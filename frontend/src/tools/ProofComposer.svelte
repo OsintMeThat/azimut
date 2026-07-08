@@ -6,8 +6,8 @@
   <div class="tool-body">
     <div class="empty" style="height: 100%">
       <div class="empty-icon"><Icon name="proof" size={40} /></div>
-      <h3>ProofComposer</h3>
-      <p>Coming in this milestone.</p>
+      <h3>Proof Composer</h3>
+      <p>Coming in the next milestone.</p>
     </div>
   </div>
 </div>

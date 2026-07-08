@@ -18,10 +18,11 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Ozimut", version=__version__, docs_url="/api/docs")
 
-    from .api import cases, files, media
+    from .api import cases, files, media, satellite
 
     app.include_router(cases.router)
     app.include_router(media.router)
+    app.include_router(satellite.router)
     app.include_router(files.router)
 
     @app.get("/api/health")
