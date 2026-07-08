@@ -23,6 +23,13 @@ class DeleteIn(BaseModel):
     path: str
 
 
+class UpdateIn(BaseModel):
+    path: str
+    notes: str | None = None
+    folder: str | None = None
+    label: str | None = None
+
+
 @router.get("/cases/{case_id}/media")
 def list_media(case_id: str) -> list[dict[str, Any]]:
     return media_engine.list_media(get_case(case_id))
@@ -76,3 +83,19 @@ def delete_media(case_id: str, path: str) -> dict[str, str]:
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "deleted"}
+
+
+@router.patch("/cases/{case_id}/media")
+def update_media_item(case_id: str, body: UpdateIn) -> dict[str, Any]:
+    case = get_case(case_id)
+    patch: dict[str, Any] = {}
+    if body.notes is not None:
+        patch["notes"] = body.notes
+    if body.folder is not None:
+        patch["folder"] = body.folder
+    if body.label is not None:
+        patch["label"] = body.label
+    try:
+        return media_engine.update_media(case, body.path, patch)
+    except (ValueError, CaseError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -145,10 +145,11 @@ get media in, annotate the match, publish the proof.
 
 | Tab | What it does |
 |-----|--------------|
-| **Media Library** | The case's media shelf. Import local files (drag & drop) or download by URL (X, Telegram, TikTok, YouTube, … via yt-dlp) → clean local file + metadata JSON + sha256. Every media becomes a `media` entity. |
-| **Satellite** | Enter/click coordinates: imagery crop centered on the point, crosshair marker, zoom control, provenance (provider, zoom, date, attribution) recorded — feeds the composer directly. XYZ tile-provider abstraction (see note below). |
+| **Media Library** | The case's media shelf. Import local files (drag & drop) or download by URL (X, Telegram, TikTok, YouTube, … via yt-dlp) → clean local file + metadata JSON + sha256. Every media becomes a `media` entity. Items can be assigned a **virtual folder** (stored in sidecar) and annotated with **notes**; an info modal surfaces full provenance (source URL, title, uploader, duration) + editable notes + folder; images show a **lightbox** on click. |
+| **Inspect** | Open any photo or video to extract and work on imagery. **Frames**: scrub a video, step frame-by-frame, one-click capture, or scan for the *sharpest* frames per time bin. **Adjust**: non-destructive brightness/contrast/saturation/gamma/sharpness/grayscale/invert/rotate + interactive **crop**, live-previewed then baked to a new image. **Collage**: tile several frames/images into one contact sheet. **Analyze**: histogram, EXIF/metadata, ELA (labeled a *hint*). Every output is filed as new case media with provenance back to its source, so it flows straight into the composer. Built on two self-describing registries (filters + analyses) so new mini-tools are one function to add. |
+| **Satellite** | Enter/click coordinates: imagery crop centered on the point, crosshair marker, zoom control, **map rotation** (turn the view off-north; capture matches the on-screen heading, bearing recorded in provenance), provenance (provider, zoom, date, bearing, attribution) recorded — feeds the composer directly. XYZ tile-provider abstraction (see note below). Captures support **editable notes** via inline modal. |
 | **Proof Composer** | The heart of v1. Compose panels side by side (frames, photos, satellite crops, imported screenshots); draw colored boxes/ellipses/lines/arrows with the mouse — same color = same feature across panels; per-shape and per-panel **comments/captions**; numbered feature legend; layout rows; export `proof.png` + re-editable JSON spec saved in `proofs/`. |
-| **Post Composer** | Turn a proof into a publishable post, GeoConfirmed-style: coordinates in multiple formats, plus code, place name, imagery attribution, source credit, character count, thread splitting. Copy-paste ready — Ozimut never posts on your behalf. |
+| **Post Composer** | Build a GeoConfirmed-style thread from a proof. Tweet 1 = `Place - Plus code`, description, decimal coordinates (6 digits), `@GeoConfirmed` mention, source. Tweet 2 = optional media (Video / Image(s), removable), with media picked from the case library. Add extra context tweets; per-tweet character count; copy-per-tweet or copy-all. **Save drafts** (in `exports/`, reopenable from the sidebar as `post` entities) and **Publish** (copies the thread and opens X compose prefilled). Copy-paste ready — Ozimut never posts on your behalf. |
 | **Case sidebar** | Always visible: case notes (`notes.md`), media list, saved proofs, entity list (simple list view). Create/open/promote cases. |
 
 v1 notes:
@@ -169,14 +170,15 @@ v1 notes:
   imagery, …) with a source/attribution field — built-in fetch and manual import
   coexist.
 - The previous frame-geolocator engine is **not** reused; v1 is a fresh,
-  minimal implementation. Frame extraction from video is v2; in v1 you bring
-  images (screenshots/exports) into the composer.
+  minimal implementation. Frame extraction and image adjustments ship in the
+  **Inspect** tab (above); v1 also lets you bring images (screenshots/exports)
+  into the composer directly.
 
 ### v2 — the GEOINT suite
 
 | Tab | What it does |
 |-----|--------------|
-| **Frame Extractor** | Drop a video: timeline scrubber, auto-suggested sharpest frames per time bin, one-click capture → frames land in the case and the composer. |
+| **Frame Extractor** | *Shipped early inside **Inspect** (§ v1)* — video scrubber, sharpest-frame suggestions, one-click capture into the case and composer. |
 | **Satellite Compare** | Same coordinates across providers (Esri / Sentinel-2 with date slider / Bing / user-keyed providers), synchronized pan/zoom — imagery history and provider comparison. Builds on the v1 tile abstraction. |
 | **Image Compare** | Overlay two images with opacity/swipe slider + pixel difference — frame vs satellite, or two imagery dates. |
 | **Coordinates** | Convert DMS/decimal/MGRS/plus code/geohash; reverse geocode (Nominatim); quick-open links to Google Maps/Yandex/Bing/OSM. |
@@ -204,7 +206,7 @@ v1 notes:
 | **Viewshed / Line of Sight** | From a point, what terrain is visible (public DEM tiles) — validate "can this ridge be seen from here?". |
 | **Map Measures** | Distance, bearing/azimuth (the app's namesake), area, camera field-of-view cone on the map. |
 | **Déjà Vu** | Perceptual-hash index of known/old clips — flags recycled footage. Local index first; optional community-shared index later. |
-| **Manipulation Hints** | ELA, JPEG quantization, noise inconsistencies — first-pass tampering indicators, honestly labeled as *hints*. |
+| **Manipulation Hints** | ELA (*shipped in Inspect*), JPEG quantization, noise inconsistencies — first-pass tampering indicators, honestly labeled as *hints*. |
 | **Channel Monitor** | Watch Telegram channels/accounts, auto-archive media into the case, queue items for geolocation. (Needs care: rate limits, ToS.) |
 
 ### Explicit non-goals

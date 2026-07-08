@@ -14,12 +14,16 @@ export const caseState = $state({
 });
 
 export const uiState = $state({
-  tool: 'media', // 'media' | 'satellite' | 'proof' | 'post'
+  tool: 'media', // 'media' | 'inspect' | 'satellite' | 'proof' | 'post'
   sidebarOpen: true,
   toasts: [],
   // cross-tool handoffs (the workbench glue):
   composeQueue: [], // media paths queued for the Proof Composer
   postProof: null, // proof spec handed to the Post Composer
+  openProof: null, // proof name to load in the Proof Composer
+  openDraft: null, // draft name to load in the Post Composer
+  inspectPath: null, // media path to open in the Inspect tool
+  gotoCoords: null, // { lat, lon } to fly to in the Satellite tool
 });
 
 let toastSeq = 0;
@@ -37,12 +41,46 @@ export async function refreshCaseList() {
   caseState.list = await api.get('/api/cases');
 }
 
+// Remember the last open case across page reloads so work is never "lost".
+const LAST_CASE_KEY = 'ozimut:lastCase';
+
+function rememberCase(id) {
+  try {
+    if (id) localStorage.setItem(LAST_CASE_KEY, id);
+    else localStorage.removeItem(LAST_CASE_KEY);
+  } catch {
+    /* localStorage unavailable (private mode) — non-fatal */
+  }
+}
+
 export async function openCase(id) {
   caseState.loading = true;
   try {
     caseState.current = await api.get(`/api/cases/${id}`);
+    rememberCase(id);
   } finally {
     caseState.loading = false;
+  }
+}
+
+/**
+ * Startup: load the case list and reopen the last-used case (if it still
+ * exists on disk). Called once from App on mount.
+ */
+export async function initSession() {
+  await refreshCaseList();
+  let lastId = null;
+  try {
+    lastId = localStorage.getItem(LAST_CASE_KEY);
+  } catch {
+    /* ignore */
+  }
+  if (lastId) {
+    try {
+      await openCase(lastId);
+    } catch {
+      rememberCase(null); // it was deleted — forget it
+    }
   }
 }
 
@@ -68,7 +106,7 @@ export async function ensureCase() {
   const scratch = await api.post('/api/cases/scratch');
   await refreshCaseList();
   await openCase(scratch.id);
-  toast('Scratch session started — promote it to keep your work', 'info');
+  toast('Scratch session started — “Keep as case…” to save it for good', 'info');
   return caseState.current;
 }
 
@@ -82,4 +120,5 @@ export async function promoteCase(name) {
 
 export function closeCase() {
   caseState.current = null;
+  rememberCase(null);
 }

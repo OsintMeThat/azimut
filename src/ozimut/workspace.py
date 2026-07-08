@@ -91,6 +91,7 @@ class Case:
                 "name": name,
                 "created_at": _now(),
                 "updated_at": _now(),
+                "folders": [],
                 "entities": [],
                 "links": [],
             }
@@ -274,6 +275,35 @@ class Case:
         if len(data["links"]) == before:
             raise CaseError(f"link '{link_id}' not found")
         self._write_json(data)
+
+    # -- folders (organisational buckets for entities) -----------------------
+
+    def list_folders(self) -> list[str]:
+        return self.read().get("folders", [])
+
+    def add_folder(self, name: str) -> list[str]:
+        name = name.strip()
+        if not name:
+            raise CaseError("folder name is required")
+        data = self.read()
+        folders = data.setdefault("folders", [])
+        if name not in folders:
+            folders.append(name)
+            folders.sort(key=str.lower)
+            self._write_json(data)
+        return data["folders"]
+
+    def remove_folder(self, name: str) -> list[str]:
+        data = self.read()
+        folders = data.setdefault("folders", [])
+        if name in folders:
+            folders.remove(name)
+        # unassign any entity still pointing at the removed folder
+        for entity in data.get("entities", []):
+            if entity.get("attrs", {}).get("folder") == name:
+                entity["attrs"].pop("folder", None)
+        self._write_json(data)
+        return data["folders"]
 
     # -- helpers -------------------------------------------------------------
 

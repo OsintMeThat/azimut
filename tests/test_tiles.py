@@ -54,6 +54,54 @@ def test_fetch_crop_missing_tiles_dont_fail():
     assert img.size == (512, 512)
 
 
+def test_fetch_crop_bearing_rotates_and_fills_corners():
+    provider = tiles.BUILTIN_PROVIDERS[0]
+    tile_colour = (10, 120, 10)
+
+    calls = {"north": 0, "rotated": 0}
+
+    def count(key):
+        def fetch(client, url):
+            calls[key] += 1
+            return Image.new("RGB", (256, 256), tile_colour)
+
+        return fetch
+
+    north, _ = tiles.fetch_crop(
+        48.8584, 2.2945, 17, 640, 480, provider, crosshair=False,
+        fetch_tile=count("north"),
+    )
+    img, prov = tiles.fetch_crop(
+        48.8584, 2.2945, 17, 640, 480, provider, crosshair=False, bearing=45,
+        fetch_tile=count("rotated"),
+    )
+
+    assert img.size == (640, 480)
+    assert prov["bearing"] == 45.0
+    # a rotated crop stitches a bigger north-up source → strictly more tiles
+    assert calls["rotated"] > calls["north"]
+    # corners stay covered by imagery, not the gray background fill
+    for corner in ((1, 1), (638, 1), (1, 478), (638, 478)):
+        assert img.getpixel(corner) == tile_colour
+
+
+def test_fetch_crop_bearing_zero_matches_unrotated():
+    provider = tiles.BUILTIN_PROVIDERS[0]
+    fetched = []
+
+    def fetch(client, url):
+        fetched.append(url)
+        return Image.new("RGB", (256, 256), (10, 120, 10))
+
+    img, prov = tiles.fetch_crop(
+        48.8584, 2.2945, 17, 640, 480, provider, crosshair=False, bearing=0,
+        fetch_tile=fetch,
+    )
+    assert img.size == (640, 480)
+    assert prov["bearing"] == 0.0
+    assert prov["tiles"] == len(fetched)
+
+
 def test_fetch_crop_tile_cap():
     provider = tiles.BUILTIN_PROVIDERS[0]
     try:

@@ -23,10 +23,16 @@ class CaptureIn(BaseModel):
     height: int = Field(default=700, ge=256, le=2048)
     provider: str = "esri-world-imagery"
     crosshair: bool = True
+    bearing: float = Field(default=0.0, ge=0, le=360)
 
 
 class ParseIn(BaseModel):
     text: str
+
+
+class SatelliteUpdateIn(BaseModel):
+    path: str
+    notes: str | None = None
 
 
 @router.get("/satellite/providers")
@@ -78,7 +84,7 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
     try:
         image, provenance = tiles.fetch_crop(
             body.lat, body.lon, body.zoom, body.width, body.height,
-            provider, crosshair=body.crosshair,
+            provider, crosshair=body.crosshair, bearing=body.bearing,
         )
     except tiles.TileFetchError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -97,7 +103,7 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
     )
 
     # suggest a place entity — analyst confirms or dismisses (spec §3.5)
-    label = f"{body.lat:.5f}, {body.lon:.5f}"
+    label = f"{body.lat:.6f}, {body.lon:.6f}"
     if not case.find_entity(attr="coords", value=label):
         case.add_entity(
             "place",
@@ -134,3 +140,28 @@ def delete_capture(case_id: str, path: str) -> dict[str, str]:
     image.unlink(missing_ok=True)
     image.with_name(image.name + ".json").unlink(missing_ok=True)
     return {"status": "deleted"}
+
+
+@router.patch("/cases/{case_id}/satellite")
+def update_capture(case_id: str, body: SatelliteUpdateIn) -> dict[str, Any]:
+    case = get_case(case_id)
+    try:
+        image_path = case.resolve_inside(body.path)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    sidecar_path = image_path.with_name(image_path.name + ".json")
+    if not sidecar_path.exists():
+        raise HTTPException(status_code=404, detail="capture not found")
+
+    data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    if body.notes is not None:
+        if body.notes == "":
+            data.pop("notes", None)
+        else:
+            data["notes"] = body.notes
+    sidecar_path.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    data["path"] = body.path
+    return data

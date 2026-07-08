@@ -106,8 +106,14 @@ def _write_sidecar(media_path: Path, data: dict[str, Any]) -> None:
     )
 
 
-def _register(case: Case, media_path: Path, source: dict[str, Any]) -> dict[str, Any]:
-    """Hash + sidecar + thumbnail + media entity. Dedupes on sha256."""
+def _register(
+    case: Case, media_path: Path, source: dict[str, Any], *, by: str = "media-library"
+) -> dict[str, Any]:
+    """Hash + sidecar + thumbnail + media entity. Dedupes on sha256.
+
+    ``by`` records which tool produced the item (media-library import, inspect
+    derivative, …) on the media entity's provenance (spec §6 honest output).
+    """
     digest = sha256_file(media_path)
 
     existing = case.find_entity(attr="sha256", value=digest)
@@ -134,7 +140,7 @@ def _register(case: Case, media_path: Path, source: dict[str, Any]) -> dict[str,
         "media",
         media_path.name,
         attrs={"path": rel_path, "sha256": digest, **({"source_url": source["url"]} if source.get("url") else {})},
-        by="media-library",
+        by=by,
         source=source.get("url"),
     )
     return {"duplicate": False, "entity": entity, "item": {**sidecar, "path": rel_path}}
@@ -147,6 +153,24 @@ def import_stream(case: Case, filename: str, stream: BinaryIO) -> dict[str, Any]
     with dest.open("wb") as out:
         shutil.copyfileobj(stream, out)
     return _register(case, dest, {"type": "upload", "original_name": filename})
+
+
+def import_image(
+    case: Case, image: Image.Image, filename: str, source: dict[str, Any], *, by: str = "inspect"
+) -> dict[str, Any]:
+    """File a freshly rendered PIL image into the case as a media derivative.
+
+    Used by tools that produce new imagery from existing media (frame capture,
+    adjustments, collages). The ``source`` dict records the derivation so the
+    output stays auditable back to its origin (spec §6).
+    """
+    media_dir = case.subdir("media")
+    name = safe_filename(filename)
+    if not name.lower().endswith(".png"):
+        name = f"{Path(name).stem}.png"
+    dest = unique_path(media_dir, name)
+    image.convert("RGB").save(dest, "PNG")
+    return _register(case, dest, source, by=by)
 
 
 def download_url(case: Case, url: str, progress_hook=None) -> dict[str, Any]:
@@ -220,6 +244,44 @@ def list_media(case: Case) -> list[dict[str, Any]]:
         items.append(data)
     items.sort(key=lambda d: d.get("added_at") or "", reverse=True)
     return items
+
+
+def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, Any]:
+    """Update mutable sidecar fields (notes, folder, label) and mirror them onto
+    the media entity so the case sidebar stays in sync."""
+    media_path = case.resolve_inside(rel_path)
+    sidecar = _sidecar_path(media_path)
+    if not sidecar.exists():
+        raise ValueError(f"no sidecar found for {rel_path!r}")
+
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    for key in ("notes", "folder", "label"):
+        if key in patch:
+            val = patch[key]
+            if val is None or val == "":
+                data.pop(key, None)
+            else:
+                data[key] = str(val)
+
+    _write_sidecar(media_path, data)
+
+    # mirror onto the media entity (label + folder/notes attrs)
+    entity = case.find_entity(attr="path", value=rel_path)
+    if entity:
+        entity_patch: dict[str, Any] = {}
+        if patch.get("label"):
+            entity_patch["label"] = patch["label"]
+        attrs: dict[str, Any] = {}
+        if "folder" in patch:
+            attrs["folder"] = patch["folder"] or ""
+        if "notes" in patch:
+            attrs["notes"] = patch["notes"] or ""
+        if attrs:
+            entity_patch["attrs"] = attrs
+        if entity_patch:
+            case.update_entity(entity["id"], entity_patch)
+
+    return {**data, "path": rel_path}
 
 
 def delete_media(case: Case, rel_path: str) -> None:

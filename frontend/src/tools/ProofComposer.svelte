@@ -92,6 +92,15 @@
     }
   });
 
+  // consume an "open this proof" handoff from the sidebar
+  $effect(() => {
+    if (uiState.tool === 'proof' && uiState.openProof && caseState.current) {
+      const name = uiState.openProof;
+      uiState.openProof = null;
+      openProof({ name });
+    }
+  });
+
   // rebuild canvas whenever the document changes
   $effect(() => {
     JSON.stringify([
@@ -121,7 +130,7 @@
         kind: 'satellite', attribution: s.attribution, lat: s.lat, lon: s.lon,
         zoom: s.zoom, provider: s.provider_label, date: s.fetched_at?.slice(0, 10),
       },
-      caption: `${s.provider_label} · ${s.lat.toFixed(5)}, ${s.lon.toFixed(5)} · ${s.fetched_at?.slice(0, 10) ?? ''}`,
+      caption: `${s.provider_label} · ${s.lat.toFixed(6)}, ${s.lon.toFixed(6)} · ${s.fetched_at?.slice(0, 10) ?? ''}`,
     };
   }
 
@@ -146,7 +155,7 @@
     pickerItems = [
       ...sats.map((s) => ({
         ...satPanelInput(s),
-        label: `${s.lat.toFixed(4)}, ${s.lon.toFixed(4)} · z${s.zoom}`,
+        label: `${s.lat.toFixed(6)}, ${s.lon.toFixed(6)} · z${s.zoom}`,
         thumb: s.path,
         kind: 'satellite',
       })),

@@ -69,6 +69,74 @@ def test_path_traversal_refused(client):
     assert b"root:" not in res.content
 
 
+def test_update_media_notes_and_folder(client):
+    cid = client.post("/api/cases", json={"name": "Update"}).json()["id"]
+    item = _upload(client, cid, "clip.png", _png_bytes()).json()["item"]
+
+    updated = client.patch(
+        f"/api/cases/{cid}/media",
+        json={"path": item["path"], "notes": "found at coordinates", "folder": "ukraine"},
+    ).json()
+    assert updated["notes"] == "found at coordinates"
+    assert updated["folder"] == "ukraine"
+
+    # persisted: shows up in listing
+    listing = client.get(f"/api/cases/{cid}/media").json()
+    assert listing[0]["notes"] == "found at coordinates"
+    assert listing[0]["folder"] == "ukraine"
+
+    # folder + notes mirrored onto the media entity (so the sidebar sees them)
+    entity = client.get(f"/api/cases/{cid}").json()["entities"][0]
+    assert entity["attrs"]["folder"] == "ukraine"
+    assert entity["attrs"]["notes"] == "found at coordinates"
+
+    # clearing the folder mirrors an empty value on the entity
+    client.patch(f"/api/cases/{cid}/media", json={"path": item["path"], "folder": ""})
+    entity = client.get(f"/api/cases/{cid}").json()["entities"][0]
+    assert entity["attrs"]["folder"] == ""
+
+
+def test_update_media_label(client):
+    cid = client.post("/api/cases", json={"name": "Label"}).json()["id"]
+    item = _upload(client, cid, "img.png", _png_bytes()).json()["item"]
+
+    updated = client.patch(
+        f"/api/cases/{cid}/media",
+        json={"path": item["path"], "label": "Strike video — Kharkiv"},
+    ).json()
+    assert updated["label"] == "Strike video — Kharkiv"
+
+    # entity label updated too
+    entities = client.get(f"/api/cases/{cid}").json()["entities"]
+    assert entities[0]["label"] == "Strike video — Kharkiv"
+
+    # clear label reverts to no custom label
+    cleared = client.patch(
+        f"/api/cases/{cid}/media", json={"path": item["path"], "label": ""}
+    ).json()
+    assert "label" not in cleared
+
+
+def test_update_media_clear_notes(client):
+    cid = client.post("/api/cases", json={"name": "Clear"}).json()["id"]
+    item = _upload(client, cid, "img.png", _png_bytes()).json()["item"]
+
+    client.patch(f"/api/cases/{cid}/media", json={"path": item["path"], "notes": "initial"})
+    updated = client.patch(
+        f"/api/cases/{cid}/media", json={"path": item["path"], "notes": ""}
+    ).json()
+    assert "notes" not in updated
+
+
+def test_update_media_bad_path(client):
+    cid = client.post("/api/cases", json={"name": "Bad"}).json()["id"]
+    res = client.patch(
+        f"/api/cases/{cid}/media",
+        json={"path": "media/nonexistent.png", "notes": "x"},
+    )
+    assert res.status_code == 400
+
+
 def test_download_job_bad_url(client):
     cid = client.post("/api/cases", json={"name": "Job"}).json()["id"]
     job_id = client.post(

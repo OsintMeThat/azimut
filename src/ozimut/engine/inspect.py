@@ -1,0 +1,443 @@
+"""Media inspection engine: open a photo or video, pull frames, adjust and
+analyse imagery — all locally, Pillow + ffmpeg only (spec §7).
+
+Two self-describing registries make new mini-tools cheap to add (the whole point
+of this module's design):
+
+* ``FILTERS`` — pixel transforms applied as an ordered pipeline. Each declares a
+  parameter schema and an optional CSS hint so the frontend can live-preview
+  without a round-trip. Adding an adjustment = one ``@filter`` function.
+* ``ANALYSES`` — read-only inspectors that return one of a small set of render
+  kinds (``keyvalue`` / ``histogram`` / ``image`` / ``text``). The frontend has a
+  generic renderer per kind, so adding an analysis = one ``@analysis`` function.
+
+Everything the tools produce is filed back as ordinary case media (via the media
+engine) with provenance recording how it was derived — honest, auditable output
+(spec §6). Nothing here mutates the original media.
+"""
+
+from __future__ import annotations
+
+import base64
+import io
+import json
+import shutil
+import subprocess
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+from PIL import Image, ImageChops, ImageEnhance, ImageFilter, ImageOps, ImageStat
+from PIL.ExifTags import GPSTAGS, TAGS
+
+from ..workspace import Case
+from . import media as media_engine
+
+FRAME_SCAN_CAP = 60  # hard cap on frames scanned for a "sharpest frame" suggestion
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ---------------------------------------------------------------------------
+# Filter registry (pixel-transform pipeline)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Param:
+    name: str
+    label: str
+    type: str = "range"  # 'range' | 'toggle'
+    min: float = 0.0
+    max: float = 2.0
+    step: float = 0.01
+    default: float = 1.0
+    unit: str = ""
+
+
+@dataclass(frozen=True)
+class Filter:
+    id: str
+    label: str
+    apply: Callable[[Image.Image, dict[str, Any]], Image.Image]
+    params: list[Param] = field(default_factory=list)
+    # optional live-preview hints for the frontend (skip a server round-trip):
+    css: str | None = None  # CSS `filter` fragment, e.g. "brightness({v})"
+    transform: str | None = None  # CSS `transform` fragment, e.g. "rotate({v}deg)"
+
+    def schema(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "params": [vars(p) for p in self.params],
+            "css": self.css,
+            "transform": self.transform,
+        }
+
+
+FILTERS: dict[str, Filter] = {}
+
+
+def _register_filter(f: Filter) -> Filter:
+    FILTERS[f.id] = f
+    return f
+
+
+def _p(params: dict[str, Any], name: str, default: float) -> float:
+    try:
+        return float(params.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _enhance(cls):
+    return lambda img, params: cls(img).enhance(_p(params, "amount", 1.0))
+
+
+_register_filter(Filter(
+    "brightness", "Brightness", _enhance(ImageEnhance.Brightness),
+    [Param("amount", "Amount", min=0, max=2, default=1)], css="brightness({v})",
+))
+_register_filter(Filter(
+    "contrast", "Contrast", _enhance(ImageEnhance.Contrast),
+    [Param("amount", "Amount", min=0, max=2, default=1)], css="contrast({v})",
+))
+_register_filter(Filter(
+    "saturation", "Saturation", _enhance(ImageEnhance.Color),
+    [Param("amount", "Amount", min=0, max=2, default=1)], css="saturate({v})",
+))
+_register_filter(Filter(
+    "sharpness", "Sharpness", _enhance(ImageEnhance.Sharpness),
+    [Param("amount", "Amount", min=0, max=3, default=1)],
+))
+
+
+def _apply_gamma(img: Image.Image, params: dict[str, Any]) -> Image.Image:
+    g = max(_p(params, "amount", 1.0), 0.01)
+    lut = [min(255, round((i / 255) ** (1 / g) * 255)) for i in range(256)]
+    return img.point(lut * len(img.getbands()))
+
+
+_register_filter(Filter(
+    "gamma", "Gamma", _apply_gamma,
+    [Param("amount", "Amount", min=0.2, max=3, default=1)],
+))
+_register_filter(Filter(
+    "grayscale", "Grayscale",
+    lambda img, params: ImageOps.grayscale(img).convert("RGB") if _p(params, "on", 0) else img,
+    [Param("on", "On", type="toggle", default=0)], css="grayscale({v})",
+))
+_register_filter(Filter(
+    "invert", "Invert",
+    lambda img, params: ImageOps.invert(img.convert("RGB")) if _p(params, "on", 0) else img,
+    [Param("on", "On", type="toggle", default=0)], css="invert({v})",
+))
+_register_filter(Filter(
+    "rotate", "Rotate",
+    lambda img, params: img.rotate(-_p(params, "angle", 0), expand=True, fillcolor=(16, 20, 28)),
+    [Param("angle", "Angle", min=-180, max=180, step=1, default=0, unit="°")],
+    transform="rotate({v}deg)",
+))
+
+
+def _apply_crop(img: Image.Image, params: dict[str, Any]) -> Image.Image:
+    """Crop from fractional (0..1) x/y/w/h relative to the image."""
+    w, h = img.size
+    x0 = max(0, min(w, round(_p(params, "x", 0) * w)))
+    y0 = max(0, min(h, round(_p(params, "y", 0) * h)))
+    x1 = max(x0 + 1, min(w, round((_p(params, "x", 0) + _p(params, "w", 1)) * w)))
+    y1 = max(y0 + 1, min(h, round((_p(params, "y", 0) + _p(params, "h", 1)) * h)))
+    return img.crop((x0, y0, x1, y1))
+
+
+_register_filter(Filter("crop", "Crop", _apply_crop))  # driven by an interactive box, no sliders
+
+
+def apply_ops(image: Image.Image, ops: list[dict[str, Any]]) -> Image.Image:
+    """Run an ordered list of ``{"op": id, "params": {...}}`` through the pipeline."""
+    out = image.convert("RGB")
+    for op in ops:
+        flt = FILTERS.get(op.get("op"))
+        if flt is None:
+            raise ValueError(f"unknown filter {op.get('op')!r}")
+        out = flt.apply(out, op.get("params") or {})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Analysis registry (read-only inspectors)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Analysis:
+    id: str
+    label: str
+    run: Callable[[Image.Image, dict[str, Any]], dict[str, Any]]
+
+
+ANALYSES: dict[str, Analysis] = {}
+
+
+def _register_analysis(a: Analysis) -> Analysis:
+    ANALYSES[a.id] = a
+    return a
+
+
+def _histogram(img: Image.Image, params: dict[str, Any]) -> dict[str, Any]:
+    rgb = img.convert("RGB")
+    hist = rgb.histogram()
+    return {
+        "kind": "histogram",
+        "channels": {"r": hist[0:256], "g": hist[256:512], "b": hist[512:768]},
+    }
+
+
+def _exif(img: Image.Image, params: dict[str, Any]) -> dict[str, Any]:
+    rows: dict[str, str] = {
+        "Format": img.format or "—",
+        "Mode": img.mode,
+        "Size": f"{img.width} × {img.height}",
+    }
+    exif = img.getexif()
+    for tag_id, value in exif.items():
+        name = TAGS.get(tag_id, str(tag_id))
+        if name == "GPSInfo":
+            gps = {GPSTAGS.get(k, str(k)): v for k, v in exif.get_ifd(tag_id).items()}
+            if gps:
+                rows["GPS"] = ", ".join(f"{k}={v}" for k, v in gps.items())
+            continue
+        text = str(value)
+        rows[name] = text[:120] + "…" if len(text) > 120 else text
+    return {"kind": "keyvalue", "rows": rows}
+
+
+def _ela(img: Image.Image, params: dict[str, Any]) -> dict[str, Any]:
+    """Error Level Analysis — a *hint*, never a verdict (spec §6)."""
+    quality = int(params.get("quality", 90))
+    base = img.convert("RGB")
+    buf = io.BytesIO()
+    base.save(buf, "JPEG", quality=quality)
+    buf.seek(0)
+    resaved = Image.open(buf).convert("RGB")
+    diff = ImageChops.difference(base, resaved)
+    peak = max((hi for _, hi in diff.getextrema()), default=1) or 1
+    amplified = ImageEnhance.Brightness(diff).enhance(255.0 / peak)
+    out = io.BytesIO()
+    amplified.save(out, "PNG")
+    data = base64.b64encode(out.getvalue()).decode("ascii")
+    return {
+        "kind": "image",
+        "data_url": f"data:image/png;base64,{data}",
+        "note": "Error Level Analysis is a tampering *hint*, not proof. "
+        "Bright, uneven regions can indicate edits — or just texture and edges.",
+    }
+
+
+_register_analysis(Analysis("histogram", "Histogram", _histogram))
+_register_analysis(Analysis("exif", "EXIF & metadata", _exif))
+_register_analysis(Analysis("ela", "Error Level Analysis", _ela))
+
+
+def registries() -> dict[str, Any]:
+    """Machine-readable description of every filter and analysis (drives the UI)."""
+    return {
+        "filters": [f.schema() for f in FILTERS.values()],
+        "analyses": [{"id": a.id, "label": a.label} for a in ANALYSES.values()],
+    }
+
+
+def run_analysis(case: Case, rel_path: str, name: str, params: dict[str, Any]) -> dict[str, Any]:
+    analysis = ANALYSES.get(name)
+    if analysis is None:
+        raise ValueError(f"unknown analysis {name!r}")
+    with Image.open(case.resolve_inside(rel_path)) as img:
+        return analysis.run(img, params or {})
+
+
+# ---------------------------------------------------------------------------
+# Video / probe helpers (ffmpeg + ffprobe)
+# ---------------------------------------------------------------------------
+
+
+def ffprobe_available() -> bool:
+    return shutil.which("ffprobe") is not None
+
+
+def probe(case: Case, rel_path: str) -> dict[str, Any]:
+    """Lightweight metadata for the viewer: kind, dimensions, duration, fps."""
+    path = case.resolve_inside(rel_path)
+    kind = media_engine.media_kind(path.name)
+    info: dict[str, Any] = {"path": rel_path, "kind": kind, "filename": path.name}
+
+    if kind == "image":
+        with Image.open(path) as img:
+            info.update(width=img.width, height=img.height)
+        return info
+
+    if kind == "video" and ffprobe_available():
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-print_format", "json",
+             "-show_format", "-show_streams", str(path)],
+            capture_output=True, timeout=30,
+        )
+        if proc.returncode == 0:
+            data = json.loads(proc.stdout or b"{}")
+            stream = next((s for s in data.get("streams", []) if s.get("codec_type") == "video"), {})
+            info.update(
+                width=stream.get("width"),
+                height=stream.get("height"),
+                duration=float(data.get("format", {}).get("duration", 0) or 0),
+                fps=_parse_fps(stream.get("avg_frame_rate") or stream.get("r_frame_rate")),
+                codec=stream.get("codec_name"),
+            )
+    return info
+
+
+def _parse_fps(rate: str | None) -> float | None:
+    if not rate or "/" not in rate:
+        return None
+    num, den = rate.split("/", 1)
+    try:
+        return round(float(num) / float(den), 3) if float(den) else None
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
+def extract_frame(video_path: Path, time_s: float) -> Image.Image:
+    """Decode a single frame at ``time_s`` seconds via ffmpeg (needs ffmpeg)."""
+    if not media_engine.ffmpeg_available():
+        raise RuntimeError("ffmpeg is required to extract video frames")
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{max(time_s, 0):.3f}",
+         "-i", str(video_path), "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1"],
+        capture_output=True, timeout=60,
+    )
+    if proc.returncode != 0 or not proc.stdout:
+        raise RuntimeError((proc.stderr or b"").decode("utf-8", "replace").strip() or "frame decode failed")
+    return Image.open(io.BytesIO(proc.stdout)).convert("RGB")
+
+
+def _sharpness(img: Image.Image) -> float:
+    """Relative focus score: variance of the edge response (no numpy needed)."""
+    edges = img.convert("L").filter(ImageFilter.FIND_EDGES)
+    w, h = edges.size
+    if w > 6 and h > 6:  # trim FIND_EDGES border artefacts
+        edges = edges.crop((2, 2, w - 2, h - 2))
+    return round(ImageStat.Stat(edges).var[0], 2)
+
+
+def _derivation(video_rel: str, sha: str | None, **extra: Any) -> dict[str, Any]:
+    return {"type": "inspect", "from": video_rel, "from_sha256": sha, "at": _now(), **extra}
+
+
+def _source_sha(case: Case, rel_path: str) -> str | None:
+    entity = case.find_entity(attr="path", value=rel_path)
+    return entity["attrs"].get("sha256") if entity else None
+
+
+def _stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+
+def capture_frame(case: Case, video_rel: str, time_s: float, label: str | None = None) -> dict[str, Any]:
+    """Extract one frame and file it as case media."""
+    video_path = case.resolve_inside(video_rel)
+    frame = extract_frame(video_path, time_s)
+    stem = Path(video_path.name).stem[:40]
+    name = f"{stem}_t{time_s:.2f}s_{_stamp()}.png"
+    source = _derivation(video_rel, _source_sha(case, video_rel), op="frame", time=round(time_s, 3))
+    result = media_engine.import_image(case, frame, name, source, by="inspect")
+    if label and not result.get("duplicate"):
+        media_engine.update_media(case, result["item"]["path"], {"label": label})
+    return result
+
+
+def suggest_frames(
+    case: Case, video_rel: str, bins: int = 12, set_progress: Callable[[dict], None] | None = None
+) -> list[dict[str, Any]]:
+    """Sample one frame per time bin and score its sharpness (spec v2 gesture)."""
+    video_path = case.resolve_inside(video_rel)
+    meta = probe(case, video_rel)
+    duration = meta.get("duration") or 0
+    if duration <= 0:
+        raise RuntimeError("could not read video duration (ffprobe needed)")
+    bins = max(1, min(bins, FRAME_SCAN_CAP))
+    out: list[dict[str, Any]] = []
+    for i in range(bins):
+        t = duration * (i + 0.5) / bins
+        try:
+            score = _sharpness(extract_frame(video_path, t))
+        except Exception:
+            continue
+        out.append({"time": round(t, 3), "score": score})
+        if set_progress:
+            set_progress({"percent": round((i + 1) * 100 / bins, 1)})
+    out.sort(key=lambda d: d["score"], reverse=True)
+    for rank, item in enumerate(out):
+        item["rank"] = rank
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Adjustments & collage (operate on images / captured frames)
+# ---------------------------------------------------------------------------
+
+
+def bake(case: Case, rel_path: str, ops: list[dict[str, Any]], label: str | None = None) -> dict[str, Any]:
+    """Apply an adjustment pipeline to an image and file the result as new media."""
+    with Image.open(case.resolve_inside(rel_path)) as img:
+        rendered = apply_ops(img, ops)
+    stem = Path(rel_path).stem[:40]
+    name = f"{stem}_edit_{_stamp()}.png"
+    source = _derivation(rel_path, _source_sha(case, rel_path), op="adjust", ops=ops)
+    result = media_engine.import_image(case, rendered, name, source, by="inspect")
+    if label and not result.get("duplicate"):
+        media_engine.update_media(case, result["item"]["path"], {"label": label})
+    return result
+
+
+def collage(
+    case: Case,
+    rel_paths: list[str],
+    *,
+    columns: int = 2,
+    gap: int = 8,
+    background: str = "#12141c",
+    cell: int = 480,
+    label: str | None = None,
+) -> dict[str, Any]:
+    """Assemble several images into a contact-sheet / collage (one derivative)."""
+    if not rel_paths:
+        raise ValueError("collage needs at least one image")
+    columns = max(1, min(columns, len(rel_paths)))
+    cell = max(64, min(cell, 1024))
+    gap = max(0, min(gap, 64))
+
+    tiles: list[Image.Image] = []
+    for rel in rel_paths:
+        with Image.open(case.resolve_inside(rel)) as img:
+            thumb = img.convert("RGB")
+            thumb.thumbnail((cell, cell))
+            tiles.append(thumb)
+
+    rows = (len(tiles) + columns - 1) // columns
+    width = columns * cell + (columns + 1) * gap
+    height = rows * cell + (rows + 1) * gap
+    canvas = Image.new("RGB", (width, height), background)
+
+    for idx, tile in enumerate(tiles):
+        r, c = divmod(idx, columns)
+        cx = gap + c * (cell + gap) + (cell - tile.width) // 2
+        cy = gap + r * (cell + gap) + (cell - tile.height) // 2
+        canvas.paste(tile, (cx, cy))
+
+    source = _derivation("", None, op="collage", sources=rel_paths, columns=columns)
+    name = f"collage_{_stamp()}.png"
+    result = media_engine.import_image(case, canvas, name, source, by="inspect")
+    if label and not result.get("duplicate"):
+        media_engine.update_media(case, result["item"]["path"], {"label": label})
+    return result

@@ -1,7 +1,8 @@
 <script>
   import { api } from '../lib/api.js';
-  import { caseState, uiState, toast } from '../lib/state.svelte.js';
+  import { caseState, uiState, toast, reloadCase } from '../lib/state.svelte.js';
   import Icon from '../components/Icon.svelte';
+  import Modal from '../components/Modal.svelte';
 
   const X_LIMIT = 280;
   const URL_WEIGHT = 23; // X counts every URL as 23 chars
@@ -10,28 +11,54 @@
   let geo = $state(null); // {lat, lon, dms, plus_code, links}
   let place = $state('');
   let placeLoading = $state(false);
-  let title = $state('');
+  let description = $state('');
+  let mention = $state('@GeoConfirmed');
   let source = $state('');
-  let attribution = $state('');
-  let text = $state('');
   let proofPng = $state(null);
-  let edited = $state(false);
+  let tweet1 = $state('');
+  let tweet1Edited = $state(false);
 
-  // ingest a proof handed over by the composer
+  // Media tweet (tweet 2)
+  let mediaEnabled = $state(true);
+  let mediaType = $state('none'); // 'none' | 'video' | 'images'
+  let mediaText = $state('');
+  let mediaPath = $state(null); // media selected from the library (case-relative)
+
+  // Extra context tweets (3, 4, …)
+  let extraSeq = 0;
+  let extraTweets = $state([]); // [{ id, text }]
+
+  // Draft persistence
+  let draftName = $state(null); // slug of the saved draft (null until first save)
+  let saving = $state(false);
+
+  // Media picker modal
+  let pickerOpen = $state(false);
+  let mediaLibrary = $state([]);
+
+  // Ingest a proof handed over by the Proof Composer
   $effect(() => {
     const p = uiState.postProof;
     if (!p) return;
     uiState.postProof = null;
-    title = p.title === 'Untitled proof' ? '' : p.title;
-    attribution = p.attribution ?? '';
+    description = p.title === 'Untitled proof' ? '' : (p.title ?? '');
     source = p.sources?.[0] ?? '';
     proofPng = p.png ?? null;
-    edited = false;
+    tweet1Edited = false;
     if (p.coords) {
       coordsText = `${p.coords.lat.toFixed(6)}, ${p.coords.lon.toFixed(6)}`;
       resolveCoords();
     } else {
       regenerate();
+    }
+  });
+
+  // Consume an "open this draft" handoff from the sidebar
+  $effect(() => {
+    if (uiState.tool === 'post' && uiState.openDraft && caseState.current) {
+      const name = uiState.openDraft;
+      uiState.openDraft = null;
+      loadDraft(name);
     }
   });
 
@@ -68,30 +95,44 @@
     }
   }
 
-  function buildText() {
+  function buildTweet1() {
     const lines = [];
-    lines.push(title.trim() ? `📍 Geolocated: ${title.trim()}` : '📍 Geolocated');
+
+    // "Place, State, Country - PLUSCODE"
+    const header = [place.trim(), geo?.plus_code].filter(Boolean).join(' - ');
+    if (header) lines.push(header);
+
+    // description
+    if (description.trim()) {
+      lines.push('');
+      lines.push(description.trim());
+    }
+
+    // decimal coords only (6 digits), no DMS
     if (geo) {
       lines.push('');
       lines.push(`${geo.lat.toFixed(6)}, ${geo.lon.toFixed(6)}`);
-      lines.push(`${geo.dms}`);
-      lines.push(`Plus code: ${geo.plus_code}`);
     }
-    if (place.trim()) lines.push(place.trim());
+
+    // mention (@GeoConfirmed by default)
+    if (mention.trim()) {
+      lines.push('');
+      lines.push(mention.trim());
+    }
+
+    // source
     if (source.trim()) {
       lines.push('');
-      lines.push(`Source: ${source.trim()}`);
+      lines.push('Source:');
+      lines.push(source.trim());
     }
-    if (attribution.trim()) {
-      lines.push('');
-      lines.push(attribution.trim());
-    }
+
     return lines.join('\n');
   }
 
   function regenerate() {
-    text = buildText();
-    edited = false;
+    tweet1 = buildTweet1();
+    tweet1Edited = false;
   }
 
   function weightedLength(t) {
@@ -101,38 +142,226 @@
     return [...stripped].length + urls * URL_WEIGHT;
   }
 
-  const count = $derived(weightedLength(text));
-  const over = $derived(count > X_LIMIT);
+  function tweet2Text() {
+    const label = mediaType === 'video' ? '2/ Video:' : '2/ Image(s):';
+    return mediaText.trim() ? `${label}\n${mediaText.trim()}` : label;
+  }
 
-  /** Split into a numbered thread at word boundaries under the weighted limit. */
-  const thread = $derived.by(() => {
-    if (!over) return null;
-    const words = text.split(/(\s+)/);
-    const parts = [];
-    let current = '';
-    for (const w of words) {
-      const suffixReserve = 8; // " (99/99)"
-      if (weightedLength(current + w) > X_LIMIT - suffixReserve && current.trim()) {
-        parts.push(current.trim());
-        current = w.trimStart();
-      } else {
-        current += w;
-      }
-    }
-    if (current.trim()) parts.push(current.trim());
-    return parts.map((p, i) => `${p}\n(${i + 1}/${parts.length})`);
-  });
+  const tweet1Count = $derived(weightedLength(tweet1));
+  const tweet1Over = $derived(tweet1Count > X_LIMIT);
+
+  function addExtraTweet() {
+    extraTweets.push({ id: ++extraSeq, text: '' });
+  }
+
+  function removeExtraTweet(id) {
+    const i = extraTweets.findIndex((t) => t.id === id);
+    if (i !== -1) extraTweets.splice(i, 1);
+  }
 
   async function copy(value) {
     await navigator.clipboard.writeText(value);
     toast('Copied to clipboard', 'ok', 1600);
   }
+
+  async function copyAll() {
+    const parts = [tweet1];
+    if (mediaEnabled && mediaType !== 'none') parts.push(tweet2Text());
+    for (const t of extraTweets) {
+      if (t.text.trim()) parts.push(t.text.trim());
+    }
+    await navigator.clipboard.writeText(parts.join('\n\n---\n\n'));
+    toast('All tweets copied', 'ok', 1800);
+  }
+
+  // ---- media picker -------------------------------------------------------
+
+  async function openPicker() {
+    if (!caseState.current) {
+      toast('Open a case to pick from your media', 'warn');
+      return;
+    }
+    try {
+      mediaLibrary = await api.get(`/api/cases/${caseState.current.id}/media`);
+      pickerOpen = true;
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  }
+
+  function pickMedia(item) {
+    mediaPath = item.path;
+    // auto-select the matching media type from the item's kind
+    if (item.kind === 'video') mediaType = 'video';
+    else if (item.kind === 'image') mediaType = 'images';
+    pickerOpen = false;
+  }
+
+  function clearMedia() {
+    mediaPath = null;
+  }
+
+  const mediaHref = $derived(
+    mediaPath && caseState.current ? `/files/${caseState.current.id}/${mediaPath}` : null
+  );
+
+  const proofHref = $derived(
+    proofPng && caseState.current ? `/files/${caseState.current.id}/${proofPng}` : null
+  );
+
+  // ---- one-click image copy / media download ------------------------------
+
+  /** Rasterise any image blob to PNG (the only format browsers reliably put on
+   *  the clipboard) so it can be pasted straight into the X composer. */
+  function toPngBlob(blob) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        canvas.toBlob((out) => (out ? resolve(out) : reject(new Error('encode failed'))), 'image/png');
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('load failed'));
+      };
+      img.src = url;
+    });
+  }
+
+  /** Copy an image into the clipboard so it can be pasted (Ctrl+V) into X. */
+  async function copyImage(url) {
+    try {
+      const res = await fetch(url);
+      let blob = await res.blob();
+      if (blob.type !== 'image/png') blob = await toPngBlob(blob);
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      toast('Image copied — paste it into X (Ctrl+V)', 'ok', 2400);
+    } catch (e) {
+      toast(`Could not copy image: ${e.message}`, 'danger');
+    }
+  }
+
+  /** Save a media file locally (X has no paste for video — drag it in from here). */
+  function downloadMedia(url, path) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (path ?? '').split('/').pop() || 'media';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast('Downloaded — drag it into X', 'info', 2600);
+  }
+
+  // ---- draft persistence --------------------------------------------------
+
+  function snapshot() {
+    return {
+      description,
+      coordsText,
+      place,
+      mention,
+      source,
+      proofPng,
+      tweet1,
+      tweet1Edited,
+      mediaEnabled,
+      mediaType,
+      mediaText,
+      mediaPath,
+      extraTweets: extraTweets.map((t) => ({ text: t.text })),
+    };
+  }
+
+  function draftTitle() {
+    return (place.trim() || description.trim() || 'Untitled post').slice(0, 120);
+  }
+
+  async function saveDraft() {
+    if (!caseState.current) {
+      toast('Open a case to save a draft', 'warn');
+      return;
+    }
+    saving = true;
+    try {
+      const body = { title: draftTitle(), state: snapshot() };
+      if (draftName) body.name = draftName;
+      const r = await api.post(`/api/cases/${caseState.current.id}/drafts`, body);
+      draftName = r.name;
+      await reloadCase(); // surface the post entity in the sidebar
+      toast('Draft saved', 'ok', 1600);
+    } catch (e) {
+      toast(`Draft not saved: ${e.message}`, 'danger');
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function loadDraft(name) {
+    if (!caseState.current) return;
+    try {
+      const doc = await api.get(`/api/cases/${caseState.current.id}/drafts/${name}`);
+      const s = doc.state ?? {};
+      description = s.description ?? '';
+      coordsText = s.coordsText ?? '';
+      place = s.place ?? '';
+      mention = s.mention ?? '@GeoConfirmed';
+      source = s.source ?? '';
+      proofPng = s.proofPng ?? null;
+      mediaEnabled = s.mediaEnabled ?? true;
+      mediaType = s.mediaType ?? 'none';
+      mediaText = s.mediaText ?? '';
+      mediaPath = s.mediaPath ?? null;
+      extraTweets = (s.extraTweets ?? []).map((t) => ({ id: ++extraSeq, text: t.text ?? '' }));
+      draftName = name;
+      // restore geo facts from the coordinates, then honor any manual tweet edits
+      if (s.coordsText?.trim()) {
+        try {
+          geo = await api.post('/api/geo/parse', { text: s.coordsText });
+        } catch {
+          geo = null;
+        }
+      } else {
+        geo = null;
+      }
+      tweet1 = s.tweet1 ?? buildTweet1();
+      tweet1Edited = s.tweet1Edited ?? false;
+      toast('Draft loaded', 'ok', 1400);
+    } catch (e) {
+      toast(`Could not load draft: ${e.message}`, 'danger');
+    }
+  }
+
+  // ---- publish (prefill X compose — Ozimut never posts on your behalf) -----
+
+  async function publish() {
+    // X's web intent only prefills the first post; copy the whole thread so the
+    // rest can be pasted as replies, then open the compose window.
+    await copyAll();
+    const url = `https://x.com/intent/post?text=${encodeURIComponent(tweet1)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+    toast('Opened X — thread copied for the replies', 'info', 3200);
+  }
 </script>
 
 <div class="tool">
   <div class="tool-header">
-    <h2>Post Composer</h2>
-    <span class="sub">publishable post from your proof — you copy, you publish, Ozimut never posts</span>
+    <div class="head-text">
+      <h2>Post Composer</h2>
+      <span class="sub">publishable post from your proof — you copy, you publish, Ozimut never posts</span>
+    </div>
+    <div class="head-actions">
+      <button class="btn btn-ghost btn-sm" onclick={saveDraft} disabled={saving}>
+        <Icon name="save" size={14} /> {draftName ? 'Save draft' : 'Save as draft'}
+      </button>
+      <button class="btn btn-primary btn-sm" onclick={publish} disabled={!tweet1.trim()} title="Copy the thread and open X compose prefilled — Ozimut never posts for you">
+        <Icon name="post" size={14} /> Publish on X
+      </button>
+    </div>
   </div>
 
   <div class="tool-body">
@@ -140,27 +369,25 @@
       <!-- left column: ingredients -->
       <div class="col">
         <div class="field">
-          <label class="label" for="pc-title">What was geolocated</label>
+          <label class="label" for="pc-desc">Description</label>
           <input
-            id="pc-title"
+            id="pc-desc"
             class="input"
-            placeholder="e.g. Strike on a warehouse, north of Kharkiv"
-            bind:value={title}
+            placeholder="A formation of 13 helicopters was spotted heading East"
+            bind:value={description}
             onchange={regenerate}
           />
         </div>
 
         <div class="field">
           <label class="label" for="pc-coords">Coordinates</label>
-          <div class="row">
-            <input
-              id="pc-coords"
-              class="input mono"
-              placeholder="50.4501, 30.5234"
-              bind:value={coordsText}
-              onchange={resolveCoords}
-            />
-          </div>
+          <input
+            id="pc-coords"
+            class="input mono"
+            placeholder="10.303315, -66.874095"
+            bind:value={coordsText}
+            onchange={resolveCoords}
+          />
           {#if geo}
             <div class="geo-facts card">
               <button class="fact mono" onclick={() => copy(`${geo.lat.toFixed(6)}, ${geo.lon.toFixed(6)}`)} title="Copy">
@@ -188,96 +415,219 @@
           <input
             id="pc-place"
             class="input"
-            placeholder="Village, Oblast, Country"
+            placeholder="Village, State, Country"
             bind:value={place}
             onchange={regenerate}
           />
         </div>
 
         <div class="field">
-          <label class="label" for="pc-source">Source credit</label>
+          <label class="label" for="pc-mention">Mention</label>
           <input
-            id="pc-source"
-            class="input"
-            placeholder="https://t.me/… (original post)"
-            bind:value={source}
+            id="pc-mention"
+            class="input mono"
+            placeholder="@GeoConfirmed"
+            bind:value={mention}
             onchange={regenerate}
           />
         </div>
 
         <div class="field">
-          <label class="label" for="pc-attr">Imagery attribution</label>
+          <label class="label" for="pc-source">Source</label>
           <input
-            id="pc-attr"
+            id="pc-source"
             class="input"
-            placeholder="Imagery: Esri, Maxar, …"
-            bind:value={attribution}
+            placeholder="https://instagram.com/… (original post)"
+            bind:value={source}
             onchange={regenerate}
           />
         </div>
 
         {#if proofPng && caseState.current}
           <div class="field">
-            <span class="label">Attached proof</span>
-            <a href={`/files/${caseState.current.id}/${proofPng}`} target="_blank" rel="noreferrer">
-              <img class="proof-preview card" src={`/files/${caseState.current.id}/${proofPng}`} alt="proof" />
+            <div class="proof-head">
+              <span class="label" style="margin:0">Attached proof</span>
+              <button class="btn btn-ghost btn-sm" onclick={() => copyImage(proofHref)} title="Copy the image — paste it into X">
+                <Icon name="copy" size={13} /> Copy image
+              </button>
+            </div>
+            <a href={proofHref} target="_blank" rel="noreferrer">
+              <img class="proof-preview card" src={proofHref} alt="proof" />
             </a>
           </div>
         {/if}
       </div>
 
-      <!-- right column: the post -->
+      <!-- right column: the thread -->
       <div class="col">
-        <div class="field grow">
-          <div class="post-head">
-            <span class="label" style="margin: 0">Post text</span>
-            {#if edited}
+
+        <!-- Tweet 1: geolocation -->
+        <div class="tweet-block card">
+          <div class="tweet-head">
+            <span class="tweet-num">1</span>
+            <span class="label" style="margin:0">Geolocation tweet</span>
+            {#if tweet1Edited}
               <button class="btn btn-ghost btn-sm" onclick={regenerate} title="Rebuild from the fields">
                 <Icon name="compass" size={13} /> regenerate
               </button>
             {/if}
-            <span class="counter" class:over>{count}/{X_LIMIT}</span>
+            <span class="counter" class:over={tweet1Over}>{tweet1Count}/{X_LIMIT}</span>
+            <button class="btn btn-ghost btn-sm" onclick={() => copy(tweet1)} disabled={!tweet1.trim()}>
+              <Icon name="copy" size={13} /> Copy
+            </button>
           </div>
           <textarea
             class="textarea post-text mono"
-            bind:value={text}
-            oninput={() => (edited = true)}
-            rows="12"
+            bind:value={tweet1}
+            oninput={() => (tweet1Edited = true)}
+            rows="11"
           ></textarea>
-          <div class="post-actions">
-            <button class="btn btn-primary" onclick={() => copy(text)} disabled={!text.trim()}>
-              <Icon name="copy" size={15} /> Copy post
-            </button>
-            {#if over}
-              <span class="over-hint">over the X limit — thread below</span>
-            {/if}
-          </div>
         </div>
 
-        {#if thread}
-          <div class="field">
-            <span class="label">As a thread ({thread.length} posts)</span>
-            <div class="thread">
-              {#each thread as part, i (i)}
-                <div class="thread-post card">
-                  <pre>{part}</pre>
-                  <button class="btn btn-ghost btn-sm" onclick={() => copy(part)} title="Copy this post">
-                    <Icon name="copy" size={13} />
-                  </button>
-                </div>
-              {/each}
+        <!-- Tweet 2: media (Video / Image(s)) -->
+        {#if mediaEnabled}
+        <div class="tweet-block card">
+          <div class="tweet-head">
+            <span class="tweet-num">2</span>
+            <span class="label" style="margin:0">Media</span>
+            <div class="media-tabs">
+              <button
+                class="btn btn-sm"
+                class:btn-primary={mediaType === 'video'}
+                class:btn-ghost={mediaType !== 'video'}
+                onclick={() => (mediaType = mediaType === 'video' ? 'none' : 'video')}
+              >Video</button>
+              <button
+                class="btn btn-sm"
+                class:btn-primary={mediaType === 'images'}
+                class:btn-ghost={mediaType !== 'images'}
+                onclick={() => (mediaType = mediaType === 'images' ? 'none' : 'images')}
+              >Image(s)</button>
             </div>
+            {#if mediaType !== 'none'}
+              <span class="counter">{weightedLength(tweet2Text())}/{X_LIMIT}</span>
+              <button class="btn btn-ghost btn-sm" onclick={() => copy(tweet2Text())}>
+                <Icon name="copy" size={13} /> Copy
+              </button>
+            {/if}
+            <button class="btn btn-ghost btn-sm danger-hover" onclick={() => (mediaEnabled = false)} title="Remove media tweet">
+              <Icon name="x" size={13} />
+            </button>
           </div>
+          {#if mediaType !== 'none'}
+            <div class="media-prefix">{mediaType === 'video' ? '2/ Video:' : '2/ Image(s):'}</div>
+            <textarea
+              class="textarea post-text mono"
+              placeholder="Paste URL or describe the media…"
+              bind:value={mediaText}
+              rows="3"
+            ></textarea>
+            <div class="media-attach">
+              <button class="btn btn-ghost btn-sm" onclick={openPicker}>
+                <Icon name="media" size={13} /> Choose from library
+              </button>
+              {#if mediaPath}
+                <span class="attach-chip">
+                  {#if mediaHref}
+                    <a href={mediaHref} target="_blank" rel="noreferrer" title={mediaPath}>
+                      {mediaPath.replace(/^media\//, '')}
+                    </a>
+                  {:else}
+                    {mediaPath.replace(/^media\//, '')}
+                  {/if}
+                  <button class="chip-x" onclick={clearMedia} title="Detach media">
+                    <Icon name="x" size={11} />
+                  </button>
+                </span>
+                {#if mediaType === 'images'}
+                  <button class="btn btn-ghost btn-sm" onclick={() => copyImage(mediaHref)} title="Copy the image — paste it into X">
+                    <Icon name="copy" size={13} /> Copy image
+                  </button>
+                {:else}
+                  <button class="btn btn-ghost btn-sm" onclick={() => downloadMedia(mediaHref, mediaPath)} title="Download the video, then drag it into X">
+                    <Icon name="download" size={13} /> Download
+                  </button>
+                {/if}
+              {/if}
+            </div>
+          {:else}
+            <span class="muted">Toggle Video or Image(s) to add a media tweet</span>
+          {/if}
+        </div>
         {/if}
+
+        <!-- Extra context tweets (3, 4, …) -->
+        {#each extraTweets as tweet, i (tweet.id)}
+          <div class="tweet-block card">
+            <div class="tweet-head">
+              <span class="tweet-num">{i + 3}</span>
+              <span class="label" style="margin:0">Context</span>
+              <span class="counter" class:over={weightedLength(tweet.text) > X_LIMIT}>
+                {weightedLength(tweet.text)}/{X_LIMIT}
+              </span>
+              <button class="btn btn-ghost btn-sm" onclick={() => copy(tweet.text)} disabled={!tweet.text.trim()}>
+                <Icon name="copy" size={13} /> Copy
+              </button>
+              <button class="btn btn-ghost btn-sm danger-hover" onclick={() => removeExtraTweet(tweet.id)} title="Remove tweet">
+                <Icon name="x" size={13} />
+              </button>
+            </div>
+            <textarea
+              class="textarea post-text mono"
+              placeholder="Additional context…"
+              bind:value={tweet.text}
+              rows="4"
+            ></textarea>
+          </div>
+        {/each}
+
+        <div class="thread-actions">
+          {#if !mediaEnabled}
+            <button class="btn btn-ghost btn-sm" onclick={() => (mediaEnabled = true)}>
+              <Icon name="plus" size={13} /> Add media tweet
+            </button>
+          {/if}
+          <button class="btn btn-ghost btn-sm" onclick={addExtraTweet}>
+            <Icon name="plus" size={13} /> Add context tweet
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick={copyAll}>
+            <Icon name="copy" size={13} /> Copy all
+          </button>
+        </div>
+
       </div>
     </div>
   </div>
 </div>
 
+{#if pickerOpen}
+  <Modal title="Choose a media" width="640px" onclose={() => (pickerOpen = false)}>
+    {#if mediaLibrary.length === 0}
+      <p class="picker-empty">No media in this case yet — import or download some in the Media tab.</p>
+    {:else}
+      <div class="picker-grid">
+        {#each mediaLibrary as item (item.path)}
+          <button class="picker-item" onclick={() => pickMedia(item)} title={item.path}>
+            <div class="picker-thumb">
+              {#if item.thumbnail}
+                <img src={`/files/${caseState.current.id}/${item.thumbnail}`} alt={item.path} />
+              {:else}
+                <Icon name={item.kind === 'video' ? 'video' : item.kind === 'audio' ? 'audio' : 'file'} size={24} />
+              {/if}
+              {#if item.kind === 'video'}<span class="kind-badge"><Icon name="video" size={11} /></span>{/if}
+            </div>
+            <span class="picker-name">{(item.label || item.path).replace(/^media\//, '')}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </Modal>
+{/if}
+
 <style>
   .layout {
     display: grid;
-    grid-template-columns: minmax(320px, 460px) minmax(360px, 1fr);
+    grid-template-columns: minmax(300px, 420px) minmax(360px, 1fr);
     gap: 26px;
     padding: 20px;
     max-width: 1200px;
@@ -288,8 +638,6 @@
     gap: 16px;
     min-width: 0;
   }
-  .field.grow { display: flex; flex-direction: column; }
-  .row { display: flex; gap: 8px; }
   .geo-facts {
     margin-top: 8px;
     padding: 8px 10px;
@@ -325,11 +673,37 @@
     object-fit: contain;
     padding: 6px;
   }
-  .post-head {
+  .proof-head {
     display: flex;
     align-items: center;
     gap: 10px;
     margin-bottom: 6px;
+  }
+
+  /* Thread / tweet blocks */
+  .tweet-block {
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .tweet-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tweet-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--bg-3);
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    color: var(--text-2);
+    flex-shrink: 0;
   }
   .counter {
     margin-left: auto;
@@ -340,38 +714,138 @@
   }
   .counter.over { color: var(--danger); }
   .post-text {
-    min-height: 260px;
     font-size: var(--fs-sm);
     line-height: 1.6;
+    min-height: 0;
   }
-  .post-actions {
+  .media-tabs {
     display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 10px;
+    gap: 4px;
   }
-  .over-hint {
+  .media-prefix {
     font-size: var(--fs-xs);
-    color: var(--warn);
+    font-family: var(--font-mono);
+    color: var(--text-2);
+    padding: 2px 0;
   }
-  .thread {
+  .muted {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    padding: 4px 0;
+  }
+  .thread-actions {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    gap: 10px;
+    align-items: center;
+    padding: 4px 0;
+    flex-wrap: wrap;
   }
-  .thread-post {
+  .danger-hover:hover { color: var(--danger); }
+
+  /* header actions */
+  .tool-header {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
-    padding: 10px 12px;
+    gap: 16px;
   }
-  .thread-post pre {
-    flex: 1;
-    margin: 0;
-    font-family: var(--font-mono);
+  .head-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .head-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  /* media attachment */
+  .media-attach {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-top: 2px;
+  }
+  .attach-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 6px 3px 9px;
+    background: var(--bg-3);
+    border-radius: var(--r-sm);
     font-size: var(--fs-xs);
-    white-space: pre-wrap;
-    word-break: break-word;
+    font-family: var(--font-mono);
     color: var(--text-1);
+    max-width: 100%;
+  }
+  .attach-chip a {
+    color: var(--text-1);
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .attach-chip a:hover { color: var(--accent); }
+  .chip-x {
+    display: inline-flex;
+    color: var(--text-3);
+  }
+  .chip-x:hover { color: var(--danger); }
+
+  /* media picker */
+  .picker-empty {
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    padding: 8px 0;
+  }
+  .picker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px;
+  }
+  .picker-item {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    text-align: left;
+  }
+  .picker-thumb {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    color: var(--text-3);
+  }
+  .picker-item:hover .picker-thumb {
+    border-color: var(--accent);
+  }
+  .picker-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .kind-badge {
+    position: absolute;
+    bottom: 4px;
+    right: 4px;
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: var(--r-sm);
+    padding: 2px;
+    color: #fff;
+    display: inline-flex;
+  }
+  .picker-name {
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

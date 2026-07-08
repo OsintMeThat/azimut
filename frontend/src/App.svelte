@@ -1,5 +1,5 @@
 <script>
-  import { uiState, refreshCaseList } from './lib/state.svelte.js';
+  import { uiState, initSession } from './lib/state.svelte.js';
   import Icon from './components/Icon.svelte';
   import CaseSwitcher from './components/CaseSwitcher.svelte';
   import CaseSidebar from './components/CaseSidebar.svelte';
@@ -8,9 +8,11 @@
   import Satellite from './tools/Satellite.svelte';
   import ProofComposer from './tools/ProofComposer.svelte';
   import PostComposer from './tools/PostComposer.svelte';
+  import Inspector from './tools/Inspector.svelte';
 
   const TOOLS = [
     { id: 'media', label: 'Media', icon: 'media', component: MediaLibrary },
+    { id: 'inspect', label: 'Inspect', icon: 'inspect', component: Inspector },
     { id: 'satellite', label: 'Satellite', icon: 'satellite', component: Satellite },
     { id: 'proof', label: 'Proof', icon: 'proof', component: ProofComposer },
     { id: 'post', label: 'Post', icon: 'post', component: PostComposer },
@@ -25,7 +27,8 @@
     history.replaceState(null, '', `#${uiState.tool}`);
   });
 
-  refreshCaseList().catch(() => {});
+  // Load the case list and reopen the last-used case (survives reloads).
+  initSession().catch(() => {});
 </script>
 
 <div class="shell">

@@ -140,23 +140,35 @@ def fetch_crop(
     provider: Provider,
     *,
     crosshair: bool = True,
+    bearing: float = 0.0,
     fetch_tile: Callable[[httpx.Client, str], Image.Image | None] | None = None,
 ) -> tuple[Image.Image, dict[str, Any]]:
     """Stitch a width×height crop centered on (lat, lon). Returns (image, provenance).
 
     Missing tiles become labeled gray placeholders instead of failing the crop.
+    ``bearing`` (degrees clockwise from north) rotates the crop: a larger
+    north-up canvas is stitched, rotated, then center-cropped to width×height so
+    the result matches a map turned to that heading.
     """
     if provider.needs_key:
         raise TileFetchError(f"provider '{provider.id}' requires an API key (settings.json)")
     zoom = min(zoom, provider.max_zoom)
     width, height = min(width, 2048), min(height, 2048)
+    bearing = bearing % 360.0
+
+    # A rotated crop needs a bigger north-up source so its corners stay covered
+    # after rotation; the diagonal is the smallest square that always fits.
+    if bearing:
+        fetch_w = fetch_h = min(math.ceil(math.hypot(width, height)) + 2, 2048)
+    else:
+        fetch_w, fetch_h = width, height
 
     center_x, center_y = project(lat, lon, zoom)
     center_px, center_py = center_x * TILE_SIZE, center_y * TILE_SIZE
-    left, top = center_px - width / 2, center_py - height / 2
+    left, top = center_px - fetch_w / 2, center_py - fetch_h / 2
 
     tile_x0, tile_y0 = int(left // TILE_SIZE), int(top // TILE_SIZE)
-    tile_x1, tile_y1 = int((left + width) // TILE_SIZE), int((top + height) // TILE_SIZE)
+    tile_x1, tile_y1 = int((left + fetch_w) // TILE_SIZE), int((top + fetch_h) // TILE_SIZE)
     n_tiles = (tile_x1 - tile_x0 + 1) * (tile_y1 - tile_y0 + 1)
     if n_tiles > MAX_TILES_PER_CROP:
         raise TileFetchError(
@@ -165,7 +177,7 @@ def fetch_crop(
 
     max_index = (1 << zoom) - 1
     fetch = fetch_tile or _default_fetch
-    canvas = Image.new("RGB", (width, height), (24, 28, 38))
+    canvas = Image.new("RGB", (fetch_w, fetch_h), (24, 28, 38))
     missing = 0
 
     def grab(tx: int, ty: int) -> tuple[int, int, Image.Image | None]:
@@ -196,6 +208,14 @@ def fetch_crop(
             continue
         canvas.paste(tile, (px, py))
 
+    if bearing:
+        # CSS rotates the map clockwise; PIL rotates counter-clockwise, hence -bearing.
+        canvas = canvas.rotate(
+            -bearing, resample=Image.Resampling.BICUBIC, expand=False, fillcolor=(24, 28, 38)
+        )
+        off_x, off_y = (fetch_w - width) // 2, (fetch_h - height) // 2
+        canvas = canvas.crop((off_x, off_y, off_x + width, off_y + height))
+
     if crosshair:
         _draw_crosshair(canvas)
 
@@ -208,6 +228,7 @@ def fetch_crop(
         "zoom": zoom,
         "width": width,
         "height": height,
+        "bearing": round(bearing, 1),
         "meters_per_pixel": round(meters_per_pixel(lat, zoom), 3),
         "tiles": n_tiles,
         "tiles_missing": missing,

@@ -2,6 +2,7 @@
   import { api } from '../lib/api.js';
   import { caseState, uiState, ensureCase, reloadCase, toast } from '../lib/state.svelte.js';
   import Icon from '../components/Icon.svelte';
+  import Modal from '../components/Modal.svelte';
 
   const KIND_ICONS = { image: 'image', video: 'video', audio: 'audio', file: 'file' };
 
@@ -11,6 +12,25 @@
   let dragOver = $state(false);
   let jobs = $state([]); // active download jobs: {id, url, progress}
   let fileInput;
+
+  // --- folder filter ---
+  let folderFilter = $state(null); // null = All
+
+  const folders = $derived(
+    [...new Set(items.filter((i) => i.folder).map((i) => i.folder))].sort()
+  );
+  const filteredItems = $derived(
+    folderFilter ? items.filter((i) => i.folder === folderFilter) : items
+  );
+
+  // --- info/edit modal ---
+  let editItem = $state(null);
+  let editNotes = $state('');
+  let editLabel = $state('');
+  let editSaving = $state(false);
+
+  // --- lightbox ---
+  let lightboxItem = $state(null);
 
   $effect(() => {
     const id = caseState.current?.id;
@@ -103,6 +123,11 @@
     uiState.tool = 'proof';
   }
 
+  function inspect(item) {
+    uiState.inspectPath = item.path;
+    uiState.tool = 'inspect';
+  }
+
   function fmtSize(bytes) {
     if (bytes >= 1 << 30) return (bytes / (1 << 30)).toFixed(1) + ' GB';
     if (bytes >= 1 << 20) return (bytes / (1 << 20)).toFixed(1) + ' MB';
@@ -110,10 +135,42 @@
     return bytes + ' B';
   }
 
+  function fmtDate(iso) {
+    if (!iso) return '';
+    return iso.slice(0, 10);
+  }
+
   function onDrop(e) {
     e.preventDefault();
     dragOver = false;
     importFiles(e.dataTransfer.files);
+  }
+
+  // --- info modal actions ---
+  function openInfo(item) {
+    editItem = item;
+    editNotes = item.notes ?? '';
+    editLabel = item.label ?? '';
+  }
+
+  async function saveInfo() {
+    if (!editItem) return;
+    editSaving = true;
+    try {
+      const updated = await api.patch(`/api/cases/${caseState.current.id}/media`, {
+        path: editItem.path,
+        notes: editNotes,
+        label: editLabel,
+      });
+      const idx = items.findIndex((i) => i.path === editItem.path);
+      if (idx !== -1) items[idx] = updated;
+      editItem = null;
+      toast('Saved', 'ok', 1600);
+    } catch (e) {
+      toast(e.message, 'danger');
+    } finally {
+      editSaving = false;
+    }
   }
 </script>
 
@@ -165,6 +222,30 @@
     />
   </div>
 
+  <!-- folder filter bar -->
+  {#if items.length > 0}
+    <div class="folder-bar">
+      <button
+        class="folder-chip"
+        class:active={folderFilter === null}
+        onclick={() => (folderFilter = null)}
+      >
+        <Icon name="media" size={13} /> All
+        <span class="chip-count">{items.length}</span>
+      </button>
+      {#each folders as f (f)}
+        <button
+          class="folder-chip"
+          class:active={folderFilter === f}
+          onclick={() => (folderFilter = f)}
+        >
+          <Icon name="folder" size={13} />{f}
+          <span class="chip-count">{items.filter((i) => i.folder === f).length}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   <div class="tool-body">
     {#each jobs as job (job.id)}
       <div class="job card fade-up">
@@ -193,11 +274,25 @@
           Every file is SHA-256 hashed and its origin recorded.
         </p>
       </div>
+    {:else if filteredItems.length === 0}
+      <div class="empty" style="height: 100%">
+        <div class="empty-icon"><Icon name="folder" size={38} /></div>
+        <h3>Folder is empty</h3>
+      </div>
     {:else}
       <div class="grid">
-        {#each items as item (item.path)}
+        {#each filteredItems as item (item.path)}
           <div class="media-card card fade-up">
-            <div class="thumb">
+            <!-- thumbnail — click to lightbox for images -->
+            <div
+              class="thumb"
+              class:clickable={item.kind === 'image'}
+              onclick={() => item.kind === 'image' && (lightboxItem = item)}
+              role={item.kind === 'image' ? 'button' : undefined}
+              tabindex={item.kind === 'image' ? 0 : undefined}
+              onkeydown={(e) => e.key === 'Enter' && item.kind === 'image' && (lightboxItem = item)}
+              aria-label={item.kind === 'image' ? `Preview ${item.filename}` : undefined}
+            >
               {#if item.thumbnail}
                 <img
                   src={`/files/${caseState.current.id}/${item.thumbnail}`}
@@ -208,9 +303,14 @@
                 <Icon name={KIND_ICONS[item.kind] ?? 'file'} size={34} />
               {/if}
               <span class="kind badge">{item.kind}</span>
+              {#if item.folder}
+                <span class="folder-badge badge">
+                  <Icon name="folder" size={10} />{item.folder}
+                </span>
+              {/if}
             </div>
             <div class="body">
-              <span class="name" title={item.filename}>{item.filename}</span>
+              <span class="name" title={item.filename}>{item.label ?? item.filename}</span>
               <span class="meta">
                 {fmtSize(item.size)} ·
                 <span class="mono" title={item.sha256}>{item.sha256.slice(0, 8)}</span>
@@ -218,8 +318,18 @@
                   · <a href={item.source.webpage_url ?? item.source.url} target="_blank" rel="noreferrer">source</a>
                 {/if}
               </span>
+              {#if item.notes}
+                <span class="notes-preview" title={item.notes}>{item.notes}</span>
+              {/if}
             </div>
             <div class="actions">
+              <button
+                class="btn btn-ghost btn-sm"
+                title="Info / Edit notes"
+                onclick={() => openInfo(item)}
+              >
+                <Icon name="note" size={14} />
+              </button>
               <a
                 class="btn btn-ghost btn-sm"
                 href={`/files/${caseState.current.id}/${item.path}`}
@@ -229,6 +339,15 @@
               >
                 <Icon name="external" size={14} />
               </a>
+              {#if item.kind === 'image' || item.kind === 'video'}
+                <button
+                  class="btn btn-ghost btn-sm"
+                  title="Open in Inspect"
+                  onclick={() => inspect(item)}
+                >
+                  <Icon name="inspect" size={14} />
+                </button>
+              {/if}
               {#if item.kind === 'image'}
                 <button
                   class="btn btn-ghost btn-sm"
@@ -258,6 +377,142 @@
   {/if}
 </div>
 
+<!-- info / edit modal -->
+{#if editItem}
+  <Modal title={editItem.filename} onclose={() => (editItem = null)} width="520px">
+    <!-- preview -->
+    {#if editItem.kind === 'image' && editItem.thumbnail}
+      <div class="modal-preview">
+        <img
+          src={`/files/${caseState.current.id}/${editItem.path}`}
+          alt={editItem.filename}
+        />
+      </div>
+    {:else if editItem.kind === 'video'}
+      <div class="modal-preview">
+        <!-- svelte-ignore a11y_media_has_caption -->
+        <video
+          src={`/files/${caseState.current.id}/${editItem.path}`}
+          controls
+          preload="metadata"
+        ></video>
+      </div>
+    {/if}
+
+    <!-- metadata section -->
+    <div class="info-rows">
+      <div class="info-row">
+        <span class="info-label">Kind</span>
+        <span>{editItem.kind}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Size</span>
+        <span>{fmtSize(editItem.size)}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Added</span>
+        <span>{fmtDate(editItem.added_at)}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">SHA-256</span>
+        <span class="mono hash" title={editItem.sha256}>{editItem.sha256}</span>
+      </div>
+      {#if editItem.source?.type === 'download'}
+        {#if editItem.source.title}
+          <div class="info-row">
+            <span class="info-label">Title</span>
+            <span>{editItem.source.title}</span>
+          </div>
+        {/if}
+        {#if editItem.source.uploader}
+          <div class="info-row">
+            <span class="info-label">Uploader</span>
+            <span>{editItem.source.uploader}</span>
+          </div>
+        {/if}
+        {#if editItem.source.upload_date}
+          <div class="info-row">
+            <span class="info-label">Published</span>
+            <span class="mono">{editItem.source.upload_date}</span>
+          </div>
+        {/if}
+        {#if editItem.source.duration}
+          <div class="info-row">
+            <span class="info-label">Duration</span>
+            <span>{editItem.source.duration}s</span>
+          </div>
+        {/if}
+        {#if editItem.source.webpage_url ?? editItem.source.url}
+          <div class="info-row">
+            <span class="info-label">Source</span>
+            <a
+              href={editItem.source.webpage_url ?? editItem.source.url}
+              target="_blank"
+              rel="noreferrer"
+              class="mono source-link"
+            >{editItem.source.webpage_url ?? editItem.source.url}</a>
+          </div>
+        {/if}
+      {/if}
+    </div>
+
+    <hr class="divider" />
+
+    <!-- editable fields -->
+    <label class="field-label" for="edit-label">Label</label>
+    <input
+      id="edit-label"
+      class="input"
+      placeholder={editItem.filename}
+      bind:value={editLabel}
+    />
+
+    <label class="field-label" for="edit-notes" style="margin-top: 12px;">Notes</label>
+    <textarea
+      id="edit-notes"
+      class="textarea"
+      rows="4"
+      placeholder="Add context, observations, links…"
+      bind:value={editNotes}
+    ></textarea>
+
+    <div class="modal-actions">
+      {#if editItem.kind === 'image'}
+        <button class="btn btn-ghost btn-sm" onclick={() => { sendToComposer(editItem); editItem = null; }}>
+          <Icon name="proof" size={14} /> Send to Composer
+        </button>
+      {/if}
+      <div style="flex:1"></div>
+      <button class="btn" onclick={() => (editItem = null)}>Cancel</button>
+      <button class="btn btn-primary" onclick={saveInfo} disabled={editSaving}>
+        {editSaving ? 'Saving…' : 'Save'}
+      </button>
+    </div>
+  </Modal>
+{/if}
+
+<!-- lightbox -->
+{#if lightboxItem}
+  <div
+    class="lightbox"
+    onclick={() => (lightboxItem = null)}
+    onkeydown={(e) => e.key === 'Escape' && (lightboxItem = null)}
+    role="dialog"
+    aria-label="Image preview"
+    tabindex="-1"
+  >
+    <button class="lb-close btn btn-ghost" onclick={() => (lightboxItem = null)} aria-label="Close">
+      <Icon name="x" size={20} />
+    </button>
+    <img
+      src={`/files/${caseState.current.id}/${lightboxItem.path}`}
+      alt={lightboxItem.filename}
+      onclick={(e) => e.stopPropagation()}
+    />
+    <span class="lb-caption">{lightboxItem.filename}</span>
+  </div>
+{/if}
+
 <style>
   .tool {
     position: relative;
@@ -270,6 +525,46 @@
     gap: 8px;
     width: min(480px, 40vw);
   }
+
+  /* folder filter bar */
+  .folder-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    flex-shrink: 0;
+  }
+  .folder-chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: border-color 0.12s, color 0.12s, background 0.12s;
+  }
+  .folder-chip:hover {
+    border-color: var(--border-strong);
+    color: var(--text-1);
+  }
+  .folder-chip.active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .chip-count {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    margin-left: 2px;
+  }
+
   .job {
     display: flex;
     align-items: center;
@@ -302,12 +597,8 @@
     animation: slide 1.2s infinite var(--ease);
   }
   @keyframes slide {
-    from {
-      transform: translateX(-100%);
-    }
-    to {
-      transform: translateX(350%);
-    }
+    from { transform: translateX(-100%); }
+    to { transform: translateX(350%); }
   }
   .job-meta {
     font-size: var(--fs-xs);
@@ -340,6 +631,9 @@
     justify-content: center;
     color: var(--text-3);
   }
+  .thumb.clickable {
+    cursor: zoom-in;
+  }
   .thumb img {
     width: 100%;
     height: 100%;
@@ -351,6 +645,21 @@
     left: 8px;
     background: rgba(11, 15, 23, 0.75);
     backdrop-filter: blur(4px);
+  }
+  .folder-badge {
+    position: absolute;
+    bottom: 6px;
+    right: 6px;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    background: rgba(11, 15, 23, 0.75);
+    backdrop-filter: blur(4px);
+    font-size: 10px;
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .body {
     padding: 10px 12px 6px;
@@ -369,6 +678,14 @@
   .meta {
     font-size: var(--fs-xs);
     color: var(--text-3);
+  }
+  .notes-preview {
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-style: italic;
   }
   .actions {
     display: flex;
@@ -399,5 +716,114 @@
     color: var(--accent);
     font-weight: 700;
     background: var(--accent-soft);
+  }
+
+  /* info modal */
+  .modal-preview {
+    border-radius: var(--r);
+    overflow: hidden;
+    background: var(--bg-2);
+    margin-bottom: 14px;
+    max-height: 260px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-preview img,
+  .modal-preview video {
+    max-width: 100%;
+    max-height: 260px;
+    object-fit: contain;
+    display: block;
+  }
+  .info-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .info-row {
+    display: flex;
+    gap: 10px;
+    font-size: var(--fs-sm);
+    align-items: baseline;
+    min-width: 0;
+  }
+  .info-label {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    min-width: 70px;
+    flex-shrink: 0;
+  }
+  .hash {
+    font-size: 11px;
+    word-break: break-all;
+    color: var(--text-2);
+  }
+  .source-link {
+    font-size: var(--fs-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 14px 0 12px;
+  }
+  .field-label {
+    display: block;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    margin-bottom: 5px;
+  }
+  .textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 80px;
+  }
+  .modal-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  /* lightbox */
+  .lightbox {
+    position: fixed;
+    inset: 0;
+    background: rgba(4, 7, 12, 0.92);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 950;
+    cursor: zoom-out;
+  }
+  .lightbox img {
+    max-width: calc(100vw - 40px);
+    max-height: calc(100vh - 80px);
+    object-fit: contain;
+    border-radius: var(--r);
+    box-shadow: var(--shadow-2);
+    cursor: default;
+  }
+  .lb-close {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+  }
+  .lb-caption {
+    position: absolute;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    background: rgba(11, 15, 23, 0.75);
+    padding: 4px 12px;
+    border-radius: 999px;
+    white-space: nowrap;
   }
 </style>

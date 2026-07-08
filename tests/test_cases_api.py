@@ -82,3 +82,125 @@ def test_entities_and_links(client):
     data = client.get(f"/api/cases/{cid}").json()
     assert len(data["entities"]) == 1
     assert data["links"] == []
+
+
+# ---------------------------------------------------------------------------
+# Satellite capture notes (PATCH /api/cases/{id}/satellite)
+# Uses a pre-written sidecar to avoid a live tile fetch.
+# ---------------------------------------------------------------------------
+
+import json
+import os
+
+
+def _plant_capture(client, cid: str) -> dict:
+    """Write a fake satellite PNG + sidecar directly into the case directory."""
+    import ozimut.config as cfg
+    from pathlib import Path
+
+    case_dir = cfg.cases_dir() / cid
+    sat_dir = case_dir / "satellite"
+    sat_dir.mkdir(parents=True, exist_ok=True)
+
+    fname = "sat_test_z16_esri.png"
+    (sat_dir / fname).write_bytes(b"\x89PNG\r\n\x1a\n")  # minimal PNG magic bytes
+    sidecar = {
+        "filename": fname,
+        "provider": "esri-world-imagery",
+        "provider_label": "Esri World Imagery",
+        "zoom": 16,
+        "lat": 50.0,
+        "lon": 30.0,
+        "fetched_at": "2026-07-08T12:00:00Z",
+        "tiles": 9,
+        "tiles_missing": 0,
+    }
+    (sat_dir / (fname + ".json")).write_text(
+        json.dumps(sidecar, indent=2) + "\n", encoding="utf-8"
+    )
+    sidecar["path"] = f"satellite/{fname}"
+    return sidecar
+
+
+def test_satellite_patch_notes(client):
+    cid = client.post("/api/cases", json={"name": "SatNotes"}).json()["id"]
+    capture = _plant_capture(client, cid)
+
+    updated = client.patch(
+        f"/api/cases/{cid}/satellite",
+        json={"path": capture["path"], "notes": "good reference point"},
+    ).json()
+    assert updated["notes"] == "good reference point"
+
+    # persisted: shows up in listing
+    listed = client.get(f"/api/cases/{cid}/satellite").json()
+    assert listed[0]["notes"] == "good reference point"
+
+
+def test_satellite_patch_clear_notes(client):
+    cid = client.post("/api/cases", json={"name": "SatClear"}).json()["id"]
+    capture = _plant_capture(client, cid)
+
+    client.patch(
+        f"/api/cases/{cid}/satellite",
+        json={"path": capture["path"], "notes": "initial"},
+    )
+    updated = client.patch(
+        f"/api/cases/{cid}/satellite",
+        json={"path": capture["path"], "notes": ""},
+    ).json()
+    assert "notes" not in updated
+
+
+def test_satellite_patch_not_found(client):
+    cid = client.post("/api/cases", json={"name": "SatMissing"}).json()["id"]
+    res = client.patch(
+        f"/api/cases/{cid}/satellite",
+        json={"path": "satellite/nonexistent.png", "notes": "x"},
+    )
+    assert res.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Folders (case-level organisational buckets)
+# ---------------------------------------------------------------------------
+
+
+def test_folders_crud(client):
+    cid = client.post("/api/cases", json={"name": "Folders"}).json()["id"]
+
+    # empty by default
+    assert client.get(f"/api/cases/{cid}/folders").json() == []
+
+    # create, deduped and sorted case-insensitively
+    client.post(f"/api/cases/{cid}/folders", json={"name": "Videos"})
+    folders = client.post(f"/api/cases/{cid}/folders", json={"name": "Aerial"}).json()
+    assert folders == ["Aerial", "Videos"]
+    # idempotent
+    assert client.post(f"/api/cases/{cid}/folders", json={"name": "Videos"}).json() == [
+        "Aerial",
+        "Videos",
+    ]
+
+    # persisted in case.json
+    assert client.get(f"/api/cases/{cid}").json()["folders"] == ["Aerial", "Videos"]
+
+    # delete
+    remaining = client.delete(f"/api/cases/{cid}/folders", params={"name": "Videos"}).json()
+    assert remaining == ["Aerial"]
+
+
+def test_delete_folder_unassigns_entities(client):
+    cid = client.post("/api/cases", json={"name": "Unassign"}).json()["id"]
+    client.post(f"/api/cases/{cid}/folders", json={"name": "Suspects"})
+    ent = client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "person", "label": "John", "attrs": {"folder": "Suspects"}},
+    ).json()
+
+    client.delete(f"/api/cases/{cid}/folders", params={"name": "Suspects"})
+    data = client.get(f"/api/cases/{cid}").json()
+    assert data["folders"] == []
+    entity = next(e for e in data["entities"] if e["id"] == ent["id"])
+    assert "folder" not in entity["attrs"]
+
