@@ -18,9 +18,11 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Ozimut", version=__version__, docs_url="/api/docs")
 
-    from .api import cases
+    from .api import cases, files, media
 
     app.include_router(cases.router)
+    app.include_router(media.router)
+    app.include_router(files.router)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -32,8 +34,8 @@ def create_app() -> FastAPI:
 
         @app.get("/{path:path}", include_in_schema=False)
         def spa(path: str):  # SPA fallback: serve index.html for app routes
-            candidate = STATIC_DIR / path
-            if path and candidate.is_file() and candidate.is_relative_to(STATIC_DIR):
+            candidate = (STATIC_DIR / path).resolve()
+            if path and candidate.is_file() and candidate.is_relative_to(STATIC_DIR.resolve()):
                 return FileResponse(candidate)
             return FileResponse(STATIC_DIR / "index.html")
 
