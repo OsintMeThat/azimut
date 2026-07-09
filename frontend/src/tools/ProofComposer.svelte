@@ -9,6 +9,7 @@
     ANNO_COLORS, PAD, CAPTION_H, LEGEND_LINE_H, FOOTER_H,
     BG, TEXT_MAIN, TEXT_DIM, TEXT_FAINT,
     layoutPanels, attributionLine, docSize, toSpec, newId, loadImage,
+    featureColors, notesFromShapes,
   } from '../lib/composer.js';
 
   const DRAW_TOOLS = [
@@ -17,10 +18,14 @@
     { id: 'ellipse', icon: 'circle', label: 'Ellipse' },
     { id: 'arrow', icon: 'arrow', label: 'Arrow' },
     { id: 'line', icon: 'line', label: 'Line' },
+    { id: 'curve', icon: 'curve', label: 'Curve (click points, double-click to finish)' },
+    { id: 'text', icon: 'text', label: 'Text' },
   ];
 
   // ---- document state -------------------------------------------------------
-  const proof = $state({ title: 'Untitled proof', panels: [], shapes: [], coords: null });
+  // `notes` holds the legend text per color (annotations are written by color,
+  // not per element); `shapes` are the drawn geometry bound to a panel.
+  const proof = $state({ title: 'Untitled proof', panels: [], shapes: [], notes: {}, coords: null });
   let savedName = $state(null);
   let dirty = $state(false);
   let tool = $state('select');
@@ -35,8 +40,9 @@
 
   // ---- konva ------------------------------------------------------------------
   let containerEl;
-  let stage, docLayer, uiLayer, transformer;
+  let stage, docLayer, uiLayer, transformer, endHandles;
   let drawing = null; // {panel, node, start, box, kind}
+  let pathDraft = null; // {panel, box, node, points:[]} — multi-click curve in progress
 
   onMount(() => {
     stage = new Konva.Stage({ container: containerEl, width: 100, height: 100 });
@@ -55,6 +61,8 @@
       ignoreStroke: true,
     });
     uiLayer.add(transformer);
+    endHandles = new Konva.Group();
+    uiLayer.add(endHandles);
 
     const resize = new ResizeObserver(() => {
       stage.width(containerEl.clientWidth);
@@ -67,6 +75,7 @@
     stage.on('pointerdown', onPointerDown);
     stage.on('pointermove', onPointerMove);
     stage.on('pointerup', onPointerUp);
+    stage.on('dblclick dbltap', () => { if (pathDraft) finishPath(true); });
 
     return () => {
       resize.disconnect();
@@ -101,11 +110,17 @@
     }
   });
 
+  // leaving the curve tool abandons an unfinished draft
+  $effect(() => {
+    if (tool !== 'curve' && pathDraft) finishPath(false);
+  });
+
   // rebuild canvas whenever the document changes
   $effect(() => {
     JSON.stringify([
       proof.panels.map((p) => [p.src, p.caption]),
       proof.shapes,
+      proof.notes,
       selectedId,
     ]);
     if (stage) rebuild();
@@ -115,6 +130,7 @@
     proof.title = 'Untitled proof';
     proof.panels = [];
     proof.shapes = [];
+    proof.notes = {};
     proof.coords = null;
     savedName = null;
     selectedId = null;
@@ -230,7 +246,7 @@
 
   function fit() {
     if (!stage || !containerEl || !containerEl.clientWidth) return;
-    const { width, height } = docSize(proof.panels, proof.shapes);
+    const { width, height } = docSize(proof.panels, proof.shapes, proof.notes);
     const k = Math.min(
       (containerEl.clientWidth - 24) / width,
       (containerEl.clientHeight - 24) / height,
@@ -289,6 +305,36 @@
     const panel = proof.panels[hit.index];
     const group = docLayer.findOne(`#pg-${panel.id}`);
     if (!group) return;
+    // text is placed with a single click (no drag) then edited in the side list
+    if (tool === 'text') {
+      const s = {
+        id: newId('s'), panel: panel.id, kind: 'text', color,
+        x: hit.nx, y: hit.ny, text: 'Text', fontSize: 28,
+      };
+      proof.shapes.push(s);
+      selectedId = s.id;
+      tool = 'select';
+      dirty = true;
+      return;
+    }
+    // curve: each click drops a vertex; double-click / Enter finishes
+    if (tool === 'curve') {
+      if (pathDraft && pathDraft.panel.id !== panel.id) return;
+      if (!pathDraft) {
+        const node = new Konva.Line({
+          points: [hit.nx, hit.ny], tension: 0.5, stroke: color,
+          strokeWidth: strokeW / hit.box.scale, lineCap: 'round', lineJoin: 'round',
+          listening: false,
+        });
+        group.add(node);
+        pathDraft = { panel, box: hit.box, node, points: [hit.nx, hit.ny] };
+      } else {
+        pathDraft.points.push(hit.nx, hit.ny);
+        pathDraft.node.points([...pathDraft.points]);
+        docLayer.batchDraw();
+      }
+      return;
+    }
     const sw = strokeW / hit.box.scale;
     const common = { stroke: color, strokeWidth: sw, listening: false };
     let node;
@@ -310,6 +356,15 @@
   }
 
   function onPointerMove() {
+    if (pathDraft) {
+      const box = pathDraft.box;
+      const doc = docPoint();
+      const nx = Math.min(Math.max((doc.x - box.x) / box.scale, 0), pathDraft.panel.natural[0]);
+      const ny = Math.min(Math.max((doc.y - box.y) / box.scale, 0), pathDraft.panel.natural[1]);
+      pathDraft.node.points([...pathDraft.points, nx, ny]);
+      docLayer.batchDraw();
+      return;
+    }
     if (!drawing) return;
     const box = drawing.box;
     const doc = docPoint();
@@ -358,7 +413,7 @@
     if (shape) {
       const s = {
         id: newId('s'), panel: panel.id, color,
-        strokeWidth: strokeW, comment: '', ...shape,
+        strokeWidth: strokeW, ...shape,
       };
       proof.shapes.push(s);
       selectedId = s.id;
@@ -366,11 +421,35 @@
     }
   }
 
+  function finishPath(commit) {
+    if (!pathDraft) return;
+    const { node, points, panel } = pathDraft;
+    pathDraft = null;
+    node.destroy();
+    // the double-click that finishes drops a duplicate last vertex — trim it
+    const n = points.length;
+    if (n >= 4 && Math.hypot(points[n - 2] - points[n - 4], points[n - 1] - points[n - 3]) < 3) {
+      points.length = n - 2;
+    }
+    if (commit && points.length >= 4) {
+      const s = {
+        id: newId('s'), panel: panel.id, kind: 'curve', color,
+        strokeWidth: strokeW, points, tension: 0.5,
+      };
+      proof.shapes.push(s);
+      selectedId = s.id;
+      tool = 'select';
+      dirty = true;
+    } else {
+      proof.shapes = [...proof.shapes]; // force rebuild to drop the preview
+    }
+  }
+
   // ---- rebuild canvas from state ------------------------------------------------------
 
   function rebuild() {
     docLayer.destroyChildren();
-    const { width, height, legend } = docSize(proof.panels, proof.shapes);
+    const { width, height, legend } = docSize(proof.panels, proof.shapes, proof.notes);
     const boxes = layoutPanels(proof.panels);
 
     docLayer.add(
@@ -435,19 +514,95 @@
     // selection
     const selectedNode = selectedId ? docLayer.findOne(`#${selectedId}`) : null;
     transformer.nodes(selectedNode ? [selectedNode] : []);
+    const cls = selectedNode?.className;
+    transformer.rotateEnabled(cls === 'Text' || cls === 'Rect' || cls === 'Ellipse');
     transformer.enabledAnchors(
-      selectedNode && (selectedNode.className === 'Rect' || selectedNode.className === 'Ellipse')
+      cls === 'Rect' || cls === 'Ellipse'
         ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
-        : []
+        : cls === 'Text'
+          ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
+          : []
     );
+    drawEndHandles(boxes);
     docLayer.batchDraw();
     uiLayer.batchDraw();
   }
 
+  // Draggable per-vertex handles for the selected line / arrow / curve, so any
+  // point can be re-placed after drawing (rects/ellipses/text use the transformer).
+  const POINT_KINDS = new Set(['line', 'arrow', 'curve']);
+  function drawEndHandles(boxes) {
+    endHandles.destroyChildren();
+    const s = selectedShape;
+    if (tool !== 'select' || !s || !POINT_KINDS.has(s.kind)) return;
+    const idx = proof.panels.findIndex((p) => p.id === s.panel);
+    if (idx < 0) return;
+    const box = boxes[idx];
+    const panel = proof.panels[idx];
+    const node = docLayer.findOne(`#${s.id}`);
+    const r = 7 / stage.scaleX();
+    for (let vi = 0; vi < s.points.length; vi += 2) {
+      const handle = new Konva.Circle({
+        x: box.x + s.points[vi] * box.scale,
+        y: box.y + s.points[vi + 1] * box.scale,
+        radius: r, fill: '#161e2e', stroke: '#e8a33d', strokeWidth: 2 / stage.scaleX(),
+        draggable: true, name: 'endh',
+      });
+      const apply = (commit) => {
+        const nx = Math.min(Math.max((handle.x() - box.x) / box.scale, 0), panel.natural[0]);
+        const ny = Math.min(Math.max((handle.y() - box.y) / box.scale, 0), panel.natural[1]);
+        handle.position({ x: box.x + nx * box.scale, y: box.y + ny * box.scale });
+        if (commit) {
+          s.points[vi] = nx;
+          s.points[vi + 1] = ny;
+          s.points = [...s.points];
+          dirty = true;
+        } else if (node) {
+          const pts = [...s.points];
+          pts[vi] = nx;
+          pts[vi + 1] = ny;
+          node.points(pts);
+          docLayer.batchDraw();
+        }
+      };
+      handle.on('dragmove', () => apply(false));
+      handle.on('dragend', () => apply(true));
+      endHandles.add(handle);
+    }
+  }
+
   function makeShapeNode(s, panelScale) {
+    if (s.kind === 'text') {
+      const node = new Konva.Text({
+        id: s.id, x: s.x, y: s.y, text: s.text || ' ',
+        fontSize: s.fontSize ?? 28, fontFamily: 'system-ui, sans-serif',
+        fontStyle: 'bold', fill: s.color, rotation: s.rotation ?? 0, draggable: true,
+      });
+      node.on('pointerdown', (e) => {
+        if (tool === 'select') {
+          e.cancelBubble = true;
+          selectedId = s.id;
+        }
+      });
+      node.on('dragend', () => {
+        s.x = node.x();
+        s.y = node.y();
+        dirty = true;
+      });
+      node.on('transformend', () => {
+        // corner drag scales the font, the top handle rotates; fold both back in
+        s.fontSize = Math.max(6, Math.round((s.fontSize ?? 28) * node.scaleX()));
+        s.rotation = node.rotation();
+        s.x = node.x();
+        s.y = node.y();
+        node.scale({ x: 1, y: 1 });
+        dirty = true;
+      });
+      return node;
+    }
     const sw = (s.strokeWidth ?? 4) / panelScale;
     const common = {
-      id: s.id, stroke: s.color, strokeWidth: sw,
+      id: s.id, stroke: s.color, strokeWidth: sw, rotation: s.rotation ?? 0,
       draggable: true, hitStrokeWidth: Math.max(sw * 3, 14 / panelScale),
     };
     let node;
@@ -455,6 +610,11 @@
       node = new Konva.Rect({ x: s.x, y: s.y, width: s.w, height: s.h, cornerRadius: 2, ...common });
     } else if (s.kind === 'ellipse') {
       node = new Konva.Ellipse({ x: s.x, y: s.y, radiusX: s.w / 2, radiusY: s.h / 2, ...common });
+    } else if (s.kind === 'curve') {
+      node = new Konva.Line({
+        points: s.points, tension: s.tension ?? 0.5,
+        lineCap: 'round', lineJoin: 'round', ...common,
+      });
     } else {
       node = new Konva.Arrow({
         points: s.points,
@@ -475,8 +635,9 @@
         s.x = node.x();
         s.y = node.y();
       } else {
+        // arrow / line / curve: fold the drag offset back into every vertex
         const dx = node.x(), dy = node.y();
-        s.points = [s.points[0] + dx, s.points[1] + dy, s.points[2] + dx, s.points[3] + dy];
+        s.points = s.points.map((v, i) => (i % 2 === 0 ? v + dx : v + dy));
         node.position({ x: 0, y: 0 });
       }
       dirty = true;
@@ -491,6 +652,7 @@
         s.w = Math.abs(node.radiusX() * 2 * node.scaleX());
         s.h = Math.abs(node.radiusY() * 2 * node.scaleY());
       }
+      s.rotation = node.rotation();
       node.scale({ x: 1, y: 1 });
       dirty = true;
     });
@@ -500,19 +662,56 @@
   // ---- shape ops from the side panel -----------------------------------------------------
 
   function deleteShape(id) {
+    const gone = proof.shapes.find((s) => s.id === id);
     proof.shapes = proof.shapes.filter((s) => s.id !== id);
+    // drop the legend note if this was the last element of its color
+    if (gone && !proof.shapes.some((s) => s.color === gone.color)) {
+      delete proof.notes[gone.color];
+    }
     if (selectedId === id) selectedId = null;
     dirty = true;
   }
 
-  function setShapeColor(s, c) {
-    s.color = c;
-    dirty = true;
+  const KIND_ICON = { rect: 'square', ellipse: 'circle', arrow: 'arrow', line: 'line', curve: 'curve', text: 'text' };
+  const KIND_LABEL = { rect: 'Box', ellipse: 'Ellipse', arrow: 'Arrow', line: 'Line', curve: 'Curve', text: 'Text' };
+
+  // Color / stroke controls act on the selected shape when there is one
+  // (live edit), otherwise they set the defaults for the next drawn shape.
+  function setColor(c) {
+    if (selectedShape) {
+      const oldColor = selectedShape.color;
+      selectedShape.color = c;
+      // carry the legend note over if this color is otherwise unused
+      if (proof.notes[oldColor] && !proof.notes[c] &&
+          !proof.shapes.some((s) => s !== selectedShape && s.color === oldColor)) {
+        proof.notes[c] = proof.notes[oldColor];
+        delete proof.notes[oldColor];
+      }
+      dirty = true;
+    } else {
+      color = c;
+    }
+  }
+
+  function setStroke(w) {
+    if (selectedShape?.kind === 'text') {
+      selectedShape.fontSize = w;
+      dirty = true;
+    } else if (selectedShape) {
+      selectedShape.strokeWidth = w;
+      dirty = true;
+    } else {
+      strokeW = w;
+    }
   }
 
   function onKeydown(e) {
     if (uiState.tool !== 'proof') return;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+    if (pathDraft && (e.key === 'Enter' || e.key === 'Escape')) {
+      finishPath(e.key === 'Enter');
+      return;
+    }
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
       deleteShape(selectedId);
     } else if (e.key === 'Escape') {
@@ -523,13 +722,15 @@
     else if (e.key === 'e') tool = 'ellipse';
     else if (e.key === 'a') tool = 'arrow';
     else if (e.key === 'l') tool = 'line';
+    else if (e.key === 'c') tool = 'curve';
+    else if (e.key === 't') tool = 'text';
     else if (e.key === 'f') fit();
   }
 
   // ---- persistence -------------------------------------------------------------------------
 
   function exportPng() {
-    const { width, height } = docSize(proof.panels, proof.shapes);
+    const { width, height } = docSize(proof.panels, proof.shapes, proof.notes);
     const prevScale = stage.scale();
     const prevPos = stage.position();
     const prevSize = { w: stage.width(), h: stage.height() };
@@ -600,6 +801,8 @@
     }
     const validPanels = new Set(proof.panels.map((p) => p.id));
     proof.shapes = (spec.shapes ?? []).filter((s) => validPanels.has(s.panel));
+    // legend text lives in `notes` (per color); migrate old per-shape comments
+    proof.notes = spec.notes ?? notesFromShapes(proof.shapes);
     savedName = entry.name;
     openList = null;
     dirty = false;
@@ -607,6 +810,8 @@
   }
 
   const selectedShape = $derived(proof.shapes.find((s) => s.id === selectedId));
+  const activeColor = $derived(selectedShape?.color ?? color);
+  const featureList = $derived(featureColors(proof.shapes));
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -622,7 +827,7 @@
     {/if}
     <button class="btn" onclick={openPicker}><Icon name="plus" size={15} /> Add panel</button>
     <button class="btn btn-primary" onclick={() => save()} disabled={!proof.panels.length || saving}>
-      <Icon name="check" size={15} /> {saving ? 'Saving…' : 'Save + export'}
+      <Icon name="check" size={15} /> {saving ? 'Saving…' : 'Save'}
     </button>
     <button class="btn" onclick={() => save({ andPost: true })} disabled={!proof.panels.length || saving}>
       <Icon name="post" size={15} /> To Post
@@ -646,19 +851,39 @@
       {#each ANNO_COLORS as c (c)}
         <button
           class="color-btn"
-          class:active={(selectedShape?.color ?? color) === c}
+          class:active={activeColor === c}
           style:background={c}
           title="Same color = same feature"
-          onclick={() => (selectedShape ? setShapeColor(selectedShape, c) : (color = c))}
+          onclick={() => setColor(c)}
           aria-label={`color ${c}`}
         ></button>
       {/each}
+      <label
+        class="color-btn color-pick"
+        class:active={!ANNO_COLORS.includes(activeColor)}
+        style:background={activeColor}
+        title="Custom color"
+      >
+        <Icon name="plus" size={12} />
+        <input
+          type="color"
+          value={activeColor}
+          oninput={(e) => setColor(e.target.value)}
+          aria-label="custom color"
+        />
+      </label>
       <div class="tb-sep"></div>
       <input
         class="stroke-slider"
-        type="range" min="2" max="10" step="1"
-        bind:value={strokeW}
-        title="Stroke width"
+        type="range"
+        min={selectedShape?.kind === 'text' ? 8 : 1}
+        max={selectedShape?.kind === 'text' ? 120 : 24}
+        step="1"
+        value={selectedShape?.kind === 'text'
+          ? (selectedShape.fontSize ?? 28)
+          : (selectedShape?.strokeWidth ?? strokeW)}
+        oninput={(e) => setStroke(+e.target.value)}
+        title={selectedShape?.kind === 'text' ? 'Font size' : selectedShape ? 'Stroke width (selected)' : 'Stroke width'}
       />
       <div class="tb-sep"></div>
       <button class="tb-btn" title="Fit view (f)" onclick={fit}><Icon name="eye" size={18} /></button>
@@ -705,13 +930,35 @@
           </div>
         {/each}
 
+        <!-- Annotations: one legend note per color (feature), not per element -->
         <div class="side-title" style="margin-top: 14px">
-          Annotations <span class="count">{proof.shapes.length}</span>
+          Annotations <span class="count">{featureList.length}</span>
         </div>
-        {#if !proof.shapes.length}
-          <div class="none">Draw on the panels with the box, ellipse, arrow or line tools.</div>
+        {#if !featureList.length}
+          <div class="none">Draw on the panels with the box, ellipse, arrow or line tools. Same color = same feature.</div>
         {/if}
-        {#each proof.shapes as s (s.id)}
+        {#each featureList as c, i (c)}
+          <div class="anno-row" class:active={activeColor === c}>
+            <button
+              class="chip-num"
+              style:background={c}
+              title="Select this color"
+              onclick={() => setColor(c)}
+            >{i + 1}</button>
+            <input
+              class="input comment-input"
+              placeholder={`Feature ${i + 1} — legend text…`}
+              bind:value={proof.notes[c]}
+              onchange={() => (dirty = true)}
+            />
+          </div>
+        {/each}
+
+        <!-- Elements: every drawn shape, for quick select / delete -->
+        <div class="side-title" style="margin-top: 14px">
+          Elements <span class="count">{proof.shapes.length}</span>
+        </div>
+        {#each proof.shapes as s, i (s.id)}
           <div
             class="shape-row"
             class:selected={selectedId === s.id}
@@ -721,16 +968,20 @@
             onkeydown={(e) => e.key === 'Enter' && (selectedId = s.id)}
           >
             <span class="chip" style:background={s.color}></span>
-            <Icon name={s.kind === 'rect' ? 'square' : s.kind === 'ellipse' ? 'circle' : s.kind} size={13} />
-            <input
-              class="input comment-input"
-              placeholder="Feature comment (legend)…"
-              bind:value={s.comment}
-              onchange={() => (dirty = true)}
-              onclick={(e) => e.stopPropagation()}
-            />
+            <Icon name={KIND_ICON[s.kind]} size={13} />
+            {#if s.kind === 'text'}
+              <input
+                class="input comment-input"
+                placeholder="Text…"
+                bind:value={s.text}
+                onchange={() => (dirty = true)}
+                onclick={(e) => e.stopPropagation()}
+              />
+            {:else}
+              <span class="el-label">{KIND_LABEL[s.kind]} <span class="el-id">#{i + 1}</span></span>
+            {/if}
             <button class="btn btn-ghost btn-sm" title="Delete" onclick={(e) => { e.stopPropagation(); deleteShape(s.id); }}>
-              <Icon name="x" size={13} />
+              <Icon name="trash" size={13} />
             </button>
           </div>
         {/each}
@@ -841,6 +1092,21 @@
     border-color: var(--text-1);
     box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 3.5px var(--text-3);
   }
+  .color-pick {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #0b0f17;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+  }
+  .color-pick input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
   .stroke-slider {
     width: 80px;
     transform: rotate(-90deg);
@@ -908,6 +1174,41 @@
     color: var(--text-3);
     padding: 2px 2px 8px;
   }
+  .anno-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 4px;
+    border-radius: var(--r-sm);
+    margin-bottom: 4px;
+    border: 1px solid transparent;
+  }
+  .anno-row.active { border-color: var(--accent); background: var(--accent-soft); }
+  .chip-num {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 700;
+    color: #0b0f17;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid transparent;
+    cursor: pointer;
+  }
+  .chip-num:hover { border-color: var(--text-1); }
+  .el-label {
+    flex: 1;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .el-id { color: var(--text-3); }
   .shape-row {
     display: flex;
     align-items: center;

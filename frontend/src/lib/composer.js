@@ -37,24 +37,46 @@ export function layoutPanels(panels) {
   });
 }
 
-/** Distinct colors in order of first use → feature numbering (same color = same feature). */
+/**
+ * Distinct colors in order of first use → feature numbering (same color = same
+ * feature). Text labels are excluded — they annotate, they aren't features.
+ */
 export function featureColors(shapes) {
   const seen = [];
   for (const s of shapes) {
+    if (s.kind === 'text') continue;
     if (!seen.includes(s.color)) seen.push(s.color);
   }
   return seen;
 }
 
-/** Legend lines: one per used color, comments joined. */
-export function legendLines(shapes) {
+/**
+ * Legend lines: one per used color (feature), text taken from the per-color
+ * `notes` map. Annotations are written by color, not per element.
+ */
+export function legendLines(shapes, notes = {}) {
   const colors = featureColors(shapes);
-  return colors.map((color, i) => {
-    const comments = shapes
-      .filter((s) => s.color === color && s.comment?.trim())
-      .map((s) => s.comment.trim());
-    return { color, n: i + 1, text: [...new Set(comments)].join(' · ') };
-  });
+  return colors.map((color, i) => ({
+    color,
+    n: i + 1,
+    text: (notes?.[color] ?? '').trim(),
+  }));
+}
+
+/**
+ * Build a per-color notes map from legacy per-shape comments (old specs stored
+ * the legend text on each shape). Used once when opening an old proof.
+ */
+export function notesFromShapes(shapes) {
+  const notes = {};
+  for (const s of shapes) {
+    const c = s.comment?.trim();
+    if (!c) continue;
+    const existing = notes[s.color];
+    if (!existing) notes[s.color] = c;
+    else if (!existing.split(' · ').includes(c)) notes[s.color] = `${existing} · ${c}`;
+  }
+  return notes;
 }
 
 /** Unique attribution strings from panel metadata. */
@@ -69,12 +91,12 @@ export function attributionLine(panels) {
 }
 
 /** Full document size given panels + shapes (legend grows with features). */
-export function docSize(panels, shapes) {
+export function docSize(panels, shapes, notes = {}) {
   const boxes = layoutPanels(panels);
   const width = boxes.length
     ? boxes[boxes.length - 1].x + boxes[boxes.length - 1].w + PAD
     : 640;
-  const legend = legendLines(shapes).filter((l) => l.text);
+  const legend = legendLines(shapes, notes).filter((l) => l.text);
   const height =
     PAD + PANEL_H + CAPTION_H + (legend.length ? 10 + legend.length * LEGEND_LINE_H : 0) + FOOTER_H + PAD;
   return { width: Math.max(width, 640), height, legend };
@@ -86,6 +108,7 @@ export function toSpec(proof) {
     ozimut_proof: 1,
     title: proof.title,
     coords: proof.coords ?? null,
+    notes: { ...(proof.notes ?? {}) },
     panels: proof.panels.map((p) => ({
       id: p.id, // kept so shapes stay bound to their panel on reload
       src: p.src,

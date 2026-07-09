@@ -23,6 +23,7 @@ SPEC = {
          "color": "#ff5252", "strokeWidth": 4, "comment": "blue roof"},
     ],
     "coords": {"lat": 1.0, "lon": 2.0},
+    "notes": {"#ff5252": "blue roof matches"},
 }
 
 
@@ -43,6 +44,7 @@ def test_save_load_roundtrip(client):
     spec = client.get(f"/api/cases/{cid}/proofs/kharkiv-strike-proof").json()
     assert spec["title"] == "Kharkiv strike proof"
     assert spec["shapes"][0]["comment"] == "blue roof"
+    assert spec["notes"] == {"#ff5252": "blue roof matches"}  # legend text is per color
     assert spec["panels"][0]["id"] == "p1"  # panel ids survive → shapes stay bound
 
     # PNG served
