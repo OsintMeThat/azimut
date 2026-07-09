@@ -14,6 +14,7 @@
     "vite": "^8.1.4"
   },
   "dependencies": {
+    "@fontsource/oxanium": "^5.2.8",
     "konva": "^9.3.0",
     "leaflet": "^1.9.4",
     "leaflet-rotate": "^0.2.8"

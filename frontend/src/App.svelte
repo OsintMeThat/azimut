@@ -1,6 +1,7 @@
 <script>
   import { uiState, initSession } from './lib/state.svelte.js';
   import Icon from './components/Icon.svelte';
+  import Logo from './components/Logo.svelte';
   import CaseSwitcher from './components/CaseSwitcher.svelte';
   import CaseSidebar from './components/CaseSidebar.svelte';
   import Toasts from './components/Toasts.svelte';
@@ -34,11 +35,7 @@
 <div class="shell">
   <header class="topbar">
     <div class="brand">
-      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true">
-        <circle cx="16" cy="16" r="14" fill="var(--bg-2)" stroke="var(--border-strong)" />
-        <path d="M16 4 L19 16 L16 28 L13 16 Z" fill="var(--accent)" />
-        <circle cx="16" cy="16" r="2.5" fill="var(--text-1)" />
-      </svg>
+      <Logo size={26} />
       <span class="brand-name">Ozimut</span>
     </div>
     <CaseSwitcher />
@@ -101,13 +98,18 @@
   .brand {
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: 10px;
     padding-right: 6px;
   }
   .brand-name {
-    font-weight: 800;
-    letter-spacing: 0.02em;
-    font-size: var(--fs-lg);
+    font-family: 'Oxanium', var(--font-sans);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    /* trailing tracking pushes the word off-center; nudge it back */
+    margin-right: -0.22em;
+    font-size: var(--fs-md);
+    color: var(--text-1);
   }
   .spacer {
     flex: 1;
