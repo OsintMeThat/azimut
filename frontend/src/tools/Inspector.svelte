@@ -3,6 +3,7 @@
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
   import {
     adjustDefaults, buildOps, previewStyle, isNeutral, uid, videoSeed, initialQuad, VIDEO_ADJUST_IDS,
+    cropImgStyle, cropAspect, styleText, collageBounds, quadFromCropRect,
   } from '../lib/inspect.js';
   import Icon from '../components/Icon.svelte';
   import SelectionMenu from './inspect/SelectionMenu.svelte';
@@ -11,6 +12,7 @@
   import CollageMenu from './inspect/CollageMenu.svelte';
   import SaveGallery from './inspect/SaveGallery.svelte';
   import SaveMenu from './inspect/SaveMenu.svelte';
+  import PieceCropModal from './inspect/PieceCropModal.svelte';
 
   // The Inspect tool is a *scratch workspace*. Opening a photo/video starts a
   // session; captured frames, per-frame adjustments, video tuning and a collage
@@ -31,6 +33,10 @@
 
   let activeTab = $state('selection');
   let collageSelectedId = $state(null);
+  let cropPieceNode = $state(null);
+  // Real (backend-composited) Save-tab thumbnails, keyed by collage id:
+  // { sig, url } — regenerated only when a collage's layout actually changes.
+  let collagePreviews = $state({});
   let saving = $state(false);
   const saveUi = $state({ selected: {}, folder: '' });
   // the saved session this workspace came from (if any) — re-saving overwrites it
@@ -38,15 +44,27 @@
   let openedSession = $state(null);
   const sessionModal = $state({ open: false, mode: 'save', name: null, title: '', list: [], busy: false });
 
+  // A fresh, empty collage. A session can hold several — the Collage tab edits
+  // one at a time (session.activeCollageId) and each is saved as its own PNG.
+  function makeCollage(name) {
+    return { id: uid('cl'), name, width: 1600, height: 800, background: '#12141c', transparent: true, nodes: [] };
+  }
+
   // the live session (reset on source / case change)
+  const _firstCollage = makeCollage('Collage 1');
   const session = $state({
     source: null,
     videoAdjust: {},
     frames: [],
     activeFrameId: null,
-    collage: { width: 1600, height: 800, background: '#12141c', transparent: false, nodes: [] },
+    collages: [_firstCollage],
+    activeCollageId: _firstCollage.id,
     saved: {},
   });
+
+  const activeCollage = $derived(
+    session.collages.find((c) => c.id === session.activeCollageId) ?? session.collages[0] ?? null
+  );
 
   // viewer bridge (video seek + crop overlay), mirrors the old shared object
   const shared = $state({ currentTime: 0, seekTo: null, cropMode: false });
@@ -77,10 +95,14 @@
         saved: !!session.saved[`frame:${fr.id}`],
       });
     }
-    if (session.collage.nodes.length) {
+    let colN = 0;
+    for (const cl of session.collages) {
+      colN += 1;
+      if (!cl.nodes.length) continue;
       out.push({
-        key: 'collage', kind: 'collage', label: 'Collage 1',
-        thumb: null, collage: session.collage, saved: !!session.saved.collage,
+        key: `collage:${cl.id}`, kind: 'collage', label: cl.name || `Collage ${colN}`,
+        thumb: null, collage: cl, preview: collagePreviews[cl.id]?.url ?? null,
+        saved: !!session.saved[`collage:${cl.id}`],
       });
     }
     return out;
@@ -139,7 +161,11 @@
     session.videoAdjust = {};
     session.frames = [];
     session.activeFrameId = null;
-    session.collage = { width: 1600, height: 800, background: '#12141c', transparent: false, nodes: [] };
+    const c0 = makeCollage('Collage 1');
+    session.collages = [c0];
+    session.activeCollageId = c0.id;
+    for (const p of Object.values(collagePreviews)) if (p?.url) URL.revokeObjectURL(p.url);
+    collagePreviews = {};
     session.saved = {};
     saveUi.selected = {};
     saveUi.folder = '';
@@ -208,6 +234,45 @@
     });
   }
 
+  // -- true-to-export collage thumbnails (Save tab) -------------------------
+  // The Save picker shows the *actual* composited PNG (backend warp), not the
+  // CSS approximation. Signature = the pieces' recipes+quads, so we only re-render
+  // when a layout really changed.
+  const collageSig = (cl) => JSON.stringify(cl.nodes.map((n) => [n.save, n.quad]));
+
+  async function buildCollagePreview(cl, sig, cid) {
+    try {
+      const b = collageBounds(cl.nodes);
+      const nodes = cl.nodes.map((n) => ({
+        src: n.save, quad: n.quad.map(([x, y]) => [x - b.minX, y - b.minY]),
+      }));
+      const res = await fetch(`/api/cases/${cid}/inspect/compose-preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ width: b.width, height: b.height, background: null, nodes }),
+      });
+      if (!res.ok) return;
+      const url = URL.createObjectURL(await res.blob());
+      const prev = collagePreviews[cl.id];
+      if (prev?.url) URL.revokeObjectURL(prev.url);
+      collagePreviews[cl.id] = { sig, url };
+    } catch {
+      /* leave the CSS fallback in place */
+    }
+  }
+
+  $effect(() => {
+    if (activeTab !== 'save') return;
+    const cid = caseState.current?.id;
+    if (!cid) return;
+    for (const cl of session.collages) {
+      if (!cl.nodes.length) continue;
+      const sig = collageSig(cl);
+      if (collagePreviews[cl.id]?.sig === sig) continue;
+      buildCollagePreview(cl, sig, cid);
+    }
+  });
+
   // -- frame capture (Selection) -------------------------------------------
   async function capture(time) {
     try {
@@ -226,21 +291,63 @@
   // Collage pieces are snapshots frozen at add-time: the modified image is baked
   // now and later frame edits never change it (deliberate — see SPEC).
   async function addToCollage(frame) {
+    const cl = activeCollage;
+    if (!cl) return;
     try {
       const ops = buildOps(filters, frame.adjust, frame.crop);
       const url = await renderUrl(frame.path, frame.time, ops);
       const dim = await imageSize(url);
-      const count = session.collage.nodes.length;
+      const count = cl.nodes.length;
       const off = 30 + (count % 4) * 40;
-      const quad = initialQuad(dim.w, dim.h, session.collage.width * 0.5, off, off);
+      const quad = initialQuad(dim.w, dim.h, cl.width * 0.5, off, off);
       const node = {
-        id: uid('nd'), frameId: frame.id, url, w: dim.w, h: dim.h,
+        id: uid('nd'), frameId: frame.id, url, baseUrl: url, w: dim.w, h: dim.h,
+        frameOps: ops, crop: null,
         save: { path: frame.path, time: frame.time ?? null, ops }, quad,
       };
-      session.collage.nodes.push(node);
+      cl.nodes.push(node);
       collageSelectedId = node.id;
     } catch (e) {
       toast(e.message, 'danger');
+    }
+  }
+
+  // Re-render a collage piece with (or without) its crop, applied before the
+  // warp. Keeps baseUrl (uncropped snapshot) so the crop editor never compounds.
+  async function applyNodeCrop(node, crop) {
+    try {
+      const frameOps = node.frameOps ?? node.save?.ops ?? [];
+      const ops = crop ? [...frameOps, { op: 'crop', params: crop }] : [...frameOps];
+      const url = await renderUrl(node.save.path, node.save.time, ops);
+      const dim = await imageSize(url);
+      // Reshape the quad so the cropped image keeps correct proportions and
+      // stays in place. Derive the *full-image* quad from the current one (a
+      // crop stored on the node is relative to the base image, so re-cropping
+      // never compounds), then re-project the new crop rectangle onto it.
+      const prev = node.crop;
+      const baseQuad = prev
+        ? quadFromCropRect(node.quad, { x: -prev.x / prev.w, y: -prev.y / prev.h, w: 1 / prev.w, h: 1 / prev.h })
+        : node.quad;
+      node.quad = crop ? quadFromCropRect(baseQuad, crop) : baseQuad.map(([x, y]) => [x, y]);
+      if (node.url && node.url !== node.baseUrl && node.url.startsWith('blob:')) {
+        URL.revokeObjectURL(node.url);
+      }
+      node.url = url;
+      node.w = dim.w;
+      node.h = dim.h;
+      node.crop = crop;
+      node.save = { ...node.save, ops };
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  }
+
+  // Open the piece crop editor, or clear the crop directly (clear=true).
+  function requestCrop(node, clear = false) {
+    if (clear) {
+      applyNodeCrop(node, null);
+    } else {
+      cropPieceNode = node;
     }
   }
 
@@ -311,16 +418,22 @@
         });
         session.saved.video = true;
       }
-      if (chosen.some((it) => it.kind === 'collage')) {
-        // each node carries its frozen snapshot recipe (path/time/ops)
-        const nodes = session.collage.nodes.map((n) => ({ src: n.save, quad: n.quad }));
+      for (const it of chosen.filter((c) => c.kind === 'collage')) {
+        // A collage is always a transparent PNG of just the pieces, trimmed to
+        // their bounds — the export size follows the layout, not a manual value.
+        const cl = it.collage;
+        const b = collageBounds(cl.nodes);
+        const nodes = cl.nodes.map((n) => ({
+          src: n.save, // frozen snapshot recipe (path/time/ops)
+          quad: n.quad.map(([x, y]) => [x - b.minX, y - b.minY]),
+        }));
         await api.post(`/api/cases/${cid}/inspect/compose`, {
-          width: Math.round(session.collage.width),
-          height: Math.round(session.collage.height),
-          background: session.collage.transparent ? null : session.collage.background,
+          width: b.width,
+          height: b.height,
+          background: null,
           nodes, folder,
         });
-        session.saved.collage = true;
+        session.saved[it.key] = true;
       }
       await reloadCase();
       await refresh();
@@ -342,13 +455,15 @@
       frames: session.frames.map((f) => ({
         id: f.id, path: f.path, time: f.time, adjust: { ...f.adjust }, crop: f.crop, w: f.w, h: f.h,
       })),
-      collage: {
-        width: session.collage.width, height: session.collage.height,
-        background: session.collage.background, transparent: session.collage.transparent,
-        nodes: session.collage.nodes.map((n) => ({
+      activeCollageId: session.activeCollageId,
+      collages: session.collages.map((cl) => ({
+        id: cl.id, name: cl.name, width: cl.width, height: cl.height,
+        background: cl.background, transparent: cl.transparent,
+        nodes: cl.nodes.map((n) => ({
           id: n.id, frameId: n.frameId, save: n.save, w: n.w, h: n.h, quad: n.quad,
+          frameOps: n.frameOps ?? n.save.ops, crop: n.crop ?? null,
         })),
-      },
+      })),
     };
   }
 
@@ -421,21 +536,38 @@
       }
     }
     session.activeFrameId = spec.activeFrameId ?? session.frames[0]?.id ?? null;
-    const nodes = [];
-    for (const n of spec.collage?.nodes ?? []) {
-      try {
-        nodes.push({ ...n, url: await renderUrl(n.save.path, n.save.time, n.save.ops) });
-      } catch {
-        /* skip a node whose source is gone */
+    // Back-compat: older sessions stored a single `collage`; newer ones an array.
+    const specCollages = spec.collages ?? (spec.collage ? [spec.collage] : []);
+    const collages = [];
+    for (const sc of specCollages) {
+      const nodes = [];
+      for (const n of sc.nodes ?? []) {
+        try {
+          // frameOps = the snapshot without the collage crop; baseUrl feeds the
+          // crop editor, url is the (possibly cropped) piece shown on the canvas.
+          const frameOps = n.frameOps ?? n.save.ops ?? [];
+          const crop = n.crop ?? null;
+          const baseUrl = await renderUrl(n.save.path, n.save.time, frameOps);
+          const url = crop ? await renderUrl(n.save.path, n.save.time, n.save.ops) : baseUrl;
+          nodes.push({ ...n, frameOps, crop, baseUrl, url });
+        } catch {
+          /* skip a node whose source is gone */
+        }
       }
+      collages.push({
+        id: sc.id ?? uid('cl'),
+        name: sc.name ?? `Collage ${collages.length + 1}`,
+        width: sc.width ?? 1600,
+        height: sc.height ?? 800,
+        background: sc.background ?? '#12141c',
+        transparent: sc.transparent ?? false,
+        nodes,
+      });
     }
-    session.collage = {
-      width: spec.collage?.width ?? 1600,
-      height: spec.collage?.height ?? 800,
-      background: spec.collage?.background ?? '#12141c',
-      transparent: spec.collage?.transparent ?? false,
-      nodes,
-    };
+    if (!collages.length) collages.push(makeCollage('Collage 1'));
+    session.collages = collages;
+    session.activeCollageId =
+      collages.find((c) => c.id === spec.activeCollageId)?.id ?? collages[0].id;
     openedSession = { name, title: spec.title || name };
     activeTab = src.kind === 'video' ? 'selection' : 'frame';
     sessionModal.open = false;
@@ -528,15 +660,31 @@
               onpointermove={cropMove}
               onpointerup={cropUp}
             >
-              <img src={activeFrame.url} alt="frame" style:filter={framePreview.filter} style:transform={framePreview.transform} />
-              {#if cropBox}
+              {#if activeFrame.crop && !shared.cropMode}
+                <!-- committed crop: show the cropped region filling the box -->
                 <div
-                  class="crop-box"
-                  style:left={`${cropBox.x * 100}%`}
-                  style:top={`${cropBox.y * 100}%`}
-                  style:width={`${cropBox.w * 100}%`}
-                  style:height={`${cropBox.h * 100}%`}
-                ></div>
+                  class="crop-view"
+                  style:--ar={cropAspect(activeFrame.crop, activeFrame.w, activeFrame.h) ?? 1}
+                >
+                  <img
+                    src={activeFrame.url}
+                    alt="frame"
+                    style={styleText(cropImgStyle(activeFrame.crop))}
+                    style:filter={framePreview.filter}
+                    style:transform={framePreview.transform}
+                  />
+                </div>
+              {:else}
+                <img src={activeFrame.url} alt="frame" style:filter={framePreview.filter} style:transform={framePreview.transform} />
+                {#if cropBox}
+                  <div
+                    class="crop-box"
+                    style:left={`${cropBox.x * 100}%`}
+                    style:top={`${cropBox.y * 100}%`}
+                    style:width={`${cropBox.w * 100}%`}
+                    style:height={`${cropBox.h * 100}%`}
+                  ></div>
+                {/if}
               {/if}
             </div>
           {:else}
@@ -546,7 +694,7 @@
             </div>
           {/if}
         {:else if activeTab === 'collage'}
-          <CollageCanvas {session} bind:selectedId={collageSelectedId} />
+          <CollageCanvas collage={activeCollage} bind:selectedId={collageSelectedId} />
         {:else if activeTab === 'save'}
           <SaveGallery {savables} {saveUi} />
         {/if}
@@ -558,12 +706,20 @@
         {:else if activeTab === 'frame'}
           <FrameMenu {session} {filters} {analyses} {activeFrame} {shared} {removeFrame} setActive={(id) => (session.activeFrameId = id)} />
         {:else if activeTab === 'collage'}
-          <CollageMenu {session} {filters} bind:selectedId={collageSelectedId} {addToCollage} />
+          <CollageMenu {session} {filters} bind:selectedId={collageSelectedId} {addToCollage} {requestCrop} />
         {:else if activeTab === 'save'}
           <SaveMenu {savables} {saveUi} {saving} save={saveSelected} />
         {/if}
       </aside>
     </div>
+  {/if}
+
+  {#if cropPieceNode}
+    <PieceCropModal
+      node={cropPieceNode}
+      onapply={(crop) => { applyNodeCrop(cropPieceNode, crop); cropPieceNode = null; }}
+      onclose={() => (cropPieceNode = null)}
+    />
   {/if}
 
   {#if sessionModal.open}
@@ -726,6 +882,17 @@
     border: 1.5px solid var(--accent);
     box-shadow: 0 0 0 9999px rgba(6, 9, 14, 0.55);
     pointer-events: none;
+  }
+  .crop-view {
+    position: relative;
+    overflow: hidden;
+    aspect-ratio: var(--ar);
+    height: calc(100vh - var(--topbar-h) - 200px);
+    max-width: 100%;
+    line-height: 0;
+  }
+  .crop-view img {
+    display: block;
   }
   .panel {
     width: 320px;

@@ -149,6 +149,59 @@ def test_update_media_bad_path(client):
     assert res.status_code == 400
 
 
+def test_download_captures_description(client, monkeypatch):
+    """yt-dlp's info dict already carries the video description — it must land
+    in the media item's source sidecar so we can show it on the source panel."""
+    import sys
+    import types
+
+    from ozimut.engine import media as media_engine
+    from ozimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Desc"}).json()["id"]
+    case = Case.open(cid)
+
+    info = {
+        "id": "abc123",
+        "title": "A clip",
+        "description": "Line one\nLine two with a link https://example.com",
+        "uploader": "Some Channel",
+        "upload_date": "20260701",
+        "webpage_url": "https://example.com/watch?v=abc123",
+        "extractor": "generic",
+        "duration": 12,
+    }
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self._tmpl = opts["outtmpl"]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def prepare_filename(self, info):
+            import os
+
+            path = os.path.join(os.path.dirname(self._tmpl), f"{info['title']} [{info['id']}].png")
+            with open(path, "wb") as fh:
+                fh.write(_png_bytes())
+            return path
+
+        def extract_info(self, url, download=True):
+            return info
+
+    fake = types.ModuleType("yt_dlp")
+    fake.YoutubeDL = FakeYDL
+    monkeypatch.setitem(sys.modules, "yt_dlp", fake)
+
+    result = media_engine.download_url(case, "https://example.com/watch?v=abc123")
+    assert result["item"]["source"]["description"] == info["description"]
+    assert result["item"]["source"]["title"] == "A clip"
+
+
 def test_download_job_bad_url(client):
     cid = client.post("/api/cases", json={"name": "Job"}).json()["id"]
     job_id = client.post(

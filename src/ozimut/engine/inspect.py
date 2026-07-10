@@ -574,6 +574,73 @@ def _perspective_coeffs(dst_quad: list[list[float]], src_quad: list[list[float]]
     return _solve_linear(matrix, rhs)
 
 
+def _compose_canvas(
+    case: Case,
+    *,
+    width: int,
+    height: int,
+    nodes: list[dict[str, Any]],
+    background: str | None,
+    scale: float = 1.0,
+) -> tuple[Image.Image, list[str]]:
+    """Warp each node's source into its quad and paint onto one canvas.
+
+    Shared by the filed export and the (unsaved) Save-tab preview. ``scale``
+    shrinks the whole layout (canvas + quads) for a cheaper preview render.
+    """
+    if not nodes:
+        raise ValueError("collage needs at least one image")
+    width = max(16, min(int(round(width * scale)), 8192))
+    height = max(16, min(int(round(height * scale)), 8192))
+    canvas = (
+        Image.new("RGB", (width, height), background)
+        if background
+        else Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    )
+
+    sources: list[str] = []
+    for node in nodes:
+        spec = node.get("src") or {}
+        rel = spec.get("path")
+        if not rel:
+            raise ValueError("collage node is missing a source path")
+        img = _source_image(case, rel, spec.get("time"), spec.get("ops")).convert("RGB")
+        w, h = img.size
+        src_corners = [[0, 0], [w, 0], [w, h], [0, h]]
+        quad = [[float(x) * scale, float(y) * scale] for x, y in node["quad"]]
+        coeffs = _perspective_coeffs(quad, src_corners)
+        warped = img.transform((width, height), Image.PERSPECTIVE, coeffs, Image.BICUBIC)
+        mask = Image.new("L", (w, h), 255).transform(
+            (width, height), Image.PERSPECTIVE, coeffs, Image.BICUBIC
+        )
+        canvas.paste(warped, (0, 0), mask)
+        sources.append(rel)
+    return canvas, sources
+
+
+def compose_preview_png(
+    case: Case,
+    *,
+    width: int,
+    height: int,
+    nodes: list[dict[str, Any]],
+    background: str | None = None,
+    max_dim: int = 640,
+) -> bytes:
+    """Render the exact composited collage to PNG bytes — nothing is filed.
+
+    Same warp as :func:`compose_perspective`, downscaled to ``max_dim`` so the
+    Save tab can show a true-to-export thumbnail cheaply.
+    """
+    scale = min(1.0, max_dim / max(1, max(int(width), int(height))))
+    canvas, _ = _compose_canvas(
+        case, width=width, height=height, nodes=nodes, background=background, scale=scale
+    )
+    buf = io.BytesIO()
+    canvas.save(buf, "PNG")
+    return buf.getvalue()
+
+
 def compose_perspective(
     case: Case,
     *,
@@ -591,34 +658,9 @@ def compose_perspective(
     pixels (top-left, top-right, bottom-right, bottom-left). A falsy ``background``
     yields a transparent (RGBA) canvas so the saved PNG carries only the pieces.
     """
-    if not nodes:
-        raise ValueError("collage needs at least one image")
-    width = max(16, min(int(width), 8192))
-    height = max(16, min(int(height), 8192))
-    canvas = (
-        Image.new("RGB", (width, height), background)
-        if background
-        else Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    canvas, sources = _compose_canvas(
+        case, width=width, height=height, nodes=nodes, background=background
     )
-
-    sources: list[str] = []
-    for node in nodes:
-        spec = node.get("src") or {}
-        rel = spec.get("path")
-        if not rel:
-            raise ValueError("collage node is missing a source path")
-        img = _source_image(case, rel, spec.get("time"), spec.get("ops")).convert("RGB")
-        w, h = img.size
-        src_corners = [[0, 0], [w, 0], [w, h], [0, h]]
-        quad = [[float(x), float(y)] for x, y in node["quad"]]
-        coeffs = _perspective_coeffs(quad, src_corners)
-        warped = img.transform((width, height), Image.PERSPECTIVE, coeffs, Image.BICUBIC)
-        mask = Image.new("L", (w, h), 255).transform(
-            (width, height), Image.PERSPECTIVE, coeffs, Image.BICUBIC
-        )
-        canvas.paste(warped, (0, 0), mask)
-        sources.append(rel)
-
     source = _derivation("", None, op="collage", sources=sources, perspective=True)
     name = f"collage_{_stamp()}.png"
     result = media_engine.import_image(case, canvas, name, source, by="inspect")

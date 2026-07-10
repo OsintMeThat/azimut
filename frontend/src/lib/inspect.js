@@ -123,6 +123,119 @@ export function quadMatrix3d(w, h, quad) {
   return `matrix3d(${t.join(',')})`;
 }
 
+const _UNIT = [[0, 0], [1, 0], [1, 1], [0, 1]];
+
+/**
+ * Map points given in the piece's own unit square (u,v in 0..1, TL origin)
+ * to canvas points, through the projective transform defined by `quad`
+ * (TL, TR, BR, BL). Lets us reshape a piece's quad when a crop changes which
+ * sub-rectangle of the source it shows.
+ */
+export function quadMapUnit(quad, pts) {
+  const H = mul(basisToPoints(quad), adj(basisToPoints(_UNIT)));
+  return pts.map(([u, v]) => {
+    const p = mulV(H, [u, v, 1]);
+    return [p[0] / p[2], p[1] / p[2]];
+  });
+}
+
+/**
+ * New quad for a piece that now shows only the fractional sub-rectangle
+ * `rect` ({x,y,w,h} in 0..1) of what `quad` currently shows. Preserves the
+ * warp and keeps the piece in place, with the right proportions for the region.
+ */
+export function quadFromCropRect(quad, rect) {
+  const { x, y, w, h } = rect;
+  return quadMapUnit(quad, [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]);
+}
+
+/**
+ * Non-destructive CSS crop: inline styles for an absolutely-positioned <img>
+ * inside an `overflow:hidden` wrapper, so the crop rect fills the wrapper. Lets
+ * the live blob preview + thumbnails *show* a fractional crop with no re-render.
+ */
+export function cropImgStyle(crop) {
+  if (!crop) return {};
+  return {
+    position: 'absolute',
+    width: `${100 / crop.w}%`,
+    height: `${100 / crop.h}%`,
+    left: `${(-crop.x / crop.w) * 100}%`,
+    top: `${(-crop.y / crop.h) * 100}%`,
+    'max-width': 'none',
+    'max-height': 'none',
+  };
+}
+
+/** Join a `{prop: value}` style object into an inline `style=""` string. */
+export function styleText(obj) {
+  return Object.entries(obj ?? {})
+    .filter(([, v]) => v != null && v !== '')
+    .map(([k, v]) => `${k}:${v}`)
+    .join(';');
+}
+
+/** Aspect ratio (w/h) of a crop rect over an image of natural size natW×natH. */
+export function cropAspect(crop, natW, natH) {
+  if (!crop || !natW || !natH) return null;
+  return (crop.w * natW) / (crop.h * natH);
+}
+
+/** Centroid (mean of the 4 corners) of a quad. */
+export function quadCentroid(quad) {
+  const cx = (quad[0][0] + quad[1][0] + quad[2][0] + quad[3][0]) / 4;
+  const cy = (quad[0][1] + quad[1][1] + quad[2][1] + quad[3][1]) / 4;
+  return [cx, cy];
+}
+
+/**
+ * Uniformly scale a quad by `k` around a fixed point (its centroid by default).
+ * Warp shape is preserved — this is the collage "resize" that composes with the
+ * per-corner warp, since both just move the same 4 points.
+ */
+export function scaleQuad(quad, k, center = null) {
+  const [cx, cy] = center ?? quadCentroid(quad);
+  return quad.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]);
+}
+
+/**
+ * Tight bounding box over every node's quad (+ optional padding). Used to trim
+ * a transparent-PNG collage to just its pieces on export, so the canvas size
+ * follows the layout instead of being set by hand.
+ */
+export function collageBounds(nodes, pad = 0) {
+  const xs = [];
+  const ys = [];
+  for (const n of nodes) for (const [x, y] of n.quad) { xs.push(x); ys.push(y); }
+  const minX = Math.min(...xs) - pad;
+  const minY = Math.min(...ys) - pad;
+  return {
+    minX,
+    minY,
+    width: Math.max(1, Math.round(Math.max(...xs) + pad - minX)),
+    height: Math.max(1, Math.round(Math.max(...ys) + pad - minY)),
+  };
+}
+
+/** Mean distance from the centroid to the corners — the quad's "radius". */
+export function quadRadius(quad) {
+  const [cx, cy] = quadCentroid(quad);
+  const d = quad.reduce((s, [x, y]) => s + Math.hypot(x - cx, y - cy), 0);
+  return d / quad.length || 1;
+}
+
+/** Rotate a quad by `rad` radians around a fixed point (its centroid by default). */
+export function rotateQuad(quad, rad, center = null) {
+  const [cx, cy] = center ?? quadCentroid(quad);
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return quad.map(([x, y]) => {
+    const dx = x - cx;
+    const dy = y - cy;
+    return [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
+  });
+}
+
 /** A sensible starting quad: the image scaled to fit `maxW`, placed at (ox, oy). */
 export function initialQuad(natW, natH, maxW, ox, oy) {
   const scale = Math.min(1, maxW / (natW || maxW));

@@ -13,9 +13,13 @@ def _png_b64() -> str:
 
 
 SPEC = {
+    "captionSize": 24,
+    "legendSize": 22,
+    "footerSize": 18,
+    "footer": "Custom footer line",
     "panels": [
-        {"id": "p1", "src": "media/frame.png", "caption": "Frame", "natural": [1280, 720], "meta": {}},
-        {"id": "p2", "src": "satellite/sat.png", "caption": "Esri", "natural": [1000, 700],
+        {"id": "p1", "src": "media/frame.png", "caption": "Frame", "row": 0, "natural": [1280, 720], "meta": {}},
+        {"id": "p2", "src": "satellite/sat.png", "caption": "Esri", "row": 1, "natural": [1000, 700],
          "meta": {"kind": "satellite", "attribution": "Esri", "lat": 1.0, "lon": 2.0}},
     ],
     "shapes": [
@@ -46,6 +50,12 @@ def test_save_load_roundtrip(client):
     assert spec["shapes"][0]["comment"] == "blue roof"
     assert spec["notes"] == {"#ff5252": "blue roof matches"}  # legend text is per color
     assert spec["panels"][0]["id"] == "p1"  # panel ids survive → shapes stay bound
+    # multi-row layout + text sizes + custom footer survive the round-trip
+    assert [p["row"] for p in spec["panels"]] == [0, 1]
+    assert spec["captionSize"] == 24
+    assert spec["legendSize"] == 22
+    assert spec["footerSize"] == 18
+    assert spec["footer"] == "Custom footer line"
 
     # PNG served
     assert client.get(f"/files/{cid}/{saved['png']}").status_code == 200

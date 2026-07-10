@@ -1,6 +1,7 @@
 <script>
   import { api } from '../lib/api.js';
   import { caseState, uiState, toast, reloadCase } from '../lib/state.svelte.js';
+  import { proofCoordsText, proofSource } from '../lib/composer.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
 
@@ -47,15 +48,13 @@
     if (!p) return;
     uiState.postProof = null;
     description = p.title === 'Untitled proof' ? '' : (p.title ?? '');
-    source = p.sources?.[0] ?? '';
+    source = p.source ?? p.sources?.[0] ?? '';
     setProof(p.png ?? null);
     tweet1Edited = false;
-    if (p.coords) {
-      coordsText = `${p.coords.lat.toFixed(6)}, ${p.coords.lon.toFixed(6)}`;
-      resolveCoords();
-    } else {
-      regenerate();
-    }
+    coordsText = p.coordsText
+      ?? (p.coords ? `${p.coords.lat.toFixed(6)}, ${p.coords.lon.toFixed(6)}` : '');
+    if (coordsText.trim()) resolveCoords();
+    else regenerate();
   });
 
   // Consume an "open this draft" handoff from the sidebar
@@ -229,13 +228,23 @@
     }
   }
 
-  function pickProof(item) {
+  async function pickProof(item) {
     setProof(item.png);
+    proofPickerOpen = false;
     if (!description.trim() && item.title && item.title !== 'Untitled proof') {
       description = item.title;
-      regenerate();
     }
-    proofPickerOpen = false;
+    // Pull the proof's coordinates + source into the post so the fields fill in.
+    try {
+      const spec = await api.get(`/api/cases/${caseState.current.id}/proofs/${item.name}`);
+      const src = proofSource(spec);
+      if (src) source = src;
+      const ct = proofCoordsText(spec);
+      if (ct) { coordsText = ct; await resolveCoords(); return; }
+    } catch {
+      /* fall through to a plain regenerate */
+    }
+    regenerate();
   }
 
   function clearProof() {

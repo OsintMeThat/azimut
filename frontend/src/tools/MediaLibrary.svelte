@@ -55,6 +55,11 @@
   // --- lightbox ---
   let lightboxItem = $state(null);
 
+  // --- focus/highlight (a media clicked from the case sidebar) ---
+  let focusedPath = $state(null);
+  let focusScrolledFor = null;
+  let focusTimer;
+
   $effect(() => {
     const id = caseState.current?.id;
     caseState.rev; // also refetch when the case is reloaded elsewhere (e.g. sidebar edit)
@@ -63,6 +68,35 @@
       items = [];
     }
     if (id) refresh(id);
+  });
+
+  // Pick up a "focus this media" handoff from the sidebar: clear filters that
+  // might hide it, flag it for the highlight ring, then let it fade on its own.
+  $effect(() => {
+    if (!uiState.focusMedia) return;
+    catFilter = null;
+    folderFilter = null;
+    focusedPath = uiState.focusMedia;
+    uiState.focusMedia = null;
+    clearTimeout(focusTimer);
+    focusTimer = setTimeout(() => (focusedPath = null), 3000);
+  });
+
+  // Scroll the focused card into view once it's actually in the rendered grid
+  // (items may still be loading when the handoff arrives).
+  $effect(() => {
+    const p = focusedPath;
+    if (!p) {
+      focusScrolledFor = null;
+      return;
+    }
+    if (focusScrolledFor === p || !filteredItems.some((i) => i.path === p)) return;
+    focusScrolledFor = p;
+    requestAnimationFrame(() => {
+      document
+        .querySelector(`.media-card[data-path="${CSS.escape(p)}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
   });
 
   async function refresh(id = caseState.current?.id) {
@@ -325,7 +359,11 @@
     {:else}
       <div class="grid">
         {#each filteredItems as item (item.path)}
-          <div class="media-card card fade-up">
+          <div
+            class="media-card card fade-up"
+            class:focused={item.path === focusedPath}
+            data-path={item.path}
+          >
             <!-- thumbnail — click to lightbox for images -->
             <div
               class="thumb"
@@ -494,6 +532,12 @@
               rel="noreferrer"
               class="mono source-link"
             >{editItem.source.webpage_url ?? editItem.source.url}</a>
+          </div>
+        {/if}
+        {#if editItem.source.description}
+          <div class="info-row">
+            <span class="info-label">Description</span>
+            <span class="description">{editItem.source.description}</span>
           </div>
         {/if}
       {/if}
@@ -672,6 +716,15 @@
     border-color: var(--border-strong);
     transform: translateY(-1px);
   }
+  .media-card.focused {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+    animation: focus-flash 0.9s var(--ease) 2;
+  }
+  @keyframes focus-flash {
+    0%, 100% { box-shadow: 0 0 0 2px var(--accent-soft); }
+    50% { box-shadow: 0 0 0 4px var(--accent-soft); }
+  }
   .thumb {
     position: relative;
     aspect-ratio: 16 / 10;
@@ -815,6 +868,16 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .description {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 8.5em;
+    overflow-y: auto;
   }
   .divider {
     border: none;

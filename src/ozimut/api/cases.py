@@ -187,6 +187,8 @@ def remove_entity(case_id: str, entity_id: str) -> dict[str, str]:
         _unlink_inside(case, attrs["spec"].removesuffix(".json") + ".png")
     elif etype == "post" and attrs.get("draft"):
         _unlink_inside(case, attrs["draft"])
+    elif etype == "inspect-session" and attrs.get("spec"):
+        _unlink_inside(case, attrs["spec"])
 
     try:
         case.remove_entity(entity_id)

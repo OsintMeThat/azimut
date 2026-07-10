@@ -245,12 +245,71 @@ def test_compose_transparent_background_keeps_alpha(client):
     assert img.getpixel((60, 60))[3] == 255
 
 
+def test_compose_node_crop_is_applied_before_warp(client):
+    cid = client.post("/api/cases", json={"name": "CropWarp"}).json()["id"]
+    # left half white, right half black — crop keeps the white half only
+    two_tone = Image.new("RGB", (80, 60), (0, 0, 0))
+    two_tone.paste((255, 255, 255), (0, 0, 40, 60))
+    buf = io.BytesIO()
+    two_tone.save(buf, "PNG")
+    a = _upload(client, cid, "two.png", buf.getvalue())
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/compose",
+        json={
+            "width": 100, "height": 100, "background": None,
+            "nodes": [
+                {
+                    "src": {"path": a["path"], "ops": [
+                        {"op": "crop", "params": {"x": 0.0, "y": 0.0, "w": 0.5, "h": 1.0}},
+                    ]},
+                    "quad": [[0, 0], [100, 0], [100, 100], [0, 100]],
+                },
+            ],
+        },
+    ).json()
+    assert res["duplicate"] is False
+
+    png = client.get(f"/files/{cid}/{res['item']['path']}").content
+    img = Image.open(io.BytesIO(png))
+    # the whole canvas is filled by the (cropped) white half, so the interior is white
+    r, g, b, alpha = img.getpixel((50, 50))
+    assert alpha == 255
+    assert r > 200 and g > 200 and b > 200
+
+
 def test_compose_requires_nodes(client):
     cid = client.post("/api/cases", json={"name": "NoNodes"}).json()["id"]
     res = client.post(
         f"/api/cases/{cid}/inspect/compose", json={"width": 100, "height": 100, "nodes": []}
     )
     assert res.status_code == 422
+
+
+def test_compose_preview_returns_png_without_filing(client):
+    cid = client.post("/api/cases", json={"name": "Preview"}).json()["id"]
+    a = _upload(client, cid, "a.png", _png_bytes(color=(10, 20, 30), size=(80, 60)))
+    before = len(client.get(f"/api/cases/{cid}/media").json())
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/compose-preview",
+        json={
+            "width": 400, "height": 300, "background": None,
+            "nodes": [
+                {"src": {"path": a["path"]},
+                 "quad": [[20, 20], [120, 20], [120, 100], [20, 100]]},
+            ],
+        },
+    )
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "image/png"
+    img = Image.open(io.BytesIO(res.content))
+    # downscaled to max_dim=640 (so <= the 400x300 request) and transparent alpha
+    assert img.mode == "RGBA"
+    assert max(img.size) <= 640
+    assert img.getpixel((0, 0))[3] == 0
+    # nothing was filed to the case
+    assert len(client.get(f"/api/cases/{cid}/media").json()) == before
 
 
 def test_analyze_accepts_transient_ops_without_filing(client):
@@ -382,6 +441,25 @@ def test_session_save_list_load_delete_roundtrip(client):
     assert client.get(f"/api/cases/{cid}/inspect/sessions").json() == []
     entities = client.get(f"/api/cases/{cid}").json()["entities"]
     assert not any(e["type"] == "inspect-session" for e in entities)
+
+
+def test_session_delete_via_sidebar_entity_removes_spec(client):
+    # Deleting the inspect-session row from the sidebar (the generic entity
+    # delete) must also drop the spec file, or the session keeps showing up in
+    # the Inspect "Open" dialog and can be reloaded.
+    cid = client.post("/api/cases", json={"name": "Sidebar delete"}).json()["id"]
+    item = _upload(client, cid, "clip.png")
+    spec = {"source": {"path": item["path"], "kind": "image"}, "frames": [], "collage": {"nodes": []}}
+    client.post(f"/api/cases/{cid}/inspect/sessions", json={"title": "Doomed", "spec": spec})
+
+    entities = client.get(f"/api/cases/{cid}").json()["entities"]
+    ent = next(e for e in entities if e["type"] == "inspect-session")
+
+    client.delete(f"/api/cases/{cid}/entities/{ent['id']}")
+
+    # gone from the Open list (spec file unlinked) and not reloadable
+    assert client.get(f"/api/cases/{cid}/inspect/sessions").json() == []
+    assert client.get(f"/api/cases/{cid}/inspect/sessions/doomed").status_code == 404
 
 
 def test_session_resave_by_name_overwrites_after_rename(client):

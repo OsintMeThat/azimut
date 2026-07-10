@@ -24,6 +24,7 @@ export const uiState = $state({
   openProof: null, // proof name to load in the Proof Composer
   openDraft: null, // draft name to load in the Post Composer
   inspectPath: null, // media path to open in the Inspect tool
+  focusMedia: null, // media path to highlight & scroll to in the Media Library
   openInspect: null, // inspect-session name to reopen in the Inspect tool
   gotoCoords: null, // { lat, lon } to fly to in the Satellite tool
 });

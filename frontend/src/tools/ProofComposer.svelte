@@ -6,11 +6,19 @@
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import {
-    ANNO_COLORS, PAD, CAPTION_H, LEGEND_LINE_H, FOOTER_H,
+    ANNO_COLORS, PAD, TWEET_GUIDES,
+    CAPTION_SIZE, LEGEND_SIZE, FOOTER_SIZE,
     BG, TEXT_MAIN, TEXT_DIM, TEXT_FAINT,
-    layoutPanels, attributionLine, docSize, toSpec, newId, loadImage,
-    featureColors, notesFromShapes,
+    layoutPanels, panelsBlockHeight, legendLineHeight, footerBand,
+    attributionLine, docSize, offsetShape, autoLayoutRows,
+    autoCoords, formatCoords, autoSource, resolveSourceUrls,
+    toSpec, newId, loadImage, featureColors, notesFromShapes,
+    copyShapeSpec,
   } from '../lib/composer.js';
+
+  const SCALE_MIN = 0.4;
+  const SCALE_MAX = 2.5;
+  const SCALE_STEP = 0.1;
 
   const DRAW_TOOLS = [
     { id: 'select', icon: 'hand', label: 'Select / move' },
@@ -25,12 +33,19 @@
   // ---- document state -------------------------------------------------------
   // `notes` holds the legend text per color (annotations are written by color,
   // not per element); `shapes` are the drawn geometry bound to a panel.
-  const proof = $state({ title: 'Untitled proof', panels: [], shapes: [], notes: {}, coords: null });
+  const proof = $state({
+    title: 'Untitled proof', panels: [], shapes: [], notes: {},
+    coordsText: '', source: '', // '' → auto-derived from panels; non-empty → manual override
+    captionSize: CAPTION_SIZE, legendSize: LEGEND_SIZE, footerSize: FOOTER_SIZE, footer: '',
+  });
+  let advancedOpen = $state(false);
+  let collapsed = $state({ panels: false, annotations: false, elements: false });
   let savedName = $state(null);
   let dirty = $state(false);
   let tool = $state('select');
   let color = $state(ANNO_COLORS[0]);
   let strokeW = $state(4);
+  let guide = $state(null); // null | '16:9' | '4:5' — tweet centre-crop overlay
   let selectedId = $state(null);
   let picker = $state(false);
   let pickerItems = $state([]);
@@ -40,7 +55,7 @@
 
   // ---- konva ------------------------------------------------------------------
   let containerEl;
-  let stage, docLayer, uiLayer, transformer, endHandles;
+  let stage, docLayer, uiLayer, transformer, endHandles, guideGroup;
   let drawing = null; // {panel, node, start, box, kind}
   let pathDraft = null; // {panel, box, node, points:[]} — multi-click curve in progress
 
@@ -60,6 +75,8 @@
       borderDash: [4, 3],
       ignoreStroke: true,
     });
+    guideGroup = new Konva.Group({ listening: false });
+    uiLayer.add(guideGroup);
     uiLayer.add(transformer);
     endHandles = new Konva.Group();
     uiLayer.add(endHandles);
@@ -118,12 +135,21 @@
   // rebuild canvas whenever the document changes
   $effect(() => {
     JSON.stringify([
-      proof.panels.map((p) => [p.src, p.caption]),
+      proof.panels.map((p) => [p.src, p.caption, p.row, p.scale]),
       proof.shapes,
       proof.notes,
+      proof.captionSize, proof.legendSize, proof.footerSize, proof.footer,
       selectedId,
+      guide,
     ]);
     if (stage) rebuild();
+  });
+
+  // Text-size options threaded into every layout/size computation.
+  const textOpts = () => ({
+    captionSize: proof.captionSize,
+    legendSize: proof.legendSize,
+    footerSize: proof.footerSize,
   });
 
   function resetDoc() {
@@ -131,7 +157,12 @@
     proof.panels = [];
     proof.shapes = [];
     proof.notes = {};
-    proof.coords = null;
+    proof.coordsText = '';
+    proof.source = '';
+    proof.captionSize = CAPTION_SIZE;
+    proof.legendSize = LEGEND_SIZE;
+    proof.footerSize = FOOTER_SIZE;
+    proof.footer = '';
     savedName = null;
     selectedId = null;
     dirty = false;
@@ -150,11 +181,16 @@
     };
   }
 
-  function mediaPanelInput(m) {
+  function mediaPanelInput(m, mediaList = []) {
+    // Trace the real source link through the derivation chain (a collage/frame
+    // carries no URL of its own — follow it back to the downloaded original).
+    // A file uploaded from disk has no URL, so it contributes no source.
+    const byPath = new Map(mediaList.map((x) => [x.path, x]));
+    const urls = resolveSourceUrls(m, byPath);
     return {
       src: m.path,
-      meta: { kind: 'media', source_url: m.source?.webpage_url ?? m.source?.url },
-      caption: m.source?.title ?? m.filename,
+      meta: { kind: 'media', source_url: urls[0], source_urls: urls },
+      caption: '',
     };
   }
 
@@ -178,7 +214,7 @@
       ...media
         .filter((m) => m.kind === 'image')
         .map((m) => ({
-          ...mediaPanelInput(m),
+          ...mediaPanelInput(m, media),
           label: m.filename,
           thumb: m.thumbnail ?? m.path,
           kind: 'media',
@@ -190,17 +226,20 @@
   async function addPanel(item) {
     try {
       const img = await loadImage(`/files/${caseState.current.id}/${item.src}`);
+      // append to the current bottom row so new panels join the strip
+      const row = proof.panels.length
+        ? Math.max(...proof.panels.map((p) => p.row ?? 0))
+        : 0;
       proof.panels.push({
         id: newId('p'),
         src: item.src,
         caption: item.caption ?? '',
+        row,
+        scale: 1,
         natural: [img.naturalWidth, img.naturalHeight],
         meta: item.meta ?? {},
         img,
       });
-      if (item.meta?.lat != null && !proof.coords) {
-        proof.coords = { lat: item.meta.lat, lon: item.meta.lon };
-      }
       dirty = true;
       requestAnimationFrame(fit);
     } catch (e) {
@@ -221,22 +260,78 @@
         continue;
       }
       const m = media.find((x) => x.path === path);
-      if (m) await addPanel(mediaPanelInput(m));
+      if (m) await addPanel(mediaPanelInput(m, media));
     }
   }
 
+  // Renumber rows to a dense 0..n-1 range after a move may have emptied one.
+  function normalizeRows() {
+    const order = [...new Set(proof.panels.map((p) => p.row ?? 0))].sort((a, b) => a - b);
+    const remap = new Map(order.map((r, i) => [r, i]));
+    for (const p of proof.panels) p.row = remap.get(p.row ?? 0);
+  }
+
+  // Swap a panel with its left/right neighbour *within the same row*.
   function movePanel(index, delta) {
-    const target = index + delta;
-    if (target < 0 || target >= proof.panels.length) return;
+    const row = proof.panels[index].row ?? 0;
+    let target = index + delta;
+    while (target >= 0 && target < proof.panels.length && (proof.panels[target].row ?? 0) !== row) {
+      target += delta;
+    }
+    if (target < 0 || target >= proof.panels.length || (proof.panels[target].row ?? 0) !== row) return;
     const [panel] = proof.panels.splice(index, 1);
     proof.panels.splice(target, 0, panel);
     dirty = true;
+  }
+
+  // Move a panel up/down a row; going past the last row starts a fresh row.
+  function movePanelRow(index, delta) {
+    const panel = proof.panels[index];
+    const maxRow = Math.max(...proof.panels.map((p) => p.row ?? 0));
+    const next = (panel.row ?? 0) + delta;
+    if (next < 0 || next > maxRow + 1) return;
+    panel.row = next;
+    normalizeRows();
+    selectedId = null;
+    dirty = true;
+    requestAnimationFrame(fit);
+  }
+
+  const rowOf = (i) => proof.panels[i]?.row ?? 0;
+  const canMoveLeft = (i) => proof.panels.slice(0, i).some((p) => (p.row ?? 0) === rowOf(i));
+  const canMoveRight = (i) => proof.panels.slice(i + 1).some((p) => (p.row ?? 0) === rowOf(i));
+
+  // Grow / shrink a single panel (its drawn elements scale with it, since they
+  // live in the panel's natural pixel space and render at the panel box scale).
+  function scalePanel(index, delta) {
+    const p = proof.panels[index];
+    const cur = p.scale ?? 1;
+    const next = Math.round(Math.min(SCALE_MAX, Math.max(SCALE_MIN, cur + delta)) * 10) / 10;
+    if (next === cur) return;
+    p.scale = next;
+    dirty = true;
+    requestAnimationFrame(fit);
+  }
+
+  // "Magic" tweet fit: re-pack panels into rows so the composite lands closest
+  // to the active tweet aspect (the toggled 16:9 / 4:5 guide, else 16:9) and
+  // reset every panel to its default size.
+  function applyMagic() {
+    if (!proof.panels.length) return;
+    const target = guide ? TWEET_GUIDES[guide] : TWEET_GUIDES['16:9'];
+    const rows = autoLayoutRows(proof.panels, proof.shapes, proof.notes, textOpts(), target);
+    proof.panels.forEach((p, i) => { p.row = rows[i]; p.scale = 1; });
+    normalizeRows();
+    selectedId = null;
+    dirty = true;
+    requestAnimationFrame(fit);
   }
 
   function removePanel(index) {
     const panel = proof.panels[index];
     proof.shapes = proof.shapes.filter((s) => s.panel !== panel.id);
     proof.panels.splice(index, 1);
+    normalizeRows();
     selectedId = null;
     dirty = true;
     requestAnimationFrame(fit);
@@ -246,7 +341,7 @@
 
   function fit() {
     if (!stage || !containerEl || !containerEl.clientWidth) return;
-    const { width, height } = docSize(proof.panels, proof.shapes, proof.notes);
+    const { width, height } = docSize(proof.panels, proof.shapes, proof.notes, textOpts());
     const k = Math.min(
       (containerEl.clientWidth - 24) / width,
       (containerEl.clientHeight - 24) / height,
@@ -271,6 +366,10 @@
       x: pointer.x - ((pointer.x - stage.x()) / old) * k,
       y: pointer.y - ((pointer.y - stage.y()) / old) * k,
     });
+    if (guide) {
+      const { width, height } = docSize(proof.panels, proof.shapes, proof.notes, textOpts());
+      drawGuide(width, height);
+    }
     stage.batchDraw();
   }
 
@@ -282,7 +381,7 @@
   }
 
   function panelAt(doc) {
-    const boxes = layoutPanels(proof.panels);
+    const boxes = layoutPanels(proof.panels, proof.captionSize);
     for (let i = 0; i < boxes.length; i++) {
       const b = boxes[i];
       if (doc.x >= b.x && doc.x <= b.x + b.w && doc.y >= b.y && doc.y <= b.y + b.h) {
@@ -323,7 +422,7 @@
       if (!pathDraft) {
         const node = new Konva.Line({
           points: [hit.nx, hit.ny], tension: 0.5, stroke: color,
-          strokeWidth: strokeW / hit.box.scale, lineCap: 'round', lineJoin: 'round',
+          strokeWidth: strokeW / hit.box.baseScale, lineCap: 'round', lineJoin: 'round',
           listening: false,
         });
         group.add(node);
@@ -335,7 +434,7 @@
       }
       return;
     }
-    const sw = strokeW / hit.box.scale;
+    const sw = strokeW / hit.box.baseScale;
     const common = { stroke: color, strokeWidth: sw, listening: false };
     let node;
     if (tool === 'rect') {
@@ -345,8 +444,8 @@
     } else {
       node = new Konva.Arrow({
         points: [hit.nx, hit.ny, hit.nx, hit.ny],
-        pointerLength: tool === 'arrow' ? 14 / hit.box.scale : 0,
-        pointerWidth: tool === 'arrow' ? 14 / hit.box.scale : 0,
+        pointerLength: tool === 'arrow' ? 14 / hit.box.baseScale : 0,
+        pointerWidth: tool === 'arrow' ? 14 / hit.box.baseScale : 0,
         fill: color,
         ...common,
       });
@@ -449,8 +548,9 @@
 
   function rebuild() {
     docLayer.destroyChildren();
-    const { width, height, legend } = docSize(proof.panels, proof.shapes, proof.notes);
-    const boxes = layoutPanels(proof.panels);
+    const { width, height, legend, cols } = docSize(proof.panels, proof.shapes, proof.notes, textOpts());
+    const boxes = layoutPanels(proof.panels, proof.captionSize);
+    const capSize = proof.captionSize ?? CAPTION_SIZE;
 
     docLayer.add(
       new Konva.Rect({ name: 'bg', x: 0, y: 0, width, height, fill: BG })
@@ -458,55 +558,73 @@
 
     proof.panels.forEach((panel, i) => {
       const box = boxes[i];
+      // Outer group is NOT clipped so an element can be dragged across panels;
+      // only the image itself is clipped to the panel box (inner group).
       const group = new Konva.Group({
         id: `pg-${panel.id}`,
         x: box.x, y: box.y,
         scaleX: box.scale, scaleY: box.scale,
-        clip: { x: 0, y: 0, width: panel.natural[0], height: panel.natural[1] },
       });
       if (panel.img) {
-        group.add(new Konva.Image({
+        const imgClip = new Konva.Group({
+          clip: { x: 0, y: 0, width: panel.natural[0], height: panel.natural[1] },
+          listening: false,
+        });
+        imgClip.add(new Konva.Image({
           image: panel.img, width: panel.natural[0], height: panel.natural[1], listening: false,
         }));
+        group.add(imgClip);
       }
       for (const s of proof.shapes.filter((x) => x.panel === panel.id)) {
-        group.add(makeShapeNode(s, box.scale));
+        group.add(makeShapeNode(s, box));
       }
       docLayer.add(group);
       if (panel.caption?.trim()) {
         docLayer.add(new Konva.Text({
           x: box.x + 2, y: box.y + box.h + 9,
           width: box.w - 4, text: panel.caption,
-          fontSize: 17, fontFamily: 'system-ui, sans-serif',
+          fontSize: capSize, fontFamily: 'system-ui, sans-serif',
           fill: TEXT_DIM, ellipsis: true, wrap: 'none', listening: false,
         }));
       }
     });
 
-    // legend (numbered colored chips) + attribution footer
-    let y = PAD + (proof.panels.length ? boxes[0].h : 0) + CAPTION_H + 8;
-    for (const line of legend.filter((l) => l.text)) {
+    // legend (numbered colored chips) laid out in `cols` columns, then footer.
+    // Chip + text scale with the legend font size and stay vertically centred.
+    const legendSize = proof.legendSize ?? 17;
+    const lineH = legendLineHeight(legendSize);
+    const r = Math.round(legendSize * 0.62);
+    const numSize = Math.round(legendSize * 0.72);
+    const legendTop = PAD + panelsBlockHeight(proof.panels, proof.captionSize) + 8;
+    const colW = (width - PAD * 2 - (cols - 1) * PAD) / cols;
+    legend.filter((l) => l.text).forEach((line, i) => {
+      const col = i % cols;
+      const rowN = Math.floor(i / cols);
+      const cx = PAD + col * (colW + PAD);
+      const cy = legendTop + rowN * lineH + lineH / 2;
       docLayer.add(new Konva.Circle({
-        x: PAD + 11, y: y + 11, radius: 10, fill: line.color, listening: false,
+        x: cx + r, y: cy, radius: r, fill: line.color, listening: false,
       }));
       docLayer.add(new Konva.Text({
-        x: PAD + 4, y: y + 5, width: 14, align: 'center',
-        text: String(line.n), fontSize: 13, fontStyle: 'bold',
+        x: cx, y: cy - numSize * 0.62, width: r * 2, align: 'center',
+        text: String(line.n), fontSize: numSize, fontStyle: 'bold',
         fill: '#0b0f17', listening: false,
       }));
       docLayer.add(new Konva.Text({
-        x: PAD + 30, y: y + 3, width: width - PAD * 2 - 30,
-        text: line.text, fontSize: 17, fill: TEXT_MAIN,
+        x: cx + r * 2 + 8, y: cy - legendSize * 0.62, width: colW - (r * 2 + 8),
+        text: line.text, fontSize: legendSize, fill: TEXT_MAIN,
         fontFamily: 'system-ui, sans-serif', ellipsis: true, wrap: 'none', listening: false,
       }));
-      y += LEGEND_LINE_H;
-    }
+    });
     if (proof.panels.length) {
+      const footerSize = proof.footerSize ?? 13;
+      const footerText = proof.footer?.trim() || attributionLine(proof.panels);
       docLayer.add(new Konva.Text({
-        x: PAD, y: height - FOOTER_H - PAD + 8,
+        x: PAD,
+        y: height - PAD - footerBand(footerSize) + Math.round((footerBand(footerSize) - footerSize) / 2),
         width: width - PAD * 2,
-        text: attributionLine(proof.panels),
-        fontSize: 12.5, fill: TEXT_FAINT,
+        text: footerText,
+        fontSize: footerSize, fill: TEXT_FAINT,
         fontFamily: 'system-ui, sans-serif', ellipsis: true, wrap: 'none', listening: false,
       }));
     }
@@ -524,8 +642,45 @@
           : []
     );
     drawEndHandles(boxes);
+    drawGuide(width, height);
     docLayer.batchDraw();
     uiLayer.batchDraw();
+  }
+
+  // Tweet centre-crop preview: X displays a single image with object-fit: cover
+  // into a box of the chosen aspect, so it crops whatever falls outside the
+  // largest centred rect of that aspect. We dim that outside region and outline
+  // the safe area. Screen-only (drawn on uiLayer, never exported).
+  function drawGuide(width, height) {
+    guideGroup.destroyChildren();
+    const aspect = guide ? TWEET_GUIDES[guide] : null;
+    if (!aspect || !proof.panels.length) return;
+    let w = width, h = width / aspect;
+    if (h > height) { h = height; w = height * aspect; }
+    const gx = (width - w) / 2;
+    const gy = (height - h) / 2;
+    const dim = 'rgba(9, 12, 20, 0.62)';
+    const masks = [
+      { x: 0, y: 0, width, height: gy },
+      { x: 0, y: gy + h, width, height: height - gy - h },
+      { x: 0, y: gy, width: gx, height: h },
+      { x: gx + w, y: gy, width: width - gx - w, height: h },
+    ];
+    for (const m of masks) {
+      if (m.width > 0.5 && m.height > 0.5) {
+        guideGroup.add(new Konva.Rect({ ...m, fill: dim, listening: false }));
+      }
+    }
+    guideGroup.add(new Konva.Rect({
+      x: gx, y: gy, width: w, height: h,
+      stroke: '#e8a33d', strokeWidth: 2 / stage.scaleX(), dash: [10 / stage.scaleX(), 6 / stage.scaleX()],
+      listening: false,
+    }));
+    guideGroup.add(new Konva.Text({
+      x: gx + 8, y: gy + 6, text: `${guide} · visible in tweet`,
+      fontSize: 15 / stage.scaleX(), fontStyle: 'bold', fill: '#e8a33d',
+      fontFamily: 'system-ui, sans-serif', listening: false,
+    }));
   }
 
   // Draggable per-vertex handles for the selected line / arrow / curve, so any
@@ -571,7 +726,50 @@
     }
   }
 
-  function makeShapeNode(s, panelScale) {
+  // On drop, re-bind a shape to whichever panel its anchor now sits over and
+  // convert its coordinates into that panel's natural pixel space. Returns the
+  // source/destination layout boxes so the caller can remap x/y or points.
+  function rebindOnDrop(s, node) {
+    const boxes = layoutPanels(proof.panels, proof.captionSize);
+    const fromIdx = proof.panels.findIndex((p) => p.id === s.panel);
+    if (fromIdx < 0) return { fromBox: null, toBox: null };
+    const fromBox = boxes[fromIdx];
+    let anchor;
+    if (s.kind === 'rect') {
+      anchor = { x: node.x() + (s.w ?? 0) / 2, y: node.y() + (s.h ?? 0) / 2 };
+    } else if (s.kind === 'ellipse' || s.kind === 'text') {
+      anchor = { x: node.x(), y: node.y() };
+    } else {
+      const pts = s.points.map((v, i) => v + (i % 2 === 0 ? node.x() : node.y()));
+      let sx = 0, sy = 0;
+      for (let i = 0; i < pts.length; i += 2) { sx += pts[i]; sy += pts[i + 1]; }
+      anchor = { x: sx / (pts.length / 2), y: sy / (pts.length / 2) };
+    }
+    const dx = fromBox.x + anchor.x * fromBox.scale;
+    const dy = fromBox.y + anchor.y * fromBox.scale;
+    let toIdx = fromIdx;
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i];
+      if (dx >= b.x && dx <= b.x + b.w && dy >= b.y && dy <= b.y + b.h) { toIdx = i; break; }
+    }
+    s.panel = proof.panels[toIdx].id;
+    return { fromBox, toBox: boxes[toIdx] };
+  }
+
+  // Doc→panel remap of a single x/y origin between two layout boxes.
+  function remapXY(x, y, fromBox, toBox) {
+    return {
+      x: (fromBox.x + x * fromBox.scale - toBox.x) / toBox.scale,
+      y: (fromBox.y + y * fromBox.scale - toBox.y) / toBox.scale,
+    };
+  }
+
+  // `box` carries `scale` (natural→doc, grows with the panel) and `baseScale`
+  // (that mapping at scale 1). Stroke width and arrow heads are normalised by
+  // baseScale so they read the same across image resolutions yet still grow
+  // proportionally when the panel is scaled up.
+  function makeShapeNode(s, box) {
+    const panelScale = box.baseScale;
     if (s.kind === 'text') {
       const node = new Konva.Text({
         id: s.id, x: s.x, y: s.y, text: s.text || ' ',
@@ -584,9 +782,12 @@
           selectedId = s.id;
         }
       });
+      node.on('dragstart', () => node.getParent()?.moveToTop());
       node.on('dragend', () => {
-        s.x = node.x();
-        s.y = node.y();
+        const { fromBox, toBox } = rebindOnDrop(s, node);
+        const p = toBox ? remapXY(node.x(), node.y(), fromBox, toBox) : { x: node.x(), y: node.y() };
+        s.x = p.x;
+        s.y = p.y;
         dirty = true;
       });
       node.on('transformend', () => {
@@ -630,14 +831,25 @@
         selectedId = s.id;
       }
     });
+    node.on('dragstart', () => node.getParent()?.moveToTop());
     node.on('dragend', () => {
       if (s.kind === 'rect' || s.kind === 'ellipse') {
-        s.x = node.x();
-        s.y = node.y();
+        const { fromBox, toBox } = rebindOnDrop(s, node);
+        const p = toBox ? remapXY(node.x(), node.y(), fromBox, toBox) : { x: node.x(), y: node.y() };
+        s.x = p.x;
+        s.y = p.y;
       } else {
-        // arrow / line / curve: fold the drag offset back into every vertex
+        // arrow / line / curve: fold the drag offset into every vertex, then
+        // remap the whole polyline into the panel it was dropped onto
         const dx = node.x(), dy = node.y();
-        s.points = s.points.map((v, i) => (i % 2 === 0 ? v + dx : v + dy));
+        const folded = s.points.map((v, i) => (i % 2 === 0 ? v + dx : v + dy));
+        const { fromBox, toBox } = rebindOnDrop(s, node);
+        s.points = toBox
+          ? folded.map((v, i) => {
+              const doc = (i % 2 === 0 ? fromBox.x : fromBox.y) + v * (fromBox?.scale ?? 1);
+              return (doc - (i % 2 === 0 ? toBox.x : toBox.y)) / toBox.scale;
+            })
+          : folded;
         node.position({ x: 0, y: 0 });
       }
       dirty = true;
@@ -660,6 +872,36 @@
   }
 
   // ---- shape ops from the side panel -----------------------------------------------------
+
+  // ---- clipboard (copy / paste / duplicate of a single element) ---------------
+  let clipboard = null; // detached deep copy of a shape spec (no id)
+
+  function copyShape(id = selectedId) {
+    const s = proof.shapes.find((x) => x.id === id);
+    if (!s) return;
+    clipboard = copyShapeSpec(s);
+  }
+
+  // Paste the clipboard as a fresh element, nudged down-right so it doesn't hide
+  // the original. Points-based kinds (line/arrow/curve) shift every vertex.
+  function pasteShape() {
+    if (!clipboard) return;
+    const target = proof.panels.some((p) => p.id === clipboard.panel)
+      ? clipboard.panel
+      : proof.panels[0]?.id;
+    if (!target) return;
+    const s = { ...offsetShape(clipboard, 26), id: newId('s'), panel: target };
+    proof.shapes.push(s);
+    selectedId = s.id;
+    // cascade further pastes so repeated Ctrl+V steps down-right
+    clipboard = offsetShape(s, 0);
+    dirty = true;
+  }
+
+  function duplicateShape(id = selectedId) {
+    copyShape(id);
+    pasteShape();
+  }
 
   function deleteShape(id) {
     const gone = proof.shapes.find((s) => s.id === id);
@@ -712,6 +954,14 @@
       finishPath(e.key === 'Enter');
       return;
     }
+    // clipboard: copy / paste / duplicate the selected element
+    if (e.ctrlKey || e.metaKey) {
+      const k = e.key.toLowerCase();
+      if (k === 'c' && selectedId) { e.preventDefault(); copyShape(); }
+      else if (k === 'v' && clipboard) { e.preventDefault(); pasteShape(); }
+      else if (k === 'd' && selectedId) { e.preventDefault(); duplicateShape(); }
+      return; // don't fall through to the single-letter tool shortcuts
+    }
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
       deleteShape(selectedId);
     } else if (e.key === 'Escape') {
@@ -730,7 +980,7 @@
   // ---- persistence -------------------------------------------------------------------------
 
   function exportPng() {
-    const { width, height } = docSize(proof.panels, proof.shapes, proof.notes);
+    const { width, height } = docSize(proof.panels, proof.shapes, proof.notes, textOpts());
     const prevScale = stage.scale();
     const prevPos = stage.position();
     const prevSize = { w: stage.width(), h: stage.height() };
@@ -768,10 +1018,10 @@
       if (andPost) {
         uiState.postProof = {
           title: proof.title,
-          coords: proof.coords,
+          coordsText: displayedCoords,
+          source: displayedSource,
           attribution: attributionLine(proof.panels),
           png: result.png,
-          sources: proof.panels.map((p) => p.meta?.source_url).filter(Boolean),
         };
         uiState.tool = 'post';
       }
@@ -790,11 +1040,16 @@
     const spec = await api.get(`/api/cases/${caseState.current.id}/proofs/${entry.name}`);
     resetDoc();
     proof.title = spec.title;
-    proof.coords = spec.coords ?? null;
+    proof.coordsText = spec.coordsText ?? '';
+    proof.source = spec.source ?? '';
+    proof.captionSize = spec.captionSize ?? CAPTION_SIZE;
+    proof.legendSize = spec.legendSize ?? LEGEND_SIZE;
+    proof.footerSize = spec.footerSize ?? FOOTER_SIZE;
+    proof.footer = spec.footer ?? '';
     for (const p of spec.panels) {
       try {
         const img = await loadImage(`/files/${caseState.current.id}/${p.src}`);
-        proof.panels.push({ ...p, id: p.id ?? newId('p'), img });
+        proof.panels.push({ ...p, id: p.id ?? newId('p'), row: p.row ?? 0, img });
       } catch {
         toast(`Missing panel image: ${p.src}`, 'warn');
       }
@@ -812,6 +1067,12 @@
   const selectedShape = $derived(proof.shapes.find((s) => s.id === selectedId));
   const activeColor = $derived(selectedShape?.color ?? color);
   const featureList = $derived(featureColors(proof.shapes));
+
+  // Coordinates + source shown above the panels: a manual override wins, else
+  // the value auto-derived from the panels (reactive — deleting the first
+  // satellite panel falls back to the next, adding media fills the source).
+  const displayedCoords = $derived(proof.coordsText.trim() || formatCoords(autoCoords(proof.panels)));
+  const displayedSource = $derived(proof.source.trim() || autoSource(proof.panels));
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -887,6 +1148,23 @@
       />
       <div class="tb-sep"></div>
       <button class="tb-btn" title="Fit view (f)" onclick={fit}><Icon name="eye" size={18} /></button>
+      <div class="tb-sep"></div>
+      {#each Object.keys(TWEET_GUIDES) as g (g)}
+        <button
+          class="tb-btn tb-guide"
+          class:active={guide === g}
+          title={`Preview the ${g} tweet crop — everything outside is cut off`}
+          onclick={() => (guide = guide === g ? null : g)}
+        >{g}</button>
+      {/each}
+      <button
+        class="tb-btn tb-magic"
+        title={`Auto-fit for a tweet — re-pack panels toward ${guide ?? '16:9'} and reset panel sizes`}
+        disabled={!proof.panels.length}
+        onclick={applyMagic}
+      >
+        <Icon name="wand" size={18} />
+      </button>
     </div>
 
     <!-- canvas -->
@@ -910,10 +1188,65 @@
     <!-- right: panels & annotations -->
     <aside class="side">
       <div class="side-scroll">
-        <div class="side-title">Panels <span class="count">{proof.panels.length}</span></div>
+        <!-- Proof context: coordinates + source, auto-filled from the panels,
+             overridable. A ! flags a value the analyst still needs to supply. -->
+        <div class="meta-field">
+          <div class="meta-head">
+            <Icon name="crosshair" size={13} />
+            <span>Coordinates</span>
+            {#if !displayedCoords}
+              <span class="meta-warn" title="No satellite panel yet — add one or type the coordinates">
+                <Icon name="alert" size={13} />
+              </span>
+            {/if}
+            {#if proof.coordsText.trim()}
+              <button class="meta-reset" title="Reset to the coordinates from the imagery" onclick={() => { proof.coordsText = ''; dirty = true; }}>
+                <Icon name="reset" size={12} />
+              </button>
+            {/if}
+          </div>
+          <input
+            class="input meta-input"
+            class:warn={!displayedCoords}
+            placeholder="lat, lon"
+            value={displayedCoords}
+            oninput={(e) => { proof.coordsText = e.target.value; dirty = true; }}
+          />
+        </div>
+        <div class="meta-field">
+          <div class="meta-head">
+            <Icon name="link" size={13} />
+            <span>Source</span>
+            {#if !displayedSource}
+              <span class="meta-warn" title="A source is a link — add media downloaded from a URL, or paste one">
+                <Icon name="alert" size={13} />
+              </span>
+            {/if}
+            {#if proof.source.trim()}
+              <button class="meta-reset" title="Reset to the source traced from the media" onclick={() => { proof.source = ''; dirty = true; }}>
+                <Icon name="reset" size={12} />
+              </button>
+            {/if}
+          </div>
+          <input
+            class="input meta-input"
+            class:warn={!displayedSource}
+            placeholder="https://…"
+            value={displayedSource}
+            oninput={(e) => { proof.source = e.target.value; dirty = true; }}
+          />
+        </div>
+
+        <button class="side-title collapsible" style="margin-top: 14px" onclick={() => (collapsed.panels = !collapsed.panels)}>
+          <span><Icon name={collapsed.panels ? 'chevronRight' : 'chevronDown'} size={13} /> Panels <span class="count">{proof.panels.length}</span></span>
+        </button>
+        {#if !collapsed.panels}
         {#each proof.panels as panel, i (panel.id)}
           <div class="panel-row card">
-            <img src={`/files/${caseState.current?.id}/${panel.src}`} alt="" />
+            <div class="panel-thumb">
+              <img src={`/files/${caseState.current?.id}/${panel.src}`} alt="" />
+              <span class="row-badge" title="Row (top→bottom)">R{(panel.row ?? 0) + 1}</span>
+            </div>
             <input
               class="input cap-input"
               placeholder="Caption…"
@@ -921,19 +1254,38 @@
               onchange={() => (dirty = true)}
             />
             <div class="panel-actions">
-              <button class="btn btn-ghost btn-sm" disabled={i === 0} title="Move left" onclick={() => movePanel(i, -1)}>←</button>
-              <button class="btn btn-ghost btn-sm" disabled={i === proof.panels.length - 1} title="Move right" onclick={() => movePanel(i, 1)}>→</button>
+              <button class="btn btn-ghost btn-sm" disabled={!canMoveLeft(i)} title="Move left in row" onclick={() => movePanel(i, -1)}>←</button>
+              <button class="btn btn-ghost btn-sm" disabled={!canMoveRight(i)} title="Move right in row" onclick={() => movePanel(i, 1)}>→</button>
+              <button class="btn btn-ghost btn-sm" disabled={(panel.row ?? 0) === 0} title="Move up a row" onclick={() => movePanelRow(i, -1)}>↑</button>
+              <button class="btn btn-ghost btn-sm" title="Move down a row" onclick={() => movePanelRow(i, 1)}>↓</button>
               <button class="btn btn-ghost btn-sm" style="margin-left:auto" title="Remove panel" onclick={() => removePanel(i)}>
                 <Icon name="trash" size={13} />
               </button>
             </div>
+            <div class="panel-scale" title="Panel size — elements scale with it">
+              <button
+                class="btn btn-ghost btn-sm"
+                disabled={(panel.scale ?? 1) <= SCALE_MIN}
+                title="Shrink panel"
+                onclick={() => scalePanel(i, -SCALE_STEP)}
+              >−</button>
+              <span class="scale-val">{Math.round((panel.scale ?? 1) * 100)}%</span>
+              <button
+                class="btn btn-ghost btn-sm"
+                disabled={(panel.scale ?? 1) >= SCALE_MAX}
+                title="Enlarge panel"
+                onclick={() => scalePanel(i, SCALE_STEP)}
+              >+</button>
+            </div>
           </div>
         {/each}
+        {/if}
 
         <!-- Annotations: one legend note per color (feature), not per element -->
-        <div class="side-title" style="margin-top: 14px">
-          Annotations <span class="count">{featureList.length}</span>
-        </div>
+        <button class="side-title collapsible" style="margin-top: 14px" onclick={() => (collapsed.annotations = !collapsed.annotations)}>
+          <span><Icon name={collapsed.annotations ? 'chevronRight' : 'chevronDown'} size={13} /> Annotations <span class="count">{featureList.length}</span></span>
+        </button>
+        {#if !collapsed.annotations}
         {#if !featureList.length}
           <div class="none">Draw on the panels with the box, ellipse, arrow or line tools. Same color = same feature.</div>
         {/if}
@@ -953,11 +1305,13 @@
             />
           </div>
         {/each}
+        {/if}
 
         <!-- Elements: every drawn shape, for quick select / delete -->
-        <div class="side-title" style="margin-top: 14px">
-          Elements <span class="count">{proof.shapes.length}</span>
-        </div>
+        <button class="side-title collapsible" style="margin-top: 14px" onclick={() => (collapsed.elements = !collapsed.elements)}>
+          <span><Icon name={collapsed.elements ? 'chevronRight' : 'chevronDown'} size={13} /> Elements <span class="count">{proof.shapes.length}</span></span>
+        </button>
+        {#if !collapsed.elements}
         {#each proof.shapes as s, i (s.id)}
           <div
             class="shape-row"
@@ -980,11 +1334,53 @@
             {:else}
               <span class="el-label">{KIND_LABEL[s.kind]} <span class="el-id">#{i + 1}</span></span>
             {/if}
+            <button class="btn btn-ghost btn-sm" title="Duplicate (Ctrl+D)" onclick={(e) => { e.stopPropagation(); duplicateShape(s.id); }}>
+              <Icon name="copy" size={13} />
+            </button>
             <button class="btn btn-ghost btn-sm" title="Delete" onclick={(e) => { e.stopPropagation(); deleteShape(s.id); }}>
               <Icon name="trash" size={13} />
             </button>
           </div>
         {/each}
+        {/if}
+
+        <!-- Advanced: text sizes + editable footer (the trickier knobs) -->
+        <button class="adv-toggle" onclick={() => (advancedOpen = !advancedOpen)} style="margin-top: 14px">
+          <Icon name={advancedOpen ? 'chevronDown' : 'chevronRight'} size={13} />
+          Advanced — text &amp; footer
+        </button>
+        {#if advancedOpen}
+          <div class="adv-body">
+            <div class="size-row">
+              <span>Caption size</span>
+              <input class="size-slider" type="range" min="10" max="40" step="1"
+                bind:value={proof.captionSize} oninput={() => (dirty = true)} />
+              <span class="size-val">{proof.captionSize}</span>
+            </div>
+            <div class="size-row">
+              <span>Legend size</span>
+              <input class="size-slider" type="range" min="11" max="40" step="1"
+                bind:value={proof.legendSize} oninput={() => (dirty = true)} />
+              <span class="size-val">{proof.legendSize}</span>
+            </div>
+            <div class="size-row">
+              <span>Footer size</span>
+              <input class="size-slider" type="range" min="10" max="32" step="1"
+                bind:value={proof.footerSize} oninput={() => (dirty = true)} />
+              <span class="size-val">{proof.footerSize}</span>
+            </div>
+            <label class="adv-label" for="footer-text">Footer text</label>
+            <textarea
+              id="footer-text"
+              class="input footer-input"
+              rows="2"
+              placeholder={attributionLine(proof.panels)}
+              bind:value={proof.footer}
+              oninput={() => (dirty = true)}
+            ></textarea>
+            <div class="adv-hint">Leave empty to keep the automatic imagery / source attribution.</div>
+          </div>
+        {/if}
       </div>
     </aside>
   </div>
@@ -1073,6 +1469,10 @@
   }
   .tb-btn:hover { color: var(--text-1); background: var(--bg-2); }
   .tb-btn.active { color: var(--accent); background: var(--accent-soft); }
+  .tb-guide { font-size: 11px; font-weight: 700; }
+  .tb-magic:not(:disabled) { color: var(--accent); }
+  .tb-magic:not(:disabled):hover { background: var(--accent-soft); }
+  .tb-magic:disabled { opacity: 0.4; cursor: default; }
   .tb-sep {
     width: 26px;
     height: 1px;
@@ -1152,7 +1552,45 @@
     display: flex;
     justify-content: space-between;
   }
+  .side-title.collapsible {
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+  }
+  .side-title.collapsible span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
   .count { color: var(--text-3); }
+  .meta-field { margin-bottom: 10px; }
+  .meta-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 5px;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-2);
+  }
+  .meta-warn { color: var(--warn, #e8a33d); display: inline-flex; }
+  .meta-reset {
+    margin-left: auto;
+    display: inline-flex;
+    color: var(--text-3);
+    padding: 1px;
+    border-radius: var(--r-sm);
+  }
+  .meta-reset:hover { color: var(--text-1); background: var(--bg-2); }
+  .meta-input { width: 100%; font-size: var(--fs-xs); padding: 5px 8px; }
+  .meta-input.warn { border-color: color-mix(in srgb, var(--warn, #e8a33d) 55%, transparent); }
   .panel-row {
     padding: 8px;
     margin-bottom: 8px;
@@ -1160,15 +1598,80 @@
     flex-direction: column;
     gap: 6px;
   }
+  .panel-thumb { position: relative; }
   .panel-row img {
     width: 100%;
     max-height: 90px;
     object-fit: cover;
     border-radius: var(--r-sm);
     background: var(--bg-2);
+    display: block;
   }
+  .row-badge {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-1);
+    background: rgba(9, 12, 20, 0.72);
+  }
+  .adv-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 6px 2px;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-2);
+  }
+  .adv-toggle:hover { color: var(--text-1); }
+  .adv-body { padding: 4px 2px 2px; }
+  .size-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+  .size-row span:first-child { min-width: 78px; }
+  .size-slider { flex: 1; accent-color: var(--accent); }
+  .size-val { min-width: 18px; text-align: right; color: var(--text-2); }
+  .adv-label {
+    display: block;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    margin: 8px 0 4px;
+  }
+  .footer-input {
+    width: 100%;
+    font-size: var(--fs-xs);
+    resize: vertical;
+    font-family: inherit;
+  }
+  .adv-hint { font-size: 11px; color: var(--text-3); margin-top: 5px; }
   .cap-input { font-size: var(--fs-xs); padding: 5px 8px; }
   .panel-actions { display: flex; gap: 2px; }
+  .panel-scale {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+  }
+  .scale-val {
+    min-width: 42px;
+    text-align: center;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+  }
   .none {
     font-size: var(--fs-xs);
     color: var(--text-3);

@@ -23,7 +23,12 @@
       <button class="card" class:sel={saveUi.selected[it.key]} class:saved={it.saved} onclick={() => toggle(it.key)}>
         <div class="thumb">
           {#if it.kind === 'collage' && it.collage?.nodes.length}
-            <CollagePreview collage={it.collage} />
+            {#if it.preview}
+              <!-- the actual composited PNG (backend warp), on a checker so alpha reads -->
+              <div class="collage-real checker"><img src={it.preview} alt={it.label} /></div>
+            {:else}
+              <CollagePreview collage={it.collage} />
+            {/if}
           {:else if it.thumb}
             <img src={it.thumb} alt={it.label} style:filter={it.filter} />
           {:else}
@@ -94,6 +99,26 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+  .collage-real {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .collage-real img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .checker {
+    background-color: #2a2f3a;
+    background-image:
+      linear-gradient(45deg, rgba(255, 255, 255, 0.07) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, 0.07) 75%),
+      linear-gradient(45deg, rgba(255, 255, 255, 0.07) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, 0.07) 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 8px 8px;
   }
   .kind {
     position: absolute;

@@ -40,8 +40,8 @@
     </div>
     <CaseSwitcher />
     <div class="spacer"></div>
-    <span class="local-badge" title="Server bound to 127.0.0.1 — nothing leaves this machine">
-      <span class="dot"></span> local only
+    <span class="local-badge" title="Everything stays on your machine — no accounts, no telemetry, no servers">
+      Your investigation. Your machine.
     </span>
     <button
       class="btn btn-ghost btn-sm"

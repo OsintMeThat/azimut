@@ -230,6 +230,7 @@ def download_url(case: Case, url: str, progress_hook=None) -> dict[str, Any]:
         "url": url,
         "downloader": f"yt-dlp",
         "title": info.get("title"),
+        "description": info.get("description"),
         "uploader": info.get("uploader") or info.get("channel"),
         "upload_date": info.get("upload_date"),
         "webpage_url": info.get("webpage_url", url),

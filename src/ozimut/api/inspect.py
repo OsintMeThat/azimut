@@ -273,6 +273,27 @@ def compose(case_id: str, body: ComposeIn) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.post("/cases/{case_id}/inspect/compose-preview")
+def compose_preview(case_id: str, body: ComposeIn) -> Response:
+    """Render the composited collage to a PNG for the Save tab — nothing is filed."""
+    case = get_case(case_id)
+    nodes = [
+        {"src": {**n.src.model_dump(exclude={"ops"}),
+                 "ops": [op.model_dump() for op in n.src.ops]},
+         "quad": [list(pt) for pt in n.quad]}
+        for n in body.nodes
+    ]
+    try:
+        png = inspect_engine.compose_preview_png(
+            case, width=body.width, height=body.height, nodes=nodes, background=body.background,
+        )
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, RuntimeError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return Response(content=png, media_type="image/png")
+
+
 @router.post("/cases/{case_id}/inspect/enhance-video")
 def enhance_video(case_id: str, body: EnhanceVideoIn) -> dict[str, Any]:
     """Re-encode a video with the gear's adjustments and file it as new media."""

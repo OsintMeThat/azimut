@@ -1,7 +1,7 @@
 <script>
   import { api } from '../../lib/api.js';
   import { caseState, toast } from '../../lib/state.svelte.js';
-  import { adjustDefaults, buildOps, previewStyle } from '../../lib/inspect.js';
+  import { adjustDefaults, buildOps, previewStyle, cropImgStyle, styleText } from '../../lib/inspect.js';
   import Icon from '../../components/Icon.svelte';
   import AdjustSliders from './AdjustSliders.svelte';
 
@@ -80,7 +80,13 @@
     {#each session.frames as fr, i (fr.id)}
       <div class="thumb" class:active={fr.id === session.activeFrameId}>
         <button class="pick" onclick={() => setActive(fr.id)} title={fr.time != null ? `Image ${i + 1} · t=${fr.time.toFixed(2)}s` : `Image ${i + 1}`}>
-          <img src={fr.url} alt={`Image ${i + 1}`} style:filter={previewStyle(filters, fr.adjust).filter} />
+          <img
+            class:cropped={fr.crop}
+            src={fr.url}
+            alt={`Image ${i + 1}`}
+            style={styleText(cropImgStyle(fr.crop))}
+            style:filter={previewStyle(filters, fr.adjust).filter}
+          />
           <span class="num">{i + 1}</span>
           {#if session.saved[`frame:${fr.id}`]}<span class="saved" title="Saved"><Icon name="check" size={11} /></span>{/if}
         </button>
@@ -158,6 +164,7 @@
     height: 60px;
   }
   .thumb .pick {
+    position: relative;
     width: 100%;
     height: 100%;
     border-radius: var(--r-sm);

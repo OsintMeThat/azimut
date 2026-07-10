@@ -135,6 +135,12 @@
       uiState.tool = 'satellite';
       return;
     }
+    if (entity.type === 'media') {
+      // switch to the Media Library and flag the item so it's highlighted there
+      if (entity.attrs?.path) uiState.focusMedia = entity.attrs.path;
+      uiState.tool = 'media';
+      return;
+    }
     const tool = ENTITY_TOOL[entity.type];
     if (tool) uiState.tool = tool;
   }
@@ -151,11 +157,19 @@
     ['user', 'Notes & manual', 'note'],
   ];
   const KNOWN_TOOLS = new Set(TOOL_GROUPS.map(([k]) => k).filter((k) => k !== 'user'));
-  const groupKey = (by) => (KNOWN_TOOLS.has(by) ? by : 'user');
+  // Any filed image/video is media first — it belongs under Media Library no
+  // matter which tool produced it (e.g. a frame saved from Inspect). Everything
+  // else groups by the tool that made it. Reopenable Inspect *sessions* stay
+  // under Inspect, since they're workspaces, not media.
+  const groupKey = (e) => {
+    if (e.type === 'media') return 'media-library';
+    const by = e.provenance?.by;
+    return KNOWN_TOOLS.has(by) ? by : 'user';
+  };
 
   const savedGroups = $derived.by(() => {
     const buckets = new Map(TOOL_GROUPS.map(([k]) => [k, []]));
-    for (const e of confirmed) buckets.get(groupKey(e.provenance?.by)).push(e);
+    for (const e of confirmed) buckets.get(groupKey(e)).push(e);
     return TOOL_GROUPS.map(([key, label, icon]) => ({
       key,
       label,
