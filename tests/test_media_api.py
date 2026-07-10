@@ -155,8 +155,8 @@ def test_download_captures_description(client, monkeypatch):
     import sys
     import types
 
-    from ozimut.engine import media as media_engine
-    from ozimut.workspace import Case
+    from azimut.engine import media as media_engine
+    from azimut.workspace import Case
 
     cid = client.post("/api/cases", json={"name": "Desc"}).json()["id"]
     case = Case.open(cid)

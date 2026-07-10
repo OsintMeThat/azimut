@@ -72,9 +72,13 @@ data/
 *.bak
 *.orig
 
-# Ozimut build artifacts (frontend builds into the Python package)
-src/ozimut/static/
+# Azimut build artifacts (frontend builds into the Python package)
+src/azimut/static/
 
-# Claude Code
+# Local tooling / assistant configs
 CLAUDE.md
 .claude/
+
+# PyInstaller local output
+dist-bin/
+build-bin/

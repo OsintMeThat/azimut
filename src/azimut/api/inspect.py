@@ -347,7 +347,7 @@ def list_sessions(case_id: str) -> list[dict[str, Any]]:
             spec = json.loads(spec_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if spec.get("ozimut_inspect") != 1:
+        if spec.get("azimut_inspect") != 1:
             continue
         out.append({
             "name": spec_path.stem,
@@ -378,7 +378,7 @@ def save_session(case_id: str, body: SessionIn) -> dict[str, Any]:
     case = get_case(case_id)
     name = _slug(body.name or body.title)
     spec = dict(body.spec)
-    spec["ozimut_inspect"] = 1
+    spec["azimut_inspect"] = 1
     spec["title"] = body.title
     spec.setdefault("created_at", _now())
     spec["updated_at"] = _now()

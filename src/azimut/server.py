@@ -16,7 +16,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 def create_app() -> FastAPI:
     config.ensure_workspace()
 
-    app = FastAPI(title="Ozimut", version=__version__, docs_url="/api/docs")
+    app = FastAPI(title="Azimut", version=__version__, docs_url="/api/docs")
 
     from .api import cases, drafts, files, inspect, media, proofs, satellite
 
@@ -32,7 +32,7 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
-    # Built frontend (frontend/ builds into src/ozimut/static/).
+    # Built frontend (frontend/ builds into src/azimut/static/).
     if (STATIC_DIR / "index.html").exists():
         app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
 
@@ -49,7 +49,7 @@ def create_app() -> FastAPI:
         def no_frontend() -> JSONResponse:
             return JSONResponse(
                 {
-                    "ozimut": __version__,
+                    "azimut": __version__,
                     "hint": "frontend not built — run `npm run build` in frontend/ "
                     "or use the Vite dev server (npm run dev)",
                 }

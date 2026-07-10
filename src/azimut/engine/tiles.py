@@ -22,7 +22,7 @@ from .. import config
 
 TILE_SIZE = 256
 MAX_TILES_PER_CROP = 64  # hard cap: bounded requests per capture, polite to providers
-USER_AGENT = "Ozimut/0.1 (+local OSINT workbench; single-user)"
+USER_AGENT = "Azimut/0.1 (+local OSINT workbench; single-user)"
 
 
 @dataclass(frozen=True)

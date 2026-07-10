@@ -4,7 +4,7 @@ import math
 
 from PIL import Image
 
-from ozimut.engine import geo, tiles
+from azimut.engine import geo, tiles
 
 
 def test_project_roundtrip():

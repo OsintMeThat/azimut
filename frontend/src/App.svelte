@@ -36,7 +36,7 @@
   <header class="topbar">
     <div class="brand">
       <Logo size={26} />
-      <span class="brand-name">Ozimut</span>
+      <span class="brand-name">Azimut</span>
     </div>
     <CaseSwitcher />
     <div class="spacer"></div>

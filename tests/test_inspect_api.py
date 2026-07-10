@@ -10,7 +10,7 @@ import time
 import pytest
 from PIL import Image
 
-from ozimut.engine import media as media_engine
+from azimut.engine import media as media_engine
 
 
 def _png_bytes(color=(120, 60, 30), size=(80, 60)) -> bytes:
@@ -429,7 +429,7 @@ def test_session_save_list_load_delete_roundtrip(client):
     assert ent["attrs"]["spec"] == "inspect/my-session.json"
 
     loaded = client.get(f"/api/cases/{cid}/inspect/sessions/my-session").json()
-    assert loaded["ozimut_inspect"] == 1
+    assert loaded["azimut_inspect"] == 1
     assert loaded["frames"][0]["adjust"]["brightness"] == 1.4
 
     # re-saving under the same title updates in place (no duplicate entity)

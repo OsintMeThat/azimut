@@ -45,7 +45,7 @@ export async function refreshCaseList() {
 }
 
 // Remember the last open case across page reloads so work is never "lost".
-const LAST_CASE_KEY = 'ozimut:lastCase';
+const LAST_CASE_KEY = 'azimut:lastCase';
 
 function rememberCase(id) {
   try {

@@ -1,4 +1,4 @@
-/** Thin fetch wrapper for the local Ozimut API. */
+/** Thin fetch wrapper for the local Azimut API. */
 
 class ApiError extends Error {
   constructor(status, detail) {
