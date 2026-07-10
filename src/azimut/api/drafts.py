@@ -3,7 +3,7 @@
 A draft is the re-editable state of the Post Composer (thread of tweets built
 from a geolocation). Drafts live in ``<case>/exports/`` as JSON and are indexed
 as ``post`` entities so they show up in the case sidebar (spec §4 — the case is
-the product). Ozimut never posts on your behalf; a draft is prepared here and the
+the product). Azimut never posts on your behalf; a draft is prepared here and the
 human publishes it (spec §6 non-goals).
 """
 
@@ -49,7 +49,7 @@ def list_drafts(case_id: str) -> list[dict[str, Any]]:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if data.get("ozimut_draft") != DRAFT_MARKER:
+        if data.get("azimut_draft") != DRAFT_MARKER:
             continue
         drafts.append(
             {
@@ -90,7 +90,7 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
             existing_created = None
 
     data = {
-        "ozimut_draft": DRAFT_MARKER,
+        "azimut_draft": DRAFT_MARKER,
         "title": body.title,
         "created_at": existing_created or _now(),
         "updated_at": _now(),

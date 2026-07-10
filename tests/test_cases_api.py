@@ -50,7 +50,7 @@ def test_promote_rejects_existing_name(client):
 
 
 def test_delete_wipes_whole_case_folder(client):
-    import ozimut.config as cfg
+    import azimut.config as cfg
 
     cid = client.post("/api/cases", json={"name": "Doomed"}).json()["id"]
     # plant content across subdirs so we can prove the whole tree is gone
@@ -135,7 +135,7 @@ import os
 
 def _plant_capture(client, cid: str) -> dict:
     """Write a fake satellite PNG + sidecar directly into the case directory."""
-    import ozimut.config as cfg
+    import azimut.config as cfg
     from pathlib import Path
 
     case_dir = cfg.cases_dir() / cid

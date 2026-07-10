@@ -1,0 +1,115 @@
+name: Release
+
+# Cut a release by pushing a semver tag, e.g.  git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create the GitHub release + upload assets
+  id-token: write   # PyPI Trusted Publishing (OIDC) — no token secret needed
+
+jobs:
+  dist:
+    name: Build wheel + sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build frontend into the package
+        working-directory: frontend
+        run: npm ci && npm run build
+      - name: Build sdist + wheel
+        run: pipx run build
+      - name: Sanity-check the wheel bundles the UI
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          whl = sorted(glob.glob("dist/*.whl"))[-1]
+          n = [x for x in zipfile.ZipFile(whl).namelist() if x.startswith("azimut/static/")]
+          assert n, "wheel is missing azimut/static/** — did the frontend build run?"
+          print(f"{whl}: {len(n)} static files bundled")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  binaries:
+    name: Binary (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: azimut-linux-x86_64
+          - os: windows-latest
+            asset: azimut-windows-x86_64.exe
+          - os: macos-latest
+            asset: azimut-macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build frontend into the package
+        working-directory: frontend
+        run: npm ci && npm run build
+      - name: Install package + PyInstaller
+        run: |
+          pip install .
+          pip install pyinstaller
+      - name: Build single-file binary
+        run: pyinstaller packaging/azimut.spec --distpath dist-bin --workpath build-bin
+      - name: Smoke-test the binary
+        shell: bash
+        run: |
+          BIN=dist-bin/azimut
+          [ "${{ runner.os }}" = "Windows" ] && BIN=dist-bin/azimut.exe
+          "$BIN" --version
+      - name: Name the asset per-OS
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            mv dist-bin/azimut.exe "dist-bin/${{ matrix.asset }}"
+          else
+            mv dist-bin/azimut "dist-bin/${{ matrix.asset }}"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist-bin/${{ matrix.asset }}
+
+  release:
+    name: GitHub release + PyPI publish
+    needs: [dist, binaries]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Gather release assets (binaries + wheel/sdist)
+        run: |
+          mkdir -p upload
+          find artifacts -type f -exec cp {} upload/ \;
+          ls -l upload
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: upload/*
+          generate_release_notes: true
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: artifacts/dist

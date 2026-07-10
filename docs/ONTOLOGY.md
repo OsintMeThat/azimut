@@ -1,4 +1,4 @@
-# Ozimut ontology (case data model)
+# Azimut ontology (case data model)
 
 > The contract every tool files against. Companion to [SPEC.md §5](SPEC.md); the
 > spec stays a summary, this is the precise vocabulary. Keep it small, coherent,

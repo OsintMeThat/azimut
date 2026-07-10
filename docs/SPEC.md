@@ -1,10 +1,10 @@
-# Ozimut — the OSINT investigator's workbench
+# Azimut — the OSINT investigator's workbench
 
 > One case, one folder, every tool. Local-first: your media and your investigations
 > never leave your machine. Built for the open-source-investigation community
 > (GeoConfirmed contributors, journalists, researchers).
 
-Status: **draft spec v0.2** (2026-07-08) — supersedes v0.1, which framed Ozimut as a
+Status: **draft spec v0.2** (2026-07-08) — supersedes v0.1, which framed Azimut as a
 collection of geolocation tools. v0.2 reframes it around a single story. Everything
 here is open to change.
 
@@ -12,18 +12,18 @@ here is open to change.
 
 ## 1. The story (read this first)
 
-Ozimut is **not** a geolocation app, and it is **not** a Maltego competitor.
+Azimut is **not** a geolocation app, and it is **not** a Maltego competitor.
 
-Ozimut is **the desk where an OSINT investigation lives**. GEOINT (geolocation
+Azimut is **the desk where an OSINT investigation lives**. GEOINT (geolocation
 proofs) is its flagship pillar and the v1 focus, but every facet of an
 investigation — media, people, places, timelines, evidence, reports — belongs in
 the same case.
 
 Today an investigation is scattered across 50 browser tabs, three Windows folders,
-Obsidian, Draw.io, Google Earth, a paint program and a notepad. Ozimut replaces
+Obsidian, Draw.io, Google Earth, a paint program and a notepad. Azimut replaces
 that mess with one promise:
 
-> **Close Ozimut. Reopen the case six months later. Everything is there:**
+> **Close Azimut. Reopen the case six months later. Everything is there:**
 > the downloaded media, the annotated proofs, the entities and their links, the
 > timeline, the notes, the exports — in one plain folder you can zip, git, or share.
 
@@ -38,20 +38,20 @@ all — **losing the thread of the investigation itself** because nothing ties t
 artifacts together. The tools that exist are abandoned, paid, or require uploading
 sensitive media to someone's server.
 
-Ozimut bundles the daily gestures into one installable app and ties their outputs
+Azimut bundles the daily gestures into one installable app and ties their outputs
 into a case, with a simple guarantee: **everything runs on your machine.**
 
 ## 3. Principles
 
 1. **Local-first, privacy-first.** No account, no telemetry, no upload. Network is
    used only when a tool inherently needs it (map tiles, geocoding, media download)
-   and always to third parties directly — never through an Ozimut server.
+   and always to third parties directly — never through an Azimut server.
 2. **The case is the product.** Tools are how you work; the case folder is what you
    keep. Plain files (JSON + media), human-readable, versionable, portable.
 3. **One tab = one tool, useful in 30 seconds.** Every tool works one-shot with no
    case open (a scratch case is created silently and can be discarded or promoted).
    Tools share data through the case, but never require ceremony.
-4. **Orchestrator, not replacer.** Ozimut does not rebuild specialized OSINT
+4. **Orchestrator, not replacer.** Azimut does not rebuild specialized OSINT
    services (email lookup, username search engines, …). It launches them,
    collects what the analyst selects, and files the results as entities with
    provenance. Build integrations, not clones.
@@ -69,7 +69,7 @@ into a case, with a simple guarantee: **everything runs on your machine.**
 
 ## 4. The case workspace (the heart)
 
-A directory per investigation (`~/Ozimut/cases/<case>/` by default):
+A directory per investigation (`~/Azimut/cases/<case>/` by default):
 
 ```
 case.json          # case metadata + entities + links (schema below, from v1)
@@ -149,12 +149,12 @@ get media in, annotate the match, publish the proof.
 
 | Tab | What it does |
 |-----|--------------|
-| **Media Library** | The case's media shelf. Import local files (drag & drop) or download by URL (X, Telegram, TikTok, YouTube, … via yt-dlp) → clean local file + metadata JSON + sha256. Every media becomes a `media` entity. A **facet bar** groups the shelf on the fly — auto **type/source facets** (Images, Videos, Collages, Imports, Downloads, Other, derived from `kind` + `source`) alongside the user's **virtual folders**. Items can be assigned a **virtual folder** (stored in sidecar) and annotated with **notes**; an info modal surfaces full provenance (source URL, title, uploader, duration) + editable notes + folder; images show a **lightbox** on click. |
-| **Inspect** | A scratch workspace over any photo/video — **nothing enters the case until Save**. **Selection** (video): scrub, step, scan *sharpest* frames, capture into a transient tray; a gear tunes the whole clip (brightness…) for an optional enhanced-video export. **Frame**: per-frame brightness/contrast/saturation/gamma/sharpness/grayscale/invert/rotate + interactive **crop** (applied live in the preview + tray thumbnails, still re-croppable), with a fold-out **Analyze** (histogram, EXIF, ELA *hint*). **Collage**: **multiple collages per session** (tab strip to add/switch/delete). Per piece: drag, **uniform-scale**/**rotate** (a compact toolbar floats above the piece, off the image, or panel ±/↺↻), **corner-warp**, **Front/Back** ordering, **Delete** key, and **per-piece crop** (editor over the piece's snapshot, baked before the warp — the piece's quad is re-projected to the crop so proportions stay correct and it stays in place). Tray frames (thumbnails show each frame's current adjustments) compose on a full-bleed scratch surface into a hand-made panorama. Each collage exports as a **transparent PNG of just its pieces, auto-trimmed to their bounds** — no manual canvas size. Auto-stitch = later. **Save**: tick which of {enhanced video, adjusted frames, each collage} to file — each re-derived full-res on the backend with provenance back to its source, into an optional folder; every collage shows a **true-to-export composited miniature** (the real backend warp, on a transparency checker) in the picker. Frames captured from a tuned clip inherit its look; collage pieces are **frozen snapshots** taken when added. The whole workspace can be **saved as a reopenable session** (`inspect-session` entity, spec in `inspect/`) — reload it later from the sidebar with every frame/adjustment/collage (all of them) intact; re-saving a reopened session **overwrites it in place** (even after a rename). Adjust/analysis controls come from self-describing filter/analysis registries. |
-| **Satellite** | Enter/click coordinates, then **Save place** (a navigable `place` — coordinates only, no image, clickable to fly back) **or Capture** (a sourced imagery crop → `capture` image entity). Capture options: **marker style** (crosshair / Google-Maps pin / none) baked in, crop-size + **capture-frame outline** (previewed on hover, capture-only), **map rotation** (off-north; capture matches the on-screen heading, bearing in provenance). **Move-pin mode** decouples the marker from center — drag it anywhere in frame (e.g. bottom of shot) and the **recorded coordinates follow the pin** for both actions. Captures are images (open to view, not map-navigable); places are the clickable points. The tool's side panel lists both in **collapsible** sections — **Places** (fly the map back) and **Captures** (open the full image) — each with an inline **title + note editor**; the case sidebar's info panel is the same editor for any capture/place/media. Provenance (provider, zoom, date, bearing, marker, center) recorded — feeds the composer. XYZ tile-provider abstraction (see note below). Editable title + notes per capture. |
-| **Proof Composer** | The heart of v1. Compose panels in a **multi-row grid** (frames, photos, satellite crops, imported screenshots) — arrange side by side *and* stack rows (↑↓ per panel) so the composite stays near-square instead of a wide bandeau. Each panel can be **resized** (± per panel, 40–250%) — its drawn elements scale with it, and shorter panels bottom-align in their row. A toggleable **tweet-crop guide** (16:9 / 4:5) dims whatever X would centre-crop; a **magic tweet-fit** button auto-repacks the panels into rows to land closest to the active guide's aspect (16:9 default) and resets panel sizes. Draw colored boxes/ellipses/lines/arrows, multi-point **curves** (rounded, click points + double-click to finish) and **text labels** with the mouse — same color = same feature across panels. Every element stays **editable after placing**: boxes/ellipses/text via transformer handles (text corner-drag = font size), lines/arrows/curves via draggable per-vertex handles; selecting an element lets you change its **color and stroke/font size live**, **copy/paste/duplicate** it (Ctrl+C/V/D, cascading offset), and **drag it onto any panel** (it re-binds to whatever panel it's dropped over). Palette presets **+ custom color picker**. Legend **annotations are written per color** (one note per feature) and auto-flow into up to 3 columns; a separate **element list** (id + kind) selects/copies/deletes individual shapes. Optional per-panel captions (**off by default** except satellite crops). A **Coordinates + Source** header (above the panels) auto-fills from them: coordinates from the first satellite panel (falls back to the next if it's deleted), source **traced through the derivation chain** back to the downloaded original (a collage/frame from a video resolves to that video's link) — a source is **always a link**, so a disk-uploaded file counts as none; both are editable and flag a **!** while empty. These carry into the **Post Composer** (on *To Post* export or when attaching the proof there). An **Advanced** panel exposes the trickier knobs: independent **caption / legend / footer font sizes** and an **editable footer** (blank = automatic imagery/source attribution). Numbered feature legend; export `proof.png` + re-editable JSON spec (`notes` per color, panel `row`/`scale`, `coords`/`coordsText`, `source`, `caption/legend/footerSize`, `footer`) saved in `proofs/`. |
-| **Post Composer** | Build a GeoConfirmed-style thread from a proof. Tweet 1 = `Place - Plus code`, description, decimal coordinates (6 digits), `@GeoConfirmed` mention, source. Tweet 2 = optional media (Video / Image(s), removable), with media picked from the case library. Add extra context tweets; per-tweet character count; copy-per-tweet or copy-all. **Save drafts** (in `exports/`, reopenable from the sidebar as `post` entities) and **Publish** (copies the thread and opens X compose prefilled). Copy-paste ready — Ozimut never posts on your behalf. |
-| **Case sidebar** | Always visible, three sections. **Case Notes** (`notes.md`). **Saved work** — every artifact, auto-grouped by the tool that produced it (Media Library / Inspect / Satellite / Proof Composer / Post Composer, from `provenance.by`); suggested entities pinned on top to confirm/dismiss; deleting here removes the item **everywhere** (drops its file — danger confirm). **My work** — the analyst's own **nested folders** (`/`-separated, e.g. `Sources/Telegram`), empty until you **drag** items in from Saved work; an item filed here stays in Saved work too (lives in both); deleting here only **unfiles** it (light confirm), and removing a folder cascades its subtree back to Saved work. Styled confirm dialogs, not browser popups. Create/open/promote/**rename**/**delete** cases from the switcher — names must be **unique** (case-insensitive, enforced on create/rename/promote); delete wipes the **whole case folder** and everything in it, gated behind typing `DELETE` in uppercase. |
+| ✅ **Media Library** | The case's media shelf. Import local files (drag & drop) or download by URL (X, Telegram, TikTok, YouTube, … via yt-dlp) → clean local file + metadata JSON + sha256. Every media becomes a `media` entity. A **facet bar** groups the shelf on the fly — auto **type/source facets** (Images, Videos, Collages, Imports, Downloads, Other, derived from `kind` + `source`) alongside the user's **virtual folders**. Items can be assigned a **virtual folder** (stored in sidecar) and annotated with **notes**; an info modal surfaces full provenance (source URL, title, uploader, duration) + editable notes + folder; images show a **lightbox** on click. |
+| ✅ **Inspect** | A scratch workspace over any photo/video — **nothing enters the case until Save**. **Selection** (video): scrub, step, scan *sharpest* frames, capture into a transient tray; a gear tunes the whole clip (brightness…) for an optional enhanced-video export. **Frame**: per-frame brightness/contrast/saturation/gamma/sharpness/grayscale/invert/rotate + interactive **crop** (applied live in the preview + tray thumbnails, still re-croppable), with a fold-out **Analyze** (histogram, EXIF, ELA *hint*). **Collage**: **multiple collages per session** (tab strip to add/switch/delete). Per piece: drag, **uniform-scale**/**rotate** (a compact toolbar floats above the piece, off the image, or panel ±/↺↻), **corner-warp**, **Front/Back** ordering, **Delete** key, and **per-piece crop** (editor over the piece's snapshot, baked before the warp — the piece's quad is re-projected to the crop so proportions stay correct and it stays in place). Tray frames (thumbnails show each frame's current adjustments) compose on a full-bleed scratch surface into a hand-made panorama. Each collage exports as a **transparent PNG of just its pieces, auto-trimmed to their bounds** — no manual canvas size. Auto-stitch = later. **Save**: tick which of {enhanced video, adjusted frames, each collage} to file — each re-derived full-res on the backend with provenance back to its source, into an optional folder; every collage shows a **true-to-export composited miniature** (the real backend warp, on a transparency checker) in the picker. Frames captured from a tuned clip inherit its look; collage pieces are **frozen snapshots** taken when added. The whole workspace can be **saved as a reopenable session** (`inspect-session` entity, spec in `inspect/`) — reload it later from the sidebar with every frame/adjustment/collage (all of them) intact; re-saving a reopened session **overwrites it in place** (even after a rename). Adjust/analysis controls come from self-describing filter/analysis registries. |
+| ✅ **Satellite** | Enter/click coordinates, then **Save place** (a navigable `place` — coordinates only, no image, clickable to fly back) **or Capture** (a sourced imagery crop → `capture` image entity). Capture options: **marker style** (crosshair / Google-Maps pin / none) baked in, crop-size + **capture-frame outline** (previewed on hover, capture-only), **map rotation** (off-north; capture matches the on-screen heading, bearing in provenance). **Move-pin mode** decouples the marker from center — drag it anywhere in frame (e.g. bottom of shot) and the **recorded coordinates follow the pin** for both actions. Captures are images (open to view, not map-navigable); places are the clickable points. The tool's side panel lists both in **collapsible** sections — **Places** (fly the map back) and **Captures** (open the full image) — each with an inline **title + note editor**; the case sidebar's info panel is the same editor for any capture/place/media. Provenance (provider, zoom, date, bearing, marker, center) recorded — feeds the composer. XYZ tile-provider abstraction (see note below). Editable title + notes per capture. |
+| ✅ **Proof Composer** | The heart of v1. Compose panels in a **multi-row grid** (frames, photos, satellite crops, imported screenshots) — arrange side by side *and* stack rows (↑↓ per panel) so the composite stays near-square instead of a wide bandeau. Each panel can be **resized** (± per panel, 40–250%) — its drawn elements scale with it, and shorter panels bottom-align in their row. A toggleable **tweet-crop guide** (16:9 / 4:5) dims whatever X would centre-crop; a **magic tweet-fit** button auto-repacks the panels into rows to land closest to the active guide's aspect (16:9 default) and resets panel sizes. Draw colored boxes/ellipses/lines/arrows, multi-point **curves** (rounded, click points + double-click to finish) and **text labels** with the mouse — same color = same feature across panels. Every element stays **editable after placing**: boxes/ellipses/text via transformer handles (text corner-drag = font size), lines/arrows/curves via draggable per-vertex handles; selecting an element lets you change its **color and stroke/font size live**, **copy/paste/duplicate** it (Ctrl+C/V/D, cascading offset), and **drag it onto any panel** (it re-binds to whatever panel it's dropped over). Palette presets **+ custom color picker**. Legend **annotations are written per color** (one note per feature) and auto-flow into up to 3 columns; a separate **element list** (id + kind) selects/copies/deletes individual shapes. Optional per-panel captions (**off by default** except satellite crops). A **Coordinates + Source** header (above the panels) auto-fills from them: coordinates from the first satellite panel (falls back to the next if it's deleted), source **traced through the derivation chain** back to the downloaded original (a collage/frame from a video resolves to that video's link) — a source is **always a link**, so a disk-uploaded file counts as none; both are editable and flag a **!** while empty. These carry into the **Post Composer** (on *To Post* export or when attaching the proof there). An **Advanced** panel exposes the trickier knobs: independent **caption / legend / footer font sizes** and an **editable footer** (blank = automatic imagery/source attribution). Numbered feature legend; export `proof.png` + re-editable JSON spec (`notes` per color, panel `row`/`scale`, `coords`/`coordsText`, `source`, `caption/legend/footerSize`, `footer`) saved in `proofs/`. |
+| ✅ **Post Composer** | Build a GeoConfirmed-style thread from a proof. Tweet 1 = `Place - Plus code`, description, decimal coordinates (6 digits), `@GeoConfirmed` mention, source. Tweet 2 = optional media (Video / Image(s), removable), with media picked from the case library. Add extra context tweets; per-tweet character count; copy-per-tweet or copy-all. **Save drafts** (in `exports/`, reopenable from the sidebar as `post` entities) and **Publish** (copies the thread and opens X compose prefilled). Copy-paste ready — Azimut never posts on your behalf. |
+| ✅ **Case sidebar** | Always visible, three sections. **Case Notes** (`notes.md`). **Saved work** — every artifact, auto-grouped by the tool that produced it (Media Library / Inspect / Satellite / Proof Composer / Post Composer, from `provenance.by`); suggested entities pinned on top to confirm/dismiss; deleting here removes the item **everywhere** (drops its file — danger confirm). **My work** — the analyst's own **nested folders** (`/`-separated, e.g. `Sources/Telegram`), empty until you **drag** items in from Saved work; an item filed here stays in Saved work too (lives in both); deleting here only **unfiles** it (light confirm), and removing a folder cascades its subtree back to Saved work. Styled confirm dialogs, not browser popups. Create/open/promote/**rename**/**delete** cases from the switcher — names must be **unique** (case-insensitive, enforced on create/rename/promote); delete wipes the **whole case folder** and everything in it, gated behind typing `DELETE` in uppercase. |
 
 v1 notes:
 
@@ -166,7 +166,7 @@ v1 notes:
   permit this use (Esri; later Sentinel-2, OSM). More imagery comes from official
   APIs with the user's own key (e.g. Google Map Tiles API), configured in
   settings. Unofficial key-less endpoints of keyed services (e.g.
-  `mt1.google.com`) are **never** shipped, suggested, or documented — Ozimut will
+  `mt1.google.com`) are **never** shipped, suggested, or documented — Azimut will
   be used by many people and must not carry that risk for them. Custom XYZ
   templates remain supported for legitimate sources (self-hosted or licensed tile
   servers).
@@ -221,39 +221,49 @@ v1 notes:
 | **Manipulation Hints** | ELA (*shipped in Inspect*), JPEG quantization, noise inconsistencies — first-pass tampering indicators, honestly labeled as *hints*. |
 | **Channel Monitor** | Watch Telegram channels/accounts, auto-archive media into the case, queue items for geolocation. (Needs care: rate limits, ToS.) |
 
-### Idea backlog (unscheduled)
+### Idea backlog (grouped by likely version)
 
-Loose ideas, not yet slotted into a version. Promote into a table above when a
-workflow forms; delete if it stops making sense. One line each.
+Loose ideas, sorted by the version they'd most likely land in — a rough order,
+not a commitment. Promote into a table above when a workflow firms up; delete if
+it stops making sense. One line each.
 
-- **Auto-panorama in collage** — auto-stitch button in Inspect (see v2 Panorama).
-- **Reverse-search + age/origin hint** in Media Library (see v2 Reverse Search).
-- **Audio analyzer** — local transcription (Whisper) + sound-pattern *hint* (gunfire/engine signatures).
-- **More satellite basemaps** — Sentinel-2 (date slider), OSM context, user-keyed Bing/Google (grows v2 Satellite Compare).
-- **Sat-vs-screen compare** — overlay/swipe/pixel-diff alignment aid; assist, never an auto-verdict (principle 5). Grows v2 Image Compare.
-- **AI-generated media detector** — a v4 Manipulation *hint*, loudly labeled, never a judgment.
-- **Weather / METAR history** — corroborate a claimed date+coords (snow/clear/rain) from free archives; pairs with Shadow Clock into a chronolocation panel.
-- **Measure-on-imagery** — draw a scale/distance line on a satellite capture to match feature sizes in-frame (focused v4 Map Measures slice).
+**Toward v2 (GEOINT suite) — mostly grow existing v2 tools:**
+- **More satellite basemaps** — Sentinel-2 (date slider), OSM context, user-keyed Bing/Google (grows Satellite Compare).
+- **Copernicus easy link / viewer** — quick link into `browser.dataspace.copernicus.eu` (grows Satellite Compare).
+- **Sat-vs-screen compare** — overlay/swipe/pixel-diff alignment aid; assist, never an auto-verdict (principle 5). Grows Image Compare.
+- **Weather / METAR history** — corroborate a claimed date+coords from free archives; pairs with Shadow Clock into a chronolocation panel.
+- **GIF maker** — before/after with annotations.
+- **Tools links page** — a page of curated OSINT tool links.
+
+**Toward v3 (investigation layer):**
 - **Archive-on-download** — optional Wayback push on URL import, archive URL into provenance (early Evidence Locker slice).
-- **3D satellite capture** — after MapLibre 2D parity: pitch/terrain + oblique capture (see §7).
-- **A gif maker** — To visualize before / after with annotations.
-- **Tools links page** — A page with many OSINT tools links.
-- **Copernicus view or easy link** — A Copernicus easy links or viewer (https://browser.dataspace.copernicus.eu/).
-- **Free-form montage editor** — only if a crisp boundary vs Proof Composer + Inspect collage is drawn first (else grow Inspect's collage); risk = scope-creep into a paint app.
-- **Case bundle export/import** — one-click **.zip** of the whole case a recipient opens in their own Ozimut. A zip, not a hosted link (principle 1: no server).
-- **Auto-translation → English** — local/offline (Whisper translate for audio; Argos/OpusMT for text): translate media titles/descriptions and audio, stored beside the original (never overwriting it). Pairs with the audio analyzer.
+- **Case bundle export/import** — one-click **.zip** of the whole case a recipient opens in their own workbench; a zip, not a hosted link (principle 1).
+- **Proof Composer free overlay layer** — **image as a first-class free element** (paste/drop, move/resize, floats or anchors to a panel) — must survive magic tweet-fit; carries the imported-screenshot source field (principle 6).
+- **Callout / detail inset** — image-as-element wired to a circled feature by a color-matched arrow; optional **smart connector** that reflows when either end moves.
+- **Audio analyzer** — local transcription (Whisper) + sound-pattern *hint* (gunfire/engine signatures).
+- **Auto-translation → English** — local/offline (Whisper translate; Argos/OpusMT) for titles/descriptions/audio, stored beside the original. Pairs with the audio analyzer.
+
+**Toward v4 (orchestration & advanced):**
+- **AI-generated media detector** — a Manipulation *hint*, loudly labeled, never a judgment.
+- **Measure-on-imagery** — draw a scale/distance line on a satellite capture to match feature sizes in-frame (focused Map Measures slice).
+
+**After the MapLibre migration (§7):**
+- **3D satellite capture** — pitch/terrain + oblique capture, pitch recorded in provenance.
+
+**Unscheduled / undecided:**
+- **Free-form montage editor** — likely unneeded once the free overlay layer lands; only with a crisp boundary vs Proof Composer + Inspect collage (risk = paint-app scope-creep).
 - _(add ideas here — keep them one-liners)_
 
 ### Explicit non-goals
 
 - No cloud, no accounts, no hosted service, no telemetry.
-- No automated geolocation "magic button" — Ozimut prepares materials and files
+- No automated geolocation "magic button" — Azimut prepares materials and files
   facts; the analyst reasons and decides.
 - No rebuilding of specialized OSINT services (email finders, people search, …) —
   orchestrate them instead (principle 4).
 - No scraping features designed to evade platform blocks; the downloader uses
   yt-dlp as-is and inherits its capabilities.
-- No auto-posting to any platform — Ozimut prepares posts, the human publishes.
+- No auto-posting to any platform — Azimut prepares posts, the human publishes.
 - No paid API dependencies, ever, for core features.
 
 ## 7. Architecture
@@ -280,36 +290,37 @@ workflow forms; delete if it stops making sense. One line each.
   linked tools surfacing their **derivation chain** (this proof ← this frame ←
   this video ← this download) as breadcrumbs — the case's connections made
   visible, an early slice of the v3 Relations view.
-- **Distribution**: `pip install ozimut` + `ozimut` command for technical users;
+- **Distribution**: `pip install azimut` + `azimut` command for technical users;
   PyInstaller single-file executables (Windows/Linux/macOS) for everyone else.
 - **Storage**: plain files as described in §4. No database server; SQLite only for
   rebuildable indexes/caches.
 
 ## 8. Milestones
 
-1. **M0 — skeleton**: repo, FastAPI app, Svelte tab shell, case workspace CRUD +
-   scratch-case flow, entity schema v1 (`case.json` read/write), packaged binary
-   proven on Linux + Windows.
-2. **M1 — Media Library**: import + URL download (yt-dlp), metadata + sha256,
+1. ✅ **M0 — skeleton**: repo, FastAPI app, Svelte tab shell, case workspace CRUD +
+   scratch-case flow, entity schema v1 (`case.json` read/write).
+2. ✅ **M1 — Media Library**: import + URL download (yt-dlp), metadata + sha256,
    media entities in the sidebar.
-3. **M2 — Satellite**: tile-provider abstraction, Esri crop with crosshair +
+3. ✅ **M2 — Satellite**: tile-provider abstraction, Esri crop with crosshair +
    provenance, settings for user-supplied providers/keys.
-4. **M3 — Proof Composer**: panels, mouse annotation, colors, comments, legend,
+4. ✅ **M3 — Proof Composer**: panels, mouse annotation, colors, comments, legend,
    export PNG + re-editable spec. *The demo video (media → satellite → proof) is
    the community launch.*
-5. **M4 — Post Composer**, v1 Proof Studio complete + deep-linkable tools.
-6. **M5 — Inspect** (Frame Extractor pulled early): scratch workspace, frame
+5. ✅ **M4 — Post Composer**, v1 Proof Studio complete + deep-linkable tools.
+6. ✅ **M5 — Inspect** (Frame Extractor pulled early): scratch workspace, frame
    extraction/adjustments, warp collage, reopenable sessions (M5.1 rework).
-7. **M6 — polish pass** across all five tools: Media facet bar, Satellite
+7. ✅ **M6 — polish pass** across all five tools: Media facet bar, Satellite
    places/captures split + move-pin, Proof Composer curves/text/live-editable
    elements, Post Composer proof picker, case rename/delete + unique names.
-8. **M7+**: v2 GEOINT suite (auto-panorama, reverse-search — see backlog) by
+8. **M7 — Launch v1**: pip-installable package (frontend bundled in the wheel),
+   AGPL-3.0 `LICENSE`, cross-platform binaries via CI (Windows/Linux/macOS),
+   PyPI publish, `v0.1.0` GitHub release, demo video (media → satellite → proof).
+9. **M8+**: v2 GEOINT suite (auto-panorama, reverse-search — see backlog) by
    community demand, then the investigation layer.
 
 ## 9. Open questions
 
-- License: MIT vs AGPL (AGPL deters closed-source forks of a community tool; MIT
-  maximizes adoption). Leaning AGPL-3.0 — to confirm.
+- ~~License: MIT vs AGPL.~~ **Decided: AGPL-3.0-only** ✅ (root `LICENSE` in place).
 - Entity schema details: attribute vocabularies per type, `same-as` merge
   semantics, confidence levels — draft during M0, freeze at v1 release.
 - Proof spec JSON format: design fresh at M3 (the old compose_proof format is a
@@ -320,4 +331,4 @@ workflow forms; delete if it stops making sense. One line each.
 - One-shot scratch cases: where do they live, when are they cleaned up, what does
   "promote to case" look like?
 - Déjà Vu community index: needs infra + moderation; out of scope until v4.
-- Name/handle availability check: GitHub org/repo `ozimut`, x.com handle, domain.
+- Name/handle availability check: GitHub org/repo `azimut`, x.com handle, domain.

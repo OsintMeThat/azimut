@@ -1,9 +1,9 @@
 """Application configuration and workspace-root resolution.
 
-Everything Ozimut persists lives under one root directory (default ``~/Ozimut``,
-overridable with the ``OZIMUT_HOME`` environment variable):
+Everything Azimut persists lives under one root directory (default ``~/Azimut``,
+overridable with the ``AZIMUT_HOME`` environment variable):
 
-    ~/Ozimut/
+    ~/Azimut/
     ├── cases/       # named investigations
     ├── scratch/     # one-shot sessions (promotable to cases)
     └── settings.json
@@ -28,7 +28,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
 
 def workspace_root() -> Path:
-    root = Path(os.environ.get("OZIMUT_HOME", "~/Ozimut")).expanduser()
+    root = Path(os.environ.get("AZIMUT_HOME", "~/Azimut")).expanduser()
     return root
 
 

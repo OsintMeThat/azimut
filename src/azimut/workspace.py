@@ -87,7 +87,7 @@ class Case:
         case = cls(path)
         case._write_json(
             {
-                "ozimut": {"schema": 1},
+                "azimut": {"schema": 1},
                 "name": name,
                 "created_at": _now(),
                 "updated_at": _now(),

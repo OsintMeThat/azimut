@@ -388,7 +388,7 @@
     }
   }
 
-  // ---- publish (prefill X compose — Ozimut never posts on your behalf) -----
+  // ---- publish (prefill X compose — Azimut never posts on your behalf) -----
 
   async function publish() {
     // X's web intent only prefills the first post; copy the whole thread so the
@@ -404,13 +404,13 @@
   <div class="tool-header">
     <div class="head-text">
       <h2>Post Composer</h2>
-      <span class="sub">publishable post from your proof — you copy, you publish, Ozimut never posts</span>
+      <span class="sub">publishable post from your proof — you copy, you publish, Azimut never posts</span>
     </div>
     <div class="head-actions">
       <button class="btn btn-ghost btn-sm" onclick={saveDraft} disabled={saving}>
         <Icon name="save" size={14} /> {draftName ? 'Save draft' : 'Save as draft'}
       </button>
-      <button class="btn btn-primary btn-sm" onclick={publish} disabled={!tweet1.trim()} title="Copy the thread and open X compose prefilled — Ozimut never posts for you">
+      <button class="btn btn-primary btn-sm" onclick={publish} disabled={!tweet1.trim()} title="Copy the thread and open X compose prefilled — Azimut never posts for you">
         <Icon name="post" size={14} /> Publish on X
       </button>
     </div>

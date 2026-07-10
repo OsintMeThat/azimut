@@ -2,7 +2,7 @@
 
 from PIL import Image
 
-from ozimut.engine import tiles
+from azimut.engine import tiles
 
 
 def _fake_tile(client, url):  # offline: every tile is a solid green square

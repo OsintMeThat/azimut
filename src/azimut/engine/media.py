@@ -1,6 +1,6 @@
 """Media engine: import local files, download by URL (yt-dlp), hash, thumbnail.
 
-Every media item gets a *sidecar* JSON (``<name>.ozimut.json``) recording how it
+Every media item gets a *sidecar* JSON (``<name>.azimut.json``) recording how it
 entered the case — source, timestamps, hashes (spec §3.6 honest output) — and a
 ``media`` entity in ``case.json``.
 """
@@ -23,7 +23,7 @@ from ..workspace import Case
 
 THUMB_DIR = ".thumbs"
 THUMB_MAX = 512
-SIDECAR_SUFFIX = ".ozimut.json"
+SIDECAR_SUFFIX = ".azimut.json"
 
 
 def _now() -> str:

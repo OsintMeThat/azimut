@@ -47,7 +47,7 @@ def list_proofs(case_id: str) -> list[dict[str, Any]]:
             spec = json.loads(spec_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if spec.get("ozimut_proof") != 1:
+        if spec.get("azimut_proof") != 1:
             continue
         name = spec_path.stem
         png = spec_path.with_suffix(".png")
@@ -85,7 +85,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     proofs_dir = case.subdir("proofs")
 
     spec = dict(body.spec)
-    spec["ozimut_proof"] = 1
+    spec["azimut_proof"] = 1
     spec["title"] = body.title
     spec.setdefault("created_at", _now())
     spec["updated_at"] = _now()

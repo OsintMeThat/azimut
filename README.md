@@ -1,4 +1,4 @@
-# Ozimut
+# Azimut
 
 **The OSINT investigator's workbench.** One case, one folder, every tool.
 Local-first: your media and your investigations never leave your machine.
@@ -6,9 +6,13 @@ Local-first: your media and your investigations never leave your machine.
 Built for the open-source-investigation community — GeoConfirmed contributors,
 journalists, researchers.
 
-> Close Ozimut. Reopen the case six months later. Everything is there: the
+> Close Azimut. Reopen the case six months later. Everything is there: the
 > downloaded media, the annotated proofs, the entities and their links, the
 > notes, the exports — in one plain folder you can zip, git, or share.
+
+*The name is the French word **azimut** — the compass bearing you sight along to
+fix a point on the map (English *azimuth*). A fitting namesake for a geolocation
+workbench: fix a direction, fix a location.*
 
 ## v1 — Proof Studio
 
@@ -17,7 +21,7 @@ journalists, researchers.
 | **Media Library** | Import local files or download by URL (X, Telegram, TikTok, YouTube… via yt-dlp) → clean local file + metadata + SHA-256. |
 | **Satellite** | Coordinates → imagery crop with crosshair and recorded provenance (provider, zoom, date, attribution). Esri World Imagery by default, bring-your-own-key providers supported. |
 | **Proof Composer** | Compose panels side by side, annotate with colored shapes (same color = same feature), comments, legend → export `proof.png` + a re-editable spec. |
-| **Post Composer** | Turn a proof into a publishable post: coordinates in all formats, plus code, attribution, character count. Copy-paste ready — Ozimut never posts for you. |
+| **Post Composer** | Turn a proof into a publishable post: coordinates in all formats, plus code, attribution, character count. Copy-paste ready — Azimut never posts for you. |
 
 Every tool works **one-shot** (no setup, scratch session) or inside a **case**
 — a plain directory holding the whole investigation.
@@ -25,25 +29,50 @@ Every tool works **one-shot** (no setup, scratch session) or inside a **case**
 ## Install & run
 
 ```bash
-pip install ozimut
-ozimut            # starts on http://127.0.0.1:8477 and opens your browser
+pip install azimut
+azimut            # starts on http://127.0.0.1:8477 and opens your browser
 ```
 
 From source:
 
 ```bash
-git clone https://github.com/ozimut/ozimut && cd ozimut
+git clone https://github.com/OsintMeThat/azimut && cd azimut
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 cd frontend && npm install && npm run build && cd ..
-.venv/bin/ozimut
+.venv/bin/azimut
 ```
 
 Frontend development (hot reload, proxied API):
 
 ```bash
-.venv/bin/ozimut --no-browser &     # backend on :8477
+.venv/bin/azimut --no-browser &     # backend on :8477
 cd frontend && npm run dev          # UI on :5173
 ```
+
+## Building & releasing
+
+The Svelte frontend builds into `src/azimut/static/` (git-ignored) and is
+bundled into the Python wheel via hatchling `artifacts`. So `npm run build`
+**must** run before building the package, or the shipped UI is stale/missing.
+
+```bash
+cd frontend && npm run build && cd ..   # refresh the bundled UI
+python -m build                          # wheel + sdist (UI included)
+pyinstaller packaging/azimut.spec        # optional: standalone binary
+```
+
+Releases are automated: push a semver tag and GitHub Actions
+([`.github/workflows/release.yml`](.github/workflows/release.yml)) builds the
+wheel + Windows/Linux/macOS binaries, attaches them to a GitHub release, and
+publishes to PyPI. **Don't publish by hand.**
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+One-time setup: register the repo as a
+[PyPI Trusted Publisher](https://docs.pypi.org/trusted-publishers/) for the
+`azimut` project (no API token to store).
 
 ## Principles
 
@@ -63,4 +92,5 @@ Full spec: [docs/SPEC.md](docs/SPEC.md).
 
 ## License
 
-AGPL-3.0 (see [SPEC §9](docs/SPEC.md) — final confirmation pending).
+[AGPL-3.0-only](LICENSE) — free and open source; hosted or modified versions
+must share their source.

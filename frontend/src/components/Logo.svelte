@@ -26,7 +26,7 @@
   width={size}
   height={size}
   viewBox="0 0 100 100"
-  aria-label="Ozimut logo"
+  aria-label="Azimut logo"
   class={variant}
 >
   <!-- Outer ring (world / scope) -->

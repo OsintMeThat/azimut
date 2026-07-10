@@ -184,7 +184,7 @@ export function attributionLine(panels) {
       for (const u of panelSourceUrls(p)) parts.add(`Source: ${u}`);
     }
   }
-  parts.add('Composed with Ozimut');
+  parts.add('Composed with Azimut');
   return [...parts].join('  ·  ');
 }
 
@@ -303,7 +303,7 @@ export function docSize(panels, shapes, notes = {}, text = {}) {
 /** Serializable spec from runtime state (drops live image objects). */
 export function toSpec(proof) {
   return {
-    ozimut_proof: 1,
+    azimut_proof: 1,
     title: proof.title,
     coords: autoCoords(proof.panels), // auto geo (first geo panel), for reference
     coordsText: proof.coordsText?.trim() ? proof.coordsText.trim() : null, // null → auto
