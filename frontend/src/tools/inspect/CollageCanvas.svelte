@@ -1,5 +1,6 @@
 <script>
-  import { quadMatrix3d, quadCentroid, scaleQuad, rotateQuad, quadRadius } from '../../lib/inspect.js';
+  import { quadMatrix3d, quadCentroid, rotateQuad, quadEdgeMidpoints, scaleQuad } from '../../lib/inspect.js';
+  import { uiState } from '../../lib/state.svelte.js';
   import Icon from '../../components/Icon.svelte';
 
   // Interactive collage surface. Each node is a tray frame placed as a 4-point
@@ -7,29 +8,75 @@
   // corner handle to warp — a hand-made panorama. The same quads are sent to the
   // backend, which renders the full-res warp with PIL (see compose_perspective).
   // `collage` is the session's *active* collage (a session may hold several).
-  let { collage, selectedId = $bindable() } = $props();
+  let { collage, selectedId = $bindable(), requestCrop } = $props();
 
   let wrapEl = $state();
   let availW = $state(800);
   let availH = $state(600);
+  let zoom = $state(1); // 1 = fit; wheel zooms toward the pointer
+  let panX = $state(0);
+  let panY = $state(0);
+  let movingId = $state(null); // piece being dragged — semi-transparent to align
 
   const cw = $derived(collage.width);
   const ch = $derived(collage.height);
-  const scale = $derived(Math.min(availW / cw, availH / ch, 1) || 1);
+  const fitScale = $derived(Math.min(availW / cw, availH / ch, 1) || 1);
+  const scale = $derived(fitScale * zoom);
 
   function boxOf(node) {
     return { w: node.w || 320, h: node.h || 240, url: node.url };
   }
 
-  // client px -> canvas px (the inner surface is scaled with transform-origin 0 0)
+  // client px -> canvas px (the inner surface is translated then scaled, origin 0 0)
   function toCanvas(e) {
     const r = wrapEl.getBoundingClientRect();
-    return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale];
+    return [(e.clientX - r.left - panX) / scale, (e.clientY - r.top - panY) / scale];
+  }
+
+  // Wheel zooms toward the pointer so the feature under the cursor stays put —
+  // pixel-level alignment needs to get closer than the fitted view.
+  function onWheel(e) {
+    e.preventDefault();
+    const r = wrapEl.getBoundingClientRect();
+    const px = e.clientX - r.left;
+    const py = e.clientY - r.top;
+    const old = scale;
+    const next = Math.min(Math.max(zoom * (e.deltaY > 0 ? 0.9 : 1.1), 0.2), 8);
+    const k = fitScale * next;
+    panX = px - ((px - panX) / old) * k;
+    panY = py - ((py - panY) / old) * k;
+    zoom = next;
+  }
+
+  function resetView() {
+    zoom = 1;
+    panX = 0;
+    panY = 0;
+  }
+
+  // Drag on the empty background pans the view (a plain click still deselects).
+  function startPan(e) {
+    selectedId = null;
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const ox = panX;
+    const oy = panY;
+    const move = (ev) => {
+      panX = ox + ev.clientX - sx;
+      panY = oy + ev.clientY - sy;
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   }
 
   function startMove(e, node) {
     e.preventDefault();
     selectedId = node.id;
+    movingId = node.id;
     let [px, py] = toCanvas(e);
     const move = (ev) => {
       const [nx, ny] = toCanvas(ev);
@@ -40,6 +87,7 @@
       py = ny;
     };
     const up = () => {
+      movingId = null;
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
@@ -63,22 +111,26 @@
     window.addEventListener('pointerup', up);
   }
 
-  // Uniformly resize the piece with a *vertical* drag (up = bigger). The factor
-  // is calibrated on the piece's own radius and eased exponentially, so it feels
-  // the same for small and large pieces and never snaps. Pure quad math, so it
-  // composes with the per-corner warp — both just move the same points.
-  function startScale(e, node) {
+  // Square side handles: uniform scale of the whole piece about its centroid
+  // (not a one-axis stretch). Dragging a side out enlarges, in shrinks; the
+  // factor tracks the handle's distance from the centre, so it composes with the
+  // per-corner warp (round handles) and holds up on an already-warped piece.
+  function startEdgeResize(e, node, side) {
     e.preventDefault();
     e.stopPropagation();
     selectedId = node.id;
     const c = quadCentroid(node.quad);
     const base = node.quad.map(([x, y]) => [x, y]);
-    const R = quadRadius(node.quad);
-    const [, sy] = toCanvas(e);
+    const mid = quadEdgeMidpoints(base)[side];
+    const dl = Math.hypot(mid.x - c[0], mid.y - c[1]) || 1;
+    const ux = (mid.x - c[0]) / dl;
+    const uy = (mid.y - c[1]) / dl;
+    const [sx, sy] = toCanvas(e);
+    const d0 = (sx - c[0]) * ux + (sy - c[1]) * uy || dl; // start projection
     const move = (ev) => {
-      const [, my] = toCanvas(ev);
-      // drag one radius up ≈ ×2, one radius down ≈ ×0.5
-      const k = Math.min(20, Math.max(0.05, Math.pow(2, (sy - my) / R)));
+      const [mx, my] = toCanvas(ev);
+      const d = (mx - c[0]) * ux + (my - c[1]) * uy;
+      const k = Math.min(20, Math.max(0.05, d / d0));
       node.quad = scaleQuad(base, k, c);
     };
     const up = () => {
@@ -89,10 +141,22 @@
     window.addEventListener('pointerup', up);
   }
 
-  // Delete / Backspace removes the selected piece. This canvas is only mounted
-  // on the Collage tab, so the window listener is scoped to it — but still bail
-  // when typing in a field or when a modal (e.g. the crop editor) is open.
+  // Nudge the piece one step up/down the stacking order (swap with its
+  // neighbour). The right panel keeps the all-the-way Front/Back buttons.
+  function stepZ(node, dir) {
+    const nodes = collage.nodes;
+    const i = nodes.findIndex((n) => n.id === node.id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= nodes.length) return;
+    [nodes[i], nodes[j]] = [nodes[j], nodes[i]];
+    collage.nodes = [...nodes];
+  }
+
+  // Delete / Backspace removes the selected piece. The Inspect tool stays
+  // mounted when another tab is shown, so bail unless it is the visible tool —
+  // and when typing in a field or when a modal (e.g. the crop editor) is open.
   function onKey(e) {
+    if (uiState.tool !== 'inspect') return;
     if (selectedId == null) return;
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;
     const t = e.target;
@@ -137,19 +201,21 @@
   bind:clientWidth={availW}
   bind:clientHeight={availH}
   style:background={collage.transparent ? null : collage.background}
-  onpointerdown={() => (selectedId = null)}
+  onpointerdown={startPan}
+  onwheel={onWheel}
 >
   <div
     class="surface"
     style:width={`${cw}px`}
     style:height={`${ch}px`}
-    style:transform={`scale(${scale})`}
+    style:transform={`translate(${panX}px, ${panY}px) scale(${scale})`}
   >
     {#each collage.nodes as node (node.id)}
       {@const box = boxOf(node)}
       <img
         class="node"
         class:selected={node.id === selectedId}
+        class:ghost={node.ghost || node.id === movingId}
         src={box.url}
         alt="collage piece"
         style:width={`${box.w}px`}
@@ -157,8 +223,10 @@
         style:transform={quadMatrix3d(box.w, box.h, node.quad)}
         draggable="false"
         onpointerdown={(e) => (e.stopPropagation(), startMove(e, node))}
+        ondblclick={() => { selectedId = node.id; requestCrop?.(node); }}
       />
       {#if node.id === selectedId}
+        <!-- round corner handles: free perspective warp -->
         {#each node.quad as pt, i (i)}
           <button
             class="handle"
@@ -170,42 +238,112 @@
             aria-label={`Warp corner ${i + 1}`}
           ></button>
         {/each}
-        {@const bx0 = Math.min(node.quad[0][0], node.quad[1][0], node.quad[2][0], node.quad[3][0])}
-        {@const bx1 = Math.max(node.quad[0][0], node.quad[1][0], node.quad[2][0], node.quad[3][0])}
-        {@const by0 = Math.min(node.quad[0][1], node.quad[1][1], node.quad[2][1], node.quad[3][1])}
-        <!-- Controls float in a compact bar just above the piece so they never
-             cover the image. Both are relative-drag gestures (see startScale /
-             startRotate), so their fixed position doesn't matter. -->
+        <!-- square side handles: resize (slide that edge, opposite edge fixed) -->
+        {#each quadEdgeMidpoints(node.quad) as m (m.side)}
+          <button
+            class="side-handle"
+            style:left={`${m.x}px`}
+            style:top={`${m.y}px`}
+            style:width={`${14 / scale}px`}
+            style:height={`${14 / scale}px`}
+            onpointerdown={(e) => startEdgeResize(e, node, m.side)}
+            aria-label={`Resize side ${m.side + 1}`}
+            title="Drag to resize this side"
+          ></button>
+        {/each}
+        <!-- Anchor the knob/bar to the piece's *right edge* along its outward
+             normal, so they follow the piece as it rotates and warps. -->
+        {@const cen = quadCentroid(node.quad)}
+        {@const rmx = (node.quad[1][0] + node.quad[2][0]) / 2}
+        {@const rmy = (node.quad[1][1] + node.quad[2][1]) / 2}
+        {@const dl = Math.hypot(rmx - cen[0], rmy - cen[1]) || 1}
+        {@const ux = (rmx - cen[0]) / dl}
+        {@const uy = (rmy - cen[1]) / dl}
+        {@const stemAng = Math.atan2(uy, ux)}
+        <!-- rotate bar on a short stem off the right edge, pointing outward -->
+        <div
+          class="rot-stem"
+          style:left={`${rmx}px`}
+          style:top={`${rmy}px`}
+          style:width={`${24 / scale}px`}
+          style:height={`${1.5 / scale}px`}
+          style:transform={`translateX(${-0.75 / scale}px) rotate(${stemAng}rad)`}
+        ></div>
+        <button
+          class="rot-handle"
+          style:left={`${rmx + ux * (24 / scale)}px`}
+          style:top={`${rmy + uy * (24 / scale)}px`}
+          style:width={`${20 / scale}px`}
+          style:height={`${20 / scale}px`}
+          onpointerdown={(e) => startRotate(e, node)}
+          aria-label="Rotate piece"
+          title="Drag to rotate"
+        >
+          <Icon name="reset" size={13 / scale} />
+        </button>
+        <!-- ghost preview + one-step stacking order. Anchored off the *bottom*
+             edge (opposite the rotate knob) so the two never overlap however the
+             piece is turned. Front/Back-all live in the right panel. -->
+        {@const bmx = (node.quad[2][0] + node.quad[3][0]) / 2}
+        {@const bmy = (node.quad[2][1] + node.quad[3][1]) / 2}
+        {@const bdl = Math.hypot(bmx - cen[0], bmy - cen[1]) || 1}
+        {@const bux = (bmx - cen[0]) / bdl}
+        {@const buy = (bmy - cen[1]) / bdl}
         <div
           class="toolbar"
-          style:left={`${(bx0 + bx1) / 2}px`}
-          style:top={`${by0 - 12 / scale}px`}
+          style:left={`${bmx + bux * (34 / scale)}px`}
+          style:top={`${bmy + buy * (34 / scale)}px`}
           style:gap={`${5 / scale}px`}
           style:padding={`${4 / scale}px ${5 / scale}px`}
         >
           <button
-            class="tbtn rot"
+            class="tbtn"
+            class:on={node.ghost}
             style:width={`${28 / scale}px`}
             style:height={`${28 / scale}px`}
-            onpointerdown={(e) => startRotate(e, node)}
-            aria-label="Rotate piece"
-            title="Drag to rotate"
+            onpointerdown={(e) => e.stopPropagation()}
+            onclick={() => (node.ghost = !node.ghost)}
+            aria-label="Toggle piece transparency"
+            title="See through this piece to align features (view only, never exported)"
           >
-            <Icon name="reset" size={15 / scale} />
+            <Icon name="ghost" size={15 / scale} />
           </button>
           <button
-            class="tbtn scl"
+            class="tbtn z-up"
             style:width={`${28 / scale}px`}
             style:height={`${28 / scale}px`}
-            onpointerdown={(e) => startScale(e, node)}
-            aria-label="Resize piece"
-            title="Drag up/down to resize"
+            onpointerdown={(e) => e.stopPropagation()}
+            onclick={() => stepZ(node, 1)}
+            aria-label="Bring forward one step"
+            title="Bring forward (one step)"
           >
-            <Icon name="grip" size={15 / scale} />
+            <Icon name="chevronDown" size={15 / scale} />
+          </button>
+          <button
+            class="tbtn"
+            style:width={`${28 / scale}px`}
+            style:height={`${28 / scale}px`}
+            onpointerdown={(e) => e.stopPropagation()}
+            onclick={() => stepZ(node, -1)}
+            aria-label="Send back one step"
+            title="Send back (one step)"
+          >
+            <Icon name="chevronDown" size={15 / scale} />
           </button>
         </div>
       {/if}
     {/each}
+  </div>
+
+  <div class="view-ctl">
+    {#if zoom !== 1}
+      <span class="zoom-val">{Math.round(zoom * 100)}%</span>
+      <button class="btn btn-ghost btn-sm" onclick={resetView} title="Fit the collage back in view">
+        <Icon name="eye" size={14} /> Fit
+      </button>
+    {:else}
+      <span class="zoom-hint">scroll to zoom · drag background to pan</span>
+    {/if}
   </div>
 
   {#if collage.nodes.length === 0}
@@ -258,6 +396,35 @@
   .node.selected {
     outline: 1px dashed var(--accent);
   }
+  .node.ghost {
+    opacity: 0.55;
+  }
+  .tbtn.on {
+    background: var(--accent-soft);
+  }
+  .view-ctl {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 6px;
+    border-radius: var(--r-md);
+    background: rgba(16, 20, 28, 0.85);
+    border: 1px solid var(--border);
+  }
+  .zoom-val {
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .zoom-hint {
+    font-size: 11px;
+    color: var(--text-3);
+    user-select: none;
+  }
   .handle {
     position: absolute;
     transform: translate(-50%, -50%);
@@ -270,7 +437,7 @@
   }
   .toolbar {
     position: absolute;
-    transform: translate(-50%, -100%);
+    transform: translate(-50%, -50%);
     display: flex;
     align-items: center;
     border-radius: 999px;
@@ -293,11 +460,42 @@
   .tbtn:hover {
     background: rgba(255, 255, 255, 0.09);
   }
-  .tbtn.rot {
-    cursor: grab;
+  .tbtn.z-up :global(svg) {
+    transform: rotate(180deg);
   }
-  .tbtn.scl {
-    cursor: ns-resize;
+  /* Square side handles resize; round corner handles warp. */
+  .side-handle {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    border-radius: 2px;
+    background: var(--accent);
+    border: 2px solid #10141c;
+    cursor: nesw-resize;
+    padding: 0;
+    touch-action: none;
+  }
+  .rot-stem {
+    position: absolute;
+    transform-origin: 0 0;
+    background: var(--accent);
+    pointer-events: none;
+  }
+  .rot-handle {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(16, 20, 28, 0.92);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    cursor: grab;
+    padding: 0;
+    touch-action: none;
+  }
+  .rot-handle:hover {
+    background: rgba(255, 255, 255, 0.09);
   }
   .empty {
     position: absolute;

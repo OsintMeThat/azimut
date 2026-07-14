@@ -1,15 +1,18 @@
-"""REST API for the Satellite tool: providers, capture crops, list captures."""
+"""REST API for the Satellite tool: providers, tile proxy, capture crops."""
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from ..engine import geo, satellite as satellite_engine, tiles
+from .. import config
+from ..engine import geo, google_tiles, media as media_engine, satellite as satellite_engine, tiles
+from ..workspace import CaseError
 from .cases import get_case
 
 router = APIRouter(prefix="/api", tags=["satellite"])
@@ -19,14 +22,17 @@ class CaptureIn(BaseModel):
     lat: float = Field(ge=-90, le=90)  # crop frame center
     lon: float = Field(ge=-180, le=180)
     zoom: int = Field(ge=1, le=22)
-    width: int = Field(default=1000, ge=256, le=2048)
-    height: int = Field(default=700, ge=256, le=2048)
+    width: int = Field(default=1000, ge=256, le=tiles.SIZE_MAX)
+    height: int = Field(default=700, ge=256, le=tiles.SIZE_MAX)
     provider: str = "esri-world-imagery"
     bearing: float = Field(default=0.0, ge=0, le=360)
+    # acquisition date of the underlying imagery (Esri best-effort), resolved
+    # client-side and recorded next to the capture timestamp (fetched_at)
+    imagery_date: str | None = None
     # marker (recorded point of interest): style + optional offset from center
     marker_style: str = Field(default="crosshair", pattern="^(crosshair|pin|none)$")
-    marker_x: int = Field(default=0, ge=-2048, le=2048)
-    marker_y: int = Field(default=0, ge=-2048, le=2048)
+    marker_x: int = Field(default=0, ge=-tiles.SIZE_MAX, le=tiles.SIZE_MAX)
+    marker_y: int = Field(default=0, ge=-tiles.SIZE_MAX, le=tiles.SIZE_MAX)
     marker_lat: float | None = Field(default=None, ge=-90, le=90)
     marker_lon: float | None = Field(default=None, ge=-180, le=180)
 
@@ -60,9 +66,77 @@ def providers() -> list[dict[str, Any]]:
             "attribution": p.attribution,
             "max_zoom": p.max_zoom,
             "needs_key": p.needs_key,
+            "imagery": p.imagery,
+            "capturable": p.capturable,
+            "cacheable": p.cacheable,
+            "session": p.session,
+            "meter": p.meter,
+            "tile_size": p.tile_size,
         }
         for p in tiles.all_providers()
     ]
+
+
+@router.get("/tiles/{provider_id}/{z}/{x}/{y}")
+def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
+    """Live-map tiles for keyed providers, proxied through the app.
+
+    Two reasons (docs/KEYED_PROVIDERS.md §3/§6): the API key and Google session
+    token never reach the browser, and the meter counts *exactly* what the
+    provider bills — one bump per tile actually served; a browser cache hit
+    never reaches this endpoint, so it never over-counts. Nothing is stored
+    server-side: the provider's own Cache-Control is passed through untouched.
+    """
+    try:
+        provider = tiles.get_provider(provider_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    upstream: httpx.Response | None = None
+    for attempt in (1, 2):
+        try:
+            url = tiles.resolve_url(provider).format(x=x, y=y, z=z)
+        except tiles.TileFetchError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        try:
+            upstream = httpx.get(
+                url, headers={"User-Agent": tiles.USER_AGENT}, timeout=20,
+                follow_redirects=True,
+            )
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"tile fetch failed: {exc}") from exc
+        # a stale Google session token answers 401/403 — re-mint once, transparently
+        if attempt == 1 and provider.session and upstream.status_code in (401, 403):
+            google_tiles.invalidate(google_tiles.key_from_url(provider.url))
+            continue
+        break
+
+    if provider.meter and upstream.status_code < 400:
+        config.record_usage(provider.meter, 1)
+    headers = {}
+    if upstream.headers.get("cache-control"):
+        headers["Cache-Control"] = upstream.headers["cache-control"]
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        media_type=upstream.headers.get("content-type", "image/png"),
+        headers=headers,
+    )
+
+
+@router.get("/satellite/imagery-date")
+def imagery_date(lat: float, lon: float, zoom: int, provider: str = "esri-world-imagery") -> dict[str, Any]:
+    """Best-effort acquisition date of the imagery under a point.
+
+    Only Esri World Imagery exposes per-scene capture dates; for any other
+    provider we report ``supported: false`` so the UI can hide the readout.
+    """
+    if provider != "esri-world-imagery":
+        return {"supported": False, "date": None, "source": None}
+    result = tiles.esri_capture_date(lat, lon, int(zoom))
+    if result is None:  # metadata service unreachable
+        return {"supported": True, "date": None, "source": None}
+    return {"supported": True, **result}
 
 
 @router.post("/geo/parse")
@@ -78,6 +152,17 @@ def parse_coordinates(body: ParseIn) -> dict[str, Any]:
         "plus_code": geo.plus_code(lat, lon),
         "links": geo.map_links(lat, lon),
     }
+
+
+@router.get("/geo/geocode")
+def geocode(q: str) -> dict[str, Any]:
+    query = q.strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="empty query")
+    result = geo.geocode(query)
+    if not result:
+        raise HTTPException(status_code=404, detail="no match for that place name")
+    return result
 
 
 @router.get("/geo/reverse")
@@ -108,36 +193,39 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
     except Exception as exc:  # network / provider failure
         raise HTTPException(status_code=502, detail=f"tile fetch failed: {exc}") from exc
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    name = f"sat_{stamp}_z{provenance['zoom']}_{provider.id}.png"
-    rel_path = f"satellite/{name}"
-    sat_dir = case.subdir("satellite")
-    image.save(sat_dir / name, "PNG")
     # the recorded point is the marker (== center unless it was moved off-center)
     marker_lat, marker_lon = provenance["lat"], provenance["lon"]
     label = satellite_engine.coords_label(marker_lat, marker_lon)
-    provenance["filename"] = name
-    provenance["title"] = label
-    provenance["plus_code"] = geo.plus_code(marker_lat, marker_lon)
+    plus_code = geo.plus_code(marker_lat, marker_lon)
+    provenance["plus_code"] = plus_code
     provenance["dms"] = geo.to_dms(marker_lat, marker_lon)
-    (sat_dir / f"{name}.json").write_text(
-        json.dumps(provenance, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    # two dates ride with a capture: fetched_at (when it was captured, set by
+    # fetch_crop) and imagery_date (when the satellite scene was shot, if known)
+    provenance["imagery_date"] = (body.imagery_date or "").strip() or None
 
-    # a capture is an image artifact, mirrored by one ``capture`` entity tied by
-    # its path (spec §3.5) — it carries the marker's coordinates as info but is
-    # not a navigable point; saving a ``place`` (below) is the separate act for that
-    case.add_entity(
-        "capture",
-        label,
-        attrs={"coords": label, "lat": marker_lat, "lon": marker_lon,
-               "plus_code": provenance["plus_code"], "path": rel_path,
-               "zoom": provenance["zoom"], "bearing": body.bearing},
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    filename = f"sat_{stamp}_z{provenance['zoom']}_{provider.id}.png"
+
+    # A capture is filed through the media pipeline so it lands in media/ (hashed,
+    # thumbnailed, shown in the Media Library, openable in Inspect), but under a
+    # ``capture`` entity carrying its coordinates (spec §3.5). The full capture
+    # provenance rides on the media sidecar's ``source`` (type "satellite").
+    result = media_engine.import_image(
+        case,
+        image,
+        filename,
+        {"type": "satellite", **provenance},
         by="satellite",
-        status="confirmed",
+        entity_type="capture",
+        extra_attrs={
+            "coords": label, "lat": marker_lat, "lon": marker_lon,
+            "plus_code": plus_code, "zoom": provenance["zoom"], "bearing": body.bearing,
+        },
+        title=label,
+        dedupe=False,  # a capture is 1:1 with its entity — never collapse re-captures
     )
 
-    return {"path": rel_path, **provenance}
+    return {"path": result["item"]["path"], "title": label, **provenance}
 
 
 @router.post("/cases/{case_id}/satellite/place")
@@ -162,40 +250,34 @@ def list_captures(case_id: str) -> list[dict[str, Any]]:
 
 @router.delete("/cases/{case_id}/satellite")
 def delete_capture(case_id: str, path: str) -> dict[str, str]:
-    # also drops the mirrored place entity when its last capture is gone
-    satellite_engine.delete_capture(get_case(case_id), path)
+    # a capture is a media item: this drops the file + thumbnail + sidecar + entity
+    case = get_case(case_id)
+    try:
+        media_engine.delete_media(case, path)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "deleted"}
 
 
 @router.patch("/cases/{case_id}/satellite")
 def update_capture(case_id: str, body: SatelliteUpdateIn) -> dict[str, Any]:
     case = get_case(case_id)
-    try:
-        image_path = case.resolve_inside(body.path)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    sidecar_path = image_path.with_name(image_path.name + ".json")
-    if not sidecar_path.exists():
+    item = media_engine.read_item(case, body.path)
+    if item is None:
         raise HTTPException(status_code=404, detail="capture not found")
-
-    data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    patch: dict[str, Any] = {}
     if body.notes is not None:
-        if body.notes == "":
-            data.pop("notes", None)
-        else:
-            data["notes"] = body.notes
+        patch["notes"] = body.notes
+    # empty title falls back to the coordinates (mirrored onto the entity label)
     if body.title is not None:
-        # empty title falls back to the coordinates; keep entity label in sync
-        title = body.title.strip() or satellite_engine.coords_label(
-            data["lat"], data["lon"]
+        source = item.get("source") or {}
+        patch["title"] = body.title.strip() or satellite_engine.coords_label(
+            source.get("lat"), source.get("lon")
         )
-        data["title"] = title
-        entity = case.find_entity(attr="path", value=body.path)
-        if entity:
-            case.update_entity(entity["id"], {"label": title})
-    sidecar_path.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
-    data["path"] = body.path
-    return data
+    try:
+        updated = media_engine.update_media(case, body.path, patch)
+    except (ValueError, CaseError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # flatten the capture provenance up, like the listing does, so the client
+    # gets the same shape back as GET /satellite
+    return {**(updated.get("source") or {}), **updated}

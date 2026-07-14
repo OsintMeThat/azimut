@@ -16,6 +16,9 @@
   let showGear = $state(false);
 
   const duration = $derived(probeInfo?.duration ?? 0);
+  // one frame at the clip's rate — the difference between a readable plate
+  // and a blurry one (falls back to 30 fps when ffprobe gave none)
+  const frameDur = $derived(probeInfo?.fps ? 1 / probeInfo.fps : 1 / 30);
 
   function fmt(t) {
     const m = Math.floor(t / 60);
@@ -73,10 +76,12 @@
   </div>
 
   <div class="stepper">
-    <button class="btn btn-sm" onclick={() => step(-1)} title="Back 1s">-1s</button>
+    <button class="btn btn-sm" onclick={() => step(-1)} title="Back 1s (Shift+←)">-1s</button>
     <button class="btn btn-sm" onclick={() => step(-0.1)} title="Back 0.1s">-0.1</button>
+    <button class="btn btn-sm" onclick={() => step(-frameDur)} title="Back 1 frame (← or ,)">-1f</button>
+    <button class="btn btn-sm" onclick={() => step(frameDur)} title="Forward 1 frame (→ or .)">+1f</button>
     <button class="btn btn-sm" onclick={() => step(0.1)} title="Forward 0.1s">+0.1</button>
-    <button class="btn btn-sm" onclick={() => step(1)} title="Forward 1s">+1s</button>
+    <button class="btn btn-sm" onclick={() => step(1)} title="Forward 1s (Shift+→)">+1s</button>
   </div>
 
   <button class="btn btn-primary w-full" disabled={capturing} onclick={() => grab()}>
@@ -144,7 +149,7 @@
   }
   .stepper {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 6px;
   }
   .w-full {

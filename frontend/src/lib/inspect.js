@@ -181,6 +181,129 @@ export function cropAspect(crop, natW, natH) {
   return (crop.w * natW) / (crop.h * natH);
 }
 
+// ---------------------------------------------------------------------------
+// Editable crop box: a fractional {x,y,w,h} (0..1) resized by dragging its 8
+// handles (4 corners + 4 edges) or moved by its body, with an optional aspect
+// lock. All pure so the same math backs the Frame overlay and the piece modal.
+// ---------------------------------------------------------------------------
+
+/** Clamp a fractional crop so it stays inside [0,1] and never smaller than `min`. */
+export function clampCrop(c, min = 0.02) {
+  const w = Math.max(min, Math.min(1, c.w));
+  const h = Math.max(min, Math.min(1, c.h));
+  const x = Math.min(Math.max(0, c.x), 1 - w);
+  const y = Math.min(Math.max(0, c.y), 1 - h);
+  return { x, y, w, h };
+}
+
+/** Translate a crop by a fractional delta, clamped inside the image. */
+export function moveCrop(c, dx, dy) {
+  const w = c.w;
+  const h = c.h;
+  return {
+    x: Math.min(Math.max(0, c.x + dx), 1 - w),
+    y: Math.min(Math.max(0, c.y + dy), 1 - h),
+    w,
+    h,
+  };
+}
+
+// Handle → which edges it drives. l/r/t/b flags mean that edge follows the pointer.
+const HANDLE_EDGES = {
+  nw: { l: true, t: true }, n: { t: true }, ne: { r: true, t: true },
+  e: { r: true }, se: { r: true, b: true }, s: { b: true },
+  sw: { l: true, b: true }, w: { l: true },
+};
+
+/**
+ * New crop after dragging `handle` (one of nw/n/ne/e/se/s/sw/w) to the pointer
+ * fraction (px, py). With `fracAspect` (w/h in *fractional* units) the box keeps
+ * that ratio: corners grow from the opposite corner, edges grow about the centre
+ * of the fixed edge. Result is clamped inside the image.
+ */
+export function resizeCropByHandle(crop, handle, px, py, fracAspect = null, min = 0.02) {
+  const e = HANDLE_EDGES[handle];
+  if (!e) return clampCrop(crop, min);
+  let left = crop.x;
+  let top = crop.y;
+  let right = crop.x + crop.w;
+  let bottom = crop.y + crop.h;
+  if (e.l) left = Math.min(px, right - min);
+  if (e.r) right = Math.max(px, left + min);
+  if (e.t) top = Math.min(py, bottom - min);
+  if (e.b) bottom = Math.max(py, top + min);
+
+  let x = left;
+  let y = top;
+  let w = right - left;
+  let h = bottom - top;
+
+  if (fracAspect) {
+    const corner = (e.l || e.r) && (e.t || e.b);
+    if (corner) {
+      // corner: drive by width, derive height, keep the opposite corner fixed
+      h = w / fracAspect;
+      if (e.t) y = bottom - h;
+    } else if (e.l || e.r) {
+      // vertical edge: width drives, expand height about the fixed edge's centre
+      const cy = crop.y + crop.h / 2;
+      h = w / fracAspect;
+      y = cy - h / 2;
+    } else {
+      // horizontal edge: height drives, expand width about the fixed edge's centre
+      const cx = crop.x + crop.w / 2;
+      w = h * fracAspect;
+      x = cx - w / 2;
+    }
+  }
+  return clampCrop({ x, y, w, h }, min);
+}
+
+// ---------------------------------------------------------------------------
+// Collage piece edges: side handles that resize a (possibly warped) quad by
+// sliding one edge along its outward normal, leaving the opposite edge fixed.
+// Corners stay free-warp handles; sides are a pure, warp-preserving resize.
+// ---------------------------------------------------------------------------
+
+/** Corner index pairs for the four quad edges: top, right, bottom, left. */
+export const QUAD_SIDES = [[0, 1], [1, 2], [2, 3], [3, 0]];
+
+/** Midpoints of the four quad edges, tagged with their side index. */
+export function quadEdgeMidpoints(quad) {
+  return QUAD_SIDES.map(([a, b], side) => ({
+    side,
+    x: (quad[a][0] + quad[b][0]) / 2,
+    y: (quad[a][1] + quad[b][1]) / 2,
+  }));
+}
+
+/**
+ * Move one edge of `quad` by the drag (dx, dy) *projected onto that edge's
+ * outward normal* — a resize that keeps the edge parallel and the opposite edge
+ * fixed. Works on a warped quad (both endpoints shift together) and composes
+ * with the per-corner warp, since it only moves two of the four points.
+ */
+export function moveQuadEdge(quad, side, dx, dy) {
+  const [a, b] = QUAD_SIDES[side];
+  const ex = quad[b][0] - quad[a][0];
+  const ey = quad[b][1] - quad[a][1];
+  const len = Math.hypot(ex, ey) || 1;
+  let nx = -ey / len;
+  let ny = ex / len;
+  const [cx, cy] = quadCentroid(quad);
+  const mx = (quad[a][0] + quad[b][0]) / 2;
+  const my = (quad[a][1] + quad[b][1]) / 2;
+  if ((mx - cx) * nx + (my - cy) * ny < 0) {
+    nx = -nx;
+    ny = -ny;
+  }
+  const t = dx * nx + dy * ny; // drag projected onto the outward normal
+  const out = quad.map(([x, y]) => [x, y]);
+  out[a] = [quad[a][0] + nx * t, quad[a][1] + ny * t];
+  out[b] = [quad[b][0] + nx * t, quad[b][1] + ny * t];
+  return out;
+}
+
 /** Centroid (mean of the 4 corners) of a quad. */
 export function quadCentroid(quad) {
   const cx = (quad[0][0] + quad[1][0] + quad[2][0] + quad[3][0]) / 4;

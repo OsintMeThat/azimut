@@ -1,6 +1,7 @@
 <script>
   import { api } from '../lib/api.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
+  import { TOOL_GROUPS, groupKey } from '../lib/savedGrouping.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
@@ -32,6 +33,17 @@
 
   // Entity types backed by a file on disk — deleting them everywhere drops the file.
   const FILE_BACKED = new Set(['media', 'capture', 'proof', 'post', 'inspect-session']);
+
+  const VIDEO_EXTS = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v']);
+  // Media entities normally carry the same `kind` the Media Library uses to tell
+  // video from image; fall back to the file extension for entities filed before
+  // that attr existed.
+  function isVideo(e) {
+    if (e.attrs?.kind) return e.attrs.kind === 'video';
+    const ext = e.attrs?.path?.split('.').pop()?.toLowerCase();
+    return !!ext && VIDEO_EXTS.has(ext);
+  }
+  const entityIcon = (e) => (e.type === 'media' && isVideo(e) ? 'video' : ENTITY_ICONS[e.type] ?? 'note');
 
   // ── case notes (single notes.md) ─────────────────────────────────────────
   let caseNotes = $state('');
@@ -145,28 +157,27 @@
     if (tool) uiState.tool = tool;
   }
 
+  // Fly the Satellite map to a capture's recorded coordinates (its marker),
+  // matching its own zoom/bearing — the capture stays an image, this just
+  // navigates. Mirrors the "Go to" button in the Satellite panel.
+  function gotoCapture(entity) {
+    const lat = Number(entity.attrs?.lat);
+    const lon = Number(entity.attrs?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    uiState.gotoCoords = {
+      lat,
+      lon,
+      zoom: Number(entity.attrs?.zoom),
+      bearing: Number(entity.attrs?.bearing),
+    };
+    uiState.tool = 'satellite';
+  }
+
   // ── Saved work: every artifact, grouped by the tool that produced it ──────
   // The grouping is derived from provenance.by — the honest record of origin —
-  // so it fills itself as you work and needs no manual upkeep.
-  const TOOL_GROUPS = [
-    ['media-library', 'Media Library', 'image'],
-    ['inspect', 'Inspect', 'inspect'],
-    ['satellite', 'Satellite', 'satellite'],
-    ['proof-composer', 'Proof Composer', 'proof'],
-    ['post-composer', 'Post Composer', 'post'],
-    ['user', 'Notes & manual', 'note'],
-  ];
-  const KNOWN_TOOLS = new Set(TOOL_GROUPS.map(([k]) => k).filter((k) => k !== 'user'));
-  // Any filed image/video is media first — it belongs under Media Library no
-  // matter which tool produced it (e.g. a frame saved from Inspect). Everything
-  // else groups by the tool that made it. Reopenable Inspect *sessions* stay
-  // under Inspect, since they're workspaces, not media.
-  const groupKey = (e) => {
-    if (e.type === 'media') return 'media-library';
-    const by = e.provenance?.by;
-    return KNOWN_TOOLS.has(by) ? by : 'user';
-  };
-
+  // so it fills itself as you work and needs no manual upkeep. See
+  // lib/savedGrouping.js for the actual bucketing rule (media/captures always
+  // go under Media Library, regardless of which tool filed them).
   const savedGroups = $derived.by(() => {
     const buckets = new Map(TOOL_GROUPS.map(([k]) => [k, []]));
     for (const e of confirmed) buckets.get(groupKey(e)).push(e);
@@ -550,7 +561,7 @@
           <div class="suggest-note">Suggested — confirm or dismiss:</div>
           {#each suggested as e (e.id)}
             <div class="entity suggested">
-              <Icon name={ENTITY_ICONS[e.type] ?? 'note'} size={14} />
+              <Icon name={entityIcon(e)} size={14} />
               <div class="e-body">
                 <span class="e-label">{e.label}</span>
                 <span class="e-meta">{e.type} · {e.provenance?.by}</span>
@@ -706,11 +717,32 @@
     onkeydown={(ev) => ev.key === 'Enter' && onEntityActivate(e)}
   >
     <Icon name="grip" size={13} />
-    <Icon name={ENTITY_ICONS[e.type] ?? 'note'} size={14} />
+    <Icon name={entityIcon(e)} size={14} />
     <div class="e-body">
       <span class="e-label">{e.label}</span>
       <span class="e-meta">{e.type}</span>
     </div>
+    {#if e.type === 'capture' && e.attrs?.lat != null}
+      <button
+        class="btn btn-ghost btn-sm act"
+        title="Go to these coordinates on the map"
+        onclick={(ev) => { ev.stopPropagation(); gotoCapture(e); }}
+      >
+        <Icon name="crosshair" size={13} />
+      </button>
+    {/if}
+    {#if e.type === 'media' && e.attrs?.path}
+      <a
+        class="btn btn-ghost btn-sm act"
+        title="Open in new tab"
+        href={`/files/${caseState.current.id}/${e.attrs.path}`}
+        target="_blank"
+        rel="noreferrer"
+        onclick={(ev) => ev.stopPropagation()}
+      >
+        <Icon name="external" size={13} />
+      </a>
+    {/if}
     <button
       class="btn btn-ghost btn-sm act"
       title="Info"
@@ -867,7 +899,10 @@
           <div class="info-row"><span class="info-k">Zoom</span><span>z{infoEntity.attrs.zoom}</span></div>
         {/if}
         {#if infoData?.fetched_at}
-          <div class="info-row"><span class="info-k">Date</span><span class="mono">{infoData.fetched_at.slice(0, 10)}</span></div>
+          <div class="info-row"><span class="info-k">Captured</span><span class="mono">{infoData.fetched_at.slice(0, 10)}</span></div>
+        {/if}
+        {#if infoData?.imagery_date}
+          <div class="info-row"><span class="info-k">Imagery</span><span class="mono">{infoData.imagery_date}</span></div>
         {/if}
       {:else if infoEntity.attrs?.content}
         <div class="info-note-body">{infoEntity.attrs.content}</div>
@@ -898,6 +933,11 @@
       {#if ENTITY_TOOL[infoEntity.type]}
         <button class="btn btn-ghost btn-sm" onclick={() => { openEntity(infoEntity); infoEntity = null; }}>
           <Icon name="arrowRight" size={13} /> Open in tool
+        </button>
+      {/if}
+      {#if infoEntity.type === 'capture' && infoEntity.attrs?.lat != null}
+        <button class="btn btn-ghost btn-sm" onclick={() => { gotoCapture(infoEntity); infoEntity = null; }}>
+          <Icon name="crosshair" size={13} /> Go to coords
         </button>
       {/if}
       <div style="flex:1"></div>

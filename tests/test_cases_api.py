@@ -134,32 +134,36 @@ import os
 
 
 def _plant_capture(client, cid: str) -> dict:
-    """Write a fake satellite PNG + sidecar directly into the case directory."""
-    import azimut.config as cfg
-    from pathlib import Path
+    """File a fake satellite capture through the media pipeline (its real store)."""
+    from PIL import Image
 
-    case_dir = cfg.cases_dir() / cid
-    sat_dir = case_dir / "satellite"
-    sat_dir.mkdir(parents=True, exist_ok=True)
+    from azimut.engine import media as media_engine
+    from azimut.workspace import Case
 
-    fname = "sat_test_z16_esri.png"
-    (sat_dir / fname).write_bytes(b"\x89PNG\r\n\x1a\n")  # minimal PNG magic bytes
-    sidecar = {
-        "filename": fname,
+    prov = {
         "provider": "esri-world-imagery",
         "provider_label": "Esri World Imagery",
         "zoom": 16,
         "lat": 50.0,
         "lon": 30.0,
+        "bearing": 0.0,
         "fetched_at": "2026-07-08T12:00:00Z",
         "tiles": 9,
         "tiles_missing": 0,
     }
-    (sat_dir / (fname + ".json")).write_text(
-        json.dumps(sidecar, indent=2) + "\n", encoding="utf-8"
+    result = media_engine.import_image(
+        Case.open(cid),
+        Image.new("RGB", (32, 32), (10, 120, 10)),
+        "sat_test_z16_esri.png",
+        {"type": "satellite", **prov},
+        by="satellite",
+        entity_type="capture",
+        extra_attrs={"coords": "50.000000, 30.000000", "lat": 50.0, "lon": 30.0,
+                     "zoom": 16, "bearing": 0.0},
+        title="50.000000, 30.000000",
+        dedupe=False,
     )
-    sidecar["path"] = f"satellite/{fname}"
-    return sidecar
+    return {"path": result["item"]["path"], **prov}
 
 
 def test_satellite_patch_notes(client):

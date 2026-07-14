@@ -3,9 +3,13 @@
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
   import {
     adjustDefaults, buildOps, previewStyle, isNeutral, uid, videoSeed, initialQuad, VIDEO_ADJUST_IDS,
-    cropImgStyle, cropAspect, styleText, collageBounds, quadFromCropRect,
+    collageBounds, quadFromCropRect, cropImgStyle, cropAspect, styleText,
   } from '../lib/inspect.js';
+  import { createHistory } from '../lib/history.js';
+  import { IDENTITY, matrixCss, rotateAbout, isIdentity, matrixAngleDeg, pointerAngleDeg } from '../lib/frameRotate.js';
   import Icon from '../components/Icon.svelte';
+  import ConfirmDialog from '../components/ConfirmDialog.svelte';
+  import CropBox from './inspect/CropBox.svelte';
   import SelectionMenu from './inspect/SelectionMenu.svelte';
   import FrameMenu from './inspect/FrameMenu.svelte';
   import CollageCanvas from './inspect/CollageCanvas.svelte';
@@ -43,6 +47,7 @@
   // in place instead of forking a new named session.
   let openedSession = $state(null);
   const sessionModal = $state({ open: false, mode: 'save', name: null, title: '', list: [], busy: false });
+  let discardConfirm = $state(false);
 
   // A fresh, empty collage. A session can hold several — the Collage tab edits
   // one at a time (session.activeCollageId) and each is saved as its own PNG.
@@ -66,10 +71,119 @@
     session.collages.find((c) => c.id === session.activeCollageId) ?? session.collages[0] ?? null
   );
 
+  // ---- collage undo / redo --------------------------------------------------
+  // Snapshot history over the collages (quads, pieces, crops). A drag mutates
+  // node.quad continuously; the debounced capture collapses it into one entry.
+  const collageHistory = createHistory();
+  let collageCanUndo = $state(false);
+  let collageCanRedo = $state(false);
+  let collageHistBusy = false; // plain (untracked): suppresses capture while restoring
+  let collageHistTimer = null;
+
+  const collageSnapshot = () => JSON.stringify(session.collages);
+
+  function syncCollageHist() {
+    collageCanUndo = collageHistory.canUndo;
+    collageCanRedo = collageHistory.canRedo;
+  }
+
+  function anchorCollageHistory() {
+    clearTimeout(collageHistTimer);
+    collageHistory.reset(collageSnapshot());
+    syncCollageHist();
+  }
+
+  $effect(() => {
+    const json = collageSnapshot(); // reads every collage field → tracked
+    if (collageHistBusy) return;
+    clearTimeout(collageHistTimer);
+    collageHistTimer = setTimeout(() => {
+      collageHistory.push(json);
+      syncCollageHist();
+    }, 350);
+  });
+
+  function applyCollageSnapshot(json) {
+    collageHistBusy = true;
+    session.collages = JSON.parse(json);
+    if (!session.collages.some((c) => c.id === session.activeCollageId)) {
+      session.activeCollageId = session.collages[0]?.id ?? null;
+    }
+    collageSelectedId = null;
+    // outlast the capture debounce so the restore itself is not re-recorded
+    setTimeout(() => (collageHistBusy = false), 400);
+  }
+
+  function undoCollage() {
+    const json = collageHistory.undo();
+    if (json != null) applyCollageSnapshot(json);
+    syncCollageHist();
+  }
+
+  function redoCollage() {
+    const json = collageHistory.redo();
+    if (json != null) applyCollageSnapshot(json);
+    syncCollageHist();
+  }
+
+  // ---- keyboard: collage undo + frame-accurate video stepping ----------------
+  const frameDur = $derived(probeInfo?.fps ? 1 / probeInfo.fps : 1 / 30);
+
+  function stepVideo(delta) {
+    const duration = probeInfo?.duration ?? Infinity;
+    shared.seekTo = Math.min(Math.max((shared.currentTime ?? 0) + delta, 0), duration);
+  }
+
+  function onWindowKeydown(e) {
+    if (uiState.tool !== 'inspect') return;
+    const t = e.target;
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable) return;
+    if (e.ctrlKey || e.metaKey) {
+      if (activeTab !== 'collage') return;
+      const k = e.key.toLowerCase();
+      if (k === 'z') { e.preventDefault(); e.shiftKey ? redoCollage() : undoCollage(); }
+      else if (k === 'y') { e.preventDefault(); redoCollage(); }
+      return;
+    }
+    // Frame tab: Enter applies the crop (→ committed preview), Esc leaves editing.
+    if (activeTab === 'frame' && cropEditing) {
+      if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); commitCrop(); }
+      return;
+    }
+    // Selection tab: ←/→ step one frame (Shift = 1s), ,/. mpv-style aliases
+    if (activeTab !== 'selection' || session.source?.kind !== 'video') return;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); stepVideo(e.shiftKey ? -1 : -frameDur); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); stepVideo(e.shiftKey ? 1 : frameDur); }
+    else if (e.key === ',') { e.preventDefault(); stepVideo(-frameDur); }
+    else if (e.key === '.') { e.preventDefault(); stepVideo(frameDur); }
+  }
+
+  // keep-alive: tools stay mounted when another tab is shown — silence the video
+  $effect(() => {
+    if (uiState.tool !== 'inspect') videoEl?.pause();
+  });
+
   // viewer bridge (video seek + crop overlay), mirrors the old shared object
   const shared = $state({ currentTime: 0, seekTo: null, cropMode: false });
   let videoEl = $state();
-  let cropDraw = $state(null);
+  // Frame-tab viewer: wheel-zoom toward the pointer, left-drag pans, middle-drag
+  // turns the view (Google-Earth style, around the grabbed point). Zoom/pan/
+  // rotate are *view only* — never saved — so turning just helps read the frame.
+  // The rotation is an affine matrix in the stage's own space (see frameRotate.js);
+  // `frameAspect` is the crop aspect lock, shared with the right-panel controls.
+  let frameZoom = $state(1);
+  let framePan = $state({ x: 0, y: 0 });
+  let frameRotMatrix = $state(IDENTITY); // accumulated view rotation (stage-local)
+  let rotating = $state(false); // a middle-drag turn is in progress
+  let rotatePivot = $state({ x: 0, y: 0 }); // target indicator, viewport-local px
+  let frameStageEl = $state(); // rotated stage (image + crop overlay)
+  let frameZoomEl = $state(); // zoom/pan layer — reference box for screen→local
+  let frameViewportEl = $state(); // outer viewport — reference box for the indicator
+  let frameAspect = $state(null);
+  // Crop has two modes: *editing* (original image + draggable box) and, once
+  // applied (Enter / Apply), a committed *preview* showing the cropped result.
+  // Re-opening crop (button or double-click) goes back to editing the original.
+  let cropEditing = $state(false);
 
   const videoFilters = $derived(filters.filter((f) => VIDEO_ADJUST_IDS.includes(f.id)));
   const tabs = $derived(
@@ -111,11 +225,14 @@
   // -- lifecycle ------------------------------------------------------------
   $effect(() => {
     const id = caseState.current?.id;
+    caseState.rev; // refetch when media changes elsewhere (e.g. Media Library upload/delete)
     if (id !== loadedFor) {
       loadedFor = id;
       mediaList = [];
       resetSession();
       if (id) refresh(id);
+    } else if (id) {
+      refresh(id);
     }
   });
 
@@ -146,7 +263,9 @@
   async function ensureOps() {
     if (filters.length) return;
     const ops = await api.get('/api/inspect/ops');
-    filters = ops.filters.filter((f) => f.id !== 'crop');
+    // `crop` is driven by the interactive box; `rotate` is a view-only tilt in
+    // the Frame tab (never baked) — neither belongs in the slider pipeline.
+    filters = ops.filters.filter((f) => f.id !== 'crop' && f.id !== 'rotate');
     analyses = ops.analyses;
   }
 
@@ -173,7 +292,13 @@
     collageSelectedId = null;
     shared.currentTime = 0;
     shared.cropMode = false;
-    cropDraw = null;
+    frameZoom = 1;
+    framePan = { x: 0, y: 0 };
+    frameRotMatrix = IDENTITY;
+    rotating = false;
+    frameAspect = null;
+    cropEditing = false;
+    anchorCollageHistory();
   }
 
   async function select(item) {
@@ -329,9 +454,8 @@
         ? quadFromCropRect(node.quad, { x: -prev.x / prev.w, y: -prev.y / prev.h, w: 1 / prev.w, h: 1 / prev.h })
         : node.quad;
       node.quad = crop ? quadFromCropRect(baseQuad, crop) : baseQuad.map(([x, y]) => [x, y]);
-      if (node.url && node.url !== node.baseUrl && node.url.startsWith('blob:')) {
-        URL.revokeObjectURL(node.url);
-      }
+      // the previous blob URL stays alive: an undo may restore a snapshot that
+      // still points at it (bounded leak, reclaimed on session reset/reload)
       node.url = url;
       node.w = dim.w;
       node.h = dim.h;
@@ -360,38 +484,140 @@
     if (session.activeFrameId === id) session.activeFrameId = session.frames[0]?.id ?? null;
   }
 
-  // -- crop overlay (Frame tab) --------------------------------------------
-  function frac(e, el) {
-    const r = el.getBoundingClientRect();
-    return {
-      x: Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1),
-      y: Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1),
-    };
+  // -- frame viewer: zoom / pan / straighten (Frame tab) -------------------
+  // Reset the view whenever the active frame changes.
+  $effect(() => {
+    session.activeFrameId; // track
+    frameZoom = 1;
+    framePan = { x: 0, y: 0 };
+    frameRotMatrix = IDENTITY;
+    frameAspect = null;
+    cropEditing = false;
+    shared.cropMode = false;
+  });
+
+  // Enter crop editing (original + box); arm a fresh draw if there's no box yet.
+  function beginCrop() {
+    if (!activeFrame) return;
+    cropEditing = true;
+    if (!activeFrame.crop) shared.cropMode = true;
   }
-  function cropDown(e) {
-    if (!shared.cropMode || !activeFrame) return;
+  // Apply the crop → drop back to the committed preview of the cropped result.
+  function commitCrop() {
+    cropEditing = false;
+    shared.cropMode = false;
+  }
+
+  // Wheel zooms toward the pointer (never below the fitted size); at 1× the pan
+  // snaps back to centre so the image can't drift off.
+  function frameWheel(e) {
+    if (!activeFrame) return;
     e.preventDefault();
-    const p = frac(e, e.currentTarget);
-    cropDraw = { sx: p.x, sy: p.y, x: p.x, y: p.y, w: 0, h: 0 };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-  function cropMove(e) {
-    if (!cropDraw) return;
-    const p = frac(e, e.currentTarget);
-    cropDraw = {
-      sx: cropDraw.sx, sy: cropDraw.sy,
-      x: Math.min(cropDraw.sx, p.x), y: Math.min(cropDraw.sy, p.y),
-      w: Math.abs(p.x - cropDraw.sx), h: Math.abs(p.y - cropDraw.sy),
-    };
-  }
-  function cropUp() {
-    if (cropDraw && cropDraw.w > 0.02 && cropDraw.h > 0.02 && activeFrame) {
-      activeFrame.crop = { x: cropDraw.x, y: cropDraw.y, w: cropDraw.w, h: cropDraw.h };
-      shared.cropMode = false;
+    const r = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - r.left;
+    const py = e.clientY - r.top;
+    const cX = r.width / 2;
+    const cY = r.height / 2;
+    const old = frameZoom;
+    const next = Math.min(Math.max(old * (e.deltaY > 0 ? 0.9 : 1.1), 1), 8);
+    if (next === 1) {
+      frameZoom = 1;
+      framePan = { x: 0, y: 0 };
+      return;
     }
-    cropDraw = null;
+    // keep the point under the pointer fixed (transform-origin is the centre)
+    const ratio = next / old;
+    framePan = {
+      x: px - (px - (cX + framePan.x)) * ratio - cX,
+      y: py - (py - (cY + framePan.y)) * ratio - cY,
+    };
+    frameZoom = next;
   }
-  const cropBox = $derived(cropDraw ?? activeFrame?.crop ?? null);
+
+  function resetFrameView() {
+    frameZoom = 1;
+    framePan = { x: 0, y: 0 };
+    frameRotMatrix = IDENTITY;
+  }
+
+  const frameViewDirty = $derived(
+    frameZoom !== 1 || framePan.x !== 0 || framePan.y !== 0 || !isIdentity(frameRotMatrix)
+  );
+  const frameAngle = $derived(Math.round(matrixAngleDeg(frameRotMatrix)));
+
+  // Middle-drag turns the *view* (never saved), Google-Earth style: a stylised
+  // target marks the exact point you grabbed and the image spins around it as you
+  // move the mouse — the turn follows the angle the cursor sweeps about that
+  // pivot. The rotation is kept as a matrix in the stage's own space, so it
+  // composes on top of any prior zoom / pan / rotate: every new grab pivots from
+  // wherever you click, with no jump, no matter what the view already looks like.
+  const ROTATE_DEADZONE = 8; // px to move off the pivot before a spoke is fixed
+  function frameRotateStart(e) {
+    if (!activeFrame || !frameStageEl || !frameZoomEl || !frameViewportEl) return;
+    // The zoom/pan layer carries only translate + scale (no rotation), so its
+    // on-screen box gives a clean screen→local map — read it live so the pivot is
+    // correct whatever the current zoom/pan is. offsetLeft/Top place the stage's
+    // origin (its transform-origin, 0 0) within that layer, unaffected by rotation.
+    const layer = frameZoomEl.getBoundingClientRect();
+    const vp = frameViewportEl.getBoundingClientRect();
+    const px = (e.clientX - layer.left) / frameZoom - frameStageEl.offsetLeft;
+    const py = (e.clientY - layer.top) / frameZoom - frameStageEl.offsetTop;
+    const base = frameRotMatrix; // freeze the accumulated rotation for this gesture
+    const pivotX = e.clientX;
+    const pivotY = e.clientY;
+    rotatePivot = { x: e.clientX - vp.left, y: e.clientY - vp.top };
+    rotating = true;
+    let startAngle = null; // the reference spoke, fixed once the cursor leaves the deadzone
+    const move = (ev) => {
+      if (startAngle === null) {
+        if (Math.hypot(ev.clientX - pivotX, ev.clientY - pivotY) < ROTATE_DEADZONE) return;
+        startAngle = pointerAngleDeg(pivotX, pivotY, ev.clientX, ev.clientY);
+        return;
+      }
+      const delta = pointerAngleDeg(pivotX, pivotY, ev.clientX, ev.clientY) - startAngle;
+      frameRotMatrix = rotateAbout(base, px, py, delta);
+    };
+    const up = () => {
+      rotating = false;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  // Kill the browser's middle-click auto-scroll so a turn doesn't also pan-scroll.
+  function frameMouseDown(e) {
+    if (e.button === 1) e.preventDefault();
+  }
+
+  // Left-drag on the image pans the view.
+  function framePanStart(e) {
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const ox = framePan.x;
+    const oy = framePan.y;
+    const move = (ev) => {
+      framePan = { x: ox + ev.clientX - sx, y: oy + ev.clientY - sy };
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  function frameViewportDown(e) {
+    if (e.button === 1) {
+      e.preventDefault();
+      if (!cropEditing) frameRotateStart(e); // keep the crop box un-rotated
+      return;
+    }
+    if (e.button !== 0 || shared.cropMode || cropEditing) return; // crop box owns drags
+    e.preventDefault(); // stop the browser's native image-drag ghost
+    framePanStart(e);
+  }
 
   // -- save (the only gate that files entities) ----------------------------
   async function saveSelected() {
@@ -571,6 +797,12 @@
     openedSession = { name, title: spec.title || name };
     activeTab = src.kind === 'video' ? 'selection' : 'frame';
     sessionModal.open = false;
+    anchorCollageHistory();
+  }
+
+  function discardSession() {
+    resetSession();
+    discardConfirm = false;
   }
 
   async function deleteSession(name) {
@@ -585,6 +817,8 @@
   }
 </script>
 
+<svelte:window onkeydown={onWindowKeydown} />
+
 <div class="tool">
   <div class="tool-header">
     <h2>Inspect</h2>
@@ -594,6 +828,11 @@
       <button class="btn btn-sm" onclick={openLoadDialog} title="Reopen a saved session">
         <Icon name="folderOpen" size={14} /> Open
       </button>
+      {#if session.source}
+        <button class="btn btn-sm" onclick={() => (discardConfirm = true)} title="Clear this workspace">
+          <Icon name="reset" size={14} /> Discard
+        </button>
+      {/if}
       <button class="btn btn-sm" disabled={!session.source} onclick={openSaveDialog} title="Save this workspace">
         <Icon name="save" size={14} /> Save session
       </button>
@@ -634,6 +873,15 @@
           <Icon name={TAB_META[t].icon} size={15} /> {TAB_META[t].label}
         </button>
       {/each}
+      {#if activeTab === 'collage'}
+        <div class="tab-spacer"></div>
+        <button class="btn btn-ghost btn-sm" title="Undo (Ctrl+Z)" disabled={!collageCanUndo} onclick={undoCollage}>
+          <Icon name="undo" size={15} />
+        </button>
+        <button class="btn btn-ghost btn-sm" title="Redo (Ctrl+Shift+Z / Ctrl+Y)" disabled={!collageCanRedo} onclick={redoCollage}>
+          <Icon name="redo" size={15} />
+        </button>
+      {/if}
     </div>
 
     <div class="workspace">
@@ -643,7 +891,7 @@
             <!-- svelte-ignore a11y_media_has_caption -->
             <video
               bind:this={videoEl}
-              src={`/files/${caseState.current.id}/${session.source.path}`}
+              src={`/files/${caseState.current?.id}/${session.source.path}`}
               controls
               ontimeupdate={() => (shared.currentTime = videoEl?.currentTime ?? 0)}
               style:filter={videoPreview.filter}
@@ -654,38 +902,79 @@
           {#if activeFrame}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div
-              class="frame"
+              class="frame-viewport"
               class:cropping={shared.cropMode}
-              onpointerdown={cropDown}
-              onpointermove={cropMove}
-              onpointerup={cropUp}
+              class:pannable={!shared.cropMode && !cropEditing}
+              class:rotating
+              bind:this={frameViewportEl}
+              onwheel={frameWheel}
+              onmousedown={frameMouseDown}
+              onpointerdown={frameViewportDown}
+              onauxclick={(e) => e.preventDefault()}
+              ondblclick={beginCrop}
             >
-              {#if activeFrame.crop && !shared.cropMode}
-                <!-- committed crop: show the cropped region filling the box -->
+              <div
+                class="zoom-layer"
+                bind:this={frameZoomEl}
+                style:transform={`translate(${framePan.x}px, ${framePan.y}px) scale(${frameZoom})`}
+              >
+                <!-- View-only rotation pivots around the grabbed point; never saved. -->
                 <div
-                  class="crop-view"
-                  style:--ar={cropAspect(activeFrame.crop, activeFrame.w, activeFrame.h) ?? 1}
+                  class="img-stage"
+                  bind:this={frameStageEl}
+                  style:transform={matrixCss(frameRotMatrix)}
+                  style:transform-origin="0 0"
                 >
-                  <img
-                    src={activeFrame.url}
-                    alt="frame"
-                    style={styleText(cropImgStyle(activeFrame.crop))}
-                    style:filter={framePreview.filter}
-                    style:transform={framePreview.transform}
-                  />
+                  {#if activeFrame.crop && !cropEditing}
+                    <!-- committed crop: show the cropped region -->
+                    <div class="crop-view" style:--ar={cropAspect(activeFrame.crop, activeFrame.w, activeFrame.h) ?? 1}>
+                      <img
+                        src={activeFrame.url}
+                        alt="frame"
+                        draggable="false"
+                        style={styleText(cropImgStyle(activeFrame.crop))}
+                        style:filter={framePreview.filter}
+                        style:transform={framePreview.transform}
+                      />
+                    </div>
+                  {:else}
+                    <img src={activeFrame.url} alt="frame" draggable="false" style:filter={framePreview.filter} style:transform={framePreview.transform} />
+                    <CropBox
+                      bind:crop={activeFrame.crop}
+                      bind:draw={shared.cropMode}
+                      aspect={frameAspect}
+                      natW={activeFrame.w}
+                      natH={activeFrame.h}
+                    />
+                  {/if}
                 </div>
-              {:else}
-                <img src={activeFrame.url} alt="frame" style:filter={framePreview.filter} style:transform={framePreview.transform} />
-                {#if cropBox}
-                  <div
-                    class="crop-box"
-                    style:left={`${cropBox.x * 100}%`}
-                    style:top={`${cropBox.y * 100}%`}
-                    style:width={`${cropBox.w * 100}%`}
-                    style:height={`${cropBox.h * 100}%`}
-                  ></div>
-                {/if}
+              </div>
+              {#if rotating}
+                <!-- "target" pivot marker: sits at the grabbed point, fixed on
+                     screen while the image turns around it -->
+                <div class="rotate-pivot" style:left={`${rotatePivot.x}px`} style:top={`${rotatePivot.y}px`} aria-hidden="true">
+                  <svg width="40" height="40" viewBox="0 0 40 40">
+                    <circle class="ring" cx="20" cy="20" r="15" />
+                    <circle class="dot" cx="20" cy="20" r="1.5" />
+                  </svg>
+                </div>
               {/if}
+              <div class="view-ctl">
+                {#if cropEditing}
+                  <span class="zoom-hint">drag to crop · Enter applies · Esc cancels</span>
+                  <button class="btn btn-sm" onclick={commitCrop} title="Apply the crop (Enter)">
+                    <Icon name="check" size={14} /> Apply
+                  </button>
+                {:else if frameViewDirty}
+                  {#if frameZoom !== 1}<span class="zoom-val">{Math.round(frameZoom * 100)}%</span>{/if}
+                  {#if frameAngle !== 0}<span class="zoom-val">{frameAngle}°</span>{/if}
+                  <button class="btn btn-ghost btn-sm" onclick={resetFrameView} title="Reset zoom / pan / rotation">
+                    <Icon name="eye" size={14} /> Fit
+                  </button>
+                {:else}
+                  <span class="zoom-hint">scroll zoom · drag pan · middle-drag turns · double-click crop</span>
+                {/if}
+              </div>
             </div>
           {:else}
             <div class="hint-mid">
@@ -694,7 +983,7 @@
             </div>
           {/if}
         {:else if activeTab === 'collage'}
-          <CollageCanvas collage={activeCollage} bind:selectedId={collageSelectedId} />
+          <CollageCanvas collage={activeCollage} bind:selectedId={collageSelectedId} {requestCrop} />
         {:else if activeTab === 'save'}
           <SaveGallery {savables} {saveUi} />
         {/if}
@@ -704,7 +993,7 @@
         {#if activeTab === 'selection'}
           <SelectionMenu {probeInfo} {shared} {videoFilters} {session} {capture} />
         {:else if activeTab === 'frame'}
-          <FrameMenu {session} {filters} {analyses} {activeFrame} {shared} {removeFrame} setActive={(id) => (session.activeFrameId = id)} />
+          <FrameMenu {session} {filters} {analyses} {activeFrame} {shared} {removeFrame} bind:cropAspect={frameAspect} bind:cropEditing {beginCrop} {commitCrop} setActive={(id) => (session.activeFrameId = id)} />
         {:else if activeTab === 'collage'}
           <CollageMenu {session} {filters} bind:selectedId={collageSelectedId} {addToCollage} {requestCrop} />
         {:else if activeTab === 'save'}
@@ -719,6 +1008,19 @@
       node={cropPieceNode}
       onapply={(crop) => { applyNodeCrop(cropPieceNode, crop); cropPieceNode = null; }}
       onclose={() => (cropPieceNode = null)}
+    />
+  {/if}
+
+  {#if discardConfirm}
+    <ConfirmDialog
+      title="Discard this session?"
+      message="The current workspace — captured frames, adjustments and collage layout — will be cleared."
+      detail={openedSession ? 'This does not delete the saved session, only the unsaved changes in this workspace.' : 'Anything not saved yet will be lost.'}
+      confirmLabel="Discard"
+      tone="danger"
+      icon="reset"
+      onconfirm={discardSession}
+      oncancel={() => (discardConfirm = false)}
     />
   {/if}
 
@@ -821,10 +1123,14 @@
   }
   .tabbar {
     display: flex;
+    align-items: center;
     gap: 4px;
     padding: 8px 12px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+  }
+  .tab-spacer {
+    flex: 1;
   }
   .tab {
     display: flex;
@@ -868,31 +1174,103 @@
     touch-action: none;
     box-shadow: var(--shadow-2);
   }
-  .frame.cropping {
-    cursor: crosshair;
-  }
-  .frame img,
   .frame video {
     max-width: 100%;
     max-height: calc(100vh - var(--topbar-h) - 160px);
     display: block;
   }
-  .crop-box {
+  /* Frame tab: a zoom/pan/rotate surface with the crop overlay on top. */
+  .frame-viewport {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    touch-action: none;
+  }
+  .frame-viewport.pannable {
+    cursor: grab;
+  }
+  .frame-viewport.cropping {
+    cursor: crosshair;
+  }
+  .frame-viewport.rotating {
+    cursor: grabbing;
+  }
+  /* Sober pivot mark (Google-Earth style): a faint translucent ring + dot. */
+  .rotate-pivot {
     position: absolute;
-    border: 1.5px solid var(--accent);
-    box-shadow: 0 0 0 9999px rgba(6, 9, 14, 0.55);
+    transform: translate(-50%, -50%);
     pointer-events: none;
+    z-index: 5;
+    color: #fff;
+  }
+  .rotate-pivot svg {
+    display: block;
+    overflow: visible;
+    filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.55));
+  }
+  .rotate-pivot .ring {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1;
+    opacity: 0.5;
+  }
+  .rotate-pivot .dot {
+    fill: currentColor;
+    opacity: 0.8;
+  }
+  .zoom-layer {
+    position: relative;
+    transform-origin: center center;
+    display: inline-block;
+    line-height: 0;
+  }
+  .img-stage {
+    position: relative;
+    display: inline-block;
+    line-height: 0;
+  }
+  .img-stage > img {
+    max-width: 100%;
+    max-height: calc(100vh - var(--topbar-h) - 200px);
+    display: block;
   }
   .crop-view {
     position: relative;
     overflow: hidden;
     aspect-ratio: var(--ar);
-    height: calc(100vh - var(--topbar-h) - 200px);
+    height: calc(100vh - var(--topbar-h) - 220px);
     max-width: 100%;
     line-height: 0;
   }
   .crop-view img {
     display: block;
+  }
+  .view-ctl {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 6px;
+    border-radius: var(--r-md);
+    background: rgba(16, 20, 28, 0.85);
+    border: 1px solid var(--border);
+  }
+  .zoom-val {
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .zoom-hint {
+    font-size: 11px;
+    color: var(--text-3);
+    user-select: none;
   }
   .panel {
     width: 320px;

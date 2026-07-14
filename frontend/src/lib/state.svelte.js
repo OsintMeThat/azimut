@@ -27,6 +27,10 @@ export const uiState = $state({
   focusMedia: null, // media path to highlight & scroll to in the Media Library
   openInspect: null, // inspect-session name to reopen in the Inspect tool
   gotoCoords: null, // { lat, lon } to fly to in the Satellite tool
+  // Satellite reference viewers: floating scratch windows holding a media image
+  // over the map to eyeball against the imagery. Session-only — never captured
+  // or saved, and dropped when the open case changes (they point at its media).
+  refViewers: [],
 });
 
 let toastSeq = 0;
@@ -59,6 +63,8 @@ function rememberCase(id) {
 export async function openCase(id) {
   caseState.loading = true;
   try {
+    // reference viewers point at the previous case's media — drop them
+    if (caseState.current?.id !== id) uiState.refViewers = [];
     caseState.current = await api.get(`/api/cases/${id}`);
     rememberCase(id);
   } finally {
@@ -132,9 +138,24 @@ export async function promoteCase(name) {
   toast(`Promoted to case “${name}”`, 'ok');
 }
 
+/**
+ * Close the open case (dropping back to one-shot mode). Also clears every
+ * cross-tool handoff — otherwise a queued handoff meant for the closed case
+ * (e.g. "open this proof") could get consumed against whatever case comes
+ * next, since the consuming effects only check that *some* case is open.
+ */
 export function closeCase() {
   caseState.current = null;
   rememberCase(null);
+  uiState.composeQueue = [];
+  uiState.postProof = null;
+  uiState.openProof = null;
+  uiState.openDraft = null;
+  uiState.inspectPath = null;
+  uiState.focusMedia = null;
+  uiState.openInspect = null;
+  uiState.gotoCoords = null;
+  uiState.refViewers = [];
 }
 
 /**

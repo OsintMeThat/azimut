@@ -4,11 +4,15 @@
   import { adjustDefaults, buildOps, previewStyle, cropImgStyle, styleText } from '../../lib/inspect.js';
   import Icon from '../../components/Icon.svelte';
   import AdjustSliders from './AdjustSliders.svelte';
+  import CropControls from './CropControls.svelte';
 
   // Right-panel menu for the Frame tab. Works on the *active* tray frame:
   // pick it, adjust it (live-previewed), crop it, or analyse it — all without
   // filing anything. The recipe is committed later from the Save tab.
-  let { session, filters, analyses, activeFrame, shared, removeFrame, setActive } = $props();
+  let {
+    session, filters, analyses, activeFrame, shared, removeFrame, setActive,
+    cropAspect = $bindable(null), cropEditing = $bindable(false), beginCrop, commitCrop,
+  } = $props();
 
   let showAnalyze = $state(false);
   let analyzing = $state(null);
@@ -20,15 +24,15 @@
     activeFrame.adjust = adjustDefaults(filters);
     activeFrame.crop = null;
     shared.cropMode = false;
-  }
-
-  function toggleCrop() {
-    shared.cropMode = !shared.cropMode;
+    cropAspect = null;
+    cropEditing = false;
   }
 
   function clearCrop() {
     if (activeFrame) activeFrame.crop = null;
     shared.cropMode = false;
+    cropAspect = null;
+    cropEditing = false;
   }
 
   async function runAnalysis(name) {
@@ -101,15 +105,26 @@
   {#if activeFrame}
     <div class="section">
       <AdjustSliders {filters} values={activeFrame.adjust} />
-      <div class="crop-row">
-        <button class="btn btn-sm" class:active={shared.cropMode} onclick={toggleCrop}>
-          <Icon name="crop" size={14} /> {shared.cropMode ? 'Drag on image…' : 'Crop region'}
-        </button>
-        {#if activeFrame.crop}
-          <span class="crop-info mono">
-            {Math.round(activeFrame.crop.w * 100)}% × {Math.round(activeFrame.crop.h * 100)}%
-          </span>
-          <button class="btn btn-ghost btn-xs" onclick={clearCrop} aria-label="Clear crop"><Icon name="x" size={13} /></button>
+      <div class="crop-block">
+        <div class="crop-row">
+          {#if cropEditing}
+            <button class="btn btn-sm active" onclick={() => commitCrop?.()} title="Apply the crop (Enter)">
+              <Icon name="check" size={14} /> Apply crop
+            </button>
+            <button class="btn btn-ghost btn-xs" onclick={() => (shared.cropMode = true)} title="Draw a fresh region">
+              <Icon name="crop" size={13} /> Redraw
+            </button>
+          {:else}
+            <button class="btn btn-sm" onclick={() => beginCrop?.()}>
+              <Icon name="crop" size={14} /> {activeFrame.crop ? 'Edit crop' : 'Crop region'}
+            </button>
+            {#if activeFrame.crop}
+              <span class="crop-info">or double-click the image</span>
+            {/if}
+          {/if}
+        </div>
+        {#if cropEditing}
+          <CropControls bind:crop={activeFrame.crop} bind:aspect={cropAspect} natW={activeFrame.w} natH={activeFrame.h} onclear={clearCrop} />
         {/if}
       </div>
       <button class="btn btn-ghost btn-sm reset" onclick={reset}><Icon name="reset" size={14} /> Reset frame</button>
@@ -231,6 +246,11 @@
     display: flex;
     flex-direction: column;
     gap: 9px;
+  }
+  .crop-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
   .crop-row {
     display: flex;

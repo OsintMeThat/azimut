@@ -5,8 +5,7 @@ A case is a plain directory (spec §4):
     <case>/
     ├── case.json      # metadata + entities + links
     ├── notes.md       # free-form case notes
-    ├── media/         # imported/downloaded media + sidecar metadata
-    ├── satellite/     # imagery crops + provenance
+    ├── media/         # imported/downloaded media + satellite crops + sidecars
     ├── proofs/        # composed proofs (PNG + editable JSON spec)
     └── exports/       # post drafts, reports
 
@@ -19,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,7 +26,25 @@ from typing import Any, Literal
 
 from . import config
 
-CASE_SUBDIRS = ("media", "satellite", "proofs", "exports", "inspect")
+CASE_SUBDIRS = ("media", "proofs", "exports", "inspect")
+
+# One lock per case directory, shared across every Case instance that points
+# at it (a fresh instance is constructed per request). Without it, concurrent
+# read-modify-write of case.json — e.g. several media downloads from the
+# multi-item picker finishing at once — silently drop each other's entity or
+# crash on the tmp-file rename (spec §6 honest output requires none lost).
+_case_locks_guard = threading.Lock()
+_case_locks: dict[str, threading.Lock] = {}
+
+
+def _case_lock(path: Path) -> threading.Lock:
+    key = str(path)
+    with _case_locks_guard:
+        lock = _case_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _case_locks[key] = lock
+        return lock
 
 EntityStatus = Literal["confirmed", "suggested"]
 
@@ -60,6 +78,7 @@ class Case:
 
     def __init__(self, path: Path):
         self.path = path
+        self._lock = _case_lock(path)
 
     # -- identity ---------------------------------------------------------
 
@@ -164,9 +183,10 @@ class Case:
     # -- lifecycle -----------------------------------------------------------
 
     def rename(self, name: str) -> None:
-        data = self.read()
-        data["name"] = name
-        self._write_json(data)
+        with self._lock:
+            data = self.read()
+            data["name"] = name
+            self._write_json(data)
 
     def promote(self, name: str) -> "Case":
         """Move a scratch case into cases/ under a proper name (spec §3.3)."""
@@ -197,45 +217,48 @@ class Case:
         status: EntityStatus = "confirmed",
         source: str | None = None,
     ) -> dict[str, Any]:
-        data = self.read()
-        entity = {
-            "id": _new_id("e"),
-            "type": type_,
-            "label": label,
-            "attrs": attrs or {},
-            "provenance": {"by": by, "at": _now(), "status": status},
-        }
-        if source:
-            entity["provenance"]["source"] = source
-        data["entities"].append(entity)
-        self._write_json(data)
-        return entity
+        with self._lock:
+            data = self.read()
+            entity = {
+                "id": _new_id("e"),
+                "type": type_,
+                "label": label,
+                "attrs": attrs or {},
+                "provenance": {"by": by, "at": _now(), "status": status},
+            }
+            if source:
+                entity["provenance"]["source"] = source
+            data["entities"].append(entity)
+            self._write_json(data)
+            return entity
 
     def update_entity(self, entity_id: str, patch: dict[str, Any]) -> dict[str, Any]:
-        data = self.read()
-        for entity in data["entities"]:
-            if entity["id"] == entity_id:
-                for key in ("type", "label"):
-                    if key in patch:
-                        entity[key] = patch[key]
-                if "attrs" in patch:
-                    entity["attrs"].update(patch["attrs"])
-                if patch.get("status") in ("confirmed", "suggested"):
-                    entity["provenance"]["status"] = patch["status"]
-                self._write_json(data)
-                return entity
-        raise CaseError(f"entity '{entity_id}' not found")
+        with self._lock:
+            data = self.read()
+            for entity in data["entities"]:
+                if entity["id"] == entity_id:
+                    for key in ("type", "label"):
+                        if key in patch:
+                            entity[key] = patch[key]
+                    if "attrs" in patch:
+                        entity["attrs"].update(patch["attrs"])
+                    if patch.get("status") in ("confirmed", "suggested"):
+                        entity["provenance"]["status"] = patch["status"]
+                    self._write_json(data)
+                    return entity
+            raise CaseError(f"entity '{entity_id}' not found")
 
     def remove_entity(self, entity_id: str) -> None:
-        data = self.read()
-        before = len(data["entities"])
-        data["entities"] = [e for e in data["entities"] if e["id"] != entity_id]
-        if len(data["entities"]) == before:
-            raise CaseError(f"entity '{entity_id}' not found")
-        data["links"] = [
-            l for l in data["links"] if entity_id not in (l["from"], l["to"])
-        ]
-        self._write_json(data)
+        with self._lock:
+            data = self.read()
+            before = len(data["entities"])
+            data["entities"] = [e for e in data["entities"] if e["id"] != entity_id]
+            if len(data["entities"]) == before:
+                raise CaseError(f"entity '{entity_id}' not found")
+            data["links"] = [
+                l for l in data["links"] if entity_id not in (l["from"], l["to"])
+            ]
+            self._write_json(data)
 
     def find_entity(self, *, attr: str, value: Any) -> dict[str, Any] | None:
         for entity in self.read()["entities"]:
@@ -252,29 +275,31 @@ class Case:
         by: str,
         status: EntityStatus = "confirmed",
     ) -> dict[str, Any]:
-        data = self.read()
-        ids = {e["id"] for e in data["entities"]}
-        for eid in (from_id, to_id):
-            if eid not in ids:
-                raise CaseError(f"entity '{eid}' not found")
-        link = {
-            "id": _new_id("l"),
-            "from": from_id,
-            "to": to_id,
-            "type": type_,
-            "provenance": {"by": by, "at": _now(), "status": status},
-        }
-        data["links"].append(link)
-        self._write_json(data)
-        return link
+        with self._lock:
+            data = self.read()
+            ids = {e["id"] for e in data["entities"]}
+            for eid in (from_id, to_id):
+                if eid not in ids:
+                    raise CaseError(f"entity '{eid}' not found")
+            link = {
+                "id": _new_id("l"),
+                "from": from_id,
+                "to": to_id,
+                "type": type_,
+                "provenance": {"by": by, "at": _now(), "status": status},
+            }
+            data["links"].append(link)
+            self._write_json(data)
+            return link
 
     def remove_link(self, link_id: str) -> None:
-        data = self.read()
-        before = len(data["links"])
-        data["links"] = [l for l in data["links"] if l["id"] != link_id]
-        if len(data["links"]) == before:
-            raise CaseError(f"link '{link_id}' not found")
-        self._write_json(data)
+        with self._lock:
+            data = self.read()
+            before = len(data["links"])
+            data["links"] = [l for l in data["links"] if l["id"] != link_id]
+            if len(data["links"]) == before:
+                raise CaseError(f"link '{link_id}' not found")
+            self._write_json(data)
 
     # -- folders (nested organisational buckets for entities) ----------------
     #
@@ -296,35 +321,37 @@ class Case:
 
     def add_folder(self, name: str) -> list[str]:
         path = self._normalize_folder(name)
-        data = self.read()
-        folders = data.setdefault("folders", [])
-        # materialise the leaf and every ancestor so the tree stays connected
-        segments = path.split("/")
-        changed = False
-        for i in range(1, len(segments) + 1):
-            ancestor = "/".join(segments[:i])
-            if ancestor not in folders:
-                folders.append(ancestor)
-                changed = True
-        if changed:
-            folders.sort(key=str.lower)
-            self._write_json(data)
-        return data["folders"]
+        with self._lock:
+            data = self.read()
+            folders = data.setdefault("folders", [])
+            # materialise the leaf and every ancestor so the tree stays connected
+            segments = path.split("/")
+            changed = False
+            for i in range(1, len(segments) + 1):
+                ancestor = "/".join(segments[:i])
+                if ancestor not in folders:
+                    folders.append(ancestor)
+                    changed = True
+            if changed:
+                folders.sort(key=str.lower)
+                self._write_json(data)
+            return data["folders"]
 
     def remove_folder(self, name: str) -> list[str]:
-        data = self.read()
-        folders = data.setdefault("folders", [])
-        # a folder and its whole subtree go together
-        prefix = name + "/"
-        doomed = {f for f in folders if f == name or f.startswith(prefix)}
-        data["folders"] = [f for f in folders if f not in doomed]
-        # unassign any entity filed under a removed node (or its descendants)
-        for entity in data.get("entities", []):
-            folder = entity.get("attrs", {}).get("folder")
-            if folder is not None and (folder == name or folder.startswith(prefix)):
-                entity["attrs"].pop("folder", None)
-        self._write_json(data)
-        return data["folders"]
+        with self._lock:
+            data = self.read()
+            folders = data.setdefault("folders", [])
+            # a folder and its whole subtree go together
+            prefix = name + "/"
+            doomed = {f for f in folders if f == name or f.startswith(prefix)}
+            data["folders"] = [f for f in folders if f not in doomed]
+            # unassign any entity filed under a removed node (or its descendants)
+            for entity in data.get("entities", []):
+                folder = entity.get("attrs", {}).get("folder")
+                if folder is not None and (folder == name or folder.startswith(prefix)):
+                    entity["attrs"].pop("folder", None)
+            self._write_json(data)
+            return data["folders"]
 
     # -- helpers -------------------------------------------------------------
 

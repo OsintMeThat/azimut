@@ -124,7 +124,7 @@
         <span class="lbl">Scale</span>
         <button class="btn btn-sm sq" onclick={() => scaleBy(selected, 1 / 1.1)} aria-label="Shrink piece">−</button>
         <button class="btn btn-sm sq" onclick={() => scaleBy(selected, 1.1)} aria-label="Enlarge piece">+</button>
-        <span class="sub">or drag the ⇕ grip above the piece</span>
+        <span class="sub">or drag a square side handle</span>
       </div>
       <div class="scale-row">
         <span class="lbl">Rotate</span>

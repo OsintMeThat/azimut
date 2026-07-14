@@ -93,13 +93,40 @@ def map_links(lat: float, lon: float, zoom: int = 17) -> dict[str, str]:
     return {
         "google": f"https://www.google.com/maps/@{lat},{lon},{zoom}z",
         "google_sat": f"https://www.google.com/maps/@{lat},{lon},2000m/data=!3m1!1e3",
+        "google_earth": f"https://earth.google.com/web/@{lat},{lon},0a,1000d,35y,0h,0t,0r",
         "osm": f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map={zoom}/{lat}/{lon}",
         "bing": f"https://www.bing.com/maps?cp={lat}~{lon}&lvl={zoom}&style=h",
         "yandex": f"https://yandex.com/maps/?ll={lon},{lat}&z={zoom}&l=sat",
+        "sentinel": f"https://browser.dataspace.copernicus.eu/?zoom={zoom}&lat={lat}&lng={lon}",
+        "zoom_earth": f"https://zoom.earth/#view={lat},{lon},{zoom}z",
     }
 
 
 # -- reverse geocoding (Nominatim, polite) ------------------------------------------
+
+
+def geocode(query: str) -> dict[str, Any] | None:
+    """Best-effort forward geocoding via Nominatim. Returns None on any failure."""
+    try:
+        response = httpx.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": query, "format": "jsonv2", "limit": 1},
+            headers={"User-Agent": USER_AGENT},
+            timeout=8,
+        )
+        response.raise_for_status()
+        results = response.json()
+        if not results:
+            return None
+        top = results[0]
+        return {
+            "lat": float(top["lat"]),
+            "lon": float(top["lon"]),
+            "display_name": top.get("display_name"),
+            "attribution": "© OpenStreetMap contributors (Nominatim)",
+        }
+    except Exception:
+        return None
 
 
 def reverse_geocode(lat: float, lon: float) -> dict[str, Any] | None:

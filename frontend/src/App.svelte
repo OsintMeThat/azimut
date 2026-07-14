@@ -10,7 +10,10 @@
   import ProofComposer from './tools/ProofComposer.svelte';
   import PostComposer from './tools/PostComposer.svelte';
   import Inspector from './tools/Inspector.svelte';
+  import Settings from './tools/Settings.svelte';
 
+  // the left rail carries the investigation tools; Settings lives behind the
+  // topbar gear instead — app plumbing, not part of the working flow
   const TOOLS = [
     { id: 'media', label: 'Media', icon: 'media', component: MediaLibrary },
     { id: 'inspect', label: 'Inspect', icon: 'inspect', component: Inspector },
@@ -18,14 +21,24 @@
     { id: 'proof', label: 'Proof', icon: 'proof', component: ProofComposer },
     { id: 'post', label: 'Post', icon: 'post', component: PostComposer },
   ];
+  const ALL_TOOLS = [
+    ...TOOLS,
+    { id: 'settings', label: 'Settings', icon: 'settings', component: Settings },
+  ];
 
-  const ActiveTool = $derived(TOOLS.find((t) => t.id === uiState.tool)?.component ?? MediaLibrary);
-
-  // deep-linkable tools: #media #satellite #proof #post
+  // deep-linkable tools: #media #satellite #proof #post #settings
   const fromHash = location.hash.slice(1);
-  if (TOOLS.some((t) => t.id === fromHash)) uiState.tool = fromHash;
+  if (ALL_TOOLS.some((t) => t.id === fromHash)) uiState.tool = fromHash;
   $effect(() => {
     history.replaceState(null, '', `#${uiState.tool}`);
+  });
+
+  // Tools mount lazily on first visit, then stay mounted (hidden via CSS) so
+  // unsaved editor state — a half-composed proof, a collage in progress —
+  // survives switching tabs to grab another capture or media.
+  const visited = $state({ [uiState.tool]: true });
+  $effect(() => {
+    visited[uiState.tool] = true;
   });
 
   // Load the case list and reopen the last-used case (survives reloads).
@@ -43,6 +56,14 @@
     <span class="local-badge" title="Everything stays on your machine — no accounts, no telemetry, no servers">
       Your investigation. Your machine.
     </span>
+    <button
+      class="btn btn-ghost btn-sm"
+      class:gear-active={uiState.tool === 'settings'}
+      title="Settings — API keys & usage"
+      onclick={() => (uiState.tool = 'settings')}
+    >
+      <Icon name="settings" size={16} />
+    </button>
     <button
       class="btn btn-ghost btn-sm"
       title="Toggle case sidebar"
@@ -68,7 +89,13 @@
     </nav>
 
     <main class="canvas">
-      <ActiveTool />
+      {#each ALL_TOOLS as tool (tool.id)}
+        {#if visited[tool.id]}
+          <div class="tool-host" class:hidden={uiState.tool !== tool.id}>
+            <tool.component />
+          </div>
+        {/if}
+      {/each}
     </main>
 
     {#if uiState.sidebarOpen}
@@ -130,6 +157,10 @@
     background: var(--ok);
     box-shadow: 0 0 6px var(--ok);
   }
+  .gear-active {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
   .main {
     flex: 1;
     display: flex;
@@ -169,5 +200,12 @@
     flex: 1;
     min-width: 0;
     background: var(--bg-0);
+  }
+  .tool-host {
+    width: 100%;
+    height: 100%;
+  }
+  .tool-host.hidden {
+    display: none;
   }
 </style>

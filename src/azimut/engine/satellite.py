@@ -1,31 +1,25 @@
-"""Satellite captures on disk and their one-to-one sync with ``place`` entities.
+"""Satellite captures and their one-to-one ``capture`` entities.
 
-A capture is an image plus a JSON sidecar under ``<case>/satellite/``:
+A capture is a satellite imagery crop. It is filed through the *media* pipeline
+(:mod:`azimut.engine.media`) so it lives in ``<case>/media/`` alongside every
+other image — hashed, thumbnailed, listed in the Media Library and openable in
+Inspect — but it is registered under a ``capture`` entity (not ``media``) that
+carries the crop's coordinates/zoom/bearing. Its media sidecar's ``source`` dict
+holds the full capture provenance (provider, attribution, acquisition, …) with
+``type == "satellite"``, which is how a capture is told apart from an ordinary
+media item both here and in the Media Library facet.
 
-    satellite/sat_<stamp>_z<zoom>_<provider>.png
-    satellite/sat_<stamp>_z<zoom>_<provider>.png.json   # provenance (lat/lon/…)
-
-Every capture is mirrored by exactly one ``capture`` entity in ``case.json``
-(spec §3.5): one capture == one entity on the right. They are tied by the
-capture's relative ``path``, stored on the entity as ``attrs.path`` — not by
-coordinates, so two captures of the same point stay two independent entities.
-The entity ``label`` is the capture title (coordinates by default, editable).
-A capture is an *image* (its marker coordinates are recorded as info); saving a
-bare ``place`` — a navigable point with no image — is a separate act.
-
-Deleting in one place must delete in the other, so all delete paths funnel here:
-
-* delete a capture        → drop the one ``capture`` entity that points at it;
-* delete a ``capture`` row → drop the one capture file it points at (handled by
-  the entities API via :func:`unlink_capture`).
+Because a capture *is* a media item, all of its lifecycle (list/patch/delete)
+funnels through the media engine; this module only adds the satellite-flavoured
+listing view the Satellite tool's "Saved › Captures" panel consumes.
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from ..workspace import Case
+from . import media as media_engine
 
 
 def coords_label(lat: float, lon: float) -> str:
@@ -33,41 +27,29 @@ def coords_label(lat: float, lon: float) -> str:
     return f"{lat:.6f}, {lon:.6f}"
 
 
-def _read_sidecar(case: Case, rel_path: str) -> dict[str, Any] | None:
-    image = case.resolve_inside(rel_path)
-    sidecar = image.with_name(image.name + ".json")
-    if not sidecar.exists():
-        return None
-    return json.loads(sidecar.read_text(encoding="utf-8"))
+def is_capture(item: dict[str, Any]) -> bool:
+    """True if a media listing item is a satellite capture."""
+    return (item.get("source") or {}).get("type") == "satellite"
 
 
 def list_captures(case: Case) -> list[dict[str, Any]]:
-    sat_dir = case.subdir("satellite")
+    """The case's satellite captures, newest first, flattened for the UI.
+
+    Each item merges the capture provenance (from the media sidecar's
+    ``source``: provider, zoom, bearing, coordinates, acquisition date, …) with
+    the media item's own fields (path, title, notes, thumbnail), so the Satellite
+    panel keeps rendering exactly the fields it did when captures had their own
+    store.
+    """
     captures: list[dict[str, Any]] = []
-    for sidecar in sorted(sat_dir.glob("*.png.json")):
-        image_name = sidecar.name[: -len(".json")]
-        if not (sat_dir / image_name).exists():
+    for item in media_engine.list_media(case):
+        if not is_capture(item):
             continue
-        data = json.loads(sidecar.read_text(encoding="utf-8"))
-        data["path"] = f"satellite/{image_name}"
-        lat, lon = data.get("lat"), data.get("lon")
-        if not data.get("title") and lat is not None and lon is not None:
-            data["title"] = coords_label(lat, lon)
-        captures.append(data)
-    captures.sort(key=lambda d: d.get("fetched_at") or "", reverse=True)
+        source = item.get("source") or {}
+        merged = {**source, **item}  # media fields (title/notes/path) win
+        lat, lon = merged.get("lat"), merged.get("lon")
+        if not merged.get("title") and lat is not None and lon is not None:
+            merged["title"] = coords_label(lat, lon)
+        captures.append(merged)
+    captures.sort(key=lambda d: d.get("fetched_at") or d.get("added_at") or "", reverse=True)
     return captures
-
-
-def unlink_capture(case: Case, rel_path: str) -> None:
-    """Remove a capture's image + sidecar from disk (leaves entities alone)."""
-    image = case.resolve_inside(rel_path)
-    image.unlink(missing_ok=True)
-    image.with_name(image.name + ".json").unlink(missing_ok=True)
-
-
-def delete_capture(case: Case, rel_path: str) -> None:
-    """Delete one capture and the single ``place`` entity mirroring it."""
-    unlink_capture(case, rel_path)
-    entity = case.find_entity(attr="path", value=rel_path)
-    if entity:
-        case.remove_entity(entity["id"])

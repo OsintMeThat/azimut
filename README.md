@@ -14,14 +14,15 @@ journalists, researchers.
 fix a point on the map (English *azimuth*). A fitting namesake for a geolocation
 workbench: fix a direction, fix a location.*
 
-## v1 — Proof Studio
+## v0.1.1 — Proof Studio
 
 | Tool | What it does |
 |------|--------------|
-| **Media Library** | Import local files or download by URL (X, Telegram, TikTok, YouTube… via yt-dlp) → clean local file + metadata + SHA-256. |
-| **Satellite** | Coordinates → imagery crop with crosshair and recorded provenance (provider, zoom, date, attribution). Esri World Imagery by default, bring-your-own-key providers supported. |
-| **Proof Composer** | Compose panels side by side, annotate with colored shapes (same color = same feature), comments, legend → export `proof.png` + a re-editable spec. |
-| **Post Composer** | Turn a proof into a publishable post: coordinates in all formats, plus code, attribution, character count. Copy-paste ready — Azimut never posts for you. |
+| **Media Library** | Import local files or download by URL (X, Telegram, TikTok, YouTube, Instagram… via yt-dlp, with a gallery-dl fallback for image-only posts) → clean local file + metadata + SHA-256. Multi-photo posts open a picker. |
+| **Inspect** | Scratch workspace over any photo/video: frame adjustments, editable crop, sharpest-frame capture, hand-made collage with per-piece warp/scale/rotate — nothing enters the case until you save. |
+| **Satellite** | Coordinates or place name → imagery crop, with select-area capture, map rotation, measurement tools, and reference-image overlays. Esri/OSM by default; add your own Mapbox/Google key for more basemaps (stored locally, never shared). |
+| **Proof Composer** | Compose panels side by side, annotate with colored shapes and text (same color = same feature), reorderable legend → export `proof.png` + a re-editable spec. |
+| **Post Composer** | Turn a proof into a publishable thread: coordinates in all formats, plus code, attribution, character count, RTL-safe text. Copy-paste ready — Azimut never posts for you. |
 
 Every tool works **one-shot** (no setup, scratch session) or inside a **case**
 — a plain directory holding the whole investigation.

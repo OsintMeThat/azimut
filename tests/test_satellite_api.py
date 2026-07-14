@@ -9,6 +9,13 @@ def _fake_tile(client, url):  # offline: every tile is a solid green square
     return Image.new("RGB", (256, 256), (10, 120, 10))
 
 
+def test_providers_flag_imagery_vs_street(client):
+    # the UI uses `imagery` to disable the OSM labels overlay over street maps
+    providers = {p["id"]: p for p in client.get("/api/satellite/providers").json()}
+    assert providers["esri-world-imagery"]["imagery"] is True
+    assert providers["osm"]["imagery"] is False
+
+
 def test_capture_persists_bearing(client, monkeypatch):
     monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
     cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
@@ -72,6 +79,80 @@ def test_capture_creates_capture_entity_not_place(client, monkeypatch):
     assert caps[0]["attrs"]["bearing"] == 0.0
     # capturing files it straight away — no confirm step
     assert caps[0]["provenance"]["status"] == "confirmed"
+
+
+def test_capture_lands_in_media_library(client, monkeypatch):
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    cap = _capture(client, cid, 48.8584, 2.2945)
+    # a capture now lives in media/ so the Media Library lists it and Inspect can open it
+    assert cap["path"].startswith("media/")
+    media = client.get(f"/api/cases/{cid}/media").json()
+    entry = next(m for m in media if m["path"] == cap["path"])
+    assert entry["kind"] == "image"
+    assert entry["source"]["type"] == "satellite"
+    # it carries a thumbnail like any other media item
+    assert entry["thumbnail"]
+
+
+def test_capture_records_both_dates(client, monkeypatch):
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    result = client.post(
+        f"/api/cases/{cid}/satellite/capture",
+        json={"lat": 48.8584, "lon": 2.2945, "zoom": 16, "width": 512, "height": 512,
+              "imagery_date": "2021-06-01"},
+    ).json()
+    # capture timestamp (when clicked) and imagery acquisition date (the scene)
+    assert result["fetched_at"]  # ISO capture timestamp
+    assert result["imagery_date"] == "2021-06-01"
+    listed = client.get(f"/api/cases/{cid}/satellite").json()[0]
+    assert listed["fetched_at"] == result["fetched_at"]
+    assert listed["imagery_date"] == "2021-06-01"
+
+
+def test_capture_imagery_date_optional(client, monkeypatch):
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    # no imagery date known → recorded as null, capture still succeeds
+    result = _capture(client, cid, 48.8584, 2.2945)
+    assert result["imagery_date"] is None
+
+
+def test_imagery_date_non_esri_is_unsupported(client):
+    out = client.get(
+        "/api/satellite/imagery-date",
+        params={"lat": 48.8584, "lon": 2.2945, "zoom": 16, "provider": "osm"},
+    ).json()
+    assert out == {"supported": False, "date": None, "source": None}
+
+
+def test_imagery_date_esri_best_effort(client, monkeypatch):
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"results": [{"attributes": {"NICE_NAME": "Maxar", "SRC_DATE2": "20200103"}}]}
+
+    monkeypatch.setattr(tiles.httpx, "get", lambda *a, **k: _Resp())
+    out = client.get(
+        "/api/satellite/imagery-date",
+        params={"lat": 48.8584, "lon": 2.2945, "zoom": 16},
+    ).json()
+    assert out == {"supported": True, "date": "2020-01-03", "source": "Maxar"}
+
+
+def test_imagery_date_service_down_is_graceful(client, monkeypatch):
+    def boom(*a, **k):
+        raise OSError("down")
+
+    monkeypatch.setattr(tiles.httpx, "get", boom)
+    out = client.get(
+        "/api/satellite/imagery-date",
+        params={"lat": 0, "lon": 0, "zoom": 10},
+    ).json()
+    assert out == {"supported": True, "date": None, "source": None}
 
 
 def test_save_place_creates_place_without_image(client):

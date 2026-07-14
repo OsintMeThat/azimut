@@ -17,6 +17,8 @@ router = APIRouter(prefix="/api", tags=["media"])
 
 class DownloadIn(BaseModel):
     url: HttpUrl
+    index: int | None = None
+    title: str | None = None
 
 
 class DeleteIn(BaseModel):
@@ -46,6 +48,7 @@ async def upload(case_id: str, file: UploadFile) -> dict[str, Any]:
 def download(case_id: str, body: DownloadIn) -> dict[str, str]:
     case = get_case(case_id)
     url = str(body.url)
+    index, title = body.index, body.title
 
     def work(set_progress):
         def hook(d):
@@ -61,7 +64,7 @@ def download(case_id: str, body: DownloadIn) -> dict[str, str]:
             elif d.get("status") == "finished":
                 set_progress({"percent": 100, "stage": "processing"})
 
-        return media_engine.download_url(case, url, progress_hook=hook)
+        return media_engine.download_url(case, url, progress_hook=hook, index=index, title=title)
 
     job_id = jobs.start("download", work)
     return {"job_id": job_id}
