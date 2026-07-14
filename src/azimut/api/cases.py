@@ -8,7 +8,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..engine import media as media_engine
-from ..engine import satellite as satellite_engine
 from ..workspace import Case, CaseError
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
@@ -170,8 +169,9 @@ def remove_entity(case_id: str, entity_id: str) -> dict[str, str]:
     etype = entity.get("type")
     attrs = entity.get("attrs", {})
 
-    # media has its own delete that drops file + thumbnail + sidecar + entity
-    if etype == "media" and attrs.get("path"):
+    # media and satellite captures both live in media/ and share the media
+    # delete: it drops the file + thumbnail + sidecar + entity in one go.
+    if etype in ("media", "capture") and attrs.get("path"):
         try:
             media_engine.delete_media(case, attrs["path"])
         except CaseError as exc:
@@ -179,10 +179,8 @@ def remove_entity(case_id: str, entity_id: str) -> dict[str, str]:
         return {"status": "deleted"}
 
     # other artifact-backed types: drop the file(s) before removing the row.
-    # captures carry the image; a bare place (no path) has nothing on disk.
-    if etype in ("capture", "place") and attrs.get("path"):
-        satellite_engine.unlink_capture(case, attrs["path"])
-    elif etype == "proof" and attrs.get("spec"):
+    # a bare place (no path) has nothing on disk.
+    if etype == "proof" and attrs.get("spec"):
         _unlink_inside(case, attrs["spec"])
         _unlink_inside(case, attrs["spec"].removesuffix(".json") + ".png")
     elif etype == "post" and attrs.get("draft"):

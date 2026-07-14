@@ -1,16 +1,19 @@
 <script>
   import { api } from '../lib/api.js';
   import { caseState, uiState, ensureCase, reloadCase, toast } from '../lib/state.svelte.js';
+  import { visibleMedia, SORTS } from '../lib/mediaFilter.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
+  import ConfirmDialog from '../components/ConfirmDialog.svelte';
 
   const KIND_ICONS = { image: 'image', video: 'video', audio: 'audio', file: 'file' };
 
   let items = $state([]);
   let loadedFor = $state(null);
   let url = $state('');
+  let picker = $state(null); // multi-item picker: {url, items: [{index, title, thumbnail, kind, selected}]}
   let dragOver = $state(false);
-  let jobs = $state([]); // active download jobs: {id, url, progress}
+  let jobs = $state([]); // active download jobs: {id, url, label, progress}
   let fileInput;
 
   // --- category facets (auto-derived from kind + source) ---
@@ -20,6 +23,7 @@
     { key: 'image', label: 'Images', icon: 'image', match: (i) => i.kind === 'image' },
     { key: 'video', label: 'Videos', icon: 'video', match: (i) => i.kind === 'video' },
     { key: 'collage', label: 'Collages', icon: 'layers', match: (i) => i.source?.op === 'collage' },
+    { key: 'satellite', label: 'Satellite', icon: 'satellite', match: (i) => i.source?.type === 'satellite' },
     { key: 'upload', label: 'Imports', icon: 'upload', match: (i) => i.source?.type === 'upload' },
     { key: 'download', label: 'Downloads', icon: 'download', match: (i) => i.source?.type === 'download' },
     { key: 'other', label: 'Other files', icon: 'file', match: (i) => i.kind !== 'image' && i.kind !== 'video' },
@@ -37,13 +41,24 @@
   // --- folder filter (user-defined folders) ---
   let folderFilter = $state(null); // null = All
 
+  // --- free-text search + sort ---
+  let query = $state('');
+  let sort = $state('newest');
+
   const folders = $derived(
     [...new Set(items.filter((i) => i.folder).map((i) => i.folder))].sort()
   );
+  // Empty when no case is open — the grid cards build file URLs from
+  // `caseState.current.id`, so a stale render during case-close (current is
+  // briefly null before `items` clears) must not reach them. See visibleMedia.
   const filteredItems = $derived(
-    items.filter(
-      (i) => (!catMatch || catMatch(i)) && (!folderFilter || i.folder === folderFilter)
-    )
+    visibleMedia(items, {
+      hasCase: !!caseState.current,
+      catMatch,
+      folderFilter,
+      query,
+      sort,
+    })
   );
 
   // --- info/edit modal ---
@@ -52,8 +67,23 @@
   let editTitle = $state('');
   let editSaving = $state(false);
 
-  // --- lightbox ---
+  // --- lightbox (←/→ flips through the filtered images) ---
   let lightboxItem = $state(null);
+  const lightboxImages = $derived(filteredItems.filter((i) => i.kind === 'image'));
+
+  function lightboxStep(delta) {
+    if (!lightboxItem || !lightboxImages.length) return;
+    const idx = lightboxImages.findIndex((i) => i.path === lightboxItem.path);
+    const next = ((idx < 0 ? 0 : idx) + delta + lightboxImages.length) % lightboxImages.length;
+    lightboxItem = lightboxImages[next];
+  }
+
+  function onLightboxKey(e) {
+    if (!lightboxItem || uiState.tool !== 'media') return;
+    if (e.key === 'Escape') lightboxItem = null;
+    else if (e.key === 'ArrowLeft') lightboxStep(-1);
+    else if (e.key === 'ArrowRight') lightboxStep(1);
+  }
 
   // --- focus/highlight (a media clicked from the case sidebar) ---
   let focusedPath = $state(null);
@@ -128,14 +158,34 @@
     const target = url.trim();
     if (!target) return;
     url = '';
-    const c = await ensureCase();
+    startDownload(target);
+  }
+
+  async function startDownload(target, index = null, title = null) {
     try {
-      const { job_id } = await api.post(`/api/cases/${c.id}/media/download`, { url: target });
-      jobs.push({ id: job_id, url: target, progress: {} });
+      const c = await ensureCase();
+      const { job_id } = await api.post(`/api/cases/${c.id}/media/download`, {
+        url: target,
+        index,
+        title,
+      });
+      jobs.push({ id: job_id, url: target, label: title || target, progress: {} });
       poll(job_id);
     } catch (e) {
       toast(e.message, 'danger');
     }
+  }
+
+  function selectAllPicker(value) {
+    picker.items.forEach((i) => (i.selected = value));
+  }
+
+  function confirmPicker() {
+    const chosen = picker.items.filter((i) => i.selected);
+    for (const item of chosen) {
+      startDownload(picker.url, item.index, item.title.trim() || undefined);
+    }
+    picker = null;
   }
 
   async function poll(jobId) {
@@ -149,7 +199,10 @@
         return;
       }
       jobs = jobs.filter((j) => j.id !== jobId);
-      if (status.status === 'done') {
+      if (status.status === 'done' && status.result?.multi) {
+        // several attachments — nothing was downloaded yet, let the analyst pick
+        picker = { url: job.url, items: status.result.items.map((i) => ({ ...i, selected: true })) };
+      } else if (status.status === 'done') {
         toast(
           status.result?.duplicate
             ? 'Already in the case (same SHA-256)'
@@ -166,12 +219,25 @@
     }
   }
 
-  async function remove(item) {
-    await api.del(
-      `/api/cases/${caseState.current.id}/media?path=${encodeURIComponent(item.path)}`
-    );
-    await Promise.all([refresh(), reloadCase()]);
-    toast(`Removed ${item.filename}`, 'info');
+  // Deleting media drops the file (evidence!) — always behind a confirm.
+  let deleteTarget = $state(null);
+  let deleteBusy = $state(false);
+
+  async function confirmDelete() {
+    if (!deleteTarget || deleteBusy) return;
+    deleteBusy = true;
+    try {
+      await api.del(
+        `/api/cases/${caseState.current.id}/media?path=${encodeURIComponent(deleteTarget.path)}`
+      );
+      await Promise.all([refresh(), reloadCase()]);
+      toast(`Removed ${deleteTarget.filename}`, 'info');
+      deleteTarget = null;
+    } catch (e) {
+      toast(e.message, 'danger');
+    } finally {
+      deleteBusy = false;
+    }
   }
 
   function sendToComposer(item) {
@@ -282,9 +348,28 @@
     />
   </div>
 
-  <!-- category + folder filter bar -->
+  <!-- search + sort + category + folder filter bar -->
   {#if items.length > 0}
     <div class="folder-bar">
+      <div class="search-box">
+        <Icon name="search" size={13} />
+        <input
+          class="search-input"
+          placeholder="Search name, notes, source…"
+          bind:value={query}
+        />
+        {#if query}
+          <button class="search-clear" onclick={() => (query = '')} aria-label="Clear search">
+            <Icon name="x" size={12} />
+          </button>
+        {/if}
+      </div>
+      <select class="select sort-select" bind:value={sort} title="Sort order">
+        {#each SORTS as s (s.id)}
+          <option value={s.id}>{s.label}</option>
+        {/each}
+      </select>
+      <span class="bar-sep"></span>
       <!-- type / source facets -->
       <button
         class="folder-chip"
@@ -326,7 +411,7 @@
     {#each jobs as job (job.id)}
       <div class="job card fade-up">
         <Icon name="download" size={15} />
-        <span class="job-url mono">{job.url}</span>
+        <span class="job-url mono" title={job.url}>{job.label ?? job.url}</span>
         <div class="bar">
           <div
             class="fill"
@@ -438,7 +523,7 @@
                   <Icon name="proof" size={14} />
                 </button>
               {/if}
-              <button class="btn btn-ghost btn-sm del" title="Delete" onclick={() => remove(item)}>
+              <button class="btn btn-ghost btn-sm del" title="Delete" onclick={() => (deleteTarget = item)}>
                 <Icon name="trash" size={14} />
               </button>
             </div>
@@ -458,9 +543,48 @@
   {/if}
 </div>
 
+<!-- multi-item picker: shown when a URL has several attachments (e.g. a tweet
+     with several photos) — pick which ones to download, before anything is fetched -->
+{#if picker}
+  <Modal title="Choose media to download" onclose={() => (picker = null)} width="560px">
+    <p class="picker-hint">This link has {picker.items.length} attachments — pick which to fetch.</p>
+    <div class="picker-toolbar">
+      <button class="btn btn-ghost btn-sm" onclick={() => selectAllPicker(true)}>Select all</button>
+      <button class="btn btn-ghost btn-sm" onclick={() => selectAllPicker(false)}>Select none</button>
+    </div>
+    <div class="picker-list">
+      {#each picker.items as item (item.index)}
+        <label class="picker-row" class:selected={item.selected}>
+          <input type="checkbox" bind:checked={item.selected} />
+          <div class="picker-thumb">
+            {#if item.thumbnail}
+              <img src={item.thumbnail} alt="" loading="lazy" />
+            {:else}
+              <Icon name={KIND_ICONS[item.kind] ?? 'file'} size={20} />
+            {/if}
+          </div>
+          <input class="input picker-title" placeholder="Title" bind:value={item.title} />
+        </label>
+      {/each}
+    </div>
+    <div class="modal-actions">
+      <div style="flex:1"></div>
+      <button class="btn" onclick={() => (picker = null)}>Cancel</button>
+      <button
+        class="btn btn-primary"
+        disabled={!picker.items.some((i) => i.selected)}
+        onclick={confirmPicker}
+      >
+        <Icon name="download" size={14} />
+        Download {picker.items.filter((i) => i.selected).length} selected
+      </button>
+    </div>
+  </Modal>
+{/if}
+
 <!-- info / edit modal -->
 {#if editItem}
-  <Modal title={editItem.filename} onclose={() => (editItem = null)} width="520px">
+  <Modal title={editTitle.trim() || editItem.filename} onclose={() => (editItem = null)} width="520px">
     <!-- preview -->
     {#if editItem.kind === 'image' && editItem.thumbnail}
       <div class="modal-preview">
@@ -579,11 +703,11 @@
 {/if}
 
 <!-- lightbox -->
+<svelte:window onkeydown={onLightboxKey} />
 {#if lightboxItem}
   <div
     class="lightbox"
     onclick={() => (lightboxItem = null)}
-    onkeydown={(e) => e.key === 'Escape' && (lightboxItem = null)}
     role="dialog"
     aria-label="Image preview"
     tabindex="-1"
@@ -591,13 +715,50 @@
     <button class="lb-close btn btn-ghost" onclick={() => (lightboxItem = null)} aria-label="Close">
       <Icon name="x" size={20} />
     </button>
+    {#if lightboxImages.length > 1}
+      <button
+        class="lb-nav prev btn btn-ghost"
+        onclick={(e) => (e.stopPropagation(), lightboxStep(-1))}
+        aria-label="Previous image"
+        title="Previous (←)"
+      >
+        <Icon name="chevronLeft" size={26} />
+      </button>
+      <button
+        class="lb-nav next btn btn-ghost"
+        onclick={(e) => (e.stopPropagation(), lightboxStep(1))}
+        aria-label="Next image"
+        title="Next (→)"
+      >
+        <Icon name="chevronRight" size={26} />
+      </button>
+    {/if}
     <img
       src={`/files/${caseState.current.id}/${lightboxItem.path}`}
       alt={lightboxItem.filename}
       onclick={(e) => e.stopPropagation()}
     />
-    <span class="lb-caption">{lightboxItem.filename}</span>
+    <span class="lb-caption">
+      {lightboxItem.title ?? lightboxItem.filename}
+      {#if lightboxImages.length > 1}
+        · {lightboxImages.findIndex((i) => i.path === lightboxItem.path) + 1}/{lightboxImages.length}
+      {/if}
+    </span>
   </div>
+{/if}
+
+<!-- delete confirm: the file on disk goes with the entity -->
+{#if deleteTarget}
+  <ConfirmDialog
+    title="Delete this media?"
+    message={`“${deleteTarget.title ?? deleteTarget.filename}” and its entity will be removed from the case.`}
+    detail="This permanently deletes the file on disk — it cannot be undone."
+    confirmLabel="Delete"
+    tone="danger"
+    busy={deleteBusy}
+    onconfirm={confirmDelete}
+    oncancel={() => (deleteTarget = null)}
+  />
 {/if}
 
 <style>
@@ -656,6 +817,44 @@
     align-self: stretch;
     margin: 2px 4px;
     background: var(--border);
+    flex-shrink: 0;
+  }
+  .search-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-2);
+    color: var(--text-3);
+    flex-shrink: 0;
+  }
+  .search-box:focus-within {
+    border-color: var(--accent);
+  }
+  .search-input {
+    width: 180px;
+    border: none;
+    background: none;
+    outline: none;
+    color: var(--text-1);
+    font-size: var(--fs-xs);
+  }
+  .search-clear {
+    display: inline-flex;
+    color: var(--text-3);
+    padding: 1px;
+    border-radius: 50%;
+  }
+  .search-clear:hover {
+    color: var(--text-1);
+    background: var(--bg-3);
+  }
+  .sort-select {
+    width: auto;
+    font-size: var(--fs-xs);
+    padding: 4px 8px;
     flex-shrink: 0;
   }
 
@@ -902,6 +1101,59 @@
     margin-top: 14px;
   }
 
+  /* multi-item picker */
+  .picker-hint {
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    margin: 0 0 10px;
+  }
+  .picker-toolbar {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 46vh;
+    overflow-y: auto;
+  }
+  .picker-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    cursor: pointer;
+  }
+  .picker-row.selected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .picker-thumb {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    border-radius: var(--r-sm, 6px);
+    overflow: hidden;
+    background: var(--bg-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-3);
+  }
+  .picker-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .picker-title {
+    flex: 1;
+    min-width: 0;
+  }
+
   /* lightbox */
   .lightbox {
     position: fixed;
@@ -925,6 +1177,24 @@
   .lb-close {
     position: absolute;
     top: 14px;
+    right: 14px;
+  }
+  .lb-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 14px 8px;
+    color: var(--text-1);
+    background: rgba(11, 15, 23, 0.55);
+    border-radius: var(--r-md);
+  }
+  .lb-nav:hover {
+    background: rgba(11, 15, 23, 0.85);
+  }
+  .lb-nav.prev {
+    left: 14px;
+  }
+  .lb-nav.next {
     right: 14px;
   }
   .lb-caption {
