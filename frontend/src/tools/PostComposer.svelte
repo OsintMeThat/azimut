@@ -2,8 +2,10 @@
   import { api } from '../lib/api.js';
   import { caseState, uiState, toast, reloadCase } from '../lib/state.svelte.js';
   import { proofCoordsText, proofSource } from '../lib/composer.js';
+  import { bidiSafe } from '../lib/bidi.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
+  import ConfirmDialog from '../components/ConfirmDialog.svelte';
 
   const X_LIMIT = 280;
   const URL_WEIGHT = 23; // X counts every URL as 23 chars
@@ -33,6 +35,8 @@
   // Draft persistence
   let draftName = $state(null); // slug of the saved draft (null until first save)
   let saving = $state(false);
+  let discardConfirm = $state(false);
+  let openList = $state(null); // list of saved drafts, null = closed
 
   // Media picker modal
   let pickerOpen = $state(false);
@@ -41,6 +45,17 @@
   // Proof picker modal
   let proofPickerOpen = $state(false);
   let proofLibrary = $state([]);
+
+  let postFor = $state(undefined); // id of the case the form's content belongs to
+
+  // reset the draft form when the case changes (close/switch/one-shot)
+  $effect(() => {
+    const id = caseState.current?.id;
+    if (id !== postFor) {
+      postFor = id;
+      resetDraft();
+    }
+  });
 
   // Ingest a proof handed over by the Proof Composer
   $effect(() => {
@@ -140,9 +155,12 @@
   }
 
   function weightedLength(t) {
+    // count the bidi-safe text that actually gets copied, so the counter
+    // stays honest for Arabic/Hebrew threads (isolates counted, worst case)
+    const safe = bidiSafe(t);
     const urlRe = /https?:\/\/\S+/g;
-    const stripped = t.replace(urlRe, '');
-    const urls = t.match(urlRe)?.length ?? 0;
+    const stripped = safe.replace(urlRe, '');
+    const urls = safe.match(urlRe)?.length ?? 0;
     return [...stripped].length + urls * URL_WEIGHT;
   }
 
@@ -163,8 +181,10 @@
     if (i !== -1) extraTweets.splice(i, 1);
   }
 
+  // Copies go through bidiSafe: Arabic/Hebrew threads keep coordinates,
+  // plus codes, @mentions and URLs reading left-to-right on X (see lib/bidi).
   async function copy(value) {
-    await navigator.clipboard.writeText(value);
+    await navigator.clipboard.writeText(bidiSafe(value));
     toast('Copied to clipboard', 'ok', 1600);
   }
 
@@ -174,7 +194,7 @@
     for (const t of extraTweets) {
       if (t.text.trim()) parts.push(t.text.trim());
     }
-    await navigator.clipboard.writeText(parts.join('\n\n---\n\n'));
+    await navigator.clipboard.writeText(parts.map(bidiSafe).join('\n\n---\n\n'));
     toast('All tweets copied', 'ok', 1800);
   }
 
@@ -353,6 +373,15 @@
     }
   }
 
+  async function openDraftList() {
+    if (!caseState.current) return;
+    try {
+      openList = await api.get(`/api/cases/${caseState.current.id}/drafts`);
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  }
+
   async function loadDraft(name) {
     if (!caseState.current) return;
     try {
@@ -382,11 +411,36 @@
       }
       tweet1 = s.tweet1 ?? buildTweet1();
       tweet1Edited = s.tweet1Edited ?? false;
+      openList = null;
       toast('Draft loaded', 'ok', 1400);
     } catch (e) {
       toast(`Could not load draft: ${e.message}`, 'danger');
     }
   }
+
+  function resetDraft() {
+    description = '';
+    coordsText = '';
+    geo = null;
+    place = '';
+    mention = '@GeoConfirmed';
+    source = '';
+    setProof(null);
+    tweet1 = '';
+    tweet1Edited = false;
+    mediaEnabled = true;
+    mediaType = 'none';
+    mediaText = '';
+    mediaPath = null;
+    extraTweets = [];
+    draftName = null;
+    discardConfirm = false;
+  }
+
+  const hasContent = $derived(
+    !!(draftName || description.trim() || coordsText.trim() || mediaPath || proofPng ||
+      extraTweets.length || tweet1.trim())
+  );
 
   // ---- publish (prefill X compose — Azimut never posts on your behalf) -----
 
@@ -394,7 +448,7 @@
     // X's web intent only prefills the first post; copy the whole thread so the
     // rest can be pasted as replies, then open the compose window.
     await copyAll();
-    const url = `https://x.com/intent/post?text=${encodeURIComponent(tweet1)}`;
+    const url = `https://x.com/intent/post?text=${encodeURIComponent(bidiSafe(tweet1))}`;
     window.open(url, '_blank', 'noopener,noreferrer');
     toast('Opened X — thread copied for the replies', 'info', 3200);
   }
@@ -407,6 +461,16 @@
       <span class="sub">publishable post from your proof — you copy, you publish, Azimut never posts</span>
     </div>
     <div class="head-actions">
+      {#if caseState.current}
+        <button class="btn btn-ghost btn-sm" onclick={openDraftList} title="Reopen a saved draft">
+          <Icon name="folderOpen" size={14} /> Open
+        </button>
+      {/if}
+      {#if hasContent}
+        <button class="btn btn-ghost btn-sm" onclick={() => (discardConfirm = true)} title="Clear this draft">
+          <Icon name="reset" size={14} /> Discard
+        </button>
+      {/if}
       <button class="btn btn-ghost btn-sm" onclick={saveDraft} disabled={saving}>
         <Icon name="save" size={14} /> {draftName ? 'Save draft' : 'Save as draft'}
       </button>
@@ -544,6 +608,7 @@
           </div>
           <textarea
             class="textarea post-text mono"
+            dir="auto"
             bind:value={tweet1}
             oninput={() => (tweet1Edited = true)}
             rows="11"
@@ -584,6 +649,7 @@
             <div class="media-prefix">{mediaType === 'video' ? '2/ Video:' : '2/ Image(s):'}</div>
             <textarea
               class="textarea post-text mono"
+              dir="auto"
               placeholder="Paste URL or describe the media…"
               bind:value={mediaText}
               rows="3"
@@ -640,6 +706,7 @@
             </div>
             <textarea
               class="textarea post-text mono"
+              dir="auto"
               placeholder="Additional context…"
               bind:value={tweet.text}
               rows="4"
@@ -666,13 +733,45 @@
   </div>
 </div>
 
+{#if openList}
+  <Modal title="Open a saved draft" onclose={() => (openList = null)} width="560px">
+    {#if !openList.length}
+      <div class="empty"><p>No saved drafts in this case yet.</p></div>
+    {:else}
+      <div class="open-list">
+        {#each openList as entry (entry.name)}
+          <button class="open-row" onclick={() => loadDraft(entry.name)}>
+            <div class="open-meta">
+              <span class="open-title">{entry.title}</span>
+              <span class="open-sub">{entry.updated_at?.slice(0, 10)}</span>
+            </div>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </Modal>
+{/if}
+
+{#if discardConfirm}
+  <ConfirmDialog
+    title="Discard this draft?"
+    message="The current post — description, coordinates, media and extra tweets — will be cleared."
+    detail={draftName ? 'This does not delete the saved draft, only the unsaved changes here.' : 'Anything not saved yet will be lost.'}
+    confirmLabel="Discard"
+    tone="danger"
+    icon="reset"
+    onconfirm={resetDraft}
+    oncancel={() => (discardConfirm = false)}
+  />
+{/if}
+
 {#if pickerOpen}
   <Modal title="Choose a media" width="640px" onclose={() => (pickerOpen = false)}>
     {#if mediaLibrary.length === 0}
       <p class="picker-empty">No media in this case yet — import or download some in the Media tab.</p>
     {:else}
       <div class="picker-grid">
-        {#each mediaLibrary as item (item.path)}
+        {#each (caseState.current ? mediaLibrary : []) as item (item.path)}
           <button class="picker-item" onclick={() => pickMedia(item)} title={item.path}>
             <div class="picker-thumb">
               {#if item.thumbnail}
@@ -696,7 +795,7 @@
       <p class="picker-empty">No proofs in this case yet — build one in the Proof tab.</p>
     {:else}
       <div class="picker-grid">
-        {#each proofLibrary as item (item.name)}
+        {#each (caseState.current ? proofLibrary : []) as item (item.name)}
           <button class="picker-item" onclick={() => pickProof(item)} title={item.title} disabled={!item.png}>
             <div class="picker-thumb">
               {#if item.png}
@@ -941,4 +1040,20 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .open-list { display: flex; flex-direction: column; gap: 8px; }
+  .open-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-2);
+    cursor: pointer;
+    text-align: left;
+  }
+  .open-row:hover { border-color: var(--accent); }
+  .open-meta { display: flex; flex-direction: column; gap: 2px; }
+  .open-title { font-weight: 600; font-size: var(--fs-sm); }
+  .open-sub { font-size: var(--fs-xs); color: var(--text-3); }
 </style>
