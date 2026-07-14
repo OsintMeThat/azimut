@@ -5,6 +5,7 @@
   import { caseState, uiState, ensureCase, reloadCase, toast } from '../lib/state.svelte.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
+  import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import {
     ANNO_COLORS, PAD, TWEET_GUIDES,
     CAPTION_SIZE, LEGEND_SIZE, FOOTER_SIZE,
@@ -12,9 +13,10 @@
     layoutPanels, panelsBlockHeight, legendLineHeight, footerBand,
     attributionLine, docSize, offsetShape, autoLayoutRows,
     autoCoords, formatCoords, autoSource, resolveSourceUrls,
-    toSpec, newId, loadImage, featureColors, notesFromShapes,
-    copyShapeSpec,
+    toSpec, newId, loadImage, orderedFeatureColors, notesFromShapes,
+    copyShapeSpec, dedupeBySrc, isSatelliteCapture,
   } from '../lib/composer.js';
+  import { createHistory } from '../lib/history.js';
 
   const SCALE_MIN = 0.4;
   const SCALE_MAX = 2.5;
@@ -34,7 +36,7 @@
   // `notes` holds the legend text per color (annotations are written by color,
   // not per element); `shapes` are the drawn geometry bound to a panel.
   const proof = $state({
-    title: 'Untitled proof', panels: [], shapes: [], notes: {},
+    title: 'Untitled proof', panels: [], shapes: [], notes: {}, legendOrder: [],
     coordsText: '', source: '', // '' → auto-derived from panels; non-empty → manual override
     captionSize: CAPTION_SIZE, legendSize: LEGEND_SIZE, footerSize: FOOTER_SIZE, footer: '',
   });
@@ -52,12 +54,92 @@
   let openList = $state(null); // list of saved proofs, null = closed
   let saving = $state(false);
   let proofFor = $state(undefined);
+  let discardConfirm = $state(false);
+
+  // ---- undo / redo -------------------------------------------------------------
+  // Snapshot-based history over the serializable document (toSpec). Mutations
+  // are captured by a debounced effect, so a slider drag collapses into one
+  // entry; panel images are re-attached from a cache on restore.
+  const history = createHistory();
+  const imgCache = new Map(); // src → HTMLImageElement, survives undo/redo
+  let canUndo = $state(false);
+  let canRedo = $state(false);
+  let histBusy = false; // plain (untracked): suppresses capture while restoring
+  let histTimer = null;
+
+  const docSnapshot = () => JSON.stringify(toSpec(proof));
+
+  function syncHist() {
+    canUndo = history.canUndo;
+    canRedo = history.canRedo;
+  }
+
+  function anchorHistory() {
+    clearTimeout(histTimer);
+    history.reset(docSnapshot());
+    syncHist();
+  }
+
+  $effect(() => {
+    const json = docSnapshot(); // reads every document field → tracked
+    if (histBusy) return;
+    clearTimeout(histTimer);
+    histTimer = setTimeout(() => {
+      history.push(json);
+      syncHist();
+    }, 350);
+  });
+
+  function applySnapshot(json) {
+    const spec = JSON.parse(json);
+    histBusy = true;
+    if (pathDraft) finishPath(false);
+    proof.title = spec.title ?? 'Untitled proof';
+    proof.coordsText = spec.coordsText ?? '';
+    proof.source = spec.source ?? '';
+    proof.captionSize = spec.captionSize ?? CAPTION_SIZE;
+    proof.legendSize = spec.legendSize ?? LEGEND_SIZE;
+    proof.footerSize = spec.footerSize ?? FOOTER_SIZE;
+    proof.footer = spec.footer ?? '';
+    proof.notes = spec.notes ?? {};
+    proof.panels = spec.panels.map((p) => ({ ...p, img: imgCache.get(p.src) ?? null }));
+    proof.shapes = spec.shapes ?? [];
+    // a panel image missing from the cache (shouldn't happen) reloads async
+    for (const p of proof.panels.filter((x) => !x.img)) {
+      loadImage(`/files/${caseState.current?.id}/${p.src}`)
+        .then((img) => {
+          imgCache.set(p.src, img);
+          p.img = img;
+        })
+        .catch(() => {});
+    }
+    selectedId = null;
+    dirty = true;
+    requestAnimationFrame(fit);
+    // outlast the capture debounce so the restore itself is not re-recorded
+    setTimeout(() => (histBusy = false), 400);
+  }
+
+  function undo() {
+    const json = history.undo();
+    if (json != null) applySnapshot(json);
+    syncHist();
+  }
+
+  function redo() {
+    const json = history.redo();
+    if (json != null) applySnapshot(json);
+    syncHist();
+  }
 
   // ---- konva ------------------------------------------------------------------
   let containerEl;
   let stage, docLayer, uiLayer, transformer, endHandles, guideGroup;
   let drawing = null; // {panel, node, start, box, kind}
   let pathDraft = null; // {panel, box, node, points:[]} — multi-click curve in progress
+  let spacePan = false; // hold-space panning (manual, so it wins over shape drags)
+  let panDrag = null; // {sx, sy, ox, oy} — space/middle-drag pan in progress
+  let textEdit = $state(null); // {id, value, left, top, size} — inline text editor
 
   onMount(() => {
     stage = new Konva.Stage({ container: containerEl, width: 100, height: 100 });
@@ -138,6 +220,7 @@
       proof.panels.map((p) => [p.src, p.caption, p.row, p.scale]),
       proof.shapes,
       proof.notes,
+      proof.legendOrder,
       proof.captionSize, proof.legendSize, proof.footerSize, proof.footer,
       selectedId,
       guide,
@@ -157,6 +240,7 @@
     proof.panels = [];
     proof.shapes = [];
     proof.notes = {};
+    proof.legendOrder = [];
     proof.coordsText = '';
     proof.source = '';
     proof.captionSize = CAPTION_SIZE;
@@ -166,6 +250,13 @@
     savedName = null;
     selectedId = null;
     dirty = false;
+    imgCache.clear();
+    anchorHistory();
+  }
+
+  function discardProof() {
+    resetDoc();
+    discardConfirm = false;
   }
 
   // ---- panels ------------------------------------------------------------------
@@ -204,7 +295,11 @@
       api.get(`/api/cases/${caseState.current.id}/media`),
       api.get(`/api/cases/${caseState.current.id}/satellite`),
     ]);
-    pickerItems = [
+    // A satellite capture *is* a media image, so it shows up in both lists. List
+    // it once, via its richer satellite entry (coordinates/attribution), and drop
+    // it from the media half. dedupeBySrc is a belt-and-braces guard so a stray
+    // overlap can never throw the keyed picker's `each_key_duplicate`.
+    pickerItems = dedupeBySrc([
       ...sats.map((s) => ({
         ...satPanelInput(s),
         label: `${s.lat.toFixed(6)}, ${s.lon.toFixed(6)} · z${s.zoom}`,
@@ -212,20 +307,21 @@
         kind: 'satellite',
       })),
       ...media
-        .filter((m) => m.kind === 'image')
+        .filter((m) => m.kind === 'image' && !isSatelliteCapture(m))
         .map((m) => ({
           ...mediaPanelInput(m, media),
           label: m.filename,
           thumb: m.thumbnail ?? m.path,
           kind: 'media',
         })),
-    ];
+    ]);
     picker = true;
   }
 
   async function addPanel(item) {
     try {
       const img = await loadImage(`/files/${caseState.current.id}/${item.src}`);
+      imgCache.set(item.src, img);
       // append to the current bottom row so new panels join the strip
       const row = proof.panels.length
         ? Math.max(...proof.panels.map((p) => p.row ?? 0))
@@ -392,6 +488,13 @@
   }
 
   function onPointerDown(e) {
+    // space-drag / middle-drag pans regardless of the active tool
+    if (spacePan || e.evt.button === 1) {
+      e.evt.preventDefault();
+      const p = stage.getPointerPosition();
+      panDrag = { sx: p.x, sy: p.y, ox: stage.x(), oy: stage.y() };
+      return;
+    }
     if (tool === 'select') {
       const onEmpty = e.target === stage || e.target.name() === 'bg';
       stage.draggable(onEmpty);
@@ -455,6 +558,12 @@
   }
 
   function onPointerMove() {
+    if (panDrag) {
+      const p = stage.getPointerPosition();
+      stage.position({ x: panDrag.ox + p.x - panDrag.sx, y: panDrag.oy + p.y - panDrag.sy });
+      stage.batchDraw();
+      return;
+    }
     if (pathDraft) {
       const box = pathDraft.box;
       const doc = docPoint();
@@ -488,6 +597,10 @@
   }
 
   function onPointerUp() {
+    if (panDrag) {
+      panDrag = null;
+      return;
+    }
     if (tool === 'select') {
       stage.draggable(false);
       return;
@@ -548,7 +661,7 @@
 
   function rebuild() {
     docLayer.destroyChildren();
-    const { width, height, legend, cols } = docSize(proof.panels, proof.shapes, proof.notes, textOpts());
+    const { width, height, legend, cols } = docSize(proof.panels, proof.shapes, proof.notes, textOpts(), proof.legendOrder);
     const boxes = layoutPanels(proof.panels, proof.captionSize);
     const capSize = proof.captionSize ?? CAPTION_SIZE;
 
@@ -589,12 +702,11 @@
       }
     });
 
-    // legend (numbered colored chips) laid out in `cols` columns, then footer.
-    // Chip + text scale with the legend font size and stay vertically centred.
+    // legend (colored dots) laid out in `cols` columns, then footer.
+    // Dot + text scale with the legend font size and stay vertically centred.
     const legendSize = proof.legendSize ?? 17;
     const lineH = legendLineHeight(legendSize);
     const r = Math.round(legendSize * 0.62);
-    const numSize = Math.round(legendSize * 0.72);
     const legendTop = PAD + panelsBlockHeight(proof.panels, proof.captionSize) + 8;
     const colW = (width - PAD * 2 - (cols - 1) * PAD) / cols;
     legend.filter((l) => l.text).forEach((line, i) => {
@@ -604,11 +716,6 @@
       const cy = legendTop + rowN * lineH + lineH / 2;
       docLayer.add(new Konva.Circle({
         x: cx + r, y: cy, radius: r, fill: line.color, listening: false,
-      }));
-      docLayer.add(new Konva.Text({
-        x: cx, y: cy - numSize * 0.62, width: r * 2, align: 'center',
-        text: String(line.n), fontSize: numSize, fontStyle: 'bold',
-        fill: '#0b0f17', listening: false,
       }));
       docLayer.add(new Konva.Text({
         x: cx + r * 2 + 8, y: cy - legendSize * 0.62, width: colW - (r * 2 + 8),
@@ -629,15 +736,16 @@
       }));
     }
 
-    // selection
+    // selection — keyed on the shape's kind, not the Konva node's class name,
+    // since a framed/backgrounded text renders as a Group rather than a Text
     const selectedNode = selectedId ? docLayer.findOne(`#${selectedId}`) : null;
     transformer.nodes(selectedNode ? [selectedNode] : []);
-    const cls = selectedNode?.className;
-    transformer.rotateEnabled(cls === 'Text' || cls === 'Rect' || cls === 'Ellipse');
+    const selKind = selectedShape?.kind;
+    transformer.rotateEnabled(selKind === 'text' || selKind === 'rect' || selKind === 'ellipse');
     transformer.enabledAnchors(
-      cls === 'Rect' || cls === 'Ellipse'
+      selKind === 'rect' || selKind === 'ellipse'
         ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
-        : cls === 'Text'
+        : selKind === 'text'
           ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
           : []
     );
@@ -771,16 +879,52 @@
   function makeShapeNode(s, box) {
     const panelScale = box.baseScale;
     if (s.kind === 'text') {
-      const node = new Konva.Text({
-        id: s.id, x: s.x, y: s.y, text: s.text || ' ',
+      // The glyph itself: always built first so its measured size drives the
+      // optional frame/background box. Unboxed, it's also the interactive node.
+      const textNode = new Konva.Text({
+        x: 0, y: 0, text: s.text || ' ',
         fontSize: s.fontSize ?? 28, fontFamily: 'system-ui, sans-serif',
-        fontStyle: 'bold', fill: s.color, rotation: s.rotation ?? 0, draggable: true,
+        fontStyle: 'bold', fill: s.color,
       });
+      const boxed = s.frame || s.bg;
+      let node; // the draggable/transformable/selectable node (group when boxed)
+      if (boxed) {
+        const pad = Math.round((s.fontSize ?? 28) * 0.28);
+        const w = textNode.width() + pad * 2;
+        const h = textNode.height() + pad * 2;
+        const frameSW = Math.max(2, Math.round((s.fontSize ?? 28) * 0.07));
+        node = new Konva.Group({ id: s.id, x: s.x, y: s.y, rotation: s.rotation ?? 0, draggable: true });
+        // invisible full-box hit target — clicking/dragging the padding (not
+        // just the glyph or the frame stroke) must still select this element
+        node.add(new Konva.Rect({ x: 0, y: 0, width: w, height: h, fill: 'transparent', listening: true }));
+        if (s.bg) {
+          node.add(new Konva.Rect({ x: 0, y: 0, width: w, height: h, fill: s.bg, cornerRadius: 4, listening: false }));
+        }
+        if (s.frame) {
+          node.add(new Konva.Rect({
+            x: 0, y: 0, width: w, height: h, stroke: s.color, strokeWidth: frameSW,
+            cornerRadius: 4, listening: false,
+          }));
+        }
+        textNode.position({ x: pad, y: pad });
+        textNode.listening(false);
+        node.add(textNode);
+      } else {
+        textNode.id(s.id);
+        textNode.position({ x: s.x, y: s.y });
+        textNode.rotation(s.rotation ?? 0);
+        textNode.draggable(true);
+        node = textNode;
+      }
       node.on('pointerdown', (e) => {
         if (tool === 'select') {
           e.cancelBubble = true;
           selectedId = s.id;
         }
+      });
+      node.on('dblclick dbltap', (e) => {
+        e.cancelBubble = true;
+        startTextEdit(s, textNode);
       });
       node.on('dragstart', () => node.getParent()?.moveToTop());
       node.on('dragend', () => {
@@ -871,6 +1015,40 @@
     return node;
   }
 
+  // ---- inline text editing (double-click a label on the canvas) ---------------
+  function startTextEdit(s, node) {
+    const boxes = layoutPanels(proof.panels, proof.captionSize);
+    const idx = proof.panels.findIndex((p) => p.id === s.panel);
+    const panelScale = idx >= 0 ? boxes[idx].scale : 1;
+    const abs = node.getAbsolutePosition(); // container px, stage transform included
+    selectedId = s.id;
+    textEdit = {
+      id: s.id,
+      value: s.text ?? '',
+      left: abs.x,
+      top: abs.y,
+      size: (s.fontSize ?? 28) * panelScale * stage.scaleX(),
+      color: s.color,
+    };
+  }
+
+  function commitTextEdit(keep = true) {
+    if (!textEdit) return;
+    if (keep) {
+      const s = proof.shapes.find((x) => x.id === textEdit.id);
+      if (s && s.text !== textEdit.value) {
+        s.text = textEdit.value;
+        dirty = true;
+      }
+    }
+    textEdit = null;
+  }
+
+  const focusSelect = (el) => {
+    el.focus();
+    el.select();
+  };
+
   // ---- shape ops from the side panel -----------------------------------------------------
 
   // ---- clipboard (copy / paste / duplicate of a single element) ---------------
@@ -914,6 +1092,23 @@
     dirty = true;
   }
 
+  // Reorder a shape among same-panel siblings only — order doubles as z-order
+  // (rebuild() adds shapes to their panel group in array order), so moving
+  // past a shape bound to a different panel would silently no-op visually.
+  function moveShape(index, delta) {
+    const panelId = proof.shapes[index].panel;
+    let target = index + delta;
+    while (target >= 0 && target < proof.shapes.length && proof.shapes[target].panel !== panelId) {
+      target += delta;
+    }
+    if (target < 0 || target >= proof.shapes.length || proof.shapes[target].panel !== panelId) return;
+    const [s] = proof.shapes.splice(index, 1);
+    proof.shapes.splice(target, 0, s);
+    dirty = true;
+  }
+  const canMoveShapeUp = (i) => proof.shapes.slice(0, i).some((s) => s.panel === proof.shapes[i].panel);
+  const canMoveShapeDown = (i) => proof.shapes.slice(i + 1).some((s) => s.panel === proof.shapes[i].panel);
+
   const KIND_ICON = { rect: 'square', ellipse: 'circle', arrow: 'arrow', line: 'line', curve: 'curve', text: 'text' };
   const KIND_LABEL = { rect: 'Box', ellipse: 'Ellipse', arrow: 'Arrow', line: 'Line', curve: 'Curve', text: 'Text' };
 
@@ -947,6 +1142,22 @@
     }
   }
 
+  // Arrow-key nudge of the selected element, in panel-natural pixels.
+  const NUDGE = {
+    ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+  };
+  function nudgeSelected(dx, dy) {
+    const s = selectedShape;
+    if (!s) return;
+    if (Array.isArray(s.points)) {
+      s.points = s.points.map((v, i) => v + (i % 2 === 0 ? dx : dy));
+    } else {
+      s.x = (s.x ?? 0) + dx;
+      s.y = (s.y ?? 0) + dy;
+    }
+    dirty = true;
+  }
+
   function onKeydown(e) {
     if (uiState.tool !== 'proof') return;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
@@ -954,13 +1165,30 @@
       finishPath(e.key === 'Enter');
       return;
     }
-    // clipboard: copy / paste / duplicate the selected element
+    // clipboard / undo / save chords
     if (e.ctrlKey || e.metaKey) {
       const k = e.key.toLowerCase();
       if (k === 'c' && selectedId) { e.preventDefault(); copyShape(); }
       else if (k === 'v' && clipboard) { e.preventDefault(); pasteShape(); }
       else if (k === 'd' && selectedId) { e.preventDefault(); duplicateShape(); }
+      else if (k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+      else if (k === 'y') { e.preventDefault(); redo(); }
+      else if (k === 's') { e.preventDefault(); save(); }
       return; // don't fall through to the single-letter tool shortcuts
+    }
+    if (NUDGE[e.key] && selectedId) {
+      e.preventDefault();
+      const step = e.shiftKey ? 10 : 1;
+      nudgeSelected(NUDGE[e.key][0] * step, NUDGE[e.key][1] * step);
+      return;
+    }
+    if (e.key === ' ' && !e.repeat) {
+      // hold space to pan, whatever the active tool — even over an element
+      e.preventDefault();
+      spacePan = true;
+      docLayer.listening(false);
+      containerEl.style.cursor = 'grab';
+      return;
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
       deleteShape(selectedId);
@@ -975,6 +1203,15 @@
     else if (e.key === 'c') tool = 'curve';
     else if (e.key === 't') tool = 'text';
     else if (e.key === 'f') fit();
+  }
+
+  function onKeyup(e) {
+    if (e.key === ' ' && spacePan) {
+      spacePan = false;
+      panDrag = null;
+      docLayer?.listening(true);
+      if (containerEl) containerEl.style.cursor = '';
+    }
   }
 
   // ---- persistence -------------------------------------------------------------------------
@@ -997,6 +1234,23 @@
     stage.height(prevSize.h);
     rebuild();
     return dataUrl;
+  }
+
+  // Copy the composed PNG straight to the clipboard — for peer review in a
+  // chat before publishing, without hunting the file in the case folder.
+  let copying = $state(false);
+  async function copyPng() {
+    if (!proof.panels.length || copying) return;
+    copying = true;
+    try {
+      const blob = await (await fetch(exportPng())).blob();
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      toast('Proof image copied — paste it anywhere', 'ok');
+    } catch (e) {
+      toast(`Could not copy image: ${e.message}`, 'danger');
+    } finally {
+      copying = false;
+    }
   }
 
   async function save({ andPost = false } = {}) {
@@ -1049,6 +1303,7 @@
     for (const p of spec.panels) {
       try {
         const img = await loadImage(`/files/${caseState.current.id}/${p.src}`);
+        imgCache.set(p.src, img);
         proof.panels.push({ ...p, id: p.id ?? newId('p'), row: p.row ?? 0, img });
       } catch {
         toast(`Missing panel image: ${p.src}`, 'warn');
@@ -1058,15 +1313,29 @@
     proof.shapes = (spec.shapes ?? []).filter((s) => validPanels.has(s.panel));
     // legend text lives in `notes` (per color); migrate old per-shape comments
     proof.notes = spec.notes ?? notesFromShapes(proof.shapes);
+    proof.legendOrder = spec.legendOrder ?? [];
     savedName = entry.name;
     openList = null;
     dirty = false;
+    anchorHistory();
     requestAnimationFrame(fit);
   }
 
   const selectedShape = $derived(proof.shapes.find((s) => s.id === selectedId));
   const activeColor = $derived(selectedShape?.color ?? color);
-  const featureList = $derived(featureColors(proof.shapes));
+  const featureList = $derived(orderedFeatureColors(proof.shapes, proof.legendOrder));
+
+  // Swap a legend entry with its neighbour, persisting the whole resulting
+  // order — this also promotes any color that was only implicitly ordered
+  // (first-use) into an explicit, saved position.
+  function moveLegendColor(i, delta) {
+    const j = i + delta;
+    if (j < 0 || j >= featureList.length) return;
+    const order = [...featureList];
+    [order[i], order[j]] = [order[j], order[i]];
+    proof.legendOrder = order;
+    dirty = true;
+  }
 
   // Coordinates + source shown above the panels: a manual override wins, else
   // the value auto-derived from the panels (reactive — deleting the first
@@ -1075,7 +1344,7 @@
   const displayedSource = $derived(proof.source.trim() || autoSource(proof.panels));
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onkeyup={onKeyup} />
 
 <div class="tool">
   <div class="tool-header">
@@ -1086,7 +1355,20 @@
     {#if caseState.current}
       <button class="btn" onclick={openProofList}><Icon name="folderOpen" size={15} /> Open</button>
     {/if}
+    {#if proof.panels.length}
+      <button class="btn" onclick={() => (discardConfirm = true)} title="Clear this proof">
+        <Icon name="reset" size={15} /> Discard
+      </button>
+    {/if}
     <button class="btn" onclick={openPicker}><Icon name="plus" size={15} /> Add panel</button>
+    <button
+      class="btn"
+      onclick={copyPng}
+      disabled={!proof.panels.length || copying}
+      title="Copy the composed PNG to the clipboard — paste it in a chat or a tweet"
+    >
+      <Icon name="copy" size={15} /> {copying ? 'Copying…' : 'Copy PNG'}
+    </button>
     <button class="btn btn-primary" onclick={() => save()} disabled={!proof.panels.length || saving}>
       <Icon name="check" size={15} /> {saving ? 'Saving…' : 'Save'}
     </button>
@@ -1098,6 +1380,13 @@
   <div class="body">
     <!-- left: drawing toolbar -->
     <div class="toolbar">
+      <button class="tb-btn" title="Undo (Ctrl+Z)" disabled={!canUndo} onclick={undo}>
+        <Icon name="undo" size={18} />
+      </button>
+      <button class="tb-btn" title="Redo (Ctrl+Shift+Z / Ctrl+Y)" disabled={!canRedo} onclick={redo}>
+        <Icon name="redo" size={18} />
+      </button>
+      <div class="tb-sep"></div>
       {#each DRAW_TOOLS as t (t.id)}
         <button
           class="tb-btn"
@@ -1170,6 +1459,23 @@
     <!-- canvas -->
     <div class="canvas-wrap" class:drawing={tool !== 'select'}>
       <div class="konva" bind:this={containerEl}></div>
+      {#if textEdit}
+        <input
+          class="text-edit"
+          style:left={`${textEdit.left}px`}
+          style:top={`${textEdit.top}px`}
+          style:font-size={`${textEdit.size}px`}
+          style:color={textEdit.color}
+          bind:value={textEdit.value}
+          use:focusSelect
+          onblur={() => commitTextEdit(true)}
+          onkeydown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') commitTextEdit(true);
+            else if (e.key === 'Escape') commitTextEdit(false);
+          }}
+        />
+      {/if}
       {#if !proof.panels.length}
         <div class="empty overlay-empty">
           <div class="empty-icon"><Icon name="proof" size={42} /></div>
@@ -1291,6 +1597,14 @@
         {/if}
         {#each featureList as c, i (c)}
           <div class="anno-row" class:active={activeColor === c}>
+            <div class="reorder">
+              <button class="btn btn-ghost reorder-btn" disabled={i === 0} title="Move up" onclick={() => moveLegendColor(i, -1)}>
+                <Icon name="chevronUp" size={11} />
+              </button>
+              <button class="btn btn-ghost reorder-btn" disabled={i === featureList.length - 1} title="Move down" onclick={() => moveLegendColor(i, 1)}>
+                <Icon name="chevronDown" size={11} />
+              </button>
+            </div>
             <button
               class="chip-num"
               style:background={c}
@@ -1321,6 +1635,14 @@
             tabindex="0"
             onkeydown={(e) => e.key === 'Enter' && (selectedId = s.id)}
           >
+            <div class="reorder">
+              <button class="btn btn-ghost reorder-btn" disabled={!canMoveShapeUp(i)} title="Move up (z-order within its panel)" onclick={(e) => { e.stopPropagation(); moveShape(i, -1); }}>
+                <Icon name="chevronUp" size={11} />
+              </button>
+              <button class="btn btn-ghost reorder-btn" disabled={!canMoveShapeDown(i)} title="Move down (z-order within its panel)" onclick={(e) => { e.stopPropagation(); moveShape(i, 1); }}>
+                <Icon name="chevronDown" size={11} />
+              </button>
+            </div>
             <span class="chip" style:background={s.color}></span>
             <Icon name={KIND_ICON[s.kind]} size={13} />
             {#if s.kind === 'text'}
@@ -1331,6 +1653,34 @@
                 onchange={() => (dirty = true)}
                 onclick={(e) => e.stopPropagation()}
               />
+              <button
+                class="btn btn-ghost btn-sm"
+                class:active={s.frame}
+                title="Frame (border in the text's color)"
+                onclick={(e) => { e.stopPropagation(); s.frame = !s.frame; dirty = true; }}
+              >
+                <Icon name="square" size={13} />
+              </button>
+              <label
+                class="color-btn color-pick bg-pick"
+                class:active={!!s.bg}
+                style:background={s.bg || 'transparent'}
+                title="Background color"
+                onclick={(e) => e.stopPropagation()}
+              >
+                <Icon name="plus" size={11} />
+                <input
+                  type="color"
+                  value={s.bg || '#000000'}
+                  oninput={(e) => { s.bg = e.target.value; dirty = true; }}
+                  aria-label="text background color"
+                />
+              </label>
+              {#if s.bg}
+                <button class="btn btn-ghost btn-sm" title="Remove background" onclick={(e) => { e.stopPropagation(); s.bg = null; dirty = true; }}>
+                  <Icon name="x" size={11} />
+                </button>
+              {/if}
             {:else}
               <span class="el-label">{KIND_LABEL[s.kind]} <span class="el-id">#{i + 1}</span></span>
             {/if}
@@ -1385,6 +1735,19 @@
     </aside>
   </div>
 </div>
+
+{#if discardConfirm}
+  <ConfirmDialog
+    title="Discard this proof?"
+    message="The current document — panels, annotations and layout — will be cleared."
+    detail={savedName ? 'This does not delete the saved proof, only the unsaved changes here.' : 'Anything not saved yet will be lost.'}
+    confirmLabel="Discard"
+    tone="danger"
+    icon="reset"
+    onconfirm={discardProof}
+    oncancel={() => (discardConfirm = false)}
+  />
+{/if}
 
 {#if picker}
   <Modal title="Add a panel" onclose={() => (picker = false)} width="720px">
@@ -1523,6 +1886,20 @@
   }
   .canvas-wrap.drawing { cursor: crosshair; }
   .konva { position: absolute; inset: 0; }
+  .tb-btn:disabled { opacity: 0.35; cursor: default; }
+  .tb-btn:disabled:hover { color: var(--text-3); background: none; }
+  .text-edit {
+    position: absolute;
+    transform: translateY(-2px);
+    min-width: 60px;
+    padding: 0 2px;
+    font-family: system-ui, sans-serif;
+    font-weight: 700;
+    background: rgba(9, 12, 20, 0.85);
+    border: 1px dashed var(--accent);
+    border-radius: 2px;
+    outline: none;
+  }
   .overlay-empty {
     position: absolute;
     inset: 0;
@@ -1687,6 +2064,26 @@
     border: 1px solid transparent;
   }
   .anno-row.active { border-color: var(--accent); background: var(--accent-soft); }
+  .reorder {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex-shrink: 0;
+  }
+  .reorder-btn {
+    padding: 0 2px;
+    line-height: 1;
+    color: var(--text-3);
+  }
+  .reorder-btn:disabled { opacity: 0.25; cursor: default; }
+  .bg-pick {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    border: 1px dashed var(--border);
+  }
+  .bg-pick.active { border-style: solid; }
+  .bg-pick:not(.active) { color: var(--text-3); }
   .chip-num {
     width: 20px;
     height: 20px;

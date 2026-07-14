@@ -16,9 +16,7 @@ export const PANEL_H = 720;
 export const PAD = 20;
 export const GAP = 16;
 export const ROW_GAP = 18;
-export const LEGEND_LINE_H = 30;
 export const LEGEND_COL_MIN = 340; // min px width before the legend splits columns
-export const FOOTER_H = 26;
 
 // Tweet centre-crop aspect guides (width / height): X shows a single image with
 // object-fit: cover into a box of this aspect, cropping whatever overflows.
@@ -39,9 +37,9 @@ export function newId(prefix) {
   return `${prefix}${Date.now().toString(36)}${(idSeq++).toString(36)}`;
 }
 
-export const CAPTION_SIZE = 17; // default caption font size (px, editable per proof)
-export const LEGEND_SIZE = 17; // default legend text size
-export const FOOTER_SIZE = 13; // default footer / attribution text size
+export const CAPTION_SIZE = 20; // default caption font size (px, editable per proof)
+export const LEGEND_SIZE = 20; // default legend text size
+export const FOOTER_SIZE = 15; // default footer / attribution text size
 
 /** Height of the caption band under a row for a given caption font size. */
 export function captionBand(captionSize = CAPTION_SIZE) {
@@ -57,6 +55,11 @@ export function legendLineHeight(legendSize = LEGEND_SIZE) {
 export function footerBand(footerSize = FOOTER_SIZE) {
   return Math.round(footerSize + 13);
 }
+
+// Default band heights, derived from the size defaults so they can't drift out
+// of sync when those change (they mirror legendLineHeight()/footerBand()).
+export const LEGEND_LINE_H = legendLineHeight();
+export const FOOTER_H = footerBand();
 
 /** Distinct row indices in ascending order (default row 0). */
 function rowOrder(panels) {
@@ -147,11 +150,25 @@ export function featureColors(shapes) {
 }
 
 /**
- * Legend lines: one per used color (feature), text taken from the per-color
- * `notes` map. Annotations are written by color, not per element.
+ * `featureColors` order (first use), overridden by an explicit `legendOrder`
+ * (array of colors) where one is given: known colors keep that order, colors
+ * no longer in use are dropped, newly-used colors not yet in `legendOrder`
+ * are appended after the known ones (first-use order among themselves).
  */
-export function legendLines(shapes, notes = {}) {
-  const colors = featureColors(shapes);
+export function orderedFeatureColors(shapes, legendOrder = []) {
+  const used = featureColors(shapes);
+  const known = legendOrder.filter((c) => used.includes(c));
+  const extra = used.filter((c) => !known.includes(c));
+  return [...known, ...extra];
+}
+
+/**
+ * Legend lines: one per used color (feature), text taken from the per-color
+ * `notes` map, ordered by `legendOrder` (falls back to first-use order).
+ * Annotations are written by color, not per element.
+ */
+export function legendLines(shapes, notes = {}, legendOrder = []) {
+  const colors = orderedFeatureColors(shapes, legendOrder);
   return colors.map((color, i) => ({
     color,
     n: i + 1,
@@ -177,15 +194,7 @@ export function notesFromShapes(shapes) {
 
 /** Unique attribution strings from panel metadata. */
 export function attributionLine(panels) {
-  const parts = new Set();
-  for (const p of panels) {
-    if (p.meta?.attribution) parts.add(`Imagery: ${p.meta.attribution}`);
-    else {
-      for (const u of panelSourceUrls(p)) parts.add(`Source: ${u}`);
-    }
-  }
-  parts.add('Composed with Azimut');
-  return [...parts].join('  ·  ');
+  return 'Composed with Azimut';
 }
 
 // ---- coordinates + source (auto-derived from panels, user-overridable) ------
@@ -281,7 +290,7 @@ export function legendRowCount(count, columns) {
  * count and every text band grows with its own font size (all editable per
  * proof via `text = { captionSize, legendSize, footerSize }`).
  */
-export function docSize(panels, shapes, notes = {}, text = {}) {
+export function docSize(panels, shapes, notes = {}, text = {}, legendOrder = []) {
   const {
     captionSize = CAPTION_SIZE, legendSize = LEGEND_SIZE, footerSize = FOOTER_SIZE,
   } = text;
@@ -290,7 +299,7 @@ export function docSize(panels, shapes, notes = {}, text = {}) {
     ? Math.max(...boxes.map((b) => b.x + b.w)) + PAD
     : 640;
   const contentW = Math.max(width, 640);
-  const legend = legendLines(shapes, notes).filter((l) => l.text);
+  const legend = legendLines(shapes, notes, legendOrder).filter((l) => l.text);
   const cols = legendColumns(contentW, legend.length);
   const legendRows = legendRowCount(legend.length, cols);
   const height =
@@ -313,6 +322,7 @@ export function toSpec(proof) {
     footerSize: proof.footerSize ?? FOOTER_SIZE,
     footer: proof.footer?.trim() ? proof.footer.trim() : null, // null → default attribution line
     notes: { ...(proof.notes ?? {}) },
+    legendOrder: [...(proof.legendOrder ?? [])],
     panels: proof.panels.map((p) => ({
       id: p.id, // kept so shapes stay bound to their panel on reload
       src: p.src,
@@ -354,6 +364,32 @@ export function offsetShape(shape, d) {
     s.y = (s.y ?? 0) + d;
   }
   return s;
+}
+
+/**
+ * True when a media listing item is a satellite capture — mirrors the backend's
+ * `satellite.is_capture`. A capture *is* a media image (one file in `media/`),
+ * flagged by its sidecar `source.type`, so it surfaces in both the /media and
+ * /satellite listings; callers use this to avoid listing it under both.
+ */
+export function isSatelliteCapture(item) {
+  return (item?.source ?? {}).type === 'satellite';
+}
+
+/**
+ * Collapse picker items that share a `src` down to their first occurrence.
+ * The picker builds its list so no `src` repeats, but a duplicate key would
+ * throw Svelte's `each_key_duplicate` and blank the whole modal — so this is a
+ * cheap last-line guard around that keyed `{#each … (item.src)}`. Callers list
+ * the richer satellite entry first, so the kept one carries coords/attribution.
+ */
+export function dedupeBySrc(items) {
+  const seen = new Set();
+  return items.filter((it) => {
+    if (seen.has(it.src)) return false;
+    seen.add(it.src);
+    return true;
+  });
 }
 
 /**

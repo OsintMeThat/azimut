@@ -4,7 +4,8 @@ import {
   layoutPanels, panelsBlockHeight, panelHeight, captionBand, legendLineHeight, footerBand,
   docSize, legendColumns, legendRowCount, toSpec, offsetShape, copyShapeSpec, autoLayoutRows, TWEET_GUIDES,
   autoCoords, formatCoords, resolveSourceUrls, autoSource, autoSourceUrls,
-  proofCoordsText, proofSource,
+  proofCoordsText, proofSource, orderedFeatureColors, legendLines,
+  dedupeBySrc, isSatelliteCapture,
 } from './composer.js';
 
 // natural is [width, height]; PANEL_H drives the per-row scale.
@@ -164,6 +165,53 @@ describe('docSize', () => {
     const { height } = docSize(panels, shapes, notes);
     const legendH = 10 + 1 * LEGEND_LINE_H;
     expect(height).toBe(PAD + panelsBlockHeight(panels) + legendH + FOOTER_H + PAD);
+  });
+});
+
+describe('orderedFeatureColors + legendLines — manual legend order', () => {
+  const shapes = [
+    { kind: 'rect', color: '#ff5252', panel: 'p1' },
+    { kind: 'rect', color: '#40c4ff', panel: 'p1' },
+    { kind: 'rect', color: '#ffd740', panel: 'p1' },
+  ];
+
+  it('falls back to first-use order when no legendOrder is given', () => {
+    expect(orderedFeatureColors(shapes)).toEqual(['#ff5252', '#40c4ff', '#ffd740']);
+  });
+
+  it('respects an explicit legendOrder', () => {
+    const order = ['#ffd740', '#ff5252', '#40c4ff'];
+    expect(orderedFeatureColors(shapes, order)).toEqual(order);
+  });
+
+  it('drops colors no longer used and appends newly-used ones after the known order', () => {
+    const order = ['#40c4ff', '#gone000']; // '#gone000' has no shape anymore
+    const twoColors = shapes.slice(0, 2); // no '#ffd740' shape
+    expect(orderedFeatureColors(twoColors, order)).toEqual(['#40c4ff', '#ff5252']);
+  });
+
+  it('legendLines follows legendOrder and numbers accordingly', () => {
+    const notes = { '#ff5252': 'road', '#40c4ff': 'river', '#ffd740': 'bridge' };
+    const order = ['#ffd740', '#40c4ff', '#ff5252'];
+    const lines = legendLines(shapes, notes, order);
+    expect(lines.map((l) => l.color)).toEqual(order);
+    expect(lines.map((l) => l.n)).toEqual([1, 2, 3]);
+    expect(lines.map((l) => l.text)).toEqual(['bridge', 'river', 'road']);
+  });
+});
+
+describe('docSize — legendOrder does not affect sizing', () => {
+  it('produces the same height regardless of legend order', () => {
+    const panels = [landscape(1000, 500)];
+    const shapes = [
+      { kind: 'rect', color: '#ff5252', panel: 'p1' },
+      { kind: 'rect', color: '#40c4ff', panel: 'p1' },
+    ];
+    const notes = { '#ff5252': 'road', '#40c4ff': 'river' };
+    const a = docSize(panels, shapes, notes, {}, []);
+    const b = docSize(panels, shapes, notes, {}, ['#40c4ff', '#ff5252']);
+    expect(b.height).toBe(a.height);
+    expect(b.legend.map((l) => l.color)).toEqual(['#40c4ff', '#ff5252']);
   });
 });
 
@@ -414,5 +462,65 @@ describe('tweet guides', () => {
   it('exposes landscape and portrait crop aspects', () => {
     expect(TWEET_GUIDES['16:9']).toBeCloseTo(16 / 9);
     expect(TWEET_GUIDES['4:5']).toBeCloseTo(0.8);
+  });
+});
+
+describe('dedupeBySrc — picker items collapse on shared src', () => {
+  // A satellite capture is registered as a media image too, so /satellite and
+  // /media surface the same path. Without this collapse the keyed picker each
+  // block throws `each_key_duplicate` and "Add panel" silently does nothing.
+  it('drops later items that repeat an earlier src', () => {
+    const items = [
+      { src: 'media/sat_1.png', kind: 'satellite' },
+      { src: 'media/photo.jpg', kind: 'media' },
+      { src: 'media/sat_1.png', kind: 'media' }, // same file, from the media list
+    ];
+    const out = dedupeBySrc(items);
+    expect(out.map((i) => i.src)).toEqual(['media/sat_1.png', 'media/photo.jpg']);
+  });
+
+  it('keeps the first occurrence, so the richer satellite entry wins over media', () => {
+    const items = [
+      { src: 'media/sat_1.png', kind: 'satellite', meta: { lat: 1 } },
+      { src: 'media/sat_1.png', kind: 'media', meta: {} },
+    ];
+    const out = dedupeBySrc(items);
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe('satellite');
+  });
+
+  it('produces a duplicate-free set of keys (the picker each-key invariant)', () => {
+    const items = [
+      { src: 'a' }, { src: 'b' }, { src: 'a' }, { src: 'c' }, { src: 'b' },
+    ];
+    const keys = dedupeBySrc(items).map((i) => i.src);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys).toEqual(['a', 'b', 'c']);
+  });
+
+  it('leaves an already-unique list untouched', () => {
+    const items = [{ src: 'x' }, { src: 'y' }, { src: 'z' }];
+    expect(dedupeBySrc(items)).toEqual(items);
+  });
+});
+
+describe('isSatelliteCapture — a capture is a media image flagged by its source', () => {
+  it('is true for a media item whose source.type is satellite', () => {
+    expect(isSatelliteCapture({ kind: 'image', source: { type: 'satellite' } })).toBe(true);
+  });
+
+  it('is false for an ordinary image, and tolerates a missing source', () => {
+    expect(isSatelliteCapture({ kind: 'image', source: { type: 'download' } })).toBe(false);
+    expect(isSatelliteCapture({ kind: 'image' })).toBe(false);
+    expect(isSatelliteCapture({})).toBe(false);
+  });
+
+  it('lets the picker drop captures from the media half so nothing double-lists', () => {
+    const media = [
+      { path: 'media/sat_1.png', kind: 'image', source: { type: 'satellite' } },
+      { path: 'media/photo.jpg', kind: 'image', source: { type: 'download' } },
+    ];
+    const kept = media.filter((m) => m.kind === 'image' && !isSatelliteCapture(m));
+    expect(kept.map((m) => m.path)).toEqual(['media/photo.jpg']);
   });
 });
