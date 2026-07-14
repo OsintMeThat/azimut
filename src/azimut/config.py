@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +25,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Each: {"id", "label", "url" ({x}/{y}/{z} template), "attribution", "max_zoom"}
     "tile_providers": [],
     # Optional user-supplied API keys, keyed by provider id. Never required.
+    # Built-in keyed providers (Mapbox, Google) read their token from here:
+    # "mapbox": "pk....", "google": "AIza...".
     "api_keys": {},
+    # Per-provider monthly tile-request counters: {"<provider_id>": {"YYYY-MM": count}}.
+    # Local bookkeeping only, for billed keyed providers (Mapbox, Google).
+    "usage": {},
 }
 
 
@@ -67,3 +74,27 @@ def save_settings(settings: dict[str, Any]) -> None:
     settings_path().write_text(
         json.dumps(settings, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
+
+
+def month_key(when: datetime | None = None) -> str:
+    """The usage-counter bucket for a moment in time: "YYYY-MM" (UTC)."""
+    return (when or datetime.now(timezone.utc)).strftime("%Y-%m")
+
+
+_usage_lock = threading.Lock()  # tile proxy bumps the counter from many threads
+
+
+def record_usage(meter: str, count: int = 1, when: datetime | None = None) -> int:
+    """Bump a provider's tile counter for the month; returns the new total.
+
+    Local bookkeeping only (docs/KEYED_PROVIDERS.md §6): billed keyed providers
+    (Mapbox, Google) get a per-month tally so the user can watch their quota.
+    No telemetry — the counter never leaves settings.json.
+    """
+    with _usage_lock:
+        settings = load_settings()
+        per_month = settings.setdefault("usage", {}).setdefault(meter, {})
+        bucket = month_key(when)
+        per_month[bucket] = int(per_month.get(bucket, 0)) + int(count)
+        save_settings(settings)
+        return per_month[bucket]

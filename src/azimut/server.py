@@ -18,7 +18,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Azimut", version=__version__, docs_url="/api/docs")
 
-    from .api import cases, drafts, files, inspect, media, proofs, satellite
+    from .api import cases, drafts, files, inspect, media, proofs, satellite, settings
 
     app.include_router(cases.router)
     app.include_router(media.router)
@@ -27,6 +27,7 @@ def create_app() -> FastAPI:
     app.include_router(proofs.router)
     app.include_router(drafts.router)
     app.include_router(files.router)
+    app.include_router(settings.router)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
