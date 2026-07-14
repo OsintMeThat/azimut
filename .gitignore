@@ -78,6 +78,7 @@ src/azimut/static/
 # Local tooling / assistant configs
 CLAUDE.md
 .claude/
+.cheatsheet
 
 # PyInstaller local output
 dist-bin/

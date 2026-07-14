@@ -5,8 +5,9 @@
 #   2. Install the package so its data is discoverable:  pip install .
 #   3. Build:                                            pyinstaller packaging/azimut.spec
 #
-# The bundled UI (azimut/static/**) and uvicorn / yt-dlp submodules are collected
-# explicitly because they are loaded dynamically and PyInstaller can't see them.
+# The bundled UI (azimut/static/**) and uvicorn / yt-dlp / gallery-dl submodules
+# are collected explicitly because they are loaded dynamically and PyInstaller
+# can't see them.
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -14,6 +15,7 @@ hiddenimports = (
     collect_submodules("uvicorn")
     + collect_submodules("azimut")
     + collect_submodules("yt_dlp")
+    + collect_submodules("gallery_dl")
 )
 
 # Grabs azimut/static/** (index.html, assets, favicon) from the installed package.

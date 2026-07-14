@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "azimut"
-version = "0.1.0"
+version = "0.1.1"
 description = "The OSINT investigator's workbench — local-first media, geolocation proofs and case management."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,6 +26,8 @@ dependencies = [
     "httpx>=0.27",
     "pillow>=10.3",
     "yt-dlp>=2024.4.9",
+    "gallery-dl>=1.27",
+    "requests>=2.31",
     "python-multipart>=0.0.9",
 ]
 
