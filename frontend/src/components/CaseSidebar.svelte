@@ -1,7 +1,7 @@
 <script>
   import { api } from '../lib/api.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
-  import { TOOL_GROUPS, groupKey } from '../lib/savedGrouping.js';
+  import { buildTree, subtreeCount, flattenPaths, folderOf } from '../lib/folderTree.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
@@ -50,7 +50,7 @@
   let caseNotesLoadedFor = $state(null);
   let saveTimer;
   let saved = $state(true);
-  let section = $state({ notes: false, saved: true, mywork: true });
+  let section = $state({ notes: false, suggestions: true, mywork: true });
 
   $effect(() => {
     const id = caseState.current?.id;
@@ -82,8 +82,6 @@
   const entities = $derived(caseState.current?.entities ?? []);
   const suggested = $derived(entities.filter((e) => e.provenance?.status === 'suggested'));
   const confirmed = $derived(entities.filter((e) => e.provenance?.status !== 'suggested'));
-
-  const folderOf = (e) => e.attrs?.folder || null;
 
   async function confirmEntity(entity) {
     await api.patch(`/api/cases/${caseState.current.id}/entities/${entity.id}`, {
@@ -173,26 +171,6 @@
     uiState.tool = 'satellite';
   }
 
-  // ── Saved work: every artifact, grouped by the tool that produced it ──────
-  // The grouping is derived from provenance.by — the honest record of origin —
-  // so it fills itself as you work and needs no manual upkeep. See
-  // lib/savedGrouping.js for the actual bucketing rule (media/captures always
-  // go under Media Library, regardless of which tool filed them).
-  const savedGroups = $derived.by(() => {
-    const buckets = new Map(TOOL_GROUPS.map(([k]) => [k, []]));
-    for (const e of confirmed) buckets.get(groupKey(e)).push(e);
-    return TOOL_GROUPS.map(([key, label, icon]) => ({
-      key,
-      label,
-      icon,
-      items: buckets.get(key),
-    })).filter((g) => g.items.length > 0);
-  });
-
-  let groupOpen = $state({}); // group key -> bool (absent = collapsed)
-  const isGroupOpen = (k) => groupOpen[k] === true;
-  const toggleGroup = (k) => (groupOpen[k] = !isGroupOpen(k));
-
   // ── My work: the analyst's own nested folder tree ('/'-separated paths) ────
   let newFolder = $state(''); // top-level create input
   let addingUnder = $state(undefined); // folder path currently gaining a child
@@ -202,44 +180,33 @@
   let dragOverFolder = $state(undefined); // folder path being hovered
 
   const caseFolders = $derived(caseState.current?.folders ?? []);
-  const filedCount = $derived(confirmed.filter((e) => folderOf(e)).length);
-
-  // Build a nested tree from flat '/'-separated folder paths + filed entities.
-  // Entities with no folder live only in Saved work, so they are ignored here.
-  function buildTree(folders, items) {
-    const root = { name: '', path: '', children: new Map(), entities: [] };
-    const ensure = (path) => {
-      let node = root, acc = '';
-      for (const seg of path.split('/')) {
-        acc = acc ? `${acc}/${seg}` : seg;
-        if (!node.children.has(seg))
-          node.children.set(seg, { name: seg, path: acc, children: new Map(), entities: [] });
-        node = node.children.get(seg);
-      }
-      return node;
-    };
-    for (const f of folders) if (f) ensure(f);
-    for (const e of items) {
-      const f = folderOf(e);
-      if (f) ensure(f).entities.push(e);
-    }
-    const sortNodes = (map) =>
-      [...map.values()]
-        .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
-        .map((n) => ({ ...n, children: sortNodes(n.children) }));
-    return sortNodes(root.children);
-  }
 
   const tree = $derived(buildTree(caseFolders, confirmed));
-  const allFolders = $derived(
-    (function flatten(nodes) {
-      return nodes.flatMap((n) => [n.path, ...flatten(n.children)]);
-    })(tree)
+  const allFolders = $derived(flattenPaths(tree));
+  // everything not yet filed — the inbox you file (or inspect) items from
+  const unfiled = $derived(confirmed.filter((e) => !folderOf(e)));
+  let unfiledOpen = $state(false);
+  let unfiledTypeFilter = $state(null);
+  const TYPE_LABEL = {
+    media: 'Media', capture: 'Satellite', note: 'Notes', proof: 'Proofs',
+    post: 'Posts', place: 'Places', 'inspect-session': 'Inspect',
+  };
+  // chip counts, in a stable order (declaration order of TYPE_LABEL, then anything unmapped)
+  const unfiledTypes = $derived.by(() => {
+    const counts = new Map();
+    for (const e of unfiled) counts.set(e.type, (counts.get(e.type) ?? 0) + 1);
+    return Object.keys(TYPE_LABEL)
+      .filter((t) => counts.has(t))
+      .concat([...counts.keys()].filter((t) => !(t in TYPE_LABEL)))
+      .map((t) => ({ type: t, label: TYPE_LABEL[t] ?? t, count: counts.get(t) }));
+  });
+  const unfiledFiltered = $derived(
+    unfiledTypeFilter ? unfiled.filter((e) => e.type === unfiledTypeFilter) : unfiled
   );
-
-  function subtreeCount(node) {
-    return node.entities.length + node.children.reduce((s, c) => s + subtreeCount(c), 0);
-  }
+  $effect(() => {
+    // drop a stale filter when its type disappears from Unfiled (e.g. filed away)
+    if (unfiledTypeFilter && !unfiled.some((e) => e.type === unfiledTypeFilter)) unfiledTypeFilter = null;
+  });
 
   const isExpanded = (path) => expanded[path] === true;
   function toggle(path) { expanded[path] = !isExpanded(path); }
@@ -323,11 +290,11 @@
   }
 
   // Delete everywhere: removes the entity and its underlying file(s). Used from
-  // Saved work (and the note modal) — irreversible, danger tone.
+  // the details panel (and the note modal) — irreversible, danger tone.
   function askDeleteEverywhere(entity, onDone) {
     confirmState = {
       title: 'Delete everywhere?',
-      message: `“${entity.label}” will be removed from Saved work and My work.`,
+      message: `“${entity.label}” will be removed from the case and its tool.`,
       detail: FILE_BACKED.has(entity.type)
         ? 'This permanently deletes the underlying file(s) on disk — it cannot be undone.'
         : 'This permanently removes it from the case — it cannot be undone.',
@@ -343,12 +310,12 @@
     };
   }
 
-  // Remove from My work: just clears the filing. The item stays in Saved work.
+  // Remove from My work: just clears the filing. The item stays in its tool.
   function askRemoveFromMyWork(entity) {
     confirmState = {
       title: 'Remove from My work?',
-      message: `“${entity.label}” goes back to Saved work — nothing is deleted.`,
-      detail: 'It stays available under its tool in Saved work. Only your filing here is cleared.',
+      message: `“${entity.label}” is unfiled. Nothing is deleted.`,
+      detail: 'It stays available in the case and its tool. Only your filing here is cleared.',
       confirmLabel: 'Remove from My work',
       tone: 'default',
       icon: 'folderMinus',
@@ -368,7 +335,7 @@
       message: subs
         ? `“${path}” and its ${subs} subfolder(s) will be removed from My work.`
         : `“${path}” will be removed from My work.`,
-      detail: 'Items inside go back to Saved work — no files are deleted.',
+      detail: 'Items inside are unfiled. No files are deleted.',
       confirmLabel: 'Remove folder',
       tone: 'default',
       icon: 'folderMinus',
@@ -382,15 +349,20 @@
     };
   }
 
-  // ── entity info / edit modal ──────────────────────────────────────────────
+  // ── details panel (selection info + editor, docs/UI.md §4) ────────────────
   let infoEntity = $state(null);
   let infoData = $state(null); // resolved media/satellite listing item (or null)
   let infoLoading = $state(false);
   // editable fields (title + notes), like the dedicated tool's editor
   let infoTitle = $state('');
   let infoNotes = $state('');
+  let infoFolder = $state('');
   let infoSaving = $state(false);
-  // which types can be edited straight from the sidebar
+  let detailsEl = $state(null);
+  const detailsFilePath = $derived(
+    infoData?.path ?? (infoEntity?.type === 'capture' ? infoEntity.attrs?.path : null)
+  );
+  // which types get title/notes editors straight from the sidebar
   const EDITABLE = new Set(['capture', 'place', 'media']);
 
   async function openInfo(entity) {
@@ -398,6 +370,8 @@
     infoData = null;
     infoTitle = entity.label ?? '';
     infoNotes = entity.attrs?.notes ?? '';
+    infoFolder = folderOf(entity) ?? '';
+    requestAnimationFrame(() => detailsEl?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     const endpoint =
       entity.type === 'media' ? 'media' : entity.type === 'capture' ? 'satellite' : null;
     if (endpoint && entity.attrs?.path) {
@@ -438,15 +412,20 @@
           title: infoTitle.trim(),
           notes: infoNotes,
         });
-      } else {
+      } else if (EDITABLE.has(infoEntity.type)) {
         // place (or any bare entity): retitle + note on the entity itself
         await api.patch(`/api/cases/${cid}/entities/${infoEntity.id}`, {
           label: infoTitle.trim() || infoEntity.label,
           attrs: { notes: infoNotes.trim() },
         });
       }
-      infoEntity = null;
+      // filing is part of the same Save: My work folder from the picker
+      if ((infoFolder.trim() || '') !== (folderOf(infoEntity) ?? '')) {
+        await assignFolder(infoEntity, infoFolder.trim());
+      }
       await reloadCase();
+      // the panel stays open on the fresh entity (reload replaced the objects)
+      infoEntity = (caseState.current?.entities ?? []).find((x) => x.id === infoEntity.id) ?? null;
       toast('Saved', 'ok', 1600);
     } catch (e) {
       toast(e.message, 'danger');
@@ -515,10 +494,7 @@
     <div class="empty">
       <div class="empty-icon"><Icon name="folder" size={34} /></div>
       <h3>No case open</h3>
-      <p>
-        Use any tool right away — a scratch session is created when needed. Open or create a case
-        to keep an investigation together.
-      </p>
+      <p>Tools work without one. Create a case to keep the investigation together.</p>
     </div>
   {:else}
     <div class="case-head">
@@ -543,22 +519,14 @@
         ></textarea>
       {/if}
 
-      <!-- 2 · Saved work (auto — grouped by the tool that produced each item) -->
-      <div class="section-head-row">
-        <button class="section-head" onclick={() => (section.saved = !section.saved)}>
-          <Icon name={section.saved ? 'chevronDown' : 'chevronRight'} size={13} />
-          <span>Saved work</span>
-          <span class="count">{confirmed.length}</span>
+      <!-- 2 · Suggestions (tool-suggested entities: confirm or dismiss) -->
+      {#if suggested.length > 0}
+        <button class="section-head" onclick={() => (section.suggestions = !section.suggestions)}>
+          <Icon name={section.suggestions ? 'chevronDown' : 'chevronRight'} size={13} />
+          <span>Suggestions</span>
+          <span class="count">{suggested.length}</span>
         </button>
-        <button class="btn btn-ghost btn-sm new-note-btn" title="New note" onclick={openNewNote}>
-          <Icon name="plus" size={13} /><Icon name="note" size={13} />
-        </button>
-      </div>
-
-      {#if section.saved}
-        <!-- suggested entities (pinned — confirm or dismiss) -->
-        {#if suggested.length > 0}
-          <div class="suggest-note">Suggested — confirm or dismiss:</div>
+        {#if section.suggestions}
           {#each suggested as e (e.id)}
             <div class="entity suggested">
               <Icon name={entityIcon(e)} size={14} />
@@ -575,34 +543,19 @@
             </div>
           {/each}
         {/if}
-
-        <div class="tree">
-          {#each savedGroups as g (g.key)}
-            <button class="grow" onclick={() => toggleGroup(g.key)}>
-              <Icon name={isGroupOpen(g.key) ? 'chevronDown' : 'chevronRight'} size={12} />
-              <Icon name={g.icon} size={13} />
-              <span class="fname">{g.label}</span>
-              <span class="fcount">{g.items.length}</span>
-            </button>
-            {#if isGroupOpen(g.key)}
-              {#each g.items as e (e.id)}
-                {@render entityRow(e, 1, 'saved')}
-              {/each}
-            {/if}
-          {/each}
-
-          {#if savedGroups.length === 0 && suggested.length === 0}
-            <div class="none">Tools file what you save here as you work.</div>
-          {/if}
-        </div>
       {/if}
 
-      <!-- 3 · My work (manual — your own folders, filled by drag & drop) -->
-      <button class="section-head" onclick={() => (section.mywork = !section.mywork)}>
-        <Icon name={section.mywork ? 'chevronDown' : 'chevronRight'} size={13} />
-        <span>My work</span>
-        <span class="count">{filedCount}</span>
-      </button>
+      <!-- 3 · My work (your own folders; file items from their details panel) -->
+      <div class="section-head-row">
+        <button class="section-head" onclick={() => (section.mywork = !section.mywork)}>
+          <Icon name={section.mywork ? 'chevronDown' : 'chevronRight'} size={13} />
+          <span>My work</span>
+          <span class="count">{confirmed.length}</span>
+        </button>
+        <button class="btn btn-ghost btn-sm new-note-btn" title="New note" onclick={openNewNote}>
+          <Icon name="plus" size={13} /><Icon name="note" size={13} />
+        </button>
+      </div>
 
       {#if section.mywork}
         <!-- create a top-level folder -->
@@ -618,15 +571,199 @@
             {@render folderNode(node, 0)}
           {/each}
 
-          {#if tree.length === 0}
+          {#if unfiled.length > 0}
+            <div
+              class="frow"
+              role="button"
+              tabindex="0"
+              onclick={() => (unfiledOpen = !unfiledOpen)}
+              onkeydown={(e) => e.key === 'Enter' && (unfiledOpen = !unfiledOpen)}
+            >
+              <Icon name={unfiledOpen ? 'chevronDown' : 'chevronRight'} size={12} />
+              <Icon name="layers" size={13} />
+              <span class="fname">Unfiled</span>
+              <span class="fcount">{unfiled.length}</span>
+            </div>
+            {#if unfiledOpen}
+              {#if unfiledTypes.length > 1}
+                <div class="chip-row">
+                  {#each unfiledTypes as t (t.type)}
+                    <button
+                      class="chip"
+                      class:active={unfiledTypeFilter === t.type}
+                      onclick={() => (unfiledTypeFilter = unfiledTypeFilter === t.type ? null : t.type)}
+                    >
+                      {t.label}<span class="chip-count">{t.count}</span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+              {#each unfiledFiltered as e (e.id)}
+                {@render entityRow(e, 1)}
+              {/each}
+            {/if}
+          {/if}
+
+          {#if tree.length === 0 && unfiled.length === 0}
             <div class="none">
-              Create a folder, then drag items from Saved work here to organize your investigation.
+              Everything you save lands here; create folders to organize it.
             </div>
           {/if}
         </div>
-        {#if tree.length > 0}
-          <div class="hint">Drag an item from Saved work onto a folder to file it here.</div>
-        {/if}
+      {/if}
+
+
+      <!-- 4 · Details (selection info + editor — docs/UI.md §4) -->
+      {#if infoEntity}
+        <div bind:this={detailsEl}>
+        <div class="section-head-row">
+          <div class="section-head static">
+            <Icon name="note" size={13} />
+            <span>Details</span>
+          </div>
+          <button class="btn btn-ghost btn-sm" title="Close details" onclick={() => (infoEntity = null)}>
+            <Icon name="x" size={13} />
+          </button>
+        </div>
+        <div class="details">
+          {#if infoLoading}
+            <div class="info-loading">Loading…</div>
+          {/if}
+
+          {#if infoData?.kind === 'image' && infoData.thumbnail}
+            <div class="info-preview">
+              <img src={`/files/${caseState.current.id}/${infoData.path}`} alt={infoEntity.label} />
+            </div>
+          {:else if infoData?.kind === 'video'}
+            <div class="info-preview">
+              <!-- svelte-ignore a11y_media_has_caption -->
+              <video src={`/files/${caseState.current.id}/${infoData.path}`} controls preload="metadata"></video>
+            </div>
+          {:else if infoEntity.type === 'capture' && infoEntity.attrs?.path}
+            <div class="info-preview">
+              <img src={`/files/${caseState.current.id}/${infoEntity.attrs.path}`} alt={infoEntity.label} />
+            </div>
+          {/if}
+
+          {#if EDITABLE.has(infoEntity.type)}
+            <label class="modal-label" for="info-title">Title</label>
+            <input
+              id="info-title"
+              class="input"
+              bind:value={infoTitle}
+              placeholder={infoEntity.attrs?.coords ?? 'Title'}
+            />
+          {:else}
+            <div class="details-title">{infoEntity.label}</div>
+          {/if}
+
+          <div class="info-rows">
+            <div class="info-row"><span class="info-k">Type</span><span>{infoEntity.type}</span></div>
+            {#if infoEntity.provenance?.by}
+              <div class="info-row"><span class="info-k">Created by</span><span>{infoEntity.provenance.by}</span></div>
+            {/if}
+            {#if infoEntity.provenance?.at}
+              <div class="info-row"><span class="info-k">Created</span><span class="mono">{infoEntity.provenance.at.slice(0, 10)}</span></div>
+            {/if}
+            {#if infoEntity.type === 'media' && infoData}
+              <div class="info-row"><span class="info-k">Kind</span><span>{infoData.kind}</span></div>
+              <div class="info-row"><span class="info-k">Size</span><span>{fmtSize(infoData.size)}</span></div>
+              {#if infoData.sha256}
+                <div class="info-row"><span class="info-k">SHA-256</span><span class="mono hash" title={infoData.sha256}>{infoData.sha256}</span></div>
+              {/if}
+              {#if infoData.source?.title}
+                <div class="info-row"><span class="info-k">Title</span><span>{infoData.source.title}</span></div>
+              {/if}
+              {#if infoData.source?.uploader}
+                <div class="info-row"><span class="info-k">Uploader</span><span>{infoData.source.uploader}</span></div>
+              {/if}
+              {#if infoData.source?.upload_date}
+                <div class="info-row"><span class="info-k">Published</span><span class="mono">{infoData.source.upload_date}</span></div>
+              {/if}
+              {#if infoData.source?.webpage_url ?? infoData.source?.url}
+                <div class="info-row">
+                  <span class="info-k">Source</span>
+                  <a class="mono src" href={infoData.source.webpage_url ?? infoData.source.url} target="_blank" rel="noreferrer">
+                    {infoData.source.webpage_url ?? infoData.source.url}
+                  </a>
+                </div>
+              {/if}
+            {:else if infoEntity.type === 'capture'}
+              {#if infoData?.provider_label}
+                <div class="info-row"><span class="info-k">Provider</span><span>{infoData.provider_label}</span></div>
+              {/if}
+              {#if infoEntity.attrs?.zoom != null}
+                <div class="info-row"><span class="info-k">Zoom</span><span>z{infoEntity.attrs.zoom}</span></div>
+              {/if}
+              {#if infoData?.fetched_at}
+                <div class="info-row"><span class="info-k">Captured</span><span class="mono">{infoData.fetched_at.slice(0, 10)}</span></div>
+              {/if}
+              {#if infoData?.imagery_date}
+                <div class="info-row"><span class="info-k">Imagery</span><span class="mono">{infoData.imagery_date}</span></div>
+              {/if}
+            {:else if infoEntity.attrs?.content}
+              <div class="info-note-body">{infoEntity.attrs.content}</div>
+            {/if}
+            {#if infoEntity.attrs?.coords}
+              <div class="info-row"><span class="info-k">Coords</span><span class="mono">{infoEntity.attrs.coords}</span></div>
+            {/if}
+          </div>
+
+          {#if EDITABLE.has(infoEntity.type)}
+            <label class="modal-label" for="info-notes">Notes</label>
+            <textarea
+              id="info-notes"
+              class="textarea"
+              rows="3"
+              bind:value={infoNotes}
+              placeholder="Add observations, links, context…"
+            ></textarea>
+          {/if}
+
+          <label class="modal-label" for="info-folder">Folder (My work)</label>
+          <input
+            id="info-folder"
+            class="input"
+            bind:value={infoFolder}
+            placeholder="none"
+            list="info-folder-suggestions"
+          />
+          <datalist id="info-folder-suggestions">
+            {#each allFolders as f (f)}<option value={f}></option>{/each}
+          </datalist>
+
+          <div class="details-actions">
+            {#if detailsFilePath}
+              <a class="btn btn-ghost btn-sm" href={`/files/${caseState.current.id}/${detailsFilePath}`} target="_blank" rel="noreferrer">
+                <Icon name="external" size={13} /> Open file
+              </a>
+            {/if}
+            {#if ENTITY_TOOL[infoEntity.type]}
+              <button class="btn btn-ghost btn-sm" onclick={() => openEntity(infoEntity)}>
+                <Icon name="arrowRight" size={13} /> Open in tool
+              </button>
+            {/if}
+            {#if infoEntity.type === 'capture' && infoEntity.attrs?.lat != null}
+              <button class="btn btn-ghost btn-sm" onclick={() => gotoCapture(infoEntity)}>
+                <Icon name="crosshair" size={13} /> Go to coords
+              </button>
+            {/if}
+          </div>
+          <div class="details-actions">
+            <button
+              class="btn btn-ghost btn-sm del"
+              title="Delete everywhere: removes the item and its file(s) from the case"
+              onclick={() => askDeleteEverywhere(infoEntity, () => (infoEntity = null))}
+            >
+              <Icon name="trash" size={13} /> Delete
+            </button>
+            <div style="flex:1"></div>
+            <button class="btn btn-primary btn-sm" onclick={saveInfo} disabled={infoSaving}>
+              {infoSaving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+        </div>
       {/if}
 
     </div>
@@ -695,13 +832,13 @@
       {@render folderNode(child, depth + 1)}
     {/each}
     {#each node.entities as e (e.id)}
-      {@render entityRow(e, depth + 1, 'mywork')}
+      {@render entityRow(e, depth + 1)}
     {/each}
   {/if}
 {/snippet}
 
-<!-- one entity row. zone 'saved' → delete everywhere; 'mywork' → unfile only -->
-{#snippet entityRow(e, depth, zone)}
+<!-- one entity row (My work): activate, info, unfile -->
+{#snippet entityRow(e, depth)}
   {@const isClickable = e.type === 'note' || e.type === 'capture' || !!ENTITY_TOOL[e.type]}
   <div
     class="entity"
@@ -750,21 +887,13 @@
     >
       <Icon name="note" size={13} />
     </button>
-    {#if zone === 'mywork'}
+    {#if folderOf(e)}
       <button
         class="btn btn-ghost btn-sm act del"
-        title="Remove from My work"
+        title="Unfile from this folder"
         onclick={(ev) => { ev.stopPropagation(); askRemoveFromMyWork(e); }}
       >
         <Icon name="folderMinus" size={13} />
-      </button>
-    {:else}
-      <button
-        class="btn btn-ghost btn-sm act del"
-        title="Delete everywhere"
-        onclick={(ev) => { ev.stopPropagation(); askDeleteEverywhere(e); }}
-      >
-        <Icon name="trash" size={13} />
       </button>
     {/if}
   </div>
@@ -825,131 +954,6 @@
   </Modal>
 {/if}
 
-<!-- Entity info modal (rich details, esp. media) -->
-{#if infoEntity}
-  <Modal title={infoEntity.label} onclose={() => (infoEntity = null)} width="520px">
-    {#if infoLoading}
-      <div class="info-loading">Loading…</div>
-    {/if}
-
-    {#if infoData?.kind === 'image' && infoData.thumbnail}
-      <div class="info-preview">
-        <img src={`/files/${caseState.current.id}/${infoData.path}`} alt={infoEntity.label} />
-      </div>
-    {:else if infoData?.kind === 'video'}
-      <div class="info-preview">
-        <!-- svelte-ignore a11y_media_has_caption -->
-        <video src={`/files/${caseState.current.id}/${infoData.path}`} controls preload="metadata"></video>
-      </div>
-    {:else if infoEntity.type === 'capture' && infoEntity.attrs?.path}
-      <div class="info-preview">
-        <img src={`/files/${caseState.current.id}/${infoEntity.attrs.path}`} alt={infoEntity.label} />
-      </div>
-    {/if}
-
-    {#if EDITABLE.has(infoEntity.type)}
-      <label class="modal-label" for="info-title">Title</label>
-      <input
-        id="info-title"
-        class="input"
-        bind:value={infoTitle}
-        placeholder={infoEntity.attrs?.coords ?? 'Title'}
-      />
-    {/if}
-
-    <div class="info-rows">
-      <div class="info-row"><span class="info-k">Type</span><span>{infoEntity.type}</span></div>
-      {#if folderOf(infoEntity)}
-        <div class="info-row"><span class="info-k">Folder</span><span>{folderOf(infoEntity)}</span></div>
-      {/if}
-      {#if infoEntity.type === 'media' && infoData}
-        <div class="info-row"><span class="info-k">Kind</span><span>{infoData.kind}</span></div>
-        <div class="info-row"><span class="info-k">Size</span><span>{fmtSize(infoData.size)}</span></div>
-        {#if infoData.added_at}
-          <div class="info-row"><span class="info-k">Added</span><span>{infoData.added_at.slice(0, 10)}</span></div>
-        {/if}
-        {#if infoData.sha256}
-          <div class="info-row"><span class="info-k">SHA-256</span><span class="mono hash" title={infoData.sha256}>{infoData.sha256}</span></div>
-        {/if}
-        {#if infoData.source?.title}
-          <div class="info-row"><span class="info-k">Title</span><span>{infoData.source.title}</span></div>
-        {/if}
-        {#if infoData.source?.uploader}
-          <div class="info-row"><span class="info-k">Uploader</span><span>{infoData.source.uploader}</span></div>
-        {/if}
-        {#if infoData.source?.upload_date}
-          <div class="info-row"><span class="info-k">Published</span><span class="mono">{infoData.source.upload_date}</span></div>
-        {/if}
-        {#if infoData.source?.duration}
-          <div class="info-row"><span class="info-k">Duration</span><span>{infoData.source.duration}s</span></div>
-        {/if}
-        {#if infoData.source?.webpage_url ?? infoData.source?.url}
-          <div class="info-row">
-            <span class="info-k">Source</span>
-            <a class="mono src" href={infoData.source.webpage_url ?? infoData.source.url} target="_blank" rel="noreferrer">
-              {infoData.source.webpage_url ?? infoData.source.url}
-            </a>
-          </div>
-        {/if}
-      {:else if infoEntity.type === 'capture'}
-        {#if infoData?.provider_label}
-          <div class="info-row"><span class="info-k">Provider</span><span>{infoData.provider_label}</span></div>
-        {/if}
-        {#if infoEntity.attrs?.zoom != null}
-          <div class="info-row"><span class="info-k">Zoom</span><span>z{infoEntity.attrs.zoom}</span></div>
-        {/if}
-        {#if infoData?.fetched_at}
-          <div class="info-row"><span class="info-k">Captured</span><span class="mono">{infoData.fetched_at.slice(0, 10)}</span></div>
-        {/if}
-        {#if infoData?.imagery_date}
-          <div class="info-row"><span class="info-k">Imagery</span><span class="mono">{infoData.imagery_date}</span></div>
-        {/if}
-      {:else if infoEntity.attrs?.content}
-        <div class="info-note-body">{infoEntity.attrs.content}</div>
-      {/if}
-      {#if infoEntity.attrs?.coords}
-        <div class="info-row"><span class="info-k">Coords</span><span class="mono">{infoEntity.attrs.coords}</span></div>
-      {/if}
-    </div>
-
-    {#if EDITABLE.has(infoEntity.type)}
-      <label class="modal-label" for="info-notes" style="margin-top:10px">Notes</label>
-      <textarea
-        id="info-notes"
-        class="textarea"
-        rows="4"
-        bind:value={infoNotes}
-        placeholder="Add observations, links, context…"
-      ></textarea>
-    {/if}
-
-    {@const filePath = infoData?.path ?? (infoEntity.type === 'capture' ? infoEntity.attrs?.path : null)}
-    <div class="modal-row">
-      {#if filePath}
-        <a class="btn btn-ghost btn-sm" href={`/files/${caseState.current.id}/${filePath}`} target="_blank" rel="noreferrer">
-          <Icon name="external" size={13} /> Open file
-        </a>
-      {/if}
-      {#if ENTITY_TOOL[infoEntity.type]}
-        <button class="btn btn-ghost btn-sm" onclick={() => { openEntity(infoEntity); infoEntity = null; }}>
-          <Icon name="arrowRight" size={13} /> Open in tool
-        </button>
-      {/if}
-      {#if infoEntity.type === 'capture' && infoEntity.attrs?.lat != null}
-        <button class="btn btn-ghost btn-sm" onclick={() => { gotoCapture(infoEntity); infoEntity = null; }}>
-          <Icon name="crosshair" size={13} /> Go to coords
-        </button>
-      {/if}
-      <div style="flex:1"></div>
-      <button class="btn" onclick={() => (infoEntity = null)}>Close</button>
-      {#if EDITABLE.has(infoEntity.type)}
-        <button class="btn btn-primary" onclick={saveInfo} disabled={infoSaving}>
-          {infoSaving ? 'Saving…' : 'Save'}
-        </button>
-      {/if}
-    </div>
-  </Modal>
-{/if}
 
 <!-- Confirmation dialog (delete everywhere / remove from My work / remove folder) -->
 {#if confirmState}
@@ -1020,19 +1024,6 @@
     width: calc(100% - 8px);
   }
   /* tool group header (Saved work) */
-  .grow {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    width: 100%;
-    padding: 6px 8px;
-    border-radius: var(--r-sm);
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-    text-align: left;
-  }
-  .grow:hover { background: var(--bg-2); color: var(--text-1); }
-  .grow > :global(svg:first-child) { color: var(--text-3); flex-shrink: 0; }
   /* folder tree */
   .new-folder { display: flex; gap: 6px; padding: 2px 8px 8px; }
   .new-folder.sub { padding: 2px 8px 4px; }
@@ -1059,8 +1050,23 @@
   .fact { opacity: 0; color: var(--text-3); display: flex; padding: 2px; border-radius: 4px; flex-shrink: 0; }
   .fact:hover { color: var(--text-1); }
   .fdel:hover { color: var(--danger, #e55); }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 8px 6px 22px; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: var(--r-sm);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    background: var(--bg-2);
+    color: var(--text-2);
+    border: 1px solid transparent;
+  }
+  .chip:hover { color: var(--text-1); }
+  .chip.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  .chip-count { color: inherit; opacity: 0.65; font-weight: 600; }
   .frow:hover .fact { opacity: 1; }
-  .hint { font-size: var(--fs-xs); color: var(--text-3); padding: 2px 12px 8px; font-style: italic; }
   /* entities */
   .entity {
     display: flex;
@@ -1097,10 +1103,28 @@
   .act { opacity: 0; flex-shrink: 0; }
   .entity:hover .act { opacity: 1; }
   .del:hover { color: var(--danger, #e55); }
-  .suggest-note { font-size: var(--fs-xs); color: var(--accent); padding: 2px 8px 6px; }
   .none { font-size: var(--fs-xs); color: var(--text-3); padding: 4px 8px 12px; line-height: 1.45; }
   /* note modal */
-  .modal-label { display: block; font-size: var(--fs-xs); color: var(--text-3); margin-bottom: 5px; }
+  .modal-label { display: block; font-size: var(--fs-xs); color: var(--text-3); margin: 8px 0 4px; }
+  .section-head.static { cursor: default; }
+  .details {
+    padding: 4px 8px 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: var(--fs-sm);
+  }
+  .details-title {
+    font-weight: 600;
+    margin-bottom: 6px;
+    overflow-wrap: anywhere;
+  }
+  .details-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .details-actions .del { color: var(--danger); }
   .note-content { width: 100%; resize: vertical; font-family: var(--font-mono); font-size: var(--fs-xs); }
   .modal-row { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
   /* info modal */

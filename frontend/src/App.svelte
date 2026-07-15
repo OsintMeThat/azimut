@@ -1,7 +1,9 @@
 <script>
   import { uiState, initSession } from './lib/state.svelte.js';
+  import { WORKSPACES, workspaceOf, toolFromHash } from './lib/workspaces.js';
   import Icon from './components/Icon.svelte';
   import Logo from './components/Logo.svelte';
+  import Wordmark from './components/Wordmark.svelte';
   import CaseSwitcher from './components/CaseSwitcher.svelte';
   import CaseSidebar from './components/CaseSidebar.svelte';
   import Toasts from './components/Toasts.svelte';
@@ -12,26 +14,41 @@
   import Inspector from './tools/Inspector.svelte';
   import Settings from './tools/Settings.svelte';
 
-  // the left rail carries the investigation tools; Settings lives behind the
-  // topbar gear instead — app plumbing, not part of the working flow
+  // The rail holds workspaces (docs/UI.md §3); tools are tabs inside them.
+  // Settings lives behind the topbar gear instead — app plumbing, not part
+  // of the working flow.
   const TOOLS = [
-    { id: 'media', label: 'Media', icon: 'media', component: MediaLibrary },
-    { id: 'inspect', label: 'Inspect', icon: 'inspect', component: Inspector },
-    { id: 'satellite', label: 'Satellite', icon: 'satellite', component: Satellite },
-    { id: 'proof', label: 'Proof', icon: 'proof', component: ProofComposer },
-    { id: 'post', label: 'Post', icon: 'post', component: PostComposer },
+    { id: 'media', label: 'Media', component: MediaLibrary },
+    { id: 'inspect', label: 'Inspect', component: Inspector },
+    { id: 'satellite', label: 'Satellite', component: Satellite },
+    { id: 'proof', label: 'Proof', component: ProofComposer },
+    { id: 'post', label: 'Post', component: PostComposer },
   ];
   const ALL_TOOLS = [
     ...TOOLS,
-    { id: 'settings', label: 'Settings', icon: 'settings', component: Settings },
+    { id: 'settings', label: 'Settings', component: Settings },
   ];
+  const TOOL_IDS = ALL_TOOLS.map((t) => t.id);
+  const toolLabel = (id) => ALL_TOOLS.find((t) => t.id === id)?.label ?? id;
 
-  // deep-linkable tools: #media #satellite #proof #post #settings
-  const fromHash = location.hash.slice(1);
-  if (ALL_TOOLS.some((t) => t.id === fromHash)) uiState.tool = fromHash;
+  // deep links: tool ids (#media, #proof, …) plus workspace aliases
+  // (#compose, #compose/post) — see lib/workspaces.js
+  const fromHash = toolFromHash(location.hash, TOOL_IDS);
+  if (fromHash) uiState.tool = fromHash;
   $effect(() => {
     history.replaceState(null, '', `#${uiState.tool}`);
   });
+
+  // Workspace navigation: clicking a workspace returns to its last-used tab.
+  const activeWs = $derived(workspaceOf(uiState.tool));
+  const lastTool = $state({});
+  $effect(() => {
+    const ws = workspaceOf(uiState.tool);
+    if (ws) lastTool[ws.id] = uiState.tool;
+  });
+  function openWorkspace(ws) {
+    uiState.tool = lastTool[ws.id] ?? ws.tools[0];
+  }
 
   // Tools mount lazily on first visit, then stay mounted (hidden via CSS) so
   // unsaved editor state — a half-composed proof, a collage in progress —
@@ -48,18 +65,15 @@
 <div class="shell">
   <header class="topbar">
     <div class="brand">
-      <Logo size={26} />
-      <span class="brand-name">Azimut</span>
+      <Logo size={28} />
+      <span class="brand-name"><Wordmark height={12} /></span>
     </div>
     <CaseSwitcher />
     <div class="spacer"></div>
-    <span class="local-badge" title="Everything stays on your machine — no accounts, no telemetry, no servers">
-      Your investigation. Your machine.
-    </span>
     <button
       class="btn btn-ghost btn-sm"
       class:gear-active={uiState.tool === 'settings'}
-      title="Settings — API keys & usage"
+      title="Settings"
       onclick={() => (uiState.tool = 'settings')}
     >
       <Icon name="settings" size={16} />
@@ -75,27 +89,42 @@
 
   <div class="main">
     <nav class="rail">
-      {#each TOOLS as tool (tool.id)}
+      {#each WORKSPACES as ws (ws.id)}
         <button
           class="rail-btn"
-          class:active={uiState.tool === tool.id}
-          onclick={() => (uiState.tool = tool.id)}
-          title={tool.label}
+          class:active={activeWs?.id === ws.id}
+          onclick={() => openWorkspace(ws)}
+          title={ws.label}
         >
-          <Icon name={tool.icon} size={21} />
-          <span>{tool.label}</span>
+          <Icon name={ws.icon} size={19} />
+          <span>{ws.label}</span>
         </button>
       {/each}
     </nav>
 
     <main class="canvas">
-      {#each ALL_TOOLS as tool (tool.id)}
-        {#if visited[tool.id]}
-          <div class="tool-host" class:hidden={uiState.tool !== tool.id}>
-            <tool.component />
-          </div>
-        {/if}
-      {/each}
+      {#if activeWs && activeWs.tools.length > 1}
+        <div class="tabstrip">
+          {#each activeWs.tools as toolId (toolId)}
+            <button
+              class="tab-btn"
+              class:active={uiState.tool === toolId}
+              onclick={() => (uiState.tool = toolId)}
+            >
+              {toolLabel(toolId)}
+            </button>
+          {/each}
+        </div>
+      {/if}
+      <div class="canvas-body">
+        {#each ALL_TOOLS as tool (tool.id)}
+          {#if visited[tool.id]}
+            <div class="tool-host" class:hidden={uiState.tool !== tool.id}>
+              <tool.component />
+            </div>
+          {/if}
+        {/each}
+      </div>
     </main>
 
     {#if uiState.sidebarOpen}
@@ -133,37 +162,15 @@
     padding-right: 6px;
   }
   .brand-name {
-    font-family: 'Oxanium', var(--font-sans);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.22em;
-    /* trailing tracking pushes the word off-center; nudge it back */
-    margin-right: -0.22em;
-    font-size: var(--fs-md);
-    color: var(--text-1);
+    display: flex;
+    align-items: center;
   }
   .spacer {
     flex: 1;
   }
-  .local-badge {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    color: var(--text-3);
-    user-select: none;
-  }
-  .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--ok);
-    box-shadow: 0 0 6px var(--ok);
-  }
   .gear-active {
-    color: var(--accent);
-    background: var(--accent-soft);
+    color: var(--text-1);
+    background: var(--bg-2);
   }
   .main {
     flex: 1;
@@ -175,35 +182,62 @@
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 10px 8px;
+    padding: 4px 0;
     border-right: 1px solid var(--border);
     background: var(--bg-1);
   }
+  /* flat, full-bleed segments — active state is the edge bar, not a card */
   .rail-btn {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
-    padding: 10px 4px 8px;
-    border-radius: var(--r-md);
+    gap: 3px;
+    padding: 10px 0 8px;
+    border-left: 2px solid transparent;
+    border-right: 2px solid transparent;
     color: var(--text-3);
     font-size: var(--fs-xs);
-    font-weight: 600;
-    transition: background 0.15s var(--ease), color 0.15s var(--ease);
+    font-weight: 500;
   }
   .rail-btn:hover {
     color: var(--text-1);
-    background: var(--bg-2);
   }
   .rail-btn.active {
-    color: var(--accent);
-    background: var(--accent-soft);
+    color: var(--text-1);
+    border-left-color: var(--accent);
   }
   .canvas {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
     background: var(--bg-0);
+  }
+  .tabstrip {
+    flex-shrink: 0;
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    padding: 0 10px;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border);
+  }
+  .tab-btn {
+    padding: 7px 12px;
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    color: var(--text-3);
+  }
+  .tab-btn:hover {
+    color: var(--text-1);
+  }
+  .tab-btn.active {
+    color: var(--text-1);
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+  .canvas-body {
+    flex: 1;
+    min-height: 0;
   }
   .tool-host {
     width: 100%;
