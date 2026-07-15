@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   clampCrop, moveCrop, resizeCropByHandle,
   QUAD_SIDES, quadEdgeMidpoints, moveQuadEdge, quadCentroid,
+  quadsBounds, translateQuad, moveQuads, rotateQuads, scaleQuads,
 } from './inspect.js';
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -122,5 +123,133 @@ describe('quad side resize', () => {
     const out = moveQuadEdge(moveQuadEdge(rect, 1, 40, 0), 1, -40, 0);
     const c1 = quadCentroid(out);
     expect(near(c0[0], c1[0], 1e-9)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Multi-select group transforms: the block moves/turns/grows as one rigid unit
+// about a shared pivot, so an off-centre piece is carried around the block's
+// centre rather than spinning about its own.
+// ---------------------------------------------------------------------------
+
+// two 10x10 squares side by side: group box 0..30 x 0..10, centre [15, 5]
+const sqA = [[0, 0], [10, 0], [10, 10], [0, 10]];
+const sqB = [[20, 0], [30, 0], [30, 10], [20, 10]];
+
+describe('quadsBounds', () => {
+  it('spans every quad of the group and centres between them', () => {
+    expect(quadsBounds([sqA, sqB])).toMatchObject({
+      minX: 0, minY: 0, maxX: 30, maxY: 10, width: 30, height: 10, center: [15, 5],
+    });
+  });
+
+  it('is the quad itself for a single-piece selection', () => {
+    expect(quadsBounds([sqA])).toMatchObject({ minX: 0, maxX: 10, center: [5, 5] });
+  });
+
+  it('covers a rotated/warped quad by its extreme corners', () => {
+    const warped = [[10, 5], [110, 0], [120, 90], [0, 85]];
+    expect(quadsBounds([warped])).toMatchObject({ minX: 0, minY: 0, maxX: 120, maxY: 90 });
+  });
+
+  it('returns null for an empty selection', () => {
+    expect(quadsBounds([])).toBe(null);
+  });
+});
+
+describe('translateQuad + moveQuads', () => {
+  it('shifts a single quad by the delta', () => {
+    expect(translateQuad(sqA, 5, -3)).toEqual([[5, -3], [15, -3], [15, 7], [5, 7]]);
+  });
+
+  it('shifts every quad of the group by the same delta (block keeps its shape)', () => {
+    const [a, b] = moveQuads([sqA, sqB], 100, 50);
+    expect(a).toEqual([[100, 50], [110, 50], [110, 60], [100, 60]]);
+    expect(b).toEqual([[120, 50], [130, 50], [130, 60], [120, 60]]);
+    // the gap between the two pieces is untouched
+    expect(quadsBounds([a, b]).width).toBe(quadsBounds([sqA, sqB]).width);
+  });
+
+  it('does not mutate the input quads', () => {
+    moveQuads([sqA], 10, 10);
+    expect(sqA).toEqual([[0, 0], [10, 0], [10, 10], [0, 10]]);
+  });
+});
+
+describe('rotateQuads — the block turns as one', () => {
+  it('half-turns the group about its centre, swapping the two pieces over', () => {
+    const [a, b] = rotateQuads([sqA, sqB], Math.PI);
+    // A lands on B's box and vice versa — proof the pivot is the *group* centre
+    expect(quadsBounds([a]).minX).toBeCloseTo(20);
+    expect(quadsBounds([a]).maxX).toBeCloseTo(30);
+    expect(quadsBounds([b]).minX).toBeCloseTo(0);
+    expect(quadsBounds([b]).maxX).toBeCloseTo(10);
+  });
+
+  it('carries an off-centre piece around instead of spinning it in place', () => {
+    const [a] = rotateQuads([sqA, sqB], Math.PI / 2);
+    // a per-piece rotation would have left A's centroid at (5, 5)
+    expect(quadCentroid(a)).not.toEqual([5, 5]);
+  });
+
+  it('is rigid — the distance between the pieces is preserved', () => {
+    const d0 = Math.hypot(...quadCentroid(sqA).map((v, i) => v - quadCentroid(sqB)[i]));
+    const [a, b] = rotateQuads([sqA, sqB], 0.7);
+    const d1 = Math.hypot(...quadCentroid(a).map((v, i) => v - quadCentroid(b)[i]));
+    expect(d1).toBeCloseTo(d0);
+  });
+
+  it('leaves the group centre fixed', () => {
+    const out = rotateQuads([sqA, sqB], 0.4);
+    const c = quadsBounds(out).center;
+    expect(c[0]).toBeCloseTo(15);
+    expect(c[1]).toBeCloseTo(5);
+  });
+
+  it('rotating out and back returns to the start', () => {
+    const out = rotateQuads(rotateQuads([sqA, sqB], 0.9, [15, 5]), -0.9, [15, 5]);
+    expect(out[0][0][0]).toBeCloseTo(0);
+    expect(out[0][0][1]).toBeCloseTo(0);
+    expect(out[1][2][0]).toBeCloseTo(30);
+  });
+
+  it('honours an explicit pivot over the group centre', () => {
+    const [a] = rotateQuads([sqA], Math.PI, [0, 0]); // pivot at A's own corner
+    const b = quadsBounds([a]);
+    expect(b.minX).toBeCloseTo(-10);
+    expect(b.minY).toBeCloseTo(-10);
+    expect(b.maxX).toBeCloseTo(0);
+    expect(b.maxY).toBeCloseTo(0);
+  });
+
+  it('returns an empty array for an empty selection', () => {
+    expect(rotateQuads([], 1)).toEqual([]);
+  });
+});
+
+describe('scaleQuads — the block grows as one', () => {
+  it('scales the whole group box about its centre', () => {
+    const out = scaleQuads([sqA, sqB], 2);
+    const b = quadsBounds(out);
+    expect(b.width).toBeCloseTo(60); // 2x the original 30
+    expect(b.center[0]).toBeCloseTo(15); // centre pinned
+    expect(b.center[1]).toBeCloseTo(5);
+  });
+
+  it('pushes the pieces apart, not just enlarges each in place', () => {
+    const [a, b] = scaleQuads([sqA, sqB], 2);
+    const gap = quadsBounds([b]).minX - quadsBounds([a]).maxX;
+    const gap0 = sqB[0][0] - sqA[1][0]; // 10
+    expect(gap).toBeCloseTo(gap0 * 2);
+  });
+
+  it('shrinking then growing back returns to the start', () => {
+    const out = scaleQuads(scaleQuads([sqA, sqB], 0.25, [15, 5]), 4, [15, 5]);
+    expect(out[0][0][0]).toBeCloseTo(0);
+    expect(out[1][2][0]).toBeCloseTo(30);
+  });
+
+  it('returns an empty array for an empty selection', () => {
+    expect(scaleQuads([], 2)).toEqual([]);
   });
 });

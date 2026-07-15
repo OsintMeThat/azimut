@@ -359,6 +359,65 @@ export function rotateQuad(quad, rad, center = null) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Group transforms — the multi-select block. Each is the single-quad primitive
+// mapped over every quad with one *shared* pivot, which is what makes the block
+// move/turn/grow as one rigid unit instead of each piece spinning about its own
+// centroid. Callers must pass the quads captured at gesture start and derive the
+// pivot once from those: re-deriving it mid-drag would chase the block's own
+// bounding box and drift it away under the pointer.
+// ---------------------------------------------------------------------------
+
+/**
+ * Axis-aligned bounds over several quads, plus their shared centre — the frame
+ * drawn around a multi-piece selection and the pivot its rotate/scale turn
+ * about. Unrounded, unlike collageBounds (which sizes an export in whole
+ * pixels). Returns null for an empty selection.
+ */
+export function quadsBounds(quads) {
+  if (!quads.length) return null;
+  const xs = [];
+  const ys = [];
+  for (const q of quads) for (const [x, y] of q) { xs.push(x); ys.push(y); }
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY,
+    center: [(minX + maxX) / 2, (minY + maxY) / 2],
+  };
+}
+
+/** Translate a single quad by (dx, dy). */
+export function translateQuad(quad, dx, dy) {
+  return quad.map(([x, y]) => [x + dx, y + dy]);
+}
+
+/** Move a group of quads by (dx, dy). */
+export function moveQuads(quads, dx, dy) {
+  return quads.map((q) => translateQuad(q, dx, dy));
+}
+
+/** Rotate a group of quads around a shared pivot (default: the group centre). */
+export function rotateQuads(quads, rad, center = null) {
+  const c = center ?? quadsBounds(quads)?.center;
+  if (!c) return [];
+  return quads.map((q) => rotateQuad(q, rad, c));
+}
+
+/** Uniformly scale a group of quads around a shared pivot (default: group centre). */
+export function scaleQuads(quads, k, center = null) {
+  const c = center ?? quadsBounds(quads)?.center;
+  if (!c) return [];
+  return quads.map((q) => scaleQuad(q, k, c));
+}
+
 /** A sensible starting quad: the image scaled to fit `maxW`, placed at (ox, oy). */
 export function initialQuad(natW, natH, maxW, ox, oy) {
   const scale = Math.min(1, maxW / (natW || maxW));

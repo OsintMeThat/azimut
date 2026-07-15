@@ -1,23 +1,30 @@
 <script>
-  import { previewStyle, scaleQuad, rotateQuad, quadCentroid, cropImgStyle, styleText, uid } from '../../lib/inspect.js';
+  import {
+    previewStyle, scaleQuad, rotateQuad, quadCentroid, cropImgStyle, styleText, uid,
+    rotateQuads, scaleQuads,
+  } from '../../lib/inspect.js';
   import Icon from '../../components/Icon.svelte';
 
   // Right-panel menu for the Collage tab: switch/create collages, add tray frames
   // to the active one, and act on the selected piece. A session holds several
   // collages (session.collages / session.activeCollageId); each is saved as its
   // own PNG. Each added piece is a frozen snapshot of the frame (addToCollage).
-  let { session, filters, selectedId = $bindable(), addToCollage, requestCrop } = $props();
+  let { session, filters, selectedIds = $bindable([]), addToCollage, requestCrop } = $props();
 
   const active = $derived(
     session.collages.find((c) => c.id === session.activeCollageId) ?? session.collages[0]
   );
 
   const onCanvas = (id) => active?.nodes.some((n) => n.frameId === id);
-  const selected = $derived(active?.nodes.find((n) => n.id === selectedId) ?? null);
+  // These controls act on one piece; a multi-piece block is transformed as a
+  // whole on the canvas, so the section simply steps aside for it.
+  const selected = $derived(
+    selectedIds.length === 1 ? (active?.nodes.find((n) => n.id === selectedIds[0]) ?? null) : null
+  );
 
   function switchCollage(id) {
     session.activeCollageId = id;
-    selectedId = null;
+    selectedIds = [];
   }
 
   function addCollage() {
@@ -26,19 +33,19 @@
     const c = { id: uid('cl'), name: `Collage ${next}`, width: 1600, height: 800, background: '#12141c', transparent: true, nodes: [] };
     session.collages.push(c);
     session.activeCollageId = c.id;
-    selectedId = null;
+    selectedIds = [];
   }
 
   function removeCollage(id) {
     if (session.collages.length <= 1) return; // always keep at least one
     session.collages = session.collages.filter((c) => c.id !== id);
     if (session.activeCollageId === id) session.activeCollageId = session.collages[0].id;
-    selectedId = null;
+    selectedIds = [];
   }
 
   function removeNode(id) {
     active.nodes = active.nodes.filter((n) => n.id !== id);
-    if (selectedId === id) selectedId = null;
+    selectedIds = selectedIds.filter((x) => x !== id);
   }
 
   function bringFront(id) {
@@ -72,6 +79,27 @@
   function rotateByDeg(node, deg) {
     node.quad = rotateQuad(node.quad, (deg * Math.PI) / 180, quadCentroid(node.quad));
   }
+
+  // ---- multi-piece block ----------------------------------------------------
+  // Same precise steps as the single-piece section, but about the block's shared
+  // centre — the exact counterpart of the on-canvas block handles.
+  const selectedGroup = $derived(
+    selectedIds.length > 1 ? (active?.nodes.filter((n) => selectedIds.includes(n.id)) ?? []) : []
+  );
+
+  function applyToGroup(out) {
+    selectedGroup.forEach((n, i) => (n.quad = out[i]));
+  }
+
+  const scaleGroupBy = (k) => applyToGroup(scaleQuads(selectedGroup.map((n) => n.quad), k));
+
+  const rotateGroupByDeg = (deg) =>
+    applyToGroup(rotateQuads(selectedGroup.map((n) => n.quad), (deg * Math.PI) / 180));
+
+  function removeGroup() {
+    active.nodes = active.nodes.filter((n) => !selectedIds.includes(n.id));
+    selectedIds = [];
+  }
 </script>
 
 <div class="module">
@@ -92,7 +120,7 @@
     </div>
   </div>
 
-  <p class="hint">Pieces are the frames you captured. Add them, drag to arrange, pull corners to warp into a panorama.</p>
+  <p class="hint">Pieces are the frames you captured. Add them, drag to arrange, pull corners to warp into a panorama. Shift-click to select several and move them as one block.</p>
 
   <div class="section">
     <div class="section-head"><span>Frames</span></div>
@@ -142,6 +170,30 @@
       {#if selected.crop}
         <button class="btn btn-ghost btn-xs" onclick={() => requestCrop?.(selected, true)}><Icon name="reset" size={12} /> Clear crop</button>
       {/if}
+    </div>
+  {/if}
+
+  {#if selectedGroup.length > 1}
+    <div class="section">
+      <div class="section-head"><span>Selected block <span class="count">{selectedGroup.length}</span></span></div>
+      <p class="hint">Scales and turns as one, about the block's centre. Shift-click a piece to add or drop it.</p>
+      <div class="scale-row">
+        <span class="lbl">Scale</span>
+        <button class="btn btn-sm sq" onclick={() => scaleGroupBy(1 / 1.1)} aria-label="Shrink block">−</button>
+        <button class="btn btn-sm sq" onclick={() => scaleGroupBy(1.1)} aria-label="Enlarge block">+</button>
+        <span class="sub">or drag a block corner</span>
+      </div>
+      <div class="scale-row">
+        <span class="lbl">Rotate</span>
+        <button class="btn btn-sm sq" onclick={() => rotateGroupByDeg(-15)} aria-label="Rotate block left">↺</button>
+        <button class="btn btn-sm sq" onclick={() => rotateGroupByDeg(15)} aria-label="Rotate block right">↻</button>
+        <span class="sub">or drag the ↻ knob</span>
+      </div>
+      <div class="actions">
+        <button class="btn btn-sm danger" onclick={removeGroup} title="or press Delete">
+          <Icon name="trash" size={13} /> Remove {selectedGroup.length}
+        </button>
+      </div>
     </div>
   {/if}
 

@@ -36,7 +36,7 @@
   let probeInfo = $state(null);
 
   let activeTab = $state('selection');
-  let collageSelectedId = $state(null);
+  let collageSelectedIds = $state([]);
   let cropPieceNode = $state(null);
   // Real (backend-composited) Save-tab thumbnails, keyed by collage id:
   // { sig, url } — regenerated only when a collage's layout actually changes.
@@ -109,7 +109,7 @@
     if (!session.collages.some((c) => c.id === session.activeCollageId)) {
       session.activeCollageId = session.collages[0]?.id ?? null;
     }
-    collageSelectedId = null;
+    collageSelectedIds = [];
     // outlast the capture debounce so the restore itself is not re-recorded
     setTimeout(() => (collageHistBusy = false), 400);
   }
@@ -289,7 +289,7 @@
     saveUi.selected = {};
     saveUi.folder = '';
     openedSession = null;
-    collageSelectedId = null;
+    collageSelectedIds = [];
     shared.currentTime = 0;
     shared.cropMode = false;
     frameZoom = 1;
@@ -431,7 +431,7 @@
         save: { path: frame.path, time: frame.time ?? null, ops }, quad,
       };
       cl.nodes.push(node);
-      collageSelectedId = node.id;
+      collageSelectedIds = [node.id];
     } catch (e) {
       toast(e.message, 'danger');
     }
@@ -983,7 +983,7 @@
             </div>
           {/if}
         {:else if activeTab === 'collage'}
-          <CollageCanvas collage={activeCollage} bind:selectedId={collageSelectedId} {requestCrop} />
+          <CollageCanvas collage={activeCollage} bind:selectedIds={collageSelectedIds} {requestCrop} />
         {:else if activeTab === 'save'}
           <SaveGallery {savables} {saveUi} />
         {/if}
@@ -995,7 +995,7 @@
         {:else if activeTab === 'frame'}
           <FrameMenu {session} {filters} {analyses} {activeFrame} {shared} {removeFrame} bind:cropAspect={frameAspect} bind:cropEditing {beginCrop} {commitCrop} setActive={(id) => (session.activeFrameId = id)} />
         {:else if activeTab === 'collage'}
-          <CollageMenu {session} {filters} bind:selectedId={collageSelectedId} {addToCollage} {requestCrop} />
+          <CollageMenu {session} {filters} bind:selectedIds={collageSelectedIds} {addToCollage} {requestCrop} />
         {:else if activeTab === 'save'}
           <SaveMenu {savables} {saveUi} {saving} save={saveSelected} />
         {/if}

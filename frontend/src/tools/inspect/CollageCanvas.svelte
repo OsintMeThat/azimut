@@ -1,5 +1,8 @@
 <script>
-  import { quadMatrix3d, quadCentroid, rotateQuad, quadEdgeMidpoints, scaleQuad } from '../../lib/inspect.js';
+  import {
+    quadMatrix3d, quadCentroid, rotateQuad, quadEdgeMidpoints, scaleQuad,
+    quadsBounds, moveQuads, rotateQuads, scaleQuads,
+  } from '../../lib/inspect.js';
   import { uiState } from '../../lib/state.svelte.js';
   import Icon from '../../components/Icon.svelte';
 
@@ -8,7 +11,11 @@
   // corner handle to warp — a hand-made panorama. The same quads are sent to the
   // backend, which renders the full-res warp with PIL (see compose_perspective).
   // `collage` is the session's *active* collage (a session may hold several).
-  let { collage, selectedId = $bindable(), requestCrop } = $props();
+  //
+  // Selection is a *set*: shift-click adds/removes a piece. One piece gets the
+  // per-piece handles (warp corners, side resize, rotate, toolbar); several get
+  // a single block frame that moves/rotates/scales them as one rigid unit.
+  let { collage, selectedIds = $bindable([]), requestCrop } = $props();
 
   let wrapEl = $state();
   let availW = $state(800);
@@ -16,7 +23,19 @@
   let zoom = $state(1); // 1 = fit; wheel zooms toward the pointer
   let panX = $state(0);
   let panY = $state(0);
-  let movingId = $state(null); // piece being dragged — semi-transparent to align
+  let movingIds = $state([]); // pieces being dragged — semi-transparent to align
+
+  const isSel = (id) => selectedIds.includes(id);
+  const selectedNodes = $derived(collage.nodes.filter((n) => isSel(n.id)));
+  const soloId = $derived(selectedNodes.length === 1 ? selectedNodes[0].id : null);
+  // the block frame: only once several pieces are selected
+  const groupBox = $derived(
+    selectedNodes.length > 1 ? quadsBounds(selectedNodes.map((n) => n.quad)) : null
+  );
+
+  function toggleSel(id) {
+    selectedIds = isSel(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id];
+  }
 
   const cw = $derived(collage.width);
   const ch = $derived(collage.height);
@@ -56,7 +75,7 @@
 
   // Drag on the empty background pans the view (a plain click still deselects).
   function startPan(e) {
-    selectedId = null;
+    selectedIds = [];
     const sx = e.clientX;
     const sy = e.clientY;
     const ox = panX;
@@ -73,21 +92,38 @@
     window.addEventListener('pointerup', up);
   }
 
+  // Shift-click adds/removes a piece from the block without moving anything.
+  // Otherwise: pressing a piece *outside* the block selects just it; pressing one
+  // already *inside* the block keeps the whole selection, so the drag carries every
+  // piece — and, if the pointer never really moved, collapses to that single piece
+  // on release (a plain click still means "just this one").
   function startMove(e, node) {
     e.preventDefault();
-    selectedId = node.id;
-    movingId = node.id;
-    let [px, py] = toCanvas(e);
+    if (e.shiftKey) {
+      toggleSel(node.id);
+      return;
+    }
+    const group = isSel(node.id) ? collage.nodes.filter((n) => isSel(n.id)) : [node];
+    if (!isSel(node.id)) selectedIds = [node.id];
+    const base = group.map((n) => n.quad.map(([x, y]) => [x, y]));
+    const [px, py] = toCanvas(e);
+    let moved = false;
     const move = (ev) => {
       const [nx, ny] = toCanvas(ev);
-      const dx = nx - px;
-      const dy = ny - py;
-      node.quad = node.quad.map(([x, y]) => [x + dx, y + dy]);
-      px = nx;
-      py = ny;
+      if (!moved) {
+        // ignore the sub-pixel jitter of a click, so it can still collapse the block
+        if (Math.hypot(nx - px, ny - py) * scale < 3) return;
+        moved = true;
+        movingIds = group.map((n) => n.id); // once, not on every move
+      }
+      // always re-derive from the quads captured at press: accumulating deltas
+      // would drift the piece away from the pointer over a long drag
+      const out = moveQuads(base, nx - px, ny - py);
+      group.forEach((n, i) => (n.quad = out[i]));
     };
     const up = () => {
-      movingId = null;
+      if (!moved && group.length > 1) selectedIds = [node.id];
+      movingIds = [];
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
@@ -95,10 +131,50 @@
     window.addEventListener('pointerup', up);
   }
 
+  // Block rotate / resize share one shape: snapshot the selected quads and the
+  // pivot *once* at press, then map a pure group transform over them until
+  // release. Re-deriving the pivot mid-drag would chase the block's own bounding
+  // box and walk it away under the pointer.
+  function dragGroup(e, transform) {
+    e.preventDefault();
+    e.stopPropagation();
+    const group = collage.nodes.filter((n) => isSel(n.id));
+    const base = group.map((n) => n.quad.map(([x, y]) => [x, y]));
+    const bounds = quadsBounds(base);
+    if (!bounds) return;
+    const c = bounds.center;
+    const start = toCanvas(e);
+    const move = (ev) => {
+      const out = transform(base, c, toCanvas(ev), start);
+      group.forEach((n, i) => (n.quad = out[i]));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  // Angle the pointer has swept around the block's centre since the press.
+  const startGroupRotate = (e) =>
+    dragGroup(e, (base, c, [mx, my], [sx, sy]) =>
+      rotateQuads(base, Math.atan2(my - c[1], mx - c[0]) - Math.atan2(sy - c[1], sx - c[0]), c));
+
+  // Uniform scale about the block's centre, tracking the handle's distance from
+  // it — the block grows as one, so the pieces spread apart instead of each
+  // swelling in place (matches the per-piece side handles' feel).
+  const startGroupResize = (e) =>
+    dragGroup(e, (base, c, [mx, my], [sx, sy]) => {
+      const d0 = Math.hypot(sx - c[0], sy - c[1]) || 1;
+      const k = Math.min(20, Math.max(0.05, Math.hypot(mx - c[0], my - c[1]) / d0));
+      return scaleQuads(base, k, c);
+    });
+
   function startWarp(e, node, corner) {
     e.preventDefault();
     e.stopPropagation();
-    selectedId = node.id;
+    selectedIds = [node.id];
     const move = (ev) => {
       node.quad[corner] = toCanvas(ev);
       node.quad = [...node.quad];
@@ -118,7 +194,7 @@
   function startEdgeResize(e, node, side) {
     e.preventDefault();
     e.stopPropagation();
-    selectedId = node.id;
+    selectedIds = [node.id];
     const c = quadCentroid(node.quad);
     const base = node.quad.map(([x, y]) => [x, y]);
     const mid = quadEdgeMidpoints(base)[side];
@@ -152,19 +228,19 @@
     collage.nodes = [...nodes];
   }
 
-  // Delete / Backspace removes the selected piece. The Inspect tool stays
+  // Delete / Backspace removes every selected piece. The Inspect tool stays
   // mounted when another tab is shown, so bail unless it is the visible tool —
   // and when typing in a field or when a modal (e.g. the crop editor) is open.
   function onKey(e) {
     if (uiState.tool !== 'inspect') return;
-    if (selectedId == null) return;
+    if (!selectedIds.length) return;
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     if (document.querySelector('.overlay')) return;
     e.preventDefault();
-    collage.nodes = collage.nodes.filter((n) => n.id !== selectedId);
-    selectedId = null;
+    collage.nodes = collage.nodes.filter((n) => !isSel(n.id));
+    selectedIds = [];
   }
 
   // Rotate the piece around its centroid by dragging the rotate handle around
@@ -172,7 +248,7 @@
   function startRotate(e, node) {
     e.preventDefault();
     e.stopPropagation();
-    selectedId = node.id;
+    selectedIds = [node.id];
     const c = quadCentroid(node.quad);
     const base = node.quad.map(([x, y]) => [x, y]);
     const [sx, sy] = toCanvas(e);
@@ -214,8 +290,8 @@
       {@const box = boxOf(node)}
       <img
         class="node"
-        class:selected={node.id === selectedId}
-        class:ghost={node.ghost || node.id === movingId}
+        class:selected={isSel(node.id)}
+        class:ghost={node.ghost || movingIds.includes(node.id)}
         src={box.url}
         alt="collage piece"
         style:width={`${box.w}px`}
@@ -223,9 +299,9 @@
         style:transform={quadMatrix3d(box.w, box.h, node.quad)}
         draggable="false"
         onpointerdown={(e) => (e.stopPropagation(), startMove(e, node))}
-        ondblclick={() => { selectedId = node.id; requestCrop?.(node); }}
+        ondblclick={() => { selectedIds = [node.id]; requestCrop?.(node); }}
       />
-      {#if node.id === selectedId}
+      {#if node.id === soloId}
         <!-- round corner handles: free perspective warp -->
         {#each node.quad as pt, i (i)}
           <button
@@ -333,6 +409,54 @@
         </div>
       {/if}
     {/each}
+
+    <!-- Block frame for a multi-piece selection: one axis-aligned box around the
+         lot, with corner handles that scale it and a knob that turns it — all
+         about the box's centre, so the pieces hold their relative places. The
+         box itself never listens, so the pieces under it stay clickable. -->
+    {#if groupBox}
+      <div
+        class="group-box"
+        style:left={`${groupBox.minX}px`}
+        style:top={`${groupBox.minY}px`}
+        style:width={`${groupBox.width}px`}
+        style:height={`${groupBox.height}px`}
+        style:border-width={`${1.5 / scale}px`}
+      ></div>
+      {#each [[groupBox.minX, groupBox.minY], [groupBox.maxX, groupBox.minY], [groupBox.maxX, groupBox.maxY], [groupBox.minX, groupBox.maxY]] as corner, i (i)}
+        <button
+          class="side-handle"
+          style:left={`${corner[0]}px`}
+          style:top={`${corner[1]}px`}
+          style:width={`${14 / scale}px`}
+          style:height={`${14 / scale}px`}
+          onpointerdown={startGroupResize}
+          aria-label="Resize the selected block"
+          title="Drag to resize the whole selection"
+        ></button>
+      {/each}
+      <!-- rotate knob on a stem off the block's right edge (mirrors the per-piece one) -->
+      <div
+        class="rot-stem"
+        style:left={`${groupBox.maxX}px`}
+        style:top={`${groupBox.center[1]}px`}
+        style:width={`${24 / scale}px`}
+        style:height={`${1.5 / scale}px`}
+        style:transform={`translateY(${-0.75 / scale}px)`}
+      ></div>
+      <button
+        class="rot-handle"
+        style:left={`${groupBox.maxX + 24 / scale}px`}
+        style:top={`${groupBox.center[1]}px`}
+        style:width={`${20 / scale}px`}
+        style:height={`${20 / scale}px`}
+        onpointerdown={startGroupRotate}
+        aria-label="Rotate the selected block"
+        title="Drag to rotate the whole selection"
+      >
+        <Icon name="reset" size={13 / scale} />
+      </button>
+    {/if}
   </div>
 
   <div class="view-ctl">
@@ -342,7 +466,7 @@
         <Icon name="eye" size={14} /> Fit
       </button>
     {:else}
-      <span class="zoom-hint">scroll to zoom · drag background to pan</span>
+      <span class="zoom-hint">scroll to zoom · drag background to pan · shift-click to select several</span>
     {/if}
   </div>
 
@@ -398,6 +522,14 @@
   }
   .node.ghost {
     opacity: 0.55;
+  }
+  /* Frame around a multi-piece selection. Never listens — the pieces it spans
+     (and their own handles) must stay clickable through it. */
+  .group-box {
+    position: absolute;
+    border-style: dashed;
+    border-color: var(--accent);
+    pointer-events: none;
   }
   .tbtn.on {
     background: var(--accent-soft);
