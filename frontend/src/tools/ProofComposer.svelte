@@ -7,20 +7,20 @@
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import {
-    ANNO_COLORS, PAD, TWEET_GUIDES,
+    ANNO_COLORS, PAD, PANEL_H, TWEET_GUIDES,
     CAPTION_SIZE, LEGEND_SIZE, FOOTER_SIZE,
     BG, TEXT_MAIN, TEXT_DIM, TEXT_FAINT,
-    layoutPanels, panelsBlockHeight, legendLineHeight, footerBand,
+    layoutPanels, panelsBottom, freeNormalizeDelta, legendLineHeight, footerBand,
     attributionLine, docSize, offsetShape, autoLayoutRows,
-    autoCoords, formatCoords, autoSource, resolveSourceUrls,
+    autoCoords, formatCoords, autoSource,
     toSpec, newId, loadImage, orderedFeatureColors, notesFromShapes,
-    copyShapeSpec, dedupeBySrc, isSatelliteCapture,
+    copyShapeSpec, dedupeBySrc, isSatelliteCapture, satPanelInput, mediaPanelInput,
   } from '../lib/composer.js';
   import { createHistory } from '../lib/history.js';
 
-  const SCALE_MIN = 0.4;
+  const SCALE_MIN = 0.25;
   const SCALE_MAX = 2.5;
-  const SCALE_STEP = 0.1;
+  const SCALE_STEP = 0.05;
 
   const DRAW_TOOLS = [
     { id: 'select', icon: 'hand', label: 'Select / move' },
@@ -39,6 +39,7 @@
     title: 'Untitled proof', panels: [], shapes: [], notes: {}, legendOrder: [],
     coordsText: '', source: '', // '' → auto-derived from panels; non-empty → manual override
     captionSize: CAPTION_SIZE, legendSize: LEGEND_SIZE, footerSize: FOOTER_SIZE, footer: '',
+    layout: 'grid', // 'grid' (rows) | 'free' (drag panels anywhere, overlap allowed)
   });
   let advancedOpen = $state(false);
   let collapsed = $state({ panels: false, annotations: false, elements: false });
@@ -49,6 +50,7 @@
   let strokeW = $state(4);
   let guide = $state(null); // null | '16:9' | '4:5' — tweet centre-crop overlay
   let selectedId = $state(null);
+  let selectedPanelId = $state(null); // free-layout only: panel picked for move/resize
   let picker = $state(false);
   let pickerItems = $state([]);
   let openList = $state(null); // list of saved proofs, null = closed
@@ -101,6 +103,7 @@
     proof.legendSize = spec.legendSize ?? LEGEND_SIZE;
     proof.footerSize = spec.footerSize ?? FOOTER_SIZE;
     proof.footer = spec.footer ?? '';
+    proof.layout = spec.layout ?? 'grid';
     proof.notes = spec.notes ?? {};
     proof.panels = spec.panels.map((p) => ({ ...p, img: imgCache.get(p.src) ?? null }));
     proof.shapes = spec.shapes ?? [];
@@ -114,6 +117,7 @@
         .catch(() => {});
     }
     selectedId = null;
+    selectedPanelId = null;
     dirty = true;
     requestAnimationFrame(fit);
     // outlast the capture debounce so the restore itself is not re-recorded
@@ -134,7 +138,7 @@
 
   // ---- konva ------------------------------------------------------------------
   let containerEl;
-  let stage, docLayer, uiLayer, transformer, endHandles, guideGroup;
+  let stage, docLayer, uiLayer, transformer, endHandles, guideGroup, panelCtrls;
   let drawing = null; // {panel, node, start, box, kind}
   let pathDraft = null; // {panel, box, node, points:[]} — multi-click curve in progress
   let spacePan = false; // hold-space panning (manual, so it wins over shape drags)
@@ -149,7 +153,7 @@
     transformer = new Konva.Transformer({
       rotateEnabled: false,
       flipEnabled: false,
-      anchorSize: 9,
+      anchorSize: 11,
       anchorCornerRadius: 3,
       anchorStroke: '#e8a33d',
       anchorFill: '#161e2e',
@@ -162,6 +166,8 @@
     uiLayer.add(transformer);
     endHandles = new Konva.Group();
     uiLayer.add(endHandles);
+    panelCtrls = new Konva.Group();
+    uiLayer.add(panelCtrls);
 
     const resize = new ResizeObserver(() => {
       stage.width(containerEl.clientWidth);
@@ -217,12 +223,14 @@
   // rebuild canvas whenever the document changes
   $effect(() => {
     JSON.stringify([
-      proof.panels.map((p) => [p.src, p.caption, p.row, p.scale]),
+      proof.panels.map((p) => [p.src, p.caption, p.row, p.scale, p.x, p.y]),
       proof.shapes,
       proof.notes,
       proof.legendOrder,
       proof.captionSize, proof.legendSize, proof.footerSize, proof.footer,
+      proof.layout,
       selectedId,
+      selectedPanelId,
       guide,
     ]);
     if (stage) rebuild();
@@ -234,6 +242,11 @@
     legendSize: proof.legendSize,
     footerSize: proof.footerSize,
   });
+
+  // Layout boxes + document measure for the active layout mode.
+  const boxesOf = () => layoutPanels(proof.panels, proof.captionSize, proof.layout);
+  const measureDoc = () =>
+    docSize(proof.panels, proof.shapes, proof.notes, textOpts(), proof.legendOrder, proof.layout);
 
   function resetDoc() {
     proof.title = 'Untitled proof';
@@ -247,8 +260,10 @@
     proof.legendSize = LEGEND_SIZE;
     proof.footerSize = FOOTER_SIZE;
     proof.footer = '';
+    proof.layout = 'grid';
     savedName = null;
     selectedId = null;
+    selectedPanelId = null;
     dirty = false;
     imgCache.clear();
     anchorHistory();
@@ -260,30 +275,6 @@
   }
 
   // ---- panels ------------------------------------------------------------------
-
-  function satPanelInput(s) {
-    return {
-      src: s.path,
-      meta: {
-        kind: 'satellite', attribution: s.attribution, lat: s.lat, lon: s.lon,
-        zoom: s.zoom, provider: s.provider_label, date: s.fetched_at?.slice(0, 10),
-      },
-      caption: `${s.provider_label} · ${s.lat.toFixed(6)}, ${s.lon.toFixed(6)} · ${s.fetched_at?.slice(0, 10) ?? ''}`,
-    };
-  }
-
-  function mediaPanelInput(m, mediaList = []) {
-    // Trace the real source link through the derivation chain (a collage/frame
-    // carries no URL of its own — follow it back to the downloaded original).
-    // A file uploaded from disk has no URL, so it contributes no source.
-    const byPath = new Map(mediaList.map((x) => [x.path, x]));
-    const urls = resolveSourceUrls(m, byPath);
-    return {
-      src: m.path,
-      meta: { kind: 'media', source_url: urls[0], source_urls: urls },
-      caption: '',
-    };
-  }
 
   async function openPicker() {
     if (!caseState.current) {
@@ -326,7 +317,7 @@
       const row = proof.panels.length
         ? Math.max(...proof.panels.map((p) => p.row ?? 0))
         : 0;
-      proof.panels.push({
+      const panel = {
         id: newId('p'),
         src: item.src,
         caption: item.caption ?? '',
@@ -335,7 +326,10 @@
         natural: [img.naturalWidth, img.naturalHeight],
         meta: item.meta ?? {},
         img,
-      });
+      };
+      // grid: append (rightmost / bottom row); free: a new panel lands in front
+      if (proof.layout === 'free') proof.panels.unshift(panel);
+      else proof.panels.push(panel);
       dirty = true;
       requestAnimationFrame(fit);
     } catch (e) {
@@ -402,18 +396,80 @@
   function scalePanel(index, delta) {
     const p = proof.panels[index];
     const cur = p.scale ?? 1;
-    const next = Math.round(Math.min(SCALE_MAX, Math.max(SCALE_MIN, cur + delta)) * 10) / 10;
+    const next = Math.round(Math.min(SCALE_MAX, Math.max(SCALE_MIN, cur + delta)) * 100) / 100;
     if (next === cur) return;
+    if (proof.layout === 'free') materializeFreePositions(); // others must not reflow
     p.scale = next;
     dirty = true;
     requestAnimationFrame(fit);
   }
 
+  // ---- free layout ------------------------------------------------------------
+  // In free mode a panel's stored x/y is its doc position; a panel without one
+  // renders at its grid fallback (layoutPanelsFree). Before any mutation that
+  // could shift those fallbacks (drag, resize, scale), stored positions are
+  // materialised from the rendered layout so panels only move when moved.
+
+  function materializeFreePositions() {
+    const boxes = layoutPanels(proof.panels, proof.captionSize, 'free');
+    proof.panels.forEach((p, i) => {
+      p.x = boxes[i].x;
+      p.y = boxes[i].y;
+    });
+  }
+
+  // Re-anchor stored positions at PAD (dragging past the top/left edge grows
+  // the document) and shift the stage by the same amount so nothing jumps.
+  function normalizeFree() {
+    const { dx, dy } = freeNormalizeDelta(proof.panels, proof.captionSize);
+    if (!dx && !dy) return;
+    for (const p of proof.panels) {
+      p.x += dx;
+      p.y += dy;
+    }
+    stage.position({ x: stage.x() - dx * stage.scaleX(), y: stage.y() - dy * stage.scaleY() });
+  }
+
+  // Fold a finished panel drag / corner-resize back into the document.
+  function commitPanelNode(panel, node, { resized = false } = {}) {
+    materializeFreePositions();
+    if (resized) {
+      // transformer scales the group; group scale = (PANEL_H·scale)/naturalH
+      const next = (node.scaleX() * panel.natural[1]) / PANEL_H;
+      panel.scale = Math.round(Math.min(SCALE_MAX, Math.max(SCALE_MIN, next)) * 100) / 100;
+    }
+    panel.x = node.x();
+    panel.y = node.y();
+    normalizeFree();
+    dirty = true;
+  }
+
+  function setLayoutMode(mode) {
+    if ((proof.layout ?? 'grid') === mode) return;
+    proof.layout = mode;
+    selectedPanelId = null;
+    dirty = true;
+    requestAnimationFrame(fit);
+  }
+
+  // Free mode: array order is the z-order, front→back (Z1 = foreground), so
+  // "bring forward" swaps toward index 0 and "send backward" toward the end.
+  function movePanelZ(index, delta) {
+    const target = index + delta;
+    if (target < 0 || target >= proof.panels.length) return;
+    const [panel] = proof.panels.splice(index, 1);
+    proof.panels.splice(target, 0, panel);
+    dirty = true;
+  }
+
   // "Magic" tweet fit: re-pack panels into rows so the composite lands closest
   // to the active tweet aspect (the toggled 16:9 / 4:5 guide, else 16:9) and
-  // reset every panel to its default size.
+  // reset every panel to its default size. Row packing is a grid concept, so
+  // from free mode this also switches the proof back to the grid layout.
   function applyMagic() {
     if (!proof.panels.length) return;
+    proof.layout = 'grid';
+    selectedPanelId = null;
     const target = guide ? TWEET_GUIDES[guide] : TWEET_GUIDES['16:9'];
     const rows = autoLayoutRows(proof.panels, proof.shapes, proof.notes, textOpts(), target);
     proof.panels.forEach((p, i) => { p.row = rows[i]; p.scale = 1; });
@@ -429,6 +485,7 @@
     proof.panels.splice(index, 1);
     normalizeRows();
     selectedId = null;
+    selectedPanelId = null;
     dirty = true;
     requestAnimationFrame(fit);
   }
@@ -437,7 +494,7 @@
 
   function fit() {
     if (!stage || !containerEl || !containerEl.clientWidth) return;
-    const { width, height } = docSize(proof.panels, proof.shapes, proof.notes, textOpts());
+    const { width, height } = measureDoc();
     const k = Math.min(
       (containerEl.clientWidth - 24) / width,
       (containerEl.clientHeight - 24) / height,
@@ -463,9 +520,10 @@
       y: pointer.y - ((pointer.y - stage.y()) / old) * k,
     });
     if (guide) {
-      const { width, height } = docSize(proof.panels, proof.shapes, proof.notes, textOpts());
+      const { width, height } = measureDoc();
       drawGuide(width, height);
     }
+    drawPanelMoveControls(boxesOf()); // keep the arrow bar screen-sized
     stage.batchDraw();
   }
 
@@ -477,7 +535,8 @@
   }
 
   function panelAt(doc) {
-    const boxes = layoutPanels(proof.panels, proof.captionSize);
+    const boxes = boxesOf();
+    // array order is front→back, so the first hit is the topmost panel
     for (let i = 0; i < boxes.length; i++) {
       const b = boxes[i];
       if (doc.x >= b.x && doc.x <= b.x + b.w && doc.y >= b.y && doc.y <= b.y + b.h) {
@@ -498,7 +557,10 @@
     if (tool === 'select') {
       const onEmpty = e.target === stage || e.target.name() === 'bg';
       stage.draggable(onEmpty);
-      if (onEmpty) selectedId = null;
+      if (onEmpty) {
+        selectedId = null;
+        selectedPanelId = null;
+      }
       return;
     }
     stage.draggable(false);
@@ -661,15 +723,19 @@
 
   function rebuild() {
     docLayer.destroyChildren();
-    const { width, height, legend, cols } = docSize(proof.panels, proof.shapes, proof.notes, textOpts(), proof.legendOrder);
-    const boxes = layoutPanels(proof.panels, proof.captionSize);
+    const { width, height, legend, cols } = measureDoc();
+    const boxes = boxesOf();
     const capSize = proof.captionSize ?? CAPTION_SIZE;
+    const free = proof.layout === 'free';
 
     docLayer.add(
       new Konva.Rect({ name: 'bg', x: 0, y: 0, width, height, fill: BG })
     );
 
-    proof.panels.forEach((panel, i) => {
+    // Drawn back→front: array order is front→back, so Z1 (the first panel in
+    // the side list) is the foreground panel where free-mode panels overlap.
+    for (let i = proof.panels.length - 1; i >= 0; i--) {
+      const panel = proof.panels[i];
       const box = boxes[i];
       // Outer group is NOT clipped so an element can be dragged across panels;
       // only the image itself is clipped to the panel box (inner group).
@@ -677,7 +743,37 @@
         id: `pg-${panel.id}`,
         x: box.x, y: box.y,
         scaleX: box.scale, scaleY: box.scale,
+        draggable: free,
       });
+      // Invisible full-panel hit target: the image itself never listens (so
+      // drawing tools pass through to the stage), but the panel must catch
+      // select-clicks — and, in free mode, drags. Added first so shapes stay
+      // on top for hit-testing.
+      group.add(new Konva.Rect({
+        x: 0, y: 0, width: panel.natural[0], height: panel.natural[1],
+        fill: 'transparent', listening: true,
+      }));
+      group.on('pointerdown', () => {
+        // only the select tool touches panels — drawing must pass through
+        group.draggable(free && tool === 'select' && !spacePan);
+        if (tool === 'select') {
+          selectedPanelId = panel.id;
+          selectedId = null;
+        }
+      });
+      if (free) {
+        group.on('dragend', () => commitPanelNode(panel, group));
+        group.on('transformend', () => commitPanelNode(panel, group, { resized: true }));
+      } else {
+        // grid: corner-drag only changes the panel's scale — the grid decides
+        // where it sits, so the row re-flows around the new size
+        group.on('transformend', () => {
+          const next = (group.scaleX() * panel.natural[1]) / PANEL_H;
+          panel.scale = Math.round(Math.min(SCALE_MAX, Math.max(SCALE_MIN, next)) * 100) / 100;
+          dirty = true;
+          requestAnimationFrame(fit);
+        });
+      }
       if (panel.img) {
         const imgClip = new Konva.Group({
           clip: { x: 0, y: 0, width: panel.natural[0], height: panel.natural[1] },
@@ -700,14 +796,14 @@
           fill: TEXT_DIM, ellipsis: true, wrap: 'none', listening: false,
         }));
       }
-    });
+    }
 
     // legend (colored dots) laid out in `cols` columns, then footer.
     // Dot + text scale with the legend font size and stay vertically centred.
     const legendSize = proof.legendSize ?? 17;
     const lineH = legendLineHeight(legendSize);
     const r = Math.round(legendSize * 0.62);
-    const legendTop = PAD + panelsBlockHeight(proof.panels, proof.captionSize) + 8;
+    const legendTop = panelsBottom(proof.panels, proof.captionSize, proof.layout) + 8;
     const colW = (width - PAD * 2 - (cols - 1) * PAD) / cols;
     legend.filter((l) => l.text).forEach((line, i) => {
       const col = i % cols;
@@ -737,19 +833,37 @@
     }
 
     // selection — keyed on the shape's kind, not the Konva node's class name,
-    // since a framed/backgrounded text renders as a Group rather than a Text
+    // since a framed/backgrounded text renders as a Group rather than a Text.
+    // A whole panel can be selected instead (both modes): corner anchors only
+    // (aspect locked, elements scale along), never rotated. In grid mode the
+    // resize keeps only the scale — the grid re-flows the position.
     const selectedNode = selectedId ? docLayer.findOne(`#${selectedId}`) : null;
-    transformer.nodes(selectedNode ? [selectedNode] : []);
+    const panelNode = !selectedNode && selectedPanelId
+      ? docLayer.findOne(`#pg-${selectedPanelId}`)
+      : null;
+    // Panels are scale-clamped *during* the gesture: letting the transform run
+    // free and clamping on release made the panel visibly snap back whenever
+    // the drag overshot the 25–250% range (worst at the bounds, where a resize
+    // in the blocked direction just reverted). Shapes stay unconstrained.
+    const boundPanel = panelNode ? proof.panels.find((p) => p.id === selectedPanelId) : null;
+    transformer.boundBoxFunc((oldBox, newBox) => {
+      if (!boundPanel) return newBox;
+      const impliedScale =
+        (newBox.width / stage.scaleX()) * (boundPanel.natural[1] / (boundPanel.natural[0] * PANEL_H));
+      return impliedScale < SCALE_MIN || impliedScale > SCALE_MAX ? oldBox : newBox;
+    });
+    transformer.nodes(selectedNode ? [selectedNode] : panelNode ? [panelNode] : []);
     const selKind = selectedShape?.kind;
     transformer.rotateEnabled(selKind === 'text' || selKind === 'rect' || selKind === 'ellipse');
     transformer.enabledAnchors(
       selKind === 'rect' || selKind === 'ellipse'
         ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
-        : selKind === 'text'
+        : selKind === 'text' || panelNode
           ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
           : []
     );
     drawEndHandles(boxes);
+    drawPanelMoveControls(boxes);
     drawGuide(width, height);
     docLayer.batchDraw();
     uiLayer.batchDraw();
@@ -834,11 +948,59 @@
     }
   }
 
+  // Grid-mode panel controls: the selected panel (framed by the transformer)
+  // gets a floating arrow bar above it — ← → swap within the row, ↑ ↓ change
+  // rows — so panels are moved right where you look instead of via side-list
+  // buttons. (Free mode needs no arrows: the panel itself is draggable.)
+  // Redrawn on rebuild and on zoom (constant on-screen size).
+  function drawPanelMoveControls(boxes) {
+    panelCtrls.destroyChildren();
+    if (proof.layout === 'free' || tool !== 'select' || !selectedPanelId) return;
+    const i = proof.panels.findIndex((p) => p.id === selectedPanelId);
+    if (i < 0) return;
+    const box = boxes[i];
+    const k = stage.scaleX();
+    const buttons = [
+      { glyph: '←', enabled: canMoveLeft(i), act: () => movePanel(i, -1) },
+      { glyph: '→', enabled: canMoveRight(i), act: () => movePanel(i, 1) },
+      { glyph: '↑', enabled: (proof.panels[i].row ?? 0) > 0, act: () => movePanelRow(i, -1) },
+      { glyph: '↓', enabled: true, act: () => movePanelRow(i, 1) },
+    ];
+    const s = 30 / k;
+    const gap = 6 / k;
+    let bx = box.x + box.w / 2 - (buttons.length * s + (buttons.length - 1) * gap) / 2;
+    const by = box.y - s - 10 / k; // floats just above the panel
+    for (const b of buttons) {
+      const g = new Konva.Group({
+        x: bx, y: by, opacity: b.enabled ? 1 : 0.35, listening: b.enabled,
+      });
+      g.add(new Konva.Rect({
+        width: s, height: s, cornerRadius: 6 / k,
+        fill: '#161e2e', stroke: '#e8a33d', strokeWidth: 1.5 / k,
+      }));
+      g.add(new Konva.Text({
+        width: s, height: s, text: b.glyph, fontSize: 15 / k, fill: TEXT_MAIN,
+        align: 'center', verticalAlign: 'middle',
+        fontFamily: 'system-ui, sans-serif', listening: false,
+      }));
+      // swallow the press so the stage doesn't treat it as an empty-deselect
+      g.on('pointerdown', (e) => { e.cancelBubble = true; });
+      g.on('click tap', (e) => {
+        e.cancelBubble = true;
+        b.act();
+      });
+      g.on('pointerenter', () => { containerEl.style.cursor = 'pointer'; });
+      g.on('pointerleave', () => { containerEl.style.cursor = ''; });
+      panelCtrls.add(g);
+      bx += s + gap;
+    }
+  }
+
   // On drop, re-bind a shape to whichever panel its anchor now sits over and
   // convert its coordinates into that panel's natural pixel space. Returns the
   // source/destination layout boxes so the caller can remap x/y or points.
   function rebindOnDrop(s, node) {
-    const boxes = layoutPanels(proof.panels, proof.captionSize);
+    const boxes = boxesOf();
     const fromIdx = proof.panels.findIndex((p) => p.id === s.panel);
     if (fromIdx < 0) return { fromBox: null, toBox: null };
     const fromBox = boxes[fromIdx];
@@ -856,6 +1018,7 @@
     const dx = fromBox.x + anchor.x * fromBox.scale;
     const dy = fromBox.y + anchor.y * fromBox.scale;
     let toIdx = fromIdx;
+    // array order is front→back — the topmost panel claims the drop
     for (let i = 0; i < boxes.length; i++) {
       const b = boxes[i];
       if (dx >= b.x && dx <= b.x + b.w && dy >= b.y && dy <= b.y + b.h) { toIdx = i; break; }
@@ -920,6 +1083,7 @@
         if (tool === 'select') {
           e.cancelBubble = true;
           selectedId = s.id;
+          selectedPanelId = null;
         }
       });
       node.on('dblclick dbltap', (e) => {
@@ -973,6 +1137,7 @@
       if (tool === 'select') {
         e.cancelBubble = true;
         selectedId = s.id;
+        selectedPanelId = null;
       }
     });
     node.on('dragstart', () => node.getParent()?.moveToTop());
@@ -1017,7 +1182,7 @@
 
   // ---- inline text editing (double-click a label on the canvas) ---------------
   function startTextEdit(s, node) {
-    const boxes = layoutPanels(proof.panels, proof.captionSize);
+    const boxes = boxesOf();
     const idx = proof.panels.findIndex((p) => p.id === s.panel);
     const panelScale = idx >= 0 ? boxes[idx].scale : 1;
     const abs = node.getAbsolutePosition(); // container px, stage transform included
@@ -1192,8 +1357,12 @@
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
       deleteShape(selectedId);
+    } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedPanelId) {
+      const idx = proof.panels.findIndex((p) => p.id === selectedPanelId);
+      if (idx >= 0) removePanel(idx);
     } else if (e.key === 'Escape') {
       selectedId = null;
+      selectedPanelId = null;
       tool = 'select';
     } else if (e.key === 'v') tool = 'select';
     else if (e.key === 'r') tool = 'rect';
@@ -1217,7 +1386,7 @@
   // ---- persistence -------------------------------------------------------------------------
 
   function exportPng() {
-    const { width, height } = docSize(proof.panels, proof.shapes, proof.notes, textOpts());
+    const { width, height } = measureDoc();
     const prevScale = stage.scale();
     const prevPos = stage.position();
     const prevSize = { w: stage.width(), h: stage.height() };
@@ -1300,6 +1469,7 @@
     proof.legendSize = spec.legendSize ?? LEGEND_SIZE;
     proof.footerSize = spec.footerSize ?? FOOTER_SIZE;
     proof.footer = spec.footer ?? '';
+    proof.layout = spec.layout ?? 'grid';
     for (const p of spec.panels) {
       try {
         const img = await loadImage(`/files/${caseState.current.id}/${p.src}`);
@@ -1438,6 +1608,23 @@
       <div class="tb-sep"></div>
       <button class="tb-btn" title="Fit view (f)" onclick={fit}><Icon name="eye" size={18} /></button>
       <div class="tb-sep"></div>
+      <button
+        class="tb-btn"
+        class:active={proof.layout !== 'free'}
+        title="Grid layout — panels flow in rows; select one to move it with the on-canvas arrows"
+        onclick={() => setLayoutMode('grid')}
+      >
+        <Icon name="grid" size={18} />
+      </button>
+      <button
+        class="tb-btn"
+        class:active={proof.layout === 'free'}
+        title="Free layout — drag panels anywhere (overlap allowed), corner handles resize"
+        onclick={() => setLayoutMode('free')}
+      >
+        <Icon name="layers" size={18} />
+      </button>
+      <div class="tb-sep"></div>
       {#each Object.keys(TWEET_GUIDES) as g (g)}
         <button
           class="tb-btn tb-guide"
@@ -1548,40 +1735,54 @@
         </button>
         {#if !collapsed.panels}
         {#each proof.panels as panel, i (panel.id)}
-          <div class="panel-row card">
-            <div class="panel-thumb">
+          <div class="panel-row card" class:selected={selectedPanelId === panel.id}>
+            <button
+              class="panel-thumb"
+              title="Select this panel on the canvas"
+              onclick={() => (selectedPanelId = selectedPanelId === panel.id ? null : panel.id)}
+            >
               <img src={`/files/${caseState.current?.id}/${panel.src}`} alt="" />
-              <span class="row-badge" title="Row (top→bottom)">R{(panel.row ?? 0) + 1}</span>
-            </div>
+              {#if proof.layout === 'free'}
+                <span class="row-badge" title="Stacking order — Z1 is the foreground">Z{i + 1}</span>
+              {:else}
+                <span class="row-badge" title="Row (top→bottom)">R{(panel.row ?? 0) + 1}</span>
+              {/if}
+            </button>
             <input
               class="input cap-input"
               placeholder="Caption…"
               bind:value={panel.caption}
               onchange={() => (dirty = true)}
             />
+            <!-- one compact row: z-order (free only) · size · delete — moving a
+                 grid panel happens on the canvas (select it, use the arrows) -->
             <div class="panel-actions">
-              <button class="btn btn-ghost btn-sm" disabled={!canMoveLeft(i)} title="Move left in row" onclick={() => movePanel(i, -1)}>←</button>
-              <button class="btn btn-ghost btn-sm" disabled={!canMoveRight(i)} title="Move right in row" onclick={() => movePanel(i, 1)}>→</button>
-              <button class="btn btn-ghost btn-sm" disabled={(panel.row ?? 0) === 0} title="Move up a row" onclick={() => movePanelRow(i, -1)}>↑</button>
-              <button class="btn btn-ghost btn-sm" title="Move down a row" onclick={() => movePanelRow(i, 1)}>↓</button>
+              {#if proof.layout === 'free'}
+                <button class="btn btn-ghost btn-sm" disabled={i === 0} title="Bring forward (toward Z1)" onclick={() => movePanelZ(i, -1)}>
+                  <Icon name="chevronUp" size={13} />
+                </button>
+                <button class="btn btn-ghost btn-sm" disabled={i === proof.panels.length - 1} title="Send backward" onclick={() => movePanelZ(i, 1)}>
+                  <Icon name="chevronDown" size={13} />
+                </button>
+              {/if}
+              <div class="panel-scale" title="Panel size — elements scale with it">
+                <button
+                  class="btn btn-ghost btn-sm"
+                  disabled={(panel.scale ?? 1) <= SCALE_MIN}
+                  title="Shrink panel"
+                  onclick={() => scalePanel(i, -SCALE_STEP)}
+                >−</button>
+                <span class="scale-val">{Math.round((panel.scale ?? 1) * 100)}%</span>
+                <button
+                  class="btn btn-ghost btn-sm"
+                  disabled={(panel.scale ?? 1) >= SCALE_MAX}
+                  title="Enlarge panel"
+                  onclick={() => scalePanel(i, SCALE_STEP)}
+                >+</button>
+              </div>
               <button class="btn btn-ghost btn-sm" style="margin-left:auto" title="Remove panel" onclick={() => removePanel(i)}>
                 <Icon name="trash" size={13} />
               </button>
-            </div>
-            <div class="panel-scale" title="Panel size — elements scale with it">
-              <button
-                class="btn btn-ghost btn-sm"
-                disabled={(panel.scale ?? 1) <= SCALE_MIN}
-                title="Shrink panel"
-                onclick={() => scalePanel(i, -SCALE_STEP)}
-              >−</button>
-              <span class="scale-val">{Math.round((panel.scale ?? 1) * 100)}%</span>
-              <button
-                class="btn btn-ghost btn-sm"
-                disabled={(panel.scale ?? 1) >= SCALE_MAX}
-                title="Enlarge panel"
-                onclick={() => scalePanel(i, SCALE_STEP)}
-              >+</button>
             </div>
           </div>
         {/each}
@@ -1975,7 +2176,16 @@
     flex-direction: column;
     gap: 6px;
   }
-  .panel-thumb { position: relative; }
+  .panel-thumb {
+    position: relative;
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+  }
+  .panel-row.selected { border-color: var(--accent); }
   .panel-row img {
     width: 100%;
     max-height: 90px;
@@ -2034,12 +2244,12 @@
   }
   .adv-hint { font-size: 11px; color: var(--text-3); margin-top: 5px; }
   .cap-input { font-size: var(--fs-xs); padding: 5px 8px; }
-  .panel-actions { display: flex; gap: 2px; }
+  .panel-actions { display: flex; align-items: center; gap: 2px; }
   .panel-scale {
     display: flex;
     align-items: center;
-    justify-content: center;
     gap: 4px;
+    margin: 0 auto; /* centres the size control between z-order and delete */
   }
   .scale-val {
     min-width: 42px;

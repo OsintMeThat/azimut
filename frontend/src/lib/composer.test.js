@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   PAD, PANEL_H, GAP, ROW_GAP, FOOTER_H, LEGEND_LINE_H,
-  layoutPanels, panelsBlockHeight, panelHeight, captionBand, legendLineHeight, footerBand,
+  layoutPanels, layoutPanelsFree, freeNormalizeDelta, panelsBottom,
+  panelsBlockHeight, panelHeight, captionBand, legendLineHeight, footerBand,
   docSize, legendColumns, legendRowCount, toSpec, offsetShape, copyShapeSpec, autoLayoutRows, TWEET_GUIDES,
   autoCoords, formatCoords, resolveSourceUrls, autoSource, autoSourceUrls,
   proofCoordsText, proofSource, orderedFeatureColors, legendLines,
-  dedupeBySrc, isSatelliteCapture,
+  dedupeBySrc, isSatelliteCapture, satPanelInput, mediaPanelInput,
 } from './composer.js';
 
 // natural is [width, height]; PANEL_H drives the per-row scale.
@@ -95,6 +96,93 @@ describe('layoutPanels — per-panel scale', () => {
     ];
     const boxes = layoutPanels(panels);
     expect(boxes[1].y).toBe(PAD + (PANEL_H * 2 + captionBand() + ROW_GAP));
+  });
+});
+
+describe('layoutPanels — free mode', () => {
+  it('renders panels without a stored position exactly where the grid would', () => {
+    const panels = [landscape(1000, 500), landscape(500, 500)];
+    expect(layoutPanels(panels, undefined, 'free')).toEqual(layoutPanels(panels));
+  });
+
+  it('places panels at their stored x/y, normalised so the top/left-most lands at PAD', () => {
+    const panels = [
+      landscape(1000, 500, { x: 100, y: 200 }),
+      landscape(500, 500, { x: 400, y: 50 }),
+    ];
+    const boxes = layoutPanelsFree(panels);
+    expect(boxes[0].x).toBe(PAD); // min x = 100 → shifted to PAD
+    expect(boxes[1].y).toBe(PAD); // min y = 50 → shifted to PAD
+    expect(boxes[1].x).toBe(PAD + 300); // relative offsets preserved
+    expect(boxes[0].y).toBe(PAD + 150);
+  });
+
+  it('allows two panels to overlap and keeps per-panel scale sizing', () => {
+    const panels = [
+      landscape(1000, 500, { x: PAD, y: PAD, scale: 2 }),
+      landscape(1000, 500, { x: PAD, y: PAD }),
+    ];
+    const boxes = layoutPanelsFree(panels);
+    expect(boxes[0]).toMatchObject({ x: PAD, y: PAD, h: PANEL_H * 2 });
+    expect(boxes[1]).toMatchObject({ x: PAD, y: PAD, h: PANEL_H });
+    expect(boxes[0].w).toBeCloseTo(2880);
+    expect(boxes[0].baseScale).toBeCloseTo(PANEL_H / 500);
+  });
+
+  it('a null stored position (persisted spec) falls back to the grid too', () => {
+    const panels = [landscape(1000, 500, { x: null, y: null })];
+    expect(layoutPanelsFree(panels)[0]).toMatchObject({ x: PAD, y: PAD });
+  });
+});
+
+describe('freeNormalizeDelta — stored positions re-anchor at PAD', () => {
+  it('is zero when positions are already anchored', () => {
+    const panels = [landscape(1000, 500, { x: PAD, y: PAD })];
+    expect(freeNormalizeDelta(panels)).toEqual({ dx: 0, dy: 0 });
+    expect(freeNormalizeDelta([])).toEqual({ dx: 0, dy: 0 });
+  });
+
+  it('returns the shift needed after a drag past the top/left edge', () => {
+    const panels = [
+      landscape(1000, 500, { x: -50, y: 120 }),
+      landscape(500, 500, { x: 300, y: 40 }),
+    ];
+    expect(freeNormalizeDelta(panels)).toEqual({ dx: PAD + 50, dy: PAD - 40 });
+  });
+});
+
+describe('panelsBottom', () => {
+  it('matches PAD + panelsBlockHeight in grid mode', () => {
+    const panels = [landscape(1000, 500, { row: 0 }), landscape(1000, 500, { row: 1 })];
+    expect(panelsBottom(panels)).toBe(PAD + panelsBlockHeight(panels));
+    expect(panelsBottom([])).toBe(PAD);
+  });
+
+  it('free mode: lowest panel bottom, caption band only under captioned panels', () => {
+    const bare = [landscape(1000, 500, { x: PAD, y: PAD })];
+    expect(panelsBottom(bare, undefined, 'free')).toBe(PAD + PANEL_H);
+    const captioned = [landscape(1000, 500, { x: PAD, y: PAD, caption: 'view' })];
+    expect(panelsBottom(captioned, undefined, 'free')).toBe(PAD + PANEL_H + captionBand());
+  });
+
+  it('free mode: the lowest panel wins, wherever it sits in the array', () => {
+    const panels = [
+      landscape(1000, 500, { x: PAD, y: 900 }),
+      landscape(500, 500, { x: PAD, y: PAD }),
+    ];
+    expect(panelsBottom(panels, undefined, 'free')).toBe(900 + PANEL_H);
+  });
+});
+
+describe('docSize — free layout', () => {
+  it('sizes the document to the panel bounding box', () => {
+    const panels = [
+      landscape(1000, 500, { x: PAD, y: PAD }), // right edge PAD + 1440
+      landscape(500, 500, { x: 2000, y: 300 }), // right edge 2720, bottom 1020
+    ];
+    const { width, height } = docSize(panels, [], {}, {}, [], 'free');
+    expect(width).toBe(2720 + PAD);
+    expect(height).toBe(1020 + FOOTER_H + PAD);
   });
 });
 
@@ -280,6 +368,71 @@ describe('toSpec — persistence of layout', () => {
       shapes: [],
     };
     expect(toSpec(proof).panels.map((p) => p.scale)).toEqual([1.5, 1]);
+  });
+});
+
+describe('toSpec — layout mode + free positions', () => {
+  it('defaults to the grid layout with null positions', () => {
+    const proof = {
+      title: 'T', panels: [{ id: 'p1', src: 'a.png', natural: [10, 10] }], shapes: [],
+    };
+    const spec = toSpec(proof);
+    expect(spec.layout).toBe('grid');
+    expect(spec.panels[0].x).toBeNull();
+    expect(spec.panels[0].y).toBeNull();
+  });
+
+  it('persists the free layout and each panel position', () => {
+    const proof = {
+      title: 'T',
+      layout: 'free',
+      panels: [{ id: 'p1', src: 'a.png', natural: [10, 10], x: 120, y: 340 }],
+      shapes: [],
+    };
+    const spec = toSpec(proof);
+    expect(spec.layout).toBe('free');
+    expect(spec.panels[0]).toMatchObject({ x: 120, y: 340 });
+  });
+});
+
+describe('satPanelInput — satellite caption dates with the imagery date, never the fetch date', () => {
+  const capture = {
+    path: 'media/sat_1.png',
+    attribution: '© Provider',
+    lat: 48.85, lon: 2.35, zoom: 17,
+    provider_label: 'Esri',
+    fetched_at: '2026-07-14T10:00:00Z',
+  };
+
+  it('captions provider · coords · imagery acquisition date when known', () => {
+    const input = satPanelInput({ ...capture, imagery_date: '2024-03-02' });
+    expect(input.caption).toBe('Esri · 48.850000, 2.350000 · 2024-03-02');
+  });
+
+  it('omits the date part when the imagery date is unknown (no fetch-date fallback)', () => {
+    expect(satPanelInput(capture).caption).toBe('Esri · 48.850000, 2.350000');
+    expect(satPanelInput({ ...capture, imagery_date: null }).caption).toBe('Esri · 48.850000, 2.350000');
+  });
+
+  it('keeps the full provenance in meta (both dates, provider, coords)', () => {
+    const input = satPanelInput({ ...capture, imagery_date: '2024-03-02' });
+    expect(input.src).toBe('media/sat_1.png');
+    expect(input.meta).toMatchObject({
+      kind: 'satellite', provider: 'Esri', lat: 48.85, lon: 2.35, zoom: 17,
+      attribution: '© Provider', date: '2026-07-14', imagery_date: '2024-03-02',
+    });
+  });
+});
+
+describe('mediaPanelInput — media panel carries its traced source', () => {
+  it('resolves the source link through the derivation chain, no caption', () => {
+    const video = { path: 'media/v.mp4', source: { type: 'download', webpage_url: 'https://x.com/a/1' } };
+    const frame = { path: 'media/f.png', source: { type: 'inspect', op: 'frame', from: 'media/v.mp4' } };
+    const input = mediaPanelInput(frame, [video, frame]);
+    expect(input.caption).toBe('');
+    expect(input.meta).toMatchObject({
+      kind: 'media', source_url: 'https://x.com/a/1', source_urls: ['https://x.com/a/1'],
+    });
   });
 });
 

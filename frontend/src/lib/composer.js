@@ -73,16 +73,28 @@ export function panelHeight(p) {
 
 /**
  * Panel layout boxes in doc space: [{x, y, w, h, scale, baseScale, row}] aligned
- * with the input `panels`. Panels are grouped by `row` and centred; rows stack
- * top→bottom with a caption band + ROW_GAP between them. Each panel is laid out
- * at PANEL_H × its own `scale`, so a row's height is its tallest panel and the
- * shorter panels are bottom-aligned so their captions share one baseline.
+ * with the input `panels`. In the default `grid` layout panels are grouped by
+ * `row` and centred; rows stack top→bottom with a caption band + ROW_GAP between
+ * them (see layoutPanelsGrid). In the `free` layout each panel sits at its own
+ * stored x/y (see layoutPanelsFree) and overlap is allowed — array order is the
+ * z-order, front→back (the first panel is the foreground one).
  *
  * `scale` maps a panel's natural pixels → doc pixels (grows/shrinks with the
  * user scale); `baseScale` is that mapping at scale 1, used to keep stroke and
  * arrow-head sizes normalised while still letting them grow with the panel.
  */
-export function layoutPanels(panels, captionSize = CAPTION_SIZE) {
+export function layoutPanels(panels, captionSize = CAPTION_SIZE, layout = 'grid') {
+  return layout === 'free'
+    ? layoutPanelsFree(panels, captionSize)
+    : layoutPanelsGrid(panels, captionSize);
+}
+
+/**
+ * Grid layout: each panel is laid out at PANEL_H × its own `scale`, so a row's
+ * height is its tallest panel and the shorter panels are bottom-aligned so
+ * their captions share one baseline.
+ */
+function layoutPanelsGrid(panels, captionSize = CAPTION_SIZE) {
   const rows = rowOrder(panels);
   const band = captionBand(captionSize);
   // width + height of each row, to centre narrower rows and stack by height
@@ -123,6 +135,52 @@ export function layoutPanels(panels, captionSize = CAPTION_SIZE) {
   });
 }
 
+/**
+ * Free layout: each panel sits at its stored doc-space x/y (its size still
+ * derives from PANEL_H × scale, exactly as in the grid). Positions are
+ * normalised so the top/left-most panel lands at PAD — stored coordinates can
+ * drift while dragging, the document always hugs its content. A panel that has
+ * no position yet (just added, or a grid spec toggled to free) falls back to
+ * where the grid would have put it, so nothing jumps when entering the mode.
+ */
+export function layoutPanelsFree(panels, captionSize = CAPTION_SIZE) {
+  if (!panels.length) return [];
+  const grid = layoutPanelsGrid(panels, captionSize); // fallback positions
+  const pos = panels.map((p, i) => ({
+    x: p.x ?? grid[i].x,
+    y: p.y ?? grid[i].y,
+  }));
+  const dx = PAD - Math.min(...pos.map((q) => q.x));
+  const dy = PAD - Math.min(...pos.map((q) => q.y));
+  return panels.map((p, i) => {
+    const ph = panelHeight(p);
+    const scale = ph / p.natural[1];
+    return {
+      x: pos[i].x + dx,
+      y: pos[i].y + dy,
+      w: p.natural[0] * scale,
+      h: ph,
+      scale,
+      baseScale: PANEL_H / p.natural[1],
+      row: p.row ?? 0,
+    };
+  });
+}
+
+/**
+ * Shift that re-anchors stored free positions at PAD (the normalisation
+ * layoutPanelsFree applies on the fly). The caller folds it into every panel's
+ * stored x/y after a drag/resize so stored coordinates always equal rendered
+ * ones — and can offset the stage by the same amount so nothing jumps on screen.
+ */
+export function freeNormalizeDelta(panels, captionSize = CAPTION_SIZE) {
+  if (!panels.length) return { dx: 0, dy: 0 };
+  const grid = layoutPanelsGrid(panels, captionSize);
+  const xs = panels.map((p, i) => p.x ?? grid[i].x);
+  const ys = panels.map((p, i) => p.y ?? grid[i].y);
+  return { dx: PAD - Math.min(...xs), dy: PAD - Math.min(...ys) };
+}
+
 /** Height of the stacked panel block (rows + their caption bands), no legend. */
 export function panelsBlockHeight(panels, captionSize = CAPTION_SIZE) {
   const rows = rowOrder(panels);
@@ -134,6 +192,21 @@ export function panelsBlockHeight(panels, captionSize = CAPTION_SIZE) {
     total += Math.max(...inRow.map(panelHeight)) + band;
   }
   return total + (rows.length - 1) * ROW_GAP;
+}
+
+/**
+ * Doc-space y where the panel block ends and the legend may start. Grid: PAD +
+ * the stacked block (every row reserves its caption band). Free: the lowest
+ * panel bottom, plus a caption band only under panels that actually carry one.
+ */
+export function panelsBottom(panels, captionSize = CAPTION_SIZE, layout = 'grid') {
+  if (!panels.length) return PAD;
+  if (layout !== 'free') return PAD + panelsBlockHeight(panels, captionSize);
+  const boxes = layoutPanelsFree(panels, captionSize);
+  const band = captionBand(captionSize);
+  return Math.max(
+    ...boxes.map((b, i) => b.y + b.h + (panels[i].caption?.trim() ? band : 0))
+  );
 }
 
 /**
@@ -290,11 +363,11 @@ export function legendRowCount(count, columns) {
  * count and every text band grows with its own font size (all editable per
  * proof via `text = { captionSize, legendSize, footerSize }`).
  */
-export function docSize(panels, shapes, notes = {}, text = {}, legendOrder = []) {
+export function docSize(panels, shapes, notes = {}, text = {}, legendOrder = [], layout = 'grid') {
   const {
     captionSize = CAPTION_SIZE, legendSize = LEGEND_SIZE, footerSize = FOOTER_SIZE,
   } = text;
-  const boxes = layoutPanels(panels, captionSize);
+  const boxes = layoutPanels(panels, captionSize, layout);
   const width = boxes.length
     ? Math.max(...boxes.map((b) => b.x + b.w)) + PAD
     : 640;
@@ -303,7 +376,7 @@ export function docSize(panels, shapes, notes = {}, text = {}, legendOrder = [])
   const cols = legendColumns(contentW, legend.length);
   const legendRows = legendRowCount(legend.length, cols);
   const height =
-    PAD + panelsBlockHeight(panels, captionSize) +
+    panelsBottom(panels, captionSize, layout) +
     (legend.length ? 10 + legendRows * legendLineHeight(legendSize) : 0) +
     footerBand(footerSize) + PAD;
   return { width: contentW, height, legend, cols };
@@ -321,6 +394,7 @@ export function toSpec(proof) {
     legendSize: proof.legendSize ?? LEGEND_SIZE,
     footerSize: proof.footerSize ?? FOOTER_SIZE,
     footer: proof.footer?.trim() ? proof.footer.trim() : null, // null → default attribution line
+    layout: proof.layout ?? 'grid', // 'grid' (rows) | 'free' (per-panel x/y, overlap allowed)
     notes: { ...(proof.notes ?? {}) },
     legendOrder: [...(proof.legendOrder ?? [])],
     panels: proof.panels.map((p) => ({
@@ -329,6 +403,8 @@ export function toSpec(proof) {
       caption: p.caption ?? '',
       row: p.row ?? 0, // vertical row (0 = top); missing → single-row layout
       scale: p.scale ?? 1, // per-panel size multiplier (1 = default PANEL_H)
+      x: p.x ?? null, // free-layout doc position; null → grid fallback
+      y: p.y ?? null,
       natural: p.natural,
       meta: p.meta ?? {},
     })),
@@ -364,6 +440,42 @@ export function offsetShape(shape, d) {
     s.y = (s.y ?? 0) + d;
   }
   return s;
+}
+
+/**
+ * Panel input for a satellite capture. The caption is provider · coordinates,
+ * dated with the imagery acquisition date (when the satellite scene was shot,
+ * NOT when we fetched the tiles) — the date part is simply omitted when the
+ * provider doesn't expose it, never substituted with the fetch date.
+ */
+export function satPanelInput(s) {
+  const parts = [`${s.provider_label} · ${s.lat.toFixed(6)}, ${s.lon.toFixed(6)}`];
+  if (s.imagery_date) parts.push(s.imagery_date);
+  return {
+    src: s.path,
+    meta: {
+      kind: 'satellite', attribution: s.attribution, lat: s.lat, lon: s.lon,
+      zoom: s.zoom, provider: s.provider_label,
+      date: s.fetched_at?.slice(0, 10), imagery_date: s.imagery_date ?? null,
+    },
+    caption: parts.join(' · '),
+  };
+}
+
+/**
+ * Panel input for a media image. Traces the real source link through the
+ * derivation chain (a collage/frame carries no URL of its own — follow it back
+ * to the downloaded original). A file uploaded from disk has no URL, so it
+ * contributes no source.
+ */
+export function mediaPanelInput(m, mediaList = []) {
+  const byPath = new Map(mediaList.map((x) => [x.path, x]));
+  const urls = resolveSourceUrls(m, byPath);
+  return {
+    src: m.path,
+    meta: { kind: 'media', source_url: urls[0], source_urls: urls },
+    caption: '',
+  };
 }
 
 /**
