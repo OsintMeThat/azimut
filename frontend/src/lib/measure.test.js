@@ -98,3 +98,30 @@ describe('formatting', () => {
     expect(formatAngle(150)).toBe('30.0° · 150.0°');
   });
 });
+
+describe('imperial units', () => {
+  it('switches ft → mi', () => {
+    expect(formatDistance(1, 'imperial')).toBe('3.3 ft');
+    expect(formatDistance(250, 'imperial')).toBe('820 ft');
+    expect(formatDistance(1609.344, 'imperial')).toBe('1.00 mi');
+    expect(formatDistance(50000, 'imperial')).toBe('31.1 mi');
+  });
+
+  it('switches ft² → acres → mi²', () => {
+    expect(formatArea(500, 'imperial')).toBe('5382 ft²');
+    expect(formatArea(50000, 'imperial')).toBe('12.36 acres');
+    expect(formatArea(5e6, 'imperial')).toBe('1.93 mi²');
+  });
+
+  it('stays metric unless imperial is asked for', () => {
+    expect(formatDistance(1500)).toBe('1.50 km');
+    expect(formatDistance(1500, 'metric')).toBe('1.50 km');
+    expect(formatArea(50000, 'metric')).toBe('5.00 ha');
+  });
+
+  it('agrees with the metric reading at the same distance', () => {
+    // 1 km is 0.62 mi — the same measurement, two labels
+    expect(formatDistance(1000)).toBe('1.00 km');
+    expect(formatDistance(1000, 'imperial')).toBe('3281 ft');
+  });
+});

@@ -49,12 +49,32 @@ export function angleAt(a, vertex, b) {
   return (Math.acos(cos) * 180) / Math.PI;
 }
 
-export function formatDistance(m) {
+// Measurements are computed and stored in metres; `units` only picks how they
+// read (Settings → Preferences). International feet/miles/acres.
+const FT_PER_M = 3.28084;
+const FT_PER_MI = 5280;
+const SQFT_PER_ACRE = 43560;
+const SQMI_PER_SQM = 3.861021585e-7;
+
+export function formatDistance(m, units = 'metric') {
+  if (units === 'imperial') {
+    const ft = m * FT_PER_M;
+    if (ft < FT_PER_MI) return `${ft < 10 ? ft.toFixed(1) : Math.round(ft)} ft`;
+    const mi = ft / FT_PER_MI;
+    return `${mi.toFixed(mi < 10 ? 2 : 1)} mi`;
+  }
   if (m < 1000) return `${m < 10 ? m.toFixed(1) : Math.round(m)} m`;
   return `${(m / 1000).toFixed(m < 10000 ? 2 : 1)} km`;
 }
 
-export function formatArea(m2) {
+export function formatArea(m2, units = 'metric') {
+  if (units === 'imperial') {
+    const sqft = m2 * FT_PER_M * FT_PER_M;
+    if (sqft < SQFT_PER_ACRE) return `${Math.round(sqft)} ft²`;
+    const sqmi = m2 * SQMI_PER_SQM;
+    if (sqmi < 1) return `${(sqft / SQFT_PER_ACRE).toFixed(2)} acres`;
+    return `${sqmi.toFixed(2)} mi²`;
+  }
   if (m2 < 10000) return `${Math.round(m2)} m²`;
   if (m2 < 1e6) return `${(m2 / 10000).toFixed(2)} ha`;
   return `${(m2 / 1e6).toFixed(2)} km²`;

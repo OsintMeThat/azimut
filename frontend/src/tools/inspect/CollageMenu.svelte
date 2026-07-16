@@ -3,6 +3,8 @@
     previewStyle, scaleQuad, rotateQuad, quadCentroid, cropImgStyle, styleText, uid,
     rotateQuads, scaleQuads,
   } from '../../lib/inspect.js';
+  import { api } from '../../lib/api.js';
+  import { caseState, toast } from '../../lib/state.svelte.js';
   import Icon from '../../components/Icon.svelte';
 
   // Right-panel menu for the Collage tab: switch/create collages, add tray frames
@@ -99,6 +101,48 @@
   function removeGroup() {
     active.nodes = active.nodes.filter((n) => !selectedIds.includes(n.id));
     selectedIds = [];
+  }
+
+  // ---- auto-stitch ----------------------------------------------------------
+  // The backend solves each piece's quad from the imagery itself and hands the
+  // geometry back — the pieces stay ordinary, hand-tunable pieces (spec § v2
+  // Panorama: machine stitch first, hand-tune after). Pieces it can't place are
+  // left exactly where they were, for the analyst to place by hand.
+  let stitching = $state(false);
+  let undoQuads = $state(null);
+
+  async function autoStitch() {
+    if (!active || active.nodes.length < 2) return;
+    stitching = true;
+    try {
+      const before = active.nodes.map((n) => ({ id: n.id, quad: n.quad.map(([x, y]) => [x, y]) }));
+      const res = await api.post(`/api/cases/${caseState.current.id}/inspect/auto-stitch`, {
+        width: active.width,
+        height: active.height,
+        nodes: active.nodes.map((n) => n.save), // frozen snapshot recipes (path/time/ops)
+      });
+      for (const { index, quad } of res.nodes) active.nodes[index].quad = quad;
+      undoQuads = before;
+      selectedIds = [];
+      const placed = res.nodes.length;
+      if (res.dropped.length) {
+        toast(`Stitched ${placed} — ${res.dropped.length} left in place (no overlap found)`, 'warn');
+      } else {
+        toast(`Stitched ${placed} pieces`, 'ok');
+      }
+    } catch (e) {
+      toast(e.message, 'danger');
+    } finally {
+      stitching = false;
+    }
+  }
+
+  function undoStitch() {
+    for (const { id, quad } of undoQuads) {
+      const node = active.nodes.find((n) => n.id === id);
+      if (node) node.quad = quad;
+    }
+    undoQuads = null;
   }
 </script>
 
@@ -197,9 +241,29 @@
     </div>
   {/if}
 
-  <button class="btn btn-sm w-full" disabled title="Automatic stitching is coming soon">
-    <Icon name="hash" size={14} /> Auto panorama (coming soon)
-  </button>
+  <div class="section">
+    <div class="section-head"><span>Auto panorama</span></div>
+    <p class="hint">
+      Solves the layout from the overlapping imagery itself, then drops the pieces back on the
+      canvas — still draggable and warpable, so you can hand-tune the machine's guess.
+    </p>
+    <button
+      class="btn btn-sm w-full"
+      disabled={stitching || !active || active.nodes.length < 2}
+      onclick={autoStitch}
+      title={active && active.nodes.length < 2
+        ? 'Add at least two overlapping pieces'
+        : 'Stitch the pieces on this collage'}
+    >
+      <Icon name={stitching ? 'clock' : 'hash'} size={14} />
+      {stitching ? 'Stitching…' : 'Auto-stitch pieces'}
+    </button>
+    {#if undoQuads}
+      <button class="btn btn-ghost btn-xs w-full" onclick={undoStitch}>
+        <Icon name="reset" size={12} /> Undo auto-stitch
+      </button>
+    {/if}
+  </div>
 </div>
 
 <style>

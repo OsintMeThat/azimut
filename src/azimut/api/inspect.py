@@ -17,8 +17,9 @@ from pydantic import BaseModel, Field
 
 from .. import jobs
 from ..engine import inspect as inspect_engine
+from ..engine import links as link_engine
 from ..workspace import CaseError
-from .cases import get_case
+from .cases import delete_by_path, get_case
 
 router = APIRouter(prefix="/api", tags=["inspect"])
 
@@ -36,7 +37,10 @@ class FramesIn(BaseModel):
 
 class SuggestIn(BaseModel):
     path: str
-    bins: int = Field(default=12, ge=1, le=inspect_engine.FRAME_SCAN_CAP)
+    # How many suggestions to return. Every frame is scanned regardless — this
+    # only sizes the shortlist.
+    count: int = Field(default=12, ge=1, le=inspect_engine.SUGGEST_CAP)
+    min_gap: float | None = Field(default=None, ge=0, le=60)
 
 
 class Op(BaseModel):
@@ -100,6 +104,12 @@ class ComposeIn(BaseModel):
     background: str | None = "#12141c"  # None → transparent (RGBA) canvas
     label: str | None = None
     folder: str | None = None
+
+
+class StitchIn(BaseModel):
+    width: int = Field(ge=16, le=8192)
+    height: int = Field(ge=16, le=8192)
+    nodes: list[NodeSrc] = Field(min_length=2)
 
 
 class EnhanceVideoIn(BaseModel):
@@ -169,7 +179,11 @@ def suggest_frames(case_id: str, body: SuggestIn) -> dict[str, str]:
     case = get_case(case_id)
 
     def work(set_progress):
-        return {"frames": inspect_engine.suggest_frames(case, body.path, body.bins, set_progress)}
+        return {
+            "frames": inspect_engine.suggest_frames(
+                case, body.path, body.count, body.min_gap, set_progress
+            )
+        }
 
     return {"job_id": jobs.start("suggest", work)}
 
@@ -273,6 +287,28 @@ def compose(case_id: str, body: ComposeIn) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.post("/cases/{case_id}/inspect/auto-stitch")
+def auto_stitch(case_id: str, body: StitchIn) -> dict[str, Any]:
+    """Solve collage quads for overlapping pieces — layout only, nothing is filed.
+
+    The pieces stay live on the canvas afterwards (spec § v2 Panorama: machine
+    stitch first, hand-tune after), so this returns geometry, not pixels.
+    """
+    case = get_case(case_id)
+    srcs = [
+        {**n.model_dump(exclude={"ops"}), "ops": [op.model_dump() for op in n.ops]}
+        for n in body.nodes
+    ]
+    try:
+        return inspect_engine.solve_collage_layout(
+            case, srcs=srcs, width=body.width, height=body.height
+        )
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, RuntimeError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/cases/{case_id}/inspect/compose-preview")
 def compose_preview(case_id: str, body: ComposeIn) -> Response:
     """Render the composited collage to a PNG for the Save tab — nothing is filed."""
@@ -349,12 +385,18 @@ def list_sessions(case_id: str) -> list[dict[str, Any]]:
             continue
         if spec.get("azimut_inspect") != 1:
             continue
+        # Sessions hold an array of collages; older ones held a single `collage`
+        # (the loader still reads both). Count the pieces across all of them.
+        collages = spec.get("collages") or (
+            [spec["collage"]] if isinstance(spec.get("collage"), dict) else []
+        )
         out.append({
             "name": spec_path.stem,
             "title": spec.get("title", spec_path.stem),
             "updated_at": spec.get("updated_at"),
             "frames": len(spec.get("frames", [])),
-            "collage": len(spec.get("collage", {}).get("nodes", [])),
+            "collages": len(collages),
+            "collage": sum(len(c.get("nodes", [])) for c in collages),
             "source": spec.get("source", {}).get("path"),
         })
     out.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
@@ -390,20 +432,34 @@ def save_session(case_id: str, body: SessionIn) -> dict[str, Any]:
     existing = case.find_entity(attr="spec", value=rel)
     if existing:
         case.update_entity(existing["id"], {"label": body.title})
+        entity_id = existing["id"]
     else:
-        case.add_entity("inspect-session", body.title, attrs={"spec": rel}, by="inspect")
+        entity_id = case.add_entity(
+            "inspect-session", body.title, attrs={"spec": rel}, by="inspect"
+        )["id"]
+
+    # A session is only adjustments and crops over its subject — nothing usable
+    # is left of it once the subject is gone, so it depends on it and is deleted
+    # with it (ONTOLOGY §3). Collage pieces pulled from the case are *not*
+    # subjects: losing one leaves a placeholder, it does not void the session.
+    link_engine.sync(
+        case,
+        entity_id,
+        link_engine.DEPENDS_ON,
+        [spec.get("source", {}).get("path")],
+        by="inspect",
+    )
     return {"name": name, "spec_path": rel}
 
 
 @router.delete("/cases/{case_id}/inspect/sessions/{name}")
-def delete_session(case_id: str, name: str) -> dict[str, str]:
+def delete_session(case_id: str, name: str) -> dict[str, Any]:
     case = get_case(case_id)
     try:
         spec_path = case.resolve_inside(f"inspect/{name}.json")
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-    spec_path.unlink(missing_ok=True)
-    entity = case.find_entity(attr="spec", value=f"inspect/{name}.json")
-    if entity:
-        case.remove_entity(entity["id"])
-    return {"status": "deleted"}
+    result = delete_by_path(case, f"inspect/{name}.json")
+    if not result["deleted"]:  # never filed as an entity: drop the file anyway
+        spec_path.unlink(missing_ok=True)
+    return result

@@ -278,6 +278,97 @@ def test_compose_node_crop_is_applied_before_warp(client):
     assert r > 200 and g > 200 and b > 200
 
 
+def _overlapping_pair(seed=13):
+    """Two crops of one textured scene, sharing 200px — a stitchable pair."""
+    import random
+
+    from PIL import ImageDraw
+
+    rng = random.Random(seed)
+    scene = Image.new("RGB", (900, 500), (18, 20, 28))
+    draw = ImageDraw.Draw(scene)
+    for _ in range(220):
+        x, y, r = rng.randrange(900), rng.randrange(500), rng.randrange(6, 34)
+        color = (rng.randrange(40, 255), rng.randrange(40, 255), rng.randrange(40, 255))
+        draw.ellipse([x, y, x + r, y + r], fill=color)
+    out = []
+    for box in [(0, 0, 500, 500), (300, 0, 800, 500)]:
+        buf = io.BytesIO()
+        scene.crop(box).save(buf, "PNG")
+        out.append(buf.getvalue())
+    return out
+
+
+def test_auto_stitch_solves_quads_without_filing_anything(client):
+    cid = client.post("/api/cases", json={"name": "Stitch"}).json()["id"]
+    left_png, right_png = _overlapping_pair()
+    a = _upload(client, cid, "left.png", left_png)
+    b = _upload(client, cid, "right.png", right_png)
+    before = len(client.get(f"/api/cases/{cid}/media").json())
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={
+            "width": 1200, "height": 600,
+            "nodes": [{"path": a["path"]}, {"path": b["path"]}],
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["dropped"] == []
+    assert [n["index"] for n in body["nodes"]] == [0, 1]
+    for node in body["nodes"]:
+        assert len(node["quad"]) == 4
+        for x, y in node["quad"]:
+            assert -1 <= x <= 1201 and -1 <= y <= 601
+    # Layout only: auto-stitch is not a Save gate, so no media may appear.
+    assert len(client.get(f"/api/cases/{cid}/media").json()) == before
+
+
+def test_auto_stitch_reports_a_piece_it_cannot_place(client):
+    cid = client.post("/api/cases", json={"name": "StitchDrop"}).json()["id"]
+    left_png, right_png = _overlapping_pair()
+    a = _upload(client, cid, "left.png", left_png)
+    b = _upload(client, cid, "right.png", right_png)
+    stranger, _ = _overlapping_pair(seed=777)
+    c = _upload(client, cid, "stranger.png", stranger)
+
+    body = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={
+            "width": 1200, "height": 600,
+            "nodes": [{"path": a["path"]}, {"path": b["path"]}, {"path": c["path"]}],
+        },
+    ).json()
+    assert body["dropped"] == [2]
+    assert [n["index"] for n in body["nodes"]] == [0, 1]
+
+
+def test_auto_stitch_rejects_unrelated_imagery(client):
+    cid = client.post("/api/cases", json={"name": "StitchNone"}).json()["id"]
+    a = _upload(client, cid, "a.png", _overlapping_pair(seed=1)[0])
+    b = _upload(client, cid, "b.png", _overlapping_pair(seed=2)[1])
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={"width": 800, "height": 600, "nodes": [{"path": a["path"]}, {"path": b["path"]}]},
+    )
+    # A wrong stitch invents geometry the analyst may then reason about — better
+    # to refuse outright than to place pieces on a coincidence.
+    assert res.status_code == 422
+    assert "no overlap" in res.json()["detail"]
+
+
+def test_auto_stitch_needs_two_pieces(client):
+    cid = client.post("/api/cases", json={"name": "StitchOne"}).json()["id"]
+    a = _upload(client, cid, "a.png")
+    res = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={"width": 800, "height": 600, "nodes": [{"path": a["path"]}]},
+    )
+    assert res.status_code == 422
+
+
 def test_compose_requires_nodes(client):
     cid = client.post("/api/cases", json={"name": "NoNodes"}).json()["id"]
     res = client.post(
@@ -441,6 +532,43 @@ def test_session_save_list_load_delete_roundtrip(client):
     assert client.get(f"/api/cases/{cid}/inspect/sessions").json() == []
     entities = client.get(f"/api/cases/{cid}").json()["entities"]
     assert not any(e["type"] == "inspect-session" for e in entities)
+
+
+def test_session_listing_counts_pieces_across_collages(client):
+    # The app saves an array of `collages`; the listing used to count only the
+    # legacy singular `collage`, so every real session advertised "0 pieces".
+    cid = client.post("/api/cases", json={"name": "Counting"}).json()["id"]
+    item = _upload(client, cid, "clip.png")
+    node = {"id": "n1", "frameId": "fr1", "save": {"path": item["path"]},
+            "quad": [[0, 0], [10, 0], [10, 10], [0, 10]]}
+    spec = {
+        "source": {"path": item["path"], "kind": "image"},
+        "frames": [{"id": "fr1", "path": item["path"], "time": None, "adjust": {}}],
+        "collages": [
+            {"id": "cl1", "name": "A", "width": 800, "height": 400, "nodes": [node, node]},
+            {"id": "cl2", "name": "B", "width": 800, "height": 400, "nodes": [node]},
+        ],
+    }
+    client.post(f"/api/cases/{cid}/inspect/sessions", json={"title": "Multi", "spec": spec})
+
+    row = client.get(f"/api/cases/{cid}/inspect/sessions").json()[0]
+    assert row["collages"] == 2
+    assert row["collage"] == 3  # pieces, summed across every collage
+
+
+def test_session_listing_still_counts_a_legacy_single_collage(client):
+    cid = client.post("/api/cases", json={"name": "Legacy"}).json()["id"]
+    item = _upload(client, cid, "clip.png")
+    node = {"id": "n1", "quad": [[0, 0], [10, 0], [10, 10], [0, 10]]}
+    spec = {
+        "source": {"path": item["path"], "kind": "image"},
+        "frames": [],
+        "collage": {"width": 800, "height": 400, "nodes": [node, node]},
+    }
+    client.post(f"/api/cases/{cid}/inspect/sessions", json={"title": "Old", "spec": spec})
+
+    row = client.get(f"/api/cases/{cid}/inspect/sessions").json()[0]
+    assert row["collages"] == 1 and row["collage"] == 2
 
 
 def test_session_delete_via_sidebar_entity_removes_spec(client):

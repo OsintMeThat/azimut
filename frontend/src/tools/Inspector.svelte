@@ -274,6 +274,33 @@
     mediaList = await api.get(`/api/cases/${id}/media`);
   }
 
+  // A delete anywhere else in the app lands here: this workspace may be sitting
+  // on a subject, or on a saved session, that no longer exists.
+  //
+  // The saved session is the dangerous half — a session cannot outlive its
+  // subject, so deleting the subject deletes the session (ONTOLOGY §3). Left
+  // bound, the next Save would silently write the deleted session back. Drop the
+  // binding instead: Save then files a new one, deliberately.
+  let sourceGone = $state(false);
+  $effect(() => {
+    caseState.rev;
+    const list = caseState.current?.entities ?? [];
+    if (
+      openedSession &&
+      !list.some((e) => e.attrs?.spec === `inspect/${openedSession.name}.json`)
+    ) {
+      openedSession = null;
+      toast('The saved session was deleted — saving now files a new one', 'warn');
+    }
+    const path = session.source?.path;
+    sourceGone = !!path && !list.some((e) => e.attrs?.path === path);
+  });
+
+  function mediaLabel(m) {
+    const name = m.title || m.filename;
+    return name.length > 60 ? name.slice(0, 57) + '…' : name;
+  }
+
   function resetSession() {
     for (const fr of session.frames) if (fr.url?.startsWith('blob:')) URL.revokeObjectURL(fr.url);
     session.source = null;
@@ -846,7 +873,7 @@
     >
       <option value="" disabled>Choose a media…</option>
       {#each mediaList as m (m.path)}
-        <option value={m.path}>{m.label || m.filename}</option>
+        <option value={m.path} title={m.title || m.filename}>{mediaLabel(m)}</option>
       {/each}
     </select>
   </div>
@@ -866,6 +893,19 @@
       {/if}
     </div>
   {:else}
+    {#if sourceGone}
+      <!-- The subject was deleted out from under this workspace. Everything
+           already captured stays on screen and can still be saved; only what
+           needs to re-read the original is out of reach. -->
+      <div class="gone-banner">
+        <Icon name="alert" size={14} />
+        <span>
+          <strong>{session.source.filename ?? session.source.path}</strong> was deleted from the
+          case. What you already captured is still here, but new frames and re-renders can't be
+          made from it.
+        </span>
+      </div>
+    {/if}
     <div class="tabbar">
       {#each tabs as t (t)}
         <button class="tab" class:active={activeTab === t} onclick={() => (activeTab = t)}>
@@ -1120,6 +1160,18 @@
     max-width: 260px;
     font-size: var(--fs-sm);
   }
+  .gone-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 12px;
+    font-size: var(--fs-xs);
+    line-height: 1.45;
+    color: color-mix(in srgb, var(--danger, #e5484d) 80%, var(--text-2));
+    background: color-mix(in srgb, var(--danger, #e5484d) 10%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--danger, #e5484d) 22%, transparent);
+  }
+  .gone-banner :global(svg) { flex-shrink: 0; margin-top: 2px; }
   .tabbar {
     display: flex;
     align-items: center;

@@ -28,13 +28,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from PIL import Image, ImageChops, ImageEnhance, ImageFilter, ImageOps, ImageStat
+from PIL import Image, ImageChops, ImageEnhance, ImageOps
 from PIL.ExifTags import GPSTAGS, TAGS
 
 from ..workspace import Case
 from . import media as media_engine
+from . import stitch
 
-FRAME_SCAN_CAP = 60  # hard cap on frames scanned for a "sharpest frame" suggestion
+SUGGEST_CAP = 60  # hard cap on how many "sharpest frame" suggestions we return
+
+# The sharpest-frame scan reads *every* frame in one ffmpeg pass, decoded to
+# greyscale at this max dimension. Full resolution buys no discrimination for a
+# focus measure but costs real time; this is small enough to stream a long clip
+# and large enough to tell a sharp frame from a soft one.
+SCAN_DIM = 480
 
 
 def _now() -> str:
@@ -339,12 +346,56 @@ def extract_frame(video_path: Path, time_s: float) -> Image.Image:
 
 
 def _sharpness(img: Image.Image) -> float:
-    """Relative focus score: variance of the edge response (no numpy needed)."""
-    edges = img.convert("L").filter(ImageFilter.FIND_EDGES)
-    w, h = edges.size
-    if w > 6 and h > 6:  # trim FIND_EDGES border artefacts
-        edges = edges.crop((2, 2, w - 2, h - 2))
-    return round(ImageStat.Stat(edges).var[0], 2)
+    """Focus score for one image — see ``_focus_scores`` for the measure itself."""
+    import numpy as np
+
+    return _focus_score(np.asarray(img.convert("L"), dtype=np.uint8))
+
+
+def _focus_score(gray) -> float:
+    """Contrast-invariant focus: Laplacian variance normalised by image variance.
+
+    Plain Laplacian variance is the classic focus measure, but it scales with the
+    scene's *contrast* as well as its focus — so a blurry frame of a high-contrast
+    subject (headlights at night, a bright sky) outscores a sharp frame of a flat
+    one, and the "sharpest frames" come back soft. Contrast enters both variances
+    quadratically, so dividing it out leaves a measure of focus alone.
+    """
+    import cv2
+    import numpy as np
+
+    arr = gray.astype(np.float64)
+    spread = float(arr.var())
+    if spread < 1e-6:  # a blank frame has no focus to speak of
+        return 0.0
+    lap = cv2.Laplacian(arr, cv2.CV_64F)
+    return float(lap.var() / spread)
+
+
+def _scan_size(width: int, height: int) -> tuple[int, int]:
+    """Decode size for the scan: capped at ``SCAN_DIM``, even, aspect preserved."""
+    longest = max(width, height)
+    scale = min(1.0, SCAN_DIM / longest) if longest else 1.0
+    w = max(2, int(round(width * scale)) & ~1)
+    h = max(2, int(round(height * scale)) & ~1)
+    return w, h
+
+
+def _spread_picks(
+    scored: list[dict[str, Any]], count: int, min_gap: float
+) -> list[dict[str, Any]]:
+    """Best-scoring frames, greedily thinned so no two picks sit within ``min_gap``.
+
+    Neighbouring frames are near-identical, so an unfiltered top-N would hand back
+    the same instant a dozen times. This keeps the best frame of each moment.
+    """
+    picks: list[dict[str, Any]] = []
+    for item in sorted(scored, key=lambda d: d["score"], reverse=True):
+        if len(picks) >= count:
+            break
+        if all(abs(item["time"] - p["time"]) >= min_gap for p in picks):
+            picks.append(item)
+    return picks
 
 
 def _derivation(video_rel: str, sha: str | None, **extra: Any) -> dict[str, Any]:
@@ -373,30 +424,90 @@ def capture_frame(case: Case, video_rel: str, time_s: float, label: str | None =
     return result
 
 
-def suggest_frames(
-    case: Case, video_rel: str, bins: int = 12, set_progress: Callable[[dict], None] | None = None
+def scan_focus(
+    case: Case, video_rel: str, set_progress: Callable[[dict], None] | None = None
 ) -> list[dict[str, Any]]:
-    """Sample one frame per time bin and score its sharpness (spec v2 gesture)."""
+    """Score *every* frame of the video for focus — one ffmpeg pass, streamed.
+
+    Returns ``[{time, score}, ...]`` in playback order. Decoding the whole clip
+    once and piping raw greyscale is what makes an exhaustive scan affordable:
+    seeking to each frame with its own ffmpeg process (the old approach) costs a
+    process spawn and a decode-from-keyframe *per frame*, which is why it could
+    only ever afford to sample a handful.
+    """
+    import numpy as np
+
+    if not media_engine.ffmpeg_available():
+        raise RuntimeError("ffmpeg is required to scan video frames")
     video_path = case.resolve_inside(video_rel)
     meta = probe(case, video_rel)
+    fps = meta.get("fps") or 0
     duration = meta.get("duration") or 0
-    if duration <= 0:
-        raise RuntimeError("could not read video duration (ffprobe needed)")
-    bins = max(1, min(bins, FRAME_SCAN_CAP))
+    if fps <= 0 or duration <= 0:
+        raise RuntimeError("could not read video duration/fps (ffprobe needed)")
+
+    w, h = _scan_size(int(meta.get("width") or 0), int(meta.get("height") or 0))
+    expected = max(1, int(duration * fps))
+    frame_bytes = w * h
+
+    proc = subprocess.Popen(
+        ["ffmpeg", "-v", "error", "-i", str(video_path),
+         "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
     out: list[dict[str, Any]] = []
-    for i in range(bins):
-        t = duration * (i + 0.5) / bins
-        try:
-            score = _sharpness(extract_frame(video_path, t))
-        except Exception:
-            continue
-        out.append({"time": round(t, 3), "score": score})
-        if set_progress:
-            set_progress({"percent": round((i + 1) * 100 / bins, 1)})
-    out.sort(key=lambda d: d["score"], reverse=True)
-    for rank, item in enumerate(out):
-        item["rank"] = rank
+    try:
+        assert proc.stdout is not None
+        index = 0
+        while True:
+            buf = proc.stdout.read(frame_bytes)
+            if not buf or len(buf) < frame_bytes:
+                break
+            gray = np.frombuffer(buf, dtype=np.uint8).reshape(h, w)
+            out.append({"time": round(index / fps, 3), "score": round(_focus_score(gray), 4)})
+            index += 1
+            if set_progress and index % 25 == 0:
+                set_progress({"percent": round(min(99.0, index * 100 / expected), 1)})
+    finally:
+        if proc.stdout:
+            proc.stdout.close()
+        err = proc.stderr.read() if proc.stderr else b""
+        if proc.stderr:
+            proc.stderr.close()
+        proc.wait()
+    if not out:
+        raise RuntimeError(
+            (err or b"").decode("utf-8", "replace").strip() or "frame scan decoded nothing"
+        )
+    if set_progress:
+        set_progress({"percent": 100.0})
     return out
+
+
+def suggest_frames(
+    case: Case,
+    video_rel: str,
+    count: int = 12,
+    min_gap: float | None = None,
+    set_progress: Callable[[dict], None] | None = None,
+) -> list[dict[str, Any]]:
+    """The sharpest frames in the clip, best first (spec v2 gesture).
+
+    Every frame is scored (``scan_focus``), then the picks are thinned so they
+    land on distinct moments — ``min_gap`` seconds apart, derived from the clip
+    length when not given.
+    """
+    count = max(1, min(count, SUGGEST_CAP))
+    scored = scan_focus(case, video_rel, set_progress)
+    span = scored[-1]["time"] if scored else 0.0
+    if min_gap is None:
+        # Enough to break up a burst of near-identical neighbours without
+        # forcing picks away from a genuinely sharp stretch.
+        min_gap = max(0.4, span / (count * 4)) if span else 0.0
+    picks = _spread_picks(scored, count, min_gap)
+    for rank, item in enumerate(picks):
+        item["rank"] = rank
+    return picks
 
 
 # ---------------------------------------------------------------------------
@@ -673,6 +784,31 @@ def compose_perspective(
         if patch:
             media_engine.update_media(case, result["item"]["path"], patch)
     return result
+
+
+def solve_collage_layout(
+    case: Case, *, srcs: list[dict[str, Any]], width: int, height: int
+) -> dict[str, Any]:
+    """Auto-stitch: solve each piece's quad from the imagery itself (no filing).
+
+    ``srcs`` are the same ``{path, time?, ops[]}`` recipes the collage already
+    speaks, so pieces stitch *as adjusted* — what the analyst sees is what gets
+    matched. The returned quads are canvas pixels, ready to drop onto the canvas
+    as ordinary (still hand-tunable) pieces; ``dropped`` lists the pieces that
+    matched nothing, which the caller leaves where they were.
+    """
+    images = [
+        _source_image(case, s["path"], s.get("time"), s.get("ops")) for s in srcs
+    ]
+    try:
+        solved = stitch.solve_layout(images, width=width, height=height)
+    finally:
+        for img in images:
+            img.close()
+    return {
+        "nodes": [{"index": i, "quad": q} for i, q in sorted(solved["quads"].items())],
+        "dropped": solved["dropped"],
+    }
 
 
 # Map the frontend's css-filter values (multiplicative, 1.0 = neutral) to ffmpeg's

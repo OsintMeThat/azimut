@@ -46,7 +46,7 @@
     try {
       const { job_id } = await api.post(`/api/cases/${caseState.current.id}/inspect/suggest`, {
         path: session.source.path,
-        bins: 12,
+        count: 12,
       });
       suggestions = await poll(job_id);
     } catch (e) {
