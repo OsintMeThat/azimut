@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ..engine import links as link_engine
 from ..engine import media as media_engine
 from ..workspace import Case, CaseError
 
@@ -37,6 +38,89 @@ def _unlink_inside(case: Case, rel_path: str) -> None:
         case.resolve_inside(rel_path).unlink(missing_ok=True)
     except CaseError:
         pass
+
+
+def _delete_artifact_files(case: Case, entity: dict[str, Any]) -> None:
+    """Drop the on-disk artifact an entity stands for (spec §6 delete/edit sync).
+
+    A bare ``place`` has no file; an unknown (free-typed) entity is assumed to
+    have none either, so a future type files its own deletion here or not at all.
+    """
+    etype = entity.get("type")
+    attrs = entity.get("attrs", {})
+    if etype in ("media", "capture") and attrs.get("path"):
+        media_engine.delete_media_files(case, attrs["path"])
+    elif etype == "proof" and attrs.get("spec"):
+        _unlink_inside(case, attrs["spec"])
+        _unlink_inside(case, attrs["spec"].removesuffix(".json") + ".png")
+    elif etype == "post" and attrs.get("draft"):
+        _unlink_inside(case, attrs["draft"])
+    elif etype == "inspect-session" and attrs.get("spec"):
+        _unlink_inside(case, attrs["spec"])
+
+
+def delete_entity_deep(case: Case, entity_id: str) -> dict[str, Any]:
+    """Delete an entity, its artifact, and whatever cannot outlive it.
+
+    The one door every delete goes through — sidebar, Media Library, a tool's
+    own list — so the rules hold wherever the click came from:
+
+    - artifacts that ``depends-on`` the target die with it (an Inspect session
+      is only adjustments over a video), transitively;
+    - artifacts ``derived-from`` it are never touched, and are scarred with a
+      tombstone first, while the target can still describe itself.
+    """
+    plan = link_engine.plan_delete(case, entity_id)
+    target = next(e for e in case.read()["entities"] if e["id"] == entity_id)
+    going = [target, *plan["cascade"]]
+
+    # Scar the survivors first, while the doomed can still describe themselves.
+    for survivor_id, lost_sources in link_engine.losses(
+        case, {e["id"] for e in going}
+    ).items():
+        for lost in lost_sources:
+            info = link_engine.tombstone_of(lost)
+            if info.get("path"):
+                link_engine.add_tombstone(case, survivor_id, info)
+
+    for entity in going:
+        _delete_artifact_files(case, entity)
+        try:
+            case.remove_entity(entity["id"])
+        except CaseError:
+            pass  # a cascade may already have taken it
+
+    return {
+        "status": "deleted",
+        "deleted": [e["id"] for e in going],
+        "tombstoned": [e["id"] for e in plan["tombstone"]],
+    }
+
+
+def _summary(entity: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": entity["id"],
+        "type": entity.get("type"),
+        "label": entity.get("label"),
+        "path": link_engine.artifact_path(entity),
+    }
+
+
+def delete_by_path(case: Case, rel_path: str) -> dict[str, Any]:
+    """Chokepoint entry for a tool that knows its artifact by path, not by id.
+
+    Returns an empty ``deleted`` when no entity claims the path: the artifact was
+    never filed, so there is no graph to honour and the caller drops the files
+    itself.
+    """
+    entity = (
+        case.find_entity(attr="path", value=rel_path)
+        or case.find_entity(attr="spec", value=rel_path)
+        or case.find_entity(attr="draft", value=rel_path)
+    )
+    if entity is None:
+        return {"status": "deleted", "deleted": [], "tombstoned": []}
+    return delete_entity_deep(case, entity["id"])
 
 
 class CreateCase(BaseModel):
@@ -157,42 +241,33 @@ def update_entity(case_id: str, entity_id: str, body: EntityPatch) -> dict[str, 
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/{case_id}/entities/{entity_id}/dependents")
+def entity_dependents(case_id: str, entity_id: str) -> dict[str, Any]:
+    """What deleting this entity would take with it, and what it would scar.
+
+    Feeds the confirm dialog so a delete states its consequences before it is
+    irreversible (ONTOLOGY §3).
+    """
+    case = get_case(case_id)
+    try:
+        plan = link_engine.plan_delete(case, entity_id)
+    except CaseError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "cascade": [_summary(e) for e in plan["cascade"]],
+        "tombstone": [_summary(e) for e in plan["tombstone"]],
+    }
+
+
 @router.delete("/{case_id}/entities/{entity_id}")
-def remove_entity(case_id: str, entity_id: str) -> dict[str, str]:
+def remove_entity(case_id: str, entity_id: str) -> dict[str, Any]:
     """Delete an entity and the on-disk artifact it stands for, so removing a
     row in the sidebar deletes it everywhere it appears (spec §3.5)."""
     case = get_case(case_id)
-    entity = next((e for e in case.read()["entities"] if e["id"] == entity_id), None)
-    if entity is None:
-        raise HTTPException(status_code=404, detail=f"entity '{entity_id}' not found")
-
-    etype = entity.get("type")
-    attrs = entity.get("attrs", {})
-
-    # media and satellite captures both live in media/ and share the media
-    # delete: it drops the file + thumbnail + sidecar + entity in one go.
-    if etype in ("media", "capture") and attrs.get("path"):
-        try:
-            media_engine.delete_media(case, attrs["path"])
-        except CaseError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"status": "deleted"}
-
-    # other artifact-backed types: drop the file(s) before removing the row.
-    # a bare place (no path) has nothing on disk.
-    if etype == "proof" and attrs.get("spec"):
-        _unlink_inside(case, attrs["spec"])
-        _unlink_inside(case, attrs["spec"].removesuffix(".json") + ".png")
-    elif etype == "post" and attrs.get("draft"):
-        _unlink_inside(case, attrs["draft"])
-    elif etype == "inspect-session" and attrs.get("spec"):
-        _unlink_inside(case, attrs["spec"])
-
     try:
-        case.remove_entity(entity_id)
+        return delete_entity_deep(case, entity_id)
     except CaseError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"status": "deleted"}
 
 
 @router.post("/{case_id}/links")

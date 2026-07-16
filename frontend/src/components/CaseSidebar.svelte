@@ -1,7 +1,16 @@
 <script>
   import { api } from '../lib/api.js';
-  import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
+  import {
+    caseState,
+    uiState,
+    reloadCase,
+    toast,
+    setSidebarWidth,
+    persistSidebarWidth,
+  } from '../lib/state.svelte.js';
+  import { DEFAULT_W } from '../lib/sidebar.js';
   import { buildTree, subtreeCount, flattenPaths, folderOf } from '../lib/folderTree.js';
+  import { chainOf, deletePlan, DEPENDS_ON } from '../lib/chain.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
@@ -80,6 +89,7 @@
 
   // ── entities ─────────────────────────────────────────────────────────────
   const entities = $derived(caseState.current?.entities ?? []);
+  const links = $derived(caseState.current?.links ?? []);
   const suggested = $derived(entities.filter((e) => e.provenance?.status === 'suggested'));
   const confirmed = $derived(entities.filter((e) => e.provenance?.status !== 'suggested'));
 
@@ -244,7 +254,7 @@
   // keeps its sidecar in sync via its own endpoint.
   async function assignFolder(entity, folder) {
     const val = folder || '';
-    if (entity.type === 'media' && entity.attrs?.path) {
+    if ((entity.type === 'media' || entity.type === 'capture') && entity.attrs?.path) {
       await api.patch(`/api/cases/${caseState.current.id}/media`, {
         path: entity.attrs.path,
         folder: val,
@@ -291,6 +301,10 @@
 
   // Delete everywhere: removes the entity and its underlying file(s). Used from
   // the details panel (and the note modal) — irreversible, danger tone.
+  //
+  // Whatever hangs off the entity is spelled out before the click: sessions that
+  // cannot outlive it go too, outputs made from it stay and keep a record of
+  // what they lost. Nothing cascades into an output — ever (ONTOLOGY §3).
   function askDeleteEverywhere(entity, onDone) {
     confirmState = {
       title: 'Delete everywhere?',
@@ -298,6 +312,7 @@
       detail: FILE_BACKED.has(entity.type)
         ? 'This permanently deletes the underlying file(s) on disk — it cannot be undone.'
         : 'This permanently removes it from the case — it cannot be undone.',
+      consequences: deletePlan(entities, links, entity.id),
       confirmLabel: 'Delete everywhere',
       tone: 'danger',
       icon: 'trash',
@@ -364,6 +379,20 @@
   );
   // which types get title/notes editors straight from the sidebar
   const EDITABLE = new Set(['capture', 'place', 'media']);
+
+  // The derivation chain around the selection: what it was made from, what was
+  // made from it, and the sources it has outlived (ONTOLOGY §3). An entity with
+  // no chain at all hides the section rather than showing an empty shell.
+  const chain = $derived(infoEntity ? chainOf(entities, links, infoEntity.id) : null);
+  const ENTITY_ICON = {
+    media: 'media',
+    capture: 'satellite',
+    place: 'pin',
+    proof: 'proof',
+    post: 'post',
+    'inspect-session': 'inspect',
+    note: 'note',
+  };
 
   async function openInfo(entity) {
     infoEntity = entity;
@@ -487,9 +516,64 @@
     }
   }
 
+  // --- resize: the sidebar's left edge is a drag handle ---
+  let resizing = $state(false);
+  const KEY_STEP = 16;
+
+  function startResize(e) {
+    if (e.button !== 0) return;
+    e.preventDefault(); // don't start a text selection under the cursor
+    const startX = e.clientX;
+    const startW = uiState.sidebarW;
+    resizing = true;
+    // dragging left (a smaller clientX) widens the sidebar — it grows into the canvas
+    const move = (ev) => setSidebarWidth(startW + startX - ev.clientX);
+    const up = () => {
+      resizing = false;
+      persistSidebarWidth(); // one write per drag, not one per frame
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  function onResizeKey(e) {
+    const step = { ArrowLeft: KEY_STEP, ArrowRight: -KEY_STEP }[e.key];
+    if (step === undefined) return;
+    e.preventDefault();
+    setSidebarWidth(uiState.sidebarW + step);
+    persistSidebarWidth();
+  }
+
+  function resetWidth() {
+    setSidebarWidth(DEFAULT_W);
+    persistSidebarWidth();
+  }
+
+  // A width dragged out on a wide screen would eat a narrower window whole, so
+  // re-clamp against the viewport as it changes. The clamped-down value is not
+  // written back — what the user actually chose is what a later session restores.
+  $effect(() => {
+    const onWindowResize = () => setSidebarWidth(uiState.sidebarW);
+    window.addEventListener('resize', onWindowResize);
+    return () => window.removeEventListener('resize', onWindowResize);
+  });
 </script>
 
-<aside class="sidebar">
+<aside class="sidebar" class:resizing style="width: {uiState.sidebarW}px">
+  <!-- a <button> rather than a bare div: the handle must be focusable and
+       keyboard-driven (arrows resize), and the element carries that for free -->
+  <button
+    type="button"
+    class="resizer"
+    aria-label="Resize sidebar"
+    title="Drag to resize · double-click to reset"
+    onpointerdown={startResize}
+    ondblclick={resetWidth}
+    onkeydown={onResizeKey}
+  ></button>
+
   {#if !caseState.current}
     <div class="empty">
       <div class="empty-icon"><Icon name="folder" size={34} /></div>
@@ -708,6 +792,48 @@
               <div class="info-row"><span class="info-k">Coords</span><span class="mono">{infoEntity.attrs.coords}</span></div>
             {/if}
           </div>
+
+          <!-- derivation chain: click a row to walk to that entity's details -->
+          {#if chain && !chain.empty}
+            <div class="chain">
+              {#if chain.sources.length || chain.lost.length}
+                <div class="chain-h">Made from</div>
+                {#each chain.sources as { entity, type } (entity.id)}
+                  <button class="chain-row" onclick={() => openInfo(entity)}>
+                    <Icon name={ENTITY_ICON[entity.type] ?? 'file'} size={12} />
+                    <span class="chain-label">{entity.label}</span>
+                    {#if type === DEPENDS_ON}
+                      <span class="chain-tag" title="This is a view over that item — it cannot outlive it">needs</span>
+                    {/if}
+                  </button>
+                {/each}
+                {#each chain.lost as lost (lost.path)}
+                  <div class="chain-row gone" title={`Deleted on ${lost.at?.slice(0, 10) ?? 'an unknown date'}${lost.sha256 ? ` · sha256 ${lost.sha256}` : ''}`}>
+                    <Icon name="alert" size={12} />
+                    <span class="chain-label">{lost.label ?? lost.path}</span>
+                    <span class="chain-tag">deleted</span>
+                  </div>
+                {/each}
+                {#each chain.lost as lost (lost.path + '-src')}
+                  {#if lost.source_url}
+                    <a class="chain-src mono" href={lost.source_url} target="_blank" rel="noreferrer">{lost.source_url}</a>
+                  {/if}
+                {/each}
+              {/if}
+              {#if chain.dependents.length}
+                <div class="chain-h">Used by</div>
+                {#each chain.dependents as { entity, type } (entity.id)}
+                  <button class="chain-row" onclick={() => openInfo(entity)}>
+                    <Icon name={ENTITY_ICON[entity.type] ?? 'file'} size={12} />
+                    <span class="chain-label">{entity.label}</span>
+                    {#if type === DEPENDS_ON}
+                      <span class="chain-tag warn" title="Deleting this item deletes that one too">goes with it</span>
+                    {/if}
+                  </button>
+                {/each}
+              {/if}
+            </div>
+          {/if}
 
           {#if EDITABLE.has(infoEntity.type)}
             <label class="modal-label" for="info-notes">Notes</label>
@@ -961,6 +1087,7 @@
     title={confirmState.title}
     message={confirmState.message}
     detail={confirmState.detail}
+    consequences={confirmState.consequences}
     confirmLabel={confirmState.confirmLabel}
     tone={confirmState.tone}
     icon={confirmState.icon}
@@ -972,13 +1099,37 @@
 
 <style>
   .sidebar {
-    width: var(--sidebar-w);
+    /* width is driven by uiState.sidebarW (inline style) — see lib/sidebar.js */
+    position: relative;
     flex-shrink: 0;
     border-left: 1px solid var(--border);
     background: var(--bg-1);
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+  /* the grab strip sits just inside the left edge, over the sections' padding */
+  .resizer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 5px;
+    height: 100%;
+    z-index: 2;
+    cursor: col-resize;
+    background: transparent;
+    transition: background 0.12s;
+  }
+  .resizer:hover,
+  .resizer:focus-visible,
+  .sidebar.resizing .resizer {
+    background: var(--accent);
+    outline: none;
+  }
+  /* a drag reads as one gesture — no text selection, no cursor flicker on hover
+     targets the pointer crosses on the way */
+  .sidebar.resizing {
+    user-select: none;
   }
   .case-head {
     padding: 16px 16px 12px;
@@ -1146,4 +1297,52 @@
   .hash { font-size: 11px; word-break: break-all; color: var(--text-2); }
   .src { font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .info-note-body { white-space: pre-wrap; font-size: var(--fs-sm); color: var(--text-2); }
+
+  /* derivation chain rows (ONTOLOGY §3) */
+  .chain { margin-top: 14px; display: flex; flex-direction: column; gap: 2px; }
+  .chain-h {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 6px 0 3px;
+  }
+  .chain-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 5px 6px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    text-align: left;
+    min-width: 0;
+  }
+  button.chain-row { cursor: pointer; }
+  button.chain-row:hover { background: var(--bg-2); color: var(--text-1); }
+  .chain-row.gone { color: var(--text-3); }
+  .chain-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chain-tag {
+    flex-shrink: 0;
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: var(--bg-2);
+    color: var(--text-3);
+  }
+  .chain-tag.warn {
+    background: color-mix(in srgb, var(--danger, #e5484d) 14%, transparent);
+    color: color-mix(in srgb, var(--danger, #e5484d) 80%, var(--text-2));
+  }
+  .chain-src {
+    font-size: 10px;
+    color: var(--text-3);
+    padding: 0 6px 4px 25px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 </style>

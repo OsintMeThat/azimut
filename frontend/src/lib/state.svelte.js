@@ -6,6 +6,51 @@
  * on first write (see ensureCase).
  */
 import { api } from './api.js';
+import { formatCoords as renderCoords } from './coords.js';
+import { loadWidth, saveWidth, clampWidth } from './sidebar.js';
+
+/**
+ * App-wide display preferences (Settings → Preferences), mirrored from
+ * settings.json. Presentation only — every tool keeps filing decimal degrees
+ * and metres, so changing these never rewrites what's on disk.
+ */
+export const prefs = $state({
+  coordFormat: 'dd', // 'dd' | 'dms' | 'mgrs'
+  units: 'metric', // 'metric' | 'imperial'
+  homeView: { lat: 48.8584, lon: 2.2945, zoom: 16 }, // where Satellite opens
+  postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
+});
+
+/** Render a lat/lon the way the user asked for it. The tools' one entry point. */
+export function fmtCoords(lat, lon) {
+  return renderCoords(lat, lon, prefs.coordFormat);
+}
+
+// Tools mount before initSession's fetch comes back (a deep link straight to
+// #satellite mounts the map on the app's first frame), so anything reading a
+// preference *once* at startup — the Satellite home view — must await this
+// instead of racing it. Resolves even if the settings read fails: the built-in
+// defaults are a fine answer, a tool hanging forever is not.
+let markPrefsReady;
+export const prefsReady = new Promise((resolve) => {
+  markPrefsReady = resolve;
+});
+
+export async function loadPrefs() {
+  try {
+    applyPrefs(await api.get('/api/settings'));
+  } finally {
+    markPrefsReady();
+  }
+}
+
+/** Adopt a settings payload (GET /api/settings or PUT /api/settings/prefs). */
+export function applyPrefs(s) {
+  if (s.coord_format) prefs.coordFormat = s.coord_format;
+  if (s.units) prefs.units = s.units;
+  if (s.home_view) prefs.homeView = s.home_view;
+  if (s.post_mention !== undefined) prefs.postMention = s.post_mention; // '' = none
+}
 
 export const caseState = $state({
   current: null, // { id, name, scratch, entities, links, ... }
@@ -17,6 +62,7 @@ export const caseState = $state({
 export const uiState = $state({
   tool: 'media', // 'media' | 'inspect' | 'satellite' | 'proof' | 'post'
   sidebarOpen: true,
+  sidebarW: loadWidth(), // px, drag-resizable and remembered across reloads
   toasts: [],
   // cross-tool handoffs (the workbench glue):
   composeQueue: [], // media paths queued for the Proof Composer
@@ -32,6 +78,20 @@ export const uiState = $state({
   // or saved, and dropped when the open case changes (they point at its media).
   refViewers: [],
 });
+
+/**
+ * Resize the case sidebar (px). Clamped against the live window, so a width
+ * dragged out on a big screen can't wedge the canvas shut on a small one.
+ * Kept out of localStorage until the drag ends — see persistSidebarWidth.
+ */
+export function setSidebarWidth(w) {
+  uiState.sidebarW = clampWidth(w, window.innerWidth);
+}
+
+/** Remember the current sidebar width for the next session. */
+export function persistSidebarWidth() {
+  saveWidth(uiState.sidebarW);
+}
 
 let toastSeq = 0;
 
@@ -77,6 +137,9 @@ export async function openCase(id) {
  * exists on disk). Called once from App on mount.
  */
 export async function initSession() {
+  // preferences must land before the tools render, or coordinates would flash
+  // in the wrong format; a settings read failure is never fatal to a session
+  await loadPrefs().catch(() => {});
   await refreshCaseList();
   let lastId = null;
   try {

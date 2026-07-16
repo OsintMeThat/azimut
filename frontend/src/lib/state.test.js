@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { caseState, uiState, closeCase } from './state.svelte.js';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { caseState, uiState, closeCase, setSidebarWidth } from './state.svelte.js';
+import { MIN_W, MAX_W } from './sidebar.js';
 
 describe('closeCase', () => {
   beforeEach(() => {
@@ -29,5 +30,24 @@ describe('closeCase', () => {
     expect(uiState.focusMedia).toBeNull();
     expect(uiState.openInspect).toBeNull();
     expect(uiState.gotoCoords).toBeNull();
+  });
+});
+
+describe('setSidebarWidth', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('takes a dragged width as-is when it fits', () => {
+    vi.stubGlobal('window', { innerWidth: 1600 });
+    setSidebarWidth(440);
+    expect(uiState.sidebarW).toBe(440);
+  });
+
+  it('clamps against the live window, not just the fixed bounds', () => {
+    vi.stubGlobal('window', { innerWidth: 900 });
+    setSidebarWidth(MAX_W); // legal on a wide screen, half the canvas here
+    expect(uiState.sidebarW).toBe(450);
+
+    setSidebarWidth(10);
+    expect(uiState.sidebarW).toBe(MIN_W);
   });
 });

@@ -7,10 +7,15 @@
   // reversible one.
   //   tone: 'danger'  → deletes everywhere (irreversible, drops files)
   //   tone: 'default' → reversible (unfile, remove a folder)
+  // `consequences` spells out what else a delete touches, so an irreversible
+  // click is never a guess: what goes with it, and what stays behind scarred.
+  // The two lists carry their own tone — "kept" must not read as a warning.
+  //   { cascade: [{ label }], tombstone: [{ label }] }
   let {
     title,
     message,
     detail = '',
+    consequences = null,
     confirmLabel = 'Confirm',
     tone = 'default', // 'danger' | 'default'
     icon = tone === 'danger' ? 'trash' : 'folderMinus',
@@ -45,6 +50,32 @@
     </div>
     {#if detail}
       <p class="detail" class:danger={tone === 'danger'}>{detail}</p>
+    {/if}
+    {#if consequences?.cascade?.length}
+      <div class="conseq danger">
+        <div class="conseq-h">
+          <Icon name="trash" size={12} />
+          <span>Goes with it — nothing is left of these without it</span>
+        </div>
+        <ul>
+          {#each consequences.cascade as item (item.id ?? item.label)}
+            <li>{item.label}</li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+    {#if consequences?.tombstone?.length}
+      <div class="conseq">
+        <div class="conseq-h">
+          <Icon name="check" size={12} />
+          <span>Kept — each keeps a record of what it was made from</span>
+        </div>
+        <ul>
+          {#each consequences.tombstone as item (item.id ?? item.label)}
+            <li>{item.label}</li>
+          {/each}
+        </ul>
+      </div>
     {/if}
     <div class="actions">
       <button class="btn" onclick={oncancel} disabled={busy}>Cancel</button>
@@ -126,6 +157,39 @@
   .detail.danger {
     color: color-mix(in srgb, var(--danger, #e5484d) 85%, var(--text-2));
     background: color-mix(in srgb, var(--danger, #e5484d) 9%, transparent);
+  }
+  .conseq {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: var(--bg-2);
+    border-radius: var(--r-sm);
+    font-size: var(--fs-xs);
+  }
+  .conseq.danger {
+    background: color-mix(in srgb, var(--danger, #e5484d) 9%, transparent);
+  }
+  .conseq-h {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-3);
+    line-height: 1.35;
+  }
+  .conseq.danger .conseq-h {
+    color: color-mix(in srgb, var(--danger, #e5484d) 85%, var(--text-2));
+  }
+  .conseq ul {
+    margin: 5px 0 0;
+    padding-left: 24px;
+    color: var(--text-2);
+    max-height: 96px;
+    overflow-y: auto;
+  }
+  .conseq li {
+    line-height: 1.5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .actions {
     display: flex;
