@@ -21,7 +21,9 @@ def _png_bytes(w=320, h=200, color=(30, 90, 30)):
 
 
 def _token(client):
-    return client.get("/api/settings").json()["ingest_token"]
+    # minting is an explicit user action (POST), never a side effect of opening
+    # Settings — see mint_ingest_token in api/settings.py
+    return client.post("/api/settings/ingest-token").json()["ingest_token"]
 
 
 def _post(client, token=None, **overrides):
@@ -39,9 +41,13 @@ def _post(client, token=None, **overrides):
 
 
 def test_token_is_minted_once_and_survives_reads(client):
+    # opening Settings must not mint a credential — only the explicit POST does
+    assert client.get("/api/settings").json()["ingest_token"] == ""
     token = _token(client)
     assert len(token) >= 24
     assert _token(client) == token  # stable across reads — pairing must not churn
+    # once minted, it does show up in Settings
+    assert client.get("/api/settings").json()["ingest_token"] == token
 
 
 def test_rotation_orphans_the_old_token(client):

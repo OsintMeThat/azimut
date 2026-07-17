@@ -52,7 +52,7 @@
       help: 'https://account.mapbox.com/access-tokens/',
       usage: USAGE_LINKS.mapbox,
       overage:
-        'Past the free tier Mapbox bills extra tiles automatically — pay-as-you-go, no hard cap. Set a spending alert in your Mapbox account.',
+        'Past the tier, Mapbox bills extra tiles automatically; set a spending alert in your account.',
     },
     {
       id: 'google',
@@ -66,7 +66,7 @@
       warning:
         'EEA billing accounts: since 8 July 2025 Google no longer serves satellite tiles to Europe (403). Use a Maps JavaScript API key instead.',
       overage:
-        'Extra tiles are billed to your Cloud project, and Google also enforces 15k tiles/day. A quota cap in the Cloud Console makes it stop serving instead of billing.',
+        'Extra tiles are billed to your Cloud project; a quota cap in the Cloud Console makes it stop serving instead.',
     },
     {
       id: 'google_js',
@@ -85,7 +85,7 @@
         'Optional but recommended: restrict the key to your own referrers.',
       ],
       overage:
-        'A map load is one widget instantiation (~10k free/month) — pan and zoom on an open map are free. Azimut builds the widget once per session and reuses it, so normal use stays far under the tier.',
+        'One load per widget, ~10k free a month; Azimut reuses one widget per session, so normal use stays far under the tier.',
     },
     {
       id: 'sentinelhub',
@@ -105,10 +105,10 @@
         'Copy the ID under "Service endpoints" and paste it here.',
       ],
       overage:
-        'A free Copernicus account gets 30,000 requests and 30,000 processing units a month (one tile = 1 request = 1 PU; a date lookup is 1 request but ~0.01 PU) and simply stops serving until the 1st — it never bills you.',
+        'A free account gets 30,000 requests a month and simply stops serving until the 1st. It never bills.',
       // the correction the free-allowance box exists for, told where it's useful
       tierNote:
-        'Copernicus still documents 10,000 while provisioning 30,000, and the figure is per-account — check yours on the dashboard.',
+        'Copernicus documents 10,000 but provisions 30,000, per account; check yours on the dashboard.',
     },
   ];
 
@@ -162,12 +162,23 @@
 
   async function copyToken() {
     try {
+      await ensureToken();
       await navigator.clipboard.writeText(ingestToken);
       toast('Pairing token copied', 'ok');
     } catch {
       tokenShown = true; // clipboard blocked — show it for manual copy
       toast('Could not copy — the token is shown for manual copy', 'warn');
     }
+  }
+
+  // The token is no longer minted just by opening Settings (the server stopped
+  // doing that) — it's created the first time the user reveals or copies it to
+  // pair the capture extension.
+  async function ensureToken() {
+    if (ingestToken) return ingestToken;
+    const r = await api.post('/api/settings/ingest-token');
+    ingestToken = r.ingest_token;
+    return ingestToken;
   }
 
   async function rotateToken() {
@@ -185,6 +196,25 @@
   let signature = $state(false);
   let sigBust = $state(0);
   let sigInput = $state(null);
+
+  // Move settings between machines: export writes settings.json to disk,
+  // import merges a previously exported file back (config keys only).
+  let settingsFile = $state(null);
+
+  async function importSettings(event) {
+    const file = event.currentTarget.files?.[0];
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      await api.post('/api/settings/import', { settings: parsed });
+      toast('Settings imported', 'ok');
+      await load();
+    } catch (e) {
+      toast(`Could not import settings: ${e.message}`, 'danger');
+    } finally {
+      event.currentTarget.value = '';
+    }
+  }
 
   // The downloaders age faster than Azimut releases: sites change, and a stale
   // yt-dlp just stops finding media. They can be refreshed from PyPI in place,
@@ -635,7 +665,7 @@
                       type="checkbox"
                       bind:checked={enabled[k.id]}
                       onchange={saveProviderPrefs}
-                      title="Show or hide this basemap in the Satellite tab — the key stays saved"
+                      title="Show or hide this basemap in the Satellite tab"
                       aria-label="Show {k.label} in the Satellite tab"
                     />
                   {/if}
@@ -725,7 +755,7 @@
                       {#if share >= BLOCK_SHARE || overrides[k.id]}
                         <label
                           class="toggle override"
-                          title="Serve past the pause — extra tiles are billed by the provider"
+                          title="Serve past the pause (extra tiles are billed)"
                         >
                           <input
                             type="checkbox"
@@ -766,7 +796,7 @@
                         {:else}
                           <label
                             class="ctrl"
-                            title="Own threshold for this basemap — blank inherits the global one, 0 turns eco off for it"
+                            title="Threshold for this basemap (blank inherits the global one, 0 turns eco off)"
                           >
                             <span>Eco below z ≤</span>
                             <input
@@ -811,7 +841,7 @@
           <h3>Eco mode</h3>
           <label
             class="toggle eco"
-            title="Zoomed out this far, billed basemaps silently swap to free imagery — paid detail only matters up close"
+            title="Zoomed out this far, billed basemaps swap to free imagery"
           >
             <input type="checkbox" bind:checked={eco} onchange={saveEcoZoom} />
             Use free imagery when zoomed out, up to z ≤
@@ -827,7 +857,7 @@
             />
           </label>
           <p class="note">
-            Paid detail only matters up close. Each provider can override this from its card.
+            Applies when zoomed out. Each provider can override this from its card.
           </p>
         </section>
 
@@ -859,13 +889,9 @@
         <section class="group">
           <h3>Capture extension</h3>
           <p class="note">
-            A small browser extension (Chrome/Edge and Firefox) that files the map you
-            are looking at into Azimut as a capture — one screenshot per click,
-            coordinates parsed from the page URL, source and timestamp recorded. It
-            serves two things: <strong>capturing external map sites</strong> (Google
-            Maps &amp; Earth, Bing, Yandex, OpenStreetMap, Apple Maps, Zoom Earth,
-            Satellites.pro), and the <strong>Capture button on the Google (Maps JS)
-            basemap</strong>, whose imagery may only leave the widget as a screenshot.
+            A browser extension (Chrome/Edge and Firefox) that captures external map
+            sites into Azimut and powers the Capture button on the Google (Maps JS)
+            basemap.
           </p>
           <div class="row">
             <div class="row-label">
@@ -883,24 +909,16 @@
             </a>
           </div>
           <p class="note">
-            Browsers do not let an app install extensions for you — it's two manual
-            steps, once: <strong>Chrome/Edge</strong>: unzip somewhere permanent →
-            <span class="mono">chrome://extensions</span> → enable Developer mode →
-            "Load unpacked" → pick the folder. <strong>Firefox</strong>:
-            <span class="mono">about:debugging</span> → "This Firefox" → "Load
-            Temporary Add-on" → pick <span class="mono">manifest.json</span> (Firefox
-            forgets temporary add-ons on exit — see the README in the zip for a
-            permanent install). Then reload this tab.
+            Unzip it somewhere permanent and load it as an unpacked extension, then
+            reload this tab. Step-by-step instructions are in the README inside the zip.
           </p>
         </section>
 
         <section class="group">
           <h3>Pairing</h3>
           <p class="note">
-            Pairing lets the extension file captures from <em>external</em> map sites
-            into your local Azimut. Paste this token once into the extension's
-            options page. The Google (Maps JS) capture inside Azimut does not need
-            pairing. Rotating the token instantly unpairs every extension.
+            Paste this token once into the extension's options page. Rotating it
+            unpairs every extension.
           </p>
           <div class="row">
             <div class="row-label">
@@ -908,7 +926,7 @@
               <span class="row-hint mono">{tokenShown ? ingestToken : '•'.repeat(24)}</span>
             </div>
             <div class="scraper-actions">
-              <button class="btn btn-sm" onclick={() => (tokenShown = !tokenShown)}>
+              <button class="btn btn-sm" onclick={async () => { await ensureToken(); tokenShown = !tokenShown; }}>
                 {tokenShown ? 'Hide' : 'Show'}
               </button>
               <button class="btn btn-sm btn-primary" onclick={copyToken}>
@@ -938,10 +956,9 @@
             <dd>AGPL-3.0-or-later</dd>
           </dl>
           <p class="note">
-            The workspace is a plain folder: cases, media and proofs are files you can
-            zip, back up or put under git. No account, no telemetry, no upload — network
-            access only happens when a tool inherently needs it (map tiles, geocoding,
-            media download), always directly to the third party.
+            The workspace is a plain folder you can zip, back up or put under git.
+            No account, no telemetry; the network is only used when a tool needs it
+            (tiles, geocoding, downloads), always directly to the third party.
           </p>
           <div class="links">
             <a class="btn btn-sm" href={REPO_URL} target="_blank" rel="noreferrer">
@@ -950,6 +967,29 @@
             <a class="btn btn-sm" href={SITE_URL} target="_blank" rel="noreferrer">
               <Icon name="globe" size={13} /> osintmethat.com <Icon name="external" size={11} />
             </a>
+          </div>
+        </section>
+
+        <section class="group">
+          <h3>Backup</h3>
+          <p class="note">
+            Export all settings, including your keys, to a file you can import on
+            another machine. Keep the file private.
+          </p>
+          <div class="links">
+            <a class="btn btn-sm" href="/api/settings/export" download>
+              <Icon name="save" size={13} /> Export settings
+            </a>
+            <button class="btn btn-sm" onclick={() => settingsFile?.click()}>
+              <Icon name="file" size={13} /> Import settings
+            </button>
+            <input
+              type="file"
+              accept="application/json,.json"
+              bind:this={settingsFile}
+              onchange={importSettings}
+              hidden
+            />
           </div>
         </section>
 
@@ -1001,11 +1041,8 @@
             </button>
           </div>
           <p class="note">
-            Checking and updating are the only things here that use the network, and only
-            when you press them — the newest release is fetched from PyPI into your
-            workspace, verified against the hash PyPI publishes, and used instead of the
-            bundled copy. <strong>Revert</strong> goes back to the version this build
-            shipped with, if an update ever makes things worse.
+            Updates are fetched from PyPI (hash-verified) only when you press the
+            button. Revert goes back to the bundled version.
           </p>
         </section>
       {/if}

@@ -50,7 +50,7 @@ def test_a_full_queue_drops_the_nudge_instead_of_failing_the_producer():
 
 
 def test_ingest_publishes_a_capture_nudge(client):
-    token = client.get("/api/settings").json()["ingest_token"]
+    token = client.post("/api/settings/ingest-token").json()["ingest_token"]
     cid = client.post("/api/cases", json={"name": "Live"}).json()["id"]
     q = events.subscribe()
     try:
@@ -58,7 +58,7 @@ def test_ingest_publishes_a_capture_nudge(client):
             "/api/ingest/screenshot",
             files={"image": ("shot.png", _png_bytes(), "image/png")},
             data={"url": "https://www.openstreetmap.org/#map=17/48.85/2.29",
-                  "site": "openstreetmap", "case_id": cid,
+                  "case_id": cid,
                   "lat": "48.85", "lon": "2.29", "title": "Test spot"},
             headers={"X-Azimut-Token": token},
         )
