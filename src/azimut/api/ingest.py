@@ -12,11 +12,11 @@ cases — CSRF-by-token, not network security. CORS is opened for these routes
 only, and only to browser-extension origins: no web page origin is ever
 allowed, whatever token it presents.
 
-Legal rails (CLAUDE.md, docs/IMAGERY_PROVIDERS.md §0): every capture is one
-user-initiated screenshot of what was already on screen — the extension never
-crawls, repeats, or touches tile servers — and provenance always records the
-source URL, site and timestamp. Attribution is burned into a footer band, the
-same treatment the widget screenshot endpoint applies.
+Legal rails (docs/IMAGERY_PROVIDERS.md §0): every capture is one user-initiated
+screenshot of what was already on screen — the extension never crawls,
+repeats, or touches tile servers — and provenance always records the source
+URL, site and timestamp. Attribution is burned into a footer band, the same
+treatment the widget screenshot endpoint applies.
 """
 
 from __future__ import annotations
