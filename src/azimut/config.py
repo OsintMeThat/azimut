@@ -21,7 +21,7 @@ import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     # Extra XYZ tile providers added by the user (spec §6 v1 notes).
@@ -159,8 +159,20 @@ def ensure_workspace() -> None:
     """Create the workspace skeleton if missing (idempotent)."""
     cases_dir().mkdir(parents=True, exist_ok=True)
     scratch_dir().mkdir(parents=True, exist_ok=True)
+    # The workspace holds API keys and the pairing token — keep it owner-only
+    # so another account on a shared machine can't read them. Best-effort:
+    # Windows ignores POSIX modes, which is fine (its ACLs already scope $HOME).
+    _restrict(workspace_root(), 0o700)
     if not settings_path().exists():
         save_settings(DEFAULT_SETTINGS)
+
+
+def _restrict(path: Path, mode: int) -> None:
+    """chmod, ignoring platforms/filesystems that don't support it."""
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
 
 
 def load_settings() -> dict[str, Any]:
@@ -180,6 +192,8 @@ def save_settings(settings: dict[str, Any]) -> None:
     settings_path().write_text(
         json.dumps(settings, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
+    # Holds the user's API keys and pairing token — owner-read/write only.
+    _restrict(settings_path(), 0o600)
 
 
 def month_key(when: datetime | None = None) -> str:
@@ -188,6 +202,21 @@ def month_key(when: datetime | None = None) -> str:
 
 
 _usage_lock = threading.Lock()  # tile proxy bumps the counter from many threads
+
+
+def update_settings(mutate: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+    """Load → mutate → save settings.json under the writer lock.
+
+    Every read-modify-write of the file must go through this (or take
+    ``_usage_lock`` itself): the tile proxy bumps counters from worker threads,
+    and an unlocked save can drop either the counter bump or the caller's
+    change (last writer wins on the whole file).
+    """
+    with _usage_lock:
+        settings = load_settings()
+        mutate(settings)
+        save_settings(settings)
+        return settings
 
 
 def record_usage(meter: str, count: int = 1, when: datetime | None = None) -> int:
