@@ -19,6 +19,7 @@ import json
 import re
 import shutil
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,6 +68,29 @@ def _slugify(name: str) -> str:
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:10]}"
+
+
+def ensure_dir(path: Path) -> Path:
+    """``path.mkdir(parents=True, exist_ok=True)``, tolerant of a transient
+    ``PermissionError`` Windows can raise when several threads race to create
+    the very same directory for the first time (e.g. several concurrent
+    downloads all hitting a case's not-yet-created ``media/.dl`` or
+    ``media/.thumbs`` at once): CreateDirectory there occasionally answers
+    "access is denied" instead of "already exists" mid-race, which
+    ``exist_ok=True`` alone does not catch. Retried briefly — the directory
+    reliably exists by the next attempt, whoever won the race.
+    """
+    for attempt in range(20):
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+        except PermissionError:
+            if path.is_dir():
+                return path
+            if attempt == 19:
+                raise
+            time.sleep(0.01)
+    return path  # pragma: no cover - loop always returns or raises above
 
 
 class CaseError(Exception):
@@ -419,9 +443,7 @@ class Case:
     def subdir(self, name: str) -> Path:
         if name not in CASE_SUBDIRS:
             raise CaseError(f"unknown case subdir '{name}'")
-        path = self.path / name
-        path.mkdir(exist_ok=True)
-        return path
+        return ensure_dir(self.path / name)
 
     def resolve_inside(self, relative: str) -> Path:
         """Resolve a case-relative path, refusing traversal outside the case."""
