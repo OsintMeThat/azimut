@@ -19,6 +19,7 @@ import json
 import re
 import shutil
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,16 +34,23 @@ CASE_SUBDIRS = ("media", "proofs", "exports", "inspect")
 # read-modify-write of case.json — e.g. several media downloads from the
 # multi-item picker finishing at once — silently drop each other's entity or
 # crash on the tmp-file rename (spec §6 honest output requires none lost).
+#
+# Reentrant on purpose: every read() and every write goes through it, and a
+# mutator (add_entity, …) reads *inside* its own locked section, so the same
+# thread has to be able to re-take the lock it already holds. It also serialises
+# reads against writes — required on Windows, where os.replace() cannot rename
+# over a case.json another thread still has open, and open() cannot read one
+# mid-replace (both surface as PermissionError; POSIX has neither problem).
 _case_locks_guard = threading.Lock()
-_case_locks: dict[str, threading.Lock] = {}
+_case_locks: dict[str, threading.RLock] = {}
 
 
-def _case_lock(path: Path) -> threading.Lock:
+def _case_lock(path: Path) -> threading.RLock:
     key = str(path)
     with _case_locks_guard:
         lock = _case_locks.get(key)
         if lock is None:
-            lock = threading.Lock()
+            lock = threading.RLock()
             _case_locks[key] = lock
         return lock
 
@@ -67,6 +75,47 @@ def _slugify(name: str) -> str:
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:10]}"
+
+
+def ensure_dir(path: Path) -> Path:
+    """``path.mkdir(parents=True, exist_ok=True)``, tolerant of a transient
+    ``PermissionError`` Windows can raise when several threads race to create
+    the very same directory for the first time (e.g. several concurrent
+    downloads all hitting a case's not-yet-created ``media/.dl`` or
+    ``media/.thumbs`` at once): CreateDirectory there occasionally answers
+    "access is denied" instead of "already exists" mid-race, which
+    ``exist_ok=True`` alone does not catch. Retried briefly — the directory
+    reliably exists by the next attempt, whoever won the race.
+    """
+    for attempt in range(20):
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+        except PermissionError:
+            if path.is_dir():
+                return path
+            if attempt == 19:
+                raise
+            time.sleep(0.01)
+    return path  # pragma: no cover - loop always returns or raises above
+
+
+def _replace_with_retry(src: Path, dst: Path) -> None:
+    """``src.replace(dst)`` with a brief retry for a transient Windows
+    ``PermissionError``. The case lock already keeps our own threads off the
+    destination during a rename, but on Windows an external handle (a virus
+    scanner or the search indexer opening the freshly written file) can still
+    make os.replace() fail for a few milliseconds. POSIX rename is atomic and
+    never hits this, so the loop is a no-op there.
+    """
+    for attempt in range(20):
+        try:
+            src.replace(dst)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.01)
 
 
 class CaseError(Exception):
@@ -157,13 +206,22 @@ class Case:
         return self.path / "case.json"
 
     def read(self) -> dict[str, Any]:
-        return json.loads(self.json_path.read_text(encoding="utf-8"))
+        # Under the lock so a concurrent write can't be replacing case.json
+        # while we open it — on Windows that open() raises PermissionError
+        # (the file is momentarily unopenable mid-rename).
+        with self._lock:
+            return json.loads(self.json_path.read_text(encoding="utf-8"))
 
     def _write_json(self, data: dict[str, Any]) -> None:
-        data["updated_at"] = _now()
-        tmp = self.json_path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        tmp.replace(self.json_path)
+        # Under the lock so no reader has case.json open when we rename over it:
+        # Windows' os.replace() refuses a destination another handle holds open
+        # ("Access is denied"). A unique tmp name keeps two writers' scratch
+        # files apart even though the lock already serialises them.
+        with self._lock:
+            data["updated_at"] = _now()
+            tmp = self.json_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            _replace_with_retry(tmp, self.json_path)
 
     # -- notes -------------------------------------------------------------
 
@@ -419,9 +477,7 @@ class Case:
     def subdir(self, name: str) -> Path:
         if name not in CASE_SUBDIRS:
             raise CaseError(f"unknown case subdir '{name}'")
-        path = self.path / name
-        path.mkdir(exist_ok=True)
-        return path
+        return ensure_dir(self.path / name)
 
     def resolve_inside(self, relative: str) -> Path:
         """Resolve a case-relative path, refusing traversal outside the case."""

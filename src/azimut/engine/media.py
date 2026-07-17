@@ -20,7 +20,7 @@ from typing import Any, BinaryIO
 
 from PIL import Image
 
-from ..workspace import Case
+from ..workspace import Case, ensure_dir
 from . import links as link_engine
 
 THUMB_DIR = ".thumbs"
@@ -75,7 +75,7 @@ def ffmpeg_available() -> bool:
 
 def make_thumbnail(media_path: Path, thumb_path: Path) -> bool:
     """Best-effort thumbnail. Images via Pillow, videos via ffmpeg if present."""
-    thumb_path.parent.mkdir(exist_ok=True)
+    ensure_dir(thumb_path.parent)
     kind = media_kind(media_path.name)
     try:
         if kind == "image":
@@ -290,7 +290,7 @@ def _register_downloaded_item(
     its own yt-dlp path, minus the yt-dlp-specific extraction bits."""
     media_dir = case.subdir("media")
     tmp_dir = media_dir / ".dl" / uuid.uuid4().hex
-    tmp_dir.mkdir(parents=True, exist_ok=True)
+    ensure_dir(tmp_dir)
     try:
         fname = safe_filename(filename)
         tmp_path = tmp_dir / fname
@@ -459,7 +459,7 @@ def download_url(
     # fires one per selected item) must not share a scratch dir, or the first
     # one to finish rmtree()s it out from under the others still writing to it
     tmp_dir = media_dir / ".dl" / uuid.uuid4().hex
-    tmp_dir.mkdir(parents=True, exist_ok=True)
+    ensure_dir(tmp_dir)
 
     extra_photos = _telegram_extra_photos(url)  # [] — and free — for non-Telegram links
 

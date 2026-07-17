@@ -654,8 +654,10 @@ def test_concurrent_downloads_dont_lose_entities(client, monkeypatch):
     def run(i):
         try:
             media_engine.download_url(case, "https://x.com/u/status/1", index=i, title=f"title {i}")
-        except Exception as exc:  # pragma: no cover - assertion below reports it
-            errors.append(exc)
+        except Exception:  # pragma: no cover - assertion below reports it
+            import traceback
+
+            errors.append(traceback.format_exc())
 
     threads = [threading.Thread(target=run, args=(i,)) for i in range(1, n + 1)]
     for t in threads:
@@ -663,7 +665,7 @@ def test_concurrent_downloads_dont_lose_entities(client, monkeypatch):
     for t in threads:
         t.join()
 
-    assert errors == []
+    assert errors == [], "\n\n".join(errors)
     assert len(case.read()["entities"]) == n
     assert len(client.get(f"/api/cases/{cid}/media").json()) == n
 
