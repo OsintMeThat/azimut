@@ -245,6 +245,45 @@ def test_compose_transparent_background_keeps_alpha(client):
     assert img.getpixel((60, 60))[3] == 255
 
 
+def test_compose_paints_through_a_remapped_piece_footprint(client):
+    """A panorama piece's transparent corners must stay holes, not black wedges.
+
+    The remap projects onto a curve, so the output rectangle overhangs the piece.
+    Composited naively that overhang paints over whatever the piece overlaps —
+    which, in a panorama, is always its neighbour.
+    """
+    cid = client.post("/api/cases", json={"name": "RemapCompose"}).json()["id"]
+    pngs = _pan_pngs()
+    paths = [_upload(client, cid, f"v{i}.png", png)["path"] for i, png in enumerate(pngs)]
+    solved = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={
+            "width": 1600, "height": 800, "mode": "cylindrical",
+            "nodes": [{"path": p} for p in paths],
+        },
+    ).json()
+    node = solved["nodes"][0]
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/compose",
+        json={
+            "width": 1600, "height": 800, "background": None,
+            "nodes": [{"src": {"path": paths[0], "ops": [node["op"]]}, "quad": node["quad"]}],
+        },
+    ).json()
+
+    png = client.get(f"/files/{cid}/{res['item']['path']}").content
+    img = Image.open(io.BytesIO(png))
+    quad = node["quad"]
+    x0, y0 = quad[0]
+    x1, y1 = quad[2]
+    # Just inside the piece's own top-left corner: on the rectangle, off the curve.
+    inset = (round(x0 + 2), round(y0 + 2))
+    assert img.getpixel(inset)[3] == 0
+    # ...while its middle is painted.
+    assert img.getpixel((round((x0 + x1) / 2), round((y0 + y1) / 2)))[3] == 255
+
+
 def test_compose_node_crop_is_applied_before_warp(client):
     cid = client.post("/api/cases", json={"name": "CropWarp"}).json()["id"]
     # left half white, right half black — crop keeps the white half only
@@ -357,6 +396,114 @@ def test_auto_stitch_rejects_unrelated_imagery(client):
     # to refuse outright than to place pieces on a coincidence.
     assert res.status_code == 422
     assert "no overlap" in res.json()["detail"]
+
+
+def _pan_pngs(angles=(-20, 0, 20)):
+    """Views of one world through a camera yawed by each angle, as PNG bytes."""
+    from test_stitch import _pan
+
+    out = []
+    for view in _pan(list(angles)):
+        buf = io.BytesIO()
+        view.save(buf, "PNG")
+        out.append(buf.getvalue())
+    return out
+
+
+def test_auto_stitch_defaults_to_planar_and_bakes_no_warp(client):
+    cid = client.post("/api/cases", json={"name": "StitchPlanar"}).json()["id"]
+    left_png, right_png = _overlapping_pair()
+    a = _upload(client, cid, "left.png", left_png)
+    b = _upload(client, cid, "right.png", right_png)
+
+    body = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={"width": 1200, "height": 600, "nodes": [{"path": a["path"]}, {"path": b["path"]}]},
+    ).json()
+
+    # Planar's whole bargain: geometry only, so the pieces keep their own pixels
+    # and stay hand-warpable.
+    assert body["mode"] == "planar"
+    assert [n["op"] for n in body["nodes"]] == [None, None]
+
+
+@pytest.mark.parametrize("mode", ["cylindrical", "spherical"])
+def test_auto_stitch_panorama_modes_return_a_remap_per_piece(client, mode):
+    cid = client.post("/api/cases", json={"name": f"Stitch{mode}"}).json()["id"]
+    paths = [
+        _upload(client, cid, f"v{i}.png", png)["path"] for i, png in enumerate(_pan_pngs())
+    ]
+    before = len(client.get(f"/api/cases/{cid}/media").json())
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={
+            "width": 1600, "height": 800, "mode": mode,
+            "nodes": [{"path": p} for p in paths],
+        },
+    )
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["mode"] == mode
+    assert body["dropped"] == []
+    for node in body["nodes"]:
+        assert node["op"]["op"] == "remap"
+        assert node["op"]["params"]["warp"] == mode
+        assert len(node["op"]["params"]["r"]) == 9
+    # Still not a Save gate: a panorama mode re-derives pixels, it does not file any.
+    assert len(client.get(f"/api/cases/{cid}/media").json()) == before
+
+
+def test_auto_stitch_remap_round_trips_through_the_render_pipeline(client):
+    """The op the solver hands back must be one the recipe pipeline can replay.
+
+    This is what carries the warp to the full-res export: nothing stores the
+    stitched pixels, only the recipe that reproduces them.
+    """
+    cid = client.post("/api/cases", json={"name": "StitchReplay"}).json()["id"]
+    paths = [
+        _upload(client, cid, f"v{i}.png", png)["path"] for i, png in enumerate(_pan_pngs())
+    ]
+    body = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={
+            "width": 1600, "height": 800, "mode": "cylindrical",
+            "nodes": [{"path": p} for p in paths],
+        },
+    ).json()
+    node = body["nodes"][0]
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/render-preview",
+        json={"path": paths[0], "ops": [node["op"]]},
+    )
+
+    assert res.status_code == 200
+    piece = Image.open(io.BytesIO(res.content))
+    # The curved footprint has to survive to the canvas, or the piece would paint
+    # black corners over its neighbours.
+    assert piece.mode == "RGBA"
+    assert piece.getchannel("A").getpixel((0, 0)) == 0
+    quad = node["quad"]
+    aspect = (quad[1][0] - quad[0][0]) / (quad[3][1] - quad[0][1])
+    assert piece.width / piece.height == pytest.approx(aspect, rel=0.01)
+
+
+def test_auto_stitch_rejects_an_unknown_mode(client):
+    cid = client.post("/api/cases", json={"name": "StitchBadMode"}).json()["id"]
+    left_png, right_png = _overlapping_pair()
+    a = _upload(client, cid, "left.png", left_png)
+    b = _upload(client, cid, "right.png", right_png)
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={
+            "width": 800, "height": 600, "mode": "toroidal",
+            "nodes": [{"path": a["path"]}, {"path": b["path"]}],
+        },
+    )
+    assert res.status_code == 422
 
 
 def test_auto_stitch_needs_two_pieces(client):

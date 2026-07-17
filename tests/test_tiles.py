@@ -221,6 +221,178 @@ def test_all_providers_adds_google_when_keyed(monkeypatch, tmp_path):
     assert google.tile_size == 1024  # hi-DPI 4x session (1/16th the billed requests)
 
 
+def test_all_providers_adds_sentinelhub_when_keyed(monkeypatch, tmp_path):
+    monkeypatch.setenv("AZIMUT_HOME", str(tmp_path))
+    config.save_settings({**config.DEFAULT_SETTINGS, "api_keys": {"sentinelhub": "inst-uuid"}})
+    s2 = next(p for p in tiles.all_providers() if p.id == "sentinel2")
+    assert "inst-uuid" in s2.url
+    assert "{key}" not in s2.url  # the instance id is the whole credential
+    assert "TIME=" not in s2.url  # omitted: the layer's own default window applies
+    assert s2.capturable is True
+    assert s2.cacheable is True  # open data — no anti-cache clause to respect
+    assert s2.attribution_burn is False
+    assert s2.session is None
+    assert s2.tile_size == 512  # one 512px tile == exactly 1 processing unit
+    # 10 m/px native: requests stop at z14 (deeper is upsampling we'd pay for),
+    # the view runs to z18 on magnified native tiles — free, since nothing new
+    # is fetched
+    assert s2.max_native_zoom == 14
+    assert s2.max_zoom == 18
+    # its own eco threshold: the global z15 sits above its native ceiling, so
+    # sharing it would swap Sentinel-2 away at most zooms it can actually serve
+    assert s2.eco_max_zoom == 11
+
+
+def test_sentinelhub_names_its_zoom_level_by_resolution(monkeypatch, tmp_path):
+    """WMTS numbers 512px levels by resolution where Mapbox numbers them by grid
+    width: tile indices valid at grid level 13 belong to TILEMATRIX=14."""
+    monkeypatch.setenv("AZIMUT_HOME", str(tmp_path))
+    config.save_settings({**config.DEFAULT_SETTINGS, "api_keys": {"sentinelhub": "inst-uuid"}})
+    s2 = next(p for p in tiles.all_providers() if p.id == "sentinel2")
+    url = tiles.tile_url(s2.url, 13, 4151, 2818, s2.zoom_offset)
+    assert "TILEMATRIX=14" in url
+    assert "TILECOL=4151" in url and "TILEROW=2818" in url
+
+
+def _sentinel(monkeypatch, tmp_path):
+    monkeypatch.setenv("AZIMUT_HOME", str(tmp_path))
+    config.save_settings({**config.DEFAULT_SETTINGS, "api_keys": {"sentinelhub": "inst-uuid"}})
+    return next(p for p in tiles.all_providers() if p.id == "sentinel2")
+
+
+def test_get_provider_resolves_a_sentinel_variant(monkeypatch, tmp_path):
+    _sentinel(monkeypatch, tmp_path)
+    p = tiles.get_provider("sentinel2~SWIR~2026-05-01~2026-05-31")
+    assert "LAYER=SWIR" in p.url
+    assert "TIME=2026-05-01/2026-05-31" in p.url
+    assert "inst-uuid" in p.url  # the credential survives the rebuild
+    assert "{key}" not in p.url
+    # the id is the variant, so the disk cache keys on it: two windows can never
+    # collide in the cache, which is the trap docs/IMAGERY_PROVIDERS.md names
+    assert p.id == "sentinel2~SWIR~2026-05-01~2026-05-31"
+    assert p.meter == "sentinelhub"  # still the same quota
+    assert p.max_native_zoom == 14 and p.max_zoom == 18
+    assert "SWIR" in p.label and "2026-05-01" in p.label
+
+
+def test_get_provider_variant_without_a_window_keeps_the_default_time(monkeypatch, tmp_path):
+    _sentinel(monkeypatch, tmp_path)
+    p = tiles.get_provider("sentinel2~FALSE_COLOR")
+    assert "LAYER=FALSE_COLOR" in p.url
+    assert "TIME=" not in p.url
+
+
+def test_get_provider_refuses_a_malformed_variant(monkeypatch, tmp_path):
+    _sentinel(monkeypatch, tmp_path)
+    for bad in ("sentinel2~../etc", "sentinel2~SWIR~2026-99-01~2026-05-31", "sentinel2~a b"):
+        with pytest.raises(KeyError):
+            tiles.get_provider(bad)
+
+
+def test_get_provider_refuses_variants_on_providers_that_have_none(monkeypatch, tmp_path):
+    monkeypatch.setenv("AZIMUT_HOME", str(tmp_path))
+    config.save_settings(config.DEFAULT_SETTINGS)
+    with pytest.raises(KeyError):
+        tiles.get_provider("esri-world-imagery~SWIR")
+
+
+def test_fetch_crop_past_native_zoom_magnifies_instead_of_paying(monkeypatch, tmp_path):
+    """Sentinel-2 views run to z18 but its pixels stop at z14: the deepest real
+    tiles are fetched and magnified. Asking Sentinel Hub for z18 would buy its
+    upsampling of the same pixels, 16× the tiles, every one billed."""
+    provider = _sentinel(monkeypatch, tmp_path)
+    urls = []
+
+    def fetch(client, url):
+        urls.append(url)
+        return Image.new("RGB", (512, 512), (10, 120, 10))
+
+    img, prov = tiles.fetch_crop(
+        48.8584, 2.2945, 18, 512, 512, provider, marker_style="none", fetch_tile=fetch
+    )
+    # every request is at the native level (grid 13 → TILEMATRIX 14), none deeper
+    assert urls and all("TILEMATRIX=14" in u for u in urls)
+    # one native tile now covers 16× the canvas, so a 512px crop needs 1–4 of
+    # them — not the 16× more a real z18 grid would have cost
+    assert len(urls) <= 4
+    assert config.load_settings()["usage"]["sentinelhub"][config.month_key()] == len(urls)
+    assert img.size == (512, 512)
+    # the canvas is fully covered — the magnified grid must still tile seamlessly
+    for xy in ((0, 0), (511, 0), (0, 511), (511, 511), (256, 256)):
+        assert img.getpixel(xy) == (10, 120, 10)
+    # provenance tells the truth twice: the view is z18, the pixels are z14
+    assert prov["zoom"] == 18
+    assert prov["native_zoom"] == 14
+    assert prov["upscaled"] is True
+    assert prov["native_meters_per_pixel"] > prov["meters_per_pixel"]
+
+
+def test_fetch_crop_at_native_zoom_is_not_marked_upscaled(monkeypatch, tmp_path):
+    provider = _sentinel(monkeypatch, tmp_path)
+
+    def fetch(client, url):
+        return Image.new("RGB", (512, 512), (10, 120, 10))
+
+    _, prov = tiles.fetch_crop(
+        48.8584, 2.2945, 14, 512, 512, provider, marker_style="none", fetch_tile=fetch
+    )
+    assert prov["zoom"] == 14 and prov["native_zoom"] == 14
+    assert prov["upscaled"] is False
+    assert prov["native_meters_per_pixel"] == prov["meters_per_pixel"]
+
+
+def test_fetch_crop_of_a_variant_requests_that_layer_and_window(monkeypatch, tmp_path):
+    _sentinel(monkeypatch, tmp_path)
+    provider = tiles.get_provider("sentinel2~SWIR~2026-05-01~2026-05-31")
+    urls = []
+
+    def fetch(client, url):
+        urls.append(url)
+        return Image.new("RGB", (512, 512), (10, 120, 10))
+
+    _, prov = tiles.fetch_crop(
+        48.8584, 2.2945, 14, 512, 512, provider, marker_style="none", fetch_tile=fetch
+    )
+    assert all("LAYER=SWIR" in u and "TIME=2026-05-01/2026-05-31" in u for u in urls)
+    # a reader of this capture can tell which layer and which window it is
+    assert prov["provider"] == "sentinel2~SWIR~2026-05-01~2026-05-31"
+    assert "SWIR" in prov["provider_label"]
+
+
+def test_tile_url_leaves_zoom_alone_without_an_offset():
+    url = tiles.tile_url("https://x/{z}/{x}/{y}.png", 7, 1, 2)
+    assert url == "https://x/7/1/2.png"
+
+
+def test_all_providers_adds_google_js_widget_when_keyed(monkeypatch, tmp_path):
+    monkeypatch.setenv("AZIMUT_HOME", str(tmp_path))
+    config.save_settings({**config.DEFAULT_SETTINGS, "api_keys": {"google_js": "AIza.js"}})
+    widget = next(p for p in tiles.all_providers() if p.id == "google-js")
+    assert "AIza.js" in widget.url  # the JS loader URL — client-side by design
+    assert widget.widget == "google-maps-js"
+    assert widget.capturable is False  # nothing to stitch — screenshots only
+    assert widget.cacheable is False
+    assert widget.meter == "google_js"  # counts map loads, not tiles
+    assert widget.eco_max_zoom == 0  # eco would re-bill a load per swap
+
+
+def test_all_providers_benches_a_key_that_failed_auth(monkeypatch, tmp_path):
+    """A basemap whose key was last seen failing (EEA block, revoked key) is
+    withheld from the selector until the key changes or a test passes."""
+    monkeypatch.setenv("AZIMUT_HOME", str(tmp_path))
+    config.save_settings({
+        **config.DEFAULT_SETTINGS,
+        "api_keys": {"google": "AIza.x", "mapbox": "pk.y"},
+        "provider_status": {"google": {"ok": False, "detail": "EEA policy", "at": "now"}},
+    })
+    ids = {p.id for p in tiles.all_providers()}
+    assert "google-satellite" not in ids  # benched
+    assert "mapbox-satellite" in ids  # untouched
+    # a passing verdict puts it back
+    config.record_provider_status("google", True, "session token created")
+    assert "google-satellite" in {p.id for p in tiles.all_providers()}
+
+
 def test_all_providers_respects_enable_toggles(monkeypatch, tmp_path):
     monkeypatch.setenv("AZIMUT_HOME", str(tmp_path))
     config.save_settings({

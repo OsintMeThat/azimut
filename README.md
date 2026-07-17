@@ -65,6 +65,16 @@ Frontend development (hot reload, proxied API):
 cd frontend && npm run dev          # UI on :5173
 ```
 
+### Capture extension (optional)
+
+A small browser extension (Chrome/Edge + Firefox) files the map you are
+looking at straight into a case: external map sites (Google Maps & Earth,
+Bing, Yandex, OSM, Apple Maps, Zoom Earth, Satellites.pro — one screenshot
+per click, coordinates parsed from the URL), and it is also what powers the
+Capture button on the Google (Maps JS) basemap. Install it from **Settings →
+Capture extension** (download the zip, load unpacked, pair with the token
+shown there) — full instructions in [extension/README.md](extension/README.md).
+
 ## Building & releasing
 
 The Svelte frontend builds into `src/azimut/static/` (git-ignored) and is

@@ -1,0 +1,81 @@
+/* Shared popup/options styling — matches the app's dark theme + amber accent. */
+
+:root {
+  --bg: #161616;
+  --bg-2: #1f1f1f;
+  --text: #e6e6e6;
+  --muted: #9a9a9a;
+  --accent: #e8a33d;
+  --accent-text: #141414;
+  --border: #333;
+  --ok: #58b368;
+  --error: #e5484d;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 12px;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 system-ui, sans-serif;
+}
+body.popup { width: 340px; }
+body.options { max-width: 460px; }
+
+h1 { font-size: 15px; margin: 0 0 8px; }
+header { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
+header .badge {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+p { margin: 6px 0; }
+.muted { color: var(--muted); font-size: 12px; }
+
+.row { display: flex; align-items: center; gap: 8px; margin: 7px 0; }
+.row label { width: 92px; flex: none; color: var(--muted); font-size: 12px; }
+.row input, .row select {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
+.row.coords input { width: 50%; }
+.row input:focus, .row select:focus { outline: 1px solid var(--accent); }
+
+.actions { display: flex; gap: 8px; margin-top: 12px; }
+button {
+  padding: 6px 12px;
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+button:disabled { opacity: 0.55; cursor: default; }
+
+.status { padding: 7px 9px; border-radius: 6px; background: var(--bg-2); border: 1px solid var(--border); }
+.status.ok { border-color: var(--ok); }
+.status.error { border-color: var(--error); }
+
+footer {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+footer a { color: var(--accent); text-decoration: none; }

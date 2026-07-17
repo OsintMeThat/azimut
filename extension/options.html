@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="ui.css" />
+</head>
+<body class="options">
+  <h1>Pair with Azimut</h1>
+  <p class="muted">
+    In Azimut open <strong>Settings → Capture extension</strong>, copy the
+    pairing token, and paste it here. The token only lets this extension file
+    captures into your local Azimut — nothing leaves your machine.
+  </p>
+  <div class="row">
+    <label for="backendUrl">Azimut URL</label>
+    <input id="backendUrl" type="text" placeholder="http://127.0.0.1:8477" />
+  </div>
+  <div class="row">
+    <label for="token">Pairing token</label>
+    <input id="token" type="password" placeholder="paste from Azimut Settings" />
+  </div>
+  <div class="actions">
+    <button id="save" class="primary">Save &amp; test</button>
+  </div>
+  <p id="status" class="status" hidden></p>
+  <script src="options.js"></script>
+</body>
+</html>

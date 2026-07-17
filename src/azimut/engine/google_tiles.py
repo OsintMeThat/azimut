@@ -46,11 +46,32 @@ class GoogleSessionError(Exception):
     pass
 
 
+def error_message(response: Any) -> str:
+    """The human sentence inside a Google Maps Platform error response.
+
+    Falls back to the HTTP status line when the body isn't the usual
+    ``{"error": {"message": …}}`` JSON envelope.
+    """
+    try:
+        message = (response.json().get("error") or {}).get("message")
+        if message:
+            return str(message)
+    except Exception:
+        pass
+    text = (getattr(response, "text", "") or "").strip()
+    return text[:300] if text else f"HTTP {response.status_code}"
+
+
 def _mint(key: str, post: Callable[..., Any] | None) -> dict[str, Any]:
     response = (post or httpx.post)(
         CREATE_SESSION_URL, params={"key": key}, json=SESSION_BODY, timeout=15
     )
-    response.raise_for_status()
+    if response.status_code >= 400:
+        # Google's error body carries the actual sentence ("satellite tiles …
+        # are not available for your account and region" for EEA accounts,
+        # "API key expired", …) — raise that, not a bare "403 Forbidden",
+        # because for a policy block the message *is* the diagnosis.
+        raise GoogleSessionError(error_message(response))
     data = response.json()
     if not data.get("session"):
         raise GoogleSessionError("createSession response carried no session token")

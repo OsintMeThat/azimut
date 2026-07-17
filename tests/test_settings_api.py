@@ -75,6 +75,17 @@ def _upstream(status=200, content=b"JPEGDATA", headers=None):
     return get
 
 
+def _png_bytes(size=512, colour=(10, 120, 10)):
+    """A real encoded tile — the overzoom path decodes what it magnifies."""
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (size, size), colour).save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def test_tile_proxy_serves_and_counts_exactly(client, monkeypatch):
     client.put("/api/settings/keys", json={"mapbox": "pk.abc"})
     upstream = _upstream(headers={"cache-control": "max-age=43200"})
@@ -314,6 +325,256 @@ def test_test_key_google_mints_a_session(client, monkeypatch):
     monkeypatch.setattr(google_tiles, "session_token", fake_token)
     assert client.post("/api/settings/keys/google/test").json()["ok"] is True
     assert minted == ["AIza.x"]
+
+
+def test_test_key_sentinelhub_reports_the_services_own_words(client, monkeypatch):
+    """A bad instance id (or an instance without a TRUE_COLOR layer) comes back
+    as a 400 ExceptionReport — the analyst gets Sentinel Hub's sentence, not
+    "400 Bad Request"."""
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+
+    def ok(url, **kwargs):
+        assert "/ogc/wmts/inst-uuid?" in url
+        assert "TILEMATRIX=14" in url  # the zoom_offset applies here too
+        return httpx.Response(200, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", ok)
+    assert client.post("/api/settings/keys/sentinelhub/test").json()["ok"] is True
+
+    body = (
+        "<?xml version='1.0'?><ows:ExceptionReport "
+        'xmlns:ows="http://www.opengis.net/ows/1.1"><ows:Exception>'
+        "<ows:ExceptionText>Invalid instance id: inst-uuid</ows:ExceptionText>"
+        "</ows:Exception></ows:ExceptionReport>"
+    )
+
+    def bad(url, **kwargs):
+        return httpx.Response(400, content=body.encode(), request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", bad)
+    result = client.post("/api/settings/keys/sentinelhub/test").json()
+    assert result["ok"] is False
+    assert result["detail"] == "Invalid instance id: inst-uuid"
+
+
+def test_sentinel2_tile_proxy_offsets_the_matrix_and_counts_tiles(client, monkeypatch):
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    upstream = _upstream()
+    monkeypatch.setattr(httpx, "get", upstream)
+
+    # the frontend asks in grid levels; WMTS wants that level named one higher
+    assert client.get("/api/tiles/sentinel2/13/4151/2818").status_code == 200
+    assert "TILEMATRIX=14" in upstream.urls[0]
+    assert "TILECOL=4151" in upstream.urls[0] and "TILEROW=2818" in upstream.urls[0]
+    body = client.get("/api/settings").json()
+    assert body["usage"]["sentinelhub"][body["month"]] == 1  # 1 tile == 1 PU
+
+
+def test_sentinel2_proxy_never_asks_upstream_past_the_native_ceiling(client, monkeypatch):
+    """A grid level deeper than z14 exists only as Sentinel Hub's own upsampling
+    of pixels we already have — and every tile of it is billed. Serve the native
+    tile magnified instead."""
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    upstream = _upstream(content=_png_bytes(), headers={"content-type": "image/png"})
+    monkeypatch.setattr(httpx, "get", upstream)
+
+    # grid 17 == view z18 for a 512px provider; native is grid 13 (TILEMATRIX 14)
+    r = client.get("/api/tiles/sentinel2/17/66424/45097")
+    assert r.status_code == 200
+    assert r.headers["x-azimut-overzoom"] == "4"  # magnified, not fetched
+    assert len(upstream.urls) == 1
+    assert "TILEMATRIX=14" in upstream.urls[0]  # the native level, nothing deeper
+    body = client.get("/api/settings").json()
+    assert body["usage"]["sentinelhub"][body["month"]] == 1  # one tile, not sixteen
+
+
+def test_sentinel_layers_does_not_touch_the_network_without_check(client, monkeypatch):
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+
+    def explode(*a, **k):
+        raise AssertionError("opening the layer list must never phone out")
+
+    monkeypatch.setattr(httpx, "get", explode)
+    body = client.get("/api/satellite/sentinel/layers").json()
+    assert body["source"] == "catalogue"
+    ids = [entry["id"] for entry in body["layers"]]
+    assert "TRUE_COLOR" in ids and "FALSE_COLOR" in ids and "SWIR" in ids
+    assert all(entry["label"] for entry in body["layers"])
+
+
+def test_sentinel_layers_check_asks_the_instance(client, monkeypatch):
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    xml = (
+        '<?xml version="1.0"?><Capabilities xmlns="http://www.opengis.net/wmts/1.0" '
+        'xmlns:ows="http://www.opengis.net/ows/1.1"><Contents>'
+        "<Layer><ows:Identifier>TRUE_COLOR</ows:Identifier></Layer>"
+        "<Layer><ows:Identifier>VESSELS</ows:Identifier><ows:Title>Vessels</ows:Title></Layer>"
+        "</Contents></Capabilities>"
+    )
+
+    def get(url, **kwargs):
+        return httpx.Response(200, content=xml.encode(), request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", get)
+    body = client.get("/api/satellite/sentinel/layers?check=true").json()
+    assert body["source"] == "instance"
+    assert [entry["id"] for entry in body["layers"]] == ["TRUE_COLOR", "VESSELS"]
+
+
+def test_sentinel_layers_check_falls_back_to_the_catalogue_and_says_why(client, monkeypatch):
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+
+    def boom(*a, **k):
+        raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr(httpx, "get", boom)
+    body = client.get("/api/satellite/sentinel/layers?check=true").json()
+    # a failed discovery leaves a usable list rather than an empty dropdown
+    assert body["source"] == "catalogue"
+    assert "offline" in body["detail"]
+
+
+def test_sentinel_dates_lists_passes_and_counts_the_request(client, monkeypatch):
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    payload = (
+        '{"features": [{"properties": {"date": "2026-05-11", "cloudCoverPercentage": 4}}]}'
+    )
+
+    def get(url, **kwargs):
+        assert "/ogc/wfs/inst-uuid" in url
+        return httpx.Response(200, content=payload.encode(), request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", get)
+    body = client.get(
+        "/api/satellite/sentinel/dates"
+        "?lat=48.8584&lon=2.2945&start=2026-05-01&end=2026-05-31"
+    ).json()
+    assert body["dates"] == [{"date": "2026-05-11", "cloud": 4.0, "granules": 1}]
+    # a WFS query is ~0.01 PU but one whole request against the request quota —
+    # the meter counts what the account is charged for, tile or not
+    settings = client.get("/api/settings").json()
+    assert settings["usage"]["sentinelhub"][settings["month"]] == 1
+
+
+def test_sentinel_dates_without_a_key_is_a_404(client):
+    assert client.get(
+        "/api/satellite/sentinel/dates?lat=1&lon=1&start=2026-05-01&end=2026-05-31"
+    ).status_code == 404
+
+
+def test_free_tier_defaults_to_the_provisioned_sentinel_allowance(client):
+    body = client.get("/api/settings").json()
+    # Copernicus documents 10k but provisions 30k to a General account
+    # (observed 2026-07) — the counter measures against what they actually give
+    assert body["free_tier"]["sentinelhub"] == 30_000
+    assert body["free_tier_default"]["sentinelhub"] == 30_000
+
+
+def test_free_tier_override_moves_the_soft_block(client, monkeypatch):
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    r = client.put("/api/settings/prefs", json={"free_tiers": {"sentinelhub": 1000, "bogus": 5}})
+    assert r.json()["free_tiers"] == {"sentinelhub": 1000}  # unknown meters ignored
+    assert client.get("/api/settings").json()["free_tier"]["sentinelhub"] == 1000
+
+    # the block now measures against the user's figure, not the shipped default
+    config.record_usage("sentinelhub", 900)  # 90% of 1000
+    monkeypatch.setattr(httpx, "get", _upstream())
+    assert client.get("/api/tiles/sentinel2/13/4151/2818").status_code == 429
+
+    # ...and clearing it restores the default, which 900 is nowhere near
+    client.put("/api/settings/prefs", json={"free_tiers": {"sentinelhub": None}})
+    assert client.get("/api/settings").json()["free_tier"]["sentinelhub"] == 30_000
+    assert client.get("/api/tiles/sentinel2/13/4151/2818").status_code == 200
+
+
+def test_key_test_records_status_and_benches_the_basemap(client, monkeypatch):
+    """A failing key test benches the basemap; saving a different key clears
+    the verdict and the basemap comes back."""
+    client.put("/api/settings/keys", json={"mapbox": "pk.bad"})
+
+    def unauthorized(url, **kwargs):
+        return httpx.Response(401, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", unauthorized)
+    assert client.post("/api/settings/keys/mapbox/test").json()["ok"] is False
+
+    status = client.get("/api/settings").json()["provider_status"]
+    assert status["mapbox"]["ok"] is False
+    ids = {p["id"] for p in client.get("/api/satellite/providers").json()}
+    assert "mapbox-satellite" not in ids
+
+    # a new key wipes the old key's verdict — the basemap is offered again
+    client.put("/api/settings/keys", json={"mapbox": "pk.fresh"})
+    assert "mapbox" not in client.get("/api/settings").json()["provider_status"]
+    ids = {p["id"] for p in client.get("/api/satellite/providers").json()}
+    assert "mapbox-satellite" in ids
+
+
+def test_google_key_test_speaks_googles_own_words(client, monkeypatch):
+    """The EEA policy block arrives as a 403 with a full explanation in the
+    body — the test verdict must carry that sentence, not '403 Forbidden'."""
+    client.put("/api/settings/keys", json={"google": "AIza.eea"})
+    eea = (
+        '{"error": {"code": 403, "status": "PERMISSION_DENIED", "message": '
+        '"Your request cannot be served because satellite tiles and 3D tiles '
+        'are not available for your account and region."}}'
+    )
+
+    def blocked(url, **kwargs):
+        return httpx.Response(
+            403, content=eea.encode(),
+            headers={"content-type": "application/json"},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(google_tiles.httpx, "post", blocked)
+    result = client.post("/api/settings/keys/google/test").json()
+    assert result["ok"] is False
+    assert "not available for your account and region" in result["detail"]
+    # and the dead basemap is no longer offered
+    ids = {p["id"] for p in client.get("/api/satellite/providers").json()}
+    assert "google-satellite" not in ids
+
+
+def test_google_js_key_is_tested_in_the_browser(client):
+    """No server-side probe exists for a Maps JS key — the backend says so,
+    and the browser reports its gm_authFailure verdict through /status."""
+    client.put("/api/settings/keys", json={"google_js": "AIza.js"})
+    assert client.post("/api/settings/keys/google_js/test").json()["ok"] is None
+
+    r = client.post(
+        "/api/settings/keys/google_js/status",
+        json={"ok": False, "detail": "gm_authFailure: InvalidKeyMapError"},
+    )
+    assert r.status_code == 200
+    ids = {p["id"] for p in client.get("/api/satellite/providers").json()}
+    assert "google-js" not in ids  # benched by the browser's verdict
+
+    assert client.post(
+        "/api/settings/keys/nope/status", json={"ok": True, "detail": ""}
+    ).status_code == 404
+
+
+def test_per_provider_eco_thresholds(client):
+    """Each tile API gets its own eco threshold; the widget is not tunable
+    (an eco swap re-bills a map load) and unknown names are ignored."""
+    client.put("/api/settings/keys", json={"mapbox": "pk.x", "sentinelhub": "inst", "google_js": "AIza.js"})
+    r = client.put(
+        "/api/settings/prefs",
+        json={"eco_max_zooms": {"mapbox": 12, "sentinelhub": 0, "google_js": 9, "bogus": 3}},
+    ).json()
+    assert r["eco_max_zooms"] == {"mapbox": 12, "sentinelhub": 0}
+
+    by_id = {p["id"]: p for p in client.get("/api/satellite/providers").json()}
+    assert by_id["mapbox-satellite"]["eco_max_zoom"] == 12  # user override
+    assert by_id["sentinel2"]["eco_max_zoom"] == 0  # user turned eco off for it
+    assert by_id["google-js"]["eco_max_zoom"] == 0  # pinned, not settable
+
+    # None removes the override: sentinel2 falls back to its own default (11)
+    r = client.put("/api/settings/prefs", json={"eco_max_zooms": {"sentinelhub": None}}).json()
+    assert r["eco_max_zooms"] == {"mapbox": 12}
+    by_id = {p["id"]: p for p in client.get("/api/satellite/providers").json()}
+    assert by_id["sentinel2"]["eco_max_zoom"] == 11
 
 
 def test_providers_expose_tile_size(client):

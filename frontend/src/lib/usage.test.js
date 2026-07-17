@@ -5,8 +5,10 @@ import {
   tilesShort,
   tilesOfFree,
   freeTierShare,
+  freeTier,
   usageBlocked,
   displayProviderId,
+  providerStatus,
   layerCell,
   FREE_TIER,
   BLOCK_SHARE,
@@ -41,12 +43,23 @@ describe('tilesShort', () => {
     expect(tilesShort(12430)).toBe('12,430 tiles');
     expect(tilesShort(1)).toBe('1 tile');
   });
+
+  it('the Maps JS meter counts map loads, not tiles', () => {
+    expect(tilesShort(3, 'google_js')).toBe('3 map loads');
+    expect(tilesShort(1, 'google_js')).toBe('1 map load');
+  });
+
+  it('the Sentinel Hub meter counts requests — a tile is one, so is a date lookup', () => {
+    expect(tilesShort(767, 'sentinelhub')).toBe('767 requests');
+    expect(tilesShort(1, 'sentinelhub')).toBe('1 request');
+  });
 });
 
 describe('tilesOfFree', () => {
   it('shows the count against the documented free allowance', () => {
     expect(tilesOfFree(767, 'mapbox')).toBe('767 / 200,000 free tiles');
     expect(tilesOfFree(12430, 'google')).toBe('12,430 / 100,000 free tiles');
+    expect(tilesOfFree(42, 'google_js')).toBe('42 / 10,000 free map loads');
   });
 
   it('falls back to the plain count for meters without a known allowance', () => {
@@ -64,6 +77,33 @@ describe('freeTierShare', () => {
   it('free tiers stay in sync with the label helper', () => {
     expect(FREE_TIER.mapbox).toBe(200_000);
     expect(FREE_TIER.google).toBe(100_000);
+    // Copernicus documents 10k but provisions 30k to a General account
+    // (observed 2026-07) — the default follows the account, not the doc
+    expect(FREE_TIER.sentinelhub).toBe(30_000);
+  });
+});
+
+describe("the account's own free tier", () => {
+  // a free tier belongs to the account: providers grant more than they document
+  // and change it silently, so the served figure always wins over our default
+  const served = { sentinelhub: 50_000 };
+
+  it('resolves to the served figure, falling back to the default', () => {
+    expect(freeTier('sentinelhub', served)).toBe(50_000);
+    expect(freeTier('mapbox', served)).toBe(200_000); // not overridden
+    expect(freeTier('sentinelhub', null)).toBe(30_000);
+    expect(freeTier('bing', served)).toBe(undefined);
+  });
+
+  it('moves the readout, the gauge and the block together', () => {
+    expect(tilesOfFree(100, 'sentinelhub', served)).toBe('100 / 50,000 free requests');
+    expect(freeTierShare(25_000, 'sentinelhub', served)).toBe(0.5);
+    // 28k is past 90% of the shipped 30k default but nowhere near 90% of the
+    // 50k this account really has: the correction is what keeps the block from
+    // pausing a provider that is still well inside its allowance
+    expect(usageBlocked(28_000, 'sentinelhub', {}, served)).toBe(false);
+    expect(usageBlocked(28_000, 'sentinelhub', {}, null)).toBe(true);
+    expect(usageBlocked(45_000, 'sentinelhub', {}, served)).toBe(true);
   });
 });
 
@@ -104,6 +144,27 @@ describe('displayProviderId', () => {
     expect(displayProviderId(google, 15, { ecoMaxZoom: 12 })).toBe('google-satellite');
   });
 
+  it('the Maps JS widget never eco-swaps (a swap re-bills a map load)', () => {
+    const widget = { id: 'google-js', meter: 'google_js', widget: 'google-maps-js', eco_max_zoom: 0 };
+    expect(displayProviderId(widget, 3)).toBe('google-js');
+    expect(displayProviderId(widget, 15, { ecoMaxZoom: 21 })).toBe('google-js');
+    // the soft block still protects the quota, eco or not
+    expect(displayProviderId(widget, 18, { blocked: true })).toBe('esri-world-imagery');
+  });
+
+  it("a provider's own eco threshold wins over the global one", () => {
+    // Sentinel-2 caps at z14, so the global z15 would hide it at every zoom it
+    // can serve; its own z11 keeps the useful z12-14 band alive.
+    const s2 = { id: 'sentinel2', meter: 'sentinelhub', eco_max_zoom: 11 };
+    expect(displayProviderId(s2, 11)).toBe('esri-world-imagery');
+    expect(displayProviderId(s2, 12)).toBe('sentinel2');
+    expect(displayProviderId(s2, 14)).toBe('sentinel2');
+    // the user's global setting doesn't drag it back under
+    expect(displayProviderId(s2, 14, { ecoMaxZoom: 15 })).toBe('sentinel2');
+    // and eco off still means off
+    expect(displayProviderId(s2, 3, { eco: false })).toBe('sentinel2');
+  });
+
   it('a paused meter always falls back, even zoomed in', () => {
     expect(displayProviderId(google, 19, { blocked: true })).toBe('esri-world-imagery');
   });
@@ -132,6 +193,64 @@ describe('layerCell', () => {
 
   it('never goes below the 256px minimum cell', () => {
     expect(layerCell({ tile_size: 256, oversample: 2 }, 17)).toBe(256);
+  });
+});
+
+describe('providerStatus', () => {
+  const ok = { ok: true };
+  const bad = { ok: false, detail: 'HTTP 403' };
+
+  it('an unconfigured provider is idle, whatever else is true of it', () => {
+    expect(providerStatus({ meter: 'mapbox' })).toEqual({ tone: 'idle', label: 'Not set' });
+    // a stale verdict from a key that has since been cleared can't shout
+    expect(providerStatus({ key: '  ', meter: 'mapbox', status: bad }).label).toBe('Not set');
+  });
+
+  it('reports a working key, and an untested one as untested', () => {
+    expect(providerStatus({ key: 'pk.x', meter: 'mapbox', status: ok })).toEqual({
+      tone: 'ok',
+      label: 'Key works',
+    });
+    expect(providerStatus({ key: 'pk.x', meter: 'mapbox' })).toEqual({
+      tone: 'idle',
+      label: 'Untested',
+    });
+  });
+
+  it('a failed key outranks every other state — it is why the basemap is benched', () => {
+    expect(providerStatus({ key: 'pk.x', meter: 'mapbox', status: bad })).toEqual({
+      tone: 'bad',
+      label: 'Key failed',
+    });
+    // even switched off, and even at a quota that would otherwise pause it
+    expect(providerStatus({ key: 'pk.x', meter: 'mapbox', status: bad, enabled: false }).label).toBe(
+      'Key failed'
+    );
+    expect(
+      providerStatus({ key: 'pk.x', meter: 'mapbox', status: bad, count: 199_000 }).label
+    ).toBe('Key failed');
+  });
+
+  it('a disabled provider reads as off rather than as a quota state', () => {
+    expect(
+      providerStatus({ key: 'pk.x', meter: 'mapbox', status: ok, enabled: false, count: 199_000 })
+    ).toEqual({ tone: 'idle', label: 'Off' });
+  });
+
+  it('separates the pause from a deliberate overrun', () => {
+    const at90 = { key: 'pk.x', meter: 'mapbox', status: ok, count: 180_000 };
+    expect(providerStatus(at90)).toEqual({ tone: 'bad', label: 'Paused' });
+    expect(providerStatus({ ...at90, overrides: { mapbox: true } })).toEqual({
+      tone: 'warn',
+      label: 'Billing',
+    });
+  });
+
+  it("measures against this account's corrected allowance, not the default", () => {
+    const half = { key: 'x', meter: 'sentinelhub', status: ok, count: 9_500 };
+    expect(providerStatus(half).label).toBe('Key works'); // 9.5k of the 30k default
+    // the account Copernicus only documents 10k for: the same count is a pause
+    expect(providerStatus({ ...half, tiers: { sentinelhub: 10_000 } }).label).toBe('Paused');
   });
 });
 

@@ -9,16 +9,22 @@
     tilesOfFree,
     freeTierShare,
     usageBlocked,
+    providerStatus,
     USAGE_LINKS,
     BLOCK_SHARE,
     ECO_MAX_ZOOM,
+    FREE_TIER,
   } from '../lib/usage.js';
+  import { probeKey, googleMapsLoadedKey } from '../lib/gmaps.js';
+  import { extensionVersion } from '../lib/extBridge.js';
   import Icon from '../components/Icon.svelte';
 
+  // Imagery and Usage were the same four objects seen from two rooms: the key
+  // here, the meter it feeds there. One tab, one card per provider.
   const TABS = [
     { id: 'preferences', label: 'Preferences', icon: 'sliders' },
     { id: 'imagery', label: 'Imagery', icon: 'key' },
-    { id: 'usage', label: 'Usage', icon: 'chart' },
+    { id: 'extension', label: 'Capture extension', icon: 'crop' },
     { id: 'about', label: 'About', icon: 'compass' },
   ];
   let tab = $state('preferences');
@@ -29,30 +35,85 @@
   // The keyed imagery providers the app knows how to light up (IMAGERY_PROVIDERS.md).
   // Keys are app-wide, stored locally in settings.json, never written into a
   // case folder or export bundle — they're the user's own billing identity.
+  //
+  // Each provider is one collapsed row until you open it: `gives` and `cost`
+  // are all a closed card says, so the tab reads at a glance and only the
+  // provider you're actually setting up spends any text. Everything below them
+  // (`steps`, `warning`, `overage`) lives in the opened body — the nuance is
+  // still here, it just isn't charged to the other three providers.
   const KEYED = [
     {
       id: 'mapbox',
       label: 'Mapbox',
+      gives: 'Satellite basemap',
+      cost: '$0.50 / 1,000 past the tier',
       field: 'Mapbox public access token',
       placeholder: 'pk.…',
       help: 'https://account.mapbox.com/access-tokens/',
       usage: USAGE_LINKS.mapbox,
-      unlocks: 'Mapbox Satellite basemap',
       overage:
-        'Beyond 200k free tiles/month, Mapbox bills extra tiles automatically ($0.50 per 1,000, pay-as-you-go, no hard cap). Set a spending alert in your Mapbox account.',
+        'Past the free tier Mapbox bills extra tiles automatically — pay-as-you-go, no hard cap. Set a spending alert in your Mapbox account.',
     },
     {
       id: 'google',
       label: 'Google',
+      gives: 'Satellite basemap',
+      cost: '$0.60 / 1,000 past the tier',
       field: 'Google Maps Platform API key',
       placeholder: 'AIza…',
       help: 'https://developers.google.com/maps/documentation/tile/get-api-key',
       usage: USAGE_LINKS.google,
-      unlocks: 'Google Satellite basemap (Map Tiles API)',
+      warning:
+        'EEA billing accounts: since 8 July 2025 Google no longer serves satellite tiles to Europe (403). Use a Maps JavaScript API key instead.',
       overage:
-        'Beyond 100k free tiles/month, Google bills extra tiles to your Cloud project ($0.60 per 1,000; Google also enforces 15k tiles/day). A quota cap in the Cloud Console makes it stop serving instead of billing.',
+        'Extra tiles are billed to your Cloud project, and Google also enforces 15k tiles/day. A quota cap in the Cloud Console makes it stop serving instead of billing.',
+    },
+    {
+      id: 'google_js',
+      label: 'Google (Maps JS)',
+      gives: 'Satellite basemap · works in the EEA',
+      cost: 'Billed per map load, not per tile',
+      field: 'Google Maps JavaScript API key',
+      placeholder: 'AIza…',
+      help: 'https://developers.google.com/maps/documentation/javascript/get-api-key',
+      usage: USAGE_LINKS.google_js,
+      // a JS key proves itself only in a browser — Test loads a real 1-tile map
+      browserTest: true,
+      steps: [
+        'In the Google Cloud Console, enable the "Maps JavaScript API" on your project.',
+        'Create an API key (Credentials) and restrict it to that API.',
+        'Optional but recommended: restrict the key to your own referrers.',
+      ],
+      overage:
+        'A map load is one widget instantiation (~10k free/month) — pan and zoom on an open map are free. Azimut builds the widget once per session and reuses it, so normal use stays far under the tier.',
+    },
+    {
+      id: 'sentinelhub',
+      label: 'Sentinel Hub',
+      gives: 'Sentinel-2 · free · 10 m/px',
+      cost: 'Never billed',
+      field: 'Copernicus configuration instance ID',
+      placeholder: 'a1b2c3d4-0000-0000-0000-000000000000',
+      help: 'https://shapps.dataspace.copernicus.eu/dashboard/#/configurations',
+      usage: USAGE_LINKS.sentinelhub,
+      // Not a token you're issued but a configuration you build, so the field
+      // needs the recipe, not just a "get one here" link.
+      steps: [
+        'Register (free) on dataspace.copernicus.eu, then open the Sentinel Hub Dashboard.',
+        'Configuration Utility → New configuration, based on "Simple Sentinel-2 L2A template".',
+        'Open it and turn Show logo and Show warnings OFF — both are burned into every tile.',
+        'Copy the ID under "Service endpoints" and paste it here.',
+      ],
+      overage:
+        'A free Copernicus account gets 30,000 requests and 30,000 processing units a month (one tile = 1 request = 1 PU; a date lookup is 1 request but ~0.01 PU) and simply stops serving until the 1st — it never bills you.',
+      // the correction the free-allowance box exists for, told where it's useful
+      tierNote:
+        'Copernicus still documents 10,000 while provisioning 30,000, and the figure is per-account — check yours on the dashboard.',
     },
   ];
+
+  /** A per-provider map over KEYED — the shape every key/pref state uses. */
+  const perProvider = (value) => Object.fromEntries(KEYED.map((k) => [k.id, value(k)]));
 
   const COORD_CHOICES = [
     { id: 'dd', label: 'Decimal' },
@@ -64,19 +125,56 @@
     { id: 'imperial', label: 'Imperial' },
   ];
 
-  let keys = $state({ mapbox: '', google: '' });
-  let shown = $state({ mapbox: false, google: false });
+  let keys = $state(perProvider(() => ''));
+  let shown = $state(perProvider(() => false));
+  // every card starts closed: four providers' worth of setup is four walls of
+  // text, and you only ever set up one at a time
+  let open = $state(perProvider(() => false));
+  let termsOpen = $state(false);
   let usage = $state({});
   let month = $state('');
-  let saving = $state(false);
-  let testing = $state({ mapbox: false, google: false });
-  let testResult = $state({ mapbox: null, google: null }); // { ok, detail } | null
+  let testing = $state(perProvider(() => false));
+  let testResult = $state(perProvider(() => null)); // { ok, detail } | null
   // keyed-provider preferences (IMAGERY_PROVIDERS.md) — saved on toggle
-  let enabled = $state({ mapbox: true, google: true });
-  let overrides = $state({ mapbox: false, google: false });
+  let enabled = $state(perProvider(() => true));
+  let overrides = $state(perProvider(() => false));
   let eco = $state(true);
   let ecoMaxZoom = $state(ECO_MAX_ZOOM);
+  // per-provider eco thresholds ('' = inherit, '0' = eco off for that basemap);
+  // the Maps JS widget is absent — an eco swap would re-bill a map load
+  let ecoZooms = $state(perProvider(() => ''));
+  // The account's real monthly allowance per meter ('' = the shipped default).
+  // A free tier belongs to the provider's account, not to us: they hand out
+  // more than they document and change it silently (Copernicus documents 10k
+  // and provisions 30k), so the number the counter and the soft block measure
+  // against has to be the user's to correct. `tiers` is the resolved figure the
+  // helpers read; `tierEdits` is what's in the boxes.
+  let tiers = $state(null);
+  let tierEdits = $state(perProvider(() => ''));
   let about = $state({ version: '', workspace_root: '' });
+
+  // --- capture extension: pairing token + detection (lib/extBridge.js) ---
+  let ingestToken = $state('');
+  let tokenShown = $state(false);
+  // read once per mount: the marker is stamped before the app loads, so a
+  // mid-session install genuinely needs a tab reload (the text says so)
+  const extDetected = extensionVersion();
+
+  async function copyToken() {
+    try {
+      await navigator.clipboard.writeText(ingestToken);
+      toast('Pairing token copied', 'ok');
+    } catch {
+      tokenShown = true; // clipboard blocked — show it for manual copy
+      toast('Could not copy — the token is shown for manual copy', 'warn');
+    }
+  }
+
+  async function rotateToken() {
+    const r = await api.post('/api/settings/ingest-token/rotate');
+    ingestToken = r.ingest_token;
+    toast('New token minted — every paired extension must re-pair', 'ok', 6000);
+  }
   // the home-view fields are edited as text, so a half-typed "-" or "48." isn't
   // fought by the number parser mid-keystroke; committed on change
   let home = $state({ lat: '', lon: '', zoom: '' });
@@ -153,14 +251,28 @@
   async function load() {
     const s = await api.get('/api/settings');
     signature = !!s.signature;
-    keys = { mapbox: s.api_keys.mapbox ?? '', google: s.api_keys.google ?? '' };
+    keys = perProvider((k) => s.api_keys[k.id] ?? '');
     usage = s.usage;
     month = s.month;
-    enabled = { mapbox: s.providers_enabled.mapbox ?? true, google: s.providers_enabled.google ?? true };
-    overrides = { mapbox: !!s.usage_overrides.mapbox, google: !!s.usage_overrides.google };
+    enabled = perProvider((k) => s.providers_enabled[k.id] ?? true);
+    overrides = perProvider((k) => !!s.usage_overrides[k.id]);
+    // a stored verdict (key test, or a live auth failure) shows up like a
+    // fresh test result — it's also what benches the basemap, so it must be
+    // visible, not buried in settings.json
+    testResult = perProvider((k) => s.provider_status?.[k.id] ?? null);
     eco = s.eco_zoom_fallback;
     ecoMaxZoom = s.eco_max_zoom ?? ECO_MAX_ZOOM;
+    ecoZooms = perProvider((k) => {
+      const v = s.eco_max_zooms?.[k.id];
+      return v === undefined || v === null ? '' : String(v);
+    });
+    tiers = s.free_tier ?? null;
+    tierEdits = perProvider((k) => {
+      const v = s.free_tiers?.[k.id];
+      return v === undefined || v === null ? '' : String(v);
+    });
     about = { version: s.version ?? '', workspace_root: s.workspace_root ?? '' };
+    ingestToken = s.ingest_token ?? '';
     home = { lat: String(s.home_view.lat), lon: String(s.home_view.lon), zoom: String(s.home_view.zoom) };
     mention = s.post_mention ?? '';
     applyPrefs(s); // the rest of the app reads these live
@@ -217,11 +329,43 @@
   }
 
   async function saveEcoZoom() {
+    // per-provider thresholds ride along: '' = inherit (server drops the
+    // override on null), a number (0 included — eco off) sets it
+    const perProviderZooms = {};
+    for (const [id, v] of Object.entries(ecoZooms)) {
+      perProviderZooms[id] = v === '' ? null : Number(v);
+    }
     const saved = await savePrefs({
       eco_zoom_fallback: eco,
       eco_max_zoom: Number(ecoMaxZoom) || ECO_MAX_ZOOM,
+      eco_max_zooms: perProviderZooms,
     });
-    if (saved) ecoMaxZoom = saved.eco_max_zoom; // reflect the server's clamping
+    if (saved) {
+      ecoMaxZoom = saved.eco_max_zoom; // reflect the server's clamping
+      ecoZooms = perProvider((k) => {
+        const v = saved.eco_max_zooms?.[k.id];
+        return v === undefined || v === null ? '' : String(v);
+      });
+    }
+  }
+
+  async function saveFreeTier() {
+    // '' = back to the documented default (the server drops the override on null)
+    const patch = {};
+    for (const [id, v] of Object.entries(tierEdits)) {
+      patch[id] = v.trim() === '' ? null : Number(v);
+    }
+    const saved = await savePrefs({ free_tiers: patch });
+    if (saved) {
+      // re-read the *resolved* tiers: the server clamps, and a cleared
+      // override has to fall back to the default in the readout too
+      const s = await api.get('/api/settings').catch(() => null);
+      if (s) tiers = s.free_tier ?? null;
+      tierEdits = perProvider((k) => {
+        const v = saved.free_tiers?.[k.id];
+        return v === undefined || v === null ? '' : String(v);
+      });
+    }
   }
 
   async function saveHome() {
@@ -251,17 +395,15 @@
     load().catch((e) => toast(`Could not load settings: ${e.message}`, 'danger'));
   });
 
-  async function saveKeys() {
-    if (saving) return;
-    saving = true;
+  // Keys save on change like every other preference here — no Save button to
+  // forget. The status chip flipping to "Untested" is the receipt, which beats
+  // a toast: it also says what to do next.
+  async function saveKey(id) {
     try {
-      await api.put('/api/settings/keys', { mapbox: keys.mapbox, google: keys.google });
-      testResult = { mapbox: null, google: null }; // stale verdicts for new keys
-      toast('Keys saved. Keyed basemaps now appear in the Satellite tab', 'ok');
+      await api.put('/api/settings/keys', { [id]: keys[id] });
+      testResult[id] = null; // the old verdict was about the old key (so does the server)
     } catch (e) {
-      toast(`Could not save keys: ${e.message}`, 'danger');
-    } finally {
-      saving = false;
+      toast(`Could not save the key: ${e.message}`, 'danger');
     }
   }
 
@@ -273,7 +415,30 @@
     testResult[id] = null;
     try {
       await api.put('/api/settings/keys', { [id]: keys[id] }); // test what's in the field
-      testResult[id] = await api.post(`/api/settings/keys/${id}/test`);
+      const def = KEYED.find((k) => k.id === id);
+      if (def?.browserTest) {
+        // a Maps JS key only proves itself in a browser; Google's script also
+        // binds to one key per page life, so a changed key needs a reload
+        const bound = googleMapsLoadedKey();
+        if (bound && bound !== keys[id].trim()) {
+          testResult[id] = {
+            ok: false,
+            detail: 'Google Maps is already loaded with the previous key — reload the app (F5), then test',
+          };
+        } else {
+          const url = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(keys[id].trim())}&v=weekly`;
+          const { billed, ...verdict } = await probeKey(url);
+          testResult[id] = verdict;
+          // The probe is a real map load on the user's bill, and it happens in
+          // this browser where no backend proxy can count it — report it, or
+          // testing a key silently drifts the counter under Google's number.
+          if (billed) await api.post(`/api/satellite/usage/${id}`).catch(() => {});
+        }
+        // persist the browser's verdict — it's what benches/unbenches the basemap
+        await api.post(`/api/settings/keys/${id}/status`, testResult[id]).catch(() => {});
+      } else {
+        testResult[id] = await api.post(`/api/settings/keys/${id}/test`);
+      }
     } catch (e) {
       testResult[id] = { ok: false, detail: e.message };
     } finally {
@@ -427,111 +592,58 @@
 
       {#if tab === 'imagery'}
         <section class="group">
-          <h3>API keys</h3>
+          <h3>Providers</h3>
           <p class="intro">
-            Optional. Azimut's built-in basemaps (Esri, OSM, OpenTopoMap) never need a key — your own
-            Mapbox / Google keys just unlock extra official basemaps in the Satellite tab.
-            Keys stay in <span class="mono">settings.json</span> on this machine.
+            Optional. The built-in basemaps (Esri, OSM, OpenTopoMap) never need a key — your own
+            Mapbox / Google / Copernicus accounts just unlock extra ones in the Satellite tab.
+            Keys stay in <span class="mono">settings.json</span> on this machine, never in a case
+            or an export, and Azimut counts every request it sends so a free tier is never a
+            surprise.
           </p>
 
-          {#each KEYED as k (k.id)}
-            <div class="key-row">
-              <label for="key-{k.id}">
-                {k.field}
-                <a href={k.help} target="_blank" rel="noreferrer" title="How to get one">
-                  how to get one <Icon name="external" size={11} />
-                </a>
-              </label>
-              <div class="key-line">
-                <input
-                  id="key-{k.id}"
-                  class="input"
-                  type={shown[k.id] ? 'text' : 'password'}
-                  placeholder={k.placeholder}
-                  bind:value={keys[k.id]}
-                  autocomplete="off"
-                  spellcheck="false"
-                />
-                <button
-                  class="btn btn-ghost btn-sm"
-                  onclick={() => (shown[k.id] = !shown[k.id])}
-                  title={shown[k.id] ? 'Hide key' : 'Show key'}
-                  aria-label={shown[k.id] ? 'Hide key' : 'Show key'}
-                >
-                  <Icon name={shown[k.id] ? 'eyeOff' : 'eye'} size={14} />
-                </button>
-                <button
-                  class="btn btn-sm"
-                  onclick={() => testKey(k.id)}
-                  disabled={testing[k.id] || !keys[k.id].trim()}
-                  title="Save this key, then exercise it against the real service"
-                >
-                  {testing[k.id] ? 'Testing…' : 'Test'}
-                </button>
-              </div>
-              <div class="key-foot">
-                <span class="unlocks">Unlocks: {k.unlocks}</span>
-                {#if keys[k.id]}
-                  <label
-                    class="toggle"
-                    title="Hide or show this basemap in the Satellite tab — the key stays saved"
+          <div class="cards">
+            {#each KEYED as k (k.id)}
+              {@const count = monthCount(usage, k.id, month)}
+              {@const share = freeTierShare(count, k.id, tiers)}
+              {@const st = providerStatus({
+                key: keys[k.id],
+                enabled: enabled[k.id],
+                status: testResult[k.id],
+                count,
+                meter: k.id,
+                overrides,
+                tiers,
+              })}
+              <div class="card" class:open={open[k.id]}>
+                <div class="card-head">
+                  <button
+                    class="card-toggle"
+                    onclick={() => (open[k.id] = !open[k.id])}
+                    aria-expanded={open[k.id]}
                   >
-                    <input type="checkbox" bind:checked={enabled[k.id]} onchange={saveProviderPrefs} />
-                    enabled
-                  </label>
-                {/if}
-                {#if testResult[k.id]}
-                  <span class="verdict" class:ok={testResult[k.id].ok} class:bad={!testResult[k.id].ok}>
-                    <Icon name={testResult[k.id].ok ? 'check' : 'alert'} size={12} />
-                    {testResult[k.id].ok ? 'Key works' : testResult[k.id].detail}
-                  </span>
-                {/if}
-              </div>
-            </div>
-          {/each}
+                    <Icon name={open[k.id] ? 'chevronDown' : 'chevronRight'} size={13} />
+                    <span class="card-name">{k.label}</span>
+                    <span class="card-gives">{k.gives}</span>
+                  </button>
+                  <span
+                    class="chip {st.tone}"
+                    title={st.tone === 'bad' ? testResult[k.id]?.detail : undefined}
+                  >{st.label}</span>
+                  {#if keys[k.id]}
+                    <input
+                      class="card-enable"
+                      type="checkbox"
+                      bind:checked={enabled[k.id]}
+                      onchange={saveProviderPrefs}
+                      title="Show or hide this basemap in the Satellite tab — the key stays saved"
+                      aria-label="Show {k.label} in the Satellite tab"
+                    />
+                  {/if}
+                </div>
 
-          <div class="actions">
-            <button class="btn btn-primary" onclick={saveKeys} disabled={saving}>
-              {saving ? 'Saving…' : 'Save keys'}
-            </button>
-          </div>
-        </section>
-
-        <section class="group">
-          <h3><Icon name="shield" size={14} /> Provider terms, encoded</h3>
-          <ul class="rules">
-            <li>Google tiles are never cached to disk, and a Google capture is a flattened screenshot with the copyright line burned into its footer; both are conditions of Google's Map Tiles API terms.</li>
-            <li>Mapbox captures keep the © Mapbox © OpenStreetMap attribution in their provenance.</li>
-            <li>Keys are never bundled into a shared case or export.</li>
-          </ul>
-        </section>
-      {/if}
-
-      {#if tab === 'usage'}
-        <section class="group">
-          <h3>Tile usage · {month}</h3>
-          <p class="intro">
-            Keyed providers bill per tile served. Azimut counts exactly what goes out to
-            each provider (live map + captures, browser cache hits excluded), so this
-            matches their billing as closely as possible. Local bookkeeping only — the
-            counter never leaves this machine.
-          </p>
-          {#if KEYED.some((k) => keys[k.id] || monthCount(usage, k.id, month))}
-            <div class="usage">
-              {#each KEYED as k (k.id)}
-                {#if keys[k.id] || monthCount(usage, k.id, month)}
-                  {@const count = monthCount(usage, k.id, month)}
-                  {@const share = freeTierShare(count, k.id)}
-                  <div class="usage-row">
-                    <div class="usage-line">
-                      <span class="usage-name">
-                        {k.label}
-                        <a href={k.usage} target="_blank" rel="noreferrer"
-                          title="The provider's own usage & limits dashboard — the counter that actually bills"
-                        >usage & limits <Icon name="external" size={11} /></a>
-                      </span>
-                      <span class="mono">{tilesOfFree(count, k.id)}</span>
-                    </div>
+                <!-- one line either way: what it would cost, or what it has cost -->
+                {#if keys[k.id] || count}
+                  <div class="card-meter">
                     <div class="meter-track" aria-hidden="true">
                       <div
                         class="meter-fill"
@@ -539,35 +651,172 @@
                         style="width:{Math.min(share * 100, 100)}%"
                       ></div>
                     </div>
-                    {#if usageBlocked(count, k.id, overrides)}
-                      <p class="blocked">
+                    <span class="mono meter-read">{tilesOfFree(count, k.id, tiers)}</span>
+                  </div>
+                {:else if !open[k.id]}
+                  <!-- open, the body's overage already leads with the cost -->
+                  <p class="card-cost">{k.cost}</p>
+                {/if}
+
+                {#if open[k.id]}
+                  <div class="card-body">
+                    {#if k.warning}
+                      <p class="key-warning"><Icon name="alert" size={12} /> {k.warning}</p>
+                    {/if}
+                    {#if k.steps}
+                      <ol class="key-steps">
+                        {#each k.steps as step (step)}
+                          <li>{step}</li>
+                        {/each}
+                      </ol>
+                    {/if}
+
+                    <label class="key-label" for="key-{k.id}">
+                      {k.field}
+                      <a href={k.help} target="_blank" rel="noreferrer" title="How to get one">
+                        how to get one <Icon name="external" size={11} />
+                      </a>
+                    </label>
+                    <div class="key-line">
+                      <input
+                        id="key-{k.id}"
+                        class="input"
+                        type={shown[k.id] ? 'text' : 'password'}
+                        placeholder={k.placeholder}
+                        bind:value={keys[k.id]}
+                        onchange={() => saveKey(k.id)}
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                      <button
+                        class="btn btn-ghost btn-sm"
+                        onclick={() => (shown[k.id] = !shown[k.id])}
+                        title={shown[k.id] ? 'Hide key' : 'Show key'}
+                        aria-label={shown[k.id] ? 'Hide key' : 'Show key'}
+                      >
+                        <Icon name={shown[k.id] ? 'eyeOff' : 'eye'} size={14} />
+                      </button>
+                      <button
+                        class="btn btn-sm"
+                        onclick={() => testKey(k.id)}
+                        disabled={testing[k.id] || !keys[k.id].trim()}
+                        title="Exercise this key against the real service"
+                      >
+                        {testing[k.id] ? 'Testing…' : 'Test'}
+                      </button>
+                    </div>
+                    {#if testResult[k.id] && !testResult[k.id].ok}
+                      <p class="verdict bad">
                         <Icon name="alert" size={12} />
-                        Paused at {Math.round(BLOCK_SHARE * 100)}% of the free tier — the map and
-                        captures fall back to free imagery until next month, or:
+                        {testResult[k.id].detail}
                       </p>
                     {/if}
-                    {#if share >= BLOCK_SHARE || overrides[k.id]}
-                      <label class="toggle override" title="Serve past the pause — extra tiles are billed by the provider">
-                        <input type="checkbox" bind:checked={overrides[k.id]} onchange={saveProviderPrefs} />
-                        keep serving past {Math.round(BLOCK_SHARE * 100)}% (billed)
-                      </label>
+
+                    <p class="overage">{k.cost} — {k.overage}</p>
+
+                    {#if keys[k.id] || count}
+                      {#if usageBlocked(count, k.id, overrides, tiers)}
+                        <p class="blocked">
+                          <Icon name="alert" size={12} />
+                          Paused at {Math.round(BLOCK_SHARE * 100)}% of the free tier — the map and
+                          captures fall back to free imagery until next month, or:
+                        </p>
+                      {/if}
+                      {#if share >= BLOCK_SHARE || overrides[k.id]}
+                        <label
+                          class="toggle override"
+                          title="Serve past the pause — extra tiles are billed by the provider"
+                        >
+                          <input
+                            type="checkbox"
+                            bind:checked={overrides[k.id]}
+                            onchange={saveProviderPrefs}
+                          />
+                          keep serving past {Math.round(BLOCK_SHARE * 100)}% (billed)
+                        </label>
+                      {/if}
+
+                      <div class="card-controls">
+                        <label
+                          class="ctrl"
+                          title={k.tierNote ??
+                            "What this account's monthly free allowance really is — check the provider's dashboard"}
+                        >
+                          <span>Free allowance</span>
+                          <input
+                            class="input num mono"
+                            type="number"
+                            min="1"
+                            step="1000"
+                            placeholder={String(FREE_TIER[k.id] ?? '')}
+                            bind:value={tierEdits[k.id]}
+                            onchange={saveFreeTier}
+                          />
+                          <span class="ctrl-note">
+                            {tierEdits[k.id].trim() === ''
+                              ? 'blank = the documented default'
+                              : `default is ${(FREE_TIER[k.id] ?? 0).toLocaleString('en-US')}`}
+                          </span>
+                        </label>
+
+                        {#if k.browserTest}
+                          <p class="ctrl-note">
+                            No eco mode: swapping the widget out and back would bill a fresh map load.
+                          </p>
+                        {:else}
+                          <label
+                            class="ctrl"
+                            title="Own threshold for this basemap — blank inherits the global one, 0 turns eco off for it"
+                          >
+                            <span>Eco below z ≤</span>
+                            <input
+                              class="input num mono"
+                              type="number"
+                              min="0"
+                              max="21"
+                              placeholder={k.id === 'sentinelhub' ? '11' : String(ecoMaxZoom)}
+                              bind:value={ecoZooms[k.id]}
+                              onchange={saveEcoZoom}
+                              disabled={!eco}
+                              aria-label="Eco threshold for {k.label}"
+                            />
+                            <span class="ctrl-note">
+                              {k.id === 'sentinelhub'
+                                ? 'blank = 11 (it caps at z14)'
+                                : 'blank = the global threshold'}
+                            </span>
+                          </label>
+                        {/if}
+                      </div>
+
+                      <a class="card-link" href={k.usage} target="_blank" rel="noreferrer">
+                        {k.label} usage & limits <Icon name="external" size={11} />
+                      </a>
                     {/if}
-                    <p class="overage">{k.overage}</p>
                   </div>
                 {/if}
-              {/each}
-            </div>
-          {:else}
-            <p class="none">No keyed provider configured yet.</p>
-          {/if}
+              </div>
+            {/each}
+          </div>
+
+          <div class="cards-foot">
+            <span class="row-hint">Counters for {month} — local bookkeeping, never sent anywhere.</span>
+            <button class="btn btn-ghost btn-sm" onclick={() => load()} title="Refresh counters">
+              <Icon name="reset" size={13} /> Refresh
+            </button>
+          </div>
+        </section>
+
+        <section class="group">
+          <h3>Eco mode</h3>
           <label
             class="toggle eco"
             title="Zoomed out this far, billed basemaps silently swap to free imagery — paid detail only matters up close"
           >
             <input type="checkbox" bind:checked={eco} onchange={saveEcoZoom} />
-            Eco mode: use free imagery when zoomed out, up to z ≤
+            Use free imagery when zoomed out, up to z ≤
             <input
-              class="input eco-zoom"
+              class="input num mono"
               type="number"
               min="1"
               max="21"
@@ -577,9 +826,103 @@
               aria-label="Eco mode zoom threshold"
             />
           </label>
-          <button class="btn btn-ghost btn-sm" onclick={() => load()} title="Refresh counters">
-            <Icon name="reset" size={13} /> Refresh
-          </button>
+          <p class="note">
+            Paid detail only matters up close. Each provider can override this from its card.
+          </p>
+        </section>
+
+        <section class="group">
+          <div class="card">
+            <div class="card-head">
+              <button
+                class="card-toggle"
+                onclick={() => (termsOpen = !termsOpen)}
+                aria-expanded={termsOpen}
+              >
+                <Icon name={termsOpen ? 'chevronDown' : 'chevronRight'} size={13} />
+                <span class="card-name">Provider terms</span>
+                <span class="card-gives">Encoded — nothing to do</span>
+              </button>
+            </div>
+            {#if termsOpen}
+              <ul class="rules">
+                <li>Google tiles are never cached to disk, and a Google capture is a flattened screenshot with the copyright line burned into its footer; both are conditions of Google's Map Tiles API terms.</li>
+                <li>Mapbox captures keep the © Mapbox © OpenStreetMap attribution in their provenance.</li>
+                <li>Keys are never bundled into a shared case or export.</li>
+              </ul>
+            {/if}
+          </div>
+        </section>
+      {/if}
+
+      {#if tab === 'extension'}
+        <section class="group">
+          <h3>Capture extension</h3>
+          <p class="note">
+            A small browser extension (Chrome/Edge and Firefox) that files the map you
+            are looking at into Azimut as a capture — one screenshot per click,
+            coordinates parsed from the page URL, source and timestamp recorded. It
+            serves two things: <strong>capturing external map sites</strong> (Google
+            Maps &amp; Earth, Bing, Yandex, OpenStreetMap, Apple Maps, Zoom Earth,
+            Satellites.pro), and the <strong>Capture button on the Google (Maps JS)
+            basemap</strong>, whose imagery may only leave the widget as a screenshot.
+          </p>
+          <div class="row">
+            <div class="row-label">
+              <span>Status in this browser</span>
+              <span class="row-hint">
+                {#if extDetected}
+                  detected · <span class="mono">v{extDetected}</span>
+                {:else}
+                  not detected — after installing, reload this tab
+                {/if}
+              </span>
+            </div>
+            <a class="btn btn-sm btn-primary" href="/api/ingest/extension.zip" download>
+              <Icon name="download" size={13} /> Download extension (.zip)
+            </a>
+          </div>
+          <p class="note">
+            Browsers do not let an app install extensions for you — it's two manual
+            steps, once: <strong>Chrome/Edge</strong>: unzip somewhere permanent →
+            <span class="mono">chrome://extensions</span> → enable Developer mode →
+            "Load unpacked" → pick the folder. <strong>Firefox</strong>:
+            <span class="mono">about:debugging</span> → "This Firefox" → "Load
+            Temporary Add-on" → pick <span class="mono">manifest.json</span> (Firefox
+            forgets temporary add-ons on exit — see the README in the zip for a
+            permanent install). Then reload this tab.
+          </p>
+        </section>
+
+        <section class="group">
+          <h3>Pairing</h3>
+          <p class="note">
+            Pairing lets the extension file captures from <em>external</em> map sites
+            into your local Azimut. Paste this token once into the extension's
+            options page. The Google (Maps JS) capture inside Azimut does not need
+            pairing. Rotating the token instantly unpairs every extension.
+          </p>
+          <div class="row">
+            <div class="row-label">
+              <span>Pairing token</span>
+              <span class="row-hint mono">{tokenShown ? ingestToken : '•'.repeat(24)}</span>
+            </div>
+            <div class="scraper-actions">
+              <button class="btn btn-sm" onclick={() => (tokenShown = !tokenShown)}>
+                {tokenShown ? 'Hide' : 'Show'}
+              </button>
+              <button class="btn btn-sm btn-primary" onclick={copyToken}>
+                <Icon name="copy" size={13} /> Copy
+              </button>
+              <button class="btn btn-sm" onclick={rotateToken}>Rotate</button>
+            </div>
+          </div>
+          <p class="note">
+            The token only authorizes filing captures into this Azimut on
+            <span class="mono">127.0.0.1</span> — nothing leaves your machine. The
+            extension takes one screenshot per explicit click, reads only the page
+            URL, and refuses non-map sites.
+          </p>
         </section>
       {/if}
 
@@ -775,6 +1118,26 @@
     font-size: var(--fs-xs);
     line-height: 1.4;
   }
+  /* Recipe for a provider whose "key" is a configuration you build yourself */
+  .key-steps {
+    margin: 4px 0 8px;
+    padding-left: 18px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    line-height: 1.5;
+  }
+  .key-steps li {
+    margin: 1px 0;
+  }
+  .key-warning {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    margin: 4px 0 8px;
+    color: var(--warn, #d8a03d);
+    font-size: var(--fs-xs);
+    line-height: 1.45;
+  }
   .scraper-actions {
     display: flex;
     align-items: center;
@@ -914,10 +1277,146 @@
     text-decoration: none;
   }
 
-  .key-row {
-    margin-bottom: 14px;
+  /* --- provider cards: one row each until you open one --------------------
+     A closed card answers the only two questions you have from across the
+     room — what does it give me, and is it working — in one line. Setting a
+     provider up is the rare act; reading the tab is the common one. */
+  .cards {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
-  .key-row label {
+  .card {
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: 8px 10px;
+    background: var(--bg-2);
+    transition: border-color 0.12s var(--ease);
+  }
+  .card.open {
+    border-color: var(--text-3);
+    background: none;
+  }
+  .card-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .card-toggle {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-3);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .card-name {
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text-1);
+    flex-shrink: 0;
+  }
+  .card-gives {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card-enable {
+    accent-color: var(--accent);
+    margin: 0;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+  /* the verdict, in one word — the detail is a tooltip, and the fix is inside */
+  .chip {
+    flex-shrink: 0;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    white-space: nowrap;
+  }
+  .chip.ok {
+    color: var(--ok);
+    border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+  }
+  .chip.bad {
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  }
+  .chip.warn {
+    color: var(--warn, #d8a03d);
+    border-color: color-mix(in srgb, var(--warn, #d8a03d) 40%, transparent);
+  }
+  .card-meter {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin: 7px 0 1px;
+  }
+  .card-meter .meter-track {
+    flex: 1;
+  }
+  .meter-read,
+  .card-cost {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    white-space: nowrap;
+  }
+  .card-cost {
+    margin: 5px 0 1px 21px; /* aligned under the name, past the chevron */
+  }
+  .card-body {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .card-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin-top: 9px;
+  }
+  .ctrl {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+  /* both control rows put their box at the same x — they read as a column */
+  .ctrl > span:first-child {
+    min-width: 104px;
+    color: var(--text-2);
+  }
+  .ctrl-note {
+    opacity: 0.8;
+  }
+  .card-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 10px;
+    color: var(--accent);
+    font-size: var(--fs-xs);
+  }
+  .cards-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .key-label {
     display: flex;
     align-items: baseline;
     gap: 10px;
@@ -926,7 +1425,7 @@
     font-weight: 600;
     margin-bottom: 5px;
   }
-  .key-row label a {
+  .key-label a {
     color: var(--accent);
     font-weight: 400;
     display: inline-flex;
@@ -942,47 +1441,16 @@
     flex: 1;
     font-family: var(--font-mono);
   }
-  .key-foot {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    margin-top: 4px;
-    font-size: var(--fs-xs);
-  }
-  .unlocks {
-    color: var(--text-3);
-  }
   .verdict {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 4px;
-  }
-  .verdict.ok {
-    color: var(--ok);
+    margin-top: 5px;
+    font-size: var(--fs-xs);
+    line-height: 1.4;
   }
   .verdict.bad {
     color: var(--danger);
-  }
-  .actions {
-    margin-top: 4px;
-  }
-  .usage {
-    margin: 0 0 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    font-size: var(--fs-sm);
-  }
-  .usage-line {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 10px;
-    margin-bottom: 5px;
-  }
-  .usage-name {
-    font-weight: 600;
-    color: var(--text-2);
   }
   .meter-track {
     height: 5px;
@@ -1001,19 +1469,10 @@
     background: var(--danger);
   }
   .overage {
-    margin-top: 5px;
+    margin-top: 9px;
     color: var(--text-3);
     font-size: var(--fs-xs);
-    line-height: 1.4;
-  }
-  .usage-name a {
-    color: var(--accent);
-    font-weight: 400;
-    font-size: var(--fs-xs);
-    margin-left: 8px;
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
+    line-height: 1.45;
   }
   .toggle {
     display: inline-flex;
@@ -1034,12 +1493,13 @@
   }
   .toggle.eco {
     display: flex;
-    margin: 2px 0 10px;
+    margin: 2px 0;
   }
-  .eco-zoom {
-    width: 58px;
+  /* every small numeric box in this tab: eco thresholds, free allowances */
+  .num {
+    width: 92px;
     padding: 2px 6px;
-    font-family: var(--font-mono);
+    flex-shrink: 0;
   }
   .blocked {
     margin-top: 6px;
@@ -1050,16 +1510,11 @@
     gap: 5px;
     line-height: 1.4;
   }
-  .none {
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-    margin-bottom: 10px;
-  }
   .rules {
-    margin: 0;
+    margin: 12px 0 2px;
     padding-left: 18px;
     color: var(--text-2);
-    font-size: var(--fs-sm);
+    font-size: var(--fs-xs);
     display: flex;
     flex-direction: column;
     gap: 6px;

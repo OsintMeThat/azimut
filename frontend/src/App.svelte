@@ -1,5 +1,6 @@
 <script>
-  import { uiState, initSession } from './lib/state.svelte.js';
+  import { uiState, initSession, caseState, reloadCase, toast } from './lib/state.svelte.js';
+  import { startEvents, onEvent } from './lib/events.js';
   import { WORKSPACES, workspaceOf, toolFromHash } from './lib/workspaces.js';
   import Icon from './components/Icon.svelte';
   import Logo from './components/Logo.svelte';
@@ -60,6 +61,15 @@
 
   // Load the case list and reopen the last-used case (survives reloads).
   initSession().catch(() => {});
+
+  // Live nudges from our own backend (SSE, same-origin — still local-first):
+  // the capture extension files screenshots while this tab just sits here, and
+  // they must show up without a reload. Refresh only what the nudge names.
+  startEvents();
+  onEvent('capture', (ev) => {
+    toast(`Capture filed from ${ev.site}: ${ev.title}`, 'ok', 5000);
+    if (caseState.current?.id === ev.case_id) reloadCase();
+  });
 </script>
 
 <div class="shell">

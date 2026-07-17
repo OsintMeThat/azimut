@@ -36,8 +36,10 @@ def coords_label(lat: float, lon: float, fmt: str | None = None) -> str:
 
 
 def is_capture(item: dict[str, Any]) -> bool:
-    """True if a media listing item is a satellite capture."""
-    return (item.get("source") or {}).get("type") == "satellite"
+    """True if a media listing item is a capture: a satellite crop, or an
+    external-map screenshot filed by the capture extension (api/ingest.py) —
+    the latter rides the same panel so its coordinates stay one click away."""
+    return (item.get("source") or {}).get("type") in ("satellite", "screenshot")
 
 
 def list_captures(case: Case) -> list[dict[str, Any]]:

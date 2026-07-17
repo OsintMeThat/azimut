@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
@@ -110,6 +110,9 @@ class StitchIn(BaseModel):
     width: int = Field(ge=16, le=8192)
     height: int = Field(ge=16, le=8192)
     nodes: list[NodeSrc] = Field(min_length=2)
+    # 'planar' keeps pieces hand-warpable; the panorama modes trade that for a
+    # bounded, undistorted strip (see engine/stitch).
+    mode: Literal["planar", "cylindrical", "spherical"] = "planar"
 
 
 class EnhanceVideoIn(BaseModel):
@@ -289,10 +292,11 @@ def compose(case_id: str, body: ComposeIn) -> dict[str, Any]:
 
 @router.post("/cases/{case_id}/inspect/auto-stitch")
 def auto_stitch(case_id: str, body: StitchIn) -> dict[str, Any]:
-    """Solve collage quads for overlapping pieces — layout only, nothing is filed.
+    """Solve collage placement for overlapping pieces — nothing is filed.
 
     The pieces stay live on the canvas afterwards (spec § v2 Panorama: machine
-    stitch first, hand-tune after), so this returns geometry, not pixels.
+    stitch first, hand-tune after), so this returns a recipe, not pixels: a quad
+    each, plus — in the panorama modes — the remap op that shapes the piece.
     """
     case = get_case(case_id)
     srcs = [
@@ -301,7 +305,7 @@ def auto_stitch(case_id: str, body: StitchIn) -> dict[str, Any]:
     ]
     try:
         return inspect_engine.solve_collage_layout(
-            case, srcs=srcs, width=body.width, height=body.height
+            case, srcs=srcs, width=body.width, height=body.height, mode=body.mode
         )
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

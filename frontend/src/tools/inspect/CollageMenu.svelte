@@ -1,7 +1,7 @@
 <script>
   import {
     previewStyle, scaleQuad, rotateQuad, quadCentroid, cropImgStyle, styleText, uid,
-    rotateQuads, scaleQuads,
+    rotateQuads, scaleQuads, pinholeOps,
   } from '../../lib/inspect.js';
   import { api } from '../../lib/api.js';
   import { caseState, toast } from '../../lib/state.svelte.js';
@@ -11,7 +11,7 @@
   // to the active one, and act on the selected piece. A session holds several
   // collages (session.collages / session.activeCollageId); each is saved as its
   // own PNG. Each added piece is a frozen snapshot of the frame (addToCollage).
-  let { session, filters, selectedIds = $bindable([]), addToCollage, requestCrop } = $props();
+  let { session, filters, selectedIds = $bindable([]), addToCollage, requestCrop, renderPiece } = $props();
 
   const active = $derived(
     session.collages.find((c) => c.id === session.activeCollageId) ?? session.collages[0]
@@ -104,25 +104,56 @@
   }
 
   // ---- auto-stitch ----------------------------------------------------------
-  // The backend solves each piece's quad from the imagery itself and hands the
-  // geometry back — the pieces stay ordinary, hand-tunable pieces (spec § v2
-  // Panorama: machine stitch first, hand-tune after). Pieces it can't place are
-  // left exactly where they were, for the analyst to place by hand.
+  // The backend solves each piece's placement from the imagery itself and hands
+  // back a recipe, never pixels (spec § v2 Panorama: machine stitch first,
+  // hand-tune after). Pieces it can't place are left exactly where they were, for
+  // the analyst to place by hand.
+  //
+  // The mode picks the projection, and the two are genuinely different bargains:
+  // `planar` returns a quad per piece and they stay corner-warpable, but it models
+  // the scene as one flat surface, so a wide pan blows the end pieces up. The
+  // panorama modes solve the camera's rotation instead and bake the resulting warp
+  // into each piece's recipe — bounded and undistorted however far you panned, at
+  // the cost of the corner handles.
+  const MODES = [
+    { id: 'planar', label: 'Planar', hint: 'One flat surface — a facade, the ground, a map. Pieces stay warpable.' },
+    { id: 'cylindrical', label: 'Cylindrical', hint: 'A camera panning sideways. Bounded and even end to end.' },
+    { id: 'spherical', label: 'Spherical', hint: 'A camera that pans *and* tilts. Same, over both axes.' },
+  ];
+  let mode = $state('cylindrical');
   let stitching = $state(false);
-  let undoQuads = $state(null);
+  let undoSnap = $state(null);
+
+  const snapshot = (n) => ({
+    id: n.id, quad: n.quad.map(([x, y]) => [x, y]), url: n.url, baseUrl: n.baseUrl,
+    w: n.w, h: n.h, frameOps: n.frameOps, crop: n.crop, save: n.save,
+  });
 
   async function autoStitch() {
     if (!active || active.nodes.length < 2) return;
     stitching = true;
     try {
-      const before = active.nodes.map((n) => ({ id: n.id, quad: n.quad.map(([x, y]) => [x, y]) }));
+      const nodes = active.nodes;
+      const before = nodes.map(snapshot);
       const res = await api.post(`/api/cases/${caseState.current.id}/inspect/auto-stitch`, {
         width: active.width,
         height: active.height,
-        nodes: active.nodes.map((n) => n.save), // frozen snapshot recipes (path/time/ops)
+        mode,
+        // frozen snapshot recipes (path/time/ops), stripped back to pinhole pixels
+        nodes: nodes.map((n) => ({ ...n.save, ops: pinholeOps(n.save) })),
       });
-      for (const { index, quad } of res.nodes) active.nodes[index].quad = quad;
-      undoQuads = before;
+      for (const { index, quad, op } of res.nodes) {
+        const node = nodes[index];
+        const base = pinholeOps(node.save);
+        const ops = op ? [...base, op] : base;
+        // Planar leaves the pixels alone; only re-derive when the recipe moved
+        // (a panorama warp arriving, or dropping off on the way back to planar).
+        if (JSON.stringify(ops) !== JSON.stringify(node.save.ops ?? [])) {
+          await renderPiece(node, ops);
+        }
+        node.quad = quad;
+      }
+      undoSnap = before;
       selectedIds = [];
       const placed = res.nodes.length;
       if (res.dropped.length) {
@@ -138,11 +169,11 @@
   }
 
   function undoStitch() {
-    for (const { id, quad } of undoQuads) {
-      const node = active.nodes.find((n) => n.id === id);
-      if (node) node.quad = quad;
+    for (const snap of undoSnap) {
+      const node = active.nodes.find((n) => n.id === snap.id);
+      if (node) Object.assign(node, snap);
     }
-    undoQuads = null;
+    undoSnap = null;
   }
 </script>
 
@@ -245,8 +276,16 @@
     <div class="section-head"><span>Auto panorama</span></div>
     <p class="hint">
       Solves the layout from the overlapping imagery itself, then drops the pieces back on the
-      canvas — still draggable and warpable, so you can hand-tune the machine's guess.
+      canvas — still draggable, so you can hand-tune the machine's guess.
     </p>
+    <div class="modes">
+      {#each MODES as m (m.id)}
+        <button class="mode" class:on={mode === m.id} onclick={() => (mode = m.id)} title={m.hint}>
+          {m.label}
+        </button>
+      {/each}
+    </div>
+    <p class="hint sub-hint">{MODES.find((m) => m.id === mode).hint}</p>
     <button
       class="btn btn-sm w-full"
       disabled={stitching || !active || active.nodes.length < 2}
@@ -258,7 +297,7 @@
       <Icon name={stitching ? 'clock' : 'hash'} size={14} />
       {stitching ? 'Stitching…' : 'Auto-stitch pieces'}
     </button>
-    {#if undoQuads}
+    {#if undoSnap}
       <button class="btn btn-ghost btn-xs w-full" onclick={undoStitch}>
         <Icon name="reset" size={12} /> Undo auto-stitch
       </button>
@@ -378,6 +417,33 @@
     border-radius: 4px;
     display: flex;
     padding: 1px;
+  }
+  .modes {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    overflow: hidden;
+    background: var(--bg-1);
+  }
+  .mode {
+    flex: 1;
+    padding: 5px 4px;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    background: transparent;
+    border: none;
+    border-left: 1px solid var(--border);
+  }
+  .mode:first-child {
+    border-left: none;
+  }
+  .mode.on {
+    background: var(--bg-3);
+    color: var(--accent);
+  }
+  .sub-hint {
+    margin-top: -2px;
   }
   .scale-row {
     display: flex;

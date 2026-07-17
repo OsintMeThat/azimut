@@ -11,6 +11,7 @@
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "happy-dom": "^20.10.6",
     "svelte": "^5.0.0",
     "vite": "^8.1.4",
     "vitest": "^4.1.10"
@@ -19,6 +20,7 @@
     "@fontsource/oxanium": "^5.2.8",
     "konva": "^9.3.0",
     "leaflet": "^1.9.4",
-    "leaflet-rotate": "^0.2.8"
+    "leaflet-rotate": "^0.2.8",
+    "leaflet.gridlayer.googlemutant": "^0.16.0"
   }
 }

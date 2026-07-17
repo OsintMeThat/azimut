@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="ui.css" />
+</head>
+<body class="popup">
+  <header>
+    <img src="icons/icon32.png" alt="" width="18" height="18" />
+    <strong>Azimut Capture</strong>
+    <span id="site" class="badge"></span>
+  </header>
+
+  <!-- one of these three states shows at a time -->
+  <section id="state-nomap" hidden>
+    <p>This doesn't look like a map site.</p>
+    <p class="muted">
+      Azimut Capture only works on the map sites Azimut recognizes (Google
+      Maps/Earth, Bing, Yandex, OSM, Apple Maps, Zoom Earth, Copernicus, …) —
+      one screenshot per click, coordinates read from the page URL by the app.
+    </p>
+  </section>
+
+  <section id="state-azimut" hidden>
+    <p>This is Azimut itself — you're set. Use the app's own <strong>Capture</strong> button.</p>
+    <p class="muted">
+      Opening this popup granted the capture permission for this tab (browsers
+      require one click on the extension before it may screenshot a tab). It
+      lasts until the tab is closed — you won't need to come back here.
+    </p>
+  </section>
+
+  <section id="state-map" hidden>
+    <div class="row">
+      <label>Case</label>
+      <select id="case"></select>
+    </div>
+    <div class="row coords">
+      <label>Lat / Lon</label>
+      <input id="lat" type="text" inputmode="decimal" placeholder="—" />
+      <input id="lon" type="text" inputmode="decimal" placeholder="—" />
+    </div>
+    <div class="row coords">
+      <label>Zoom / Bearing</label>
+      <input id="zoom" type="text" inputmode="decimal" placeholder="—" />
+      <input id="bearing" type="text" inputmode="decimal" placeholder="—" />
+    </div>
+    <div class="row">
+      <label>Title</label>
+      <input id="title" type="text" placeholder="optional" />
+    </div>
+    <p id="coords-note" class="muted" hidden>
+      No coordinates in this URL — the capture files without them (fixable later
+      in Azimut's sidebar).
+    </p>
+    <div class="actions">
+      <button id="capture-area" class="primary">Select area to capture…</button>
+    </div>
+  </section>
+
+  <p id="status" class="status" hidden></p>
+  <footer>
+    <a id="open-options" href="#">Extension options</a>
+    <span class="muted">· one screenshot per click, URL only</span>
+  </footer>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

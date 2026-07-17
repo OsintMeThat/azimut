@@ -264,8 +264,10 @@
     if (filters.length) return;
     const ops = await api.get('/api/inspect/ops');
     // `crop` is driven by the interactive box; `rotate` is a view-only tilt in
-    // the Frame tab (never baked) — neither belongs in the slider pipeline.
-    filters = ops.filters.filter((f) => f.id !== 'crop' && f.id !== 'rotate');
+    // the Frame tab (never baked); `remap` is solved by auto-stitch — none of the
+    // three belongs in the slider pipeline.
+    const solved = ['crop', 'rotate', 'remap'];
+    filters = ops.filters.filter((f) => !solved.includes(f.id));
     analyses = ops.analyses;
   }
 
@@ -491,6 +493,23 @@
     } catch (e) {
       toast(e.message, 'danger');
     }
+  }
+
+  // Re-derive a collage piece's pixels for a new op pipeline — auto-stitch's
+  // panorama modes bake their warp into the recipe, so the piece the analyst sees
+  // is the piece the backend will export. A crop rect is relative to the piece's
+  // own snapshot, and that snapshot has just changed underneath it, so the
+  // re-derived piece starts crop-free: whatever it was showing is now baked in.
+  async function renderPiece(node, ops) {
+    const url = await renderUrl(node.save.path, node.save.time, ops);
+    const dim = await imageSize(url);
+    node.url = url;
+    node.baseUrl = url;
+    node.w = dim.w;
+    node.h = dim.h;
+    node.frameOps = ops;
+    node.crop = null;
+    node.save = { ...node.save, ops };
   }
 
   // Open the piece crop editor, or clear the crop directly (clear=true).
@@ -1034,7 +1053,7 @@
         {:else if activeTab === 'frame'}
           <FrameMenu {session} {filters} {analyses} {activeFrame} {shared} {removeFrame} bind:cropAspect={frameAspect} bind:cropEditing {beginCrop} {commitCrop} setActive={(id) => (session.activeFrameId = id)} />
         {:else if activeTab === 'collage'}
-          <CollageMenu {session} {filters} bind:selectedIds={collageSelectedIds} {addToCollage} {requestCrop} />
+          <CollageMenu {session} {filters} bind:selectedIds={collageSelectedIds} {addToCollage} {requestCrop} {renderPiece} />
         {:else if activeTab === 'save'}
           <SaveMenu {savables} {saveUi} {saving} save={saveSelected} />
         {/if}

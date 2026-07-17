@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -20,7 +21,7 @@ import httpx
 from PIL import Image, ImageDraw, ImageFont
 
 from .. import config
-from . import google_tiles
+from . import google_tiles, sentinel
 
 TILE_SIZE = 256
 SIZE_MAX = 4096  # hard cap on a capture's width/height, in px
@@ -39,6 +40,16 @@ class Provider:
     url: str  # template with {x} {y} {z}, optionally {key}
     attribution: str
     max_zoom: int = 19
+    # Deepest zoom the provider has *pixels* for, when that is shallower than
+    # the deepest zoom worth showing. None = they're the same (the usual case).
+    # Sentinel-2 resolves 10 m/px and stops at z14, but a z14 ceiling makes the
+    # basemap unusable for its actual job — you cannot look at a ship at 10 m/px
+    # from three levels out. So the view runs to z18 while requests stop at 14
+    # and the last native tile is upscaled: identical pixels, magnified, for
+    # zero extra requests. Asking Sentinel Hub for z18 instead would buy their
+    # upsampling of the same pixels at 256× the quota (16× the tiles, each
+    # billed) — the same image, paid for.
+    max_native_zoom: int | None = None
     needs_key: bool = False
     subdomains: tuple[str, ...] = field(default_factory=tuple)  # for {s} templates
     # True for satellite/aerial imagery, False for street/base maps. Drives the UI:
@@ -64,6 +75,24 @@ class Provider:
     # requests (still ¼ of plain 256px tiles) for crisp imagery. Captures are
     # unaffected: they stay 1:1 provider pixels for evidential integrity.
     oversample: int = 1
+    # Levels to re-add to the URL z after tile_size shifted it down. WMTS
+    # services number their 512px levels by *resolution* where Mapbox numbers
+    # them by *grid width*: Sentinel Hub's TILEMATRIX=14 and Mapbox's z13 are
+    # both 9.55 m/px on an 8192-wide grid. The tile indices stay at tile_z
+    # either way — only the level's name differs.
+    zoom_offset: int = 0
+    # Non-XYZ basemap rendered by a frontend widget (e.g. "google-maps-js"):
+    # no tiles, no proxy, no fetch_crop — `url` is the widget's script loader
+    # and the frontend does the rest. Backend still owns key storage + meter.
+    widget: str | None = None
+    # Eco-mode threshold for *this* provider: the visual zoom at or below which
+    # free imagery replaces it. None = the user's global eco_max_zoom, which is
+    # tuned for providers that run to z22. A shallow provider needs its own: at
+    # Sentinel-2's z14 ceiling the global z15 rule would fire everywhere and the
+    # basemap could never be seen at all. Its threshold is instead set where its
+    # imagery stops earning the quota — the swap costs a known date for an
+    # unknown one, which is only worth it where 10 m/px adds nothing anyway.
+    eco_max_zoom: int | None = None
 
 
 # Built-in keyed providers (docs/IMAGERY_PROVIDERS.md): only surfaced from
@@ -75,6 +104,18 @@ MAPBOX_SATELLITE_URL = (
     "https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/512/{z}/{x}/{y}?access_token={key}"
 )
 GOOGLE_SATELLITE_URL = "https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?session={session}&key={key}"
+# Maps JavaScript API loader (docs/IMAGERY_PROVIDERS.md § Google in the EEA):
+# the official Google satellite route left to EEA billing accounts since
+# 2025-07-08 (Map Tiles + Static satellite are policy-blocked there). A JS-API
+# key is client-side by design (referrer-restricted, not secret), so shipping
+# it to the browser in this loader URL is the intended use, unlike tile keys.
+GOOGLE_JS_LOADER_URL = "https://maps.googleapis.com/maps/api/js?key={key}&v=weekly"
+# Sentinel Hub OGC WMTS (docs/IMAGERY_PROVIDERS.md): {key} is the user's
+# configuration-instance UUID, which is the whole credential — no token to mint.
+# The layer and the mosaicking window are choices, not constants, so the
+# template is built per variant in engine/sentinel.py; this is the plain one
+# (TRUE_COLOR, the layer's own default window = most recent).
+SENTINELHUB_WMTS_URL = sentinel.wmts_url()
 
 BUILTIN_PROVIDERS: tuple[Provider, ...] = (
     Provider(
@@ -118,7 +159,17 @@ def all_providers() -> list[Provider]:
     # a keyed basemap can be switched off in Settings without deleting the key
     enabled = settings.get("providers_enabled", {})
 
-    mapbox_key = keys.get("mapbox") if enabled.get("mapbox", True) else None
+    def key_for(key_id: str) -> str | None:
+        """The credential, unless switched off or last seen failing auth — a
+        basemap whose key is known-dead is withheld from the selector until
+        the key changes or a test passes (Settings shows why)."""
+        if not enabled.get(key_id, True):
+            return None
+        if config.provider_key_bad(key_id, settings):
+            return None
+        return keys.get(key_id)
+
+    mapbox_key = key_for("mapbox")
     if mapbox_key:
         providers.append(
             Provider(
@@ -135,7 +186,7 @@ def all_providers() -> list[Provider]:
             )
         )
 
-    google_key = keys.get("google") if enabled.get("google", True) else None
+    google_key = key_for("google")
     if google_key:
         providers.append(
             Provider(
@@ -154,6 +205,63 @@ def all_providers() -> list[Provider]:
                 meter="google",
                 tile_size=1024,  # hi-DPI 4x session (engine/google_tiles.py)
                 oversample=2,  # mid-zoom mosaics are soft — show z+1 detail
+            )
+        )
+
+    # Google Satellite via the Maps JavaScript widget — the only official
+    # Google satellite route for EEA billing accounts (2025-07-08 policy).
+    # No tiles: the frontend embeds a real google.maps.Map under Leaflet, so
+    # capturable=False (fetch_crop has nothing to stitch — captures are the
+    # user's own screenshots, filed with attribution burned in), cacheable is
+    # moot, and the meter counts *map loads*, not tiles. eco_max_zoom=0 turns
+    # eco off for it: swapping the widget out and back re-instantiates the
+    # Google map, and every instantiation is a billed load — eco would cost
+    # money here, not save it.
+    google_js_key = key_for("google_js")
+    if google_js_key:
+        providers.append(
+            Provider(
+                id="google-js",
+                label="Google Satellite (Maps JS)",
+                url=GOOGLE_JS_LOADER_URL.replace("{key}", google_js_key),
+                attribution="Map data © Google",
+                max_zoom=21,
+                imagery=True,
+                capturable=False,
+                cacheable=False,
+                widget="google-maps-js",
+                meter="google_js",
+                eco_max_zoom=0,
+            )
+        )
+
+    # Sentinel-2: open data (attribution only — no capture or cache limit), but
+    # a small quota. 512px tiles are what make the tile meter honest: one
+    # 512×512 3-band 8-bit tile is exactly 1 processing unit, so counting tiles
+    # counts PU. Requests stop at z14 — 10 m/px is Sentinel-2's native ground
+    # resolution and anything deeper is Sentinel Hub upsampling we would pay
+    # full price for — while the *view* runs to z18 on upscaled native tiles.
+    sentinelhub_key = key_for("sentinelhub")
+    if sentinelhub_key:
+        providers.append(
+            Provider(
+                id="sentinel2",
+                label="Sentinel-2 (Copernicus)",
+                url=SENTINELHUB_WMTS_URL.replace("{key}", sentinelhub_key),
+                attribution="© Copernicus Sentinel data / Sentinel Hub",
+                max_zoom=18,
+                max_native_zoom=14,
+                imagery=True,
+                capturable=True,
+                cacheable=True,
+                meter="sentinelhub",
+                tile_size=512,
+                zoom_offset=1,  # WMTS names this level 14 where z_shift says 13
+                # Its own eco threshold, three levels under its z14 ceiling: at
+                # z11 and out a Sentinel-2 pixel is ~40 m of ground and Esri
+                # shows the same scene for free, so the quota buys nothing.
+                # z12-14 is where the dated mosaic is the reason you're here.
+                eco_max_zoom=11,
             )
         )
 
@@ -185,10 +293,46 @@ def all_providers() -> list[Provider]:
 
 
 def get_provider(provider_id: str) -> Provider:
+    """A provider by id, including a Sentinel-2 *variant* id.
+
+    ``sentinel2~SWIR~2026-05-01~2026-05-31`` resolves to the sentinel2 basemap
+    rendering that layer over that mosaicking window (engine/sentinel.py). The
+    variant is carried on the id rather than passed alongside it so that every
+    consumer inherits it for free and none can forget it: the tile proxy and
+    fetch_crop only ever hold a Provider, the disk cache keys on ``provider.id``
+    (so a window is in the cache key — tiles from two dates can never collide),
+    and a capture's provenance records the id it was actually rendered from.
+    """
+    base_id, sep, spec = provider_id.partition(sentinel.VARIANT_SEP)
     for provider in all_providers():
-        if provider.id == provider_id:
-            return provider
+        if provider.id == base_id:
+            if not sep:
+                return provider
+            if provider.id != "sentinel2":
+                raise KeyError(f"provider '{base_id}' has no variants")
+            try:
+                layer, start, end = sentinel.parse_variant(spec)
+            except ValueError as exc:
+                raise KeyError(str(exc)) from exc
+            return replace(
+                provider,
+                id=provider_id,
+                label=f"{provider.label} · {sentinel.variant_label(layer, start, end)}",
+                url=sentinel.wmts_url(layer, start, end).replace(
+                    "{key}", _sentinel_key_from(provider.url)
+                ),
+            )
     raise KeyError(f"unknown tile provider '{provider_id}'")
+
+
+def _sentinel_key_from(url: str) -> str:
+    """The instance UUID out of a built Sentinel Hub URL — rebuilding the
+    template for a variant needs the credential back, and the resolved provider
+    is the only place it exists at this point."""
+    match = re.search(r"/ogc/wmts/([^/?]+)", url)
+    if not match:
+        raise KeyError("Sentinel Hub provider URL carries no instance id")
+    return match.group(1)
 
 
 # -- Web Mercator ------------------------------------------------------------
@@ -257,6 +401,18 @@ def resolve_url(provider: Provider) -> str:
         raise TileFetchError(f"Google session token: {exc}") from exc
 
 
+def tile_url(url_template: str, z: int, x: int, y: int, zoom_offset: int = 0) -> str:
+    """Fill an XYZ template for one tile.
+
+    ``z`` is always a tile-grid level (indices are valid at ``1 << z``);
+    ``zoom_offset`` only renames it for providers whose levels are numbered by
+    resolution rather than by grid width (Provider.zoom_offset). Every caller
+    goes through here so that correction can never be applied in one code path
+    and forgotten in another.
+    """
+    return url_template.format(x=x, y=y, z=z + zoom_offset)
+
+
 def _default_fetch(client: httpx.Client, url: str) -> Image.Image | None:
     """Fetch one tile; None for 'no imagery here' (404 or a known placeholder
     tile), raise on other errors."""
@@ -314,8 +470,17 @@ def fetch_crop(
     # lower URL z: one 512px tile at z-1 covers four 256px tiles at z.
     z_shift = int(math.log2(provider.tile_size // TILE_SIZE))
     zoom = max(min(zoom, provider.max_zoom), z_shift)
-    tile_z = zoom - z_shift
-    ts = provider.tile_size
+    # Past a provider's native ceiling nothing new exists to fetch (Sentinel-2:
+    # native z14, view z18), so the deepest real tiles are fetched and magnified
+    # to the requested zoom. `ts` becomes one native tile's *footprint at the
+    # view zoom*, which is all the grid math below cares about; the fetched
+    # image is still tile_size px and gets resized up to it.
+    native_max = provider.max_native_zoom
+    native_max = provider.max_zoom if native_max is None else native_max
+    upscale = max(0, zoom - max(native_max, z_shift))
+    tile_z = zoom - z_shift - upscale
+    native_ts = provider.tile_size
+    ts = native_ts << upscale
     width, height = min(width, SIZE_MAX), min(height, SIZE_MAX)
     bearing = bearing % 360.0
 
@@ -355,7 +520,8 @@ def fetch_crop(
         def grab(tx: int, ty: int) -> tuple[int, int, Image.Image | None]:
             if not (0 <= tx <= max_index and 0 <= ty <= max_index):
                 return tx, ty, None
-            return tx, ty, fetch(client, url_template.format(x=tx, y=ty, z=tile_z))
+            url = tile_url(url_template, tile_z, tx, ty, provider.zoom_offset)
+            return tx, ty, fetch(client, url)
 
         with httpx.Client(
             headers={"User-Agent": USER_AGENT}, timeout=20, follow_redirects=True
@@ -384,6 +550,8 @@ def fetch_crop(
                 gaps.append((tx, ty))
             continue
         served += 1
+        if upscale:
+            tile = tile.resize((ts, ts), Image.Resampling.LANCZOS)
         canvas.paste(tile, (px, py))
 
     # overzoom fallback: fill coverage gaps from parent-level imagery, upscaled —
@@ -391,7 +559,10 @@ def fetch_crop(
     upscaled = 0
     if gaps:
         try:
-            filled, parent_served = _overzoom_fill(resolve_url(provider), gaps, tile_z, ts, fetch)
+            filled, parent_served = _overzoom_fill(
+                resolve_url(provider), gaps, tile_z, native_ts, fetch,
+                provider.zoom_offset, out_size=ts,
+            )
         except TileFetchError:
             filled, parent_served = {}, 0
         served += parent_served
@@ -434,7 +605,7 @@ def fetch_crop(
         )
 
     if provider.attribution_burn:
-        canvas = _burn_attribution(canvas, attribution)
+        canvas = burn_attribution(canvas, attribution)
 
     provenance = {
         "provider": provider.id,
@@ -447,10 +618,19 @@ def fetch_crop(
         "center_lat": lat,
         "center_lon": lon,
         "zoom": zoom,
+        # The zoom the pixels are actually from. Below `zoom` when the view ran
+        # past the provider's native ceiling (Sentinel-2 at z18 is magnified z14
+        # imagery): the image is real, its resolution is not what the zoom
+        # implies, and a reader of this capture has to be able to tell.
+        "native_zoom": zoom - upscale,
+        "upscaled": bool(upscale),
         "width": width,
         "height": height,
         "bearing": round(bearing, 1),
         "meters_per_pixel": round(meters_per_pixel(lat, zoom), 3),
+        # ground sample distance of the source imagery — unlike meters_per_pixel
+        # this doesn't improve by magnifying, so it's the honest resolution
+        "native_meters_per_pixel": round(meters_per_pixel(lat, zoom - upscale), 3),
         "tiles": n_tiles,
         "tiles_missing": missing,
         "tiles_upscaled": upscaled,
@@ -470,6 +650,8 @@ def _overzoom_fill(
     tile_z: int,
     ts: int,
     fetch: Callable[[httpx.Client, str], Image.Image | None],
+    zoom_offset: int = 0,
+    out_size: int | None = None,
 ) -> tuple[dict[tuple[int, int], Image.Image], int]:
     """Best-effort fill for missing tiles from parent-level imagery.
 
@@ -478,7 +660,12 @@ def _overzoom_fill(
     child crops + upscales its own quadrant. Returns (filled tiles, number of
     parent tiles the provider served — what a billed meter must count).
     Individual fetch errors just leave tiles unfilled; never raises.
+
+    ``ts`` is the provider's real tile size (the parent's pixels — what the crop
+    math measures); ``out_size`` is the footprint the caller pastes at, which is
+    larger when the caller is already magnifying past a native ceiling.
     """
+    out_size = ts if out_size is None else out_size
     filled: dict[tuple[int, int], Image.Image] = {}
     unresolved = list(gaps)
     served = 0
@@ -492,7 +679,7 @@ def _overzoom_fill(
 
             def grab(pxy: tuple[int, int]) -> tuple[tuple[int, int], Image.Image | None]:
                 try:
-                    url = url_template.format(x=pxy[0], y=pxy[1], z=tile_z - up)
+                    url = tile_url(url_template, tile_z - up, pxy[0], pxy[1], zoom_offset)
                     return pxy, fetch(client, url)
                 except Exception:
                     return pxy, None
@@ -511,7 +698,7 @@ def _overzoom_fill(
                     continue
                 qx, qy = (tx & mask) * sub, (ty & mask) * sub
                 filled[(tx, ty)] = parent.crop((qx, qy, qx + sub, qy + sub)).resize(
-                    (ts, ts), Image.Resampling.LANCZOS
+                    (out_size, out_size), Image.Resampling.LANCZOS
                 )
             unresolved = still
     return filled, served
@@ -597,12 +784,13 @@ def esri_capture_date(
 ATTRIBUTION_BAND = 20  # px footer appended below the imagery
 
 
-def _burn_attribution(img: Image.Image, text: str) -> Image.Image:
+def burn_attribution(img: Image.Image, text: str) -> Image.Image:
     """Append a footer band carrying the attribution line.
 
     For providers whose terms make attribution a condition of the allowed use
     (Google), the capture must never exist without it — burned in, not optional.
-    The band is added *below* the imagery so nothing is covered.
+    The band is added *below* the imagery so nothing is covered. Public: the
+    screenshot-capture endpoint stamps user screenshots through the same band.
     """
     out = Image.new("RGB", (img.width, img.height + ATTRIBUTION_BAND), (16, 18, 24))
     out.paste(img, (0, 0))

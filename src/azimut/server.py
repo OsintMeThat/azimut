@@ -23,7 +23,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Azimut", version=__version__, docs_url="/api/docs")
 
-    from .api import cases, drafts, files, inspect, media, proofs, satellite, settings
+    from .api import cases, drafts, events, files, ingest, inspect, media, proofs, satellite, settings
 
     app.include_router(cases.router)
     app.include_router(media.router)
@@ -33,6 +33,10 @@ def create_app() -> FastAPI:
     app.include_router(drafts.router)
     app.include_router(files.router)
     app.include_router(settings.router)
+    app.include_router(ingest.router)
+    app.include_router(events.router)
+    # extension-origin CORS, /api/ingest/* only (see ingest.install_cors)
+    ingest.install_cors(app)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

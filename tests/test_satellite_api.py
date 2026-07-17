@@ -404,3 +404,124 @@ def test_place_label_follows_the_coordinate_format(client):
         json={"lat": 48.8583701, "lon": 2.2944813, "zoom": 16, "title": "Rooftop"},
     ).json()
     assert titled["label"] == "Rooftop"
+
+
+def _png_bytes(w=320, h=200, color=(30, 90, 30)):
+    import io
+
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), color).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_widget_usage_endpoint_counts_map_loads(client):
+    client.put("/api/settings/keys", json={"google_js": "AIza.js"})
+    assert client.post("/api/satellite/usage/google_js").json()["count"] == 1
+    assert client.post("/api/satellite/usage/google_js").json()["count"] == 2
+    # tile meters are counted by the proxy, never by the browser
+    assert client.post("/api/satellite/usage/google").status_code == 404
+    assert client.post("/api/satellite/usage/nope").status_code == 404
+
+
+def test_screenshot_capture_files_with_burned_attribution(client):
+    client.put("/api/settings/keys", json={"google_js": "AIza.js"})
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+
+    r = client.post(
+        f"/api/cases/{cid}/satellite/screenshot",
+        files={"image": ("shot.png", _png_bytes(), "image/png")},
+        data={"lat": "48.8584", "lon": "2.2945", "zoom": "18",
+              "provider": "google-js", "bearing": "45"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["method"] == "screenshot"
+    assert "Google" in body["attribution"]
+    assert body["attribution_burned"] is True
+    # the footer band grew the image — attribution is pixels, not metadata
+    assert body["height"] == 200 + tiles.ATTRIBUTION_BAND
+
+    listed = client.get(f"/api/cases/{cid}/satellite").json()
+    assert len(listed) == 1
+    assert listed[0]["method"] == "screenshot"
+    assert listed[0]["bearing"] == 45.0
+    # nothing said it was framed, so provenance must not imply the coordinates
+    # are a crop centre
+    assert body["framed"] is False
+
+
+def test_screenshot_provenance_distinguishes_a_framed_crop_from_a_pasted_image(client):
+    """A screen crop taken through the capture frame is registered — its
+    lat/lon *are* the crop centre — while a pasted screenshot's coordinates are
+    only the map view at filing time. Provenance has to tell them apart, or a
+    reader can't know what the coordinates mean."""
+    client.put("/api/settings/keys", json={"google_js": "AIza.js"})
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+
+    framed = client.post(
+        f"/api/cases/{cid}/satellite/screenshot",
+        files={"image": ("shot.png", _png_bytes(), "image/png")},
+        data={"lat": "48.8584", "lon": "2.2945", "zoom": "18",
+              "provider": "google-js", "framed": "true"},
+    ).json()
+    assert framed["framed"] is True
+
+    pasted = client.post(
+        f"/api/cases/{cid}/satellite/screenshot",
+        files={"image": ("shot.png", _png_bytes(), "image/png")},
+        data={"lat": "48.8584", "lon": "2.2945", "zoom": "18",
+              "provider": "google-js", "framed": "false"},
+    ).json()
+    assert pasted["framed"] is False
+    # both are still screenshots: framing never upgrades the method
+    assert framed["method"] == pasted["method"] == "screenshot"
+
+    listed = client.get(f"/api/cases/{cid}/satellite").json()
+    assert sorted(c["framed"] for c in listed) == [False, True]
+
+
+def test_screenshot_capture_refused_for_tile_providers(client):
+    # tile providers have the real, pixel-registered capture path — routing a
+    # screenshot around it would only launder away provenance
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    r = client.post(
+        f"/api/cases/{cid}/satellite/screenshot",
+        files={"image": ("shot.png", _png_bytes(), "image/png")},
+        data={"lat": "0", "lon": "0", "zoom": "10", "provider": "esri-world-imagery"},
+    )
+    assert r.status_code == 422
+
+
+def test_tile_proxy_benches_google_on_a_persistent_403(client, monkeypatch):
+    """A 403 that survives the session re-mint names the key (EEA policy,
+    revoked key) — the basemap must stop being offered, with Google's own
+    sentence stored as the reason."""
+    import httpx
+
+    from azimut.engine import google_tiles
+
+    client.put("/api/settings/keys", json={"google": "AIza.x"})
+    monkeypatch.setattr(
+        google_tiles, "resolve_template", lambda url, **kw: url.replace("{session}", "tok")
+    )
+    monkeypatch.setattr(google_tiles, "invalidate", lambda key: None)
+    eea = (
+        b'{"error": {"code": 403, "status": "PERMISSION_DENIED", "message": '
+        b'"Satellite tiles are not available for your account and region."}}'
+    )
+
+    def forbidden(url, **kwargs):
+        return httpx.Response(
+            403, content=eea, headers={"content-type": "application/json"},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx, "get", forbidden)
+    r = client.get("/api/tiles/google-satellite/15/16597/11278")
+    assert r.status_code == 403  # passthrough, as before
+
+    status = client.get("/api/settings").json()["provider_status"]["google"]
+    assert status["ok"] is False
+    assert "not available for your account and region" in status["detail"]
+    ids = {p["id"] for p in client.get("/api/satellite/providers").json()}
+    assert "google-satellite" not in ids

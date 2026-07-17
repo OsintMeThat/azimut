@@ -162,15 +162,43 @@ def _apply_crop(img: Image.Image, params: dict[str, Any]) -> Image.Image:
 
 _register_filter(Filter("crop", "Crop", _apply_crop))  # driven by an interactive box, no sliders
 
+# Auto-stitch's panorama modes bake their projection into the piece's recipe, so
+# the full-res export re-derives the very warp the solver measured. Solved by
+# machine, never by slider — like crop, it has no params of its own.
+_register_filter(Filter("remap", "Panorama warp", lambda img, params: stitch.apply_warp(img, params)))
+
+# Filters that speak RGBA themselves: the remap *produces* the alpha, and a crop
+# carries whatever it is handed straight through.
+_ALPHA_NATIVE = {"remap", "crop"}
+
+
+def _apply_keeping_alpha(flt: Filter, img: Image.Image, params: dict[str, Any]) -> Image.Image:
+    """Run a filter on RGB pixels, carrying an alpha channel across untouched.
+
+    Once a piece has been remapped onto a cylinder its transparent corners are
+    load-bearing — they are what stops it painting black wedges over its
+    neighbours. The colour filters know nothing about that channel and would
+    happily scale it, so hold it aside and put it back.
+    """
+    if img.mode != "RGBA" or flt.id in _ALPHA_NATIVE:
+        return flt.apply(img, params)
+    alpha = img.getchannel("A")
+    out = flt.apply(img.convert("RGB"), params)
+    if out.size != alpha.size:  # a resizing filter (rotate expands) — footprint lost
+        return out.convert("RGBA")
+    out = out.convert("RGB")
+    out.putalpha(alpha)
+    return out
+
 
 def apply_ops(image: Image.Image, ops: list[dict[str, Any]]) -> Image.Image:
     """Run an ordered list of ``{"op": id, "params": {...}}`` through the pipeline."""
-    out = image.convert("RGB")
+    out = image if image.mode == "RGBA" else image.convert("RGB")
     for op in ops:
         flt = FILTERS.get(op.get("op"))
         if flt is None:
             raise ValueError(f"unknown filter {op.get('op')!r}")
-        out = flt.apply(out, op.get("params") or {})
+        out = _apply_keeping_alpha(flt, out, op.get("params") or {})
     return out
 
 
@@ -613,9 +641,14 @@ def render_preview_png(
     """Render a recipe (video frame or image + ops) to PNG bytes — no filing.
 
     Backs collage snapshots and rebuilding previews when a saved session reopens.
+    A remapped (panorama) piece keeps its alpha, so the canvas shows the same
+    curved footprint the export will paint.
     """
+    img = _source_image(case, rel_path, time_s, ops)
+    if img.mode != "RGBA":
+        img = img.convert("RGB")
     buf = io.BytesIO()
-    _source_image(case, rel_path, time_s, ops).convert("RGB").save(buf, "PNG")
+    img.save(buf, "PNG")
     return buf.getvalue()
 
 
@@ -715,15 +748,18 @@ def _compose_canvas(
         rel = spec.get("path")
         if not rel:
             raise ValueError("collage node is missing a source path")
-        img = _source_image(case, rel, spec.get("time"), spec.get("ops")).convert("RGB")
+        img = _source_image(case, rel, spec.get("time"), spec.get("ops"))
+        # A piece remapped onto a panorama's cylinder arrives with its footprint in
+        # the alpha channel — paint through that rather than over it, or its
+        # transparent corners land as black wedges on the neighbour underneath.
+        footprint = img.getchannel("A") if img.mode == "RGBA" else Image.new("L", img.size, 255)
+        img = img.convert("RGB")
         w, h = img.size
         src_corners = [[0, 0], [w, 0], [w, h], [0, h]]
         quad = [[float(x) * scale, float(y) * scale] for x, y in node["quad"]]
         coeffs = _perspective_coeffs(quad, src_corners)
         warped = img.transform((width, height), Image.PERSPECTIVE, coeffs, Image.BICUBIC)
-        mask = Image.new("L", (w, h), 255).transform(
-            (width, height), Image.PERSPECTIVE, coeffs, Image.BICUBIC
-        )
+        mask = footprint.transform((width, height), Image.PERSPECTIVE, coeffs, Image.BILINEAR)
         canvas.paste(warped, (0, 0), mask)
         sources.append(rel)
     return canvas, sources
@@ -786,27 +822,51 @@ def compose_perspective(
     return result
 
 
+STITCH_MODES = ("planar", *stitch.WARPS)
+
+
 def solve_collage_layout(
-    case: Case, *, srcs: list[dict[str, Any]], width: int, height: int
+    case: Case, *, srcs: list[dict[str, Any]], width: int, height: int, mode: str = "planar"
 ) -> dict[str, Any]:
-    """Auto-stitch: solve each piece's quad from the imagery itself (no filing).
+    """Auto-stitch: solve each piece's placement from the imagery itself (no filing).
 
     ``srcs`` are the same ``{path, time?, ops[]}`` recipes the collage already
     speaks, so pieces stitch *as adjusted* — what the analyst sees is what gets
     matched. The returned quads are canvas pixels, ready to drop onto the canvas
-    as ordinary (still hand-tunable) pieces; ``dropped`` lists the pieces that
-    matched nothing, which the caller leaves where they were.
+    as ordinary pieces; ``dropped`` lists the pieces that matched nothing, which
+    the caller leaves where they were.
+
+    ``mode`` picks the projection (see :mod:`azimut.engine.stitch`). ``planar``
+    returns quads alone — the pieces keep their pixels and stay hand-warpable. The
+    panorama modes also return a per-piece ``op``: the remap to append to that
+    piece's recipe, which is how the warp survives to the full-res export. Callers
+    must hand in *un-remapped* recipes; a cylinder is not a pinhole view, so
+    solving cameras from already-warped pixels would measure the wrong scene.
     """
+    if mode not in STITCH_MODES:
+        raise ValueError(f"unknown panorama mode {mode!r}")
     images = [
         _source_image(case, s["path"], s.get("time"), s.get("ops")) for s in srcs
     ]
     try:
-        solved = stitch.solve_layout(images, width=width, height=height)
+        if mode == "planar":
+            solved = stitch.solve_layout(images, width=width, height=height)
+        else:
+            solved = stitch.solve_rotation_layout(images, width=width, height=height, warp=mode)
     finally:
         for img in images:
             img.close()
+    remaps = solved.get("remaps") or {}
     return {
-        "nodes": [{"index": i, "quad": q} for i, q in sorted(solved["quads"].items())],
+        "mode": mode,
+        "nodes": [
+            {
+                "index": i,
+                "quad": q,
+                "op": ({"op": "remap", "params": remaps[i]} if i in remaps else None),
+            }
+            for i, q in sorted(solved["quads"].items())
+        ],
         "dropped": solved["dropped"],
     }
 

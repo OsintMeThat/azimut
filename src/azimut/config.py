@@ -43,8 +43,26 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     #   billed basemap for free imagery; paid detail only matters zoomed in.
     "providers_enabled": {},
     "usage_overrides": {},
+    # Per-meter monthly free allowance, overriding config.FREE_TIER:
+    # {"sentinelhub": 30000}. A free tier is a fact about the user's account,
+    # not about the app — providers grant more than they document (and change
+    # it), so the number the soft block measures against has to be theirs to
+    # correct. Absent = the FREE_TIER default.
+    "free_tiers": {},
+    # Last known health of each keyed credential: {"<key_id>": {"ok": bool,
+    # "detail": str, "at": iso}}. Written by the Settings key test and by
+    # *auth-shaped* provider rejections (never plain network errors); cleared
+    # when the key changes. A key marked bad withholds its basemap from the
+    # selector until it tests good again — a dead map should not be on offer.
+    "provider_status": {},
     "eco_zoom_fallback": True,
     "eco_max_zoom": 15,
+    # Per-provider eco thresholds: {"<key_id>": zoom}. Overrides the provider's
+    # own default and the global eco_max_zoom for that basemap; 0 = eco never
+    # fires for it. Absent = inherit (provider default, else global). The
+    # Maps JS widget is not configurable here — swapping it out and back
+    # re-bills a map load, so eco is pinned off for it in engine/tiles.py.
+    "eco_max_zooms": {},
     # Display preferences, app-wide (Settings → Preferences):
     # - coord_format: how every tool renders a latitude/longitude — "dd"
     #   (decimal degrees), "dms" (degrees/minutes/seconds), "mgrs" (grid ref).
@@ -58,6 +76,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "home_view": {"lat": 48.8584, "lon": 2.2945, "zoom": 16},
     # The handle a new post draft is addressed to. Empty means no mention.
     "post_mention": "@GeoConfirmed",
+    # Pairing token for the capture browser extension (api/ingest.py). Minted
+    # lazily on first use, shown once in Settings, pasted into the extension.
+    # Empty means "not minted yet" — never a valid credential.
+    "ingest_token": "",
 }
 
 # Accepted values for the display preferences above — mirror of
@@ -65,11 +87,22 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 COORD_FORMATS = ("dd", "dms", "mgrs")
 UNIT_SYSTEMS = ("metric", "imperial")
 
-# Documented monthly free allowances per meter, in tile requests (verified
+# Documented monthly free allowances per meter, in billed requests (verified
 # 2026-07: Google 2D Map Tiles 100k then $0.60/1k, and ≤15k/day; Mapbox Static
-# Tiles 200k then $0.50/1k). A yardstick, not a guarantee — mirror of
-# frontend/src/lib/usage.js FREE_TIER.
-FREE_TIER = {"mapbox": 200_000, "google": 100_000}
+# Tiles 200k then $0.50/1k; Sentinel Hub 30k requests *and* 30k processing units
+# for a Copernicus General account, and its 512px tiles are 1 PU each — see
+# docs/IMAGERY_PROVIDERS.md, which is why tiles are a faithful unit here).
+# A yardstick, not a guarantee — mirror of frontend/src/lib/usage.js FREE_TIER.
+# google_js counts *map loads* (Maps JavaScript API dynamic maps), not tiles:
+# 10k free/month on the 2025 Essentials tier, then ~$7/1k. One load per widget
+# instantiation; pan/zoom on an open map is free, so the unit is coarse but honest.
+#
+# These are *defaults*, not facts: a free tier is per-account and providers move
+# it without touching their docs (Copernicus still documents 10k while actually
+# provisioning 30k — observed 2026-07). `free_tiers` in settings.json overrides
+# any of them, which is what free_tier() below resolves; a hardcoded number
+# would make the counter lie about someone else's account.
+FREE_TIER = {"mapbox": 200_000, "google": 100_000, "google_js": 10_000, "sentinelhub": 30_000}
 # Share of the free tier past which metered providers stop serving unless the
 # user flips the per-provider override in Settings.
 BLOCK_SHARE = 0.9
@@ -179,13 +212,80 @@ def month_usage(meter: str, settings: dict[str, Any] | None = None) -> int:
     return int((settings.get("usage", {}).get(meter) or {}).get(month_key(), 0))
 
 
+def free_tier(meter: str, settings: dict[str, Any] | None = None) -> int | None:
+    """This account's monthly free allowance for a meter: the user's own figure
+    when they corrected it in Settings, else the documented default.
+
+    None means "unmetered" — no allowance is known, so nothing to block on.
+    """
+    settings = settings or load_settings()
+    override = (settings.get("free_tiers") or {}).get(meter)
+    if isinstance(override, (int, float)) and int(override) > 0:
+        return int(override)
+    return FREE_TIER.get(meter)
+
+
+def free_tiers(settings: dict[str, Any] | None = None) -> dict[str, int]:
+    """Every meter's live allowance — what the UI mirrors (api/settings.py)."""
+    settings = settings or load_settings()
+    resolved = {}
+    for meter in FREE_TIER:
+        value = free_tier(meter, settings)
+        if value:
+            resolved[meter] = value
+    return resolved
+
+
 def usage_blocked(meter: str, settings: dict[str, Any] | None = None) -> bool:
     """True when a metered provider passed BLOCK_SHARE of its free tier and the
     user hasn't opted into overage billing for it (docs/IMAGERY_PROVIDERS.md)."""
-    free = FREE_TIER.get(meter)
+    settings = settings or load_settings()
+    free = free_tier(meter, settings)
     if not free:
         return False
-    settings = settings or load_settings()
     if settings.get("usage_overrides", {}).get(meter):
         return False
     return month_usage(meter, settings) >= free * BLOCK_SHARE
+
+
+def record_provider_status(key_id: str, ok: bool, detail: str = "") -> None:
+    """Persist a keyed credential's last known health (DEFAULT_SETTINGS note).
+
+    Only call this for *auth-shaped* verdicts — a key test, or a provider
+    rejection that names the key/account (Google's PERMISSION_DENIED, Sentinel
+    Hub's "Invalid instance id"). A timeout or DNS hiccup says nothing about
+    the key and must never bench a basemap.
+    """
+    with _usage_lock:  # same file as the counters — same writer lock
+        settings = load_settings()
+        settings.setdefault("provider_status", {})[key_id] = {
+            "ok": bool(ok),
+            "detail": str(detail)[:300],
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        save_settings(settings)
+
+
+def provider_key_bad(key_id: str, settings: dict[str, Any] | None = None) -> bool:
+    """True when the key's last recorded verdict was a failure."""
+    settings = settings or load_settings()
+    status = (settings.get("provider_status") or {}).get(key_id)
+    return bool(status) and not status.get("ok", True)
+
+
+def ingest_token(rotate: bool = False) -> str:
+    """The capture extension's pairing token — minted lazily, kept in settings.json.
+
+    Guards /api/ingest/* (api/ingest.py): the server binds localhost, so the
+    token's job is to stop *other local pages and processes* from filing
+    images into cases, not to survive a hostile network. ``rotate=True``
+    mints a fresh one (Settings), instantly orphaning every paired extension.
+    """
+    import secrets
+
+    with _usage_lock:  # same file as the counters — same writer lock
+        settings = load_settings()
+        if rotate or not settings.get("ingest_token"):
+            settings["ingest_token"] = secrets.token_urlsafe(24)
+            save_settings(settings)
+        return settings["ingest_token"]

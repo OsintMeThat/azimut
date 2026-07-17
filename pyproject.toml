@@ -61,6 +61,22 @@ artifacts = ["src/azimut/static/**"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/azimut"]
+# The capture extension (repo root extension/) ships inside the wheel so the
+# app can serve it for install (GET /api/ingest/extension.zip) — a pip/binary
+# user has no repo checkout to load it from. Runtime files only: the dev
+# harness (vitest, package.json, node_modules) stays out.
+[tool.hatch.build.targets.wheel.force-include]
+"extension/manifest.json" = "azimut/extension/manifest.json"
+"extension/background.js" = "azimut/extension/background.js"
+"extension/bridge.js" = "azimut/extension/bridge.js"
+"extension/overlay.js" = "azimut/extension/overlay.js"
+"extension/popup.html" = "azimut/extension/popup.html"
+"extension/popup.js" = "azimut/extension/popup.js"
+"extension/options.html" = "azimut/extension/options.html"
+"extension/options.js" = "azimut/extension/options.js"
+"extension/ui.css" = "azimut/extension/ui.css"
+"extension/icons" = "azimut/extension/icons"
+"extension/README.md" = "azimut/extension/README.md"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

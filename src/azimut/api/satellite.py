@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -17,6 +17,7 @@ from ..engine import (
     google_tiles,
     media as media_engine,
     satellite as satellite_engine,
+    sentinel,
     tilecache,
     tiles,
 )
@@ -66,6 +67,9 @@ class SatelliteUpdateIn(BaseModel):
 
 @router.get("/satellite/providers")
 def providers() -> list[dict[str, Any]]:
+    # the user's per-provider eco threshold (Settings) beats the provider's
+    # own default; the frontend falls back to the global one when both absent
+    eco_overrides = config.load_settings().get("eco_max_zooms", {})
     return [
         {
             "id": p.id,
@@ -73,6 +77,10 @@ def providers() -> list[dict[str, Any]]:
             "url": p.url,
             "attribution": p.attribution,
             "max_zoom": p.max_zoom,
+            # deepest zoom with real pixels; null = same as max_zoom. The live
+            # map hands it to Leaflet's maxNativeZoom, which magnifies the last
+            # native tile instead of requesting one that doesn't exist.
+            "max_native_zoom": p.max_native_zoom,
             "needs_key": p.needs_key,
             "imagery": p.imagery,
             "capturable": p.capturable,
@@ -81,9 +89,94 @@ def providers() -> list[dict[str, Any]]:
             "meter": p.meter,
             "tile_size": p.tile_size,
             "oversample": p.oversample,
+            "widget": p.widget,
+            "eco_max_zoom": (
+                p.eco_max_zoom
+                if p.widget  # the widget's pinned 0 is not user-tunable
+                else eco_overrides.get(p.meter, p.eco_max_zoom)
+            ),
         }
         for p in tiles.all_providers()
     ]
+
+
+def _sentinel_instance() -> str:
+    key = (config.load_settings().get("api_keys") or {}).get("sentinelhub")
+    if not key:
+        raise HTTPException(status_code=404, detail="no Sentinel Hub key saved")
+    return key
+
+
+@router.get("/satellite/sentinel/layers")
+def sentinel_layers(check: bool = False) -> dict[str, Any]:
+    """The Sentinel-2 layers on offer.
+
+    Without ``check`` this is the built-in catalogue and touches nothing —
+    opening the Satellite tab must never phone out (local-first). ``check=true``
+    asks the user's own instance what it really serves (GetCapabilities), which
+    is the only authority: a configuration can rename or drop any of them.
+    """
+    if not check:
+        return {
+            "layers": [{"id": e.id, "label": e.label, "hint": e.hint} for e in sentinel.LAYERS],
+            "source": "catalogue",
+        }
+    try:
+        found = sentinel.capabilities_layers(_sentinel_instance())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # the catalogue still works — say why the real list is missing, don't fail
+        return {
+            "layers": [{"id": e.id, "label": e.label, "hint": e.hint} for e in sentinel.LAYERS],
+            "source": "catalogue",
+            "detail": f"could not read the instance's layers: {exc}",
+        }
+    if not found:
+        return {
+            "layers": [{"id": e.id, "label": e.label, "hint": e.hint} for e in sentinel.LAYERS],
+            "source": "catalogue",
+            "detail": "the instance listed no layers",
+        }
+    return {"layers": found, "source": "instance"}
+
+
+@router.get("/satellite/sentinel/dates")
+def sentinel_dates(lat: float, lon: float, start: str, end: str) -> dict[str, Any]:
+    """Sentinel-2 acquisition dates over a point, newest first.
+
+    User-triggered only (a date picker being opened/moved) — never on mount.
+    Billed as one request on the sentinelhub meter: a WFS query is ~0.01 PU
+    against a tile's 1 PU, but it is one request against the request quota, and
+    the meter's job is to count what the account is charged for.
+    """
+    instance = _sentinel_instance()
+    if config.usage_blocked("sentinelhub"):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Sentinel Hub is paused: {int(config.BLOCK_SHARE * 100)}% of the monthly "
+            "free tier is used — enable the override in Settings to keep going",
+        )
+    try:
+        found = sentinel.dates(instance, lat, lon, start, end)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"date lookup failed: {exc}") from exc
+    config.record_usage("sentinelhub", 1)
+    return {"dates": found, "start": start, "end": end}
+
+
+@router.post("/satellite/usage/{meter}")
+def record_widget_usage(meter: str) -> dict[str, Any]:
+    """Count one billed *map load* for a widget basemap.
+
+    Tile meters are counted server-side by the proxy, but a widget (Maps JS)
+    instantiates in the browser — the frontend reports each instantiation
+    here so the Settings counter stays a faithful mirror of Google's billing.
+    """
+    known = {p.meter for p in tiles.all_providers() if p.widget}
+    if meter not in known:
+        raise HTTPException(status_code=404, detail=f"no widget meter '{meter}'")
+    return {"count": config.record_usage(meter, 1)}
 
 
 def _serve_tile(
@@ -104,8 +197,15 @@ def _serve_tile(
     upstream: httpx.Response | None = None
     for attempt in (1, 2):
         try:
-            url = tiles.resolve_url(provider).format(x=x, y=y, z=z)
+            url = tiles.tile_url(tiles.resolve_url(provider), z, x, y, provider.zoom_offset)
         except tiles.TileFetchError as exc:
+            # a session mint that the provider *refused* (not a network hiccup)
+            # is an auth verdict — Google's EEA policy block lands here with
+            # its own sentence. Bench the basemap so it isn't offered dead.
+            if provider.meter and isinstance(
+                exc.__cause__, google_tiles.GoogleSessionError
+            ):
+                config.record_provider_status(provider.meter, False, str(exc.__cause__))
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         try:
             upstream = httpx.get(
@@ -123,6 +223,13 @@ def _serve_tile(
     if upstream.status_code == 404:
         return None
     if upstream.status_code >= 400:
+        # a 401/403 that survived the re-mint retry names the key, not the
+        # tile: record it (with the provider's own sentence when it sent one)
+        # so the basemap stops being offered until the key changes or re-tests
+        if provider.meter and upstream.status_code in (401, 403):
+            config.record_provider_status(
+                provider.meter, False, google_tiles.error_message(upstream)
+            )
         return Response(
             content=upstream.content,
             status_code=upstream.status_code,
@@ -139,6 +246,21 @@ def _serve_tile(
     if upstream.headers.get("cache-control"):
         headers["Cache-Control"] = upstream.headers["cache-control"]
     return upstream.content, media_type, headers
+
+
+def _native_grid_zoom(provider: tiles.Provider) -> int | None:
+    """The provider's native ceiling in *tile-grid* levels, or None if it has
+    pixels everywhere it can be viewed.
+
+    ``max_native_zoom`` is a view zoom, like ``max_zoom``; the proxy speaks the
+    grid, which a big tile shifts down (512px → one level).
+    """
+    if provider.max_native_zoom is None:
+        return None
+    import math
+
+    z_shift = int(math.log2(provider.tile_size // tiles.TILE_SIZE))
+    return provider.max_native_zoom - z_shift
 
 
 @router.get("/tiles/{provider_id}/{z}/{x}/{y}")
@@ -163,7 +285,14 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
             "monthly free tier is used — enable the override in Settings to keep going",
         )
 
-    served = _serve_tile(provider, z, x, y)
+    # Past the provider's native ceiling there is nothing new upstream: Sentinel
+    # Hub would upsample its own z14 pixels and bill every tile of it. Skip the
+    # fetch and let the climb below magnify the native tile instead — same
+    # pixels, no quota. The live map already stops asking (Leaflet's
+    # maxNativeZoom), so this is the guard for anything that doesn't.
+    native_z = _native_grid_zoom(provider)
+    beyond_native = max(0, z - native_z) if native_z is not None else 0
+    served = None if beyond_native else _serve_tile(provider, z, x, y)
     if isinstance(served, Response):
         return served
     if served is not None:
@@ -173,7 +302,8 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
     # no imagery at this zoom — climb parents and upscale the matching quadrant
     import io
 
-    for up in range(1, tiles.OVERZOOM_LEVELS + 1):
+    first = max(1, beyond_native)
+    for up in range(first, first + tiles.OVERZOOM_LEVELS):
         if z - up < 0:
             break
         parent = _serve_tile(provider, z - up, x >> up, y >> up)
@@ -301,6 +431,96 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
         dedupe=False,  # a capture is 1:1 with its entity — never collapse re-captures
     )
 
+    return {"path": result["item"]["path"], "title": label, **provenance}
+
+
+@router.post("/cases/{case_id}/satellite/screenshot")
+async def capture_screenshot(
+    case_id: str,
+    image: UploadFile,
+    lat: float = Form(ge=-90, le=90),
+    lon: float = Form(ge=-180, le=180),
+    zoom: int = Form(ge=1, le=22),
+    provider: str = Form(),
+    bearing: float = Form(default=0.0, ge=0, le=360),
+    framed: bool = Form(default=False),
+) -> dict[str, Any]:
+    """File a user-made screenshot of a widget basemap as a capture.
+
+    Widget providers (Google Maps JS) have no tiles to stitch, and the only
+    image Google's terms allow out of the widget is a screenshot the user took
+    themselves (Geo Guidelines: permitted with attribution). So the frontend
+    grabs the screen and this endpoint files it like any capture — attribution
+    burned into a footer band (never optional for Google), provenance marked
+    ``method: "screenshot"``.
+
+    ``framed`` is what keeps that provenance honest, and the two paths differ:
+    a screen crop taken through the capture frame is registered, so ``lat``/
+    ``lon`` are the *centre of the crop*; a pasted or dropped screenshot is
+    not, so they only describe the *map view when it was filed*. Readers of the
+    provenance must be able to tell which they are holding.
+    """
+    case = get_case(case_id)
+    try:
+        prov = tiles.get_provider(provider)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not prov.widget:
+        # tile providers have the real capture path — a screenshot would only
+        # launder away its provenance
+        raise HTTPException(status_code=422, detail="screenshot captures are for widget basemaps")
+
+    import io
+
+    raw = await image.read()
+    try:
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"not a readable image: {exc}") from exc
+
+    year = datetime.now(timezone.utc).year
+    attribution = f"Map data ©{year} Google"
+    img = tiles.burn_attribution(img, attribution)
+
+    label = satellite_engine.coords_label(lat, lon)
+    coords_dd = satellite_engine.coords_label(lat, lon, "dd")
+    plus_code = geo.plus_code(lat, lon)
+    provenance: dict[str, Any] = {
+        "provider": prov.id,
+        "provider_label": prov.label,
+        "method": "screenshot",  # user-taken screen pixels, not a stitched crop
+        # True: lat/lon are the centre of a registered crop frame.
+        # False: they are only the map view at filing time (pasted image).
+        "framed": framed,
+        "lat": lat,
+        "lon": lon,
+        "zoom": zoom,
+        "bearing": bearing,
+        "attribution": attribution,
+        "attribution_burned": True,
+        "plus_code": plus_code,
+        "dms": geo.to_dms(lat, lon),
+        "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "width": img.width,
+        "height": img.height,
+    }
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    filename = f"sat_{stamp}_z{zoom}_{prov.id}_screenshot.png"
+    result = media_engine.import_image(
+        case,
+        img,
+        filename,
+        {"type": "satellite", **provenance},
+        by="satellite",
+        entity_type="capture",
+        extra_attrs={
+            "coords": coords_dd, "lat": lat, "lon": lon,
+            "plus_code": plus_code, "zoom": zoom, "bearing": bearing,
+        },
+        title=label,
+        dedupe=False,
+    )
     return {"path": result["item"]["path"], "title": label, **provenance}
 
 

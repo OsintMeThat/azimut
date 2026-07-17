@@ -10,6 +10,8 @@
   import * as measure from '../lib/measure.js';
   import { dragBearing, pivotPanOffset } from '../lib/satRotate.js';
   import { SIZE_MIN, SIZE_MAX, clampSize, scaledCapture } from '../lib/captureSize.js';
+  import { isRegistered, sourceRect, frameFitsView } from '../lib/screenCrop.js';
+  import { extensionVersion, captureTab, onActivated } from '../lib/extBridge.js';
   import {
     monthCount,
     tilesShort,
@@ -17,7 +19,22 @@
     displayProviderId,
     layerCell,
   } from '../lib/usage.js';
+  import {
+    SENTINEL_ID,
+    DEFAULT_LAYER,
+    variantId,
+    validDay,
+    cloudLabel,
+    cloudClass,
+    isoDay,
+    monthOf,
+    monthLabel,
+    monthBounds,
+    monthGrid,
+    addMonths,
+  } from '../lib/sentinel.js';
   import { createViewer, nextZ, restack } from '../lib/refViewers.js';
+  import { loadGoogleMaps, createSatelliteMutant } from '../lib/gmaps.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
@@ -46,6 +63,7 @@
   let rotatePivot = $state({ x: 0, y: 0 }); // grabbed point, map-wrap-local px
   let capturing = $state(false);
   let captureHover = $state(false); // previewing the crop frame (capture group hover)
+  let hideOverlays = $state(false); // frame/marquee outlines must not land in a screen crop
   let captures = $state([]);
   let capturesFor = $state(null);
   let capturesCollapsed = $state(false);
@@ -63,8 +81,54 @@
   const currentProvider = $derived(providers.find((p) => p.id === providerId));
   const baseIsImagery = $derived(currentProvider?.imagery ?? true);
   // view-only basemaps (capturable=false) keep the map but not the capture
-  // button (IMAGERY_PROVIDERS.md) — none built-in today, gate wired anyway
-  const captureBlocked = $derived(currentProvider?.capturable === false);
+  // button (IMAGERY_PROVIDERS.md). Widget basemaps are also capturable=false —
+  // there are no tiles to stitch — but they are *not* blocked: they capture the
+  // same way through the same button, from screen pixels rather than tiles.
+  const isWidgetBase = $derived(!!currentProvider?.widget);
+  const captureBlocked = $derived(currentProvider?.capturable === false && !isWidgetBase);
+
+  // --- Sentinel-2: which layer, and over which window (lib/sentinel.js) ---
+  // Sentinel-2 is the one basemap with choices in it. Both live here and are
+  // packed onto the provider id, which is what the map, the capture and the
+  // cache all key on.
+  let s2Layer = $state(DEFAULT_LAYER);
+  // One date, not a range: a Sentinel-2 image *is* a pass on a day. (The WMTS
+  // window underneath is a range, so we send day/day — but a range is a mosaic
+  // of several passes, which is not a thing you can point at and date.)
+  let s2Date = $state(''); // '' = the layer's default, i.e. the most recent pass
+  let s2MenuOpen = $state(false);
+  let s2MenuEl; // bound to the popover wrapper — outside-click detection
+  let s2Layers = $state([]); // [{id,label,hint}] — catalogue until the instance is asked
+  let s2LayersSource = $state('');
+  let s2LayersAsked = false; // the instance is asked once per session, on first open
+  // The month the calendar is showing, and the passes found in it:
+  // { 'YYYY-MM-DD': {cloud, granules} }. A day with no entry has no imagery and
+  // is not selectable — the same rule the Copernicus browser follows.
+  let s2Month = $state(monthOf(''));
+  let s2Passes = $state({});
+  let s2PassesFor = $state(''); // the month+place s2Passes describes
+  let s2PassesBusy = $state(false);
+  let s2PassesNote = $state('');
+  // The newest pass over this point — what "most recent" is actually showing.
+  // The layer's default window renders the latest acquisition, so naming it is
+  // the difference between a dated image and an undated one.
+  let s2Latest = $state('');
+  let s2LatestFor = $state(''); // the place s2Latest was resolved for
+  const isSentinel = $derived(currentProvider?.id === SENTINEL_ID);
+  // A half-typed date is not a date: it stays "most recent" rather than
+  // becoming a request the backend would refuse.
+  const s2Window = $derived(
+    validDay(s2Date) ? { from: s2Date, to: s2Date } : { from: '', to: '' }
+  );
+  // A pinned day *is* the acquisition date — the one provider that can answer
+  // "when was this taken?" without being asked.
+  const s2PinnedDate = $derived(isSentinel && s2Window.from ? s2Window.from : null);
+  const s2LayerHint = $derived(s2Layers.find((l) => l.id === s2Layer)?.hint ?? '');
+  const s2LayerLabel = $derived(
+    s2Layers.find((l) => l.id === s2Layer)?.label ?? s2Layer.replace(/_/g, ' ').toLowerCase()
+  );
+  // the pill is small: "false colour (infrared)" doesn't fit, "FALSE COLOR" does
+  const s2LayerShort = $derived(s2Layer.replace(/_/g, ' '));
 
   // --- keyed-provider usage (IMAGERY_PROVIDERS.md) ---
   // Metered tiles are proxied through the backend, which counts each one it
@@ -73,7 +137,9 @@
   let usageMonth = $state('');
   // keyed-provider prefs mirrored from Settings: overrides lift the 90% soft
   // block, eco swaps billed basemaps for free imagery when zoomed out
-  let usagePrefs = $state({ overrides: {}, eco: true, ecoMaxZoom: 15 });
+  // `tiers` is this account's real allowance per meter (the user's correction
+  // where they made one) — a provider's free tier is not ours to hardcode
+  let usagePrefs = $state({ overrides: {}, eco: true, ecoMaxZoom: 15, tiers: null });
   async function refreshUsage() {
     try {
       const s = await api.get('/api/settings');
@@ -83,6 +149,7 @@
         overrides: s.usage_overrides ?? {},
         eco: s.eco_zoom_fallback !== false,
         ecoMaxZoom: s.eco_max_zoom ?? 15,
+        tiers: s.free_tier ?? null,
       };
     } catch {
       /* readout only — never blocks the map */
@@ -91,7 +158,7 @@
   // small readout near the basemap selector, billed providers only
   const usagePill = $derived(
     currentProvider?.meter
-      ? tilesShort(monthCount(usageTotals, currentProvider.meter, usageMonth))
+      ? tilesShort(monthCount(usageTotals, currentProvider.meter, usageMonth), currentProvider.meter)
       : null
   );
 
@@ -103,18 +170,25 @@
       ? usageBlocked(
           monthCount(usageTotals, currentProvider.meter, usageMonth),
           currentProvider.meter,
-          usagePrefs.overrides
+          usagePrefs.overrides,
+          usagePrefs.tiers
         )
       : false
   );
-  const displayedProviderId = $derived(
+  // the basemap on screen, before Sentinel-2's layer/window choices are folded in
+  const displayedBaseId = $derived(
     displayProviderId(currentProvider, center.zoom, {
       eco: usagePrefs.eco,
       blocked: meterBlocked,
       ecoMaxZoom: usagePrefs.ecoMaxZoom,
     })
   );
-  const displayedProvider = $derived(providers.find((p) => p.id === displayedProviderId));
+  const displayedProvider = $derived(providers.find((p) => p.id === displayedBaseId));
+  // What every downstream consumer asks for: the tile URL, the capture, the
+  // disk cache. For Sentinel-2 the layer and window ride *on the id*
+  // (lib/sentinel.js), so none of them can be rendered from one window and
+  // filed as another.
+  const displayedProviderId = $derived(variantId(displayedBaseId, { layer: s2Layer, ...s2Window }));
   // memoized so the layer is only rebuilt when the cell actually changes
   // (i.e. crossing the z17 boost bracket), not on every zoom step
   const displayedCell = $derived(
@@ -238,10 +312,15 @@
     mapEl.addEventListener('mousedown', onSelectStart, true);
     window.addEventListener('keydown', onKeydown);
     document.addEventListener('fullscreenchange', onFullscreenChange);
+    // the user clicked the extension after a refused capture — close the loop
+    const offActivated = onActivated(() =>
+      toast('Extension ready — press Capture again', 'ok', 5000)
+    );
     mapReady = true;
     return () => {
       window.removeEventListener('keydown', onKeydown);
       document.removeEventListener('fullscreenchange', onFullscreenChange);
+      offActivated();
       map.remove();
     };
   });
@@ -284,6 +363,159 @@
     osmOverlay; // toggle the labels overlay
     setOverlay();
   });
+
+  // --- Sentinel-2 layers & passes ---
+  // The catalogue costs nothing and reaches no network (the backend answers it
+  // from its own list); `check` asks the user's instance what it really serves,
+  // which is the only authority — a configuration can rename or drop any layer.
+  async function loadS2Layers(check = false, quiet = false) {
+    try {
+      const r = await api.get(`/api/satellite/sentinel/layers${check ? '?check=true' : ''}`);
+      s2Layers = r.layers ?? [];
+      s2LayersSource = r.source ?? '';
+      // a layer that vanished with the list can't stay selected
+      if (s2Layers.length && !s2Layers.some((l) => l.id === s2Layer)) s2Layer = s2Layers[0].id;
+      if (quiet) return;
+      if (check && r.detail) toast(r.detail, 'warn', 6000);
+      else if (check && r.source === 'instance') {
+        toast(`${r.layers.length} layers read from your instance`, 'ok');
+      }
+    } catch (e) {
+      toast(`Sentinel-2 layers: ${e.message}`, 'danger');
+    }
+  }
+
+  function toggleS2Menu() {
+    s2MenuOpen = !s2MenuOpen;
+    if (!s2MenuOpen) return;
+    // Ask the instance what it actually serves, once per session. The built-in
+    // list is only a fallback: a configuration serves whatever it was built
+    // with, and offering a layer that isn't there just 400s when picked.
+    if (!s2LayersAsked) {
+      s2LayersAsked = true;
+      loadS2Layers(true, true);
+    } else if (!s2Layers.length) {
+      loadS2Layers(false);
+    }
+    loadS2Passes();
+  }
+
+  // Passes are looked up per month *and* per place — Sentinel-2's swath means
+  // the answer genuinely differs a few km away. Cached so paging back to a
+  // month already seen is free; the key is the map centre rounded to ~100 m,
+  // because a nudge of the map is not a new question.
+  const s2PassCache = new Map();
+  const s2PlaceKey = () => `${center.lat.toFixed(3)},${center.lon.toFixed(3)}`;
+
+  /**
+   * One month's passes over one place: `{ 'YYYY-MM-DD': {cloud, granules} }`,
+   * or null when the lookup failed. Cached — paging back to a month already
+   * seen must not spend a second request.
+   */
+  async function fetchS2Month(month, place, force = false) {
+    const key = `${month}@${place}`;
+    if (!force && s2PassCache.has(key)) return s2PassCache.get(key);
+    const { from, to } = monthBounds(month);
+    try {
+      const r = await api.get(
+        `/api/satellite/sentinel/dates?lat=${center.lat}&lon=${center.lon}` +
+          `&start=${from}&end=${to}`
+      );
+      const byDay = {};
+      for (const d of r.dates) byDay[d.date] = { cloud: d.cloud, granules: d.granules };
+      s2PassCache.set(key, byDay);
+      refreshUsage(); // the lookup is billed: keep the pill honest
+      return byDay;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Which days Sentinel-2 actually passed over this point, and how cloudy each
+   * was. This is what makes the calendar honest: a day with no pass is not
+   * selectable, so you can't pick a date, pay for a tile and discover it was a
+   * coverage gap. One metadata request per month (~1/100th of a tile's
+   * processing units), only while the picker is open.
+   */
+  async function loadS2Passes(force = false) {
+    if (s2PassesBusy) return;
+    const place = s2PlaceKey();
+    const key = `${s2Month}@${place}`;
+    s2PassesBusy = true;
+    s2PassesNote = '';
+    const days = await fetchS2Month(s2Month, place, force);
+    if (days) {
+      s2Passes = days;
+      s2PassesFor = key;
+      if (!Object.keys(days).length) s2PassesNote = 'No Sentinel-2 pass here this month.';
+    } else {
+      // an empty month and a failed lookup are different facts. Never blur them:
+      // greying every day out because the network hiccuped would be a lie about
+      // what exists.
+      s2Passes = {};
+      s2PassesFor = '';
+      s2PassesNote = 'Could not read this month’s passes — the days below are not a coverage answer.';
+    }
+    s2PassesBusy = false;
+  }
+
+  function stepS2Month(delta) {
+    s2Month = addMonths(s2Month, delta);
+    loadS2Passes();
+  }
+
+  /**
+   * Which pass "most recent" is showing. Sentinel-2 revisits every ~5 days, so
+   * this month usually answers it; early in a month it may not, and one step
+   * back does. Two requests at worst, once per place — the alternative is a
+   * basemap that can't say what date it is showing, which for satellite
+   * imagery is most of the point.
+   */
+  async function resolveS2Latest() {
+    const place = s2PlaceKey();
+    if (s2LatestFor === place) return;
+    const today = isoDay(new Date());
+    for (const month of [monthOf(today), addMonths(monthOf(today), -1)]) {
+      const days = await fetchS2Month(month, place);
+      if (days === null) return; // lookup failed — say nothing rather than guess
+      const past = Object.keys(days).filter((d) => d <= today).sort();
+      if (past.length) {
+        s2Latest = past.at(-1);
+        s2LatestFor = place;
+        return;
+      }
+    }
+    // no pass in ~2 months: real (deep polar winter, persistent gaps) — the
+    // pill falls back to "most recent" rather than inventing a date
+    s2Latest = '';
+    s2LatestFor = place;
+  }
+
+  function pickS2Date(day) {
+    if (!s2Passes[day]) return; // no pass, nothing to render — the cell is dead
+    s2Date = day === s2Date ? '' : day; // clicking the pinned day unpins it
+  }
+
+  // The passes on screen describe the place they were fetched for; once the map
+  // has moved somewhere else they are stale and must not grey out real imagery.
+  const s2PassesStale = $derived(
+    !!s2PassesFor && s2PassesFor !== `${s2Month}@${s2PlaceKey()}`
+  );
+
+  // Naming the date of what's on screen is why you'd pick this basemap, so the
+  // latest pass is resolved as soon as Sentinel-2 is actually being displayed —
+  // one metadata request, on the user's own action (choosing the basemap), and
+  // only once per place. Not on mount: no tab may phone out by being opened.
+  $effect(() => {
+    if (!mapReady || displayedBaseId !== SENTINEL_ID) return;
+    center.lat;
+    center.lon;
+    clearTimeout(s2LatestTimer);
+    // debounced: panning must not spend a request per frame
+    s2LatestTimer = setTimeout(() => resolveS2Latest().catch(() => {}), 900);
+  });
+  let s2LatestTimer;
 
   // --- imagery date under the crosshair (item 2) ---
   async function refreshImageryDate() {
@@ -382,8 +614,15 @@
       try {
         await toolEl.requestFullscreen();
         return; // state + resize handled by onFullscreenChange
-      } catch {
-        /* blocked — fall through to the CSS fallback */
+      } catch (e) {
+        // The CSS fallback only fills the *window* — the browser's tabs and
+        // toolbar stay visible — so degrading into it silently reads as a
+        // broken fullscreen button rather than a refusal. Name the reason.
+        toast(
+          `Real fullscreen refused (${e.name}: ${e.message}) — filling the window instead`,
+          'warn',
+          8000
+        );
       }
     }
     fullscreen = !fullscreen;
@@ -475,7 +714,8 @@
 
   // fly the map to a capture's recorded point (item 7)
   function flyToCapture(item) {
-    if (!map) return;
+    // ingest captures can arrive without coordinates (nothing in the URL)
+    if (!map || item.lat == null || item.lon == null) return;
     map.setView([item.lat, item.lon], item.zoom || map.getZoom());
     setBearing(item.bearing || 0);
   }
@@ -519,21 +759,76 @@
     }
   }
 
+  // The Google widget layer is created ONCE and reused across basemap
+  // switches: every google.maps.Map instantiation is a billed dynamic map
+  // load, while re-adding the same layer costs nothing. Never destroyed
+  // until the tool unmounts, for the same reason.
+  let mutantLayer = null;
+
+  async function setWidgetLayer(p) {
+    try {
+      await loadGoogleMaps(p.url, {
+        onAuthFailure: async () => {
+          // Google's only key-rejection signal — can fire minutes after a
+          // clean load. Persist the verdict (benches the basemap), tell the
+          // user, and let the provider refetch fall the map back to Esri.
+          try {
+            await api.post(`/api/settings/keys/${p.meter}/status`, {
+              ok: false,
+              detail: 'Google rejected the Maps JavaScript key (gm_authFailure)',
+            });
+          } catch { /* the toast still tells the user */ }
+          toast('Google rejected the Maps JavaScript key — basemap disabled (see Settings)', 'danger', 8000);
+          providers = await api.get('/api/satellite/providers');
+        },
+      });
+    } catch (e) {
+      toast(`Google Maps failed to load: ${e.message}`, 'danger', 6000);
+      providerId = 'esri-world-imagery';
+      return;
+    }
+    if (displayedProvider?.id !== p.id) return; // user moved on while loading
+    if (!mutantLayer) {
+      mutantLayer = createSatelliteMutant(p.max_zoom, p.attribution);
+      // one billed map load, counted where it happens (the proxy can't see it)
+      api.post(`/api/satellite/usage/${p.meter}`).then(refreshUsage).catch(() => {});
+    }
+    // Already the live layer — leave it alone. Returning to this tab refetches
+    // the providers, and the fresh objects re-run the layer effect, so this is
+    // the common path rather than an edge case. Re-adding costs no map load
+    // (the mutant reuses its google.maps.Map), but Leaflet drops and re-clones
+    // every tile in the grid, which reads on screen as a reloading map.
+    if (tileLayer === mutantLayer) return;
+    if (tileLayer) tileLayer.remove();
+    if (map.getZoom() > p.max_zoom) map.setZoom(p.max_zoom);
+    tileLayer = mutantLayer.addTo(map);
+  }
+
   function setLayer() {
     const p = displayedProvider;
     if (!p || !map) return;
+    if (p.widget) {
+      setWidgetLayer(p);
+      return;
+    }
     // every provider goes through the backend tile proxy: keys and session
     // tokens stay server-side, every billed tile is counted exactly once
     // (browser cache hits never reach the proxy), cacheable providers share
     // the disk tile cache, and coverage gaps come back overzoomed instead of
     // as "not yet available" placards. Only {s} subdomain templates (custom
     // providers) stay direct — the proxy can't expand those.
-    const url = p.url.includes('{s}') ? p.url : `/api/tiles/${p.id}/{z}/{x}/{y}`;
+    const url = p.url.includes('{s}') ? p.url : `/api/tiles/${displayedProviderId}/{z}/{x}/{y}`;
     // maxZoom caps the map itself (no map-level maxZoom is set), which is what
     // keeps a shallower provider (OpenTopoMap, z17) from ever being asked for
     // tiles it would answer with a "max zoom layer" placard — and keeps the
     // view zoom at or under the provider max, which capture sizing relies on.
     const opts = { attribution: p.attribution, maxZoom: p.max_zoom };
+    // Where a provider's pixels stop short of its useful view (Sentinel-2:
+    // native z14, view z18), Leaflet keeps requesting the native level and
+    // scales those tiles up in CSS. The extra zoom therefore costs nothing —
+    // asking Sentinel Hub for z18 would buy its upsampling of the same pixels,
+    // 16× the tiles, every one billed.
+    if (p.max_native_zoom != null) opts.maxNativeZoom = p.max_native_zoom;
     // grid cell in CSS px (lib/usage.js layerCell): bigger tiles offset the
     // URL z down (512 → -1, 1024 → -2); an oversample halves the cell so each
     // tile is shown downscaled — deeper zoom on screen. Google's mid-zoom
@@ -568,7 +863,8 @@
   }
 
   $effect(() => {
-    displayedProviderId; // track provider changes (incl. eco/block fallbacks)
+    displayedProviderId; // track provider changes (incl. eco/block fallbacks,
+    // and Sentinel-2's layer/window — a new window is a new set of tiles)
     displayedCell; // and the z17 detail-boost bracket
     setLayer();
   });
@@ -774,10 +1070,14 @@
 
   // The single capture path. `centerLL` frames the crop (a Leaflet LatLng);
   // `baseW`/`baseH` are the crop size at the current view zoom, then scaled to
-  // the chosen output resolution. The recorded point is the moved pin (if any),
-  // else the crop centre.
-  async function doCapture(centerLL, baseW, baseH) {
+  // the chosen output resolution. `rectCss` is the same frame as a rectangle in
+  // map-container px — only the widget path needs it, since it crops screen
+  // pixels rather than stitching tiles. The recorded point is the moved pin (if
+  // any), else the crop centre.
+  async function doCapture(centerLL, baseW, baseH, rectCss) {
     if (capturing) return;
+    // widget basemaps have no tiles to stitch: same frame, screen pixels
+    if (isWidgetBase) return doWidgetCapture(centerLL, rectCss);
     capturing = true;
     const { zoom, width, height, mult } = scaledCapture(
       baseW, baseH, resolution, center.zoom, providerMaxZoom
@@ -811,7 +1111,9 @@
         marker_lat,
         marker_lon,
         // second date on the capture: the imagery's acquisition date, if known
-        imagery_date: imageryDate?.date ?? null,
+        // a pinned Sentinel-2 window is the acquisition date outright; every
+        // other provider's is Esri's best-effort estimate or nothing
+        imagery_date: s2PinnedDate ?? imageryDate?.date ?? null,
       });
       captures = [result, ...captures];
       await reloadCase();
@@ -833,16 +1135,235 @@
   // Centred Capture button: the standard preset size, framed on the map centre.
   function captureCentered() {
     const [w, h] = presetSize;
-    doCapture(map.getCenter(), w, h);
+    const r = mapEl.getBoundingClientRect();
+    doCapture(map.getCenter(), w, h, {
+      x: (r.width - w) / 2,
+      y: (r.height - h) / 2,
+      w,
+      h,
+    });
   }
 
   // The main capture button runs whichever mode is currently selected —
   // captureMode itself *is* the "last used mode" memory, so nothing else
   // needs to track it.
-  function runCapture() {
-    if (captureBlocked) return; // view-only basemap
+  async function runCapture() {
+    if (captureBlocked || capturing) return; // view-only basemap
+    // The widget basemap captures from screen pixels via the browser extension
+    // (extBridge.js). Without it there is nothing legitimate to capture with —
+    // gate here, before any frame is drawn, and explain instead of half-working.
+    if (isWidgetBase && !extensionVersion()) {
+      extGateOpen = true;
+      return;
+    }
     if (captureMode === 'select') toggleSelect();
     else captureCentered();
+  }
+
+  // --- widget capture: the same crop frame, filled with screen pixels ---
+  //
+  // Google's terms allow a user-taken screenshot with attribution and nothing
+  // programmatic out of the widget: the cloned tiles in the DOM are off-limits,
+  // so the pixels come from the capture extension — one tabs.captureVisibleTab
+  // behind the user's click, the browser-blessed way to screenshot the tab.
+  // No share prompt, no sharing bar, fullscreen stays. That's the only
+  // difference from a tile capture: the frame, the modes (centred preset /
+  // free marquee) and the filing are identical, so the widget goes through
+  // doCapture() like every other basemap.
+  let extGateOpen = $state(false); // "you need the extension" explainer
+
+  // One frame of this tab as a drawable image, via the extension. The frame is
+  // exactly the viewport, so registration is the viewport aspect check — a
+  // mismatch means browser zoom mid-flight or a foreign frame, both refusals.
+  async function extFrame() {
+    const dataUrl = await captureTab();
+    const img = new window.Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = () => reject(new Error('unreadable frame from the extension'));
+      img.src = dataUrl;
+    });
+    if (!isRegistered(img.naturalWidth, img.naturalHeight, window.innerWidth, window.innerHeight)) {
+      throw new Error('the captured frame does not match this view — try again');
+    }
+    return img;
+  }
+
+  // Map a rect in map-container CSS px onto the captured frame, and render it
+  // at exactly outW × outH (default: the native source pixels). Source pixels
+  // are usually denser than CSS px (devicePixelRatio, Region Capture), so a
+  // requested size is a supersampled downscale rather than a blur-up.
+  async function shotCropCanvas(img, rect, outW, outH) {
+    const src = sourceRect(rect, {
+      mapRect: mapEl.getBoundingClientRect(),
+      viewportWidth: window.innerWidth,
+      videoWidth: img.naturalWidth,
+      videoHeight: img.naturalHeight,
+    });
+    if (!src) {
+      throw new Error('the frame runs past the captured area — resize the window or pick a smaller size');
+    }
+    const { sx, sy, sw, sh } = src;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(outW ?? sw);
+    canvas.height = Math.round(outH ?? sh);
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    return canvas;
+  }
+
+  // The widget arm of doCapture: grab the tab via the extension, crop, file.
+  async function doWidgetCapture(centerLL, rect) {
+    if (!extensionVersion()) {
+      extGateOpen = true;
+      return;
+    }
+    const mapRect = mapEl.getBoundingClientRect();
+    if (!frameFitsView(rect, mapRect)) {
+      toast(
+        `The ${Math.round(rect.w)}×${Math.round(rect.h)} frame is bigger than the map view — screen pixels are the ceiling here. Pick a smaller size or enlarge the window`,
+        'warn', 7000
+      );
+      return;
+    }
+    capturing = true;
+    // The tab frame is the whole viewport, so our own chrome painted over the
+    // map (HUD, controls, reference windows, the frame outline itself) would
+    // land inside the crop. Hide it for the grab — a capture must show the
+    // map, not the app. Only the marker stays: the tile path burns one into
+    // its crop, so dropping it here would be the odd one out.
+    hideOverlays = true;
+    try {
+      // let the hidden chrome actually leave the composited frame
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      await new Promise((r) => setTimeout(r, 60));
+      const img = await extFrame();
+      const canvas = await shotCropCanvas(img, rect, Math.round(rect.w), Math.round(rect.h));
+      const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+      await fileScreenshot(blob, centerLL, true);
+    } catch (e) {
+      if (e.needsActivation) {
+        // one-time per tab: the browser only lets the extension screenshot a
+        // tab it has been invoked on (activeTab) — not an error, a step
+        toast(
+          'One-time step: click the Azimut Capture icon in the toolbar (or press Alt+Shift+A), then press Capture again',
+          'warn',
+          10000
+        );
+      } else {
+        // Never fall back to the import dialog: a capture that couldn't be
+        // taken must stay untaken. Quietly offering to file some other image
+        // instead is how an unregistered picture ends up wearing a capture's
+        // provenance.
+        toast(`Capture failed: ${e.message}`, 'danger', 7000);
+      }
+    } finally {
+      hideOverlays = false;
+      capturing = false;
+    }
+  }
+
+  // File a screenshot blob as a capture. `framed` records whether the
+  // coordinates are the centre of a registered crop (the frame paths) or just
+  // the map view at filing time (a pasted screenshot) — the backend keeps that
+  // distinction in provenance.
+  async function fileScreenshot(blob, centerLL, framed) {
+    const c = await ensureCase();
+    const form = new FormData();
+    form.append('image', blob, 'screenshot.png');
+    form.append('lat', String(centerLL ? centerLL.lat : center.lat));
+    form.append('lon', String(centerLL ? centerLL.lng : center.lon));
+    form.append('zoom', String(center.zoom));
+    form.append('bearing', String(bearing));
+    form.append('provider', currentProvider.id);
+    form.append('framed', String(!!framed));
+    const result = await api.post(`/api/cases/${c.id}/satellite/screenshot`, form);
+    captures = [result, ...captures];
+    await reloadCase();
+    toast(
+      framed
+        ? 'Screen crop captured & filed (attribution burned in)'
+        : 'Screenshot filed as a capture (attribution burned in)',
+      'ok'
+    );
+    return result;
+  }
+
+  // --- manual screenshot dialog (fallback: paste / drop) ---
+  let shotOpen = $state(false);
+  let shotBlob = $state(null);
+  let shotPreview = $state(''); // object URL for the <img> preview
+  let shotBusy = $state(false);
+
+  function shotReset() {
+    if (shotPreview) URL.revokeObjectURL(shotPreview);
+    shotBlob = null;
+    shotPreview = '';
+  }
+  function shotClose() {
+    shotReset();
+    shotOpen = false;
+  }
+  function shotTake(file) {
+    if (!file || !file.type?.startsWith('image/')) return;
+    shotReset();
+    shotBlob = file;
+    shotPreview = URL.createObjectURL(file);
+  }
+  function onShotPaste(e) {
+    const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith('image/'));
+    if (item) {
+      e.preventDefault();
+      shotTake(item.getAsFile());
+    }
+  }
+  function onShotDrop(e) {
+    e.preventDefault();
+    shotTake(e.dataTransfer?.files?.[0]);
+  }
+
+  // One-click grab of the whole map view into the dialog's preview: the same
+  // extension frame as a framed capture, minus the crop, at native resolution.
+  // The preview is what lets the user judge it before filing. Only offered
+  // when the extension is present — without it the dialog is paste/drop only.
+  let shotGrabbing = $state(false);
+  async function shotGrab() {
+    if (shotGrabbing) return;
+    shotGrabbing = true;
+    try {
+      const img = await extFrame();
+      const r0 = mapEl.getBoundingClientRect();
+      const canvas = await shotCropCanvas(img, { x: 0, y: 0, w: r0.width, h: r0.height });
+      const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+      if (blob) shotTake(new File([blob], 'screenshot.png', { type: 'image/png' }));
+    } catch (e) {
+      // extension missing or refused — the paste path still works
+      toast(`Screen capture unavailable (${e.message}) — paste a screenshot instead`, 'warn', 6000);
+    } finally {
+      shotGrabbing = false;
+    }
+  }
+  // paste works anywhere while the dialog is open — no need to focus a zone
+  $effect(() => {
+    if (!shotOpen) return;
+    window.addEventListener('paste', onShotPaste);
+    return () => window.removeEventListener('paste', onShotPaste);
+  });
+
+  async function shotSave() {
+    if (!shotBlob || shotBusy) return;
+    shotBusy = true;
+    try {
+      // a pasted image is not registered to any frame: its coordinates are the
+      // map view at filing time, and provenance says so (framed: false)
+      await fileScreenshot(shotBlob, null, false);
+      shotClose();
+    } catch (e) {
+      toast(`Could not file the screenshot: ${e.message}`, 'danger', 6000);
+    } finally {
+      shotBusy = false;
+    }
   }
 
   // clicking outside the open size/ratio/resolution popover closes it
@@ -850,6 +1371,16 @@
     if (!sizeMenuOpen) return;
     const onDocMousedown = (e) => {
       if (sizeMenuEl && !sizeMenuEl.contains(e.target)) sizeMenuOpen = false;
+    };
+    document.addEventListener('mousedown', onDocMousedown, true);
+    return () => document.removeEventListener('mousedown', onDocMousedown, true);
+  });
+
+  // …and the Sentinel-2 layer/date popover
+  $effect(() => {
+    if (!s2MenuOpen) return;
+    const onDocMousedown = (e) => {
+      if (s2MenuEl && !s2MenuEl.contains(e.target)) s2MenuOpen = false;
     };
     document.addEventListener('mousedown', onDocMousedown, true);
     return () => document.removeEventListener('mousedown', onDocMousedown, true);
@@ -910,7 +1441,12 @@
       L.point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)
     );
     selectArmed = false; // one box per arm — re-arm to draw another
-    doCapture(centerLL, Math.round(w), Math.round(h));
+    doCapture(centerLL, Math.round(w), Math.round(h), {
+      x: Math.min(r.x0, r.x1),
+      y: Math.min(r.y0, r.y1),
+      w,
+      h,
+    });
   }
 
   // save just the point (pin if moved, else center) as a navigable place — no image
@@ -1134,7 +1670,12 @@
   </div>
 
   <div class="body">
-    <div class="map-wrap" class:measuring={measureMode} class:selecting={selectArmed}>
+    <div
+      class="map-wrap"
+      class:measuring={measureMode}
+      class:selecting={selectArmed}
+      class:grabbing={hideOverlays}
+    >
       <div class="map" bind:this={mapEl}></div>
 
       <!-- top-left control cluster: fullscreen, OSM labels overlay, measure tools -->
@@ -1296,7 +1837,29 @@
 
       <!-- imagery acquisition date: a compact, unobtrusive pill in the corner so
            it doesn't crowd the coordinates readout (item 2) -->
-      {#if imageryDate?.supported}
+      {#if isSentinel && displayedBaseId === SENTINEL_ID}
+        <!-- Sentinel-2 says what it is showing: a pinned day is the window the
+             tiles were rendered from; otherwise the layer's default renders the
+             most recent pass, which the calendar lookup has already named. -->
+        <span
+          class="date-pill mono"
+          class:exact={!!s2PinnedDate}
+          title={s2PinnedDate
+            ? `Sentinel-2 ${s2LayerLabel} from this exact date`
+            : s2Latest
+              ? `Sentinel-2 ${s2LayerLabel} — most recent pass over this point`
+              : `Sentinel-2 ${s2LayerLabel} — most recent pass (open the picker to date it)`}
+        >
+          <Icon name="clock" size={11} />
+          {s2PinnedDate ?? s2Latest ?? ''}
+          {#if !s2PinnedDate}
+            <span class="tag">{s2Latest ? 'latest' : 'most recent'}</span>
+          {/if}
+          {#if s2Layer !== DEFAULT_LAYER}
+            <span class="tag layer">{s2LayerShort}</span>
+          {/if}
+        </span>
+      {:else if imageryDate?.supported}
         <span
           class="date-pill mono"
           title={imageryDate.source
@@ -1354,13 +1917,114 @@
             </option>
           {/each}
         </select>
+        {#if isSentinel}
+          <div class="s2-wrap" bind:this={s2MenuEl}>
+            <!-- icon-only: the bar is shared with the capture controls and has a
+                 finite width — the chosen layer and date read from the pill in
+                 the map's corner, where they don't cost the bar a row -->
+            <button
+              class="btn btn-icon"
+              class:on={s2MenuOpen}
+              onclick={toggleS2Menu}
+              title="Sentinel-2 — layer & date"
+              aria-label="Sentinel-2 layer and date"
+            >
+              <Icon name="layers" size={14} />
+            </button>
+            {#if s2MenuOpen}
+              <div class="s2-menu card">
+                <div class="menu-row">
+                  <span class="menu-label">Layer</span>
+                  <select class="select" bind:value={s2Layer}>
+                    {#each s2Layers as l (l.id)}
+                      <option value={l.id}>{l.label}</option>
+                    {/each}
+                  </select>
+                </div>
+                {#if s2LayerHint}
+                  <div class="menu-hint">{s2LayerHint}</div>
+                {/if}
+                <div class="menu-hint dim">
+                  {s2LayersSource === 'instance'
+                    ? 'Read from your configuration — these are the layers it serves.'
+                    : 'Could not read your configuration; showing the standard layers.'}
+                  <button class="linkish" onclick={() => loadS2Layers(true)}>Refresh</button>
+                </div>
+
+                <div class="menu-sep" aria-hidden="true"></div>
+
+                <div class="menu-row">
+                  <span class="menu-label">Date</span>
+                  <div class="chips">
+                    <button class="chip" class:on={!s2Date} onclick={() => (s2Date = '')}>
+                      Most recent
+                    </button>
+                  </div>
+                </div>
+
+                <div class="cal">
+                  <div class="cal-head">
+                    <button class="cal-nav" onclick={() => stepS2Month(-1)} aria-label="Previous month">
+                      <Icon name="chevronLeft" size={13} />
+                    </button>
+                    <span class="cal-month">{monthLabel(s2Month)}</span>
+                    <button class="cal-nav" onclick={() => stepS2Month(1)} aria-label="Next month">
+                      <Icon name="chevronRight" size={13} />
+                    </button>
+                  </div>
+                  <div class="cal-grid" class:busy={s2PassesBusy}>
+                    {#each ['M', 'T', 'W', 'T', 'F', 'S', 'S'] as d, i (i)}
+                      <span class="cal-dow" aria-hidden="true">{d}</span>
+                    {/each}
+                    {#each monthGrid(s2Month) as day, i (day ?? `pad${i}`)}
+                      {#if !day}
+                        <span class="cal-pad" aria-hidden="true"></span>
+                      {:else}
+                        {@const pass = s2Passes[day]}
+                        <button
+                          class="cal-day {pass ? cloudClass(pass.cloud) : ''}"
+                          class:has={!!pass}
+                          class:on={s2Date === day}
+                          disabled={!pass}
+                          onclick={() => pickS2Date(day)}
+                          title={pass
+                            ? `${day} — ${cloudLabel(pass.cloud) || 'cloud cover unknown'}`
+                            : `${day} — no Sentinel-2 pass`}
+                        >
+                          {Number(day.slice(8))}
+                        </button>
+                      {/if}
+                    {/each}
+                  </div>
+                </div>
+
+                {#if s2PassesBusy}
+                  <div class="menu-hint dim">Reading this month's passes…</div>
+                {:else if s2PassesNote}
+                  <div class="menu-hint warn">{s2PassesNote}</div>
+                {:else if s2PassesStale}
+                  <div class="menu-hint">
+                    <span class="warn">The map moved — these passes are for where you were.</span>
+                    <button class="linkish" onclick={() => loadS2Passes(true)}>Refresh</button>
+                  </div>
+                {:else}
+                  <div class="menu-hint dim">
+                    Only days Sentinel-2 passed over this point are selectable; the colour is
+                    cloud cover. A pinned day shows that pass alone — near a swath edge it can
+                    still be black (no data), so try the neighbouring date.
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          </div>
+        {/if}
         {#if usagePill}
           <span
             class="usage-pill mono"
-            title="Tiles requested from this billed provider this month — local counter, see Settings"
+            title="Requests made to this billed provider this month — local counter, see Settings"
           >{usagePill}</span>
         {/if}
-        {#if currentProvider?.meter && displayedProviderId !== providerId}
+        {#if currentProvider?.meter && displayedBaseId !== providerId}
           <span
             class="fallback-pill"
             class:paused={meterBlocked}
@@ -1424,8 +2088,8 @@
             title={captureBlocked
               ? 'View-only basemap — this provider cannot be captured'
               : captureMode === 'select'
-                ? 'Draw a rectangle on the map to capture exactly that area'
-                : 'Capture the centred preset size'}
+                ? `Draw a rectangle on the map to capture exactly that area${isWidgetBase ? ' (grabbed from the screen)' : ''}`
+                : `Capture the centred preset size${isWidgetBase ? ' (grabbed from the screen)' : ''}`}
           >
             {#if capturing}
               <span class="spinner"></span> Capturing…
@@ -1441,7 +2105,9 @@
               class="btn btn-icon capture-arrow"
               class:on={sizeMenuOpen}
               onclick={() => (sizeMenuOpen = !sizeMenuOpen)}
-              title="Capture mode, size, ratio & resolution"
+              title={isWidgetBase
+                ? 'Capture mode, size & ratio'
+                : 'Capture mode, size, ratio & resolution'}
               aria-label="Capture options"
             >
               <Icon name="chevronDown" size={13} />
@@ -1513,15 +2179,40 @@
                   {/if}
                 {/if}
 
-                <div class="menu-row">
-                  <span class="menu-label">Resolution</span>
-                  <div class="chips">
-                    <button class="chip" class:on={resolution === 1} onclick={() => (resolution = 1)}>1×</button>
-                    <button class="chip" class:on={resolution === 2} onclick={() => (resolution = 2)}>2×</button>
-                    <button class="chip" class:on={resolution === 'max'} onclick={() => (resolution = 'max')}>Max</button>
+                <!-- the widget's one real difference: its pixels come off the
+                     screen, so there is no deeper zoom to capture and no
+                     resolution to choose -->
+                {#if isWidgetBase}
+                  <div class="menu-row">
+                    <span class="menu-label">Source</span>
+                    <div class="chips">
+                      <button
+                        class="chip"
+                        onclick={() => {
+                          sizeMenuOpen = false;
+                          shotOpen = true;
+                        }}
+                      >
+                        Paste a screenshot…
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <div class="menu-hint">Captures a deeper zoom for a sharper file.</div>
+                  <div class="menu-hint">
+                    This basemap is captured from the screen (Google's terms allow nothing
+                    programmatic out of it), so the frame can't go past the map view and screen
+                    pixels are the ceiling.
+                  </div>
+                {:else}
+                  <div class="menu-row">
+                    <span class="menu-label">Resolution</span>
+                    <div class="chips">
+                      <button class="chip" class:on={resolution === 1} onclick={() => (resolution = 1)}>1×</button>
+                      <button class="chip" class:on={resolution === 2} onclick={() => (resolution = 2)}>2×</button>
+                      <button class="chip" class:on={resolution === 'max'} onclick={() => (resolution = 'max')}>Max</button>
+                    </div>
+                  </div>
+                  <div class="menu-hint">Captures a deeper zoom for a sharper file.</div>
+                {/if}
               </div>
             {/if}
           </div>
@@ -1580,6 +2271,16 @@
               {/each}
             </div>
             <div class="links-note mono">{readout}</div>
+            <!-- the way back: the capture extension files what you find over
+                 there straight into the case, coordinates parsed from the URL -->
+            <button type="button" class="links-advert" onclick={() => (uiState.tool = 'settings')}>
+              <Icon name="crop" size={12} />
+              <span>
+                {extensionVersion()
+                  ? 'Capture these sites into the case with the browser extension'
+                  : 'Get the capture extension to file these sites into the case'}
+              </span>
+            </button>
           {/if}
 
           <!-- Places: navigable points (no image) -->
@@ -1677,7 +2378,8 @@
                     <div class="cap-meta">
                       <span class="title">{item.title ?? coordsLabel(item)}</span>
                       <span class="mono coords">{coordsLabel(item)}</span>
-                      <span class="prov">z{item.zoom}{item.bearing ? ` · ${Math.round(item.bearing)}°` : ''} · {item.provider_label}</span>
+                      <!-- ingest captures may have no zoom (URL carried none) -->
+                      <span class="prov">{item.zoom != null ? `z${item.zoom}` : '—'}{item.bearing ? ` · ${Math.round(item.bearing)}°` : ''} · {item.provider_label ?? item.site}</span>
                       <span class="prov dates" title="Capture date · imagery acquisition date">
                         <Icon name="crosshair" size={10} /> {item.fetched_at?.slice(0, 10)}
                         {#if item.imagery_date}<span class="img-date"><Icon name="satellite" size={10} /> {item.imagery_date}</span>{/if}
@@ -1687,11 +2389,29 @@
                   <div class="cap-actions">
                     <button
                       class="btn btn-ghost btn-sm"
-                      title="Go to these coordinates on the map"
+                      disabled={item.lat == null}
+                      title={item.lat == null
+                        ? 'No coordinates recorded for this capture'
+                        : 'Go to these coordinates on the map'}
                       onclick={() => flyToCapture(item)}
                     >
                       <Icon name="crosshair" size={14} />
                     </button>
+                    {#if item.source_url}
+                      <!-- straight back to the page this was captured from — the
+                           recorded URL itself, not a reconstruction -->
+                      <a
+                        class="btn btn-ghost btn-sm"
+                        class:disabled={fullscreen}
+                        href={fullscreen ? undefined : item.source_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-disabled={fullscreen}
+                        title={leavesFullscreen ?? `Open the source page (${item.site})`}
+                      >
+                        <Icon name="external" size={13} />
+                      </a>
+                    {/if}
                     <button
                       class="btn btn-ghost btn-sm"
                       title="Edit title & note"
@@ -1807,6 +2527,94 @@
   </Modal>
 {/if}
 
+<!-- The manual way in, for when the Capture button's extension grab can't be
+     used or the screenshot came from somewhere else entirely. -->
+{#if shotOpen && !shotGrabbing}
+  <Modal title="File a screenshot" onclose={shotClose} width="520px">
+    <p class="shot-hint">
+      The <strong>Capture</strong> button already crops this basemap off the screen
+      through the usual frame. Use this when it can't:
+      {#if extensionVersion()}grab the whole map view below, or paste{:else}paste{/if}
+      (<span class="mono">Ctrl+V</span>) / drop your own OS screenshot.
+      Unlike a framed capture, this is filed at the current <em>view</em>
+      (<span class="mono">{fmtCoords(center.lat, center.lon)}</span>, z{center.zoom}) —
+      the coordinates describe the map, not a registered crop. The Google attribution
+      is burned into a footer either way; keep Google's on-screen credits inside the
+      frame too.
+    </p>
+    {#if extensionVersion()}
+      <div style="display:flex;justify-content:center;margin-bottom:10px">
+        <button class="btn btn-primary" onclick={shotGrab} disabled={shotGrabbing}>
+          {#if shotGrabbing}<span class="spinner"></span> Grabbing…{:else}
+            <Icon name="satellite" size={14} /> Capture the view{/if}
+        </button>
+      </div>
+    {/if}
+    <div
+      class="shot-zone"
+      class:has-image={!!shotPreview}
+      role="button"
+      tabindex="0"
+      ondrop={onShotDrop}
+      ondragover={(e) => e.preventDefault()}
+    >
+      {#if shotPreview}
+        <img src={shotPreview} alt="screenshot to file" />
+      {:else}
+        <span>Paste (Ctrl+V) or drop the screenshot here</span>
+      {/if}
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      {#if shotPreview}
+        <button class="btn" onclick={shotReset}>Clear</button>
+      {/if}
+      <button class="btn" onclick={shotClose}>Cancel</button>
+      <button class="btn btn-primary" onclick={shotSave} disabled={!shotBlob || shotBusy}>
+        {shotBusy ? 'Filing…' : 'File as capture'}
+      </button>
+    </div>
+  </Modal>
+{/if}
+
+<!-- Google JS capture gate: this basemap can only be captured through the
+     browser extension (screen pixels are the only thing Google's terms allow
+     out of the widget, and the extension is the promptless way to get them).
+     Explain briefly and point at Settings; never a half-working share flow. -->
+{#if extGateOpen}
+  <Modal title="Capture needs the browser extension" onclose={() => (extGateOpen = false)} width="460px">
+    <p class="shot-hint">
+      Google's terms allow nothing programmatic out of this basemap — a capture
+      here is a <strong>screenshot of the tab</strong>, and the Azimut Capture
+      extension is what takes it (one grab per click, no screen-share prompt,
+      works in fullscreen). Other basemaps are not affected.
+    </p>
+    <p class="shot-hint">
+      Install it from <strong>Settings → Capture extension</strong>, then reload
+      this tab. You can also paste an OS screenshot instead.
+    </p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button
+        class="btn"
+        onclick={() => {
+          extGateOpen = false;
+          shotOpen = true;
+        }}
+      >
+        Paste a screenshot…
+      </button>
+      <button
+        class="btn btn-primary"
+        onclick={() => {
+          extGateOpen = false;
+          uiState.tool = 'settings';
+        }}
+      >
+        Open Settings
+      </button>
+    </div>
+  </Modal>
+{/if}
+
 <!-- place edit / save-with-details modal -->
 {#if placeModal}
   <Modal
@@ -1912,6 +2720,18 @@
     position: absolute;
     inset: 0;
     background: var(--bg-2);
+  }
+  /* Mid screen-grab: a widget capture crops the map element's *rectangle*, so
+     everything we paint over the map (HUD, control clusters, capture bar,
+     reference windows, the frame outline itself) would land in the capture.
+     Hide our chrome for the grab and leave the map — Google's own credits live
+     inside it and must ride along. The marker is the deliberate exception: the
+     tile path burns one into its crop, so a screen crop keeps its own.
+     :global is load-bearing — the reference windows are a child component, so
+     a scoped selector would skip exactly the overlay the spec says must never
+     be captured. */
+  .map-wrap.grabbing > :global(:not(.map):not(.marker-overlay)) {
+    visibility: hidden;
   }
   .frame-overlay {
     position: absolute;
@@ -2204,12 +3024,25 @@
   .capture-bar {
     position: absolute;
     bottom: 34px;
-    left: 50%;
-    transform: translateX(-50%);
+    /* Centred by auto margins across the full width, NOT by left:50% +
+       translateX: an absolutely positioned box with `left: 50%` may only be as
+       wide as the half it starts at, so the bar was being squeezed to half the
+       map and cut off (or, once it could wrap, folded into a stack of rows).
+       Spanning left:0/right:0 gives it the whole width to size against, and
+       fit-content keeps it hugging its controls. */
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    width: fit-content;
+    max-width: calc(100% - 20px);
     z-index: 600;
     display: flex;
     align-items: center;
-    gap: 10px;
+    justify-content: center;
+    /* only ever reached on a genuinely narrow map — a second row beats
+       controls that are off-screen */
+    flex-wrap: wrap;
+    gap: 8px 10px;
     padding: 10px 12px;
     background: rgba(24, 24, 24, 0.92);
     backdrop-filter: blur(6px);
@@ -2217,6 +3050,8 @@
   }
   .capture-bar .select {
     width: auto;
+    /* "OpenTopoMap (topographic · contour lines)" is not worth a row of bar */
+    max-width: 190px;
   }
   /* billed-provider tile counter (IMAGERY_PROVIDERS.md) — full readout in Settings */
   .usage-pill {
@@ -2360,6 +3195,163 @@
     font-size: 10px;
     color: var(--text-3);
     margin: -1px 0 5px;
+  }
+  .menu-hint.dim {
+    opacity: 0.75;
+  }
+  .menu-hint .warn,
+  .menu-hint.warn {
+    color: var(--warn, #e2a03f);
+  }
+  .menu-sep {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 0 6px;
+  }
+
+  /* --- Sentinel-2 layer + date popover --- */
+  .s2-wrap {
+    position: relative;
+    display: flex;
+  }
+  .s2-menu {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    width: max-content;
+    max-width: 320px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px;
+    background: rgba(24, 24, 24, 0.96);
+    backdrop-filter: blur(6px);
+    box-shadow: var(--shadow-2);
+    z-index: 700;
+  }
+  .s2-menu .select {
+    max-width: 190px;
+  }
+  .linkish {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: var(--accent);
+    font-size: 10px;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  /* --- the pass calendar --- */
+  .cal {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 2px 0 6px;
+  }
+  .cal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .cal-month {
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--text-1);
+  }
+  .cal-nav {
+    display: flex;
+    padding: 3px 5px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--bg-2);
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .cal-nav:hover {
+    color: var(--text-1);
+    border-color: var(--text-3);
+  }
+  .cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+  }
+  .cal-grid.busy {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+  .cal-dow {
+    text-align: center;
+    font-size: 9px;
+    color: var(--text-3);
+    padding-bottom: 2px;
+  }
+  .cal-day {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text-3);
+    font-size: 10px;
+    font-family: var(--font-mono);
+    cursor: pointer;
+  }
+  /* a day with no pass isn't dimmed decoration — there is nothing to render, so
+     it cannot be chosen (the same rule the Copernicus browser follows) */
+  .cal-day:disabled {
+    opacity: 0.28;
+    cursor: default;
+  }
+  .cal-day.has {
+    color: var(--text-1);
+    background: var(--bg-2);
+    border-color: var(--border);
+  }
+  /* cloud cover, at a glance: most passes are white and cost a tile to find out */
+  .cal-day.clear {
+    border-color: color-mix(in srgb, var(--ok, #46a758) 65%, transparent);
+    color: var(--ok, #46a758);
+  }
+  .cal-day.part {
+    border-color: color-mix(in srgb, var(--warn, #e2a03f) 55%, transparent);
+    color: var(--warn, #e2a03f);
+  }
+  .cal-day.cloudy,
+  .cal-day.unknown {
+    border-color: var(--border);
+    color: var(--text-2);
+  }
+  .cal-day.has:hover {
+    border-color: var(--text-1);
+  }
+  .cal-day.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+    font-weight: 700;
+  }
+  /* a pinned date is a fact about the pixels; "latest" is an inference from the
+     pass list — they must not look identical */
+  .date-pill.exact {
+    border-color: var(--ok, #46a758);
+  }
+  .date-pill .tag {
+    font-family: var(--font-sans);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 3px;
+  }
+  .date-pill .tag.layer {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   }
   .menu-row + .custom-size {
     justify-content: flex-end;
@@ -2539,6 +3531,24 @@
     padding: 0 4px 6px;
     font-size: var(--fs-xs);
     color: var(--text-3);
+  }
+  /* the capture-extension pointer under the external links — quiet, one line */
+  .links-advert {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 4px;
+    margin: 0 0 6px;
+    border: none;
+    background: none;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    text-align: left;
+    cursor: pointer;
+  }
+  .links-advert:hover {
+    color: var(--accent);
   }
   .place-notes {
     padding: 0 10px 8px 30px;
@@ -2743,6 +3753,30 @@
     font-size: var(--fs-sm);
     color: var(--text-2);
     margin: 0 0 12px;
+  }
+  .shot-hint {
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    margin: 0 0 12px;
+  }
+  .shot-zone {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 180px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    overflow: hidden;
+  }
+  .shot-zone.has-image {
+    border-style: solid;
+  }
+  .shot-zone img {
+    max-width: 100%;
+    max-height: 320px;
+    display: block;
   }
   .ref-empty {
     padding: 24px 4px;

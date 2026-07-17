@@ -69,6 +69,18 @@ export function buildOps(filters, values, crop = null) {
   return ops;
 }
 
+/**
+ * A collage piece's recipe stripped back to its unprojected pixels.
+ *
+ * Auto-stitch's panorama modes bake their warp into the piece as a `remap` op,
+ * and that op is only valid for the pixels it was solved on: a cylinder is not a
+ * pinhole view, so re-stitching a remapped piece would measure the wrong scene
+ * and compound one projection onto the last. Every stitch therefore starts here.
+ */
+export function pinholeOps(save) {
+  return (save?.ops ?? []).filter((o) => o.op !== 'remap');
+}
+
 // ---------------------------------------------------------------------------
 // Collage perspective: map an image's box to a 4-point quad via a CSS matrix3d.
 // Classic homography-from-4-corners (general 2D projection). The same quad is

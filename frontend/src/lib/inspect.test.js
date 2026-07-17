@@ -2,10 +2,29 @@ import { describe, it, expect } from 'vitest';
 import {
   clampCrop, moveCrop, resizeCropByHandle,
   QUAD_SIDES, quadEdgeMidpoints, moveQuadEdge, quadCentroid,
-  quadsBounds, translateQuad, moveQuads, rotateQuads, scaleQuads,
+  quadsBounds, translateQuad, moveQuads, rotateQuads, scaleQuads, pinholeOps,
 } from './inspect.js';
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
+
+describe('pinholeOps', () => {
+  const remap = { op: 'remap', params: { warp: 'cylindrical' } };
+  const bright = { op: 'brightness', params: { amount: 1.2 } };
+
+  it('leaves a piece that was never stitched alone', () => {
+    expect(pinholeOps({ ops: [bright] })).toEqual([bright]);
+  });
+  it('drops a solved warp so a re-stitch never compounds two projections', () => {
+    expect(pinholeOps({ ops: [bright, remap] })).toEqual([bright]);
+  });
+  it('drops every warp, however many stitches a piece has been through', () => {
+    expect(pinholeOps({ ops: [remap, bright, remap] })).toEqual([bright]);
+  });
+  it('handles a recipe with no ops at all', () => {
+    expect(pinholeOps({})).toEqual([]);
+    expect(pinholeOps(null)).toEqual([]);
+  });
+});
 
 describe('clampCrop', () => {
   it('keeps a valid crop untouched', () => {

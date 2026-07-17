@@ -29,11 +29,6 @@ export function mapLinks(lat, lon, zoom = 17) {
       url: `https://yandex.com/maps/?ll=${lon},${lat}&z=${z}&l=sat`,
     },
     {
-      id: 'satellites_pro',
-      label: 'Satellites.pro',
-      url: `https://satellites.pro/#${lat},${lon},${z}`,
-    },
-    {
       id: 'sentinel',
       label: 'Copernicus Browser',
       url: `https://browser.dataspace.copernicus.eu/?zoom=${z}&lat=${lat}&lng=${lon}`,

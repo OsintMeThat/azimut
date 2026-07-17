@@ -13,7 +13,6 @@ describe('mapLinks', () => {
         'google',
         'google_earth',
         'google_sat',
-        'satellites_pro',
         'sentinel',
         'yandex',
         'zoom_earth',
@@ -21,9 +20,11 @@ describe('mapLinks', () => {
     );
   });
 
-  it('deliberately excludes the in-tool tile providers (Esri, OSM)', () => {
+  it('deliberately excludes the in-tool tile providers (Esri, OSM) and duplicates', () => {
     expect(byId.esri).toBeUndefined();
     expect(byId.osm).toBeUndefined();
+    // Satellites.pro was dropped: its basemaps are the other links' imagery
+    expect(byId.satellites_pro).toBeUndefined();
   });
 
   it('embeds the coordinates in each URL', () => {
