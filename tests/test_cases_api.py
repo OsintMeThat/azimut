@@ -309,3 +309,36 @@ def test_delete_media_entity_removes_file(client):
         e["type"] == "media" for e in client.get(f"/api/cases/{cid}").json()["entities"]
     )
 
+
+
+def test_cleanup_scratch_reaps_only_old_empty_sessions(tmp_workspace):
+    import json as jsonlib
+
+    from azimut.workspace import Case
+
+    old_stamp = "2000-01-01T00:00:00Z"
+
+    def _age(case):
+        data = jsonlib.loads(case.json_path.read_text(encoding="utf-8"))
+        data["updated_at"] = old_stamp
+        case.json_path.write_text(jsonlib.dumps(data), encoding="utf-8")
+
+    # old and empty → reaped
+    empty_old = Case.create("Scratch session", scratch=True)
+    _age(empty_old)
+    # old but holding an entity → kept
+    with_entity = Case.create("Scratch session", scratch=True)
+    with_entity.add_entity("place", "Somewhere", attrs={}, by="test")
+    _age(with_entity)
+    # old but holding a media file → kept
+    with_file = Case.create("Scratch session", scratch=True)
+    (with_file.path / "media" / "shot.png").write_bytes(b"png")
+    _age(with_file)
+    # fresh and empty → kept (it may be in use right now)
+    empty_new = Case.create("Scratch session", scratch=True)
+
+    assert Case.cleanup_scratch() == 1
+    assert not empty_old.path.exists()
+    assert with_entity.path.exists()
+    assert with_file.path.exists()
+    assert empty_new.path.exists()

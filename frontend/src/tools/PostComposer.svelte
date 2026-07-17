@@ -182,7 +182,7 @@
   }
 
   function tweet2Text() {
-    const label = mediaType === 'video' ? '2/ Video:' : '2/ Image(s):';
+    const label = mediaType === 'video' ? '2/ Video:' : '2/ Image:';
     return mediaText.trim() ? `${label}\n${mediaText.trim()}` : label;
   }
 
@@ -503,7 +503,7 @@
       <button class="btn btn-ghost btn-sm" onclick={saveDraft} disabled={saving}>
         <Icon name="save" size={14} /> {draftName ? 'Save draft' : 'Save as draft'}
       </button>
-      <button class="btn btn-primary btn-sm" onclick={publish} disabled={!tweet1.trim()} title="Copy the thread and open X compose prefilled — Azimut never posts for you">
+      <button class="btn btn-primary btn-sm" onclick={publish} disabled={!tweet1.trim()} title="Copy the thread and open X compose">
         <Icon name="post" size={14} /> Publish on X
       </button>
     </div>
@@ -644,7 +644,7 @@
           ></textarea>
         </div>
 
-        <!-- Tweet 2: media (Video / Image(s)) -->
+        <!-- Tweet 2: media (Video / Image) -->
         {#if mediaEnabled}
         <div class="tweet-block card">
           <div class="tweet-head">
@@ -662,7 +662,7 @@
                 class:btn-primary={mediaType === 'images'}
                 class:btn-ghost={mediaType !== 'images'}
                 onclick={() => (mediaType = mediaType === 'images' ? 'none' : 'images')}
-              >Image(s)</button>
+              >Image</button>
             </div>
             {#if mediaType !== 'none'}
               <span class="counter">{weightedLength(tweet2Text())}/{X_LIMIT}</span>
@@ -675,7 +675,7 @@
             </button>
           </div>
           {#if mediaType !== 'none'}
-            <div class="media-prefix">{mediaType === 'video' ? '2/ Video:' : '2/ Image(s):'}</div>
+            <div class="media-prefix">{mediaType === 'video' ? '2/ Video:' : '2/ Image:'}</div>
             <textarea
               class="textarea post-text mono"
               dir="auto"
@@ -712,7 +712,7 @@
               {/if}
             </div>
           {:else}
-            <span class="muted">Toggle Video or Image(s) to add a media tweet</span>
+            <span class="muted">Toggle Video or Image to add a media tweet</span>
           {/if}
         </div>
         {/if}
@@ -802,7 +802,7 @@
 {#if discardConfirm}
   <ConfirmDialog
     title="Discard this draft?"
-    message="The current post — description, coordinates, media and extra tweets — will be cleared."
+    message="This clears the current post."
     detail={draftName ? 'This does not delete the saved draft, only the unsaved changes here.' : 'Anything not saved yet will be lost.'}
     confirmLabel="Discard"
     tone="danger"

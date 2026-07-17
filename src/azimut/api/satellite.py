@@ -274,6 +274,8 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
     (404s / "not yet available" placeholders) are overzoomed — the parent
     tile's quadrant upscaled — instead of breaking the map.
     """
+    if z < 0 or not (0 <= x < (1 << z)) or not (0 <= y < (1 << z)):
+        raise HTTPException(status_code=422, detail="tile coordinates out of range")
     try:
         provider = tiles.get_provider(provider_id)
     except KeyError as exc:

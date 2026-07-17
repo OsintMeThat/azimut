@@ -1661,7 +1661,7 @@
         class="input"
         placeholder={'50.4501, 30.5234  ·  48°51\'29"N 2°17\'40"E  ·  a place name'}
         bind:value={coordsText}
-        title="Coordinates (decimal or DMS) or a place name (geocoded via Nominatim)"
+        title="Coordinates (decimal, DMS, MGRS, plus code) or a place name"
       />
       <button type="submit" class="btn" disabled={!coordsText.trim() || searching}>
         <Icon name="search" size={15} /> {searching ? '…' : 'Go'}
@@ -1715,7 +1715,7 @@
             class="mtbtn"
             class:on={uiState.refViewers.length}
             onclick={openRefPicker}
-            title="Add a reference image or video over the map (scratch only — never captured or saved)"
+            title="Add a reference image or video over the map"
             aria-label="Add reference"
           >
             <Icon name="image" size={16} />
@@ -2021,7 +2021,7 @@
         {#if usagePill}
           <span
             class="usage-pill mono"
-            title="Requests made to this billed provider this month — local counter, see Settings"
+            title="Requests to this billed provider this month"
           >{usagePill}</span>
         {/if}
         {#if currentProvider?.meter && displayedBaseId !== providerId}
@@ -2046,7 +2046,7 @@
           class:on={moveMode}
           onclick={toggleMoveMode}
           disabled={markerStyle === 'none'}
-          title="Move the marker off-center — recorded coordinates follow the pin"
+          title="Move the marker (coordinates follow it)"
         >
           <Icon name="crosshair" size={14} /> {moveMode ? 'Moving' : 'Move pin'}
         </button>
@@ -2056,7 +2056,7 @@
             class="btn place-save-main"
             onclick={savePlace}
             disabled={savingPlace}
-            title="Save just this point (the pin, or the crop center) as a navigable place — no image"
+            title="Save this point as a place (no image)"
           >
             <Icon name="pin" size={15} /> {savingPlace ? 'Saving…' : 'Save place'}
           </button>
@@ -2661,8 +2661,8 @@
 {#if refPicker}
   <Modal title="Add reference" onclose={() => (refPicker = false)} width="560px">
     <p class="ref-hint">
-      Float one of the case's images or videos over the map to eyeball against the imagery.
-      It's a scratch aid — never captured or saved.
+      Float a case image or video over the map to compare against the imagery.
+      Reference windows are never captured or saved.
     </p>
     {#if refLoading}
       <div class="ref-empty">Loading…</div>

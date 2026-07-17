@@ -13,11 +13,23 @@ from typing import Any, Callable
 _jobs: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
 
+# Finished jobs kept for late polls; older ones are dropped when a new job
+# starts, so a long session doesn't grow the registry without bound.
+MAX_FINISHED = 100
+
+
+def _evict_finished() -> None:
+    """Drop the oldest finished jobs past MAX_FINISHED. Call under _lock."""
+    finished = [jid for jid, job in _jobs.items() if job["status"] != "running"]
+    for jid in finished[: max(0, len(finished) - MAX_FINISHED)]:
+        del _jobs[jid]
+
 
 def start(kind: str, work: Callable[[Callable[[dict[str, Any]], None]], Any]) -> str:
     """Run `work(set_progress)` in a thread; returns the job id."""
     job_id = uuid.uuid4().hex[:12]
     with _lock:
+        _evict_finished()
         _jobs[job_id] = {"id": job_id, "kind": kind, "status": "running", "progress": {}}
 
     def set_progress(progress: dict[str, Any]) -> None:

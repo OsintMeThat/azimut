@@ -37,7 +37,7 @@
 </script>
 
 <Modal title="Crop piece" width="560px" {onclose}>
-  <p class="hint">Drag to draw a region, then nudge the handles or type exact values. Lock an aspect ratio to match a panel. Applied before the warp, so the collage updates in place.</p>
+  <p class="hint">Drag to draw a region, then nudge the handles or type exact values.</p>
   <div class="stage">
     <img
       bind:this={imgEl}

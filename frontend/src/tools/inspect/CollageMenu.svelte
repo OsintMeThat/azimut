@@ -195,7 +195,7 @@
     </div>
   </div>
 
-  <p class="hint">Pieces are the frames you captured. Add them, drag to arrange, pull corners to warp into a panorama. Shift-click to select several and move them as one block.</p>
+  <p class="hint">Drag pieces to arrange them, pull corners to warp; shift-click selects several.</p>
 
   <div class="section">
     <div class="section-head"><span>Frames</span></div>
@@ -251,7 +251,7 @@
   {#if selectedGroup.length > 1}
     <div class="section">
       <div class="section-head"><span>Selected block <span class="count">{selectedGroup.length}</span></span></div>
-      <p class="hint">Scales and turns as one, about the block's centre. Shift-click a piece to add or drop it.</p>
+      <p class="hint">Moves as one block; shift-click a piece to add or drop it.</p>
       <div class="scale-row">
         <span class="lbl">Scale</span>
         <button class="btn btn-sm sq" onclick={() => scaleGroupBy(1 / 1.1)} aria-label="Shrink block">−</button>

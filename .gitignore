@@ -9,64 +9,29 @@ secrets/
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
 *.egg-info/
-.eggs/
 .venv/
-venv/
-env/
-.Python
 build/
 dist/
 *.whl
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.tox/
-pip-log.txt
 
 # Node / JS
 node_modules/
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-.pnpm-store/
-dist/
-build/
-.next/
-.nuxt/
-.turbo/
-.parcel-cache/
 
 # Editors / IDE
-.vscode/
-!.vscode/extensions.json
 .idea/
 *.swp
-*.swo
 *~
 .DS_Store
 Thumbs.db
 
 # Workspace / OS
 *.code-workspace
-.cache/
-.tmp/
-tmp/
 *.log
-logs/
-
-# Data / local artifacts
-*.sqlite3
-*.db
-data/
-*.csv
-!docs/**/*.csv
-
-# Docker
-*.pid
-.docker/
 
 # Misc
 *.bak

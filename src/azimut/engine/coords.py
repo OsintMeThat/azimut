@@ -13,6 +13,7 @@ reference vectors (tests/test_coords.py, frontend/src/lib/coords.test.js).
 from __future__ import annotations
 
 import math
+import re
 
 from .. import config
 
@@ -139,6 +140,97 @@ def to_utm(lat: float, lon: float) -> tuple[int, float, float]:
     if lat < 0:
         northing += 10000000  # southern hemisphere false northing
     return zone, easting, northing
+
+
+def from_utm(zone: int, easting: float, northing: float, southern: bool) -> tuple[float, float]:
+    """Inverse UTM projection: (lat, lon) for a zone/easting/northing triple."""
+    x = easting - 500000
+    y = northing - (10000000 if southern else 0)
+
+    m = y / _K0
+    mu = m / (_A * (1 - _E2 / 4 - 3 * _E2**2 / 64 - 5 * _E2**3 / 256))
+    e1 = (1 - math.sqrt(1 - _E2)) / (1 + math.sqrt(1 - _E2))
+    phi1 = (
+        mu
+        + (3 * e1 / 2 - 27 * e1**3 / 32) * math.sin(2 * mu)
+        + (21 * e1**2 / 16 - 55 * e1**4 / 32) * math.sin(4 * mu)
+        + (151 * e1**3 / 96) * math.sin(6 * mu)
+        + (1097 * e1**4 / 512) * math.sin(8 * mu)
+    )
+
+    sin1 = math.sin(phi1)
+    cos1 = math.cos(phi1)
+    tan1 = math.tan(phi1)
+    c1 = _EP2 * cos1 * cos1
+    t1 = tan1 * tan1
+    n1 = _A / math.sqrt(1 - _E2 * sin1 * sin1)
+    r1 = _A * (1 - _E2) / (1 - _E2 * sin1 * sin1) ** 1.5
+    d = x / (n1 * _K0)
+
+    lat = phi1 - (n1 * tan1 / r1) * (
+        d * d / 2
+        - (5 + 3 * t1 + 10 * c1 - 4 * c1 * c1 - 9 * _EP2) * d**4 / 24
+        + (61 + 90 * t1 + 298 * c1 + 45 * t1 * t1 - 252 * _EP2 - 3 * c1 * c1) * d**6 / 720
+    )
+    lon0 = math.radians((zone - 1) * 6 - 180 + 3)
+    lon = lon0 + (
+        d
+        - (1 + 2 * t1 + c1) * d**3 / 6
+        + (5 - 2 * c1 + 28 * t1 - 3 * c1 * c1 + 8 * _EP2 + 24 * t1 * t1) * d**5 / 120
+    ) / cos1
+    return math.degrees(lat), math.degrees(lon)
+
+
+_MGRS_RE = (
+    r"(?P<zone>\d{1,2})\s*(?P<band>[C-HJ-NP-X])\s*"
+    r"(?P<col>[A-HJ-NP-Z])(?P<row>[A-HJ-NP-V])\s*(?P<digits>\d[\d ]*)?"
+)
+
+
+def parse_mgrs(text: str) -> tuple[float, float] | None:
+    """Parse an MGRS reference ("31U DQ 48250 11951", spacing optional) to the
+    centre of its cell. None when the text isn't MGRS or the square is invalid.
+    """
+    m = re.fullmatch(_MGRS_RE, text.strip().upper())
+    if not m:
+        return None
+    zone = int(m.group("zone"))
+    band = m.group("band")
+    if not 1 <= zone <= 60:
+        return None
+    groups = (m.group("digits") or "").split()
+    if len(groups) == 2 and len(groups[0]) != len(groups[1]):
+        return None  # "482 11951" is a typo, not a 10 m reference
+    digits = "".join(groups)
+    if len(digits) % 2 or len(digits) > 10:
+        return None
+    half = len(digits) // 2
+    unit = 10 ** (5 - half)  # metres per least-significant digit
+    e_in = (int(digits[:half]) if half else 0) * unit + unit / 2
+    n_in = (int(digits[half:]) if half else 0) * unit + unit / 2
+
+    col_set = _COL_SETS[(zone - 1) % 3]
+    if m.group("col") not in col_set:
+        return None
+    e100k = (col_set.index(m.group("col")) + 1) * 100000
+    row_index = _ROW_LETTERS.index(m.group("row"))
+    if zone % 2 == 0:
+        row_index = (row_index - 5) % 20
+    n100k = row_index * 100000
+
+    # The 100 km row letters repeat every 2,000 km; the band letter picks which
+    # repeat. Try each candidate and keep the one that lands inside the band.
+    southern = band < "N"
+    band_bottom = -80 + _BANDS.index(band) * 8
+    band_top = 84 if band == "X" else band_bottom + 8
+    for k in range(0, 10):
+        northing = n100k + n_in + k * 2000000
+        lat, lon = from_utm(zone, e100k + e_in, northing, southern)
+        # half a degree of slack: points near a band edge round across it
+        if band_bottom - 0.5 <= lat <= band_top + 0.5:
+            if -90 <= lat <= 90 and -180 <= lon <= 180:
+                return lat, lon
+    return None
 
 
 def format_mgrs(lat: float, lon: float) -> str | None:

@@ -29,6 +29,9 @@ from . import config
 
 CASE_SUBDIRS = ("media", "proofs", "exports", "inspect")
 
+# Empty scratch sessions older than this are reaped at startup (spec §9).
+SCRATCH_MAX_AGE_DAYS = 14
+
 # One lock per case directory, shared across every Case instance that points
 # at it (a fresh instance is constructed per request). Without it, concurrent
 # read-modify-write of case.json — e.g. several media downloads from the
@@ -174,6 +177,52 @@ class Case:
             if (path / "case.json").exists():
                 return cls(path)
         raise CaseError(f"case '{case_id}' not found")
+
+    @classmethod
+    def cleanup_scratch(cls, max_age_days: int = SCRATCH_MAX_AGE_DAYS) -> int:
+        """Delete scratch cases that hold nothing and haven't been touched in
+        ``max_age_days``. Returns how many were removed.
+
+        "Nothing" means no entities, no links and no files under the case
+        subdirs — a scratch with any content is never touched (promote or
+        delete it deliberately). Closes the spec §9 question: one-shot
+        sessions and unpicked extension captures stop accumulating forever.
+        """
+        parent = config.scratch_dir()
+        if not parent.is_dir():
+            return 0
+        cutoff = datetime.now(timezone.utc).timestamp() - max_age_days * 86400
+        removed = 0
+        for path in list(parent.iterdir()):
+            if not (path / "case.json").exists():
+                continue
+            case = cls(path)
+            try:
+                data = case.read()
+            except (OSError, json.JSONDecodeError):
+                continue
+            if data.get("entities") or data.get("links"):
+                continue
+            stamp = data.get("updated_at") or data.get("created_at") or ""
+            try:
+                when = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ")
+            except ValueError:
+                continue
+            if when.replace(tzinfo=timezone.utc).timestamp() > cutoff:
+                continue
+            if any(
+                p.is_file()
+                for sub in CASE_SUBDIRS
+                if (path / sub).is_dir()
+                for p in (path / sub).rglob("*")
+            ):
+                continue
+            try:
+                case.delete()
+                removed += 1
+            except OSError:
+                continue  # a file may be open elsewhere (Windows) — next start
+        return removed
 
     @classmethod
     def list_all(cls) -> list[dict[str, Any]]:

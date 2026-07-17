@@ -70,6 +70,30 @@ def test_save_load_roundtrip(client):
     assert entities[0]["label"] == "Renamed proof"
 
 
+def test_resave_with_png_adds_the_path_to_the_entity(client):
+    cid = client.post("/api/cases", json={"name": "SpecFirst"}).json()["id"]
+
+    # first save is spec-only: no PNG, so the entity has no path
+    saved = client.post(
+        f"/api/cases/{cid}/proofs", json={"title": "Draft proof", "spec": SPEC}
+    ).json()
+    entity = next(
+        e for e in client.get(f"/api/cases/{cid}").json()["entities"] if e["type"] == "proof"
+    )
+    assert "path" not in entity["attrs"]
+
+    # exporting later re-saves with the PNG — the entity must gain the path,
+    # or the sidebar preview and delete_by_path can't see the file
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"name": saved["name"], "title": "Draft proof", "spec": SPEC, "png_base64": _png_b64()},
+    )
+    entity = next(
+        e for e in client.get(f"/api/cases/{cid}").json()["entities"] if e["type"] == "proof"
+    )
+    assert entity["attrs"]["path"] == f"proofs/{saved['name']}.png"
+
+
 def test_invalid_png_rejected(client):
     cid = client.post("/api/cases", json={"name": "Bad"}).json()["id"]
     res = client.post(

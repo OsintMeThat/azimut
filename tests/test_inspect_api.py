@@ -44,15 +44,16 @@ def test_probe_image(client):
     assert probe["width"] == 120 and probe["height"] == 90
 
 
-def test_bake_creates_derivative_media(client):
+def test_save_frames_files_adjusted_derivative(client):
     cid = client.post("/api/cases", json={"name": "Bake"}).json()["id"]
     item = _upload(client, cid, "orig.png")
 
     res = client.post(
-        f"/api/cases/{cid}/inspect/bake",
-        json={"path": item["path"], "ops": [{"op": "brightness", "params": {"amount": 1.4}}],
-              "label": "Brightened"},
-    ).json()
+        f"/api/cases/{cid}/inspect/save-frames",
+        json={"items": [{"path": item["path"],
+                         "ops": [{"op": "brightness", "params": {"amount": 1.4}}],
+                         "label": "Brightened"}]},
+    ).json()["saved"][0]
     assert res["duplicate"] is False
     new_path = res["item"]["path"]
     assert new_path != item["path"]
@@ -70,13 +71,18 @@ def test_bake_creates_derivative_media(client):
     assert updated["source"]["op"] == "adjust"
     assert updated["source"]["from"] == item["path"]
 
+    # the label reaches the sidecar title and the entity label — a labeled
+    # save must never be a silent no-op
+    assert updated["title"] == "Brightened"
+    assert derived["label"] == "Brightened"
 
-def test_bake_unknown_filter_is_rejected(client):
+
+def test_save_frames_unknown_filter_is_rejected(client):
     cid = client.post("/api/cases", json={"name": "BadOp"}).json()["id"]
     item = _upload(client, cid, "x.png")
     res = client.post(
-        f"/api/cases/{cid}/inspect/bake",
-        json={"path": item["path"], "ops": [{"op": "nope", "params": {}}]},
+        f"/api/cases/{cid}/inspect/save-frames",
+        json={"items": [{"path": item["path"], "ops": [{"op": "nope", "params": {}}]}]},
     )
     assert res.status_code == 422
 
@@ -85,37 +91,46 @@ def test_crop_op_reduces_dimensions(client):
     cid = client.post("/api/cases", json={"name": "Crop"}).json()["id"]
     item = _upload(client, cid, "big.png", _png_bytes(size=(200, 100)))
     res = client.post(
-        f"/api/cases/{cid}/inspect/bake",
-        json={"path": item["path"],
-              "ops": [{"op": "crop", "params": {"x": 0.25, "y": 0.25, "w": 0.5, "h": 0.5}}]},
-    ).json()
+        f"/api/cases/{cid}/inspect/save-frames",
+        json={"items": [{"path": item["path"],
+                         "ops": [{"op": "crop",
+                                  "params": {"x": 0.25, "y": 0.25, "w": 0.5, "h": 0.5}}]}]},
+    ).json()["saved"][0]
     probe = client.get(
         f"/api/cases/{cid}/inspect/probe", params={"path": res["item"]["path"]}
     ).json()
     assert probe["width"] == 100 and probe["height"] == 50
 
 
-def test_collage_combines_images(client):
+def test_compose_combines_images(client):
     cid = client.post("/api/cases", json={"name": "Collage"}).json()["id"]
     a = _upload(client, cid, "a.png", _png_bytes(color=(10, 20, 30)))
     b = _upload(client, cid, "b.png", _png_bytes(color=(200, 100, 50)))
 
     res = client.post(
-        f"/api/cases/{cid}/inspect/collage",
-        json={"paths": [a["path"], b["path"]], "columns": 2, "cell": 100, "gap": 10},
+        f"/api/cases/{cid}/inspect/compose",
+        json={"width": 230, "height": 120,
+              "nodes": [
+                  {"src": {"path": a["path"]},
+                   "quad": [[10, 10], [110, 10], [110, 110], [10, 110]]},
+                  {"src": {"path": b["path"]},
+                   "quad": [[120, 10], [220, 10], [220, 110], [120, 110]]},
+              ]},
     ).json()
     assert res["duplicate"] is False
     probe = client.get(
         f"/api/cases/{cid}/inspect/probe", params={"path": res["item"]["path"]}
     ).json()
-    # 2 columns × 100 cell + 3 gaps × 10 = 230 wide, 1 row = 120 tall
     assert probe["width"] == 230 and probe["height"] == 120
     assert client.get(f"/api/cases/{cid}/media").json().__len__() == 3
 
 
-def test_collage_requires_paths(client):
+def test_compose_requires_nodes(client):
     cid = client.post("/api/cases", json={"name": "Empty"}).json()["id"]
-    res = client.post(f"/api/cases/{cid}/inspect/collage", json={"paths": []})
+    res = client.post(
+        f"/api/cases/{cid}/inspect/compose",
+        json={"width": 100, "height": 100, "nodes": []},
+    )
     assert res.status_code == 422
 
 
@@ -585,7 +600,7 @@ def test_frame_preview_returns_png_without_filing(client, tmp_path):
     before = len(client.get(f"/api/cases/{cid}/media").json())
 
     res = client.post(
-        f"/api/cases/{cid}/inspect/frame/preview", json={"path": item["path"], "time": 1.0}
+        f"/api/cases/{cid}/inspect/render-preview", json={"path": item["path"], "time": 1.0}
     )
     assert res.status_code == 200
     assert res.headers["content-type"] == "image/png"
@@ -799,8 +814,9 @@ def test_frame_capture_from_video(client, tmp_path):
         ).json()["item"]
 
     res = client.post(
-        f"/api/cases/{cid}/inspect/frame", json={"path": item["path"], "time": 1.0}
-    ).json()
+        f"/api/cases/{cid}/inspect/save-frames",
+        json={"items": [{"path": item["path"], "time": 1.0}]},
+    ).json()["saved"][0]
     assert res["item"]["kind"] == "image"
     assert client.get(f"/files/{cid}/{res['item']['path']}").status_code == 200
 

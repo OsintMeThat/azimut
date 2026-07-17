@@ -541,7 +541,11 @@ def download_url(
         downloaded = Path(ydl.prepare_filename(info))
 
     if not downloaded.exists():  # extension may differ after post-processing
-        candidates = sorted(tmp_dir.glob(f"*[{info['id']}]*"), key=lambda p: p.stat().st_mtime)
+        # literal substring match — glob would treat "[id]" as a character class
+        candidates = sorted(
+            (p for p in tmp_dir.iterdir() if f"[{info['id']}]" in p.name),
+            key=lambda p: p.stat().st_mtime,
+        )
         if not candidates:
             raise RuntimeError("yt-dlp reported success but no file was produced")
         downloaded = candidates[-1]
@@ -597,7 +601,7 @@ def list_media(case: Case) -> list[dict[str, Any]]:
 
 
 def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, Any]:
-    """Update mutable sidecar fields (notes, folder, label) and mirror them onto
+    """Update mutable sidecar fields (notes, folder, title) and mirror them onto
     the media entity so the case sidebar stays in sync."""
     media_path = case.resolve_inside(rel_path)
     sidecar = _sidecar_path(media_path)
@@ -619,8 +623,10 @@ def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, 
     entity = case.find_entity(attr="path", value=rel_path)
     if entity:
         entity_patch: dict[str, Any] = {}
-        if patch.get("title"):
-            entity_patch["label"] = patch["title"]
+        if "title" in patch:
+            # a cleared title falls back to the filename, like a fresh import —
+            # the sidebar label must never freeze on a title that no longer exists
+            entity_patch["label"] = str(patch["title"] or "") or media_path.name
         attrs: dict[str, Any] = {}
         if "folder" in patch:
             attrs["folder"] = patch["folder"] or ""

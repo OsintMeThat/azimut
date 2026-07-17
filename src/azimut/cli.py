@@ -1,14 +1,11 @@
-"""`azimut` command: start the local server and open the browser."""
+"""`azimut` command: start the local server and open the browser tab."""
 
 from __future__ import annotations
 
 import argparse
-import threading
-import webbrowser
-
-import uvicorn
 
 from . import __version__
+from .launcher import serve
 
 DEFAULT_PORT = 8477  # uncommon high port, clear of common dev ranges
 
@@ -16,22 +13,13 @@ DEFAULT_PORT = 8477  # uncommon high port, clear of common dev ranges
 def main() -> None:
     parser = argparse.ArgumentParser(prog="azimut", description="Azimut — the OSINT investigator's workbench")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    parser.add_argument("--no-browser", action="store_true", help="don't open the browser")
+    parser.add_argument("--no-browser", action="store_true", help="don't open the browser tab")
     parser.add_argument("--version", action="version", version=f"azimut {__version__}")
     args = parser.parse_args()
 
-    url = f"http://127.0.0.1:{args.port}"
-    if not args.no_browser:
-        threading.Timer(0.8, webbrowser.open, args=(url,)).start()
-
-    print(f"Azimut {__version__} — {url}  (local only, nothing leaves this machine)")
-    uvicorn.run(
-        "azimut.server:create_app",
-        factory=True,
-        host="127.0.0.1",  # local-first: never bind beyond localhost
-        port=args.port,
-        log_level="warning",
-    )
+    print(f"Azimut {__version__} — http://127.0.0.1:{args.port}  (local only, nothing leaves this machine)")
+    print("Runs in your browser tab. Close this window to stop Azimut.")
+    serve(args.port, open_browser=not args.no_browser)
 
 
 if __name__ == "__main__":

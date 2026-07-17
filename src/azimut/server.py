@@ -4,13 +4,61 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__, config
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# The server binds localhost only, but that alone doesn't stop a web page the
+# browser has open from reaching it — a page can hit 127.0.0.1 directly (its
+# own Origin travels along), or point a name it controls at 127.0.0.1 (DNS
+# rebinding, where the Host header becomes that name). Both are refused here:
+# the Host must be a loopback name (defeats rebinding), and a cross-origin
+# web Origin is turned away on every route except the token-gated ingest
+# island, which opens itself to browser-extension origins on purpose.
+LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
+
+def _hostname(value: str) -> str:
+    """The bare host of a Host or Origin header — no scheme, path or port."""
+    host = value.strip().lower()
+    if "://" in host:
+        host = host.split("://", 1)[1]
+    host = host.split("/", 1)[0]
+    if host.startswith("["):  # bracketed IPv6, e.g. [::1]:8477 -> [::1]
+        return host.split("]", 1)[0] + "]"
+    return host.split(":", 1)[0]
+
+
+def _is_local(hostname: str) -> bool:
+    return hostname in LOCAL_HOSTNAMES or hostname.endswith(".localhost")
+
+
+def install_local_guard(app: FastAPI) -> None:
+    """Reject requests that don't originate from this machine's own loopback.
+
+    Added last so it runs first (outermost middleware): a bad Host or a
+    cross-origin web Origin is refused before any router — or the ingest CORS
+    layer — sees it. Extension origins are still allowed, but only on the
+    ingest routes they're scoped to.
+    """
+    from .api.ingest import EXTENSION_ORIGIN_SCHEMES
+
+    @app.middleware("http")
+    async def local_guard(request: Request, call_next):
+        if not _is_local(_hostname(request.headers.get("host", ""))):
+            return PlainTextResponse("invalid host header", status_code=400)
+        origin = request.headers.get("origin")
+        if origin and not _is_local(_hostname(origin)):
+            ingest_extension = request.url.path.startswith(
+                "/api/ingest/"
+            ) and origin.startswith(EXTENSION_ORIGIN_SCHEMES)
+            if not ingest_extension:
+                return PlainTextResponse("cross-origin request refused", status_code=403)
+        return await call_next(request)
 
 
 def create_app() -> FastAPI:
@@ -20,6 +68,14 @@ def create_app() -> FastAPI:
     from .engine import scrapers
 
     scrapers.activate()
+
+    # Reap stale empty scratch sessions; never let housekeeping block startup.
+    from .workspace import Case
+
+    try:
+        Case.cleanup_scratch()
+    except OSError:
+        pass
 
     app = FastAPI(title="Azimut", version=__version__, docs_url="/api/docs")
 
@@ -37,6 +93,8 @@ def create_app() -> FastAPI:
     app.include_router(events.router)
     # extension-origin CORS, /api/ingest/* only (see ingest.install_cors)
     ingest.install_cors(app)
+    # last, so it wraps everything: refuse non-loopback Host / cross-origin web
+    install_local_guard(app)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

@@ -34,5 +34,10 @@ export function mapLinks(lat, lon, zoom = 17) {
       url: `https://browser.dataspace.copernicus.eu/?zoom=${z}&lat=${lat}&lng=${lon}`,
     },
     { id: 'zoom_earth', label: 'Zoom Earth', url: `https://zoom.earth/#view=${lat},${lon},${z}z` },
+    {
+      id: 'satellites_pro',
+      label: 'Satellites.pro',
+      url: `https://satellites.pro/#${lat},${lon},${z}`,
+    },
   ];
 }

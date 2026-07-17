@@ -492,6 +492,13 @@ def test_screenshot_capture_refused_for_tile_providers(client):
     assert r.status_code == 422
 
 
+def test_tile_proxy_rejects_out_of_range_coordinates(client):
+    # a negative z used to reach `1 << z` and 500; bad input is a 422, not a crash
+    assert client.get("/api/tiles/esri-world-imagery/-1/0/0").status_code == 422
+    assert client.get("/api/tiles/esri-world-imagery/2/4/0").status_code == 422
+    assert client.get("/api/tiles/esri-world-imagery/2/0/-1").status_code == 422
+
+
 def test_tile_proxy_benches_google_on_a_persistent_403(client, monkeypatch):
     """A 403 that survives the session re-mint names the key (EEA policy,
     revoked key) — the basemap must stop being offered, with Google's own

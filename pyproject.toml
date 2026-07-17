@@ -18,6 +18,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 # Upper bounds stop at the next major we haven't tested against: a range is a
 # claim about what works, and we can't make that claim for code that doesn't

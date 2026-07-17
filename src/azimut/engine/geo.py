@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from . import coords
 from .tiles import USER_AGENT
 
 # -- parsing -------------------------------------------------------------------
@@ -20,7 +21,11 @@ _DMS = (
 
 
 def parse_coords(text: str) -> tuple[float, float] | None:
-    """Parse 'lat, lon' in decimal or DMS. Returns (lat, lon) or None."""
+    """Parse coordinates in decimal, DMS, MGRS or plus-code form.
+
+    Every format the app can display is accepted back — a reference copied out
+    of Azimut must always paste back in. Returns (lat, lon) or None.
+    """
     text = text.strip()
 
     # decimal: "50.4501, 30.5234" / "50.4501 30.5234"
@@ -44,7 +49,34 @@ def parse_coords(text: str) -> tuple[float, float] | None:
         lon = next((v for v, h in values if h in "EW"), None)
         if lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180:
             return lat, lon
-    return None
+
+    # MGRS: "31U DQ 48250 11951" (spacing optional)
+    mgrs = coords.parse_mgrs(text)
+    if mgrs:
+        return mgrs
+
+    # full plus code: "8FW4V75V+8Q"
+    return parse_plus_code(text)
+
+
+def parse_plus_code(text: str) -> tuple[float, float] | None:
+    """Decode a full Open Location Code to its cell centre. None otherwise.
+
+    Only full codes (the 8+2 form the app generates) — a short code needs a
+    reference location to resolve, which a paste doesn't carry.
+    """
+    code = text.strip().upper()
+    if not re.fullmatch(rf"[{_OLC_ALPHABET}]{{8}}\+[{_OLC_ALPHABET}]{{2}}", code):
+        return None
+    digits = code.replace("+", "")
+    lat, lon = 0.0, 0.0
+    res = 20.0
+    for i in range(0, 10, 2):
+        lat += _OLC_ALPHABET.index(digits[i]) * res
+        lon += _OLC_ALPHABET.index(digits[i + 1]) * res
+        res /= 20
+    res *= 20  # the last pair's cell size
+    return lat - 90 + res / 2, lon - 180 + res / 2
 
 
 # -- formatting ------------------------------------------------------------------
@@ -94,11 +126,13 @@ def map_links(lat: float, lon: float, zoom: int = 17) -> dict[str, str]:
         "google": f"https://www.google.com/maps/@{lat},{lon},{zoom}z",
         "google_sat": f"https://www.google.com/maps/@{lat},{lon},2000m/data=!3m1!1e3",
         "google_earth": f"https://earth.google.com/web/@{lat},{lon},0a,1000d,35y,0h,0t,0r",
+        "apple": f"https://maps.apple.com/?ll={lat},{lon}&z={zoom}&t=k",
         "osm": f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map={zoom}/{lat}/{lon}",
         "bing": f"https://www.bing.com/maps?cp={lat}~{lon}&lvl={zoom}&style=h",
         "yandex": f"https://yandex.com/maps/?ll={lon},{lat}&z={zoom}&l=sat",
         "sentinel": f"https://browser.dataspace.copernicus.eu/?zoom={zoom}&lat={lat}&lng={lon}",
         "zoom_earth": f"https://zoom.earth/#view={lat},{lon},{zoom}z",
+        "satellites_pro": f"https://satellites.pro/#{lat},{lon},{zoom}",
     }
 
 

@@ -1621,7 +1621,7 @@
       class="btn"
       onclick={copyPng}
       disabled={!proof.panels.length || copying}
-      title="Copy the composed PNG to the clipboard — paste it in a chat or a tweet"
+      title="Copy the composed PNG to the clipboard"
     >
       <Icon name="copy" size={15} /> {copying ? 'Copying…' : 'Copy PNG'}
     </button>
@@ -1697,7 +1697,7 @@
       <button
         class="tb-btn"
         class:active={proof.layout !== 'free'}
-        title="Grid layout — panels flow in rows; select one to move it with the on-canvas arrows"
+        title="Grid layout: panels flow in rows"
         onclick={() => setLayoutMode('grid')}
       >
         <Icon name="grid" size={18} />
@@ -1705,7 +1705,7 @@
       <button
         class="tb-btn"
         class:active={proof.layout === 'free'}
-        title="Free layout — drag panels anywhere (overlap allowed), corner handles resize"
+        title="Free layout: drag panels anywhere"
         onclick={() => setLayoutMode('free')}
       >
         <Icon name="layers" size={18} />
@@ -1794,7 +1794,7 @@
             <Icon name="link" size={13} />
             <span>Source</span>
             {#if !displayedSource}
-              <span class="meta-warn" title="A source is a link — add media downloaded from a URL, or paste one">
+              <span class="meta-warn" title="Missing source link">
                 <Icon name="alert" size={13} />
               </span>
             {/if}
@@ -2088,7 +2088,7 @@
 {#if discardConfirm}
   <ConfirmDialog
     title="Discard this proof?"
-    message="The current document — panels, annotations and layout — will be cleared."
+    message="This clears the current document."
     detail={savedName ? 'This does not delete the saved proof, only the unsaved changes here.' : 'Anything not saved yet will be lost.'}
     confirmLabel="Discard"
     tone="danger"

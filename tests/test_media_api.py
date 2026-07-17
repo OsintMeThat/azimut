@@ -128,6 +128,11 @@ def test_update_media_title(client):
     ).json()
     assert "title" not in cleared
 
+    # the entity label falls back to the filename — it must not freeze on the
+    # old title once that title is gone
+    entities = client.get(f"/api/cases/{cid}").json()["entities"]
+    assert entities[0]["label"] == item["path"].rsplit("/", 1)[-1]
+
 
 def test_update_media_clear_notes(client):
     cid = client.post("/api/cases", json={"name": "Clear"}).json()["id"]

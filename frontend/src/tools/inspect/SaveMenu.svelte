@@ -19,7 +19,7 @@
 </script>
 
 <div class="module">
-  <p class="hint">Tick items on the left, pick a folder, and save. Everything lands in the Media Library with provenance back to its source.</p>
+  <p class="hint">Tick what to save; it lands in the Media Library with its provenance.</p>
 
   <div class="pickers">
     <button class="btn btn-sm" onclick={selectAll} disabled={!savables.length}>Select all</button>

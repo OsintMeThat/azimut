@@ -5,8 +5,9 @@
 > extensible, **versioned** — grown from real tool needs, never a whiteboard
 > taxonomy. Nothing enters a case without a human click (SPEC principle 5).
 
-**Schema version: `0`** (draft, 2026-07-10, aligns with spec v0.2). Bump on any
-breaking change to entity/link shape; ship a migration when you do.
+**Schema version: `1`** (what `case.json` carries as `{"azimut": {"schema": 1}}`;
+aligns with spec v0.2). Bump on any breaking change to entity/link shape; ship a
+migration when you do.
 
 Legend: ✅ implemented in code · 🔶 machinery exists, unused · ⬜ proposed.
 
@@ -50,7 +51,7 @@ just doesn't get a custom renderer for them (SPEC §5 escape hatch, keep it).
 |---|---|---|---|---|
 | `media` | ✅ | media-library | `path`, `sha256`, `source_url?` | yes (+ sidecar) |
 | `capture` | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `path` | yes (image) |
-| `place` | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `dms`, `zoom`, `bearing`, `notes?` | no (a point) |
+| `place` | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?` | no (a point) |
 | `proof` | ✅ | proof-composer | `spec` (json), `path` (png) | yes |
 | `post` | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | ✅ | inspect | `spec` (json) | yes |
@@ -156,7 +157,9 @@ How it is wired (`engine/links.py`):
   (UTC), `status`, optional `source` (a URL). Borrow the *shape* of W3C PROV
   (entity/activity/agent) conceptually — don't adopt the standard wholesale.
 - **Confidence** = `status`: `confirmed` (analyst-made or analyst-accepted) vs
-  `suggested` (a tool proposed it, awaiting a click). ✅ Binary on purpose —
+  `suggested` (a tool proposed it, awaiting a click). 🔶 `suggested` has no
+  producer yet — the sidebar section and the PATCH validator exist, but no tool
+  emits it until the v2 EXIF/OCR tools land. ✅ Binary on purpose —
   honest and simple; resist finer grading until a tool truly needs it.
   **A derivation is `confirmed`**: `derived-from`/`depends-on` record what the
   analyst's own click just made, not what a tool inferred. `suggested` is for

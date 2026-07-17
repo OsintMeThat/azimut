@@ -1072,7 +1072,7 @@
   {#if discardConfirm}
     <ConfirmDialog
       title="Discard this session?"
-      message="The current workspace — captured frames, adjustments and collage layout — will be cleared."
+      message="This clears the current workspace."
       detail={openedSession ? 'This does not delete the saved session, only the unsaved changes in this workspace.' : 'Anything not saved yet will be lost.'}
       confirmLabel="Discard"
       tone="danger"
@@ -1097,7 +1097,7 @@
         </div>
 
         {#if sessionModal.mode === 'save'}
-          <p class="modal-hint">Persist the whole workspace (frames, adjustments, collages) to reopen later. Saving the session does not file any media.</p>
+          <p class="modal-hint">Saves the workspace to reopen later; no media is filed.</p>
           <input
             class="input"
             placeholder="Session name"

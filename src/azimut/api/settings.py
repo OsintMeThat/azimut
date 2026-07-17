@@ -9,11 +9,12 @@ settings.json, reaching a case only as pixels in a rendered proof PNG.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -95,6 +96,9 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
 def get_settings() -> dict[str, Any]:
     settings = config.load_settings()
     return {
+        # keys travel in cleartext by decision: the Settings UI edits them in
+        # place, and the loopback bind + Host/Origin guard (server.py) is what
+        # keeps other pages from reading them
         "api_keys": settings.get("api_keys", {}),
         "usage": settings.get("usage", {}),
         "month": config.month_key(),
@@ -114,14 +118,25 @@ def get_settings() -> dict[str, Any]:
         # About tab: what this build is, and where it keeps its files
         "version": __version__,
         "workspace_root": str(config.workspace_root()),
-        # capture-extension pairing token (api/ingest.py) — minted on first read
-        "ingest_token": config.ingest_token(),
+        # capture-extension pairing token (api/ingest.py) — reported only if it
+        # already exists; loading Settings no longer mints a credential (POST
+        # /settings/ingest-token does, on the user's explicit reveal/copy)
+        "ingest_token": settings.get("ingest_token") or "",
     }
 
 
 @router.put("/settings/prefs")
 def put_prefs(body: PrefsIn) -> dict[str, Any]:
-    settings = config.load_settings()
+    # validate before taking the settings lock — a 422 must not hold it
+    if body.coord_format is not None and body.coord_format not in config.COORD_FORMATS:
+        raise HTTPException(status_code=422, detail=f"unknown coord_format '{body.coord_format}'")
+    if body.units is not None and body.units not in config.UNIT_SYSTEMS:
+        raise HTTPException(status_code=422, detail=f"unknown units '{body.units}'")
+    settings = config.update_settings(lambda s: _apply_prefs(s, body))
+    return _prefs(settings)
+
+
+def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
     if body.providers_enabled is not None:
         merged = dict(settings.get("providers_enabled", {}))
         merged.update({k: bool(v) for k, v in body.providers_enabled.items() if k in KEYED_PROVIDERS})
@@ -157,42 +172,37 @@ def put_prefs(body: PrefsIn) -> dict[str, Any]:
                 merged[name] = max(1, min(10_000_000, int(value)))
         settings["free_tiers"] = merged
     if body.coord_format is not None:
-        if body.coord_format not in config.COORD_FORMATS:
-            raise HTTPException(status_code=422, detail=f"unknown coord_format '{body.coord_format}'")
         settings["coord_format"] = body.coord_format
     if body.units is not None:
-        if body.units not in config.UNIT_SYSTEMS:
-            raise HTTPException(status_code=422, detail=f"unknown units '{body.units}'")
         settings["units"] = body.units
     if body.home_view is not None:
         settings["home_view"] = body.home_view.model_dump()
     if body.post_mention is not None:
         settings["post_mention"] = body.post_mention.strip()[:64]
-    config.save_settings(settings)
-    return _prefs(settings)
 
 
 @router.put("/settings/keys")
 def put_keys(body: KeysIn) -> dict[str, Any]:
-    settings = config.load_settings()
-    keys = settings.setdefault("api_keys", {})
-    status = settings.setdefault("provider_status", {})
-    for name in KEYED_PROVIDERS:
-        value = getattr(body, name)
-        if value is None:
-            continue
-        value = value.strip()
-        if value != keys.get(name):
-            # a different credential gets a clean slate: the old verdict was
-            # about the old key, and a stale failure would keep the basemap
-            # benched (tiles.key_for) with no way back but a manual re-test
-            status.pop(name, None)
-        if value:
-            keys[name] = value
-        else:
-            keys.pop(name, None)
-    config.save_settings(settings)
-    return {"api_keys": keys}
+    def apply(settings: dict[str, Any]) -> None:
+        keys = settings.setdefault("api_keys", {})
+        status = settings.setdefault("provider_status", {})
+        for name in KEYED_PROVIDERS:
+            value = getattr(body, name)
+            if value is None:
+                continue
+            value = value.strip()
+            if value != keys.get(name):
+                # a different credential gets a clean slate: the old verdict was
+                # about the old key, and a stale failure would keep the basemap
+                # benched (tiles.key_for) with no way back but a manual re-test
+                status.pop(name, None)
+            if value:
+                keys[name] = value
+            else:
+                keys.pop(name, None)
+
+    settings = config.update_settings(apply)
+    return {"api_keys": settings.get("api_keys", {})}
 
 
 class StatusIn(BaseModel):
@@ -208,6 +218,51 @@ def rotate_ingest_token() -> dict[str, Any]:
     """Mint a fresh capture-extension pairing token, orphaning every extension
     paired with the old one (each must paste the new token to reconnect)."""
     return {"ingest_token": config.ingest_token(rotate=True)}
+
+
+@router.post("/settings/ingest-token")
+def mint_ingest_token() -> dict[str, Any]:
+    """Return the pairing token, minting it if it doesn't exist yet.
+
+    Split out from GET /settings so merely opening Settings can't create a
+    credential: the token is minted only when the user reveals/copies it to
+    pair the capture extension."""
+    return {"ingest_token": config.ingest_token()}
+
+
+@router.get("/settings/export")
+def export_settings() -> Response:
+    """Download the whole settings.json (keys, providers, preferences) so it can
+    be restored on another machine (POST /settings/import). It carries the
+    user's own keys by design — it's a local download to their own disk, the
+    same secrets that already live in the workspace."""
+    payload = json.dumps(config.load_settings(), indent=2, ensure_ascii=False)
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="azimut-settings.json"'},
+    )
+
+
+class ImportIn(BaseModel):
+    """A previously exported settings blob. Only keys Azimut recognises are
+    applied — anything else in the file is ignored, so a hand-edited or foreign
+    JSON can't inject arbitrary state."""
+
+    settings: dict[str, Any]
+
+
+@router.post("/settings/import")
+def import_settings(body: ImportIn) -> dict[str, Any]:
+    known = set(config.DEFAULT_SETTINGS)
+    applied = sorted(k for k in body.settings if k in known)
+
+    def apply(settings: dict[str, Any]) -> None:
+        for key in applied:
+            settings[key] = body.settings[key]
+
+    config.update_settings(apply)
+    return {"imported": applied}
 
 
 @router.post("/settings/keys/{provider}/status")

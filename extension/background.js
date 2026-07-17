@@ -75,7 +75,11 @@ async function ingest(blob, meta) {
   if (r.status === 401) throw new Error("pairing token rejected — re-pair in the extension options");
   if (!r.ok) throw new Error(`Azimut refused the capture (${r.status}): ${(await r.text()).slice(0, 200)}`);
   const body = await r.json();
-  if (meta.caseId) api.storage.local.set({ lastCaseId: meta.caseId });
+  // Remember where this capture landed — including a freshly minted scratch
+  // (body.case_id), so repeated captures reuse it instead of minting one each.
+  if (body.case_id || meta.caseId) {
+    api.storage.local.set({ lastCaseId: body.case_id || meta.caseId });
+  }
   return body;
 }
 

@@ -14,7 +14,8 @@ fixes it and the extension never needs a reinstall.
 It serves two flows:
 
 - **External map sites** — Google Maps, Google Earth (web), Bing Maps, Yandex
-  Maps, OpenStreetMap, Apple Maps, Zoom Earth, Copernicus Browser, and
+  Maps, OpenStreetMap, Apple Maps, Zoom Earth, Copernicus Browser,
+  Satellites.pro, and
   whatever Azimut learns to recognize later. Click the toolbar icon (or
   `Alt+Shift+A`): a popup shows what Azimut parsed from the URL (correctable),
   a case picker, and one button — drag the area to capture. The result

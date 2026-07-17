@@ -16,9 +16,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The three OSes we ship binaries for, plus both ends of the Python range
-        # pyproject claims. Testing one Linux/3.12 box and shipping a Windows exe
-        # was a guess; this is the part that makes "works everywhere" checkable.
+        # The three OSes we ship binaries for, plus the floor and ceiling of the
+        # Python range pyproject claims. Testing one Linux/3.12 box and shipping a
+        # Windows exe was a guess; this is what makes "works everywhere" checkable.
         # Filesystem behaviour is where they actually differ — engine/scrapers.py
         # swaps directories, and Windows won't delete an open file.
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -26,6 +26,8 @@ jobs:
         include:
           - os: ubuntu-latest
             python: "3.11"  # the floor in requires-python
+          - os: ubuntu-latest
+            python: "3.13"  # the ceiling we've tested against
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
