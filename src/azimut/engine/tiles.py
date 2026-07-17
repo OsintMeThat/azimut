@@ -486,6 +486,9 @@ def fetch_crop(
 
     # A rotated crop needs a bigger north-up source so its corners stay covered
     # after rotation; the diagonal is the smallest square that always fits.
+    # Near the SIZE_MAX cap the enlarged square is clamped back to SIZE_MAX, so
+    # an extreme size+bearing combination can leave fill-coloured corners — the
+    # cap wins over corner coverage by design.
     if bearing:
         fetch_w = fetch_h = min(math.ceil(math.hypot(width, height)) + 2, SIZE_MAX)
     else:

@@ -134,7 +134,6 @@ async def ingest_screenshot(
     image: UploadFile,
     url: str = Form(min_length=1, max_length=4000),
     case_id: str = Form(default=""),
-    site: str = Form(default="", max_length=64),
     lat: float | None = Form(default=None, ge=-90, le=90),
     lon: float | None = Form(default=None, ge=-180, le=180),
     zoom: float | None = Form(default=None, ge=0, le=23),

@@ -377,8 +377,17 @@
   const detailsFilePath = $derived(
     infoData?.path ?? (infoEntity?.type === 'capture' ? infoEntity.attrs?.path : null)
   );
-  // which types get title/notes editors straight from the sidebar
-  const EDITABLE = new Set(['capture', 'place', 'media']);
+  // Every artifact type gets the title/notes editor (UI.md §4). Media and
+  // captures go through their sidecar PATCH; the rest edit the entity itself.
+  const EDITABLE = new Set([
+    'capture',
+    'place',
+    'media',
+    'proof',
+    'post',
+    'inspect-session',
+    'note',
+  ]);
 
   // The derivation chain around the selection: what it was made from, what was
   // made from it, and the sources it has outlived (ONTOLOGY §3). An entity with

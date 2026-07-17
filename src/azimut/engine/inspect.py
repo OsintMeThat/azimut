@@ -439,19 +439,6 @@ def _stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
 
-def capture_frame(case: Case, video_rel: str, time_s: float, label: str | None = None) -> dict[str, Any]:
-    """Extract one frame and file it as case media."""
-    video_path = case.resolve_inside(video_rel)
-    frame = extract_frame(video_path, time_s)
-    stem = Path(video_path.name).stem[:40]
-    name = f"{stem}_t{time_s:.2f}s_{_stamp()}.png"
-    source = _derivation(video_rel, _source_sha(case, video_rel), op="frame", time=round(time_s, 3))
-    result = media_engine.import_image(case, frame, name, source, by="inspect")
-    if label and not result.get("duplicate"):
-        media_engine.update_media(case, result["item"]["path"], {"label": label})
-    return result
-
-
 def scan_focus(
     case: Case, video_rel: str, set_progress: Callable[[dict], None] | None = None
 ) -> list[dict[str, Any]]:
@@ -539,67 +526,6 @@ def suggest_frames(
 
 
 # ---------------------------------------------------------------------------
-# Adjustments & collage (operate on images / captured frames)
-# ---------------------------------------------------------------------------
-
-
-def bake(case: Case, rel_path: str, ops: list[dict[str, Any]], label: str | None = None) -> dict[str, Any]:
-    """Apply an adjustment pipeline to an image and file the result as new media."""
-    with Image.open(case.resolve_inside(rel_path)) as img:
-        rendered = apply_ops(img, ops)
-    stem = Path(rel_path).stem[:40]
-    name = f"{stem}_edit_{_stamp()}.png"
-    source = _derivation(rel_path, _source_sha(case, rel_path), op="adjust", ops=ops)
-    result = media_engine.import_image(case, rendered, name, source, by="inspect")
-    if label and not result.get("duplicate"):
-        media_engine.update_media(case, result["item"]["path"], {"label": label})
-    return result
-
-
-def collage(
-    case: Case,
-    rel_paths: list[str],
-    *,
-    columns: int = 2,
-    gap: int = 8,
-    background: str = "#12141c",
-    cell: int = 480,
-    label: str | None = None,
-) -> dict[str, Any]:
-    """Assemble several images into a contact-sheet / collage (one derivative)."""
-    if not rel_paths:
-        raise ValueError("collage needs at least one image")
-    columns = max(1, min(columns, len(rel_paths)))
-    cell = max(64, min(cell, 1024))
-    gap = max(0, min(gap, 64))
-
-    tiles: list[Image.Image] = []
-    for rel in rel_paths:
-        with Image.open(case.resolve_inside(rel)) as img:
-            thumb = img.convert("RGB")
-            thumb.thumbnail((cell, cell))
-            tiles.append(thumb)
-
-    rows = (len(tiles) + columns - 1) // columns
-    width = columns * cell + (columns + 1) * gap
-    height = rows * cell + (rows + 1) * gap
-    canvas = Image.new("RGB", (width, height), background)
-
-    for idx, tile in enumerate(tiles):
-        r, c = divmod(idx, columns)
-        cx = gap + c * (cell + gap) + (cell - tile.width) // 2
-        cy = gap + r * (cell + gap) + (cell - tile.height) // 2
-        canvas.paste(tile, (cx, cy))
-
-    source = _derivation("", None, op="collage", sources=rel_paths, columns=columns)
-    name = f"collage_{_stamp()}.png"
-    result = media_engine.import_image(case, canvas, name, source, by="inspect")
-    if label and not result.get("duplicate"):
-        media_engine.update_media(case, result["item"]["path"], {"label": label})
-    return result
-
-
-# ---------------------------------------------------------------------------
 # Session workspace: recipes -> filed entities (Inspect Selection/Frame/Collage/Save)
 # ---------------------------------------------------------------------------
 #
@@ -625,14 +551,6 @@ def _source_image(
     if ops:
         img = apply_ops(img, ops)
     return img
-
-
-def preview_frame_png(case: Case, video_rel: str, time_s: float) -> bytes:
-    """Decode one video frame and return PNG bytes — for the transient tray only."""
-    frame = extract_frame(case.resolve_inside(video_rel), time_s)
-    buf = io.BytesIO()
-    frame.save(buf, "PNG")
-    return buf.getvalue()
 
 
 def render_preview_png(
@@ -678,7 +596,7 @@ def save_frame(
     if not result.get("duplicate"):
         patch: dict[str, Any] = {}
         if label:
-            patch["label"] = label
+            patch["title"] = label
         if folder:
             patch["folder"] = folder
         if patch:
@@ -814,7 +732,7 @@ def compose_perspective(
     if not result.get("duplicate"):
         patch: dict[str, Any] = {}
         if label:
-            patch["label"] = label
+            patch["title"] = label
         if folder:
             patch["folder"] = folder
         if patch:
@@ -930,7 +848,7 @@ def enhance_video(
     if not result.get("duplicate"):
         patch: dict[str, Any] = {}
         if label:
-            patch["label"] = label
+            patch["title"] = label
         if folder:
             patch["folder"] = folder
         if patch:

@@ -150,6 +150,18 @@ def test_session_save_depends_on_its_subject(client):
     assert depends[0]["to"] == _entity(client, cid, path=a)["id"]
 
 
+def _compose_two(client, cid, a, b):
+    """Compose two case images side by side (the modern collage save)."""
+    return client.post(
+        f"/api/cases/{cid}/inspect/compose",
+        json={"width": 220, "height": 100,
+              "nodes": [
+                  {"src": {"path": a}, "quad": [[0, 0], [100, 0], [100, 100], [0, 100]]},
+                  {"src": {"path": b}, "quad": [[110, 0], [210, 0], [210, 100], [110, 100]]},
+              ]},
+    ).json()
+
+
 def test_a_derived_media_links_to_its_sources(client):
     # Frames, collages and enhanced videos are all filed through one registration
     # point, so the chain is wired once for every tool that makes imagery — the
@@ -158,9 +170,7 @@ def test_a_derived_media_links_to_its_sources(client):
     a = _upload(client, cid, "a.png", _png_bytes((1, 2, 3)))["item"]["path"]
     b = _upload(client, cid, "b.png", _png_bytes((4, 5, 6)))["item"]["path"]
 
-    res = client.post(
-        f"/api/cases/{cid}/inspect/collage", json={"paths": [a, b], "columns": 2}
-    ).json()
+    res = _compose_two(client, cid, a, b)
 
     collage = _entity(client, cid, path=res["item"]["path"])
     targets = {l["to"] for l in _links(client, cid, "derived-from") if l["from"] == collage["id"]}
@@ -179,10 +189,9 @@ def test_a_deduped_derivative_still_gets_its_chain_once(client):
     cid = _new_case(client, "Dedupe")
     a = _upload(client, cid, "a.png", _png_bytes((1, 2, 3)))["item"]["path"]
     b = _upload(client, cid, "b.png", _png_bytes((4, 5, 6)))["item"]["path"]
-    body = {"paths": [a, b], "columns": 2}
 
-    first = client.post(f"/api/cases/{cid}/inspect/collage", json=body).json()
-    second = client.post(f"/api/cases/{cid}/inspect/collage", json=body).json()
+    first = _compose_two(client, cid, a, b)
+    second = _compose_two(client, cid, a, b)
 
     assert second["duplicate"] is True
     assert second["entity"]["id"] == first["entity"]["id"]

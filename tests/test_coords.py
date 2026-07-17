@@ -44,6 +44,32 @@ def test_format_mgrs_is_none_beyond_the_utm_limits():
     assert coords.format_mgrs(-85, 10) is None
 
 
+@pytest.mark.parametrize("lat,lon,expected", MGRS_VECTORS)
+def test_parse_mgrs_round_trips_the_reference(lat, lon, expected):
+    import math
+
+    parsed = coords.parse_mgrs(expected)
+    assert parsed is not None
+    plat, plon = parsed
+    # the reference cell is 1 m; the parse answers its centre, so the
+    # round-trip error must stay within a few metres
+    assert abs(plat - lat) * 111320 < 5
+    assert abs(plon - lon) * 111320 * math.cos(math.radians(lat)) < 5
+
+
+def test_parse_mgrs_accepts_compact_spacing_and_lowercase():
+    reference = coords.parse_mgrs("31U DQ 48250 11951")
+    assert coords.parse_mgrs("31UDQ4825011951") == reference
+    assert coords.parse_mgrs("31u dq 48250 11951") == reference
+
+
+def test_parse_mgrs_rejects_non_mgrs_text():
+    assert coords.parse_mgrs("hello world") is None
+    assert coords.parse_mgrs("31U DQ 482 11951") is None  # odd digit count
+    assert coords.parse_mgrs("31U IQ 48250 11951") is None  # I is never a column
+    assert coords.parse_mgrs("99U DQ 48250 11951") is None  # zone out of range
+
+
 def test_utm_zone_exceptions():
     assert coords.utm_zone(48.8583701, 2.2944813) == 31
     assert coords.utm_zone(59.9, 4.9) == 32  # plain formula would say 31

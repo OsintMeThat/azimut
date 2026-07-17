@@ -108,7 +108,12 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     # upsert the proof entity (analyst action → confirmed)
     existing = case.find_entity(attr="spec", value=f"proofs/{name}.json")
     if existing:
-        case.update_entity(existing["id"], {"label": body.title})
+        patch: dict[str, Any] = {"label": body.title}
+        if png_rel and existing["attrs"].get("path") != png_rel:
+            # a spec-only proof exported later gains its PNG here — without the
+            # path the sidebar preview and delete_by_path can't see the file
+            patch["attrs"] = {"path": png_rel}
+        case.update_entity(existing["id"], patch)
         entity_id = existing["id"]
     else:
         entity_id = case.add_entity(

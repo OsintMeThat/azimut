@@ -627,6 +627,13 @@ def test_parse_coords():
     lat, lon = geo.parse_coords("""48°51'29.6"N 2°17'40.2"E""")
     assert abs(lat - 48.85822) < 1e-4
     assert abs(lon - 2.29450) < 1e-4
+    # every displayable format pastes back in: MGRS…
+    lat, lon = geo.parse_coords("31U DQ 48250 11951")
+    assert abs(lat - 48.85837) < 1e-3 and abs(lon - 2.29448) < 1e-3
+    # …and full plus codes (round-trip through the app's own encoder)
+    lat, lon = geo.parse_coords(geo.plus_code(48.8584, 2.2945))
+    assert abs(lat - 48.8584) < 1e-3 and abs(lon - 2.2945) < 1e-3
+
     assert geo.parse_coords("hello world") is None
     assert geo.parse_coords("91, 0") is None
 
@@ -643,7 +650,10 @@ def test_dms_format():
 
 def test_map_links_cover_external_maps():
     links = geo.map_links(48.8584, 2.2945, 16)
-    for key in ("google", "google_earth", "bing", "yandex", "sentinel", "zoom_earth"):
+    for key in (
+        "google", "google_earth", "apple", "bing", "yandex",
+        "sentinel", "zoom_earth", "satellites_pro",
+    ):
         assert key in links and links[key].startswith("https://")
     # Yandex takes lon,lat order
     assert "ll=2.2945,48.8584" in links["yandex"]
