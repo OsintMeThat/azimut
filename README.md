@@ -10,7 +10,7 @@ there, in one plain folder you can zip, git, or share.
 *The name is the French word for azimuth, the compass bearing you sight along
 to fix a point on the map.*
 
-## v0.1.1 — Proof Studio
+## v0.1.2 — Proof Studio
 
 | Tool | What it does |
 |------|--------------|
@@ -23,20 +23,13 @@ to fix a point on the map.*
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
 
-New in v0.1.1, a polish pass over the v1 tools:
+New in v0.1.2:
 
-- Satellite: OSM labels overlay, true browser fullscreen, Esri overzoom past
-  World Imagery's last level, and imagery acquisition dates on the map and in
-  captures.
-- Keyed providers: a Settings tab for Mapbox/Google keys with per-provider
-  toggles, monthly usage counters, a soft block at 90% of the free tier, an
-  eco mode that uses free imagery when zoomed out, and a disk tile cache.
-  Keys stay optional and local.
-- Proof Composer: free layout mode with z-order, corner-drag panel resize,
-  and satellite panels that auto-caption with provider, coordinates and
-  imagery date.
-- Inspect: shift-click a block of collage pieces to move, scale and rotate
-  them as one.
+- Files: a desktop-style view of the case's "My work" tree in the Collect
+  workspace, with rubber-band select, multi-drag and right-click move/delete.
+- Bookmarks: pin the places, media and proofs you keep coming back to.
+- In-app updater: check for and install a new Azimut release from Settings,
+  without touching your cases or keys.
 
 ## Install & run
 
@@ -63,7 +56,6 @@ opens Azimut in your browser.
 |----|-------|
 | Windows | `azimut-windows-x86_64.exe` |
 | macOS (Apple Silicon) | `azimut-macos-arm64` |
-| macOS (Intel) | `azimut-macos-x86_64` |
 | Linux | `azimut-linux-x86_64` |
 
 First run, the binaries are **unsigned**, so the OS warns before letting them

@@ -54,10 +54,9 @@ jobs:
             asset: azimut-windows-x86_64.exe
           - os: macos-latest
             asset: azimut-macos-arm64
-          # macos-latest is Apple Silicon; macos-13 is the last Intel runner,
-          # so Intel Macs get a native binary too (PyInstaller can't cross-build).
-          - os: macos-13
-            asset: azimut-macos-x86_64
+          # macos-latest is Apple Silicon. We don't ship an Intel binary: the
+          # last Intel runner (macos-13) is deprecated and its queue stalls
+          # releases. Intel Macs are covered by `pip install azimut` instead.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
