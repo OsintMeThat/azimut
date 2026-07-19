@@ -1,5 +1,13 @@
 <script>
-  import { uiState, initSession, caseState, reloadCase, toast } from './lib/state.svelte.js';
+  import {
+    uiState,
+    initSession,
+    caseState,
+    reloadCase,
+    toast,
+    updateState,
+    checkForUpdateOnStart,
+  } from './lib/state.svelte.js';
   import { startEvents, onEvent } from './lib/events.js';
   import { WORKSPACES, workspaceOf, toolFromHash } from './lib/workspaces.js';
   import Icon from './components/Icon.svelte';
@@ -15,6 +23,7 @@
   import PostComposer from './tools/PostComposer.svelte';
   import Inspector from './tools/Inspector.svelte';
   import Settings from './tools/Settings.svelte';
+  import UpdateModal from './components/UpdateModal.svelte';
 
   // The rail holds workspaces (docs/UI.md §3); tools are tabs inside them.
   // Settings lives behind the topbar gear instead — app plumbing, not part
@@ -61,8 +70,13 @@
     visited[uiState.tool] = true;
   });
 
-  // Load the case list and reopen the last-used case (survives reloads).
-  initSession().catch(() => {});
+  // Load the case list and reopen the last-used case (survives reloads), then
+  // — once preferences have landed — see whether a newer release is out and
+  // pop a notice. The check reads prefs.updateCheckOnStart, so it must follow
+  // initSession, which loads them.
+  initSession()
+    .catch(() => {})
+    .finally(() => checkForUpdateOnStart());
 
   // Live nudges from our own backend (SSE, same-origin — still local-first):
   // the capture extension files screenshots while this tab just sits here, and
@@ -150,6 +164,10 @@
 </div>
 
 <Toasts />
+
+{#if updateState.show}
+  <UpdateModal />
+{/if}
 
 <style>
   .shell {

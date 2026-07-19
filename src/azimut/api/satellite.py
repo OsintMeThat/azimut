@@ -27,6 +27,26 @@ from .cases import delete_by_path, get_case
 router = APIRouter(prefix="/api", tags=["satellite"])
 
 
+# A live map pans through dozens of tiles at once, all proxied through here. A
+# fresh connection per tile means a TCP + TLS handshake per tile — the dominant
+# cost, and worst on Windows, where the loopback hop and Defender's per-request
+# scan pile on. One pooled client keeps connections alive across tiles instead.
+# httpx.Client is safe to share across the threadpool the sync routes run in.
+_tile_client: httpx.Client | None = None
+
+
+def _client() -> httpx.Client:
+    global _tile_client
+    if _tile_client is None:
+        _tile_client = httpx.Client(
+            follow_redirects=True,
+            timeout=20,
+            limits=httpx.Limits(max_keepalive_connections=16, max_connections=32),
+            headers={"User-Agent": tiles.USER_AGENT},
+        )
+    return _tile_client
+
+
 class CaptureIn(BaseModel):
     lat: float = Field(ge=-90, le=90)  # crop frame center
     lon: float = Field(ge=-180, le=180)
@@ -208,10 +228,7 @@ def _serve_tile(
                 config.record_provider_status(provider.meter, False, str(exc.__cause__))
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         try:
-            upstream = httpx.get(
-                url, headers={"User-Agent": tiles.USER_AGENT}, timeout=20,
-                follow_redirects=True,
-            )
+            upstream = _client().get(url)
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=f"tile fetch failed: {exc}") from exc
         # a stale Google session token answers 401/403 — re-mint once, transparently

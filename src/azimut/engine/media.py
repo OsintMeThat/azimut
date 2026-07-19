@@ -21,6 +21,7 @@ from typing import Any, BinaryIO
 from PIL import Image
 
 from ..workspace import Case, ensure_dir
+from . import ffmpeg as ffmpeg_engine
 from . import links as link_engine
 
 THUMB_DIR = ".thumbs"
@@ -70,7 +71,7 @@ def unique_path(directory: Path, filename: str) -> Path:
 
 
 def ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None
+    return ffmpeg_engine.ffmpeg_available()
 
 
 def make_thumbnail(media_path: Path, thumb_path: Path) -> bool:
@@ -87,7 +88,7 @@ def make_thumbnail(media_path: Path, thumb_path: Path) -> bool:
         if kind == "video" and ffmpeg_available():
             subprocess.run(
                 [
-                    "ffmpeg", "-y", "-loglevel", "error",
+                    ffmpeg_engine.ffmpeg_exe(), "-y", "-loglevel", "error",
                     "-ss", "1", "-i", str(media_path),
                     "-frames:v", "1", "-vf", f"scale={THUMB_MAX}:-2",
                     str(thumb_path),
@@ -477,7 +478,13 @@ def download_url(
     narrowed = index is not None and not extra_photos
     if narrowed:
         ydl_opts["playlist_items"] = str(index)
-    if not ffmpeg_available():
+    if ffmpeg_available():
+        # a bundled ffmpeg is not on PATH, so yt-dlp can't find it by itself;
+        # point it at the directory (None when ffmpeg is a system PATH copy).
+        location = ffmpeg_engine.location_for_ytdlp()
+        if location:
+            ydl_opts["ffmpeg_location"] = location
+    else:
         # without ffmpeg yt-dlp cannot merge separate audio+video streams
         ydl_opts["format"] = "best[acodec!=none][vcodec!=none]/best"
     if progress_hook:

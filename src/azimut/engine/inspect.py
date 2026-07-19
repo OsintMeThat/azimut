@@ -21,7 +21,6 @@ from __future__ import annotations
 import base64
 import io
 import json
-import shutil
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -32,6 +31,7 @@ from PIL import Image, ImageChops, ImageEnhance, ImageOps
 from PIL.ExifTags import GPSTAGS, TAGS
 
 from ..workspace import Case
+from . import ffmpeg as ffmpeg_engine
 from . import media as media_engine
 from . import stitch
 
@@ -318,7 +318,7 @@ def run_analysis(
 
 
 def ffprobe_available() -> bool:
-    return shutil.which("ffprobe") is not None
+    return ffmpeg_engine.ffprobe_available()
 
 
 def probe(case: Case, rel_path: str) -> dict[str, Any]:
@@ -334,7 +334,7 @@ def probe(case: Case, rel_path: str) -> dict[str, Any]:
 
     if kind == "video" and ffprobe_available():
         proc = subprocess.run(
-            ["ffprobe", "-v", "error", "-print_format", "json",
+            [ffmpeg_engine.ffprobe_exe(), "-v", "error", "-print_format", "json",
              "-show_format", "-show_streams", str(path)],
             capture_output=True, timeout=30,
         )
@@ -368,7 +368,7 @@ def extract_frame(video_path: Path, time_s: float) -> Image.Image:
     if not media_engine.ffmpeg_available():
         raise RuntimeError("ffmpeg is required to extract video frames")
     proc = subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{max(time_s, 0):.3f}",
+        [ffmpeg_engine.ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", f"{max(time_s, 0):.3f}",
          "-i", str(video_path), "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1"],
         capture_output=True, timeout=60,
     )
@@ -470,7 +470,7 @@ def scan_focus(
     frame_bytes = w * h
 
     proc = subprocess.Popen(
-        ["ffmpeg", "-v", "error", "-i", str(video_path),
+        [ffmpeg_engine.ffmpeg_exe(), "-v", "error", "-i", str(video_path),
          "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
@@ -841,7 +841,7 @@ def enhance_video(
     tmp = case.subdir("media") / f".enhance_{_stamp()}.mp4"
     try:
         proc = subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src),
+            [ffmpeg_engine.ffmpeg_exe(), "-y", "-loglevel", "error", "-i", str(src),
              "-vf", vf, "-c:a", "copy", str(tmp)],
             capture_output=True, timeout=600,
         )

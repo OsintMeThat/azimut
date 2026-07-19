@@ -8,6 +8,7 @@
 import { api } from './api.js';
 import { formatCoords as renderCoords } from './coords.js';
 import { loadWidth, saveWidth, clampWidth } from './sidebar.js';
+import { shouldShowUpdate } from './appUpdate.js';
 
 /**
  * App-wide display preferences (Settings → Preferences), mirrored from
@@ -19,6 +20,19 @@ export const prefs = $state({
   units: 'metric', // 'metric' | 'imperial'
   homeView: { lat: 48.8584, lon: 2.2945, zoom: 16 }, // where Satellite opens
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
+  updateCheckOnStart: true, // ask GitHub for a newer release when the page loads
+  updateDismissedVersion: '', // the release tag muted with "don't show again"
+});
+
+/**
+ * The startup update pop-up (App.svelte). `show` is flipped on once a check
+ * comes back with a newer, non-muted release; the modal reads the rest.
+ */
+export const updateState = $state({
+  show: false,
+  latest: '', // the newer release tag, e.g. "v0.2.0"
+  url: '', // where to download it
+  notes: '', // the release body (rendered as plain text)
 });
 
 /** Render a lat/lon the way the user asked for it. The tools' one entry point. */
@@ -50,6 +64,43 @@ export function applyPrefs(s) {
   if (s.units) prefs.units = s.units;
   if (s.home_view) prefs.homeView = s.home_view;
   if (s.post_mention !== undefined) prefs.postMention = s.post_mention; // '' = none
+  if (s.update_check_on_start !== undefined) prefs.updateCheckOnStart = s.update_check_on_start;
+  if (s.update_dismissed_version !== undefined)
+    prefs.updateDismissedVersion = s.update_dismissed_version;
+}
+
+/**
+ * On page load, ask GitHub whether a newer release is out and pop a notice if
+ * so. The one network call Azimut makes on mount — gated on the user's
+ * `updateCheckOnStart` preference (Settings turns it off), so with it disabled
+ * opening the app still phones nowhere. Never throws: a failed or muted check
+ * simply leaves the pop-up closed.
+ */
+export async function checkForUpdateOnStart() {
+  if (!prefs.updateCheckOnStart) return;
+  try {
+    const check = await api.get('/api/settings/update?check=true');
+    if (shouldShowUpdate(check, prefs.updateDismissedVersion)) {
+      updateState.latest = check.latest;
+      updateState.url = check.url;
+      updateState.notes = check.notes ?? '';
+      updateState.show = true;
+    }
+  } catch {
+    /* offline, rate-limited, whatever — the pop-up is a courtesy, not a gate */
+  }
+}
+
+/** Close the update pop-up. `mute` remembers the tag so it won't show again. */
+export async function dismissUpdate(mute = false) {
+  updateState.show = false;
+  if (mute && updateState.latest) {
+    try {
+      applyPrefs(await api.put('/api/settings/prefs', { update_dismissed_version: updateState.latest }));
+    } catch {
+      /* the mute is a nicety; failing to persist it just means it re-shows */
+    }
+  }
 }
 
 export const caseState = $state({

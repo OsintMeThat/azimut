@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .. import __version__, config
-from ..engine import google_tiles, scrapers, sentinel, tiles, updates
+from ..engine import ffmpeg, google_tiles, scrapers, sentinel, tiles, updates
 from .ingest import bundled_extension_version
 
 router = APIRouter(prefix="/api", tags=["settings"])
@@ -74,6 +74,10 @@ class PrefsIn(BaseModel):
     units: str | None = None  # one of config.UNIT_SYSTEMS
     home_view: HomeView | None = None  # where the Satellite tab opens
     post_mention: str | None = None  # handle a new post draft is addressed to
+    # app self-update pop-up (engine/updates.py) — check on load, and the tag
+    # the user muted with "don't show again"
+    update_check_on_start: bool | None = None
+    update_dismissed_version: str | None = None
 
 
 def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
@@ -90,6 +94,8 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "units": settings.get("units", "metric"),
         "home_view": settings.get("home_view", DEFAULT_HOME_VIEW),
         "post_mention": settings.get("post_mention", DEFAULT_POST_MENTION),
+        "update_check_on_start": bool(settings.get("update_check_on_start", True)),
+        "update_dismissed_version": settings.get("update_dismissed_version", ""),
     }
 
 
@@ -127,6 +133,13 @@ def get_settings() -> dict[str, Any]:
         # /settings/ingest-token does, on the user's explicit reveal/copy)
         "ingest_token": settings.get("ingest_token") or "",
     }
+
+
+@router.get("/settings/ffmpeg")
+def ffmpeg_info() -> dict[str, Any]:
+    """About tab: ffmpeg version + where it resolves from. Separate from the
+    hot /settings poll because it shells out to ``ffmpeg -version``."""
+    return ffmpeg.info()
 
 
 @router.put("/settings/prefs")
@@ -183,6 +196,10 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["home_view"] = body.home_view.model_dump()
     if body.post_mention is not None:
         settings["post_mention"] = body.post_mention.strip()[:64]
+    if body.update_check_on_start is not None:
+        settings["update_check_on_start"] = bool(body.update_check_on_start)
+    if body.update_dismissed_version is not None:
+        settings["update_dismissed_version"] = body.update_dismissed_version.strip()[:64]
 
 
 @router.put("/settings/keys")

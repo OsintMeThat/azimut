@@ -30,7 +30,9 @@ their outputs into the case.
 
 1. **Local-first, privacy-first.** No account, no telemetry, no upload. Network
    only when a tool inherently needs it (tiles, geocoding, download), always to
-   third parties directly, never through an Azimut server.
+   third parties directly, never through an Azimut server. One exception: an
+   opt-out check to GitHub's public releases feed on load, so binary users hear
+   about updates (Settings → Updates turns it off).
 2. **The case is the product.** Tools are how you work; the case folder is what
    you keep — plain JSON + media, human-readable, versionable, portable.
 3. **One tab = one tool, useful in 30 seconds.** Every tool works one-shot with
@@ -237,10 +239,13 @@ firms up; delete when it stops making sense.
   tools are tabs inside them (see [UI.md](UI.md)).
 - **Settings & secrets** ✅: in-app tabs (Preferences / Imagery / About), keys
   stored locally and never bundled into a shared case, monthly usage counters,
-  backup export/import. Display prefs are presentation only — artifacts keep
+  backup export/import, opt-out "new release is live" pop-up on load (per-version
+  "don't show again"). Display prefs are presentation only — artifacts keep
   decimal degrees + metres on disk.
-- **Distribution**: `pip install azimut` + PyInstaller single-file binaries
-  (Windows/Linux/macOS).
+- **Distribution** ✅: `pip install azimut` + PyInstaller single-file binaries
+  (Windows/Linux/macOS) that bundle a static ffmpeg/ffprobe (works out of the
+  box; pip installs still want ffmpeg on `PATH`) and carry the app icon on the
+  Windows `.exe`.
 - **Dependencies** ✅: ranges in `pyproject.toml`, exact pins in `uv.lock`; yt-dlp
   + gallery-dl unbounded on purpose; scraper self-update keeps an old binary useful.
 - **Storage**: plain files (§3); SQLite only for rebuildable caches.
@@ -248,7 +253,9 @@ firms up; delete when it stops making sense.
   guard (DNS rebinding), 0600/0700 perms, 100 MP Pillow clamp, token-gated ingest
   island for the extension. Accepted risks recorded here: cleartext keys over
   localhost, the hash-verified scraper updater, and tile/media URL fetches (SSRF
-  only matters if the localhost assumption breaks).
+  only matters if the localhost assumption breaks). The startup update check is
+  the one on-mount network call — opt-out, read-only against GitHub's releases
+  feed, notes rendered as text (no HTML injection).
 
 ## 10. Open questions
 

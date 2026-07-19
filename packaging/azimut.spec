@@ -9,6 +9,8 @@
 # are collected explicitly because they are loaded dynamically and PyInstaller
 # can't see them.
 
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 hiddenimports = (
@@ -21,10 +23,22 @@ hiddenimports = (
 # Grabs azimut/static/** (index.html, assets, favicon) from the installed package.
 datas = collect_data_files("azimut")
 
+# Static ffmpeg / ffprobe, when the release CI has dropped them in
+# packaging/vendor/. They land at the bundle root, where engine/ffmpeg.py looks
+# for them (sys._MEIPASS). Absent (a plain local build), the binary just falls
+# back to a system ffmpeg on PATH — same as a pip install. See docs/SPEC.md.
+vendor = Path(SPECPATH) / "vendor"
+binaries = [
+    (str(p), ".")
+    for name in ("ffmpeg", "ffprobe", "ffmpeg.exe", "ffprobe.exe")
+    for p in [vendor / name]
+    if p.is_file()
+]
+
 a = Analysis(
     ["entry.py"],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -34,6 +48,14 @@ a = Analysis(
 )
 
 pyz = PYZ(a.pure)
+
+# The .exe icon. Windows is the only shipped artifact that embeds one: Linux
+# binaries can't, and our macOS artifact is a raw binary (not an .app bundle),
+# so Finder shows no custom icon there either. PyInstaller wants a .ico.
+import sys
+
+ico = Path(SPECPATH) / "azimut.ico"
+icon = str(ico) if sys.platform == "win32" and ico.is_file() else None
 
 exe = EXE(
     pyz,
@@ -45,4 +67,5 @@ exe = EXE(
     console=True,           # it's a local server; the console shows the URL
     disable_windowed_traceback=False,
     upx=False,
+    icon=icon,
 )

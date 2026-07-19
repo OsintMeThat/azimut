@@ -17,6 +17,10 @@ import httpx
 LATEST_RELEASE_URL = "https://api.github.com/repos/OsintMeThat/azimut/releases/latest"
 RELEASES_PAGE_URL = "https://github.com/OsintMeThat/azimut/releases/latest"
 
+# How much of the release body the pop-up carries. Enough for a changelog,
+# short enough that a runaway release note never bloats the response.
+NOTES_LIMIT = 4000
+
 
 def _parse(version: str) -> tuple[int, ...]:
     """A tag like ``v0.1.2`` (or a bare ``0.1.2``) as a comparable tuple.
@@ -46,6 +50,7 @@ def check(current: str, *, timeout: float = 6.0) -> dict[str, object]:
         "latest": None,
         "update_available": False,
         "url": RELEASES_PAGE_URL,
+        "notes": "",
     }
     try:
         resp = httpx.get(
@@ -64,4 +69,8 @@ def check(current: str, *, timeout: float = 6.0) -> dict[str, object]:
         result["update_available"] = is_newer(latest, current)
         if body.get("html_url"):
             result["url"] = str(body["html_url"])
+        # The release body, shown in the startup pop-up. Markdown from our own
+        # releases; the UI renders it as plain text (no HTML injection), so we
+        # just cap the length to keep the payload sane.
+        result["notes"] = str(body.get("body") or "").strip()[:NOTES_LIMIT]
     return result

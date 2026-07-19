@@ -499,12 +499,46 @@ def test_tile_proxy_rejects_out_of_range_coordinates(client):
     assert client.get("/api/tiles/esri-world-imagery/2/0/-1").status_code == 422
 
 
+def test_tile_proxy_reuses_one_pooled_client(client, monkeypatch):
+    """Every tile goes through one shared, keep-alive client — not a fresh
+    connection per tile. Several tiles must hit the same client instance."""
+    import httpx
+
+    from azimut.api import satellite
+
+    seen: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(id(request))
+        return httpx.Response(200, content=_png_bytes(), headers={"content-type": "image/png"})
+
+    pooled = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(satellite, "_tile_client", pooled)
+    # spy: the route must fetch through the pooled client, never httpx.get
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: pytest.fail("used a one-shot connection"))
+
+    calls = {"n": 0}
+    real_get = pooled.get
+
+    def counting_get(*a, **k):
+        calls["n"] += 1
+        return real_get(*a, **k)
+
+    monkeypatch.setattr(pooled, "get", counting_get)
+
+    for x in (16600, 16601, 16602):
+        r = client.get(f"/api/tiles/esri-world-imagery/15/{x}/11278")
+        assert r.status_code == 200
+    assert calls["n"] == 3  # three tiles, all served by the one pooled client
+
+
 def test_tile_proxy_benches_google_on_a_persistent_403(client, monkeypatch):
     """A 403 that survives the session re-mint names the key (EEA policy,
     revoked key) — the basemap must stop being offered, with Google's own
     sentence stored as the reason."""
     import httpx
 
+    from azimut.api import satellite
     from azimut.engine import google_tiles
 
     client.put("/api/settings/keys", json={"google": "AIza.x"})
@@ -517,13 +551,15 @@ def test_tile_proxy_benches_google_on_a_persistent_403(client, monkeypatch):
         b'"Satellite tiles are not available for your account and region."}}'
     )
 
-    def forbidden(url, **kwargs):
+    def forbidden(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             403, content=eea, headers={"content-type": "application/json"},
-            request=httpx.Request("GET", url),
         )
 
-    monkeypatch.setattr(httpx, "get", forbidden)
+    # the tile proxy pools one shared client; swap in one with a mock transport
+    monkeypatch.setattr(
+        satellite, "_tile_client", httpx.Client(transport=httpx.MockTransport(forbidden))
+    )
     r = client.get("/api/tiles/google-satellite/15/16597/11278")
     assert r.status_code == 403  # passthrough, as before
 

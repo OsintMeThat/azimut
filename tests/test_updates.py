@@ -59,7 +59,21 @@ def test_check_reports_a_newer_release(monkeypatch):
         "latest": "v9.9.9",
         "update_available": True,
         "url": "https://x/rel",
+        "notes": "",
     }
+
+
+def test_check_carries_release_notes_capped(monkeypatch):
+    monkeypatch.setattr(
+        updates.httpx,
+        "get",
+        lambda *a, **k: FakeResponse(
+            {"tag_name": "v9.9.9", "body": "  ## What's new\n- stuff  " + "x" * 9000}
+        ),
+    )
+    result = updates.check("0.1.1")
+    assert result["notes"].startswith("## What's new")  # stripped
+    assert len(result["notes"]) == updates.NOTES_LIMIT  # capped
 
 
 def test_check_up_to_date(monkeypatch):

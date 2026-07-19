@@ -75,6 +75,26 @@ jobs:
         run: |
           uv sync --frozen --no-dev
           uv pip install . pyinstaller
+      # ffmpeg is a native program, not a Python dep, so it isn't in the wheel.
+      # Vendor a static ffmpeg + ffprobe per-OS so the binary works out of the
+      # box (packaging/azimut.spec picks them up; engine/ffmpeg.py finds them at
+      # runtime). One host, one arch per runner; each zip holds a single binary.
+      - name: Vendor static ffmpeg + ffprobe into the binary
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Linux)   plat=linux/amd64 ;;
+            Windows) plat=windows/amd64 ;;
+            macOS)   plat=macos/arm64 ;;
+          esac
+          mkdir -p packaging/vendor
+          base="https://ffmpeg.martin-riedl.de/redirect/latest/$plat/release"
+          for tool in ffmpeg ffprobe; do
+            curl -fL "$base/$tool.zip" -o "$tool.zip"
+            uv run python -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall('packaging/vendor')" "$tool.zip"
+          done
+          chmod +x packaging/vendor/* 2>/dev/null || true
+          ls -l packaging/vendor
       - name: Build single-file binary
         run: uv run pyinstaller packaging/azimut.spec --distpath dist-bin --workpath build-bin
       - name: Smoke-test the binary

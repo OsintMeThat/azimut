@@ -13,6 +13,30 @@ def test_get_settings_defaults(client):
     assert body["month"] == config.month_key()
 
 
+def test_ffmpeg_info_reports_bundled_copy(client, monkeypatch):
+    from azimut.engine import ffmpeg
+
+    monkeypatch.setattr(ffmpeg, "ffmpeg_path", lambda: "/opt/azimut/ffmpeg")
+    monkeypatch.setattr(ffmpeg, "_bundled", lambda name: "/opt/azimut/ffmpeg")
+    monkeypatch.setattr(ffmpeg, "_version", lambda exe: "n7.1")
+
+    body = client.get("/api/settings/ffmpeg").json()
+    assert body == {
+        "available": True,
+        "path": "/opt/azimut/ffmpeg",
+        "source": "bundled",
+        "version": "n7.1",
+    }
+
+
+def test_ffmpeg_info_reports_missing(client, monkeypatch):
+    from azimut.engine import ffmpeg
+
+    monkeypatch.setattr(ffmpeg, "ffmpeg_path", lambda: None)
+    body = client.get("/api/settings/ffmpeg").json()
+    assert body == {"available": False, "path": None, "source": None, "version": None}
+
+
 def test_put_keys_lights_up_keyed_providers(client):
     saved = client.put("/api/settings/keys", json={"mapbox": "pk.abc"}).json()
     assert saved["api_keys"] == {"mapbox": "pk.abc"}
@@ -75,6 +99,22 @@ def _upstream(status=200, content=b"JPEGDATA", headers=None):
     return get
 
 
+def _use_tile_upstream(monkeypatch, handler):
+    """Route the tile proxy's pooled client through *handler* (``url -> Response``).
+
+    The proxy reuses one shared httpx.Client, so patching module-level
+    ``httpx.get`` no longer intercepts it — swap in a client with a mock
+    transport that calls the same handler the old tests used.
+    """
+    from azimut.api import satellite
+
+    monkeypatch.setattr(
+        satellite,
+        "_tile_client",
+        httpx.Client(transport=httpx.MockTransport(lambda request: handler(str(request.url)))),
+    )
+
+
 def _png_bytes(size=512, colour=(10, 120, 10)):
     """A real encoded tile — the overzoom path decodes what it magnifies."""
     import io
@@ -89,7 +129,7 @@ def _png_bytes(size=512, colour=(10, 120, 10)):
 def test_tile_proxy_serves_and_counts_exactly(client, monkeypatch):
     client.put("/api/settings/keys", json={"mapbox": "pk.abc"})
     upstream = _upstream(headers={"cache-control": "max-age=43200"})
-    monkeypatch.setattr(httpx, "get", upstream)
+    _use_tile_upstream(monkeypatch, upstream)
 
     r = client.get("/api/tiles/mapbox-satellite/14/8298/5639")
     assert r.status_code == 200
@@ -108,7 +148,7 @@ def test_tile_proxy_serves_and_counts_exactly(client, monkeypatch):
 
 def test_tile_proxy_does_not_count_errors(client, monkeypatch):
     client.put("/api/settings/keys", json={"mapbox": "pk.abc"})
-    monkeypatch.setattr(httpx, "get", _upstream(status=404, content=b""))
+    _use_tile_upstream(monkeypatch, _upstream(status=404, content=b""))
     r = client.get("/api/tiles/mapbox-satellite/14/0/0")
     assert r.status_code == 404
     assert client.get("/api/settings").json()["usage"] == {}
@@ -134,7 +174,7 @@ def test_tile_proxy_google_remints_session_on_403(client, monkeypatch):
             request=httpx.Request("GET", url),
         )
 
-    monkeypatch.setattr(httpx, "get", get)
+    _use_tile_upstream(monkeypatch, get)
     r = client.get("/api/tiles/google-satellite/15/16597/11278")
     assert r.status_code == 200
     assert r.content == b"TILE"
@@ -151,6 +191,22 @@ def test_get_settings_exposes_prefs_and_free_tier(client):
     assert body["eco_zoom_fallback"] is True
     assert body["providers_enabled"] == {}
     assert body["usage_overrides"] == {}
+    # startup update pop-up: on by default, nothing muted yet
+    assert body["update_check_on_start"] is True
+    assert body["update_dismissed_version"] == ""
+
+
+def test_put_prefs_roundtrips_update_popup_prefs(client):
+    saved = client.put(
+        "/api/settings/prefs",
+        json={"update_check_on_start": False, "update_dismissed_version": "v0.2.0"},
+    ).json()
+    assert saved["update_check_on_start"] is False
+    assert saved["update_dismissed_version"] == "v0.2.0"
+    # partial PUT leaves the other one untouched
+    saved = client.put("/api/settings/prefs", json={"update_check_on_start": True}).json()
+    assert saved["update_check_on_start"] is True
+    assert saved["update_dismissed_version"] == "v0.2.0"
 
 
 def test_put_prefs_roundtrips_and_filters_unknown_providers(client):
@@ -184,7 +240,7 @@ def test_disabled_provider_hidden_but_key_kept(client):
 
 def test_tile_proxy_blocks_at_soft_limit_and_override_lifts(client, monkeypatch):
     client.put("/api/settings/keys", json={"mapbox": "pk.abc"})
-    monkeypatch.setattr(httpx, "get", _upstream())
+    _use_tile_upstream(monkeypatch, _upstream())
     config.record_usage("mapbox", int(config.FREE_TIER["mapbox"] * config.BLOCK_SHARE))
 
     r = client.get("/api/tiles/mapbox-satellite/14/8298/5639")
@@ -198,7 +254,7 @@ def test_tile_proxy_blocks_at_soft_limit_and_override_lifts(client, monkeypatch)
 def test_tile_proxy_disk_cache_serves_repeats_without_rebilling(client, monkeypatch):
     client.put("/api/settings/keys", json={"mapbox": "pk.abc"})
     upstream = _upstream()
-    monkeypatch.setattr(httpx, "get", upstream)
+    _use_tile_upstream(monkeypatch, upstream)
 
     assert client.get("/api/tiles/mapbox-satellite/14/8298/5639").status_code == 200
     r = client.get("/api/tiles/mapbox-satellite/14/8298/5639")
@@ -215,7 +271,7 @@ def test_tile_proxy_never_caches_google(client, monkeypatch):
         google_tiles, "resolve_template", lambda url, **kw: url.replace("{session}", "tok")
     )
     upstream = _upstream()
-    monkeypatch.setattr(httpx, "get", upstream)
+    _use_tile_upstream(monkeypatch, upstream)
 
     client.get("/api/tiles/google-satellite/15/16597/11278")
     client.get("/api/tiles/google-satellite/15/16597/11278")
@@ -249,7 +305,7 @@ def test_tile_proxy_overzoom_fills_coverage_gaps(client, monkeypatch):
         )
 
     get.urls = []
-    monkeypatch.setattr(httpx, "get", get)
+    _use_tile_upstream(monkeypatch, get)
 
     r = client.get("/api/tiles/esri-world-imagery/19/155000/400000")
     assert r.status_code == 200
@@ -284,7 +340,7 @@ def test_tile_proxy_placeholder_tile_triggers_overzoom(client, monkeypatch):
             request=httpx.Request("GET", url),
         )
 
-    monkeypatch.setattr(httpx, "get", get)
+    _use_tile_upstream(monkeypatch, get)
     r = client.get("/api/tiles/esri-world-imagery/19/155000/400000")
     assert r.status_code == 200
     assert r.headers["x-azimut-overzoom"] == "1"
@@ -360,7 +416,7 @@ def test_test_key_sentinelhub_reports_the_services_own_words(client, monkeypatch
 def test_sentinel2_tile_proxy_offsets_the_matrix_and_counts_tiles(client, monkeypatch):
     client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
     upstream = _upstream()
-    monkeypatch.setattr(httpx, "get", upstream)
+    _use_tile_upstream(monkeypatch, upstream)
 
     # the frontend asks in grid levels; WMTS wants that level named one higher
     assert client.get("/api/tiles/sentinel2/13/4151/2818").status_code == 200
@@ -376,7 +432,7 @@ def test_sentinel2_proxy_never_asks_upstream_past_the_native_ceiling(client, mon
     tile magnified instead."""
     client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
     upstream = _upstream(content=_png_bytes(), headers={"content-type": "image/png"})
-    monkeypatch.setattr(httpx, "get", upstream)
+    _use_tile_upstream(monkeypatch, upstream)
 
     # grid 17 == view z18 for a 512px provider; native is grid 13 (TILEMATRIX 14)
     r = client.get("/api/tiles/sentinel2/17/66424/45097")
@@ -478,7 +534,7 @@ def test_free_tier_override_moves_the_soft_block(client, monkeypatch):
 
     # the block now measures against the user's figure, not the shipped default
     config.record_usage("sentinelhub", 900)  # 90% of 1000
-    monkeypatch.setattr(httpx, "get", _upstream())
+    _use_tile_upstream(monkeypatch, _upstream())
     assert client.get("/api/tiles/sentinel2/13/4151/2818").status_code == 429
 
     # ...and clearing it restores the default, which 900 is nowhere near

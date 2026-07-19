@@ -89,6 +89,15 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # lazily on first use, shown once in Settings, pasted into the extension.
     # Empty means "not minted yet" — never a valid credential.
     "ingest_token": "",
+    # App self-update pop-up (frontend App.svelte + engine/updates.py):
+    # - update_check_on_start: ask GitHub for the latest release when the page
+    #   loads, and pop a notice if one is newer. On by default so a binary user
+    #   (no package manager behind them) hears about releases; the one network
+    #   call Azimut makes on mount, and the toggle in Settings turns it off.
+    # - update_dismissed_version: the release the user chose "don't show again"
+    #   for. The pop-up stays quiet for that exact tag; a newer one shows again.
+    "update_check_on_start": True,
+    "update_dismissed_version": "",
 }
 
 # Accepted values for the display preferences above — mirror of

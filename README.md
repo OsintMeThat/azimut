@@ -72,8 +72,12 @@ release is out and links the download; replace the old file with the new one.
 To uninstall, delete the file. Either way `~/Azimut` stays put, so your cases
 open unchanged in the new version.
 
-Optional: install **ffmpeg** on your `PATH` for video thumbnails and video
-metadata (dimensions/duration). Everything else works without it.
+The downloadable binaries bundle a static **ffmpeg** (and ffprobe), so video
+thumbnails, frame scans, video enhancement, and downloads that merge separate
+audio+video streams work out of the box. If you `pip install azimut` instead,
+put ffmpeg on your `PATH` for those features — everything else works without it.
+The bundled ffmpeg is redistributed under its own license; see
+[ffmpeg.org/legal.html](https://ffmpeg.org/legal.html).
 
 From source:
 

@@ -162,6 +162,9 @@
   let tiers = $state(null);
   let tierEdits = $state(perProvider(() => ''));
   let about = $state({ version: '', workspace_root: '', extension_version: '' });
+  // ffmpeg powers video thumbnails, frame scans and merged-stream downloads.
+  // The binaries bundle it; a pip install uses a system copy on PATH. Read-only.
+  let ffmpeg = $state({ available: false, version: null, source: null, path: null });
 
   // --- capture extension: pairing token + detection (lib/extBridge.js) ---
   let ingestToken = $state('');
@@ -205,6 +208,7 @@
   // fought by the number parser mid-keystroke; committed on change
   let home = $state({ lat: '', lon: '', zoom: '' });
   let mention = $state('');
+  let updateOnStart = $state(true); // pop a notice on load when a release is out
   // the analyst's logo: app-wide like the API keys, and under the same rule —
   // it lives beside settings.json and only ever reaches a case as pixels in a
   // rendered proof PNG. `sigBust` re-fetches the <img> after a replace.
@@ -344,8 +348,11 @@
     ingestToken = s.ingest_token ?? '';
     home = { lat: String(s.home_view.lat), lon: String(s.home_view.lon), zoom: String(s.home_view.zoom) };
     mention = s.post_mention ?? '';
+    updateOnStart = s.update_check_on_start ?? true;
     applyPrefs(s); // the rest of the app reads these live
     await loadScrapers().catch(() => {}); // local disk read; never blocks Settings
+    // shells out to `ffmpeg -version`; non-blocking, About tab only reads it
+    api.get('/api/settings/ffmpeg').then((r) => (ffmpeg = r)).catch(() => {});
   }
 
   // Every preference saves on change — no "Save" button to forget. The server's
@@ -1002,6 +1009,15 @@
             <dd class="mono">{about.version || '—'}</dd>
             <dt>Workspace</dt>
             <dd class="mono">{about.workspace_root || '—'}</dd>
+            <dt>ffmpeg</dt>
+            <dd class="mono" title={ffmpeg.path || ''}>
+              {#if ffmpeg.available}
+                {ffmpeg.version || 'installed'}
+                <span class="sub">· {ffmpeg.source === 'bundled' ? 'bundled' : 'system PATH'}</span>
+              {:else}
+                not found <span class="sub">· install ffmpeg on your PATH</span>
+              {/if}
+            </dd>
             <dt>License</dt>
             <dd>AGPL-3.0-or-later</dd>
           </dl>
@@ -1045,6 +1061,21 @@
                 {checkingApp ? 'Checking…' : 'Check for updates'}
               </button>
             {/if}
+          </div>
+          <div class="row">
+            <div class="row-label">
+              <span>Tell me on startup</span>
+              <span class="row-hint">
+                Checks GitHub when the app loads and pops a notice if a newer
+                release is out. The only network call Azimut makes on its own.
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              bind:checked={updateOnStart}
+              onchange={() => savePrefs({ update_check_on_start: updateOnStart })}
+              aria-label="Check for updates on startup"
+            />
           </div>
           <p class="note">
             A <span class="mono">pip</span> or <span class="mono">pipx</span> install updates with
