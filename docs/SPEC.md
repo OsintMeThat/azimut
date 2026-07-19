@@ -105,6 +105,14 @@ cost controls, the capture browser extension, the settings tabs
 (Preferences/Imagery/About) + settings backup, scraper self-update, the launcher,
 server security hardening, and the two-regime dependency setup.
 
+**Shipped since** (first v2 tools landed on `main`):
+
+| Tool | What it does |
+|------|--------------|
+| ✅ **Coordinates** | Map-workspace tab: paste a point in any notation (decimal, DDM, DMS, UTM, MGRS, plus code, geohash) → read it back in every other with copy; the nine external-map links; opt-in Nominatim place name. |
+| ✅ **Reverse Search** | Collect-workspace launcher: pick a case image (or scrub a video to a frame), tweak brightness/contrast/saturation/grayscale → copy to the clipboard for Google Lens or save the PNG to drag into Yandex/Bing/TinEye, each opened key-less. Orchestrates, never queries itself. |
+| ✅ **Grid Search** | Satellite mode: overlay a custom metric grid on an area of interest — drag a box or draw a polygon, reshape either after the fact — and sweep it cell by cell. Fly-to-review with keyboard marks, cleared/flagged coverage; every action auto-saves. A case holds several named grids you switch between; promote a hit to a `place`. In-app only, no export. |
+
 **Key constraints** (carried forward):
 
 - **Legal-only imagery**: built-in providers are Esri (default, key-less), OSM,
@@ -130,11 +138,10 @@ never as new rail entries. Releases ship as GitHub `v0.x` tags.
 |------|--------------|
 | **Satellite Compare** | Same coords across providers (Esri / Sentinel-2 date slider / Bing / keyed), synced pan/zoom. Copernicus easy link. |
 | **Image Compare** | Overlay two images with opacity/swipe + pixel diff. Sat-vs-screen alignment aid (assist, never a verdict). |
-| **Coordinates** | Paste anything (any format or a map URL) → normalize; convert DMS/decimal/MGRS/plus code/geohash; reverse geocode (Nominatim); quick-open map links. |
 | **EXIF & Metadata** | GPS/timestamps/device/codecs parsed locally + a "what was stripped" hint; suggests place/event. |
 | **Shadow Clock** | Mark a shadow → possible capture times (sun-position math, local); sun times + solar azimuth readout at coords+date. Pairs with weather/METAR history. |
-| **Reverse Search Launcher** | Image/frame → reverse-search links (Google/Yandex/Bing/TinEye) + an oldest-date origin hint. First orchestrator tool. |
 | **OCR** | Read signs/plates (tesseract), detect script/language. |
+| **Audio Transcript** | Transcribe speech (Whisper) + acoustic context hints (bells/adhan/aircraft/language); auto-translate → English (offline). |
 | **Ground Imagery** | Ground-level photos: Panoramax/Mapillary/KartaView key-less first; Street View easy link, optional keyed in-app view. |
 | **Panorama** | Stitch a video window / frame set. Auto-stitch already in Inspect; still to do: sample a video window directly, seam blending. |
 | **Proof annotation** | Grow the Proof Composer toolbox: shape fill + dashed strokes, freehand, numbered markers, a redaction/blur box; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
@@ -147,7 +154,10 @@ capture (paste an image or a URL anywhere → filed as media with provenance),
 scale bar + north arrow + optional graticule burned into captures
 (preference-toggled auto-inclusion, extension/widget capture path included),
 read EXIF/GPS at media import → suggest place/time, Post Composer targets beyond
-X (Mastodon, Bluesky, generic report).
+X (Mastodon, Bluesky, generic report). Grow the two shipped GEOINT tools:
+Coordinates gains map-URL paste (reuse the extension's `parse_map_url`) and a
+Satellite hand-off; Reverse Search gains an optional TinEye-API-keyed
+oldest-date origin hint (Settings key, labeled a hint).
 
 Engineering (toward v2): split the monolith tool components (Satellite,
 ProofComposer) by extracting their logic into `lib/` modules like the other
@@ -167,9 +177,7 @@ tools; add component/interaction tests (Playwright) for the canvas gestures the
 Also toward v3: dependency-aware delete (partly done), downloader cookies,
 archive-on-download + archive time machine (Wayback CDX snapshot timeline +
 diff), web-page save extension, case bundle export/import, an editable/filterable
-places table (CSV/GeoJSON export), audio analyzer (Whisper) + acoustic context
-hints (bells/adhan/aircraft/language), auto-translation → English (offline),
-temporal change detection over imagery dates, a pattern-of-life map (a source's
+places table (CSV/GeoJSON export), temporal change detection over imagery dates, a pattern-of-life map (a source's
 extractable locations on map + timeline), a full chronolocation solver
 (shadow + sun + weather → dated window), auto-hash + timestamp on every export
 (proof.png etc.) recorded in the evidence journal, cross-case global search (a

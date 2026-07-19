@@ -1,7 +1,7 @@
 <script>
   import { api } from '../../lib/api.js';
   import { caseState, toast } from '../../lib/state.svelte.js';
-  import { isNeutral } from '../../lib/inspect.js';
+  import { adjustDefaults, isNeutral } from '../../lib/inspect.js';
   import Icon from '../../components/Icon.svelte';
   import AdjustSliders from './AdjustSliders.svelte';
 
@@ -67,6 +67,10 @@
 
   const maxScore = $derived(Math.max(1, ...suggestions.map((s) => s.score)));
   const gearActive = $derived(!isNeutral(videoFilters, session.videoAdjust));
+
+  function resetVideoAdjust() {
+    session.videoAdjust = adjustDefaults(videoFilters);
+  }
 </script>
 
 <div class="module">
@@ -100,6 +104,9 @@
     {#if showGear}
       <p class="hint">Preview the whole clip brighter/clearer; save an enhanced copy in Save.</p>
       <AdjustSliders filters={videoFilters} values={session.videoAdjust} />
+      <button class="btn btn-ghost btn-sm reset" disabled={!gearActive} onclick={resetVideoAdjust}>
+        <Icon name="reset" size={14} /> Reset adjustments
+      </button>
     {/if}
   </div>
 
@@ -197,6 +204,9 @@
     color: var(--text-3);
     font-size: var(--fs-xs);
     margin: 0;
+  }
+  .reset {
+    align-self: flex-start;
   }
   .sugg {
     display: flex;

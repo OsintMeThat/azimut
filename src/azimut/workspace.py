@@ -27,7 +27,7 @@ from typing import Any, Callable, Literal
 
 from . import config
 
-CASE_SUBDIRS = ("media", "proofs", "exports", "inspect")
+CASE_SUBDIRS = ("media", "proofs", "exports", "inspect", "search")
 
 # On-disk schema for case.json. A newer Azimut opens an older case by running
 # the migrations below up to this number on first open; a case written by a

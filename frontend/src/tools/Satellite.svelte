@@ -8,6 +8,7 @@
   } from '../lib/state.svelte.js';
   import { mapLinks } from '../lib/maplinks.js';
   import * as measure from '../lib/measure.js';
+  import * as gridSearch from '../lib/gridSearch.js';
   import { dragBearing, pivotPanOffset } from '../lib/satRotate.js';
   import { SIZE_MIN, SIZE_MAX, clampSize, scaledCapture } from '../lib/captureSize.js';
   import { isRegistered, sourceRect, frameFitsView } from '../lib/screenCrop.js';
@@ -216,6 +217,50 @@
   // External-maps quick links, in the SAVED panel (item 6).
   let linksOpen = $state(false);
 
+  // --- Grid Search (spec §5): overlay a metric grid on an area of interest and
+  // sweep it cell by cell, marking each cleared or flagged. A case can hold
+  // several saved grids (files under search/, working aids, not entities); each
+  // action auto-saves. Persists across basemap changes — its own layer group is
+  // untouched by setLayer().
+  let gridMode = $state(false); // mode armed from the tools bar
+  let grid = $state(null); // the open grid spec (lib/gridSearch.js), or null
+  let gridName = $state(null); // slug of the open grid's file (drives the picker)
+  let gridList = $state([]); // summaries of this case's saved grids (the picker)
+  let gridFor = null; // case id the list was loaded for (plain: load-dedup only)
+  let gridCollapsed = $state(false); // fold the panel down to its header
+  let gridCellM = $state(500); // metric cell size the next area is drawn with
+  let gridDraw = $state(null); // null | 'rect' | 'polygon' — drawing an area
+  let polyDraft = $state([]); // polygon vertices being placed, [{ lat, lon }]
+  let editArea = $state(false); // showing the area box to resize/reshape it
+  let gridHidden = $state(false); // eye toggle: keep the grid but hide it on the map
+  let renamingGrid = $state(false); // editing the open grid's title inline
+  let renameText = $state(''); // the title being typed while renaming
+  let reviewKey = $state(null); // 'i:j' of the cell under review, or null
+  let gridSaveTimer; // debounce the persist call
+  let gridLayer = null; // Leaflet layerGroup of the cells
+  let gridAoiLayer = null; // Leaflet layerGroup of the area outline + handles
+  let gridDraftLayer = null; // Leaflet layerGroup of the in-progress polygon
+  let gridRenderer = null; // one shared canvas renderer for all the cells
+  let cellRects = new Map(); // 'i:j' -> Leaflet rectangle (for cheap restyles)
+  let aoiOutline = null; // Leaflet path: the area's dashed outline
+  let dragBounds = null; // live rect bounds while a corner handle is dragged
+  let liveVerts = null; // live polygon vertices while a vertex handle is dragged
+  let draftLine = null; // Leaflet polyline of the in-progress polygon
+  const gridCov = $derived(grid ? gridSearch.coverage(grid) : null);
+  const savedOthers = $derived(gridList.filter((g) => g.name !== gridName));
+  const GRID_MAX_CELLS = gridSearch.MAX_CELLS;
+  // status → cell paint. Unchecked is a bright thin outline so the lattice reads
+  // clearly over dark imagery; cleared greys the cell out; flagged fills yellow
+  // (chosen over red so it reads for colour-blind analysts too).
+  const CELL_STYLE = {
+    unchecked: { color: '#ffffff', weight: 1, opacity: 0.7, fill: true, fillColor: '#fff', fillOpacity: 0 },
+    cleared: { color: '#ffffff', weight: 1, opacity: 0.55, fill: true, fillColor: '#2b3040', fillOpacity: 0.62 },
+    flagged: { color: '#ffcf33', weight: 1.5, opacity: 1, fill: true, fillColor: '#ffdb4d', fillOpacity: 0.6 },
+  };
+  const AOI_STYLE = { color: '#f5a623', weight: 1.5, opacity: 0.9, fill: false, dashArray: '5 4', interactive: false };
+  const CORNERS = ['sw', 'se', 'nw', 'ne']; // rect resize handles
+
+
   // --- reference viewers: floating scratch windows over the map that hold a
   // media image (the shot to geolocate) so you can eyeball it against the
   // imagery while panning. Session-only (uiState.refViewers) — never captured,
@@ -310,6 +355,8 @@
     // left-drag draws the capture marquee when that mode is armed (capture-phase
     // so Leaflet's pan handler never sees the gesture)
     mapEl.addEventListener('mousedown', onSelectStart, true);
+    // left-drag draws a Grid Search area when the rectangle tool is armed
+    mapEl.addEventListener('mousedown', onGridRectStart, true);
     window.addEventListener('keydown', onKeydown);
     document.addEventListener('fullscreenchange', onFullscreenChange);
     // the user clicked the extension after a refused capture — close the loop
@@ -326,9 +373,28 @@
   });
 
   function onKeydown(e) {
-    if (uiState.tool !== 'satellite' || e.key !== 'Escape') return;
-    // a dialog on top owns Escape — it closes itself, the map keeps its state
+    if (uiState.tool !== 'satellite') return;
+    // a dialog on top owns the keyboard — it closes itself, the map keeps state
     if (notesItem || placeModal || refPicker || deleteTarget) return;
+    const tag = e.target?.tagName;
+    const typing = tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable;
+    // Enter confirms a polygon area, same as the Confirm button
+    if (gridMode && gridDraw === 'polygon' && !typing && e.key === 'Enter' && polyDraft.length >= 3) {
+      e.preventDefault();
+      confirmPolygon();
+      return;
+    }
+    // Grid Search sweep: single-key marks while a cell is under review
+    if (gridMode && reviewKey && !typing) {
+      const k = e.key.toLowerCase();
+      if (k === ' ' || k === 'c') return void (e.preventDefault(), markReview('cleared'));
+      if (k === 'f') return void (e.preventDefault(), markReview('flagged'));
+      if (k === 's') return void (e.preventDefault(), reviewAdvance());
+      if (k === 'p') return void (e.preventDefault(), reviewToPlace());
+    }
+    if (e.key !== 'Escape') return;
+    if (gridDraw) return cancelGridDraw();
+    if (reviewKey) return stopReview();
     if (selectArmed) toggleSelect();
     else if (sizeMenuOpen) sizeMenuOpen = false;
     else if (measureMode) setMeasureMode(null);
@@ -638,6 +704,12 @@
 
   // --- measure tools (item 5) ---
   function onMapClick(e) {
+    // Grid Search polygon: each click drops a vertex
+    if (gridDraw === 'polygon') {
+      polyDraft = [...polyDraft, { lat: e.latlng.lat, lon: e.latlng.lng }];
+      renderDraft();
+      return;
+    }
     if (!measureMode) return;
     const pt = { lat: e.latlng.lat, lon: e.latlng.lng };
     // an angle is exactly three points; a fourth click starts a fresh angle
@@ -1450,6 +1522,578 @@
     });
   }
 
+  // --- Grid Search: layers, drawing, sweeping, persistence -------------------
+
+  function toggleGridMode() {
+    gridMode = !gridMode;
+    if (gridMode) {
+      if (selectArmed) toggleSelect(); // exclusive with the capture marquee…
+      if (measureMode) setMeasureMode(null); // …and the measure tools
+      gridHidden = false;
+      ensureGridLayers();
+      refreshGridList();
+      if (grid) {
+        renderGrid();
+        renderAoi();
+      }
+    } else {
+      cancelGridDraw();
+      stopReview();
+      editArea = false;
+      clearGridLayers();
+    }
+  }
+
+  function ensureGridLayers() {
+    if (!map) return;
+    if (!gridRenderer) gridRenderer = L.canvas({ padding: 0.5 });
+    if (!gridLayer) gridLayer = L.layerGroup();
+    if (!gridAoiLayer) gridAoiLayer = L.layerGroup();
+    if (!gridDraftLayer) gridDraftLayer = L.layerGroup();
+    syncGridVisibility();
+  }
+
+  // the eye toggle keeps the grid but drops its layers off the map so you can
+  // read the bare imagery underneath, then puts them back
+  function syncGridVisibility() {
+    if (!map) return;
+    for (const lyr of [gridLayer, gridAoiLayer, gridDraftLayer]) {
+      if (!lyr) continue;
+      const on = map.hasLayer(lyr);
+      if (gridHidden && on) map.removeLayer(lyr);
+      else if (!gridHidden && !on) map.addLayer(lyr);
+    }
+  }
+
+  function toggleGridHidden() {
+    gridHidden = !gridHidden;
+    syncGridVisibility();
+  }
+
+  function startRename() {
+    if (!grid) return;
+    renameText = grid.title || '';
+    renamingGrid = true;
+  }
+
+  function commitRename() {
+    renamingGrid = false;
+    if (!grid) return;
+    const t = renameText.trim();
+    if (t && t !== grid.title) {
+      grid.title = t;
+      scheduleGridSave();
+    }
+  }
+
+  function clearGridLayers() {
+    cellRects.clear();
+    aoiOutline = null;
+    draftLine = null;
+    gridLayer?.clearLayers();
+    gridAoiLayer?.clearLayers();
+    gridDraftLayer?.clearLayers();
+  }
+
+  function gridHandleIcon() {
+    return L.divIcon({ className: 'grid-handle', iconSize: [16, 16], iconAnchor: [8, 8] });
+  }
+
+  function cellLatLngBounds(i, j) {
+    const b = gridSearch.cellBounds(grid, i, j);
+    return [[b.south, b.west], [b.north, b.east]];
+  }
+
+  function cellStyle(key) {
+    const base = CELL_STYLE[grid?.statuses[key] || 'unchecked'];
+    // the cell under review gets a bright cyan outline — distinct from the
+    // yellow flag and the grey cleared fill for colour-blind readability
+    return key === reviewKey ? { ...base, color: '#33c9ff', weight: 2.5, opacity: 1 } : base;
+  }
+
+  function renderGrid() {
+    ensureGridLayers();
+    gridLayer.clearLayers();
+    cellRects.clear();
+    if (!grid) return;
+    for (const [i, j] of gridSearch.cellsInAoi(grid)) {
+      const key = gridSearch.cellKey(i, j);
+      const rect = L.rectangle(cellLatLngBounds(i, j), {
+        renderer: gridRenderer,
+        bubblingMouseEvents: false,
+        ...cellStyle(key),
+      });
+      rect.on('click', (e) => {
+        L.DomEvent.stop(e);
+        cycleCell(i, j);
+      });
+      rect.on('contextmenu', (e) => {
+        L.DomEvent.stop(e);
+        flagCell(i, j);
+      });
+      rect.addTo(gridLayer);
+      cellRects.set(key, rect);
+    }
+  }
+
+  function restyleCell(key) {
+    cellRects.get(key)?.setStyle(cellStyle(key));
+  }
+
+  function setReview(key) {
+    const prev = reviewKey;
+    reviewKey = key;
+    if (prev) restyleCell(prev);
+    if (key) restyleCell(key);
+  }
+
+  function cycleCell(i, j) {
+    const key = gridSearch.cellKey(i, j);
+    // during a sweep, clicking the cell you're reviewing clears it and moves on
+    // (same as the Clear button) — you're looking right at it
+    if (reviewKey && key === reviewKey) {
+      markReview('cleared');
+      return;
+    }
+    const next = gridSearch.cycleStatus(grid.statuses[key]);
+    if (next) grid.statuses[key] = next;
+    else delete grid.statuses[key];
+    restyleCell(key);
+    scheduleGridSave();
+  }
+
+  function flagCell(i, j) {
+    const key = gridSearch.cellKey(i, j);
+    if (grid.statuses[key] === 'flagged') delete grid.statuses[key];
+    else grid.statuses[key] = 'flagged';
+    restyleCell(key);
+    scheduleGridSave();
+  }
+
+  // --- editing the area of interest (rect corners / polygon vertices) ---
+  function cornerLatLng(b, c) {
+    return [c[0] === 'n' ? b.north : b.south, c[1] === 'e' ? b.east : b.west];
+  }
+
+  function normBounds(b) {
+    return {
+      south: Math.min(b.south, b.north),
+      north: Math.max(b.south, b.north),
+      west: Math.min(b.west, b.east),
+      east: Math.max(b.west, b.east),
+    };
+  }
+
+  // The area box + handles show only while editing the area; once a grid is
+  // drawn the box is hidden and just the cells remain.
+  function renderAoi() {
+    ensureGridLayers();
+    gridAoiLayer.clearLayers();
+    aoiOutline = null;
+    if (!grid || !editArea) return;
+    const b = gridSearch.aoiBounds(grid.aoi);
+    if (grid.aoi.type === 'rect') {
+      aoiOutline = L.rectangle([[b.south, b.west], [b.north, b.east]], AOI_STYLE).addTo(gridAoiLayer);
+      for (const corner of CORNERS) {
+        const m = L.marker(cornerLatLng(b, corner), {
+          draggable: true,
+          keyboard: false,
+          icon: gridHandleIcon(),
+          zIndexOffset: 1200,
+        });
+        m.on('dragstart', () => (dragBounds = { ...gridSearch.aoiBounds(grid.aoi) }));
+        m.on('drag', (e) => onCornerDrag(corner, e.target.getLatLng()));
+        m.on('dragend', commitResize);
+        m.addTo(gridAoiLayer);
+      }
+    } else {
+      aoiOutline = L.polygon(grid.aoi.vertices, AOI_STYLE).addTo(gridAoiLayer);
+      addVertHandles();
+    }
+  }
+
+  function onCornerDrag(corner, latlng) {
+    if (!dragBounds) return;
+    if (corner[0] === 'n') dragBounds.north = latlng.lat;
+    else dragBounds.south = latlng.lat;
+    if (corner[1] === 'e') dragBounds.east = latlng.lng;
+    else dragBounds.west = latlng.lng;
+    const b = normBounds(dragBounds);
+    aoiOutline?.setBounds([[b.south, b.west], [b.north, b.east]]);
+  }
+
+  function commitResize() {
+    if (!dragBounds || !grid) return;
+    const b = normBounds(dragBounds);
+    dragBounds = null;
+    const resized = gridSearch.resizeRect(grid, b);
+    if (gridSearch.estimateCells(resized) > GRID_MAX_CELLS) {
+      toast(`That area is too fine for ${grid.cell_m} m cells — keeping the previous size`, 'warn', 5000);
+      renderAoi(); // snap the handles back
+      return;
+    }
+    grid = resized;
+    renderGrid();
+    renderAoi();
+    scheduleGridSave();
+  }
+
+  // reshape a confirmed polygon: draggable handles on every vertex
+  function addVertHandles() {
+    grid.aoi.vertices.forEach((v, k) => {
+      const m = L.marker([v[0], v[1]], {
+        draggable: true,
+        keyboard: false,
+        icon: gridHandleIcon(),
+        zIndexOffset: 1200,
+      });
+      m.on('dragstart', () => (liveVerts = grid.aoi.vertices.map((x) => [...x])));
+      m.on('drag', (e) => {
+        if (!liveVerts) return;
+        const ll = e.target.getLatLng();
+        liveVerts[k] = [ll.lat, ll.lng];
+        aoiOutline?.setLatLngs(liveVerts);
+      });
+      m.on('dragend', commitVertEdit);
+      m.addTo(gridAoiLayer);
+    });
+  }
+
+  function commitVertEdit() {
+    if (!liveVerts || !grid) return;
+    const verts = liveVerts;
+    liveVerts = null;
+    const resized = gridSearch.resizePolygon(grid, verts);
+    if (gridSearch.estimateCells(resized) > GRID_MAX_CELLS) {
+      toast(`That shape is too fine for ${grid.cell_m} m cells — keeping the previous one`, 'warn', 5000);
+      renderAoi();
+      return;
+    }
+    grid = resized;
+    renderGrid();
+    renderAoi();
+    scheduleGridSave();
+  }
+
+  // show the area box to resize (rect corners) or reshape (polygon vertices)
+  function toggleEditArea() {
+    if (!grid) return;
+    stopReview();
+    cancelGridDraw();
+    editArea = !editArea;
+    renderAoi();
+  }
+
+  function startDraw(type) {
+    cancelGridDraw();
+    stopReview();
+    editArea = false;
+    gridHidden = false;
+    gridDraw = type;
+    // hide the current cells while drawing so map clicks reach the canvas
+    // (polygon vertices) instead of being swallowed by a cell underneath
+    gridLayer?.clearLayers();
+    cellRects.clear();
+    if (type === 'polygon') {
+      polyDraft = [];
+      renderDraft();
+    }
+  }
+
+  function cancelGridDraw() {
+    const wasDrawing = gridDraw;
+    gridDraw = null;
+    polyDraft = [];
+    selRect = null;
+    draftLine = null;
+    gridDraftLayer?.clearLayers();
+    if (wasDrawing && grid) renderGrid(); // restore the cells hidden while drawing
+  }
+
+  // rectangle area: drag a box (mirrors the capture marquee, reusing selRect for
+  // the live outline). Armed while gridDraw === 'rect'.
+  function onGridRectStart(e) {
+    if (gridDraw !== 'rect' || e.button !== 0 || !map) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const rect = mapEl.getBoundingClientRect();
+    const start = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    selRect = { x0: start.x, y0: start.y, x1: start.x, y1: start.y };
+    const move = (ev) => {
+      selRect = { x0: start.x, y0: start.y, x1: ev.clientX - rect.left, y1: ev.clientY - rect.top };
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      finishGridRect();
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }
+
+  function finishGridRect() {
+    const r = selRect;
+    selRect = null;
+    gridDraw = null;
+    if (!r || Math.abs(r.x1 - r.x0) < 12 || Math.abs(r.y1 - r.y0) < 12) {
+      if (grid) renderGrid(); // stray click: restore the cells hidden to draw
+      return;
+    }
+    const p1 = map.containerPointToLatLng(L.point(r.x0, r.y0));
+    const p2 = map.containerPointToLatLng(L.point(r.x1, r.y1));
+    doApplyArea({
+      type: 'rect',
+      bounds: normBounds({ south: p1.lat, north: p2.lat, west: p1.lng, east: p2.lng }),
+    });
+  }
+
+  // polygon area: click to drop vertices (handled in onMapClick), drag the
+  // handles to adjust, Confirm to build.
+  function draftLatLngs() {
+    const pts = polyDraft.map((p) => [p.lat, p.lon]);
+    return pts.length >= 3 ? pts.concat([pts[0]]) : pts;
+  }
+
+  function renderDraft() {
+    ensureGridLayers();
+    gridDraftLayer.clearLayers();
+    draftLine = null;
+    if (gridDraw !== 'polygon') return;
+    draftLine = L.polyline(draftLatLngs(), {
+      color: '#f5a623',
+      weight: 1.5,
+      opacity: 0.95,
+      dashArray: '5 4',
+    }).addTo(gridDraftLayer);
+    polyDraft.forEach((p, k) => {
+      const m = L.marker([p.lat, p.lon], {
+        draggable: true,
+        keyboard: false,
+        icon: gridHandleIcon(),
+        zIndexOffset: 1200,
+      });
+      m.on('drag', (e) => {
+        const ll = e.target.getLatLng();
+        polyDraft[k] = { lat: ll.lat, lon: ll.lng };
+        draftLine?.setLatLngs(draftLatLngs());
+      });
+      m.on('dragend', renderDraft);
+      m.addTo(gridDraftLayer);
+    });
+  }
+
+  function confirmPolygon() {
+    if (polyDraft.length < 3) return;
+    const vertices = polyDraft.map((p) => [p.lat, p.lon]);
+    gridDraw = null;
+    polyDraft = [];
+    gridDraftLayer?.clearLayers();
+    doApplyArea({ type: 'polygon', vertices });
+  }
+
+  // Drawing an area always makes a *new* grid (the case can hold several); the
+  // one you were on stays saved. Resizing the current grid is the handles.
+  async function doApplyArea(aoi) {
+    const cellM = Math.max(10, Number(gridCellM) || 500); // never a NaN lattice
+    const g = gridSearch.createGrid(aoi, cellM);
+    if (gridSearch.estimateCells(g) > GRID_MAX_CELLS) {
+      toast(`That area is too fine — over the ${GRID_MAX_CELLS}-cell limit. Use a larger cell size.`, 'warn', 6000);
+      renderGrid(); // restore the previous grid we hid to draw
+      return;
+    }
+    await ensureCase(); // a grid is case state; make sure there is one to hold it
+    await flushGridSave(); // persist the grid we're leaving before switching
+    g.title = gridTitleFor(aoi);
+    grid = g;
+    gridName = `grid-${Date.now().toString(36)}`;
+    gridFor = caseState.current?.id;
+    reviewKey = null;
+    editArea = false;
+    gridHidden = false;
+    renderGrid();
+    renderAoi();
+    await saveGrid(); // create it on disk now, then refresh the picker
+    refreshGridList();
+  }
+
+  function gridTitleFor(aoi) {
+    const b = gridSearch.aoiBounds(aoi);
+    return fmtCoords((b.south + b.north) / 2, (b.west + b.east) / 2);
+  }
+
+  // --- sweep loop: fly to a cell, mark it, advance ---
+  function flyToCell([i, j]) {
+    setReview(gridSearch.cellKey(i, j));
+    const b = gridSearch.cellBounds(grid, i, j);
+    map.fitBounds([[b.south, b.west], [b.north, b.east]], {
+      padding: [80, 80],
+      maxZoom: 20,
+      animate: true,
+    });
+  }
+
+  function startReview() {
+    if (!grid) return;
+    editArea = false;
+    const cell = gridSearch.nextUnchecked(grid, null);
+    if (!cell) {
+      toast('Every cell is marked — sweep complete', 'ok');
+      return;
+    }
+    flyToCell(cell);
+  }
+
+  function reviewAdvance() {
+    const next = gridSearch.nextUnchecked(grid, reviewKey);
+    if (!next) {
+      setReview(null);
+      toast('Sweep complete', 'ok');
+      return;
+    }
+    flyToCell(next);
+  }
+
+  function markReview(status) {
+    if (!reviewKey) return;
+    if (status) grid.statuses[reviewKey] = status;
+    else delete grid.statuses[reviewKey];
+    restyleCell(reviewKey);
+    scheduleGridSave();
+    reviewAdvance();
+  }
+
+  function stopReview() {
+    if (reviewKey) setReview(null);
+  }
+
+  // flag the cell under review and file its centre as a place (spec §5 — a hit
+  // the analyst promotes into the case graph)
+  async function reviewToPlace() {
+    if (!reviewKey || !grid) return;
+    const [i, j] = gridSearch.parseKey(reviewKey);
+    const c = gridSearch.cellCenter(grid, i, j);
+    grid.statuses[reviewKey] = 'flagged';
+    restyleCell(reviewKey);
+    scheduleGridSave();
+    try {
+      const cs = await ensureCase();
+      await api.post(`/api/cases/${cs.id}/satellite/place`, {
+        lat: c.lat,
+        lon: c.lon,
+        zoom: Math.max(center.zoom, 16),
+        bearing: 0,
+      });
+      await reloadCase();
+      toast('Cell flagged and saved as a place', 'ok');
+    } catch (e) {
+      toast(`Could not save place: ${e.message}`, 'danger', 6000);
+    }
+  }
+
+  // --- the case's saved grids: list, load, new, delete, persist ---
+  function scheduleGridSave() {
+    clearTimeout(gridSaveTimer);
+    gridSaveTimer = setTimeout(saveGrid, 600);
+  }
+
+  // persist any pending change to the *current* grid before we switch away
+  async function flushGridSave() {
+    clearTimeout(gridSaveTimer);
+    await saveGrid();
+  }
+
+  async function saveGrid() {
+    const id = caseState.current?.id;
+    if (!id || !grid || !gridName) return;
+    try {
+      const spec = JSON.parse(JSON.stringify(grid)); // strip the $state proxy
+      await api.put(`/api/cases/${id}/search-grids/${gridName}`, { spec, title: grid.title });
+    } catch (e) {
+      toast(`Could not save the grid: ${e.message}`, 'danger', 5000);
+    }
+  }
+
+  async function refreshGridList() {
+    const id = caseState.current?.id;
+    if (!id) {
+      gridList = [];
+      return;
+    }
+    try {
+      gridList = await api.get(`/api/cases/${id}/search-grids`);
+    } catch {
+      gridList = [];
+    }
+  }
+
+  async function loadGrid(name) {
+    const id = caseState.current?.id;
+    if (!id) return;
+    cancelGridDraw();
+    stopReview();
+    editArea = false;
+    gridHidden = false;
+    await flushGridSave(); // persist the grid we're leaving
+    try {
+      const spec = await api.get(`/api/cases/${id}/search-grids/${name}`);
+      grid = spec;
+      gridName = name;
+      reviewKey = null;
+      ensureGridLayers();
+      renderGrid();
+      renderAoi();
+      refreshGridList(); // the grid we left becomes a picker entry
+    } catch (e) {
+      toast(`Could not load grid: ${e.message}`, 'danger', 6000);
+    }
+  }
+
+  // close the open grid (it stays saved) — the draw buttons then start a fresh one
+  function closeGrid() {
+    grid = null;
+    gridName = null;
+    reviewKey = null;
+    editArea = false;
+    cancelGridDraw();
+    clearGridLayers();
+  }
+
+  // the Discard button: persist any pending rename/marks first, then close, then
+  // refresh the picker so the just-closed grid shows its latest title
+  async function discardOpenGrid() {
+    await flushGridSave();
+    closeGrid();
+    refreshGridList();
+  }
+
+  async function deleteGrid(name) {
+    const id = caseState.current?.id;
+    if (id) {
+      try {
+        await api.del(`/api/cases/${id}/search-grids/${name}`);
+      } catch {
+        /* the file may already be gone — nothing left to do */
+      }
+    }
+    if (gridName === name) closeGrid();
+    refreshGridList();
+  }
+
+  // on case change: refresh the picker and close whatever grid was open
+  $effect(() => {
+    const id = caseState.current?.id;
+    caseState.rev; // re-read after a reload elsewhere
+    if (!mapReady) return;
+    if (gridFor === id) return;
+    gridFor = id;
+    grid = null;
+    gridName = null;
+    reviewKey = null;
+    editArea = false;
+    clearGridLayers();
+    refreshGridList();
+  });
+
   // save just the point (pin if moved, else center) as a navigable place — no image
   let savingPlace = $state(false);
   async function savePlace() {
@@ -1675,6 +2319,7 @@
       class="map-wrap"
       class:measuring={measureMode}
       class:selecting={selectArmed}
+      class:grid-drawing={!!gridDraw}
       class:grabbing={hideOverlays}
     >
       <div class="map" bind:this={mapEl}></div>
@@ -1711,6 +2356,15 @@
             aria-label="Measure tools"
           >
             <Icon name="ruler" size={16} />
+          </button>
+          <button
+            class="mtbtn"
+            class:on={gridMode}
+            onclick={toggleGridMode}
+            title="Grid Search — sweep an area cell by cell"
+            aria-label="Grid Search"
+          >
+            <Icon name="grid" size={16} />
           </button>
           <button
             class="mtbtn"
@@ -1758,6 +2412,166 @@
                 <button class="btn btn-ghost btn-sm" onclick={clearMeasure} title="Clear points">
                   <Icon name="reset" size={13} />
                 </button>
+              </div>
+            {/if}
+          </div>
+        {/if}
+
+        {#if gridMode}
+          <div class="grid-panel card" class:collapsed={gridCollapsed}>
+            <div class="grid-head">
+              <button
+                class="grid-collapse"
+                onclick={() => (gridCollapsed = !gridCollapsed)}
+                title={gridCollapsed ? 'Expand' : 'Collapse'}
+                aria-label={gridCollapsed ? 'Expand panel' : 'Collapse panel'}
+              >
+                <Icon name={gridCollapsed ? 'chevronDown' : 'chevronUp'} size={14} />
+              </button>
+              {#if renamingGrid}
+                <!-- svelte-ignore a11y_autofocus -->
+                <input
+                  class="input grid-rename"
+                  bind:value={renameText}
+                  autofocus
+                  onblur={commitRename}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') commitRename();
+                    else if (e.key === 'Escape') {
+                      renameText = grid.title || '';
+                      renamingGrid = false;
+                    }
+                  }}
+                />
+              {:else}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <span
+                  class="grid-head-title"
+                  class:renamable={grid}
+                  ondblclick={startRename}
+                  title={grid ? 'Double-click to rename' : ''}
+                >
+                  {grid ? grid.title || 'Grid' : 'Grid Search'}
+                </span>
+              {/if}
+              {#if grid}
+                <button
+                  class="grid-eye"
+                  onclick={toggleGridHidden}
+                  title={gridHidden ? 'Show grid' : 'Hide grid'}
+                  aria-label={gridHidden ? 'Show grid' : 'Hide grid'}
+                >
+                  <Icon name={gridHidden ? 'eyeOff' : 'eye'} size={14} />
+                </button>
+                {#if gridCov}
+                  <span class="grid-head-pct mono">{gridCov.percent}%</span>
+                {/if}
+              {/if}
+            </div>
+
+            {#if !gridCollapsed}
+              <div class="grid-body">
+                {#if grid}
+                  <div class="grid-cov">
+                    <div class="grid-bar">
+                      <span class="grid-bar-fill" style="width:{gridCov.percent}%"></span>
+                    </div>
+                    <span class="grid-cov-text mono">
+                      {gridCov.cleared + gridCov.flagged}/{gridCov.total} · {gridCov.percent}%{#if gridCov.flagged} · {gridCov.flagged} flagged{/if}
+                    </span>
+                  </div>
+
+                  {#if reviewKey}
+                    <div class="grid-hint">
+                      <b>C</b> clear · <b>F</b> flag · <b>S</b> skip · <b>P</b> place · <b>Esc</b> stop
+                    </div>
+                    <div class="grid-btns">
+                      <button class="btn btn-sm" onclick={() => markReview('cleared')}>
+                        <Icon name="check" size={13} /> Clear
+                      </button>
+                      <button class="btn btn-sm" onclick={() => markReview('flagged')}>
+                        <Icon name="pin" size={13} /> Flag
+                      </button>
+                      <button class="btn btn-sm" onclick={reviewToPlace} title="Flag and save as a place">
+                        <Icon name="plus" size={13} /> Place
+                      </button>
+                      <button class="btn btn-ghost btn-sm" onclick={stopReview}>Stop</button>
+                    </div>
+                  {:else}
+                    <div class="grid-btns">
+                      <button class="btn btn-sm" onclick={startReview} title="Fly through the unchecked cells">
+                        <Icon name="eye" size={13} /> Review
+                      </button>
+                      <button class="btn btn-sm" class:on={editArea} onclick={toggleEditArea} title="Show the area box to resize or reshape it">
+                        <Icon name="edit" size={13} /> Edit area
+                      </button>
+                      <button class="btn btn-sm grid-discard" onclick={discardOpenGrid} title="Close this grid (it stays saved) to draw or open another">
+                        Discard
+                      </button>
+                      <button class="btn btn-ghost btn-sm" onclick={() => deleteGrid(gridName)} title="Delete this grid for good">
+                        <Icon name="trash" size={13} />
+                      </button>
+                    </div>
+                    {#if editArea}
+                      <div class="grid-hint">Drag the {grid.aoi.type === 'rect' ? 'corners' : 'points'} to reshape.</div>
+                    {/if}
+                  {/if}
+                {/if}
+
+                {#if !grid}
+                  <div class="grid-new">
+                    <div class="grid-size">
+                      <span>Cell</span>
+                      <input
+                        class="input"
+                        type="number"
+                        min="10"
+                        step="10"
+                        bind:value={gridCellM}
+                        title="Cell size in metres for the next grid"
+                      />
+                      <span>m</span>
+                    </div>
+                    <div class="grid-btns">
+                      <button class="btn btn-sm" class:on={gridDraw === 'rect'} onclick={() => startDraw('rect')}>
+                        <Icon name="square" size={13} /> Box
+                      </button>
+                      <button class="btn btn-sm" class:on={gridDraw === 'polygon'} onclick={() => startDraw('polygon')}>
+                        <Icon name="polygon" size={13} /> Polygon
+                      </button>
+                    </div>
+                    {#if gridDraw === 'polygon'}
+                      <div class="grid-hint">Click to add points{#if polyDraft.length} · {polyDraft.length}{/if}. Drag to adjust.</div>
+                      <div class="grid-btns">
+                        <button class="btn btn-sm" disabled={polyDraft.length < 3} onclick={confirmPolygon}>Confirm</button>
+                        <button class="btn btn-ghost btn-sm" onclick={cancelGridDraw}>Cancel</button>
+                      </div>
+                    {:else if gridDraw === 'rect'}
+                      <div class="grid-hint">Drag a box on the map. Esc to cancel.</div>
+                    {/if}
+                  </div>
+                {/if}
+
+                {#if !grid && savedOthers.length}
+                  <div class="grid-saved">
+                    <div class="grid-saved-label">Saved grids ({savedOthers.length})</div>
+                    <div class="grid-saved-list">
+                      {#each savedOthers as g (g.name)}
+                        <div class="grid-saved-row">
+                          <button class="grid-load" onclick={() => loadGrid(g.name)} title="Open this grid">
+                            {g.title || g.name}
+                          </button>
+                          <span class="grid-saved-cov mono" title="cleared · flagged">
+                            {g.cleared}{#if g.flagged}<span class="flagged"> ⚑{g.flagged}</span>{/if}
+                          </span>
+                          <button class="btn btn-ghost btn-sm" onclick={() => deleteGrid(g.name)} title="Delete">
+                            <Icon name="trash" size={12} />
+                          </button>
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
               </div>
             {/if}
           </div>
@@ -2942,6 +3756,213 @@
   .map-wrap.measuring :global(.leaflet-container),
   .map-wrap.selecting :global(.leaflet-container) {
     cursor: crosshair;
+  }
+  .map-wrap.grid-drawing :global(.leaflet-container) {
+    cursor: crosshair;
+  }
+
+  /* Grid Search panel — same shelf as the measure panel, to the cluster's right */
+  .grid-panel {
+    position: absolute;
+    top: 0;
+    left: calc(100% + 8px);
+    width: 218px;
+    display: flex;
+    flex-direction: column;
+    background: rgba(24, 24, 24, 0.92);
+    backdrop-filter: blur(6px);
+    box-shadow: var(--shadow-2);
+  }
+  .grid-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+  .grid-collapse {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-1);
+    color: var(--text-2);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .grid-collapse:hover {
+    color: var(--text-1);
+    background: var(--bg-3);
+  }
+  .grid-head-title {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .grid-head-title.renamable {
+    cursor: text;
+  }
+  .grid-rename {
+    flex: 1;
+    min-width: 0;
+    height: 24px;
+    padding: 2px 6px;
+    font-size: var(--fs-sm);
+  }
+  .grid-eye {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-1);
+    color: var(--text-2);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .grid-eye:hover {
+    color: var(--text-1);
+    background: var(--bg-3);
+  }
+  .grid-head-pct {
+    font-size: var(--fs-xs);
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  .grid-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 10px 10px;
+  }
+  .grid-size {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+  }
+  .grid-size .input {
+    width: 64px;
+  }
+  .grid-btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .grid-btns .btn.on {
+    background: var(--accent);
+    color: var(--accent-text);
+    border-color: var(--accent);
+  }
+  .grid-discard {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: var(--text-1);
+  }
+  .grid-discard:hover {
+    background: rgba(255, 255, 255, 0.16);
+    color: var(--text-1);
+  }
+  .grid-hint {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+  .grid-hint b {
+    color: var(--text-2);
+  }
+  .grid-cov {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .grid-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(124, 138, 165, 0.25);
+    overflow: hidden;
+  }
+  .grid-bar-fill {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.15s ease;
+  }
+  .grid-cov-text {
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+  }
+  .grid-new {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .grid-saved {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .grid-saved-label {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    margin-bottom: 2px;
+  }
+  .grid-saved-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    /* hundreds of grids scroll inside the panel instead of stretching it down
+       the whole page */
+    max-height: 240px;
+    overflow-y: auto;
+  }
+  .grid-saved-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .grid-load {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    padding: 3px 6px;
+    border-radius: var(--radius-1);
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .grid-load:hover {
+    color: var(--text-1);
+    background: var(--bg-3);
+  }
+  .grid-saved-cov {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    flex-shrink: 0;
+  }
+  .grid-saved-cov .flagged {
+    color: #ffcf33;
+  }
+  /* draggable square handle for the area corners / polygon vertices */
+  :global(.grid-handle) {
+    background: var(--accent, #f5a623);
+    border: 2px solid #14161d;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+    cursor: grab;
+  }
+  :global(.grid-handle:active) {
+    cursor: grabbing;
   }
 
   /* live capture marquee: a dashed box with a dark scrim over the rest of the

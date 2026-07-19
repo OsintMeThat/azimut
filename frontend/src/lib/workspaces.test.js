@@ -1,20 +1,28 @@
 import { describe, it, expect } from 'vitest';
 import { WORKSPACES, workspaceOf, toolFromHash } from './workspaces.js';
 
-const ALL_TOOLS = ['media', 'files', 'inspect', 'satellite', 'proof', 'post', 'settings'];
+const ALL_TOOLS = [
+  'media', 'files', 'reverse', 'inspect', 'satellite', 'coordinates', 'proof', 'post', 'settings',
+];
 
 describe('workspaceOf', () => {
   it('maps every rail tool to exactly one workspace', () => {
-    for (const tool of ['media', 'files', 'inspect', 'satellite', 'proof', 'post']) {
+    for (const tool of ['media', 'files', 'reverse', 'inspect', 'satellite', 'coordinates', 'proof', 'post']) {
       const owners = WORKSPACES.filter((w) => w.tools.includes(tool));
       expect(owners).toHaveLength(1);
       expect(workspaceOf(tool)).toBe(owners[0]);
     }
   });
 
-  it('groups media and files under collect', () => {
+  it('groups media, files and reverse search under collect', () => {
     expect(workspaceOf('media').id).toBe('collect');
     expect(workspaceOf('files').id).toBe('collect');
+    expect(workspaceOf('reverse').id).toBe('collect');
+  });
+
+  it('groups satellite and coordinates under map', () => {
+    expect(workspaceOf('satellite').id).toBe('map');
+    expect(workspaceOf('coordinates').id).toBe('map');
   });
 
   it('groups proof and post under compose', () => {

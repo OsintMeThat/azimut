@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -83,6 +85,29 @@ class SatelliteUpdateIn(BaseModel):
     path: str
     notes: str | None = None
     title: str | None = None
+
+
+class GridSaveIn(BaseModel):
+    # The whole grid spec, built and owned by the client (lib/gridSearch.js).
+    # Stored under search/, one file per grid; the server only stamps +
+    # sanity-checks it. A human title rides alongside for the picker.
+    spec: dict[str, Any]
+    title: str | None = None
+
+
+# Search grids are saved sweeps a case can hold several of (spec §5 "Grid
+# Search"): JSON specs under search/, each a working aid, not a filed entity.
+GRID_STATUSES = {"cleared", "flagged"}
+GRID_MAX_STATUSES = 50000
+
+
+def _slug(text: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+    return slug[:80] or "grid"
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @router.get("/satellite/providers")
@@ -373,8 +398,11 @@ def parse_coordinates(body: ParseIn) -> dict[str, Any]:
     return {
         "lat": lat,
         "lon": lon,
+        # flat keys the Post Composer reads by name
         "dms": geo.to_dms(lat, lon),
         "plus_code": geo.plus_code(lat, lon),
+        # the Coordinates tool renders this ordered list wholesale
+        "formats": geo.all_formats(lat, lon),
         "links": geo.map_links(lat, lon),
     }
 
@@ -604,3 +632,82 @@ def update_capture(case_id: str, body: SatelliteUpdateIn) -> dict[str, Any]:
     # flatten the capture provenance up, like the listing does, so the client
     # gets the same shape back as GET /satellite
     return {**(updated.get("source") or {}), **updated}
+
+
+@router.get("/cases/{case_id}/search-grids")
+def list_search_grids(case_id: str) -> list[dict[str, Any]]:
+    """Summaries of every saved grid, newest first, for the picker."""
+    case = get_case(case_id)
+    out = []
+    for spec_path in case.subdir("search").glob("*.json"):
+        try:
+            spec = json.loads(spec_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if spec.get("azimut_grid") != 1:
+            continue
+        statuses = spec.get("statuses") or {}
+        out.append({
+            "name": spec_path.stem,
+            "title": spec.get("title", spec_path.stem),
+            "updated_at": spec.get("updated_at"),
+            "aoi_type": (spec.get("aoi") or {}).get("type"),
+            "cleared": sum(1 for v in statuses.values() if v == "cleared"),
+            "flagged": sum(1 for v in statuses.values() if v == "flagged"),
+        })
+    out.sort(key=lambda g: g.get("updated_at") or "", reverse=True)
+    return out
+
+
+@router.get("/cases/{case_id}/search-grids/{name}")
+def get_search_grid(case_id: str, name: str) -> dict[str, Any]:
+    """One saved grid's full spec."""
+    case = get_case(case_id)
+    try:
+        spec_path = case.resolve_inside(f"search/{name}.json")
+    except CaseError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if not spec_path.exists():
+        raise HTTPException(status_code=404, detail="grid not found")
+    return json.loads(spec_path.read_text(encoding="utf-8"))
+
+
+@router.put("/cases/{case_id}/search-grids/{name}")
+def save_search_grid(case_id: str, name: str, body: GridSaveIn) -> dict[str, Any]:
+    """Create or replace one grid. The client owns the name (a stable slug)."""
+    case = get_case(case_id)
+    slug = _slug(name)
+    spec = dict(body.spec)
+    aoi = spec.get("aoi")
+    if not isinstance(aoi, dict) or aoi.get("type") not in {"rect", "polygon"}:
+        raise HTTPException(status_code=400, detail="grid needs a rect or polygon aoi")
+    # keep only the two real marks; a corrupt value never reaches disk
+    raw = spec.get("statuses")
+    statuses = {} if not isinstance(raw, dict) else {
+        str(k): v for k, v in raw.items() if v in GRID_STATUSES
+    }
+    if len(statuses) > GRID_MAX_STATUSES:
+        raise HTTPException(status_code=400, detail="grid has too many cells")
+    spec["statuses"] = statuses
+    spec["azimut_grid"] = 1
+    if body.title is not None:
+        spec["title"] = body.title
+    spec.setdefault("title", slug)
+    spec.setdefault("created_at", _now())
+    spec["updated_at"] = _now()
+    spec_path = case.subdir("search") / f"{slug}.json"
+    spec_path.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return {"name": slug, "title": spec["title"], "updated_at": spec["updated_at"]}
+
+
+@router.delete("/cases/{case_id}/search-grids/{name}")
+def delete_search_grid(case_id: str, name: str) -> dict[str, Any]:
+    """Discard one saved grid."""
+    case = get_case(case_id)
+    try:
+        spec_path = case.resolve_inside(f"search/{name}.json")
+    except CaseError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    existed = spec_path.exists()
+    spec_path.unlink(missing_ok=True)
+    return {"deleted": existed}

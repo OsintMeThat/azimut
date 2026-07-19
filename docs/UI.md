@@ -21,9 +21,9 @@ entry**; it registers in `frontend/src/lib/workspaces.js`.
 
 | Workspace | Tools today | Future tools land here |
 |---|---|---|
-| **Collect** | Media Library, Files | Reverse Search, Channel Monitor, Evidence Locker |
+| **Collect** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect (Selection / Frame / Collage / Analyze) | EXIF, OCR, Image Compare, Hints, Shadow Clock, audio |
-| **Map** | Satellite | **one map, many modes**: Compare, Ground Imagery, Coordinates, Measures, Viewshed, OSM Query, Map Board |
+| **Map** | Satellite, Coordinates | **one map, many modes**: Compare, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
 | **Compose** | Proof Composer, Post Composer | Report Builder, GIF maker |
 | *(Case)* | — sidebar covers it | v3: Notes, Relations, Timeline, Orchestrator |
 

@@ -1,5 +1,7 @@
 """Forward geocoding (/api/geo/geocode): Nominatim behind a mock, never the network."""
 
+import pytest
+
 from azimut.engine import geo
 
 
@@ -63,3 +65,34 @@ def test_geocode_network_failure_is_404(client, monkeypatch):
     # engine swallows the error (best-effort) → API reports no match
     response = client.get("/api/geo/geocode", params={"q": "paris"})
     assert response.status_code == 404
+
+
+# -- /api/geo/parse: pure offline conversion, no network -------------------------------
+
+
+def test_parse_returns_every_format_and_the_map_links(client):
+    result = client.post("/api/geo/parse", json={"text": "48.8583701, 2.2944813"}).json()
+    assert result["lat"] == pytest.approx(48.8583701)
+    assert result["lon"] == pytest.approx(2.2944813)
+    # flat keys the Post Composer reads by name stay in place
+    assert result["dms"].endswith('E')
+    assert "+" in result["plus_code"]
+    # the ordered list the Coordinates tool renders
+    assert [f["id"] for f in result["formats"]] == [
+        "dd", "ddm", "dms", "utm", "mgrs", "plus_code", "geohash",
+    ]
+    # all nine external maps, keyed by site
+    assert set(result["links"]) >= {"google", "yandex", "bing", "sentinel"}
+
+
+def test_parse_accepts_the_formats_it_emits(client):
+    for text in ("31U 448251 5411952", "u09tunqu9", "48°51.502'N 2°17.669'E"):
+        response = client.post("/api/geo/parse", json={"text": text})
+        assert response.status_code == 200, text
+        body = response.json()
+        assert body["lat"] == pytest.approx(48.858, abs=1e-2)
+        assert body["lon"] == pytest.approx(2.294, abs=1e-2)
+
+
+def test_parse_rejects_gibberish_with_422(client):
+    assert client.post("/api/geo/parse", json={"text": "hello world"}).status_code == 422

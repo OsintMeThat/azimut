@@ -13,9 +13,16 @@ from .tiles import USER_AGENT
 # -- parsing -------------------------------------------------------------------
 
 _DEC = r"[-+]?\d{1,3}(?:\.\d+)?"
+# Degrees, then minutes (decimal allowed, so degrees-decimal-minutes reads back),
+# then optional seconds, then a hemisphere letter.
 _DMS = (
-    r"(?P<deg>\d{1,3})\s*[°d]\s*(?:(?P<min>\d{1,2})\s*[’'m]\s*)?"
+    r"(?P<deg>\d{1,3})\s*[°d]\s*(?:(?P<min>\d{1,2}(?:\.\d+)?)\s*[’'m]\s*)?"
     r"(?:(?P<sec>\d{1,2}(?:\.\d+)?)\s*[”\"s]\s*)?(?P<hemi>[NSEW])"
+)
+# UTM: "31U 448251 5411932" (zone, band, easting, northing; spacing loose).
+_UTM = (
+    r"(?P<zone>\d{1,2})\s*(?P<band>[C-HJ-NP-X])\s+"
+    r"(?P<easting>\d{1,7}(?:\.\d+)?)\s+(?P<northing>\d{1,8}(?:\.\d+)?)"
 )
 
 
@@ -57,8 +64,25 @@ def parse_coords(text: str) -> tuple[float, float] | None:
     if mgrs:
         return mgrs
 
+    # UTM: "31U 448251 5411932" — bands C-M are the southern hemisphere.
+    m = re.fullmatch(_UTM, text, flags=re.IGNORECASE)
+    if m:
+        zone = int(m.group("zone"))
+        southern = m.group("band").upper() < "N"
+        lat, lon = coords.from_utm(
+            zone, float(m.group("easting")), float(m.group("northing")), southern
+        )
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
+            return lat, lon
+        return None
+
     # full plus code: "8FW4V75V+8Q"
-    return parse_plus_code(text)
+    plus = parse_plus_code(text)
+    if plus:
+        return plus
+
+    # geohash: "u09tvw0f" — tried last, it is the most permissive shape
+    return parse_geohash(text)
 
 
 def parse_plus_code(text: str) -> tuple[float, float] | None:
@@ -97,6 +121,97 @@ def to_dms(lat: float, lon: float) -> str:
     return f"{fmt(lat, 'N', 'S')} {fmt(lon, 'E', 'W')}"
 
 
+def to_ddm(lat: float, lon: float) -> str:
+    """Degrees decimal minutes, e.g. "48°51.502'N 2°17.669'E" (~0.06 m on lat)."""
+
+    def fmt(value: float, pos: str, neg: str) -> str:
+        hemi = pos if value >= 0 else neg
+        value = abs(value)
+        deg = int(value)
+        minutes = (value - deg) * 60
+        return f"{deg}°{minutes:06.3f}'{hemi}"
+
+    return f"{fmt(lat, 'N', 'S')} {fmt(lon, 'E', 'W')}"
+
+
+def to_utm(lat: float, lon: float) -> str | None:
+    """UTM grid reference, e.g. "31U 448251 5411932". None outside its domain."""
+    band = coords.lat_band(lat)
+    if band is None:
+        return None
+    zone, easting, northing = coords.to_utm(lat, lon)
+    return f"{zone}{band} {round(easting)} {round(northing)}"
+
+
+# -- geohash ------------------------------------------------------------------------
+# Standard base32 geohash (public-domain algorithm), used by many OSINT sites.
+
+_GEOHASH_BASE32 = "0123456789bcdefghjkmnpqrstuvwxyz"
+
+
+def geohash(lat: float, lon: float, precision: int = 9) -> str:
+    lat_lo, lat_hi = -90.0, 90.0
+    lon_lo, lon_hi = -180.0, 180.0
+    out: list[str] = []
+    bit = 0
+    ch = 0
+    even = True  # even bits refine longitude
+    while len(out) < precision:
+        if even:
+            mid = (lon_lo + lon_hi) / 2
+            if lon >= mid:
+                ch = (ch << 1) | 1
+                lon_lo = mid
+            else:
+                ch <<= 1
+                lon_hi = mid
+        else:
+            mid = (lat_lo + lat_hi) / 2
+            if lat >= mid:
+                ch = (ch << 1) | 1
+                lat_lo = mid
+            else:
+                ch <<= 1
+                lat_hi = mid
+        even = not even
+        if bit < 4:
+            bit += 1
+        else:
+            out.append(_GEOHASH_BASE32[ch])
+            bit = 0
+            ch = 0
+    return "".join(out)
+
+
+def parse_geohash(text: str) -> tuple[float, float] | None:
+    """Decode a geohash to its cell centre. None if it holds a non-base32 char."""
+    code = text.strip().lower()
+    if not code or len(code) < 4:  # too short to be an unambiguous paste
+        return None
+    lat_lo, lat_hi = -90.0, 90.0
+    lon_lo, lon_hi = -180.0, 180.0
+    even = True
+    for c in code:
+        idx = _GEOHASH_BASE32.find(c)
+        if idx < 0:
+            return None
+        for mask in (16, 8, 4, 2, 1):
+            if even:
+                mid = (lon_lo + lon_hi) / 2
+                if idx & mask:
+                    lon_lo = mid
+                else:
+                    lon_hi = mid
+            else:
+                mid = (lat_lo + lat_hi) / 2
+                if idx & mask:
+                    lat_lo = mid
+                else:
+                    lat_hi = mid
+            even = not even
+    return (lat_lo + lat_hi) / 2, (lon_lo + lon_hi) / 2
+
+
 # -- Open Location Code (plus codes) ----------------------------------------------
 # Standard encoding, full 10-character code + '+'. Public-domain algorithm.
 
@@ -118,6 +233,24 @@ def plus_code(lat: float, lon: float) -> str:
         lat_res /= 20
         lon_res /= 20
     return "".join(code[:8]) + "+" + "".join(code[8:])
+
+
+def all_formats(lat: float, lon: float) -> list[dict[str, str]]:
+    """Every coordinate notation the app can render, ordered for display.
+
+    Notations that don't cover the poles (UTM, MGRS) are simply left out when a
+    point falls outside their domain, so the list is always well-formed.
+    """
+    rows = [
+        ("dd", "Decimal", coords.format_dd(lat, lon)),
+        ("ddm", "Deg. decimal min.", to_ddm(lat, lon)),
+        ("dms", "Deg. min. sec.", to_dms(lat, lon)),
+        ("utm", "UTM", to_utm(lat, lon)),
+        ("mgrs", "MGRS", coords.format_mgrs(lat, lon)),
+        ("plus_code", "Plus code", plus_code(lat, lon)),
+        ("geohash", "Geohash", geohash(lat, lon)),
+    ]
+    return [{"id": i, "label": lb, "value": v} for i, lb, v in rows if v]
 
 
 # -- map links (quick-open, spec Coordinates tool preview) --------------------------

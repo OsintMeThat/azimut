@@ -18,7 +18,9 @@
   import Toasts from './components/Toasts.svelte';
   import MediaLibrary from './tools/MediaLibrary.svelte';
   import Files from './tools/Files.svelte';
+  import ReverseSearch from './tools/ReverseSearch.svelte';
   import Satellite from './tools/Satellite.svelte';
+  import Coordinates from './tools/Coordinates.svelte';
   import ProofComposer from './tools/ProofComposer.svelte';
   import PostComposer from './tools/PostComposer.svelte';
   import Inspector from './tools/Inspector.svelte';
@@ -31,8 +33,10 @@
   const TOOLS = [
     { id: 'media', label: 'Media', component: MediaLibrary },
     { id: 'files', label: 'Files', component: Files },
+    { id: 'reverse', label: 'Reverse Search', component: ReverseSearch },
     { id: 'inspect', label: 'Inspect', component: Inspector },
     { id: 'satellite', label: 'Satellite', component: Satellite },
+    { id: 'coordinates', label: 'Coordinates', component: Coordinates },
     { id: 'proof', label: 'Proof', component: ProofComposer },
     { id: 'post', label: 'Post', component: PostComposer },
   ];

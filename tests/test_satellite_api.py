@@ -568,3 +568,107 @@ def test_tile_proxy_benches_google_on_a_persistent_403(client, monkeypatch):
     assert "not available for your account and region" in status["detail"]
     ids = {p["id"] for p in client.get("/api/satellite/providers").json()}
     assert "google-satellite" not in ids
+
+
+# --- Grid Search: several saved grids per case (spec §5) -------------------
+
+
+def _rect_grid(south=48.0, west=2.0, north=48.02, east=2.02, statuses=None, title=None):
+    return {
+        "title": title,
+        "spec": {
+            "azimut_grid": 1,
+            "cell_m": 500,
+            "anchor": {"lat": south, "lon": west},
+            "lat_step": 0.0045,
+            "lon_step": 0.0067,
+            "aoi": {"type": "rect", "bounds": {
+                "south": south, "west": west, "north": north, "east": east}},
+            "statuses": statuses or {},
+        },
+    }
+
+
+def test_search_grids_empty_list(client):
+    cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
+    assert client.get(f"/api/cases/{cid}/search-grids").json() == []
+
+
+def test_search_grid_save_and_reload(client):
+    cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
+    body = _rect_grid(statuses={"0:0": "cleared", "1:2": "flagged"}, title="North sweep")
+    saved = client.put(f"/api/cases/{cid}/search-grids/north-sweep", json=body).json()
+    assert saved["name"] == "north-sweep"
+    assert saved["title"] == "North sweep"
+    assert saved["updated_at"]
+
+    loaded = client.get(f"/api/cases/{cid}/search-grids/north-sweep").json()
+    assert loaded["cell_m"] == 500
+    assert loaded["aoi"]["type"] == "rect"
+    assert loaded["statuses"] == {"0:0": "cleared", "1:2": "flagged"}
+    assert loaded["azimut_grid"] == 1
+    assert loaded["title"] == "North sweep"
+    assert loaded["created_at"]
+
+
+def test_search_grids_list_summaries(client):
+    cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
+    client.put(f"/api/cases/{cid}/search-grids/a",
+               json=_rect_grid(statuses={"0:0": "cleared"}, title="A"))
+    client.put(f"/api/cases/{cid}/search-grids/b",
+               json=_rect_grid(statuses={"0:0": "flagged", "0:1": "flagged"}, title="B"))
+    listed = {g["name"]: g for g in client.get(f"/api/cases/{cid}/search-grids").json()}
+    assert set(listed) == {"a", "b"}
+    assert listed["a"]["cleared"] == 1
+    assert listed["b"]["flagged"] == 2
+    assert listed["a"]["aoi_type"] == "rect"
+
+
+def test_search_grid_replace_keeps_created_at(client):
+    cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
+    client.put(f"/api/cases/{cid}/search-grids/g", json=_rect_grid())
+    first = client.get(f"/api/cases/{cid}/search-grids/g").json()["created_at"]
+
+    body = _rect_grid(north=48.05, east=48.05, statuses={"3:3": "cleared"})
+    body["spec"]["created_at"] = first  # the client round-trips it back
+    client.put(f"/api/cases/{cid}/search-grids/g", json=body)
+    again = client.get(f"/api/cases/{cid}/search-grids/g").json()
+    assert again["created_at"] == first
+    assert again["statuses"] == {"3:3": "cleared"}
+
+
+def test_search_grid_sanitizes_bad_statuses(client):
+    cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
+    body = _rect_grid(statuses={"0:0": "cleared", "0:1": "bogus", "0:2": "flagged"})
+    client.put(f"/api/cases/{cid}/search-grids/g", json=body)
+    loaded = client.get(f"/api/cases/{cid}/search-grids/g").json()
+    assert loaded["statuses"] == {"0:0": "cleared", "0:2": "flagged"}
+
+
+def test_search_grid_rejects_missing_aoi(client):
+    cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
+    r = client.put(f"/api/cases/{cid}/search-grids/g", json={"spec": {"cell_m": 500}})
+    assert r.status_code == 400
+
+
+def test_search_grid_missing_is_404(client):
+    cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
+    assert client.get(f"/api/cases/{cid}/search-grids/nope").status_code == 404
+
+
+def test_search_grid_delete_one(client):
+    cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
+    client.put(f"/api/cases/{cid}/search-grids/a", json=_rect_grid(title="A"))
+    client.put(f"/api/cases/{cid}/search-grids/b", json=_rect_grid(title="B"))
+    assert client.delete(f"/api/cases/{cid}/search-grids/a").json()["deleted"] is True
+    names = {g["name"] for g in client.get(f"/api/cases/{cid}/search-grids").json()}
+    assert names == {"b"}
+    # deleting again is a no-op, not an error
+    assert client.delete(f"/api/cases/{cid}/search-grids/a").json()["deleted"] is False
+
+
+def test_search_grids_are_not_entities(client):
+    cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
+    client.put(f"/api/cases/{cid}/search-grids/g", json=_rect_grid())
+    # grids are working aids, filed under search/, never in the case graph
+    assert client.get(f"/api/cases/{cid}").json()["entities"] == []
