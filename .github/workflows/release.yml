@@ -82,17 +82,31 @@ jobs:
       - name: Vendor static ffmpeg + ffprobe into the binary
         shell: bash
         run: |
-          case "${{ runner.os }}" in
-            Linux)   plat=linux/amd64 ;;
-            Windows) plat=windows/amd64 ;;
-            macOS)   plat=macos/arm64 ;;
-          esac
           mkdir -p packaging/vendor
-          base="https://ffmpeg.martin-riedl.de/redirect/latest/$plat/release"
-          for tool in ffmpeg ffprobe; do
-            curl -fL "$base/$tool.zip" -o "$tool.zip"
-            uv run python -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall('packaging/vendor')" "$tool.zip"
-          done
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            # martin-riedl.de stopped publishing Windows builds; BtbN's
+            # "latest" release tag always points at the newest static win64
+            # build, so pull ffmpeg.exe/ffprobe.exe out of its nested bin/.
+            curl -fL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -o ffmpeg.zip
+            uv run python -c "
+          import zipfile
+          zf = zipfile.ZipFile('ffmpeg.zip')
+          for n in zf.namelist():
+              tail = n.rsplit('/', 1)[-1]
+              if tail in ('ffmpeg.exe', 'ffprobe.exe'):
+                  open('packaging/vendor/' + tail, 'wb').write(zf.read(n))
+          "
+          else
+            case "${{ runner.os }}" in
+              Linux) plat=linux/amd64 ;;
+              macOS) plat=macos/arm64 ;;
+            esac
+            base="https://ffmpeg.martin-riedl.de/redirect/latest/$plat/release"
+            for tool in ffmpeg ffprobe; do
+              curl -fL "$base/$tool.zip" -o "$tool.zip"
+              uv run python -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall('packaging/vendor')" "$tool.zip"
+            done
+          fi
           chmod +x packaging/vendor/* 2>/dev/null || true
           ls -l packaging/vendor
       - name: Build single-file binary
