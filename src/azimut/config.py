@@ -8,7 +8,8 @@ overridable with the ``AZIMUT_HOME`` environment variable):
     ├── scratch/     # one-shot sessions (promotable to cases)
     ├── runtime/     # newer scrapers fetched at runtime (engine/scrapers.py)
     ├── signature.png  # optional analyst logo, stamped onto proofs
-    └── settings.json
+    ├── settings.json
+    └── templates.json  # reusable proof and post styles
 
 No database server — plain files only (spec §4).
 """
@@ -17,11 +18,16 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
+import re
+import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 # On-disk schema for settings.json — the app-wide sibling of case.json's
 # CASE_SCHEMA (workspace.py). An older file is migrated up to this on load; a
@@ -85,6 +91,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "home_view": {"lat": 48.8584, "lon": 2.2945, "zoom": 16},
     # The handle a new post draft is addressed to. Empty means no mention.
     "post_mention": "@GeoConfirmed",
+    # The social composer a new post draft starts with. A saved draft keeps its
+    # own target so a later preference change never rewrites it.
+    "post_target": "x",
+    # The handle stamped onto proofs when a proof/template enables it. Empty
+    # means no account-handle slot can render.
+    "signature_handle": "",
     # Pairing token for the capture browser extension (api/ingest.py). Minted
     # lazily on first use, shown once in Settings, pasted into the extension.
     # Empty means "not minted yet" — never a valid credential.
@@ -104,6 +116,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 # frontend/src/lib/coords.js and frontend/src/lib/measure.js.
 COORD_FORMATS = ("dd", "dms", "mgrs")
 UNIT_SYSTEMS = ("metric", "imperial")
+POST_TARGETS = ("x", "bluesky", "mastodon")
 
 # Documented monthly free allowances per meter, in billed requests (verified
 # 2026-07: Google 2D Map Tiles 100k then $0.60/1k, and ≤15k/day; Mapbox Static
@@ -164,6 +177,16 @@ def signature_path() -> Path:
     Only the rendered proof PNG ever carries it.
     """
     return workspace_root() / "signature.png"
+
+
+def templates_path() -> Path:
+    """Reusable proof-style and post-thread presets, app-wide.
+
+    A "house style" spans every case, so it lives beside settings.json rather
+    than inside a case — same rule as the signature. Kept out of settings.json
+    itself so the secrets file stays small and single-purpose.
+    """
+    return workspace_root() / "templates.json"
 
 
 # Refuse anything larger as a signature: a logo is a small badge on a composite,
@@ -272,6 +295,93 @@ def update_settings(mutate: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
         mutate(settings)
         save_settings(settings)
         return settings
+
+
+# Reusable presets file (templates.json). The two families a template can be:
+# "proof" (a proof's house style) and "post" (a thread skeleton).
+TEMPLATE_KINDS = ("proof", "post")
+DEFAULT_TEMPLATES: dict[str, Any] = {"schema": 1, "proof": [], "post": []}
+_templates_lock = threading.Lock()
+
+
+def load_templates() -> dict[str, Any]:
+    try:
+        data = json.loads(
+            templates_path().read_text(encoding="utf-8"),
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"invalid JSON constant: {value}")
+            ),
+        )
+    except FileNotFoundError:
+        return copy.deepcopy(DEFAULT_TEMPLATES)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        logger.warning("Ignoring unreadable templates.json: %s", exc)
+        return copy.deepcopy(DEFAULT_TEMPLATES)
+    if not isinstance(data, dict) or data.get("schema", 1) != 1:
+        logger.warning("Ignoring templates.json with an unsupported root or schema")
+        return copy.deepcopy(DEFAULT_TEMPLATES)
+    merged = copy.deepcopy(DEFAULT_TEMPLATES)
+    for kind in TEMPLATE_KINDS:
+        value = data.get(kind)
+        if not isinstance(value, list):
+            continue
+        seen: set[str] = set()
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            template_id = item.get("id")
+            name = item.get("name")
+            template_data = item.get("data")
+            updated_at = item.get("updated_at")
+            if (
+                not isinstance(template_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", template_id)
+                or template_id in seen
+                or not isinstance(name, str)
+                or not name.strip()
+                or len(name.strip()) > 120
+                or not isinstance(template_data, dict)
+                or (updated_at is not None and not isinstance(updated_at, str))
+                or (isinstance(updated_at, str) and len(updated_at) > 64)
+            ):
+                logger.warning("Ignoring malformed %s template record", kind)
+                continue
+            record = {"id": template_id, "name": name.strip(), "data": template_data}
+            if updated_at is not None:
+                record["updated_at"] = updated_at
+            merged[kind].append(record)
+            seen.add(template_id)
+    return merged
+
+
+def save_templates(templates: dict[str, Any]) -> None:
+    path = templates_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _restrict(path.parent, 0o700)
+    payload = json.dumps(
+        templates, indent=2, ensure_ascii=False, allow_nan=False
+    ) + "\n"
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _restrict(tmp_path, 0o600)
+        os.replace(tmp_path, path)
+        _restrict(path, 0o600)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def update_templates(mutate: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+    """Load → mutate → save templates.json under a writer lock."""
+    with _templates_lock:
+        templates = load_templates()
+        mutate(templates)
+        save_templates(templates)
+        return templates
 
 
 def record_usage(meter: str, count: int = 1, when: datetime | None = None) -> int:

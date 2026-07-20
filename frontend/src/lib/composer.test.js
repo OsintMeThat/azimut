@@ -7,8 +7,18 @@ import {
   autoCoords, formatCoords, resolveSourceUrls, autoSource, autoSourceUrls,
   proofCoordsText, proofSource, orderedFeatureColors, legendLines,
   dedupeBySrc, isSatelliteCapture, satPanelInput, mediaPanelInput,
-  SIG_MARGIN, SIG_SCALE, newSignature, signatureBox, signatureOffset,
-  proofSlug, uniqueProofTitle, DEFAULT_PROOF_TITLE,
+  SIG_MARGIN, SIG_SCALE, newSignature, signatureBox, signatureOffset, signaturePairPositions,
+  proofSlug, uniqueProofTitle, proofTitleFromCase, DEFAULT_PROOF_TITLE,
+  filterProofPanelItems, hasProofCanvasContent,
+  remapPanelXY, panelHitTest, groupNeighborIndex, hasGroupNeighbor,
+  denseRowValues, clampPanelScale, trimClosingDuplicate, smoothFreehandPoints,
+  freehandShape, canReassignLegendNote,
+  savedProofEntities, savedProofSlugs, savedProofTitles, savedProofTitle,
+  BG, ANNO_COLORS, MAX_ANNO_COLORS, normSpace, isLightColor, textColors,
+  normalizePreferredColors, replacePreferredColor,
+  TEXT_MAIN, TEXT_MAIN_LIGHT, templateFromProof, applyProofStyle, normalizeProofStyle,
+  anchoredPos, anchoredOffset, newSignatureText, SIG_TEXT_SIZE,
+  orientFirstPanels, proofExportOptions,
 } from './composer.js';
 
 // natural is [width, height]; PANEL_H drives the per-row scale.
@@ -36,7 +46,7 @@ describe('layoutPanels — single row (backward compatible)', () => {
 
 describe('layoutPanels — stacked rows', () => {
   it('stacks a second row below the first with a caption band + ROW_GAP', () => {
-    const panels = [landscape(1000, 500, { row: 0 }), landscape(1000, 500, { row: 1 })];
+    const panels = [landscape(1000, 500, { row: 0, caption: 'a' }), landscape(1000, 500, { row: 1, caption: 'b' })];
     const boxes = layoutPanels(panels);
     expect(boxes[0].y).toBe(PAD);
     expect(boxes[1].y).toBe(PAD + (PANEL_H + captionBand() + ROW_GAP));
@@ -58,7 +68,7 @@ describe('layoutPanels — stacked rows', () => {
 
   it('normalises sparse row indices by ascending order', () => {
     // rows 0 and 5 → two stacked rows, not six
-    const panels = [landscape(1000, 500, { row: 0 }), landscape(1000, 500, { row: 5 })];
+    const panels = [landscape(1000, 500, { row: 0, caption: 'a' }), landscape(1000, 500, { row: 5, caption: 'b' })];
     const boxes = layoutPanels(panels);
     expect(boxes[1].y).toBe(PAD + (PANEL_H + captionBand() + ROW_GAP));
   });
@@ -93,8 +103,8 @@ describe('layoutPanels — per-panel scale', () => {
 
   it('stacks the next row below the tallest panel of the previous row', () => {
     const panels = [
-      landscape(1000, 500, { row: 0, scale: 2 }),
-      landscape(1000, 500, { row: 1, scale: 1 }),
+      landscape(1000, 500, { row: 0, scale: 2, caption: 'a' }),
+      landscape(1000, 500, { row: 1, scale: 1, caption: 'b' }),
     ];
     const boxes = layoutPanels(panels);
     expect(boxes[1].y).toBe(PAD + (PANEL_H * 2 + captionBand() + ROW_GAP));
@@ -195,26 +205,42 @@ describe('captionBand + panelsBlockHeight', () => {
   });
 
   it('measures the stacked panel block including caption bands and gaps', () => {
-    const oneRow = [landscape()];
-    const twoRows = [landscape(1000, 500, { row: 0 }), landscape(1000, 500, { row: 1 })];
+    const oneRow = [landscape(1000, 500, { caption: 'c' })];
+    const twoRows = [landscape(1000, 500, { row: 0, caption: 'a' }), landscape(1000, 500, { row: 1, caption: 'b' })];
     expect(panelsBlockHeight(oneRow)).toBe(PANEL_H + captionBand());
     expect(panelsBlockHeight(twoRows)).toBe(2 * (PANEL_H + captionBand()) + ROW_GAP);
   });
 
   it('reflects a custom caption size in the block height', () => {
-    const rows = [landscape(1000, 500, { row: 0 }), landscape(1000, 500, { row: 1 })];
+    const rows = [landscape(1000, 500, { row: 0, caption: 'a' }), landscape(1000, 500, { row: 1, caption: 'b' })];
     expect(panelsBlockHeight(rows, 30)).toBe(2 * (PANEL_H + captionBand(30)) + ROW_GAP);
   });
 
   it('uses the tallest panel of each row when panels are scaled', () => {
     const panels = [
-      landscape(1000, 500, { row: 0, scale: 2 }),
+      landscape(1000, 500, { row: 0, scale: 2, caption: 'a' }),
       landscape(1000, 500, { row: 0, scale: 1 }),
-      landscape(1000, 500, { row: 1, scale: 0.5 }),
+      landscape(1000, 500, { row: 1, scale: 0.5, caption: 'b' }),
     ];
     const expected =
       (PANEL_H * 2 + captionBand()) + (PANEL_H * 0.5 + captionBand()) + ROW_GAP;
     expect(panelsBlockHeight(panels)).toBe(expected);
+  });
+
+  it('collapses the caption band on a row with no caption text', () => {
+    // caption-less panels leave no empty strip: the block is just the panels
+    expect(panelsBlockHeight([landscape()])).toBe(PANEL_H);
+    const twoRows = [landscape(1000, 500, { row: 0 }), landscape(1000, 500, { row: 1 })];
+    expect(panelsBlockHeight(twoRows)).toBe(2 * PANEL_H + ROW_GAP);
+    // only the captioned row keeps its band
+    const mixed = [landscape(1000, 500, { row: 0, caption: 'a' }), landscape(1000, 500, { row: 1 })];
+    expect(panelsBlockHeight(mixed)).toBe(2 * PANEL_H + captionBand() + ROW_GAP);
+  });
+
+  it('stacks caption-less rows tighter (no band between them)', () => {
+    const panels = [landscape(1000, 500, { row: 0 }), landscape(1000, 500, { row: 1 })];
+    const boxes = layoutPanels(panels);
+    expect(boxes[1].y).toBe(PAD + PANEL_H + ROW_GAP);
   });
 });
 
@@ -232,13 +258,13 @@ describe('text band sizes', () => {
 
 describe('docSize', () => {
   it('sizes a single panel with no legend', () => {
-    const { width, height } = docSize([landscape(1000, 500)], [], {});
+    const { width, height } = docSize([landscape(1000, 500, { caption: 'c' })], [], {});
     expect(width).toBe(PAD + 1440 + PAD);
     expect(height).toBe(PAD + (PANEL_H + captionBand()) + FOOTER_H + PAD);
   });
 
   it('accounts for custom caption / legend / footer sizes', () => {
-    const panels = [landscape(1000, 500)];
+    const panels = [landscape(1000, 500, { caption: 'c' })];
     const shapes = [{ kind: 'rect', color: '#ff5252', panel: 'p1' }];
     const notes = { '#ff5252': 'road' };
     const text = { captionSize: 30, legendSize: 24, footerSize: 20 };
@@ -467,6 +493,28 @@ describe('autoLayoutRows — magic tweet fit', () => {
     const tall = autoLayoutRows(panels, [], {}, {}, TWEET_GUIDES['4:5']);
     expect(Math.max(...tall)).toBeGreaterThanOrEqual(Math.max(...wide));
   });
+
+  it.each([18, 32])('keeps %i panels on the bounded layout path', (count) => {
+    const rows = autoLayoutRows(Array.from({ length: count }, () => sq()));
+    expect(rows).toHaveLength(count);
+    expect(rows[0]).toBe(0);
+    for (let i = 1; i < rows.length; i++) {
+      expect(rows[i] - rows[i - 1]).toBeGreaterThanOrEqual(0);
+      expect(rows[i] - rows[i - 1]).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('uses active spacing when choosing row breaks', () => {
+    const panels = [landscape(1658, 500), landscape(569, 500), landscape(880, 500)];
+    const tight = autoLayoutRows(panels, [], {}, {}, TWEET_GUIDES['16:9'], {
+      pad: 20, gap: 0, rowGap: 0,
+    });
+    const wide = autoLayoutRows(panels, [], {}, {}, TWEET_GUIDES['16:9'], {
+      pad: 20, gap: 200, rowGap: 200,
+    });
+    expect(tight).toEqual([0, 1, 1]);
+    expect(wide).toEqual([0, 0, 1]);
+  });
 });
 
 describe('copyShapeSpec — clipboard copy of any shape kind', () => {
@@ -476,11 +524,11 @@ describe('copyShapeSpec — clipboard copy of any shape kind', () => {
     expect(out).toEqual({ kind: 'rect', panel: 'p1', color: '#fff', x: 1, y: 2, w: 3, h: 4 });
   });
 
-  // The regression: line/arrow/curve keep their geometry in a `points` array, so
+  // The regression: line/arrow/curve/freehand keep their geometry in a `points` array, so
   // the copy must carry the full array (a shallow spread once left it proxied and
   // the browser refused to clone it, silently breaking copy for those kinds).
-  it('copies the whole points array of line / arrow / curve kinds', () => {
-    for (const kind of ['line', 'arrow', 'curve']) {
+  it('copies the whole points array of line / arrow / curve / freehand kinds', () => {
+    for (const kind of ['line', 'arrow', 'curve', 'freehand']) {
       const out = copyShapeSpec({ id: 's', kind, panel: 'p1', color: '#fff', points: [0, 0, 10, 20, 30, 40] });
       expect(out).toEqual({ kind, panel: 'p1', color: '#fff', points: [0, 0, 10, 20, 30, 40] });
     }
@@ -504,7 +552,7 @@ describe('offsetShape — copy / paste / duplicate', () => {
     expect(out).toMatchObject({ x: 36, y: 46, w: 5, h: 5, panel: 'p1' });
   });
 
-  it('shifts every vertex of points-based kinds (line/arrow/curve)', () => {
+  it('shifts every vertex of points-based kinds', () => {
     const line = { id: 's2', kind: 'line', panel: 'p1', color: '#fff', points: [0, 0, 100, 40] };
     const out = offsetShape(line, 10);
     expect(out.points).toEqual([10, 10, 110, 50]);
@@ -515,6 +563,29 @@ describe('offsetShape — copy / paste / duplicate', () => {
     const out = offsetShape(src, 5);
     out.points[0] = 999;
     expect(src.points[0]).toBe(1);
+  });
+});
+
+describe('freehand strokes', () => {
+  it('dampens pointer jitter while preserving both endpoints', () => {
+    expect(smoothFreehandPoints([0, 0, 5, 10, 10, 0], 0)).toEqual([
+      0, 0, 5, 5, 10, 0,
+    ]);
+  });
+
+  it('drops samples that are too close to matter on screen', () => {
+    expect(smoothFreehandPoints([0, 0, 0.2, 0.1, 0.4, -0.1, 10, 0], 2)).toEqual([
+      0, 0, 10, 0,
+    ]);
+  });
+
+  it('builds a lightly tensioned stroke and rejects accidental tiny drags', () => {
+    expect(freehandShape([0, 0, 1, 1], { minDistance: 0, minLength: 5 })).toBeNull();
+    expect(freehandShape([0, 0, 5, 10, 10, 0], { minDistance: 0, minLength: 5 })).toEqual({
+      kind: 'freehand',
+      points: [0, 0, 5, 5, 10, 0],
+      tension: 0.25,
+    });
   });
 });
 
@@ -726,10 +797,16 @@ describe('signatureBox — anchoring', () => {
   const natural = [200, 100]; // 2:1 logo
   const sig = (extra = {}) => ({ ...newSignature(), ...extra });
 
-  it('sizes the logo as a share of the doc width, keeping its aspect', () => {
+  it('sizes the logo inside a proof-relative footprint, keeping its aspect', () => {
     const box = signatureBox(sig({ scale: 0.1 }), 1000, 800, natural);
     expect(box.w).toBe(100);
     expect(box.h).toBe(50); // 2:1 preserved
+  });
+
+  it('caps a tall PNG inside the same standard footprint', () => {
+    const box = signatureBox(sig({ scale: 0.1 }), 1000, 800, [100, 400]);
+    expect(box.w).toBe(20);
+    expect(box.h).toBe(80);
   });
 
   it('hangs off each of the four corners, inset by the margin', () => {
@@ -761,6 +838,7 @@ describe('signatureBox — anchoring', () => {
 
   it('defaults to bottom-right at the default scale', () => {
     const box = signatureBox(newSignature(), 1000, 800, natural);
+    expect(SIG_SCALE).toBe(0.08);
     expect(box.w).toBe(1000 * SIG_SCALE);
     expect(box.x + box.w).toBe(1000 - SIG_MARGIN);
   });
@@ -776,6 +854,43 @@ describe('signatureOffset — a drag round-trips through the anchor', () => {
       const box = signatureBox({ ...sig, dx, dy }, 1000, 800, natural);
       expect(box).toMatchObject({ x: 300, y: 250 });
     }
+  });
+
+  it('keeps a free placement at the same relative position on another proof size', () => {
+    const sig = { ...newSignature(), anchor: 'tl', scale: 0.1 };
+    const placement = signatureOffset(sig, 1000, 800, natural, 300, 250);
+    const grown = signatureBox({ ...sig, ...placement }, 2000, 1600, natural);
+    expect(grown).toMatchObject({ x: 600, y: 500 });
+  });
+});
+
+describe('signaturePairPositions — untouched branding never overlaps', () => {
+  it('centres the account handle below the logo', () => {
+    const signature = newSignature();
+    const handle = newSignatureText();
+    const logo = signatureBox(signature, 1000, 800, [200, 100]);
+    const pair = signaturePairPositions(signature, handle, 1000, 800, logo, 120, 28);
+    expect(pair.handle.y).toBeGreaterThan(pair.logo.y + pair.logo.h);
+    expect(pair.logo.x + pair.logo.w / 2).toBeCloseTo(pair.handle.x + 60);
+  });
+
+  it('stops grouping after either item is moved', () => {
+    const signature = { ...newSignature(), xRatio: 0.5, yRatio: 0.5 };
+    const logo = signatureBox(signature, 1000, 800, [200, 100]);
+    expect(signaturePairPositions(signature, newSignatureText(), 1000, 800, logo, 120, 28))
+      .toBeNull();
+  });
+});
+
+describe('orientFirstPanels — template direction', () => {
+  it('places the first pair side by side or in two rows', () => {
+    const horizontal = [{ row: 3 }, { row: 4 }, { row: 4 }];
+    orientFirstPanels(horizontal, 'horizontal');
+    expect(horizontal.map((p) => p.row)).toEqual([0, 0, 4]);
+
+    const vertical = [{ row: 3 }, { row: 4 }, { row: 4 }];
+    orientFirstPanels(vertical, 'vertical');
+    expect(vertical.map((p) => p.row)).toEqual([0, 1, 4]);
   });
 });
 
@@ -808,5 +923,682 @@ describe('uniqueProofTitle — a fresh proof reads apart from the case', () => {
 
   it('the numbered title still slugs to a distinct filename', () => {
     expect(proofSlug(uniqueProofTitle(DEFAULT_PROOF_TITLE, ['Untitled proof']))).toBe('untitled-proof-2');
+  });
+});
+
+describe('proofTitleFromCase — new-proof name', () => {
+  it('uses the trimmed case name and keeps it unique among saved proofs', () => {
+    expect(proofTitleFromCase('  Harbour review  ', [])).toBe('Harbour review');
+    expect(proofTitleFromCase('Harbour review', ['Harbour review'])).toBe('Harbour review 2');
+  });
+
+  it('falls back to the normal untitled name when no case name is available', () => {
+    expect(proofTitleFromCase('', [])).toBe(DEFAULT_PROOF_TITLE);
+    expect(proofTitleFromCase(null, [DEFAULT_PROOF_TITLE])).toBe('Untitled proof 2');
+  });
+});
+
+describe('filterProofPanelItems — new-proof panel selector', () => {
+  const items = [
+    {
+      src: 'media/satellite-city.png',
+      label: '48.85, 2.35 · z17',
+      kind: 'satellite',
+      meta: { provider: 'Esri World Imagery', imagery_date: '2026-07-01' },
+    },
+    { src: 'media/storefront.jpg', label: 'Storefront.jpg', kind: 'media', meta: {} },
+    { src: 'media/roof.png', label: 'Red roof.png', kind: 'media', meta: {} },
+  ];
+
+  it('filters satellite captures independently from other images', () => {
+    expect(filterProofPanelItems(items, '', 'satellite').map((item) => item.src))
+      .toEqual(['media/satellite-city.png']);
+    expect(filterProofPanelItems(items, '', 'media').map((item) => item.src))
+      .toEqual(['media/storefront.jpg', 'media/roof.png']);
+  });
+
+  it('searches the active category by label, path, and satellite metadata', () => {
+    expect(filterProofPanelItems(items, 'roof', 'media').map((item) => item.src))
+      .toEqual(['media/roof.png']);
+    expect(filterProofPanelItems(items, 'esri', 'satellite').map((item) => item.src))
+      .toEqual(['media/satellite-city.png']);
+    expect(filterProofPanelItems(items, 'storefront', 'satellite')).toEqual([]);
+  });
+});
+
+describe('hasProofCanvasContent — empty template-only proof', () => {
+  it('keeps template decoration hidden until a panel exists', () => {
+    expect(hasProofCanvasContent({ panels: [], signature: { anchor: 'br' }, footer: 'Source' }))
+      .toBe(false);
+    expect(hasProofCanvasContent({ panels: [{ src: 'media/a.png' }], signature: null }))
+      .toBe(true);
+  });
+});
+
+describe('remapPanelXY — moving a shape between panels', () => {
+  it('is identity when the two boxes coincide', () => {
+    const box = { x: 100, y: 40, scale: 2 };
+    expect(remapPanelXY(10, 5, box, box)).toEqual({ x: 10, y: 5 });
+  });
+
+  it('maps a natural point through doc space into the target scale', () => {
+    const from = { x: 100, y: 40, scale: 2 };
+    const to = { x: 0, y: 0, scale: 4 };
+    // doc point (100 + 10*2, 40 + 5*2) = (120, 50); target natural divides by 4
+    expect(remapPanelXY(10, 5, from, to)).toEqual({ x: 30, y: 12.5 });
+  });
+});
+
+describe('panelHitTest — topmost panel under a point', () => {
+  const boxes = [
+    { x: 0, y: 0, w: 100, h: 100, scale: 2 }, // front (drawn first = z-top)
+    { x: 50, y: 50, w: 100, h: 100, scale: 1 }, // back
+  ];
+
+  it('returns null when the point misses every box', () => {
+    expect(panelHitTest(boxes, { x: 500, y: 500 })).toBeNull();
+  });
+
+  it('returns the front box on overlap, with natural coords', () => {
+    const hit = panelHitTest(boxes, { x: 60, y: 60 });
+    expect(hit.index).toBe(0);
+    expect(hit.nx).toBe(30); // (60-0)/2
+    expect(hit.ny).toBe(30);
+  });
+
+  it('falls through to a lower box when the front one misses', () => {
+    const hit = panelHitTest(boxes, { x: 120, y: 120 });
+    expect(hit.index).toBe(1);
+    expect(hit.nx).toBe(70); // (120-50)/1
+  });
+
+  it('counts the box edges as inside', () => {
+    expect(panelHitTest(boxes, { x: 0, y: 0 }).index).toBe(0);
+    expect(panelHitTest(boxes, { x: 100, y: 100 }).index).toBe(0);
+  });
+});
+
+describe('groupNeighborIndex / hasGroupNeighbor — reorder within a group', () => {
+  // rows [0, 1, 0, 0]: indices 0, 2, 3 share row 0
+  const panels = [{ row: 0 }, { row: 1 }, { row: 0 }, { row: 0 }];
+  const rowOf = (p) => p.row ?? 0;
+
+  it('skips other groups to find the nearest same-group neighbour', () => {
+    expect(groupNeighborIndex(panels, 0, 1, rowOf)).toBe(2); // index 1 is row 1
+    expect(groupNeighborIndex(panels, 2, -1, rowOf)).toBe(0);
+    expect(groupNeighborIndex(panels, 2, 1, rowOf)).toBe(3);
+  });
+
+  it('returns -1 at the group edge', () => {
+    expect(groupNeighborIndex(panels, 0, -1, rowOf)).toBe(-1);
+    expect(groupNeighborIndex(panels, 1, 1, rowOf)).toBe(-1); // lone row 1
+    expect(groupNeighborIndex(panels, 3, 1, rowOf)).toBe(-1);
+  });
+
+  it('hasGroupNeighbor agrees on whether a move is possible', () => {
+    expect(hasGroupNeighbor(panels, 0, -1, rowOf)).toBe(false);
+    expect(hasGroupNeighbor(panels, 0, 1, rowOf)).toBe(true);
+    expect(hasGroupNeighbor(panels, 1, 1, rowOf)).toBe(false);
+    expect(hasGroupNeighbor(panels, 3, -1, rowOf)).toBe(true);
+  });
+
+  it('works for shapes keyed by their panel too', () => {
+    const shapes = [{ panel: 'a' }, { panel: 'b' }, { panel: 'a' }];
+    expect(groupNeighborIndex(shapes, 0, 1, (s) => s.panel)).toBe(2);
+    expect(hasGroupNeighbor(shapes, 1, -1, (s) => s.panel)).toBe(false);
+  });
+});
+
+describe('denseRowValues — collapse sparse rows to 0..n-1', () => {
+  it('renumbers gaps left by an emptied row', () => {
+    const panels = [{ row: 0 }, { row: 2 }, { row: 2 }, { row: 5 }];
+    expect(denseRowValues(panels)).toEqual([0, 1, 1, 2]);
+  });
+
+  it('treats a missing row as 0', () => {
+    expect(denseRowValues([{}, { row: 3 }])).toEqual([0, 1]);
+  });
+});
+
+describe('clampPanelScale', () => {
+  it('adds the delta and clamps to the range', () => {
+    expect(clampPanelScale(1, 0.5, 0.25, 2.5)).toBe(1.5);
+    expect(clampPanelScale(2.4, 0.5, 0.25, 2.5)).toBe(2.5);
+    expect(clampPanelScale(0.3, -0.5, 0.25, 2.5)).toBe(0.25);
+  });
+
+  it('rounds to whole percent and defaults a missing scale to 1', () => {
+    expect(clampPanelScale(1, 0.024, 0.25, 2.5)).toBe(1.02);
+    expect(clampPanelScale(undefined, 0.5, 0.25, 2.5)).toBe(1.5);
+  });
+});
+
+describe('trimClosingDuplicate — drop the double-click tail', () => {
+  it('trims the last vertex when it lands on the previous one', () => {
+    expect(trimClosingDuplicate([0, 0, 10, 10, 10, 11])).toEqual([0, 0, 10, 10]);
+  });
+
+  it('keeps a genuine final vertex', () => {
+    const pts = [0, 0, 10, 10, 40, 40];
+    expect(trimClosingDuplicate(pts)).toEqual(pts);
+  });
+
+  it('returns a copy, never mutating the input', () => {
+    const pts = [0, 0, 10, 10, 10, 10];
+    const out = trimClosingDuplicate(pts);
+    expect(pts).toHaveLength(6);
+    expect(out).toHaveLength(4);
+  });
+
+  it('leaves a genuine two-point line alone', () => {
+    expect(trimClosingDuplicate([0, 0, 40, 40])).toEqual([0, 0, 40, 40]);
+  });
+});
+
+describe('canReassignLegendNote — move a note with a recolored shape', () => {
+  it('moves the note when the new color is free and no other shape keeps the old', () => {
+    const moving = { color: 'red' };
+    const notes = { red: 'the roof' };
+    expect(canReassignLegendNote(notes, 'red', 'blue', [moving], moving)).toBe(true);
+  });
+
+  it('keeps the note when another shape still uses the old color', () => {
+    const moving = { color: 'red' };
+    const other = { color: 'red' };
+    const notes = { red: 'the roof' };
+    expect(canReassignLegendNote(notes, 'red', 'blue', [moving, other], moving)).toBe(false);
+  });
+
+  it('does not clobber an existing note on the new color', () => {
+    const moving = { color: 'red' };
+    const notes = { red: 'the roof', blue: 'the car' };
+    expect(canReassignLegendNote(notes, 'red', 'blue', [moving], moving)).toBe(false);
+  });
+
+  it('is false when the old color had no note', () => {
+    const moving = { color: 'red' };
+    expect(canReassignLegendNote({}, 'red', 'blue', [moving], moving)).toBe(false);
+  });
+});
+
+describe('saved-proof case queries', () => {
+  const entities = [
+    { label: 'Rooftop', attrs: { spec: 'proofs/rooftop.json' } },
+    { label: 'Bridge', attrs: { spec: 'proofs/bridge.json' } },
+    { label: 'A place', attrs: { spec: 'places/x.json' } }, // not a proof
+    { label: 'No spec' },
+  ];
+
+  it('picks only entities filed as proofs/*.json', () => {
+    expect(savedProofEntities(entities).map((e) => e.label)).toEqual(['Rooftop', 'Bridge']);
+    expect(savedProofEntities(undefined)).toEqual([]);
+  });
+
+  it('lists the slugs (filename without proofs/ and .json)', () => {
+    expect(savedProofSlugs(entities)).toEqual(new Set(['rooftop', 'bridge']));
+  });
+
+  it('lists the titles', () => {
+    expect(savedProofTitles(entities)).toEqual(new Set(['Rooftop', 'Bridge']));
+  });
+
+  it('resolves a title by slug, falling back to the slug itself', () => {
+    expect(savedProofTitle(entities, 'bridge')).toBe('Bridge');
+    expect(savedProofTitle(entities, 'unknown')).toBe('unknown');
+  });
+});
+
+describe('isLightColor + textColors — text tracks the proof background', () => {
+  it('reads dark backgrounds as dark and pale ones as light', () => {
+    expect(isLightColor('#0d1117')).toBe(false);
+    expect(isLightColor('#000000')).toBe(false);
+    expect(isLightColor('#ffffff')).toBe(true);
+    expect(isLightColor('#f4f1ea')).toBe(true);
+    expect(isLightColor('#fff')).toBe(true); // 3-digit shorthand
+  });
+
+  it('is tolerant of a missing or malformed colour (treats it as dark)', () => {
+    expect(isLightColor('')).toBe(false);
+    expect(isLightColor('nope')).toBe(false);
+    expect(isLightColor(null)).toBe(false);
+  });
+
+  it('gives light text on the default dark bg and dark text on a light bg', () => {
+    expect(textColors(BG).main).toBe(TEXT_MAIN);
+    expect(textColors('#ffffff').main).toBe(TEXT_MAIN_LIGHT);
+  });
+});
+
+describe('normSpace — panel spacing with shipped-default fallbacks', () => {
+  it('fills every field from the defaults when nothing is given', () => {
+    expect(normSpace()).toEqual({ pad: PAD, gap: GAP, rowGap: ROW_GAP });
+    expect(normSpace(null)).toEqual({ pad: PAD, gap: GAP, rowGap: ROW_GAP });
+  });
+
+  it('keeps the values it is given, defaulting only the missing ones', () => {
+    expect(normSpace({ gap: 40 })).toEqual({ pad: PAD, gap: 40, rowGap: ROW_GAP });
+    expect(normSpace({ pad: 0, gap: 0, rowGap: 0 })).toEqual({ pad: 0, gap: 0, rowGap: 0 });
+  });
+
+  it('clamps unsafe values and replaces non-finite values', () => {
+    expect(normSpace({ pad: -1, gap: 1e308, rowGap: NaN }))
+      .toEqual({ pad: 0, gap: 200, rowGap: ROW_GAP });
+    expect(normSpace({ pad: Infinity, gap: '20', rowGap: {} }))
+      .toEqual({ pad: PAD, gap: GAP, rowGap: ROW_GAP });
+  });
+});
+
+describe('layout — parametric margins (bg/space templates)', () => {
+  it('a wider gap pushes the second panel further right', () => {
+    const panels = [landscape(1000, 500), landscape(500, 500)];
+    const boxes = layoutPanels(panels, undefined, 'grid', { gap: 100 });
+    expect(boxes[1].x).toBeCloseTo(PAD + 1440 + 100);
+  });
+
+  it('a custom outer padding moves the origin of the first panel', () => {
+    const boxes = layoutPanels([landscape(1000, 500)], undefined, 'grid', { pad: 60 });
+    expect(boxes[0]).toMatchObject({ x: 60, y: 60 });
+  });
+
+  it('a custom rowGap changes where the next row stacks', () => {
+    const panels = [landscape(1000, 500, { row: 0, caption: 'a' }), landscape(1000, 500, { row: 1, caption: 'b' })];
+    const boxes = layoutPanels(panels, undefined, 'grid', { rowGap: 80 });
+    expect(boxes[1].y).toBe(PAD + PANEL_H + captionBand() + 80);
+  });
+
+  it('docSize grows with a bigger padding', () => {
+    const tight = docSize([landscape(1000, 500)], [], {}, {}, [], 'grid', { pad: 20 });
+    const roomy = docSize([landscape(1000, 500)], [], {}, {}, [], 'grid', { pad: 60 });
+    expect(roomy.width).toBe(tight.width + 2 * (60 - 20));
+    expect(roomy.height).toBe(tight.height + 2 * (60 - 20));
+  });
+
+  it('defaults leave the layout identical to the shipped constants', () => {
+    const panels = [landscape(1000, 500), landscape(500, 500, { row: 0 })];
+    expect(layoutPanels(panels, undefined, 'grid', normSpace())).toEqual(layoutPanels(panels));
+  });
+});
+
+describe('toSpec — background + spacing persistence', () => {
+  it('defaults a fresh proof to the shipped bg and spacing', () => {
+    const spec = toSpec({ title: 'T', panels: [], shapes: [] });
+    expect(spec.bg).toBe(BG);
+    expect(spec.space).toEqual({ pad: PAD, gap: GAP, rowGap: ROW_GAP });
+  });
+
+  it('persists a custom background and partial spacing (missing fields filled)', () => {
+    const spec = toSpec({ title: 'T', panels: [], shapes: [], bg: '#ffffff', space: { gap: 50 } });
+    expect(spec.bg).toBe('#ffffff');
+    expect(spec.space).toEqual({ pad: PAD, gap: 50, rowGap: ROW_GAP });
+  });
+
+  it('persists a custom drawing palette and defaults older proofs', () => {
+    const custom = toSpec({ title: 'T', panels: [], shapes: [], palette: ['#123456'] });
+    const older = toSpec({ title: 'T', panels: [], shapes: [] });
+    expect(custom.palette).toEqual(['#123456']);
+    expect(older.palette).toEqual(ANNO_COLORS);
+  });
+});
+
+describe('preferred drawing colours', () => {
+  it('uses the seven shipped colours for a missing or empty palette', () => {
+    expect(normalizePreferredColors()).toEqual(ANNO_COLORS);
+    expect(normalizePreferredColors([])).toEqual(ANNO_COLORS);
+    expect(ANNO_COLORS).toHaveLength(MAX_ANNO_COLORS);
+  });
+
+  it('deduplicates colours and caps the palette at seven', () => {
+    expect(normalizePreferredColors([
+      '#111111', '#111111', '#222222', '#333333', '#444444',
+      '#555555', '#666666', '#777777', '#888888', 'invalid',
+    ])).toEqual([
+      '#111111', '#222222', '#333333', '#444444',
+      '#555555', '#666666', '#777777',
+    ]);
+  });
+
+  it('replaces the selected palette slot', () => {
+    expect(replacePreferredColor(ANNO_COLORS, 2, '#123456')).toEqual([
+      ANNO_COLORS[0], ANNO_COLORS[1], '#123456', ...ANNO_COLORS.slice(3),
+    ]);
+  });
+
+  it('swaps slots when the replacement colour is already in the palette', () => {
+    expect(replacePreferredColor(ANNO_COLORS, 2, ANNO_COLORS[0])).toEqual([
+      ANNO_COLORS[2], ANNO_COLORS[1], ANNO_COLORS[0], ...ANNO_COLORS.slice(3),
+    ]);
+  });
+});
+
+describe('templateFromProof — a content-free house style', () => {
+  const proof = {
+    title: 'Rooftop match',
+    bg: '#101418',
+    space: { pad: 30, gap: 40, rowGap: 24 },
+    layout: 'free',
+    captionSize: 24, legendSize: 22, footerSize: 16,
+    footer: 'By the desk',
+    footerEnabled: false,
+    footerColor: '#aabbcc',
+    captionsEnabled: false,
+    signature: { anchor: 'br', dx: 5, dy: 0, scale: 0.12, opacity: 0.9 },
+    signatureText: { text: '@desk', anchor: 'tr', dx: 0, dy: 0, size: 44, color: '#ffffff', opacity: 1 },
+    palette: ['#123456', '#ff5252', '#40c4ff'],
+    notes: { '#ff5252': 'Match', '#40c4ff': 'Reference' },
+    legendOrder: ['#40c4ff', '#ff5252'],
+    coordsText: '48.85, 2.35',
+    source: 'https://x.com/a/1',
+    panels: [{ id: 'p1', src: 'a.png', natural: [10, 10] }],
+    shapes: [{ id: 's1', kind: 'rect', color: '#ff5252', panel: 'p1' }],
+  };
+
+  it('keeps only the style, never the content', () => {
+    const t = templateFromProof(proof);
+    expect(t).toEqual({
+      bg: '#101418',
+      space: { pad: 30, gap: 40, rowGap: 24 },
+      layout: 'free',
+      captionSize: 24, legendSize: 22, footerSize: 16,
+      footer: 'By the desk',
+      footerEnabled: false,
+      footerColor: '#aabbcc',
+      footerAlign: 'left',
+      captionsEnabled: false,
+      panelDirection: 'horizontal',
+      signature: { anchor: 'br', dx: 5, dy: 0, scale: 0.12, opacity: 0.9 },
+      signatureText: { anchor: 'tr', dx: 0, dy: 0, size: 44, color: '#ffffff', opacity: 1 },
+      palette: ['#123456', '#ff5252', '#40c4ff'],
+    });
+    expect(t).not.toHaveProperty('panels');
+    expect(t).not.toHaveProperty('shapes');
+    expect(t).not.toHaveProperty('title');
+    expect(t).not.toHaveProperty('coordsText');
+    expect(t).not.toHaveProperty('source');
+    expect(t).not.toHaveProperty('notes');
+    expect(t).not.toHaveProperty('legendOrder');
+  });
+
+  it('detaches — mutating the template leaves the proof untouched', () => {
+    const t = templateFromProof(proof);
+    t.palette[0] = '#abcdef';
+    t.signature.dx = 999;
+    t.signatureText.size = 99;
+    expect(proof.palette[0]).toBe('#123456');
+    expect(proof.signature.dx).toBe(5);
+    expect(proof.signatureText.size).toBe(44);
+  });
+
+  it('fills shipped defaults for a bare proof', () => {
+    const t = templateFromProof({ panels: [], shapes: [] });
+    expect(t.bg).toBe(BG);
+    expect(t.space).toEqual({ pad: PAD, gap: GAP, rowGap: ROW_GAP });
+    expect(t.layout).toBe('grid');
+    expect(t.signature).toBeNull();
+    expect(t.signatureText).toBeNull();
+    expect(t.footerEnabled).toBe(true);
+    expect(t.footerColor).toBeNull();
+    expect(t.footerAlign).toBe('left');
+    expect(t.panelDirection).toBe('horizontal');
+    expect(t.captionsEnabled).toBe(true);
+    expect(t.palette).toEqual(ANNO_COLORS);
+  });
+});
+
+describe('normalizeProofStyle — renderer boundary', () => {
+  it('normalizes malformed nested values, enums, colors and numbers', () => {
+    const style = normalizeProofStyle({
+      bg: 'red', space: { pad: -10, gap: Infinity, rowGap: 1e308 },
+      layout: 'stacked', captionSize: NaN, legendSize: -1, footerSize: 1e308,
+      footer: 'x'.repeat(250), footerColor: 'white', footerAlign: 'center',
+      signature: { anchor: 'middle', dx: Infinity, scale: 99, opacity: -1 },
+      signatureText: [], palette: ['bad'],
+    });
+    expect(style).toMatchObject({
+      bg: BG,
+      space: { pad: 0, gap: GAP, rowGap: 200 },
+      layout: 'grid',
+      captionSize: 20,
+      legendSize: 8,
+      footerSize: 80,
+      footerColor: null,
+      footerAlign: 'left',
+      signature: { anchor: 'br', dx: 0, scale: 0.6, opacity: 0 },
+      signatureText: null,
+      palette: ANNO_COLORS,
+    });
+    expect(style.footer).toHaveLength(200);
+  });
+
+  it('keeps document-relative branding coordinates within the document range', () => {
+    const style = normalizeProofStyle({
+      signature: { anchor: 'tl', xRatio: 1.5, yRatio: -0.5 },
+      signatureText: { anchor: 'br', xRatio: 0.25, yRatio: 0.75 },
+    });
+    expect(style.signature).toMatchObject({ xRatio: 1, yRatio: 0 });
+    expect(style.signatureText).toMatchObject({ xRatio: 0.25, yRatio: 0.75 });
+  });
+});
+
+describe('proofExportOptions — canvas allocation guard', () => {
+  it('returns the existing export ratio for an ordinary proof', () => {
+    expect(proofExportOptions(1800, 900)).toEqual({
+      pixelRatio: 1, outputWidth: 1800, outputHeight: 900,
+    });
+  });
+
+  it('rejects invalid, over-dimension and over-pixel exports', () => {
+    expect(() => proofExportOptions(Infinity, 900)).toThrow(/dimensions are invalid/i);
+    expect(() => proofExportOptions(30_000, 100)).toThrow(/too large to export/i);
+    expect(() => proofExportOptions(12_000, 12_000)).toThrow(/too large to export/i);
+  });
+});
+
+describe('applyProofStyle — restyle without touching content', () => {
+  const style = {
+    bg: '#ffffff',
+    space: { pad: 40, gap: 40, rowGap: 40 },
+    layout: 'free',
+    captionSize: 26, legendSize: 26, footerSize: 18,
+    footer: 'House line',
+    signature: { anchor: 'tl', dx: 0, dy: 0, scale: 0.1, opacity: 1 },
+    palette: ['#123456', '#abcdef'],
+  };
+
+  it('applies every style field but leaves panels/shapes/title/coords alone', () => {
+    const proof = {
+      title: 'Keep me', coordsText: '1, 2', source: 'http://s',
+      panels: [{ id: 'p1', src: 'a.png' }], shapes: [{ id: 's1' }],
+      notes: { '#ff5252': 'Keep this legend' }, legendOrder: ['#ff5252'],
+    };
+    applyProofStyle(proof, style);
+    expect(proof.bg).toBe('#ffffff');
+    expect(proof.space).toEqual({ pad: 40, gap: 40, rowGap: 40 });
+    expect(proof.layout).toBe('free');
+    expect(proof.footer).toBe('House line');
+    expect(proof.signature).toMatchObject({ anchor: 'tl' });
+    // content untouched
+    expect(proof.title).toBe('Keep me');
+    expect(proof.coordsText).toBe('1, 2');
+    expect(proof.panels).toHaveLength(1);
+    expect(proof.shapes).toHaveLength(1);
+    expect(proof.palette).toEqual(['#123456', '#abcdef']);
+    expect(proof.notes).toEqual({ '#ff5252': 'Keep this legend' });
+    expect(proof.legendOrder).toEqual(['#ff5252']);
+  });
+
+  it('replaces the preferred palette without changing legend content', () => {
+    const proof = {
+      palette: [...ANNO_COLORS],
+      notes: { '#ff5252': 'My own label' },
+      legendOrder: ['#ff5252'],
+    };
+    applyProofStyle(proof, style);
+    expect(proof.palette).toEqual(['#123456', '#abcdef']);
+    expect(proof.notes).toEqual({ '#ff5252': 'My own label' });
+    expect(proof.legendOrder).toEqual(['#ff5252']);
+  });
+
+  it('detaches the applied signature and space objects', () => {
+    const proof = { notes: {}, legendOrder: [] };
+    applyProofStyle(proof, style);
+    proof.signature.dx = 99;
+    proof.space.pad = 99;
+    expect(style.signature.dx).toBe(0);
+    expect(style.space.pad).toBe(40);
+  });
+
+  it('a round-trip through a template reproduces the same style', () => {
+    const original = {
+      bg: '#101418', space: { pad: 30, gap: 40, rowGap: 24 }, layout: 'free',
+      captionSize: 24, legendSize: 22, footerSize: 16, footer: 'By the desk',
+      footerEnabled: false, footerColor: '#aabbcc',
+      signature: { anchor: 'br', dx: 5, dy: 0, scale: 0.12, opacity: 0.9 },
+      signatureText: { text: '@desk', anchor: 'tr', dx: 2, dy: 3, size: 44, color: '#fff', opacity: 1 },
+      palette: ['#123456', '#abcdef'],
+      notes: { '#ff5252': 'Match' }, legendOrder: ['#ff5252'],
+      panels: [], shapes: [],
+    };
+    const target = { notes: {}, legendOrder: [], panels: [], shapes: [] };
+    applyProofStyle(target, templateFromProof(original));
+    expect(templateFromProof(target)).toEqual(templateFromProof(original));
+  });
+
+  it('applies the footer switch/colour and the text signature', () => {
+    const proof = { notes: {}, legendOrder: [], panels: [], shapes: [] };
+    applyProofStyle(proof, {
+      footerEnabled: false,
+      footerColor: '#123456',
+      footerAlign: 'right',
+      signatureText: { text: '@name', anchor: 'tl', dx: 0, dy: 0, size: 50, color: '#fff', opacity: 1 },
+    });
+    expect(proof.footerEnabled).toBe(false);
+    expect(proof.footerColor).toBe('#123456');
+    expect(proof.footerAlign).toBe('right');
+    expect(proof.signatureText).toMatchObject({ anchor: 'tl' });
+    expect(proof.signatureText).not.toHaveProperty('text');
+    // a style without a text signature clears any existing one
+    applyProofStyle(proof, { signatureText: null });
+    expect(proof.signatureText).toBeNull();
+  });
+
+  it('adds logo and account-handle slots only when both the template and Settings provide them', () => {
+    const proof = { notes: {}, legendOrder: [] };
+    const signed = {
+      signature: { anchor: 'br', dx: 0, dy: 0, scale: 0.12, opacity: 1 },
+      signatureText: { anchor: 'tl', dx: 0, dy: 0, size: 50, color: '#fff', opacity: 1 },
+    };
+    applyProofStyle(proof, signed, { logo: false, handle: false });
+    expect(proof.signature).toBeNull();
+    expect(proof.signatureText).toBeNull();
+
+    applyProofStyle(proof, signed, { logo: true, handle: true });
+    expect(proof.signature).toMatchObject({ anchor: 'br' });
+    expect(proof.signatureText).toMatchObject({ anchor: 'tl' });
+  });
+
+  it('applies the template direction to the first two existing panels', () => {
+    const proof = { panels: [{ row: 0 }, { row: 0 }], notes: {}, legendOrder: [] };
+    applyProofStyle(proof, { panelDirection: 'vertical' });
+    expect(proof.panelDirection).toBe('vertical');
+    expect(proof.panels.map((p) => p.row)).toEqual([0, 1]);
+  });
+
+  it('apply-then-discard restores the visual style the proof had before', () => {
+    // The composer's "Discard template" path: snapshot the look, apply a
+    // template over it, then re-apply the snapshot to walk the style back.
+    const proof = {
+      bg: '#0d1117', space: { pad: 40, gap: 24, rowGap: 24 }, layout: 'grid',
+      captionSize: 20, legendSize: 18, footerSize: 14, footer: '',
+      footerEnabled: true, footerColor: null,
+      signature: null, signatureText: null, palette: [...ANNO_COLORS], notes: {}, legendOrder: [],
+      panels: [], shapes: [],
+    };
+    const before = templateFromProof(proof);
+    applyProofStyle(proof, {
+      bg: '#ffffff', space: { pad: 0, gap: 0, rowGap: 0 }, layout: 'free',
+      palette: ['#123456'],
+      footerEnabled: false, signature: { anchor: 'br', dx: 0, dy: 0, scale: 0.2, opacity: 1 },
+    });
+    expect(proof.footerEnabled).toBe(false);
+    applyProofStyle(proof, before); // discard
+    expect(templateFromProof(proof)).toEqual(before);
+  });
+});
+
+describe('toSpec — footer switch/colour + text signature', () => {
+  it('defaults a fresh proof to footer-on, auto colour, no text signature', () => {
+    const spec = toSpec({ title: 'T', panels: [], shapes: [] });
+    expect(spec.footerEnabled).toBe(true);
+    expect(spec.footerColor).toBeNull();
+    expect(spec.footerAlign).toBe('left');
+    expect(spec.panelDirection).toBe('horizontal');
+    expect(spec.signatureText).toBeNull();
+  });
+
+  it('persists a disabled footer, a footer colour and a text signature', () => {
+    const spec = toSpec({
+      title: 'T', panels: [], shapes: [],
+      footerEnabled: false, footerColor: '#334455', footerAlign: 'right', panelDirection: 'vertical',
+      signatureText: { text: '@n', anchor: 'br', dx: 1, dy: 2, size: 44, color: '#fff', opacity: 0.8 },
+    });
+    expect(spec.footerEnabled).toBe(false);
+    expect(spec.footerColor).toBe('#334455');
+    expect(spec.footerAlign).toBe('right');
+    expect(spec.panelDirection).toBe('vertical');
+    expect(spec.signatureText).toMatchObject({ anchor: 'br' });
+    expect(spec.signatureText).not.toHaveProperty('text');
+  });
+});
+
+describe('docSize — footer can be switched off', () => {
+  it('reclaims the footer band height when the footer is disabled', () => {
+    const panels = [landscape(1000, 500)];
+    const on = docSize(panels, [], {}, { footerEnabled: true });
+    const off = docSize(panels, [], {}, { footerEnabled: false });
+    expect(on.height - off.height).toBe(FOOTER_H);
+  });
+
+  it('footer off + no captions + no margins reduces to just the panels', () => {
+    const panels = [landscape(1000, 500), landscape(500, 500)];
+    const { width, height } = docSize(
+      panels, [], {}, { footerEnabled: false }, [], 'grid', { pad: 0, gap: 0, rowGap: 0 }
+    );
+    expect(height).toBe(PANEL_H); // no caption band, no footer, no padding
+    expect(width).toBe(1440 + 720); // the two panels, no gap
+  });
+});
+
+describe('anchoredPos / anchoredOffset — the text-signature placement', () => {
+  it('hangs a box off each corner inset by the margin', () => {
+    expect(anchoredPos({ anchor: 'tl' }, 1000, 800, 100, 40)).toEqual({ x: SIG_MARGIN, y: SIG_MARGIN });
+    expect(anchoredPos({ anchor: 'br' }, 1000, 800, 100, 40))
+      .toEqual({ x: 1000 - SIG_MARGIN - 100, y: 800 - SIG_MARGIN - 40 });
+  });
+
+  it('applies a nudge and clamps inside the document', () => {
+    expect(anchoredPos({ anchor: 'tl', dx: 20, dy: 10 }, 1000, 800, 100, 40)).toEqual({ x: SIG_MARGIN + 20, y: SIG_MARGIN + 10 });
+    expect(anchoredPos({ anchor: 'tl', dx: -9999, dy: -9999 }, 1000, 800, 100, 40)).toEqual({ x: 0, y: 0 });
+  });
+
+  it('anchoredOffset reproduces a dropped position (round-trip)', () => {
+    for (const anchor of ['tl', 'tr', 'bl', 'br']) {
+      const off = anchoredOffset({ anchor }, 1000, 800, 120, 44, 300, 250);
+      const pos = anchoredPos({ anchor, ...off }, 1000, 800, 120, 44);
+      expect(pos).toEqual({ x: 300, y: 250 });
+    }
+  });
+
+  it('keeps a free account-handle placement relative to a resized proof', () => {
+    const placement = anchoredOffset({ anchor: 'tl' }, 1000, 800, 100, 40, 300, 250);
+    const grown = anchoredPos({ anchor: 'tl', ...placement }, 2000, 1600, 200, 80);
+    expect(grown.x).toBeCloseTo(600);
+    expect(grown.y).toBeCloseTo(500);
+  });
+
+  it('newSignatureText is a bottom-right handle at the default size', () => {
+    const s = newSignatureText();
+    expect(SIG_TEXT_SIZE).toBe(28);
+    expect(s).toMatchObject({ anchor: 'br', size: SIG_TEXT_SIZE, opacity: 1 });
+    expect(s).not.toHaveProperty('text');
   });
 });

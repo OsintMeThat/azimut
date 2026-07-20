@@ -1,7 +1,12 @@
 <script>
   import { onMount } from 'svelte';
   import { api } from '../lib/api.js';
-  import { toast, prefs, applyPrefs } from '../lib/state.svelte.js';
+  import { toast, prefs, applyPrefs, uiState } from '../lib/state.svelte.js';
+  import {
+    templatesState, loadTemplates, saveTemplate, deleteTemplate,
+  } from '../lib/state.svelte.js';
+  import { templateFromProof, textSignatureStyle } from '../lib/composer.js';
+  import { POST_TARGETS, templateFromPost } from '../lib/post.js';
   import { formatCoords, parseHomeView } from '../lib/coords.js';
   import { formatDistance, formatArea } from '../lib/measure.js';
   import {
@@ -18,12 +23,16 @@
   import { probeKey, googleMapsLoadedKey } from '../lib/gmaps.js';
   import { extensionVersion, extensionOutdated } from '../lib/extBridge.js';
   import Icon from '../components/Icon.svelte';
+  import ProofTemplateEditor from '../components/ProofTemplateEditor.svelte';
+  import PostTemplateEditor from '../components/PostTemplateEditor.svelte';
+  import ConfirmDialog from '../components/ConfirmDialog.svelte';
 
   // Imagery and Usage were the same four objects seen from two rooms: the key
   // here, the meter it feeds there. One tab, one card per provider.
   const TABS = [
     { id: 'preferences', label: 'Preferences', icon: 'sliders' },
     { id: 'imagery', label: 'Imagery', icon: 'key' },
+    { id: 'templates', label: 'Templates', icon: 'layers' },
     { id: 'extension', label: 'Capture extension', icon: 'crop' },
     { id: 'about', label: 'About', icon: 'compass' },
   ];
@@ -208,11 +217,13 @@
   // fought by the number parser mid-keystroke; committed on change
   let home = $state({ lat: '', lon: '', zoom: '' });
   let mention = $state('');
+  let postTarget = $state('x');
   let updateOnStart = $state(true); // pop a notice on load when a release is out
   // the analyst's logo: app-wide like the API keys, and under the same rule —
   // it lives beside settings.json and only ever reaches a case as pixels in a
   // rendered proof PNG. `sigBust` re-fetches the <img> after a replace.
   let signature = $state(false);
+  let signatureHandle = $state('');
   let sigBust = $state(0);
   let sigInput = $state(null);
 
@@ -320,6 +331,7 @@
   async function load() {
     const s = await api.get('/api/settings');
     signature = !!s.signature;
+    signatureHandle = s.signature_handle ?? '';
     keys = perProvider((k) => s.api_keys[k.id] ?? '');
     usage = s.usage;
     month = s.month;
@@ -348,6 +360,7 @@
     ingestToken = s.ingest_token ?? '';
     home = { lat: String(s.home_view.lat), lon: String(s.home_view.lon), zoom: String(s.home_view.zoom) };
     mention = s.post_mention ?? '';
+    postTarget = s.post_target ?? 'x';
     updateOnStart = s.update_check_on_start ?? true;
     applyPrefs(s); // the rest of the app reads these live
     await loadScrapers().catch(() => {}); // local disk read; never blocks Settings
@@ -469,7 +482,76 @@
 
   onMount(() => {
     load().catch((e) => toast(`Could not load settings: ${e.message}`, 'danger'));
+    loadTemplates();
   });
+
+  $effect(() => {
+    if (uiState.tool !== 'settings') return;
+    const target = uiState.settingsTab;
+    if (!target) return;
+    if (TABS.some((t) => t.id === target)) tab = target;
+    uiState.settingsTab = null;
+  });
+
+  // ---- reusable templates (proof house style + post thread) ----------------
+  // One editor draft at a time. `editing` = { kind, id|null, name, data }; a
+  // fresh id is null until first save. Content-free presets, workspace-level.
+  let editing = $state(null);
+  let savingTpl = $state(false);
+  let deleteTpl = $state(null); // { kind, id, name } pending confirmation
+
+  function freshTemplate(kind) {
+    return kind === 'proof' ? templateFromProof({}) : templateFromPost({});
+  }
+
+  function newTemplate(kind) {
+    editing = { kind, id: null, name: '', data: freshTemplate(kind) };
+  }
+
+  function editTemplate(kind, rec) {
+    // deep copy so a cancelled edit leaves the stored template untouched. A JSON
+    // round-trip (not structuredClone) because `rec.data` is a Svelte state
+    // proxy and structuredClone throws on a proxy.
+    editing = { kind, id: rec.id, name: rec.name, data: JSON.parse(JSON.stringify(rec.data)) };
+  }
+
+  function cancelEdit() {
+    editing = null;
+  }
+
+  async function saveEditingTemplate() {
+    if (!editing || savingTpl) return;
+    const name = editing.name.trim();
+    if (!name) {
+      toast('Give the template a name', 'warn');
+      return;
+    }
+    savingTpl = true;
+    try {
+      const data = editing.kind === 'proof'
+        ? { ...editing.data, signatureText: textSignatureStyle(editing.data.signatureText) }
+        : editing.data;
+      await saveTemplate(editing.kind, { id: editing.id, name, data });
+      toast('Template saved', 'ok', 1600);
+      editing = null;
+    } catch (e) {
+      toast(`Could not save the template: ${e.message}`, 'danger');
+    } finally {
+      savingTpl = false;
+    }
+  }
+
+  async function confirmDeleteTemplate() {
+    const t = deleteTpl;
+    deleteTpl = null;
+    try {
+      await deleteTemplate(t.kind, t.id);
+      if (editing?.kind === t.kind && editing?.id === t.id) editing = null;
+      toast(`Deleted "${t.name}"`, 'info');
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  }
 
   // Keys save on change like every other preference here — no Save button to
   // forget. The status chip flipping to "Untested" is the receipt, which beats
@@ -629,10 +711,42 @@
               spellcheck="false"
             />
           </div>
+          <div class="row">
+            <div class="row-label">
+              <span>Preferred platform</span>
+              <span class="row-hint">Used for new post drafts.</span>
+            </div>
+            <div class="seg" role="group" aria-label="Preferred platform">
+              {#each Object.values(POST_TARGETS) as option (option.id)}
+                <button
+                  class="seg-btn"
+                  class:on={postTarget === option.id}
+                  onclick={() => {
+                    postTarget = option.id;
+                    savePrefs({ post_target: option.id });
+                  }}
+                >{option.label}</button>
+              {/each}
+            </div>
+          </div>
         </section>
 
         <section class="group">
           <h3>Signature</h3>
+          <div class="row">
+            <div class="row-label">
+              <span>Your account handle</span>
+              <span class="row-hint">Used when a proof or template enables “Add account handle”; leave empty to hide it.</span>
+            </div>
+            <input
+              class="input mention"
+              bind:value={signatureHandle}
+              onchange={() => savePrefs({ signature_handle: signatureHandle })}
+              placeholder="@my_handle"
+              maxlength="64"
+              spellcheck="false"
+            />
+          </div>
           <div class="row">
             <div class="row-label">
               <span>Your logo</span>
@@ -1160,9 +1274,112 @@
           </p>
         </section>
       {/if}
+
+      {#if tab === 'templates'}
+        <section class="group">
+          <h3>Proof templates</h3>
+          <p class="note">
+            A proof's house style — background, margins, text sizes, footer,
+            signature placement and preferred colours. New proofs can start
+            from one. Shared across every case.
+          </p>
+          <div class="tpl-list">
+            {#each templatesState.proof as t (t.id)}
+              <div class="tpl-row">
+                <span class="tpl-name">{t.name}</span>
+                <div class="tpl-actions">
+                  <button class="btn btn-sm" onclick={() => editTemplate('proof', t)}>
+                    <Icon name="edit" size={13} /> Edit
+                  </button>
+                  <button class="btn btn-sm" title="Delete"
+                    onclick={() => (deleteTpl = { kind: 'proof', id: t.id, name: t.name })}>
+                    <Icon name="trash" size={13} />
+                  </button>
+                </div>
+              </div>
+            {/each}
+            {#if !templatesState.proof.length}
+              <p class="empty">No proof templates yet.</p>
+            {/if}
+          </div>
+          <button class="btn btn-sm" onclick={() => newTemplate('proof')}>
+            <Icon name="plus" size={13} /> New proof template
+          </button>
+        </section>
+
+        <section class="group">
+          <h3>Post templates</h3>
+          <p class="note">
+            A thread skeleton — the mention, which lines the first tweet keeps,
+            whether a media tweet rides along, and boilerplate extra tweets.
+          </p>
+          <div class="tpl-list">
+            {#each templatesState.post as t (t.id)}
+              <div class="tpl-row">
+                <span class="tpl-name">{t.name}</span>
+                <div class="tpl-actions">
+                  <button class="btn btn-sm" onclick={() => editTemplate('post', t)}>
+                    <Icon name="edit" size={13} /> Edit
+                  </button>
+                  <button class="btn btn-sm" title="Delete"
+                    onclick={() => (deleteTpl = { kind: 'post', id: t.id, name: t.name })}>
+                    <Icon name="trash" size={13} />
+                  </button>
+                </div>
+              </div>
+            {/each}
+            {#if !templatesState.post.length}
+              <p class="empty">No post templates yet.</p>
+            {/if}
+          </div>
+          <button class="btn btn-sm" onclick={() => newTemplate('post')}>
+            <Icon name="plus" size={13} /> New post template
+          </button>
+        </section>
+      {/if}
     </div>
   </div>
 </div>
+
+{#if editing}
+  <div class="tpl-modal-overlay" role="presentation"
+    onclick={(e) => e.target === e.currentTarget && cancelEdit()}>
+    <div class="tpl-modal">
+      <div class="tpl-modal-head">
+        <input class="tpl-title" type="text" placeholder="Template name"
+          maxlength="120" bind:value={editing.name} />
+        <button class="btn btn-ghost btn-sm" onclick={cancelEdit} aria-label="Close">
+          <Icon name="x" size={16} />
+        </button>
+      </div>
+      <div class="tpl-modal-body">
+        {#if editing.kind === 'proof'}
+          <ProofTemplateEditor bind:data={editing.data} />
+        {:else}
+          <PostTemplateEditor bind:data={editing.data} />
+        {/if}
+      </div>
+      <div class="tpl-modal-foot">
+        <button class="btn btn-ghost" onclick={cancelEdit}>Cancel</button>
+        <button class="btn btn-primary" disabled={savingTpl} onclick={saveEditingTemplate}>
+          <Icon name="save" size={14} /> {savingTpl ? 'Saving…' : 'Save template'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if deleteTpl}
+  <ConfirmDialog
+    title="Delete template"
+    message={`Delete "${deleteTpl.name}"?`}
+    detail="This preset is removed for every case. Proofs already made keep their style."
+    confirmLabel="Delete"
+    tone="danger"
+    onconfirm={confirmDeleteTemplate}
+    oncancel={() => (deleteTpl = null)}
+  />
+{/if}
 
 <style>
   .tool {
@@ -1673,5 +1890,89 @@
     flex-direction: column;
     gap: 6px;
     line-height: 1.45;
+  }
+
+  /* --- templates tab ------------------------------------------------------ */
+  .tpl-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .tpl-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-2);
+  }
+  .tpl-name {
+    font-size: var(--fs-sm);
+    color: var(--text-1);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tpl-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .empty {
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    font-style: italic;
+  }
+
+  .tpl-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .tpl-modal {
+    width: min(920px, 100%);
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg, 12px);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  }
+  .tpl-modal-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tpl-title {
+    flex: 1;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-1);
+    padding: 7px 10px;
+    font: inherit;
+    font-weight: 600;
+  }
+  .tpl-modal-body {
+    padding: 16px;
+    overflow-y: auto;
+  }
+  .tpl-modal-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 14px;
+    border-top: 1px solid var(--border);
   }
 </style>

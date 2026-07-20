@@ -97,8 +97,7 @@ def sync(
     """
     found, missing = resolve(case, rel_paths)
     case.sync_links(entity_id, type_, found, by=by)
-    for path in missing:
-        add_tombstone(case, entity_id, {"path": path})
+    add_tombstones(case, entity_id, [{"path": path} for path in missing])
 
 
 def link_all(
@@ -114,8 +113,7 @@ def link_all(
     for to_id in found:
         if to_id != entity_id:
             case.add_link(entity_id, to_id, type_, by=by, unique=True)
-    for path in missing:
-        add_tombstone(case, entity_id, {"path": path})
+    add_tombstones(case, entity_id, [{"path": path} for path in missing])
 
 
 def tombstone_of(entity: dict[str, Any]) -> dict[str, Any]:
@@ -142,12 +140,26 @@ def add_tombstone(case: Case, entity_id: str, info: dict[str, Any]) -> None:
 
     Keyed by path, so re-saving or a second delete never stacks duplicates.
     """
+    add_tombstones(case, entity_id, [info])
+
+
+def add_tombstones(case: Case, entity_id: str, infos: list[dict[str, Any]]) -> None:
+    """Record several lost sources with one case read and at most one write."""
+    if not infos:
+        return
     entity = _entity(case, entity_id)
     lost = list(entity.get("attrs", {}).get(LOST, []))
-    if any(t.get("path") == info.get("path") for t in lost):
-        return
-    lost.append({**info, "at": info.get("at") or _now()})
-    case.update_entity(entity_id, {"attrs": {LOST: lost}})
+    paths = {item.get("path") for item in lost}
+    changed = False
+    for info in infos:
+        path = info.get("path")
+        if path in paths:
+            continue
+        lost.append({**info, "at": info.get("at") or _now()})
+        paths.add(path)
+        changed = True
+    if changed:
+        case.update_entity(entity_id, {"attrs": {LOST: lost}})
 
 
 def losses(case: Case, doomed_ids: set[str]) -> dict[str, list[dict[str, Any]]]:

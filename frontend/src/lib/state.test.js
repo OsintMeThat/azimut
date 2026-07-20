@@ -5,7 +5,7 @@ import { MIN_W, MAX_W } from './sidebar.js';
 // The prefs tests below exercise import-time module state, so the transport is
 // stubbed and the module re-imported fresh per test. The static import above
 // still works: these tests never call the API.
-vi.mock('./api.js', () => ({ api: { get: vi.fn() } }));
+vi.mock('./api.js', () => ({ api: { get: vi.fn(), post: vi.fn(), del: vi.fn() } }));
 
 async function freshState() {
   vi.resetModules();
@@ -104,8 +104,60 @@ describe('applyPrefs', () => {
     expect(prefs.coordFormat).toBe('mgrs');
     expect(prefs.units).toBe('imperial');
     expect(prefs.postMention).toBe('@GeoConfirmed'); // untouched by a partial payload
+    expect(prefs.postTarget).toBe('x'); // untouched by a partial payload
+    expect(prefs.signatureHandle).toBe(''); // untouched by a partial payload
 
     applyPrefs({ post_mention: '' }); // an empty mention is a real choice, not absence
     expect(prefs.postMention).toBe('');
+
+    applyPrefs({ post_target: 'bluesky' });
+    expect(prefs.postTarget).toBe('bluesky');
+
+    applyPrefs({ signature_handle: '@example' });
+    expect(prefs.signatureHandle).toBe('@example');
+  });
+});
+
+describe('templates store', () => {
+  let api;
+  beforeEach(async () => {
+    ({ api } = await import('./api.js'));
+    api.get.mockReset();
+    api.post.mockReset();
+    api.del.mockReset();
+  });
+
+  it('loadTemplates mirrors both families, tolerating a bad payload', async () => {
+    const { loadTemplates, templatesState } = await freshState();
+    ({ api } = await import('./api.js'));
+    api.get.mockResolvedValue({ proof: [{ id: 'a', name: 'Dark' }], post: [{ id: 'b', name: 'Terse' }] });
+    await loadTemplates();
+    expect(templatesState.proof.map((t) => t.id)).toEqual(['a']);
+    expect(templatesState.post.map((t) => t.id)).toEqual(['b']);
+
+    api.get.mockRejectedValue(new Error('offline'));
+    await loadTemplates(); // never throws; leaves the last good store
+    expect(templatesState.proof.map((t) => t.id)).toEqual(['a']);
+  });
+
+  it('saveTemplate posts to the kind endpoint then refreshes the store', async () => {
+    const { saveTemplate, templatesState } = await freshState();
+    ({ api } = await import('./api.js'));
+    api.post.mockResolvedValue({ id: 'x', name: 'Dark', data: {} });
+    api.get.mockResolvedValue({ proof: [{ id: 'x', name: 'Dark' }], post: [] });
+    const rec = await saveTemplate('proof', { name: 'Dark', data: { bg: '#000' } });
+    expect(api.post).toHaveBeenCalledWith('/api/templates/proof', { name: 'Dark', data: { bg: '#000' } });
+    expect(rec.id).toBe('x');
+    expect(templatesState.proof).toHaveLength(1);
+  });
+
+  it('deleteTemplate hits the id endpoint then refreshes', async () => {
+    const { deleteTemplate, templatesState } = await freshState();
+    ({ api } = await import('./api.js'));
+    api.del.mockResolvedValue({ deleted: true });
+    api.get.mockResolvedValue({ proof: [], post: [] });
+    await deleteTemplate('post', 'b');
+    expect(api.del).toHaveBeenCalledWith('/api/templates/post/b');
+    expect(templatesState.post).toEqual([]);
   });
 });

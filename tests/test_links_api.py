@@ -11,6 +11,8 @@ import io
 
 from PIL import Image
 
+from azimut.engine import links as link_engine
+
 
 def _png_bytes(color=(200, 30, 30), size=(64, 48)) -> bytes:
     buf = io.BytesIO()
@@ -137,6 +139,27 @@ def test_post_save_links_to_its_proof_and_media(client):
     }
 
 
+def test_post_save_links_to_every_selected_media_file(client):
+    cid = _new_case(client, "Post media set")
+    a = _upload(client, cid, "a.png", _png_bytes((7, 8, 9)))["item"]["path"]
+    b = _upload(client, cid, "b.png", _png_bytes((3, 4, 5)))["item"]["path"]
+
+    client.post(
+        f"/api/cases/{cid}/drafts",
+        json={
+            "title": "Thread",
+            "state": {
+                "mediaPaths": [a],
+                "extraTweets": [{"text": "", "mediaPaths": [b], "mediaType": "images"}],
+            },
+        },
+    )
+
+    post = _entity(client, cid, draft="exports/thread.json")
+    targets = {lk["to"] for lk in _links(client, cid, "derived-from") if lk["from"] == post["id"]}
+    assert targets == {_entity(client, cid, path=a)["id"], _entity(client, cid, path=b)["id"]}
+
+
 def test_session_save_depends_on_its_subject(client):
     cid = _new_case(client, "Session links")
     a = _upload(client, cid, "a.png")["item"]["path"]
@@ -222,6 +245,32 @@ def test_a_source_deleted_before_the_save_leaves_a_tombstone(client):
     assert proof["attrs"]["lost_sources"] == [
         {"path": a, "at": proof["attrs"]["lost_sources"][0]["at"]}
     ]
+
+
+def test_missing_sources_are_tombstoned_in_one_case_update():
+    class FakeCase:
+        def __init__(self):
+            self.read_count = 0
+            self.updates = []
+
+        def read(self):
+            self.read_count += 1
+            return {"entities": [{"id": "post", "attrs": {}}]}
+
+        def update_entity(self, entity_id, changes):
+            self.updates.append((entity_id, changes))
+
+    case = FakeCase()
+    link_engine.add_tombstones(
+        case,
+        "post",
+        [{"path": "media/a.png"}, {"path": "media/b.png"}, {"path": "media/a.png"}],
+    )
+
+    assert case.read_count == 1
+    assert len(case.updates) == 1
+    lost = case.updates[0][1]["attrs"][link_engine.LOST]
+    assert [item["path"] for item in lost] == ["media/a.png", "media/b.png"]
 
 
 # ── delete: what goes, what stays ──────────────────────────────────────────

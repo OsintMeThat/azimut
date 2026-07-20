@@ -1671,19 +1671,6 @@
   }
 
   // --- editing the area of interest (rect corners / polygon vertices) ---
-  function cornerLatLng(b, c) {
-    return [c[0] === 'n' ? b.north : b.south, c[1] === 'e' ? b.east : b.west];
-  }
-
-  function normBounds(b) {
-    return {
-      south: Math.min(b.south, b.north),
-      north: Math.max(b.south, b.north),
-      west: Math.min(b.west, b.east),
-      east: Math.max(b.west, b.east),
-    };
-  }
-
   // The area box + handles show only while editing the area; once a grid is
   // drawn the box is hidden and just the cells remain.
   function renderAoi() {
@@ -1695,7 +1682,7 @@
     if (grid.aoi.type === 'rect') {
       aoiOutline = L.rectangle([[b.south, b.west], [b.north, b.east]], AOI_STYLE).addTo(gridAoiLayer);
       for (const corner of CORNERS) {
-        const m = L.marker(cornerLatLng(b, corner), {
+        const m = L.marker(gridSearch.cornerLatLng(b, corner), {
           draggable: true,
           keyboard: false,
           icon: gridHandleIcon(),
@@ -1718,13 +1705,13 @@
     else dragBounds.south = latlng.lat;
     if (corner[1] === 'e') dragBounds.east = latlng.lng;
     else dragBounds.west = latlng.lng;
-    const b = normBounds(dragBounds);
+    const b = gridSearch.normalizeBounds(dragBounds);
     aoiOutline?.setBounds([[b.south, b.west], [b.north, b.east]]);
   }
 
   function commitResize() {
     if (!dragBounds || !grid) return;
-    const b = normBounds(dragBounds);
+    const b = gridSearch.normalizeBounds(dragBounds);
     dragBounds = null;
     const resized = gridSearch.resizeRect(grid, b);
     if (gridSearch.estimateCells(resized) > GRID_MAX_CELLS) {
@@ -1843,15 +1830,14 @@
     const p2 = map.containerPointToLatLng(L.point(r.x1, r.y1));
     doApplyArea({
       type: 'rect',
-      bounds: normBounds({ south: p1.lat, north: p2.lat, west: p1.lng, east: p2.lng }),
+      bounds: gridSearch.normalizeBounds({ south: p1.lat, north: p2.lat, west: p1.lng, east: p2.lng }),
     });
   }
 
   // polygon area: click to drop vertices (handled in onMapClick), drag the
   // handles to adjust, Confirm to build.
   function draftLatLngs() {
-    const pts = polyDraft.map((p) => [p.lat, p.lon]);
-    return pts.length >= 3 ? pts.concat([pts[0]]) : pts;
+    return gridSearch.closeRing(polyDraft.map((p) => [p.lat, p.lon]));
   }
 
   function renderDraft() {
@@ -1917,8 +1903,8 @@
   }
 
   function gridTitleFor(aoi) {
-    const b = gridSearch.aoiBounds(aoi);
-    return fmtCoords((b.south + b.north) / 2, (b.west + b.east) / 2);
+    const c = gridSearch.aoiCenter(aoi);
+    return fmtCoords(c.lat, c.lon);
   }
 
   // --- sweep loop: fly to a cell, mark it, advance ---
