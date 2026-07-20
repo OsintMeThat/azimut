@@ -10,29 +10,31 @@ there, in one plain folder you can zip, git, or share.
 *The name is the French word for azimuth, the compass bearing you sight along
 to fix a point on the map.*
 
-## v0.1.3 — Proof Studio
+## v0.2.0 — Proof Studio & Post outputs
 
 | Tool | What it does |
 |------|--------------|
 | **Media Library** | Import local files or download by URL (X, Telegram, TikTok, YouTube, Instagram and more via yt-dlp, with a gallery-dl fallback for image-only posts). Each item gets a clean local file, metadata and a SHA-256. Multi-photo posts open a picker. |
 | **Inspect** | A scratch workspace over any photo or video: frame adjustments, editable crop, sharpest-frame capture, hand-made collage with per-piece warp/scale/rotate, and auto-stitch to solve a panorama's layout for you. Nothing enters the case until you save. |
 | **Satellite** | Coordinates or a place name become an imagery crop, with select-area capture, map rotation, measurement tools and reference-image overlays. Esri/OSM by default; add a Mapbox or Google key for more basemaps. |
-| **Proof Composer** | Compose panels in a grid or free layout, annotate with colored shapes and text (same color = same feature), write a per-color legend, and export `proof.png` plus a re-editable spec. |
-| **Post Composer** | Turn a proof into a publishable thread: coordinates, plus code, attribution, character count, RTL-safe text, ready to paste into X. |
+| **Proof Composer** | Start a named proof from a reusable house style, select case panels with search, compose them in a grid or free layout, annotate with colored shapes/freehand/text, and export `proof.png` plus a re-editable spec. |
+| **Post Composer** | Turn a proof into a prepared thread for X, Bluesky, or Mastodon: coordinates, plus code, attribution, target-specific character counts, media, and Markdown report output. |
 
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
 
-New in v0.1.3:
+New in v0.2.0:
 
-- The binaries bundle ffmpeg and ffprobe, so video thumbnails, frame scans,
-  video enhancement and downloads that merge separate audio+video streams
-  work out of the box, no PATH install needed.
-- Settings pops a notice when a newer release is out (opt-out, "don't show
-  again" per version) so binary users hear about updates without checking
-  by hand.
-- Faster Satellite tile loading: the tile proxy now reuses one pooled
-  connection instead of opening a new one per tile.
+- Settings → Templates stores reusable proof house styles and post-thread
+  skeletons. Proof templates cover background, spacing, text, footer, signature
+  placement, and preferred colours; post templates cover the mention, tweet-1
+  fields, media tweet, and extra tweets.
+- Proof Composer can start a named proof, search and filter case panels, apply a
+  template, arrange panels horizontally or vertically, and draw freehand marks.
+- Post Composer prepares the same thread for X, Bluesky, or Mastodon, groups
+  selected media safely, and copies a compact Markdown report.
+- Draft and template storage validates bounds and paths before writing, with
+  atomic template saves and efficient multi-source link updates.
 
 ## Install & run
 
@@ -159,7 +161,7 @@ wheel + Windows/Linux/macOS binaries, attaches them to a GitHub release, and
 publishes to PyPI. **Don't publish by hand.**
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.2.0 && git push origin v0.2.0
 ```
 
 One-time setup: register the repo as a
