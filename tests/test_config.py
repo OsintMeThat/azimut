@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from azimut import config
 
 
@@ -50,3 +52,54 @@ def test_load_settings_missing_file_returns_defaults(monkeypatch, tmp_path):
     loaded = config.load_settings()
     assert loaded == config.DEFAULT_SETTINGS
     assert loaded is not config.DEFAULT_SETTINGS
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["[]", "{", '{"schema": 2, "proof": [], "post": []}', '{"schema": 1, "proof": [42], "post": []}'],
+)
+def test_load_templates_recovers_from_malformed_stores(monkeypatch, tmp_path, content):
+    monkeypatch.setenv("AZIMUT_HOME", str(tmp_path))
+    config.templates_path().write_text(content, encoding="utf-8")
+    assert config.load_templates() == config.DEFAULT_TEMPLATES
+
+
+def test_load_templates_filters_bad_records_and_duplicate_ids(monkeypatch, tmp_path):
+    monkeypatch.setenv("AZIMUT_HOME", str(tmp_path))
+    config.templates_path().write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "proof": [
+                    {"id": "kept", "name": " First ", "data": {"bg": "#ffffff"}},
+                    {"id": "kept", "name": "Duplicate", "data": {}},
+                    {"id": "bad id", "name": "Bad", "data": {}},
+                    {"id": "scalar", "name": "Bad", "data": 3},
+                ],
+                "post": [None, {"id": "post", "name": " Post ", "data": {}}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = config.load_templates()
+    assert loaded["proof"] == [{"id": "kept", "name": "First", "data": {"bg": "#ffffff"}}]
+    assert loaded["post"] == [{"id": "post", "name": "Post", "data": {}}]
+
+
+def test_save_templates_is_atomic_when_replace_fails(monkeypatch, tmp_path):
+    monkeypatch.setenv("AZIMUT_HOME", str(tmp_path))
+    original = {"schema": 1, "proof": [], "post": []}
+    config.save_templates(original)
+    before = config.templates_path().read_bytes()
+
+    def fail_replace(_source, _target):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(config.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="replace failed"):
+        config.save_templates(
+            {"schema": 1, "proof": [{"id": "x", "name": "X", "data": {}}], "post": []}
+        )
+
+    assert config.templates_path().read_bytes() == before
+    assert list(tmp_path.glob(".templates.json.*.tmp")) == []

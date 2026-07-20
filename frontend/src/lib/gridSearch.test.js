@@ -18,6 +18,10 @@ import {
   pruneStatuses,
   resizeRect,
   resizePolygon,
+  aoiCenter,
+  normalizeBounds,
+  cornerLatLng,
+  closeRing,
 } from './gridSearch.js';
 
 const rect = (south, west, north, east) => ({ type: 'rect', bounds: { south, west, north, east } });
@@ -238,5 +242,50 @@ describe('resizePolygon', () => {
     expect(grown.anchor).toEqual(anchor);
     expect(grown.aoi.type).toBe('polygon');
     expect(grown.statuses[cellKey(...cells[0])]).toBe('cleared');
+  });
+});
+
+describe('aoiCenter', () => {
+  it('centres a rectangle', () => {
+    expect(aoiCenter(rect(0, 0, 2, 4))).toEqual({ lat: 1, lon: 2 });
+  });
+
+  it('centres a polygon by its bounding box', () => {
+    const aoi = { type: 'polygon', vertices: [[0, 0], [0, 4], [2, 2]] };
+    expect(aoiCenter(aoi)).toEqual({ lat: 1, lon: 2 });
+  });
+});
+
+describe('normalizeBounds', () => {
+  it('leaves an already-ordered box untouched', () => {
+    expect(normalizeBounds({ south: 1, north: 2, west: 3, east: 4 }))
+      .toEqual({ south: 1, north: 2, west: 3, east: 4 });
+  });
+
+  it('sorts a box dragged past its opposite corner', () => {
+    expect(normalizeBounds({ south: 2, north: 1, west: 4, east: 3 }))
+      .toEqual({ south: 1, north: 2, west: 3, east: 4 });
+  });
+});
+
+describe('cornerLatLng', () => {
+  const b = { south: 1, north: 2, west: 3, east: 4 };
+  it('reads each corner code as [lat, lon]', () => {
+    expect(cornerLatLng(b, 'sw')).toEqual([1, 3]);
+    expect(cornerLatLng(b, 'se')).toEqual([1, 4]);
+    expect(cornerLatLng(b, 'nw')).toEqual([2, 3]);
+    expect(cornerLatLng(b, 'ne')).toEqual([2, 4]);
+  });
+});
+
+describe('closeRing', () => {
+  it('repeats the first point once there are three or more', () => {
+    expect(closeRing([[0, 0], [0, 1], [1, 1]])).toEqual([[0, 0], [0, 1], [1, 1], [0, 0]]);
+  });
+
+  it('leaves a segment still being drawn open', () => {
+    expect(closeRing([[0, 0], [0, 1]])).toEqual([[0, 0], [0, 1]]);
+    expect(closeRing([[0, 0]])).toEqual([[0, 0]]);
+    expect(closeRing([])).toEqual([]);
   });
 });

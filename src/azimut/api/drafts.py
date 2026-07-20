@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -24,6 +25,10 @@ from .cases import delete_by_path, get_case
 router = APIRouter(prefix="/api", tags=["drafts"])
 
 DRAFT_MARKER = 1
+MAX_MEDIA_PER_POST = 4
+MAX_EXTRA_POSTS = 20
+MAX_DRAFT_ATTACHMENTS = 1 + MAX_MEDIA_PER_POST * (1 + MAX_EXTRA_POSTS)
+MAX_ARTIFACT_PATH_LENGTH = 512
 
 
 class DraftIn(BaseModel):
@@ -39,6 +44,74 @@ def _slug(text: str) -> str:
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _artifact_path(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value or len(value) > MAX_ARTIFACT_PATH_LENGTH:
+        raise HTTPException(status_code=422, detail=f"{field} must be a bounded path string")
+    if (
+        "\\" in value
+        or "\x00" in value
+        or PurePosixPath(value).is_absolute()
+        or PureWindowsPath(value).is_absolute()
+        or bool(PureWindowsPath(value).drive)
+        or value == "."
+        or ".." in PurePosixPath(value).parts
+    ):
+        raise HTTPException(status_code=422, detail=f"{field} must be case-relative")
+    return value
+
+
+def _media_paths(state: dict[str, Any], field: str) -> list[str]:
+    current = state.get("mediaPaths")
+    if current is None:
+        current = [] if state.get("mediaPath") is None else [state.get("mediaPath")]
+    if not isinstance(current, list):
+        raise HTTPException(status_code=422, detail=f"{field}.mediaPaths must be an array")
+    if len(current) > MAX_MEDIA_PER_POST:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{field}.mediaPaths allows at most {MAX_MEDIA_PER_POST} paths",
+        )
+    paths = []
+    for index, value in enumerate(current):
+        path = _artifact_path(value, f"{field}.mediaPaths[{index}]")
+        if path is None:
+            raise HTTPException(
+                status_code=422, detail=f"{field}.mediaPaths[{index}] must be a path string"
+            )
+        paths.append(path)
+    return paths
+
+
+def _draft_source_paths(state: dict[str, Any]) -> list[str]:
+    paths = []
+    proof = _artifact_path(state.get("proofPng"), "state.proofPng")
+    if proof:
+        paths.append(proof)
+    paths.extend(_media_paths(state, "state"))
+
+    extra = state.get("extraTweets", [])
+    if not isinstance(extra, list):
+        raise HTTPException(status_code=422, detail="state.extraTweets must be an array")
+    if len(extra) > MAX_EXTRA_POSTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"state.extraTweets allows at most {MAX_EXTRA_POSTS} posts",
+        )
+    for index, tweet in enumerate(extra):
+        if not isinstance(tweet, dict):
+            raise HTTPException(
+                status_code=422, detail=f"state.extraTweets[{index}] must be an object"
+            )
+        paths.extend(_media_paths(tweet, f"state.extraTweets[{index}]"))
+
+    unique = list(dict.fromkeys(paths))
+    if len(unique) > MAX_DRAFT_ATTACHMENTS:
+        raise HTTPException(status_code=422, detail="draft has too many attachment paths")
+    return unique
 
 
 @router.get("/cases/{case_id}/drafts")
@@ -81,6 +154,7 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
     case = get_case(case_id)
     name = _slug(body.name or body.title)
     exports_dir = case.subdir("exports")
+    source_paths = _draft_source_paths(body.state)
 
     path = exports_dir / f"{name}.json"
     existing_created = None
@@ -121,7 +195,7 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
         case,
         entity_id,
         link_engine.DERIVED_FROM,
-        [p for p in (body.state.get("proofPng"), body.state.get("mediaPath")) if p],
+        source_paths,
         by="post-composer",
     )
 

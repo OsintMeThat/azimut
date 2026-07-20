@@ -1,22 +1,48 @@
+<script module>
+  /**
+   * Keep selection out of pointerdown. Selecting rebuilds the Konva document,
+   * so doing it before pointerup destroys the gesture target and can strand
+   * Firefox's drag state. A click/tap or dragend is already a settled gesture.
+   */
+  export function bindPanelPointerLifecycle(group, { onPress, onSelect, onDragEnd }) {
+    group.on('pointerdown', onPress);
+    group.on('click tap', onSelect);
+    if (onDragEnd) {
+      group.on('dragend', () => {
+        onSelect();
+        onDragEnd();
+      });
+    }
+  }
+</script>
+
 <script>
   import { onMount } from 'svelte';
   import Konva from 'konva';
   import { api } from '../lib/api.js';
   import { caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords } from '../lib/state.svelte.js';
+  import { templatesState } from '../lib/state.svelte.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import {
-    ANNO_COLORS, PAD, PANEL_H, TWEET_GUIDES,
+    ANNO_COLORS, PAD, GAP, ROW_GAP, PANEL_H, TWEET_GUIDES,
     CAPTION_SIZE, LEGEND_SIZE, FOOTER_SIZE,
-    BG, TEXT_MAIN, TEXT_DIM, TEXT_FAINT,
+    BG, TEXT_MAIN, normSpace, textColors,
     layoutPanels, panelsBottom, freeNormalizeDelta, legendLineHeight, footerBand,
     attributionLine, docSize, offsetShape, autoLayoutRows,
     autoCoords, formatCoords, autoSource,
     toSpec, newId, loadImage, orderedFeatureColors, notesFromShapes,
+    templateFromProof, applyProofStyle, normalizeProofStyle, newSignatureText,
+    anchoredPos, anchoredOffset, SIG_TEXT_SIZE,
     copyShapeSpec, dedupeBySrc, isSatelliteCapture, satPanelInput, mediaPanelInput,
-    SIG_ANCHORS, newSignature, signatureBox, signatureOffset,
-    DEFAULT_PROOF_TITLE, proofSlug, uniqueProofTitle,
+    SIG_ANCHORS, SIG_SCALE, newSignature, signatureBox, signatureOffset, signaturePairPositions,
+    remapPanelXY, panelHitTest, groupNeighborIndex, hasGroupNeighbor,
+    denseRowValues, clampPanelScale, trimClosingDuplicate, freehandShape,
+    canReassignLegendNote,
+    savedProofSlugs, savedProofTitles as libSavedProofTitles, savedProofTitle as libSavedProofTitle,
+    DEFAULT_PROOF_TITLE, proofSlug, uniqueProofTitle, proofTitleFromCase,
+    filterProofPanelItems, hasProofCanvasContent, proofExportOptions,
   } from '../lib/composer.js';
   import { createHistory } from '../lib/history.js';
 
@@ -25,13 +51,14 @@
   const SCALE_STEP = 0.05;
 
   const DRAW_TOOLS = [
-    { id: 'select', icon: 'hand', label: 'Select / move' },
-    { id: 'rect', icon: 'square', label: 'Box' },
-    { id: 'ellipse', icon: 'circle', label: 'Ellipse' },
-    { id: 'arrow', icon: 'arrow', label: 'Arrow' },
-    { id: 'line', icon: 'line', label: 'Line' },
-    { id: 'curve', icon: 'curve', label: 'Curve (click points, double-click to finish)' },
-    { id: 'text', icon: 'text', label: 'Text' },
+    { id: 'select', icon: 'hand', label: 'Select / move', shortcut: 'v' },
+    { id: 'rect', icon: 'square', label: 'Box', shortcut: 'r' },
+    { id: 'ellipse', icon: 'circle', label: 'Ellipse', shortcut: 'e' },
+    { id: 'arrow', icon: 'arrow', label: 'Arrow', shortcut: 'a' },
+    { id: 'line', icon: 'line', label: 'Line', shortcut: 'l' },
+    { id: 'curve', icon: 'curve', label: 'Curve (click points, double-click to finish)', shortcut: 'c' },
+    { id: 'freehand', icon: 'freehand', label: 'Freehand', shortcut: 'd' },
+    { id: 'text', icon: 'text', label: 'Text', shortcut: 't' },
   ];
 
   // ---- document state -------------------------------------------------------
@@ -41,8 +68,17 @@
     title: DEFAULT_PROOF_TITLE, panels: [], shapes: [], notes: {}, legendOrder: [],
     coordsText: '', source: '', // '' → auto-derived from panels; non-empty → manual override
     captionSize: CAPTION_SIZE, legendSize: LEGEND_SIZE, footerSize: FOOTER_SIZE, footer: '',
+    footerEnabled: true, // false → no footer line at all
+    footerColor: null, // null → auto from the background
+    footerAlign: 'left',
+    captionsEnabled: true, // whether newly added panels get a default caption
+    bg: BG, // proof background fill; captions/legend/footer follow it (textColors)
+    space: { pad: PAD, gap: GAP, rowGap: ROW_GAP }, // panel spacing, editable per proof
     layout: 'grid', // 'grid' (rows) | 'free' (drag panels anywhere, overlap allowed)
+    panelDirection: 'horizontal', // preferred arrangement for the first two panels
     signature: null, // null → unsigned; else { anchor, dx, dy, scale, opacity }
+    signatureText: null, // null → none; else a Settings-handle slot over the panels
+    palette: [...ANNO_COLORS], // ordered drawing colours, most preferred first
   });
 
   // The analyst's logo (Settings → Signature): one app-wide PNG, loaded once per
@@ -65,6 +101,9 @@
   // asks before overwriting an existing proof. Reset on open/discard.
   let titleTouched = $state(false);
   let dirty = $state(false);
+  // A named proof can exist before it has content. This distinguishes the
+  // initial composer shell from a template-only proof the user just created.
+  let proofStarted = $state(false);
 
   // Kept in step with deletes made anywhere else in the app. If the saved proof
   // this canvas came from is gone, the binding has to go with it — otherwise the
@@ -94,8 +133,22 @@
   let guide = $state(null); // null | '16:9' | '4:5' — tweet centre-crop overlay
   let selectedId = $state(null);
   let selectedPanelId = $state(null); // free-layout only: panel picked for move/resize
+  let selectedSig = $state(null); // null | 'logo' | 'text' — signature picked for resize
   let picker = $state(false);
   let pickerItems = $state([]);
+  let newProofOpen = $state(false);
+  let newProofName = $state('');
+  let newProofTemplateId = $state('');
+  let newProofPanelPaths = $state([]);
+  let newProofQuery = $state('');
+  let newProofCategory = $state('all');
+  let newProofLoading = $state(false);
+  let creatingProof = $state(false);
+  let replaceWithNewConfirm = $state(false);
+  const filteredNewProofItems = $derived(
+    filterProofPanelItems(pickerItems, newProofQuery, newProofCategory)
+  );
+  const proofHasContent = $derived(hasProofCanvasContent(proof));
   let openList = $state(null); // list of saved proofs, null = closed
   let saving = $state(false);
   let proofFor = $state(undefined);
@@ -137,18 +190,31 @@
 
   function applySnapshot(json) {
     const spec = JSON.parse(json);
+    const style = normalizeProofStyle(spec);
     histBusy = true;
+    proofStarted = true;
     if (pathDraft) finishPath(false);
     proof.title = spec.title ?? DEFAULT_PROOF_TITLE;
     proof.coordsText = spec.coordsText ?? '';
     proof.source = spec.source ?? '';
-    proof.captionSize = spec.captionSize ?? CAPTION_SIZE;
-    proof.legendSize = spec.legendSize ?? LEGEND_SIZE;
-    proof.footerSize = spec.footerSize ?? FOOTER_SIZE;
-    proof.footer = spec.footer ?? '';
-    proof.layout = spec.layout ?? 'grid';
-    proof.signature = spec.signature ?? null;
+    proof.captionSize = style.captionSize;
+    proof.legendSize = style.legendSize;
+    proof.footerSize = style.footerSize;
+    proof.footer = style.footer;
+    proof.footerEnabled = style.footerEnabled;
+    proof.footerColor = style.footerColor;
+    proof.footerAlign = style.footerAlign;
+    proof.captionsEnabled = style.captionsEnabled;
+    proof.bg = style.bg;
+    proof.space = style.space;
+    proof.layout = style.layout;
+    proof.panelDirection = style.panelDirection;
+    proof.signature = style.signature;
+    proof.signatureText = style.signatureText;
+    proof.palette = style.palette;
+    color = proof.palette[0];
     proof.notes = spec.notes ?? {};
+    proof.legendOrder = spec.legendOrder ?? [];
     proof.panels = spec.panels.map((p) => ({ ...p, img: imgCache.get(p.src) ?? null }));
     proof.shapes = spec.shapes ?? [];
     // a panel image missing from the cache (shouldn't happen) reloads async
@@ -162,6 +228,8 @@
     }
     selectedId = null;
     selectedPanelId = null;
+    selectedSig = null;
+    appliedTemplate = null;
     dirty = true;
     requestAnimationFrame(fit);
     // outlast the capture debounce so the restore itself is not re-recorded
@@ -273,13 +341,20 @@
       proof.notes,
       proof.legendOrder,
       proof.captionSize, proof.legendSize, proof.footerSize, proof.footer,
+      proof.footerEnabled, proof.footerColor,
+      proof.footerAlign,
+      proof.bg, proof.space,
       proof.layout,
+      proof.panelDirection,
       proof.signature,
+      proof.signatureText,
       selectedId,
       selectedPanelId,
+      selectedSig,
       guide,
     ]);
     sigImg; // the logo lands async — redraw once it does
+    prefs.signatureHandle; // Settings can change the rendered handle live
     if (stage) rebuild();
   });
 
@@ -288,12 +363,13 @@
     captionSize: proof.captionSize,
     legendSize: proof.legendSize,
     footerSize: proof.footerSize,
+    footerEnabled: proof.footerEnabled !== false,
   });
 
   // Layout boxes + document measure for the active layout mode.
-  const boxesOf = () => layoutPanels(proof.panels, proof.captionSize, proof.layout);
+  const boxesOf = () => layoutPanels(proof.panels, proof.captionSize, proof.layout, proof.space);
   const measureDoc = () =>
-    docSize(proof.panels, proof.shapes, proof.notes, textOpts(), proof.legendOrder, proof.layout);
+    docSize(proof.panels, proof.shapes, proof.notes, textOpts(), proof.legendOrder, proof.layout, proof.space);
 
   function resetDoc() {
     proof.title = freshTitle();
@@ -307,12 +383,25 @@
     proof.legendSize = LEGEND_SIZE;
     proof.footerSize = FOOTER_SIZE;
     proof.footer = '';
+    proof.footerEnabled = true;
+    proof.footerColor = null;
+    proof.footerAlign = 'left';
+    proof.captionsEnabled = true;
+    proof.bg = BG;
+    proof.space = { pad: PAD, gap: GAP, rowGap: ROW_GAP };
     proof.layout = 'grid';
+    proof.panelDirection = 'horizontal';
     proof.signature = null;
+    proof.signatureText = null;
+    proof.palette = [...ANNO_COLORS];
+    color = proof.palette[0];
     savedName = null;
     titleTouched = false;
+    proofStarted = false;
     selectedId = null;
     selectedPanelId = null;
+    selectedSig = null;
+    appliedTemplate = null;
     dirty = false;
     imgCache.clear();
     anchorHistory();
@@ -323,14 +412,74 @@
     discardConfirm = false;
   }
 
+  // ---- house-style templates ---------------------------------------------------
+  // Apply a saved proof template (Settings → Templates) onto this proof.
+  // Content stays put — templates carry only the look.
+  // The house style laid over this proof: { id, name, prevStyle }. Choosing
+  // "No template" restores the look from before the first template was applied.
+  // It stays out of the saved spec because the style values are already copied.
+  let appliedTemplate = $state(null);
+
+  function applyTemplate(t, { notify = true } = {}) {
+    // first apply snapshots the current look; re-applying keeps that original,
+    // so Discard always walks back to the pre-template style, not the last one.
+    const prevStyle = appliedTemplate?.prevStyle ?? templateFromProof(proof);
+    applyProofStyle(proof, t.data, {
+      logo: !!sigImg,
+      handle: !!prefs.signatureHandle?.trim(),
+    });
+    color = proof.palette[0] ?? ANNO_COLORS[0];
+    appliedTemplate = { id: t.id, name: t.name, prevStyle };
+    dirty = true;
+    requestAnimationFrame(fit); // margins/layout may have changed the doc size
+    if (notify) toast(`Template loaded: ${t.name}`, 'ok', 1400);
+  }
+
+  function applyFromSelect(e) {
+    if (!proofStarted) return;
+    const t = templatesState.proof.find((x) => x.id === e.currentTarget.value);
+    if (t) applyTemplate(t);
+    else discardTemplate();
+  }
+
+  function discardTemplate() {
+    if (!appliedTemplate) return;
+    applyProofStyle(proof, appliedTemplate.prevStyle, {
+      logo: !!sigImg,
+      handle: !!prefs.signatureHandle?.trim(),
+    });
+    color = proof.palette[0] ?? ANNO_COLORS[0];
+    appliedTemplate = null;
+    dirty = true;
+    requestAnimationFrame(fit);
+    toast('Template removed', 'ok', 1200);
+  }
+
+  function openTemplateSettings() {
+    uiState.settingsTab = 'templates';
+    uiState.tool = 'settings';
+  }
+
+  // Pick the logo or the @handle so the transformer wraps it — click a corner to
+  // resize it right on the canvas. Content selections drop, so only one thing
+  // ever carries the handles.
+  function selectSig(which) {
+    selectedSig = which;
+    selectedId = null;
+    selectedPanelId = null;
+  }
+
+  function selectPanel(id) {
+    if (tool !== 'select') return;
+    selectedPanelId = id;
+    selectedId = null;
+    selectedSig = null;
+  }
+
   // ---- panels ------------------------------------------------------------------
 
-  async function openPicker() {
-    if (!caseState.current) {
-      toast('Add media first. The composer works on case images', 'info');
-      uiState.tool = 'media';
-      return;
-    }
+  async function fetchPanelItems() {
+    if (!caseState.current) return [];
     const [media, sats] = await Promise.all([
       api.get(`/api/cases/${caseState.current.id}/media`),
       api.get(`/api/cases/${caseState.current.id}/satellite`),
@@ -339,7 +488,7 @@
     // it once, via its richer satellite entry (coordinates/attribution), and drop
     // it from the media half. dedupeBySrc is a belt-and-braces guard so a stray
     // overlap can never throw the keyed picker's `each_key_duplicate`.
-    pickerItems = dedupeBySrc([
+    return dedupeBySrc([
       ...sats.map((s) => ({
         ...satPanelInput(s, prefs.coordFormat),
         label: `${fmtCoords(s.lat, s.lon)} · z${s.zoom}`,
@@ -355,21 +504,94 @@
           kind: 'media',
         })),
     ]);
+  }
+
+  async function openNewProofDialog() {
+    newProofName = proofTitleFromCase(caseState.current?.name, savedProofTitles());
+    newProofTemplateId = '';
+    newProofPanelPaths = [];
+    newProofQuery = '';
+    newProofCategory = 'all';
+    pickerItems = [];
+    newProofOpen = true;
+    newProofLoading = true;
+    try {
+      pickerItems = await fetchPanelItems();
+    } catch (e) {
+      toast(`Could not load case images: ${e.message}`, 'danger');
+    } finally {
+      newProofLoading = false;
+    }
+  }
+
+  function toggleNewProofPanel(src) {
+    newProofPanelPaths = newProofPanelPaths.includes(src)
+      ? newProofPanelPaths.filter((path) => path !== src)
+      : [...newProofPanelPaths, src];
+  }
+
+  function requestNewProofCreation() {
+    if (!newProofName.trim() || creatingProof) return;
+    if (proofStarted && dirty) {
+      replaceWithNewConfirm = true;
+      return;
+    }
+    createNewProof();
+  }
+
+  async function createNewProof() {
+    if (!newProofName.trim() || creatingProof) return;
+    creatingProof = true;
+    const title = newProofName.trim();
+    const template = templatesState.proof.find((t) => t.id === newProofTemplateId);
+    const selectedItems = newProofPanelPaths
+      .map((path) => pickerItems.find((item) => item.src === path))
+      .filter(Boolean);
+    try {
+      resetDoc();
+      proofStarted = true;
+      proof.title = title;
+      titleTouched = true;
+      if (template) applyTemplate(template, { notify: false });
+      for (const item of selectedItems) await addPanel(item);
+      dirty = true;
+      anchorHistory();
+      newProofOpen = false;
+      replaceWithNewConfirm = false;
+      if (proof.panels.length) requestAnimationFrame(fit);
+    } finally {
+      creatingProof = false;
+    }
+  }
+
+  async function openPicker() {
+    if (!caseState.current) {
+      toast('Add media first. The composer works on case images', 'info');
+      uiState.tool = 'media';
+      return;
+    }
+    pickerItems = await fetchPanelItems();
     picker = true;
   }
 
   async function addPanel(item) {
     try {
+      proofStarted = true;
       const img = await loadImage(`/files/${caseState.current.id}/${item.src}`);
       imgCache.set(item.src, img);
-      // append to the current bottom row so new panels join the strip
-      const row = proof.panels.length
-        ? Math.max(...proof.panels.map((p) => p.row ?? 0))
-        : 0;
+      // A template can stack the first pair. Later panels keep joining the
+      // current bottom row, preserving the composer's existing workflow.
+      const row = proof.panels.length === 1
+        ? (proof.panelDirection === 'vertical' ? 1 : 0)
+        : proof.panels.length
+          ? Math.max(...proof.panels.map((p) => p.row ?? 0))
+          : 0;
       const panel = {
         id: newId('p'),
         src: item.src,
-        caption: item.caption ?? '',
+        // captionsEnabled off → new panels start caption-less (you can still add
+        // one). On → they carry the panel's own default (satellite coords, etc.).
+        caption: proof.captionsEnabled === false ? '' : (item.caption ?? ''),
         row,
         scale: 1,
         natural: [img.naturalWidth, img.naturalHeight],
@@ -405,19 +627,14 @@
 
   // Renumber rows to a dense 0..n-1 range after a move may have emptied one.
   function normalizeRows() {
-    const order = [...new Set(proof.panels.map((p) => p.row ?? 0))].sort((a, b) => a - b);
-    const remap = new Map(order.map((r, i) => [r, i]));
-    for (const p of proof.panels) p.row = remap.get(p.row ?? 0);
+    const rows = denseRowValues(proof.panels);
+    proof.panels.forEach((p, i) => { p.row = rows[i]; });
   }
 
   // Swap a panel with its left/right neighbour *within the same row*.
   function movePanel(index, delta) {
-    const row = proof.panels[index].row ?? 0;
-    let target = index + delta;
-    while (target >= 0 && target < proof.panels.length && (proof.panels[target].row ?? 0) !== row) {
-      target += delta;
-    }
-    if (target < 0 || target >= proof.panels.length || (proof.panels[target].row ?? 0) !== row) return;
+    const target = groupNeighborIndex(proof.panels, index, delta, (p) => p.row ?? 0);
+    if (target < 0) return;
     const [panel] = proof.panels.splice(index, 1);
     proof.panels.splice(target, 0, panel);
     dirty = true;
@@ -436,16 +653,15 @@
     requestAnimationFrame(fit);
   }
 
-  const rowOf = (i) => proof.panels[i]?.row ?? 0;
-  const canMoveLeft = (i) => proof.panels.slice(0, i).some((p) => (p.row ?? 0) === rowOf(i));
-  const canMoveRight = (i) => proof.panels.slice(i + 1).some((p) => (p.row ?? 0) === rowOf(i));
+  const canMoveLeft = (i) => hasGroupNeighbor(proof.panels, i, -1, (p) => p.row ?? 0);
+  const canMoveRight = (i) => hasGroupNeighbor(proof.panels, i, 1, (p) => p.row ?? 0);
 
   // Grow / shrink a single panel (its drawn elements scale with it, since they
   // live in the panel's natural pixel space and render at the panel box scale).
   function scalePanel(index, delta) {
     const p = proof.panels[index];
     const cur = p.scale ?? 1;
-    const next = Math.round(Math.min(SCALE_MAX, Math.max(SCALE_MIN, cur + delta)) * 100) / 100;
+    const next = clampPanelScale(cur, delta, SCALE_MIN, SCALE_MAX);
     if (next === cur) return;
     if (proof.layout === 'free') materializeFreePositions(); // others must not reflow
     p.scale = next;
@@ -460,7 +676,7 @@
   // materialised from the rendered layout so panels only move when moved.
 
   function materializeFreePositions() {
-    const boxes = layoutPanels(proof.panels, proof.captionSize, 'free');
+    const boxes = layoutPanels(proof.panels, proof.captionSize, 'free', proof.space);
     proof.panels.forEach((p, i) => {
       p.x = boxes[i].x;
       p.y = boxes[i].y;
@@ -470,7 +686,7 @@
   // Re-anchor stored positions at PAD (dragging past the top/left edge grows
   // the document) and shift the stage by the same amount so nothing jumps.
   function normalizeFree() {
-    const { dx, dy } = freeNormalizeDelta(proof.panels, proof.captionSize);
+    const { dx, dy } = freeNormalizeDelta(proof.panels, proof.captionSize, proof.space);
     if (!dx && !dy) return;
     for (const p of proof.panels) {
       p.x += dx;
@@ -520,7 +736,9 @@
     proof.layout = 'grid';
     selectedPanelId = null;
     const target = guide ? TWEET_GUIDES[guide] : TWEET_GUIDES['16:9'];
-    const rows = autoLayoutRows(proof.panels, proof.shapes, proof.notes, textOpts(), target);
+    const rows = autoLayoutRows(
+      proof.panels, proof.shapes, proof.notes, textOpts(), target, proof.space,
+    );
     proof.panels.forEach((p, i) => { p.row = rows[i]; p.scale = 1; });
     normalizeRows();
     selectedId = null;
@@ -584,15 +802,7 @@
   }
 
   function panelAt(doc) {
-    const boxes = boxesOf();
-    // array order is front→back, so the first hit is the topmost panel
-    for (let i = 0; i < boxes.length; i++) {
-      const b = boxes[i];
-      if (doc.x >= b.x && doc.x <= b.x + b.w && doc.y >= b.y && doc.y <= b.y + b.h) {
-        return { index: i, box: b, nx: (doc.x - b.x) / b.scale, ny: (doc.y - b.y) / b.scale };
-      }
-    }
-    return null;
+    return panelHitTest(boxesOf(), doc);
   }
 
   function onPointerDown(e) {
@@ -609,6 +819,7 @@
       if (onEmpty) {
         selectedId = null;
         selectedPanelId = null;
+        selectedSig = null;
       }
       return;
     }
@@ -649,6 +860,15 @@
       return;
     }
     const sw = strokeW / hit.box.baseScale;
+    if (tool === 'freehand') {
+      const node = new Konva.Line({
+        points: [hit.nx, hit.ny], tension: 0.25, stroke: color,
+        strokeWidth: sw, lineCap: 'round', lineJoin: 'round', listening: false,
+      });
+      group.add(node);
+      drawing = { panel, node, box: hit.box, kind: tool };
+      return;
+    }
     const common = { stroke: color, strokeWidth: sw, listening: false };
     let node;
     if (tool === 'rect') {
@@ -691,7 +911,12 @@
     const nx = Math.min(Math.max((doc.x - box.x) / box.scale, 0), drawing.panel.natural[0]);
     const ny = Math.min(Math.max((doc.y - box.y) / box.scale, 0), drawing.panel.natural[1]);
     const { start, node, kind } = drawing;
-    if (kind === 'rect') {
+    if (kind === 'freehand') {
+      const points = node.points();
+      const lx = points[points.length - 2];
+      const ly = points[points.length - 1];
+      if (nx !== lx || ny !== ly) node.points([...points, nx, ny]);
+    } else if (kind === 'rect') {
       node.setAttrs({
         x: Math.min(start.x, nx), y: Math.min(start.y, ny),
         width: Math.abs(nx - start.x), height: Math.abs(ny - start.y),
@@ -731,6 +956,11 @@
       if (Math.hypot(pts[2] - pts[0], pts[3] - pts[1]) > minSize) {
         shape = { kind, points: pts };
       }
+    } else if (kind === 'freehand') {
+      shape = freehandShape(node.points(), {
+        minDistance: 2 / (box.scale * stage.scaleX()),
+        minLength: minSize,
+      });
     }
     node.destroy();
     if (shape) {
@@ -750,14 +980,11 @@
     pathDraft = null;
     node.destroy();
     // the double-click that finishes drops a duplicate last vertex — trim it
-    const n = points.length;
-    if (n >= 4 && Math.hypot(points[n - 2] - points[n - 4], points[n - 1] - points[n - 3]) < 3) {
-      points.length = n - 2;
-    }
-    if (commit && points.length >= 4) {
+    const pts = trimClosingDuplicate(points);
+    if (commit && pts.length >= 4) {
       const s = {
         id: newId('s'), panel: panel.id, kind: 'curve', color,
-        strokeWidth: strokeW, points, tension: 0.5,
+        strokeWidth: strokeW, points: pts, tension: 0.5,
       };
       proof.shapes.push(s);
       selectedId = s.id;
@@ -772,13 +999,27 @@
 
   function rebuild() {
     docLayer.destroyChildren();
+    // A template can be selected before any panels are chosen. Keep its style
+    // in state, but do not render a background, footer, logo, or handle yet.
+    if (!hasProofCanvasContent(proof)) {
+      transformer.nodes([]);
+      endHandles.destroyChildren();
+      panelCtrls.destroyChildren();
+      guideGroup.destroyChildren();
+      docLayer.batchDraw();
+      uiLayer.batchDraw();
+      return;
+    }
     const { width, height, legend, cols } = measureDoc();
     const boxes = boxesOf();
     const capSize = proof.captionSize ?? CAPTION_SIZE;
     const free = proof.layout === 'free';
+    const { pad } = normSpace(proof.space);
+    const bgFill = proof.bg ?? BG;
+    const tc = textColors(bgFill); // caption/legend/footer colours track the bg
 
     docLayer.add(
-      new Konva.Rect({ name: 'bg', x: 0, y: 0, width, height, fill: BG })
+      new Konva.Rect({ name: 'bg', x: 0, y: 0, width, height, fill: bgFill })
     );
 
     // Drawn back→front: array order is front→back, so Z1 (the first panel in
@@ -802,16 +1043,14 @@
         x: 0, y: 0, width: panel.natural[0], height: panel.natural[1],
         fill: 'transparent', listening: true,
       }));
-      group.on('pointerdown', () => {
-        // only the select tool touches panels — drawing must pass through
-        group.draggable(free && tool === 'select' && !spacePan);
-        if (tool === 'select') {
-          selectedPanelId = panel.id;
-          selectedId = null;
-        }
+      bindPanelPointerLifecycle(group, {
+        // Only the select tool touches panels. Selection itself waits until the
+        // gesture settles so rebuild() cannot destroy the pointerdown target.
+        onPress: () => group.draggable(free && tool === 'select' && !spacePan),
+        onSelect: () => selectPanel(panel.id),
+        onDragEnd: free ? () => commitPanelNode(panel, group) : null,
       });
       if (free) {
-        group.on('dragend', () => commitPanelNode(panel, group));
         group.on('transformend', () => commitPanelNode(panel, group, { resized: true }));
       } else {
         // grid: corner-drag only changes the panel's scale — the grid decides
@@ -842,7 +1081,7 @@
           x: box.x + 2, y: box.y + box.h + 9,
           width: box.w - 4, text: panel.caption,
           fontSize: capSize, fontFamily: 'system-ui, sans-serif',
-          fill: TEXT_DIM, ellipsis: true, wrap: 'none', listening: false,
+          fill: tc.dim, ellipsis: true, wrap: 'none', listening: false,
         }));
       }
     }
@@ -852,41 +1091,66 @@
     const legendSize = proof.legendSize ?? 17;
     const lineH = legendLineHeight(legendSize);
     const r = Math.round(legendSize * 0.62);
-    const legendTop = panelsBottom(proof.panels, proof.captionSize, proof.layout) + 8;
-    const colW = (width - PAD * 2 - (cols - 1) * PAD) / cols;
+    const legendTop = panelsBottom(proof.panels, proof.captionSize, proof.layout, proof.space) + 8;
+    const colW = (width - pad * 2 - (cols - 1) * pad) / cols;
     legend.filter((l) => l.text).forEach((line, i) => {
       const col = i % cols;
       const rowN = Math.floor(i / cols);
-      const cx = PAD + col * (colW + PAD);
+      const cx = pad + col * (colW + pad);
       const cy = legendTop + rowN * lineH + lineH / 2;
       docLayer.add(new Konva.Circle({
         x: cx + r, y: cy, radius: r, fill: line.color, listening: false,
       }));
       docLayer.add(new Konva.Text({
         x: cx + r * 2 + 8, y: cy - legendSize * 0.62, width: colW - (r * 2 + 8),
-        text: line.text, fontSize: legendSize, fill: TEXT_MAIN,
+        text: line.text, fontSize: legendSize, fill: tc.main,
         fontFamily: 'system-ui, sans-serif', ellipsis: true, wrap: 'none', listening: false,
       }));
     });
-    if (proof.panels.length) {
+    if (proof.panels.length && proof.footerEnabled !== false) {
       const footerSize = proof.footerSize ?? 13;
       const footerText = proof.footer?.trim() || attributionLine(proof.panels);
       docLayer.add(new Konva.Text({
-        x: PAD,
-        y: height - PAD - footerBand(footerSize) + Math.round((footerBand(footerSize) - footerSize) / 2),
-        width: width - PAD * 2,
+        x: pad,
+        y: height - pad - footerBand(footerSize) + Math.round((footerBand(footerSize) - footerSize) / 2),
+        width: width - pad * 2,
         text: footerText,
-        fontSize: footerSize, fill: TEXT_FAINT,
+        align: proof.footerAlign === 'right' ? 'right' : 'left',
+        fontSize: footerSize, fill: proof.footerColor || tc.faint,
         fontFamily: 'system-ui, sans-serif', ellipsis: true, wrap: 'none', listening: false,
       }));
     }
 
+    const st = proof.signatureText && prefs.signatureHandle?.trim() ? proof.signatureText : null;
+    const pendingHandleNode = st ? new Konva.Text({
+      id: 'sig-text',
+      text: prefs.signatureHandle.trim(),
+      fontSize: st.size ?? SIG_TEXT_SIZE,
+      fontStyle: 'bold',
+      fontFamily: 'system-ui, sans-serif',
+      fill: st.color ?? '#ffffff',
+      opacity: st.opacity ?? 1,
+      listening: true,
+    }) : null;
+    const sigNatural = proof.signature && sigImg
+      ? [sigImg.naturalWidth, sigImg.naturalHeight]
+      : null;
+    const baseLogoBox = sigNatural
+      ? signatureBox(proof.signature, width, height, sigNatural)
+      : null;
+    const pair = pendingHandleNode
+      ? signaturePairPositions(
+          proof.signature, st, width, height, baseLogoBox,
+          pendingHandleNode.width(), pendingHandleNode.height(),
+        )
+      : null;
+
     // signature — last, so the logo sits over everything it overlaps. Drawn into
     // docLayer (not the UI layer) because it's part of the published image.
     if (proof.signature && sigImg) {
-      const natural = [sigImg.naturalWidth, sigImg.naturalHeight];
-      const box = signatureBox(proof.signature, width, height, natural);
+      const box = pair?.logo ?? baseLogoBox;
       const node = new Konva.Image({
+        id: 'sig-logo',
         image: sigImg, x: box.x, y: box.y, width: box.w, height: box.h,
         opacity: proof.signature.opacity ?? 1,
       });
@@ -896,13 +1160,51 @@
       node.on('pointerdown', () => {
         node.draggable(tool === 'select' && !spacePan);
       });
+      // a plain click (no drag) selects the logo so the resize handles appear.
+      node.on('click tap', () => { if (tool === 'select') selectSig('logo'); });
       // the corner picker gets you there; the drag fine-tunes. Either way the
       // stored value is an offset from the anchor, so it survives a doc resize
       node.on('dragend', () => {
-        const { dx, dy } = signatureOffset(
-          proof.signature, width, height, natural, node.x(), node.y(),
+        const placement = signatureOffset(
+          proof.signature, width, height, sigNatural, node.x(), node.y(),
         );
-        proof.signature = { ...proof.signature, dx, dy };
+        proof.signature = { ...proof.signature, ...placement };
+        dirty = true;
+      });
+      // corner-drag scales the logo; fold it back into the stored width share.
+      node.on('transformend', () => {
+        const scale = (proof.signature.scale ?? SIG_SCALE) * node.scaleX();
+        node.scale({ x: 1, y: 1 });
+        proof.signature = {
+          ...proof.signature,
+          scale: Math.round(Math.max(0.03, Math.min(0.4, scale)) * 1000) / 1000,
+        };
+        dirty = true;
+      });
+      docLayer.add(node);
+    }
+
+    // Account handle laid over the panels. Positioned
+    // by anchor + drag like the logo, so it survives a document resize; drag it
+    // anywhere with the select tool.
+    if (st && pendingHandleNode) {
+      const node = pendingHandleNode;
+      const tw = node.width();
+      const th = node.height();
+      const pos = pair?.handle ?? anchoredPos(st, width, height, tw, th);
+      node.position(pos);
+      node.on('pointerdown', () => node.draggable(tool === 'select' && !spacePan));
+      node.on('click tap', () => { if (tool === 'select') selectSig('text'); });
+      node.on('dragend', () => {
+        const placement = anchoredOffset(st, width, height, tw, th, node.x(), node.y());
+        proof.signatureText = { ...st, ...placement };
+        dirty = true;
+      });
+      // corner-drag scales the handle; fold it back into the stored font size.
+      node.on('transformend', () => {
+        const size = Math.round((st.size ?? SIG_TEXT_SIZE) * node.scaleX());
+        node.scale({ x: 1, y: 1 });
+        proof.signatureText = { ...st, size: Math.max(12, Math.min(300, size)) };
         dirty = true;
       });
       docLayer.add(node);
@@ -921,6 +1223,10 @@
     // free and clamping on release made the panel visibly snap back whenever
     // the drag overshot the 25–250% range (worst at the bounds, where a resize
     // in the blocked direction just reverted). Shapes stay unconstrained.
+    // the logo or the @handle, picked for a corner-resize (aspect locked).
+    const sigNode = !selectedNode && !panelNode && selectedSig
+      ? docLayer.findOne(selectedSig === 'logo' ? '#sig-logo' : '#sig-text')
+      : null;
     const boundPanel = panelNode ? proof.panels.find((p) => p.id === selectedPanelId) : null;
     transformer.boundBoxFunc((oldBox, newBox) => {
       if (!boundPanel) return newBox;
@@ -928,13 +1234,16 @@
         (newBox.width / stage.scaleX()) * (boundPanel.natural[1] / (boundPanel.natural[0] * PANEL_H));
       return impliedScale < SCALE_MIN || impliedScale > SCALE_MAX ? oldBox : newBox;
     });
-    transformer.nodes(selectedNode ? [selectedNode] : panelNode ? [panelNode] : []);
+    transformer.keepRatio(!!sigNode);
+    transformer.nodes(
+      selectedNode ? [selectedNode] : panelNode ? [panelNode] : sigNode ? [sigNode] : []
+    );
     const selKind = selectedShape?.kind;
     transformer.rotateEnabled(selKind === 'text' || selKind === 'rect' || selKind === 'ellipse');
     transformer.enabledAnchors(
       selKind === 'rect' || selKind === 'ellipse'
         ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
-        : selKind === 'text' || panelNode
+        : selKind === 'text' || panelNode || sigNode
           ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
           : []
     );
@@ -983,6 +1292,8 @@
 
   // Draggable per-vertex handles for the selected line / arrow / curve, so any
   // point can be re-placed after drawing (rects/ellipses/text use the transformer).
+  // Freehand strokes stay draggable as a whole; showing every sampled point
+  // would cover the stroke in handles.
   const POINT_KINDS = new Set(['line', 'arrow', 'curve']);
   function drawEndHandles(boxes) {
     endHandles.destroyChildren();
@@ -1104,13 +1415,6 @@
   }
 
   // Doc→panel remap of a single x/y origin between two layout boxes.
-  function remapXY(x, y, fromBox, toBox) {
-    return {
-      x: (fromBox.x + x * fromBox.scale - toBox.x) / toBox.scale,
-      y: (fromBox.y + y * fromBox.scale - toBox.y) / toBox.scale,
-    };
-  }
-
   // `box` carries `scale` (natural→doc, grows with the panel) and `baseScale`
   // (that mapping at scale 1). Stroke width and arrow heads are normalised by
   // baseScale so they read the same across image resolutions yet still grow
@@ -1160,6 +1464,7 @@
           e.cancelBubble = true;
           selectedId = s.id;
           selectedPanelId = null;
+          selectedSig = null;
         }
       });
       node.on('dblclick dbltap', (e) => {
@@ -1169,7 +1474,7 @@
       node.on('dragstart', () => node.getParent()?.moveToTop());
       node.on('dragend', () => {
         const { fromBox, toBox } = rebindOnDrop(s, node);
-        const p = toBox ? remapXY(node.x(), node.y(), fromBox, toBox) : { x: node.x(), y: node.y() };
+        const p = toBox ? remapPanelXY(node.x(), node.y(), fromBox, toBox) : { x: node.x(), y: node.y() };
         s.x = p.x;
         s.y = p.y;
         dirty = true;
@@ -1195,9 +1500,9 @@
       node = new Konva.Rect({ x: s.x, y: s.y, width: s.w, height: s.h, cornerRadius: 2, ...common });
     } else if (s.kind === 'ellipse') {
       node = new Konva.Ellipse({ x: s.x, y: s.y, radiusX: s.w / 2, radiusY: s.h / 2, ...common });
-    } else if (s.kind === 'curve') {
+    } else if (s.kind === 'curve' || s.kind === 'freehand') {
       node = new Konva.Line({
-        points: s.points, tension: s.tension ?? 0.5,
+        points: s.points, tension: s.tension ?? (s.kind === 'freehand' ? 0.25 : 0.5),
         lineCap: 'round', lineJoin: 'round', ...common,
       });
     } else {
@@ -1214,17 +1519,18 @@
         e.cancelBubble = true;
         selectedId = s.id;
         selectedPanelId = null;
+        selectedSig = null;
       }
     });
     node.on('dragstart', () => node.getParent()?.moveToTop());
     node.on('dragend', () => {
       if (s.kind === 'rect' || s.kind === 'ellipse') {
         const { fromBox, toBox } = rebindOnDrop(s, node);
-        const p = toBox ? remapXY(node.x(), node.y(), fromBox, toBox) : { x: node.x(), y: node.y() };
+        const p = toBox ? remapPanelXY(node.x(), node.y(), fromBox, toBox) : { x: node.x(), y: node.y() };
         s.x = p.x;
         s.y = p.y;
       } else {
-        // arrow / line / curve: fold the drag offset into every vertex, then
+        // points-based shapes: fold the drag offset into every vertex, then
         // remap the whole polyline into the panel it was dropped onto
         const dx = node.x(), dy = node.y();
         const folded = s.points.map((v, i) => (i % 2 === 0 ? v + dx : v + dy));
@@ -1302,7 +1608,7 @@
   }
 
   // Paste the clipboard as a fresh element, nudged down-right so it doesn't hide
-  // the original. Points-based kinds (line/arrow/curve) shift every vertex.
+  // the original. Points-based kinds shift every vertex.
   function pasteShape() {
     if (!clipboard) return;
     const target = proof.panels.some((p) => p.id === clipboard.panel)
@@ -1337,21 +1643,17 @@
   // (rebuild() adds shapes to their panel group in array order), so moving
   // past a shape bound to a different panel would silently no-op visually.
   function moveShape(index, delta) {
-    const panelId = proof.shapes[index].panel;
-    let target = index + delta;
-    while (target >= 0 && target < proof.shapes.length && proof.shapes[target].panel !== panelId) {
-      target += delta;
-    }
-    if (target < 0 || target >= proof.shapes.length || proof.shapes[target].panel !== panelId) return;
+    const target = groupNeighborIndex(proof.shapes, index, delta, (s) => s.panel);
+    if (target < 0) return;
     const [s] = proof.shapes.splice(index, 1);
     proof.shapes.splice(target, 0, s);
     dirty = true;
   }
-  const canMoveShapeUp = (i) => proof.shapes.slice(0, i).some((s) => s.panel === proof.shapes[i].panel);
-  const canMoveShapeDown = (i) => proof.shapes.slice(i + 1).some((s) => s.panel === proof.shapes[i].panel);
+  const canMoveShapeUp = (i) => hasGroupNeighbor(proof.shapes, i, -1, (s) => s.panel);
+  const canMoveShapeDown = (i) => hasGroupNeighbor(proof.shapes, i, 1, (s) => s.panel);
 
-  const KIND_ICON = { rect: 'square', ellipse: 'circle', arrow: 'arrow', line: 'line', curve: 'curve', text: 'text' };
-  const KIND_LABEL = { rect: 'Box', ellipse: 'Ellipse', arrow: 'Arrow', line: 'Line', curve: 'Curve', text: 'Text' };
+  const KIND_ICON = { rect: 'square', ellipse: 'circle', arrow: 'arrow', line: 'line', curve: 'curve', freehand: 'freehand', text: 'text' };
+  const KIND_LABEL = { rect: 'Box', ellipse: 'Ellipse', arrow: 'Arrow', line: 'Line', curve: 'Curve', freehand: 'Freehand', text: 'Text' };
 
   // Color / stroke controls act on the selected shape when there is one
   // (live edit), otherwise they set the defaults for the next drawn shape.
@@ -1360,8 +1662,7 @@
       const oldColor = selectedShape.color;
       selectedShape.color = c;
       // carry the legend note over if this color is otherwise unused
-      if (proof.notes[oldColor] && !proof.notes[c] &&
-          !proof.shapes.some((s) => s !== selectedShape && s.color === oldColor)) {
+      if (canReassignLegendNote(proof.notes, oldColor, c, proof.shapes, selectedShape)) {
         proof.notes[c] = proof.notes[oldColor];
         delete proof.notes[oldColor];
       }
@@ -1439,6 +1740,7 @@
     } else if (e.key === 'Escape') {
       selectedId = null;
       selectedPanelId = null;
+      selectedSig = null;
       tool = 'select';
     } else if (e.key === 'v') tool = 'select';
     else if (e.key === 'r') tool = 'rect';
@@ -1446,6 +1748,7 @@
     else if (e.key === 'a') tool = 'arrow';
     else if (e.key === 'l') tool = 'line';
     else if (e.key === 'c') tool = 'curve';
+    else if (e.key === 'd') tool = 'freehand';
     else if (e.key === 't') tool = 'text';
     else if (e.key === 'f') fit();
   }
@@ -1463,22 +1766,24 @@
 
   function exportPng() {
     const { width, height } = measureDoc();
+    const { pixelRatio } = proofExportOptions(width, height);
     const prevScale = stage.scale();
     const prevPos = stage.position();
     const prevSize = { w: stage.width(), h: stage.height() };
-    transformer.nodes([]);
-    stage.scale({ x: 1, y: 1 });
-    stage.position({ x: 0, y: 0 });
-    stage.width(width);
-    stage.height(height);
-    const pixelRatio = Math.min(Math.max(1800 / width, 0.75), 2);
-    const dataUrl = docLayer.toDataURL({ x: 0, y: 0, width, height, pixelRatio });
-    stage.scale(prevScale);
-    stage.position(prevPos);
-    stage.width(prevSize.w);
-    stage.height(prevSize.h);
-    rebuild();
-    return dataUrl;
+    try {
+      transformer.nodes([]);
+      stage.scale({ x: 1, y: 1 });
+      stage.position({ x: 0, y: 0 });
+      stage.width(width);
+      stage.height(height);
+      return docLayer.toDataURL({ x: 0, y: 0, width, height, pixelRatio });
+    } finally {
+      stage.scale(prevScale);
+      stage.position(prevPos);
+      stage.width(prevSize.w);
+      stage.height(prevSize.h);
+      rebuild();
+    }
   }
 
   // Copy the composed PNG straight to the clipboard — for peer review in a
@@ -1501,20 +1806,12 @@
   // Every proof already saved in this case, read off the filed entities: the
   // slugs (filename without `proofs/…​.json`) to catch a filename collision, and
   // the titles so a fresh proof can take a title that reads apart from them.
-  function savedProofEntities() {
-    return (caseState.current?.entities ?? []).filter((e) => {
-      const s = e.attrs?.spec;
-      return typeof s === 'string' && s.startsWith('proofs/') && s.endsWith('.json');
-    });
-  }
-  const savedProofNames = () =>
-    new Set(savedProofEntities().map((e) => e.attrs.spec.slice(7, -5)));
-  const savedProofTitles = () => new Set(savedProofEntities().map((e) => e.label ?? ''));
+  const savedProofNames = () => savedProofSlugs(caseState.current?.entities);
+  const savedProofTitles = () => libSavedProofTitles(caseState.current?.entities);
 
   // Title of a saved proof by its slug, for the overwrite prompt.
   function savedProofTitle(name) {
-    const e = savedProofEntities().find((x) => x.attrs.spec === `proofs/${name}.json`);
-    return e?.label ?? name;
+    return libSavedProofTitle(caseState.current?.entities, name);
   }
 
   // Default title for a fresh proof, numbered past any already in the case so
@@ -1593,7 +1890,9 @@
 
   async function openProof(entry) {
     const spec = await api.get(`/api/cases/${caseState.current.id}/proofs/${entry.name}`);
+    const style = normalizeProofStyle(spec);
     resetDoc();
+    proofStarted = true;
     // Bind the opened proof's name up front, before the panel images load: they
     // stream in one by one and enable the Save button as they arrive, so a Save
     // during the load has to write back over this proof, not file a new one.
@@ -1601,12 +1900,22 @@
     proof.title = spec.title;
     proof.coordsText = spec.coordsText ?? '';
     proof.source = spec.source ?? '';
-    proof.captionSize = spec.captionSize ?? CAPTION_SIZE;
-    proof.legendSize = spec.legendSize ?? LEGEND_SIZE;
-    proof.footerSize = spec.footerSize ?? FOOTER_SIZE;
-    proof.footer = spec.footer ?? '';
-    proof.layout = spec.layout ?? 'grid';
-    proof.signature = spec.signature ?? null;
+    proof.captionSize = style.captionSize;
+    proof.legendSize = style.legendSize;
+    proof.footerSize = style.footerSize;
+    proof.footer = style.footer;
+    proof.footerEnabled = style.footerEnabled;
+    proof.footerColor = style.footerColor;
+    proof.footerAlign = style.footerAlign;
+    proof.captionsEnabled = style.captionsEnabled;
+    proof.bg = style.bg;
+    proof.space = style.space;
+    proof.layout = style.layout;
+    proof.panelDirection = style.panelDirection;
+    proof.signature = style.signature;
+    proof.signatureText = style.signatureText;
+    proof.palette = style.palette;
+    color = proof.palette[0];
     for (const p of spec.panels) {
       try {
         const img = await loadImage(`/files/${caseState.current.id}/${p.src}`);
@@ -1657,34 +1966,36 @@
 <div class="tool">
   <div class="tool-header">
     <h2>Proof Composer</h2>
-    <input
-      class="input title-input"
-      bind:value={proof.title}
-      oninput={() => { dirty = true; titleTouched = true; }}
-    />
-    {#if dirty}<span class="badge">unsaved</span>{/if}
+    {#if proofStarted}
+      <input
+        class="input title-input"
+        bind:value={proof.title}
+        oninput={() => { dirty = true; titleTouched = true; }}
+      />
+      {#if dirty}<span class="badge">unsaved</span>{/if}
+    {/if}
     <div class="spacer"></div>
     {#if caseState.current}
       <button class="btn" onclick={openProofList}><Icon name="folderOpen" size={15} /> Open</button>
     {/if}
-    {#if proof.panels.length}
+    {#if proofStarted}
       <button class="btn" onclick={() => (discardConfirm = true)} title="Clear this proof">
         <Icon name="reset" size={15} /> Discard
       </button>
     {/if}
-    <button class="btn" onclick={openPicker}><Icon name="plus" size={15} /> Add panel</button>
+    <button class="btn" onclick={openNewProofDialog}><Icon name="plus" size={15} /> New proof</button>
     <button
       class="btn"
       onclick={copyPng}
-      disabled={!proof.panels.length || copying}
+      disabled={!proofHasContent || copying}
       title="Copy the composed PNG to the clipboard"
     >
       <Icon name="copy" size={15} /> {copying ? 'Copying…' : 'Copy PNG'}
     </button>
-    <button class="btn btn-primary" onclick={() => save()} disabled={!proof.panels.length || saving}>
+    <button class="btn btn-primary" onclick={() => save()} disabled={!proofHasContent || saving}>
       <Icon name="check" size={15} /> {saving ? 'Saving…' : 'Save'}
     </button>
-    <button class="btn" onclick={() => save({ andPost: true })} disabled={!proof.panels.length || saving}>
+    <button class="btn" onclick={() => save({ andPost: true })} disabled={!proofHasContent || saving}>
       <Icon name="post" size={15} /> To Post
     </button>
   </div>
@@ -1703,14 +2014,14 @@
         <button
           class="tb-btn"
           class:active={tool === t.id}
-          title="{t.label} ({t.id === 'select' ? 'v' : t.id[0]})"
+          title="{t.label} ({t.shortcut})"
           onclick={() => (tool = t.id)}
         >
           <Icon name={t.icon} size={18} />
         </button>
       {/each}
       <div class="tb-sep"></div>
-      {#each ANNO_COLORS as c (c)}
+      {#each proof.palette as c (c)}
         <button
           class="color-btn"
           class:active={activeColor === c}
@@ -1722,7 +2033,7 @@
       {/each}
       <label
         class="color-btn color-pick"
-        class:active={!ANNO_COLORS.includes(activeColor)}
+        class:active={!proof.palette.includes(activeColor)}
         style:background={activeColor}
         title="Custom color"
       >
@@ -1805,21 +2116,74 @@
           }}
         />
       {/if}
-      {#if !proof.panels.length}
+      {#if !proofHasContent}
         <div class="empty overlay-empty">
           <div class="empty-icon"><Icon name="proof" size={42} /></div>
-          <h3>Compose a proof</h3>
-          <p>Add panels, then mark matching features in the same color.</p>
-          <button class="btn" onclick={openPicker}>
-            <Icon name="plus" size={15} /> Add panel
-          </button>
+          {#if proofStarted}
+            <h3>No panels yet</h3>
+            <p>Add panels when you are ready.</p>
+            <button class="btn" onclick={openPicker}>
+              <Icon name="plus" size={15} /> Add panel
+            </button>
+          {:else}
+            <h3>Compose a proof</h3>
+            <p>Create a proof to choose its template and starting panels.</p>
+            <button class="btn" onclick={openNewProofDialog}>
+              <Icon name="plus" size={15} /> New proof
+            </button>
+          {/if}
         </div>
       {/if}
     </div>
 
-    <!-- right: panels & annotations -->
-    <aside class="side">
-      <div class="side-scroll">
+    <!-- right: proof settings, panels & annotations -->
+    {#if proofStarted}
+      <aside class="side">
+        <div class="side-scroll">
+        <!-- House style stays independent from content. A new proof can keep a
+             selected template while its canvas remains empty until panels land. -->
+        <div class="meta-field">
+          <div class="meta-head">
+            <Icon name="layers" size={13} />
+            <span>House style</span>
+            {#if templatesState.proof.length}
+              <button
+                class="tpl-settings-link"
+                type="button"
+                title="Open Settings → Templates to create, edit or delete house styles"
+                onclick={openTemplateSettings}
+              >
+                Settings templates
+              </button>
+            {/if}
+          </div>
+          {#if templatesState.proof.length}
+            <select
+              class="input meta-input"
+              value={appliedTemplate?.id ?? ''}
+              title="Choose a saved house style"
+              onchange={applyFromSelect}
+            >
+              <option value="">No template</option>
+              {#each templatesState.proof as t (t.id)}
+                <option value={t.id}>{t.name}</option>
+              {/each}
+            </select>
+          {:else}
+            <p class="tpl-none">
+              No templates yet.
+              <button
+                class="tpl-inline-link"
+                type="button"
+                title="Open Settings → Templates to create your first house style"
+                onclick={openTemplateSettings}
+              >
+                Create one in Settings → Templates.
+              </button>
+            </p>
+          {/if}
+        </div>
+
         <!-- Proof context: coordinates + source, auto-filled from the panels,
              overridable. A ! flags a value the analyst still needs to supply. -->
         <div class="meta-field">
@@ -1869,9 +2233,18 @@
           />
         </div>
 
-        <button class="side-title collapsible" style="margin-top: 14px" onclick={() => (collapsed.panels = !collapsed.panels)}>
-          <span><Icon name={collapsed.panels ? 'chevronRight' : 'chevronDown'} size={13} /> Panels <span class="count">{proof.panels.length}</span></span>
-        </button>
+        <div class="side-title-row" style="margin-top: 14px">
+          <button class="side-title collapsible" onclick={() => (collapsed.panels = !collapsed.panels)}>
+            <span><Icon name={collapsed.panels ? 'chevronRight' : 'chevronDown'} size={13} /> Panels <span class="count">{proof.panels.length}</span></span>
+          </button>
+          <button
+            class="btn btn-ghost btn-sm side-add"
+            title="Add a panel"
+            onclick={openPicker}
+          >
+            <Icon name="plus" size={13} />
+          </button>
+        </div>
         {#if !collapsed.panels}
         {#if gonePanels.length}
           <!-- A panel's media was deleted from the case. The proof keeps it: the
@@ -1945,7 +2318,7 @@
         </button>
         {#if !collapsed.annotations}
         {#if !featureList.length}
-          <div class="none">Draw on the panels with the box, ellipse, arrow or line tools. Same color = same feature.</div>
+          <div class="none">Draw on a panel. Same color = same feature.</div>
         {/if}
         {#each featureList as c, i (c)}
           <div class="anno-row" class:active={activeColor === c}>
@@ -2053,6 +2426,18 @@
         </button>
         {#if advancedOpen}
           <div class="adv-body">
+            <label class="sig-check">
+              <input
+                type="checkbox"
+                checked={proof.captionsEnabled !== false}
+                onchange={(e) => {
+                  proof.captionsEnabled = e.currentTarget.checked;
+                  dirty = true;
+                }}
+              />
+              <span>Caption new panels</span>
+            </label>
+            <div class="adv-hint">Off: added panels start blank. You can still type a caption on any panel.</div>
             <div class="size-row">
               <span>Caption size</span>
               <input class="size-slider" type="range" min="10" max="40" step="1"
@@ -2065,28 +2450,51 @@
                 bind:value={proof.legendSize} oninput={() => (dirty = true)} />
               <span class="size-val">{proof.legendSize}</span>
             </div>
-            <div class="size-row">
-              <span>Footer size</span>
-              <input class="size-slider" type="range" min="10" max="32" step="1"
-                bind:value={proof.footerSize} oninput={() => (dirty = true)} />
-              <span class="size-val">{proof.footerSize}</span>
-            </div>
-            <label class="adv-label" for="footer-text">Footer text</label>
-            <textarea
-              id="footer-text"
-              class="input footer-input"
-              rows="2"
-              placeholder={attributionLine(proof.panels)}
-              bind:value={proof.footer}
-              oninput={() => (dirty = true)}
-            ></textarea>
-            <div class="adv-hint">Leave empty to keep the automatic imagery / source attribution.</div>
+            <label class="sig-check">
+              <input
+                type="checkbox"
+                checked={proof.footerEnabled !== false}
+                onchange={(e) => {
+                  proof.footerEnabled = e.currentTarget.checked;
+                  dirty = true;
+                }}
+              />
+              <span>Show footer</span>
+            </label>
+            {#if proof.footerEnabled !== false}
+              <div class="size-row">
+                <span>Footer size</span>
+                <input class="size-slider" type="range" min="10" max="32" step="1"
+                  bind:value={proof.footerSize} oninput={() => (dirty = true)} />
+                <span class="size-val">{proof.footerSize}</span>
+              </div>
+              <label class="adv-label" for="footer-text">Footer text</label>
+              <textarea
+                id="footer-text"
+                class="input footer-input"
+                rows="2"
+                placeholder={attributionLine(proof.panels)}
+                bind:value={proof.footer}
+                oninput={() => (dirty = true)}
+              ></textarea>
+              <div class="size-row">
+                <span>Footer alignment</span>
+                <select class="input" bind:value={proof.footerAlign}
+                  onchange={() => (dirty = true)}>
+                  <option value="left">Left</option>
+                  <option value="right">Right</option>
+                </select>
+              </div>
+              <div class="adv-hint">Leave empty to keep the automatic imagery / source attribution.</div>
+            {:else}
+              <div class="adv-hint">The band under the panels is gone. Drop all margins for panels-only output.</div>
+            {/if}
 
             <label class="sig-check">
               <input
                 type="checkbox"
                 disabled={!sigImg}
-                checked={!!proof.signature}
+                checked={!!proof.signature && !!sigImg}
                 onchange={(e) => {
                   proof.signature = e.currentTarget.checked ? newSignature() : null;
                   dirty = true;
@@ -2106,7 +2514,14 @@
                     onclick={() => {
                       // a new corner starts fresh: the old nudge was measured
                       // from the old corner, so keeping it would fling the logo
-                      proof.signature = { ...proof.signature, anchor: a.id, dx: 0, dy: 0 };
+                      proof.signature = {
+                        ...proof.signature,
+                        anchor: a.id,
+                        dx: 0,
+                        dy: 0,
+                        xRatio: undefined,
+                        yRatio: undefined,
+                      };
                       dirty = true;
                     }}
                   >{a.label}</button>
@@ -2114,7 +2529,7 @@
               </div>
               <div class="size-row">
                 <span>Size</span>
-                <input class="size-slider" type="range" min="0.04" max="0.4" step="0.01"
+                <input class="size-slider" type="range" min="0.03" max="0.4" step="0.01"
                   value={proof.signature.scale}
                   oninput={(e) => {
                     proof.signature = { ...proof.signature, scale: Number(e.currentTarget.value) };
@@ -2134,12 +2549,153 @@
               </div>
               <div class="adv-hint">Drag the logo on the canvas to nudge it off the corner.</div>
             {/if}
+
+            <label class="sig-check">
+              <input
+                type="checkbox"
+                disabled={!prefs.signatureHandle?.trim()}
+                checked={!!proof.signatureText && !!prefs.signatureHandle?.trim()}
+                onchange={(e) => {
+                  proof.signatureText = e.currentTarget.checked ? newSignatureText() : null;
+                  dirty = true;
+                }}
+              />
+              <span>Add account handle</span>
+            </label>
+            {#if !prefs.signatureHandle?.trim()}
+              <div class="adv-hint">Add your account handle in Settings → Preferences to use it on proofs.</div>
+            {:else if proof.signatureText}
+              <div class="adv-hint">Drag the account handle on the canvas to place it.</div>
+            {/if}
           </div>
         {/if}
-      </div>
-    </aside>
+        </div>
+      </aside>
+    {/if}
   </div>
 </div>
+
+{#if newProofOpen}
+  <Modal
+    title="Create proof"
+    onclose={() => { if (!creatingProof) newProofOpen = false; }}
+    width="780px"
+  >
+    <form class="new-proof-form" onsubmit={(e) => { e.preventDefault(); requestNewProofCreation(); }}>
+      <label class="new-proof-field">
+        <span>Name</span>
+        <input
+          class="input"
+          bind:value={newProofName}
+          maxlength="200"
+          placeholder="Proof name"
+        />
+      </label>
+
+      <label class="new-proof-field">
+        <span>Template</span>
+        <select class="input" bind:value={newProofTemplateId}>
+          <option value="">No template</option>
+          {#each templatesState.proof as t (t.id)}
+            <option value={t.id}>{t.name}</option>
+          {/each}
+        </select>
+        <small>Sets the look without choosing content.</small>
+      </label>
+
+      <fieldset class="new-proof-panels">
+        <legend>
+          <span>Panels</span>
+          <span class="selected-count">
+            {newProofPanelPaths.length} panel{newProofPanelPaths.length === 1 ? '' : 's'} selected
+          </span>
+        </legend>
+
+        <div class="panel-picker-bar">
+          <div class="panel-search">
+            <Icon name="search" size={13} />
+            <input placeholder="Search panels…" bind:value={newProofQuery} />
+            {#if newProofQuery}
+              <button type="button" onclick={() => (newProofQuery = '')} aria-label="Clear search">
+                <Icon name="x" size={12} />
+              </button>
+            {/if}
+          </div>
+          <div class="panel-categories" aria-label="Panel categories">
+            <button
+              type="button"
+              class:active={newProofCategory === 'all'}
+              onclick={() => (newProofCategory = 'all')}
+            >All <span>{pickerItems.length}</span></button>
+            <button
+              type="button"
+              class:active={newProofCategory === 'satellite'}
+              onclick={() => (newProofCategory = 'satellite')}
+            >Satellite captures <span>{pickerItems.filter((item) => item.kind === 'satellite').length}</span></button>
+            <button
+              type="button"
+              class:active={newProofCategory === 'media'}
+              onclick={() => (newProofCategory = 'media')}
+            >Other images <span>{pickerItems.filter((item) => item.kind === 'media').length}</span></button>
+          </div>
+        </div>
+
+        {#if newProofLoading}
+          <div class="picker-empty">Loading case images…</div>
+        {:else if !pickerItems.length}
+          <div class="picker-empty">No case images yet, but you can add panels later.</div>
+        {:else if !filteredNewProofItems.length}
+          <div class="picker-empty">No panels match this search.</div>
+        {:else}
+          <div class="pick-grid new-proof-grid">
+            {#each filteredNewProofItems as item (item.src)}
+              <button
+                type="button"
+                class="pick card selectable-pick"
+                class:selected={newProofPanelPaths.includes(item.src)}
+                aria-pressed={newProofPanelPaths.includes(item.src)}
+                onclick={() => toggleNewProofPanel(item.src)}
+              >
+                <span class="pick-image">
+                  <img src={`/files/${caseState.current?.id}/${item.thumb}`} alt="" loading="lazy" />
+                  {#if newProofPanelPaths.includes(item.src)}
+                    <span class="pick-selected"><Icon name="check" size={13} /></span>
+                  {/if}
+                </span>
+                <span class="pick-label" title={item.label}>
+                  <Icon name={item.kind === 'satellite' ? 'satellite' : 'image'} size={12} />
+                  {item.label}
+                </span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </fieldset>
+
+      <div class="new-proof-actions">
+        <button type="button" class="btn" disabled={creatingProof} onclick={() => (newProofOpen = false)}>
+          Cancel
+        </button>
+        <button type="submit" class="btn btn-primary" disabled={!newProofName.trim() || creatingProof}>
+          <Icon name="plus" size={15} /> {creatingProof ? 'Creating…' : 'Create proof'}
+        </button>
+      </div>
+    </form>
+  </Modal>
+{/if}
+
+{#if replaceWithNewConfirm}
+  <ConfirmDialog
+    title="Create a new proof?"
+    message="The current proof has unsaved changes."
+    detail="Creating a new proof discards those changes."
+    confirmLabel="Create proof"
+    tone="danger"
+    icon="plus"
+    onconfirm={() => { replaceWithNewConfirm = false; createNewProof(); }}
+    oncancel={() => (replaceWithNewConfirm = false)}
+  />
+{/if}
 
 {#if discardConfirm}
   <ConfirmDialog
@@ -2244,6 +2800,131 @@
   .title-input {
     width: min(320px, 26vw);
     font-weight: 600;
+  }
+  .new-proof-form {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+  .new-proof-field {
+    display: grid;
+    grid-template-columns: 110px minmax(0, 1fr);
+    align-items: center;
+    gap: 5px 12px;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+  }
+  .new-proof-field small {
+    grid-column: 2;
+    color: var(--text-3);
+    font-weight: 400;
+  }
+  .new-proof-panels {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+  .new-proof-panels legend {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 7px;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    color: var(--text-2);
+  }
+  .selected-count { color: var(--text-3); font-weight: 500; }
+  .panel-picker-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-bottom: 10px;
+    min-width: 0;
+  }
+  .panel-search {
+    min-width: 170px;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--bg-2);
+    color: var(--text-3);
+  }
+  .panel-search:focus-within { border-color: var(--accent); }
+  .panel-search input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--text-1);
+    font: inherit;
+  }
+  .panel-search button { display: flex; color: var(--text-3); }
+  .panel-categories { display: flex; gap: 5px; overflow-x: auto; max-width: 100%; }
+  .panel-categories button {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--bg-2);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
+  }
+  .panel-categories button:hover { border-color: var(--border-strong); color: var(--text-1); }
+  .panel-categories button.active { border-color: var(--accent); color: var(--text-1); }
+  .panel-categories span { color: var(--text-3); }
+  .new-proof-grid {
+    max-height: min(42vh, 390px);
+    overflow-y: auto;
+    padding: 1px;
+  }
+  .selectable-pick { position: relative; }
+  .selectable-pick.selected { border-color: var(--accent); }
+  .pick-image { position: relative; display: block; }
+  .pick-selected {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+  .picker-empty {
+    min-height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    border: 1px dashed var(--border);
+    border-radius: var(--r-md);
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+  }
+  .new-proof-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 2px;
+  }
+  .tpl-none {
+    margin: 0 0 6px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    line-height: 1.4;
   }
   .body {
     flex: 1;
@@ -2386,6 +3067,9 @@
     align-items: center;
     gap: 4px;
   }
+  .side-title-row { display: flex; align-items: center; gap: 4px; }
+  .side-title-row .side-title { margin-bottom: 0; }
+  .side-add { margin-left: auto; color: var(--text-3); }
   .count { color: var(--text-3); }
   .meta-field { margin-bottom: 10px; }
   .meta-head {
@@ -2408,6 +3092,28 @@
     border-radius: var(--r-sm);
   }
   .meta-reset:hover { color: var(--text-1); background: var(--bg-2); }
+  .tpl-settings-link {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+  }
+  .tpl-settings-link:hover { color: var(--text-2); }
+  .tpl-inline-link {
+    color: var(--text-3);
+    font: inherit;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+  }
+  .tpl-inline-link:hover { color: var(--text-2); }
   .meta-input { width: 100%; font-size: var(--fs-xs); padding: 5px 8px; }
   .meta-input.warn { border-color: color-mix(in srgb, var(--warn, #e8a33d) 55%, transparent); }
   .gone-note {

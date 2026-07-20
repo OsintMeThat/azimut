@@ -49,6 +49,9 @@ dev = [
     "pytest>=8,<10",
     "pytest-asyncio>=0.23,<2",
     "httpx>=0.27,<1.0",
+    # Starlette 1.3+ uses HTTPX2 for TestClient; keep the old HTTPX runtime
+    # client above because application integrations still import that package.
+    "httpx2>=2,<3",
     # Static analysis, run in CI (see .github/workflows/ci.yml). ruff is 0.x and
     # ships rule changes between minors, so it's pinned to one minor; mypy to the
     # next major. Both bounds are raised deliberately, after the suite is green.

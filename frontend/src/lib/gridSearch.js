@@ -33,6 +33,43 @@ export function aoiBounds(aoi) {
   };
 }
 
+/** Centre {lat, lon} of an area of interest (rect bounds or polygon). */
+export function aoiCenter(aoi) {
+  const b = aoiBounds(aoi);
+  return { lat: (b.south + b.north) / 2, lon: (b.west + b.east) / 2 };
+}
+
+/**
+ * Bounds with each pair sorted low→high, so a box dragged in any direction (a
+ * corner pulled past its opposite) still reads as a valid south<north /
+ * west<east rectangle.
+ */
+export function normalizeBounds(b) {
+  return {
+    south: Math.min(b.south, b.north),
+    north: Math.max(b.south, b.north),
+    west: Math.min(b.west, b.east),
+    east: Math.max(b.west, b.east),
+  };
+}
+
+/**
+ * The [lat, lon] of one corner of a bounds box, addressed by a two-letter code
+ * (n/s then e/w): 'ne', 'sw', … — used to place the rect resize handles.
+ */
+export function cornerLatLng(b, corner) {
+  return [corner[0] === 'n' ? b.north : b.south, corner[1] === 'e' ? b.east : b.west];
+}
+
+/**
+ * Close a polygon ring: `points` with the first repeated at the end so a
+ * polyline draws shut, but only once there are ≥3 points (a segment still
+ * being drawn is left open). Points are [lat, lon] pairs.
+ */
+export function closeRing(points) {
+  return points.length >= 3 ? [...points, points[0]] : points;
+}
+
 /** Build a fresh grid over `aoi` with `cellM`-metre cells (no marks yet). */
 export function createGrid(aoi, cellM) {
   const b = aoiBounds(aoi);

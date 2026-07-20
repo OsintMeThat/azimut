@@ -79,7 +79,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Azimut", version=__version__, docs_url="/api/docs")
 
-    from .api import cases, drafts, events, files, ingest, inspect, media, proofs, satellite, settings
+    from .api import cases, drafts, events, files, ingest, inspect, media, proofs, satellite, settings, templates
 
     app.include_router(cases.router)
     app.include_router(media.router)
@@ -91,6 +91,7 @@ def create_app() -> FastAPI:
     app.include_router(settings.router)
     app.include_router(ingest.router)
     app.include_router(events.router)
+    app.include_router(templates.router)
     # extension-origin CORS, /api/ingest/* only (see ingest.install_cors)
     ingest.install_cors(app)
     # last, so it wraps everything: refuse non-loopback Host / cross-origin web

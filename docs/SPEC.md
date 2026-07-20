@@ -94,7 +94,7 @@ the wheel, cross-platform binaries, tag-driven release CI).
 | ✅ **Media Library** | Case media shelf. Import (drag & drop) or download by URL (yt-dlp + gallery-dl fallback + Telegram photo scraper) → clean file + metadata + sha256, each a `media` entity. Multi-attachment picker, facet bar (type/source + virtual folders), per-item notes, lightbox, provenance modal. |
 | ✅ **Inspect** | Scratch workspace over any photo/video, nothing saved until Save. Sharpest-frame scan, per-frame adjustments, view-only zoom/pan/rotate, editable crop, multi-piece warp collage with auto-stitch (planar/cylindrical/spherical), ELA hint, reopenable sessions. |
 | ✅ **Satellite** | Coordinate map over an XYZ tile abstraction. Save a `place` or capture a sourced crop (→ `capture`, filed in `media/`). Standard-size or marquee capture, resolution multiplier, marker styles, map rotation, move-pin, dual dates, measure, OSM overlay, reference windows, external-map links. |
-| ✅ **Proof Composer** | The v1 heart. Multi-row grid or free layout of panels; resize, tweet-crop guide, magic tweet-fit. Draw boxes/ellipses/lines/arrows/curves/text, all editable after placing; per-color legend; captions; a Coordinates + Source header traced through the derivation chain; signature. Export `proof.png` + re-editable JSON spec. |
+| ✅ **Proof Composer** | The v1 heart. Start a named proof with independent template and searchable case-panel selection. Multi-row grid or free layout; resize, tweet-crop guide, magic tweet-fit; editable shapes/freehand/text, per-color legend, captions, traced Coordinates + Source, signature. Export `proof.png` + re-editable JSON spec. |
 | ✅ **Post Composer** | GeoConfirmed thread from a proof: place + plus code, decimal coords, mention, source, optional media tweet, extra tweets, char counts. Save drafts, publish (opens X prefilled — never posts for you). |
 | ✅ **Case sidebar** | Resizable. Case notes, suggestions inbox, nested "My work" folders + Unfiled, a details/selection editor, two-way delete sync, and the case switcher (create/open/promote/rename/delete, unique names). |
 
@@ -112,6 +112,8 @@ server security hardening, and the two-regime dependency setup.
 | ✅ **Coordinates** | Map-workspace tab: paste a point in any notation (decimal, DDM, DMS, UTM, MGRS, plus code, geohash) → read it back in every other with copy; the nine external-map links; opt-in Nominatim place name. |
 | ✅ **Reverse Search** | Collect-workspace launcher: pick a case image (or scrub a video to a frame), tweak brightness/contrast/saturation/grayscale → copy to the clipboard for Google Lens or save the PNG to drag into Yandex/Bing/TinEye, each opened key-less. Orchestrates, never queries itself. |
 | ✅ **Grid Search** | Satellite mode: overlay a custom metric grid on an area of interest — drag a box or draw a polygon, reshape either after the fact — and sweep it cell by cell. Fly-to-review with keyboard marks, cleared/flagged coverage; every action auto-saves. A case holds several named grids you switch between; promote a hit to a `place`. In-app only, no export. |
+| ✅ **Templates** | Reusable house styles, workspace-level: a proof style (background, panel margins, text sizes, footer, signature placement, preferred colours) and a post-thread skeleton (mention, which tweet-1 lines, media tweet, extra tweets). Built and edited in Settings → Templates, applied from the Proof/Post Composer. |
+| ✅ **Post outputs** | Prepare one thread for X, Bluesky or Mastodon, hand it to the selected composer, or copy a Markdown report. |
 
 **Key constraints** (carried forward):
 
@@ -144,25 +146,18 @@ never as new rail entries. Releases ship as GitHub `v0.x` tags.
 | **Audio Transcript** | Transcribe speech (Whisper) + acoustic context hints (bells/adhan/aircraft/language); auto-translate → English (offline). |
 | **Ground Imagery** | Ground-level photos: Panoramax/Mapillary/KartaView key-less first; Street View easy link, optional keyed in-app view. |
 | **Panorama** | Stitch a video window / frame set. Auto-stitch already in Inspect; still to do: sample a video window directly, seam blending. |
-| **Proof annotation** | Grow the Proof Composer toolbox: shape fill + dashed strokes, freehand, numbered markers, a redaction/blur box; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
+| **Proof annotation** | Grow the Proof Composer toolbox: shape fill + dashed strokes, numbered markers, a redaction/blur box; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
 | **Case Notebook** | A full notes page, not just raw `notes.md`: write, paste screenshots and images, embed links to places/entities; a writer pane + a reader pane. |
-| **Proof Templates** | Save a proof's house style (layout, colors, legend, signature) as a reusable template/preset; new proofs start from one. |
 
 Also toward v2: GIF maker, curated tools-links page, command palette (Ctrl+K),
 full-text case search, timezone + local-time readout at coords, clipboard
 capture (paste an image or a URL anywhere → filed as media with provenance),
 scale bar + north arrow + optional graticule burned into captures
 (preference-toggled auto-inclusion, extension/widget capture path included),
-read EXIF/GPS at media import → suggest place/time, Post Composer targets beyond
-X (Mastodon, Bluesky, generic report). Grow the two shipped GEOINT tools:
-Coordinates gains map-URL paste (reuse the extension's `parse_map_url`) and a
-Satellite hand-off; Reverse Search gains an optional TinEye-API-keyed
-oldest-date origin hint (Settings key, labeled a hint).
+read EXIF/GPS at media import → suggest place/time.
 
-Engineering (toward v2): split the monolith tool components (Satellite,
-ProofComposer) by extracting their logic into `lib/` modules like the other
-tools; add component/interaction tests (Playwright) for the canvas gestures the
-`lib` unit tests can't reach.
+Engineering toward v2: split Satellite and Proof Composer into focused modules;
+add Playwright coverage for canvas interactions that unit tests cannot exercise.
 
 ### v3 — investigation layer
 

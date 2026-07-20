@@ -20,6 +20,8 @@ export const prefs = $state({
   units: 'metric', // 'metric' | 'imperial'
   homeView: { lat: 48.8584, lon: 2.2945, zoom: 16 }, // where Satellite opens
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
+  postTarget: 'x', // social composer a fresh post draft starts with
+  signatureHandle: '', // account handle stamped onto proofs that opt into it
   updateCheckOnStart: true, // ask GitHub for a newer release when the page loads
   updateDismissedVersion: '', // the release tag muted with "don't show again"
 });
@@ -64,6 +66,8 @@ export function applyPrefs(s) {
   if (s.units) prefs.units = s.units;
   if (s.home_view) prefs.homeView = s.home_view;
   if (s.post_mention !== undefined) prefs.postMention = s.post_mention; // '' = none
+  if (s.post_target !== undefined) prefs.postTarget = s.post_target;
+  if (s.signature_handle !== undefined) prefs.signatureHandle = s.signature_handle; // '' = none
   if (s.update_check_on_start !== undefined) prefs.updateCheckOnStart = s.update_check_on_start;
   if (s.update_dismissed_version !== undefined)
     prefs.updateDismissedVersion = s.update_dismissed_version;
@@ -110,11 +114,43 @@ export const caseState = $state({
   rev: 0, // bumped on every reload so tools can re-fetch their own artifacts
 });
 
+/**
+ * Reusable house-style presets (Settings → Templates), app-wide like the
+ * signature. Two families: `proof` (a proof's layout/colours/legend) and
+ * `post` (a thread skeleton). Loaded once at startup and refreshed whenever
+ * Settings edits one, so the composers' "start from a template" menus stay
+ * current without re-fetching. Each entry: { id, name, updated_at, data }.
+ */
+export const templatesState = $state({ proof: [], post: [] });
+
+export async function loadTemplates() {
+  try {
+    const t = await api.get('/api/templates');
+    templatesState.proof = Array.isArray(t.proof) ? t.proof : [];
+    templatesState.post = Array.isArray(t.post) ? t.post : [];
+  } catch {
+    /* templates are a convenience; an empty store is a fine fallback */
+  }
+}
+
+/** Create or update a preset (id present → update), then refresh the store. */
+export async function saveTemplate(kind, { id, name, data }) {
+  const rec = await api.post(`/api/templates/${kind}`, { id, name, data });
+  await loadTemplates();
+  return rec;
+}
+
+export async function deleteTemplate(kind, id) {
+  await api.del(`/api/templates/${kind}/${id}`);
+  await loadTemplates();
+}
+
 export const uiState = $state({
-  tool: 'media', // 'media' | 'inspect' | 'satellite' | 'proof' | 'post'
+  tool: 'media', // 'media' | 'inspect' | 'satellite' | 'proof' | 'post' | 'settings'
   sidebarOpen: true,
   sidebarW: loadWidth(), // px, drag-resizable and remembered across reloads
   toasts: [],
+  settingsTab: null, // settings section id to open when switching to Settings
   // cross-tool handoffs (the workbench glue):
   composeQueue: [], // media paths queued for the Proof Composer
   postProof: null, // proof spec handed to the Post Composer
@@ -191,6 +227,7 @@ export async function initSession() {
   // preferences must land before the tools render, or coordinates would flash
   // in the wrong format; a settings read failure is never fatal to a session
   await loadPrefs().catch(() => {});
+  await loadTemplates().catch(() => {});
   await refreshCaseList();
   let lastId = null;
   try {

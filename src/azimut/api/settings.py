@@ -33,6 +33,8 @@ ECO_TUNABLE = ("mapbox", "google", "sentinelhub")
 
 DEFAULT_HOME_VIEW = config.DEFAULT_SETTINGS["home_view"]
 DEFAULT_POST_MENTION = config.DEFAULT_SETTINGS["post_mention"]
+DEFAULT_POST_TARGET = config.DEFAULT_SETTINGS["post_target"]
+DEFAULT_SIGNATURE_HANDLE = config.DEFAULT_SETTINGS["signature_handle"]
 
 
 class KeysIn(BaseModel):
@@ -74,6 +76,8 @@ class PrefsIn(BaseModel):
     units: str | None = None  # one of config.UNIT_SYSTEMS
     home_view: HomeView | None = None  # where the Satellite tab opens
     post_mention: str | None = None  # handle a new post draft is addressed to
+    post_target: str | None = None  # social composer a new post draft starts with
+    signature_handle: str | None = None  # account handle stamped on opted-in proofs
     # app self-update pop-up (engine/updates.py) — check on load, and the tag
     # the user muted with "don't show again"
     update_check_on_start: bool | None = None
@@ -94,6 +98,8 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "units": settings.get("units", "metric"),
         "home_view": settings.get("home_view", DEFAULT_HOME_VIEW),
         "post_mention": settings.get("post_mention", DEFAULT_POST_MENTION),
+        "post_target": settings.get("post_target", DEFAULT_POST_TARGET),
+        "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
         "update_check_on_start": bool(settings.get("update_check_on_start", True)),
         "update_dismissed_version": settings.get("update_dismissed_version", ""),
     }
@@ -149,6 +155,8 @@ def put_prefs(body: PrefsIn) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=f"unknown coord_format '{body.coord_format}'")
     if body.units is not None and body.units not in config.UNIT_SYSTEMS:
         raise HTTPException(status_code=422, detail=f"unknown units '{body.units}'")
+    if body.post_target is not None and body.post_target not in config.POST_TARGETS:
+        raise HTTPException(status_code=422, detail=f"unknown post_target '{body.post_target}'")
     settings = config.update_settings(lambda s: _apply_prefs(s, body))
     return _prefs(settings)
 
@@ -196,6 +204,10 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["home_view"] = body.home_view.model_dump()
     if body.post_mention is not None:
         settings["post_mention"] = body.post_mention.strip()[:64]
+    if body.post_target is not None:
+        settings["post_target"] = body.post_target
+    if body.signature_handle is not None:
+        settings["signature_handle"] = body.signature_handle.strip()[:64]
     if body.update_check_on_start is not None:
         settings["update_check_on_start"] = bool(body.update_check_on_start)
     if body.update_dismissed_version is not None:

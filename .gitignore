@@ -43,6 +43,8 @@ src/azimut/static/
 # Local tooling / assistant configs
 CLAUDE.md
 .claude/
+AGENTS.md
+.codex/
 .cheatsheet
 
 # PyInstaller local output

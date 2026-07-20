@@ -191,6 +191,7 @@ def test_get_settings_exposes_prefs_and_free_tier(client):
     assert body["eco_zoom_fallback"] is True
     assert body["providers_enabled"] == {}
     assert body["usage_overrides"] == {}
+    assert body["signature_handle"] == ""
     # startup update pop-up: on by default, nothing muted yet
     assert body["update_check_on_start"] is True
     assert body["update_dismissed_version"] == ""
@@ -207,6 +208,12 @@ def test_put_prefs_roundtrips_update_popup_prefs(client):
     saved = client.put("/api/settings/prefs", json={"update_check_on_start": True}).json()
     assert saved["update_check_on_start"] is True
     assert saved["update_dismissed_version"] == "v0.2.0"
+
+
+def test_put_prefs_roundtrips_signature_handle(client):
+    saved = client.put("/api/settings/prefs", json={"signature_handle": "  @example  "}).json()
+    assert saved["signature_handle"] == "@example"
+    assert client.get("/api/settings").json()["signature_handle"] == "@example"
 
 
 def test_put_prefs_roundtrips_and_filters_unknown_providers(client):
@@ -657,18 +664,25 @@ def test_display_prefs_default_and_round_trip(client):
     body = client.get("/api/settings").json()
     assert body["coord_format"] == "dd"
     assert body["units"] == "metric"
+    assert body["post_target"] == "x"
 
-    saved = client.put("/api/settings/prefs", json={"coord_format": "mgrs", "units": "imperial"})
+    saved = client.put(
+        "/api/settings/prefs",
+        json={"coord_format": "mgrs", "units": "imperial", "post_target": "bluesky"},
+    )
     assert saved.json()["coord_format"] == "mgrs"
     assert saved.json()["units"] == "imperial"
+    assert saved.json()["post_target"] == "bluesky"
     reloaded = client.get("/api/settings").json()
     assert reloaded["coord_format"] == "mgrs"
     assert reloaded["units"] == "imperial"
+    assert reloaded["post_target"] == "bluesky"
 
 
 def test_display_prefs_reject_unknown_values(client):
     assert client.put("/api/settings/prefs", json={"coord_format": "utm"}).status_code == 422
     assert client.put("/api/settings/prefs", json={"units": "furlongs"}).status_code == 422
+    assert client.put("/api/settings/prefs", json={"post_target": "threads"}).status_code == 422
     # a rejected value leaves the stored preference alone
     assert client.get("/api/settings").json()["coord_format"] == "dd"
 
