@@ -737,6 +737,9 @@ export function toSpec(proof) {
   return {
     azimut_proof: 1,
     title: proof.title,
+    // A proof keeps the selected house-style identity as well as its copied
+    // style values, so reopening it can restore the template picker.
+    templateId: typeof proof.templateId === 'string' ? proof.templateId : null,
     coords: autoCoords(proof.panels), // auto geo (first geo panel), for reference
     coordsText: proof.coordsText?.trim() ? proof.coordsText.trim() : null, // null → auto
     source: proof.source?.trim() ? proof.source.trim() : null, // null → auto (link only)

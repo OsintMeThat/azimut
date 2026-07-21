@@ -5,14 +5,74 @@
    * Firefox's drag state. A click/tap or dragend is already a settled gesture.
    */
   export function bindPanelPointerLifecycle(group, { onPress, onSelect, onDragEnd }) {
-    group.on('pointerdown', onPress);
-    group.on('click tap', onSelect);
+    const isPanelTarget = (event) =>
+      event?.target === group || event?.target?.name?.() === 'panel-hit';
+    group.on('pointerdown', (event) => {
+      if (isPanelTarget(event)) onPress(event);
+    });
+    group.on('click tap', (event) => {
+      if (isPanelTarget(event)) onSelect(event);
+    });
     if (onDragEnd) {
-      group.on('dragend', () => {
-        onSelect();
-        onDragEnd();
+      group.on('dragend', (event) => {
+        // Konva drag events bubble. A shape dragged inside this panel must keep
+        // the shape selected and must never commit the parent panel's position.
+        if (event?.target !== group) return;
+        onSelect(event);
+        onDragEnd(event);
       });
     }
+  }
+
+  /**
+   * Coalesce document rebuilds and keep them out of an active pointer gesture.
+   * Replacing Konva nodes between pointerdown and pointerup can leave Firefox
+   * dispatching the rest of the gesture to a node that no longer exists.
+   */
+  export function createCanvasRenderGate(schedule, cancel, { rebuild, refreshUi }) {
+    let pointerActive = false;
+    let rebuildPending = false;
+    let uiPending = false;
+    let frame = null;
+
+    function arm() {
+      if (pointerActive || (!rebuildPending && !uiPending) || frame !== null) return;
+      frame = schedule(() => {
+        frame = null;
+        if (pointerActive || (!rebuildPending && !uiPending)) return;
+        const needsRebuild = rebuildPending;
+        const needsUi = uiPending;
+        rebuildPending = false;
+        uiPending = false;
+        if (needsRebuild) rebuild();
+        else if (needsUi) refreshUi();
+      });
+    }
+
+    return {
+      beginPointer() {
+        pointerActive = true;
+      },
+      endPointer() {
+        pointerActive = false;
+        arm();
+      },
+      requestRebuild() {
+        rebuildPending = true;
+        arm();
+      },
+      requestUi() {
+        uiPending = true;
+        arm();
+      },
+      destroy() {
+        if (frame !== null) cancel(frame);
+        frame = null;
+        rebuildPending = false;
+        uiPending = false;
+        pointerActive = false;
+      },
+    };
   }
 </script>
 
@@ -66,6 +126,7 @@
   // not per element); `shapes` are the drawn geometry bound to a panel.
   const proof = $state({
     title: DEFAULT_PROOF_TITLE, panels: [], shapes: [], notes: {}, legendOrder: [],
+    templateId: null, // selected saved house style; its values remain copied below
     coordsText: '', source: '', // '' → auto-derived from panels; non-empty → manual override
     captionSize: CAPTION_SIZE, legendSize: LEGEND_SIZE, footerSize: FOOTER_SIZE, footer: '',
     footerEnabled: true, // false → no footer line at all
@@ -215,6 +276,7 @@
     color = proof.palette[0];
     proof.notes = spec.notes ?? {};
     proof.legendOrder = spec.legendOrder ?? [];
+    proof.templateId = typeof spec.templateId === 'string' ? spec.templateId : null;
     proof.panels = spec.panels.map((p) => ({ ...p, img: imgCache.get(p.src) ?? null }));
     proof.shapes = spec.shapes ?? [];
     // a panel image missing from the cache (shouldn't happen) reloads async
@@ -229,7 +291,10 @@
     selectedId = null;
     selectedPanelId = null;
     selectedSig = null;
-    appliedTemplate = null;
+    const template = templatesState.proof.find((t) => t.id === proof.templateId);
+    appliedTemplate = template
+      ? { id: template.id, name: template.name, prevStyle: templateFromProof(proof) }
+      : null;
     dirty = true;
     requestAnimationFrame(fit);
     // outlast the capture debounce so the restore itself is not re-recorded
@@ -251,6 +316,7 @@
   // ---- konva ------------------------------------------------------------------
   let containerEl;
   let stage, docLayer, uiLayer, transformer, endHandles, guideGroup, panelCtrls;
+  let canvasRenderGate;
   let drawing = null; // {panel, node, start, box, kind}
   let pathDraft = null; // {panel, box, node, points:[]} — multi-click curve in progress
   let spacePan = false; // hold-space panning (manual, so it wins over shape drags)
@@ -260,6 +326,14 @@
   onMount(() => {
     loadSignature(); // async: the canvas redraws when it lands
     stage = new Konva.Stage({ container: containerEl, width: 100, height: 100 });
+    canvasRenderGate = createCanvasRenderGate(
+      requestAnimationFrame,
+      cancelAnimationFrame,
+      {
+        rebuild: () => { if (stage) rebuild(); },
+        refreshUi: () => { if (stage) refreshCanvasUi(); },
+      },
+    );
     docLayer = new Konva.Layer();
     uiLayer = new Konva.Layer();
     stage.add(docLayer, uiLayer);
@@ -295,9 +369,27 @@
     stage.on('pointerup', onPointerUp);
     stage.on('dblclick dbltap', () => { if (pathDraft) finishPath(true); });
 
+    // The release can happen outside the canvas. Capture it at window level so
+    // a deferred rebuild is never left waiting after an interrupted drag.
+    const beginPointer = () => canvasRenderGate?.beginPointer();
+    const settlePointer = () => canvasRenderGate?.endPointer();
+    // Capture before Konva dispatches the event: selected annotations stop
+    // bubbling at their node, so a Stage listener alone cannot see every press.
+    containerEl.addEventListener('pointerdown', beginPointer, true);
+    window.addEventListener('pointerup', settlePointer, true);
+    window.addEventListener('pointercancel', settlePointer, true);
+    window.addEventListener('blur', settlePointer);
+
     return () => {
       resize.disconnect();
+      containerEl.removeEventListener('pointerdown', beginPointer, true);
+      window.removeEventListener('pointerup', settlePointer, true);
+      window.removeEventListener('pointercancel', settlePointer, true);
+      window.removeEventListener('blur', settlePointer);
+      canvasRenderGate?.destroy();
       stage.destroy();
+      canvasRenderGate = null;
+      stage = null;
     };
   });
 
@@ -333,7 +425,8 @@
     if (tool !== 'curve' && pathDraft) finishPath(false);
   });
 
-  // rebuild canvas whenever the document changes
+  // Rebuild only when published document content changes. Selection is UI-only
+  // and gets a lightweight refresh below, without recreating every image node.
   $effect(() => {
     JSON.stringify([
       proof.panels.map((p) => [p.src, p.caption, p.row, p.scale, p.x, p.y]),
@@ -348,14 +441,19 @@
       proof.panelDirection,
       proof.signature,
       proof.signatureText,
-      selectedId,
-      selectedPanelId,
-      selectedSig,
-      guide,
     ]);
     sigImg; // the logo lands async — redraw once it does
     prefs.signatureHandle; // Settings can change the rendered handle live
-    if (stage) rebuild();
+    if (stage) canvasRenderGate?.requestRebuild();
+  });
+
+  $effect(() => {
+    selectedId;
+    selectedPanelId;
+    selectedSig;
+    guide;
+    tool;
+    if (stage) canvasRenderGate?.requestUi();
   });
 
   // Text-size options threaded into every layout/size computation.
@@ -377,6 +475,7 @@
     proof.shapes = [];
     proof.notes = {};
     proof.legendOrder = [];
+    proof.templateId = null;
     proof.coordsText = '';
     proof.source = '';
     proof.captionSize = CAPTION_SIZE;
@@ -429,6 +528,7 @@
       handle: !!prefs.signatureHandle?.trim(),
     });
     color = proof.palette[0] ?? ANNO_COLORS[0];
+    proof.templateId = t.id;
     appliedTemplate = { id: t.id, name: t.name, prevStyle };
     dirty = true;
     requestAnimationFrame(fit); // margins/layout may have changed the doc size
@@ -449,6 +549,7 @@
       handle: !!prefs.signatureHandle?.trim(),
     });
     color = proof.palette[0] ?? ANNO_COLORS[0];
+    proof.templateId = null;
     appliedTemplate = null;
     dirty = true;
     requestAnimationFrame(fit);
@@ -1041,7 +1142,7 @@
       // on top for hit-testing.
       group.add(new Konva.Rect({
         x: 0, y: 0, width: panel.natural[0], height: panel.natural[1],
-        fill: 'transparent', listening: true,
+        fill: 'transparent', listening: true, name: 'panel-hit',
       }));
       bindPanelPointerLifecycle(group, {
         // Only the select tool touches panels. Selection itself waits until the
@@ -1210,7 +1311,18 @@
       docLayer.add(node);
     }
 
-    // selection — keyed on the shape's kind, not the Konva node's class name,
+    docLayer.batchDraw();
+    refreshCanvasUi(boxes, width, height);
+  }
+
+  function refreshCanvasUi(boxes = null, width = null, height = null) {
+    boxes ??= boxesOf();
+    if (width === null || height === null) {
+      const measured = measureDoc();
+      width = measured.width;
+      height = measured.height;
+    }
+    // Selection is keyed on the shape's kind, not the Konva node's class name,
     // since a framed/backgrounded text renders as a Group rather than a Text.
     // A whole panel can be selected instead (both modes): corner anchors only
     // (aspect locked, elements scale along), never rotated. In grid mode the
@@ -1250,7 +1362,6 @@
     drawEndHandles(boxes);
     drawPanelMoveControls(boxes);
     drawGuide(width, height);
-    docLayer.batchDraw();
     uiLayer.batchDraw();
   }
 
@@ -1930,6 +2041,13 @@
     // legend text lives in `notes` (per color); migrate old per-shape comments
     proof.notes = spec.notes ?? notesFromShapes(proof.shapes);
     proof.legendOrder = spec.legendOrder ?? [];
+    proof.templateId = typeof spec.templateId === 'string' ? spec.templateId : null;
+    const template = templatesState.proof.find((t) => t.id === proof.templateId);
+    if (template) {
+      // The style is already part of the saved proof. Restore only the picker
+      // association, not the template's current values.
+      appliedTemplate = { id: template.id, name: template.name, prevStyle: templateFromProof(proof) };
+    }
     openList = null;
     dirty = false;
     anchorHistory();

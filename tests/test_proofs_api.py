@@ -13,6 +13,7 @@ def _png_b64() -> str:
 
 
 SPEC = {
+    "templateId": "dark-house",
     "captionSize": 24,
     "legendSize": 22,
     "footerSize": 18,
@@ -56,6 +57,7 @@ def test_save_load_roundtrip(client):
     assert spec["legendSize"] == 22
     assert spec["footerSize"] == 18
     assert spec["footer"] == "Custom footer line"
+    assert spec["templateId"] == "dark-house"
 
     # PNG served
     assert client.get(f"/files/{cid}/{saved['png']}").status_code == 200

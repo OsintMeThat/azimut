@@ -157,7 +157,9 @@ scale bar + north arrow + optional graticule burned into captures
 read EXIF/GPS at media import → suggest place/time.
 
 Engineering toward v2: split Satellite and Proof Composer into focused modules;
-add Playwright coverage for canvas interactions that unit tests cannot exercise.
+add Playwright coverage for canvas interactions that unit tests cannot exercise;
+follow the [case storage and performance migration](STORAGE_AND_PERFORMANCE.md)
+so large cases stay responsive on modest hardware.
 
 ### v3 — investigation layer
 

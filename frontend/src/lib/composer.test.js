@@ -354,6 +354,13 @@ describe('legend columns', () => {
 });
 
 describe('toSpec — persistence of layout', () => {
+  it('persists the selected house-style ID without putting it in the style payload', () => {
+    const spec = toSpec({ title: 'T', templateId: 'dark-house', panels: [], shapes: [] });
+    expect(spec.templateId).toBe('dark-house');
+    expect(templateFromProof({ templateId: 'dark-house', panels: [], shapes: [] }))
+      .not.toHaveProperty('templateId');
+  });
+
   it('serialises the row index and caption size', () => {
     const proof = {
       title: 'T', coords: null, captionSize: 24, legendSize: 22, footerSize: 18,
