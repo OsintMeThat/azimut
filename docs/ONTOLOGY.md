@@ -1,13 +1,13 @@
 # Azimut ontology (case data model)
 
-> The contract every tool files against. Companion to [SPEC.md §5](SPEC.md); the
-> spec stays a summary, this is the precise vocabulary. Keep it small, coherent,
-> extensible, **versioned** — grown from real tool needs, never a whiteboard
-> taxonomy. Nothing enters a case without a human click (SPEC principle 5).
+> This is the filing contract for every tool and the detailed companion to
+> [SPEC.md §5](SPEC.md). Extend and version it only when implemented tools need
+> new vocabulary. Nothing enters a case without analyst confirmation.
 
-**Schema version: `1`** (what `case.json` carries as `{"azimut": {"schema": 1}}`;
-aligns with spec v0.2). Bump on any breaking change to entity/link shape; ship a
-migration when you do.
+**Storage schema: `3`.** The manifest carries `{"azimut": {"schema": 3,
+"storage": "sqlite"}}`; schema 3 moved the graph from `case.json` to per-case
+`case.db`. The entity/link shape is unchanged since v1. Breaking changes require
+a schema bump and migration.
 
 Legend: ✅ implemented in code · 🔶 machinery exists, unused · ⬜ proposed.
 
@@ -15,20 +15,19 @@ Legend: ✅ implemented in code · 🔶 machinery exists, unused · ⬜ proposed
 
 ## 1. Where it lives
 
-`case.json` is the single source of truth for the graph:
+`case.db` (SQLite) is the source of truth for the graph; the storage boundary
+presents it as this logical shape:
 
 ```jsonc
 { "entities": [ … ], "links": [ … ], "folders": [ … ] }
 ```
 
-- **Entities** = the nodes (files, points, proofs, people…). ✅
-- **Links** = typed directed edges between nodes. ✅ (every save states what its
-  output was made from; see §3.)
-- **Folders** = the analyst's own `/`-nested buckets (`attrs.folder`), an
-  organisational overlay, **not** semantic links. ✅
-- Rich per-media metadata (kind, size, uploader, duration, thumbnail…) lives in a
-  **media sidecar**, not on the entity — the entity carries only what the graph
-  needs to point and dedupe.
+- **Entities** are nodes such as files, points, proofs and people. ✅
+- **Links** are typed directed edges. Every save records its inputs; see §3. ✅
+- **Folders** are `/`-nested analyst buckets in `attrs.folder`, not semantic
+  links. ✅
+- Media sidecars hold kind, size, uploader, duration and thumbnail data. Entities
+  retain only what the graph needs for identity, links and deduplication.
 
 ## 2. Entity
 
@@ -41,9 +40,8 @@ Legend: ✅ implemented in code · 🔶 machinery exists, unused · ⬜ proposed
                   "status": "confirmed", "source": "https://…" } }
 ```
 
-Rules: `type` is extensible — unknown strings are accepted and stored; the UI
-just doesn't get a custom renderer for them (SPEC §5 escape hatch, keep it).
-`label` is always editable and never load-bearing for identity.
+`type` is extensible: unknown strings are stored but receive no custom renderer.
+`label` is editable and never defines identity.
 
 ### Entity type registry
 
@@ -55,7 +53,7 @@ just doesn't get a custom renderer for them (SPEC §5 escape hatch, keep it).
 | `proof` | ✅ | proof-composer | `spec` (json), `path` (png) | yes |
 | `post` | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | ✅ | inspect | `spec` (json) | yes |
-| `note` | ✅ | (manual) | free | no |
+| `note` | ✅ | notebook | `path`, `folder?` | yes (Markdown) |
 | `person` | ⬜ | manual / future | name attrs | no |
 | `organization` | ⬜ | manual / future | | no |
 | `alias` / `account` | ⬜ | future orchestrator | `platform`, `handle`, `url` | no |
@@ -66,9 +64,8 @@ just doesn't get a custom renderer for them (SPEC §5 escape hatch, keep it).
 New types coming from the roadmap (declare here when built): `panorama`,
 `ground-image`, `map-board`, `report`.
 
-Per-type **attribute schemas** are the main open work: fix a controlled vocab of
-attr keys per type so tools read each other's output reliably. Today attrs are
-convention, not contract.
+Per-type attribute schemas remain open work. Today attribute keys are conventions,
+not a validated contract between tools.
 
 ## 3. Link
 
@@ -78,9 +75,8 @@ convention, not contract.
   "provenance": { "by": "proof-composer", "at": "…", "status": "confirmed" } }
 ```
 
-Directed: read as **`from` → `type` → `to`**. Removing an entity drops every
-link touching it (`remove_entity`, ✅) — but *what* gets removed is decided
-first, by link type (see "Delete" below).
+Read a directed link as **`from` → `type` → `to`**. Removing an entity drops its
+incident links. The link type decides whether dependent entities also disappear.
 
 ### Link type registry (proposed core)
 
@@ -95,12 +91,11 @@ first, by link type (see "Delete" below).
 | `posted` | account → media/post | authorship | ⬜ |
 | `mentions` | media/note → any | referenced, weaker than depicts | ⬜ |
 
-### Delete: the policy is the link type, not the tool
+### Delete policy
 
-A new tool inherits the right behaviour by picking a link type, so this never
-needs re-deciding per tool. The test:
+A tool selects one of two deletion behaviours through its link type:
 
-> **Delete the target — is anything usable left in my file?**
+> **After deleting the target, is the holder still usable?**
 > Yes → `derived-from`. No → `depends-on`.
 
 | | `derived-from` | `depends-on` |
@@ -109,23 +104,21 @@ needs re-deciding per tool. The test:
 | Holds | its own pixels/text | only a reference |
 | Target deleted | **survives**, + tombstone | **deleted with it**, transitively |
 
-- **Never cascade into an output.** A post keeps its coordinates and text when
-  its proof goes; a frame keeps its pixels when its video goes.
-- **Tombstone** = `attrs.lost_sources[]`, `{label, type, path, sha256,
-  source_url, at}` — the sha256 and URL are what keep the loss auditable six
-  months later. Keyed by path, never stacked. Additive: schema stays 0.
-- **One door.** Every delete (sidebar, Media Library, a tool's own list) routes
-  through the chokepoint, so the rules cannot be sidestepped by where you click.
-  The confirm dialog states both lists before the click.
-- A **secondary** reference never cascades: losing one collage piece leaves a
-  placeholder, it does not void the session. Only the subject does.
+- `derived-from` never cascades into an output. A post keeps its text when its
+  proof is deleted; a frame keeps its pixels when its video is deleted.
+- `attrs.lost_sources[]` stores `{label, type, path, sha256, source_url, at}`.
+  Tombstones are keyed by path and never stacked.
+- Every UI deletion uses the same dependency-aware service. The confirmation
+  lists cascading deletions and surviving outputs before the action.
+- Losing a secondary source leaves a placeholder. Only losing the subject can
+  invalidate a dependent session.
 
-Free-typed labels stay allowed (SPEC §5) — the registry is the well-known set the
-UI understands, not a closed list.
+Free-typed labels remain valid. The registry defines what the UI understands,
+not a closed list.
 
 ### The derivation chain
 
-The chain, filed at save time — same click, no new ceremony (principle 3):
+The chain is filed with the save action:
 
 ```
 post ──derived-from──▶ proof ──derived-from──▶ capture ──(provenance: provider,zoom,bearing)
@@ -138,10 +131,9 @@ How it is wired (`engine/links.py`):
 - Sources are recorded as **case paths** (a proof's panels, a session's
   `spec.source`, a derivative's sidecar `source.from`/`sources`); the link layer
   resolves path → entity and emits the edge.
-- **Every save restates them** (`sync`): a panel dropped from a proof drops its
-  edge, a proof saved three times still carries one edge per panel.
-- A path that resolves to nothing (its source was deleted while the tool was
-  open) cannot be linked — it leaves a tombstone instead. Never lost in silence.
+- Every save restates sources through `sync`. Removing a panel removes its edge;
+  repeated saves keep one edge per panel.
+- A missing source path produces a tombstone instead of a link.
 - Media derivatives are all filed through one registration point, so any future
   tool producing imagery gets its chain for free. A derivative that **dedupes**
   onto an existing entity still records its derivation: the same frame really
@@ -152,33 +144,31 @@ How it is wired (`engine/links.py`):
 
 ## 4. Provenance, confidence, identity
 
-- **Provenance** (on every entity *and* link): `by` (tool id — `media-library`,
-  `satellite`, `proof-composer`, `post-composer`, `inspect`, or `manual`), `at`
-  (UTC), `status`, optional `source` (a URL). Borrow the *shape* of W3C PROV
-  (entity/activity/agent) conceptually — don't adopt the standard wholesale.
+- **Provenance** (on every entity and link): `by` (tool id: `media-library`,
+  `satellite`, `proof-composer`, `post-composer`, `inspect`, or `user`), `at`
+  (UTC), `status` and optional source URL. It borrows the entity/activity/agent
+  shape of W3C PROV without implementing the full standard.
 - **Confidence** = `status`: `confirmed` (analyst-made or analyst-accepted) vs
   `suggested` (a tool proposed it, awaiting a click). 🔶 `suggested` has no
-  producer yet — the sidebar section and the PATCH validator exist, but no tool
-  emits it until the v2 EXIF/OCR tools land. ✅ Binary on purpose —
-  honest and simple; resist finer grading until a tool truly needs it.
+  producer yet. The sidebar and PATCH validator exist, but no tool emits it until
+  the v3 EXIF/OCR tools land. Keep the status binary until a real workflow needs
+  finer grading. ✅
   **A derivation is `confirmed`**: `derived-from`/`depends-on` record what the
   analyst's own click just made, not what a tool inferred. `suggested` is for
-  inference — OCR reading a street name, EXIF proposing a `place` (see §5.2).
-- **`same-as` / merge** (⬜ open, SPEC §9): when two entities are one real thing,
+  inference, such as OCR reading a street name or EXIF proposing a `place`.
+- **`same-as` / merge** (⬜ open, SPEC §10): when two entities are one real thing,
   link `same-as` rather than destructively merging; a resolver treats a `same-as`
-  cluster as one node in views and unions their attrs/links. Keeps it reversible
-  and auditable. Decide the collapse rules before the first orchestrator tool
-  produces duplicate accounts.
+  cluster as one node in views and unions its attributes and links. Collapse rules
+  must be defined before an orchestrator creates duplicate accounts.
 
 ## 5. Design rules
 
-1. **Extensible core, not complete taxonomy.** Small well-known set + free-string
-   escape hatch. Grow from real tool needs.
-2. **Nothing without a click.** Tools emit `suggested`; the analyst confirms
-   (principle 5). Inferred links are `suggested` too — but a derivation filed at
-   save time is `confirmed`: it states what the click did, it does not guess (§4).
+1. Keep a small known vocabulary and allow free-string extensions required by
+   implemented tools.
+2. Tools emit `suggested`; the analyst confirms. Derivations filed during save are
+   `confirmed` because they record the action rather than an inference.
 3. **Two-way delete.** An artifact and its entity are one thing; deleting either
    drops the other and its links (SPEC §6 delete/edit sync). What that takes
    with it is the link type's call, never the tool's (§3).
-4. **Version the schema.** This file's version travels with `case.json`; a bump
-   ships a migration. Do the formalisation now, while the corpus is tiny.
+4. Version graph-shape and storage-format changes in the case manifest and ship a
+   migration with each bump.

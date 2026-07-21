@@ -21,6 +21,8 @@ dist/
 # Node / JS
 node_modules/
 npm-debug.log*
+playwright-report/
+test-results/
 
 # Editors / IDE
 .idea/
@@ -32,6 +34,7 @@ Thumbs.db
 # Workspace / OS
 *.code-workspace
 *.log
+.azimut-relaunch.json
 
 # Misc
 *.bak

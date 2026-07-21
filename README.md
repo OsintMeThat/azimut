@@ -1,24 +1,23 @@
 # Azimut
 
-The OSINT investigator's workbench: one case, one folder, every tool.
-Local-first, so your media and your investigations stay on your machine.
+Azimut is a local OSINT workspace for reviewing media, building geolocation
+proofs and keeping case notes together.
 
-Built for the open-source-investigation community: GeoConfirmed contributors,
-journalists, researchers. Reopen a case months later and everything is still
-there, in one plain folder you can zip, git, or share.
+It is built for open-source investigators, journalists and researchers. Each
+case is a plain folder that can be reopened, archived or shared.
 
 *The name is the French word for azimuth, the compass bearing you sight along
 to fix a point on the map.*
 
-## v0.2.0 — Proof Studio & Post outputs
+## v0.2.0: Proof Studio and post outputs
 
 | Tool | What it does |
 |------|--------------|
 | **Media Library** | Import local files or download by URL (X, Telegram, TikTok, YouTube, Instagram and more via yt-dlp, with a gallery-dl fallback for image-only posts). Each item gets a clean local file, metadata and a SHA-256. Multi-photo posts open a picker. |
 | **Inspect** | A scratch workspace over any photo or video: frame adjustments, editable crop, sharpest-frame capture, hand-made collage with per-piece warp/scale/rotate, and auto-stitch to solve a panorama's layout for you. Nothing enters the case until you save. |
 | **Satellite** | Coordinates or a place name become an imagery crop, with select-area capture, map rotation, measurement tools and reference-image overlays. Esri/OSM by default; add a Mapbox or Google key for more basemaps. |
-| **Proof Composer** | Start a named proof from a reusable house style, select case panels with search, compose them in a grid or free layout, annotate with colored shapes/freehand/text, and export `proof.png` plus a re-editable spec. |
-| **Post Composer** | Turn a proof into a prepared thread for X, Bluesky, or Mastodon: coordinates, plus code, attribution, target-specific character counts, media, and Markdown report output. |
+| **Geo Proof** | Start a named proof from a reusable house style, select case panels with search, compose them in a grid or free layout, annotate with colored shapes/freehand/text, and export `proof.png` plus a re-editable spec. |
+| **Geo Report** | Turn a proof into a prepared thread for X, Bluesky, or Mastodon: coordinates, plus code, attribution, target-specific character counts, media, and a structured Markdown case note with linked evidence. |
 
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
@@ -29,10 +28,12 @@ New in v0.2.0:
   skeletons. Proof templates cover background, spacing, text, footer, signature
   placement, and preferred colours; post templates cover the mention, tweet-1
   fields, media tweet, and extra tweets.
-- Proof Composer can start a named proof, search and filter case panels, apply a
+- Geo Proof can start a named proof, search and filter case panels, apply a
   template, arrange panels horizontally or vertically, and draw freehand marks.
-- Post Composer prepares the same thread for X, Bluesky, or Mastodon, groups
-  selected media safely, and copies a compact Markdown report.
+- Geo Report prepares the same thread for X, Bluesky, or Mastodon, groups
+  selected media safely, and saves a structured Markdown case note with
+  clickable case entities and embedded local evidence. Its save confirmation
+  includes an `OPEN` action for the new note.
 - Draft and template storage validates bounds and paths before writing, with
   atomic template saves and efficient multi-source link updates.
 
@@ -44,9 +45,8 @@ azimut                # starts on http://127.0.0.1:8477 and opens a browser tab
 ```
 
 Update with `pipx upgrade azimut`, remove with `pipx uninstall azimut`. Your
-cases and settings live under `~/Azimut` and are left untouched by both — an
-upgrade never makes you redo an investigation, and an uninstall never deletes
-your data (delete `~/Azimut` by hand if you also want the data gone).
+cases and settings live under `~/Azimut`; upgrades and uninstalling the app do
+not remove them. Delete `~/Azimut` manually if you also want to remove the data.
 
 Azimut runs in a normal browser tab (Firefox/Chrome); there is no separate
 window. Closing the terminal it prints its URL into stops the app.
@@ -61,7 +61,11 @@ opens Azimut in your browser.
 |----|-------|
 | Windows | `azimut-windows-x86_64.exe` |
 | macOS (Apple Silicon) | `azimut-macos-arm64` |
+| macOS (Intel) | No standalone binary; install with `pipx` or `pip` |
 | Linux | `azimut-linux-x86_64` |
+
+Intel Macs are supported through the Python package. They do not have a
+downloadable standalone binary.
 
 First run, the binaries are **unsigned**, so the OS warns before letting them
 open:
@@ -80,18 +84,47 @@ open unchanged in the new version.
 The downloadable binaries bundle a static **ffmpeg** (and ffprobe), so video
 thumbnails, frame scans, video enhancement, and downloads that merge separate
 audio+video streams work out of the box. If you `pip install azimut` instead,
-put ffmpeg on your `PATH` for those features — everything else works without it.
+put ffmpeg on your `PATH` for those features. Everything else works without it.
 The bundled ffmpeg is redistributed under its own license; see
 [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html).
 
 From source:
 
+Requires Python 3.11+ and Node.js 20+ for the frontend build.
+
+macOS and Linux:
+
 ```bash
 git clone https://github.com/OsintMeThat/azimut && cd azimut
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-cd frontend && npm install && npm run build && cd ..
+cd frontend && npm ci && npm run build && cd ..
 .venv/bin/azimut
 ```
+
+Windows PowerShell:
+
+```powershell
+git clone https://github.com/OsintMeThat/azimut
+Set-Location azimut
+py -3.11 -m venv .venv
+.venv\Scripts\python -m pip install -e ".[dev]"
+Set-Location frontend
+npm ci
+npm run build
+Set-Location ..
+.venv\Scripts\azimut.exe
+```
+
+Rebuild and relaunch the local app with the cross-platform helper:
+
+```bash
+python3 scripts/relaunch.py       # macOS / Linux
+py scripts\relaunch.py            # Windows
+```
+
+The tool rebuilds the frontend, stops the previous Azimut instance started
+through the same tool, and launches the fresh build. It never kills unrelated
+processes by name. Use `--no-browser` to keep it from opening a new tab.
 
 Frontend development (hot reload, proxied API):
 
@@ -126,9 +159,10 @@ bundled into the Python wheel via hatchling `artifacts`. So `npm run build`
 
 ```bash
 cd frontend && npm run build && cd ..    # refresh the bundled UI
-uv sync --frozen                         # the exact deps CI tested
-pipx run build                           # wheel + sdist (UI included)
-uv run pyinstaller packaging/azimut.spec # optional: standalone binary
+uv sync --frozen --no-dev --group release --no-install-project
+uv sync --frozen --no-dev --group release --no-build-isolation --no-editable
+uv run --no-sync python -m build --no-isolation
+uv run --no-sync pyinstaller packaging/azimut.spec
 ```
 
 ### Dependencies
@@ -173,8 +207,9 @@ One-time setup: register the repo as a
 1. **Local-first, privacy-first.** No account, no telemetry, no upload; the
    server binds to `127.0.0.1` only, and Azimut never posts anywhere on your
    behalf.
-2. **The case is the product.** Plain JSON + media files, versionable,
-   portable.
+2. **The case is the product.** Media and notes stay as files and the graph lives
+   in per-case SQLite. A closed case folder is complete and portable; a ZIP
+   import/export workflow is planned.
 3. One tab = one tool, useful in 30 seconds.
 4. **Orchestrator, not replacer.** Integrate specialized services rather than
    cloning them.

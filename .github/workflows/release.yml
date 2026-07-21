@@ -18,15 +18,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-      - uses: actions/setup-python@v5
+          node-version: "20.20.2"
+      - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
       - name: Build frontend into the package
         working-directory: frontend
         run: npm ci && npm run build
       - name: Build sdist + wheel
-        run: pipx run build
+        run: |
+          uv sync --frozen --no-dev --group release --no-install-project
+          uv run --no-sync python -m build --no-isolation
       - name: Sanity-check the wheel bundles the UI
         run: |
           python - <<'PY'
@@ -61,20 +63,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "20.20.2"
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
       - name: Build frontend into the package
         working-directory: frontend
         run: npm ci && npm run build
-      # The wheel only *declares* its dependencies, but the binary *contains*
-      # them — this is the one artifact where the resolver's mood on build day
-      # ships to users. Install from the lock so a tag rebuilds byte-for-byte.
-      - name: Install locked deps + package + PyInstaller
+      # The wheel only declares its dependencies, but the binary contains them.
+      # Application and release tooling both come from the same lock.
+      - name: Install locked application and release tooling
         run: |
-          uv sync --frozen --no-dev
-          uv pip install . pyinstaller
+          uv sync --frozen --no-dev --group release --no-install-project
+          uv sync --frozen --no-dev --group release --no-build-isolation --no-editable
       # ffmpeg is a native program, not a Python dep, so it isn't in the wheel.
       # Vendor a static ffmpeg + ffprobe per-OS so the binary works out of the
       # box (packaging/azimut.spec picks them up; engine/ffmpeg.py finds them at
@@ -88,7 +89,7 @@ jobs:
             # "latest" release tag always points at the newest static win64
             # build, so pull ffmpeg.exe/ffprobe.exe out of its nested bin/.
             curl -fL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -o ffmpeg.zip
-            uv run python -c "
+            uv run --no-sync python -c "
           import zipfile
           zf = zipfile.ZipFile('ffmpeg.zip')
           for n in zf.namelist():
@@ -104,19 +105,19 @@ jobs:
             base="https://ffmpeg.martin-riedl.de/redirect/latest/$plat/release"
             for tool in ffmpeg ffprobe; do
               curl -fL "$base/$tool.zip" -o "$tool.zip"
-              uv run python -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall('packaging/vendor')" "$tool.zip"
+              uv run --no-sync python -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall('packaging/vendor')" "$tool.zip"
             done
           fi
           chmod +x packaging/vendor/* 2>/dev/null || true
           ls -l packaging/vendor
       - name: Build single-file binary
-        run: uv run pyinstaller packaging/azimut.spec --distpath dist-bin --workpath build-bin
+        run: uv run --no-sync pyinstaller packaging/azimut.spec --distpath dist-bin --workpath build-bin
       - name: Smoke-test the binary
         shell: bash
         run: |
           BIN=dist-bin/azimut
           [ "${{ runner.os }}" = "Windows" ] && BIN=dist-bin/azimut.exe
-          "$BIN" --version
+          uv run --no-sync python scripts/smoke_binary.py "$BIN"
       - name: Name the asset per-OS
         shell: bash
         run: |
