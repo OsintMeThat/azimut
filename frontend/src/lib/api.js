@@ -30,7 +30,9 @@ async function request(method, path, body, opts = {}) {
 }
 
 export const api = {
-  get: (path) => request('GET', path),
+  // `opts` reaches fetch (e.g. `{ signal }`) so a caller can cancel a stale
+  // request — the bounded catalog aborts an in-flight page on case/filter change.
+  get: (path, opts) => request('GET', path, undefined, opts),
   post: (path, body) => request('POST', path, body),
   put: (path, body) => request('PUT', path, body),
   patch: (path, body) => request('PATCH', path, body),

@@ -118,6 +118,31 @@ describe('applyPrefs', () => {
   });
 });
 
+describe('startup update check', () => {
+  it('checks by default and stays silent when the Settings switch is off', async () => {
+    const { api } = await import('./api.js');
+    api.get.mockReset().mockResolvedValue({
+      current: 'v0.1.0', latest: null, update_available: false,
+    });
+    const { applyPrefs, checkForUpdateOnStart } = await freshState();
+
+    await checkForUpdateOnStart();
+    expect(api.get).toHaveBeenCalledWith('/api/settings/update?check=true');
+
+    api.get.mockClear();
+    applyPrefs({ update_check_on_start: false });
+    await checkForUpdateOnStart();
+    expect(api.get).not.toHaveBeenCalled();
+  });
+
+  it('does not surface an offline failure', async () => {
+    const { api } = await import('./api.js');
+    api.get.mockReset().mockRejectedValue(new Error('offline'));
+    const { checkForUpdateOnStart } = await freshState();
+    await expect(checkForUpdateOnStart()).resolves.toBeUndefined();
+  });
+});
+
 describe('templates store', () => {
   let api;
   beforeEach(async () => {

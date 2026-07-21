@@ -92,7 +92,7 @@
         class="input"
         placeholder={'Paste any coordinate: 48.8584, 2.2945  ·  DMS  ·  UTM  ·  MGRS  ·  plus code  ·  geohash'}
         bind:value={text}
-        title="Decimal, degrees-minutes-seconds, degrees-decimal-minutes, UTM, MGRS, plus code or geohash"
+        title="Decimal, DMS, DDM, UTM, MGRS, plus code or geohash"
       />
       <button type="submit" class="btn" disabled={!text.trim() || parsing}>
         <Icon name="search" size={15} /> {parsing ? '…' : 'Convert'}

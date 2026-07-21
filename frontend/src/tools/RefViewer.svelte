@@ -19,7 +19,7 @@
 
   let el; // the window root
   let headEl;
-  let bodyEl;
+  let bodyEl = $state();
 
   // the map-wrap we're positioned in — the box drags/resizes are clamped to
   const bounds = () => {
@@ -145,6 +145,9 @@
   style:height={viewer.collapsed ? 'auto' : `${viewer.h}px`}
   style:z-index={zBase + viewer.z}
   onpointerdown={focus}
+  role="dialog"
+  aria-label={viewer.title || 'Reference'}
+  tabindex="0"
 >
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div bind:this={headEl} class="rv-head" onpointerdown={startWindowDrag} title="Drag to move">

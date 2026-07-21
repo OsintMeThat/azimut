@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import {
     caseState,
@@ -9,14 +10,16 @@
     persistSidebarWidth,
   } from '../lib/state.svelte.js';
   import { DEFAULT_W } from '../lib/sidebar.js';
-  import { buildTree, subtreeCount, flattenPaths, folderOf } from '../lib/folderTree.js';
+  import { buildTree, subtreeCountFrom, flattenPaths, folderOf } from '../lib/folderTree.js';
+  import { buildCatalogQuery, settleCatalogSummary } from '../lib/catalog.js';
   import { assignFolder as fileEntity } from '../lib/filing.js';
-  import { deletePlan } from '../lib/chain.js';
-  import { openEntity, gotoCapture, ENTITY_TOOL } from '../lib/navigate.js';
+  import { createNote } from '../lib/notes.js';
+  import { openEntity, gotoCapture, openNotebook, ENTITY_TOOL } from '../lib/navigate.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import EntityDetails from './EntityDetails.svelte';
+  import FolderSelect from './FolderSelect.svelte';
 
   const ENTITY_ICONS = {
     person: 'user',
@@ -38,9 +41,6 @@
     'inspect-session': 'inspect',
   };
 
-  // Entity types backed by a file on disk — deleting them everywhere drops the file.
-  const FILE_BACKED = new Set(['media', 'capture', 'proof', 'post', 'inspect-session']);
-
   const VIDEO_EXTS = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v']);
   // Media entities normally carry the same `kind` the Media Library uses to tell
   // video from image; fall back to the file extension for entities filed before
@@ -52,44 +52,100 @@
   }
   const entityIcon = (e) => (e.type === 'media' && isVideo(e) ? 'video' : ENTITY_ICONS[e.type] ?? 'note');
 
-  // ── case notes (single notes.md) ─────────────────────────────────────────
-  let caseNotes = $state('');
-  let caseNotesLoadedFor = $state(null);
-  let saveTimer;
-  let saved = $state(true);
   let section = $state({ notes: false, suggestions: true, mywork: true });
+
+  // ── bounded catalog loading (docs/STORAGE_AND_PERFORMANCE.md, Step 5) ───────
+  // The sidebar no longer holds the whole graph. It builds the folder tree from
+  // the (small) folder list plus the summary's folder keys, takes its badge
+  // counts from the summary, and loads entities a page at a time per section:
+  // Suggestions, Unfiled, and each folder on expand. `seq` guards a stale
+  // response from landing after the case or a mutation moved on.
+  const CATALOG_PAGE = 200;
+  const emptySection = () => ({ items: [], cursor: null, done: false, loading: false, loaded: false });
+
+  let summary = $state(null); // { total, by_type, by_status, by_folder }
+  let suggestedData = $state(emptySection());
+  let unfiledData = $state(emptySection());
+  let folderData = $state({}); // path -> section
+  let seq = 0;
+  let loadedCaseId = null;
+
+  const byFolder = $derived(summary?.by_folder ?? {});
+  const suggestedCount = $derived(summary?.by_status?.suggested ?? 0);
+  const confirmedCount = $derived(Math.max(0, (summary?.total ?? 0) - suggestedCount));
+
+  async function loadSection(sec, params, { id, mySeq, more = false } = {}) {
+    id ??= caseState.current?.id;
+    mySeq ??= seq;
+    if (!id) return;
+    if (more && (sec.loading || sec.done)) return; // don't stack a "show more"
+    sec.loading = true;
+    try {
+      const page = await api.get(
+        buildCatalogQuery(id, { ...params, limit: CATALOG_PAGE, cursor: more ? sec.cursor : null })
+      );
+      if (mySeq !== seq) return; // a case switch or reload superseded us
+      sec.items = more ? [...sec.items, ...(page.items ?? [])] : page.items ?? [];
+      sec.cursor = page.next_cursor ?? null;
+      sec.done = !sec.cursor;
+      sec.loaded = true;
+      sec.loading = false;
+    } catch (e) {
+      if (mySeq !== seq) return;
+      sec.loading = false;
+      toast(e.message, 'danger');
+    }
+  }
+
+  const loadSuggested = (more = false) => loadSection(suggestedData, { status: 'suggested' }, { more });
+  const loadUnfiled = (more = false) =>
+    loadSection(unfiledData, { status: 'confirmed', unfiled: true }, { more });
+  function loadFolder(path, more = false) {
+    if (!folderData[path]) folderData[path] = emptySection();
+    return loadSection(folderData[path], { status: 'confirmed', folder: path }, { more });
+  }
+
+  async function loadSummary(id, mySeq) {
+    try {
+      const s = await api.get(`/api/cases/${id}/catalog/summary`);
+      summary = settleCatalogSummary(summary, s, mySeq === seq);
+    } catch {
+      summary = settleCatalogSummary(summary, null, mySeq === seq);
+      /* counts are a nicety; an empty summary just shows zeroes */
+    }
+  }
+
+  // Reload the summary and every open section. Runs on case change (full reset
+  // first) and on every reloadCase() (caseState.rev), so a mutation anywhere is
+  // reflected without re-reading the whole graph.
+  function refreshAll(id) {
+    seq++;
+    if (id !== loadedCaseId) {
+      loadedCaseId = id;
+      summary = null;
+      expanded = {};
+      folderData = {};
+      unfiledOpen = false;
+      addingUnder = undefined;
+      infoEntity = null;
+      suggestedData = emptySection();
+      unfiledData = emptySection();
+    }
+    if (!id) {
+      summary = null;
+      return;
+    }
+    loadSummary(id, seq);
+    loadSuggested();
+    loadUnfiled();
+    for (const path of Object.keys(expanded)) if (expanded[path]) loadFolder(path);
+  }
 
   $effect(() => {
     const id = caseState.current?.id;
-    if (id && id !== caseNotesLoadedFor) {
-      caseNotesLoadedFor = id;
-      api.get(`/api/cases/${id}/notes`).then((r) => (caseNotes = r.text));
-    } else if (!id) {
-      caseNotesLoadedFor = null;
-      caseNotes = '';
-    }
+    caseState.rev; // re-run on every reload (a mutation elsewhere or our own)
+    untrack(() => refreshAll(id));
   });
-
-  function onCaseNotesInput() {
-    saved = false;
-    clearTimeout(saveTimer);
-    const id = caseState.current?.id;
-    saveTimer = setTimeout(async () => {
-      if (!id) return;
-      try {
-        await api.put(`/api/cases/${id}/notes`, { text: caseNotes });
-        saved = true;
-      } catch (e) {
-        toast(`Notes not saved: ${e.message}`, 'danger');
-      }
-    }, 700);
-  }
-
-  // ── entities ─────────────────────────────────────────────────────────────
-  const entities = $derived(caseState.current?.entities ?? []);
-  const links = $derived(caseState.current?.links ?? []);
-  const suggested = $derived(entities.filter((e) => e.provenance?.status === 'suggested'));
-  const confirmed = $derived(entities.filter((e) => e.provenance?.status !== 'suggested'));
 
   async function confirmEntity(entity) {
     await api.patch(`/api/cases/${caseState.current.id}/entities/${entity.id}`, {
@@ -105,10 +161,8 @@
     toast(`Dismissed "${entity.label}"`, 'info');
   }
 
-  // clicking a row: notes open the editor, captures open their image, places
-  // navigate the map — everything else opens its tool
+  // Clicking a row opens its owning workspace; notes share the Notebook.
   function onEntityActivate(entity) {
-    if (entity.type === 'note') return openEditNote(entity);
     if (entity.type === 'capture') return openInfo(entity);
     openEntity(entity);
   }
@@ -121,40 +175,24 @@
   let addingUnder = $state(undefined); // folder path currently gaining a child
   let newSubName = $state('');
   let expanded = $state({}); // path -> bool (absent = collapsed)
-  let dragEntityId = $state(null);
+  let dragEntityId = $state(null); // for the dragging visual
+  let dragEntity = null; // the entity being dragged (no full-graph lookup on drop)
   let dragOverFolder = $state(undefined); // folder path being hovered
 
   const caseFolders = $derived(caseState.current?.folders ?? []);
 
-  const tree = $derived(buildTree(caseFolders, confirmed));
+  // Structure only: the tree is built from folders plus any folder a summary
+  // count refers to (an entity filed into a path that was never an explicit
+  // folder still gets a node), with no entities attached — those load per node.
+  const tree = $derived(buildTree([...new Set([...caseFolders, ...Object.keys(byFolder)])], []));
   const allFolders = $derived(flattenPaths(tree));
-  // everything not yet filed — the inbox you file (or inspect) items from
-  const unfiled = $derived(confirmed.filter((e) => !folderOf(e)));
   let unfiledOpen = $state(false);
-  let unfiledTypeFilter = $state(null);
-  const TYPE_LABEL = {
-    media: 'Media', capture: 'Satellite', note: 'Notes', proof: 'Proofs',
-    post: 'Posts', place: 'Places', 'inspect-session': 'Inspect',
-  };
-  // chip counts, in a stable order (declaration order of TYPE_LABEL, then anything unmapped)
-  const unfiledTypes = $derived.by(() => {
-    const counts = new Map();
-    for (const e of unfiled) counts.set(e.type, (counts.get(e.type) ?? 0) + 1);
-    return Object.keys(TYPE_LABEL)
-      .filter((t) => counts.has(t))
-      .concat([...counts.keys()].filter((t) => !(t in TYPE_LABEL)))
-      .map((t) => ({ type: t, label: TYPE_LABEL[t] ?? t, count: counts.get(t) }));
-  });
-  const unfiledFiltered = $derived(
-    unfiledTypeFilter ? unfiled.filter((e) => e.type === unfiledTypeFilter) : unfiled
-  );
-  $effect(() => {
-    // drop a stale filter when its type disappears from Unfiled (e.g. filed away)
-    if (unfiledTypeFilter && !unfiled.some((e) => e.type === unfiledTypeFilter)) unfiledTypeFilter = null;
-  });
 
   const isExpanded = (path) => expanded[path] === true;
-  function toggle(path) { expanded[path] = !isExpanded(path); }
+  function toggle(path) {
+    expanded[path] = !isExpanded(path);
+    if (expanded[path]) loadFolder(path);
+  }
   function focus(node) { node.focus(); }
 
   async function createFolder(fullName) {
@@ -196,14 +234,16 @@
   // drag & drop wiring
   function onDragStart(ev, entity) {
     dragEntityId = entity.id;
+    dragEntity = entity;
     ev.dataTransfer.effectAllowed = 'move';
     ev.dataTransfer.setData('text/plain', entity.id);
   }
   function onDropFolder(ev, folder) {
     ev.preventDefault();
     dragOverFolder = undefined;
-    const entity = entities.find((e) => e.id === dragEntityId);
+    const entity = dragEntity;
     dragEntityId = null;
+    dragEntity = null;
     if (entity) assignFolder(entity, folder).catch((e) => toast(e.message, 'danger'));
   }
 
@@ -225,32 +265,6 @@
     }
   }
 
-  // Delete everywhere: removes the entity and its underlying file(s). Used from
-  // the details panel (and the note modal) — irreversible, danger tone.
-  //
-  // Whatever hangs off the entity is spelled out before the click: sessions that
-  // cannot outlive it go too, outputs made from it stay and keep a record of
-  // what they lost. Nothing cascades into an output — ever (ONTOLOGY §3).
-  function askDeleteEverywhere(entity, onDone) {
-    confirmState = {
-      title: 'Delete everywhere?',
-      message: `“${entity.label}” will be removed from the case and its tool.`,
-      detail: FILE_BACKED.has(entity.type)
-        ? 'This permanently deletes the underlying file(s) on disk — it cannot be undone.'
-        : 'This permanently removes it from the case — it cannot be undone.',
-      consequences: deletePlan(entities, links, entity.id),
-      confirmLabel: 'Delete everywhere',
-      tone: 'danger',
-      icon: 'trash',
-      action: async () => {
-        await api.del(`/api/cases/${caseState.current.id}/entities/${entity.id}`);
-        await reloadCase();
-        toast(`Deleted "${entity.label}"`, 'info');
-        onDone?.();
-      },
-    };
-  }
-
   // Remove from My work: just clears the filing. The item stays in its tool.
   function askRemoveFromMyWork(entity) {
     confirmState = {
@@ -266,10 +280,6 @@
 
   function askDeleteFolder(path) {
     const prefix = path + '/';
-    const inside = entities.filter((e) => {
-      const f = folderOf(e);
-      return f === path || (f && f.startsWith(prefix));
-    });
     const subs = allFolders.filter((f) => f.startsWith(prefix)).length;
     confirmState = {
       title: 'Remove this folder?',
@@ -280,8 +290,9 @@
       confirmLabel: 'Remove folder',
       tone: 'default',
       icon: 'folderMinus',
+      // The backend unfiles every entity under the removed subtree, so this
+      // does not enumerate the graph — it just drops the folder and refreshes.
       action: async () => {
-        for (const e of inside) await assignFolder(e, '');
         await api.del(
           `/api/cases/${caseState.current.id}/folders?name=${encodeURIComponent(path)}`
         );
@@ -308,38 +319,19 @@
   let noteModalSaving = $state(false);
 
   function openNewNote() {
-    noteModal = { entity: null, title: '', folder: '', content: '' };
-  }
-
-  function openEditNote(entity) {
-    noteModal = {
-      entity,
-      title: entity.label,
-      folder: entity.attrs?.folder ?? '',
-      content: entity.attrs?.content ?? '',
-    };
+    noteModal = { title: '', folder: '' };
   }
 
   async function saveNote() {
     if (!noteModal) return;
-    const { entity, title, folder, content } = noteModal;
+    const { title, folder } = noteModal;
     if (!title.trim()) { toast('Title required', 'warn'); return; }
     noteModalSaving = true;
     try {
-      const attrs = { content, folder: folder.trim() };
-      if (!entity) {
-        await api.post(`/api/cases/${caseState.current.id}/entities`, {
-          type: 'note', label: title.trim(), attrs,
-        });
-        toast('Note created', 'ok', 1600);
-      } else {
-        await api.patch(`/api/cases/${caseState.current.id}/entities/${entity.id}`, {
-          label: title.trim(), attrs,
-        });
-        toast('Note saved', 'ok', 1600);
-      }
+      const note = await createNote(caseState.current.id, { title, folder });
       await reloadCase();
       noteModal = null;
+      openNotebook(note.id);
     } catch (e) {
       toast(e.message, 'danger');
     } finally {
@@ -420,29 +412,21 @@
     <div class="sections">
 
       <!-- 1 · Case Notes (single notes.md) -->
-      <button class="section-head" onclick={() => (section.notes = !section.notes)}>
-        <Icon name={section.notes ? 'chevronDown' : 'chevronRight'} size={13} />
+      <button class="section-head" onclick={() => openNotebook()}>
+        <Icon name="note" size={13} />
         <span>Case Notes</span>
-        {#if !saved}<span class="badge">saving…</span>{/if}
+        <span class="open-note">Open</span>
       </button>
-      {#if section.notes}
-        <textarea
-          class="textarea notes mono"
-          bind:value={caseNotes}
-          oninput={onCaseNotesInput}
-          placeholder="Case notes (markdown)…"
-        ></textarea>
-      {/if}
 
       <!-- 2 · Suggestions (tool-suggested entities: confirm or dismiss) -->
-      {#if suggested.length > 0}
+      {#if suggestedCount > 0}
         <button class="section-head" onclick={() => (section.suggestions = !section.suggestions)}>
           <Icon name={section.suggestions ? 'chevronDown' : 'chevronRight'} size={13} />
           <span>Suggestions</span>
-          <span class="count">{suggested.length}</span>
+          <span class="count">{suggestedCount}</span>
         </button>
         {#if section.suggestions}
-          {#each suggested as e (e.id)}
+          {#each suggestedData.items as e (e.id)}
             <div class="entity suggested">
               <Icon name={entityIcon(e)} size={14} />
               <div class="e-body">
@@ -457,6 +441,11 @@
               </button>
             </div>
           {/each}
+          {#if !suggestedData.done}
+            <button class="more" onclick={() => loadSuggested(true)} disabled={suggestedData.loading}>
+              Show more
+            </button>
+          {/if}
         {/if}
       {/if}
 
@@ -465,7 +454,7 @@
         <button class="section-head" onclick={() => (section.mywork = !section.mywork)}>
           <Icon name={section.mywork ? 'chevronDown' : 'chevronRight'} size={13} />
           <span>My work</span>
-          <span class="count">{confirmed.length}</span>
+          <span class="count">{confirmedCount}</span>
         </button>
         <button class="btn btn-ghost btn-sm new-note-btn" title="New note" onclick={openNewNote}>
           <Icon name="plus" size={13} /><Icon name="note" size={13} />
@@ -486,7 +475,7 @@
             {@render folderNode(node, 0)}
           {/each}
 
-          {#if unfiled.length > 0}
+          {#if unfiledData.items.length > 0}
             <div
               class="frow"
               role="button"
@@ -497,29 +486,21 @@
               <Icon name={unfiledOpen ? 'chevronDown' : 'chevronRight'} size={12} />
               <Icon name="layers" size={13} />
               <span class="fname">Unfiled</span>
-              <span class="fcount">{unfiled.length}</span>
+              <span class="fcount">{unfiledData.items.length}{unfiledData.done ? '' : '+'}</span>
             </div>
             {#if unfiledOpen}
-              {#if unfiledTypes.length > 1}
-                <div class="chip-row">
-                  {#each unfiledTypes as t (t.type)}
-                    <button
-                      class="chip"
-                      class:active={unfiledTypeFilter === t.type}
-                      onclick={() => (unfiledTypeFilter = unfiledTypeFilter === t.type ? null : t.type)}
-                    >
-                      {t.label}<span class="chip-count">{t.count}</span>
-                    </button>
-                  {/each}
-                </div>
-              {/if}
-              {#each unfiledFiltered as e (e.id)}
+              {#each unfiledData.items as e (e.id)}
                 {@render entityRow(e, 1)}
               {/each}
+              {#if !unfiledData.done}
+                <button class="more" onclick={() => loadUnfiled(true)} disabled={unfiledData.loading}>
+                  Show more
+                </button>
+              {/if}
             {/if}
           {/if}
 
-          {#if tree.length === 0 && unfiled.length === 0}
+          {#if tree.length === 0 && unfiledData.items.length === 0}
             <div class="none">
               Everything you save lands here; create folders to organize it.
             </div>
@@ -571,7 +552,7 @@
     <Icon name={isExpanded(node.path) ? 'chevronDown' : 'chevronRight'} size={12} />
     <Icon name={isExpanded(node.path) ? 'folderOpen' : 'folder'} size={13} />
     <span class="fname">{node.name}</span>
-    <span class="fcount">{subtreeCount(node)}</span>
+    <span class="fcount">{subtreeCountFrom(node, byFolder)}</span>
     <span
       class="fact"
       role="button"
@@ -615,15 +596,30 @@
     {#each node.children as child (child.path)}
       {@render folderNode(child, depth + 1)}
     {/each}
-    {#each node.entities as e (e.id)}
-      {@render entityRow(e, depth + 1)}
-    {/each}
+    {@const sec = folderData[node.path]}
+    {#if sec}
+      {#each sec.items as e (e.id)}
+        {@render entityRow(e, depth + 1)}
+      {/each}
+      {#if !sec.done}
+        <button
+          class="more"
+          style="margin-left: {8 + (depth + 1) * 14}px"
+          onclick={() => loadFolder(node.path, true)}
+          disabled={sec.loading}
+        >
+          Show more
+        </button>
+      {/if}
+    {/if}
   {/if}
 {/snippet}
 
 <!-- one entity row (My work): activate, info, unfile -->
 {#snippet entityRow(e, depth)}
   {@const isClickable = e.type === 'note' || e.type === 'capture' || !!ENTITY_TOOL[e.type]}
+  <!-- The role and tab stop deliberately exist only for activatable entity types. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
     class="entity"
     class:clickable={isClickable}
@@ -631,7 +627,7 @@
     style="padding-left: {8 + depth * 14}px"
     draggable="true"
     ondragstart={(ev) => onDragStart(ev, e)}
-    ondragend={() => { dragEntityId = null; dragOverFolder = undefined; }}
+    ondragend={() => { dragEntityId = null; dragEntity = null; dragOverFolder = undefined; }}
     onclick={() => onEntityActivate(e)}
     role={isClickable ? 'button' : undefined}
     tabindex={isClickable ? 0 : undefined}
@@ -686,7 +682,7 @@
 <!-- Note edit / create modal -->
 {#if noteModal}
   <Modal
-    title={noteModal.entity ? 'Edit note' : 'New note'}
+    title="New note"
     onclose={() => (noteModal = null)}
     width="580px"
   >
@@ -698,48 +694,21 @@
       bind:value={noteModal.title}
     />
 
-    <label class="modal-label" for="note-folder" style="margin-top:10px">Folder (in My work)</label>
-    <input
-      id="note-folder"
-      class="input"
-      placeholder="e.g. research, timeline, sources…"
-      bind:value={noteModal.folder}
-      list="note-folder-suggestions"
-    />
-    <datalist id="note-folder-suggestions">
-      {#each allFolders as f (f)}<option value={f}></option>{/each}
-    </datalist>
-
-    <label class="modal-label" for="note-content" style="margin-top:10px">Content</label>
-    <textarea
-      id="note-content"
-      class="textarea note-content"
-      rows="14"
-      placeholder="Write your notes in markdown…"
-      bind:value={noteModal.content}
-    ></textarea>
+    <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
+    <FolderSelect bind:value={noteModal.folder} folders={allFolders} emptyLabel="My work (root)" />
 
     <div class="modal-row">
-      {#if noteModal.entity}
-        <button
-          class="btn btn-ghost btn-sm"
-          style="color:var(--danger,#e55)"
-          onclick={() => askDeleteEverywhere(noteModal.entity, () => (noteModal = null))}
-        >
-          <Icon name="trash" size={13} /> Delete note
-        </button>
-      {/if}
       <div style="flex:1"></div>
       <button class="btn" onclick={() => (noteModal = null)}>Cancel</button>
       <button class="btn btn-primary" onclick={saveNote} disabled={noteModalSaving}>
-        {noteModalSaving ? 'Saving…' : noteModal.entity ? 'Save' : 'Create'}
+        {noteModalSaving ? 'Creating…' : 'Create'}
       </button>
     </div>
   </Modal>
 {/if}
 
 
-<!-- Confirmation dialog (delete everywhere / remove from My work / remove folder) -->
+<!-- Confirmation dialog (remove from My work / remove folder) -->
 {#if confirmState}
   <ConfirmDialog
     title={confirmState.title}
@@ -825,13 +794,8 @@
     gap: 2px;
   }
   .new-note-btn:hover { color: var(--accent); }
+  .open-note { margin-left: auto; color: var(--text-3); font-weight: 600; }
   .count { margin-left: auto; color: var(--text-3); font-weight: 600; }
-  .notes {
-    min-height: 130px;
-    font-size: var(--fs-xs);
-    margin: 0 4px 10px;
-    width: calc(100% - 8px);
-  }
   /* tool group header (Saved work) */
   /* folder tree */
   .new-folder { display: flex; gap: 6px; padding: 2px 8px 8px; }
@@ -859,22 +823,20 @@
   .fact { opacity: 0; color: var(--text-3); display: flex; padding: 2px; border-radius: 4px; flex-shrink: 0; }
   .fact:hover { color: var(--text-1); }
   .fdel:hover { color: var(--danger, #e55); }
-  .chip-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 8px 6px 22px; }
-  .chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 7px;
-    border-radius: var(--r-sm);
+  .more {
+    align-self: flex-start;
+    margin: 2px 8px 6px;
+    padding: 3px 10px;
     font-size: var(--fs-xs);
-    font-weight: 500;
-    background: var(--bg-2);
+    font-weight: 600;
     color: var(--text-2);
-    border: 1px solid transparent;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    cursor: pointer;
   }
-  .chip:hover { color: var(--text-1); }
-  .chip.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
-  .chip-count { color: inherit; opacity: 0.65; font-weight: 600; }
+  .more:hover { color: var(--text-1); border-color: var(--border-strong); }
+  .more:disabled { opacity: 0.5; cursor: default; }
   .frow:hover .fact { opacity: 1; }
   /* entities */
   .entity {
@@ -921,6 +883,5 @@
     border-bottom: 1px solid var(--border);
     font-size: var(--fs-sm);
   }
-  .note-content { width: 100%; resize: vertical; font-family: var(--font-mono); font-size: var(--fs-xs); }
   .modal-row { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
 </style>

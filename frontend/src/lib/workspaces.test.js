@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { WORKSPACES, workspaceOf, toolFromHash } from './workspaces.js';
+import { WORKSPACES, TOOL_LABELS, sidebarOpenForWorkspace, workspaceOf, toolFromHash } from './workspaces.js';
 
 const ALL_TOOLS = [
   'media', 'files', 'reverse', 'inspect', 'satellite', 'coordinates', 'proof', 'post', 'settings',
@@ -33,6 +33,27 @@ describe('workspaceOf', () => {
   it('returns null for settings and unknown tools', () => {
     expect(workspaceOf('settings')).toBeNull();
     expect(workspaceOf('nope')).toBeNull();
+  });
+});
+
+describe('product-facing labels', () => {
+  it('uses the Sources, Geo Proof and Geo Report names', () => {
+    expect(WORKSPACES.find((w) => w.id === 'collect').label).toBe('Sources');
+    expect(TOOL_LABELS.proof).toBe('Geo Proof');
+    expect(TOOL_LABELS.post).toBe('Geo Report');
+  });
+});
+
+describe('sidebarOpenForWorkspace', () => {
+  it('defaults Map closed and other workspaces open', () => {
+    expect(sidebarOpenForWorkspace('map')).toBe(false);
+    expect(sidebarOpenForWorkspace('collect')).toBe(true);
+    expect(sidebarOpenForWorkspace('examine')).toBe(true);
+  });
+
+  it('uses the remembered state instead of the workspace default', () => {
+    expect(sidebarOpenForWorkspace('map', { map: true })).toBe(true);
+    expect(sidebarOpenForWorkspace('collect', { collect: false })).toBe(false);
   });
 });
 

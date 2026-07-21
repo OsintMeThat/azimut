@@ -7,43 +7,46 @@
     toast,
     updateState,
     checkForUpdateOnStart,
+    toggleTheme,
   } from './lib/state.svelte.js';
   import { startEvents, onEvent } from './lib/events.js';
-  import { WORKSPACES, workspaceOf, toolFromHash } from './lib/workspaces.js';
+  import {
+    WORKSPACES,
+    TOOL_LABELS,
+    sidebarOpenForWorkspace,
+    workspaceOf,
+    toolFromHash,
+  } from './lib/workspaces.js';
+  import { createToolLoader } from './lib/toolLoader.js';
   import Icon from './components/Icon.svelte';
   import Logo from './components/Logo.svelte';
   import Wordmark from './components/Wordmark.svelte';
   import CaseSwitcher from './components/CaseSwitcher.svelte';
   import CaseSidebar from './components/CaseSidebar.svelte';
   import Toasts from './components/Toasts.svelte';
-  import MediaLibrary from './tools/MediaLibrary.svelte';
-  import Files from './tools/Files.svelte';
-  import ReverseSearch from './tools/ReverseSearch.svelte';
-  import Satellite from './tools/Satellite.svelte';
-  import Coordinates from './tools/Coordinates.svelte';
-  import ProofComposer from './tools/ProofComposer.svelte';
-  import PostComposer from './tools/PostComposer.svelte';
-  import Inspector from './tools/Inspector.svelte';
-  import Settings from './tools/Settings.svelte';
   import UpdateModal from './components/UpdateModal.svelte';
 
   // The rail holds workspaces (docs/UI.md §3); tools are tabs inside them.
   // Settings lives behind the topbar gear instead — app plumbing, not part
   // of the working flow.
   const TOOLS = [
-    { id: 'media', label: 'Media', component: MediaLibrary },
-    { id: 'files', label: 'Files', component: Files },
-    { id: 'reverse', label: 'Reverse Search', component: ReverseSearch },
-    { id: 'inspect', label: 'Inspect', component: Inspector },
-    { id: 'satellite', label: 'Satellite', component: Satellite },
-    { id: 'coordinates', label: 'Coordinates', component: Coordinates },
-    { id: 'proof', label: 'Proof', component: ProofComposer },
-    { id: 'post', label: 'Post', component: PostComposer },
+    { id: 'media', label: TOOL_LABELS.media, load: () => import('./tools/MediaLibrary.svelte') },
+    { id: 'files', label: TOOL_LABELS.files, load: () => import('./tools/Files.svelte') },
+    { id: 'reverse', label: TOOL_LABELS.reverse, load: () => import('./tools/ReverseSearch.svelte') },
+    { id: 'inspect', label: TOOL_LABELS.inspect, load: () => import('./tools/Inspector.svelte') },
+    { id: 'satellite', label: TOOL_LABELS.satellite, load: () => import('./tools/Satellite.svelte') },
+    { id: 'coordinates', label: TOOL_LABELS.coordinates, load: () => import('./tools/Coordinates.svelte') },
+    { id: 'proof', label: TOOL_LABELS.proof, load: () => import('./tools/ProofComposer.svelte') },
+    { id: 'post', label: TOOL_LABELS.post, load: () => import('./tools/PostComposer.svelte') },
+    { id: 'notebook', label: TOOL_LABELS.notebook, load: () => import('./tools/Notebook.svelte') },
   ];
   const ALL_TOOLS = [
     ...TOOLS,
-    { id: 'settings', label: 'Settings', component: Settings },
+    { id: 'settings', label: TOOL_LABELS.settings, load: () => import('./tools/Settings.svelte') },
   ];
+  const loader = createToolLoader(Object.fromEntries(ALL_TOOLS.map((tool) => [tool.id, tool.load])));
+  let toolComponents = $state.raw({});
+  let toolErrors = $state.raw({});
   const TOOL_IDS = ALL_TOOLS.map((t) => t.id);
   const toolLabel = (id) => ALL_TOOLS.find((t) => t.id === id)?.label ?? id;
 
@@ -58,20 +61,48 @@
   // Workspace navigation: clicking a workspace returns to its last-used tab.
   const activeWs = $derived(workspaceOf(uiState.tool));
   const lastTool = $state({});
+  const sidebarOpenByWorkspace = $state({});
+  let previousTool = null;
   $effect(() => {
     const ws = workspaceOf(uiState.tool);
     if (ws) lastTool[ws.id] = uiState.tool;
   });
+  $effect(() => {
+    const nextTool = uiState.tool;
+    const previousWs = workspaceOf(previousTool);
+    const nextWs = workspaceOf(nextTool);
+    if (nextWs && previousWs?.id !== nextWs.id) {
+      uiState.sidebarOpen = sidebarOpenForWorkspace(nextWs.id, sidebarOpenByWorkspace);
+    }
+    previousTool = nextTool;
+  });
   function openWorkspace(ws) {
     uiState.tool = lastTool[ws.id] ?? ws.tools[0];
+  }
+  function toggleSidebar() {
+    const open = !uiState.sidebarOpen;
+    const ws = workspaceOf(uiState.tool);
+    if (ws) sidebarOpenByWorkspace[ws.id] = open;
+    uiState.sidebarOpen = open;
   }
 
   // Tools mount lazily on first visit, then stay mounted (hidden via CSS) so
   // unsaved editor state — a half-composed proof, a collage in progress —
   // survives switching tabs to grab another capture or media.
   const visited = $state({ [uiState.tool]: true });
+  async function ensureTool(id) {
+    try {
+      const component = await loader.load(id);
+      toolComponents = { ...toolComponents, [id]: component };
+      if (toolErrors[id]) toolErrors = { ...toolErrors, [id]: null };
+    } catch (error) {
+      toolErrors = { ...toolErrors, [id]: error?.message ?? 'Could not load this tool' };
+    }
+  }
   $effect(() => {
-    visited[uiState.tool] = true;
+    const id = uiState.tool;
+    visited[id] = true;
+    void ensureTool(id);
   });
 
   // Load the case list and reopen the last-used case (survives reloads), then
@@ -115,7 +146,7 @@
     <button
       class="btn btn-ghost btn-sm"
       title="Toggle case sidebar"
-      onclick={() => (uiState.sidebarOpen = !uiState.sidebarOpen)}
+      onclick={toggleSidebar}
     >
       <Icon name="panelRight" size={16} />
     </button>
@@ -134,6 +165,14 @@
           <span>{ws.label}</span>
         </button>
       {/each}
+      <button
+        class="rail-btn theme-toggle"
+        onclick={toggleTheme}
+        title={uiState.theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+      >
+        <Icon name={uiState.theme === 'light' ? 'moon' : 'sun'} size={19} />
+        <span>{uiState.theme === 'light' ? 'Dark' : 'Light'}</span>
+      </button>
     </nav>
 
     <main class="canvas">
@@ -153,8 +192,18 @@
       <div class="canvas-body">
         {#each ALL_TOOLS as tool (tool.id)}
           {#if visited[tool.id]}
+            {@const ToolComponent = toolComponents[tool.id]}
             <div class="tool-host" class:hidden={uiState.tool !== tool.id}>
-              <tool.component />
+              {#if ToolComponent}
+                <ToolComponent />
+              {:else if toolErrors[tool.id]}
+                <div class="tool-loading">
+                  <p>{toolErrors[tool.id]}</p>
+                  <button class="btn btn-sm" onclick={() => ensureTool(tool.id)}>Retry</button>
+                </div>
+              {:else}
+                <div class="tool-loading">Loading {tool.label}…</div>
+              {/if}
             </div>
           {/if}
         {/each}
@@ -244,6 +293,10 @@
     color: var(--text-1);
     border-left-color: var(--accent);
   }
+  /* pinned to the foot of the rail, away from the workspace switches */
+  .theme-toggle {
+    margin-top: auto;
+  }
   .canvas {
     flex: 1;
     min-width: 0;
@@ -283,5 +336,15 @@
   }
   .tool-host.hidden {
     display: none;
+  }
+  .tool-loading {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 10px;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
   }
 </style>

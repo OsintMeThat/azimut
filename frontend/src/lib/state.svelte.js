@@ -8,6 +8,7 @@
 import { api } from './api.js';
 import { formatCoords as renderCoords } from './coords.js';
 import { loadWidth, saveWidth, clampWidth } from './sidebar.js';
+import { loadTheme, saveTheme, applyTheme } from './theme.js';
 import { shouldShowUpdate } from './appUpdate.js';
 
 /**
@@ -147,6 +148,7 @@ export async function deleteTemplate(kind, id) {
 
 export const uiState = $state({
   tool: 'media', // 'media' | 'inspect' | 'satellite' | 'proof' | 'post' | 'settings'
+  theme: loadTheme(), // 'dark' | 'light'; index.html stamps it before first paint
   sidebarOpen: true,
   sidebarW: loadWidth(), // px, drag-resizable and remembered across reloads
   toasts: [],
@@ -156,15 +158,29 @@ export const uiState = $state({
   postProof: null, // proof spec handed to the Post Composer
   openProof: null, // proof name to load in the Proof Composer
   openDraft: null, // draft name to load in the Post Composer
+  openNotebook: null, // { noteId: string|null }; null noteId opens case notes.md
   inspectPath: null, // media path to open in the Inspect tool
   focusMedia: null, // media path to highlight & scroll to in the Media Library
   openInspect: null, // inspect-session name to reopen in the Inspect tool
   gotoCoords: null, // { lat, lon } to fly to in the Satellite tool
+  focusCapture: null, // case-relative capture path selected from another workspace
   // Satellite reference viewers: floating scratch windows holding a media image
   // over the map to eyeball against the imagery. Session-only — never captured
   // or saved, and dropped when the open case changes (they point at its media).
   refViewers: [],
 });
+
+/** Switch light/dark, mirror it to <html>, and remember it across reloads. */
+export function setTheme(theme) {
+  uiState.theme = theme === 'light' ? 'light' : 'dark';
+  applyTheme(uiState.theme);
+  saveTheme(uiState.theme);
+}
+
+/** Flip to the other theme. Wired to the rail toggle. */
+export function toggleTheme() {
+  setTheme(uiState.theme === 'light' ? 'dark' : 'light');
+}
 
 /**
  * Resize the case sidebar (px). Clamped against the live window, so a width
@@ -182,9 +198,9 @@ export function persistSidebarWidth() {
 
 let toastSeq = 0;
 
-export function toast(message, kind = 'info', timeout = 3800) {
+export function toast(message, kind = 'info', timeout = 3800, action = null) {
   const id = ++toastSeq;
-  uiState.toasts.push({ id, message, kind });
+  uiState.toasts.push({ id, message, kind, action });
   setTimeout(() => {
     const i = uiState.toasts.findIndex((t) => t.id === id);
     if (i !== -1) uiState.toasts.splice(i, 1);
@@ -211,7 +227,11 @@ export async function openCase(id) {
   caseState.loading = true;
   try {
     // reference viewers point at the previous case's media — drop them
-    if (caseState.current?.id !== id) uiState.refViewers = [];
+    if (caseState.current?.id !== id) {
+      uiState.refViewers = [];
+      uiState.openNotebook = null;
+      uiState.focusCapture = null;
+    }
     caseState.current = await api.get(`/api/cases/${id}`);
     rememberCase(id);
   } finally {

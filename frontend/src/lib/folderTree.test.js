@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { buildTree, subtreeCount, flattenPaths, folderOf } from './folderTree.js';
+import {
+  buildTree, subtreeCount, subtreeCountFrom, flattenPaths, folderOf, isInFolderSubtree,
+} from './folderTree.js';
 
 const ent = (id, folder) => ({ id, attrs: folder ? { folder } : {} });
 
@@ -8,6 +10,16 @@ describe('folderOf', () => {
     expect(folderOf(ent('a', 'x/y'))).toBe('x/y');
     expect(folderOf(ent('b'))).toBeNull();
     expect(folderOf({ id: 'c', attrs: { folder: '' } })).toBeNull();
+  });
+});
+
+describe('isInFolderSubtree', () => {
+  it('includes a folder and its descendants, but not sibling or similarly named folders', () => {
+    expect(isInFolderSubtree(ent('a', 'Sources'), 'Sources')).toBe(true);
+    expect(isInFolderSubtree(ent('b', 'Sources/Telegram'), 'Sources')).toBe(true);
+    expect(isInFolderSubtree(ent('c', 'SourcesElse'), 'Sources')).toBe(false);
+    expect(isInFolderSubtree(ent('d', 'Timeline'), 'Sources')).toBe(false);
+    expect(isInFolderSubtree(ent('e'), 'Sources')).toBe(false);
   });
 });
 
@@ -39,5 +51,15 @@ describe('buildTree', () => {
     // 'A' and 'a' are distinct folders; 'a' keeps its sorted children
     const a = tree.find((n) => n.name === 'a');
     expect(a.children.map((n) => n.name)).toEqual(['B', 'c']);
+  });
+});
+
+describe('subtreeCountFrom', () => {
+  it('sums a folder and its descendants from a by_folder count map', () => {
+    const tree = buildTree(['Sources/Telegram', 'Sources/Signal', 'Timeline'], []);
+    const byFolder = { Sources: 1, 'Sources/Telegram': 3, Timeline: 2 };
+    const sources = tree.find((n) => n.name === 'Sources');
+    expect(subtreeCountFrom(sources, byFolder)).toBe(4); // 1 own + 3 Telegram + 0 Signal
+    expect(subtreeCountFrom(tree.find((n) => n.name === 'Timeline'), byFolder)).toBe(2);
   });
 });

@@ -204,12 +204,12 @@
       <input
         id="case-name"
         class="input"
-        placeholder="e.g. Kharkiv strike — March 2026"
+        placeholder="e.g. March 2026 incident"
         bind:value={nameInput}
         autofocus
       />
       {#if nameTaken}
-        <p class="err">A case with this name already exists — pick another.</p>
+        <p class="err">A case with this name already exists. Pick another.</p>
       {/if}
       <div class="actions">
         <button type="button" class="btn" onclick={() => (modal = null)}>Cancel</button>
@@ -234,9 +234,8 @@
           You will lose everything in “{delTarget.name}”.
         </p>
         <p class="warn-body">
-          This permanently deletes the whole case folder and all its contents —
-          media, satellite crops, proofs, exports and notes. This cannot be
-          undone.
+          This permanently deletes the whole case folder, including its media,
+          satellite crops, proofs, exports and notes. It cannot be undone.
         </p>
       </div>
     </div>
@@ -373,10 +372,6 @@
   }
   .item:hover {
     background: var(--bg-2);
-  }
-  .item.active {
-    background: var(--bg-3);
-    color: var(--text-1);
   }
   .warn {
     display: flex;

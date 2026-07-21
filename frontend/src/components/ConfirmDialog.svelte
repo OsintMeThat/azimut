@@ -55,7 +55,7 @@
       <div class="conseq danger">
         <div class="conseq-h">
           <Icon name="trash" size={12} />
-          <span>Goes with it — nothing is left of these without it</span>
+          <span>Deleted with it because they cannot stand alone</span>
         </div>
         <ul>
           {#each consequences.cascade as item (item.id ?? item.label)}
@@ -68,7 +68,7 @@
       <div class="conseq">
         <div class="conseq-h">
           <Icon name="check" size={12} />
-          <span>Kept — each keeps a record of what it was made from</span>
+          <span>Kept with a record of its missing source</span>
         </div>
         <ul>
           {#each consequences.tombstone as item (item.id ?? item.label)}

@@ -10,16 +10,18 @@
    */
   import { api } from '../lib/api.js';
   import { caseState, reloadCase, toast } from '../lib/state.svelte.js';
-  import { buildTree, subtreeCount, folderOf, flattenPaths } from '../lib/folderTree.js';
+  import { buildTree, subtreeCount, folderOf, flattenPaths, isInFolderSubtree } from '../lib/folderTree.js';
   import { assignFolderBatch } from '../lib/filing.js';
   import { createNote } from '../lib/notes.js';
+  import { openNotebook } from '../lib/navigate.js';
   import { createBookmark } from '../lib/bookmarks.js';
   import { marqueeRect, marqueeHits, toggleSelection } from '../lib/gridSelect.js';
-  import { deletePlan } from '../lib/chain.js';
+  import { fetchAllEntities } from '../lib/catalog.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
+  import FolderSelect from '../components/FolderSelect.svelte';
 
   const TYPE_ICON = {
     media: 'image', capture: 'satellite', note: 'note', proof: 'proof',
@@ -27,13 +29,27 @@
   };
   const VIDEO_EXTS = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v']);
   // Entity types backed by a file on disk — deleting them drops the file too.
-  const FILE_BACKED = new Set(['media', 'capture', 'proof', 'post', 'inspect-session']);
+  const FILE_BACKED = new Set(['media', 'capture', 'proof', 'post', 'inspect-session', 'note']);
 
   // ── case data ──────────────────────────────────────────────────────────────
-  const confirmed = $derived(
-    (caseState.current?.entities ?? []).filter((e) => e.provenance?.status !== 'suggested')
-  );
-  const links = $derived(caseState.current?.links ?? []);
+  // Every filed artifact, read a page at a time off the bounded catalog rather
+  // than the case-open payload. My work is inherently the whole confirmed
+  // catalog, so it fetches the whole slice — but server-side, never shipped in
+  // the open response, and re-read on case change or a save/delete elsewhere.
+  let confirmed = $state([]);
+  $effect(() => {
+    const id = caseState.current?.id;
+    caseState.rev;
+    if (!id) {
+      confirmed = [];
+      return;
+    }
+    let live = true;
+    fetchAllEntities(id, { status: 'confirmed' })
+      .then((list) => { if (live) confirmed = list; })
+      .catch(() => { if (live) confirmed = []; });
+    return () => { live = false; };
+  });
   const tree = $derived(buildTree(caseState.current?.folders ?? [], confirmed));
   const allFolders = $derived(flattenPaths(tree));
   const unfiled = $derived(confirmed.filter((e) => !folderOf(e)));
@@ -91,7 +107,8 @@
     return node;
   }
 
-  // free-text search spans the whole of My work, not just the open folder
+  // Search stays inside the open folder and its subfolders. The root is the
+  // one intentional exception: it represents all of My work.
   let query = $state('');
   const searching = $derived(!!query.trim());
   function matches(e) {
@@ -104,8 +121,11 @@
   }
 
   const current = $derived(showUnfiled ? { path: '', children: [], entities: unfiled } : nodeAt(cwd));
+  const searchScope = $derived(
+    showUnfiled ? unfiled : cwd ? confirmed.filter((e) => isInFolderSubtree(e, cwd)) : confirmed
+  );
   const curFolders = $derived(searching ? [] : current.children);
-  const curEntities = $derived(searching ? confirmed.filter(matches) : current.entities);
+  const curEntities = $derived(searching ? searchScope.filter(matches) : current.entities);
   const entityOrder = $derived(curEntities.map((e) => e.id));
   const crumbs = $derived(cwd ? cwd.split('/') : []);
   // the Unfiled bucket shows as a tile at the root, even when empty (drop here
@@ -282,19 +302,31 @@
     }
   }
 
-  function askDeleteEntities(ids) {
+  async function askDeleteEntities(ids) {
     const ents = confirmed.filter((e) => ids.includes(e.id));
     if (!ents.length) return;
     const multi = ents.length > 1;
+    // The authoritative plan is the backend's; a single delete previews its
+    // dependents endpoint rather than mirroring the whole graph client-side.
+    let consequences = null;
+    if (!multi) {
+      try {
+        consequences = await api.get(
+          `/api/cases/${caseState.current.id}/entities/${ents[0].id}/dependents`
+        );
+      } catch {
+        /* no preview — the delete still enforces the plan server-side */
+      }
+    }
     confirmState = {
       title: multi ? `Delete ${ents.length} items?` : 'Delete everywhere?',
       message: multi
         ? `${ents.length} items will be removed from the case and their tools.`
         : `“${ents[0].label}” will be removed from the case and its tool.`,
       detail: ents.some((e) => FILE_BACKED.has(e.type))
-        ? 'This permanently deletes the underlying file(s) on disk — it cannot be undone.'
-        : 'This permanently removes it from the case — it cannot be undone.',
-      consequences: multi ? null : deletePlan(confirmed, links, ents[0].id),
+        ? 'This permanently deletes the underlying file(s) on disk. It cannot be undone.'
+        : 'This permanently removes it from the case. It cannot be undone.',
+      consequences,
       confirmLabel: multi ? 'Delete all' : 'Delete everywhere',
       tone: 'danger',
       icon: 'trash',
@@ -359,6 +391,14 @@
     }
     ctx = { x: e.clientX, y: e.clientY, kind: 'entity', ids: [...selected] };
   }
+
+  function openEntityTile(entity) {
+    if (entity.type === 'note') {
+      openNotebook(entity.id);
+      return;
+    }
+    infoEntityId = entity.id;
+  }
   function ctxMoveToUnfiled() {
     const ids = ctx?.ids ?? [];
     ctx = null;
@@ -373,10 +413,10 @@
   }
 
   // ── notes ────────────────────────────────────────────────────────────────
-  let noteModal = $state(null); // { folder, title, content }
+  let noteModal = $state(null); // { folder, title }
   let noteSaving = $state(false);
   function openNewNote(folder) {
-    noteModal = { folder: folder ?? '', title: '', content: '' };
+    noteModal = { folder: folder ?? '', title: '' };
   }
   async function saveNote() {
     if (!noteModal || !noteModal.title.trim()) {
@@ -385,10 +425,10 @@
     }
     noteSaving = true;
     try {
-      await createNote(caseState.current.id, noteModal);
+      const note = await createNote(caseState.current.id, noteModal);
       await reloadCase();
-      toast('Note created', 'ok', 1600);
       noteModal = null;
+      openNotebook(note.id);
     } catch (e) {
       toast(e.message, 'danger');
     } finally {
@@ -436,7 +476,7 @@
     <div class="spacer"></div>
     <div class="search-box">
       <Icon name="search" size={13} />
-      <input class="search-input" placeholder="Search My work…" bind:value={query} />
+      <input class="search-input" placeholder={cwd ? 'Search this folder…' : 'Search My work…'} bind:value={query} />
       {#if query}
         <button class="search-clear" onclick={() => (query = '')} aria-label="Clear search">
           <Icon name="x" size={12} />
@@ -591,8 +631,8 @@
               tabindex="0"
               title={e.label}
               onclick={(ev) => onTileClick(ev, e.id)}
-              ondblclick={() => (infoEntityId = e.id)}
-              onkeydown={(ev) => ev.key === 'Enter' && (infoEntityId = e.id)}
+              ondblclick={() => openEntityTile(e)}
+              onkeydown={(ev) => ev.key === 'Enter' && openEntityTile(e)}
               oncontextmenu={(ev) => openEntityCtx(ev, e)}
               ondragstart={(ev) => onTileDragStart(ev, e.id)}
               ondragend={() => { draggingIds = []; dropTarget = null; }}
@@ -756,26 +796,8 @@
     <label class="modal-label" for="fnote-title">Title</label>
     <input id="fnote-title" class="input" placeholder="Note title…" bind:value={noteModal.title} />
 
-    <label class="modal-label" for="fnote-folder" style="margin-top:10px">Folder (in My work)</label>
-    <input
-      id="fnote-folder"
-      class="input"
-      placeholder="e.g. research, timeline, sources…"
-      bind:value={noteModal.folder}
-      list="fnote-folder-suggestions"
-    />
-    <datalist id="fnote-folder-suggestions">
-      {#each allFolders as f (f)}<option value={f}></option>{/each}
-    </datalist>
-
-    <label class="modal-label" for="fnote-content" style="margin-top:10px">Content</label>
-    <textarea
-      id="fnote-content"
-      class="textarea note-content"
-      rows="14"
-      placeholder="Write your notes in markdown…"
-      bind:value={noteModal.content}
-    ></textarea>
+    <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
+    <FolderSelect bind:value={noteModal.folder} folders={allFolders} emptyLabel="My work (root)" />
 
     <div class="modal-row">
       <div style="flex:1"></div>
@@ -796,17 +818,8 @@
     <label class="modal-label" for="fbm-title" style="margin-top:10px">Title</label>
     <input id="fbm-title" class="input" placeholder="Bookmark title…" bind:value={bookmarkModal.title} />
 
-    <label class="modal-label" for="fbm-folder" style="margin-top:10px">Folder (in My work)</label>
-    <input
-      id="fbm-folder"
-      class="input"
-      placeholder="e.g. research, sources…"
-      bind:value={bookmarkModal.folder}
-      list="fbm-folder-suggestions"
-    />
-    <datalist id="fbm-folder-suggestions">
-      {#each allFolders as f (f)}<option value={f}></option>{/each}
-    </datalist>
+    <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
+    <FolderSelect bind:value={bookmarkModal.folder} folders={allFolders} emptyLabel="My work (root)" />
 
     <label class="modal-label" for="fbm-notes" style="margin-top:10px">Notes</label>
     <textarea id="fbm-notes" class="textarea" rows="3" placeholder="Why this page matters…" bind:value={bookmarkModal.notes}></textarea>
@@ -944,12 +957,6 @@
     font-size: var(--fs-xs);
     color: var(--text-3);
     margin: 8px 0 4px;
-  }
-  .note-content {
-    width: 100%;
-    resize: vertical;
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
   }
   .modal-row {
     display: flex;

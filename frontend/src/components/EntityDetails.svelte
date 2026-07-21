@@ -14,10 +14,11 @@
   import { caseState, reloadCase, toast } from '../lib/state.svelte.js';
   import { buildTree, flattenPaths, folderOf } from '../lib/folderTree.js';
   import { assignFolder as fileEntity } from '../lib/filing.js';
-  import { chainOf, deletePlan, DEPENDS_ON } from '../lib/chain.js';
+  import { DEPENDS_ON } from '../lib/chain.js';
   import { openEntity, gotoCapture, ENTITY_TOOL } from '../lib/navigate.js';
   import Icon from './Icon.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
+  import FolderSelect from './FolderSelect.svelte';
 
   let { entityId, onclose, ondeleted } = $props();
 
@@ -33,15 +34,34 @@
   });
   const currentId = $derived(walkedId ?? entityId);
 
-  const entities = $derived(caseState.current?.entities ?? []);
-  const links = $derived(caseState.current?.links ?? []);
-  const entity = $derived(entities.find((e) => e.id === currentId) ?? null);
+  // The entity and its derivation chain come from the bounded chain endpoint
+  // (Step 5), not the whole graph: fetched for the selected/walked id and
+  // refetched after a reload, guarded so a stale response can't overwrite a
+  // newer selection.
+  let chainData = $state(null); // { entity, sources, lost, dependents, empty }
+  let chainSeq = 0;
+  const entity = $derived(chainData?.entity ?? null);
+  const chain = $derived(chainData);
 
-  const confirmed = $derived(entities.filter((e) => e.provenance?.status !== 'suggested'));
-  const allFolders = $derived(flattenPaths(buildTree(caseState.current?.folders ?? [], confirmed)));
+  $effect(() => {
+    const id = currentId;
+    const cid = caseState.current?.id;
+    caseState.rev; // refetch after a save / delete / folder move
+    const mySeq = ++chainSeq;
+    if (!id || !cid) {
+      chainData = null;
+      return;
+    }
+    api
+      .get(`/api/cases/${cid}/entities/${id}/chain`)
+      .then((c) => { if (mySeq === chainSeq) chainData = c; })
+      .catch(() => { if (mySeq === chainSeq) chainData = null; });
+  });
+
+  const allFolders = $derived(flattenPaths(buildTree(caseState.current?.folders ?? [], [])));
 
   // Entity types backed by a file on disk — deleting them drops the file.
-  const FILE_BACKED = new Set(['media', 'capture', 'proof', 'post', 'inspect-session']);
+  const FILE_BACKED = new Set(['media', 'capture', 'proof', 'post', 'inspect-session', 'note']);
   // Every artifact type gets the title/notes editor. Media/captures go through
   // their sidecar PATCH; the rest edit the entity itself.
   const EDITABLE = new Set(['capture', 'place', 'media', 'proof', 'post', 'inspect-session', 'note', 'bookmark']);
@@ -49,8 +69,6 @@
     media: 'media', capture: 'satellite', place: 'pin', proof: 'proof',
     post: 'post', 'inspect-session': 'inspect', note: 'note', bookmark: 'link',
   };
-
-  const chain = $derived(entity ? chainOf(entities, links, entity.id) : null);
 
   // ── resolved listing item (media/satellite) + editable fields ──────────────
   let infoData = $state(null);
@@ -140,16 +158,26 @@
   let confirmState = $state(null);
   let confirmBusy = $state(false);
 
-  function askDeleteEverywhere() {
+  async function askDeleteEverywhere() {
     const e = entity;
     if (!e) return;
+    // The authoritative plan is the backend's; the preview reads its dependents
+    // endpoint rather than mirroring the whole graph client-side.
+    let consequences = { cascade: [], tombstone: [] };
+    try {
+      consequences = await api.get(
+        `/api/cases/${caseState.current.id}/entities/${e.id}/dependents`
+      );
+    } catch {
+      /* no preview — the delete still enforces the plan server-side */
+    }
     confirmState = {
       title: 'Delete everywhere?',
       message: `“${e.label}” will be removed from the case and its tool.`,
       detail: FILE_BACKED.has(e.type)
-        ? 'This permanently deletes the underlying file(s) on disk — it cannot be undone.'
-        : 'This permanently removes it from the case — it cannot be undone.',
-      consequences: deletePlan(entities, links, e.id),
+        ? 'This permanently deletes the underlying file(s) on disk. It cannot be undone.'
+        : 'This permanently removes it from the case. It cannot be undone.',
+      consequences,
       action: async () => {
         await api.del(`/api/cases/${caseState.current.id}/entities/${e.id}`);
         await reloadCase();
@@ -265,8 +293,6 @@
           <span class="info-k">URL</span>
           <a class="mono src" href={entity.attrs.url} target="_blank" rel="noreferrer">{entity.attrs.url}</a>
         </div>
-      {:else if entity.attrs?.content}
-        <div class="info-note-body">{entity.attrs.content}</div>
       {/if}
       {#if entity.attrs?.coords}
         <div class="info-row"><span class="info-k">Coords</span><span class="mono">{entity.attrs.coords}</span></div>
@@ -283,7 +309,7 @@
               <Icon name={ENTITY_ICON[src.type] ?? 'file'} size={12} />
               <span class="chain-label">{src.label}</span>
               {#if type === DEPENDS_ON}
-                <span class="chain-tag" title="This is a view over that item — it cannot outlive it">needs</span>
+                <span class="chain-tag" title="This view cannot outlive that item">needs</span>
               {/if}
             </button>
           {/each}
@@ -320,11 +346,8 @@
       <textarea id="ed-notes" class="textarea" rows="3" bind:value={infoNotes} placeholder="Add observations, links, context…"></textarea>
     {/if}
 
-    <label class="modal-label" for="ed-folder">Folder (My work)</label>
-    <input id="ed-folder" class="input" bind:value={infoFolder} placeholder="none" list="ed-folder-suggestions" />
-    <datalist id="ed-folder-suggestions">
-      {#each allFolders as f (f)}<option value={f}></option>{/each}
-    </datalist>
+    <span class="modal-label">Folder (My work)</span>
+    <FolderSelect bind:value={infoFolder} folders={allFolders} emptyLabel="None" />
 
     <div class="details-actions">
       {#if detailsFilePath}
@@ -337,9 +360,9 @@
           <Icon name="external" size={13} /> Open link
         </a>
       {/if}
-      {#if ENTITY_TOOL[entity.type]}
+      {#if ENTITY_TOOL[entity.type] || entity.type === 'note'}
         <button class="btn btn-ghost btn-sm" onclick={() => { openEntity(entity); onclose?.(); }}>
-          <Icon name="arrowRight" size={13} /> Open in tool
+          <Icon name="arrowRight" size={13} /> {entity.type === 'note' ? 'Open note' : 'Open in tool'}
         </button>
       {/if}
       {#if entity.type === 'capture' && entity.attrs?.lat != null}
@@ -351,7 +374,7 @@
     <div class="details-actions">
       <button
         class="btn btn-ghost btn-sm del"
-        title="Delete everywhere: removes the item and its file(s) from the case"
+        title="Delete this item and its case files"
         onclick={askDeleteEverywhere}
       >
         <Icon name="trash" size={13} /> Delete
@@ -464,11 +487,6 @@
     word-break: break-word;
     max-height: 8.5em;
     overflow-y: auto;
-  }
-  .info-note-body {
-    white-space: pre-wrap;
-    font-size: var(--fs-sm);
-    color: var(--text-2);
   }
   .textarea {
     width: 100%;

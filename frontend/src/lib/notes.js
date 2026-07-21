@@ -1,8 +1,7 @@
 /**
- * Creating a note entity. A note is just an entity of type `note` whose body
- * lives in `attrs.content`; `attrs.folder` files it into a My-work folder
- * (''=unfiled). Lifted out of the case sidebar so the desktop organizer's
- * right-click menu can create notes the same way.
+ * Creating a filed Markdown note. Its title and folder stay on the entity;
+ * its body is written to notes/<entity id>.md by the case API. Lifted out of
+ * the case sidebar so the desktop organizer can create notes the same way.
  *
  * Does not reload the case: the caller refetches once it returns.
  */
@@ -11,9 +10,17 @@ import { api } from './api.js';
 export async function createNote(caseId, { title, folder = '', content = '' }) {
   const label = (title ?? '').trim();
   if (!label) throw new Error('Title required');
-  await api.post(`/api/cases/${caseId}/entities`, {
-    type: 'note',
-    label,
-    attrs: { content: content ?? '', folder: (folder ?? '').trim() },
+  return api.post(`/api/cases/${caseId}/notes`, {
+    title: label,
+    folder: (folder ?? '').trim(),
+    content: content ?? '',
   });
+}
+
+export function resetCaseNotes(caseId) {
+  return api.put(`/api/cases/${caseId}/notes`, { text: '' });
+}
+
+export function deleteNote(caseId, noteId) {
+  return api.del(`/api/cases/${caseId}/entities/${noteId}`);
 }

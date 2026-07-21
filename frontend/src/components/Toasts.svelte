@@ -4,6 +4,15 @@
   import { portal } from '../lib/fullscreen.js';
 
   const icons = { info: 'compass', ok: 'check', danger: 'alert', warn: 'alert' };
+
+  function activate(t) {
+    try {
+      t.action?.onClick?.();
+    } finally {
+      const index = uiState.toasts.findIndex((item) => item.id === t.id);
+      if (index !== -1) uiState.toasts.splice(index, 1);
+    }
+  }
 </script>
 
 <div class="toasts" use:portal>
@@ -11,6 +20,11 @@
     <div class="toast {t.kind}">
       <Icon name={icons[t.kind] ?? 'compass'} size={15} />
       <span>{t.message}</span>
+      {#if t.action}
+        <button class="toast-action" type="button" onclick={() => activate(t)}>
+          {t.action.label}
+        </button>
+      {/if}
     </div>
   {/each}
 </div>
@@ -52,5 +66,24 @@
   .toast.warn {
     border-color: var(--warn);
     color: var(--warn);
+  }
+  .toast-action {
+    pointer-events: auto;
+    margin-left: 4px;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+  .toast-action:hover,
+  .toast-action:focus-visible {
+    color: var(--text);
   }
 </style>

@@ -10,14 +10,33 @@
  * layer (today the case sidebar covers it).
  */
 export const WORKSPACES = [
-  { id: 'collect', label: 'Collect', icon: 'download', tools: ['media', 'files', 'reverse'] },
+  { id: 'collect', label: 'Sources', icon: 'download', tools: ['media', 'files', 'reverse'] },
   { id: 'examine', label: 'Examine', icon: 'inspect', tools: ['inspect'] },
   { id: 'map', label: 'Map', icon: 'satellite', tools: ['satellite', 'coordinates'] },
-  { id: 'compose', label: 'Compose', icon: 'proof', tools: ['proof', 'post'] },
+  { id: 'compose', label: 'Compose', icon: 'proof', tools: ['proof', 'post', 'notebook'] },
 ];
+
+export const TOOL_LABELS = {
+  media: 'Media',
+  files: 'Files',
+  reverse: 'Reverse Search',
+  inspect: 'Inspect',
+  satellite: 'Satellite',
+  coordinates: 'Coordinates',
+  proof: 'Geo Proof',
+  post: 'Geo Report',
+  notebook: 'Notebook',
+  settings: 'Settings',
+};
 
 export function workspaceOf(tool) {
   return WORKSPACES.find((w) => w.tools.includes(tool)) ?? null;
+}
+
+/** Return the session's sidebar state for a workspace, falling back to defaults. */
+export function sidebarOpenForWorkspace(workspaceId, remembered = {}) {
+  if (remembered[workspaceId] !== undefined) return remembered[workspaceId];
+  return workspaceId !== 'map';
 }
 
 /**

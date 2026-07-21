@@ -120,7 +120,7 @@
       steps: [
         'Register (free) on dataspace.copernicus.eu, then open the Sentinel Hub Dashboard.',
         'Configuration Utility → New configuration, based on "Simple Sentinel-2 L2A template".',
-        'Open it and turn Show logo and Show warnings OFF — both are burned into every tile.',
+        'Open it and turn off Show logo and Show warnings. Both are burned into every tile.',
         'Copy the ID under "Service endpoints" and paste it here.',
       ],
       overage:
@@ -194,7 +194,7 @@
       toast('Pairing token copied', 'ok');
     } catch {
       tokenShown = true; // clipboard blocked — show it for manual copy
-      toast('Could not copy — the token is shown for manual copy', 'warn');
+      toast('Could not copy. The token is shown for manual copy', 'warn');
     }
   }
 
@@ -211,7 +211,7 @@
   async function rotateToken() {
     const r = await api.post('/api/settings/ingest-token/rotate');
     ingestToken = r.ingest_token;
-    toast('New token minted — every paired extension must re-pair', 'ok', 6000);
+    toast('New token minted. Every extension must pair again', 'ok', 6000);
   }
   // the home-view fields are edited as text, so a half-typed "-" or "48." isn't
   // fought by the number parser mid-keystroke; committed on change
@@ -321,7 +321,7 @@
     try {
       const r = await api.del(`/api/settings/scrapers/${dist}`);
       await loadScrapers();
-      if (r.restart_required) toast(`${dist} reverted — restart Azimut to use it`, 'warn');
+      if (r.restart_required) toast(`${dist} reverted. Restart Azimut to use it`, 'warn');
       else toast(`${dist} reverted to the bundled version`, 'ok');
     } catch (e) {
       toast(`${dist}: ${e.message}`, 'danger');
@@ -581,7 +581,7 @@
         if (bound && bound !== keys[id].trim()) {
           testResult[id] = {
             ok: false,
-            detail: 'Google Maps is already loaded with the previous key — reload the app (F5), then test',
+            detail: 'Google Maps still has the previous key. Reload the app (F5), then test.',
           };
         } else {
           const url = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(keys[id].trim())}&v=weekly`;
@@ -647,7 +647,7 @@
           </div>
           <p class="sample mono">{coordSample}</p>
           <p class="note">
-            Display only — captures, proofs and <span class="mono">case.json</span> always
+            Display only. Captures, proofs and <span class="mono">case.json</span> always
             keep decimal degrees, so a case reads the same for everyone.
           </p>
         </section>
@@ -678,7 +678,7 @@
           <h3>Satellite home view</h3>
           <p class="intro">
             Where the Satellite tab opens. A case artifact or a “go to coordinates”
-            handoff still wins — this is only the starting point.
+            handoff still wins. This is only the starting point.
           </p>
           <div class="grid-3">
             <label class="field">
@@ -697,7 +697,7 @@
         </section>
 
         <section class="group">
-          <h3>Post composer</h3>
+          <h3>Geo Report</h3>
           <div class="row">
             <div class="row-label">
               <span>Default mention</span>
@@ -714,7 +714,7 @@
           <div class="row">
             <div class="row-label">
               <span>Preferred platform</span>
-              <span class="row-hint">Used for new post drafts.</span>
+              <span class="row-hint">Used for new Geo Report drafts.</span>
             </div>
             <div class="seg" role="group" aria-label="Preferred platform">
               {#each Object.values(POST_TARGETS) as option (option.id)}
@@ -751,7 +751,7 @@
             <div class="row-label">
               <span>Your logo</span>
               <span class="row-hint">
-                A transparent PNG, under 2 MB. Stays on this machine — the proof
+                A transparent PNG under 2 MB. It stays on this machine. The proof
                 composer stamps it onto proofs you tick “Signature” on, and
                 nothing else ever carries it.
               </span>
@@ -784,7 +784,7 @@
         <section class="group">
           <h3>Providers</h3>
           <p class="intro">
-            Optional. The built-in basemaps (Esri, OSM, OpenTopoMap) never need a key — your own
+            Optional. The built-in basemaps (Esri, OSM, OpenTopoMap) never need a key. Your own
             Mapbox / Google / Copernicus accounts just unlock extra ones in the Satellite tab.
             Keys stay in <span class="mono">settings.json</span> on this machine, never in a case
             or an export, and Azimut counts every request it sends so a free tier is never a
@@ -902,13 +902,13 @@
                       </p>
                     {/if}
 
-                    <p class="overage">{k.cost} — {k.overage}</p>
+                    <p class="overage">{k.cost}. {k.overage}</p>
 
                     {#if keys[k.id] || count}
                       {#if usageBlocked(count, k.id, overrides, tiers)}
                         <p class="blocked">
                           <Icon name="alert" size={12} />
-                          Paused at {Math.round(BLOCK_SHARE * 100)}% of the free tier — the map and
+                          Paused at {Math.round(BLOCK_SHARE * 100)}% of the free tier. The map and
                           captures fall back to free imagery until next month, or:
                         </p>
                       {/if}
@@ -930,7 +930,7 @@
                         <label
                           class="ctrl"
                           title={k.tierNote ??
-                            "What this account's monthly free allowance really is — check the provider's dashboard"}
+                            "This account's monthly free allowance. Check the provider dashboard"}
                         >
                           <span>Free allowance</span>
                           <input
@@ -956,7 +956,7 @@
                         {:else}
                           <label
                             class="ctrl"
-                            title="Threshold for this basemap (blank inherits the global one, 0 turns eco off)"
+                            title="Blank uses global; 0 disables eco mode"
                           >
                             <span>Eco below z ≤</span>
                             <input
@@ -990,7 +990,7 @@
           </div>
 
           <div class="cards-foot">
-            <span class="row-hint">Counters for {month} — local bookkeeping, never sent anywhere.</span>
+            <span class="row-hint">Counters for {month}. Stored locally.</span>
             <button class="btn btn-ghost btn-sm" onclick={() => load()} title="Refresh counters">
               <Icon name="reset" size={13} /> Refresh
             </button>
@@ -1031,7 +1031,7 @@
               >
                 <Icon name={termsOpen ? 'chevronDown' : 'chevronRight'} size={13} />
                 <span class="card-name">Provider terms</span>
-                <span class="card-gives">Encoded — nothing to do</span>
+                <span class="card-gives">Encoded; nothing to do</span>
               </button>
             </div>
             {#if termsOpen}
@@ -1063,7 +1063,7 @@
                     · update bundled (<span class="mono">v{about.extension_version}</span>)
                   {/if}
                 {:else}
-                  not detected — after installing, reload this tab
+                  not detected. After installing, reload this tab
                 {/if}
               </span>
             </div>
@@ -1108,7 +1108,7 @@
           </div>
           <p class="note">
             The token only authorizes filing captures into this Azimut on
-            <span class="mono">127.0.0.1</span> — nothing leaves your machine. The
+            <span class="mono">127.0.0.1</span>. Nothing leaves your machine. The
             extension takes one screenshot per explicit click, reads only the page
             URL, and refuses non-map sites.
           </p>
@@ -1157,7 +1157,7 @@
               <span>Check for a newer release</span>
               <span class="row-hint">
                 {#if appUpdate?.update_available}
-                  <span class="mono">{appUpdate.latest}</span> is out — you have
+                  <span class="mono">{appUpdate.latest}</span> is out. You have
                   <span class="mono">{about.version}</span>
                 {:else if appUpdate && !appUpdate.error}
                   you're on the latest (<span class="mono">{about.version}</span>)
@@ -1194,7 +1194,7 @@
           <p class="note">
             A <span class="mono">pip</span> or <span class="mono">pipx</span> install updates with
             <span class="mono">pipx upgrade azimut</span>. For the standalone binary, download the new
-            release and replace the file — your cases under the workspace are untouched.
+            release and replace the file. Your cases under the workspace are untouched.
           </p>
         </section>
 
@@ -1225,7 +1225,7 @@
           <h3>Downloaders</h3>
           <p class="note">
             Media download leans on two projects that track sites as they change. They
-            age faster than Azimut does — if a link stops resolving, update these first.
+            age faster than Azimut does. Update these first if a link stops resolving.
           </p>
           {#each scrapers as s (s.dist)}
             <div class="row">
@@ -1277,9 +1277,9 @@
 
       {#if tab === 'templates'}
         <section class="group">
-          <h3>Proof templates</h3>
+          <h3>Geo Proof templates</h3>
           <p class="note">
-            A proof's house style — background, margins, text sizes, footer,
+            A proof's house style: background, margins, text sizes, footer,
             signature placement and preferred colours. New proofs can start
             from one. Shared across every case.
           </p>
@@ -1308,9 +1308,9 @@
         </section>
 
         <section class="group">
-          <h3>Post templates</h3>
+          <h3>Geo Report templates</h3>
           <p class="note">
-            A thread skeleton — the mention, which lines the first tweet keeps,
+            A thread skeleton: the mention, which lines the first tweet keeps,
             whether a media tweet rides along, and boilerplate extra tweets.
           </p>
           <div class="tpl-list">

@@ -1,5 +1,6 @@
 <script>
   import { api } from '../lib/api.js';
+  import { lookupEntity } from '../lib/catalog.js';
   import { caseState, uiState, ensureCase, reloadCase, toast } from '../lib/state.svelte.js';
   import { visibleMedia, SORTS } from '../lib/mediaFilter.js';
   import Icon from '../components/Icon.svelte';
@@ -88,6 +89,15 @@
   let focusScrolledFor = null;
   let focusTimer;
 
+  // --- thumbnails still generating in the background ---
+  // A broken <img> (a thumbnail evicted by the cache budget between list and
+  // render) falls back to the type icon, reported once by dropping the path in
+  // here — it does not retry on every render.
+  let brokenThumbs = $state(new Set());
+  const thumbsPending = $derived(
+    items.some((i) => i.thumb_state === 'queued' || i.thumb_state === 'running')
+  );
+
   $effect(() => {
     const id = caseState.current?.id;
     caseState.rev; // also refetch when the case is reloaded elsewhere (e.g. sidebar edit)
@@ -129,6 +139,43 @@
 
   async function refresh(id = caseState.current?.id) {
     if (id) items = await api.get(`/api/cases/${id}/media`);
+  }
+
+  // While the single worker is still generating thumbnails (video frames, or a
+  // regenerate), re-list to pick up readiness — only while the tool is visible,
+  // and the poll stops on its own once nothing is pending.
+  $effect(() => {
+    if (!thumbsPending || uiState.tool !== 'media' || !caseState.current) return;
+    const t = setTimeout(() => refresh(), 1500);
+    return () => clearTimeout(t);
+  });
+
+  // Queue (re)generation: a single failed thumbnail (path given) or every
+  // missing/failed one across the case. The worker drains the queue; the poll
+  // above reflects each result as it lands.
+  async function regenerateThumbs(path = null) {
+    const id = caseState.current?.id;
+    if (!id) return;
+    try {
+      const { queued } = await api.post(
+        `/api/cases/${id}/media/thumbnails/regenerate`,
+        path ? { path } : {}
+      );
+      if (path) {
+        const next = new Set(brokenThumbs);
+        next.delete(path);
+        brokenThumbs = next;
+      }
+      await refresh();
+      if (!path) {
+        toast(
+          queued ? `Regenerating ${queued} thumbnail${queued > 1 ? 's' : ''}` : 'Thumbnails are up to date',
+          queued ? 'info' : 'ok'
+        );
+      }
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
   }
 
   async function importFiles(fileList) {
@@ -265,8 +312,8 @@
 
   // Open the shared details editor (same body as the case sidebar) for this
   // file's case entity — full provenance, derivation chain, title/notes/folder.
-  function openInfo(item) {
-    const ent = (caseState.current?.entities ?? []).find((e) => e.attrs?.path === item.path);
+  async function openInfo(item) {
+    const ent = await lookupEntity(caseState.current?.id, 'path', item.path);
     if (ent) infoEntityId = ent.id;
     else toast('This file has no case entity yet', 'warn');
   }
@@ -306,6 +353,14 @@
     </form>
     <button class="btn" onclick={() => fileInput.click()}>
       <Icon name="upload" size={15} /> Import
+    </button>
+    <button
+      class="btn"
+      onclick={() => regenerateThumbs()}
+      title="Regenerate missing or failed thumbnails"
+      disabled={!items.length}
+    >
+      <Icon name="reset" size={15} /> Thumbnails
     </button>
     <input
       type="file"
@@ -418,6 +473,8 @@
             data-path={item.path}
           >
             <!-- thumbnail — click to lightbox for images -->
+            <!-- The role and tab stop deliberately exist only for image previews. -->
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
             <div
               class="thumb"
               class:clickable={item.kind === 'image'}
@@ -427,12 +484,31 @@
               onkeydown={(e) => e.key === 'Enter' && item.kind === 'image' && (lightboxItem = item)}
               aria-label={item.kind === 'image' ? `Preview ${item.filename}` : undefined}
             >
-              {#if item.thumbnail}
+              {#if item.thumbnail && item.thumb_state === 'ready' && !brokenThumbs.has(item.path)}
                 <img
                   src={`/files/${caseState.current.id}/${item.thumbnail}`}
                   alt={item.filename}
                   loading="lazy"
+                  decoding="async"
+                  onerror={() => (brokenThumbs = new Set(brokenThumbs).add(item.path))}
                 />
+              {:else if item.thumb_state === 'queued' || item.thumb_state === 'running'}
+                <div class="thumb-status">
+                  <Icon name="clock" size={22} />
+                  <span>Generating…</span>
+                </div>
+              {:else if item.thumb_state === 'failed'}
+                <button
+                  class="thumb-status thumb-retry"
+                  title="Retry thumbnail"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    regenerateThumbs(item.path);
+                  }}
+                >
+                  <Icon name="reset" size={20} />
+                  <span>Retry</span>
+                </button>
               {:else}
                 <Icon name={KIND_ICONS[item.kind] ?? 'file'} size={34} />
               {/if}
@@ -485,7 +561,7 @@
               {#if item.kind === 'image'}
                 <button
                   class="btn btn-ghost btn-sm"
-                  title="Send to Proof Composer"
+                  title="Send to Geo Proof"
                   onclick={() => sendToComposer(item)}
                 >
                   <Icon name="proof" size={14} />
@@ -567,7 +643,8 @@
 {#if lightboxItem}
   <div
     class="lightbox"
-    onclick={() => (lightboxItem = null)}
+    onclick={(e) => e.target === e.currentTarget && (lightboxItem = null)}
+    onkeydown={(e) => e.key === 'Escape' && (lightboxItem = null)}
     role="dialog"
     aria-label="Image preview"
     tabindex="-1"
@@ -596,7 +673,6 @@
     <img
       src={`/files/${caseState.current.id}/${lightboxItem.path}`}
       alt={lightboxItem.filename}
-      onclick={(e) => e.stopPropagation()}
     />
     <span class="lb-caption">
       {lightboxItem.title ?? lightboxItem.filename}
@@ -612,7 +688,7 @@
   <ConfirmDialog
     title="Delete this media?"
     message={`“${deleteTarget.title ?? deleteTarget.filename}” and its entity will be removed from the case.`}
-    detail="This permanently deletes the file on disk — it cannot be undone."
+    detail="This permanently deletes the file on disk. It cannot be undone."
     confirmLabel="Delete"
     tone="danger"
     busy={deleteBusy}
@@ -785,19 +861,56 @@
   }
   .thumb {
     position: relative;
+    width: 100%;
     aspect-ratio: 16 / 10;
+    min-width: 0;
+    min-height: 0;
     background: var(--bg-2);
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--text-3);
+    overflow: hidden;
+    flex: 0 0 auto;
   }
   .thumb.clickable {
     cursor: zoom-in;
   }
+  .thumb-status {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    background: none;
+    border: none;
+  }
+  .thumb-status :global(svg) {
+    opacity: 0.85;
+    animation: thumb-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes thumb-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 0.9; }
+  }
+  .thumb-retry {
+    cursor: pointer;
+  }
+  .thumb-retry:hover {
+    color: var(--text-1);
+  }
+  .thumb-retry :global(svg) {
+    animation: none;
+  }
   .thumb img {
+    position: absolute;
+    inset: 0;
+    display: block;
     width: 100%;
     height: 100%;
+    min-width: 0;
+    min-height: 0;
     object-fit: cover;
   }
   .kind {

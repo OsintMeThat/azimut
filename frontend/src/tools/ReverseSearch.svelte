@@ -112,7 +112,7 @@
   async function copySelection() {
     try {
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob() })]);
-      toast(`Copied the ${frameLabel} — paste it (Ctrl+V) in the tab`, 'ok', 4500);
+      toast(`Copied the ${frameLabel}. Paste it in the tab with Ctrl+V`, 'ok', 4500);
     } catch (e) {
       toast(e.message || 'Could not copy the image', 'warn');
     }
@@ -127,7 +127,7 @@
       a.download = `reverse-${base}.png`;
       a.click();
       URL.revokeObjectURL(a.href);
-      toast(`Saved the ${frameLabel} — drag it into the tab`, 'ok', 4500);
+      toast(`Saved the ${frameLabel}. Drag it into the tab`, 'ok', 4500);
     } catch (e) {
       toast(e.message || 'Could not save the image', 'warn');
     }
