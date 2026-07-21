@@ -205,3 +205,4 @@ def test_worker_wakes_and_drains_in_the_background(tmp_workspace, monkeypatch):
         time.sleep(0.05)
     refreshed = media_engine.read_item(c, item["path"])
     assert refreshed["thumbnail"] and c.resolve_inside(refreshed["thumbnail"]).exists()
+    assert thumbnails.wait_until_idle()

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -235,6 +236,23 @@ def wake(case: "CaseType") -> None:
             return
         _worker_running = True
     threading.Thread(target=_run_loop, name="thumbnail-worker", daemon=True).start()
+
+
+def wait_until_idle(timeout: float = 5.0) -> bool:
+    """Wait for the shared worker to finish its current queue, if any.
+
+    This is mainly useful for orderly shutdown and deterministic callers that
+    need to remove a case directory after queuing work. It never interrupts an
+    active render; ``False`` means the caller's timeout elapsed first.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with _worker_lock:
+            if not _worker_running:
+                return True
+        time.sleep(0.01)
+    with _worker_lock:
+        return not _worker_running
 
 
 # -- cache maintenance -----------------------------------------------------
