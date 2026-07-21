@@ -123,9 +123,9 @@ def test_update_endpoint_with_check_queries_github(client, monkeypatch):
 
 def test_bundled_extension_version_matches_manifest():
     # The repo checkout's extension/manifest.json is the source of truth here.
-    assert bundled_extension_version() == "0.2.0"
+    assert bundled_extension_version() == __version__
 
 
 def test_settings_reports_extension_version(client):
     body = client.get("/api/settings").json()
-    assert body["extension_version"] == "0.2.0"
+    assert body["extension_version"] == __version__

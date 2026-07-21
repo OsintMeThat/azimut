@@ -53,3 +53,6 @@ AGENTS.md
 # PyInstaller local output
 dist-bin/
 build-bin/
+
+# Native binaries downloaded by the release workflow
+packaging/vendor/

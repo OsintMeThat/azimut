@@ -9,7 +9,7 @@ case is a plain folder that can be reopened, archived or shared.
 *The name is the French word for azimuth, the compass bearing you sight along
 to fix a point on the map.*
 
-## v0.2.0: Proof Studio and post outputs
+## v0.2.1: Scalable case workspace
 
 | Tool | What it does |
 |------|--------------|
@@ -22,20 +22,22 @@ to fix a point on the map.*
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
 
-New in v0.2.0:
+New in v0.2.1:
 
-- Settings → Templates stores reusable proof house styles and post-thread
-  skeletons. Proof templates cover background, spacing, text, footer, signature
-  placement, and preferred colours; post templates cover the mention, tweet-1
-  fields, media tweet, and extra tweets.
-- Geo Proof can start a named proof, search and filter case panels, apply a
-  template, arrange panels horizontally or vertically, and draw freehand marks.
-- Geo Report prepares the same thread for X, Bluesky, or Mastodon, groups
-  selected media safely, and saves a structured Markdown case note with
-  clickable case entities and embedded local evidence. Its save confirmation
-  includes an `OPEN` action for the new note.
-- Draft and template storage validates bounds and paths before writing, with
-  atomic template saves and efficient multi-source link updates.
+- Existing JSON case graphs migrate automatically to per-case SQLite on open.
+  Media, notes and proofs remain ordinary files, the original graph is retained
+  as a recoverable backup, and a closed case folder stays portable.
+- The case sidebar now loads a bounded catalog, with folders, suggestions and
+  unfiled work fetched as needed. Video thumbnails use a durable one-worker
+  queue, so large cases remain responsive.
+- Case Notebook adds tabbed Markdown notes with local media, linked evidence,
+  broken-reference markers and a print-ready PDF view.
+- Geo Proof, Geo Report, Inspect and Satellite now have clearer, componentised
+  canvas workflows. Browser tests exercise real Konva and Leaflet gestures in
+  Chromium and Firefox.
+- Release builds now use the lock for distribution tooling, smoke-test the
+  launched binary and verify its bundled `ffmpeg` and `ffprobe`. The local
+  relaunch helper works on Windows, Linux and macOS.
 
 ## Install & run
 
@@ -195,7 +197,7 @@ wheel + Windows/Linux/macOS binaries, attaches them to a GitHub release, and
 publishes to PyPI. **Don't publish by hand.**
 
 ```bash
-git tag v0.2.0 && git push origin v0.2.0
+git tag v0.2.1 && git push origin v0.2.1
 ```
 
 One-time setup: register the repo as a

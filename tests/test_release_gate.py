@@ -22,7 +22,7 @@ from pathlib import Path
 from bigcase import build_big_case
 from legacy_case import write_legacy_json_case
 
-from azimut import workspace
+from azimut import __version__, workspace
 from azimut.engine import links as link_engine
 from azimut.engine import media as media_engine
 from azimut.engine import thumbnails
@@ -173,6 +173,7 @@ def test_case_db_lives_under_the_workspace_root(tmp_workspace):
 
 def test_release_tooling_is_bounded_and_built_from_the_lock():
     cfg = _pyproject()
+    assert cfg["project"]["version"] == __version__
     assert cfg["build-system"]["requires"] == ["hatchling>=1.27,<2"]
     release = cfg["dependency-groups"]["release"]
     assert any(dep.startswith("build>=") and "<2" in dep for dep in release)
@@ -189,6 +190,12 @@ def test_release_tooling_is_bounded_and_built_from_the_lock():
     assert "--no-build-isolation" in workflow
     assert "--no-editable" in workflow
     assert "uv run python" not in workflow
+    assert "body_path: docs/RELEASE_NOTES.md" in workflow
+    release_job = workflow.split("  release:\n", maxsplit=1)[1]
+    assert release_job.index("actions/checkout@v4") < release_job.index(
+        "softprops/action-gh-release@v2"
+    )
+    assert (root / "docs" / "RELEASE_NOTES.md").is_file()
 
 
 def test_release_binary_runs_the_application_smoke_test():
