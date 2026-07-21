@@ -9,7 +9,8 @@ from pydantic import BaseModel, HttpUrl
 
 from .. import jobs
 from ..engine import media as media_engine
-from ..workspace import CaseError
+from ..engine import thumbnails as thumbnail_engine
+from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
 
 router = APIRouter(prefix="/api", tags=["media"])
@@ -32,9 +33,61 @@ class UpdateIn(BaseModel):
     title: str | None = None
 
 
+class ThumbRegenIn(BaseModel):
+    path: str | None = None
+
+
+def _with_thumb_state(case: Case, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Tag each media item with a ``thumb_state`` the grid renders: ``ready`` when
+    the cached file is present, ``queued``/``running``/``failed`` from its
+    thumbnail job while the worker is on it, else ``none`` (no thumbnail, e.g. an
+    audio file, or one pruned from the cache). A referenced-but-missing thumbnail
+    (evicted by the budget) is reported as absent so the grid falls back cleanly.
+    """
+    jobs_by_path = {j["key"]: j for j in case.list_jobs(kind=thumbnail_engine.THUMB_KIND)}
+    for item in items:
+        thumb = item.get("thumbnail")
+        if thumb and case.resolve_inside(thumb).exists():
+            item["thumb_state"] = "ready"
+            continue
+        item["thumbnail"] = None
+        if item.get("kind") not in thumbnail_engine.THUMBNAILED_KINDS:
+            item["thumb_state"] = "none"
+        else:
+            job = jobs_by_path.get(item["path"])
+            item["thumb_state"] = (
+                job["state"] if job and job["state"] in ("queued", "running", "failed") else "none"
+            )
+    return items
+
+
 @router.get("/cases/{case_id}/media")
 def list_media(case_id: str) -> list[dict[str, Any]]:
-    return media_engine.list_media(get_case(case_id))
+    case = get_case(case_id)
+    return _with_thumb_state(case, media_engine.list_media(case))
+
+
+@router.post("/cases/{case_id}/media/thumbnails/regenerate")
+def regenerate_thumbnails(case_id: str, body: ThumbRegenIn) -> dict[str, int]:
+    """Queue (re)generation of thumbnails. With a ``path`` it re-queues that one
+    item — the per-card retry for a failed thumbnail. Without one it queues every
+    thumbnailable item whose cached thumbnail is missing or failed, skipping the
+    ones already ready. The single worker drains the queue one at a time.
+    """
+    case = get_case(case_id)
+    items = media_engine.list_media(case)
+    if body.path is not None:
+        targets = [i["path"] for i in items if i["path"] == body.path]
+    else:
+        targets = [
+            i["path"]
+            for i in items
+            if i.get("kind") in thumbnail_engine.THUMBNAILED_KINDS
+            and not (i.get("thumbnail") and case.resolve_inside(i["thumbnail"]).exists())
+        ]
+    for path in targets:
+        thumbnail_engine.enqueue(case, path)
+    return {"queued": len(targets)}
 
 
 @router.post("/cases/{case_id}/media/upload")

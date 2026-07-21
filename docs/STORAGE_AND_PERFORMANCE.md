@@ -1,70 +1,53 @@
-# Case storage and performance migration
+# Case storage and performance
 
-This document plans the move from a monolithic `case.json` to a per-case
-SQLite database. The goal is to keep every existing workflow intact while
-making large cases comfortable on modest computers.
+This document describes current case storage and the controls that keep large
+cases responsive. The migration from a monolithic `case.json` graph to per-case
+SQLite is complete.
 
-The migration changes structured case data only. Images, videos, proof PNGs,
-drafts and saved Inspect sessions remain ordinary files inside the case
-folder.
+Structured case data lives in SQLite. Images, videos, proof PNGs, drafts, saved
+Inspect sessions and note bodies remain ordinary files inside the case folder.
 
-## Goals
-
-- Open a case without loading its full catalog into Python or the browser.
-- Keep metadata edits fast as the number of entities and links grows.
-- Bound CPU and memory use during thumbnail generation and media analysis.
-- Preserve the current local-first, portable case folder.
-- Migrate old cases automatically without moving or rewriting their media.
-- Give future EXIF, OCR, transcript, timeline, map and evidence tools one
-  durable storage and job model.
-- Keep unknown entity and link types readable so the ontology remains
-  extensible.
-
-## Non-goals
-
-- Media bytes do not move into SQLite.
-- Migration does not change image or video codecs.
-- SQLite is not a reason to load every row and render every card at once.
-- This work does not add cloud storage, telemetry or background network calls.
-- The first migration does not need to implement every future entity
-  attribute. It must leave room for versioned additions.
-
-## Target case layout
+## The shape of a case
 
 ```text
-case.json       # small manifest: name, dates, format and compatibility
-case.db         # entities, links, folders, catalog, jobs and events
-notes.md        # current case notes; later indexed for Case Notebook
-media/          # imported, downloaded and derived media
+case.json       # small manifest: name, dates, storage format and schema
+case.db         # entities, links, folders, catalog and jobs (SQLite)
+notes.md        # case-wide Markdown note
+notes/          # filed Markdown note bodies (one file per note entity)
+media/          # imported, downloaded and derived media + sidecars
+  .dl/          #   in-progress downloads (transient)
+  .thumbs/      #   disposable thumbnail cache
 proofs/         # editable proof specs and rendered PNGs
-exports/        # post drafts, reports and case bundles
+exports/        # post drafts and reports
 inspect/        # saved Inspect session specs
-.thumbs/        # disposable thumbnail cache
-evidence.jsonl  # future portable evidence journal
+search/         # saved Grid Search state
 ```
 
-`case.json` remains the discovery manifest. It owns the case name, creation
-date and storage compatibility fields. It no longer contains the entity graph.
-Keeping this small file lets the case switcher identify a case without opening
-its database.
+`case.json` is the discovery manifest: name, creation date, and the storage and
+schema fields. It no longer holds the graph, so the case switcher can identify a
+case without opening its database. `case.db` is the source of truth for mutable
+structured state (entities, links, folders, jobs). The files under `media/`,
+`proofs/`, `exports/`, `inspect/` and `notes/` are the source of truth for their
+own content.
 
-`case.db` becomes the source of truth for mutable structured state. The files
-under `media/`, `proofs/`, `exports/` and `inspect/` remain the source of truth
-for their content.
+Every mutation used to re-read and rewrite the whole `case.json` under a per-case
+lock. At 10k entities that rewrote megabytes per edit and shipped the entire
+graph to the browser on open. SQLite removes both ceilings: a single edit touches
+one row in one short transaction, and case open ships a manifest instead of a
+graph.
 
-Media sidecars keep immutable acquisition and technical metadata that belongs
-with a file. Mutable catalog fields such as title, notes and folder move to
-the database. The migration imports existing values and the storage layer
-becomes the only code allowed to change them.
+## Source of truth
 
-This is a deliberate change to the current SPEC rule that limits SQLite to
-rebuildable caches. `docs/SPEC.md` and `docs/ONTOLOGY.md` must be updated in the
-implementation change that activates the new format.
+`case.db` owns the graph. Portability currently means copying the complete case
+folder while it is closed; rollback journaling leaves no WAL checkpoint outside
+that folder. Media, proofs and note bodies remain inspectable files. A future
+case ZIP workflow will package and import this same folder without creating a
+second writable copy.
 
 ## Ownership rules
 
-Each value has one owner. Cached copies may exist, but they must be disposable
-and carry enough information to detect when they are stale.
+Each value has one owner. Cached copies may exist, but they are disposable and
+carry enough information to detect staleness.
 
 | Data | Owner | Notes |
 |---|---|---|
@@ -74,304 +57,234 @@ and carry enough information to detect when they are stale.
 | Image, video and audio bytes | Filesystem | Never stored as database blobs |
 | Proof and session content | Their JSON/PNG files | Registered as artifacts in the database |
 | Acquisition provenance | Media sidecar | Immutable after registration |
-| Search rows | SQLite index tables | Rebuildable from owned data |
-| Thumbnails | `.thumbs/` | Cache; safe to remove at any time |
-| Cross-case search | Workspace index | Rebuildable from each case |
-| Evidence export | `evidence.jsonl` | Produced from committed event records |
+| Background jobs | `case.db` (`jobs`) | Durable, recoverable, one worker |
+| Thumbnails | `media/.thumbs/` | Cache; safe to remove at any time |
+| Note bodies | `notes.md`, `notes/<id>.md` | Graph keeps only id, title, folder, path |
+
+## Packaging and frozen-binary constraints
+
+The same storage layer serves `pip install azimut` and PyInstaller binaries for
+Windows, macOS and Linux:
+
+- **No runtime dependency was added.** SQLite is the stdlib `sqlite3` module,
+  already bundled by PyInstaller; the durable queue and thumbnail worker use only
+  `threading`/`subprocess`/`sqlite3` plus the already-declared Pillow. The three
+  binaries build unchanged. `tests/test_release_gate.py` guards this.
+- **Feature availability is per-binary, not per-Python.** `sqlite3` links whatever
+  SQLite the build environment provides, so FTS5, JSON1 and RTree can be present
+  on the dev machine yet missing from a shipped binary. The store stays on core
+  SQL: `find_entity` scans and matches attributes in Python rather than relying on
+  JSON1. Any future indexed projection (geo, time, full-text) is probed at runtime
+  with a `LIKE`/scan fallback before it enters the contract.
+- **`case.db` lives under the workspace root**, inside the case folder, never
+  beside the frozen executable, which may sit on read-only media.
+- **Dev-only tooling stays out of the artifact.** The synthetic fixture
+  (`tests/bigcase.py`) and the benchmark harness (`bench/case_baseline.py`) live
+  outside `src/azimut/`, so hatchling never packages them, and use only the
+  standard library.
+
+## The storage boundary
+
+`repository.py` defines `CaseRepository`, the one interface every tool and route
+uses to read and mutate a case's graph, catalog and jobs. Nothing outside the
+implementation reaches into a raw `case.json` shape. `workspace.Case` is the
+filesystem shell (manifest, notes, media, lifecycle, path resolution) and
+delegates every graph, catalog and job method to a `SqliteCase`
+(`sqlite_backend.py`) over `case.db`. `engine/links.py` and `api/cases.py` read
+through `get_entity` / `links_of` / `snapshot`, never the file.
+
+`snapshot()` returns the whole graph for delete planning, export, migration checks
+and test assertions.
+`overview()` is the case-open view: the manifest and folder list, without the
+entity/link arrays. Direct storage access outside `Case`/`SqliteCase` should fail
+review.
 
 ## Database shape
 
-The first schema should stay small. New roadmap tools add migrations when they
-need new indexed concepts.
+`case.db` is at SQLite schema 3. The schema counter is independent of the JSON
+`CASE_SCHEMA`: the manifest's `azimut.storage` field selects the backend, and each
+format counts its own shape upgrades.
 
-### Core tables
+### Tables
 
 `meta`
-: Database schema version, ontology version and creation information.
+: Schema version, case name and timestamps.
 
 `schema_migrations`
-: Every applied migration, its version and completion time.
+: Every applied SQLite-schema migration and its completion time.
 
 `entities`
-: `id`, `type`, `label`, `attrs_json`, provenance fields and status. Unknown
-  types and attributes remain valid.
+: `id`, `type`, `label`, `attrs_json`, an indexed `folder` (denormalised from
+  `attrs.folder`), provenance fields and status. Unknown types and attributes stay
+  valid.
 
 `links`
-: `id`, source entity, target entity, type, provenance fields and status.
-  Foreign keys prevent links to missing entities. Delete policy remains in the
-  existing dependency-aware service rather than in a blind SQL cascade.
+: `id`, source, target, `type`, provenance and status. Foreign keys forbid a link
+  to a missing entity. The delete policy lives in the dependency-aware service
+  (`engine/links.py`), not in a blind SQL cascade.
 
 `folders`
-: Normalized logical paths for the analyst's organisation. These are not
-  filesystem directories and are not semantic links.
-
-`artifacts`
-: Entity, safe relative path, media kind, MIME type, size, SHA-256 and source
-  metadata needed by catalog queries. Paths are unique within a case.
+: Normalized `/`-separated logical paths for the analyst's organisation. Not
+  filesystem directories, not semantic links.
 
 `jobs`
-: Durable local work such as thumbnails, EXIF extraction, OCR, transcription
-  and video analysis. Stores state, progress, retry count and a short error.
+: Durable local background work: `id`, `kind`, an optional `job_key`, `state`,
+  `attempts`, `max_attempts`, `payload_json`, `error` and timestamps. See
+  "Thumbnails and background jobs".
 
-`events`
-: Committed case changes that can feed the future Evidence Locker and its
-  `evidence.jsonl` export. An event identifier makes export idempotent.
+### Indexes and migrations
 
-### Indexes
+Indexes cover entity type/status/folder and link source/target/type, plus job
+state and a partial unique index on `(kind, job_key)` that keeps a keyed job from
+being enqueued twice. `SqliteCase.open` upgrades an older `case.db` in place
+through `_SQLITE_MIGRATIONS`, each step in its own immediate transaction, re-reading
+the version inside the transaction so a raced second opener applies nothing; a
+newer schema is refused rather than mangled. The two shipped migrations add the
+indexed `folder` column (1→2) and the `jobs` table (2→3).
 
-The initial schema needs indexes for:
-
-- entity type, status and creation time;
-- link source, target and type;
-- artifact path, hash and media kind;
-- folder path;
-- job state and requested time.
-
-Full-text search is added over labels, notes and selected metadata. Geographic
-and temporal projections should be added when the first map and timeline
-queries land. Generic attributes stay in JSON until a real workflow needs an
-indexed, typed field.
-
-Use the SQLite support shipped with Python. Any reliance on FTS5, JSON or RTree
-must be tested on the Windows, Linux and macOS release matrix before it becomes
-part of the storage contract.
+Geographic, temporal and full-text projections are deferred until a query needs
+them. Each projection requires its own migration and tests.
 
 ### Connection policy
 
-- Enable foreign keys on every connection.
-- Set a bounded busy timeout instead of failing immediately on a short write.
-- Keep transactions short. File hashing and ffmpeg work happen outside them.
-- Start with SQLite's rollback journal and `synchronous=FULL`. The app is
-  single-user and portability matters more than speculative write concurrency.
-- Benchmark WAL before adopting it. If WAL is ever enabled, case close and
-  export must checkpoint it so a copied case is complete.
-- Create live backups through SQLite's backup API. A manual folder copy is only
-  guaranteed when the case is closed.
-- Apply restrictive file permissions through the existing workspace helpers.
+- Foreign keys on every connection; a bounded `busy_timeout` instead of failing a
+  short write immediately.
+- Transactions are short. File hashing and ffmpeg work happen outside them.
+- Rollback journal with `synchronous=FULL` (not WAL): the app is single-user and
+  portability matters more than write concurrency, so a plain folder copy of a
+  closed case is always complete with nothing to checkpoint.
+- A fresh connection per operation, closed before any rename, so Windows' rules
+  for open files and directory replacement are respected. Writes run in one
+  `BEGIN IMMEDIATE`..`COMMIT` and roll back on error.
 
-## Storage boundary before migration
+## Automatic migration of legacy cases
 
-The first implementation step is not SQL. Introduce one repository boundary
-for every case operation:
+Legacy json cases still open. `Case.open` runs `migrate`: it applies the json-shape
+migrations up to `JSON_SCHEMA`, materializes any inline note bodies to files, then
+`convert_json_to_sqlite` builds `case.db` and the manifest is flipped to
+`{"schema": 3, "storage": "sqlite"}` **last**. A crash before the flip leaves the
+legacy json case active. A `case.pre-migrate-v<n>.json` backup is taken once before
+the first rewrite and never overwritten, so the conversion is recoverable.
 
-- read case summary;
-- list, get, add, update and remove entities;
-- list, add and remove links;
-- manage folders;
-- register and update artifacts;
-- resolve paths to entities;
-- plan and apply dependency-aware deletion;
-- enqueue and update local jobs.
+The converter builds `case.db.tmp`, imports the whole graph in one transaction,
+runs `foreign_key_check` and `integrity_check`, then atomically renames into place;
+any failure removes the temp file and leaves the target untouched. A link to a
+missing endpoint is reported (`MigrationReport.missing_endpoints`) and dropped,
+never erasing an entity. Recorded media hashes are imported as-is; migration does
+not rehash large videos; an integrity scan is a separate, explicit action.
 
-The API and tools call this boundary. They no longer read or rewrite
-`case.json` directly. A JSON-backed repository keeps the current behavior while
-the boundary is introduced. The SQLite implementation then replaces it without
-requiring every tool to change at once.
+The live in-file JSON graph backend has been removed. `Case.create` always makes a
+`case.db`; no code path writes an entity/link graph back into `case.json`. The only
+JSON code left is the one-way importer and the on-open migration.
 
-Direct storage access should fail review after this phase. Tests may inspect
-fixtures and migration output, but production tools use the repository.
+## Bounded catalog API
 
-## Automatic migration
+SQLite only helps the interface when queries and rendering are bounded. Case open
+ships `overview()` (manifest + folders), and the catalog loads through cursor-paged
+endpoints:
 
-The conversion is one-way for normal use. A backup makes it recoverable, and
-the legacy importer remains available indefinitely.
+- `GET /api/cases/{id}/catalog/entities` returns `{items, next_cursor}` in stable
+  insertion order, with a clamped page size and server-side filters: a
+  comma-separated `type` set, `status`, a label substring `q`, and folder
+  (`unfiled=true` or an exact `folder` path). The cursor keys on `rowid`, so a
+  background import appending rows never shifts a page already scrolled past, and a
+  deletion before the cursor never skips a live row.
+- `GET /api/cases/{id}/catalog/summary` returns `{total, by_type, by_status,
+  by_folder}` without shipping the graph.
+- `GET /api/cases/{id}/entities/{id}/chain` (neighbour derivation),
+  `GET /entities/lookup` (one entity by attribute), and
+  `GET /entities/{id}/derivation` (transitive `derived-from` closure) are the
+  bounded single-entity reads, each built on `links_of` rather than the whole
+  graph.
 
-### Format versioning
+The sidebar pages the catalog through `buildCatalogQuery` and uses a generation
+guard, so a stale page never lands after a case or filter switch.
+`fetchAllEntities` walks the pages server-side for the whole-slice cases and
+accepts an `AbortController` signal; `lookupEntity` and `fetchDerivation` cover
+the single-entity and closure cases. These helpers live in
+`frontend/src/lib/catalog.js`. The sidebar, `Files`, `Notebook`, `Satellite`,
+`Media Library`, `Inspector` and the composers use them; none loads
+`caseState.current.entities`/`.links`, which no longer exist on the case-open
+response.
 
-Storage format and ontology version become separate concepts. The new manifest
-must still carry a higher compatibility schema so an older Azimut refuses to
-open it instead of treating it as an empty case.
+Deferred to their first consumer: date filters (a timeline filter), links
+pagination (a relations/graph view), and notes/label full-text search (gated on
+per-binary FTS5).
 
-The new application supports:
+## Thumbnails and background jobs
 
-- opening and migrating legacy JSON cases;
-- opening current SQLite cases;
-- refusing a database created by a newer unsupported schema;
-- importing a retained legacy backup for recovery.
+Thumbnails are disposable pixels: a broken or missing one never blocks access to
+the original. `engine/thumbnails.py` owns their whole lifecycle, and the durable
+`jobs` table is the general background-work model behind it (EXIF, OCR and
+transcripts will reuse it).
 
-It does not dual-write JSON and SQLite in production. Dual writes create two
-authoritative copies and make crash recovery ambiguous.
+### Cache identity, atomic generation
 
-### Conversion sequence
+A thumbnail's file name folds in the original's SHA-256 and the generator version
+(`THUMB_GEN`): `media/.thumbs/<sha[:24]>-g<gen>.jpg`. A changed original or a
+bumped generator therefore maps to a *new* file rather than serving stale pixels;
+the superseded ones become orphans that `repair` sweeps. Pixels are rendered to a
+unique temp file, validated, then renamed into `.thumbs/`. Readers never see a
+half-written thumbnail, and the Windows rename rules hold. Images decode through
+the process-wide Pillow pixel clamp.
 
-1. Acquire the existing per-case lock.
-2. Read and validate the legacy `case.json`.
-3. Check free disk space for the small database and its temporary copy.
-4. Create a uniquely named, versioned JSON backup without overwriting an older
-   backup.
-5. Build `case.db.tmp` with the target schema.
-6. Import entities, links, folders and artifact references in one database
-   transaction.
-7. Import mutable media fields from existing sidecars.
-8. Validate row counts, identifiers, relative paths and link endpoints.
-9. Run `foreign_key_check` and `integrity_check`.
-10. Commit and close the temporary database.
-11. Atomically rename the temporary database to `case.db`.
-12. Atomically replace `case.json` with the new manifest.
-13. Reopen the case through the normal SQLite repository and compare its
-    summary with the migration report.
+### Inline for cheap, queued for heavy
 
-The manifest changes last. A crash before that point leaves the legacy case as
-the active format. A complete but unreferenced temporary database can be
-validated and reused or safely replaced on the next attempt.
+A registered image gets its thumbnail rendered inline with Pillow. Videos use the
+CPU-heavy ffmpeg path and are queued, as are images whose inline render fails.
+Jobs are keyed on media path, so retrying or regenerating does not stack duplicates.
 
-Do not rehash every large video during migration. Import the recorded hash,
-verify file existence and offer a separate integrity scan. Forced rehashing
-would make the first launch unexpectedly expensive on a slow disk.
+### One worker, recoverable
 
-### Migration validation
+A single background worker drains thumbnail jobs, so only one ffmpeg process runs
+at a time.
+Work starts only from a user action (an import, a regenerate) or crash recovery,
+never from merely opening a case or tab. A job lifecycle is `queued → running →
+ready`, or `failed` once its retry budget is spent, or `cancelled` (its media is
+gone). A job left `running` by an interrupted process is reclaimed to `queued` (or
+`failed`) on case open and on server startup (`Case.recover_jobs`,
+`server._recover_jobs`), so work resumes instead of stalling.
 
-The migration report records:
+### Budget, repair, retry states
 
-- entity, link and folder counts;
-- artifact and sidecar counts;
-- missing files and unresolved paths;
-- duplicate identifiers or paths;
-- links whose endpoints are missing;
-- database integrity results.
+`prune_cache` evicts least-recently-used thumbnails (by mtime) past a size budget;
+`repair` removes abandoned temp files and orphaned thumbnails no live sidecar
+references. Both only ever touch the cache, never originals or database rows. A
+content-addressed thumbnail can be shared by identical-bytes captures, so deleting
+one media file drops the cached thumbnail only when no surviving sidecar still
+points at it.
 
-Missing media is reported but does not erase its entity or provenance. Existing
-dependency and tombstone rules remain in force.
-
-If validation fails, the manifest is not changed. The user sees a short error
-with the recovery location, and the legacy case remains available.
-
-## API and frontend migration
-
-SQLite only helps the interface when queries and rendering are bounded.
-
-### Compatibility pass
-
-First, keep current API responses unchanged and run them against both storage
-implementations. This isolates storage regressions from UI changes.
-
-### Bounded catalog API
-
-Add cursor-based endpoints for entities, media and links with:
-
-- stable ordering;
-- a default and maximum page size;
-- type, folder, status and date filters;
-- server-side search;
-- summary counts returned separately;
-- direct lookup by identifier.
-
-Cursor pagination avoids shifting pages when an import adds a new item. Offset
-pagination is acceptable only for small, static lists.
-
-Once every consumer has moved, the case-open response stops embedding the full
-entity and link arrays. It returns the manifest, counts and the first data
-needed by the active view.
-
-### Bounded rendering
-
-- Fetch the first page only when a tool becomes visible.
-- Keep a small in-memory cache keyed by entity identifier.
-- Load more rows as the user approaches the end of the visible list.
-- Limit mounted media cards. Add simple windowing if progressive pages still
-  leave too many DOM nodes.
-- Preserve selection by identifier, not by list position.
-- Run filters and full-text search in the backend.
-- Cancel stale requests when the user changes case or query.
-
-This work must not introduce a frontend dependency unless it has compatible
-prebuilt support requirements and earns its maintenance cost. A small local
-list window is preferable if it covers the current layouts.
-
-## Thumbnail and background-job model
-
-Thumbnails are disposable. A broken thumbnail must never block access to the
-original file.
-
-### Cache identity
-
-A thumbnail key includes:
-
-- original artifact identifier and SHA-256;
-- requested size or variant;
-- thumbnail generator version.
-
-Changing the original file or generator therefore schedules a new result
-instead of serving stale pixels.
-
-### Job states
-
-Use at least `queued`, `running`, `ready`, `failed` and `cancelled`. A job also
-stores attempts, timestamps, progress where available and a short diagnostic.
-On startup, an interrupted `running` job returns to `queued` or `failed`
-according to its retry policy.
-
-### Generation rules
-
-- Generate visible and newly imported items first. Do not rebuild the entire
-  case during open.
-- Default to one CPU-heavy worker on modest hardware. A preference may allow
-  more, but foreground interaction keeps priority.
-- Bound ffmpeg execution time and remove partial output after failure.
-- Decode images through the existing pixel clamp.
-- Write to a unique temporary file, validate the result, then rename it into
-  `.thumbs/` atomically.
-- Store a concise error and retry with a limit. Never loop forever.
-- Provide a manual regenerate action for one item or the whole cache.
-- Apply a configurable cache-size budget and evict least-recently-used results.
-  Eviction never touches originals or database records.
-
-### UI failure behavior
-
-- Use lazy image loading and asynchronous browser decoding.
-- Show a type-specific placeholder while queued or after failure.
-- A failed `<img>` request switches to the placeholder and reports the stale
-  cache entry once. It does not retry on every render.
-- Keep title, provenance and actions usable without a thumbnail.
-- Expose retry without turning a technical failure into a blocking dialog.
-
-The same durable queue later runs EXIF parsing, OCR, transcripts, perceptual
-hashes and other local analysis. Each job begins only after a user action that
-requires it; opening a tab does not create network work.
+The media listing tags each item with a `thumb_state` (`ready`, `queued`,
+`running`, `failed`, or `none`). The Media Library renders the image when ready
+(lazy-loaded, async-decoded, with an `onerror` fallback to the type icon that
+reports once and does not retry per render), a "Generating…" placeholder while
+queued, and a retry affordance on failure. `POST
+/api/cases/{id}/media/thumbnails/regenerate` re-queues one item (the per-card
+retry) or every missing/failed one; the grid polls the listing while anything is
+pending, and stops on its own once nothing is.
 
 ## Filesystem and database consistency
 
-SQLite cannot atomically commit a filesystem rename. File-backed operations
-therefore follow a recoverable sequence.
+SQLite cannot atomically commit a filesystem rename, so file-backed operations are
+recoverable. Creation produces a file under a unique temp name, validates it,
+renames it to its final path, then registers it in a short transaction. Deletion
+removes the file and sidecar, then settles the database. Thumbnail generation
+follows the same temp-then-rename discipline. The rollback journal means a copied
+closed case is always complete.
 
-For creation:
+## Performance
 
-1. Produce the file under a unique temporary name.
-2. Validate and hash it.
-3. Rename it to its final path.
-4. Register it in a short database transaction.
-5. Reconciliation removes abandoned temporary files and registers or reports
-   untracked final files according to the operation journal.
+The reference profile for absolute timings is a modest machine (four logical
+cores, 8 GB RAM, integrated graphics, SATA-class drive); the exact machine and
+versions belong in the benchmark report. The large-case fixture
+(`tests/bigcase.py` `build_big_case`, driven by `bench/case_baseline.py`, standard
+library only, outside the wheel) builds 10k entities / 20k links / 5k media with
+nested folders, notes, suggestions, unknown types, mixed thumbnail states, proof/
+post/Inspect artifacts, missing files and tombstones. It writes `case.json` in one
+pass (the per-item path is the O(n²) cost being measured) and is seeded, so the
+same arguments produce byte-identical rows.
 
-For deletion, first rename the file into a case-local trash/staging directory,
-then commit the database deletion, then remove it. A crash leaves a recoverable
-staged file. This also follows Windows rules for open files and directory
-replacement.
-
-An inexpensive reconciliation pass checks pending operations when a case
-opens. Full hashing and media probing stay behind an explicit integrity scan.
-
-## Performance budgets
-
-Performance work needs a repeatable fixture and a reference machine. Use a
-modest profile such as four logical CPU cores, 8 GB of RAM, integrated graphics
-and a SATA-class drive. Keep the exact machine and software versions in the
-benchmark report.
-
-The initial large-case fixture should contain:
-
-- 10,000 entities;
-- 20,000 links;
-- 5,000 registered media items and sidecars;
-- nested folders, notes, suggestions and unknown entity types;
-- ready, missing, corrupt and failed thumbnails;
-- proof, post and Inspect artifacts;
-- missing source files and dependency tombstones.
-
-Large binaries can be sparse fixtures or small synthetic files. Separate
-benchmarks cover real image decoding and video thumbnail extraction.
-
-Initial interaction targets on the reference machine:
+Interaction budgets on the reference machine:
 
 | Operation | Target |
 |---|---:|
@@ -382,154 +295,68 @@ Initial interaction targets on the reference machine:
 | Mounted catalog rows/cards | 300 or fewer |
 | Default CPU-heavy background jobs | 1 at a time |
 
-These are starting budgets, not release claims. Record the current JSON
-baseline first, calibrate the reference device, then make regressions fail CI
-using stable relative thresholds. Absolute timings remain a manual release
-check because shared CI hardware varies.
+These are starting budgets, not release claims: absolute timings are a manual
+release check because shared CI hardware varies, while relative regressions can be
+made to fail CI against a recorded baseline.
 
-Also track peak backend memory, browser memory, query count, long browser tasks
-and thumbnail queue depth. Memory use for the first page must not grow linearly
-with the total case catalog.
+### Captured baselines (fast dev machine, not the reference profile)
 
-## Test plan
+Read the shape, not the absolute milliseconds. At the default size (10k / 20k /
+5k), the old monolithic `case.json` was **8.4 MB** and case open shipped **~6 MB**
+of graph to the browser; every single mutation was **~244 ms** because it
+read-modify-wrote the whole file (linear in case size). On the SQLite backend a
+single `add_entity` is **~5.5 ms** (one durable row, roughly flat with case size),
+a `get_entity` is a **0.15 ms** indexed read, and converting a 5k-entity case runs
+once in **~233 ms**. Case open no longer ships the graph at all. The
+reference-machine capture remains a manual release step.
 
-### Characterization
+## How it is verified
 
-Pin current behavior before changing storage:
+- **Graph contract** (`tests/test_repository.py`): entity/link/folder CRUD,
+  dedupe, `sync_links` id preservation, folder subtree removal, cursor paging and
+  summaries, the derivation closure, and the durable job queue (idempotent
+  enqueue, claim, retry-then-fail, recover, prune) held against `Case`
+  (SQLite-backed).
+- **Store specifics** (`tests/test_sqlite_backend.py`): create/open, newer-schema
+  refusal, foreign keys, rollback, the in-place schema upgrade through every
+  migration, keyset paging, and the atomic converter (roundtrip, dangling-link
+  report, failure leaves no db, large-case integrity).
+- **Migration** (`tests/test_migrations.py`): legacy json → sqlite on open, backup
+  recoverability, a failed activation leaving the json case usable, forward-compat
+  refusal.
+- **Thumbnails and jobs** (`tests/test_thumbnails.py`, `tests/test_media_api.py`):
+  inline vs queued, atomic generation with no partial/temp on failure, content-key
+  by generator version, drain + retry-then-fail, cancel on missing media, LRU
+  budget eviction, orphan/temp repair, shared-thumbnail delete safety, the
+  background worker, startup recovery, and the `thumb_state` + regenerate API.
+- **Release gate** (`tests/test_release_gate.py`): a legacy case migrates and every
+  workflow answers, a closed-case folder copy opens identically, a large migrated
+  case opens through bounded queries, and the frozen-binary packaging constraints
+  hold.
+- **Frontend** (vitest + svelte-check + the production build): first-page paging,
+  request cancellation on case switch, and the thumbnail placeholder/failure/retry
+  markup.
 
-- case creation, rename, promotion and deletion;
-- entity and link CRUD;
-- unknown entity and link types;
-- folders and unfiled items;
-- suggested and confirmed status;
-- media import, download, deduplication and sidecars;
-- proof, post and Inspect save/reopen;
-- dependency-aware delete and tombstones;
-- concurrent media registration;
-- notes and provenance updates.
+The backend suite runs on Python 3.11 and the three release operating systems.
 
-### Migration fixtures
+## Manual release steps
 
-Keep small legacy cases in the test suite with Unicode, unusual paths, absent
-optional fields, unknown types, missing files and valid derivation chains.
-Compare their public API results before and after migration.
+Two parts of the release gate are inherently manual and are done at release time,
+not in CI:
 
-Test failure after every conversion stage. Reopening must either finish the
-migration or leave the JSON case untouched. It must never expose a half-filled
-database as current.
-
-### Database behavior
-
-- constraints and foreign keys;
-- rollback on failed writes;
-- concurrent readers and short writers;
-- unsupported newer schema refusal;
-- sequential schema upgrades;
-- backup and restore;
-- corruption detection;
-- cross-platform path handling and permissions.
-
-### Frontend and load tests
-
-- first-page rendering without a full-case fetch;
-- pagination stability while imports arrive;
-- selection across page loads;
-- fast case switching with stale-request cancellation;
-- broken and missing thumbnail fallbacks;
-- bounded DOM and memory use;
-- no network request merely from opening a case or tab.
-
-Run the backend suite on Python 3.11 and the three release operating systems.
-Run frontend unit tests, checks, the production build and targeted Playwright
-coverage for scrolling, selection and thumbnail failure.
+- Record the reference-machine numbers (the profile above) and calibrate the
+  relative CI thresholds against them.
+- Migrate several disposable real-world case copies end to end and confirm every
+  workflow before tagging.
 
 ## Roadmap compatibility
 
-The storage work is successful only if later tools reuse it.
-
-| Roadmap work | Storage support |
-|---|---|
-| EXIF and metadata | Local jobs emit suggested place/event entities |
-| OCR and transcript | Durable jobs, text artifacts and full-text index |
-| Case Notebook | File-backed content with indexed text and entity references |
-| Case Board / Relations | Indexed entities, typed links and reversible `same-as` |
-| Map Board | Place entities plus indexed geographic projections |
-| Timeline Builder | Event entities plus indexed time projections |
-| Evidence Locker | Committed events exported idempotently to `evidence.jsonl` |
-| Report Builder | Stable artifact identifiers and derivation links |
-| Cross-case search | Rebuildable workspace index over closed case summaries |
-| Search Orchestrator | Durable jobs and analyst-confirmed suggestions |
-| Déjà Vu | Perceptual hashes indexed without loading media bytes |
-| Channel Monitor | Bounded persistent queue with explicit network actions |
-
-Do not pre-build all of these tables now. Add typed projections when the first
-real query needs them, with a schema migration and tests. The core identifiers,
-provenance and link rules must remain stable.
-
-## Delivery sequence
-
-### 1. Baseline and contract
-
-- Add the large synthetic fixture and benchmark commands.
-- Capture current JSON timings and memory.
-- Finalize ownership and compatibility fields.
-- Add characterization tests where behavior is not already pinned.
-
-### 2. Repository boundary
-
-- Add the storage interface and JSON implementation.
-- Move all case graph and catalog access behind it.
-- Keep API responses and frontend behavior unchanged.
-
-### 3. SQLite implementation
-
-- Add schema creation, migrations, indexes and backup helpers.
-- Run the same repository contract tests against JSON and SQLite.
-- Add the converter and crash/failure tests.
-
-### 4. Safe activation
-
-- Enable migration on case open.
-- Keep the legacy importer and JSON backup.
-- Update SPEC, ONTOLOGY, UI documentation and case-tree examples.
-- Verify Windows, Linux, macOS and Python 3.11.
-
-### 5. Bounded loading
-
-- Add paginated endpoints and server-side filters.
-- Change frontend stores to summary plus page caches.
-- Add progressive loading, request cancellation and DOM bounds.
-
-### 6. Job and thumbnail hardening
-
-- Add the durable queue and one-worker default.
-- Make thumbnail generation lazy, atomic and recoverable.
-- Add cache budgeting, repair and visible retry states.
-
-### 7. Release gate
-
-- Run functional, migration, load and packaging tests.
-- Test copies, backups and case bundles.
-- Migrate several disposable real-world case copies.
-- Record the reference-machine results.
-- Ship only when the new format matches all current workflows and meets the
-  agreed performance budgets.
-
-The legacy importer is permanent. The JSON writer can be removed after the
-SQLite release is stable, but opening an untouched old case must continue to
-work.
-
-## Completion criteria
-
-The migration is complete when:
-
-- existing cases migrate automatically with a retained backup;
-- no production tool reads or writes the old graph arrays directly;
-- all current workflows pass unchanged;
-- older applications refuse the new format safely;
-- a failed migration leaves the original case usable;
-- case opening and lists use bounded queries and bounded rendering;
-- thumbnail failures never block media access;
-- the large-case fixture meets the reference performance budgets;
-- the documented v2, v3 and v4 workflows fit the storage, job and event model;
-- the full frontend and backend validation paths pass on supported platforms.
+Later tools reuse this storage, job and event model rather than inventing their
+own: EXIF/OCR/transcript jobs on the durable queue with text artifacts and a
+future full-text index; the Notebook's file-backed content with indexed text and
+entity references; Board/Relations over indexed entities and typed links; Map and
+Timeline over geographic and temporal projections added when their first query
+lands; the Evidence Locker exporting committed events idempotently to
+`evidence.jsonl`; cross-case search over a rebuildable workspace index. New typed
+projections arrive with their own migration and tests; the core identifiers,
+provenance and link rules stay stable.

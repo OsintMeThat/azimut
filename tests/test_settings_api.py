@@ -3,7 +3,7 @@
 import httpx
 
 from azimut import config
-from azimut.engine import google_tiles, scrapers
+from azimut.engine import google_tiles, scrapers, sentinel
 
 
 def test_get_settings_defaults(client):
@@ -523,6 +523,61 @@ def test_sentinel_dates_without_a_key_is_a_404(client):
     assert client.get(
         "/api/satellite/sentinel/dates?lat=1&lon=1&start=2026-05-01&end=2026-05-31"
     ).status_code == 404
+
+
+def test_sentinel_coverage_checks_the_layer_and_counts_the_request(client, monkeypatch):
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    calls = []
+
+    def check(instance, lat, lon, layer, day):
+        calls.append((instance, lat, lon, layer, day))
+        return {
+            "available": False,
+            "coverage": 0.0,
+            "date": day,
+            "layer": layer,
+        }
+
+    monkeypatch.setattr(sentinel, "coverage", check)
+    body = client.get(
+        "/api/satellite/sentinel/coverage"
+        "?lat=48.8584&lon=2.2945&layer=SWIR&date=2026-05-11"
+    ).json()
+
+    assert body["available"] is False
+    assert calls == [("inst-uuid", 48.8584, 2.2945, "SWIR", "2026-05-11")]
+    settings = client.get("/api/settings").json()
+    assert settings["usage"]["sentinelhub"][settings["month"]] == 1
+
+
+def test_sentinel_coverage_rejects_bad_input_without_counting(client, monkeypatch):
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+
+    def reject(*args):
+        raise ValueError("malformed Sentinel-2 layer")
+
+    monkeypatch.setattr(sentinel, "coverage", reject)
+    response = client.get(
+        "/api/satellite/sentinel/coverage"
+        "?lat=48.8584&lon=2.2945&layer=bad&date=2026-05-11"
+    )
+    assert response.status_code == 422
+    assert client.get("/api/settings").json()["usage"] == {}
+
+
+def test_sentinel_coverage_failure_is_upstream_error(client, monkeypatch):
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+
+    def fail(*args):
+        raise sentinel.CoverageError("no readable image")
+
+    monkeypatch.setattr(sentinel, "coverage", fail)
+    response = client.get(
+        "/api/satellite/sentinel/coverage"
+        "?lat=48.8584&lon=2.2945&layer=SWIR&date=2026-05-11"
+    )
+    assert response.status_code == 502
+    assert client.get("/api/settings").json()["usage"] == {}
 
 
 def test_free_tier_defaults_to_the_provisioned_sentinel_allowance(client):

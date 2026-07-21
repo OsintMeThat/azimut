@@ -87,6 +87,7 @@ class StitchIn(BaseModel):
 class EnhanceVideoIn(BaseModel):
     path: str
     params: dict[str, Any] = {}
+    rotation: Literal[-180, -90, 0, 90, 180] = 0
     label: str | None = None
     folder: str | None = None
 
@@ -238,11 +239,12 @@ def compose_preview(case_id: str, body: ComposeIn) -> Response:
 
 @router.post("/cases/{case_id}/inspect/enhance-video")
 def enhance_video(case_id: str, body: EnhanceVideoIn) -> dict[str, Any]:
-    """Re-encode a video with the gear's adjustments and file it as new media."""
+    """Re-encode a video with its adjustments and orientation, then file it."""
     case = get_case(case_id)
     try:
         return inspect_engine.enhance_video(
-            case, body.path, body.params, label=body.label, folder=body.folder
+            case, body.path, body.params, rotation=body.rotation,
+            label=body.label, folder=body.folder,
         )
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

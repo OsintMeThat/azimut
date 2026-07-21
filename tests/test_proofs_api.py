@@ -1,6 +1,8 @@
 """Proofs: save spec+PNG, list, reload, entity upsert, delete."""
 
 import base64
+
+import graph_read
 import io
 
 from PIL import Image
@@ -67,7 +69,7 @@ def test_save_load_roundtrip(client):
         f"/api/cases/{cid}/proofs",
         json={"name": saved["name"], "title": "Renamed proof", "spec": SPEC},
     )
-    entities = [e for e in client.get(f"/api/cases/{cid}").json()["entities"] if e["type"] == "proof"]
+    entities = [e for e in graph_read.entities(cid) if e["type"] == "proof"]
     assert len(entities) == 1
     assert entities[0]["label"] == "Renamed proof"
 
@@ -80,7 +82,7 @@ def test_resave_with_png_adds_the_path_to_the_entity(client):
         f"/api/cases/{cid}/proofs", json={"title": "Draft proof", "spec": SPEC}
     ).json()
     entity = next(
-        e for e in client.get(f"/api/cases/{cid}").json()["entities"] if e["type"] == "proof"
+        e for e in graph_read.entities(cid) if e["type"] == "proof"
     )
     assert "path" not in entity["attrs"]
 
@@ -91,7 +93,7 @@ def test_resave_with_png_adds_the_path_to_the_entity(client):
         json={"name": saved["name"], "title": "Draft proof", "spec": SPEC, "png_base64": _png_b64()},
     )
     entity = next(
-        e for e in client.get(f"/api/cases/{cid}").json()["entities"] if e["type"] == "proof"
+        e for e in graph_read.entities(cid) if e["type"] == "proof"
     )
     assert entity["attrs"]["path"] == f"proofs/{saved['name']}.png"
 
@@ -114,4 +116,4 @@ def test_delete_proof(client):
     client.delete(f"/api/cases/{cid}/proofs/{saved['name']}")
     assert client.get(f"/api/cases/{cid}/proofs").json() == []
     assert client.get(f"/api/cases/{cid}/proofs/{saved['name']}").status_code == 404
-    assert [e for e in client.get(f"/api/cases/{cid}").json()["entities"] if e["type"] == "proof"] == []
+    assert [e for e in graph_read.entities(cid) if e["type"] == "proof"] == []

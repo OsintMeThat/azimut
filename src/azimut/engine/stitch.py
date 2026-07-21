@@ -292,7 +292,7 @@ def solve_layout(images: list[Image.Image], *, width: int, height: int) -> dict[
 
     if not edges:
         raise RuntimeError(
-            "auto-stitch found no overlap between these pieces — do they show the same scene?"
+            "auto-stitch found no overlap between these pieces. Do they show the same scene?"
         )
 
     anchor, chained = _anchor_and_chain(edges, weights, len(images))
@@ -560,7 +560,7 @@ def solve_rotation_layout(
     pairwise, keep = _match_component(cv2, feats)
     if len(keep) < 2:
         raise RuntimeError(
-            "auto-stitch found no overlap between these pieces — do they show the same scene?"
+            "auto-stitch found no overlap between these pieces. Do they show the same scene?"
         )
     if len(keep) < len(images):
         # Re-match on the subset alone: the estimator indexes cameras by position

@@ -1,6 +1,8 @@
 """Satellite capture API: bearing is honored and persisted with provenance."""
 
 import pytest
+
+import graph_read
 from PIL import Image
 
 from azimut.engine import tiles
@@ -52,7 +54,7 @@ def _capture(client, cid, lat, lon, zoom=16):
 
 
 def _of_type(client, cid, etype):
-    return [e for e in client.get(f"/api/cases/{cid}").json()["entities"]
+    return [e for e in graph_read.entities(cid)
             if e["type"] == etype]
 
 
@@ -78,6 +80,7 @@ def test_capture_creates_capture_entity_not_place(client, monkeypatch):
     assert caps[0]["label"] == "48.858400, 2.294500"
     assert caps[0]["attrs"]["zoom"] == 16
     assert caps[0]["attrs"]["bearing"] == 0.0
+    assert caps[0]["attrs"]["provider"] == "esri-world-imagery"
     # capturing files it straight away — no confirm step
     assert caps[0]["provenance"]["status"] == "confirmed"
 
@@ -154,6 +157,22 @@ def test_imagery_date_service_down_is_graceful(client, monkeypatch):
         params={"lat": 0, "lon": 0, "zoom": 10},
     ).json()
     assert out == {"supported": True, "date": None, "source": None}
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"lat": -91, "lon": 0, "zoom": 10},
+        {"lat": 91, "lon": 0, "zoom": 10},
+        {"lat": 0, "lon": -181, "zoom": 10},
+        {"lat": 0, "lon": 181, "zoom": 10},
+        {"lat": 0, "lon": 0, "zoom": -1},
+        {"lat": 0, "lon": 0, "zoom": 23},
+    ],
+)
+def test_imagery_date_rejects_out_of_range_inputs_before_provider_call(client, monkeypatch, params):
+    monkeypatch.setattr(tiles, "esri_capture_date", lambda *_args: pytest.fail("provider called"))
+    assert client.get("/api/satellite/imagery-date", params=params).status_code == 422
 
 
 def test_save_place_creates_place_without_image(client):
@@ -358,7 +377,7 @@ def test_capture_title_follows_the_coordinate_format(client, monkeypatch):
     # provenance is never re-expressed: a later reader still gets the numbers
     assert listed["lat"] == pytest.approx(48.8583701)
     assert listed["lon"] == pytest.approx(2.2944813)
-    entity = client.get(f"/api/cases/{cid}").json()["entities"][0]
+    entity = graph_read.entities(cid)[0]
     assert entity["attrs"]["coords"] == "48.858370, 2.294481"
 
 
@@ -492,11 +511,28 @@ def test_screenshot_capture_refused_for_tile_providers(client):
     assert r.status_code == 422
 
 
+def test_screenshot_capture_has_the_same_size_limit_as_extension_ingest(client, monkeypatch):
+    from azimut.api import satellite
+
+    monkeypatch.setattr(satellite, "MAX_IMAGE_BYTES", 100)
+    client.put("/api/settings/keys", json={"google_js": "AIza.js"})
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    r = client.post(
+        f"/api/cases/{cid}/satellite/screenshot",
+        files={"image": ("shot.png", _png_bytes(), "image/png")},
+        data={"lat": "0", "lon": "0", "zoom": "10", "provider": "google-js"},
+    )
+    assert r.status_code == 413
+    assert graph_read.entities(cid) == []
+
+
 def test_tile_proxy_rejects_out_of_range_coordinates(client):
     # a negative z used to reach `1 << z` and 500; bad input is a 422, not a crash
     assert client.get("/api/tiles/esri-world-imagery/-1/0/0").status_code == 422
     assert client.get("/api/tiles/esri-world-imagery/2/4/0").status_code == 422
     assert client.get("/api/tiles/esri-world-imagery/2/0/-1").status_code == 422
+    # The zoom is rejected before exponentiation, so an absurd path value stays cheap.
+    assert client.get("/api/tiles/esri-world-imagery/1000000/0/0").status_code == 422
 
 
 def test_tile_proxy_reuses_one_pooled_client(client, monkeypatch):
@@ -656,6 +692,39 @@ def test_search_grid_missing_is_404(client):
     assert client.get(f"/api/cases/{cid}/search-grids/nope").status_code == 404
 
 
+def test_search_grid_corruption_is_skipped_in_picker_and_reported_on_open(client):
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
+    path = Case.open(cid).subdir("search") / "broken.json"
+    path.write_text('["not", "an", "object"]', encoding="utf-8")
+
+    assert client.get(f"/api/cases/{cid}/search-grids").json() == []
+    opened = client.get(f"/api/cases/{cid}/search-grids/broken")
+    assert opened.status_code == 422
+    assert "corrupt grid" in opened.json()["detail"]
+
+
+def test_search_grid_write_is_atomic(client, monkeypatch):
+    from azimut.api import satellite
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
+    client.put(f"/api/cases/{cid}/search-grids/g", json=_rect_grid(title="Before"))
+    path = Case.open(cid).subdir("search") / "g.json"
+    before = path.read_bytes()
+
+    def fail_replace(_source, _target):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(satellite.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="replace failed"):
+        satellite._write_grid_atomic(path, {**_rect_grid(title="After")["spec"], "title": "After"})
+
+    assert path.read_bytes() == before
+    assert list(path.parent.glob(".g.json.*.tmp")) == []
+
+
 def test_search_grid_delete_one(client):
     cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
     client.put(f"/api/cases/{cid}/search-grids/a", json=_rect_grid(title="A"))
@@ -671,4 +740,4 @@ def test_search_grids_are_not_entities(client):
     cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
     client.put(f"/api/cases/{cid}/search-grids/g", json=_rect_grid())
     # grids are working aids, filed under search/, never in the case graph
-    assert client.get(f"/api/cases/{cid}").json()["entities"] == []
+    assert graph_read.entities(cid) == []

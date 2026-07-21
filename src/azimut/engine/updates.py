@@ -1,9 +1,10 @@
 """Is a newer Azimut out? — a self-check for the binary, which has no package
 manager behind it (a ``pip``/``pipx`` user runs ``pipx upgrade`` instead).
 
-Local-first: this reaches the network only when the user presses "Check for
-updates" (api/settings.py gates it behind ``?check=true``, the same opt-in the
-scraper check uses). Nothing here runs on launch or on opening Settings.
+The frontend calls this once on startup by default so binary users hear about
+new releases. Settings can disable that call; the manual button uses the same
+``?check=true`` route, and failures are always returned inline rather than
+breaking the app.
 """
 
 from __future__ import annotations

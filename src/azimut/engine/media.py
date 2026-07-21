@@ -12,7 +12,6 @@ import json
 import mimetypes
 import re
 import shutil
-import subprocess
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,9 +22,12 @@ from PIL import Image
 from ..workspace import Case, ensure_dir
 from . import ffmpeg as ffmpeg_engine
 from . import links as link_engine
+from . import thumbnails as thumbnail_engine
 
-THUMB_DIR = ".thumbs"
-THUMB_MAX = 512
+# The thumbnail cache lives here; content-addressed generation, the durable job
+# model and cache budgeting are owned by `thumbnails.py`. Re-exported for the
+# test fixtures that build a case's `.thumbs/` directly.
+THUMB_DIR = thumbnail_engine.THUMB_DIR
 SIDECAR_SUFFIX = ".azimut.json"
 # a post's attachments (photos on a tweet, an album, …) fit comfortably under
 # this; above it, treat the link as a real playlist and just grab its first
@@ -72,35 +74,6 @@ def unique_path(directory: Path, filename: str) -> Path:
 
 def ffmpeg_available() -> bool:
     return ffmpeg_engine.ffmpeg_available()
-
-
-def make_thumbnail(media_path: Path, thumb_path: Path) -> bool:
-    """Best-effort thumbnail. Images via Pillow, videos via ffmpeg if present."""
-    ensure_dir(thumb_path.parent)
-    kind = media_kind(media_path.name)
-    try:
-        if kind == "image":
-            with Image.open(media_path) as img:
-                rgb = img.convert("RGB")
-                rgb.thumbnail((THUMB_MAX, THUMB_MAX))
-                rgb.save(thumb_path, "JPEG", quality=82)
-            return True
-        if kind == "video" and ffmpeg_available():
-            subprocess.run(
-                [
-                    ffmpeg_engine.ffmpeg_exe(), "-y", "-loglevel", "error",
-                    "-ss", "1", "-i", str(media_path),
-                    "-frames:v", "1", "-vf", f"scale={THUMB_MAX}:-2",
-                    str(thumb_path),
-                ],
-                check=True,
-                timeout=30,
-                capture_output=True,
-            )
-            return thumb_path.exists()
-    except Exception:
-        thumb_path.unlink(missing_ok=True)
-    return False
 
 
 def _sidecar_path(media_path: Path) -> Path:
@@ -163,17 +136,20 @@ def _register(
             return {"duplicate": True, "entity": existing, "item": read_item(case, existing["attrs"]["path"])}
 
     rel_path = f"media/{media_path.name}"
-    thumb = case.subdir("media") / THUMB_DIR / (media_path.name + ".jpg")
-    has_thumb = make_thumbnail(media_path, thumb)
+    kind = media_kind(media_path.name)
+    # Cheap image thumbnails render inline for instant feedback; a failed image
+    # render and every (CPU-heavy) video are queued to the single worker, which
+    # fills the sidecar in later via `set_thumbnail`.
+    thumb_rel = thumbnail_engine.on_register(case, rel_path, digest, kind)
 
     sidecar = {
         "filename": media_path.name,
-        "kind": media_kind(media_path.name),
+        "kind": kind,
         "sha256": digest,
         "size": media_path.stat().st_size,
         "added_at": _now(),
         "source": source,
-        "thumbnail": f"media/{THUMB_DIR}/{media_path.name}.jpg" if has_thumb else None,
+        "thumbnail": thumb_rel,
     }
     if title:
         sidecar["title"] = title
@@ -583,6 +559,19 @@ def download_url(
     return result
 
 
+def set_thumbnail(case: Case, rel_path: str, thumb_rel: str | None) -> None:
+    """Record (or clear) a media item's thumbnail path in its sidecar. The
+    thumbnail worker calls this once it finishes a queued (e.g. video) render, so
+    the next media listing reports the thumbnail as ready."""
+    media_path = case.resolve_inside(rel_path)
+    sidecar = _sidecar_path(media_path)
+    if not sidecar.exists():
+        return
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    data["thumbnail"] = thumb_rel
+    _write_sidecar(media_path, data)
+
+
 def read_item(case: Case, rel_path: str) -> dict[str, Any] | None:
     media_path = case.resolve_inside(rel_path)
     sidecar = _sidecar_path(media_path)
@@ -661,4 +650,9 @@ def delete_media_files(case: Case, rel_path: str) -> None:
     media_path.unlink(missing_ok=True)
     sidecar.unlink(missing_ok=True)
     if data and data.get("thumbnail"):
-        case.resolve_inside(data["thumbnail"]).unlink(missing_ok=True)
+        # Thumbnails are content-addressed, so identical-bytes captures can share
+        # one file (satellite re-captures dedupe to the same sha). Drop the cached
+        # thumbnail only when no surviving sidecar still points at it.
+        thumb = data["thumbnail"]
+        if not any(it.get("thumbnail") == thumb for it in list_media(case)):
+            case.resolve_inside(thumb).unlink(missing_ok=True)

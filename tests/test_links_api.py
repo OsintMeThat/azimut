@@ -12,6 +12,9 @@ import io
 from PIL import Image
 
 from azimut.engine import links as link_engine
+from azimut.workspace import Case
+
+import graph_read
 
 
 def _png_bytes(color=(200, 30, 30), size=(64, 48)) -> bytes:
@@ -31,21 +34,21 @@ def _upload(client, cid, name, data=None):
     ).json()
 
 
-def _case(client, cid):
-    return client.get(f"/api/cases/{cid}").json()
-
-
 def _entity(client, cid, **attrs):
-    """The entity whose attrs match, e.g. _entity(client, cid, path='media/a.png')."""
-    for e in _case(client, cid)["entities"]:
-        if all(e["attrs"].get(k) == v for k, v in attrs.items()):
-            return e
-    return None
+    """The entity whose attrs match, e.g. _entity(client, cid, path='media/a.png').
+
+    The case-open response no longer ships the graph (Step 5), so tests read it in
+    process — see tests/graph_read.py.
+    """
+    return graph_read.entity(cid, **attrs)
 
 
 def _links(client, cid, type_=None):
-    links = _case(client, cid)["links"]
-    return [lk for lk in links if type_ is None or lk["type"] == type_]
+    return graph_read.links(cid, type_)
+
+
+def _add_link(cid, from_id, to_id, type_):
+    return Case.open(cid).add_link(from_id, to_id, type_, by="user")
 
 
 def _new_case(client, name):
@@ -253,9 +256,9 @@ def test_missing_sources_are_tombstoned_in_one_case_update():
             self.read_count = 0
             self.updates = []
 
-        def read(self):
+        def get_entity(self, entity_id):
             self.read_count += 1
-            return {"entities": [{"id": "post", "attrs": {}}]}
+            return {"id": entity_id, "attrs": {}}
 
         def update_entity(self, entity_id, changes):
             self.updates.append((entity_id, changes))
@@ -373,11 +376,7 @@ def test_cascade_is_transitive_through_depends_on(client):
         f"/api/cases/{cid}/entities",
         json={"type": "inspect-session", "label": "S2", "attrs": {"spec": "inspect/s2.json"}},
     ).json()
-    made = client.post(
-        f"/api/cases/{cid}/links",
-        json={"from_id": s2["id"], "to_id": s1["id"], "type": "depends-on"},
-    )
-    assert made.status_code == 200, made.text
+    _add_link(cid, s2["id"], s1["id"], "depends-on")
 
     client.delete(f"/api/cases/{cid}/entities/{_entity(client, cid, path=a)['id']}")
 
@@ -392,15 +391,12 @@ def test_a_session_over_a_frame_survives_the_frames_video_going(client):
     cid = _new_case(client, "Frame session")
     video = _upload(client, cid, "v.png", _png_bytes((9, 9, 9)))["item"]["path"]
     frame = _upload(client, cid, "f.png", _png_bytes((8, 8, 8)))["item"]["path"]
-    made = client.post(
-        f"/api/cases/{cid}/links",
-        json={
-            "from_id": _entity(client, cid, path=frame)["id"],
-            "to_id": _entity(client, cid, path=video)["id"],
-            "type": "derived-from",
-        },
+    _add_link(
+        cid,
+        _entity(client, cid, path=frame)["id"],
+        _entity(client, cid, path=video)["id"],
+        "derived-from",
     )
-    assert made.status_code == 200, made.text
     _save_session(client, cid, "On the video", video, name="onvideo")
     _save_session(client, cid, "On the frame", frame, name="onframe")
 
@@ -464,7 +460,7 @@ def test_the_satellite_delete_honours_the_graph(client):
 def test_a_tool_delete_still_drops_an_unfiled_artifact(client):
     # An artifact with no entity has no graph to honour, but its file must go.
     cid = _new_case(client, "Orphan")
-    case = _case(client, cid)
+    case = client.get(f"/api/cases/{cid}").json()
     client.post(f"/api/cases/{cid}/proofs", json={"title": "P", "spec": {"panels": []}, "name": "p"})
     proof = _entity(client, cid, spec="proofs/p.json")
     client.delete(f"/api/cases/{cid}/entities/{proof['id']}")  # entity + files gone
@@ -506,3 +502,77 @@ def test_dependents_endpoint_is_empty_for_a_lone_entity(client):
 def test_dependents_endpoint_404s_on_an_unknown_entity(client):
     cid = _new_case(client, "Ghost")
     assert client.get(f"/api/cases/{cid}/entities/e_nope/dependents").status_code == 404
+
+
+# ── the derivation chain the Details panel reads ───────────────────────────
+
+
+def test_chain_endpoint_reads_sources_and_dependents(client):
+    cid = _new_case(client, "Chain")
+    a = _upload(client, cid, "a.png")["item"]["path"]
+    _save_proof(client, cid, "P", [a], name="p")
+
+    media = _entity(client, cid, path=a)
+    proof = _entity(client, cid, spec="proofs/p.json")
+
+    proof_chain = client.get(f"/api/cases/{cid}/entities/{proof['id']}/chain").json()
+    assert proof_chain["entity"]["id"] == proof["id"]
+    assert len(proof_chain["sources"]) == 1
+    src = proof_chain["sources"][0]
+    assert src["entity"]["id"] == media["id"] and src["type"] == "derived-from"
+    assert proof_chain["dependents"] == [] and proof_chain["empty"] is False
+
+    # the mirror: the media sees the proof among its dependents
+    media_chain = client.get(f"/api/cases/{cid}/entities/{media['id']}/chain").json()
+    assert [d["entity"]["id"] for d in media_chain["dependents"]] == [proof["id"]]
+    assert media_chain["sources"] == []
+
+
+def test_chain_endpoint_includes_lost_sources_and_404s(client):
+    cid = _new_case(client, "Chain lost")
+    a = _upload(client, cid, "a.png")["item"]["path"]
+    client.delete(f"/api/cases/{cid}/media?path={a}")
+    _save_proof(client, cid, "P", [a], name="p")  # source gone → tombstone, no edge
+
+    proof = _entity(client, cid, spec="proofs/p.json")
+    chain = client.get(f"/api/cases/{cid}/entities/{proof['id']}/chain").json()
+    assert [t["path"] for t in chain["lost"]] == [a]
+    assert chain["empty"] is False
+
+    assert client.get(f"/api/cases/{cid}/entities/e_nope/chain").status_code == 404
+
+
+def test_chain_endpoint_is_empty_for_a_lone_entity(client):
+    cid = _new_case(client, "Chain lone")
+    a = _upload(client, cid, "a.png")["item"]["path"]
+    chain = client.get(
+        f"/api/cases/{cid}/entities/{_entity(client, cid, path=a)['id']}/chain"
+    ).json()
+    assert chain["sources"] == [] and chain["dependents"] == [] and chain["lost"] == []
+    assert chain["empty"] is True
+
+
+def test_lookup_endpoint_resolves_an_entity_by_attr(client):
+    cid = _new_case(client, "Lookup")
+    a = _upload(client, cid, "a.png")["item"]["path"]
+    ent = _entity(client, cid, path=a)
+
+    hit = client.get(f"/api/cases/{cid}/entities/lookup?attr=path&value={a}").json()
+    assert hit["entity"]["id"] == ent["id"]
+    miss = client.get(f"/api/cases/{cid}/entities/lookup?attr=path&value=media/none.jpg").json()
+    assert miss["entity"] is None
+
+
+def test_derivation_endpoint_returns_the_closure_and_404s(client):
+    cid = _new_case(client, "Derivation")
+    a = _upload(client, cid, "a.png", _png_bytes((1, 2, 3)))["item"]["path"]
+    b = _upload(client, cid, "b.png", _png_bytes((4, 5, 6)))["item"]["path"]
+    _save_proof(client, cid, "P", [a, b], name="p")
+    proof = _entity(client, cid, spec="proofs/p.json")
+
+    sub = client.get(f"/api/cases/{cid}/entities/{proof['id']}/derivation").json()
+    ids = {e["id"] for e in sub["entities"]}
+    assert ids == {proof["id"], _entity(client, cid, path=a)["id"], _entity(client, cid, path=b)["id"]}
+    assert len(sub["links"]) == 2 and all(lk["type"] == "derived-from" for lk in sub["links"])
+
+    assert client.get(f"/api/cases/{cid}/entities/e_nope/derivation").status_code == 404

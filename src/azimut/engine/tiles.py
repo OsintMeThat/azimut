@@ -464,7 +464,7 @@ def fetch_crop(
     if provider.meter and config.usage_blocked(provider.meter):
         raise TileFetchError(
             f"{provider.label} is paused: {int(config.BLOCK_SHARE * 100)}% of the monthly "
-            "free tier is used — enable the override in Settings to keep going (billed)"
+            "free tier is used; enable the override in Settings to keep going (billed)"
         )
     # Bigger tiles keep the caller's visual zoom (same m/px) but request a
     # lower URL z: one 512px tile at z-1 covers four 256px tiles at z.
@@ -505,7 +505,7 @@ def fetch_crop(
     n_tiles = (tile_x1 - tile_x0 + 1) * (tile_y1 - tile_y0 + 1)
     if n_tiles > MAX_TILES_PER_CROP:
         raise TileFetchError(
-            f"crop needs {n_tiles} tiles (max {MAX_TILES_PER_CROP}) — reduce size or zoom"
+            f"crop needs {n_tiles} tiles (max {MAX_TILES_PER_CROP}); reduce size or zoom"
         )
 
     max_index = (1 << tile_z) - 1

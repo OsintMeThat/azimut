@@ -9,6 +9,8 @@ of those walls.
 
 import io
 
+import graph_read
+
 from PIL import Image
 
 from azimut.engine import tiles
@@ -229,7 +231,7 @@ def test_bookmark_files_a_link_entity_without_a_screenshot(client):
     assert r.status_code == 200
     body = r.json()
     assert body["case_id"] == cid and body["title"] == "Leak site"
-    ents = client.get(f"/api/cases/{cid}").json()["entities"]
+    ents = graph_read.entities(cid)
     bm = [e for e in ents if e["type"] == "bookmark"]
     assert len(bm) == 1
     assert bm[0]["label"] == "Leak site"

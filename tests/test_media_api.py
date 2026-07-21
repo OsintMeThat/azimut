@@ -1,6 +1,8 @@
 """Media Library: upload, dedupe, listing, file serving, deletion."""
 
 import io
+
+import graph_read
 import time
 
 from PIL import Image
@@ -32,13 +34,61 @@ def test_upload_and_list(client):
     assert [m["filename"] for m in listed] == ["frame one.png"]
 
     # media entity was filed with provenance
-    case = client.get(f"/api/cases/{cid}").json()
-    assert case["entities"][0]["type"] == "media"
-    assert case["entities"][0]["provenance"]["by"] == "media-library"
+    entities = graph_read.entities(cid)
+    assert entities[0]["type"] == "media"
+    assert entities[0]["provenance"]["by"] == "media-library"
 
     # the file and its thumbnail are served
     assert client.get(f"/files/{cid}/{item['path']}").status_code == 200
     assert client.get(f"/files/{cid}/{item['thumbnail']}").status_code == 200
+
+
+def test_media_list_reports_thumb_state(client):
+    cid = client.post("/api/cases", json={"name": "Thumbs"}).json()["id"]
+    _upload(client, cid, "shot.png", _png_bytes())
+
+    item = client.get(f"/api/cases/{cid}/media").json()[0]
+    assert item["thumb_state"] == "ready"  # image thumbnails render inline
+
+
+def test_video_thumbnail_is_queued_then_regenerated(client, monkeypatch):
+    from azimut.engine import thumbnails
+    from azimut.workspace import Case
+
+    # drive the queue by hand: disable the background worker, force a rendering
+    # that always succeeds so the test never depends on a real ffmpeg.
+    monkeypatch.setattr(thumbnails, "start_workers", False)
+    monkeypatch.setattr(
+        thumbnails, "_render", lambda mp, out, kind: (out.write_bytes(b"\xff\xd8jpg"), True)[1]
+    )
+    cid = client.post("/api/cases", json={"name": "Video"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/media/upload",
+        files={"file": ("clip.mp4", io.BytesIO(b"bytes"), "video/mp4")},
+    )
+
+    item = client.get(f"/api/cases/{cid}/media").json()[0]
+    assert item["thumbnail"] is None and item["thumb_state"] == "queued"
+
+    thumbnails.drain(Case.open(cid))  # the worker's work, run synchronously
+    item = client.get(f"/api/cases/{cid}/media").json()[0]
+    assert item["thumb_state"] == "ready" and item["thumbnail"]
+
+
+def test_regenerate_queues_missing_thumbnails(client, monkeypatch):
+    from azimut.engine import thumbnails
+
+    monkeypatch.setattr(thumbnails, "start_workers", False)
+    cid = client.post("/api/cases", json={"name": "Regen"}).json()["id"]
+    # an image whose cached thumbnail is then removed (as budget eviction would)
+    item = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]
+    from azimut.workspace import Case
+
+    Case.open(cid).resolve_inside(item["thumbnail"]).unlink()
+
+    res = client.post(f"/api/cases/{cid}/media/thumbnails/regenerate", json={}).json()
+    assert res["queued"] == 1  # the now-missing thumbnail is re-queued
+    assert client.get(f"/api/cases/{cid}/media").json()[0]["thumb_state"] == "queued"
 
 
 def test_listing_carries_category_fields(client):
@@ -67,7 +117,7 @@ def test_delete_media_removes_entity(client):
     item = _upload(client, cid, "x.png", _png_bytes()).json()["item"]
     client.delete(f"/api/cases/{cid}/media", params={"path": item["path"]})
     assert client.get(f"/api/cases/{cid}/media").json() == []
-    assert client.get(f"/api/cases/{cid}").json()["entities"] == []
+    assert graph_read.entities(cid) == []
     assert client.get(f"/files/{cid}/{item['path']}").status_code == 404
 
 
@@ -97,13 +147,13 @@ def test_update_media_notes_and_folder(client):
     assert listing[0]["folder"] == "ukraine"
 
     # folder + notes mirrored onto the media entity (so the sidebar sees them)
-    entity = client.get(f"/api/cases/{cid}").json()["entities"][0]
+    entity = graph_read.entities(cid)[0]
     assert entity["attrs"]["folder"] == "ukraine"
     assert entity["attrs"]["notes"] == "found at coordinates"
 
     # clearing the folder mirrors an empty value on the entity
     client.patch(f"/api/cases/{cid}/media", json={"path": item["path"], "folder": ""})
-    entity = client.get(f"/api/cases/{cid}").json()["entities"][0]
+    entity = graph_read.entities(cid)[0]
     assert entity["attrs"]["folder"] == ""
 
 
@@ -119,7 +169,7 @@ def test_update_media_title(client):
     assert updated["title"] == "Strike video — Kharkiv"
 
     # the entity label mirrors the title so the case sidebar stays in sync
-    entities = client.get(f"/api/cases/{cid}").json()["entities"]
+    entities = graph_read.entities(cid)
     assert entities[0]["label"] == "Strike video — Kharkiv"
 
     # clearing the title reverts to no custom title
@@ -130,7 +180,7 @@ def test_update_media_title(client):
 
     # the entity label falls back to the filename — it must not freeze on the
     # old title once that title is gone
-    entities = client.get(f"/api/cases/{cid}").json()["entities"]
+    entities = graph_read.entities(cid)
     assert entities[0]["label"] == item["path"].rsplit("/", 1)[-1]
 
 
@@ -288,7 +338,7 @@ def test_download_reports_multi_without_downloading(client, monkeypatch):
             {"index": 3, "title": "p3", "thumbnail": None, "kind": "video"},
         ],
     }
-    assert case.read()["entities"] == []
+    assert case.list_entities() == []
     assert client.get(f"/api/cases/{cid}/media").json() == []
 
 
@@ -473,7 +523,7 @@ def test_gallery_dl_fallback_multi_images(client, monkeypatch):
             {"index": 2, "title": "b", "thumbnail": items[1][0], "kind": "image"},
         ],
     }
-    assert case.read()["entities"] == []
+    assert case.list_entities() == []
 
     picked = media_engine.download_url(case, "https://x.com/u/status/2", index=2)
     assert picked["multi"] is False
@@ -568,7 +618,7 @@ def test_download_merges_telegram_video_and_photos(client, monkeypatch):
         (3, "image"),
         (4, "image"),
     ]
-    assert case.read()["entities"] == []  # detection only — nothing downloaded
+    assert case.list_entities() == []  # detection only — nothing downloaded
 
 
 def test_download_picks_telegram_photo_from_mixed_post(client, monkeypatch):
@@ -671,7 +721,7 @@ def test_concurrent_downloads_dont_lose_entities(client, monkeypatch):
         t.join()
 
     assert errors == [], "\n\n".join(errors)
-    assert len(case.read()["entities"]) == n
+    assert len(case.list_entities()) == n
     assert len(client.get(f"/api/cases/{cid}/media").json()) == n
 
 

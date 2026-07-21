@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .. import __version__, config
 from ..engine import ffmpeg, google_tiles, scrapers, sentinel, tiles, updates
@@ -277,22 +277,128 @@ def export_settings() -> Response:
     )
 
 
+ShortId = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")]
+SecretValue = Annotated[str, Field(max_length=4096)]
+UsageMonth = Annotated[str, Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")]
+UsageCount = Annotated[int, Field(ge=0, le=1_000_000_000_000)]
+FreeTier = Annotated[int, Field(ge=1, le=10_000_000)]
+EcoZoom = Annotated[int, Field(ge=0, le=21)]
+
+
+class ImportedTileProvider(BaseModel):
+    """Canonical shape of a custom XYZ provider in a settings backup."""
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    id: ShortId
+    url: str = Field(min_length=1, max_length=2048)
+    label: str | None = Field(default=None, max_length=120)
+    attribution: str | None = Field(default=None, max_length=500)
+    max_zoom: int = Field(default=19, ge=1, le=24)
+    imagery: bool = True
+    tile_size: Literal[256, 512] = 256
+
+
+class ImportedProviderStatus(BaseModel):
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    ok: bool
+    detail: str = Field(default="", max_length=300)
+    at: str = Field(default="", max_length=64)
+
+
+class ImportedHomeView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    zoom: int = Field(ge=1, le=21)
+
+
+class ImportedSettings(BaseModel):
+    """Validated, canonical subset of a settings backup.
+
+    Unknown top-level and provider keys are ignored for forward compatibility.
+    Every key this build recognises is strictly typed and bounded before the
+    live file is touched.
+    """
+
+    model_config = ConfigDict(extra="ignore", strict=True, populate_by_name=True)
+
+    schema_version: int = Field(
+        default=config.SETTINGS_SCHEMA,
+        alias="schema",
+        ge=config.SETTINGS_SCHEMA,
+        le=config.SETTINGS_SCHEMA,
+    )
+    tile_providers: list[ImportedTileProvider] = Field(default_factory=list, max_length=100)
+    api_keys: dict[ShortId, SecretValue] = Field(default_factory=dict, max_length=128)
+    usage: dict[ShortId, dict[UsageMonth, UsageCount]] = Field(
+        default_factory=dict, max_length=128
+    )
+    providers_enabled: dict[ShortId, bool] = Field(default_factory=dict, max_length=128)
+    usage_overrides: dict[ShortId, bool] = Field(default_factory=dict, max_length=128)
+    free_tiers: dict[ShortId, FreeTier] = Field(default_factory=dict, max_length=128)
+    provider_status: dict[ShortId, ImportedProviderStatus] = Field(
+        default_factory=dict, max_length=128
+    )
+    eco_zoom_fallback: bool = True
+    eco_max_zoom: int = Field(default=config.ECO_MAX_ZOOM, ge=1, le=21)
+    eco_max_zooms: dict[ShortId, EcoZoom] = Field(default_factory=dict, max_length=128)
+    coord_format: Literal["dd", "dms", "mgrs"] = "dd"
+    units: Literal["metric", "imperial"] = "metric"
+    home_view: ImportedHomeView = Field(
+        default_factory=lambda: ImportedHomeView.model_validate(DEFAULT_HOME_VIEW)
+    )
+    post_mention: str = Field(default=DEFAULT_POST_MENTION, max_length=64)
+    post_target: Literal["x", "bluesky", "mastodon"] = DEFAULT_POST_TARGET
+    signature_handle: str = Field(default=DEFAULT_SIGNATURE_HANDLE, max_length=64)
+    ingest_token: str = Field(default="", max_length=128, pattern=r"^[A-Za-z0-9_-]*$")
+    update_check_on_start: bool = True
+    update_dismissed_version: str = Field(default="", max_length=64)
+
+    @field_validator("api_keys")
+    @classmethod
+    def canonical_keys(cls, value: dict[str, str]) -> dict[str, str]:
+        return {key: secret for key, raw in value.items() if (secret := raw.strip())}
+
+    @field_validator("providers_enabled", "usage_overrides")
+    @classmethod
+    def canonical_keyed_flags(cls, value: dict[str, bool]) -> dict[str, bool]:
+        return {key: enabled for key, enabled in value.items() if key in KEYED_PROVIDERS}
+
+    @field_validator("free_tiers", "provider_status")
+    @classmethod
+    def canonical_meter_maps(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return {key: item for key, item in value.items() if key in config.FREE_TIER}
+
+    @field_validator("eco_max_zooms")
+    @classmethod
+    def canonical_eco_zooms(cls, value: dict[str, int]) -> dict[str, int]:
+        return {key: zoom for key, zoom in value.items() if key in ECO_TUNABLE}
+
+    @field_validator("post_mention", "signature_handle", "update_dismissed_version")
+    @classmethod
+    def strip_short_text(cls, value: str) -> str:
+        return value.strip()
+
+
 class ImportIn(BaseModel):
     """A previously exported settings blob. Only keys Azimut recognises are
     applied — anything else in the file is ignored, so a hand-edited or foreign
     JSON can't inject arbitrary state."""
 
-    settings: dict[str, Any]
+    settings: ImportedSettings
 
 
 @router.post("/settings/import")
 def import_settings(body: ImportIn) -> dict[str, Any]:
-    known = set(config.DEFAULT_SETTINGS)
-    applied = sorted(k for k in body.settings if k in known)
+    canonical = body.settings.model_dump(exclude_unset=True, by_alias=True)
+    applied = sorted(canonical)
 
     def apply(settings: dict[str, Any]) -> None:
         for key in applied:
-            settings[key] = body.settings[key]
+            settings[key] = canonical[key]
 
     config.update_settings(apply)
     return {"imported": applied}

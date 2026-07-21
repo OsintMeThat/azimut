@@ -266,12 +266,23 @@ def load_settings() -> dict[str, Any]:
 
 
 def save_settings(settings: dict[str, Any]) -> None:
-    settings_path().parent.mkdir(parents=True, exist_ok=True)
-    settings_path().write_text(
-        json.dumps(settings, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
-    # Holds the user's API keys and pairing token — owner-read/write only.
-    _restrict(settings_path(), 0o600)
+    path = settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _restrict(path.parent, 0o700)
+    payload = json.dumps(settings, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _restrict(tmp_path, 0o600)
+        os.replace(tmp_path, path)
+        # Holds the user's API keys and pairing token — owner-read/write only.
+        _restrict(path, 0o600)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def month_key(when: datetime | None = None) -> str:

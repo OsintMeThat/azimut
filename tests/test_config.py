@@ -54,6 +54,22 @@ def test_load_settings_missing_file_returns_defaults(monkeypatch, tmp_path):
     assert loaded is not config.DEFAULT_SETTINGS
 
 
+def test_save_settings_is_atomic_when_replace_fails(monkeypatch, tmp_path):
+    monkeypatch.setenv("AZIMUT_HOME", str(tmp_path))
+    config.save_settings({**config.DEFAULT_SETTINGS, "units": "metric"})
+    before = config.settings_path().read_bytes()
+
+    def fail_replace(_source, _target):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(config.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="replace failed"):
+        config.save_settings({**config.DEFAULT_SETTINGS, "units": "imperial"})
+
+    assert config.settings_path().read_bytes() == before
+    assert list(tmp_path.glob(".settings.json.*.tmp")) == []
+
+
 @pytest.mark.parametrize(
     "content",
     ["[]", "{", '{"schema": 2, "proof": [], "post": []}', '{"schema": 1, "proof": [42], "post": []}'],

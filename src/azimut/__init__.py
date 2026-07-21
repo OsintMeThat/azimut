@@ -1,4 +1,4 @@
-"""Azimut — the OSINT investigator's workbench."""
+"""Azimut, a local OSINT workspace."""
 
 from PIL import Image as _Image
 

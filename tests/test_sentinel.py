@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import io
 
 import httpx
 import pytest
+from PIL import Image
 
 from azimut.engine import sentinel
 
@@ -227,6 +229,72 @@ def test_dates_raises_rather_than_report_an_empty_sky():
     # must never render as the same empty list
     with pytest.raises(httpx.HTTPStatusError):
         sentinel.dates("inst-uuid", 48.0, 2.0, "2026-05-01", "2026-05-31", get=get)
+
+
+# -- rendered coverage --------------------------------------------------------
+
+
+def _mask_response(url, values):
+    image = Image.new("L", (8, 8))
+    image.putdata(values)
+    payload = io.BytesIO()
+    image.save(payload, format="PNG")
+    return httpx.Response(
+        200, content=payload.getvalue(), request=httpx.Request("GET", url)
+    )
+
+
+def test_coverage_uses_the_selected_layer_and_day():
+    captured = {}
+
+    def get(url, params=None, **kwargs):
+        captured["url"] = url
+        captured["params"] = params
+        return _mask_response(url, [0] * 63 + [255])
+
+    result = sentinel.coverage(
+        "inst-uuid", 48.8584, 2.2945, "SWIR", "2026-05-11", get=get
+    )
+
+    assert result == {
+        "available": True,
+        "coverage": 0.016,
+        "date": "2026-05-11",
+        "layer": "SWIR",
+    }
+    assert captured["url"].endswith("/ogc/wms/inst-uuid")
+    assert captured["params"]["LAYERS"] == "SWIR"
+    assert captured["params"]["TIME"] == "2026-05-11/2026-05-11"
+    assert captured["params"]["FORMAT"] == "image/png"
+    assert captured["params"]["EVALSCRIPT"]
+
+
+def test_coverage_reports_no_source_pixels():
+    result = sentinel.coverage(
+        "inst-uuid", 48.8584, 2.2945, "TRUE_COLOR", "2026-05-11",
+        get=lambda url, **kwargs: _mask_response(url, [0] * 64),
+    )
+    assert result["available"] is False
+    assert result["coverage"] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("layer", "day"),
+    [("../SWIR", "2026-05-11"), ("SWIR", "2026-02-30")],
+)
+def test_coverage_rejects_malformed_layer_or_day(layer, day):
+    with pytest.raises(ValueError):
+        sentinel.coverage("inst-uuid", 48.0, 2.0, layer, day)
+
+
+def test_coverage_rejects_a_non_image_response():
+    def get(url, **kwargs):
+        return _response(url, text="<ExceptionReport />")
+
+    with pytest.raises(sentinel.CoverageError, match="no readable image"):
+        sentinel.coverage(
+            "inst-uuid", 48.0, 2.0, "TRUE_COLOR", "2026-05-11", get=get
+        )
 
 
 # -- layer discovery -----------------------------------------------------------

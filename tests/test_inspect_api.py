@@ -5,12 +5,18 @@ needs ffmpeg and is skipped when it is unavailable in the environment.
 """
 
 import io
+import subprocess
+import threading
+
+import graph_read
 import time
 
 import pytest
 from PIL import Image
 
+from azimut.engine import inspect as inspect_engine
 from azimut.engine import media as media_engine
+from azimut.workspace import Case
 
 
 def _png_bytes(color=(120, 60, 30), size=(80, 60)) -> bytes:
@@ -34,6 +40,68 @@ def test_ops_registry_is_self_describing(client):
     assert brightness["css"] == "brightness({v})"
     assert brightness["params"][0]["default"] == 1
     assert {a["id"] for a in ops["analyses"]} >= {"histogram", "exif", "ela"}
+
+
+def test_video_rotation_filterchain_covers_every_orientation_control():
+    assert inspect_engine._video_filterchain({}, -180) == "hflip,vflip"
+    assert inspect_engine._video_filterchain({}, -90) == "transpose=cclock"
+    assert inspect_engine._video_filterchain({}, 0) is None
+    assert inspect_engine._video_filterchain({}, 90) == "transpose=clock"
+    assert inspect_engine._video_filterchain({}, 180) == "hflip,vflip"
+    with pytest.raises(ValueError, match="video rotation"):
+        inspect_engine._video_filterchain({}, 45)
+
+
+def test_focus_scan_redirects_stderr_and_terminates_a_stalled_decoder(client, monkeypatch):
+    cid = client.post("/api/cases", json={"name": "Scan"}).json()["id"]
+    case = Case.open(cid)
+    video = case.subdir("media") / "clip.mp4"
+    video.write_bytes(b"placeholder")
+    stopped = threading.Event()
+    seen = {}
+
+    class BlockingStdout:
+        def read(self, _size):
+            stopped.wait(timeout=1)
+            return b""
+
+        def close(self):
+            pass
+
+    class FakeProcess:
+        returncode = None
+
+        def __init__(self, *args, stdout=None, stderr=None, **kwargs):
+            seen["stderr"] = stderr
+            self.stdout = BlockingStdout()
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+            stopped.set()
+
+        def kill(self):
+            self.returncode = -9
+            stopped.set()
+
+        def wait(self, timeout=None):
+            if self.returncode is None:
+                raise subprocess.TimeoutExpired("ffmpeg", timeout)
+            return self.returncode
+
+    monkeypatch.setattr(media_engine, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(inspect_engine, "probe", lambda *_args: {
+        "fps": 25, "duration": 1, "width": 16, "height": 16,
+    })
+    monkeypatch.setattr(inspect_engine, "_scan_timeout", lambda _duration: 0.01)
+    monkeypatch.setattr(inspect_engine.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        inspect_engine.scan_focus(case, "media/clip.mp4")
+    assert stopped.is_set()
+    assert seen["stderr"] is not subprocess.PIPE
 
 
 def test_probe_image(client):
@@ -61,7 +129,7 @@ def test_save_frames_files_adjusted_derivative(client):
     # filed as a new media with inspect provenance and served
     listing = client.get(f"/api/cases/{cid}/media").json()
     assert len(listing) == 2
-    entities = client.get(f"/api/cases/{cid}").json()["entities"]
+    entities = graph_read.entities(cid)
     derived = next(e for e in entities if e["attrs"]["path"] == new_path)
     assert derived["provenance"]["by"] == "inspect"
     assert client.get(f"/files/{cid}/{new_path}").status_code == 200
@@ -100,6 +168,22 @@ def test_crop_op_reduces_dimensions(client):
         f"/api/cases/{cid}/inspect/probe", params={"path": res["item"]["path"]}
     ).json()
     assert probe["width"] == 100 and probe["height"] == 50
+
+
+def test_rotate_op_saves_image_in_selected_orientation(client):
+    cid = client.post("/api/cases", json={"name": "Rotate image"}).json()["id"]
+    item = _upload(client, cid, "landscape.png", _png_bytes(size=(120, 80)))
+    res = client.post(
+        f"/api/cases/{cid}/inspect/save-frames",
+        json={"items": [{
+            "path": item["path"],
+            "ops": [{"op": "rotate", "params": {"angle": -90}}],
+        }]},
+    ).json()["saved"][0]
+    probe = client.get(
+        f"/api/cases/{cid}/inspect/probe", params={"path": res["item"]["path"]}
+    ).json()
+    assert probe["width"] == 80 and probe["height"] == 120
 
 
 def test_compose_combines_images(client):
@@ -199,7 +283,7 @@ def test_save_frames_files_selected_images_into_folder(client):
     assert len(listing) == before + 1
     new_path = saved[0]["item"]["path"]
     entity = next(
-        e for e in client.get(f"/api/cases/{cid}").json()["entities"]
+        e for e in graph_read.entities(cid)
         if e["attrs"].get("path") == new_path
     )
     assert entity["attrs"]["folder"] == "Frames"
@@ -620,7 +704,7 @@ def test_enhance_video_files_new_video(client, tmp_path):
     res = client.post(
         f"/api/cases/{cid}/inspect/enhance-video",
         json={"path": item["path"], "params": {"brightness": 1.3, "contrast": 1.2},
-              "folder": "Enhanced"},
+              "rotation": 90, "folder": "Enhanced"},
     ).json()
     assert res["duplicate"] is False
     new_path = res["item"]["path"]
@@ -629,8 +713,11 @@ def test_enhance_video_files_new_video(client, tmp_path):
         f"/api/cases/{cid}/inspect/probe", params={"path": new_path}
     ).json()
     assert probe["kind"] == "video"
+    assert probe["width"] == 120 and probe["height"] == 160
+    saved = next(m for m in client.get(f"/api/cases/{cid}/media").json() if m["path"] == new_path)
+    assert saved["source"]["rotation"] == 90
     entity = next(
-        e for e in client.get(f"/api/cases/{cid}").json()["entities"]
+        e for e in graph_read.entities(cid)
         if e["attrs"].get("path") == new_path
     )
     assert entity["attrs"]["folder"] == "Enhanced"
@@ -669,7 +756,7 @@ def test_session_save_list_load_delete_roundtrip(client):
     assert len(listing) == 1 and listing[0]["title"] == "My session" and listing[0]["frames"] == 1
 
     # an inspect-session entity is upserted so it reopens from the sidebar
-    entities = client.get(f"/api/cases/{cid}").json()["entities"]
+    entities = graph_read.entities(cid)
     ent = next(e for e in entities if e["type"] == "inspect-session")
     assert ent["attrs"]["spec"] == "inspect/my-session.json"
 
@@ -679,12 +766,12 @@ def test_session_save_list_load_delete_roundtrip(client):
 
     # re-saving under the same title updates in place (no duplicate entity)
     client.post(f"/api/cases/{cid}/inspect/sessions", json={"title": "My session", "spec": spec})
-    entities = client.get(f"/api/cases/{cid}").json()["entities"]
+    entities = graph_read.entities(cid)
     assert sum(1 for e in entities if e["type"] == "inspect-session") == 1
 
     client.delete(f"/api/cases/{cid}/inspect/sessions/my-session")
     assert client.get(f"/api/cases/{cid}/inspect/sessions").json() == []
-    entities = client.get(f"/api/cases/{cid}").json()["entities"]
+    entities = graph_read.entities(cid)
     assert not any(e["type"] == "inspect-session" for e in entities)
 
 
@@ -734,7 +821,7 @@ def test_session_delete_via_sidebar_entity_removes_spec(client):
     spec = {"source": {"path": item["path"], "kind": "image"}, "frames": [], "collage": {"nodes": []}}
     client.post(f"/api/cases/{cid}/inspect/sessions", json={"title": "Doomed", "spec": spec})
 
-    entities = client.get(f"/api/cases/{cid}").json()["entities"]
+    entities = graph_read.entities(cid)
     ent = next(e for e in entities if e["type"] == "inspect-session")
 
     client.delete(f"/api/cases/{cid}/entities/{ent['id']}")
@@ -763,7 +850,7 @@ def test_session_resave_by_name_overwrites_after_rename(client):
     listing = client.get(f"/api/cases/{cid}/inspect/sessions").json()
     assert len(listing) == 1
     assert listing[0]["name"] == "original" and listing[0]["title"] == "Renamed"
-    entities = client.get(f"/api/cases/{cid}").json()["entities"]
+    entities = graph_read.entities(cid)
     assert sum(1 for e in entities if e["type"] == "inspect-session") == 1
 
 
@@ -784,6 +871,15 @@ def test_enhance_video_rejects_neutral_params(client, tmp_path):
         ).json()["item"]
     res = client.post(
         f"/api/cases/{cid}/inspect/enhance-video", json={"path": item["path"], "params": {}}
+    )
+    assert res.status_code == 422
+
+
+def test_enhance_video_rejects_non_right_angle_rotation(client):
+    cid = client.post("/api/cases", json={"name": "Bad rotation"}).json()["id"]
+    res = client.post(
+        f"/api/cases/{cid}/inspect/enhance-video",
+        json={"path": "media/clip.mp4", "params": {}, "rotation": 45},
     )
     assert res.status_code == 422
 

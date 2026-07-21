@@ -22,6 +22,8 @@ import base64
 import io
 import json
 import subprocess
+import tempfile
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +44,23 @@ SUGGEST_CAP = 60  # hard cap on how many "sharpest frame" suggestions we return
 # focus measure but costs real time; this is small enough to stream a long clip
 # and large enough to tell a sharp frame from a soft one.
 SCAN_DIM = 480
+
+
+def _scan_timeout(duration: float) -> float:
+    """Allow slow software decoding without letting a broken scan run forever."""
+    return max(30.0, min(1800.0, duration * 4 + 15))
+
+
+def _stop_process(proc: subprocess.Popen[Any]) -> None:
+    """Stop a child promptly, escalating when graceful termination stalls."""
+    if proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=2)
 
 
 def _now() -> str:
@@ -270,7 +289,7 @@ def _ela(img: Image.Image, params: dict[str, Any]) -> dict[str, Any]:
         "kind": "image",
         "data_url": f"data:image/png;base64,{data}",
         "note": "Error Level Analysis is a tampering *hint*, not proof. "
-        "Bright, uneven regions can indicate edits — or just texture and edges.",
+        "Bright, uneven regions can indicate edits, texture or hard edges.",
     }
 
 
@@ -469,31 +488,54 @@ def scan_focus(
     expected = max(1, int(duration * fps))
     frame_bytes = w * h
 
-    proc = subprocess.Popen(
-        [ffmpeg_engine.ffmpeg_exe(), "-v", "error", "-i", str(video_path),
-         "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
     out: list[dict[str, Any]] = []
-    try:
-        assert proc.stdout is not None
-        index = 0
-        while True:
-            buf = proc.stdout.read(frame_bytes)
-            if not buf or len(buf) < frame_bytes:
-                break
-            gray = np.frombuffer(buf, dtype=np.uint8).reshape(h, w)
-            out.append({"time": round(index / fps, 3), "score": round(_focus_score(gray), 4)})
-            index += 1
-            if set_progress and index % 25 == 0:
-                set_progress({"percent": round(min(99.0, index * 100 / expected), 1)})
-    finally:
-        if proc.stdout:
-            proc.stdout.close()
-        err = proc.stderr.read() if proc.stderr else b""
-        if proc.stderr:
-            proc.stderr.close()
-        proc.wait()
+    timed_out = threading.Event()
+    with tempfile.TemporaryFile() as stderr_file:
+        proc = subprocess.Popen(
+            [ffmpeg_engine.ffmpeg_exe(), "-v", "error", "-i", str(video_path),
+             "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
+            stdout=subprocess.PIPE, stderr=stderr_file,
+        )
+
+        def expire() -> None:
+            timed_out.set()
+            _stop_process(proc)
+
+        timer = threading.Timer(_scan_timeout(duration), expire)
+        timer.daemon = True
+        timer.start()
+        try:
+            assert proc.stdout is not None
+            index = 0
+            while True:
+                buf = proc.stdout.read(frame_bytes)
+                if not buf or len(buf) < frame_bytes:
+                    break
+                gray = np.frombuffer(buf, dtype=np.uint8).reshape(h, w)
+                out.append({"time": round(index / fps, 3), "score": round(_focus_score(gray), 4)})
+                index += 1
+                if set_progress and index % 25 == 0:
+                    set_progress({"percent": round(min(99.0, index * 100 / expected), 1)})
+        except BaseException:
+            _stop_process(proc)
+            raise
+        finally:
+            timer.cancel()
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.poll() is None:
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    _stop_process(proc)
+            stderr_file.seek(0)
+            err = stderr_file.read()
+    if timed_out.is_set():
+        raise RuntimeError("frame scan timed out")
+    if proc.returncode not in (0, None):
+        raise RuntimeError(
+            (err or b"").decode("utf-8", "replace").strip() or "frame scan failed"
+        )
     if not out:
         raise RuntimeError(
             (err or b"").decode("utf-8", "replace").strip() or "frame scan decoded nothing"
@@ -821,20 +863,40 @@ def _eq_filterchain(params: dict[str, Any]) -> str | None:
     return ",".join(parts) or None
 
 
+def _rotation_filterchain(rotation: int) -> str | None:
+    """Map the UI's clockwise degrees to ffmpeg right-angle filters."""
+    chains = {
+        -180: "hflip,vflip",
+        -90: "transpose=cclock",
+        0: None,
+        90: "transpose=clock",
+        180: "hflip,vflip",
+    }
+    if rotation not in chains:
+        raise ValueError("video rotation must be -180, -90, 0, 90 or 180 degrees")
+    return chains[rotation]
+
+
+def _video_filterchain(params: dict[str, Any], rotation: int) -> str | None:
+    parts = (_rotation_filterchain(rotation), _eq_filterchain(params))
+    return ",".join(part for part in parts if part) or None
+
+
 def enhance_video(
     case: Case,
     video_rel: str,
     params: dict[str, Any],
     *,
+    rotation: int = 0,
     label: str | None = None,
     folder: str | None = None,
 ) -> dict[str, Any]:
-    """Re-encode a video with the gear's adjustments and file it as new media."""
+    """Re-encode a video with its adjustments and orientation, then file it."""
     if not media_engine.ffmpeg_available():
         raise RuntimeError("ffmpeg is required to enhance video")
-    vf = _eq_filterchain(params)
+    vf = _video_filterchain(params, rotation)
     if not vf:
-        raise ValueError("no adjustments to apply — tune the gear first")
+        raise ValueError("no adjustments or rotation to apply")
 
     src = case.resolve_inside(video_rel)
     stem = Path(src.name).stem[:40]
@@ -842,7 +904,7 @@ def enhance_video(
     try:
         proc = subprocess.run(
             [ffmpeg_engine.ffmpeg_exe(), "-y", "-loglevel", "error", "-i", str(src),
-             "-vf", vf, "-c:a", "copy", str(tmp)],
+             "-vf", vf, "-c:a", "copy", "-metadata:s:v:0", "rotate=0", str(tmp)],
             capture_output=True, timeout=600,
         )
         if proc.returncode != 0 or not tmp.exists():
@@ -850,7 +912,10 @@ def enhance_video(
                 (proc.stderr or b"").decode("utf-8", "replace").strip() or "video enhance failed"
             )
         name = f"{stem}_enhanced_{_stamp()}.mp4"
-        source = _derivation(video_rel, _source_sha(case, video_rel), op="enhance-video", params=params)
+        source = _derivation(
+            video_rel, _source_sha(case, video_rel), op="enhance-video",
+            params=params, rotation=rotation,
+        )
         result = media_engine.import_produced_file(case, tmp, name, source, by="inspect")
     finally:
         tmp.unlink(missing_ok=True)

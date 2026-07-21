@@ -61,6 +61,23 @@ def install_local_guard(app: FastAPI) -> None:
         return await call_next(request)
 
 
+def _recover_jobs() -> None:
+    """On startup, return jobs a crashed process left ``running`` to the queue and
+    wake the worker for any case with pending thumbnail work. A `running` row
+    nothing owns would otherwise stall forever; recovery resumes it."""
+    from .engine import thumbnails
+    from .workspace import Case
+
+    for row in Case.list_all():
+        try:
+            case = Case.open(row["id"])
+            case.recover_jobs()
+        except Exception:
+            continue
+        if any(j["state"] == "queued" for j in case.list_jobs(kind=thumbnails.THUMB_KIND)):
+            thumbnails.wake(case)
+
+
 def create_app() -> FastAPI:
     config.ensure_workspace()
     # Before any router can import a scraper: point yt-dlp/gallery-dl at the
@@ -75,6 +92,14 @@ def create_app() -> FastAPI:
     try:
         Case.cleanup_scratch()
     except OSError:
+        pass
+
+    # Reclaim background jobs a previous run left mid-flight and resume any
+    # pending thumbnail work through the single worker. Best-effort: housekeeping
+    # must never block or crash startup.
+    try:
+        _recover_jobs()
+    except Exception:
         pass
 
     app = FastAPI(title="Azimut", version=__version__, docs_url="/api/docs")
@@ -119,7 +144,7 @@ def create_app() -> FastAPI:
             return JSONResponse(
                 {
                     "azimut": __version__,
-                    "hint": "frontend not built — run `npm run build` in frontend/ "
+                    "hint": "frontend not built; run `npm run build` in frontend/ "
                     "or use the Vite dev server (npm run dev)",
                 }
             )

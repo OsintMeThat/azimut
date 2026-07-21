@@ -1,14 +1,37 @@
 """Case lifecycle, notes, entities and links through the REST API."""
 
+import graph_read
+
 
 def test_health(client):
     assert client.get("/api/health").json()["status"] == "ok"
 
 
+def test_entity_status_is_validated_consistently(client):
+    cid = client.post("/api/cases", json={"name": "Statuses"}).json()["id"]
+    invalid_create = client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "person", "label": "Lead", "status": "pending"},
+    )
+    assert invalid_create.status_code == 422
+    assert graph_read.entities(cid) == []
+
+    entity = client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "person", "label": "Lead", "status": "suggested"},
+    ).json()
+    invalid_patch = client.patch(
+        f"/api/cases/{cid}/entities/{entity['id']}", json={"status": "pending"}
+    )
+    assert invalid_patch.status_code == 422
+    saved = next(item for item in graph_read.entities(cid) if item["id"] == entity["id"])
+    assert saved["provenance"]["status"] == "suggested"
+
+
 def test_case_lifecycle(client):
     created = client.post("/api/cases", json={"name": "Kharkiv Strike"}).json()
     assert created["id"] == "kharkiv-strike"
-    assert created["entities"] == []
+    assert graph_read.entities(created["id"]) == []
 
     # duplicate name → 409
     assert client.post("/api/cases", json={"name": "Kharkiv Strike"}).status_code == 409
@@ -83,7 +106,36 @@ def test_notes_roundtrip(client):
     assert client.get(f"/api/cases/{case['id']}/notes").json()["text"] == "# hello\n\nworld"
 
 
-def test_entities_and_links(client):
+def test_filed_notes_are_markdown_files(client):
+    import azimut.config as cfg
+
+    cid = client.post("/api/cases", json={"name": "Notebook"}).json()["id"]
+    note = client.post(
+        f"/api/cases/{cid}/notes",
+        json={"title": "Lead", "folder": "Research", "content": "# First lead"},
+    ).json()
+
+    assert note["attrs"] == {"folder": "Research", "path": f"notes/{note['id']}.md"}
+    assert (cfg.cases_dir() / cid / note["attrs"]["path"]).read_text(encoding="utf-8") == "# First lead"
+    assert client.get(f"/api/cases/{cid}/notes/{note['id']}").json()["text"] == "# First lead"
+
+    client.put(f"/api/cases/{cid}/notes/{note['id']}", json={"text": "Updated"})
+    assert client.get(f"/api/cases/{cid}/notes/{note['id']}").json()["text"] == "Updated"
+
+
+def test_deleting_filed_note_removes_markdown_file(client):
+    import azimut.config as cfg
+
+    cid = client.post("/api/cases", json={"name": "Notebook delete"}).json()["id"]
+    note = client.post(f"/api/cases/{cid}/notes", json={"title": "Disposable"}).json()
+    path = cfg.cases_dir() / cid / note["attrs"]["path"]
+    assert path.exists()
+
+    client.delete(f"/api/cases/{cid}/entities/{note['id']}")
+    assert not path.exists()
+
+
+def test_entities_and_deletion_cleanup(client):
     cid = client.post("/api/cases", json={"name": "Graph"}).json()["id"]
 
     person = client.post(
@@ -102,26 +154,93 @@ def test_entities_and_links(client):
     ).json()
     assert patched["provenance"]["status"] == "confirmed"
 
-    link = client.post(
-        f"/api/cases/{cid}/links",
-        json={"from_id": person["id"], "to_id": account["id"], "type": "owns"},
-    ).json()
-    assert link["type"] == "owns"
+    from azimut.workspace import Case
 
-    # unknown entity in a link → 404
-    assert (
-        client.post(
-            f"/api/cases/{cid}/links",
-            json={"from_id": person["id"], "to_id": "e_nope", "type": "owns"},
-        ).status_code
-        == 404
-    )
+    link = Case.open(cid).add_link(person["id"], account["id"], "owns", by="user")
+    assert link["type"] == "owns"
 
     # deleting an entity cascades to its links
     client.delete(f"/api/cases/{cid}/entities/{account['id']}")
-    data = client.get(f"/api/cases/{cid}").json()
-    assert len(data["entities"]) == 1
-    assert data["links"] == []
+    assert len(graph_read.entities(cid)) == 1
+    assert graph_read.links(cid) == []
+
+
+def test_catalog_pagination_and_summary(client):
+    cid = client.post("/api/cases", json={"name": "Catalog"}).json()["id"]
+    for i in range(5):
+        client.post(f"/api/cases/{cid}/entities", json={"type": "person", "label": f"P{i}"})
+    client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "account", "label": "@acct", "status": "suggested"},
+    )
+
+    # walk the whole catalog in bounded pages
+    seen: list[str] = []
+    cursor = None
+    while True:
+        params: dict[str, object] = {"limit": 2}
+        if cursor:
+            params["cursor"] = cursor
+        page = client.get(f"/api/cases/{cid}/catalog/entities", params=params).json()
+        assert len(page["items"]) <= 2
+        seen.extend(e["label"] for e in page["items"])
+        cursor = page["next_cursor"]
+        if not cursor:
+            break
+    assert seen == ["P0", "P1", "P2", "P3", "P4", "@acct"]
+
+    # server-side filters
+    people = client.get(
+        f"/api/cases/{cid}/catalog/entities", params={"type": "person"}
+    ).json()
+    assert {e["label"] for e in people["items"]} == {"P0", "P1", "P2", "P3", "P4"}
+    suggested = client.get(
+        f"/api/cases/{cid}/catalog/entities", params={"status": "suggested"}
+    ).json()
+    assert [e["label"] for e in suggested["items"]] == ["@acct"]
+
+    # summary counts without shipping the graph
+    summary = client.get(f"/api/cases/{cid}/catalog/summary").json()
+    assert summary["total"] == 6
+    assert summary["by_type"] == {"person": 5, "account": 1}
+    assert summary["by_status"] == {"confirmed": 5, "suggested": 1}
+
+
+def test_catalog_filters_by_folder(client):
+    cid = client.post("/api/cases", json={"name": "Foldered"}).json()["id"]
+    client.post(f"/api/cases/{cid}/folders", json={"name": "Alpha"})
+    client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "person", "label": "filed", "attrs": {"folder": "Alpha"}},
+    )
+    client.post(f"/api/cases/{cid}/entities", json={"type": "person", "label": "loose"})
+
+    in_alpha = client.get(
+        f"/api/cases/{cid}/catalog/entities", params={"folder": "Alpha"}
+    ).json()
+    assert [e["label"] for e in in_alpha["items"]] == ["filed"]
+
+    unfiled = client.get(
+        f"/api/cases/{cid}/catalog/entities", params={"unfiled": "true"}
+    ).json()
+    assert [e["label"] for e in unfiled["items"]] == ["loose"]
+
+    assert client.get(f"/api/cases/{cid}/catalog/summary").json()["by_folder"] == {"Alpha": 1}
+
+
+def test_catalog_rejects_a_bad_cursor(client):
+    cid = client.post("/api/cases", json={"name": "BadCursor"}).json()["id"]
+    res = client.get(f"/api/cases/{cid}/catalog/entities", params={"cursor": "not-an-int"})
+    assert res.status_code == 400
+
+
+def test_catalog_clamps_the_page_size(client):
+    cid = client.post("/api/cases", json={"name": "Clamp"}).json()["id"]
+    for i in range(3):
+        client.post(f"/api/cases/{cid}/entities", json={"type": "person", "label": f"P{i}"})
+    # a limit below 1 is clamped up to 1 so a page always makes progress
+    page = client.get(f"/api/cases/{cid}/catalog/entities", params={"limit": 0}).json()
+    assert len(page["items"]) == 1 and page["next_cursor"] is not None
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +362,7 @@ def test_delete_folder_unassigns_entities(client):
     client.delete(f"/api/cases/{cid}/folders", params={"name": "Suspects"})
     data = client.get(f"/api/cases/{cid}").json()
     assert data["folders"] == []
-    entity = next(e for e in data["entities"] if e["id"] == ent["id"])
+    entity = next(e for e in graph_read.entities(cid) if e["id"] == ent["id"])
     assert "folder" not in entity["attrs"]
 
 
@@ -277,8 +396,7 @@ def test_delete_folder_cascades_subtree(client):
         f"/api/cases/{cid}/folders", params={"name": "Sources"}
     ).json()
     assert remaining == []
-    data = client.get(f"/api/cases/{cid}").json()
-    entity = next(e for e in data["entities"] if e["id"] == deep["id"])
+    entity = next(e for e in graph_read.entities(cid) if e["id"] == deep["id"])
     assert "folder" not in entity["attrs"]
 
 
@@ -296,7 +414,7 @@ def test_delete_media_entity_removes_file(client):
         files={"file": ("frame.png", io.BytesIO(png), "image/png")},
     ).json()["item"]
     entity = next(
-        e for e in client.get(f"/api/cases/{cid}").json()["entities"]
+        e for e in graph_read.entities(cid)
         if e["type"] == "media"
     )
 
@@ -304,7 +422,7 @@ def test_delete_media_entity_removes_file(client):
     client.delete(f"/api/cases/{cid}/entities/{entity['id']}")
     assert client.get(f"/files/{cid}/{item['path']}").status_code == 404
     assert not any(
-        e["type"] == "media" for e in client.get(f"/api/cases/{cid}").json()["entities"]
+        e["type"] == "media" for e in graph_read.entities(cid)
     )
 
 

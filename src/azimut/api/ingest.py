@@ -38,11 +38,9 @@ from ..engine import geo, mapsites, media as media_engine, satellite as satellit
 from ..workspace import Case
 from . import events
 from .cases import get_case
+from .limits import MAX_IMAGE_BYTES
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
-
-# Screenshots are viewport-sized PNGs — a 4K display lands well under this.
-MAX_IMAGE_BYTES = 25 * 1024 * 1024
 
 # Browser extensions are the only cross-origin callers these routes accept.
 EXTENSION_ORIGIN_SCHEMES = ("chrome-extension://", "moz-extension://", "safari-web-extension://")
@@ -160,7 +158,7 @@ async def ingest_screenshot(
     parsed = mapsites.parse_map_url(url)
     if parsed is None:
         raise HTTPException(
-            status_code=422, detail="not a recognized map site — captures are for maps only"
+            status_code=422, detail="not a recognized map site; captures are for maps only"
         )
 
     # popup corrections win; the URL fills whatever the client didn't send

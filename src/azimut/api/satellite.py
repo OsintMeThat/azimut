@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import math
+import os
 import re
+import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -25,6 +29,7 @@ from ..engine import (
 )
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
+from .limits import MAX_IMAGE_BYTES
 
 router = APIRouter(prefix="/api", tags=["satellite"])
 
@@ -200,7 +205,7 @@ def sentinel_dates(lat: float, lon: float, start: str, end: str) -> dict[str, An
         raise HTTPException(
             status_code=429,
             detail=f"Sentinel Hub is paused: {int(config.BLOCK_SHARE * 100)}% of the monthly "
-            "free tier is used — enable the override in Settings to keep going",
+            "free tier is used; enable the override in Settings to keep going",
         )
     try:
         found = sentinel.dates(instance, lat, lon, start, end)
@@ -208,6 +213,28 @@ def sentinel_dates(lat: float, lon: float, start: str, end: str) -> dict[str, An
         raise HTTPException(status_code=502, detail=f"date lookup failed: {exc}") from exc
     config.record_usage("sentinelhub", 1)
     return {"dates": found, "start": start, "end": end}
+
+
+@router.get("/satellite/sentinel/coverage")
+def sentinel_coverage(
+    lat: float, lon: float, layer: str, date: str
+) -> dict[str, Any]:
+    """Verify a candidate date against the configured layer at the crosshair."""
+    instance = _sentinel_instance()
+    if config.usage_blocked("sentinelhub"):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Sentinel Hub is paused: {int(config.BLOCK_SHARE * 100)}% of the monthly "
+            "free tier is used; enable the override in Settings to keep going",
+        )
+    try:
+        result = sentinel.coverage(instance, lat, lon, layer, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"coverage check failed: {exc}") from exc
+    config.record_usage("sentinelhub", 1)
+    return result
 
 
 @router.post("/satellite/usage/{meter}")
@@ -317,17 +344,20 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
     (404s / "not yet available" placeholders) are overzoomed — the parent
     tile's quadrant upscaled — instead of breaking the map.
     """
-    if z < 0 or not (0 <= x < (1 << z)) or not (0 <= y < (1 << z)):
-        raise HTTPException(status_code=422, detail="tile coordinates out of range")
     try:
         provider = tiles.get_provider(provider_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if z < 0 or z > provider.max_zoom:
+        raise HTTPException(status_code=422, detail="tile zoom out of range")
+    grid_size = 1 << z
+    if not (0 <= x < grid_size) or not (0 <= y < grid_size):
+        raise HTTPException(status_code=422, detail="tile coordinates out of range")
     if provider.meter and config.usage_blocked(provider.meter):
         raise HTTPException(
             status_code=429,
             detail=f"{provider.label} is paused: {int(config.BLOCK_SHARE * 100)}% of the "
-            "monthly free tier is used — enable the override in Settings to keep going",
+            "monthly free tier is used; enable the override in Settings to keep going",
         )
 
     # Past the provider's native ceiling there is nothing new upstream: Sentinel
@@ -375,7 +405,12 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
 
 
 @router.get("/satellite/imagery-date")
-def imagery_date(lat: float, lon: float, zoom: int, provider: str = "esri-world-imagery") -> dict[str, Any]:
+def imagery_date(
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+    zoom: int = Query(ge=1, le=22),
+    provider: str = "esri-world-imagery",
+) -> dict[str, Any]:
     """Best-effort acquisition date of the imagery under a point.
 
     Only Esri World Imagery exposes per-scene capture dates; for any other
@@ -474,6 +509,7 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
         extra_attrs={
             "coords": coords_dd, "lat": marker_lat, "lon": marker_lon,
             "plus_code": plus_code, "zoom": provenance["zoom"], "bearing": body.bearing,
+            "provider": provenance["provider"],
         },
         title=label,
         dedupe=False,  # a capture is 1:1 with its entity — never collapse re-captures
@@ -520,7 +556,12 @@ async def capture_screenshot(
 
     import io
 
-    raw = await image.read()
+    raw = await image.read(MAX_IMAGE_BYTES + 1)
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"screenshot must be under {MAX_IMAGE_BYTES // 1024 // 1024} MB",
+        )
     try:
         img = Image.open(io.BytesIO(raw)).convert("RGB")
     except Exception as exc:
@@ -565,6 +606,7 @@ async def capture_screenshot(
         extra_attrs={
             "coords": coords_dd, "lat": lat, "lon": lon,
             "plus_code": plus_code, "zoom": zoom, "bearing": bearing,
+            "provider": prov.id,
         },
         title=label,
         dedupe=False,
@@ -634,6 +676,99 @@ def update_capture(case_id: str, body: SatelliteUpdateIn) -> dict[str, Any]:
     return {**(updated.get("source") or {}), **updated}
 
 
+def _grid_number(value: Any, name: str, *, low: float, high: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"grid {name} must be a finite number")
+    try:
+        number = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError(f"grid {name} must be a finite number") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"grid {name} must be a finite number")
+    if not low <= number <= high:
+        raise ValueError(f"grid {name} is out of range")
+    return number
+
+
+def _validate_grid_spec(value: Any) -> dict[str, Any]:
+    """Return a usable saved grid or raise a concise corruption error."""
+    if not isinstance(value, dict):
+        raise ValueError("grid root must be an object")
+    if value.get("azimut_grid") != 1:
+        raise ValueError("grid schema is not supported")
+    cell_m = _grid_number(value.get("cell_m"), "cell size", low=1, high=1_000_000)
+    anchor = value.get("anchor")
+    if not isinstance(anchor, dict):
+        raise ValueError("grid anchor must be an object")
+    _grid_number(anchor.get("lat"), "anchor latitude", low=-90, high=90)
+    _grid_number(anchor.get("lon"), "anchor longitude", low=-180, high=180)
+    lat_step = _grid_number(value.get("lat_step"), "latitude step", low=0, high=180)
+    lon_step = _grid_number(value.get("lon_step"), "longitude step", low=0, high=360)
+    if cell_m <= 0 or lat_step <= 0 or lon_step <= 0:
+        raise ValueError("grid size and steps must be positive")
+
+    aoi = value.get("aoi")
+    if not isinstance(aoi, dict):
+        raise ValueError("grid area must be an object")
+    if aoi.get("type") == "rect":
+        bounds = aoi.get("bounds")
+        if not isinstance(bounds, dict):
+            raise ValueError("grid rectangle bounds must be an object")
+        south = _grid_number(bounds.get("south"), "south bound", low=-90, high=90)
+        north = _grid_number(bounds.get("north"), "north bound", low=-90, high=90)
+        west = _grid_number(bounds.get("west"), "west bound", low=-180, high=180)
+        east = _grid_number(bounds.get("east"), "east bound", low=-180, high=180)
+        if south >= north or west >= east:
+            raise ValueError("grid rectangle bounds are empty or reversed")
+    elif aoi.get("type") == "polygon":
+        vertices = aoi.get("vertices")
+        if not isinstance(vertices, list) or len(vertices) < 3:
+            raise ValueError("grid polygon needs at least three vertices")
+        for index, vertex in enumerate(vertices):
+            if not isinstance(vertex, (list, tuple)) or len(vertex) != 2:
+                raise ValueError(f"grid polygon vertex {index} is invalid")
+            _grid_number(vertex[0], f"polygon latitude {index}", low=-90, high=90)
+            _grid_number(vertex[1], f"polygon longitude {index}", low=-180, high=180)
+    else:
+        raise ValueError("grid needs a rect or polygon area")
+
+    statuses = value.get("statuses")
+    if not isinstance(statuses, dict):
+        raise ValueError("grid statuses must be an object")
+    if len(statuses) > GRID_MAX_STATUSES:
+        raise ValueError("grid has too many cells")
+    for key, status in statuses.items():
+        if not isinstance(key, str) or re.fullmatch(r"-?\d+:-?\d+", key) is None:
+            raise ValueError("grid contains an invalid cell key")
+        if status not in GRID_STATUSES:
+            raise ValueError("grid contains an invalid cell status")
+    if "title" in value and not isinstance(value["title"], str):
+        raise ValueError("grid title must be text")
+    return value
+
+
+def _read_grid(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("grid file is not readable JSON") from exc
+    return _validate_grid_spec(value)
+
+
+def _write_grid_atomic(path: Path, spec: dict[str, Any]) -> None:
+    payload = json.dumps(spec, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp_path = path.with_name(os.path.basename(tmp_name))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 @router.get("/cases/{case_id}/search-grids")
 def list_search_grids(case_id: str) -> list[dict[str, Any]]:
     """Summaries of every saved grid, newest first, for the picker."""
@@ -641,10 +776,8 @@ def list_search_grids(case_id: str) -> list[dict[str, Any]]:
     out = []
     for spec_path in case.subdir("search").glob("*.json"):
         try:
-            spec = json.loads(spec_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if spec.get("azimut_grid") != 1:
+            spec = _read_grid(spec_path)
+        except ValueError:
             continue
         statuses = spec.get("statuses") or {}
         out.append({
@@ -669,7 +802,10 @@ def get_search_grid(case_id: str, name: str) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     if not spec_path.exists():
         raise HTTPException(status_code=404, detail="grid not found")
-    return json.loads(spec_path.read_text(encoding="utf-8"))
+    try:
+        return _read_grid(spec_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"corrupt grid: {exc}") from exc
 
 
 @router.put("/cases/{case_id}/search-grids/{name}")
@@ -695,8 +831,12 @@ def save_search_grid(case_id: str, name: str, body: GridSaveIn) -> dict[str, Any
     spec.setdefault("title", slug)
     spec.setdefault("created_at", _now())
     spec["updated_at"] = _now()
+    try:
+        _validate_grid_spec(spec)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     spec_path = case.subdir("search") / f"{slug}.json"
-    spec_path.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _write_grid_atomic(spec_path, spec)
     return {"name": slug, "title": spec["title"], "updated_at": spec["updated_at"]}
 
 

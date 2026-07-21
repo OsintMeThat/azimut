@@ -276,7 +276,7 @@ def _download_wheel(url: str, expected_sha256: str) -> bytes:
         for chunk in response.iter_bytes():
             buffer.write(chunk)
             if buffer.tell() > WHEEL_MAX_BYTES:
-                raise RuntimeError("scraper wheel is implausibly large — refusing")
+                raise RuntimeError("scraper wheel is implausibly large; refusing")
         data = buffer.getvalue()
     digest = hashlib.sha256(data).hexdigest()
     if digest != expected_sha256:
@@ -333,7 +333,7 @@ def update(dist: str) -> dict[str, Any]:
         "previous": before,
         "restart_required": restart,
         "detail": (
-            f"updated to {version} — restart Azimut to use it"
+            f"updated to {version}; restart Azimut to use it"
             if restart
             else f"updated to {version}"
         ),

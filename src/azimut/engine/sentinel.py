@@ -18,6 +18,9 @@ instance itself, which is the only authority (user-triggered — local-first).
 
 from __future__ import annotations
 
+import base64
+import io
+import math
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -25,6 +28,7 @@ from datetime import date
 from typing import Any, Callable
 
 import httpx
+from PIL import Image, UnidentifiedImageError
 
 BASE = "https://sh.dataspace.copernicus.eu/ogc"
 USER_AGENT = "Azimut/0.1 (+local OSINT workbench; single-user)"
@@ -53,7 +57,7 @@ class Layer:
 # `hint` is the reason to pick one — this is a workbench, and "SWIR" tells a
 # user nothing about why they'd want it.
 LAYERS: tuple[Layer, ...] = (
-    Layer("TRUE_COLOR", "True colour", "Natural colour (B04/B03/B02) — what the eye would see."),
+    Layer("TRUE_COLOR", "True colour", "Natural colour (B04/B03/B02), close to what the eye would see."),
     Layer(
         "FALSE_COLOR",
         "False colour (infrared)",
@@ -63,24 +67,24 @@ LAYERS: tuple[Layer, ...] = (
     Layer(
         "SWIR",
         "SWIR (short-wave infrared)",
-        "B12/B8A/B04: water is darkest of all — the strongest contrast for vessels at "
+        "B12/B8A/B04: water is darkest of all, giving the strongest contrast for vessels at "
         "sea, and the band that sees through thin haze and smoke to fires and flares.",
     ),
-    Layer("NDVI", "NDVI (vegetation index)", "Vegetation vigour — crops, clearing, seasonal change."),
+    Layer("NDVI", "NDVI (vegetation index)", "Vegetation vigour for crops, clearing and seasonal change."),
 )
 
 # Hints for layers we know but don't offer by default — a configuration that
 # ships them gets the explanation, not a bare identifier.
 KNOWN_HINTS: dict[str, str] = {
-    "HIGHLIGHT_OPTIMIZED": "Natural colour with the highlights pulled back — bright objects on "
+    "HIGHLIGHT_OPTIMIZED": "Natural colour with highlights pulled back. Bright objects on "
     "dark water keep their shape instead of blowing out.",
-    "NDWI": "Water/land boundary as an index — the shoreline, flooding, and what is water at "
+    "NDWI": "Water/land boundary as an index. Shows shorelines, flooding and what is water at "
     "all on a given date.",
     "SCENE_CLASSIFICATION": "The scene's own per-pixel classes (cloud, shadow, water, "
-    "vegetation) — whether a date is worth looking at before you look.",
-    "MOISTURE_INDEX": "Surface/vegetation water content — irrigation, drought, burn scars.",
+    "vegetation). Use it to decide whether a date is worth opening.",
+    "MOISTURE_INDEX": "Surface and vegetation water content for irrigation, drought and burn scars.",
     "FALSE_COLOR_URBAN": "B12/B11/B04: built-up surfaces separate from bare ground and vegetation.",
-    "NDSI": "Snow index — snow and ice against cloud, which they otherwise resemble.",
+    "NDSI": "Snow index that separates snow and ice from similar-looking cloud.",
 }
 DEFAULT_LAYER = LAYERS[0].id
 
@@ -181,6 +185,32 @@ _BBOX_PAD = 0.005
 # is "up to 100 granules" rather than "100 dates" — the caller sees how many
 # dates that collapsed to.
 _MAX_FEATURES = 100
+
+# A metadata hit says a scene intersects the search area. It does not prove the
+# configured layer has source pixels at the crosshair. This tiny WMS override
+# asks the layer's own data source for dataMask only, over an 80 m square. The
+# 8x8 response is enough to answer coverage without paying to render a map tile.
+_COVERAGE_HALF_METRES = 40.0
+_COVERAGE_SIZE = 8
+_COVERAGE_MAX_BYTES = 1_000_000
+_COVERAGE_MAX_PIXELS = 4096
+_COVERAGE_EVALSCRIPT = base64.b64encode(
+    b"""//VERSION=3
+function setup() {
+  return {
+    input: ["dataMask"],
+    output: { bands: 1, sampleType: "UINT8" }
+  };
+}
+function evaluatePixel(sample) {
+  return [sample.dataMask * 255];
+}
+"""
+).decode("ascii")
+
+
+class CoverageError(RuntimeError):
+    """Sentinel Hub did not return a usable dataMask image."""
 
 
 def _cloud(props: dict[str, Any]) -> float | None:
@@ -302,6 +332,73 @@ def dates(
         if cloud is not None and (entry["cloud"] is None or cloud < entry["cloud"]):
             entry["cloud"] = cloud
     return sorted(by_date.values(), key=lambda entry: entry["date"], reverse=True)
+
+
+def coverage(
+    instance: str,
+    lat: float,
+    lon: float,
+    layer: str,
+    day: str,
+    *,
+    get: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+    """Check whether ``layer`` has source pixels near a point on ``day``.
+
+    WFS supplies candidate acquisition dates. This WMS dataMask probe is the
+    final authority before the UI replaces a working map with a dated layer.
+    It uses the configured layer, so a custom layer is checked against its own
+    collection rather than the date catalogue's L2A assumption.
+    """
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise ValueError("coordinates are outside WGS84 bounds")
+    # Reuse the variant parser as the validation boundary for both URL values.
+    checked_layer, checked_day, _ = parse_variant(
+        f"{layer}{VARIANT_SEP}{day}{VARIANT_SEP}{day}"
+    )
+
+    earth_radius = 6_378_137.0
+    clamped_lat = min(max(lat, -85.05112878), 85.05112878)
+    x = earth_radius * math.radians(lon)
+    y = earth_radius * math.log(math.tan(math.pi / 4 + math.radians(clamped_lat) / 2))
+    half = _COVERAGE_HALF_METRES
+    params = {
+        "SERVICE": "WMS",
+        "REQUEST": "GetMap",
+        "VERSION": "1.3.0",
+        "LAYERS": checked_layer,
+        "CRS": "EPSG:3857",
+        "BBOX": f"{x - half},{y - half},{x + half},{y + half}",
+        "WIDTH": str(_COVERAGE_SIZE),
+        "HEIGHT": str(_COVERAGE_SIZE),
+        "FORMAT": "image/png",
+        "TIME": f"{checked_day}/{checked_day}",
+        "EVALSCRIPT": _COVERAGE_EVALSCRIPT,
+    }
+    fetch = get or httpx.get
+    response = fetch(
+        f"{BASE}/wms/{instance}", params=params,
+        headers={"User-Agent": USER_AGENT}, timeout=15,
+    )
+    response.raise_for_status()
+    if len(response.content) > _COVERAGE_MAX_BYTES:
+        raise CoverageError("coverage probe returned an oversized image")
+    try:
+        with Image.open(io.BytesIO(response.content)) as source:
+            if source.width * source.height > _COVERAGE_MAX_PIXELS:
+                raise CoverageError("coverage probe returned an oversized image")
+            values = source.convert("L").tobytes()
+    except (OSError, UnidentifiedImageError) as exc:
+        raise CoverageError("coverage probe returned no readable image") from exc
+    if not values:
+        raise CoverageError("coverage probe returned an empty image")
+    valid = sum(value > 0 for value in values)
+    return {
+        "available": valid > 0,
+        "coverage": round(valid / len(values), 3),
+        "date": checked_day,
+        "layer": checked_layer,
+    }
 
 
 # -- layer discovery (GetCapabilities) -----------------------------------------

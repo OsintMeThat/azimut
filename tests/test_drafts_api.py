@@ -2,6 +2,8 @@
 
 import pytest
 
+import graph_read
+
 STATE = {
     "description": "A formation of 13 helicopters was spotted heading East",
     "coordsText": "10.303315, -66.874095",
@@ -52,7 +54,7 @@ def test_draft_filed_as_post_entity_and_updated_on_resave(client):
         f"/api/cases/{cid}/drafts",
         json={"name": saved["name"], "title": "Renamed draft", "state": STATE},
     )
-    posts = [e for e in client.get(f"/api/cases/{cid}").json()["entities"] if e["type"] == "post"]
+    posts = [e for e in graph_read.entities(cid) if e["type"] == "post"]
     assert len(posts) == 1
     assert posts[0]["label"] == "Renamed draft"
     assert posts[0]["attrs"]["draft"] == "exports/first-title.json"
@@ -78,7 +80,7 @@ def test_delete_removes_file_and_entity(client):
     assert r.json()["status"] == "deleted"
     assert client.get(f"/api/cases/{cid}/drafts").json() == []
     assert client.get(f"/api/cases/{cid}/drafts/to-delete").status_code == 404
-    posts = [e for e in client.get(f"/api/cases/{cid}").json()["entities"] if e["type"] == "post"]
+    posts = [e for e in graph_read.entities(cid) if e["type"] == "post"]
     assert posts == []
 
 

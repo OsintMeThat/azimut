@@ -31,11 +31,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from ..workspace import Case, CaseError
+from ..repository import CaseRepository
+from ..workspace import CaseError
 
 DERIVED_FROM = "derived-from"
 DEPENDS_ON = "depends-on"
 
+#: The two link types the derivation chain reads, in either direction.
+CHAIN_TYPES = (DERIVED_FROM, DEPENDS_ON)
 #: Incoming links of these types take their holder down with the target.
 CASCADE_TYPES = (DEPENDS_ON,)
 #: Incoming links of these types leave their holder in place, with a tombstone.
@@ -49,11 +52,11 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _entity(case: Case, entity_id: str) -> dict[str, Any]:
-    for entity in case.read()["entities"]:
-        if entity["id"] == entity_id:
-            return entity
-    raise CaseError(f"entity '{entity_id}' not found")
+def _entity(case: CaseRepository, entity_id: str) -> dict[str, Any]:
+    entity = case.get_entity(entity_id)
+    if entity is None:
+        raise CaseError(f"entity '{entity_id}' not found")
+    return entity
 
 
 def artifact_path(entity: dict[str, Any]) -> str | None:
@@ -65,14 +68,14 @@ def artifact_path(entity: dict[str, Any]) -> str | None:
     return None
 
 
-def resolve(case: Case, rel_paths: list[str]) -> tuple[list[str], list[str]]:
+def resolve(case: CaseRepository, rel_paths: list[str]) -> tuple[list[str], list[str]]:
     """Map case-relative artifact paths to entity ids, in one read.
 
     Returns ``(entity_ids, unresolved_paths)``. A path resolves to nothing when
     its artifact was deleted while the tool that references it was open.
     """
     by_path: dict[str, str] = {}
-    for entity in case.read()["entities"]:
+    for entity in case.list_entities():
         path = artifact_path(entity)
         if path:
             by_path.setdefault(path, entity["id"])
@@ -86,7 +89,7 @@ def resolve(case: Case, rel_paths: list[str]) -> tuple[list[str], list[str]]:
 
 
 def sync(
-    case: Case, entity_id: str, type_: str, rel_paths: list[str], *, by: str
+    case: CaseRepository, entity_id: str, type_: str, rel_paths: list[str], *, by: str
 ) -> None:
     """Restate an artifact's sources: reconcile its links, tombstone the rest.
 
@@ -101,7 +104,7 @@ def sync(
 
 
 def link_all(
-    case: Case, entity_id: str, type_: str, rel_paths: list[str], *, by: str
+    case: CaseRepository, entity_id: str, type_: str, rel_paths: list[str], *, by: str
 ) -> None:
     """Add an artifact's source links without removing any (see ``sync``).
 
@@ -135,7 +138,7 @@ def tombstone_of(entity: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in fields.items() if v}
 
 
-def add_tombstone(case: Case, entity_id: str, info: dict[str, Any]) -> None:
+def add_tombstone(case: CaseRepository, entity_id: str, info: dict[str, Any]) -> None:
     """Record on an artifact that one of its sources is gone.
 
     Keyed by path, so re-saving or a second delete never stacks duplicates.
@@ -143,7 +146,7 @@ def add_tombstone(case: Case, entity_id: str, info: dict[str, Any]) -> None:
     add_tombstones(case, entity_id, [info])
 
 
-def add_tombstones(case: Case, entity_id: str, infos: list[dict[str, Any]]) -> None:
+def add_tombstones(case: CaseRepository, entity_id: str, infos: list[dict[str, Any]]) -> None:
     """Record several lost sources with one case read and at most one write."""
     if not infos:
         return
@@ -162,13 +165,13 @@ def add_tombstones(case: Case, entity_id: str, infos: list[dict[str, Any]]) -> N
         case.update_entity(entity_id, {"attrs": {LOST: lost}})
 
 
-def losses(case: Case, doomed_ids: set[str]) -> dict[str, list[dict[str, Any]]]:
+def losses(case: CaseRepository, doomed_ids: set[str]) -> dict[str, list[dict[str, Any]]]:
     """Per surviving artifact, the doomed sources it *actually* derives from.
 
     Scars belong only where the derivation was: a proof loses the media it was
     composed from, not whatever else happened to be deleted in the same breath.
     """
-    data = case.read()
+    data = case.snapshot()
     by_id = {e["id"]: e for e in data["entities"]}
     out: dict[str, list[dict[str, Any]]] = {}
     for link in data["links"]:
@@ -182,7 +185,76 @@ def losses(case: Case, doomed_ids: set[str]) -> dict[str, list[dict[str, Any]]]:
     return out
 
 
-def plan_delete(case: Case, entity_id: str) -> dict[str, list[dict[str, Any]]]:
+def chain_of(case: CaseRepository, entity_id: str) -> dict[str, Any] | None:
+    """One entity's derivation chain (ONTOLOGY §3), for the Details panel.
+
+    Mirrors the frontend ``chainOf``: its direct ``sources`` (outgoing
+    ``derived-from`` / ``depends-on`` edges), its direct ``dependents`` (the
+    incoming ones), and the tombstoned ``lost_sources`` it still carries. Reads
+    only the edges incident to this entity (``links_of``) plus each neighbour, so
+    it never materialises the whole graph. Returns ``None`` if the entity is
+    gone.
+    """
+    entity = case.get_entity(entity_id)
+    if entity is None:
+        return None
+    sources: list[dict[str, Any]] = []
+    dependents: list[dict[str, Any]] = []
+    for link in case.links_of(entity_id):
+        if link["type"] not in CHAIN_TYPES:
+            continue
+        if link["from"] == entity_id:
+            neighbour = case.get_entity(link["to"])
+            if neighbour is not None:
+                sources.append({"entity": neighbour, "type": link["type"]})
+        elif link["to"] == entity_id:
+            neighbour = case.get_entity(link["from"])
+            if neighbour is not None:
+                dependents.append({"entity": neighbour, "type": link["type"]})
+    lost = list(entity.get("attrs", {}).get(LOST, []))
+    return {
+        "entity": entity,
+        "sources": sources,
+        "lost": lost,
+        "dependents": dependents,
+        "empty": not sources and not lost and not dependents,
+    }
+
+
+def derivation_subgraph(case: CaseRepository, entity_id: str) -> dict[str, Any] | None:
+    """The transitive ``derived-from`` closure rooted at an entity.
+
+    Walks only the outgoing ``derived-from`` edges (artifact → source) through
+    bounded ``links_of`` reads and returns ``{entities, links}`` — the slice the
+    Post composer needs to trace a proof back to the original downloaded media it
+    was built from, without shipping the whole graph. Returns ``None`` if the
+    root entity is gone.
+    """
+    root = case.get_entity(entity_id)
+    if root is None:
+        return None
+    entities: dict[str, dict[str, Any]] = {entity_id: root}
+    links: list[dict[str, Any]] = []
+    seen_links: set[str] = set()
+    frontier = [entity_id]
+    while frontier:
+        current = frontier.pop()
+        for link in case.links_of(current):
+            if link["type"] != DERIVED_FROM or link["from"] != current:
+                continue
+            if link["id"] not in seen_links:
+                seen_links.add(link["id"])
+                links.append(link)
+            to_id = link["to"]
+            if to_id not in entities:
+                neighbour = case.get_entity(to_id)
+                if neighbour is not None:
+                    entities[to_id] = neighbour
+                    frontier.append(to_id)
+    return {"entities": list(entities.values()), "links": links}
+
+
+def plan_delete(case: CaseRepository, entity_id: str) -> dict[str, list[dict[str, Any]]]:
     """What deleting ``entity_id`` takes with it, and what it leaves standing.
 
     ``cascade`` follows ``depends-on`` transitively (a session dies with its
@@ -191,7 +263,7 @@ def plan_delete(case: Case, entity_id: str) -> dict[str, list[dict[str, Any]]]:
     ``tombstone`` lists the artifacts that survive with a scar, computed over
     everything about to go, not just the entity that was asked for.
     """
-    data = case.read()
+    data = case.snapshot()
     by_id = {e["id"]: e for e in data["entities"]}
     if entity_id not in by_id:
         raise CaseError(f"entity '{entity_id}' not found")
