@@ -737,6 +737,80 @@ def list_media(case: Case) -> list[dict[str, Any]]:
     return items
 
 
+def _matches_media(item: dict[str, Any], q: str, kind: str | None, folder: str | None) -> bool:
+    if kind and item.get("kind") != kind:
+        return False
+    if folder is not None and (item.get("folder") or "") != folder:
+        return False
+    if q:
+        src = item.get("source") or {}
+        haystack = "\n".join(
+            str(v)
+            for v in (
+                item.get("filename"),
+                item.get("title"),
+                item.get("notes"),
+                item.get("folder"),
+                src.get("title"),
+                src.get("uploader"),
+                src.get("webpage_url") or src.get("url"),
+            )
+            if v
+        ).lower()
+        if not all(term in haystack for term in q.lower().split()):
+            return False
+    return True
+
+
+def _media_sort_key(item: dict[str, Any], sort: str) -> Any:
+    name = (item.get("title") or item.get("filename") or "").lower()
+    added = item.get("added_at") or ""
+    size = item.get("size") or 0
+    if sort == "name":
+        return name
+    if sort == "size":
+        return -size
+    return added  # newest / oldest both key on added_at (direction below)
+
+
+def paginate_media(
+    items: list[dict[str, Any]],
+    *,
+    q: str | None = None,
+    kind: str | None = None,
+    folder: str | None = None,
+    sort: str = "newest",
+    limit: int = 200,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Filter, sort, and slice a media listing server-side, with facet counts
+    over the whole filtered set so the browse UI's chips stay accurate under
+    paging. ``offset``/``limit`` page a stable sorted list; the caller turns the
+    returned ``next_cursor`` back into the next ``offset``."""
+    filtered = [it for it in items if _matches_media(it, q or "", kind, folder)]
+
+    kind_counts: dict[str, int] = {}
+    folder_counts: dict[str, int] = {}
+    for it in filtered:
+        k = it.get("kind") or "other"
+        kind_counts[k] = kind_counts.get(k, 0) + 1
+        f = it.get("folder") or ""
+        folder_counts[f] = folder_counts.get(f, 0) + 1
+
+    filtered.sort(key=lambda it: _media_sort_key(it, sort), reverse=(sort == "newest"))
+
+    total = len(filtered)
+    page = filtered[offset : offset + limit]
+    next_offset = offset + limit
+    next_cursor = str(next_offset) if next_offset < total else None
+    return {
+        "items": page,
+        "next_cursor": next_cursor,
+        "total": total,
+        "facets": {"kind_counts": kind_counts, "folder_counts": folder_counts},
+    }
+
+
 def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, Any]:
     """Update mutable sidecar fields (notes, folder, title) and mirror them onto
     the media entity so the case sidebar stays in sync."""

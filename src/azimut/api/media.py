@@ -70,6 +70,39 @@ def list_media(case_id: str) -> list[dict[str, Any]]:
     return _with_thumb_state(case, media_engine.list_media(case))
 
 
+@router.get("/cases/{case_id}/media/page")
+def page_media(
+    case_id: str,
+    q: str | None = None,
+    kind: str | None = None,
+    folder: str | None = None,
+    sort: str = "newest",
+    limit: int = 200,
+    cursor: str | None = None,
+) -> dict[str, Any]:
+    """A bounded, filterable page of the media list for the browse surfaces
+    (Media Library, Files). Small cases return one page with a null
+    ``next_cursor``, so the client filters in memory with no further calls; a
+    large case pages via ``cursor`` and searches server-side via ``q``.
+    ``facets`` counts the whole filtered set so category/folder chips stay
+    accurate. The unbounded ``GET .../media`` stays for consumers that need the
+    full list (pickers, satellite crops, derivation)."""
+    case = get_case(case_id)
+    limit = max(1, min(limit, 500))
+    offset = int(cursor) if cursor and cursor.isdigit() else 0
+    result = media_engine.paginate_media(
+        media_engine.list_media(case),
+        q=q,
+        kind=kind,
+        folder=folder,
+        sort=sort,
+        limit=limit,
+        offset=offset,
+    )
+    result["items"] = _with_thumb_state(case, result["items"])
+    return result
+
+
 @router.post("/cases/{case_id}/media/thumbnails/regenerate")
 def regenerate_thumbnails(case_id: str, body: ThumbRegenIn) -> dict[str, int]:
     """Queue (re)generation of thumbnails. With a ``path`` it re-queues that one

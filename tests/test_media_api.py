@@ -102,6 +102,93 @@ def test_listing_carries_category_fields(client):
     assert item["source"]["type"] == "upload"  # drives the Imports facet
 
 
+def _set(client, cid, path, **patch):
+    return client.patch(f"/api/cases/{cid}/media", json={"path": path, **patch}).json()
+
+
+def test_media_page_paginates(client):
+    cid = client.post("/api/cases", json={"name": "Page"}).json()["id"]
+    for i in range(5):
+        _upload(client, cid, f"shot{i}.png", _png_bytes(color=(i, 0, 0)))
+
+    first = client.get(f"/api/cases/{cid}/media/page", params={"limit": 2}).json()
+    assert len(first["items"]) == 2
+    assert first["total"] == 5
+    assert first["next_cursor"] == "2"
+
+    mid = client.get(
+        f"/api/cases/{cid}/media/page", params={"limit": 2, "cursor": first["next_cursor"]}
+    ).json()
+    assert len(mid["items"]) == 2
+    assert mid["next_cursor"] == "4"
+
+    last = client.get(
+        f"/api/cases/{cid}/media/page", params={"limit": 2, "cursor": mid["next_cursor"]}
+    ).json()
+    assert len(last["items"]) == 1
+    assert last["next_cursor"] is None
+
+
+def test_media_page_query_matches_title_notes_folder(client):
+    cid = client.post("/api/cases", json={"name": "Q"}).json()["id"]
+    a = _upload(client, cid, "alpha.png", _png_bytes(color=(1, 0, 0))).json()["item"]
+    b = _upload(client, cid, "beta.png", _png_bytes(color=(2, 0, 0))).json()["item"]
+    _set(client, cid, a["path"], notes="bridge over the river", folder="ukraine")
+    _set(client, cid, b["path"], title="Harbour view")
+
+    hit = client.get(f"/api/cases/{cid}/media/page", params={"q": "bridge"}).json()
+    assert [i["path"] for i in hit["items"]] == [a["path"]]
+    # folder + a source/title term both match
+    assert client.get(f"/api/cases/{cid}/media/page", params={"q": "harbour"}).json()["total"] == 1
+    # two space-split terms must both be present (AND)
+    assert client.get(f"/api/cases/{cid}/media/page", params={"q": "bridge river"}).json()["total"] == 1
+    assert client.get(f"/api/cases/{cid}/media/page", params={"q": "bridge harbour"}).json()["total"] == 0
+
+
+def test_media_page_kind_and_folder_filters(client):
+    cid = client.post("/api/cases", json={"name": "Filt"}).json()["id"]
+    a = _upload(client, cid, "a.png", _png_bytes(color=(3, 0, 0))).json()["item"]
+    _upload(client, cid, "b.png", _png_bytes(color=(4, 0, 0)))
+    _set(client, cid, a["path"], folder="kyiv")
+
+    assert client.get(f"/api/cases/{cid}/media/page", params={"kind": "image"}).json()["total"] == 2
+    assert client.get(f"/api/cases/{cid}/media/page", params={"folder": "kyiv"}).json()["total"] == 1
+
+
+def test_media_page_sort_name_and_size(client):
+    cid = client.post("/api/cases", json={"name": "Sort"}).json()["id"]
+    small = _upload(client, cid, "s.png", _png_bytes(color=(5, 0, 0), size=(16, 16))).json()["item"]
+    big = _upload(client, cid, "b.png", _png_bytes(color=(6, 0, 0), size=(256, 256))).json()["item"]
+    _set(client, cid, small["path"], title="Zebra")
+    _set(client, cid, big["path"], title="Alpha")
+
+    by_name = client.get(f"/api/cases/{cid}/media/page", params={"sort": "name"}).json()
+    assert [i["title"] for i in by_name["items"]] == ["Alpha", "Zebra"]
+
+    by_size = client.get(f"/api/cases/{cid}/media/page", params={"sort": "size"}).json()
+    assert by_size["items"][0]["path"] == big["path"]
+
+
+def test_media_page_facets_count_full_set(client):
+    cid = client.post("/api/cases", json={"name": "Facets2"}).json()["id"]
+    a = _upload(client, cid, "a.png", _png_bytes(color=(7, 0, 0))).json()["item"]
+    _upload(client, cid, "b.png", _png_bytes(color=(8, 0, 0)))
+    _set(client, cid, a["path"], folder="kyiv")
+
+    # facets reflect the whole filtered set even when a page slices it
+    page = client.get(f"/api/cases/{cid}/media/page", params={"limit": 1}).json()
+    assert len(page["items"]) == 1  # only one item on the page
+    assert page["facets"]["kind_counts"]["image"] == 2  # ...but both counted
+    assert page["facets"]["folder_counts"]["kyiv"] == 1
+
+
+def test_media_page_items_carry_thumb_state(client):
+    cid = client.post("/api/cases", json={"name": "PageThumb"}).json()["id"]
+    _upload(client, cid, "shot.png", _png_bytes())
+    page = client.get(f"/api/cases/{cid}/media/page").json()
+    assert page["items"][0]["thumb_state"] == "ready"
+
+
 def test_duplicate_detection(client):
     cid = client.post("/api/cases", json={"name": "Dup"}).json()["id"]
     data = _png_bytes(color=(1, 2, 3))
