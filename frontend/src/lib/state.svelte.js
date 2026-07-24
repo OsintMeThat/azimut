@@ -207,8 +207,9 @@ export function toast(message, kind = 'info', timeout = 3800, action = null) {
   }, timeout);
 }
 
-export async function refreshCaseList() {
-  caseState.list = await api.get('/api/cases');
+export async function refreshCaseList({ q } = {}) {
+  const query = q?.trim();
+  caseState.list = await api.get(`/api/cases${query ? `?q=${encodeURIComponent(query)}` : ''}`);
 }
 
 // Remember the last open case across page reloads so work is never "lost".

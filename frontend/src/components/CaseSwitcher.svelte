@@ -12,8 +12,10 @@
   } from '../lib/state.svelte.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
+  import SearchInput from './SearchInput.svelte';
 
   let open = $state(false);
+  let search = $state('');
   let modal = $state(null); // 'create' | 'promote' | 'rename' | null
   let nameInput = $state('');
   let busy = $state(false);
@@ -56,8 +58,25 @@
 
   async function toggle() {
     open = !open;
-    if (open) await refreshCaseList();
+    if (open) {
+      search = '';
+      await refreshCaseList();
+    }
   }
+
+  // Search the case list: client-filter the loaded list for instant feedback,
+  // and debounce a server query so it still finds a case in a long list the
+  // first page didn't hold. Both paths key on the case name.
+  const matchesSearch = (c) =>
+    (c.name ?? c.id ?? '').toLowerCase().includes(search.trim().toLowerCase());
+  let searchTimer;
+  $effect(() => {
+    const q = search;
+    if (!open) return;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => refreshCaseList({ q }), 200);
+    return () => clearTimeout(searchTimer);
+  });
 
   async function pick(id) {
     open = false;
@@ -90,6 +109,10 @@
 
   const named = $derived(caseState.list.filter((c) => !c.scratch));
   const scratches = $derived(caseState.list.filter((c) => c.scratch));
+  // Filtered views for the menu list (the unfiltered `named` still backs the
+  // duplicate-name guard below, which must see every case).
+  const visibleNamed = $derived(named.filter(matchesSearch));
+  const visibleScratches = $derived(scratches.filter(matchesSearch));
 
   // Guard against duplicate names (case-insensitive) — the backend enforces
   // this too, but flag it early so the button disables instead of erroring.
@@ -145,9 +168,14 @@
           <Icon name="x" size={15} /> Close case (one-shot mode)
         </button>
       {/if}
-      {#if named.length}
+      {#if named.length + scratches.length > 6}
+        <div class="search-row">
+          <SearchInput bind:value={search} placeholder="Find a case…" width="100%" />
+        </div>
+      {/if}
+      {#if visibleNamed.length}
         <div class="section">Cases</div>
-        {#each named as c (c.id)}
+        {#each visibleNamed as c (c.id)}
           <div class="row" class:active={c.id === caseState.current?.id}>
             <button class="item" onclick={() => pick(c.id)}>
               <Icon name="folder" size={15} />
@@ -163,9 +191,9 @@
           </div>
         {/each}
       {/if}
-      {#if scratches.length}
+      {#if visibleScratches.length}
         <div class="section">Scratch sessions</div>
-        {#each scratches as c (c.id)}
+        {#each visibleScratches as c (c.id)}
           <div class="row" class:active={c.id === caseState.current?.id}>
             <button class="item" onclick={() => pick(c.id)}>
               <Icon name="clock" size={15} />
@@ -179,6 +207,8 @@
       {/if}
       {#if !named.length && !scratches.length}
         <div class="hint">No cases yet. Tools work without one.</div>
+      {:else if !visibleNamed.length && !visibleScratches.length}
+        <div class="hint">No case matches “{search.trim()}”.</div>
       {/if}
     </div>
   {/if}
@@ -313,6 +343,9 @@
     z-index: 100;
     box-shadow: var(--shadow-2);
     padding: 6px;
+  }
+  .search-row {
+    padding: 6px 6px 8px;
   }
   .section {
     font-size: var(--fs-xs);
