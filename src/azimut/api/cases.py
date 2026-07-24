@@ -165,8 +165,8 @@ class FolderIn(BaseModel):
 
 
 @router.get("")
-def list_cases() -> list[dict[str, Any]]:
-    return Case.list_all()
+def list_cases(q: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+    return Case.list_all(q=q, limit=limit)
 
 
 @router.post("")

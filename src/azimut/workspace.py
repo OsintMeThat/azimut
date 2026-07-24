@@ -386,7 +386,9 @@ class Case:
         return removed
 
     @classmethod
-    def list_all(cls) -> list[dict[str, Any]]:
+    def list_all(
+        cls, *, q: str | None = None, limit: int | None = None
+    ) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for parent, scratch in ((config.cases_dir(), False), (config.scratch_dir(), True)):
             if not parent.is_dir():
@@ -410,6 +412,11 @@ class Case:
                     }
                 )
         out.sort(key=lambda c: c.get("updated_at") or "", reverse=True)
+        if q:
+            needle = q.strip().lower()
+            out = [c for c in out if needle in str(c.get("name", "")).lower()]
+        if limit is not None:
+            out = out[: max(0, limit)]
         return out
 
     # -- json io -----------------------------------------------------------

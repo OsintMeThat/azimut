@@ -28,6 +28,22 @@ def test_entity_status_is_validated_consistently(client):
     assert saved["provenance"]["status"] == "suggested"
 
 
+def test_list_cases_filters_by_name(client):
+    for name in ("Kharkiv Strike", "Bakhmut Front", "Kharkiv Bridge"):
+        client.post("/api/cases", json={"name": name})
+
+    hits = client.get("/api/cases", params={"q": "kharkiv"}).json()
+    assert {c["name"] for c in hits} == {"Kharkiv Strike", "Kharkiv Bridge"}
+    # unfiltered still returns everything
+    assert len(client.get("/api/cases").json()) == 3
+
+
+def test_list_cases_respects_limit(client):
+    for name in ("One", "Two", "Three", "Four"):
+        client.post("/api/cases", json={"name": name})
+    assert len(client.get("/api/cases", params={"limit": 2}).json()) == 2
+
+
 def test_case_lifecycle(client):
     created = client.post("/api/cases", json={"name": "Kharkiv Strike"}).json()
     assert created["id"] == "kharkiv-strike"
