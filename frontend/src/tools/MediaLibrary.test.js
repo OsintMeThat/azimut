@@ -56,6 +56,13 @@ describe('Media Library thumbnail states', () => {
     expect(source).toContain("if (!thumbsPending || uiState.tool !== 'media' || !caseState.current) return;");
     expect(source).toContain('/media/thumbnails/regenerate');
   });
+
+  it('repeats the poll (not a one-shot timer that leaves a slow thumbnail stuck)', () => {
+    // a self-repeating poll, so a thumbnail slower than one tick still resolves
+    // without a page reload; the effect alone would not re-arm while pending
+    expect(source).toContain('pollWhile(() => thumbsPending, () => refresh(), 1500)');
+    expect(source).not.toContain('setTimeout(() => refresh()');
+  });
 });
 
 describe('Media Library bounded loading', () => {

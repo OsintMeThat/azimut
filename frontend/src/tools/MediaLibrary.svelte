@@ -3,6 +3,7 @@
   import { lookupEntity } from '../lib/catalog.js';
   import { buildMediaQuery } from '../lib/mediaQuery.js';
   import { createPagedList } from '../lib/pagedList.svelte.js';
+  import { pollWhile } from '../lib/poll.js';
   import { caseState, uiState, ensureCase, reloadCase, toast } from '../lib/state.svelte.js';
   import { visibleMedia, SORTS } from '../lib/mediaFilter.js';
   import Icon from '../components/Icon.svelte';
@@ -180,11 +181,13 @@
 
   // While the single worker is still generating thumbnails (video frames, or a
   // regenerate), re-list to pick up readiness — only while the tool is visible,
-  // and the poll stops on its own once nothing is pending.
+  // and the poll stops on its own once nothing is pending. Uses a repeating
+  // poll, not a one-shot timer: this effect only re-runs when `thumbsPending`
+  // flips, so a `setTimeout` here would fire once and leave a slow thumbnail
+  // stuck until a page reload (e.g. after a case switch reloads pending items).
   $effect(() => {
     if (!thumbsPending || uiState.tool !== 'media' || !caseState.current) return;
-    const t = setTimeout(() => refresh(), 1500);
-    return () => clearTimeout(t);
+    return pollWhile(() => thumbsPending, () => refresh(), 1500);
   });
 
   // Queue (re)generation: a single failed thumbnail (path given) or every
