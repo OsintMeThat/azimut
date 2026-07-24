@@ -61,6 +61,18 @@ export function createPagedList({ fetchPage, debounceMs = 250 }) {
     get query() {
       return query;
     },
+    /** Drop everything synchronously — call before switching cases so a stale
+     *  list can't render for a beat against the new case's file URLs. */
+    clear() {
+      clearTimeout(timer);
+      runId++; // abandon any in-flight load
+      items = [];
+      total = 0;
+      facets = null;
+      nextCursor = null;
+      serverMode = false;
+      loading = false;
+    },
     /** Re-establish the baseline (first page, mode reset). Call on case open. */
     reload() {
       clearTimeout(timer);

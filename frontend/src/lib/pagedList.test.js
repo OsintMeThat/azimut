@@ -71,6 +71,20 @@ describe('createPagedList — large case (multi page)', () => {
   });
 });
 
+describe('createPagedList — clear', () => {
+  it('drops items synchronously and abandons an in-flight load', async () => {
+    let resolveSlow;
+    const fetchPage = () => new Promise((r) => (resolveSlow = r));
+    const list = createPagedList({ fetchPage });
+    const p = list.reload();
+    list.clear();
+    expect(list.items).toEqual([]);
+    resolveSlow({ items: [{ id: 'stale' }], next_cursor: null, total: 1 });
+    await p;
+    expect(list.items).toEqual([]); // the abandoned load never lands
+  });
+});
+
 describe('createPagedList — superseded loads', () => {
   it('a slow earlier load does not clobber a newer one', async () => {
     let resolveFirst;

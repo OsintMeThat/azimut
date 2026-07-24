@@ -1,17 +1,29 @@
 <script>
   import { api } from '../lib/api.js';
   import { lookupEntity } from '../lib/catalog.js';
+  import { buildMediaQuery } from '../lib/mediaQuery.js';
+  import { createPagedList } from '../lib/pagedList.svelte.js';
   import { caseState, uiState, ensureCase, reloadCase, toast } from '../lib/state.svelte.js';
   import { visibleMedia, SORTS } from '../lib/mediaFilter.js';
   import Icon from '../components/Icon.svelte';
+  import SearchInput from '../components/SearchInput.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
 
   const KIND_ICONS = { image: 'image', video: 'video', audio: 'audio', file: 'file' };
 
-  let items = $state([]);
-  let loadedFor = $state(null);
+  // Bounded loading: a case that fits one page (the common case, incl. a 3–4
+  // file case) is filtered/sorted entirely client-side below; a large case
+  // pages in and searches server-side. The unbounded `/media` list still backs
+  // the pickers/derivation elsewhere — this browse view uses `/media/page`.
+  const PAGE = 200;
+  const pl = createPagedList({
+    fetchPage: ({ query, cursor }) =>
+      api.get(buildMediaQuery(caseState.current?.id, { q: query, limit: PAGE, cursor })),
+  });
+  const items = $derived(pl.items);
+  let loadedFor = null; // non-reactive: only the load effect reads/writes it
   let url = $state('');
   let picker = $state(null); // multi-item picker: {url, items: [{index, title, thumbnail, kind, selected}]}
   let dragOver = $state(false);
@@ -121,9 +133,16 @@
     caseState.rev; // also refetch when the case is reloaded elsewhere (e.g. sidebar edit)
     if (id !== loadedFor) {
       loadedFor = id;
-      items = [];
+      pl.clear(); // drop the old case's page before the new one loads
     }
-    if (id) refresh(id);
+    if (id) pl.reload();
+  });
+
+  // Drive the paged list from the search box: in a small (single-page) case
+  // this just records the term and `visibleMedia` filters in memory with no
+  // network; in a large case it debounces a server search.
+  $effect(() => {
+    pl.setQuery(query);
   });
 
   // Pick up a "focus this media" handoff from the sidebar: clear filters that
@@ -155,8 +174,8 @@
     });
   });
 
-  async function refresh(id = caseState.current?.id) {
-    if (id) items = await api.get(`/api/cases/${id}/media`);
+  async function refresh() {
+    if (caseState.current?.id) await pl.reload();
   }
 
   // While the single worker is still generating thumbnails (video frames, or a
@@ -440,19 +459,11 @@
   <!-- search + sort + category + folder filter bar -->
   {#if items.length > 0}
     <div class="folder-bar">
-      <div class="search-box">
-        <Icon name="search" size={13} />
-        <input
-          class="search-input"
-          placeholder="Search name, notes, source…"
-          bind:value={query}
-        />
-        {#if query}
-          <button class="search-clear" onclick={() => (query = '')} aria-label="Clear search">
-            <Icon name="x" size={12} />
-          </button>
-        {/if}
-      </div>
+      <SearchInput
+        bind:value={query}
+        placeholder="Search name, notes, source…"
+        count={query ? `${filteredItems.length} shown` : null}
+      />
       <select class="select sort-select" bind:value={sort} title="Sort order">
         {#each SORTS as s (s.id)}
           <option value={s.id}>{s.label}</option>
@@ -637,6 +648,13 @@
           </div>
         {/each}
       </div>
+      {#if pl.hasMore}
+        <div class="show-more">
+          <button class="btn" onclick={() => pl.loadMore()} disabled={pl.loading}>
+            {pl.loading ? 'Loading…' : 'Show more'}
+          </button>
+        </div>
+      {/if}
     {/if}
   </div>
 
@@ -873,37 +891,10 @@
     background: var(--border);
     flex-shrink: 0;
   }
-  .search-box {
+  .show-more {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    background: var(--bg-2);
-    color: var(--text-3);
-    flex-shrink: 0;
-  }
-  .search-box:focus-within {
-    border-color: var(--accent);
-  }
-  .search-input {
-    width: 180px;
-    border: none;
-    background: none;
-    outline: none;
-    color: var(--text-1);
-    font-size: var(--fs-xs);
-  }
-  .search-clear {
-    display: inline-flex;
-    color: var(--text-3);
-    padding: 1px;
-    border-radius: 50%;
-  }
-  .search-clear:hover {
-    color: var(--text-1);
-    background: var(--bg-3);
+    justify-content: center;
+    padding: 16px 0 4px;
   }
   .sort-select {
     width: auto;

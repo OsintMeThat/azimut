@@ -58,6 +58,26 @@ describe('Media Library thumbnail states', () => {
   });
 });
 
+describe('Media Library bounded loading', () => {
+  it('browses via the bounded /media/page endpoint, not the unbounded list', () => {
+    expect(source).toContain('createPagedList');
+    expect(source).toContain('buildMediaQuery(caseState.current?.id');
+    // the browse view must not fetch the whole media list on mount
+    expect(source).not.toMatch(/api\.get\(`\/api\/cases\/\$\{[^}]+\}\/media`\)/);
+  });
+
+  it('shares the SearchInput and pages the rest in with Show more', () => {
+    expect(source).toContain("import SearchInput from '../components/SearchInput.svelte'");
+    expect(source).toContain('pl.setQuery(query)');
+    expect(source).toContain('{#if pl.hasMore}');
+    expect(source).toContain('pl.loadMore()');
+  });
+
+  it('clears the previous case before loading the next', () => {
+    expect(source).toContain('pl.clear()');
+  });
+});
+
 describe('Media Library gated-download cookie affordance', () => {
   it('keeps the first attempt cookie-less and only opts in on retry', () => {
     // default download path never asks for cookies (local-first)
