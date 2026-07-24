@@ -263,6 +263,13 @@ queued, and a retry affordance on failure. `POST
 retry) or every missing/failed one; the grid polls the listing while anything is
 pending, and stops on its own once nothing is.
 
+The Media Library and Files browse the media through `GET
+/api/cases/{id}/media/page` — a bounded page (`q`, `kind`, `folder`, `sort`,
+`limit`, `cursor`) that also returns `total` and facet counts, so a large case
+loads one page and searches server-side instead of shipping every sidecar. The
+unbounded `GET /api/cases/{id}/media` stays for consumers that genuinely need
+the whole list (the composer pickers, satellite crops, derivation traces).
+
 ## Filesystem and database consistency
 
 SQLite cannot atomically commit a filesystem rename, so file-backed operations are

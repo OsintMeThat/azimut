@@ -108,6 +108,7 @@ proof for publication.
 | ✅ **Canvas tests** | Exercises Leaflet and Konva interactions in Chromium and Firefox. |
 | ✅ **Storage platform** | Uses per-case SQLite, bounded catalog queries and a durable one-worker job queue. |
 | ✅ **Gated downloads** | Fetches login-walled media by borrowing a browser session or cookies.txt, cookie-less by default and prompted only on a wall. |
+| ✅ **Find at scale** | Bounded, paged loading with a shared search box and sort across the Media Library and Files, plus case-name search in the switcher. |
 
 
 ---
