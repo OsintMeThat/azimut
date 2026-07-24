@@ -16,8 +16,10 @@
   import { openNotebook } from '../lib/navigate.js';
   import { createBookmark } from '../lib/bookmarks.js';
   import { marqueeRect, marqueeHits, toggleSelection } from '../lib/gridSelect.js';
-  import { fetchAllEntities } from '../lib/catalog.js';
+  import { buildCatalogQuery } from '../lib/catalog.js';
+  import { createPagedList } from '../lib/pagedList.svelte.js';
   import Icon from '../components/Icon.svelte';
+  import SearchInput from '../components/SearchInput.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
@@ -32,24 +34,38 @@
   const FILE_BACKED = new Set(['media', 'capture', 'proof', 'post', 'inspect-session', 'note']);
 
   // ── case data ──────────────────────────────────────────────────────────────
-  // Every filed artifact, read a page at a time off the bounded catalog rather
-  // than the case-open payload. My work is inherently the whole confirmed
-  // catalog, so it fetches the whole slice — but server-side, never shipped in
-  // the open response, and re-read on case change or a save/delete elsewhere.
-  let confirmed = $state([]);
+  // Bounded loading: a first page (200) off the catalog, not the whole graph on
+  // open. A small case (incl. a 3–4 file one) fits one page, so the tree, search
+  // and counts below are the full picture and everything filters in memory. A
+  // large case loads more under the analyst's control ("Show more"); `summary`
+  // gives the honest total. Re-read on case change or a save/delete elsewhere.
+  const PAGE = 200;
+  const pl = createPagedList({
+    fetchPage: ({ cursor }) =>
+      api.get(buildCatalogQuery(caseState.current?.id, { status: 'confirmed', limit: PAGE, cursor })),
+  });
+  const confirmed = $derived(pl.items);
+  let summary = $state(null); // { total, by_type, by_status, by_folder }
+  let loadedFor = null; // non-reactive: only the load effect reads/writes it
   $effect(() => {
     const id = caseState.current?.id;
     caseState.rev;
     if (!id) {
-      confirmed = [];
+      pl.clear();
+      summary = null;
       return;
     }
-    let live = true;
-    fetchAllEntities(id, { status: 'confirmed' })
-      .then((list) => { if (live) confirmed = list; })
-      .catch(() => { if (live) confirmed = []; });
-    return () => { live = false; };
+    if (id !== loadedFor) {
+      loadedFor = id;
+      pl.clear();
+    }
+    pl.reload();
+    api
+      .get(`/api/cases/${id}/catalog/summary`)
+      .then((s) => (summary = s))
+      .catch(() => (summary = null));
   });
+  const total = $derived(summary?.total ?? confirmed.length);
   const tree = $derived(buildTree(caseState.current?.folders ?? [], confirmed));
   const allFolders = $derived(flattenPaths(tree));
   const unfiled = $derived(confirmed.filter((e) => !folderOf(e)));
@@ -116,8 +132,25 @@
     return (
       (e.label ?? '').toLowerCase().includes(q) ||
       e.type.toLowerCase().includes(q) ||
-      (folderOf(e) ?? '').toLowerCase().includes(q)
+      (folderOf(e) ?? '').toLowerCase().includes(q) ||
+      (e.attrs?.notes ?? '').toLowerCase().includes(q)
     );
+  }
+
+  // Sort the current grid. Files had no sort at all — a plain desktop gap.
+  let sort = $state('name');
+  const SORTS = [
+    { id: 'name', label: 'Name A–Z' },
+    { id: 'type', label: 'Type' },
+    { id: 'recent', label: 'Recent' },
+  ];
+  function sortEntities(list) {
+    const out = [...list];
+    const name = (e) => (e.label ?? '').toLowerCase();
+    if (sort === 'type') out.sort((a, b) => a.type.localeCompare(b.type) || name(a).localeCompare(name(b)));
+    else if (sort === 'recent') out.sort((a, b) => (b.provenance?.at ?? '').localeCompare(a.provenance?.at ?? ''));
+    else out.sort((a, b) => name(a).localeCompare(name(b)));
+    return out;
   }
 
   const current = $derived(showUnfiled ? { path: '', children: [], entities: unfiled } : nodeAt(cwd));
@@ -125,7 +158,9 @@
     showUnfiled ? unfiled : cwd ? confirmed.filter((e) => isInFolderSubtree(e, cwd)) : confirmed
   );
   const curFolders = $derived(searching ? [] : current.children);
-  const curEntities = $derived(searching ? searchScope.filter(matches) : current.entities);
+  const curEntities = $derived(
+    sortEntities(searching ? searchScope.filter(matches) : current.entities)
+  );
   const entityOrder = $derived(curEntities.map((e) => e.id));
   const crumbs = $derived(cwd ? cwd.split('/') : []);
   // the Unfiled bucket shows as a tile at the root, even when empty (drop here
@@ -474,15 +509,16 @@
     <h2>Files</h2>
     <span class="sub">Organize My work</span>
     <div class="spacer"></div>
-    <div class="search-box">
-      <Icon name="search" size={13} />
-      <input class="search-input" placeholder={cwd ? 'Search this folder…' : 'Search My work…'} bind:value={query} />
-      {#if query}
-        <button class="search-clear" onclick={() => (query = '')} aria-label="Clear search">
-          <Icon name="x" size={12} />
-        </button>
-      {/if}
-    </div>
+    <SearchInput
+      bind:value={query}
+      placeholder={cwd ? 'Search this folder…' : 'Search My work…'}
+      width="160px"
+    />
+    <select class="select sort-select" bind:value={sort} title="Sort order">
+      {#each SORTS as s (s.id)}
+        <option value={s.id}>{s.label}</option>
+      {/each}
+    </select>
     <button
       class="btn btn-ghost btn-sm"
       title={dense ? 'Larger thumbnails' : 'Smaller thumbnails'}
@@ -674,6 +710,14 @@
             ></div>
           {/if}
         </div>
+        {#if pl.hasMore}
+          <div class="show-more">
+            <button class="btn" onclick={() => pl.loadMore()} disabled={pl.loading}>
+              {pl.loading ? 'Loading…' : 'Show more'}
+            </button>
+            <span>Showing {confirmed.length} of {total}</span>
+          </div>
+        {/if}
       </section>
     </div>
   {/if}
@@ -857,36 +901,17 @@
     width: 160px;
     font-size: var(--fs-sm);
   }
-  .search-box {
+  .sort-select {
+    font-size: var(--fs-sm);
+  }
+  .show-more {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    background: var(--bg-2);
+    justify-content: center;
+    gap: 10px;
+    padding: 16px 0 4px;
     color: var(--text-3);
-  }
-  .search-box:focus-within {
-    border-color: var(--accent);
-  }
-  .search-input {
-    width: 160px;
-    border: none;
-    background: none;
-    outline: none;
-    color: var(--text-1);
     font-size: var(--fs-xs);
-  }
-  .search-clear {
-    display: inline-flex;
-    color: var(--text-3);
-    padding: 1px;
-    border-radius: 50%;
-  }
-  .search-clear:hover {
-    color: var(--text-1);
-    background: var(--bg-3);
   }
 
   /* right-click new-folder menu */
