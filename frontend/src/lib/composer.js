@@ -1,15 +1,8 @@
 /**
- * Proof composer document logic — pure functions, no Konva/DOM here.
+ * Pure proof-document logic with no Konva or DOM dependency.
  *
- * Document space: panels share a common height (PANEL_H doc units) within a
- * row, and rows stack vertically. Each panel carries a `row` index (default 0);
- * panels of the same row sit side by side (array order = left→right), rows are
- * centered and stacked top→bottom. A single-row document (all row 0) is exactly
- * the classic side-by-side strip. Stacking rows keeps the composite closer to a
- * square so it survives a tweet's centre-crop instead of being a wide bandeau.
- *
- * Shape coordinates are stored in each panel's *natural image pixels* so the
- * spec stays valid regardless of layout or zoom (re-editable forever).
+ * Panels share a row height and rows stack vertically. Shape coordinates use
+ * each panel's natural pixels so layout and zoom do not invalidate the spec.
  */
 
 import { formatCoords as renderCoords } from './coords.js';
@@ -118,42 +111,12 @@ export function newId(prefix) {
   return `${prefix}${Date.now().toString(36)}${(idSeq++).toString(36)}`;
 }
 
-// Title a fresh proof carries until the analyst renames it. Two proofs left at
-// this title auto-number on save (see uniqueProofName) instead of clobbering.
-export const DEFAULT_PROOF_TITLE = 'Untitled proof';
-
-/** URL-safe proof filename from free text — mirror of the backend `_slug`. */
-export function proofSlug(text) {
-  const slug = (text ?? '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return slug.slice(0, 80) || 'proof';
-}
-
-/**
- * A proof title that doesn't collide with `taken` (existing proof titles):
- * `base` when free, else `base 2`, `base 3`, … A new proof left at the default
- * title gets numbered so two never-renamed proofs read apart in the case, and
- * the filename simply follows the title (proofSlug). `taken` is a Set or array.
- */
-export function uniqueProofTitle(base, taken) {
-  const set = taken instanceof Set ? taken : new Set(taken);
-  if (!set.has(base)) return base;
-  let n = 2;
-  while (set.has(`${base} ${n}`)) n += 1;
-  return `${base} ${n}`;
-}
-
-/** Prefill a new proof from its case name without colliding with a saved proof. */
-export function proofTitleFromCase(caseName, taken = []) {
-  const base = String(caseName ?? '').trim() || DEFAULT_PROOF_TITLE;
-  return uniqueProofTitle(base, taken);
-}
-
 /**
  * Search and category filter for the proof panel picker. Satellite captures
  * carry `kind: satellite`; every other case image carries `kind: media`.
+ * The search reads the title the analyst gave the image (its `label`) and the
+ * folder it sits in, not the file name on disk — a downloaded photo keeps a
+ * name nobody chose, so matching it drowns the titles that mean something.
  */
 export function filterProofPanelItems(items, query = '', category = 'all') {
   const needle = String(query).trim().toLocaleLowerCase();
@@ -163,13 +126,30 @@ export function filterProofPanelItems(items, query = '', category = 'all') {
     if (!needle) return true;
     const text = [
       item.label,
-      item.src,
+      item.folder,
       item.meta?.provider,
       item.meta?.date,
       item.meta?.imagery_date,
     ].filter(Boolean).join(' ').toLocaleLowerCase();
     return text.includes(needle);
   });
+}
+
+/**
+ * What a panel picker cell should show for a case image.
+ *
+ * Only the cached thumbnail is small enough for a 150px cell: falling back to
+ * the original meant every open of the picker downloaded and decoded the
+ * full-resolution captures. `thumbnail` is null unless the listing found the
+ * cached file, so a missing one is a placeholder, and a queued or running
+ * thumbnail job is a pending one the caller can poll on.
+ */
+export function panelPreview(item) {
+  const state = item?.thumb_state;
+  return {
+    thumb: state === 'ready' ? (item.thumbnail ?? null) : null,
+    thumbPending: state === 'queued' || state === 'running',
+  };
 }
 
 /** A proof has nothing to render until it contains at least one panel. */
@@ -732,6 +712,121 @@ export function signatureOffset(sig, docW, docH, natural, x, y) {
   };
 }
 
+// ---- frames & pasted images --------------------------------------------------
+
+export const FRAME_WIDTH = 6; // default border thickness, in the surface's own pixels
+export const FRAME_WIDTH_MAX = 60;
+export const FRAME_COLOR = ANNO_COLORS[0];
+
+/**
+ * A coloured border around a panel or a pasted image, or `null` for none.
+ * Decoration only: unlike a drawn shape, a frame never enters the legend, so it
+ * is not something the analyst has to explain. Drawn inset on the surface, so it
+ * costs the layout nothing. Width 0 is how the UI turns a frame off.
+ */
+export function normalizeFrame(frame) {
+  if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return null;
+  const width = Math.round(boundedNumber(frame.width, 0, 0, FRAME_WIDTH_MAX));
+  return width ? { color: normalizedColor(frame.color, FRAME_COLOR), width } : null;
+}
+
+export function newFrame() {
+  return { color: FRAME_COLOR, width: FRAME_WIDTH };
+}
+
+export const PASTE_SCALE_MIN = 0.02;
+export const PASTE_SCALE_MAX = 8;
+export const PASTE_SHARE = 0.4; // insertion width, as a share of the document
+
+/**
+ * A pasted image: pixels that live in this proof and nowhere else. It carries no
+ * `src`, so nothing in the case claims it and the save files no derived-from
+ * edge for it — `asset` is a file name inside the proof's own assets folder.
+ */
+export function newPaste(asset, natural, { x = 0, y = 0, scale = 1 } = {}) {
+  return {
+    id: newId('x'),
+    asset,
+    natural: [natural[0], natural[1]],
+    x,
+    y,
+    scale: clampPasteScale(scale),
+    frame: null,
+  };
+}
+
+export function clampPasteScale(scale) {
+  const v = Number.isFinite(scale) ? scale : 1;
+  return Math.round(clamp(v, PASTE_SCALE_MIN, PASTE_SCALE_MAX) * 1000) / 1000;
+}
+
+/** Insertion scale: a share of the document width, never larger than life size. */
+export function pasteInsertScale(natural, docW, share = PASTE_SHARE) {
+  const w = natural?.[0];
+  if (!w || !docW) return 1;
+  return clampPasteScale(Math.min(1, Math.round(((docW * share) / w) * 1000) / 1000));
+}
+
+/**
+ * Layout boxes for pasted images, in the same shape as panel boxes so a shape
+ * can bind to either. A paste sits at its own doc position, and its `scale` maps
+ * natural pixels straight to doc pixels (1 = life size). `baseScale` is 1, which
+ * puts stroke widths in natural pixels — so an annotation drawn on a paste grows
+ * with it exactly as one drawn on a panel grows with the panel.
+ */
+export function pasteBoxes(pastes) {
+  return (pastes ?? []).map((p) => {
+    const scale = clampPasteScale(p.scale);
+    return {
+      x: p.x ?? 0,
+      y: p.y ?? 0,
+      w: p.natural[0] * scale,
+      h: p.natural[1] * scale,
+      scale,
+      baseScale: 1,
+      row: 0,
+    };
+  });
+}
+
+/**
+ * Everything an annotation can be drawn on, front→back: pasted images first
+ * (they float above the composition), then the panels in their own z-order.
+ * Each entry is `{ id, kind, item, box, index }`, `index` being the item's
+ * position inside its own array — what the mutating helpers take.
+ */
+export function surfaces(proof) {
+  const panels = proof?.panels ?? [];
+  const pastes = proof?.pastes ?? [];
+  const panelBox = layoutPanels(panels, proof?.captionSize, proof?.layout, proof?.space);
+  const pasteBox = pasteBoxes(pastes);
+  return [
+    ...pastes.map((item, index) => ({ id: item.id, kind: 'paste', item, box: pasteBox[index], index })),
+    ...panels.map((item, index) => ({ id: item.id, kind: 'panel', item, box: panelBox[index], index })),
+  ];
+}
+
+/** Topmost surface under a doc-space point, with the point in its own pixels. */
+export function surfaceHitTest(list, point) {
+  const hit = panelHitTest(list.map((s) => s.box), point);
+  return hit ? { ...list[hit.index], nx: hit.nx, ny: hit.ny } : null;
+}
+
+/**
+ * Keep a pasted image inside the document. The document is sized by its panels
+ * alone, so a paste can never grow it — dragged to the edge, it stops there. One
+ * bigger than the document is held so it covers the whole of it.
+ */
+export function clampPaste(paste, docW, docH) {
+  const scale = clampPasteScale(paste.scale);
+  const w = paste.natural[0] * scale;
+  const h = paste.natural[1] * scale;
+  return {
+    x: clamp(paste.x ?? 0, Math.min(0, docW - w), Math.max(0, docW - w)),
+    y: clamp(paste.y ?? 0, Math.min(0, docH - h), Math.max(0, docH - h)),
+  };
+}
+
 /** Serializable spec from runtime state (drops live image objects). */
 export function toSpec(proof) {
   return {
@@ -776,6 +871,18 @@ export function toSpec(proof) {
       y: p.y ?? null,
       natural: p.natural,
       meta: p.meta ?? {},
+      frame: normalizeFrame(p.frame), // decorative border; null → none
+    })),
+    // Pasted images, front→back. They have no `src`: the case holds nothing for
+    // them beyond the file in the proof's own assets folder.
+    pastes: (proof.pastes ?? []).map((p) => ({
+      id: p.id, // kept so shapes stay bound to their paste on reload
+      asset: p.asset,
+      natural: p.natural,
+      x: p.x ?? 0,
+      y: p.y ?? 0,
+      scale: clampPasteScale(p.scale),
+      frame: normalizeFrame(p.frame),
     })),
     shapes: proof.shapes.map((s) => ({ ...s })),
   };
@@ -946,16 +1053,6 @@ export function mediaPanelInput(m, mediaList = []) {
     meta: { kind: 'media', source_url: urls[0], source_urls: urls },
     caption: '',
   };
-}
-
-/**
- * True when a media listing item is a satellite capture — mirrors the backend's
- * `satellite.is_capture`. A capture *is* a media image (one file in `media/`),
- * flagged by its sidecar `source.type`, so it surfaces in both the /media and
- * /satellite listings; callers use this to avoid listing it under both.
- */
-export function isSatelliteCapture(item) {
-  return (item?.source ?? {}).type === 'satellite';
 }
 
 /**
@@ -1206,32 +1303,6 @@ export function canReassignLegendNote(notes, oldColor, newColor, shapes, moving)
     notes?.[oldColor] && !notes?.[newColor] &&
     !shapes.some((s) => s !== moving && s.color === oldColor),
   );
-}
-
-// ---- saved-proof case queries ----------------------------------------------
-
-/** Filed proof entities in a case (those whose `attrs.spec` is `proofs/*.json`). */
-export function savedProofEntities(entities) {
-  return (entities ?? []).filter((e) => {
-    const s = e.attrs?.spec;
-    return typeof s === 'string' && s.startsWith('proofs/') && s.endsWith('.json');
-  });
-}
-
-/** Slugs (filename without `proofs/….json`) of every saved proof — the collision set. */
-export function savedProofSlugs(entities) {
-  return new Set(savedProofEntities(entities).map((e) => e.attrs.spec.slice(7, -5)));
-}
-
-/** Titles of every saved proof, so a fresh title can read apart from them. */
-export function savedProofTitles(entities) {
-  return new Set(savedProofEntities(entities).map((e) => e.label ?? ''));
-}
-
-/** Title of the saved proof with slug `name`, for the overwrite prompt. */
-export function savedProofTitle(entities, name) {
-  const e = savedProofEntities(entities).find((x) => x.attrs.spec === `proofs/${name}.json`);
-  return e?.label ?? name;
 }
 
 export function loadImage(url) {

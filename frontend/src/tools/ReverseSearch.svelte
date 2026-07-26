@@ -9,18 +9,47 @@
   // image via a same-origin canvas — nothing leaves the machine until an
   // engine tab is opened by the analyst.
   import { api } from '../lib/api.js';
+  import { matchesTerms } from '../lib/folderBrowse.js';
   import { caseState, uiState, toast } from '../lib/state.svelte.js';
   import { UPLOAD_PAGES } from '../lib/reverseSearch.js';
   import Modal from '../components/Modal.svelte';
   import Icon from '../components/Icon.svelte';
+  import SearchInput from '../components/SearchInput.svelte';
+  import FolderBrowser from '../components/FolderBrowser.svelte';
 
   const PASTE = UPLOAD_PAGES.filter((e) => e.paste);
   const DRAG = UPLOAD_PAGES.filter((e) => !e.paste);
+  const MEDIA_FILTERS = [
+    { id: 'all', label: 'All' },
+    { id: 'image', label: 'Images' },
+    { id: 'video', label: 'Video' },
+    { id: 'capture', label: 'Captures' },
+    { id: 'frame', label: 'Frames' },
+    { id: 'collage', label: 'Collages' },
+  ];
 
   let pickerOpen = $state(false);
   let mediaLibrary = $state([]);
+  let mediaQuery = $state('');
+  let mediaFilter = $state('all');
+  let pickerBrowserOpen = $state(false);
+  let pickerBrowsePath = $state('');
+  let pickerBrowseSelection = $state(null);
   let selected = $state(null); // the chosen media item, or null
   let videoEl = $state(null); // the <video> element, when a video is selected
+
+  const searchableMedia = $derived(mediaLibrary.filter((m) => m.kind === 'image' || m.kind === 'video'));
+  const filteredPickerMedia = $derived(
+    mediaFilter === 'all' ? searchableMedia : searchableMedia.filter((m) => mediaCategory(m) === mediaFilter)
+  );
+  const pickableMedia = $derived(
+    mediaQuery.trim()
+      ? filteredPickerMedia.filter((m) => matchesMediaName(m, mediaQuery))
+      : filteredPickerMedia
+  );
+  const pickerBrowserEntries = $derived(
+    filteredPickerMedia.map((m) => ({ ...m, id: m.path, attrs: { folder: m.folder ?? '' } }))
+  );
 
   // -- adjustments (client-side CSS filters, baked into the export) -----------
   const NEUTRAL = { brightness: 100, contrast: 100, saturate: 100, grayscale: 0 };
@@ -48,6 +77,11 @@
       toast('Open a case to search its media', 'warn');
       return;
     }
+    mediaQuery = '';
+    mediaFilter = 'all';
+    pickerBrowserOpen = false;
+    pickerBrowsePath = '';
+    pickerBrowseSelection = null;
     try {
       mediaLibrary = await api.get(`/api/cases/${caseState.current.id}/media`);
       pickerOpen = true;
@@ -60,6 +94,54 @@
     selected = item;
     resetAdjust();
     pickerOpen = false;
+  }
+
+  function matchesMediaName(item, query) {
+    return matchesTerms(item.title || item.filename || '', query);
+  }
+
+  function mediaCategory(item) {
+    const source = item.source ?? {};
+    if (source.type === 'satellite' || source.type === 'screenshot') return 'capture';
+    if (source.op === 'collage') return 'collage';
+    if (source.op === 'frame' || source.op === 'adjust') return 'frame';
+    return item.kind;
+  }
+
+  function openPickerBrowser() {
+    mediaQuery = '';
+    pickerBrowsePath = '';
+    pickerBrowseSelection = null;
+    pickerBrowserOpen = true;
+  }
+
+  function togglePickerBrowser() {
+    if (pickerBrowserOpen) {
+      pickerBrowserOpen = false;
+      return;
+    }
+    openPickerBrowser();
+  }
+
+  function setMediaFilter(filter) {
+    mediaFilter = filter;
+    pickerBrowsePath = '';
+    pickerBrowseSelection = null;
+  }
+
+  function openPickerFolder(path) {
+    pickerBrowsePath = path;
+    pickerBrowseSelection = null;
+  }
+
+  function confirmPickerBrowser() {
+    const item = pickerBrowserEntries.find((m) => m.path === pickerBrowseSelection);
+    if (item) pickMedia(item);
+  }
+
+  function selectPickerBrowser(item, confirm = false) {
+    pickerBrowseSelection = item.path;
+    if (confirm) pickMedia(item);
   }
 
   function discard() {
@@ -158,7 +240,7 @@
         <div class="empty-icon"><Icon name="search" size={42} /></div>
         <h3>Reverse image search</h3>
         <p>Pick a case photo, or a video to grab a frame from, then send it to the engines.</p>
-        <button class="btn btn-primary" onclick={openPicker}>
+        <button class="btn btn-sm" onclick={openPicker}>
           <Icon name="image" size={15} /> Pick from case
         </button>
         <div class="fallback">
@@ -270,25 +352,70 @@
 
 {#if pickerOpen}
   <Modal title="Pick a case image or video" width="640px" onclose={() => (pickerOpen = false)}>
-    {#if mediaLibrary.length === 0}
-      <p class="picker-empty">No media in this case yet. Import or download some in the Media tab.</p>
-    {:else}
-      <div class="picker-grid">
-        {#each mediaLibrary as item (item.path)}
-          <button class="picker-item" onclick={() => pickMedia(item)} title={item.path}>
-            <div class="picker-thumb">
-              {#if item.thumbnail}
-                <img src={`/files/${caseState.current.id}/${item.thumbnail}`} alt={item.path} />
-              {:else}
-                <Icon name={item.kind === 'video' ? 'video' : 'image'} size={24} />
-              {/if}
-              {#if item.kind === 'video'}<span class="kind-badge"><Icon name="video" size={11} /></span>{/if}
-            </div>
-            <span class="picker-name">{nameOf(item)}</span>
-          </button>
-        {/each}
+    <div class="picker-content">
+      <div class="picker-search">
+        <SearchInput bind:value={mediaQuery} placeholder="Search names…" width="100%" />
+        <button class="btn btn-ghost btn-sm browse-btn" title="Browse folders" onclick={togglePickerBrowser}>…</button>
       </div>
-    {/if}
+
+      {#if searchableMedia.length === 0}
+        <p class="picker-empty">No images or videos in this case yet. Import or download some in the Media tab.</p>
+      {:else}
+        <div class="picker-filters" aria-label="Media type">
+          {#each MEDIA_FILTERS as filter (filter.id)}
+            <button
+              class="btn btn-ghost btn-sm"
+              class:active={mediaFilter === filter.id}
+              aria-pressed={mediaFilter === filter.id}
+              onclick={() => setMediaFilter(filter.id)}
+            >
+              {filter.label}
+            </button>
+          {/each}
+        </div>
+
+        {#if pickerBrowserOpen}
+          <FolderBrowser
+            entries={pickerBrowserEntries}
+            path={pickerBrowsePath}
+            rootLabel="Case media"
+            selectedId={pickerBrowseSelection}
+            matches={(m) => matchesMediaName(m, mediaQuery)}
+            emptyText="This folder has no matching media."
+            icon={(m) => (m.kind === 'video' ? 'video' : 'image')}
+            label={(m) => m.title || m.filename}
+            onnavigate={openPickerFolder}
+            onselect={(m) => selectPickerBrowser(m)}
+            onconfirm={(m) => selectPickerBrowser(m, true)}
+          />
+          <div class="modal-actions">
+            <button class="btn btn-primary btn-sm" disabled={!pickerBrowseSelection} onclick={confirmPickerBrowser}>Use selected</button>
+          </div>
+        {:else if pickableMedia.length === 0}
+          <p class="modal-hint">No media matches this filter.</p>
+        {:else}
+          <div class="picker-list">
+            {#each pickableMedia as item (item.path)}
+              <button class="picker-open" onclick={() => pickMedia(item)} title={item.path}>
+                <div class="picker-thumb">
+                  {#if item.thumbnail}
+                    <img src={`/files/${caseState.current.id}/${item.thumbnail}`} alt="" loading="lazy" />
+                  {:else}
+                    <Icon name={item.kind === 'video' ? 'video' : 'image'} size={22} />
+                  {/if}
+                </div>
+                <span class="picker-copy">
+                  <span class="picker-title">{item.title || item.filename}</span>
+                  <span class="picker-meta">
+                    {mediaCategory(item)}{item.folder ? ` · ${item.folder}` : ''}{item.title && item.filename !== item.title ? ` · ${item.filename}` : ''}
+                  </span>
+                </span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      {/if}
+    </div>
   </Modal>
 {/if}
 
@@ -492,39 +619,80 @@
   }
 
   /* picker modal */
+  .picker-content {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
   .picker-empty {
     color: var(--text-3);
     font-size: var(--fs-sm);
     padding: 8px;
   }
-  .picker-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  .modal-hint {
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    margin: 0;
+  }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
     gap: 8px;
   }
-  .picker-item {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    padding: 6px;
-    background: var(--bg-2);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    cursor: pointer;
-    text-align: left;
-  }
-  .picker-item:hover {
-    border-color: var(--border-strong);
-  }
-  .picker-thumb {
-    position: relative;
-    aspect-ratio: 4 / 3;
+  .picker-search {
     display: flex;
     align-items: center;
-    justify-content: center;
-    background: var(--bg-0);
-    border-radius: 3px;
+    gap: 6px;
+  }
+  .picker-search :global(.search-box) {
+    flex: 1;
+  }
+  .browse-btn {
+    min-width: 30px;
+    font-size: var(--fs-lg);
+    line-height: 1;
+  }
+  .picker-filters {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .picker-filters .active {
+    color: var(--text-1);
+    background: var(--bg-3);
+  }
+  .picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: min(52vh, 480px);
+    overflow: auto;
+  }
+  .picker-open {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 7px;
+    text-align: left;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-2);
+  }
+  .picker-open:hover {
+    border-color: var(--accent);
+    background: var(--bg-3);
+  }
+  .picker-thumb {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 40px;
+    flex-shrink: 0;
     overflow: hidden;
+    border-radius: var(--r-sm);
+    background: var(--bg-0);
     color: var(--text-3);
   }
   .picker-thumb img {
@@ -532,19 +700,25 @@
     height: 100%;
     object-fit: cover;
   }
-  .kind-badge {
-    position: absolute;
-    bottom: 3px;
-    right: 3px;
-    display: inline-flex;
-    padding: 2px;
-    background: rgba(0, 0, 0, 0.6);
-    border-radius: 3px;
+  .picker-copy {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 2px;
   }
-  .picker-name {
-    font-size: var(--fs-xs);
+  .picker-title,
+  .picker-meta {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .picker-title {
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+  }
+  .picker-meta {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
   }
 </style>

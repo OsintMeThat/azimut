@@ -1,9 +1,11 @@
 <script>
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
+  import FolderBrowser from '../../components/FolderBrowser.svelte';
+  import PanelCategories from './PanelCategories.svelte';
+  import { filterProofPanelItems } from '../../lib/composer.js';
 
   let {
-    name = $bindable(),
     templateId = $bindable(),
     panelPaths = $bindable(),
     query = $bindable(),
@@ -18,15 +20,29 @@
     requestCreation,
     close,
   } = $props();
+
+  // "…" swaps the thumbnail grid for the folder view. Panels stay multi-select
+  // there: a row toggles the same selection the grid does.
+  let browserOpen = $state(false);
+  let browsePath = $state('');
+  const categoryItems = $derived(filterProofPanelItems(items, '', category));
+  const browserEntries = $derived(
+    categoryItems.map((item) => ({ ...item, id: item.src, attrs: { folder: item.folder ?? '' } }))
+  );
+
+  function toggleBrowser() {
+    browserOpen = !browserOpen;
+    browsePath = '';
+  }
+
+  function pickCategory(id) {
+    category = id;
+    browsePath = '';
+  }
 </script>
 
 <Modal title="Create proof" onclose={() => { if (!creating) close(); }} width="780px">
   <form class="new-proof-form" onsubmit={(event) => { event.preventDefault(); requestCreation(); }}>
-    <label class="new-proof-field">
-      <span>Name</span>
-      <input class="input" bind:value={name} maxlength="200" placeholder="Proof name" />
-    </label>
-
     <label class="new-proof-field">
       <span>Template</span>
       <select class="input" bind:value={templateId}>
@@ -56,23 +72,32 @@
             </button>
           {/if}
         </div>
-        <div class="panel-categories" aria-label="Panel categories">
-          <button type="button" class:active={category === 'all'} onclick={() => (category = 'all')}>
-            All <span>{items.length}</span>
-          </button>
-          <button type="button" class:active={category === 'satellite'} onclick={() => (category = 'satellite')}>
-            Satellite captures <span>{items.filter((item) => item.kind === 'satellite').length}</span>
-          </button>
-          <button type="button" class:active={category === 'media'} onclick={() => (category = 'media')}>
-            Other images <span>{items.filter((item) => item.kind === 'media').length}</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm browse-btn"
+          title={browserOpen ? 'Show every image' : 'Browse folders'}
+          onclick={toggleBrowser}
+        >…</button>
+        <PanelCategories {items} {category} onpick={pickCategory} />
       </div>
 
       {#if loading}
         <div class="picker-empty">Loading case images…</div>
       {:else if !items.length}
         <div class="picker-empty">No case images yet, but you can add panels later.</div>
+      {:else if browserOpen}
+        <FolderBrowser
+          entries={browserEntries}
+          path={browsePath}
+          rootLabel="Case images"
+          mark
+          isSelected={(item) => panelPaths.includes(item.src)}
+          matches={(item) => filterProofPanelItems([item], query, 'all').length > 0}
+          emptyText="This folder has no matching images."
+          icon={(item) => (item.kind === 'satellite' ? 'satellite' : 'image')}
+          onnavigate={(path) => (browsePath = path)}
+          onselect={(item) => togglePanel(item.src)}
+        />
       {:else if !filteredItems.length}
         <div class="picker-empty">No panels match this search.</div>
       {:else}
@@ -86,7 +111,15 @@
               onclick={() => togglePanel(item.src)}
             >
               <span class="pick-image">
-                <img src={`/files/${caseId}/${item.thumb}`} alt="" loading="lazy" />
+                {#if item.thumb}
+                  <img src={`/files/${caseId}/${item.thumb}`} alt="" loading="lazy" decoding="async" />
+                {:else}
+                  <!-- no cached thumbnail yet: a placeholder, never the
+                       full-size original in a 150px cell -->
+                  <span class="pick-placeholder">
+                    <Icon name={item.thumbPending ? 'clock' : 'image'} size={20} />
+                  </span>
+                {/if}
                 {#if panelPaths.includes(item.src)}
                   <span class="pick-selected"><Icon name="check" size={13} /></span>
                 {/if}
@@ -103,7 +136,7 @@
 
     <div class="new-proof-actions">
       <button type="button" class="btn" disabled={creating} onclick={close}>Cancel</button>
-      <button type="submit" class="btn btn-primary" disabled={!name.trim() || creating}>
+      <button type="submit" class="btn btn-primary" disabled={creating}>
         <Icon name="plus" size={15} /> {creating ? 'Creating…' : 'Create proof'}
       </button>
     </div>
@@ -164,22 +197,11 @@
     font: inherit;
   }
   .panel-search button { display: flex; color: var(--text-3); }
-  .panel-categories { display: flex; gap: 5px; overflow-x: auto; max-width: 100%; }
-  .panel-categories button {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    padding: 5px 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    background: var(--bg-2);
-    color: var(--text-2);
-    font-size: var(--fs-xs);
-    white-space: nowrap;
+  .browse-btn {
+    min-width: 30px;
+    font-size: var(--fs-lg);
+    line-height: 1;
   }
-  .panel-categories button:hover { border-color: var(--border-strong); color: var(--text-1); }
-  .panel-categories button.active { border-color: var(--accent); color: var(--text-1); }
-  .panel-categories span { color: var(--text-3); }
   .pick-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -200,6 +222,15 @@
     background: var(--bg-2);
   }
   .pick-image { position: relative; display: block; }
+  .pick-placeholder {
+    width: 100%;
+    aspect-ratio: 16 / 11;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-2);
+    color: var(--text-3);
+  }
   .pick-selected {
     position: absolute;
     top: 6px;

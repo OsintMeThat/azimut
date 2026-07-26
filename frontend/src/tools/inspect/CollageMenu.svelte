@@ -11,7 +11,10 @@
   // to the active one, and act on the selected piece. A session holds several
   // collages (session.collages / session.activeCollageId); each is saved as its
   // own PNG. Each added piece is a frozen snapshot of the frame (addToCollage).
-  let { session, filters, selectedIds = $bindable([]), addToCollage, requestCrop, renderPiece } = $props();
+  let {
+    session, filters, selectedIds = $bindable([]), addToCollage, requestCrop, renderPiece,
+    onRename,
+  } = $props();
 
   const active = $derived(
     session.collages.find((c) => c.id === session.activeCollageId) ?? session.collages[0]
@@ -27,6 +30,37 @@
   function switchCollage(id) {
     session.activeCollageId = id;
     selectedIds = [];
+  }
+
+  // Renaming rides on the tab itself: a click switches, a click on the tab you
+  // are already in opens it for editing. The name follows the collage into the
+  // Save tab, so it is worth setting here while the layout is in front of you.
+  let renamingId = $state(null);
+  let draftName = $state('');
+
+  function tabClick(cl) {
+    if (cl.id === session.activeCollageId) {
+      renamingId = cl.id;
+      draftName = cl.name ?? '';
+    } else {
+      switchCollage(cl.id);
+    }
+  }
+
+  function commitRename(cl) {
+    const next = draftName.trim();
+    if (next && next !== cl.name) {
+      cl.name = next;
+      // The Save tab shows this same name; tell it the name is now the user's,
+      // so a base name typed there stops refilling it.
+      onRename?.(cl);
+    }
+    renamingId = null;
+  }
+
+  function renameKey(event, cl) {
+    if (event.key === 'Enter') commitRename(cl);
+    else if (event.key === 'Escape') renamingId = null;
   }
 
   function addCollage() {
@@ -183,9 +217,26 @@
     <div class="collage-tabs">
       {#each session.collages as cl (cl.id)}
         <div class="ctab" class:active={cl.id === session.activeCollageId}>
-          <button class="ctab-name" onclick={() => switchCollage(cl.id)} title="Switch to this collage">
-            {cl.name}{#if cl.nodes.length}<span class="count">{cl.nodes.length}</span>{/if}
-          </button>
+          {#if renamingId === cl.id}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="ctab-input"
+              bind:value={draftName}
+              onblur={() => commitRename(cl)}
+              onkeydown={(e) => renameKey(e, cl)}
+              aria-label="Collage name"
+              maxlength="200"
+              autofocus
+            />
+          {:else}
+            <button
+              class="ctab-name"
+              onclick={() => tabClick(cl)}
+              title={cl.id === session.activeCollageId ? 'Rename this collage' : 'Switch to this collage'}
+            >
+              {cl.name}{#if cl.nodes.length}<span class="count">{cl.nodes.length}</span>{/if}
+            </button>
+          {/if}
           {#if session.collages.length > 1}
             <button class="ctab-x" onclick={() => removeCollage(cl.id)} aria-label="Delete collage"><Icon name="x" size={11} /></button>
           {/if}
@@ -359,6 +410,18 @@
   }
   .ctab.active .ctab-name {
     color: var(--accent);
+  }
+  .ctab-input {
+    width: 9em;
+    font: inherit;
+    font-size: var(--fs-xs);
+    color: var(--text-1);
+    background: var(--bg-0);
+    border: none;
+    padding: 4px 8px;
+  }
+  .ctab-input:focus {
+    outline: none;
   }
   .ctab-name .count {
     font-size: 9px;

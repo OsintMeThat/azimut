@@ -1,7 +1,7 @@
 """Latitude/longitude presentation — the server-side mirror of
 ``frontend/src/lib/coords.js``.
 
-The app stores decimal degrees everywhere (case.json, sidecars, proof specs).
+The app stores decimal degrees in its SQLite graph, sidecars and proof specs.
 This module only decides how a pair is *written out* in a human-facing label,
 following the user's ``coord_format`` preference (Settings → Preferences).
 

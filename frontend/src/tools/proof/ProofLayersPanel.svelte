@@ -6,16 +6,23 @@
     collapsed,
     gonePanels,
     selectedPanelId = $bindable(),
+    selectedPasteId = $bindable(),
     selectedId = $bindable(),
     activeColor,
     caseId,
     scaleMin,
     scaleMax,
     scaleStep,
+    frameWidthMax,
+    frameColor,
     openPicker,
     movePanelZ,
     scalePanel,
     removePanel,
+    movePasteZ,
+    removePaste,
+    setFrame,
+    pickImageFile,
     featureList,
     moveLegendColor,
     setColor,
@@ -30,6 +37,45 @@
   } = $props();
 </script>
 
+<!-- Coloured border for a panel or a pasted image. Picking a colour adds one,
+     thickness 0 or the cross takes it away. -->
+{#snippet frameControl(item)}
+  <div class="frame-ctl">
+    <label
+      class="color-btn color-pick bg-pick"
+      class:active={!!item.frame}
+      style:background={item.frame?.color ?? 'transparent'}
+      title="Border color"
+    >
+      <Icon name="square" size={11} />
+      <input
+        type="color"
+        value={item.frame?.color ?? frameColor}
+        oninput={(event) => setFrame(item, { color: event.target.value })}
+        aria-label="border color"
+      />
+    </label>
+    {#if item.frame}
+      <input
+        class="input frame-width"
+        type="number"
+        min="0"
+        max={frameWidthMax}
+        step="1"
+        value={item.frame.width}
+        oninput={(event) => setFrame(item, { width: +event.target.value })}
+        title="Border thickness"
+        aria-label="border thickness"
+      />
+      <button
+        class="btn btn-ghost btn-sm"
+        title="Remove border"
+        onclick={() => setFrame(item, null)}
+      ><Icon name="x" size={11} /></button>
+    {/if}
+  </div>
+{/snippet}
+
 <div class="side-title-row" style="margin-top: 14px">
   <button class="side-title collapsible" onclick={() => (collapsed.panels = !collapsed.panels)}>
     <span>
@@ -37,8 +83,8 @@
       Panels <span class="count">{proof.panels.length}</span>
     </span>
   </button>
-  <button class="btn btn-ghost btn-sm side-add" title="Add a panel" onclick={openPicker}>
-    <Icon name="plus" size={13} />
+  <button class="btn btn-sm side-add" title="Add a panel" onclick={openPicker}>
+    <Icon name="plus" size={13} /> Add panel
   </button>
 </div>
 {#if !collapsed.panels}
@@ -105,10 +151,62 @@
             onclick={() => scalePanel(index, scaleStep)}
           >+</button>
         </div>
+        {@render frameControl(panel)}
         <button
           class="btn btn-ghost btn-sm remove-panel"
           title="Remove panel"
           onclick={() => removePanel(index)}
+        ><Icon name="trash" size={13} /></button>
+      </div>
+    </div>
+  {/each}
+{/if}
+
+<!-- Overlays: images this proof owns, laid over the composition. They are not
+     panels, so they never join a row, claim no source, and stay out of the case. -->
+<div class="side-title-row spaced">
+  <button class="side-title collapsible" onclick={() => (collapsed.overlays = !collapsed.overlays)}>
+    <span>
+      <Icon name={collapsed.overlays ? 'chevronRight' : 'chevronDown'} size={13} />
+      Overlays <span class="count">{proof.pastes.length}</span>
+    </span>
+  </button>
+  <button class="btn btn-sm side-add" title="Add an overlay from a file" onclick={pickImageFile}>
+    <Icon name="plus" size={13} /> Add overlay
+  </button>
+</div>
+{#if !collapsed.overlays}
+  {#if !proof.pastes.length}
+    <div class="none">Paste a screenshot with Ctrl+V. It stays in this proof only.</div>
+  {/if}
+  {#each proof.pastes as paste, index (paste.id)}
+    <div class="panel-row paste-row card" class:selected={selectedPasteId === paste.id}>
+      <button
+        class="panel-thumb"
+        title="Select this overlay on the canvas"
+        onclick={() => (selectedPasteId = selectedPasteId === paste.id ? null : paste.id)}
+      >
+        <img src={paste.img?.src} alt="" />
+        <span class="row-badge" title="Z1 is the foreground">Z{index + 1}</span>
+      </button>
+      <div class="panel-actions">
+        <button
+          class="btn btn-ghost btn-sm"
+          disabled={index === 0}
+          title="Bring forward (toward Z1)"
+          onclick={() => movePasteZ(index, -1)}
+        ><Icon name="chevronUp" size={13} /></button>
+        <button
+          class="btn btn-ghost btn-sm"
+          disabled={index === proof.pastes.length - 1}
+          title="Send backward"
+          onclick={() => movePasteZ(index, 1)}
+        ><Icon name="chevronDown" size={13} /></button>
+        {@render frameControl(paste)}
+        <button
+          class="btn btn-ghost btn-sm remove-panel"
+          title="Remove overlay"
+          onclick={() => removePaste(index)}
         ><Icon name="trash" size={13} /></button>
       </div>
     </div>
@@ -261,14 +359,31 @@
     padding: 0;
     cursor: pointer;
     text-align: left;
-    font: inherit;
+    font-family: inherit;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    line-height: 1.2;
     color: inherit;
   }
   .side-title.collapsible span { display: flex; align-items: center; gap: 4px; }
   .side-title.spaced { margin-top: 14px; }
-  .side-title-row { display: flex; align-items: center; gap: 4px; }
+  .side-title-row { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+  .side-title-row.spaced { margin-top: 14px; }
   .side-title-row .side-title { margin-bottom: 0; }
-  .side-add { margin-left: auto; color: var(--text-3); }
+  .side-add {
+    margin-left: auto;
+    padding: 2px 7px;
+    gap: 5px;
+    line-height: 1.1;
+    background: var(--bg-2);
+    border-color: var(--border-strong);
+    color: var(--text-1);
+    font-weight: 600;
+  }
+  .side-add:hover:not(:disabled, .disabled) {
+    background: var(--bg-3);
+    border-color: var(--text-3);
+  }
   .count { color: var(--text-3); }
   .gone-note {
     display: flex;
@@ -321,8 +436,16 @@
     background: rgba(14, 14, 14, 0.72);
   }
   .cap-input { font-size: var(--fs-xs); padding: 5px 8px; }
-  .panel-actions { display: flex; align-items: center; gap: 2px; }
+  .panel-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; row-gap: 4px; }
   .remove-panel { margin-left: auto; }
+  .frame-ctl { display: flex; align-items: center; gap: 3px; }
+  .frame-width {
+    width: 44px;
+    padding: 2px 4px;
+    font-size: var(--fs-xs);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
   .panel-scale { display: flex; align-items: center; gap: 4px; margin: 0 auto; }
   .scale-val {
     min-width: 42px;

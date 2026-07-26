@@ -12,7 +12,10 @@
   import { insertNotebookText, notebookImageMarkdown, notebookMediaMarkdown } from '../lib/notebookContent.js';
   import { caseTab, closeNotebookTab, openNotebookTab } from '../lib/notebookTabs.js';
   import { openEntity } from '../lib/navigate.js';
+  import { matchesTerms } from '../lib/folderBrowse.js';
   import Icon from '../components/Icon.svelte';
+  import SearchInput from '../components/SearchInput.svelte';
+  import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import Modal from '../components/Modal.svelte';
   import FolderSelect from '../components/FolderSelect.svelte';
@@ -22,6 +25,12 @@
   let tabsCaseId = $state(null);
   let menuOpen = $state(false);
   let query = $state('');
+  // Past a handful of notes the flat list stops being a way to find one: the
+  // menu then offers a search box and a "…" that browses the note folders, the
+  // same pair the media and proof pickers use.
+  const NOTE_SEARCH_MIN = 6;
+  let notesBrowserOpen = $state(false);
+  let notesBrowsePath = $state('');
   let previewOnly = $state(false);
   let split = $state(loadNotebookSplit());
   let panesEl = $state(null);
@@ -71,10 +80,7 @@
   const noteEntities = $derived(graphEntities
     .filter((entity) => entity.type === 'note')
     .sort((a, b) => a.label.localeCompare(b.label)));
-  const filteredNotes = $derived(noteEntities.filter((entity) => {
-    const haystack = `${entity.label} ${entity.attrs?.folder ?? ''}`.toLowerCase();
-    return haystack.includes(query.trim().toLowerCase());
-  }));
+  const filteredNotes = $derived(noteEntities.filter((entity) => matchesNote(entity, query)));
   const referenceEntities = $derived(graphEntities
     .filter((entity) => entity.provenance?.status !== 'suggested')
     .filter((entity) => `${entity.label} ${entity.type}`.toLowerCase().includes(referenceQuery.trim().toLowerCase()))
@@ -104,6 +110,8 @@
     activeId = 'case';
     previewOnly = false;
     menuOpen = false;
+    notesBrowserOpen = false;
+    notesBrowsePath = '';
     query = '';
     referenceOpen = false;
     referenceQuery = '';
@@ -172,16 +180,41 @@
     return () => window.removeEventListener('resize', clampToPanes);
   });
 
+  function onWindowKeydown(event) {
+    if (event.key === 'Escape' && menuOpen) closeNotesMenu();
+  }
+
+  function matchesNote(entity, search) {
+    return matchesTerms(`${entity.label} ${entity.attrs?.folder ?? ''}`, search);
+  }
+
+  function toggleNotesMenu() {
+    menuOpen = !menuOpen;
+    if (menuOpen) return;
+    closeNotesMenu();
+  }
+
+  function closeNotesMenu() {
+    menuOpen = false;
+    notesBrowserOpen = false;
+    notesBrowsePath = '';
+  }
+
+  function toggleNotesBrowser() {
+    notesBrowserOpen = !notesBrowserOpen;
+    notesBrowsePath = '';
+  }
+
   function selectTab(tab) {
     activeId = tab.id;
     uiState.openNotebook = { noteId: tab.noteId };
-    menuOpen = false;
+    closeNotesMenu();
   }
 
   function selectNote(noteId = null) {
     openRequestedNote(noteId);
     uiState.openNotebook = { noteId };
-    menuOpen = false;
+    closeNotesMenu();
   }
 
   function openNewNote() {
@@ -465,29 +498,56 @@
   }
 </script>
 
+<svelte:window onkeydown={onWindowKeydown} />
+
 {#if !caseState.current}
   <div class="empty"><h2>No case open</h2><p>Open a case to write notes.</p></div>
 {:else}
   <section bind:this={notebookEl} class="notebook">
     <header class="notebook-bar">
       <div class="notes-menu-wrap">
-        <button class="menu-toggle" class:active={menuOpen} onclick={() => (menuOpen = !menuOpen)} aria-expanded={menuOpen}>
+        <button class="menu-toggle" class:active={menuOpen} onclick={toggleNotesMenu} aria-expanded={menuOpen}>
           <Icon name="note" size={15} /> Notes <Icon name="chevronDown" size={13} />
         </button>
         {#if menuOpen}
+          <button class="menu-backdrop" onclick={closeNotesMenu} aria-label="Close the notes menu"></button>
           <div class="notes-menu">
-            <input class="input note-search" bind:value={query} placeholder="Find a note…" />
+            {#if notesBrowserOpen || noteEntities.length > NOTE_SEARCH_MIN}
+              <div class="note-search">
+                <SearchInput bind:value={query} placeholder="Find a note…" width="100%" />
+                <button
+                  class="btn btn-ghost btn-sm browse-btn"
+                  title={notesBrowserOpen ? 'Show every note' : 'Browse folders'}
+                  onclick={toggleNotesBrowser}
+                >…</button>
+              </div>
+            {/if}
             <button class="menu-note" class:selected={activeId === 'case'} onclick={() => selectNote()}>
               <Icon name="note" size={14} /><span>Case Notes</span>
             </button>
-            {#each filteredNotes as note (note.id)}
-              <button class="menu-note" class:selected={activeId === note.id} onclick={() => selectNote(note.id)}>
-                <Icon name="note" size={14} />
-                <span>{note.label}</span>
-                {#if note.attrs?.folder}<small>{note.attrs.folder}</small>{/if}
-              </button>
-            {/each}
-            {#if !filteredNotes.length && query.trim()}<p class="menu-empty">No matching notes.</p>{/if}
+            {#if notesBrowserOpen}
+              <FolderBrowser
+                entries={noteEntities}
+                path={notesBrowsePath}
+                rootLabel="Notes"
+                selectedId={activeId}
+                matches={(note) => matchesNote(note, query)}
+                emptyText="This folder has no matching notes."
+                icon={() => 'note'}
+                label={(note) => note.label}
+                onnavigate={(path) => (notesBrowsePath = path)}
+                onselect={(note) => selectNote(note.id)}
+              />
+            {:else}
+              {#each filteredNotes as note (note.id)}
+                <button class="menu-note" class:selected={activeId === note.id} onclick={() => selectNote(note.id)}>
+                  <Icon name="note" size={14} />
+                  <span>{note.label}</span>
+                  {#if note.attrs?.folder}<small>{note.attrs.folder}</small>{/if}
+                </button>
+              {/each}
+              {#if !filteredNotes.length && query.trim()}<p class="menu-empty">No matching notes.</p>{/if}
+            {/if}
           </div>
         {/if}
       </div>
@@ -670,7 +730,7 @@ console.log(status);</code></pre></div>
         ? `Are you sure you want to delete “${noteAction.label}”?`
         : 'Are you sure you want to reset the content of this note?'}
       detail={noteAction.kind === 'delete'
-        ? 'This permanently removes the note and its content.'
+        ? 'Removes the note and its contents and cannot be undone.'
         : 'The case note will remain, but its content will be cleared.'}
       confirmLabel={noteAction.kind === 'delete' ? 'Delete' : 'Reset'}
       tone={noteAction.kind === 'delete' ? 'danger' : 'default'}
@@ -689,7 +749,10 @@ console.log(status);</code></pre></div>
   .menu-toggle { display: flex; align-items: center; gap: 5px; padding: 5px 7px; border-radius: var(--r-sm); color: var(--text-2); font-size: var(--fs-sm); }
   .menu-toggle:hover, .menu-toggle.active { background: var(--bg-2); color: var(--text-1); }
   .notes-menu { position: absolute; z-index: 8; top: calc(100% + 5px); left: 0; width: 270px; max-height: min(440px, calc(100vh - 115px)); overflow: auto; padding: 6px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-1); box-shadow: 0 12px 30px #0004; }
-  .note-search { width: 100%; margin-bottom: 5px; font-size: var(--fs-sm); }
+  .menu-backdrop { position: fixed; inset: 0; z-index: 7; cursor: default; }
+  .note-search { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+  .note-search :global(.search-box) { flex: 1; }
+  .browse-btn { min-width: 30px; font-size: var(--fs-lg); line-height: 1; }
   .menu-note { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 7px; width: 100%; padding: 7px; border-radius: var(--r-sm); text-align: left; color: var(--text-2); font-size: var(--fs-sm); }
   .menu-note:hover, .menu-note.selected { background: var(--bg-2); color: var(--text-1); }
   .menu-note span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

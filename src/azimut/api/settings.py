@@ -1,10 +1,6 @@
-"""REST API for app-wide settings: API keys, usage counters, and the signature.
+"""REST API for app-wide keys, preferences, usage and proof branding.
 
-Keys are the user's own billing identity (docs/IMAGERY_PROVIDERS.md): stored
-locally in settings.json, app-wide (never per-case), never written into a case
-folder or export bundle. Usage counters are local bookkeeping only. The
-signature (the analyst's logo) follows the same rule — one file beside
-settings.json, reaching a case only as pixels in a rendered proof PNG.
+Keys and branding stay beside settings.json, outside cases and exports.
 """
 
 from __future__ import annotations
@@ -24,11 +20,10 @@ from .ingest import bundled_extension_version
 
 router = APIRouter(prefix="/api", tags=["settings"])
 
-# the keyed providers the settings tab manages — matching api_keys entries
-# light up the built-in basemaps (engine/tiles.py all_providers)
+# Providers managed by the Settings imagery tab.
 KEYED_PROVIDERS = ("mapbox", "google", "google_js", "sentinelhub")
-# tile APIs whose eco threshold the user may tune per provider; the Maps JS
-# widget is deliberately absent (eco re-bills a map load per swap — never worth it)
+# Providers with configurable eco thresholds. Maps JS is excluded because each
+# widget reload is billed.
 ECO_TUNABLE = ("mapbox", "google", "sentinelhub")
 
 DEFAULT_HOME_VIEW = config.DEFAULT_SETTINGS["home_view"]
@@ -56,16 +51,14 @@ class HomeView(BaseModel):
 
 
 class DownloadCookiesIn(BaseModel):
-    """The login source for gated downloads the user picks in Settings. The
-    ``file`` source is set by the cookies-file upload, not here — through this
-    field the user only chooses a browser or turns cookies off."""
+    """Browser login source for gated downloads; file uploads use another route."""
 
     source: Literal["none", "browser"]
     browser: str | None = None  # required and validated when source == "browser"
 
 
 class PrefsIn(BaseModel):
-    """Keyed-provider and display preferences — None leaves a field untouched."""
+    """Keyed-provider and display preferences; None leaves a field untouched."""
 
     # {"mapbox": bool, "google": bool}: basemap on/off without touching the key
     providers_enabled: dict[str, bool] | None = None

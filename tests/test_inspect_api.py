@@ -831,9 +831,10 @@ def test_session_delete_via_sidebar_entity_removes_spec(client):
     assert client.get(f"/api/cases/{cid}/inspect/sessions/doomed").status_code == 404
 
 
-def test_session_resave_by_name_overwrites_after_rename(client):
-    # Reopening a session then saving it re-uses its slug (name), so a title
-    # change updates the same session in place instead of forking a new one.
+def test_session_rename_moves_the_spec_and_keeps_one_entity(client):
+    # The name shown in the Inspect header is the filename. Renaming a saved
+    # session moves its spec instead of leaving a copy behind, and the entity is
+    # rebound rather than duplicated, so its folder and links survive.
     cid = client.post("/api/cases", json={"name": "Rename"}).json()["id"]
     item = _upload(client, cid, "clip.png")
     spec = {"source": {"path": item["path"], "kind": "image"}, "frames": [], "collage": {"nodes": []}}
@@ -842,16 +843,61 @@ def test_session_resave_by_name_overwrites_after_rename(client):
         f"/api/cases/{cid}/inspect/sessions", json={"title": "Original", "spec": spec}
     ).json()
     assert first["name"] == "original"
+    before = next(e for e in graph_read.entities(cid) if e["type"] == "inspect-session")
+    client.patch(f"/api/cases/{cid}/entities/{before['id']}", json={"attrs": {"folder": "Angles"}})
+
+    renamed = client.post(
+        f"/api/cases/{cid}/inspect/sessions",
+        json={"rename_from": first["name"], "title": "Rooftop angle", "spec": spec},
+    ).json()
+    assert renamed["name"] == "rooftop-angle"
+
+    listing = client.get(f"/api/cases/{cid}/inspect/sessions").json()
+    assert len(listing) == 1
+    assert listing[0]["name"] == "rooftop-angle" and listing[0]["title"] == "Rooftop angle"
+    assert client.get(f"/api/cases/{cid}/inspect/sessions/original").status_code == 404
+
+    after = [e for e in graph_read.entities(cid) if e["type"] == "inspect-session"]
+    assert len(after) == 1
+    assert after[0]["id"] == before["id"]  # same entity, so its filing survives
+    assert after[0]["attrs"]["spec"] == "inspect/rooftop-angle.json"
+    assert after[0]["attrs"]["folder"] == "Angles"
+
+
+def test_session_rename_keeps_the_creation_date(client):
+    cid = client.post("/api/cases", json={"name": "Born"}).json()["id"]
+    item = _upload(client, cid, "clip.png")
+    spec = {"source": {"path": item["path"], "kind": "image"}, "frames": [], "collage": {"nodes": []}}
+
+    client.post(f"/api/cases/{cid}/inspect/sessions", json={"title": "Original", "spec": spec})
+    born = client.get(f"/api/cases/{cid}/inspect/sessions/original").json()["created_at"]
 
     client.post(
         f"/api/cases/{cid}/inspect/sessions",
-        json={"name": first["name"], "title": "Renamed", "spec": spec},
+        json={"rename_from": "original", "title": "Renamed", "spec": spec},
     )
+    assert client.get(f"/api/cases/{cid}/inspect/sessions/renamed").json()["created_at"] == born
+
+
+def test_session_rename_onto_a_taken_name_is_refused(client):
+    # Two sessions under one file would leave two entities pointing at it, and
+    # there is no sane merge — the save is refused and both survive untouched.
+    cid = client.post("/api/cases", json={"name": "Clash"}).json()["id"]
+    item = _upload(client, cid, "clip.png")
+    spec = {"source": {"path": item["path"], "kind": "image"}, "frames": [], "collage": {"nodes": []}}
+
+    client.post(f"/api/cases/{cid}/inspect/sessions", json={"title": "Inspect 1", "spec": spec})
+    client.post(f"/api/cases/{cid}/inspect/sessions", json={"title": "Inspect 2", "spec": spec})
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/sessions",
+        json={"rename_from": "inspect-2", "title": "Inspect 1", "spec": spec},
+    )
+    assert res.status_code == 409
+
     listing = client.get(f"/api/cases/{cid}/inspect/sessions").json()
-    assert len(listing) == 1
-    assert listing[0]["name"] == "original" and listing[0]["title"] == "Renamed"
-    entities = graph_read.entities(cid)
-    assert sum(1 for e in entities if e["type"] == "inspect-session") == 1
+    assert sorted(s["name"] for s in listing) == ["inspect-1", "inspect-2"]
+    assert sum(1 for e in graph_read.entities(cid) if e["type"] == "inspect-session") == 2
 
 
 @pytest.mark.skipif(not media_engine.ffmpeg_available(), reason="ffmpeg not installed")
@@ -919,3 +965,143 @@ def test_frame_capture_from_video(client, tmp_path):
         time.sleep(0.1)
     assert job["status"] == "done"
     assert len(job["result"]["frames"]) >= 1
+
+
+def test_saved_frame_filename_follows_the_typed_name(client):
+    cid = client.post("/api/cases", json={"name": "Naming"}).json()["id"]
+    item = _upload(client, cid, "dsc_00421.png")
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/save-frames",
+        json={
+            "items": [
+                {"path": item["path"], "ops": [{"op": "brightness", "params": {"amount": 1.4}}],
+                 "label": "Hangar roof"}
+            ],
+            "notes": "Roof line matches the satellite view",
+        },
+    ).json()["saved"][0]
+
+    name = res["item"]["path"].rsplit("/", 1)[-1]
+    assert name.startswith("Hangar_roof_") and name.endswith(".png")
+    assert "dsc_00421" not in name
+
+    media = next(
+        m for m in client.get(f"/api/cases/{cid}/media").json()
+        if m["path"] == res["item"]["path"]
+    )
+    assert media["title"] == "Hangar roof"
+    assert media["notes"] == "Roof line matches the satellite view"
+
+
+def test_saved_frame_name_is_scrubbed_for_the_filesystem(client):
+    cid = client.post("/api/cases", json={"name": "Scrub"}).json()["id"]
+    item = _upload(client, cid, "orig.png")
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/save-frames",
+        json={
+            "items": [
+                {"path": item["path"], "ops": [{"op": "contrast", "params": {"amount": 1.3}}],
+                 "label": 'a/b:c*d?"e'}
+            ]
+        },
+    ).json()["saved"][0]
+
+    name = res["item"]["path"].rsplit("/", 1)[-1]
+    assert not set(name) & set('/:*?"<>|\\')
+    # the title keeps what was typed; only the file on disk is scrubbed
+    media = next(
+        m for m in client.get(f"/api/cases/{cid}/media").json()
+        if m["path"] == res["item"]["path"]
+    )
+    assert media["title"] == 'a/b:c*d?"e'
+
+
+def test_unnamed_frame_keeps_the_source_stem_and_tag(client):
+    cid = client.post("/api/cases", json={"name": "Unnamed"}).json()["id"]
+    item = _upload(client, cid, "orig.png")
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/save-frames",
+        json={
+            "items": [
+                {"path": item["path"], "ops": [{"op": "brightness", "params": {"amount": 1.6}}]}
+            ]
+        },
+    ).json()["saved"][0]
+
+    name = res["item"]["path"].rsplit("/", 1)[-1]
+    assert name.startswith("orig_edit_")
+
+
+def test_composed_collage_filename_follows_the_typed_name(client):
+    cid = client.post("/api/cases", json={"name": "ComposeName"}).json()["id"]
+    a = _upload(client, cid, "a.png", _png_bytes(color=(10, 20, 30)))
+    b = _upload(client, cid, "b.png", _png_bytes(color=(200, 100, 50)))
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/compose",
+        json={
+            "width": 400, "height": 300,
+            "nodes": [
+                {"src": {"path": a["path"]}, "quad": [[0, 0], [200, 10], [190, 300], [0, 290]]},
+                {"src": {"path": b["path"]}, "quad": [[200, 10], [400, 0], [400, 300], [190, 300]]},
+            ],
+            "label": "Yard panorama",
+            "notes": "Two angles of the same yard",
+        },
+    ).json()
+
+    assert res["item"]["path"].rsplit("/", 1)[-1].startswith("Yard_panorama_")
+    media = next(
+        m for m in client.get(f"/api/cases/{cid}/media").json()
+        if m["path"] == res["item"]["path"]
+    )
+    assert media["title"] == "Yard panorama"
+    assert media["notes"] == "Two angles of the same yard"
+
+
+def test_duplicate_save_renames_the_media_it_landed_on(client):
+    """Re-saving an unchanged collage hits the same pixels, so it hits the same
+    entity. The name typed at the gate has to reach it anyway — that silent drop
+    is what made a collage look like it ignored its name."""
+    cid = client.post("/api/cases", json={"name": "Dupe"}).json()["id"]
+    a = _upload(client, cid, "a.png", _png_bytes(color=(10, 20, 30)))
+    b = _upload(client, cid, "b.png", _png_bytes(color=(200, 100, 50)))
+    body = {
+        "width": 400, "height": 300,
+        "nodes": [
+            {"src": {"path": a["path"]}, "quad": [[0, 0], [200, 10], [190, 300], [0, 290]]},
+            {"src": {"path": b["path"]}, "quad": [[200, 10], [400, 0], [400, 300], [190, 300]]},
+        ],
+        "label": "First name",
+    }
+    first = client.post(f"/api/cases/{cid}/inspect/compose", json=body).json()
+    assert first["duplicate"] is False
+
+    body["label"] = "Second name"
+    again = client.post(f"/api/cases/{cid}/inspect/compose", json=body).json()
+    assert again["duplicate"] is True
+    assert again["item"]["path"] == first["item"]["path"]
+
+    media = next(
+        m for m in client.get(f"/api/cases/{cid}/media").json()
+        if m["path"] == first["item"]["path"]
+    )
+    assert media["title"] == "Second name"
+
+
+def test_duplicate_save_files_no_second_copy(client):
+    cid = client.post("/api/cases", json={"name": "DupeCount"}).json()["id"]
+    item = _upload(client, cid, "orig.png")
+    body = {
+        "items": [
+            {"path": item["path"], "ops": [{"op": "brightness", "params": {"amount": 1.4}}],
+             "label": "Roof"}
+        ]
+    }
+    client.post(f"/api/cases/{cid}/inspect/save-frames", json=body)
+    after_first = len(client.get(f"/api/cases/{cid}/media").json())
+    client.post(f"/api/cases/{cid}/inspect/save-frames", json=body)
+    assert len(client.get(f"/api/cases/{cid}/media").json()) == after_first

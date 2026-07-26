@@ -1,11 +1,39 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import { render } from 'svelte/server';
+import { readFileSync } from 'node:fs';
 import { caseState, uiState } from '../lib/state.svelte.js';
 import Notebook from './Notebook.svelte';
 
 afterEach(() => {
   caseState.current = null;
   uiState.openNotebook = null;
+});
+
+const source = readFileSync(new URL('./Notebook.svelte', import.meta.url), 'utf8');
+
+describe('Notebook notes menu', () => {
+  it('closes on a click outside and on Escape', () => {
+    expect(source).toContain('class="menu-backdrop" onclick={closeNotesMenu}');
+    expect(source).toContain("if (event.key === 'Escape' && menuOpen) closeNotesMenu();");
+    expect(source).toContain('<svelte:window onkeydown={onWindowKeydown} />');
+  });
+
+  it('searches and browses note folders once the case has more than six notes', () => {
+    expect(source).toContain('const NOTE_SEARCH_MIN = 6;');
+    expect(source).toContain('{#if notesBrowserOpen || noteEntities.length > NOTE_SEARCH_MIN}');
+    expect(source).toContain("import FolderBrowser from '../components/FolderBrowser.svelte'");
+    expect(source).toContain('rootLabel="Notes"');
+    expect(source).toContain('onselect={(note) => selectNote(note.id)}');
+    expect(source).toContain('matches={(note) => matchesNote(note, query)}');
+  });
+
+  it('leaves the browser and the search behind when the menu closes', () => {
+    expect(source).toContain(`  function closeNotesMenu() {
+    menuOpen = false;
+    notesBrowserOpen = false;
+    notesBrowsePath = '';
+  }`);
+  });
 });
 
 describe('Notebook note creation', () => {

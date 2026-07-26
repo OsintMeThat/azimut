@@ -3,15 +3,20 @@
   import Konva from 'konva';
   import { api } from '../lib/api.js';
   import { lookupEntity, fetchAllEntities } from '../lib/catalog.js';
+  import { matchesTerms } from '../lib/folderBrowse.js';
+  import { isSatelliteMedia } from '../lib/mediaFilter.js';
   import { caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords } from '../lib/state.svelte.js';
   import { templatesState } from '../lib/state.svelte.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
+  import SearchInput from '../components/SearchInput.svelte';
+  import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import ProofToolbar from './proof/ProofToolbar.svelte';
   import ProofCanvas from './proof/ProofCanvas.svelte';
   import ProofLayersPanel from './proof/ProofLayersPanel.svelte';
   import NewProofDialog from './proof/NewProofDialog.svelte';
+  import PanelCategories from './proof/PanelCategories.svelte';
   import { bindPanelPointerLifecycle, createCanvasRenderGate } from './proof/canvasLifecycle.js';
   import {
     ANNO_COLORS, PAD, GAP, ROW_GAP, PANEL_H, TWEET_GUIDES,
@@ -23,16 +28,22 @@
     toSpec, newId, loadImage, orderedFeatureColors, notesFromShapes,
     templateFromProof, applyProofStyle, normalizeProofStyle, newSignatureText,
     anchoredPos, anchoredOffset, SIG_TEXT_SIZE,
-    copyShapeSpec, dedupeBySrc, isSatelliteCapture, satPanelInput, mediaPanelInput,
+    copyShapeSpec, dedupeBySrc, satPanelInput, mediaPanelInput,
     SIG_ANCHORS, SIG_SCALE, newSignature, signatureBox, signatureOffset, signaturePairPositions,
-    remapPanelXY, panelHitTest, groupNeighborIndex, hasGroupNeighbor,
+    remapPanelXY, groupNeighborIndex, hasGroupNeighbor,
     denseRowValues, clampPanelScale, trimClosingDuplicate, freehandShape,
     canReassignLegendNote,
-    savedProofSlugs, savedProofTitles as libSavedProofTitles, savedProofTitle as libSavedProofTitle,
-    DEFAULT_PROOF_TITLE, proofSlug, uniqueProofTitle, proofTitleFromCase,
-    filterProofPanelItems, hasProofCanvasContent, proofExportOptions,
+    surfaces, surfaceHitTest, pasteBoxes, clampPaste, clampPasteScale,
+    pasteInsertScale, newPaste, newFrame, normalizeFrame, FRAME_WIDTH_MAX, FRAME_COLOR,
+    PASTE_SCALE_MIN, PASTE_SCALE_MAX,
+    filterProofPanelItems, hasProofCanvasContent, proofExportOptions, panelPreview,
   } from '../lib/composer.js';
+  import {
+    assetName, base64Of, PASTE_TYPES, MAX_PASTES, MAX_PASTE_BYTES,
+  } from '../lib/pasteAsset.js';
+  import { nextName, savedSlugs, savedTitles, savedTitle, slugify } from '../lib/naming.js';
   import { createHistory } from '../lib/history.js';
+  import { pollWhile } from '../lib/poll.js';
 
   const SCALE_MIN = 0.25;
   const SCALE_MAX = 2.5;
@@ -49,11 +60,10 @@
     { id: 'text', icon: 'text', label: 'Text', shortcut: 't' },
   ];
 
-  // ---- document state -------------------------------------------------------
-  // `notes` holds the legend text per color (annotations are written by color,
-  // not per element); `shapes` are the drawn geometry bound to a panel.
+  // Document state. Notes are keyed by color, shapes bind to surfaces and pasted
+  // images remain local to this proof.
   const proof = $state({
-    title: DEFAULT_PROOF_TITLE, panels: [], shapes: [], notes: {}, legendOrder: [],
+    title: '', panels: [], pastes: [], shapes: [], notes: {}, legendOrder: [],
     templateId: null, // selected saved house style; its values remain copied below
     coordsText: '', source: '', // '' → auto-derived from panels; non-empty → manual override
     captionSize: CAPTION_SIZE, legendSize: LEGEND_SIZE, footerSize: FOOTER_SIZE, footer: '',
@@ -70,34 +80,27 @@
     palette: [...ANNO_COLORS], // ordered drawing colours, most preferred first
   });
 
-  // The analyst's logo (Settings → Signature): one app-wide PNG, loaded once per
-  // session and shared by every proof. `null` = none saved, which is what keeps
-  // the signature control disabled rather than stamping a broken image.
+  // Load the app-wide signature once per session; null disables the control.
   let sigImg = $state(null);
 
   async function loadSignature() {
     try {
       sigImg = await loadImage('/api/settings/signature.png');
     } catch {
-      sigImg = null; // none saved — the control stays disabled
+      sigImg = null; // No saved logo.
     }
   }
   let advancedOpen = $state(false);
-  let collapsed = $state({ panels: false, annotations: false, elements: false });
+  let collapsed = $state({ panels: false, overlays: false, annotations: false, elements: false });
+  // Saved proof slug, or null before the first save.
   let savedName = $state(null);
-  // Whether the analyst edited the title on this document (vs the auto-assigned
-  // default). An untouched default renumbers on a name clash; a title they typed
-  // asks before overwriting an existing proof. Reset on open/discard.
-  let titleTouched = $state(false);
   let dirty = $state(false);
   // A named proof can exist before it has content. This distinguishes the
   // initial composer shell from a template-only proof the user just created.
   let proofStarted = $state(false);
 
-  // Kept in step with deletes made anywhere else in the app. If the saved proof
-  // this canvas came from is gone, the binding has to go with it — otherwise the
-  // next Save writes a deleted proof back into the case under its old name.
-  // The canvas itself is left alone: the work on screen is still the analyst's.
+  // Drop the saved binding when another surface deletes the proof.
+  // Keep the canvas so a later Save creates a new proof.
   $effect(() => {
     const id = caseState.current?.id;
     caseState.rev;
@@ -151,11 +154,11 @@
   let guide = $state(null); // null | '16:9' | '4:5' — tweet centre-crop overlay
   let selectedId = $state(null);
   let selectedPanelId = $state(null); // free-layout only: panel picked for move/resize
+  let selectedPasteId = $state(null); // pasted image picked for move/resize/frame
   let selectedSig = $state(null); // null | 'logo' | 'text' — signature picked for resize
   let picker = $state(false);
   let pickerItems = $state([]);
   let newProofOpen = $state(false);
-  let newProofName = $state('');
   let newProofTemplateId = $state('');
   let newProofPanelPaths = $state([]);
   let newProofQuery = $state('');
@@ -167,7 +170,31 @@
     filterProofPanelItems(pickerItems, newProofQuery, newProofCategory)
   );
   const proofHasContent = $derived(hasProofCanvasContent(proof));
+  // Both pickers below follow the Inspect rule: a flat list until it passes six
+  // entries, then a search box and a "…" that swaps in the read-only folder
+  // browser (crumbs, folders, then what is filed there).
+  const PICKER_SEARCH_MIN = 6;
+  let panelQuery = $state('');
+  let panelCategory = $state('all');
+  let panelBrowserOpen = $state(false);
+  let panelBrowsePath = $state('');
+  let panelBrowseSelection = $state(null);
+  // The chips narrow the set (and the folders); the search box then narrows what
+  // is shown inside it, in the grid and in the browser alike.
+  const panelCategoryItems = $derived(filterProofPanelItems(pickerItems, '', panelCategory));
+  const visiblePanelItems = $derived(filterProofPanelItems(panelCategoryItems, panelQuery, 'all'));
+  const panelBrowserEntries = $derived(
+    panelCategoryItems.map((item) => ({ ...item, id: item.src, attrs: { folder: item.folder ?? '' } }))
+  );
   let openList = $state(null); // list of saved proofs, null = closed
+  let proofQuery = $state('');
+  let proofBrowserOpen = $state(false);
+  let proofBrowsePath = $state('');
+  let proofBrowseSelection = $state(null);
+  const visibleProofs = $derived((openList ?? []).filter((entry) => matchesProofQuery(entry, proofQuery)));
+  const proofBrowserEntries = $derived(
+    (openList ?? []).map((entry) => ({ ...entry, id: entry.name, attrs: { folder: entry.folder ?? '' } }))
+  );
   let saving = $state(false);
   let proofFor = $state(undefined);
   let discardConfirm = $state(false);
@@ -178,6 +205,10 @@
   // entry; panel images are re-attached from a cache on restore.
   const history = createHistory();
   const imgCache = new Map(); // src → HTMLImageElement, survives undo/redo
+  // asset name → { img, data, pending }. `data` is the base64 body a paste that
+  // has never been saved still has to hand to the server; `pending` clears once
+  // the case holds the file. Survives undo/redo like imgCache does.
+  const pasteAssets = new Map();
   let canUndo = $state(false);
   let canRedo = $state(false);
   let histBusy = false; // plain (untracked): suppresses capture while restoring
@@ -212,7 +243,7 @@
     histBusy = true;
     proofStarted = true;
     if (pathDraft) finishPath(false);
-    proof.title = spec.title ?? DEFAULT_PROOF_TITLE;
+    proof.title = spec.title ?? freshTitle();
     proof.coordsText = spec.coordsText ?? '';
     proof.source = spec.source ?? '';
     proof.captionSize = style.captionSize;
@@ -235,6 +266,10 @@
     proof.legendOrder = spec.legendOrder ?? [];
     proof.templateId = typeof spec.templateId === 'string' ? spec.templateId : null;
     proof.panels = spec.panels.map((p) => ({ ...p, img: imgCache.get(p.src) ?? null }));
+    proof.pastes = (spec.pastes ?? []).map((p) => ({
+      ...p,
+      img: pasteAssets.get(p.asset)?.img ?? null,
+    }));
     proof.shapes = spec.shapes ?? [];
     // a panel image missing from the cache (shouldn't happen) reloads async
     for (const p of proof.panels.filter((x) => !x.img)) {
@@ -247,6 +282,7 @@
     }
     selectedId = null;
     selectedPanelId = null;
+    selectedPasteId = null;
     selectedSig = null;
     const template = templatesState.proof.find((t) => t.id === proof.templateId);
     appliedTemplate = template
@@ -386,7 +422,8 @@
   // and gets a lightweight refresh below, without recreating every image node.
   $effect(() => {
     JSON.stringify([
-      proof.panels.map((p) => [p.src, p.caption, p.row, p.scale, p.x, p.y]),
+      proof.panels.map((p) => [p.src, p.caption, p.row, p.scale, p.x, p.y, p.frame]),
+      proof.pastes.map((p) => [p.asset, p.x, p.y, p.scale, p.frame, !!p.img]),
       proof.shapes,
       proof.notes,
       proof.legendOrder,
@@ -407,6 +444,7 @@
   $effect(() => {
     selectedId;
     selectedPanelId;
+    selectedPasteId;
     selectedSig;
     guide;
     tool;
@@ -421,14 +459,18 @@
     footerEnabled: proof.footerEnabled !== false,
   });
 
-  // Layout boxes + document measure for the active layout mode.
+  // Layout boxes + document measure for the active layout mode. Pasted images
+  // are deliberately absent from the measure: the panels alone size the
+  // document, so moving a paste can never change the export.
   const boxesOf = () => layoutPanels(proof.panels, proof.captionSize, proof.layout, proof.space);
+  const surfacesOf = () => surfaces(proof);
   const measureDoc = () =>
     docSize(proof.panels, proof.shapes, proof.notes, textOpts(), proof.legendOrder, proof.layout, proof.space);
 
   function resetDoc() {
     proof.title = freshTitle();
     proof.panels = [];
+    proof.pastes = [];
     proof.shapes = [];
     proof.notes = {};
     proof.legendOrder = [];
@@ -452,14 +494,15 @@
     proof.palette = [...ANNO_COLORS];
     color = proof.palette[0];
     savedName = null;
-    titleTouched = false;
     proofStarted = false;
     selectedId = null;
     selectedPanelId = null;
+    selectedPasteId = null;
     selectedSig = null;
     appliedTemplate = null;
     dirty = false;
     imgCache.clear();
+    pasteAssets.clear();
     anchorHistory();
   }
 
@@ -525,11 +568,21 @@
     selectedSig = which;
     selectedId = null;
     selectedPanelId = null;
+    selectedPasteId = null;
+  }
+
+  function selectPaste(id) {
+    if (tool !== 'select') return;
+    selectedPasteId = id;
+    selectedId = null;
+    selectedPanelId = null;
+    selectedSig = null;
   }
 
   function selectPanel(id) {
     if (tool !== 'select') return;
     selectedPanelId = id;
+    selectedPasteId = null;
     selectedId = null;
     selectedSig = null;
   }
@@ -542,30 +595,37 @@
       api.get(`/api/cases/${caseState.current.id}/media`),
       api.get(`/api/cases/${caseState.current.id}/satellite`),
     ]);
-    // A satellite capture *is* a media image, so it shows up in both lists. List
-    // it once, via its richer satellite entry (coordinates/attribution), and drop
-    // it from the media half. dedupeBySrc is a belt-and-braces guard so a stray
-    // overlap can never throw the keyed picker's `each_key_duplicate`.
+    // A capture *is* a media image, so it shows up in both lists. List it once,
+    // via its richer capture entry (coordinates/attribution), and drop it from
+    // the media half. dedupeBySrc is a belt-and-braces guard so a stray overlap
+    // can never throw the keyed picker's `each_key_duplicate`.
+    //
+    // The capture listing also carries map screenshots the extension filed, and
+    // only some of those are satellite imagery. The chips call an item satellite
+    // exactly when the Media Library does (isSatelliteMedia), so a Street View
+    // grab reads the same on both screens.
+    const captured = new Set(sats.map((s) => s.path));
     return dedupeBySrc([
       ...sats.map((s) => ({
         ...satPanelInput(s, prefs.coordFormat),
         label: `${fmtCoords(s.lat, s.lon)} · z${s.zoom}`,
-        thumb: s.path,
-        kind: 'satellite',
+        ...panelPreview(s),
+        kind: isSatelliteMedia(s) ? 'satellite' : 'media',
+        folder: s.folder ?? '',
       })),
       ...media
-        .filter((m) => m.kind === 'image' && !isSatelliteCapture(m))
+        .filter((m) => m.kind === 'image' && !captured.has(m.path))
         .map((m) => ({
           ...mediaPanelInput(m, media),
-          label: m.filename,
-          thumb: m.thumbnail ?? m.path,
+          label: m.title || m.filename,
+          ...panelPreview(m),
           kind: 'media',
+          folder: m.folder ?? '',
         })),
     ]);
   }
 
   async function openNewProofDialog() {
-    newProofName = proofTitleFromCase(caseState.current?.name, savedProofTitles());
     newProofTemplateId = '';
     newProofPanelPaths = [];
     newProofQuery = '';
@@ -589,7 +649,7 @@
   }
 
   function requestNewProofCreation() {
-    if (!newProofName.trim() || creatingProof) return;
+    if (creatingProof) return;
     if (proofStarted && dirty) {
       replaceWithNewConfirm = true;
       return;
@@ -598,9 +658,8 @@
   }
 
   async function createNewProof() {
-    if (!newProofName.trim() || creatingProof) return;
+    if (creatingProof) return;
     creatingProof = true;
-    const title = newProofName.trim();
     const template = templatesState.proof.find((t) => t.id === newProofTemplateId);
     const selectedItems = newProofPanelPaths
       .map((path) => pickerItems.find((item) => item.src === path))
@@ -608,8 +667,6 @@
     try {
       resetDoc();
       proofStarted = true;
-      proof.title = title;
-      titleTouched = true;
       if (template) applyTemplate(template, { notify: false });
       for (const item of selectedItems) await addPanel(item);
       dirty = true;
@@ -628,8 +685,64 @@
       uiState.tool = 'media';
       return;
     }
+    panelQuery = '';
+    panelCategory = 'all';
+    panelBrowserOpen = false;
+    panelBrowsePath = '';
+    panelBrowseSelection = null;
     pickerItems = await fetchPanelItems();
     picker = true;
+  }
+
+  // Items whose thumbnail the worker has not produced yet show a placeholder.
+  // Re-list while a picker is open so they fill in on their own, and stop as
+  // soon as nothing is pending (or the dialog closes).
+  const pickerThumbsPending = $derived(pickerItems.some((i) => i.thumbPending));
+
+  async function refreshPickerItems() {
+    if (caseState.current) pickerItems = await fetchPanelItems();
+  }
+
+  $effect(() => {
+    if (!pickerThumbsPending || !(picker || newProofOpen)) return;
+    return pollWhile(() => pickerThumbsPending, () => refreshPickerItems(), 1500);
+  });
+
+  function setPanelCategory(category) {
+    panelCategory = category;
+    panelBrowsePath = '';
+    panelBrowseSelection = null;
+  }
+
+  function togglePanelBrowser() {
+    if (panelBrowserOpen) {
+      panelBrowserOpen = false;
+      return;
+    }
+    panelQuery = '';
+    panelBrowsePath = '';
+    panelBrowseSelection = null;
+    panelBrowserOpen = true;
+  }
+
+  function openPanelFolder(path) {
+    panelBrowsePath = path;
+    panelBrowseSelection = null;
+  }
+
+  function selectPanelBrowser(item, confirm = false) {
+    panelBrowseSelection = item.src;
+    if (confirm) addPanelFromPicker(item);
+  }
+
+  function confirmPanelBrowser() {
+    const item = panelBrowserEntries.find((entry) => entry.src === panelBrowseSelection);
+    if (item) addPanelFromPicker(item);
+  }
+
+  function addPanelFromPicker(item) {
+    addPanel(item);
+    picker = false;
   }
 
   async function addPanel(item) {
@@ -815,6 +928,149 @@
     requestAnimationFrame(fit);
   }
 
+  // ---- overlays ----------------------------------------------------------------
+  // An image dropped straight into the composition: a screenshot, a chart, a
+  // crop from somewhere else. It never becomes a panel, so it is never filed as
+  // media and the save records no source for it — it is decoration the analyst
+  // moves, sizes and frames. Called a paste in the code and in the spec, after
+  // how it gets there; the UI calls it an overlay, after what it is. The caps
+  // mirror the ones the API enforces.
+
+  let imageInputEl = $state();
+
+  /** Doc-space centre of what the analyst is looking at. */
+  function viewCentre() {
+    if (!stage || !containerEl) return { x: 0, y: 0 };
+    return {
+      x: (containerEl.clientWidth / 2 - stage.x()) / stage.scaleX(),
+      y: (containerEl.clientHeight / 2 - stage.y()) / stage.scaleY(),
+    };
+  }
+
+  async function addPastedImage(file) {
+    // A paste sits on top of a proof; the panels are what give the document its
+    // size, so there has to be one before an image has anywhere to land.
+    if (!proof.panels.length) {
+      toast('Add a panel before adding an overlay', 'warn', 5000);
+      return;
+    }
+    if (!file || !PASTE_TYPES.includes(file.type)) {
+      toast('Paste a PNG, JPEG or WebP image', 'warn');
+      return;
+    }
+    if (proof.pastes.length >= MAX_PASTES) {
+      toast(`A proof holds ${MAX_PASTES} overlays at most`, 'warn');
+      return;
+    }
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (bytes.length > MAX_PASTE_BYTES) {
+        toast('That image is too large to paste (20 MB max)', 'warn');
+        return;
+      }
+      const name = await assetName(bytes, file.type);
+      const data = base64Of(bytes);
+      const img = await loadImage(`data:${file.type};base64,${data}`);
+      // an image already in the case keeps its saved state: no re-upload
+      pasteAssets.set(name, { img, data, pending: pasteAssets.get(name)?.pending ?? true });
+      const { width, height } = measureDoc();
+      const natural = [img.naturalWidth, img.naturalHeight];
+      const scale = pasteInsertScale(natural, width);
+      const centre = viewCentre();
+      const paste = newPaste(name, natural, {
+        x: centre.x - (natural[0] * scale) / 2,
+        y: centre.y - (natural[1] * scale) / 2,
+        scale,
+      });
+      Object.assign(paste, clampPaste(paste, width, height));
+      paste.img = img;
+      proof.pastes.unshift(paste); // newest lands in front
+      tool = 'select';
+      selectPaste(paste.id);
+      dirty = true;
+    } catch (e) {
+      toast(`Could not add that image (${e.message})`, 'danger');
+    }
+  }
+
+  const isTextTarget = (el) =>
+    !!el && (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable);
+
+  /**
+   * One place decides what Ctrl+V means: an image in the system clipboard is
+   * what the analyst just copied, so it wins; otherwise the copied annotation is
+   * pasted, which is what this shortcut did before images could be pasted.
+   */
+  function onPaste(e) {
+    if (uiState.tool !== 'proof' || isTextTarget(e.target)) return;
+    const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith('image/'));
+    if (item) {
+      e.preventDefault();
+      addPastedImage(item.getAsFile());
+    } else if (clipboard) {
+      e.preventDefault();
+      pasteShape();
+    }
+  }
+
+  function pickImageFile() {
+    imageInputEl?.click();
+  }
+
+  function onImageFile(e) {
+    const file = e.currentTarget.files?.[0];
+    e.currentTarget.value = ''; // so picking the same file twice still fires
+    if (file) addPastedImage(file);
+  }
+
+  function onCanvasDrop(e) {
+    const file = [...(e.dataTransfer?.files ?? [])].find((f) => f.type.startsWith('image/'));
+    if (!file) return;
+    e.preventDefault();
+    addPastedImage(file);
+  }
+
+  // Dropping an image on the canvas pastes it. Wired here rather than in the
+  // markup so the canvas needs no interactive ARIA role to be a drop target.
+  $effect(() => {
+    if (!containerEl) return;
+    const allow = (e) => e.preventDefault();
+    containerEl.addEventListener('dragover', allow);
+    containerEl.addEventListener('drop', onCanvasDrop);
+    return () => {
+      containerEl.removeEventListener('dragover', allow);
+      containerEl.removeEventListener('drop', onCanvasDrop);
+    };
+  });
+
+  function removePaste(index) {
+    const paste = proof.pastes[index];
+    if (!paste) return;
+    proof.shapes = proof.shapes.filter((s) => s.panel !== paste.id);
+    proof.pastes.splice(index, 1);
+    selectedId = null;
+    if (selectedPasteId === paste.id) selectedPasteId = null;
+    dirty = true;
+  }
+
+  function movePasteZ(index, delta) {
+    const target = index + delta;
+    if (target < 0 || target >= proof.pastes.length) return;
+    const [paste] = proof.pastes.splice(index, 1);
+    proof.pastes.splice(target, 0, paste);
+    dirty = true;
+  }
+
+  /**
+   * The decorative border of a panel or a pasted image. `patch` of null removes
+   * it, `{}` adds it at the default colour and thickness, and a width of 0
+   * removes it too — which is how the thickness input turns one off.
+   */
+  function setFrame(item, patch) {
+    item.frame = patch === null ? null : normalizeFrame({ ...(item.frame ?? newFrame()), ...patch });
+    dirty = true;
+  }
+
   // ---- view (zoom / pan / fit) ----------------------------------------------------
 
   function fit() {
@@ -859,8 +1115,10 @@
     return { x: (p.x - stage.x()) / stage.scaleX(), y: (p.y - stage.y()) / stage.scaleY() };
   }
 
-  function panelAt(doc) {
-    return panelHitTest(boxesOf(), doc);
+  // Annotations are drawn on whatever surface is under the pointer — a panel or
+  // a pasted image. Pasted images are in front, so they claim the point first.
+  function surfaceAt(doc) {
+    return surfaceHitTest(surfacesOf(), doc);
   }
 
   function onPointerDown(e) {
@@ -877,14 +1135,17 @@
       if (onEmpty) {
         selectedId = null;
         selectedPanelId = null;
+        selectedPasteId = null;
         selectedSig = null;
       }
       return;
     }
     stage.draggable(false);
-    const hit = panelAt(docPoint());
+    const hit = surfaceAt(docPoint());
     if (!hit) return;
-    const panel = proof.panels[hit.index];
+    // `panel` here is the surface the annotation binds to: the shape's `panel`
+    // field holds a panel id or a pasted image's id.
+    const panel = hit.item;
     const group = docLayer.findOne(`#pg-${panel.id}`);
     if (!group) return;
     // text is placed with a single click (no drag) then edited in the side list
@@ -1053,6 +1314,34 @@
     }
   }
 
+  // Fold a drag or a corner-resize of a pasted image back into its stored
+  // position and scale, then hold it inside the document.
+  function commitPasteNode(paste, node, { resized = false } = {}) {
+    if (resized) paste.scale = clampPasteScale(node.scaleX());
+    paste.x = node.x();
+    paste.y = node.y();
+    const { width, height } = measureDoc();
+    Object.assign(paste, clampPaste(paste, width, height));
+    node.scale({ x: paste.scale, y: paste.scale });
+    node.position({ x: paste.x, y: paste.y });
+    dirty = true;
+  }
+
+  /**
+   * The decorative border of a panel or a pasted image, drawn inset so it never
+   * spills past the image: the document is measured from the panels, and a frame
+   * must not change what that measure sees. Width is in the surface's own pixels,
+   * so it grows with the surface exactly as an annotation does.
+   */
+  function frameNode(frame, natural) {
+    const w = frame.width;
+    return new Konva.Rect({
+      x: w / 2, y: w / 2,
+      width: Math.max(0, natural[0] - w), height: Math.max(0, natural[1] - w),
+      stroke: frame.color, strokeWidth: w, listening: false,
+    });
+  }
+
   // ---- rebuild canvas from state ------------------------------------------------------
 
   function rebuild() {
@@ -1070,6 +1359,7 @@
     }
     const { width, height, legend, cols } = measureDoc();
     const boxes = boxesOf();
+    const pasteBox = pasteBoxes(proof.pastes);
     const capSize = proof.captionSize ?? CAPTION_SIZE;
     const free = proof.layout === 'free';
     const { pad } = normSpace(proof.space);
@@ -1130,6 +1420,7 @@
         }));
         group.add(imgClip);
       }
+      if (panel.frame) group.add(frameNode(panel.frame, panel.natural));
       for (const s of proof.shapes.filter((x) => x.panel === panel.id)) {
         group.add(makeShapeNode(s, box));
       }
@@ -1177,6 +1468,42 @@
         fontSize: footerSize, fill: proof.footerColor || tc.faint,
         fontFamily: 'system-ui, sans-serif', ellipsis: true, wrap: 'none', listening: false,
       }));
+    }
+
+    // Pasted images, over the panels and the legend: pixels laid on top of the
+    // proof rather than part of its composition. Back→front like the panels, so
+    // the first one in the list is the one in front.
+    for (let i = proof.pastes.length - 1; i >= 0; i--) {
+      const paste = proof.pastes[i];
+      const box = pasteBox[i];
+      const group = new Konva.Group({
+        id: `pg-${paste.id}`,
+        x: box.x, y: box.y,
+        scaleX: box.scale, scaleY: box.scale,
+        draggable: false,
+      });
+      // same invisible hit target as a panel: the image never listens, so a
+      // drawing tool passes through to the stage, but a click still selects.
+      group.add(new Konva.Rect({
+        x: 0, y: 0, width: paste.natural[0], height: paste.natural[1],
+        fill: 'transparent', listening: true, name: 'panel-hit',
+      }));
+      bindPanelPointerLifecycle(group, {
+        onPress: () => group.draggable(tool === 'select' && !spacePan),
+        onSelect: () => selectPaste(paste.id),
+        onDragEnd: () => commitPasteNode(paste, group),
+      });
+      group.on('transformend', () => commitPasteNode(paste, group, { resized: true }));
+      if (paste.img) {
+        group.add(new Konva.Image({
+          image: paste.img, width: paste.natural[0], height: paste.natural[1], listening: false,
+        }));
+      }
+      if (paste.frame) group.add(frameNode(paste.frame, paste.natural));
+      for (const s of proof.shapes.filter((x) => x.panel === paste.id)) {
+        group.add(makeShapeNode(s, box));
+      }
+      docLayer.add(group);
     }
 
     const st = proof.signatureText && prefs.signatureHandle?.trim() ? proof.signatureText : null;
@@ -1293,30 +1620,42 @@
     // the drag overshot the 25–250% range (worst at the bounds, where a resize
     // in the blocked direction just reverted). Shapes stay unconstrained.
     // the logo or the @handle, picked for a corner-resize (aspect locked).
-    const sigNode = !selectedNode && !panelNode && selectedSig
+    // a pasted image resizes from its corners with its aspect locked, within the
+    // same kind of scale bounds a panel has
+    const pasteNode = !selectedNode && !panelNode && selectedPasteId
+      ? docLayer.findOne(`#pg-${selectedPasteId}`)
+      : null;
+    const sigNode = !selectedNode && !panelNode && !pasteNode && selectedSig
       ? docLayer.findOne(selectedSig === 'logo' ? '#sig-logo' : '#sig-text')
       : null;
     const boundPanel = panelNode ? proof.panels.find((p) => p.id === selectedPanelId) : null;
+    const boundPaste = pasteNode ? proof.pastes.find((p) => p.id === selectedPasteId) : null;
     transformer.boundBoxFunc((oldBox, newBox) => {
+      if (boundPaste) {
+        const implied = newBox.width / stage.scaleX() / boundPaste.natural[0];
+        return implied < PASTE_SCALE_MIN || implied > PASTE_SCALE_MAX ? oldBox : newBox;
+      }
       if (!boundPanel) return newBox;
       const impliedScale =
         (newBox.width / stage.scaleX()) * (boundPanel.natural[1] / (boundPanel.natural[0] * PANEL_H));
       return impliedScale < SCALE_MIN || impliedScale > SCALE_MAX ? oldBox : newBox;
     });
-    transformer.keepRatio(!!sigNode);
+    transformer.keepRatio(!!sigNode || !!pasteNode);
     transformer.nodes(
-      selectedNode ? [selectedNode] : panelNode ? [panelNode] : sigNode ? [sigNode] : []
+      selectedNode
+        ? [selectedNode]
+        : panelNode ? [panelNode] : pasteNode ? [pasteNode] : sigNode ? [sigNode] : []
     );
     const selKind = selectedShape?.kind;
     transformer.rotateEnabled(selKind === 'text' || selKind === 'rect' || selKind === 'ellipse');
     transformer.enabledAnchors(
       selKind === 'rect' || selKind === 'ellipse'
         ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
-        : selKind === 'text' || panelNode || sigNode
+        : selKind === 'text' || panelNode || pasteNode || sigNode
           ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
           : []
     );
-    drawEndHandles(boxes);
+    drawEndHandles(surfacesOf());
     drawPanelMoveControls(boxes);
     drawGuide(width, height);
     uiLayer.batchDraw();
@@ -1363,14 +1702,14 @@
   // Freehand strokes stay draggable as a whole; showing every sampled point
   // would cover the stroke in handles.
   const POINT_KINDS = new Set(['line', 'arrow', 'curve']);
-  function drawEndHandles(boxes) {
+  function drawEndHandles(list) {
     endHandles.destroyChildren();
     const s = selectedShape;
     if (tool !== 'select' || !s || !POINT_KINDS.has(s.kind)) return;
-    const idx = proof.panels.findIndex((p) => p.id === s.panel);
-    if (idx < 0) return;
-    const box = boxes[idx];
-    const panel = proof.panels[idx];
+    const surface = list.find((x) => x.id === s.panel);
+    if (!surface) return;
+    const box = surface.box;
+    const panel = surface.item;
     const node = docLayer.findOne(`#${s.id}`);
     const r = 7 / stage.scaleX();
     for (let vi = 0; vi < s.points.length; vi += 2) {
@@ -1451,14 +1790,15 @@
     }
   }
 
-  // On drop, re-bind a shape to whichever panel its anchor now sits over and
-  // convert its coordinates into that panel's natural pixel space. Returns the
-  // source/destination layout boxes so the caller can remap x/y or points.
+  // On drop, re-bind a shape to whichever surface its anchor now sits over — a
+  // panel or a pasted image — and convert its coordinates into that surface's
+  // natural pixel space. Returns the source/destination layout boxes so the
+  // caller can remap x/y or points.
   function rebindOnDrop(s, node) {
-    const boxes = boxesOf();
-    const fromIdx = proof.panels.findIndex((p) => p.id === s.panel);
-    if (fromIdx < 0) return { fromBox: null, toBox: null };
-    const fromBox = boxes[fromIdx];
+    const list = surfacesOf();
+    const from = list.find((x) => x.id === s.panel);
+    if (!from) return { fromBox: null, toBox: null };
+    const fromBox = from.box;
     let anchor;
     if (s.kind === 'rect') {
       anchor = { x: node.x() + (s.w ?? 0) / 2, y: node.y() + (s.h ?? 0) / 2 };
@@ -1472,14 +1812,10 @@
     }
     const dx = fromBox.x + anchor.x * fromBox.scale;
     const dy = fromBox.y + anchor.y * fromBox.scale;
-    let toIdx = fromIdx;
-    // array order is front→back — the topmost panel claims the drop
-    for (let i = 0; i < boxes.length; i++) {
-      const b = boxes[i];
-      if (dx >= b.x && dx <= b.x + b.w && dy >= b.y && dy <= b.y + b.h) { toIdx = i; break; }
-    }
-    s.panel = proof.panels[toIdx].id;
-    return { fromBox, toBox: boxes[toIdx] };
+    // the list is front→back, so the topmost surface claims the drop
+    const to = surfaceHitTest(list, { x: dx, y: dy }) ?? from;
+    s.panel = to.id;
+    return { fromBox, toBox: to.box };
   }
 
   // Doc→panel remap of a single x/y origin between two layout boxes.
@@ -1532,6 +1868,7 @@
           e.cancelBubble = true;
           selectedId = s.id;
           selectedPanelId = null;
+          selectedPasteId = null;
           selectedSig = null;
         }
       });
@@ -1587,6 +1924,7 @@
         e.cancelBubble = true;
         selectedId = s.id;
         selectedPanelId = null;
+        selectedPasteId = null;
         selectedSig = null;
       }
     });
@@ -1632,9 +1970,7 @@
 
   // ---- inline text editing (double-click a label on the canvas) ---------------
   function startTextEdit(s, node) {
-    const boxes = boxesOf();
-    const idx = proof.panels.findIndex((p) => p.id === s.panel);
-    const panelScale = idx >= 0 ? boxes[idx].scale : 1;
+    const panelScale = surfacesOf().find((x) => x.id === s.panel)?.box.scale ?? 1;
     const abs = node.getAbsolutePosition(); // container px, stage transform included
     selectedId = s.id;
     textEdit = {
@@ -1782,8 +2118,9 @@
     // clipboard / undo / save chords
     if (e.ctrlKey || e.metaKey) {
       const k = e.key.toLowerCase();
+      // Ctrl+V is deliberately absent: the paste event decides between an image
+      // in the system clipboard and a copied annotation (see onPaste).
       if (k === 'c' && selectedId) { e.preventDefault(); copyShape(); }
-      else if (k === 'v' && clipboard) { e.preventDefault(); pasteShape(); }
       else if (k === 'd' && selectedId) { e.preventDefault(); duplicateShape(); }
       else if (k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       else if (k === 'y') { e.preventDefault(); redo(); }
@@ -1809,9 +2146,12 @@
     } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedPanelId) {
       const idx = proof.panels.findIndex((p) => p.id === selectedPanelId);
       if (idx >= 0) removePanel(idx);
+    } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedPasteId) {
+      removePaste(proof.pastes.findIndex((p) => p.id === selectedPasteId));
     } else if (e.key === 'Escape') {
       selectedId = null;
       selectedPanelId = null;
+      selectedPasteId = null;
       selectedSig = null;
       tool = 'select';
     } else if (e.key === 'v') tool = 'select';
@@ -1877,51 +2217,52 @@
 
   // Every proof already saved in this case, read off the filed entities: the
   // slugs (filename without `proofs/…​.json`) to catch a filename collision, and
-  // the titles so a fresh proof can take a title that reads apart from them.
-  const savedProofNames = () => savedProofSlugs(proofEntities);
-  const savedProofTitles = () => libSavedProofTitles(proofEntities);
+  // the names so a fresh proof can take one that reads apart from them.
+  const savedProofNames = () => savedSlugs(proofEntities, 'proof');
+  const savedProofTitles = () => savedTitles(proofEntities, 'proof');
 
-  // Title of a saved proof by its slug, for the overwrite prompt.
-  function savedProofTitle(name) {
-    return libSavedProofTitle(proofEntities, name);
-  }
+  // Default name for a fresh proof, numbered past those already in the case so
+  // the top-of-screen name reads apart ("Proof 2"). Called on reset.
+  const freshTitle = () => nextName('proof', savedProofTitles());
 
-  // Default title for a fresh proof, numbered past any already in the case so
-  // the top-of-screen name reads apart ("Untitled proof 2"). Called on reset.
-  const freshTitle = () => uniqueProofTitle(DEFAULT_PROOF_TITLE, savedProofTitles());
-
-  let overwritePrompt = $state(null); // { name, andPost } when a first save hits a named proof
+  let overwritePrompt = $state(null); // { slug, andPost } when a save hits a named proof
 
   async function save({ andPost = false } = {}) {
     if (!proof.panels.length || saving) return;
-    // A proof already bound to a saved name (opened, or saved once) writes back
-    // over itself — no collision to resolve. On a first save the title is the
-    // name: an untouched default title keeps itself unique/numbered (no prompt),
-    // a title the analyst typed that lands on an existing proof asks before it
-    // overwrites the one already under that name.
-    if (!savedName) {
-      if (!titleTouched) {
-        proof.title = freshTitle();
-      } else if (savedProofNames().has(proofSlug(proof.title))) {
-        overwritePrompt = { name: proofSlug(proof.title), andPost };
-        return;
-      }
+    // The name in the header is the filename. A bound proof writes back over
+    // itself, and renaming it moves the file — the backend refuses a rename onto
+    // a name another proof holds. An unbound proof landing on a saved name is
+    // the one case that can go either way, so it asks first.
+    if (!savedName && savedProofNames().has(slugify(proof.title, 'proof'))) {
+      overwritePrompt = { slug: slugify(proof.title, 'proof'), andPost };
+      return;
     }
-    return performSave(savedName, andPost);
+    return performSave(andPost);
   }
 
-  async function performSave(name, andPost = false) {
+  async function performSave(andPost = false) {
     if (!proof.panels.length || saving) return;
     saving = true;
     try {
       const c = await ensureCase();
       const dataUrl = exportPng();
+      // Pasted images the case does not hold yet ride along with the spec; the
+      // ones already written are named by their content, so they need no resend.
+      const assets = [...new Set(proof.pastes.map((p) => p.asset))]
+        .map((name) => ({ name, entry: pasteAssets.get(name) }))
+        .filter(({ entry }) => entry?.pending && entry.data)
+        .map(({ name, entry }) => ({ name, data: entry.data }));
       const result = await api.post(`/api/cases/${c.id}/proofs`, {
-        name,
+        rename_from: savedName,
         title: proof.title,
         spec: toSpec(proof),
         png_base64: dataUrl.split(',')[1],
+        assets,
       });
+      for (const { name } of assets) {
+        const entry = pasteAssets.get(name);
+        if (entry) entry.pending = false;
+      }
       savedName = result.name;
       dirty = false;
       await reloadCase();
@@ -1943,8 +2284,59 @@
     }
   }
 
+  /** Open the list fresh: search and folder view reset. Deleting from the list
+   *  refreshes through openProofList instead, which keeps them. */
+  function openProofDialog() {
+    proofQuery = '';
+    proofBrowserOpen = false;
+    proofBrowsePath = '';
+    proofBrowseSelection = null;
+    return openProofList();
+  }
+
   async function openProofList() {
-    openList = await api.get(`/api/cases/${caseState.current.id}/proofs`);
+    const proofs = await api.get(`/api/cases/${caseState.current.id}/proofs`);
+    // A saved proof is filed like any other entity, so its folder lives on the
+    // catalog side; the proofs route only knows the files.
+    try {
+      const entities = await fetchAllEntities(caseState.current.id, { types: ['proof'] });
+      const folders = new Map(
+        entities.map((entity) => [entity.attrs?.spec ?? '', entity.attrs?.folder ?? ''])
+      );
+      openList = proofs.map((entry) => ({ ...entry, folder: folders.get(entry.spec_path) ?? '' }));
+    } catch {
+      openList = proofs;
+    }
+  }
+
+  function matchesProofQuery(entry, query) {
+    return matchesTerms([entry.title, entry.name, entry.folder].filter(Boolean).join('\n'), query);
+  }
+
+  function toggleProofBrowser() {
+    if (proofBrowserOpen) {
+      proofBrowserOpen = false;
+      return;
+    }
+    proofQuery = '';
+    proofBrowsePath = '';
+    proofBrowseSelection = null;
+    proofBrowserOpen = true;
+  }
+
+  function openProofFolder(path) {
+    proofBrowsePath = path;
+    proofBrowseSelection = null;
+  }
+
+  function selectProofBrowser(entry, confirm = false) {
+    proofBrowseSelection = entry.name;
+    if (confirm) openProof(entry);
+  }
+
+  function confirmProofBrowser() {
+    const entry = proofBrowserEntries.find((item) => item.name === proofBrowseSelection);
+    if (entry) openProof(entry);
   }
 
   let deleteEntry = $state(null); // open-list entry pending deletion
@@ -1997,8 +2389,21 @@
         toast(`Missing panel image: ${p.src}`, 'warn');
       }
     }
-    const validPanels = new Set(proof.panels.map((p) => p.id));
-    proof.shapes = (spec.shapes ?? []).filter((s) => validPanels.has(s.panel));
+    // Pasted images come from the proof's own assets folder — nothing in the
+    // case points at them, so they are read by the name the spec carries.
+    for (const p of spec.pastes ?? []) {
+      try {
+        const img = await loadImage(
+          `/files/${caseState.current.id}/proofs/${entry.name}.assets/${p.asset}`
+        );
+        pasteAssets.set(p.asset, { img, data: null, pending: false });
+        proof.pastes.push({ ...p, id: p.id ?? newId('x'), img });
+      } catch {
+        toast('An overlay of this proof is missing', 'warn');
+      }
+    }
+    const validSurfaces = new Set([...proof.panels, ...proof.pastes].map((s) => s.id));
+    proof.shapes = (spec.shapes ?? []).filter((s) => validSurfaces.has(s.panel));
     // legend text lives in `notes` (per color); migrate old per-shape comments
     proof.notes = spec.notes ?? notesFromShapes(proof.shapes);
     proof.legendOrder = spec.legendOrder ?? [];
@@ -2040,7 +2445,7 @@
   const displayedSource = $derived(proof.source.trim() || autoSource(proof.panels));
 </script>
 
-<svelte:window onkeydown={onKeydown} onkeyup={onKeyup} />
+<svelte:window onkeydown={onKeydown} onkeyup={onKeyup} onpaste={onPaste} />
 
 <div class="tool">
   <div class="tool-header">
@@ -2049,37 +2454,40 @@
       <input
         class="input title-input"
         bind:value={proof.title}
-        oninput={() => { dirty = true; titleTouched = true; }}
+        oninput={() => (dirty = true)}
       />
       {#if dirty}<span class="badge">unsaved</span>{/if}
     {/if}
     <div class="spacer"></div>
     {#if caseState.current}
-      <button class="btn" onclick={openProofList}><Icon name="folderOpen" size={15} /> Open</button>
+      <button class="btn btn-sm" onclick={openProofDialog}><Icon name="folderOpen" size={14} /> Open proof</button>
     {/if}
     {#if proofStarted}
-      <button class="btn" onclick={() => (discardConfirm = true)} title="Clear this proof">
-        <Icon name="reset" size={15} /> Discard
+      <button class="btn btn-sm" onclick={() => (discardConfirm = true)} title="Clear this proof">
+        <Icon name="reset" size={14} /> Discard
       </button>
     {/if}
-    <button class="btn" onclick={openNewProofDialog}><Icon name="plus" size={15} /> New proof</button>
+    <button class="btn btn-sm" onclick={openNewProofDialog}><Icon name="plus" size={14} /> New proof</button>
     <button
-      class="btn"
+      class="btn btn-sm"
       onclick={copyPng}
       disabled={!proofHasContent || copying}
       title="Copy the composed PNG to the clipboard"
     >
-      <Icon name="copy" size={15} /> {copying ? 'Copying…' : 'Copy PNG'}
+      <Icon name="copy" size={14} /> {copying ? 'Copying…' : 'Copy PNG'}
     </button>
-    <button class="btn btn-primary" onclick={() => save()} disabled={!proofHasContent || saving}>
-      <Icon name="check" size={15} /> {saving ? 'Saving…' : 'Save'}
+    <button class="btn btn-ok btn-sm" onclick={() => save()} disabled={!proofHasContent || saving}>
+      <Icon name="save" size={14} /> {saving ? 'Saving…' : 'Save proof'}
     </button>
-    <button class="btn" onclick={() => save({ andPost: true })} disabled={!proofHasContent || saving}>
-      <Icon name="post" size={15} /> To Post
+    <button class="btn btn-info btn-sm" onclick={() => save({ andPost: true })} disabled={!proofHasContent || saving}>
+      <Icon name="post" size={14} /> To Post
     </button>
   </div>
 
   <div class="body">
+    <!-- The drawing tools act on a proof; until one is open or created there is
+         nothing to draw on, so the rail stays out of the way. -->
+    {#if proofStarted}
     <ProofToolbar
       {canUndo}
       {canRedo}
@@ -2101,6 +2509,7 @@
       panelCount={proof.panels.length}
       {applyMagic}
     />
+    {/if}
 
     <ProofCanvas
       bind:containerEl
@@ -2112,6 +2521,16 @@
       {proofStarted}
       {openPicker}
       {openNewProofDialog}
+    />
+
+    <!-- Image picked off the disk for a paste: it goes into the proof, never
+         into the case, so it does not travel through the media ingest. -->
+    <input
+      type="file"
+      hidden
+      accept="image/png,image/jpeg,image/webp"
+      bind:this={imageInputEl}
+      onchange={onImageFile}
     />
 
     <!-- right: proof settings, panels & annotations -->
@@ -2216,16 +2635,23 @@
           {collapsed}
           {gonePanels}
           bind:selectedPanelId
+          bind:selectedPasteId
           bind:selectedId
           {activeColor}
           caseId={caseState.current?.id}
           scaleMin={SCALE_MIN}
           scaleMax={SCALE_MAX}
           scaleStep={SCALE_STEP}
+          frameWidthMax={FRAME_WIDTH_MAX}
+          frameColor={FRAME_COLOR}
           {openPicker}
           {movePanelZ}
           {scalePanel}
           {removePanel}
+          {movePasteZ}
+          {removePaste}
+          {setFrame}
+          {pickImageFile}
           {featureList}
           {moveLegendColor}
           {setColor}
@@ -2397,7 +2823,6 @@
 
 {#if newProofOpen}
   <NewProofDialog
-    bind:name={newProofName}
     bind:templateId={newProofTemplateId}
     bind:panelPaths={newProofPanelPaths}
     bind:query={newProofQuery}
@@ -2443,7 +2868,7 @@
 {#if overwritePrompt}
   <ConfirmDialog
     title="Overwrite this proof?"
-    message={`“${savedProofTitle(overwritePrompt.name)}” is already saved in this case.`}
+    message={`“${savedTitle(proofEntities, 'proof', overwritePrompt.slug)}” is already saved in this case.`}
     detail="Saving replaces its PNG and editable spec. Rename this proof to keep both."
     confirmLabel="Overwrite"
     tone="danger"
@@ -2451,7 +2876,7 @@
     onconfirm={() => {
       const p = overwritePrompt;
       overwritePrompt = null;
-      performSave(p.name, p.andPost);
+      performSave(p.andPost);
     }}
     oncancel={() => (overwritePrompt = null)}
   />
@@ -2461,7 +2886,7 @@
   <ConfirmDialog
     title="Delete this proof?"
     message={`“${deleteEntry.title}” will be removed from the case.`}
-    detail="This permanently deletes the exported PNG and its editable spec. It cannot be undone."
+    detail="Deletes the PNG and editable proof and cannot be undone."
     confirmLabel="Delete"
     tone="danger"
     icon="trash"
@@ -2477,22 +2902,57 @@
         <p>No images in this case yet. Import media or capture satellite imagery first.</p>
       </div>
     {:else}
-      <div class="pick-grid">
-        {#each pickerItems as item (item.src)}
-          <button
-            class="pick card"
-            onclick={() => {
-              addPanel(item);
-              picker = false;
-            }}
-          >
-            <img src={`/files/${caseState.current.id}/${item.thumb}`} alt="" loading="lazy" />
-            <span class="pick-label">
-              <Icon name={item.kind === 'satellite' ? 'satellite' : 'image'} size={12} />
-              {item.label}
-            </span>
-          </button>
-        {/each}
+      <div class="picker-stack">
+        {#if panelBrowserOpen || pickerItems.length > PICKER_SEARCH_MIN}
+          <div class="picker-search">
+            <SearchInput bind:value={panelQuery} placeholder="Search titles…" width="100%" />
+            <button
+              class="btn btn-ghost btn-sm browse-btn"
+              title={panelBrowserOpen ? 'Show every image' : 'Browse folders'}
+              onclick={togglePanelBrowser}
+            >…</button>
+          </div>
+        {/if}
+        <PanelCategories items={pickerItems} category={panelCategory} onpick={setPanelCategory} />
+        {#if panelBrowserOpen}
+          <FolderBrowser
+            entries={panelBrowserEntries}
+            path={panelBrowsePath}
+            rootLabel="Case images"
+            selectedId={panelBrowseSelection}
+            matches={(item) => filterProofPanelItems([item], panelQuery, 'all').length > 0}
+            emptyText="This folder has no matching images."
+            icon={(item) => (item.kind === 'satellite' ? 'satellite' : 'image')}
+            onnavigate={openPanelFolder}
+            onselect={(item) => selectPanelBrowser(item)}
+            onconfirm={(item) => selectPanelBrowser(item, true)}
+          />
+          <div class="picker-actions">
+            <button class="btn btn-primary btn-sm" disabled={!panelBrowseSelection} onclick={confirmPanelBrowser}>Add selected</button>
+          </div>
+        {:else if !visiblePanelItems.length}
+          <p class="picker-hint">No image matches this search.</p>
+        {:else}
+          <div class="pick-grid">
+            {#each visiblePanelItems as item (item.src)}
+              <button class="pick card" onclick={() => addPanelFromPicker(item)}>
+                {#if item.thumb}
+                  <img src={`/files/${caseState.current.id}/${item.thumb}`} alt="" loading="lazy" decoding="async" />
+                {:else if item.thumbPending}
+                  <span class="pick-placeholder"><Icon name="clock" size={20} /></span>
+                {:else}
+                  <span class="pick-placeholder">
+                    <Icon name={item.kind === 'satellite' ? 'satellite' : 'image'} size={20} />
+                  </span>
+                {/if}
+                <span class="pick-label">
+                  <Icon name={item.kind === 'satellite' ? 'satellite' : 'image'} size={12} />
+                  {item.label}
+                </span>
+              </button>
+            {/each}
+          </div>
+        {/if}
       </div>
     {/if}
   </Modal>
@@ -2503,34 +2963,74 @@
     {#if !openList.length}
       <div class="empty"><p>No saved proofs in this case yet.</p></div>
     {:else}
-      <div class="open-list">
-        {#each openList as entry (entry.name)}
-          <div class="open-row-wrap">
-            <button class="open-row" onclick={() => openProof(entry)}>
-              {#if entry.png}
-                <img src={`/files/${caseState.current.id}/${entry.png}`} alt="" loading="lazy" />
-              {/if}
-              <div class="open-meta">
-                <span class="open-title">{entry.title}</span>
-                <span class="open-sub">{entry.panels} panels · {entry.shapes} annotations · {entry.updated_at?.slice(0, 10)}</span>
-              </div>
-            </button>
-            <button class="btn btn-ghost btn-sm open-del" title="Delete this saved proof" onclick={() => (deleteEntry = entry)}>
-              <Icon name="trash" size={13} />
-            </button>
+      <div class="picker-stack">
+        {#if proofBrowserOpen || openList.length > PICKER_SEARCH_MIN}
+          <div class="picker-search">
+            <SearchInput bind:value={proofQuery} placeholder="Search proofs…" width="100%" />
+            <button
+              class="btn btn-ghost btn-sm browse-btn"
+              title={proofBrowserOpen ? 'Show every proof' : 'Browse folders'}
+              onclick={toggleProofBrowser}
+            >…</button>
           </div>
-        {/each}
+        {/if}
+        {#if proofBrowserOpen}
+          <FolderBrowser
+            entries={proofBrowserEntries}
+            path={proofBrowsePath}
+            rootLabel="Proofs"
+            selectedId={proofBrowseSelection}
+            matches={(entry) => matchesProofQuery(entry, proofQuery)}
+            emptyText="This folder has no matching proofs."
+            icon={() => 'proof'}
+            label={(entry) => entry.title}
+            onnavigate={openProofFolder}
+            onselect={(entry) => selectProofBrowser(entry)}
+            onconfirm={(entry) => selectProofBrowser(entry, true)}
+          />
+          <div class="picker-actions">
+            <button class="btn btn-primary btn-sm" disabled={!proofBrowseSelection} onclick={confirmProofBrowser}>Open selected</button>
+          </div>
+        {:else if !visibleProofs.length}
+          <p class="picker-hint">No proof matches this search.</p>
+        {:else}
+          <div class="open-list">
+            {#each visibleProofs as entry (entry.name)}
+              <div class="open-row-wrap">
+                <button class="open-row" onclick={() => openProof(entry)}>
+                  {#if entry.thumb || entry.png}
+                    <!-- the thumbnail of the export, or the export itself when
+                         it could not be rendered; decoded off the main thread -->
+                    <img src={`/files/${caseState.current.id}/${entry.thumb ?? entry.png}`} alt="" loading="lazy" decoding="async" />
+                  {/if}
+                  <div class="open-meta">
+                    <span class="open-title">{entry.title}</span>
+                    <span class="open-sub">{entry.panels} panels · {entry.shapes} annotations · {entry.updated_at?.slice(0, 10)}</span>
+                  </div>
+                </button>
+                <button class="btn btn-ghost btn-sm open-del" title="Delete this saved proof" onclick={() => (deleteEntry = entry)}>
+                  <Icon name="trash" size={13} />
+                </button>
+              </div>
+            {/each}
+          </div>
+        {/if}
       </div>
     {/if}
   </Modal>
 {/if}
 
 <style>
-  .spacer { flex: 1; }
-  .title-input {
-    width: min(320px, 26vw);
-    font-weight: 600;
+  .tool-header {
+    align-items: baseline;
+    gap: 10px;
+    padding: 14px 16px 12px;
+    flex-shrink: 0;
   }
+  .tool-header h2 {
+    font-weight: 700;
+  }
+  .spacer { flex: 1; }
   .tpl-none {
     margin: 0 0 6px;
     font-size: var(--fs-xs);
@@ -2668,6 +3168,33 @@
     color: var(--accent);
     border-color: var(--accent);
   }
+  .picker-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .picker-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .picker-search :global(.search-box) {
+    flex: 1;
+  }
+  .browse-btn {
+    min-width: 30px;
+    font-size: var(--fs-lg);
+    line-height: 1;
+  }
+  .picker-hint {
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    padding: 8px 2px;
+  }
+  .picker-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
   .pick-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -2684,6 +3211,15 @@
     aspect-ratio: 16 / 11;
     object-fit: cover;
     background: var(--bg-2);
+  }
+  .pick-placeholder {
+    width: 100%;
+    aspect-ratio: 16 / 11;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-2);
+    color: var(--text-3);
   }
   .pick-label {
     display: flex;
