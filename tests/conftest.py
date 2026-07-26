@@ -3,6 +3,21 @@ import tempfile
 import pytest
 from fastapi.testclient import TestClient
 
+from azimut.engine import geo
+
+
+@pytest.fixture(autouse=True)
+def offline_reverse_geocode(monkeypatch):
+    """Nominatim is unreachable unless a test says otherwise.
+
+    Saving a place or a capture now resolves its country as part of the save, so
+    without this the suite would fire a live lookup per saved item. Tests that
+    care about the located path stub ``geo.reverse_geocode`` themselves; every
+    other one gets the offline verdict (``failed``), which is what the app is
+    designed to survive.
+    """
+    monkeypatch.setattr(geo, "reverse_geocode", lambda lat, lon, timeout=8, language=None: None)
+
 
 @pytest.fixture()
 def tmp_workspace(monkeypatch):

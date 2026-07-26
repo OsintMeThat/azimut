@@ -55,18 +55,16 @@ def _new_case(client, name):
     return client.post("/api/cases", json={"name": name}).json()["id"]
 
 
-def _save_proof(client, cid, title, srcs, name=None):
+# The filename follows the title everywhere (api/naming.slugify), so these pass
+# short titles and read the slug straight off them.
+def _save_proof(client, cid, title, srcs):
     spec = {"panels": [{"id": f"p{i}", "src": s} for i, s in enumerate(srcs)]}
     body = {"title": title, "spec": spec, "png_base64": _png_b64()}
-    if name:
-        body["name"] = name
     return client.post(f"/api/cases/{cid}/proofs", json=body).json()
 
 
-def _save_session(client, cid, title, source_path, name=None):
+def _save_session(client, cid, title, source_path):
     body = {"title": title, "spec": {"source": {"path": source_path, "kind": "image"}}}
-    if name:
-        body["name"] = name
     return client.post(f"/api/cases/{cid}/inspect/sessions", json=body).json()
 
 
@@ -103,11 +101,11 @@ def test_resaving_a_proof_reconciles_rather_than_stacks(client):
     a = _upload(client, cid, "a.png", _png_bytes((1, 2, 3)))["item"]["path"]
     b = _upload(client, cid, "b.png", _png_bytes((4, 5, 6)))["item"]["path"]
 
-    _save_proof(client, cid, "P", [a, b], name="p")
-    _save_proof(client, cid, "P", [a, b], name="p")  # same panels, saved twice
+    _save_proof(client, cid, "P", [a, b])
+    _save_proof(client, cid, "P", [a, b])  # same panels, saved twice
     assert len(_links(client, cid, "derived-from")) == 2
 
-    _save_proof(client, cid, "P", [a], name="p")  # panel b dropped from the proof
+    _save_proof(client, cid, "P", [a])  # panel b dropped from the proof
     links = _links(client, cid, "derived-from")
     assert len(links) == 1
     assert links[0]["to"] == _entity(client, cid, path=a)["id"]
@@ -118,16 +116,16 @@ def test_resaving_keeps_the_untouched_edge_identical(client):
     # its timestamp, so case.json stays a readable diff.
     cid = _new_case(client, "Stable")
     a = _upload(client, cid, "a.png")["item"]["path"]
-    _save_proof(client, cid, "P", [a], name="p")
+    _save_proof(client, cid, "P", [a])
     before = _links(client, cid, "derived-from")[0]
-    _save_proof(client, cid, "P", [a], name="p")
+    _save_proof(client, cid, "P", [a])
     assert _links(client, cid, "derived-from")[0] == before
 
 
 def test_post_save_links_to_its_proof_and_media(client):
     cid = _new_case(client, "Post links")
     a = _upload(client, cid, "a.png", _png_bytes((7, 8, 9)))["item"]["path"]
-    _save_proof(client, cid, "P", [a], name="p")
+    _save_proof(client, cid, "P", [a])
 
     client.post(
         f"/api/cases/{cid}/drafts",
@@ -241,7 +239,7 @@ def test_a_source_deleted_before_the_save_leaves_a_tombstone(client):
     a = _upload(client, cid, "a.png")["item"]["path"]
     client.delete(f"/api/cases/{cid}/media?path={a}")
 
-    _save_proof(client, cid, "P", [a], name="p")
+    _save_proof(client, cid, "P", [a])
 
     proof = _entity(client, cid, spec="proofs/p.json")
     assert _links(client, cid) == []
@@ -282,8 +280,8 @@ def test_missing_sources_are_tombstoned_in_one_case_update():
 def test_deleting_a_subject_deletes_its_session_but_spares_its_outputs(client):
     cid = _new_case(client, "Cascade")
     a = _upload(client, cid, "a.png", _png_bytes((1, 1, 1)))["item"]["path"]
-    _save_session(client, cid, "S", a, name="s")
-    _save_proof(client, cid, "P", [a], name="p")
+    _save_session(client, cid, "S", a)
+    _save_proof(client, cid, "P", [a])
 
     subject = _entity(client, cid, path=a)
     res = client.delete(f"/api/cases/{cid}/entities/{subject['id']}").json()
@@ -301,7 +299,7 @@ def test_deleting_a_subject_deletes_its_session_but_spares_its_outputs(client):
 def test_a_survivor_keeps_a_tombstone_of_what_it_lost(client):
     cid = _new_case(client, "Tombstone")
     a = _upload(client, cid, "strike.png")["item"]["path"]
-    _save_proof(client, cid, "P", [a], name="p")
+    _save_proof(client, cid, "P", [a])
     subject = _entity(client, cid, path=a)
     sha = subject["attrs"]["sha256"]
 
@@ -322,8 +320,8 @@ def test_a_survivor_is_only_scarred_by_what_it_derived_from(client):
     # that merely died in the same breath.
     cid = _new_case(client, "Only mine")
     a = _upload(client, cid, "a.png")["item"]["path"]
-    _save_session(client, cid, "S", a, name="s")
-    _save_proof(client, cid, "P", [a], name="p")
+    _save_session(client, cid, "S", a)
+    _save_proof(client, cid, "P", [a])
 
     client.delete(f"/api/cases/{cid}/entities/{_entity(client, cid, path=a)['id']}")
 
@@ -335,10 +333,10 @@ def test_tombstones_never_stack_on_a_second_delete(client):
     cid = _new_case(client, "Once")
     a = _upload(client, cid, "a.png", _png_bytes((2, 2, 2)))["item"]["path"]
     b = _upload(client, cid, "b.png", _png_bytes((3, 3, 3)))["item"]["path"]
-    _save_proof(client, cid, "P", [a, b], name="p")
+    _save_proof(client, cid, "P", [a, b])
 
     client.delete(f"/api/cases/{cid}/entities/{_entity(client, cid, path=a)['id']}")
-    _save_proof(client, cid, "P", [a, b], name="p")  # re-save still names the dead path
+    _save_proof(client, cid, "P", [a, b])  # re-save still names the dead path
     client.delete(f"/api/cases/{cid}/entities/{_entity(client, cid, path=b)['id']}")
 
     lost = _entity(client, cid, spec="proofs/p.json")["attrs"]["lost_sources"]
@@ -350,7 +348,7 @@ def test_deleting_a_proof_spares_the_post_that_announces_it(client):
     # its proof and only loses the attachment.
     cid = _new_case(client, "Post survives")
     a = _upload(client, cid, "a.png")["item"]["path"]
-    _save_proof(client, cid, "P", [a], name="p")
+    _save_proof(client, cid, "P", [a])
     client.post(
         f"/api/cases/{cid}/drafts",
         json={"title": "T", "state": {"proofPng": "proofs/p.png", "description": "kept"}},
@@ -368,7 +366,7 @@ def test_deleting_a_proof_spares_the_post_that_announces_it(client):
 def test_cascade_is_transitive_through_depends_on(client):
     cid = _new_case(client, "Deep")
     a = _upload(client, cid, "a.png")["item"]["path"]
-    _save_session(client, cid, "S1", a, name="s1")
+    _save_session(client, cid, "S1", a)
     # a second session opened over the first one's spec — contrived, but it is
     # what a future tool nesting sessions would produce, and it must follow.
     s1 = _entity(client, cid, spec="inspect/s1.json")
@@ -397,20 +395,20 @@ def test_a_session_over_a_frame_survives_the_frames_video_going(client):
         _entity(client, cid, path=video)["id"],
         "derived-from",
     )
-    _save_session(client, cid, "On the video", video, name="onvideo")
-    _save_session(client, cid, "On the frame", frame, name="onframe")
+    _save_session(client, cid, "On the video", video)
+    _save_session(client, cid, "On the frame", frame)
 
     client.delete(f"/api/cases/{cid}/entities/{_entity(client, cid, path=video)['id']}")
 
-    assert _entity(client, cid, spec="inspect/onvideo.json") is None
-    assert _entity(client, cid, spec="inspect/onframe.json") is not None
+    assert _entity(client, cid, spec="inspect/on-the-video.json") is None
+    assert _entity(client, cid, spec="inspect/on-the-frame.json") is not None
     assert _entity(client, cid, path=frame) is not None
 
 
 def test_deleting_an_entity_drops_the_links_touching_it(client):
     cid = _new_case(client, "Edges")
     a = _upload(client, cid, "a.png")["item"]["path"]
-    _save_proof(client, cid, "P", [a], name="p")
+    _save_proof(client, cid, "P", [a])
     assert len(_links(client, cid)) == 1
 
     client.delete(f"/api/cases/{cid}/entities/{_entity(client, cid, path=a)['id']}")
@@ -425,8 +423,8 @@ def test_the_media_library_delete_honours_the_graph(client):
     # same media from its own tool must do exactly the same thing.
     cid = _new_case(client, "Via library")
     a = _upload(client, cid, "a.png")["item"]["path"]
-    _save_session(client, cid, "S", a, name="s")
-    _save_proof(client, cid, "P", [a], name="p")
+    _save_session(client, cid, "S", a)
+    _save_proof(client, cid, "P", [a])
 
     client.delete(f"/api/cases/{cid}/media?path={a}")
 
@@ -437,7 +435,7 @@ def test_the_media_library_delete_honours_the_graph(client):
 def test_the_inspect_delete_honours_the_graph(client):
     cid = _new_case(client, "Via inspect")
     a = _upload(client, cid, "a.png")["item"]["path"]
-    _save_session(client, cid, "S", a, name="s")
+    _save_session(client, cid, "S", a)
 
     client.delete(f"/api/cases/{cid}/inspect/sessions/s")
 
@@ -450,7 +448,7 @@ def test_the_inspect_delete_honours_the_graph(client):
 def test_the_satellite_delete_honours_the_graph(client):
     cid = _new_case(client, "Via satellite")
     a = _upload(client, cid, "cap.png")["item"]["path"]
-    _save_session(client, cid, "S", a, name="s")
+    _save_session(client, cid, "S", a)
 
     client.delete(f"/api/cases/{cid}/satellite?path={a}")
 
@@ -478,8 +476,8 @@ def test_a_tool_delete_still_drops_an_unfiled_artifact(client):
 def test_dependents_endpoint_reports_the_plan(client):
     cid = _new_case(client, "Preview")
     a = _upload(client, cid, "a.png")["item"]["path"]
-    _save_session(client, cid, "S", a, name="s")
-    _save_proof(client, cid, "P", [a], name="p")
+    _save_session(client, cid, "S", a)
+    _save_proof(client, cid, "P", [a])
 
     subject = _entity(client, cid, path=a)
     plan = client.get(f"/api/cases/{cid}/entities/{subject['id']}/dependents").json()
@@ -510,7 +508,7 @@ def test_dependents_endpoint_404s_on_an_unknown_entity(client):
 def test_chain_endpoint_reads_sources_and_dependents(client):
     cid = _new_case(client, "Chain")
     a = _upload(client, cid, "a.png")["item"]["path"]
-    _save_proof(client, cid, "P", [a], name="p")
+    _save_proof(client, cid, "P", [a])
 
     media = _entity(client, cid, path=a)
     proof = _entity(client, cid, spec="proofs/p.json")
@@ -532,7 +530,7 @@ def test_chain_endpoint_includes_lost_sources_and_404s(client):
     cid = _new_case(client, "Chain lost")
     a = _upload(client, cid, "a.png")["item"]["path"]
     client.delete(f"/api/cases/{cid}/media?path={a}")
-    _save_proof(client, cid, "P", [a], name="p")  # source gone → tombstone, no edge
+    _save_proof(client, cid, "P", [a])  # source gone → tombstone, no edge
 
     proof = _entity(client, cid, spec="proofs/p.json")
     chain = client.get(f"/api/cases/{cid}/entities/{proof['id']}/chain").json()
@@ -567,7 +565,7 @@ def test_derivation_endpoint_returns_the_closure_and_404s(client):
     cid = _new_case(client, "Derivation")
     a = _upload(client, cid, "a.png", _png_bytes((1, 2, 3)))["item"]["path"]
     b = _upload(client, cid, "b.png", _png_bytes((4, 5, 6)))["item"]["path"]
-    _save_proof(client, cid, "P", [a, b], name="p")
+    _save_proof(client, cid, "P", [a, b])
     proof = _entity(client, cid, spec="proofs/p.json")
 
     sub = client.get(f"/api/cases/{cid}/entities/{proof['id']}/derivation").json()

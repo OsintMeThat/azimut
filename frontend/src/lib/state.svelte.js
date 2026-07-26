@@ -207,8 +207,9 @@ export function toast(message, kind = 'info', timeout = 3800, action = null) {
   }, timeout);
 }
 
-export async function refreshCaseList() {
-  caseState.list = await api.get('/api/cases');
+export async function refreshCaseList({ q } = {}) {
+  const query = q?.trim();
+  caseState.list = await api.get(`/api/cases${query ? `?q=${encodeURIComponent(query)}` : ''}`);
 }
 
 // Remember the last open case across page reloads so work is never "lost".
@@ -287,7 +288,7 @@ export async function ensureCase() {
   const scratch = await api.post('/api/cases/scratch');
   await refreshCaseList();
   await openCase(scratch.id);
-  toast('Scratch session started — “Keep as case…” to save it for good', 'info');
+  toast('Scratch session started. Use “Keep as case…” to save it', 'info');
   return caseState.current;
 }
 

@@ -32,7 +32,7 @@ test('a real Konva panel remains interactive after click and drag', async ({ pag
   await page.mouse.move(x + 45, y + 28, { steps: 6 });
   await page.mouse.up();
 
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
   await expect.poll(() => fixture.proofSaves.length).toBe(1);
   const savedPanel = fixture.proofSaves[0].spec.panels[0];
   expect(Number.isFinite(savedPanel.x)).toBe(true);
@@ -94,7 +94,7 @@ test('a picked colour becomes the default for the next drawn shape', async ({ pa
   await page.mouse.up();
   await expect(page.locator('.shape-row')).toHaveCount(2);
 
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
   await expect.poll(() => fixture.proofSaves.length).toBe(1);
   const shapes = fixture.proofSaves[0].spec.shapes;
   expect(shapes[1].color).toBe('#40c4ff');
@@ -128,7 +128,7 @@ test('a picked stroke width becomes the default for the next drawn shape', async
   await page.mouse.up();
   await expect(page.locator('.shape-row')).toHaveCount(2);
 
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
   await expect.poll(() => fixture.proofSaves.length).toBe(1);
   const shapes = fixture.proofSaves[0].spec.shapes;
   expect(shapes[1].strokeWidth).toBe(11);
@@ -151,5 +151,113 @@ test('the layout overflow flyout opens and closes on outside click', async ({ pa
   const box = await canvas.boundingBox();
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await expect(freeBtn).toBeHidden();
+  fixture.expectNoUnexpectedRequests();
+});
+
+// A pasted image goes through the real browser path: clipboard event, Web Crypto
+// hash, decode, Konva render. What must hold is that it lands as an image and not
+// as a panel, and that its bytes ride along with the save exactly once.
+async function pasteScreenshot(page, { via = 'paste' } = {}) {
+  return page.evaluate(async (kind) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 400;
+    canvas.height = 300;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#c0392b';
+    ctx.fillRect(0, 0, 400, 300);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([blob], 'shot.png', { type: 'image/png' }));
+    if (kind === 'drop') {
+      document.querySelector('.konva').dispatchEvent(
+        new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true })
+      );
+    } else {
+      window.dispatchEvent(
+        new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true })
+      );
+    }
+  }, via);
+}
+
+test('pastes a screenshot into the proof without filing it as a panel', async ({ page, browserName }) => {
+  // Firefox drops the clipboardData of a synthetic ClipboardEvent, so only the
+  // real shortcut can drive it there. The drop test below covers the same insert
+  // path on both engines.
+  test.skip(browserName === 'firefox', 'synthetic paste carries no clipboardData in Firefox');
+  const fixture = await installAppFixture(page);
+  await openProofWithPanel(page);
+
+  await pasteScreenshot(page);
+  await expect(page.locator('.paste-row')).toHaveCount(1);
+  await expect(page.locator('.paste-row')).toHaveClass(/selected/); // ready to place
+  await expect(page.locator('.panel-row:not(.paste-row)')).toHaveCount(1); // still one panel
+
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
+  await expect.poll(() => fixture.proofSaves.length).toBe(1);
+  const saved = fixture.proofSaves[0];
+
+  expect(saved.spec.panels).toHaveLength(1); // the paste is not evidence
+  expect(saved.spec.pastes).toHaveLength(1);
+  const paste = saved.spec.pastes[0];
+  expect(paste.asset).toMatch(/^[0-9a-f]{16}\.png$/); // named by its own bytes
+  expect(paste.natural).toEqual([400, 300]);
+  expect(paste.frame).toBeNull();
+  // the pixels ride along with this save, and only this one
+  expect(saved.assets.map((a) => a.name)).toEqual([paste.asset]);
+  expect(saved.assets[0].data.length).toBeGreaterThan(0);
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('a dropped image is pasted, and its frame survives the save', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await openProofWithPanel(page);
+
+  await pasteScreenshot(page, { via: 'drop' });
+  await expect(page.locator('.paste-row')).toHaveCount(1);
+
+  // picking a border colour is what turns a frame on, on a paste or on a panel
+  await page.locator('.paste-row input[aria-label="border color"]').fill('#40c4ff');
+  await expect(page.locator('.paste-row input[aria-label="border thickness"]')).toBeVisible();
+  await page.locator('.panel-row:not(.paste-row) input[aria-label="border color"]').fill('#69f0ae');
+
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
+  await expect.poll(() => fixture.proofSaves.length).toBe(1);
+  const { spec } = fixture.proofSaves[0];
+
+  expect(spec.pastes[0].frame).toEqual({ color: '#40c4ff', width: 6 });
+  expect(spec.panels[0].frame).toEqual({ color: '#69f0ae', width: 6 });
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('a pasted image hosts its own annotations and leaves with them', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await openProofWithPanel(page);
+  await pasteScreenshot(page, { via: 'drop' });
+  await expect(page.locator('.paste-row')).toHaveCount(1);
+
+  // the image lands centred on the view, so the centre of the canvas is over it
+  const canvas = page.locator('.konva canvas').first();
+  const box = await canvas.boundingBox();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+
+  await page.getByTitle('Box (r)').click();
+  await page.mouse.move(cx - 12, cy - 8);
+  await page.mouse.down();
+  await page.mouse.move(cx + 14, cy + 9, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.locator('.shape-row')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
+  await expect.poll(() => fixture.proofSaves.length).toBe(1);
+  const { spec } = fixture.proofSaves[0];
+  // the annotation is bound to the pasted image, not to the panel behind it
+  expect(spec.shapes[0].panel).toBe(spec.pastes[0].id);
+
+  // removing the image takes its annotation with it
+  await page.locator('.paste-row').getByTitle('Remove overlay').click();
+  await expect(page.locator('.paste-row')).toHaveCount(0);
+  await expect(page.locator('.shape-row')).toHaveCount(0);
   fixture.expectNoUnexpectedRequests();
 });

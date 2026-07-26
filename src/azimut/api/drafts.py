@@ -10,7 +10,6 @@ human publishes it (spec §6 non-goals).
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime, timezone
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
@@ -21,6 +20,7 @@ from pydantic import BaseModel, Field
 from ..engine import links as link_engine
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
+from .naming import read_created_at, slugify
 
 router = APIRouter(prefix="/api", tags=["drafts"])
 
@@ -32,14 +32,13 @@ MAX_ARTIFACT_PATH_LENGTH = 512
 
 
 class DraftIn(BaseModel):
-    name: str | None = None  # slug; None → derived from title
+    # The filename always follows the title, so renaming a saved draft moves its
+    # file. ``rename_from`` is the slug the composer is currently bound to
+    # (absent on a first save); a save that lands elsewhere renames that file in
+    # place instead of leaving a copy behind under the old name.
+    rename_from: str | None = None
     title: str = Field(min_length=1, max_length=200)
     state: dict[str, Any]  # opaque Post Composer state (fields + tweets)
-
-
-def _slug(text: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-    return slug[:80] or "draft"
 
 
 def _now() -> str:
@@ -125,12 +124,16 @@ def list_drafts(case_id: str) -> list[dict[str, Any]]:
             continue
         if data.get("azimut_draft") != DRAFT_MARKER:
             continue
+        state = data.get("state")
         drafts.append(
             {
                 "name": path.stem,
                 "title": data.get("title", path.stem),
                 "updated_at": data.get("updated_at"),
                 "created_at": data.get("created_at"),
+                # The Saved map popup uses this small listing to identify the
+                # destination without loading every full draft state.
+                "target": state.get("target") if isinstance(state, dict) else None,
             }
         )
     drafts.sort(key=lambda d: d.get("updated_at") or "", reverse=True)
@@ -152,22 +155,25 @@ def load_draft(case_id: str, name: str) -> dict[str, Any]:
 @router.post("/cases/{case_id}/drafts")
 def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
     case = get_case(case_id)
-    name = _slug(body.name or body.title)
+    name = slugify(body.title, "draft")
     exports_dir = case.subdir("exports")
     source_paths = _draft_source_paths(body.state)
-
+    rel = f"exports/{name}.json"
     path = exports_dir / f"{name}.json"
-    existing_created = None
-    if path.exists():
-        try:
-            existing_created = json.loads(path.read_text(encoding="utf-8")).get("created_at")
-        except (OSError, json.JSONDecodeError):
-            existing_created = None
+
+    # A rename lands on a free name or not at all: taking a name another draft
+    # holds would leave two entities pointing at one file, and there is no sane
+    # merge of the two. The first save of an unbound composer still writes over
+    # a same-named draft — there the analyst is updating that one.
+    old = slugify(body.rename_from, "draft") if body.rename_from else None
+    old_rel = f"exports/{old}.json" if old and old != name else None
+    if old_rel and path.exists():
+        raise HTTPException(status_code=409, detail="another draft already uses that name")
 
     data = {
         "azimut_draft": DRAFT_MARKER,
         "title": body.title,
-        "created_at": existing_created or _now(),
+        "created_at": read_created_at(exports_dir / f"{old or name}.json") or _now(),
         "updated_at": _now(),
         "state": body.state,
     }
@@ -175,18 +181,25 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
         json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
 
-    # upsert the post entity (analyst action → confirmed)
-    existing = case.find_entity(attr="draft", value=f"exports/{name}.json")
+    # upsert the post entity (analyst action → confirmed). A rename rebinds the
+    # entity the old name held rather than filing a second one, so the draft
+    # keeps its folder, notes and links.
+    existing = case.find_entity(attr="draft", value=old_rel or rel)
     if existing:
-        case.update_entity(existing["id"], {"label": body.title})
+        patch: dict[str, Any] = {"label": body.title}
+        if old_rel:
+            patch["attrs"] = {"draft": rel}
+        case.update_entity(existing["id"], patch)
         entity_id = existing["id"]
     else:
         entity_id = case.add_entity(
             "post",
             body.title,
-            attrs={"draft": f"exports/{name}.json"},
+            attrs={"draft": rel},
             by="post-composer",
         )["id"]
+    if old_rel:
+        (exports_dir / f"{old}.json").unlink(missing_ok=True)
 
     # A post is derived from the proof it announces and the media it attaches —
     # it carries their coordinates and source in its own text, so it outlives
@@ -199,7 +212,7 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
         by="post-composer",
     )
 
-    return {"name": name, "draft": f"exports/{name}.json"}
+    return {"name": name, "draft": rel}
 
 
 @router.delete("/cases/{case_id}/drafts/{name}")

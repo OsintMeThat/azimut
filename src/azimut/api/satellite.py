@@ -7,6 +7,7 @@ import math
 import os
 import re
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -27,9 +28,11 @@ from ..engine import (
     tilecache,
     tiles,
 )
-from ..workspace import CaseError
+from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
 from .limits import MAX_IMAGE_BYTES
+from .naming import slugify
+from .media import with_thumb_state
 
 router = APIRouter(prefix="/api", tags=["satellite"])
 
@@ -80,6 +83,7 @@ class PlaceIn(BaseModel):
     bearing: float = Field(default=0.0, ge=0, le=360)
     title: str | None = None
     notes: str | None = None
+    folder: str | None = None
 
 
 class ParseIn(BaseModel):
@@ -90,6 +94,7 @@ class SatelliteUpdateIn(BaseModel):
     path: str
     notes: str | None = None
     title: str | None = None
+    folder: str | None = None
 
 
 class GridSaveIn(BaseModel):
@@ -106,13 +111,27 @@ GRID_STATUSES = {"cleared", "flagged"}
 GRID_MAX_STATUSES = 50000
 
 
-def _slug(text: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
-    return slug[:80] or "grid"
-
-
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# A save waits this long for a country, and no longer. Online, the answer is
+# there in a few hundred milliseconds and the item lands in the Saved panel
+# already grouped; offline, the save is a fraction of a second slower and the
+# item lands under Unlocated for the Locate pass to pick up.
+SAVE_LOOKUP_TIMEOUT = 4
+
+
+def locate_on_save(case: Case, entity_id: str, lat: Any, lon: Any) -> None:
+    """Resolve a freshly saved item's country, so it is filed where it belongs
+    the moment it appears in the Saved panel.
+
+    The entity is written *before* this runs and this never raises, so saving
+    cannot fail because of Nominatim — the worst case is a bounded wait and a
+    ``failed`` verdict the Locate pass retries. An item with no position is
+    settled on the spot: there is nothing to look up.
+    """
+    satellite_engine.resolve_geo(case, entity_id, lat, lon, SAVE_LOOKUP_TIMEOUT)
 
 
 @router.get("/satellite/providers")
@@ -514,6 +533,7 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
         title=label,
         dedupe=False,  # a capture is 1:1 with its entity — never collapse re-captures
     )
+    locate_on_save(case, result["entity"]["id"], marker_lat, marker_lon)
 
     return {"path": result["item"]["path"], "title": label, **provenance}
 
@@ -611,6 +631,7 @@ async def capture_screenshot(
         title=label,
         dedupe=False,
     )
+    locate_on_save(case, result["entity"]["id"], lat, lon)
     return {"path": result["item"]["path"], "title": label, **provenance}
 
 
@@ -619,19 +640,80 @@ def save_place(case_id: str, body: PlaceIn) -> dict[str, Any]:
     """Save just a point (the pin, or the crop center) as a navigable ``place`` —
     no image. Clicking it in the sidebar flies the map back to it."""
     case = get_case(case_id)
-    label = (body.title or "").strip() or satellite_engine.coords_label(body.lat, body.lon)
-    attrs = {"coords": satellite_engine.coords_label(body.lat, body.lon, "dd"),
-             "lat": body.lat, "lon": body.lon,
-             "plus_code": geo.plus_code(body.lat, body.lon),
-             "zoom": body.zoom, "bearing": body.bearing}
+    extra: dict[str, Any] = {}
     if body.notes and body.notes.strip():
-        attrs["notes"] = body.notes.strip()
-    return case.add_entity("place", label, attrs=attrs, by="satellite", status="confirmed")
+        extra["notes"] = body.notes.strip()
+    if body.folder and body.folder.strip():
+        extra["folder"] = body.folder.strip()
+    entity = satellite_engine.save_place(
+        case, body.lat, body.lon, body.zoom, body.bearing, body.title, extra_attrs=extra
+    )
+    locate_on_save(case, entity["id"], body.lat, body.lon)
+    return entity
 
 
 @router.get("/cases/{case_id}/satellite")
 def list_captures(case_id: str) -> list[dict[str, Any]]:
-    return satellite_engine.list_captures(get_case(case_id))
+    # tagged like the media listing: the proof pickers render captures in small
+    # cells and need the thumbnail, not the full-size crop.
+    case = get_case(case_id)
+    return with_thumb_state(case, satellite_engine.list_captures(case))
+
+
+@router.get("/cases/{case_id}/satellite/index")
+def saved_index(case_id: str) -> list[dict[str, Any]]:
+    """The case's saved work — places, captures, ingested screenshots — as one
+    compact list, newest first.
+
+    This is what the Saved panel opens on: the tree, the search modal and the
+    map overlay all read it and nothing else, so opening a case costs one
+    request of tens of KB instead of every capture row and every image. It
+    makes no network call of its own.
+    """
+    return satellite_engine.saved_index(get_case(case_id))
+
+
+# Nominatim asks for at most one request a second. A backfill is the only place
+# we make more than one lookup in a row, so it is the only place that waits.
+NOMINATIM_INTERVAL = 1.1
+
+
+@router.post("/cases/{case_id}/satellite/locate")
+def locate_saved(
+    case_id: str, limit: int = Query(default=10, ge=1, le=25)
+) -> dict[str, Any]:
+    """Resolve the country of up to ``limit`` saved items that still have none.
+
+    Progress is the stored geography itself, so the pass resumes after a restart
+    and re-running it is a no-op: ``remaining`` is what the client loops on. The
+    cap keeps one request comfortably inside a timeout at Nominatim's one-per-
+    second pace.
+    """
+    case = get_case(case_id)
+    located = failed = 0
+    looked_up = False
+    for entity in satellite_engine.unlocated_entities(case, limit):
+        attrs = entity.get("attrs") or {}
+        lat, lon = attrs.get("lat"), attrs.get("lon")
+        if lat is None or lon is None:
+            # nothing to look up, and nothing will ever change that
+            satellite_engine.set_geo(case, entity["id"], {"state": "nocoords"})
+            located += 1
+            continue
+        if looked_up:
+            time.sleep(NOMINATIM_INTERVAL)
+        looked_up = True
+        result = geo.locate_point(float(lat), float(lon))
+        satellite_engine.set_geo(case, entity["id"], result)
+        if result["state"] == "failed":
+            failed += 1
+        else:
+            located += 1
+    return {
+        "located": located,
+        "failed": failed,
+        "remaining": len(satellite_engine.unlocated_entities(case)),
+    }
 
 
 @router.delete("/cases/{case_id}/satellite")
@@ -657,6 +739,10 @@ def update_capture(case_id: str, body: SatelliteUpdateIn) -> dict[str, Any]:
     patch: dict[str, Any] = {}
     if body.notes is not None:
         patch["notes"] = body.notes
+    # the My-work folder lives on the sidecar and is mirrored onto the entity by
+    # update_media, so filing a capture stays one request
+    if body.folder is not None:
+        patch["folder"] = body.folder
     # empty title falls back to the coordinates (mirrored onto the entity label)
     if body.title is not None:
         source = item.get("source") or {}
@@ -812,7 +898,7 @@ def get_search_grid(case_id: str, name: str) -> dict[str, Any]:
 def save_search_grid(case_id: str, name: str, body: GridSaveIn) -> dict[str, Any]:
     """Create or replace one grid. The client owns the name (a stable slug)."""
     case = get_case(case_id)
-    slug = _slug(name)
+    slug = slugify(name, "grid")
     spec = dict(body.spec)
     aoi = spec.get("aoi")
     if not isinstance(aoi, dict) or aoi.get("type") not in {"rect", "polygon"}:

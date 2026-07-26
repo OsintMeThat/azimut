@@ -20,17 +20,27 @@
 </script>
 
 <div class="module">
-  <p class="hint">Tick what to save; it lands in the Media Library with its provenance.</p>
+  <p class="hint">Tick what to save. Names carry into the Media Library with the provenance.</p>
 
   <div class="pickers">
     <button class="btn btn-sm" onclick={selectAll} disabled={!savables.length}>Select all</button>
     <button class="btn btn-sm" onclick={selectNone} disabled={!count}>Clear</button>
   </div>
 
-  <div class="folder">
+  <label class="field">
+    <span><Icon name="edit" size={14} /> Base name (optional)</span>
+    <input class="input" bind:value={saveUi.baseName} placeholder="Names the batch" maxlength="200" />
+  </label>
+
+  <div class="field">
     <span><Icon name="folder" size={14} /> Folder (optional)</span>
     <FolderSelect bind:value={saveUi.folder} {folders} emptyLabel="Unfiled" />
   </div>
+
+  <label class="field">
+    <span><Icon name="note" size={14} /> Note (optional)</span>
+    <textarea class="input note" bind:value={saveUi.note} rows="2" placeholder="Why these matter" maxlength="2000"></textarea>
+  </label>
 
   <button class="btn btn-primary w-full" disabled={saving || !count} onclick={save}>
     <Icon name="save" size={15} /> {saving ? 'Saving…' : `Save ${count || ''} to case`.trim()}
@@ -56,17 +66,20 @@
     display: flex;
     gap: 6px;
   }
-  .folder {
+  .field {
     display: flex;
     flex-direction: column;
     gap: 5px;
     font-size: var(--fs-sm);
     color: var(--text-2);
   }
-  .folder span {
+  .field span {
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+  .note {
+    resize: vertical;
   }
   .w-full {
     width: 100%;

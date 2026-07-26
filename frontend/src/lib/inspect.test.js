@@ -4,6 +4,7 @@ import {
   QUAD_SIDES, quadEdgeMidpoints, moveQuadEdge, quadCentroid,
   quadsBounds, translateQuad, moveQuads, rotateQuads, scaleQuads, pinholeOps,
   buildFrameOps, hasVideoEdits, normalizeRightAngleRotation, rotationOps,
+  sourceStem, timecode, autoSaveNames, saveNameOf,
 } from './inspect.js';
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -301,5 +302,87 @@ describe('scaleQuads — the block grows as one', () => {
 
   it('returns an empty array for an empty selection', () => {
     expect(scaleQuads([], 2)).toEqual([]);
+  });
+});
+
+
+describe('sourceStem', () => {
+  it('prefers the title, then the filename, then the path', () => {
+    expect(sourceStem({ label: 'Hangar clip', filename: 'dsc_1.mp4' })).toBe('Hangar clip');
+    expect(sourceStem({ filename: 'dsc_1.mp4', path: 'media/dsc_1.mp4' })).toBe('dsc_1');
+    expect(sourceStem({ path: 'media/sub/roof.png' })).toBe('roof');
+  });
+
+  it('strips only the extension, keeping dots inside the name', () => {
+    expect(sourceStem({ filename: 'v1.2 roof.png' })).toBe('v1.2 roof');
+  });
+
+  it('falls back to Capture when there is nothing to read', () => {
+    expect(sourceStem(null)).toBe('Capture');
+    expect(sourceStem({})).toBe('Capture');
+  });
+
+  it('reads Windows paths too', () => {
+    expect(sourceStem({ path: 'media\\sub\\roof.png' })).toBe('roof');
+  });
+});
+
+describe('timecode', () => {
+  it('formats seconds as hh-mm-ss', () => {
+    expect(timecode(0)).toBe('00-00-00');
+    expect(timecode(750)).toBe('00-12-30');
+    expect(timecode(3725)).toBe('01-02-05');
+  });
+
+  it('rounds and floors at zero rather than producing a negative name', () => {
+    expect(timecode(12.6)).toBe('00-00-13');
+    expect(timecode(-5)).toBe('00-00-00');
+    expect(timecode(undefined)).toBe('00-00-00');
+  });
+});
+
+describe('autoSaveNames', () => {
+  const items = [
+    { key: 'a', defaultName: 'roof 00-01-00' },
+    { key: 'b', defaultName: 'roof 00-02-00' },
+  ];
+
+  it('starts every field on the item default', () => {
+    expect(autoSaveNames(items)).toEqual(['roof 00-01-00', 'roof 00-02-00']);
+  });
+
+  it('numbers the gallery under a base name', () => {
+    expect(autoSaveNames(items, 'Roof')).toEqual(['Roof 01', 'Roof 02']);
+  });
+
+  it('numbers over the whole gallery, so ticking a box never renumbers a field', () => {
+    const three = [...items, { key: 'c', defaultName: 'collage' }];
+    expect(autoSaveNames(three, 'Roof')).toEqual(['Roof 01', 'Roof 02', 'Roof 03']);
+  });
+
+  it('leaves a lone item unnumbered', () => {
+    expect(autoSaveNames([items[0]], 'Roof')).toEqual(['Roof']);
+  });
+
+  it('ignores a whitespace-only base name', () => {
+    expect(autoSaveNames(items, '   ')).toEqual(['roof 00-01-00', 'roof 00-02-00']);
+  });
+});
+
+describe('saveNameOf', () => {
+  const item = { key: 'a', defaultName: 'roof 00-01-00' };
+
+  it('files under what stands in the field', () => {
+    expect(saveNameOf(item, 'Front door')).toBe('Front door');
+  });
+
+  it('trims what the user typed', () => {
+    expect(saveNameOf(item, '  Front door  ')).toBe('Front door');
+  });
+
+  it('falls back to the default rather than filing something nameless', () => {
+    expect(saveNameOf(item, '   ')).toBe('roof 00-01-00');
+    expect(saveNameOf(item, '')).toBe('roof 00-01-00');
+    expect(saveNameOf(item)).toBe('roof 00-01-00');
   });
 });

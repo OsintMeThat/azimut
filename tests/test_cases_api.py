@@ -28,6 +28,22 @@ def test_entity_status_is_validated_consistently(client):
     assert saved["provenance"]["status"] == "suggested"
 
 
+def test_list_cases_filters_by_name(client):
+    for name in ("Kharkiv Strike", "Bakhmut Front", "Kharkiv Bridge"):
+        client.post("/api/cases", json={"name": name})
+
+    hits = client.get("/api/cases", params={"q": "kharkiv"}).json()
+    assert {c["name"] for c in hits} == {"Kharkiv Strike", "Kharkiv Bridge"}
+    # unfiltered still returns everything
+    assert len(client.get("/api/cases").json()) == 3
+
+
+def test_list_cases_respects_limit(client):
+    for name in ("One", "Two", "Three", "Four"):
+        client.post("/api/cases", json={"name": name})
+    assert len(client.get("/api/cases", params={"limit": 2}).json()) == 2
+
+
 def test_case_lifecycle(client):
     created = client.post("/api/cases", json={"name": "Kharkiv Strike"}).json()
     assert created["id"] == "kharkiv-strike"
@@ -226,6 +242,29 @@ def test_catalog_filters_by_folder(client):
     assert [e["label"] for e in unfiled["items"]] == ["loose"]
 
     assert client.get(f"/api/cases/{cid}/catalog/summary").json()["by_folder"] == {"Alpha": 1}
+
+
+def test_catalog_searches_notes_and_descendant_folders(client):
+    cid = client.post("/api/cases", json={"name": "Search"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/entities",
+        json={
+            "type": "media",
+            "label": "frame",
+            "attrs": {"folder": "Sources/Telegram", "notes": "bridge crossing"},
+        },
+    )
+    client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "media", "label": "other", "attrs": {"folder": "Research"}},
+    )
+
+    page = client.get(
+        f"/api/cases/{cid}/catalog/entities",
+        params={"folder": "Sources", "recursive": "true", "q": "bridge"},
+    ).json()
+    assert page["total"] == 1
+    assert [entity["label"] for entity in page["items"]] == ["frame"]
 
 
 def test_catalog_rejects_a_bad_cursor(client):

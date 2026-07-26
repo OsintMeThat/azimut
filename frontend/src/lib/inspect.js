@@ -15,6 +15,44 @@ export const ADJUST_ORDER = [
 let _seq = 0;
 export const uid = (prefix = 'id') => `${prefix}_${Date.now().toString(36)}_${_seq++}`;
 
+// -- Save-tab naming ---------------------------------------------------------
+// What the user types at the Save gate becomes the media title *and* the stem of
+// the file on disk, so these defaults have to read as names, not placeholders.
+
+export function sourceStem(source) {
+  const raw = source?.label || source?.filename || source?.path || '';
+  const base = String(raw).split(/[\\/]/).pop() ?? '';
+  return base.replace(/\.[^.]+$/, '') || 'Capture';
+}
+
+/** Seconds → `hh-mm-ss`, safe in a filename and readable in a list. */
+export function timecode(seconds) {
+  const t = Math.max(0, Math.round(Number(seconds) || 0));
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(Math.floor(t / 3600))}-${pad(Math.floor((t % 3600) / 60))}-${pad(t % 60)}`;
+}
+
+/**
+ * The name every savable starts out holding, before anyone edits it.
+ *
+ * A base name numbers the gallery (`Roof 01`, `Roof 02`); numbering runs over the
+ * whole gallery, not the ticked subset, so a name never renumbers under you as
+ * you tick boxes. A lone savable takes the base name bare — a `01` with nothing
+ * to follow it just adds noise. With no base name, each item's default stands.
+ */
+export function autoSaveNames(savables, baseName = '') {
+  const base = String(baseName ?? '').trim();
+  return savables.map((it, i) => {
+    if (!base) return it.defaultName;
+    return savables.length > 1 ? `${base} ${String(i + 1).padStart(2, '0')}` : base;
+  });
+}
+
+/** The name an item is filed under: what stands in its field, else its default. */
+export function saveNameOf(item, value) {
+  return String(value ?? '').trim() || item.defaultName;
+}
+
 export function adjustDefaults(filters) {
   const out = {};
   for (const f of filters) out[f.id] = f.params[0]?.default ?? 0;

@@ -1,15 +1,19 @@
 <script>
   import { api } from '../lib/api.js';
-  import { lookupEntity } from '../lib/catalog.js';
+  import { fetchAllEntities, lookupEntity } from '../lib/catalog.js';
+  import { matchesTerms } from '../lib/folderBrowse.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
   import {
     adjustDefaults, buildFrameOps, previewStyle, uid, videoSeed, initialQuad, VIDEO_ADJUST_IDS,
     collageBounds, quadFromCropRect, cropImgStyle, cropAspect, styleText, hasVideoEdits,
-    normalizeRightAngleRotation, rotationOps,
+    normalizeRightAngleRotation, rotationOps, sourceStem, timecode, autoSaveNames, saveNameOf,
   } from '../lib/inspect.js';
+  import { isDefaultName, nextName, savedSlugs, savedTitles, savedTitle, slugify } from '../lib/naming.js';
   import { createHistory } from '../lib/history.js';
   import { IDENTITY, matrixCss, rotateAbout, isIdentity, matrixAngleDeg, pointerAngleDeg } from '../lib/frameRotate.js';
   import Icon from '../components/Icon.svelte';
+  import SearchInput from '../components/SearchInput.svelte';
+  import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import CropBox from './inspect/CropBox.svelte';
   import SelectionMenu from './inspect/SelectionMenu.svelte';
@@ -21,18 +25,41 @@
   import PieceCropModal from './inspect/PieceCropModal.svelte';
   import VideoPlayer from './inspect/VideoPlayer.svelte';
 
-  // The Inspect tool is a *scratch workspace*. Opening a photo/video starts a
-  // session; captured frames, per-frame adjustments, video tuning and a collage
-  // layout all live here as plain data. Nothing becomes case media until the Save
-  // tab commits it — the recipes are re-derived full-res on the backend then.
+  // Inspect keeps edits in session state until the Save tab renders them at full
+  // resolution and commits selected outputs to the case.
   const TAB_META = {
     selection: { label: 'Selection', icon: 'video' },
     frame: { label: 'Frame', icon: 'image' },
     collage: { label: 'Collage', icon: 'layers' },
     save: { label: 'Save', icon: 'save' },
   };
+  const SOURCE_FILTERS = [
+    { id: 'all', label: 'All' },
+    { id: 'image', label: 'Images' },
+    { id: 'video', label: 'Video' },
+    { id: 'capture', label: 'Captures' },
+    { id: 'frame', label: 'Frames' },
+    { id: 'collage', label: 'Collages' },
+  ];
 
   let mediaList = $state([]);
+  let sourceQuery = $state('');
+  let sourceFilter = $state('all');
+  let sourceModalOpen = $state(false);
+  let sourceBrowserOpen = $state(false);
+  let sourceBrowsePath = $state('');
+  let sourceBrowseSelection = $state(null);
+  let openSourceAfterDiscard = $state(false);
+  const inspectableMedia = $derived(mediaList.filter((m) => m.kind === 'image' || m.kind === 'video'));
+  const filteredSourceMedia = $derived(
+    sourceFilter === 'all' ? inspectableMedia : inspectableMedia.filter((m) => sourceCategory(m) === sourceFilter)
+  );
+  const pickableMedia = $derived(
+    sourceQuery.trim() ? filteredSourceMedia.filter((m) => matchesSourceName(m, sourceQuery)) : filteredSourceMedia
+  );
+  const sourceBrowserEntries = $derived(
+    filteredSourceMedia.map((m) => ({ ...m, id: m.path, attrs: { folder: m.folder ?? '' } }))
+  );
   let loadedFor = $state(null);
   let filters = $state([]);
   let analyses = $state([]);
@@ -41,22 +68,30 @@
   let activeTab = $state('selection');
   let collageSelectedIds = $state([]);
   let cropPieceNode = $state(null);
-  // Real (backend-composited) Save-tab thumbnails, keyed by collage id:
-  // { sig, url } — regenerated only when a collage's layout actually changes.
+  // Backend-composited Save thumbnails keyed by collage id: { sig, url }.
   let collagePreviews = $state({});
   let saving = $state(false);
-  const saveUi = $state({ selected: {}, folder: '' });
-  // the saved session this workspace came from (if any) — re-saving overwrites it
-  // in place instead of forking a new named session.
+  // Keep names outside the derived `savables` list so slider changes preserve input.
+  const saveUi = $state({ selected: {}, folder: '', names: {}, touched: {}, baseName: '', note: '' });
+  // The header name controls the session filename; `openedSession` stores its slug.
+  let sessionName = $state('');
   let openedSession = $state(null);
-  const sessionModal = $state({ open: false, mode: 'save', name: null, title: '', list: [], busy: false });
+  const sessionModal = $state({ open: false, list: [], busy: false });
+  let sessionQuery = $state('');
+  let sessionBrowserOpen = $state(false);
+  let sessionBrowsePath = $state('');
+  let sessionBrowseSelection = $state(null);
+  const visibleSessions = $derived(
+    sessionQuery.trim() ? sessionModal.list.filter((s) => matchesSessionQuery(s, sessionQuery)) : sessionModal.list
+  );
+  const sessionBrowserEntries = $derived(
+    sessionModal.list.map((s) => ({ ...s, id: s.name, attrs: { folder: s.folder ?? '' } }))
+  );
   let discardConfirm = $state(false);
-  // openSession fetches the spec then re-renders every frame and collage node
-  // one at a time — slow enough on a heavy session that the tool needs to say so.
+  // Loading can be slow because each frame and collage node is rendered in sequence.
   let sessionLoading = $state(false);
 
-  // A fresh, empty collage. A session can hold several — the Collage tab edits
-  // one at a time (session.activeCollageId) and each is saved as its own PNG.
+  // A session can hold several collages and edits one at a time.
   function makeCollage(name) {
     return { id: uid('cl'), name, width: 1600, height: 800, background: '#12141c', transparent: true, nodes: [] };
   }
@@ -202,7 +237,7 @@
 
   const videoFilters = $derived(filters.filter((f) => VIDEO_ADJUST_IDS.includes(f.id)));
   const tabs = $derived(
-    session.source?.kind === 'video' ? ['selection', 'frame', 'collage', 'save'] : ['frame', 'collage', 'save']
+    session.source?.kind === 'video' ? ['selection', 'frame', 'collage', 'save'] : ['frame', 'save']
   );
   const activeFrame = $derived(session.frames.find((f) => f.id === session.activeFrameId) ?? null);
   const framePreview = $derived(activeFrame ? previewStyle(filters, activeFrame.adjust) : { filter: '', transform: '' });
@@ -216,20 +251,21 @@
   const savables = $derived.by(() => {
     const out = [];
     const cid = caseState.current?.id;
+    const stem = sourceStem(session.source);
     if (session.source?.kind === 'video' && hasVideoEdits(videoFilters, session.videoAdjust, videoRotation)) {
       const t = session.source.thumbnail ? `/files/${cid}/${session.source.thumbnail}` : null;
       out.push({
-        key: 'video', kind: 'video', label: 'Video 1', thumb: t,
+        key: 'video', kind: 'video', defaultName: `${stem} (enhanced)`, thumb: t,
         filter: videoPreview.filter, transform: videoPreviewTransform,
         saved: !!session.saved.video,
       });
     }
-    let imgN = 0;
     for (const fr of session.frames) {
-      imgN += 1;
+      const frameStem = sourceStem({ path: fr.path }) || stem;
       out.push({
         key: `frame:${fr.id}`, kind: 'frame', frame: fr, thumb: fr.url,
-        label: `Image ${imgN}`, filter: previewStyle(filters, fr.adjust).filter,
+        defaultName: fr.time == null ? `${frameStem} (edited)` : `${frameStem} ${timecode(fr.time)}`,
+        filter: previewStyle(filters, fr.adjust).filter,
         saved: !!session.saved[`frame:${fr.id}`],
       });
     }
@@ -238,12 +274,36 @@
       colN += 1;
       if (!cl.nodes.length) continue;
       out.push({
-        key: `collage:${cl.id}`, kind: 'collage', label: cl.name || `Collage ${colN}`,
+        key: `collage:${cl.id}`, kind: 'collage', defaultName: cl.name || `Collage ${colN}`,
         thumb: null, collage: cl, preview: collagePreviews[cl.id]?.url ?? null,
         saved: !!session.saved[`collage:${cl.id}`],
       });
     }
     return out;
+  });
+
+  // Every field carries real, editable text — never a placeholder to guess at.
+  // Fields the user has not touched follow the base name; the ones they typed in
+  // are theirs and stay put.
+  //
+  // A collage keeps its name in the session (session.collages[].name), not in
+  // saveUi — that is the one name the Collage tab and the Save tab share, so a
+  // rename in either place shows up in the other.
+  const saveName = (it) => (it.kind === 'collage' ? (it.collage.name ?? '') : (saveUi.names[it.key] ?? ''));
+  function setSaveName(it, value) {
+    if (it.kind === 'collage') it.collage.name = value;
+    else saveUi.names[it.key] = value;
+    saveUi.touched[it.key] = true;
+    saveUi.selected[it.key] = true;
+  }
+
+  $effect(() => {
+    const auto = autoSaveNames(savables, saveUi.baseName);
+    savables.forEach((it, i) => {
+      if (saveUi.touched[it.key]) return;
+      if (it.kind === 'collage') it.collage.name = auto[i];
+      else saveUi.names[it.key] = auto[i];
+    });
   });
 
   // -- lifecycle ------------------------------------------------------------
@@ -338,9 +398,129 @@
     };
   });
 
-  function mediaLabel(m) {
-    const name = m.title || m.filename;
-    return name.length > 60 ? name.slice(0, 57) + '…' : name;
+  // Every saved session in this case, read off the filed entities: the slugs to
+  // catch a name already taken, the names so a fresh session reads apart.
+  let sessionEntities = $state([]);
+  $effect(() => {
+    const id = caseState.current?.id;
+    caseState.rev; // refresh after a save or a delete anywhere else
+    if (!id) {
+      sessionEntities = [];
+      return;
+    }
+    let live = true;
+    fetchAllEntities(id, { types: ['inspect-session'] })
+      .then((list) => {
+        if (!live) return;
+        sessionEntities = list;
+        // The name was assigned before the case's sessions were known. Renumber
+        // it now rather than letting a fresh workspace collide on its first save.
+        if (!openedSession && isDefaultName(sessionName, 'session')) {
+          sessionName = nextName('session', savedTitles(sessionEntities, 'session'));
+        }
+      })
+      .catch(() => { if (live) sessionEntities = []; });
+    return () => { live = false; };
+  });
+
+  const takenSlugs = () => savedSlugs(sessionEntities, 'session');
+
+  function openSourceDialog() {
+    sourceQuery = '';
+    sourceFilter = 'all';
+    sourceBrowserOpen = false;
+    sourceBrowsePath = '';
+    sourceBrowseSelection = null;
+    sourceModalOpen = true;
+  }
+
+  function matchesSourceName(item, query) {
+    return matchesTerms(item.title || item.filename || '', query);
+  }
+
+  function sourceCategory(item) {
+    const source = item.source ?? {};
+    if (source.type === 'satellite' || source.type === 'screenshot') return 'capture';
+    if (source.op === 'collage') return 'collage';
+    if (source.op === 'frame' || source.op === 'adjust') return 'frame';
+    return item.kind;
+  }
+
+  function matchesSessionQuery(session, query) {
+    return matchesTerms([session.title, session.name, session.source].filter(Boolean).join('\n'), query);
+  }
+
+  function openSourceBrowser() {
+    sourceQuery = '';
+    sourceBrowsePath = '';
+    sourceBrowseSelection = null;
+    sourceBrowserOpen = true;
+  }
+
+  function toggleSourceBrowser() {
+    if (sourceBrowserOpen) {
+      sourceBrowserOpen = false;
+      return;
+    }
+    openSourceBrowser();
+  }
+
+  function setSourceFilter(filter) {
+    sourceFilter = filter;
+    sourceBrowsePath = '';
+    sourceBrowseSelection = null;
+  }
+
+  function openSourceFolder(path) {
+    sourceBrowsePath = path;
+    sourceBrowseSelection = null;
+  }
+
+  function confirmSourceBrowser() {
+    const item = sourceBrowserEntries.find((m) => m.path === sourceBrowseSelection);
+    if (item) selectNewSource(item);
+  }
+
+  function selectSourceBrowser(item, confirm = false) {
+    sourceBrowseSelection = item.path;
+    if (confirm) selectNewSource(item);
+  }
+
+  function openSessionBrowser() {
+    sessionBrowsePath = '';
+    sessionBrowseSelection = null;
+    sessionBrowserOpen = true;
+  }
+
+  function toggleSessionBrowser() {
+    if (sessionBrowserOpen) {
+      sessionBrowserOpen = false;
+      return;
+    }
+    openSessionBrowser();
+  }
+
+  function openSessionFolder(path) {
+    sessionBrowsePath = path;
+    sessionBrowseSelection = null;
+  }
+
+  function confirmSessionBrowser() {
+    if (sessionBrowseSelection) openSession(sessionBrowseSelection);
+  }
+
+  function selectSessionBrowser(session, confirm = false) {
+    sessionBrowseSelection = session.name;
+    if (confirm) openSession(session.name);
+  }
+
+  function startNewSession() {
+    if (session.source) {
+      openSourceAfterDiscard = true;
+      discardConfirm = true;
+      return;
+    }
+    openSourceDialog();
   }
 
   function resetSession() {
@@ -358,7 +538,13 @@
     session.saved = {};
     saveUi.selected = {};
     saveUi.folder = '';
+    saveUi.names = {};
+    saveUi.touched = {};
+    saveUi.baseName = '';
+    saveUi.note = '';
     openedSession = null;
+    sessionName = nextName('session', savedTitles(sessionEntities, 'session'));
+    savedSignature = null;
     collageSelectedIds = [];
     shared.currentTime = 0;
     shared.cropMode = false;
@@ -391,6 +577,11 @@
       session.activeFrameId = frame.id;
       activeTab = 'frame';
     }
+  }
+
+  async function selectNewSource(item) {
+    sourceModalOpen = false;
+    await select(item);
   }
 
   function makeFrame(path, time, url) {
@@ -745,6 +936,12 @@
     const folder = saveUi.folder?.trim() || null;
     const chosen = savables.filter((it) => saveUi.selected[it.key]);
     if (!chosen.length) return;
+    const note = saveUi.note?.trim() || null;
+    const nameOf = (item) => saveNameOf(item, saveName(item));
+    // A save can land on media the case already holds (re-saving an unchanged
+    // collage is the common one). The name still applies, but the toast has to
+    // say no new file appeared, or the count looks wrong in the library.
+    let dupes = 0;
     saving = true;
     try {
       const frameItems = chosen
@@ -753,15 +950,22 @@
           path: it.frame.path,
           time: it.frame.time ?? null,
           ops: buildFrameOps(filters, it.frame),
+          label: nameOf(it),
         }));
       if (frameItems.length) {
-        await api.post(`/api/cases/${cid}/inspect/save-frames`, { items: frameItems, folder });
+        const res = await api.post(`/api/cases/${cid}/inspect/save-frames`, {
+          items: frameItems, folder, notes: note,
+        });
+        dupes += (res?.saved ?? []).filter((r) => r.duplicate).length;
         for (const it of chosen) if (it.kind === 'frame') session.saved[it.key] = true;
       }
-      if (chosen.some((it) => it.kind === 'video')) {
-        await api.post(`/api/cases/${cid}/inspect/enhance-video`, {
+      const videoItem = chosen.find((it) => it.kind === 'video');
+      if (videoItem) {
+        const res = await api.post(`/api/cases/${cid}/inspect/enhance-video`, {
           path: session.source.path, params: session.videoAdjust, rotation: videoRotation, folder,
+          label: nameOf(videoItem), notes: note,
         });
+        if (res?.duplicate) dupes += 1;
         session.saved.video = true;
       }
       for (const it of chosen.filter((c) => c.kind === 'collage')) {
@@ -773,18 +977,25 @@
           src: n.save, // frozen snapshot recipe (path/time/ops)
           quad: n.quad.map(([x, y]) => [x - b.minX, y - b.minY]),
         }));
-        await api.post(`/api/cases/${cid}/inspect/compose`, {
+        const res = await api.post(`/api/cases/${cid}/inspect/compose`, {
           width: b.width,
           height: b.height,
           background: null,
           nodes, folder,
+          label: nameOf(it), notes: note,
         });
+        if (res?.duplicate) dupes += 1;
         session.saved[it.key] = true;
       }
       await reloadCase();
       await refresh();
       saveUi.selected = {};
-      toast(`Saved ${chosen.length} item${chosen.length === 1 ? '' : 's'} to the case`, 'ok');
+      saveUi.names = {};
+      saveUi.touched = {};
+      const dupeNote = dupes
+        ? `. ${dupes} matched existing media and ${dupes === 1 ? 'was' : 'were'} renamed`
+        : '';
+      toast(`Saved ${chosen.length} item${chosen.length === 1 ? '' : 's'} to the case${dupeNote}`, 'ok');
     } catch (e) {
       toast(e.message, 'danger');
     } finally {
@@ -816,19 +1027,35 @@
     };
   }
 
-  function openSaveDialog() {
-    sessionModal.mode = 'save';
-    sessionModal.name = openedSession?.name ?? null;
-    sessionModal.title = openedSession?.title || session.source?.label || session.source?.filename || 'Inspect session';
-    sessionModal.open = true;
-  }
+  // The "unsaved" badge compares what a save would write against what the last
+  // one wrote. Deriving it costs one stringify per change, which beats setting a
+  // dirty flag at each of the dozens of places that mutate the workspace — and
+  // it can't drift out of step with them.
+  let savedSignature = $state(null);
+  const signature = () => JSON.stringify([sessionName.trim(), sessionSpec()]);
+  const sessionDirty = $derived(session.source ? signature() !== savedSignature : false);
 
   async function openLoadDialog() {
-    sessionModal.mode = 'open';
     sessionModal.busy = true;
+    sessionQuery = '';
+    sessionBrowserOpen = false;
+    sessionBrowsePath = '';
+    sessionBrowseSelection = null;
     sessionModal.open = true;
     try {
-      sessionModal.list = await api.get(`/api/cases/${caseState.current.id}/inspect/sessions`);
+      const sessions = await api.get(`/api/cases/${caseState.current.id}/inspect/sessions`);
+      try {
+        const entities = await fetchAllEntities(caseState.current.id, { types: ['inspect-session'] });
+        const folders = new Map(
+          entities.map((entity) => [
+            (entity.attrs?.spec ?? '').replace(/^inspect\//, '').replace(/\.json$/, ''),
+            entity.attrs?.folder ?? '',
+          ])
+        );
+        sessionModal.list = sessions.map((session) => ({ ...session, folder: folders.get(session.name) ?? '' }));
+      } catch {
+        sessionModal.list = sessions;
+      }
     } catch (e) {
       toast(e.message, 'danger');
     } finally {
@@ -836,22 +1063,39 @@
     }
   }
 
-  async function confirmSaveSession() {
-    const title = sessionModal.title.trim();
-    if (!title) return;
-    sessionModal.busy = true;
+  // Saving writes under the name in the header. When that name is free the
+  // backend just renames the bound session onto it; when another session holds
+  // it, only an unbound workspace may take it, and only after this asks.
+  let overwritePrompt = $state(null);
+  let savingSession = $state(false);
+
+  async function saveSession() {
+    const title = sessionName.trim();
+    if (!title || savingSession || !session.source) return;
+    const slug = slugify(title, 'session');
+    if (!openedSession && takenSlugs().has(slug)) {
+      overwritePrompt = { slug };
+      return;
+    }
+    return performSessionSave();
+  }
+
+  async function performSessionSave() {
+    const title = sessionName.trim();
+    savingSession = true;
     try {
       const res = await api.post(`/api/cases/${caseState.current.id}/inspect/sessions`, {
-        name: sessionModal.name, title, spec: sessionSpec(),
+        rename_from: openedSession?.name ?? null, title, spec: sessionSpec(),
       });
       openedSession = { name: res.name, title };
+      savedSignature = signature();
       await reloadCase();
-      sessionModal.open = false;
       toast('Session saved. Reopen it from the sidebar', 'ok');
     } catch (e) {
       toast(e.message, 'danger');
     } finally {
-      sessionModal.busy = false;
+      savingSession = false;
+      overwritePrompt = null;
     }
   }
 
@@ -924,6 +1168,8 @@
       session.activeCollageId =
         collages.find((c) => c.id === spec.activeCollageId)?.id ?? collages[0].id;
       openedSession = { name, title: spec.title || name };
+      sessionName = openedSession.title;
+      savedSignature = signature();
       activeTab = src.kind === 'video' ? 'selection' : 'frame';
       anchorCollageHistory();
     } finally {
@@ -934,6 +1180,15 @@
   function discardSession() {
     resetSession();
     discardConfirm = false;
+    if (openSourceAfterDiscard) {
+      openSourceAfterDiscard = false;
+      openSourceDialog();
+    }
+  }
+
+  function cancelDiscard() {
+    discardConfirm = false;
+    openSourceAfterDiscard = false;
   }
 
   async function deleteSession(name) {
@@ -953,33 +1208,32 @@
 <div class="tool">
   <div class="tool-header">
     <h2>Inspect</h2>
+    {#if session.source}
+      <input class="input title-input" bind:value={sessionName} maxlength="200" aria-label="Session name" />
+      {#if sessionDirty}<span class="badge">unsaved</span>{/if}
+    {/if}
     <div class="spacer"></div>
     {#if caseState.current}
       <button class="btn btn-sm" onclick={openLoadDialog} title="Reopen a saved session">
-        <Icon name="folderOpen" size={14} /> Open
+        <Icon name="folderOpen" size={14} /> Open session
+      </button>
+      <button class="btn btn-sm" onclick={startNewSession} title="Start from case media">
+        <Icon name="plus" size={14} /> New session
       </button>
       {#if session.source}
         <button class="btn btn-sm" onclick={() => (discardConfirm = true)} title="Clear this workspace">
           <Icon name="reset" size={14} /> Discard
         </button>
       {/if}
-      <button class="btn btn-sm" disabled={!session.source} onclick={openSaveDialog} title="Save this workspace">
-        <Icon name="save" size={14} /> Save session
+      <button
+        class="btn btn-ok btn-sm"
+        disabled={!session.source || savingSession || !sessionName.trim()}
+        onclick={saveSession}
+        title="Save this workspace under its name"
+      >
+        <Icon name="save" size={14} /> {savingSession ? 'Saving…' : 'Save session'}
       </button>
     {/if}
-    <select
-      class="input source-select"
-      value={session.source?.path ?? ''}
-      onchange={(e) => {
-        const m = mediaList.find((x) => x.path === e.target.value);
-        if (m) select(m);
-      }}
-    >
-      <option value="" disabled>Choose a media…</option>
-      {#each mediaList as m (m.path)}
-        <option value={m.path} title={m.title || m.filename}>{mediaLabel(m)}</option>
-      {/each}
-    </select>
   </div>
 
   {#if !caseState.current}
@@ -996,10 +1250,11 @@
   {:else if !session.source}
     <div class="empty">
       <Icon name="inspect" size={40} />
-      <p>Choose a media above to open it.</p>
-      {#if mediaList.length === 0}
-        <button class="btn" onclick={() => (uiState.tool = 'media')}>Add media first</button>
-      {/if}
+      <h3>Start a session</h3>
+      <p>Start a session to choose media.</p>
+      <button class="btn" onclick={startNewSession}>
+        <Icon name="plus" size={15} /> New session
+      </button>
     </div>
   {:else}
     {#if sourceGone}
@@ -1132,7 +1387,7 @@
         {:else if activeTab === 'collage'}
           <CollageCanvas collage={activeCollage} bind:selectedIds={collageSelectedIds} {requestCrop} />
         {:else if activeTab === 'save'}
-          <SaveGallery {savables} {saveUi} />
+          <SaveGallery {savables} {saveUi} {saveName} {setSaveName} />
         {/if}
       </div>
 
@@ -1147,7 +1402,11 @@
             setActive={(id) => (session.activeFrameId = id)}
           />
         {:else if activeTab === 'collage'}
-          <CollageMenu {session} {filters} bind:selectedIds={collageSelectedIds} {addToCollage} {requestCrop} {renderPiece} />
+          <CollageMenu
+            {session} {filters} bind:selectedIds={collageSelectedIds}
+            {addToCollage} {requestCrop} {renderPiece}
+            onRename={(cl) => (saveUi.touched[`collage:${cl.id}`] = true)}
+          />
         {:else if activeTab === 'save'}
           <SaveMenu {savables} {saveUi} {saving} save={saveSelected} />
         {/if}
@@ -1172,8 +1431,109 @@
       tone="danger"
       icon="reset"
       onconfirm={discardSession}
-      oncancel={() => (discardConfirm = false)}
+      oncancel={cancelDiscard}
     />
+  {/if}
+
+  {#if overwritePrompt}
+    <ConfirmDialog
+      title="Overwrite this session?"
+      message={`“${savedTitle(sessionEntities, 'session', overwritePrompt.slug)}” is already saved in this case.`}
+      detail="Saving replaces its workspace. Rename this session to keep both."
+      confirmLabel="Overwrite"
+      tone="danger"
+      icon="check"
+      onconfirm={performSessionSave}
+      oncancel={() => (overwritePrompt = null)}
+    />
+  {/if}
+
+  {#if sourceModalOpen}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal-back" onclick={() => (sourceModalOpen = false)} role="presentation">
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <div class="modal source-modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="new-session-title" tabindex="-1">
+        <div class="modal-head">
+          <h3 id="new-session-title">New session</h3>
+          <button class="btn btn-ghost btn-xs" onclick={() => (sourceModalOpen = false)} aria-label="Close">
+            <Icon name="x" size={15} />
+          </button>
+        </div>
+
+        <div class="picker-search">
+          <SearchInput bind:value={sourceQuery} placeholder="Search names…" width="100%" />
+          <button class="btn btn-ghost btn-sm browse-btn" title="Browse folders" onclick={toggleSourceBrowser}>…</button>
+        </div>
+
+        {#if inspectableMedia.length === 0}
+          <p class="modal-hint">Add an image or video to start an Inspect session.</p>
+          <div class="modal-actions">
+            <button class="btn btn-sm" onclick={() => (sourceModalOpen = false)}>Cancel</button>
+            <button class="btn btn-primary btn-sm" onclick={() => { sourceModalOpen = false; uiState.tool = 'media'; }}>
+              Go to Media Library
+            </button>
+          </div>
+        {:else}
+          <div class="source-filters" aria-label="Media type">
+            {#each SOURCE_FILTERS as filter (filter.id)}
+              <button
+                class="btn btn-ghost btn-sm"
+                class:active={sourceFilter === filter.id}
+                aria-pressed={sourceFilter === filter.id}
+                onclick={() => setSourceFilter(filter.id)}
+              >
+                {filter.label}
+              </button>
+            {/each}
+          </div>
+
+          {#if sourceBrowserOpen}
+          <FolderBrowser
+            entries={sourceBrowserEntries}
+            path={sourceBrowsePath}
+            rootLabel="Case media"
+            selectedId={sourceBrowseSelection}
+            matches={(m) => matchesSourceName(m, sourceQuery)}
+            emptyText="This folder has no matching media."
+            icon={(m) => (m.kind === 'video' ? 'video' : 'image')}
+            label={(m) => m.title || m.filename}
+            onnavigate={openSourceFolder}
+            onselect={(m) => selectSourceBrowser(m)}
+            onconfirm={(m) => selectSourceBrowser(m, true)}
+          />
+          <div class="modal-actions">
+            <button class="btn btn-primary btn-sm" disabled={!sourceBrowseSelection} onclick={confirmSourceBrowser}>Open selected</button>
+          </div>
+          {:else}
+          {#if pickableMedia.length === 0}
+            <p class="modal-hint">No media matches this filter.</p>
+          {:else}
+            <div class="source-list">
+              {#each pickableMedia as m (m.path)}
+                <button class="source-open" onclick={() => selectNewSource(m)}>
+                  <div class="source-thumb">
+                    {#if m.thumbnail}
+                      <img src={`/files/${caseState.current.id}/${m.thumbnail}`} alt="" loading="lazy" />
+                    {:else}
+                      <Icon name={m.kind === 'video' ? 'video' : 'image'} size={22} />
+                    {/if}
+                  </div>
+                  <span class="source-copy">
+                    <span class="source-title">{m.title || m.filename}</span>
+                    <span class="source-meta">
+                      {sourceCategory(m)}{m.folder ? ` · ${m.folder}` : ''}{m.title && m.filename !== m.title ? ` · ${m.filename}` : ''}
+                    </span>
+                  </span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+          {/if}
+        {/if}
+      </div>
+    </div>
   {/if}
 
   {#if sessionModal.open}
@@ -1184,45 +1544,62 @@
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
         <div class="modal-head">
-          <h3>{sessionModal.mode === 'save' ? 'Save session' : 'Open session'}</h3>
+          <h3>Open session</h3>
           <button class="btn btn-ghost btn-xs" onclick={() => (sessionModal.open = false)} aria-label="Close">
             <Icon name="x" size={15} />
           </button>
         </div>
 
-        {#if sessionModal.mode === 'save'}
-          <p class="modal-hint">Saves the workspace to reopen later; no media is filed.</p>
-          <input
-            class="input"
-            placeholder="Session name"
-            bind:value={sessionModal.title}
-            onkeydown={(e) => e.key === 'Enter' && confirmSaveSession()}
+        {#if sessionBrowserOpen}
+          <div class="picker-search">
+            <SearchInput bind:value={sessionQuery} placeholder="Search sessions…" width="100%" />
+            <button class="btn btn-ghost btn-sm browse-btn" title="Show session list" onclick={toggleSessionBrowser}>…</button>
+          </div>
+          <FolderBrowser
+            entries={sessionBrowserEntries}
+            path={sessionBrowsePath}
+            rootLabel="Sessions"
+            selectedId={sessionBrowseSelection}
+            matches={(s) => matchesSessionQuery(s, sessionQuery)}
+            emptyText="This folder has no matching sessions."
+            icon={() => 'inspect'}
+            label={(s) => s.title}
+            onnavigate={openSessionFolder}
+            onselect={(s) => selectSessionBrowser(s)}
+            onconfirm={(s) => selectSessionBrowser(s, true)}
           />
           <div class="modal-actions">
-            <button class="btn btn-sm" onclick={() => (sessionModal.open = false)}>Cancel</button>
-            <button class="btn btn-primary btn-sm" disabled={sessionModal.busy || !sessionModal.title.trim()} onclick={confirmSaveSession}>
-              <Icon name="save" size={14} /> Save
-            </button>
+            <button class="btn btn-primary btn-sm" disabled={!sessionBrowseSelection} onclick={confirmSessionBrowser}>Open selected</button>
           </div>
         {:else}
           {#if sessionModal.busy}
             <p class="modal-hint">Loading…</p>
-          {:else if sessionModal.list.length === 0}
-            <p class="modal-hint">No saved sessions yet.</p>
           {:else}
-            <div class="session-list">
-              {#each sessionModal.list as s (s.name)}
-                <div class="session-row">
-                  <button class="session-open" disabled={sessionLoading} onclick={() => openSession(s.name)}>
-                    <span class="session-title">{s.title}</span>
-                    <span class="session-meta">{s.frames} frame{s.frames === 1 ? '' : 's'} · {s.collage} collage piece{s.collage === 1 ? '' : 's'}</span>
-                  </button>
-                  <button class="btn btn-ghost btn-xs" disabled={sessionLoading} onclick={() => deleteSession(s.name)} aria-label="Delete session">
-                    <Icon name="trash" size={14} />
-                  </button>
-                </div>
-              {/each}
-            </div>
+            {#if sessionModal.list.length > 6}
+              <div class="picker-search">
+                <SearchInput bind:value={sessionQuery} placeholder="Search sessions…" width="100%" />
+                <button class="btn btn-ghost btn-sm browse-btn" title="Browse folders" onclick={toggleSessionBrowser}>…</button>
+              </div>
+            {/if}
+            {#if sessionModal.list.length === 0}
+              <p class="modal-hint">No saved sessions yet.</p>
+            {:else if visibleSessions.length === 0}
+              <p class="modal-hint">No sessions match this search.</p>
+            {:else}
+              <div class="session-list">
+                {#each visibleSessions as s (s.name)}
+                  <div class="session-row">
+                    <button class="session-open" disabled={sessionLoading} onclick={() => openSession(s.name)}>
+                      <span class="session-title">{s.title}</span>
+                      <span class="session-meta">{s.frames} frame{s.frames === 1 ? '' : 's'} · {s.collage} collage piece{s.collage === 1 ? '' : 's'}</span>
+                    </button>
+                    <button class="btn btn-ghost btn-xs" disabled={sessionLoading} onclick={() => deleteSession(s.name)} aria-label="Delete session">
+                      <Icon name="trash" size={14} />
+                    </button>
+                  </div>
+                {/each}
+              </div>
+            {/if}
           {/if}
         {/if}
       </div>
@@ -1250,9 +1627,6 @@
   }
   .spacer {
     flex: 1;
-  }
-  .source-select {
-    max-width: 280px;
   }
   .empty,
   .hint-mid {
@@ -1467,6 +1841,9 @@
     flex-direction: column;
     gap: 12px;
   }
+  .source-modal {
+    width: 560px;
+  }
   .modal-head {
     display: flex;
     align-items: center;
@@ -1485,6 +1862,88 @@
     display: flex;
     justify-content: flex-end;
     gap: 8px;
+  }
+  .source-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: min(52vh, 480px);
+    overflow: auto;
+  }
+  .source-filters {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .picker-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .picker-search :global(.search-box) {
+    flex: 1;
+  }
+  .browse-btn {
+    min-width: 30px;
+    font-size: var(--fs-lg);
+    line-height: 1;
+  }
+  .source-filters .active {
+    color: var(--text-1);
+    background: var(--bg-3);
+  }
+  .source-open {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 7px;
+    text-align: left;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-2);
+  }
+  .source-open:hover {
+    border-color: var(--accent);
+    background: var(--bg-3);
+  }
+  .source-thumb {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 40px;
+    flex-shrink: 0;
+    overflow: hidden;
+    border-radius: var(--r-sm);
+    background: var(--bg-0);
+    color: var(--text-3);
+  }
+  .source-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .source-copy {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 2px;
+  }
+  .source-title,
+  .source-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .source-title {
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+  }
+  .source-meta {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
   }
   .session-list {
     display: flex;

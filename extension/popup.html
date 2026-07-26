@@ -33,11 +33,9 @@
   </section>
 
   <section id="state-azimut" hidden>
-    <p>This is Azimut. Use the app's own <strong>Capture</strong> button.</p>
+    <p>Permission granted for this tab.</p>
     <p class="muted">
-      Opening this popup granted the capture permission for this tab (browsers
-      require one click on the extension before it may screenshot a tab). It
-      lasts until the tab is closed. You will not need to return here.
+      Return to Azimut and use <strong>Capture</strong>.
     </p>
   </section>
 
@@ -61,18 +59,17 @@
       <input id="title" type="text" placeholder="optional" />
     </div>
     <p id="coords-note" class="muted" hidden>
-      No coordinates were found in this URL. The capture is filed without them and can be fixed later
-      in Azimut's sidebar).
+      No coordinates found. Enter them now or add them later in Azimut.
     </p>
-    <div class="actions">
+    <div class="actions stacked">
       <button id="capture-area" class="primary">Select area to capture…</button>
+      <button id="save-place">Save this place</button>
     </div>
   </section>
 
   <p id="status" class="status" hidden></p>
   <footer>
     <a id="open-options" href="#">Extension options</a>
-    <span class="muted">· one screenshot per click, URL only</span>
   </footer>
 
   <script type="module" src="popup.js"></script>

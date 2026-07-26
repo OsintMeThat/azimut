@@ -5,7 +5,10 @@
   // Viewer side of the Save tab: everything this session produced that can be
   // filed — the enhanced video, each adjusted frame, the collage. Tick the ones
   // to commit; the menu on the right does the actual save.
-  let { savables, saveUi } = $props();
+  // `saveName`/`setSaveName` read and write wherever an item's name actually
+  // lives — the session for a collage, saveUi for everything else — so this
+  // gallery never has to know the difference.
+  let { savables, saveUi, saveName, setSaveName } = $props();
 
   function toggle(key) {
     saveUi.selected[key] = !saveUi.selected[key];
@@ -20,26 +23,34 @@
     </div>
   {:else}
     {#each savables as it (it.key)}
-      <button class="card" class:sel={saveUi.selected[it.key]} class:saved={it.saved} onclick={() => toggle(it.key)}>
-        <div class="thumb">
-          {#if it.kind === 'collage' && it.collage?.nodes.length}
-            {#if it.preview}
-              <!-- the actual composited PNG (backend warp), on a checker so alpha reads -->
-              <div class="collage-real checker"><img src={it.preview} alt={it.label} /></div>
+      <div class="card" class:sel={saveUi.selected[it.key]} class:saved={it.saved}>
+        <button class="pick" onclick={() => toggle(it.key)} aria-label={`Select ${it.defaultName}`}>
+          <div class="thumb">
+            {#if it.kind === 'collage' && it.collage?.nodes.length}
+              {#if it.preview}
+                <!-- the actual composited PNG (backend warp), on a checker so alpha reads -->
+                <div class="collage-real checker"><img src={it.preview} alt={it.defaultName} /></div>
+              {:else}
+                <CollagePreview collage={it.collage} />
+              {/if}
+            {:else if it.thumb}
+              <img src={it.thumb} alt={it.defaultName} style:filter={it.filter} style:transform={it.transform} />
             {:else}
-              <CollagePreview collage={it.collage} />
+              <Icon name={it.kind === 'collage' ? 'layers' : it.kind === 'video' ? 'video' : 'image'} size={30} />
             {/if}
-          {:else if it.thumb}
-            <img src={it.thumb} alt={it.label} style:filter={it.filter} style:transform={it.transform} />
-          {:else}
-            <Icon name={it.kind === 'collage' ? 'layers' : it.kind === 'video' ? 'video' : 'image'} size={30} />
-          {/if}
-          <span class="kind"><Icon name={it.kind === 'video' ? 'video' : it.kind === 'collage' ? 'layers' : 'image'} size={12} /></span>
-          <span class="tick"><Icon name="check" size={14} /></span>
-        </div>
-        <span class="label">{it.label}</span>
-        {#if it.saved}<span class="badge">saved</span>{/if}
-      </button>
+            <span class="kind"><Icon name={it.kind === 'video' ? 'video' : it.kind === 'collage' ? 'layers' : 'image'} size={12} /></span>
+            <span class="tick"><Icon name="check" size={14} /></span>
+            {#if it.saved}<span class="badge">saved</span>{/if}
+          </div>
+        </button>
+        <input
+          class="name"
+          bind:value={() => saveName(it), (v) => setSaveName(it, v)}
+          placeholder={it.defaultName}
+          aria-label={`Name for ${it.defaultName}`}
+          maxlength="200"
+        />
+      </div>
     {/each}
   {/if}
 </div>
@@ -80,6 +91,13 @@
     background: var(--bg-1);
     text-align: left;
     position: relative;
+  }
+  .pick {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
   }
   .card.sel {
     border-color: var(--accent);
@@ -149,17 +167,27 @@
     border-color: var(--accent);
     color: var(--accent-text);
   }
-  .label {
+  .name {
+    width: 100%;
+    font: inherit;
     font-size: var(--fs-sm);
-    color: var(--text-2);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    color: var(--text-1);
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    padding: 3px 6px;
+  }
+  .name:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .name::placeholder {
+    color: var(--text-3);
   }
   .badge {
     position: absolute;
-    bottom: 8px;
-    right: 8px;
+    bottom: 4px;
+    right: 4px;
     font-size: 9px;
     text-transform: uppercase;
     letter-spacing: 0.04em;

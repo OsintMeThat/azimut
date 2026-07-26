@@ -82,13 +82,15 @@ jobs:
         include:
           - os: ubuntu-latest
             asset: azimut-linux-x86_64
+            ffmpeg_target: linux-x86_64
           - os: windows-latest
             asset: azimut-windows-x86_64.exe
+            ffmpeg_target: windows-x86_64
           - os: macos-latest
             asset: azimut-macos-arm64
-          # macos-latest is Apple Silicon. We don't ship an Intel binary: the
-          # last Intel runner (macos-13) is deprecated and its queue stalls
-          # releases. Intel Macs are covered by `pip install azimut` instead.
+            ffmpeg_target: macos-arm64
+          # macos-latest is Apple Silicon. Intel remains a documented Python
+          # package install rather than a standalone release asset.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -106,40 +108,13 @@ jobs:
         run: |
           uv sync --frozen --no-dev --group release --no-install-project
           uv sync --frozen --no-dev --group release --no-build-isolation --no-editable
-      # ffmpeg is a native program, not a Python dep, so it isn't in the wheel.
-      # Vendor a static ffmpeg + ffprobe per-OS so the binary works out of the
-      # box (packaging/azimut.spec picks them up; engine/ffmpeg.py finds them at
-      # runtime). One host, one arch per runner; each zip holds a single binary.
+      # ffmpeg is a native program, not a Python dep. The helper pins and hashes
+      # each upstream archive, then extracts only the expected tools.
       - name: Vendor static ffmpeg + ffprobe into the binary
-        shell: bash
-        run: |
-          mkdir -p packaging/vendor
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            # martin-riedl.de stopped publishing Windows builds; BtbN's
-            # "latest" release tag always points at the newest static win64
-            # build, so pull ffmpeg.exe/ffprobe.exe out of its nested bin/.
-            curl -fL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -o ffmpeg.zip
-            uv run --no-sync python -c "
-          import zipfile
-          zf = zipfile.ZipFile('ffmpeg.zip')
-          for n in zf.namelist():
-              tail = n.rsplit('/', 1)[-1]
-              if tail in ('ffmpeg.exe', 'ffprobe.exe'):
-                  open('packaging/vendor/' + tail, 'wb').write(zf.read(n))
-          "
-          else
-            case "${{ runner.os }}" in
-              Linux) plat=linux/amd64 ;;
-              macOS) plat=macos/arm64 ;;
-            esac
-            base="https://ffmpeg.martin-riedl.de/redirect/latest/$plat/release"
-            for tool in ffmpeg ffprobe; do
-              curl -fL "$base/$tool.zip" -o "$tool.zip"
-              uv run --no-sync python -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall('packaging/vendor')" "$tool.zip"
-            done
-          fi
-          chmod +x packaging/vendor/* 2>/dev/null || true
-          ls -l packaging/vendor
+        run: >-
+          uv run --no-sync python scripts/vendor_ffmpeg.py
+          "${{ matrix.ffmpeg_target }}"
+          --output packaging/vendor
       - name: Build single-file binary
         run: uv run --no-sync pyinstaller packaging/azimut.spec --distpath dist-bin --workpath build-bin
       - name: Smoke-test the binary

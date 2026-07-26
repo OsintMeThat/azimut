@@ -26,6 +26,9 @@ describe('buildCatalogQuery', () => {
     expect(buildCatalogQuery('c1', { unfiled: true, folder: 'ignored' })).toBe(
       '/api/cases/c1/catalog/entities?unfiled=true'
     );
+    expect(buildCatalogQuery('c1', { folder: 'Sources', recursive: true })).toBe(
+      '/api/cases/c1/catalog/entities?folder=Sources&recursive=true'
+    );
   });
 });
 
@@ -69,6 +72,47 @@ describe('fetchAllEntities — the full bounded slice', () => {
     expect(paths[0]).toContain('type=place');
     expect(paths[0]).toContain('status=confirmed');
     expect(await fetchAllEntities(null, { get })).toEqual([]);
+  });
+
+  it('pages an exact folder or the unfiled bucket', async () => {
+    const paths = [];
+    const get = async (path) => {
+      paths.push(path);
+      return { items: [], next_cursor: null };
+    };
+    await fetchAllEntities('c1', {
+      folder: 'Research/Images', recursive: true, status: 'confirmed', get,
+    });
+    await fetchAllEntities('c1', { unfiled: true, status: 'confirmed', get });
+    expect(paths[0]).toContain('folder=Research%2FImages');
+    expect(paths[0]).toContain('recursive=true');
+    expect(paths[0]).toContain('status=confirmed');
+    expect(paths[1]).toContain('unfiled=true');
+  });
+
+  it('walks every page inside a folder instead of stopping at the first page', async () => {
+    const paths = [];
+    const labels = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo'];
+    const get = async (path) => {
+      paths.push(path);
+      const url = new URL(path, 'http://x');
+      const cursor = Number(url.searchParams.get('cursor') ?? 0);
+      const limit = Number(url.searchParams.get('limit'));
+      const items = labels.slice(cursor, cursor + limit).map((label) => ({ id: label, label }));
+      return {
+        items,
+        next_cursor: cursor + limit < labels.length ? String(cursor + limit) : null,
+      };
+    };
+
+    const all = await fetchAllEntities('c1', {
+      folder: 'Research/Images',
+      pageSize: 2,
+      get,
+    });
+    expect(all.map((entity) => entity.label)).toEqual(labels);
+    expect(paths).toHaveLength(3);
+    expect(paths.every((path) => path.includes('folder=Research%2FImages'))).toBe(true);
   });
 });
 

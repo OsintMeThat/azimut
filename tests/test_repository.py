@@ -135,6 +135,23 @@ def test_derivation_subgraph_walks_the_derived_from_closure(repo):
     assert link_engine.derivation_subgraph(repo, "ghost") is None
 
 
+def test_count_dependents_groups_incoming_edges_by_target(repo):
+    capture = repo.add_entity("capture", "worked", {"lat": 50.4}, by="user")
+    quiet = repo.add_entity("capture", "untouched", {"lat": 51.5}, by="user")
+    photo = repo.add_entity("media", "photo", {"path": "media/x.jpg"}, by="user")
+    for name in ("P1", "P2"):
+        proof = repo.add_entity("proof", name, {"spec": f"proofs/{name}.json"}, by="user")
+        repo.add_link(proof["id"], capture["id"], "derived-from", by="user")
+    repo.add_link(photo["id"], capture["id"], "derived-from", by="user")  # wrong source type
+    post = repo.add_entity("post", "draft", {"draft": "exports/d.json"}, by="user")
+    repo.add_link(post["id"], capture["id"], "mentions", by="user")  # wrong link type
+
+    counts = repo.count_dependents(link_type="derived-from", from_type="proof")
+    assert counts == {capture["id"]: 2}  # untouched targets are absent, not zero
+    assert quiet["id"] not in counts
+    assert repo.count_dependents(link_type="derived-from", from_type="post") == {}
+
+
 def test_find_entity_by_attr(repo):
     repo.add_entity("media", "photo", {"path": "media/x.jpg"}, by="user")
     found = repo.find_entity(attr="path", value="media/x.jpg")
@@ -170,8 +187,13 @@ def test_page_entities_walks_the_whole_catalog_in_order(repo):
 
 
 def test_page_entities_filters_by_type_status_and_query(repo):
-    p = repo.add_entity("person", "Ada Lovelace", by="user")
-    repo.add_entity("account", "@ada", by="user")
+    p = repo.add_entity(
+        "person",
+        "Ada Lovelace",
+        {"folder": "Researchers", "notes": "analytical engine"},
+        by="user",
+    )
+    account = repo.add_entity("account", "@ada", by="user")
     sugg = repo.add_entity("person", "Alan Turing", by="user", status="suggested")
 
     people = repo.page_entities(limit=50, types=["person"])
@@ -182,6 +204,11 @@ def test_page_entities_filters_by_type_status_and_query(repo):
 
     hits = repo.page_entities(limit=50, query="lovelace")  # case-insensitive label search
     assert [e["id"] for e in hits["items"]] == [p["id"]]
+    assert [e["id"] for e in repo.page_entities(query="analytical engine")["items"]] == [
+        p["id"]
+    ]
+    assert [e["id"] for e in repo.page_entities(query="researchers")["items"]] == [p["id"]]
+    assert [e["id"] for e in repo.page_entities(query="account")["items"]] == [account["id"]]
 
 
 def test_page_entities_cursor_is_stable_when_an_import_appends(repo):
@@ -228,6 +255,20 @@ def test_page_entities_filters_by_folder_and_unfiled(repo):
 
     unfiled = repo.page_entities(limit=50, unfiled=True)
     assert [e["id"] for e in unfiled["items"]] == [loose["id"]]
+
+
+def test_page_entities_can_include_descendant_folders(repo):
+    parent = repo.add_entity("media", "parent", {"folder": "Sources"}, by="user")
+    child = repo.add_entity(
+        "media", "child", {"folder": "Sources/Telegram"}, by="user"
+    )
+    repo.add_entity("media", "other", {"folder": "Research"}, by="user")
+
+    exact = repo.page_entities(folder="Sources")
+    recursive = repo.page_entities(folder="Sources", recursive=True)
+
+    assert [e["id"] for e in exact["items"]] == [parent["id"]]
+    assert [e["id"] for e in recursive["items"]] == [parent["id"], child["id"]]
 
 
 def test_page_entities_folder_filter_follows_an_edit(repo):

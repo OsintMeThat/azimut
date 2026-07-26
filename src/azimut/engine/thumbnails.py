@@ -23,6 +23,7 @@ to the original file. This module owns their whole lifecycle.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import threading
 import time
@@ -270,9 +271,25 @@ def cache_size(case: "CaseType") -> int:
     return sum(p.stat().st_size for p in thumbs.iterdir() if p.is_file())
 
 
+def _proof_thumbs(case: "CaseType") -> set[str]:
+    """Thumbnails the saved proofs point at. Proofs are not media items, but
+    their exports share this cache, so the sweep below has to count them as
+    referenced or it would delete every one of them."""
+    names = set()
+    for spec_path in case.subdir("proofs").glob("*.json"):
+        try:
+            spec = json.loads(spec_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        thumb = spec.get("thumb")
+        if isinstance(thumb, str) and thumb:
+            names.add(thumb.rsplit("/", 1)[-1])
+    return names
+
+
 def repair(case: "CaseType") -> int:
-    """Sweep the cache: delete abandoned temp files and thumbnails no live media
-    sidecar references any more (orphans left by a generator bump or a delete).
+    """Sweep the cache: delete abandoned temp files and thumbnails nothing live
+    references any more (orphans left by a generator bump or a delete).
     Returns how many files were removed. Never touches originals."""
     from . import media as media_engine
 
@@ -283,7 +300,7 @@ def repair(case: "CaseType") -> int:
         item["thumbnail"].rsplit("/", 1)[-1]
         for item in media_engine.list_media(case)
         if item.get("thumbnail")
-    }
+    } | _proof_thumbs(case)
     removed = 0
     for path in thumbs.iterdir():
         if not path.is_file():

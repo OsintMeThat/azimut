@@ -23,6 +23,24 @@ export function matchesQuery(item, query) {
   return q.split(/\s+/).every((term) => haystack.includes(term));
 }
 
+/** True for native satellite captures and extension screenshots whose URL
+ * explicitly identified satellite imagery. */
+export function isSatelliteMedia(item) {
+  const source = item?.source ?? {};
+  return source.type === 'satellite' ||
+    (source.type === 'screenshot' && source.imagery_mode === 'satellite');
+}
+
+/** Images that are not already classified as satellite captures. */
+export function isGenericImage(item) {
+  return item?.kind === 'image' && !isSatelliteMedia(item);
+}
+
+/** User-facing kind label for the Media Library card. */
+export function mediaDisplayKind(item) {
+  return isSatelliteMedia(item) ? 'satellite' : item?.kind;
+}
+
 export const SORTS = [
   { id: 'newest', label: 'Newest first' },
   { id: 'oldest', label: 'Oldest first' },
@@ -41,7 +59,7 @@ export const SORTS = [
  */
 export function visibleMedia(
   items,
-  { hasCase = true, catMatch = null, folderFilter = null, query = '', sort = 'newest' } = {}
+  { hasCase = true, catMatch = null, folderFilter = null, query = '', sort = 'newest', direction } = {}
 ) {
   if (!hasCase) return [];
   return sortItems(
@@ -51,7 +69,18 @@ export function visibleMedia(
         (!folderFilter || i.folder === folderFilter) &&
         matchesQuery(i, query)
     ),
-    sort
+    sort,
+    direction
+  );
+}
+
+/** Whether a folder and category can produce at least one media item.
+ *  Deliberately ignores the text query: choosing a compatible folder/type
+ *  combination should not reset either filter just because a search is active.
+ */
+export function hasMediaForFilters(items, { catMatch = null, folderFilter = null } = {}) {
+  return items.some(
+    (i) => (!catMatch || catMatch(i)) && (!folderFilter || i.folder === folderFilter)
   );
 }
 
@@ -59,8 +88,9 @@ const displayName = (i) => (i.title ?? i.filename ?? '').toLowerCase();
 
 /** Stable-sorted copy of `items` (the API's order is newest-first on disk scan,
  *  but sorting explicitly keeps the toggle honest whatever the backend does). */
-export function sortItems(items, sort) {
+export function sortItems(items, sort, direction) {
   const out = [...items];
+  let descending = false;
   switch (sort) {
     case 'oldest':
       out.sort((a, b) => (a.added_at ?? '').localeCompare(b.added_at ?? ''));
@@ -68,13 +98,24 @@ export function sortItems(items, sort) {
     case 'name':
       out.sort((a, b) => displayName(a).localeCompare(displayName(b)));
       break;
+    case 'type':
+      out.sort((a, b) => (mediaDisplayKind(a) ?? '').localeCompare(mediaDisplayKind(b) ?? ''));
+      break;
+    case 'folder':
+      out.sort((a, b) => (a.folder ?? '').localeCompare(b.folder ?? ''));
+      break;
     case 'size':
-      out.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+      out.sort((a, b) => (a.size ?? 0) - (b.size ?? 0));
+      descending = true;
       break;
     case 'newest':
     default:
-      out.sort((a, b) => (b.added_at ?? '').localeCompare(a.added_at ?? ''));
+      out.sort((a, b) => (a.added_at ?? '').localeCompare(b.added_at ?? ''));
+      descending = true;
       break;
   }
+  if (direction === 'asc') descending = false;
+  if (direction === 'desc') descending = true;
+  if (descending) out.reverse();
   return out;
 }

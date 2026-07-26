@@ -1,11 +1,14 @@
 """Satellite capture API: bearing is honored and persisted with provenance."""
 
+import io
+
 import pytest
 
 import graph_read
 from PIL import Image
 
-from azimut.engine import tiles
+from azimut.api import satellite as satellite_api
+from azimut.engine import geo, tiles
 
 
 def _fake_tile(client, url):  # offline: every tile is a solid green square
@@ -741,3 +744,330 @@ def test_search_grids_are_not_entities(client):
     client.put(f"/api/cases/{cid}/search-grids/g", json=_rect_grid())
     # grids are working aids, filed under search/, never in the case graph
     assert graph_read.entities(cid) == []
+
+
+def test_capture_listing_carries_its_thumbnail_and_state(client, monkeypatch):
+    # the proof panel pickers render this list in 150px cells: without a
+    # thumbnail they would fall back to the full-size capture PNG.
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/satellite/capture",
+        json={"lat": 48.8584, "lon": 2.2945, "zoom": 16, "width": 640, "height": 480},
+    )
+
+    capture = client.get(f"/api/cases/{cid}/satellite").json()[0]
+    assert capture["thumbnail"] and capture["thumbnail"] != capture["path"]
+    assert capture["thumb_state"] == "ready"
+
+
+# -- saved index & the Locate backfill ------------------------------------------------
+# The Saved panel navigates hundreds of items off one compact list. What must
+# hold: the list carries every kind of saved work with the fields the tree, the
+# search modal and the map overlay read; reading it never touches the network;
+# and the geography behind it is filled in without a save ever blocking on it.
+
+
+def _address(payload):
+    return lambda lat, lon, timeout=8, language=None: {
+        "display_name": "x", "address": payload, "attribution": "x",
+    }
+
+
+_UKRAINE = _address({"country_code": "ua", "country": "Ukraine", "state": "Donetsk Oblast"})
+
+
+def _index(client, cid):
+    return client.get(f"/api/cases/{cid}/satellite/index").json()
+
+
+def test_index_lists_places_and_captures_newest_first(client, monkeypatch):
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/satellite/place",
+        json={"lat": 48.0159, "lon": 37.8029, "title": "checkpoint north", "notes": "two vehicles"},
+    )
+    cap = _capture(client, cid, 50.4501, 30.5234)
+
+    rows = _index(client, cid)
+    assert [r["kind"] for r in rows] == ["capture", "place"]  # newest first
+
+    capture, place = rows
+    assert capture["path"] == cap["path"]
+    assert capture["thumbnail"] and capture["thumbnail"] != capture["path"]
+    assert capture["zoom"] == 16
+    assert capture["provider"] == "Esri World Imagery"
+    assert capture["lat"] == 50.4501
+
+    assert place["title"] == "checkpoint north"
+    assert place["notes"] == "two vehicles"
+    assert place["path"] is None and place["thumbnail"] is None
+    assert place["lat"] == 48.0159 and place["lon"] == 37.8029
+
+
+def test_index_carries_the_geography_and_derives_the_continent(client, monkeypatch):
+    monkeypatch.setattr(geo, "reverse_geocode", _UKRAINE)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 48.0159, "lon": 37.8029})
+
+    row = _index(client, cid)[0]
+    assert row["geo"] == {
+        "state": "ok", "country_code": "ua", "country": "Ukraine", "region": "Donetsk Oblast",
+    }
+    # never stored, always derived — fixing the tables repairs old cases
+    assert row["continent"] == "Europe"
+    assert row["country_en"] == "Ukraine"
+
+
+def test_index_files_a_transcontinental_country_by_the_point(client, monkeypatch):
+    # one country, two continents: the coordinates decide, not the country
+    monkeypatch.setattr(
+        geo, "reverse_geocode",
+        _address({"country_code": "ru", "country": "Russia", "state": "Primorsky Krai"}),
+    )
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 43.1155, "lon": 131.8855})
+    client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 55.7558, "lon": 37.6173})
+
+    moscow, vladivostok = _index(client, cid)
+    assert moscow["continent"] == "Europe"
+    assert vladivostok["continent"] == "Asia"
+
+
+def test_index_names_the_country_in_english_beside_the_native_one(client, monkeypatch):
+    # Nominatim answers in the local language; the English name is derived from
+    # the code, so rows filed long before the tree spoke English gain it too
+    monkeypatch.setattr(
+        geo, "reverse_geocode",
+        _address({"country_code": "ua", "country": "Україна", "state": "Донецька область"}),
+    )
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 48.0159, "lon": 37.8029})
+
+    row = _index(client, cid)[0]
+    assert row["geo"]["country"] == "Україна"
+    assert row["country_en"] == "Ukraine"
+
+
+def test_index_carries_the_my_work_folder(client, monkeypatch):
+    """The saved-work modal browses by folder, so the index has to say which one
+    each item is in — the capture reads its sidecar, the place its own attrs."""
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    cap = _capture(client, cid, 50.4501, 30.5234)
+    client.patch(
+        f"/api/cases/{cid}/satellite", json={"path": cap["path"], "folder": "recon/bridges"}
+    )
+    client.post(
+        f"/api/cases/{cid}/satellite/place",
+        json={"lat": 48.0159, "lon": 37.8029, "title": "checkpoint", "folder": "recon"},
+    )
+    client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 48.02, "lon": 37.81})
+
+    folders = {row["title"]: row["folder"] for row in _index(client, cid)}
+    assert folders["checkpoint"] == "recon"
+    assert folders["50.450100, 30.523400"] == "recon/bridges"
+    assert folders["48.020000, 37.810000"] == ""  # unfiled, never null
+
+
+def _proof(client, cid, title, *srcs):
+    return client.post(
+        f"/api/cases/{cid}/proofs",
+        json={
+            "title": title,
+            "spec": {"panels": [{"id": f"p{i}", "src": s} for i, s in enumerate(srcs)]},
+        },
+    ).json()
+
+
+def test_index_counts_the_proofs_built_on_each_row(client, monkeypatch):
+    """`All` shows every point once, so a worked capture is marked rather than
+    doubled. The count is what the mark reads."""
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    worked = _capture(client, cid, 50.4501, 30.5234)
+    _capture(client, cid, 48.8584, 2.2945)  # untouched
+    client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 48.0159, "lon": 37.8029})
+    _proof(client, cid, "First", worked["path"])
+    _proof(client, cid, "Second", worked["path"])
+
+    counts = {row["title"]: row["proofs"] for row in _index(client, cid)}
+    assert counts["50.450100, 30.523400"] == 2
+    assert counts["48.858400, 2.294500"] == 0  # never null, so the mark is a plain test
+    assert counts["48.015900, 37.802900"] == 0
+
+
+def test_filing_a_capture_moves_the_entity_with_it(client, monkeypatch):
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    cap = _capture(client, cid, 48.8584, 2.2945)
+
+    client.patch(f"/api/cases/{cid}/satellite", json={"path": cap["path"], "folder": "paris"})
+    assert _captures(client, cid)[0]["attrs"]["folder"] == "paris"
+
+    # a patch that says nothing about the folder leaves it where it was
+    client.patch(f"/api/cases/{cid}/satellite", json={"path": cap["path"], "notes": "hangar"})
+    assert _index(client, cid)[0]["folder"] == "paris"
+
+    client.patch(f"/api/cases/{cid}/satellite", json={"path": cap["path"], "folder": ""})
+    assert _index(client, cid)[0]["folder"] == ""
+
+
+def test_index_makes_no_network_call(client, monkeypatch):
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    _capture(client, cid, 48.8584, 2.2945)
+    client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 48.8584, "lon": 2.2945})
+
+    def boom(*args, **kwargs):
+        raise AssertionError("reading saved work must never touch the network")
+
+    monkeypatch.setattr(geo.httpx, "get", boom)
+    assert len(_index(client, cid)) == 2
+
+
+def test_index_reports_an_ingested_screenshot_as_its_own_kind(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    token = client.post("/api/settings/ingest-token").json()["ingest_token"]
+    buf = io.BytesIO()
+    Image.new("RGB", (320, 200), (30, 90, 30)).save(buf, format="PNG")
+    client.post(
+        "/api/ingest/screenshot",
+        files={"image": ("shot.png", buf.getvalue(), "image/png")},
+        data={"url": "https://yandex.com/maps/?ll=37.8029,48.0159&z=17&l=sat", "case_id": cid},
+        headers={"X-Azimut-Token": token},
+    )
+
+    row = _index(client, cid)[0]
+    assert row["kind"] == "screenshot"
+    assert row["site"] == "yandex-maps"
+    # the way back to a site we cannot embed is the recorded URL itself
+    assert row["source_url"].startswith("https://yandex.com/maps/")
+
+
+# -- geography on save ----------------------------------------------------------------
+
+
+def test_saving_resolves_the_country_before_it_answers(client, monkeypatch):
+    # the item must land in the Saved panel already grouped, not appear under
+    # Unlocated and jump elsewhere a moment later
+    monkeypatch.setattr(geo, "reverse_geocode", _UKRAINE)
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 48.0159, "lon": 37.8029})
+    _capture(client, cid, 48.0159, 37.8029)
+
+    assert [r["geo"]["country"] for r in _index(client, cid)] == ["Ukraine", "Ukraine"]
+
+
+def test_the_save_lookup_is_bounded(client, monkeypatch):
+    # a filed capture must never sit behind a slow geocoder: the save path asks
+    # for a short timeout, the explicit backfill keeps the generous one
+    seen = []
+    monkeypatch.setattr(
+        geo, "reverse_geocode",
+        lambda lat, lon, timeout=8: seen.append(timeout) or _UKRAINE(lat, lon),
+    )
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 48.0159, "lon": 37.8029})
+    assert seen == [satellite_api.SAVE_LOOKUP_TIMEOUT]
+    assert satellite_api.SAVE_LOOKUP_TIMEOUT < 8
+
+
+def test_a_save_succeeds_when_the_lookup_fails(client, monkeypatch):
+    # the conftest fixture already has Nominatim unreachable — saving is local
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    assert client.post(
+        f"/api/cases/{cid}/satellite/place", json={"lat": 48.0159, "lon": 37.8029}
+    ).status_code == 200
+    _capture(client, cid, 48.0159, 37.8029)
+
+    assert [r["geo"] for r in _index(client, cid)] == [{"state": "failed"}, {"state": "failed"}]
+
+    # …and a later Locate pass resolves what the failure left behind
+    monkeypatch.setattr(geo, "reverse_geocode", _UKRAINE)
+    assert client.post(f"/api/cases/{cid}/satellite/locate").json() == {
+        "located": 2, "failed": 0, "remaining": 0,
+    }
+    assert {r["geo"]["country"] for r in _index(client, cid)} == {"Ukraine"}
+
+
+def test_a_screenshot_without_coordinates_is_never_looked_up(client, monkeypatch):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    token = client.post("/api/settings/ingest-token").json()["ingest_token"]
+    buf = io.BytesIO()
+    Image.new("RGB", (320, 200), (30, 90, 30)).save(buf, format="PNG")
+    client.post(
+        "/api/ingest/screenshot",
+        files={"image": ("shot.png", buf.getvalue(), "image/png")},
+        data={"url": "https://www.openstreetmap.org/", "case_id": cid},
+        headers={"X-Azimut-Token": token},
+    )
+
+    row = _index(client, cid)[0]
+    assert row["lat"] is None
+    assert row["geo"] == {"state": "nocoords"}
+
+    def boom(lat, lon, timeout=8):
+        raise AssertionError("a point with no coordinates has nothing to look up")
+
+    monkeypatch.setattr(geo, "reverse_geocode", boom)
+    assert client.post(f"/api/cases/{cid}/satellite/locate").json()["remaining"] == 0
+
+
+# -- the Locate backfill ---------------------------------------------------------------
+
+
+def _places_at(client, cid, count):
+    for i in range(count):
+        client.post(
+            f"/api/cases/{cid}/satellite/place", json={"lat": 48.0 + i / 100, "lon": 37.8}
+        )
+
+
+def test_locate_works_through_the_backlog_and_reports_what_is_left(client, monkeypatch):
+    monkeypatch.setattr(satellite_api, "NOMINATIM_INTERVAL", 0)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    _places_at(client, cid, 5)  # all saved offline → all failed
+
+    monkeypatch.setattr(geo, "reverse_geocode", _UKRAINE)
+    first = client.post(f"/api/cases/{cid}/satellite/locate", params={"limit": 2}).json()
+    assert first == {"located": 2, "failed": 0, "remaining": 3}
+
+    second = client.post(f"/api/cases/{cid}/satellite/locate", params={"limit": 25}).json()
+    assert second == {"located": 3, "failed": 0, "remaining": 0}
+    # settled items are never looked up again — re-running is a no-op
+    assert client.post(f"/api/cases/{cid}/satellite/locate").json() == {
+        "located": 0, "failed": 0, "remaining": 0,
+    }
+
+
+def test_locate_leaves_a_failure_for_the_next_pass(client, monkeypatch):
+    monkeypatch.setattr(satellite_api, "NOMINATIM_INTERVAL", 0)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    _places_at(client, cid, 2)
+
+    assert client.post(f"/api/cases/{cid}/satellite/locate").json() == {
+        "located": 0, "failed": 2, "remaining": 2,
+    }
+
+
+def test_locate_settles_open_sea_without_retrying_it(client, monkeypatch):
+    monkeypatch.setattr(satellite_api, "NOMINATIM_INTERVAL", 0)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 0.0, "lon": -30.0})
+
+    monkeypatch.setattr(geo, "reverse_geocode", _address({}))
+    assert client.post(f"/api/cases/{cid}/satellite/locate").json() == {
+        "located": 1, "failed": 0, "remaining": 0,
+    }
+    assert _index(client, cid)[0]["geo"] == {"state": "nocountry"}
+    assert _index(client, cid)[0]["continent"] is None
+
+
+def test_locate_clamps_its_batch_size(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    assert client.post(f"/api/cases/{cid}/satellite/locate", params={"limit": 26}).status_code == 422
+    assert client.post(f"/api/cases/{cid}/satellite/locate", params={"limit": 0}).status_code == 422

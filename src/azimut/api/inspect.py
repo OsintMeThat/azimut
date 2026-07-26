@@ -8,7 +8,6 @@ the Proof Composer picker with zero extra plumbing). Long scans run as jobs.
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -20,6 +19,7 @@ from ..engine import inspect as inspect_engine
 from ..engine import links as link_engine
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
+from .naming import read_created_at, slugify
 
 router = APIRouter(prefix="/api", tags=["inspect"])
 
@@ -47,12 +47,13 @@ class FrameSpec(BaseModel):
     path: str
     time: float | None = Field(default=None, ge=0)
     ops: list[Op] = []
-    label: str | None = None
+    label: str | None = Field(default=None, max_length=200)
 
 
 class SaveFramesIn(BaseModel):
     items: list[FrameSpec] = Field(min_length=1)
     folder: str | None = None
+    notes: str | None = Field(default=None, max_length=2000)
 
 
 class NodeSrc(BaseModel):
@@ -71,8 +72,9 @@ class ComposeIn(BaseModel):
     height: int = Field(ge=16, le=8192)
     nodes: list[ComposeNode] = Field(min_length=1)
     background: str | None = "#12141c"  # None → transparent (RGBA) canvas
-    label: str | None = None
+    label: str | None = Field(default=None, max_length=200)
     folder: str | None = None
+    notes: str | None = Field(default=None, max_length=2000)
 
 
 class StitchIn(BaseModel):
@@ -88,8 +90,9 @@ class EnhanceVideoIn(BaseModel):
     path: str
     params: dict[str, Any] = {}
     rotation: Literal[-180, -90, 0, 90, 180] = 0
-    label: str | None = None
+    label: str | None = Field(default=None, max_length=200)
     folder: str | None = None
+    notes: str | None = Field(default=None, max_length=2000)
 
 
 class AnalyzeIn(BaseModel):
@@ -101,7 +104,11 @@ class AnalyzeIn(BaseModel):
 
 
 class SessionIn(BaseModel):
-    name: str | None = None  # slug; None → derived from title
+    # The filename always follows the title, so renaming a saved session moves
+    # its file. ``rename_from`` is the slug the workspace is currently bound to
+    # (absent on a first save); a save that lands elsewhere renames that file in
+    # place instead of leaving a copy behind under the old name.
+    rename_from: str | None = None
     title: str = Field(min_length=1, max_length=200)
     spec: dict[str, Any]
 
@@ -164,7 +171,7 @@ def save_frames(case_id: str, body: SaveFramesIn) -> dict[str, Any]:
             results.append(
                 inspect_engine.save_frame(
                     case, item.path, time_s=item.time, ops=ops,
-                    label=item.label, folder=body.folder,
+                    label=item.label, folder=body.folder, notes=body.notes,
                 )
             )
     except CaseError as exc:
@@ -187,6 +194,7 @@ def compose(case_id: str, body: ComposeIn) -> dict[str, Any]:
         return inspect_engine.compose_perspective(
             case, width=body.width, height=body.height, nodes=nodes,
             background=body.background, label=body.label, folder=body.folder,
+            notes=body.notes,
         )
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -244,7 +252,7 @@ def enhance_video(case_id: str, body: EnhanceVideoIn) -> dict[str, Any]:
     try:
         return inspect_engine.enhance_video(
             case, body.path, body.params, rotation=body.rotation,
-            label=body.label, folder=body.folder,
+            label=body.label, folder=body.folder, notes=body.notes,
         )
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -271,11 +279,6 @@ def analyze(case_id: str, body: AnalyzeIn) -> dict[str, Any]:
 # Mirrors the proofs pattern: a JSON spec on disk + an upserted entity, so a
 # session reopens from the sidebar. Only recipes are stored (no pixels).
 # ---------------------------------------------------------------------------
-
-
-def _slug(text: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-    return slug[:80] or "session"
 
 
 def _now() -> str:
@@ -326,25 +329,42 @@ def load_session(case_id: str, name: str) -> dict[str, Any]:
 @router.post("/cases/{case_id}/inspect/sessions")
 def save_session(case_id: str, body: SessionIn) -> dict[str, Any]:
     case = get_case(case_id)
-    name = _slug(body.name or body.title)
+    sessions_dir = case.subdir("inspect")
+    name = slugify(body.title, "session")
+    rel = f"inspect/{name}.json"
+    spec_path = sessions_dir / f"{name}.json"
+
+    # A rename lands on a free name or not at all: taking a name another session
+    # holds would leave two entities pointing at one file, and there is no sane
+    # merge of the two. The first save of an unbound workspace still writes over
+    # a same-named session — there the analyst is updating that one.
+    old = slugify(body.rename_from, "session") if body.rename_from else None
+    old_rel = f"inspect/{old}.json" if old and old != name else None
+    if old_rel and spec_path.exists():
+        raise HTTPException(status_code=409, detail="another session already uses that name")
+
     spec = dict(body.spec)
     spec["azimut_inspect"] = 1
     spec["title"] = body.title
-    spec.setdefault("created_at", _now())
+    spec.setdefault("created_at", read_created_at(sessions_dir / f"{old or name}.json") or _now())
     spec["updated_at"] = _now()
-
-    spec_path = case.subdir("inspect") / f"{name}.json"
     spec_path.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
-    rel = f"inspect/{name}.json"
-    existing = case.find_entity(attr="spec", value=rel)
+    # Rebind the entity the old name held rather than filing a second one, so a
+    # rename keeps the session's folder, notes and links.
+    existing = case.find_entity(attr="spec", value=old_rel or rel)
     if existing:
-        case.update_entity(existing["id"], {"label": body.title})
+        patch: dict[str, Any] = {"label": body.title}
+        if old_rel:
+            patch["attrs"] = {"spec": rel}
+        case.update_entity(existing["id"], patch)
         entity_id = existing["id"]
     else:
         entity_id = case.add_entity(
             "inspect-session", body.title, attrs={"spec": rel}, by="inspect"
         )["id"]
+    if old_rel:
+        (sessions_dir / f"{old}.json").unlink(missing_ok=True)
 
     # A session is only adjustments and crops over its subject — nothing usable
     # is left of it once the subject is gone, so it depends on it and is deleted

@@ -1,10 +1,10 @@
 """The derivation link layer (ONTOLOGY §3), and what deleting an entity means.
 
-Every tool that files an artifact already knows the case paths it was made from
-— a proof's panels, a post's proof, a frame's video. This module turns those
-paths into typed edges in ``case.json`` so the chain becomes traversable: the
-Details panel's relations, the derivation breadcrumbs and the dependency-aware
-delete all read the same edges.
+Every tool that files an artifact already knows the case paths it was made from:
+a proof's panels, a post's proof or a frame's video. This module turns those
+paths into typed edges in the case graph so the chain becomes traversable. The
+Details panel, derivation breadcrumbs and dependency-aware delete all read the
+same edges.
 
 Two link types carry it, and the delete policy reads off the **link type**, not
 off the producing tool, so a new tool inherits the right behaviour just by

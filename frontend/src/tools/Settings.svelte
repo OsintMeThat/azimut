@@ -27,8 +27,7 @@
   import PostTemplateEditor from '../components/PostTemplateEditor.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
 
-  // Imagery and Usage were the same four objects seen from two rooms: the key
-  // here, the meter it feeds there. One tab, one card per provider.
+  // Imagery keys and their usage meters share one card per provider.
   const TABS = [
     { id: 'preferences', label: 'Preferences', icon: 'sliders' },
     { id: 'imagery', label: 'Imagery', icon: 'key' },
@@ -42,14 +41,9 @@
   const SITE_URL = 'https://osintmethat.com';
 
   // The keyed imagery providers the app knows how to light up (IMAGERY_PROVIDERS.md).
-  // Keys are app-wide, stored locally in settings.json, never written into a
-  // case folder or export bundle — they're the user's own billing identity.
+  // Keys are app-wide and stored in settings.json, outside cases and exports.
   //
-  // Each provider is one collapsed row until you open it: `gives` and `cost`
-  // are all a closed card says, so the tab reads at a glance and only the
-  // provider you're actually setting up spends any text. Everything below them
-  // (`steps`, `warning`, `overage`) lives in the opened body — the nuance is
-  // still here, it just isn't charged to the other three providers.
+  // Collapsed cards show `gives` and `cost`; setup details stay in the open card.
   const KEYED = [
     {
       id: 'mapbox',
@@ -96,7 +90,7 @@
       placeholder: 'AIza…',
       help: 'https://developers.google.com/maps/documentation/javascript/get-api-key',
       usage: USAGE_LINKS.google_js,
-      // a JS key proves itself only in a browser — Test loads a real 1-tile map
+      // A JavaScript key must be tested in the browser with a real map load.
       browserTest: true,
       steps: [
         'In the Google Cloud Console, enable the "Maps JavaScript API" on your project.',
@@ -131,7 +125,7 @@
     },
   ];
 
-  /** A per-provider map over KEYED — the shape every key/pref state uses. */
+  /** Build the per-provider shape used by key and preference state. */
   const perProvider = (value) => Object.fromEntries(KEYED.map((k) => [k.id, value(k)]));
 
   const COORD_CHOICES = [
@@ -146,28 +140,23 @@
 
   let keys = $state(perProvider(() => ''));
   let shown = $state(perProvider(() => false));
-  // every card starts closed: four providers' worth of setup is four walls of
-  // text, and you only ever set up one at a time
+  // Start cards closed so setup details appear only for the selected provider.
   let open = $state(perProvider(() => false));
   let termsOpen = $state(false);
   let usage = $state({});
   let month = $state('');
   let testing = $state(perProvider(() => false));
   let testResult = $state(perProvider(() => null)); // { ok, detail } | null
-  // keyed-provider preferences (IMAGERY_PROVIDERS.md) — saved on toggle
+  // Keyed-provider preferences are saved on toggle.
   let enabled = $state(perProvider(() => true));
   let overrides = $state(perProvider(() => false));
   let eco = $state(true);
   let ecoMaxZoom = $state(ECO_MAX_ZOOM);
-  // per-provider eco thresholds ('' = inherit, '0' = eco off for that basemap);
-  // the Maps JS widget is absent — an eco swap would re-bill a map load
+  // Per-provider eco thresholds: '' inherits and '0' disables eco mode.
+  // Maps JS has no threshold because reopening its widget starts a billed load.
   let ecoZooms = $state(perProvider(() => ''));
-  // The account's real monthly allowance per meter ('' = the shipped default).
-  // A free tier belongs to the provider's account, not to us: they hand out
-  // more than they document and change it silently (Copernicus documents 10k
-  // and provisions 30k), so the number the counter and the soft block measure
-  // against has to be the user's to correct. `tiers` is the resolved figure the
-  // helpers read; `tierEdits` is what's in the boxes.
+  // The account's monthly allowance per meter; '' uses the shipped default.
+  // Users can correct provider-specific allowances that differ from documentation.
   let tiers = $state(null);
   let tierEdits = $state(perProvider(() => ''));
   let about = $state({ version: '', workspace_root: '', extension_version: '' });
@@ -175,16 +164,13 @@
   // The binaries bundle it; a pip install uses a system copy on PATH. Read-only.
   let ffmpeg = $state({ available: false, version: null, source: null, path: null });
 
-  // --- capture extension: pairing token + detection (lib/extBridge.js) ---
+  // Capture extension pairing and detection.
   let ingestToken = $state('');
   let tokenShown = $state(false);
-  // read once per mount: the marker is stamped before the app loads, so a
-  // mid-session install genuinely needs a tab reload (the text says so)
+  // Read once per mount because an extension installed mid-session needs a reload.
   const extDetected = extensionVersion();
 
-  // Is the bundled extension newer than the one loaded in this browser? The app
-  // can't reload an unpacked extension for the user (the browser won't let it),
-  // so it flags the mismatch and points at the same re-download + reload steps.
+  // Flag when the bundled extension is newer than the browser's loaded copy.
   let extOutdated = $derived(extensionOutdated(extDetected, about.extension_version));
 
   async function copyToken() {
@@ -193,14 +179,12 @@
       await navigator.clipboard.writeText(ingestToken);
       toast('Pairing token copied', 'ok');
     } catch {
-      tokenShown = true; // clipboard blocked — show it for manual copy
+      tokenShown = true; // Show the token when clipboard access is blocked.
       toast('Could not copy. The token is shown for manual copy', 'warn');
     }
   }
 
-  // The token is no longer minted just by opening Settings (the server stopped
-  // doing that) — it's created the first time the user reveals or copies it to
-  // pair the capture extension.
+  // Mint the token only when the user reveals or copies it.
   async function ensureToken() {
     if (ingestToken) return ingestToken;
     const r = await api.post('/api/settings/ingest-token');
@@ -213,15 +197,13 @@
     ingestToken = r.ingest_token;
     toast('New token minted. Every extension must pair again', 'ok', 6000);
   }
-  // the home-view fields are edited as text, so a half-typed "-" or "48." isn't
-  // fought by the number parser mid-keystroke; committed on change
+  // Keep home-view fields as text until change so partial numbers remain editable.
   let home = $state({ lat: '', lon: '', zoom: '' });
   let mention = $state('');
   let postTarget = $state('x');
   let updateOnStart = $state(true); // pop a notice on load when a release is out
-  // the analyst's logo: app-wide like the API keys, and under the same rule —
-  // it lives beside settings.json and only ever reaches a case as pixels in a
-  // rendered proof PNG. `sigBust` re-fetches the <img> after a replace.
+  // The app-wide logo lives beside settings.json and reaches cases only in proof PNGs.
+  // `sigBust` refreshes the preview after replacement.
   let signature = $state(false);
   let signatureHandle = $state('');
   let sigBust = $state(0);
@@ -246,9 +228,7 @@
     }
   }
 
-  // The downloaders age faster than Azimut releases: sites change, and a stale
-  // yt-dlp just stops finding media. They can be refreshed from PyPI in place,
-  // without waiting for (or reinstalling) the app — see engine/scrapers.py.
+  // Downloaders can be refreshed from PyPI between Azimut releases.
   const SCRAPER_LABELS = { 'yt-dlp': 'yt-dlp', 'gallery-dl': 'gallery-dl' };
   let scrapers = $state([]);
   let checking = $state(false);
@@ -259,8 +239,7 @@
     scrapers = (await api.get(path)).scrapers;
   }
 
-  // Opt-in, never on mount: Azimut is local-first, so opening Settings must not
-  // phone out. The user asks, and only then do we look at PyPI.
+  // Scraper checks run only when requested and never on Settings mount.
   async function checkScrapers() {
     if (checking) return;
     checking = true;
@@ -277,9 +256,7 @@
     }
   }
 
-  // App self-update check (engine/updates.py). The binary has no package
-  // manager behind it; a pip/pipx user runs `pipx upgrade azimut` instead.
-  // Opt-in and never on mount — local-first, like the downloader check.
+  // Manual app update check. The separate startup check remains enabled by default.
   let appUpdate = $state(null); // { current, latest, update_available, url, error }
   let checkingApp = $state(false);
 
@@ -305,7 +282,7 @@
       if (!r.ok) toast(`${dist}: ${r.detail}`, 'danger');
       else toast(`${dist} ${r.detail}`, r.restart_required ? 'warn' : 'ok');
       await loadScrapers();
-      // keep the "restart to use it" state visible — a reload would drop it
+      // Preserve the restart-required state after reloading the scraper list.
       if (r.ok && r.restart_required) {
         const entry = scrapers.find((s) => s.dist === dist);
         if (entry) entry.restart_required = true;
@@ -337,9 +314,7 @@
     month = s.month;
     enabled = perProvider((k) => s.providers_enabled[k.id] ?? true);
     overrides = perProvider((k) => !!s.usage_overrides[k.id]);
-    // a stored verdict (key test, or a live auth failure) shows up like a
-    // fresh test result — it's also what benches the basemap, so it must be
-    // visible, not buried in settings.json
+    // Show stored key-test and live-auth verdicts in the provider card.
     testResult = perProvider((k) => s.provider_status?.[k.id] ?? null);
     eco = s.eco_zoom_fallback;
     ecoMaxZoom = s.eco_max_zoom ?? ECO_MAX_ZOOM;
@@ -368,8 +343,7 @@
     api.get('/api/settings/ffmpeg').then((r) => (ffmpeg = r)).catch(() => {});
   }
 
-  // Every preference saves on change — no "Save" button to forget. The server's
-  // answer is the source of truth, so clamped/normalised values show up here.
+  // Preferences save on change; the server returns canonical values.
   async function savePrefs(patch) {
     try {
       const saved = await api.put('/api/settings/prefs', patch);
@@ -418,8 +392,7 @@
   }
 
   async function saveEcoZoom() {
-    // per-provider thresholds ride along: '' = inherit (server drops the
-    // override on null), a number (0 included — eco off) sets it
+    // Empty thresholds inherit; zero disables eco mode for that provider.
     const perProviderZooms = {};
     for (const [id, v] of Object.entries(ecoZooms)) {
       perProviderZooms[id] = v === '' ? null : Number(v);
@@ -465,7 +438,7 @@
       return;
     }
     const saved = await savePrefs({ home_view: view });
-    // echo back what the server stored — a point off the globe is refused there
+    // Reflect the validated value returned by the server.
     if (saved) {
       home = {
         lat: String(saved.home_view.lat),
@@ -553,9 +526,7 @@
     }
   }
 
-  // Keys save on change like every other preference here — no Save button to
-  // forget. The status chip flipping to "Untested" is the receipt, which beats
-  // a toast: it also says what to do next.
+  // Keys save on change and reset their status to Untested.
   async function saveKey(id) {
     try {
       await api.put('/api/settings/keys', { [id]: keys[id] });
@@ -587,12 +558,10 @@
           const url = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(keys[id].trim())}&v=weekly`;
           const { billed, ...verdict } = await probeKey(url);
           testResult[id] = verdict;
-          // The probe is a real map load on the user's bill, and it happens in
-          // this browser where no backend proxy can count it — report it, or
-          // testing a key silently drifts the counter under Google's number.
+          // Count the billed browser probe because the backend cannot observe it.
           if (billed) await api.post(`/api/satellite/usage/${id}`).catch(() => {});
         }
-        // persist the browser's verdict — it's what benches/unbenches the basemap
+        // Persist the browser verdict used to enable or disable the basemap.
         await api.post(`/api/settings/keys/${id}/status`, testResult[id]).catch(() => {});
       } else {
         testResult[id] = await api.post(`/api/settings/keys/${id}/test`);
@@ -647,8 +616,7 @@
           </div>
           <p class="sample mono">{coordSample}</p>
           <p class="note">
-            Display only. Captures, proofs and <span class="mono">case.json</span> always
-            keep decimal degrees, so a case reads the same for everyone.
+            Changes display only; case data stays in decimal degrees.
           </p>
         </section>
 
@@ -677,8 +645,7 @@
         <section class="group">
           <h3>Satellite home view</h3>
           <p class="intro">
-            Where the Satellite tab opens. A case artifact or a “go to coordinates”
-            handoff still wins. This is only the starting point.
+            Default opening position for Satellite; case navigation still takes priority.
           </p>
           <div class="grid-3">
             <label class="field">
@@ -736,7 +703,7 @@
           <div class="row">
             <div class="row-label">
               <span>Your account handle</span>
-              <span class="row-hint">Used when a proof or template enables “Add account handle”; leave empty to hide it.</span>
+              <span class="row-hint">Shown on proofs that enable “Add account handle”.</span>
             </div>
             <input
               class="input mention"
@@ -751,9 +718,7 @@
             <div class="row-label">
               <span>Your logo</span>
               <span class="row-hint">
-                A transparent PNG under 2 MB. It stays on this machine. The proof
-                composer stamps it onto proofs you tick “Signature” on, and
-                nothing else ever carries it.
+                Transparent PNG, up to 2 MB, used only on signed proofs.
               </span>
             </div>
             <div class="sig-side">
@@ -784,11 +749,7 @@
         <section class="group">
           <h3>Providers</h3>
           <p class="intro">
-            Optional. The built-in basemaps (Esri, OSM, OpenTopoMap) never need a key. Your own
-            Mapbox / Google / Copernicus accounts just unlock extra ones in the Satellite tab.
-            Keys stay in <span class="mono">settings.json</span> on this machine, never in a case
-            or an export, and Azimut counts every request it sends so a free tier is never a
-            surprise.
+            Add provider keys to unlock more Satellite basemaps; usage appears on each card.
           </p>
 
           <div class="cards">
@@ -951,7 +912,7 @@
 
                         {#if k.browserTest}
                           <p class="ctrl-note">
-                            No eco mode: swapping the widget out and back would bill a fresh map load.
+                            Eco mode is unavailable because reopening this widget starts another billed map load.
                           </p>
                         {:else}
                           <label
@@ -1017,7 +978,7 @@
             />
           </label>
           <p class="note">
-            Applies when zoomed out. Each provider can override this from its card.
+            Applies while zoomed out; provider cards can override it.
           </p>
         </section>
 
@@ -1031,14 +992,14 @@
               >
                 <Icon name={termsOpen ? 'chevronDown' : 'chevronRight'} size={13} />
                 <span class="card-name">Provider terms</span>
-                <span class="card-gives">Encoded; nothing to do</span>
+                <span class="card-gives">Applied automatically</span>
               </button>
             </div>
             {#if termsOpen}
               <ul class="rules">
-                <li>Google tiles are never cached to disk, and a Google capture is a flattened screenshot with the copyright line burned into its footer; both are conditions of Google's Map Tiles API terms.</li>
-                <li>Mapbox captures keep the © Mapbox © OpenStreetMap attribution in their provenance.</li>
-                <li>Keys are never bundled into a shared case or export.</li>
+                <li>Google tiles are not cached; captures are screenshots with attribution.</li>
+                <li>Mapbox attribution remains attached to captures.</li>
+                <li>Provider keys stay outside cases and exports.</li>
               </ul>
             {/if}
           </div>
@@ -1049,9 +1010,7 @@
         <section class="group">
           <h3>Capture extension</h3>
           <p class="note">
-            A browser extension (Chrome/Edge and Firefox) that captures external map
-            sites into Azimut and powers the Capture button on the Google (Maps JS)
-            basemap.
+            Captures supported map sites and powers the Google basemap Capture button.
           </p>
           <div class="row">
             <div class="row-label">
@@ -1074,22 +1033,19 @@
           </div>
           {#if extOutdated}
             <p class="note warn">
-              This Azimut ships a newer capture extension (v{about.extension_version}) than the
-              v{extDetected} loaded here. Download it, replace the unpacked folder, then reload the
-              extension in your browser's extensions page. Azimut can't reload it for you.
+              Bundled v{about.extension_version} is newer than installed v{extDetected}; replace
+              the unpacked folder and reload the extension.
             </p>
           {/if}
           <p class="note">
-            Unzip it somewhere permanent and load it as an unpacked extension, then
-            reload this tab. Step-by-step instructions are in the README inside the zip.
+            Unzip it, load it as an unpacked extension, then reload this tab.
           </p>
         </section>
 
         <section class="group">
           <h3>Pairing</h3>
           <p class="note">
-            Paste this token once into the extension's options page. Rotating it
-            unpairs every extension.
+            Paste this token into the extension options; rotating it unpairs existing extensions.
           </p>
           <div class="row">
             <div class="row-label">
@@ -1107,10 +1063,7 @@
             </div>
           </div>
           <p class="note">
-            The token only authorizes filing captures into this Azimut on
-            <span class="mono">127.0.0.1</span>. Nothing leaves your machine. The
-            extension takes one screenshot per explicit click, reads only the page
-            URL, and refuses non-map sites.
+            The extension can file one user-requested map capture through this local app.
           </p>
         </section>
       {/if}
@@ -1133,12 +1086,11 @@
               {/if}
             </dd>
             <dt>License</dt>
-            <dd>AGPL-3.0-or-later</dd>
+            <dd>AGPL-3.0-only</dd>
           </dl>
           <p class="note">
-            The workspace is a plain folder you can zip, back up or put under git.
-            No account, no telemetry; the network is only used when a tool needs it
-            (tiles, geocoding, downloads), always directly to the third party.
+            Case data stays in the workspace; network access is limited to requested features
+            and the automatic GitHub update check.
           </p>
           <div class="links">
             <a class="btn btn-sm" href={REPO_URL} target="_blank" rel="noreferrer">
@@ -1162,7 +1114,9 @@
                 {:else if appUpdate && !appUpdate.error}
                   you're on the latest (<span class="mono">{about.version}</span>)
                 {:else}
-                  looks at GitHub only when you press it
+                  {updateOnStart
+                    ? 'checks GitHub on startup and when requested'
+                    : 'checks GitHub when requested'}
                 {/if}
               </span>
             </div>
@@ -1180,8 +1134,7 @@
             <div class="row-label">
               <span>Tell me on startup</span>
               <span class="row-hint">
-                Checks GitHub when the app loads and pops a notice if a newer
-                release is out. The only network call Azimut makes on its own.
+                Checks GitHub when the app opens and reports available releases.
               </span>
             </div>
             <input
@@ -1192,17 +1145,15 @@
             />
           </div>
           <p class="note">
-            A <span class="mono">pip</span> or <span class="mono">pipx</span> install updates with
-            <span class="mono">pipx upgrade azimut</span>. For the standalone binary, download the new
-            release and replace the file. Your cases under the workspace are untouched.
+            Update with <span class="mono">pipx upgrade azimut</span>; standalone users replace
+            the downloaded binary.
           </p>
         </section>
 
         <section class="group">
           <h3>Backup</h3>
           <p class="note">
-            Export all settings, including your keys, to a file you can import on
-            another machine. Keep the file private.
+            Export settings and keys for another machine; keep the file private.
           </p>
           <div class="links">
             <a class="btn btn-sm" href="/api/settings/export" download>
@@ -1224,8 +1175,7 @@
         <section class="group">
           <h3>Downloaders</h3>
           <p class="note">
-            Media download leans on two projects that track sites as they change. They
-            age faster than Azimut does. Update these first if a link stops resolving.
+            Update these tools if a media link stops resolving.
           </p>
           {#each scrapers as s (s.dist)}
             <div class="row">
@@ -1269,8 +1219,7 @@
             </button>
           </div>
           <p class="note">
-            Updates are fetched from PyPI (hash-verified) only when you press the
-            button. Revert goes back to the bundled version.
+            Updates are hash-verified from PyPI when requested; Revert restores the bundled version.
           </p>
         </section>
       {/if}
@@ -1279,9 +1228,7 @@
         <section class="group">
           <h3>Geo Proof templates</h3>
           <p class="note">
-            A proof's house style: background, margins, text sizes, footer,
-            signature placement and preferred colours. New proofs can start
-            from one. Shared across every case.
+            Reusable proof styles shared across cases.
           </p>
           <div class="tpl-list">
             {#each templatesState.proof as t (t.id)}
@@ -1310,8 +1257,7 @@
         <section class="group">
           <h3>Geo Report templates</h3>
           <p class="note">
-            A thread skeleton: the mention, which lines the first tweet keeps,
-            whether a media tweet rides along, and boilerplate extra tweets.
+            Reusable thread structures for new Geo Reports.
           </p>
           <div class="tpl-list">
             {#each templatesState.post as t (t.id)}
@@ -1401,8 +1347,7 @@
     font-size: var(--fs-sm);
   }
 
-  /* a preferences window, not a dashboard: a rail of sections on the left,
-     one flat scrolling pane on the right — no cards, no boxes */
+  /* Preferences use a section rail and one scrolling pane. */
   .split {
     flex: 1;
     display: flex;
@@ -1522,7 +1467,7 @@
     gap: 10px;
   }
   .sig-preview {
-    /* checkerboard: a logo is meant to be transparent — show whether it is */
+    /* Checkerboard preview for transparent logos. */
     max-width: 88px;
     max-height: 44px;
     padding: 4px;
@@ -1543,7 +1488,7 @@
     display: none;
   }
 
-  /* segmented control — one row of mutually exclusive choices */
+  /* One-row segmented control. */
   .seg {
     display: flex;
     flex-shrink: 0;
@@ -1648,10 +1593,7 @@
     text-decoration: none;
   }
 
-  /* --- provider cards: one row each until you open one --------------------
-     A closed card answers the only two questions you have from across the
-     room — what does it give me, and is it working — in one line. Setting a
-     provider up is the rare act; reading the tab is the common one. */
+  /* Provider cards show a summary until opened for setup. */
   .cards {
     display: flex;
     flex-direction: column;
@@ -1706,7 +1648,7 @@
     flex-shrink: 0;
     cursor: pointer;
   }
-  /* the verdict, in one word — the detail is a tooltip, and the fix is inside */
+  /* One-word verdict; the tooltip carries the detail. */
   .chip {
     flex-shrink: 0;
     padding: 1px 7px;
@@ -1764,7 +1706,7 @@
     font-size: var(--fs-xs);
     color: var(--text-3);
   }
-  /* both control rows put their box at the same x — they read as a column */
+  /* Align provider control fields in one column. */
   .ctrl > span:first-child {
     min-width: 104px;
     color: var(--text-2);

@@ -9,9 +9,7 @@ case is a plain folder that can be reopened, archived or shared.
 *The name is the French word for azimuth, the compass bearing you sight along
 to fix a point on the map.*
 
-## v0.2.2: Login-walled downloads
-
-> v0.2.3 is a bug-fix release: it corrects the version the v0.2.2 binary reported, which made its startup update check falsely announce an update to everyone already on v0.2.2. No feature changes.
+## v0.2.4: Saved work and scalable browsing
 
 | Tool | What it does |
 |------|--------------|
@@ -31,15 +29,18 @@ extension, and cross-platform binaries with a bundled ffmpeg.
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
 
-New in v0.2.2:
+New in v0.2.4:
 
-- Downloads now handle login-walled media. The first attempt is always
-  cookie-less; only when a post turns out to need an account does Media offer to
-  borrow a signed-in browser's session or an exported `cookies.txt`. The session
-  is used for that download, kept 0600 in the workspace, and never leaves the
-  machine. Chromium on Windows can't be read, so it points you to the file route.
-- The Geo Proof toolbar reflows to fit narrow screens instead of overflowing,
-  and remembers the color and stroke width you last drew with.
+- Saved places, captures, filed screenshots and proofs are easier to find,
+  preview and place on the map.
+- The case sidebar and Files now support search, filters, folder browsing,
+  multi-select filing and a details list.
+- Media and Files use bounded SQLite queries, including complete category
+  counts and search results beyond the first page.
+- Inspect, Geo Proof and Geo Report use named saves. Their pickers can search
+  and browse folders.
+- Release binaries now fetch pinned, SHA-256-verified ffmpeg archives. Images
+  above 100 MP are rejected before decode.
 
 ## Install & run
 
@@ -65,11 +66,8 @@ opens Azimut in your browser.
 |----|-------|
 | Windows | `azimut-windows-x86_64.exe` |
 | macOS (Apple Silicon) | `azimut-macos-arm64` |
-| macOS (Intel) | No standalone binary; install with `pipx` or `pip` |
+| macOS (Intel, 14+) | No standalone binary; install with `pipx` or `pip` |
 | Linux | `azimut-linux-x86_64` |
-
-Intel Macs are supported through the Python package. They do not have a
-downloadable standalone binary.
 
 First run, the binaries are **unsigned**, so the OS warns before letting them
 open:
@@ -80,10 +78,10 @@ open:
   info** → **Run anyway**.
 - **Linux**: mark it executable with `chmod +x azimut-linux-x86_64`.
 
-To update, **Settings → About → Check for updates** tells you when a newer
-release is out and links the download; replace the old file with the new one.
-To uninstall, delete the file. Either way `~/Azimut` stays put, so your cases
-open unchanged in the new version.
+Azimut checks for a newer release on startup by default and links the download.
+Settings can disable that check, and **Settings → About → Check for updates**
+runs it manually. Replace the old binary with the new one. To uninstall, delete
+the binary. Either way `~/Azimut` stays put, so cases open unchanged.
 
 The downloadable binaries bundle a static **ffmpeg** (and ffprobe), so video
 thumbnails, frame scans, video enhancement, and downloads that merge separate
@@ -199,7 +197,7 @@ wheel + Windows/Linux/macOS binaries, attaches them to a GitHub release, and
 publishes to PyPI. **Don't publish by hand.**
 
 ```bash
-git tag v0.2.3 && git push origin v0.2.3
+git tag v0.2.4 && git push origin v0.2.4
 ```
 
 One-time setup: register the repo as a
@@ -208,17 +206,14 @@ One-time setup: register the repo as a
 
 ## Principles
 
-1. **Local-first, privacy-first.** No account, no telemetry, no upload; the
-   server binds to `127.0.0.1` only, and Azimut never posts anywhere on your
-   behalf.
-2. **The case is the product.** Media and notes stay as files and the graph lives
-   in per-case SQLite. A closed case folder is complete and portable; a ZIP
-   import/export workflow is planned.
+1. No account, telemetry or automatic upload. The server binds to
+   `127.0.0.1`, and Azimut never posts on your behalf.
+2. A case contains the investigation's files and SQLite graph. A closed case
+   folder is complete and portable; ZIP import/export is planned.
 3. One tab = one tool, useful in 30 seconds.
-4. **Orchestrator, not replacer.** Integrate specialized services rather than
-   cloning them.
-5. Tools emit facts; the analyst decides. No automated "magic button".
-6. **Honest output.** Every artifact records how it was produced.
+4. Azimut integrates specialized services instead of recreating them.
+5. The analyst decides; tools do not produce automated verdicts.
+6. Every artifact records how it was produced.
 7. Free and open source. No paid key is ever required; bring your own for
    more basemaps.
 

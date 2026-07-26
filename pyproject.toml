@@ -14,7 +14,7 @@ license = { text = "AGPL-3.0-only" }
 authors = [{ name = "OsintMeThat" }]
 keywords = ["osint", "geoint", "geolocation", "investigation", "verification"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Web Environment",
     "Intended Audience :: Other Audience",
     "Operating System :: OS Independent",

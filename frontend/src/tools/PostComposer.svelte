@@ -1,11 +1,12 @@
 <script>
   import { api } from '../lib/api.js';
-  import { lookupEntity, fetchDerivation } from '../lib/catalog.js';
+  import { fetchAllEntities, lookupEntity, fetchDerivation } from '../lib/catalog.js';
   import { caseState, uiState, toast, reloadCase, prefs } from '../lib/state.svelte.js';
   import { templatesState } from '../lib/state.svelte.js';
   import { createNote } from '../lib/notes.js';
   import { openNotebook } from '../lib/navigate.js';
-  import { proofCoordsText, proofSource, DEFAULT_PROOF_TITLE } from '../lib/composer.js';
+  import { proofCoordsText, proofSource } from '../lib/composer.js';
+  import { isDefaultName, nextName, savedSlugs, savedTitles, savedTitle, slugify } from '../lib/naming.js';
   import {
     buildTweet1 as buildTweet1Lines, DEFAULT_TWEET_BODY,
     extraPostTweetText, groupPostMedia, MAX_POST_MEDIA, mediaTweetText,
@@ -15,7 +16,9 @@
     postTarget, templateUsesPostField, togglePostMedia,
   } from '../lib/post.js';
   import { bidiSafe } from '../lib/bidi.js';
+  import { matchesQuery } from '../lib/mediaFilter.js';
   import Icon from '../components/Icon.svelte';
+  import SearchInput from '../components/SearchInput.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import FolderSelect from '../components/FolderSelect.svelte';
@@ -49,8 +52,39 @@
   let extraSeq = 0;
   let extraTweets = $state([]); // [{ id, text, mediaPaths, mediaType }]
 
-  // Draft persistence
-  let draftName = $state(null); // slug of the saved draft (null until first save)
+  // Draft persistence. The name in the header is the draft's filename: saving
+  // writes under it, and renaming a saved draft moves its file (the backend
+  // does the move). `draftName` is the slug it is currently bound to, or null
+  // before the first save.
+  let postName = $state('');
+  let draftName = $state(null);
+
+  // Every draft already saved in this case: the slugs to catch a name already
+  // taken, the names so a fresh draft reads apart from them.
+  let draftEntities = $state([]);
+  $effect(() => {
+    const id = caseState.current?.id;
+    caseState.rev;
+    if (!id) {
+      draftEntities = [];
+      return;
+    }
+    let live = true;
+    fetchAllEntities(id, { types: ['post'] })
+      .then((list) => {
+        if (!live) return;
+        draftEntities = list;
+        // The name was assigned before the case's drafts were known. Renumber it
+        // now rather than letting a fresh thread collide on its first save.
+        if (!draftName && isDefaultName(postName, 'draft')) postName = freshPostName();
+      })
+      .catch(() => { if (live) draftEntities = []; });
+    return () => { live = false; };
+  });
+
+  // Numbered past the drafts already in the case, so two never-renamed threads
+  // read apart. Assigned on mount and on discard.
+  const freshPostName = () => nextName('draft', savedTitles(draftEntities, 'draft'));
 
   // Kept in step with deletes made anywhere else in the app: a draft deleted
   // from the sidebar must not be resurrected by the next Save under its old
@@ -93,6 +127,7 @@
   let pickerOpen = $state(false);
   let mediaLibrary = $state([]);
   let mediaPickerTarget = $state(null); // null = tweet 2; an id = a later media tweet
+  let pickerQuery = $state(''); // search box, shown once the picker holds >6 items
 
   // path → media kind, from our own /media shelf, so attach chips can label a
   // video without scanning the whole entity graph. Refreshed on case change.
@@ -134,7 +169,7 @@
     const p = uiState.postProof;
     if (!p) return;
     uiState.postProof = null;
-    description = p.title === DEFAULT_PROOF_TITLE ? '' : (p.title ?? '');
+    description = isDefaultName(p.title, 'proof') ? '' : (p.title ?? '');
     const proofSourceUrl = p.source ?? p.sources?.[0] ?? '';
     source = proofSourceUrl;
     setProof(p.png ?? null);
@@ -353,6 +388,7 @@
     try {
       mediaLibrary = await api.get(`/api/cases/${caseState.current.id}/media`);
       mediaPickerTarget = normalizePostMediaPickerTarget(target);
+      pickerQuery = '';
       pickerOpen = true;
     } catch (e) {
       toast(e.message, 'danger');
@@ -367,6 +403,14 @@
 
   function pickerItems() {
     return postMediaForType(mediaLibrary, pickerTweet()?.mediaType);
+  }
+
+  // The picker narrows by a search box once the list grows past six. Reuses the
+  // Media Library matcher (filename/title/notes/source).
+  function visiblePickerItems() {
+    const items = pickerItems();
+    const q = pickerQuery.trim();
+    return q ? items.filter((m) => matchesQuery(m, q)) : items;
   }
 
   function pickerTitle() {
@@ -491,7 +535,7 @@
   async function pickProof(item) {
     setProof(item.png);
     proofPickerOpen = false;
-    if (!description.trim() && item.title && item.title !== DEFAULT_PROOF_TITLE) {
+    if (!description.trim() && item.title && !isDefaultName(item.title, 'proof')) {
       description = item.title;
     }
     // Pull the proof's coordinates + source into the post so the fields fill in.
@@ -614,20 +658,38 @@
     };
   }
 
-  function draftTitle() {
-    return (place.trim() || description.trim() || 'Untitled post').slice(0, 120);
-  }
+  // The saved report is titled after the thread it documents, so the two read as
+  // one piece of work. The report dialog leaves it editable.
+  const draftTitle = () => postName.trim() || 'Untitled post';
+
+  // Saving writes under the name in the header. A bound draft writes back over
+  // itself, and renaming it moves the file — the backend refuses a rename onto a
+  // name another draft holds. An unbound draft landing on a saved name is the
+  // one case that can go either way, so it asks first.
+  let overwritePrompt = $state(null);
 
   async function saveDraft() {
     if (!caseState.current) {
       toast('Open a case to save a draft', 'warn');
       return;
     }
+    const title = postName.trim();
+    if (!title || saving) return;
+    if (!draftName && savedSlugs(draftEntities, 'draft').has(slugify(title, 'draft'))) {
+      overwritePrompt = { slug: slugify(title, 'draft') };
+      return;
+    }
+    return performDraftSave();
+  }
+
+  async function performDraftSave() {
     saving = true;
     try {
-      const body = { title: draftTitle(), state: snapshot() };
-      if (draftName) body.name = draftName;
-      const r = await api.post(`/api/cases/${caseState.current.id}/drafts`, body);
+      const r = await api.post(`/api/cases/${caseState.current.id}/drafts`, {
+        rename_from: draftName,
+        title: postName.trim(),
+        state: snapshot(),
+      });
       draftName = r.name;
       await reloadCase(); // surface the post entity in the sidebar
       toast('Draft saved', 'ok', 1600);
@@ -635,6 +697,7 @@
       toast(`Draft not saved: ${e.message}`, 'danger');
     } finally {
       saving = false;
+      overwritePrompt = null;
     }
   }
 
@@ -700,6 +763,7 @@
         };
       });
       draftName = name;
+      postName = doc.title || name;
       appliedPostTemplate = null;
       // restore geo facts from the coordinates, then honor any manual tweet edits
       if (s.coordsText?.trim()) {
@@ -739,6 +803,7 @@
     body = DEFAULT_TWEET_BODY;
     extraTweets = [];
     draftName = null;
+    postName = freshPostName();
     appliedPostTemplate = null;
     discardConfirm = false;
   }
@@ -851,6 +916,9 @@
     <div class="head-text">
       <h2>Geo Report</h2>
     </div>
+    {#if caseState.current}
+      <input class="input title-input" bind:value={postName} maxlength="200" aria-label="Post name" />
+    {/if}
     <div class="head-actions">
       {#if caseState.current}
         <button class="btn btn-ghost btn-sm" onclick={openDraftList} title="Reopen a saved draft">
@@ -862,7 +930,7 @@
           <Icon name="reset" size={14} /> Discard
         </button>
       {/if}
-      <button class="btn btn-ghost btn-sm" onclick={saveDraft} disabled={saving}>
+      <button class="btn btn-ghost btn-sm" onclick={saveDraft} disabled={saving || !postName.trim()}>
         <Icon name="save" size={14} /> {draftName ? 'Save draft' : 'Save as draft'}
       </button>
       <button class="btn btn-ghost btn-sm" onclick={openSaveReport} disabled={!hasContent || reportSaving}>
@@ -1307,7 +1375,7 @@
   <ConfirmDialog
     title="Delete this draft?"
     message={`“${deleteEntry.title}” will be removed from the case.`}
-    detail="This permanently deletes the saved draft. It cannot be undone."
+    detail="Deletes the saved draft and cannot be undone."
     confirmLabel="Delete"
     tone="danger"
     icon="trash"
@@ -1329,13 +1397,39 @@
   />
 {/if}
 
+{#if overwritePrompt}
+  <ConfirmDialog
+    title="Overwrite this draft?"
+    message={`“${savedTitle(draftEntities, 'draft', overwritePrompt.slug)}” is already saved in this case.`}
+    detail="Saving replaces its thread. Rename this draft to keep both."
+    confirmLabel="Overwrite"
+    tone="danger"
+    icon="check"
+    onconfirm={performDraftSave}
+    oncancel={() => (overwritePrompt = null)}
+  />
+{/if}
+
 {#if pickerOpen}
   <Modal title={pickerTitle()} width="640px" onclose={() => (pickerOpen = false)}>
     {#if pickerItems().length === 0}
       <p class="picker-empty">No {pickerTweet()?.mediaType === 'video' ? 'videos' : 'images'} in this case.</p>
     {:else}
+      {#if pickerItems().length > 6}
+        <div class="picker-search">
+          <SearchInput
+            bind:value={pickerQuery}
+            placeholder="Search media…"
+            width="100%"
+            count={pickerQuery.trim() ? `${visiblePickerItems().length} shown` : null}
+          />
+        </div>
+      {/if}
+      {#if visiblePickerItems().length === 0}
+        <p class="picker-empty">No media matches “{pickerQuery.trim()}”.</p>
+      {/if}
       <div class="picker-grid">
-        {#each (caseState.current ? pickerItems() : []) as item (item.path)}
+        {#each (caseState.current ? visiblePickerItems() : []) as item (item.path)}
           {@const targetTweet = mediaPickerTarget === null
             ? null
             : extraTweets.find((tweet) => tweet.id === mediaPickerTarget)}
@@ -1641,6 +1735,9 @@
     color: var(--text-3);
     font-size: var(--fs-sm);
     padding: 8px 0;
+  }
+  .picker-search {
+    margin-bottom: 12px;
   }
   .picker-grid {
     display: grid;

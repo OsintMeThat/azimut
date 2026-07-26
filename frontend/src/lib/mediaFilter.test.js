@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { matchesQuery, sortItems, visibleMedia } from './mediaFilter.js';
+import {
+  hasMediaForFilters,
+  isGenericImage,
+  isSatelliteMedia,
+  mediaDisplayKind,
+  matchesQuery,
+  sortItems,
+  visibleMedia,
+} from './mediaFilter.js';
 
 const item = (extra = {}) => ({
   filename: 'strike_video.mp4',
@@ -46,6 +54,37 @@ describe('matchesQuery', () => {
   });
 });
 
+describe('media categories', () => {
+  it('classifies native satellite captures as Satellite', () => {
+    const capture = { kind: 'image', source: { type: 'satellite' } };
+    expect(isSatelliteMedia(capture)).toBe(true);
+    expect(isGenericImage(capture)).toBe(false);
+  });
+
+  it('classifies explicit satellite screenshots as Satellite', () => {
+    const capture = {
+      kind: 'image',
+      source: { type: 'screenshot', imagery_mode: 'satellite' },
+    };
+    expect(isSatelliteMedia(capture)).toBe(true);
+    expect(isGenericImage(capture)).toBe(false);
+  });
+
+  it('keeps ordinary extension screenshots under Images', () => {
+    const capture = { kind: 'image', source: { type: 'screenshot' } };
+    expect(isSatelliteMedia(capture)).toBe(false);
+    expect(isGenericImage(capture)).toBe(true);
+    expect(mediaDisplayKind(capture)).toBe('image');
+  });
+
+  it('uses the Satellite label for satellite captures while keeping image data', () => {
+    expect(mediaDisplayKind({ kind: 'image', source: { type: 'satellite' } })).toBe('satellite');
+    expect(
+      mediaDisplayKind({ kind: 'image', source: { type: 'screenshot', imagery_mode: 'satellite' } })
+    ).toBe('satellite');
+  });
+});
+
 describe('sortItems', () => {
   const a = item({ filename: 'b.mp4', title: 'Bravo', size: 10, added_at: '2026-07-01T00:00:00Z' });
   const b = item({ filename: 'a.jpg', title: null, size: 30, added_at: '2026-07-03T00:00:00Z' });
@@ -65,6 +104,18 @@ describe('sortItems', () => {
 
   it('largest first', () => {
     expect(sortItems([a, b, c], 'size').map((i) => i.filename)).toEqual(['a.jpg', 'c.png', 'b.mp4']);
+  });
+
+  it('reverses a column when requested', () => {
+    expect(sortItems([a, b, c], 'name', 'desc').map((i) => i.filename)).toEqual(['b.mp4', 'c.png', 'a.jpg']);
+    expect(sortItems([a, b, c], 'size', 'asc').map((i) => i.filename)).toEqual(['b.mp4', 'c.png', 'a.jpg']);
+  });
+
+  it('sorts the details-list type and folder columns', () => {
+    const image = item({ filename: 'image.png', kind: 'image', folder: 'evidence' });
+    const video = item({ filename: 'video.mp4', kind: 'video', folder: 'archive' });
+    expect(sortItems([image, video], 'type').map((i) => i.filename)).toEqual(['image.png', 'video.mp4']);
+    expect(sortItems([image, video], 'folder').map((i) => i.filename)).toEqual(['video.mp4', 'image.png']);
   });
 
   it('does not mutate the input', () => {
@@ -116,5 +167,22 @@ describe('visibleMedia — case gating', () => {
     const snapshot = items.map((i) => i.filename);
     visibleMedia(items, { sort: 'name' });
     expect(items.map((i) => i.filename)).toEqual(snapshot);
+  });
+});
+
+describe('hasMediaForFilters', () => {
+  const items = [
+    { kind: 'image', folder: 'sources' },
+    { kind: 'video', folder: 'sources' },
+    { kind: 'image', folder: 'evidence' },
+  ];
+
+  it('finds whether a folder and category intersection exists', () => {
+    expect(hasMediaForFilters(items, { folderFilter: 'sources', catMatch: (i) => i.kind === 'image' })).toBe(true);
+    expect(hasMediaForFilters(items, { folderFilter: 'evidence', catMatch: (i) => i.kind === 'video' })).toBe(false);
+  });
+
+  it('ignores the text query because it only validates the two filter facets', () => {
+    expect(hasMediaForFilters(items, { folderFilter: 'sources' })).toBe(true);
   });
 });

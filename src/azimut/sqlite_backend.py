@@ -1,16 +1,9 @@
 """SQLite-backed `CaseRepository` (Step 3 of docs/STORAGE_AND_PERFORMANCE.md).
 
-`SqliteCase` is the second implementation of the graph contract in
-`repository.py`; `workspace.Case` is the first (JSON). It answers the same
-methods from a per-case `case.db`, so a single mutation touches one row and one
-short transaction instead of rewriting the whole file — the O(n)-per-write
-ceiling the migration removes.
-
-Scope of this step: the store and the JSON->SQLite converter, exercised by the
-shared contract tests in `tests/test_repository.py` and by
-`tests/test_sqlite_backend.py`. Wiring it into `Case.open` behind the manifest's
-storage format is deliberately a *later* step (Delivery 4, "Safe activation"),
-so nothing here changes production behavior yet.
+`SqliteCase` implements the graph and media browse contracts in
+`repository.py`. Production cases use one `case.db`, so a mutation touches one
+row and one short transaction instead of rewriting the complete graph. The
+small case manifest only identifies the case and selects this backend.
 
 Frozen-binary constraints (see the doc): SQLite is the stdlib `sqlite3` module,
 already bundled by PyInstaller, so this adds no runtime dependency. Anything
@@ -28,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator, TypeVar
 
+from .engine import mapsites
 from .repository import EntityStatus
 from .workspace import Case, CaseError, _new_id, _now, _parse_cursor, _replace_with_retry
 
@@ -44,7 +38,10 @@ if TYPE_CHECKING:
 # Schema 3 adds the durable `jobs` table: local background work (thumbnails
 # today, EXIF/OCR/transcript later) that must survive a restart and be
 # recoverable — the doc's "thumbnail and background-job model".
-SQLITE_SCHEMA = 3
+# Schema 4 adds a browse index for sidecar-backed media. Sidecars remain the
+# file-level record; the index avoids opening and sorting every sidecar for each
+# bounded Media Library page.
+SQLITE_SCHEMA = 4
 
 _SCHEMA = """
 CREATE TABLE meta (
@@ -61,6 +58,7 @@ CREATE TABLE entities (
     label       TEXT NOT NULL,
     attrs_json  TEXT NOT NULL DEFAULT '{}',
     folder      TEXT,
+    search_text TEXT NOT NULL DEFAULT '',
     prov_by     TEXT NOT NULL,
     prov_at     TEXT NOT NULL,
     prov_status TEXT NOT NULL DEFAULT 'confirmed',
@@ -91,6 +89,21 @@ CREATE TABLE jobs (
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL
 );
+CREATE TABLE media_items (
+    path         TEXT PRIMARY KEY,
+    entity_id    TEXT UNIQUE,
+    item_json    TEXT NOT NULL,
+    filename     TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    folder       TEXT,
+    name_sort    TEXT NOT NULL,
+    size         INTEGER NOT NULL DEFAULT 0,
+    added_at     TEXT NOT NULL,
+    search_text  TEXT NOT NULL,
+    source_type  TEXT,
+    source_op    TEXT,
+    imagery_mode TEXT
+);
 CREATE INDEX idx_entities_type   ON entities(type);
 CREATE INDEX idx_entities_status ON entities(prov_status);
 CREATE INDEX idx_entities_folder ON entities(folder);
@@ -99,6 +112,12 @@ CREATE INDEX idx_links_to   ON links(to_id);
 CREATE INDEX idx_links_type ON links(type);
 CREATE INDEX idx_jobs_state ON jobs(state);
 CREATE UNIQUE INDEX idx_jobs_key ON jobs(kind, job_key) WHERE job_key IS NOT NULL;
+CREATE INDEX idx_media_kind     ON media_items(kind);
+CREATE INDEX idx_media_folder   ON media_items(folder);
+CREATE INDEX idx_media_name     ON media_items(name_sort);
+CREATE INDEX idx_media_size     ON media_items(size);
+CREATE INDEX idx_media_added    ON media_items(added_at);
+CREATE INDEX idx_media_source   ON media_items(source_type);
 """
 
 # Job lifecycle (doc "Job states"): a fresh job is `queued`; the worker claims it
@@ -119,11 +138,25 @@ def _like_contains(term: str) -> str:
     return f"%{escaped}%"
 
 
+def _like_prefix(term: str) -> str:
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"{escaped}%"
+
+
 def _folder_of(attrs: dict[str, Any] | None) -> str | None:
     """The indexed folder value for an entity: its ``attrs.folder`` path, or None
     when unfiled — an absent or empty folder both read as unfiled."""
     folder = (attrs or {}).get("folder")
     return folder or None
+
+
+def _entity_search_text(type_: str, label: str, attrs: dict[str, Any] | None) -> str:
+    attrs = attrs or {}
+    return "\n".join(
+        str(value)
+        for value in (label, type_, attrs.get("folder"), attrs.get("notes"))
+        if value
+    ).casefold()
 
 
 def _migrate_1_to_2(conn: sqlite3.Connection) -> None:
@@ -150,13 +183,126 @@ def _migrate_2_to_3(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE UNIQUE INDEX idx_jobs_key ON jobs(kind, job_key) WHERE job_key IS NOT NULL")
 
 
+def _migrate_3_to_4(conn: sqlite3.Connection) -> None:
+    """Add the sidecar-derived media browse index.
+
+    Backfilling needs the case directory as well as the database connection, so
+    ``SqliteCase.open`` performs it after the schema transaction and records a
+    durable ``media_index_ready`` marker. A crash between the two simply retries
+    the backfill on the next open.
+    """
+    conn.execute("ALTER TABLE entities ADD COLUMN search_text TEXT NOT NULL DEFAULT ''")
+    for row in conn.execute("SELECT id, type, label, attrs_json FROM entities"):
+        attrs = json.loads(row["attrs_json"])
+        conn.execute(
+            "UPDATE entities SET search_text = ? WHERE id = ?",
+            (_entity_search_text(row["type"], row["label"], attrs), row["id"]),
+        )
+    conn.execute(
+        "CREATE TABLE media_items ("
+        " path TEXT PRIMARY KEY, entity_id TEXT UNIQUE, item_json TEXT NOT NULL,"
+        " filename TEXT NOT NULL, kind TEXT NOT NULL, folder TEXT,"
+        " name_sort TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0,"
+        " added_at TEXT NOT NULL, search_text TEXT NOT NULL,"
+        " source_type TEXT, source_op TEXT, imagery_mode TEXT)"
+    )
+    conn.execute("CREATE INDEX idx_media_kind ON media_items(kind)")
+    conn.execute("CREATE INDEX idx_media_folder ON media_items(folder)")
+    conn.execute("CREATE INDEX idx_media_name ON media_items(name_sort)")
+    conn.execute("CREATE INDEX idx_media_size ON media_items(size)")
+    conn.execute("CREATE INDEX idx_media_added ON media_items(added_at)")
+    conn.execute("CREATE INDEX idx_media_source ON media_items(source_type)")
+
+
 # from_version -> function(conn) applying the in-place upgrade to from_version + 1.
 # Runs inside one transaction per step in `SqliteCase._upgrade`, which stamps the
 # new schema_version and records the migration; the step only reshapes the db.
 _SQLITE_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
+    3: _migrate_3_to_4,
 }
+
+_MEDIA_CATEGORIES = (
+    "image",
+    "video",
+    "collage",
+    "satellite",
+    "upload",
+    "download",
+    "other",
+)
+_SATELLITE_SQL = (
+    "(COALESCE(source_type, '') = 'satellite' OR "
+    "(COALESCE(source_type, '') = 'screenshot' AND imagery_mode = 'satellite'))"
+)
+_MEDIA_CATEGORY_SQL = {
+    "image": f"(kind = 'image' AND NOT {_SATELLITE_SQL})",
+    "video": "kind = 'video'",
+    "collage": "source_op = 'collage'",
+    "satellite": _SATELLITE_SQL,
+    "upload": "source_type = 'upload'",
+    "download": "source_type = 'download'",
+    "other": "kind NOT IN ('image', 'video')",
+}
+
+
+def _normalise_media_item(item: dict[str, Any]) -> tuple[dict[str, Any], tuple[Any, ...]]:
+    """Return a JSON-safe browse item plus its indexed column values."""
+    clean = json.loads(json.dumps(item, ensure_ascii=False))
+    source = clean.get("source")
+    if not isinstance(source, dict):
+        source = {}
+        clean["source"] = source
+    if (
+        source.get("type") == "screenshot"
+        and "imagery_mode" not in source
+        and isinstance(source.get("source_url"), str)
+    ):
+        parsed = mapsites.parse_map_url(source["source_url"])
+        if parsed and parsed.get("imagery_mode"):
+            source = {**source, "imagery_mode": parsed["imagery_mode"]}
+            clean["source"] = source
+
+    path = str(clean.get("path") or "")
+    filename = str(clean.get("filename") or Path(path).name)
+    kind = str(clean.get("kind") or "file")
+    folder = str(clean.get("folder") or "") or None
+    title = str(clean.get("title") or "")
+    notes = str(clean.get("notes") or "")
+    name_sort = (title or filename).casefold()
+    try:
+        size = max(0, int(clean.get("size") or 0))
+    except (TypeError, ValueError):
+        size = 0
+    added_at = str(clean.get("added_at") or "")
+    search_text = "\n".join(
+        str(value)
+        for value in (
+            filename,
+            title,
+            notes,
+            folder,
+            source.get("title"),
+            source.get("uploader"),
+            source.get("webpage_url") or source.get("url"),
+        )
+        if value
+    ).casefold()
+    return clean, (
+        path,
+        json.dumps(clean, ensure_ascii=False),
+        filename,
+        kind,
+        folder,
+        name_sort,
+        size,
+        added_at,
+        search_text,
+        source.get("type"),
+        source.get("op"),
+        source.get("imagery_mode"),
+    )
 
 
 class SqliteCase:
@@ -225,6 +371,7 @@ class SqliteCase:
             )
         if version < SQLITE_SCHEMA:
             store._upgrade()
+        store._ensure_media_index()
         return store
 
     def _upgrade(self) -> None:
@@ -251,6 +398,65 @@ class SqliteCase:
                         "INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)",
                         (step + 1, _now()),
                     )
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+
+    def _ensure_media_index(self) -> None:
+        """Backfill media sidecars once after schema 4 reaches a case.
+
+        The marker is written in the same transaction as the rows, so an
+        interrupted scan is retried rather than leaving a partial index active.
+        Normal media writes keep the index current after this one-time pass.
+        """
+        with self._connect() as conn:
+            ready = conn.execute(
+                "SELECT value FROM meta WHERE key = 'media_index_ready'"
+            ).fetchone()
+            if ready is not None and ready["value"] == "1":
+                return
+            entity_by_path: dict[str, str] = {}
+            for row in conn.execute("SELECT id, attrs_json FROM entities"):
+                attrs = json.loads(row["attrs_json"])
+                path = attrs.get("path")
+                if isinstance(path, str):
+                    entity_by_path[path] = row["id"]
+
+        rows: list[tuple[dict[str, Any], str | None]] = []
+        media_dir = self.db_path.parent / "media"
+        for sidecar in sorted(media_dir.glob("*.azimut.json")):
+            media_name = sidecar.name[: -len(".azimut.json")]
+            if not (media_dir / media_name).is_file():
+                continue
+            try:
+                item = json.loads(sidecar.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                continue
+            path = f"media/{media_name}"
+            item["path"] = path
+            rows.append((item, entity_by_path.get(path)))
+
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                # Several download workers can reach the first schema-4 open at
+                # once. They may all scan before one acquires the write lock, so
+                # re-check the marker inside the transaction. Otherwise a late
+                # opener can delete rows registered after an earlier backfill.
+                ready = conn.execute(
+                    "SELECT value FROM meta WHERE key = 'media_index_ready'"
+                ).fetchone()
+                if ready is not None and ready["value"] == "1":
+                    conn.execute("COMMIT")
+                    return
+                conn.execute("DELETE FROM media_items")
+                for item, entity_id in rows:
+                    self._upsert_media_conn(conn, item, entity_id=entity_id)
+                conn.execute(
+                    "INSERT INTO meta(key, value) VALUES('media_index_ready', '1')"
+                    " ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+                )
                 conn.execute("COMMIT")
             except BaseException:
                 conn.execute("ROLLBACK")
@@ -382,6 +588,17 @@ class SqliteCase:
             ).fetchall()
         return [self._link(r) for r in rows]
 
+    def count_dependents(self, *, link_type: str, from_type: str) -> dict[str, int]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT links.to_id AS to_id, COUNT(*) AS n FROM links"
+                " JOIN entities ON entities.id = links.from_id"
+                " WHERE links.type = ? AND entities.type = ?"
+                " GROUP BY links.to_id",
+                (link_type, from_type),
+            ).fetchall()
+        return {r["to_id"]: int(r["n"]) for r in rows}
+
     def page_entities(
         self,
         *,
@@ -392,6 +609,7 @@ class SqliteCase:
         query: str | None = None,
         folder: str | None = None,
         unfiled: bool = False,
+        recursive: bool = False,
     ) -> dict[str, Any]:
         """A bounded, cursor-paginated slice of entities in insertion order.
 
@@ -400,14 +618,12 @@ class SqliteCase:
         scrolled past — new rows land after the current tail. Filters compose in
         SQL: ``types`` (an ``IN`` set), ``status``, a case-insensitive ``query``
         over the label, and folder — either ``unfiled`` (no folder) or an exact
-        ``folder`` path. One extra row is peeked to know whether a further page
-        exists, so ``next_cursor`` is None exactly on the last page.
+        ``folder`` path (or its descendants when ``recursive`` is true). One
+        extra row is peeked to know whether a further page exists, so
+        ``next_cursor`` is None exactly on the last page.
         """
         where: list[str] = []
         params: list[Any] = []
-        if cursor is not None:
-            where.append("rowid > ?")
-            params.append(_parse_cursor(cursor))
         if types:
             where.append(f"type IN ({', '.join('?' * len(types))})")
             params.extend(types)
@@ -417,14 +633,29 @@ class SqliteCase:
         if unfiled:
             where.append("folder IS NULL")
         elif folder is not None:
-            where.append("folder = ?")
-            params.append(folder)
-        if query:
-            where.append("label LIKE ? ESCAPE '\\'")
-            params.append(_like_contains(query))
+            if recursive:
+                where.append("(folder = ? OR folder LIKE ? ESCAPE '\\')")
+                params.extend((folder, _like_prefix(folder + "/")))
+            else:
+                where.append("folder = ?")
+                params.append(folder)
+        for term in (query or "").casefold().split():
+            where.append("search_text LIKE ? ESCAPE '\\'")
+            params.append(_like_contains(term))
+        filter_clause = (" WHERE " + " AND ".join(where)) if where else ""
+        filter_params = list(params)
+        if cursor is not None:
+            where.append("rowid > ?")
+            params.append(_parse_cursor(cursor))
         clause = (" WHERE " + " AND ".join(where)) if where else ""
         params.append(limit + 1)
         with self._connect() as conn:
+            total = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM entities{filter_clause}",
+                    filter_params,
+                ).fetchone()[0]
+            )
             rows = conn.execute(
                 f"SELECT rowid AS _rowid, * FROM entities{clause} ORDER BY rowid LIMIT ?",
                 params,
@@ -432,7 +663,11 @@ class SqliteCase:
         has_more = len(rows) > limit
         rows = rows[:limit]
         next_cursor = str(rows[-1]["_rowid"]) if has_more and rows else None
-        return {"items": [self._entity(r) for r in rows], "next_cursor": next_cursor}
+        return {
+            "items": [self._entity(r) for r in rows],
+            "next_cursor": next_cursor,
+            "total": total,
+        }
 
     def catalog_summary(self) -> dict[str, Any]:
         """Total plus per-type, per-status and per-folder counts in grouped scans
@@ -485,6 +720,181 @@ class SqliteCase:
                 for r in conn.execute("SELECT path FROM folders ORDER BY path COLLATE NOCASE")
             ]
 
+    # -- media browse index ------------------------------------------------
+
+    @staticmethod
+    def _upsert_media_conn(
+        conn: sqlite3.Connection,
+        item: dict[str, Any],
+        *,
+        entity_id: str | None = None,
+    ) -> None:
+        clean, values = _normalise_media_item(item)
+        if not clean.get("path"):
+            raise CaseError("media item has no path")
+        conn.execute(
+            "INSERT INTO media_items("
+            " path, entity_id, item_json, filename, kind, folder, name_sort,"
+            " size, added_at, search_text, source_type, source_op, imagery_mode"
+            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(path) DO UPDATE SET"
+            " entity_id = COALESCE(excluded.entity_id, media_items.entity_id),"
+            " item_json = excluded.item_json,"
+            " filename = excluded.filename, kind = excluded.kind,"
+            " folder = excluded.folder, name_sort = excluded.name_sort,"
+            " size = excluded.size, added_at = excluded.added_at,"
+            " search_text = excluded.search_text, source_type = excluded.source_type,"
+            " source_op = excluded.source_op, imagery_mode = excluded.imagery_mode",
+            (values[0], entity_id, *values[1:]),
+        )
+
+    def upsert_media_item(
+        self, item: dict[str, Any], *, entity_id: str | None = None
+    ) -> None:
+        def op(conn: sqlite3.Connection) -> None:
+            self._upsert_media_conn(conn, item, entity_id=entity_id)
+
+        self._write(op)
+
+    def remove_media_item(self, path: str) -> None:
+        def op(conn: sqlite3.Connection) -> None:
+            conn.execute("DELETE FROM media_items WHERE path = ?", (path,))
+
+        self._write(op)
+
+    @staticmethod
+    def _media_item(row: sqlite3.Row) -> dict[str, Any]:
+        return json.loads(row["item_json"])
+
+    def list_media_items(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT item_json FROM media_items"
+                " ORDER BY added_at DESC, path COLLATE NOCASE"
+            ).fetchall()
+        return [self._media_item(row) for row in rows]
+
+    def media_items_by_paths(self, paths: list[str]) -> list[dict[str, Any]]:
+        unique = list(dict.fromkeys(paths))
+        if not unique:
+            return []
+        if len(unique) > 500:
+            raise CaseError("media metadata lookup is limited to 500 paths")
+        placeholders = ", ".join("?" for _ in unique)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT item_json FROM media_items WHERE path IN ({placeholders})",
+                unique,
+            ).fetchall()
+        by_path = {
+            item["path"]: item for item in (self._media_item(row) for row in rows)
+        }
+        return [by_path[path] for path in unique if path in by_path]
+
+    def page_media_items(
+        self,
+        *,
+        q: str | None = None,
+        kind: str | None = None,
+        category: str | None = None,
+        folder: str | None = None,
+        sort: str = "newest",
+        direction: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        base_where: list[str] = []
+        base_params: list[Any] = []
+        if kind:
+            base_where.append("kind = ?")
+            base_params.append(kind)
+        if folder is not None:
+            if folder:
+                base_where.append("folder = ?")
+                base_params.append(folder)
+            else:
+                base_where.append("folder IS NULL")
+        for term in (q or "").casefold().split():
+            base_where.append("search_text LIKE ? ESCAPE '\\'")
+            base_params.append(_like_contains(term))
+
+        selected_where = list(base_where)
+        selected_params = list(base_params)
+        if category in _MEDIA_CATEGORY_SQL:
+            selected_where.append(_MEDIA_CATEGORY_SQL[category])
+
+        def clause(parts: list[str]) -> str:
+            return (" WHERE " + " AND ".join(parts)) if parts else ""
+
+        sort_columns = {
+            "name": "name_sort",
+            "size": "size",
+            "type": "kind",
+            "folder": "COALESCE(folder, '')",
+            "oldest": "added_at",
+            "newest": "added_at",
+        }
+        order_col = sort_columns.get(sort, "added_at")
+        descending = direction == "desc" or (
+            direction not in {"asc", "desc"} and sort in {"newest", "size"}
+        )
+        order = "DESC" if descending else "ASC"
+
+        selected_clause = clause(selected_where)
+        with self._connect() as conn:
+            total = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM media_items{selected_clause}",
+                    selected_params,
+                ).fetchone()[0]
+            )
+            rows = conn.execute(
+                f"SELECT item_json FROM media_items{selected_clause}"
+                f" ORDER BY {order_col} {order}, path COLLATE NOCASE {order}"
+                " LIMIT ? OFFSET ?",
+                [*selected_params, limit, offset],
+            ).fetchall()
+            kind_counts = {
+                row["kind"]: int(row["n"])
+                for row in conn.execute(
+                    f"SELECT kind, COUNT(*) AS n FROM media_items{selected_clause}"
+                    " GROUP BY kind",
+                    selected_params,
+                )
+            }
+            folder_counts = {
+                row["folder"]: int(row["n"])
+                for row in conn.execute(
+                    f"SELECT folder, COUNT(*) AS n FROM media_items{selected_clause}"
+                    f" {'AND' if selected_clause else 'WHERE'} folder IS NOT NULL"
+                    " GROUP BY folder",
+                    selected_params,
+                ).fetchall()
+            }
+            # The category chooser remains useful after one category is
+            # selected, so its counts use the text/kind/folder base but exclude
+            # the current category.
+            category_counts: dict[str, int] = {}
+            for key in _MEDIA_CATEGORIES:
+                category_counts[key] = int(
+                    conn.execute(
+                        f"SELECT COUNT(*) FROM media_items{clause([*base_where, _MEDIA_CATEGORY_SQL[key]])}",
+                        base_params,
+                    ).fetchone()[0]
+                )
+
+        next_offset = offset + len(rows)
+        return {
+            "items": [self._media_item(row) for row in rows],
+            "next_cursor": str(next_offset) if next_offset < total else None,
+            "total": total,
+            "facets": {
+                "kind_counts": kind_counts,
+                "folder_counts": folder_counts,
+                "category_counts": category_counts,
+            },
+        }
+
     def count_entities(self) -> int:
         """Entity total via one indexed count — the case switcher's per-case
         badge without materialising the graph."""
@@ -524,14 +934,16 @@ class SqliteCase:
         def op(conn: sqlite3.Connection) -> dict[str, Any]:
             conn.execute(
                 "INSERT INTO entities"
-                "(id, type, label, attrs_json, folder, prov_by, prov_at, prov_status, prov_source)"
-                " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(id, type, label, attrs_json, folder, search_text,"
+                " prov_by, prov_at, prov_status, prov_source)"
+                " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     entity["id"],
                     type_,
                     label,
                     json.dumps(entity["attrs"], ensure_ascii=False),
                     _folder_of(entity["attrs"]),
+                    _entity_search_text(type_, label, entity["attrs"]),
                     by,
                     entity["provenance"]["at"],
                     status,
@@ -558,12 +970,15 @@ class SqliteCase:
                 entity["provenance"]["status"] = patch["status"]
             conn.execute(
                 "UPDATE entities SET type = ?, label = ?, attrs_json = ?, folder = ?,"
-                " prov_status = ? WHERE id = ?",
+                " search_text = ?, prov_status = ? WHERE id = ?",
                 (
                     entity["type"],
                     entity["label"],
                     json.dumps(entity["attrs"], ensure_ascii=False),
                     _folder_of(entity["attrs"]),
+                    _entity_search_text(
+                        entity["type"], entity["label"], entity["attrs"]
+                    ),
                     entity["provenance"]["status"],
                     entity_id,
                 ),
@@ -729,14 +1144,21 @@ class SqliteCase:
             if doomed:
                 conn.executemany("DELETE FROM folders WHERE path = ?", doomed)
             # Unfile any entity filed under a removed node or its descendants.
-            for row in conn.execute("SELECT id, attrs_json FROM entities").fetchall():
+            for row in conn.execute(
+                "SELECT id, type, label, attrs_json FROM entities"
+            ).fetchall():
                 attrs = json.loads(row["attrs_json"])
                 folder = attrs.get("folder")
                 if folder is not None and (folder == name or folder.startswith(prefix)):
                     attrs.pop("folder", None)
                     conn.execute(
-                        "UPDATE entities SET attrs_json = ?, folder = NULL WHERE id = ?",
-                        (json.dumps(attrs, ensure_ascii=False), row["id"]),
+                        "UPDATE entities SET attrs_json = ?, folder = NULL,"
+                        " search_text = ? WHERE id = ?",
+                        (
+                            json.dumps(attrs, ensure_ascii=False),
+                            _entity_search_text(row["type"], row["label"], attrs),
+                            row["id"],
+                        ),
                     )
             self._touch(conn)
             return [
@@ -947,9 +1369,8 @@ def convert_json_to_sqlite(data: dict[str, Any], db_path: Path) -> MigrationRepo
     Writes a `case.db.tmp` beside the target, imports the whole graph in one
     transaction, runs `foreign_key_check` / `integrity_check`, then renames it
     into place. Any failure removes the temporary file and raises, leaving the
-    target untouched (the doc's "a crash before the manifest change leaves the
-    legacy case active"). This is the mechanism; flipping the manifest onto it is
-    Delivery step 4.
+    target untouched. A crash before the manifest change leaves the legacy case
+    active; ``Case._activate_sqlite`` flips the manifest only after this returns.
     """
     db_path = Path(db_path)
     tmp = db_path.with_name(db_path.name + ".tmp")
@@ -995,14 +1416,20 @@ def _import_graph(conn: sqlite3.Connection, data: dict[str, Any], report: Migrat
         prov = entity.get("provenance", {})
         conn.execute(
             "INSERT INTO entities"
-            "(id, type, label, attrs_json, folder, prov_by, prov_at, prov_status, prov_source)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(id, type, label, attrs_json, folder, search_text,"
+            " prov_by, prov_at, prov_status, prov_source)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 entity["id"],
                 entity.get("type", ""),
                 entity.get("label", ""),
                 json.dumps(entity.get("attrs") or {}, ensure_ascii=False),
                 _folder_of(entity.get("attrs")),
+                _entity_search_text(
+                    entity.get("type", ""),
+                    entity.get("label", ""),
+                    entity.get("attrs"),
+                ),
                 prov.get("by", ""),
                 prov.get("at", ""),
                 prov.get("status", "confirmed"),

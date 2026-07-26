@@ -13,9 +13,10 @@ verifiable by anyone with the recorded source URL.
 
 ``parse_map_url(url)`` returns None for a non-map URL (the extension refuses
 to capture there — maps only), else a dict with ``site``/``label`` always set
-and ``lat``/``lon``/``zoom``/``bearing``/``title``/``imagery_date`` set to
-values when the URL carries them, None when it doesn't. A malformed URL on a
-known host degrades to "known site, nothing parsed" — parsers never raise.
+and ``lat``/``lon``/``zoom``/``bearing``/``title``/``imagery_date``/
+``imagery_mode`` set to values when the URL carries them, None when it
+doesn't. A malformed URL on a known host degrades to "known site, nothing
+parsed" — parsers never raise.
 """
 
 from __future__ import annotations
@@ -80,6 +81,29 @@ def _iso_date(raw: str | None) -> str | None:
 def _param(u, name: str) -> str | None:
     values = parse_qs(u.query).get(name)
     return values[0] if values else None
+
+
+def _imagery_mode(site_id: str, u) -> str | None:
+    """Identify satellite imagery only when the URL makes it explicit.
+
+    The capture extension sees pixels but deliberately does not inspect the
+    page DOM. Generic map URLs therefore remain unclassified rather than being
+    guessed as satellite imagery. Satellite-only sites and explicit layer
+    parameters are safe to classify from the address bar.
+    """
+    if site_id in {"google-earth", "zoom-earth", "satellites-pro", "copernicus-browser"}:
+        return "satellite"
+    if site_id == "google-maps":
+        return "satellite" if "!1e3" in unquote(u.geturl()) else None
+    if site_id == "bing-maps":
+        return "satellite" if (_param(u, "style") or "").lower() in {"a", "h"} else None
+    if site_id == "yandex-maps":
+        layers = {part.strip().lower() for part in (_param(u, "l") or "").split(",")}
+        return "satellite" if layers & {"sat", "satellite"} else None
+    if site_id == "apple-maps":
+        layer = (_param(u, "map") or _param(u, "t") or "").lower()
+        return "satellite" if layer in {"satellite", "hybrid", "k", "h"} else None
+    return None
 
 
 # --- per-site parsers (each takes a SplitResult) -------------------------------
@@ -232,5 +256,10 @@ def parse_map_url(url: str) -> dict[str, Any] | None:
             parsed = parse(u)
         except Exception:
             parsed = _no_view()  # a weird URL on a known site still captures
-        return {"site": site_id, "label": label, **parsed}
+        return {
+            "site": site_id,
+            "label": label,
+            **parsed,
+            "imagery_mode": _imagery_mode(site_id, u),
+        }
     return None

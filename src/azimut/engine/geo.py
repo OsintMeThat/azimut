@@ -275,11 +275,16 @@ def map_links(lat: float, lon: float, zoom: int = 17) -> dict[str, str]:
 
 
 def geocode(query: str) -> dict[str, Any] | None:
-    """Best-effort forward geocoding via Nominatim. Returns None on any failure."""
+    """Best-effort forward geocoding via Nominatim. Returns None on any failure.
+
+    Nominatim reads a query in any language; ``accept-language=en`` only decides
+    what it answers with, so typing ``Москва`` comes back as "Moscow, Russia"
+    and the analyst can tell they landed where they meant to.
+    """
     try:
         response = httpx.get(
             "https://nominatim.openstreetmap.org/search",
-            params={"q": query, "format": "jsonv2", "limit": 1},
+            params={"q": query, "format": "jsonv2", "limit": 1, "accept-language": "en"},
             headers={"User-Agent": USER_AGENT},
             timeout=8,
         )
@@ -298,14 +303,28 @@ def geocode(query: str) -> dict[str, Any] | None:
         return None
 
 
-def reverse_geocode(lat: float, lon: float) -> dict[str, Any] | None:
-    """Best-effort place name via Nominatim. Returns None on any failure."""
+def reverse_geocode(
+    lat: float, lon: float, timeout: float = 8, language: str | None = None
+) -> dict[str, Any] | None:
+    """Best-effort place name via Nominatim. Returns None on any failure.
+
+    ``timeout`` is short on the save path — a filed capture must not sit behind
+    a slow geocoder — and generous on the explicit backfill, where waiting is
+    the whole point.
+
+    ``language`` is unset by default, which is Nominatim's local-language
+    answer. Keep it that way for anything the Post and Proof composers read:
+    they name a place the way it is named where it is.
+    """
+    params: dict[str, Any] = {"lat": lat, "lon": lon, "format": "jsonv2", "zoom": 14}
+    if language:
+        params["accept-language"] = language
     try:
         response = httpx.get(
             "https://nominatim.openstreetmap.org/reverse",
-            params={"lat": lat, "lon": lon, "format": "jsonv2", "zoom": 14},
+            params=params,
             headers={"User-Agent": USER_AGENT},
-            timeout=8,
+            timeout=timeout,
         )
         response.raise_for_status()
         data = response.json()
@@ -316,3 +335,75 @@ def reverse_geocode(lat: float, lon: float) -> dict[str, Any] | None:
         }
     except Exception:
         return None
+
+
+# Nominatim spells the first administrative level differently by country. Read
+# in this order and take the first one present — the goal is one honest label
+# per country, not a faithful reproduction of each country's admin hierarchy.
+_REGION_KEYS = ("state", "region", "province", "county")
+
+
+def locate_point(lat: float, lon: float, timeout: float = 8) -> dict[str, Any]:
+    """Which country (and region) a point falls in — the ``attrs.geo`` record.
+
+    Never raises: callers file the verdict as-is and move on. The four states
+    are the whole vocabulary, and three of them are permanent:
+
+    - ``ok`` — country resolved, ``country_code``/``country`` (and ``region``
+      when Nominatim has one) ride along;
+    - ``nocountry`` — the lookup answered but the point is in no country
+      (open sea);
+    - ``failed`` — the lookup itself did not answer (offline, timeout, 5xx),
+      the one state a later backfill pass retries.
+
+    ``nocoords`` is the fourth, written by callers for items that have no
+    position to look up at all.
+
+    The native answer is the authority. When it named a region, a second
+    English lookup fills ``region_en`` so the Saved tree can label the branch in
+    both languages; the English country name needs no lookup at all (see
+    ``engine.countries``). That second call is best-effort in the strongest
+    sense: if it fails the verdict is filed native-only and nothing retries it.
+    """
+    try:
+        result = reverse_geocode(lat, lon, timeout)
+    except Exception:
+        return {"state": "failed"}
+    if result is None:
+        return {"state": "failed"}
+    address = result.get("address") or {}
+    code = str(address.get("country_code") or "").strip().lower()
+    if not code:
+        return {"state": "nocountry"}
+    geo: dict[str, Any] = {
+        "state": "ok",
+        "country_code": code,
+        "country": str(address.get("country") or "").strip() or code.upper(),
+    }
+    region = _region_of(address)
+    if region:
+        geo["region"] = region
+        english = _region_in_english(lat, lon, timeout)
+        if english and english != region:
+            geo["region_en"] = english
+    return geo
+
+
+def _region_of(address: dict[str, Any]) -> str:
+    """The first administrative level Nominatim spelled, or ``""``."""
+    for key in _REGION_KEYS:
+        region = str(address.get(key) or "").strip()
+        if region:
+            return region
+    return ""
+
+
+def _region_in_english(lat: float, lon: float, timeout: float) -> str:
+    """The same region asked for again in English, or ``""`` if that fails."""
+    try:
+        result = reverse_geocode(lat, lon, timeout, language="en")
+    except Exception:
+        return ""
+    if result is None:
+        return ""
+    return _region_of(result.get("address") or {})

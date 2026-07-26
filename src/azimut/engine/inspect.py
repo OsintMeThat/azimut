@@ -21,6 +21,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import re
 import subprocess
 import tempfile
 import threading
@@ -462,6 +463,36 @@ def _stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
 
+def _name_stem(label: str | None, fallback: str) -> str:
+    """Filename stem for a filed item: the name the user typed, else the source's.
+
+    ``media_engine.safe_filename`` still scrubs what comes out of here, so this
+    only has to fold whitespace and keep the stem short enough to read.
+    """
+    stem = re.sub(r"\s+", "_", (label or "").strip())
+    return stem[:60] if stem else fallback[:40]
+
+
+def _apply_meta(
+    case: Case,
+    result: dict[str, Any],
+    *,
+    label: str | None = None,
+    folder: str | None = None,
+    notes: str | None = None,
+) -> None:
+    """Write the Save gate's chosen name, folder and note onto the filed item.
+
+    This applies to a deduped save too. Re-saving an unchanged collage lands on
+    the same pixels and so on the same entity, and dropping the name there is
+    exactly the case where a name the user just typed seems to vanish. The gate
+    is an explicit act: the last one through it wins.
+    """
+    patch = {k: v for k, v in (("title", label), ("folder", folder), ("notes", notes)) if v}
+    if patch:
+        media_engine.update_media(case, result["item"]["path"], patch)
+
+
 def scan_focus(
     case: Case, video_rel: str, set_progress: Callable[[dict], None] | None = None
 ) -> list[dict[str, Any]]:
@@ -624,29 +655,25 @@ def save_frame(
     ops: list[dict[str, Any]] | None = None,
     label: str | None = None,
     folder: str | None = None,
+    notes: str | None = None,
 ) -> dict[str, Any]:
     """File one tray frame (a video frame or an adjusted image) as case media."""
     image = _source_image(case, rel_path, time_s, ops)
-    stem = Path(rel_path).stem[:40]
+    stem = _name_stem(label, Path(rel_path).stem)
     if time_s is not None:
         tag, op = f"_t{time_s:.2f}s", "frame"
     else:
         tag, op = "_edit", "adjust"
-    name = f"{stem}{tag}_{_stamp()}.png"
+    # A named item keeps its name on disk; the timecode tag only makes sense on
+    # the fallback stem, where nothing else says which instant this is.
+    name = f"{stem}{'' if label else tag}_{_stamp()}.png"
     source = _derivation(
         rel_path, _source_sha(case, rel_path), op=op,
         **({"time": round(time_s, 3)} if time_s is not None else {}),
         **({"ops": ops} if ops else {}),
     )
     result = media_engine.import_image(case, image, name, source, by="inspect")
-    if not result.get("duplicate"):
-        patch: dict[str, Any] = {}
-        if label:
-            patch["title"] = label
-        if folder:
-            patch["folder"] = folder
-        if patch:
-            media_engine.update_media(case, result["item"]["path"], patch)
+    _apply_meta(case, result, label=label, folder=folder, notes=notes)
     return result
 
 
@@ -766,6 +793,7 @@ def compose_perspective(
     background: str | None = "#12141c",
     label: str | None = None,
     folder: str | None = None,
+    notes: str | None = None,
 ) -> dict[str, Any]:
     """Composite tray/case images, each warped into a 4-point quad, onto a canvas.
 
@@ -778,16 +806,9 @@ def compose_perspective(
         case, width=width, height=height, nodes=nodes, background=background
     )
     source = _derivation("", None, op="collage", sources=sources, perspective=True)
-    name = f"collage_{_stamp()}.png"
+    name = f"{_name_stem(label, 'collage')}_{_stamp()}.png"
     result = media_engine.import_image(case, canvas, name, source, by="inspect")
-    if not result.get("duplicate"):
-        patch: dict[str, Any] = {}
-        if label:
-            patch["title"] = label
-        if folder:
-            patch["folder"] = folder
-        if patch:
-            media_engine.update_media(case, result["item"]["path"], patch)
+    _apply_meta(case, result, label=label, folder=folder, notes=notes)
     return result
 
 
@@ -890,6 +911,7 @@ def enhance_video(
     rotation: int = 0,
     label: str | None = None,
     folder: str | None = None,
+    notes: str | None = None,
 ) -> dict[str, Any]:
     """Re-encode a video with its adjustments and orientation, then file it."""
     if not media_engine.ffmpeg_available():
@@ -899,7 +921,7 @@ def enhance_video(
         raise ValueError("no adjustments or rotation to apply")
 
     src = case.resolve_inside(video_rel)
-    stem = Path(src.name).stem[:40]
+    stem = _name_stem(label, Path(src.name).stem)
     tmp = case.subdir("media") / f".enhance_{_stamp()}.mp4"
     try:
         proc = subprocess.run(
@@ -911,7 +933,7 @@ def enhance_video(
             raise RuntimeError(
                 (proc.stderr or b"").decode("utf-8", "replace").strip() or "video enhance failed"
             )
-        name = f"{stem}_enhanced_{_stamp()}.mp4"
+        name = f"{stem}{'' if label else '_enhanced'}_{_stamp()}.mp4"
         source = _derivation(
             video_rel, _source_sha(case, video_rel), op="enhance-video",
             params=params, rotation=rotation,
@@ -919,12 +941,5 @@ def enhance_video(
         result = media_engine.import_produced_file(case, tmp, name, source, by="inspect")
     finally:
         tmp.unlink(missing_ok=True)
-    if not result.get("duplicate"):
-        patch: dict[str, Any] = {}
-        if label:
-            patch["title"] = label
-        if folder:
-            patch["folder"] = folder
-        if patch:
-            media_engine.update_media(case, result["item"]["path"], patch)
+    _apply_meta(case, result, label=label, folder=folder, notes=notes)
     return result

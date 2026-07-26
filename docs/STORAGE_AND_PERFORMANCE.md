@@ -30,6 +30,13 @@ structured state (entities, links, folders, jobs). The files under `media/`,
 `proofs/`, `exports/`, `inspect/` and `notes/` are the source of truth for their
 own content.
 
+Under `proofs/`, `exports/` and `inspect/`, a file's stem is the name shown at the
+top of its tool, slugified (`api/naming.slugify`, mirrored in `lib/naming.js`).
+Renaming therefore moves the file: the save carries the slug it was bound to, and
+the endpoint writes the new one, moves the proof's PNG with it, rebinds the same
+entity and deletes the old file. A rename onto a name another item holds is
+refused (409) — two entities pointing at one spec has no sane merge.
+
 Every mutation used to re-read and rewrite the whole `case.json` under a per-case
 lock. At 10k entities that rewrote megabytes per edit and shipped the entire
 graph to the browser on open. SQLite removes both ceilings: a single edit touches
@@ -53,10 +60,12 @@ carry enough information to detect staleness.
 |---|---|---|
 | Case name and storage version | `case.json` | Small manifest, atomically replaced |
 | Entities, links and folders | `case.db` | Transactional and versioned |
-| Mutable titles and notes | `case.db` | Never duplicated into a writable sidecar |
+| Entity labels and notes | `case.db` | Indexed for catalog search |
+| Media title, notes and folder | Media sidecar | Mirrored to the graph and browse index |
 | Image, video and audio bytes | Filesystem | Never stored as database blobs |
 | Proof and session content | Their JSON/PNG files | Registered as artifacts in the database |
 | Acquisition provenance | Media sidecar | Immutable after registration |
+| Media browse fields | `case.db` (`media_items`) | Search index mirrored from sidecars |
 | Background jobs | `case.db` (`jobs`) | Durable, recoverable, one worker |
 | Thumbnails | `media/.thumbs/` | Cache; safe to remove at any time |
 | Note bodies | `notes.md`, `notes/<id>.md` | Graph keeps only id, title, folder, path |
@@ -79,9 +88,8 @@ Windows, macOS and Linux:
 - **`case.db` lives under the workspace root**, inside the case folder, never
   beside the frozen executable, which may sit on read-only media.
 - **Dev-only tooling stays out of the artifact.** The synthetic fixture
-  (`tests/bigcase.py`) and the benchmark harness (`bench/case_baseline.py`) live
-  outside `src/azimut/`, so hatchling never packages them, and use only the
-  standard library.
+  (`tests/bigcase.py`) lives outside `src/azimut/`, so hatchling never packages
+  it, and uses only the standard library.
 
 ## The storage boundary
 
@@ -101,7 +109,7 @@ review.
 
 ## Database shape
 
-`case.db` is at SQLite schema 3. The schema counter is independent of the JSON
+`case.db` is at SQLite schema 4. The schema counter is independent of the JSON
 `CASE_SCHEMA`: the manifest's `azimut.storage` field selects the backend, and each
 format counts its own shape upgrades.
 
@@ -115,7 +123,8 @@ format counts its own shape upgrades.
 
 `entities`
 : `id`, `type`, `label`, `attrs_json`, an indexed `folder` (denormalised from
-  `attrs.folder`), provenance fields and status. Unknown types and attributes stay
+  `attrs.folder`), denormalised search text, provenance fields and status.
+  Search covers label, type, folder and notes. Unknown types and attributes stay
   valid.
 
 `links`
@@ -132,15 +141,26 @@ format counts its own shape upgrades.
   `attempts`, `max_attempts`, `payload_json`, `error` and timestamps. See
   "Thumbnails and background jobs".
 
+`media_items`
+: Queryable browse metadata mirrored from each media sidecar. It indexes path,
+  kind, folder, display name, size, date, source and imagery mode. The original
+  files and sidecars remain the file-level records.
+
 ### Indexes and migrations
 
-Indexes cover entity type/status/folder and link source/target/type, plus job
-state and a partial unique index on `(kind, job_key)` that keeps a keyed job from
-being enqueued twice. `SqliteCase.open` upgrades an older `case.db` in place
+Indexes cover entity type/status/folder, link source/target/type and media browse
+fields. Job state and a partial unique index on `(kind, job_key)` keep a keyed
+job from being enqueued twice. `SqliteCase.open` upgrades an older `case.db` in place
 through `_SQLITE_MIGRATIONS`, each step in its own immediate transaction, re-reading
 the version inside the transaction so a raced second opener applies nothing; a
-newer schema is refused rather than mangled. The two shipped migrations add the
-indexed `folder` column (1→2) and the `jobs` table (2→3).
+newer schema is refused rather than mangled. The shipped migrations add the
+indexed `folder` column (1→2), the `jobs` table (2→3), then entity search text and
+the media browse index (3→4).
+
+The schema-4 media backfill scans sidecars once on first open. Its completion
+marker and index rows commit together, so an interrupted backfill retries safely.
+Normal media creation, edits, thumbnail changes and deletion keep the index in
+sync.
 
 Geographic, temporal and full-text projections are deferred until a query needs
 them. Each projection requires its own migration and tests.
@@ -185,8 +205,8 @@ endpoints:
 
 - `GET /api/cases/{id}/catalog/entities` returns `{items, next_cursor}` in stable
   insertion order, with a clamped page size and server-side filters: a
-  comma-separated `type` set, `status`, a label substring `q`, and folder
-  (`unfiled=true` or an exact `folder` path). The cursor keys on `rowid`, so a
+  comma-separated `type` set, `status`, `q` over label/type/folder/notes, and
+  folder (`unfiled=true` or an exact path, with optional descendants). The cursor keys on `rowid`, so a
   background import appending rows never shifts a page already scrolled past, and a
   deletion before the cursor never skips a live row.
 - `GET /api/cases/{id}/catalog/summary` returns `{total, by_type, by_status,
@@ -208,7 +228,7 @@ the single-entity and closure cases. These helpers live in
 response.
 
 Deferred to their first consumer: date filters (a timeline filter), links
-pagination (a relations/graph view), and notes/label full-text search (gated on
+pagination (a relations/graph view), and ranked full-text search (gated on
 per-binary FTS5).
 
 ## Thumbnails and background jobs
@@ -254,7 +274,8 @@ content-addressed thumbnail can be shared by identical-bytes captures, so deleti
 one media file drops the cached thumbnail only when no surviving sidecar still
 points at it.
 
-The media listing tags each item with a `thumb_state` (`ready`, `queued`,
+The media listing and the satellite capture listing both tag each item with a
+`thumb_state` (`ready`, `queued`,
 `running`, `failed`, or `none`). The Media Library renders the image when ready
 (lazy-loaded, async-decoded, with an `onerror` fallback to the type icon that
 reports once and does not retry per render), a "Generating…" placeholder while
@@ -262,6 +283,52 @@ queued, and a retry affordance on failure. `POST
 /api/cases/{id}/media/thumbnails/regenerate` re-queues one item (the per-card
 retry) or every missing/failed one; the grid polls the listing while anything is
 pending, and stops on its own once nothing is.
+
+Every picker cell shows the cached thumbnail or a placeholder, never the
+original: a proof panel picker rendering full-size captures in 150px cells was
+the slowest surface in the app. The proof pickers poll the listing while
+anything is pending, like the grid does.
+
+A saved proof's export is thumbnailed through the same cache: `POST
+/cases/{id}/proofs` renders one from the bytes it just wrote and records it in
+the spec, and `GET /cases/{id}/proofs` backfills any proof that has none (saved
+before this existed, or evicted) at the cost of one hash of the export. The open
+dialog falls back to the export itself when no thumbnail could be produced.
+Proof thumbnails count as referenced by `repair`, which otherwise sweeps
+anything no media sidecar points at.
+
+`GET /files/{case}/{path}` serves with an ETag and answers a matching
+`If-None-Match` with a 304, so reopening a picker revalidates instead of
+refetching. Thumbnail URLs fold in the content hash and the generator version,
+so they can never change meaning and are served `immutable` — the browser stops
+asking for them at all.
+
+The Media Library and Files browse media through `GET
+/api/cases/{id}/media/page`, a bounded SQLite query with `q`, `kind`,
+source-derived `category`, `folder`, `sort`, `limit` and `cursor`. It returns
+`total` plus full-result kind, folder and category facets. Large cases load one
+page and search without opening or sorting every sidecar. Files requests
+thumbnail, kind and size metadata only for paths it can render through `POST
+/api/cases/{id}/media/metadata`. The unbounded `GET /api/cases/{id}/media`
+stays for consumers that genuinely need the whole index, such as composer
+pickers, satellite crops and derivation traces.
+
+The Map's Saved panel opens on `GET /api/cases/{id}/satellite/index`: one compact
+row per place, capture and filed screenshot — id, kind, title, coordinates,
+geography, thumbnail, provider, dates, notes, and nothing else. The tree, the
+search modal and the map overlay all read that one response, so hundreds of saved
+items cost tens of KB instead of every capture's full media row and full-size
+image. Rows come newest first on a single normalised timestamp, and the endpoint
+makes no network call. Geography rides on the entity's `attrs.geo`
+(`ok`/`nocoords`/`nocountry`/`failed`); continent is never stored, it is derived
+from the country code at read time (`engine/continents.py`), so correcting that
+table repairs existing cases with no migration. Countries that span two
+continents (Russia, Kazakhstan, Turkey) are split by the point's own
+coordinates, so a Vladivostok capture files under Asia. Saving resolves the country
+inline, bounded by a short timeout; `POST /api/cases/{id}/satellite/locate?limit=N`
+backfills up to 25 at a time, waiting ~1.1s between lookups for Nominatim's rate
+limit, and reports `remaining` so the client can loop. Progress is the stored
+geography itself, which makes the pass resumable and idempotent.
 
 ## Filesystem and database consistency
 
@@ -274,15 +341,11 @@ closed case is always complete.
 
 ## Performance
 
-The reference profile for absolute timings is a modest machine (four logical
-cores, 8 GB RAM, integrated graphics, SATA-class drive); the exact machine and
-versions belong in the benchmark report. The large-case fixture
-(`tests/bigcase.py` `build_big_case`, driven by `bench/case_baseline.py`, standard
-library only, outside the wheel) builds 10k entities / 20k links / 5k media with
-nested folders, notes, suggestions, unknown types, mixed thumbnail states, proof/
-post/Inspect artifacts, missing files and tombstones. It writes `case.json` in one
-pass (the per-item path is the O(n²) cost being measured) and is seeded, so the
-same arguments produce byte-identical rows.
+The deterministic large-case fixture (`tests/bigcase.py`) builds entities,
+links, media, nested folders, notes, suggestions, unknown types, mixed thumbnail
+states, proof/post/Inspect artifacts, missing files and tombstones. Storage and
+release tests open that fixture through the SQLite migration boundary. The same
+arguments produce byte-identical graph rows.
 
 Interaction budgets on the reference machine:
 
@@ -295,20 +358,9 @@ Interaction budgets on the reference machine:
 | Mounted catalog rows/cards | 300 or fewer |
 | Default CPU-heavy background jobs | 1 at a time |
 
-These are starting budgets, not release claims: absolute timings are a manual
-release check because shared CI hardware varies, while relative regressions can be
-made to fail CI against a recorded baseline.
-
-### Captured baselines (fast dev machine, not the reference profile)
-
-Read the shape, not the absolute milliseconds. At the default size (10k / 20k /
-5k), the old monolithic `case.json` was **8.4 MB** and case open shipped **~6 MB**
-of graph to the browser; every single mutation was **~244 ms** because it
-read-modify-wrote the whole file (linear in case size). On the SQLite backend a
-single `add_entity` is **~5.5 ms** (one durable row, roughly flat with case size),
-a `get_entity` is a **0.15 ms** indexed read, and converting a 5k-entity case runs
-once in **~233 ms**. Case open no longer ships the graph at all. The
-reference-machine capture remains a manual release step.
+These are interaction budgets, not release claims. Shared CI hardware varies,
+so the automated suites enforce bounded queries, result sizes, and mounted-row
+limits instead of machine-specific timings.
 
 ## How it is verified
 
@@ -319,8 +371,8 @@ reference-machine capture remains a manual release step.
   (SQLite-backed).
 - **Store specifics** (`tests/test_sqlite_backend.py`): create/open, newer-schema
   refusal, foreign keys, rollback, the in-place schema upgrade through every
-  migration, keyset paging, and the atomic converter (roundtrip, dangling-link
-  report, failure leaves no db, large-case integrity).
+  migration, keyset paging, media browse search/facets, and the atomic converter
+  (roundtrip, dangling-link report, failure leaves no db, large-case integrity).
 - **Migration** (`tests/test_migrations.py`): legacy json → sqlite on open, backup
   recoverability, a failed activation leaving the json case usable, forward-compat
   refusal.
@@ -329,13 +381,18 @@ reference-machine capture remains a manual release step.
   by generator version, drain + retry-then-fail, cancel on missing media, LRU
   budget eviction, orphan/temp repair, shared-thumbnail delete safety, the
   background worker, startup recovery, and the `thumb_state` + regenerate API.
+- **File serving** (`tests/test_files_api.py`): revalidation to 304, immutable
+  thumbnails, and an edited original invalidating its own ETag.
+- **Proof exports** (`tests/test_proofs_api.py`): a thumbnail on save, the
+  listing backfilling an older proof and recording it, the fallback when none
+  can be rendered, and `repair` leaving proof thumbnails alone.
 - **Release gate** (`tests/test_release_gate.py`): a legacy case migrates and every
   workflow answers, a closed-case folder copy opens identically, a large migrated
   case opens through bounded queries, and the frozen-binary packaging constraints
   hold.
 - **Frontend** (vitest + svelte-check + the production build): first-page paging,
-  request cancellation on case switch, and the thumbnail placeholder/failure/retry
-  markup.
+  complete server search, full-result media facets, request cancellation on case
+  switch, scoped metadata loading and thumbnail placeholder/failure/retry markup.
 
 The backend suite runs on Python 3.11 and the three release operating systems.
 

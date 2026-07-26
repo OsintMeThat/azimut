@@ -10,49 +10,21 @@
     persistSidebarWidth,
   } from '../lib/state.svelte.js';
   import { DEFAULT_W } from '../lib/sidebar.js';
-  import { buildTree, subtreeCountFrom, flattenPaths, folderOf } from '../lib/folderTree.js';
+  import { buildTree, flattenPaths } from '../lib/folderTree.js';
   import { buildCatalogQuery, settleCatalogSummary } from '../lib/catalog.js';
-  import { assignFolder as fileEntity } from '../lib/filing.js';
+  import { createPagedList } from '../lib/pagedList.svelte.js';
+  import { filterEntities, isFiltering, typeChips } from '../lib/sidebarSearch.js';
+  import { assignFolder as fileEntity, assignFolderBatch } from '../lib/filing.js';
   import { createNote } from '../lib/notes.js';
-  import { openEntity, gotoCapture, openNotebook, ENTITY_TOOL } from '../lib/navigate.js';
+  import { openEntity, openNotebook } from '../lib/navigate.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import EntityDetails from './EntityDetails.svelte';
   import FolderSelect from './FolderSelect.svelte';
-
-  const ENTITY_ICONS = {
-    person: 'user',
-    organization: 'layers',
-    alias: 'user',
-    account: 'globe',
-    email: 'note',
-    phone: 'hash',
-    place: 'pin',
-    capture: 'satellite',
-    event: 'clock',
-    media: 'image',
-    proof: 'proof',
-    post: 'post',
-    domain: 'globe',
-    ip: 'hash',
-    vehicle: 'grip',
-    note: 'note',
-    'inspect-session': 'inspect',
-  };
-
-  const VIDEO_EXTS = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v']);
-  // Media entities normally carry the same `kind` the Media Library uses to tell
-  // video from image; fall back to the file extension for entities filed before
-  // that attr existed.
-  function isVideo(e) {
-    if (e.attrs?.kind) return e.attrs.kind === 'video';
-    const ext = e.attrs?.path?.split('.').pop()?.toLowerCase();
-    return !!ext && VIDEO_EXTS.has(ext);
-  }
-  const entityIcon = (e) => (e.type === 'media' && isVideo(e) ? 'video' : ENTITY_ICONS[e.type] ?? 'note');
-
-  let section = $state({ notes: false, suggestions: true, mywork: true });
+  import SidebarHeader from './sidebar/SidebarHeader.svelte';
+  import SidebarTree from './sidebar/SidebarTree.svelte';
+  import SidebarResults from './sidebar/SidebarResults.svelte';
+  import DetailsDrawer from './sidebar/DetailsDrawer.svelte';
 
   // ── bounded catalog loading (docs/STORAGE_AND_PERFORMANCE.md, Step 5) ───────
   // The sidebar no longer holds the whole graph. It builds the folder tree from
@@ -72,7 +44,6 @@
 
   const byFolder = $derived(summary?.by_folder ?? {});
   const suggestedCount = $derived(summary?.by_status?.suggested ?? 0);
-  const confirmedCount = $derived(Math.max(0, (summary?.total ?? 0) - suggestedCount));
 
   async function loadSection(sec, params, { id, mySeq, more = false } = {}) {
     id ??= caseState.current?.id;
@@ -126,8 +97,10 @@
       expanded = {};
       folderData = {};
       unfiledOpen = false;
-      addingUnder = undefined;
+      suggestedOpen = false;
       infoEntity = null;
+      query = '';
+      typeFilter = null;
       suggestedData = emptySection();
       unfiledData = emptySection();
     }
@@ -147,6 +120,46 @@
     untrack(() => refreshAll(id));
   });
 
+  // ── search: one rule, browse or results (lib/sidebarSearch.js) ─────────────
+  // No filter shows the tree; a text query or a type chip shows a flat list.
+  // The list is only fetched once something is actually filtered — opening a
+  // case still costs the same bounded pages it did before.
+  let query = $state('');
+  let typeFilter = $state(null);
+  const filtering = $derived(isFiltering({ query, type: typeFilter }));
+  const chips = $derived(typeChips(summary));
+
+  const results = createPagedList({
+    fetchPage: ({ query: q, cursor }) =>
+      api.get(
+        buildCatalogQuery(caseState.current?.id, {
+          query: q,
+          types: typeFilter ? [typeFilter] : null,
+          limit: CATALOG_PAGE,
+          cursor,
+        })
+      ),
+  });
+  // In client mode the fetched page is the whole case, so the term filters in
+  // memory; in server mode the request already carries it.
+  const resultRows = $derived(
+    results.serverMode ? results.items : filterEntities(results.items, { query, type: typeFilter })
+  );
+
+  let resultsKey = null; // non-reactive: only the load effect reads/writes it
+  $effect(() => {
+    const id = caseState.current?.id;
+    const rev = caseState.rev; // a filing elsewhere changes a row's folder meta
+    const key = filtering && id ? `${id}|${typeFilter ?? ''}|${rev}` : null;
+    if (key === resultsKey) return;
+    resultsKey = key;
+    if (!key) results.clear();
+    else results.reload();
+  });
+  $effect(() => {
+    results.setQuery(query);
+  });
+
   async function confirmEntity(entity) {
     await api.patch(`/api/cases/${caseState.current.id}/entities/${entity.id}`, {
       status: 'confirmed',
@@ -162,22 +175,17 @@
   }
 
   // Clicking a row opens its owning workspace; notes share the Notebook.
+  // openEntity / gotoCapture live in lib/navigate.js — the case sidebar and the
+  // Details editor send an analyst to the same place.
   function onEntityActivate(entity) {
     if (entity.type === 'capture') return openInfo(entity);
     openEntity(entity);
   }
 
-  // openEntity / gotoCapture live in lib/navigate.js — the case sidebar and the
-  // Details editor send an analyst to the same place.
-
   // ── My work: the analyst's own nested folder tree ('/'-separated paths) ────
-  let newFolder = $state(''); // top-level create input
-  let addingUnder = $state(undefined); // folder path currently gaining a child
-  let newSubName = $state('');
+  let newFolderOpen = $state(false);
+  let newFolder = $state('');
   let expanded = $state({}); // path -> bool (absent = collapsed)
-  let dragEntityId = $state(null); // for the dragging visual
-  let dragEntity = null; // the entity being dragged (no full-graph lookup on drop)
-  let dragOverFolder = $state(undefined); // folder path being hovered
 
   const caseFolders = $derived(caseState.current?.folders ?? []);
 
@@ -187,40 +195,32 @@
   const tree = $derived(buildTree([...new Set([...caseFolders, ...Object.keys(byFolder)])], []));
   const allFolders = $derived(flattenPaths(tree));
   let unfiledOpen = $state(false);
+  let suggestedOpen = $state(false);
 
-  const isExpanded = (path) => expanded[path] === true;
   function toggle(path) {
-    expanded[path] = !isExpanded(path);
+    expanded[path] = expanded[path] !== true;
     if (expanded[path]) loadFolder(path);
   }
-  function focus(node) { node.focus(); }
+  function focusInput(node) { node.focus(); }
 
-  async function createFolder(fullName) {
-    const name = (fullName ?? newFolder).trim();
-    if (!name) return;
-    if (fullName == null) newFolder = '';
+  async function createFolder(name) {
+    const clean = (name ?? '').trim();
+    if (!clean) return;
     try {
-      await api.post(`/api/cases/${caseState.current.id}/folders`, { name });
+      await api.post(`/api/cases/${caseState.current.id}/folders`, { name: clean });
       let acc = '';
-      for (const seg of name.split('/')) { acc = acc ? `${acc}/${seg}` : seg; expanded[acc] = true; }
+      for (const seg of clean.split('/')) { acc = acc ? `${acc}/${seg}` : seg; expanded[acc] = true; }
       await reloadCase();
     } catch (e) {
       toast(e.message, 'danger');
     }
   }
 
-  function startAddSub(path) {
-    addingUnder = path;
-    newSubName = '';
-    expanded[path] = true;
-  }
-  async function submitAddSub() {
-    const name = newSubName.trim();
-    const parent = addingUnder;
-    addingUnder = undefined;
-    newSubName = '';
-    if (!name || parent === undefined) return;
-    await createFolder(parent ? `${parent}/${name}` : name);
+  function submitNewFolder() {
+    const name = newFolder;
+    newFolder = '';
+    newFolderOpen = false;
+    createFolder(name);
   }
 
   // File (or unfile, with folder='') an entity into a My-work folder, then
@@ -231,20 +231,54 @@
     await reloadCase();
   }
 
-  // drag & drop wiring
-  function onDragStart(ev, entity) {
-    dragEntityId = entity.id;
-    dragEntity = entity;
-    ev.dataTransfer.effectAllowed = 'move';
-    ev.dataTransfer.setData('text/plain', entity.id);
+  // A drop carries whatever was selected — one row, or a ctrl/shift-picked run.
+  // Filed in order, then one refresh for the batch.
+  async function onFileDrop(entities, folder) {
+    try {
+      await assignFolderBatch(caseState.current.id, entities, folder);
+      await reloadCase();
+      if (entities.length > 1)
+        toast(folder ? `Filed ${entities.length} items in ${folder}` : `Unfiled ${entities.length} items`, 'ok', 1600);
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
   }
-  function onDropFolder(ev, folder) {
+
+  // ── scrolling while a drag is in flight ───────────────────────────────────
+  // A native drag swallows the wheel in Chromium, so the tree scrolls itself
+  // when the pointer nears an edge. Firefox does deliver the wheel, and the
+  // handler below uses it when it arrives.
+  let bodyEl = $state(null);
+  let dragActive = $state(false);
+  const EDGE = 44;
+  const EDGE_SPEED = 12;
+  let edgeDir = 0;
+  let edgeRaf = 0;
+
+  function stepEdgeScroll() {
+    if (!edgeDir || !bodyEl) { edgeRaf = 0; return; }
+    bodyEl.scrollTop += edgeDir * EDGE_SPEED;
+    edgeRaf = requestAnimationFrame(stepEdgeScroll);
+  }
+  function setEdgeScroll(dir) {
+    edgeDir = dir;
+    if (dir && !edgeRaf) edgeRaf = requestAnimationFrame(stepEdgeScroll);
+  }
+  function onBodyDragOver(ev) {
+    if (!bodyEl) return;
+    const box = bodyEl.getBoundingClientRect();
+    if (ev.clientY < box.top + EDGE) setEdgeScroll(-1);
+    else if (ev.clientY > box.bottom - EDGE) setEdgeScroll(1);
+    else setEdgeScroll(0);
+  }
+  function onBodyWheel(ev) {
+    if (!dragActive || !bodyEl) return; // otherwise the browser scrolls it itself
     ev.preventDefault();
-    dragOverFolder = undefined;
-    const entity = dragEntity;
-    dragEntityId = null;
-    dragEntity = null;
-    if (entity) assignFolder(entity, folder).catch((e) => toast(e.message, 'danger'));
+    bodyEl.scrollTop += ev.deltaY;
+  }
+  function onDragActive(active) {
+    dragActive = active;
+    if (!active) setEdgeScroll(0);
   }
 
   // ── confirmation dialog (replaces browser confirm()) ──────────────────────
@@ -301,26 +335,27 @@
     };
   }
 
-  // ── details panel (docs/UI.md §4) ─────────────────────────────────────────
+  // ── details drawer (docs/UI.md §Case sidebar) ─────────────────────────────
   // The editor body lives in EntityDetails.svelte (shared with the Media
-  // Library modal). The sidebar only tracks which entity is selected and
-  // scrolls it into view.
+  // Library modal). It opens over the sidebar instead of growing under the
+  // tree, so selecting a row never pushes the case out of the viewport.
   let infoEntity = $state(null);
-  let detailsEl = $state(null);
+  let returnFocusEl = null;
 
   function openInfo(entity) {
+    returnFocusEl = document.activeElement;
     infoEntity = entity;
-    requestAnimationFrame(() => detailsEl?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
+
+  function closeInfo() {
+    infoEntity = null;
+    returnFocusEl?.focus?.();
+    returnFocusEl = null;
   }
 
   // ── note entities ─────────────────────────────────────────────────────────
-  let noteModal = $state(null);
-  // shape: { entity: obj|null, title: string, folder: string, content: string }
+  let noteModal = $state(null); // { title, folder }
   let noteModalSaving = $state(false);
-
-  function openNewNote() {
-    noteModal = { title: '', folder: '' };
-  }
 
   async function saveNote() {
     if (!noteModal) return;
@@ -380,7 +415,10 @@
   $effect(() => {
     const onWindowResize = () => setSidebarWidth(uiState.sidebarW);
     window.addEventListener('resize', onWindowResize);
-    return () => window.removeEventListener('resize', onWindowResize);
+    return () => {
+      window.removeEventListener('resize', onWindowResize);
+      cancelAnimationFrame(edgeRaf);
+    };
   });
 </script>
 
@@ -404,295 +442,105 @@
       <p>Tools work without one. Create a case to keep the investigation together.</p>
     </div>
   {:else}
-    <div class="case-head">
-      <h3>{caseState.current.name}</h3>
-      <span class="path mono">{caseState.current.id}</span>
-    </div>
+    <SidebarHeader
+      caseName={caseState.current.name}
+      caseId={caseState.current.id}
+      bind:query
+      type={typeFilter}
+      {chips}
+      total={summary?.total ?? 0}
+      resultCount={filtering ? resultRows.length : null}
+      onnotes={() => openNotebook()}
+      onselecttype={(t) => (typeFilter = t)}
+    />
 
-    <div class="sections">
-
-      <!-- 1 · Case Notes (single notes.md) -->
-      <button class="section-head" onclick={() => openNotebook()}>
-        <Icon name="note" size={13} />
-        <span>Case Notes</span>
-        <span class="open-note">Open</span>
-      </button>
-
-      <!-- 2 · Suggestions (tool-suggested entities: confirm or dismiss) -->
-      {#if suggestedCount > 0}
-        <button class="section-head" onclick={() => (section.suggestions = !section.suggestions)}>
-          <Icon name={section.suggestions ? 'chevronDown' : 'chevronRight'} size={13} />
-          <span>Suggestions</span>
-          <span class="count">{suggestedCount}</span>
-        </button>
-        {#if section.suggestions}
-          {#each suggestedData.items as e (e.id)}
-            <div class="entity suggested">
-              <Icon name={entityIcon(e)} size={14} />
-              <div class="e-body">
-                <span class="e-label">{e.label}</span>
-                <span class="e-meta">{e.type} · {e.provenance?.by}</span>
-              </div>
-              <button class="btn btn-ghost btn-sm" title="Confirm" onclick={() => confirmEntity(e)}>
-                <Icon name="check" size={13} />
-              </button>
-              <button class="btn btn-ghost btn-sm" title="Dismiss" onclick={() => dismissSuggestion(e)}>
-                <Icon name="x" size={13} />
-              </button>
-            </div>
-          {/each}
-          {#if !suggestedData.done}
-            <button class="more" onclick={() => loadSuggested(true)} disabled={suggestedData.loading}>
-              Show more
-            </button>
-          {/if}
-        {/if}
-      {/if}
-
-      <!-- 3 · My work (your own folders; file items from their details panel) -->
-      <div class="section-head-row">
-        <button class="section-head" onclick={() => (section.mywork = !section.mywork)}>
-          <Icon name={section.mywork ? 'chevronDown' : 'chevronRight'} size={13} />
-          <span>My work</span>
-          <span class="count">{confirmedCount}</span>
-        </button>
-        <button class="btn btn-ghost btn-sm new-note-btn" title="New note" onclick={openNewNote}>
-          <Icon name="plus" size={13} /><Icon name="note" size={13} />
-        </button>
-      </div>
-
-      {#if section.mywork}
-        <!-- create a top-level folder -->
-        <form class="new-folder" onsubmit={(e) => { e.preventDefault(); createFolder(); }}>
-          <input class="input" placeholder="New folder…" bind:value={newFolder} />
-          <button class="btn btn-sm" type="submit" title="Create folder" disabled={!newFolder.trim()}>
-            <Icon name="plus" size={13} />
+    <!-- the drag handlers here only auto-scroll; the drop targets are the
+         folder rows inside, which carry their own roles -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="body"
+      bind:this={bodyEl}
+      ondragover={onBodyDragOver}
+      ondragleave={() => setEdgeScroll(0)}
+      ondrop={() => setEdgeScroll(0)}
+      onwheel={onBodyWheel}
+    >
+      {#if filtering}
+        <SidebarResults
+          rows={resultRows}
+          caseId={caseState.current.id}
+          loading={results.loading}
+          hasMore={results.serverMode && results.hasMore}
+          onmore={() => results.loadMore()}
+          onactivate={onEntityActivate}
+          oninfo={openInfo}
+          onunfile={askRemoveFromMyWork}
+        />
+      {:else}
+        <div class="actions">
+          <button class="act-btn" onclick={() => (newFolderOpen = !newFolderOpen)}>
+            <Icon name="plus" size={12} /><Icon name="folder" size={13} /><span>Folder</span>
           </button>
-        </form>
-
-        <div class="tree">
-          {#each tree as node (node.path)}
-            {@render folderNode(node, 0)}
-          {/each}
-
-          {#if unfiledData.items.length > 0}
-            <div
-              class="frow"
-              role="button"
-              tabindex="0"
-              onclick={() => (unfiledOpen = !unfiledOpen)}
-              onkeydown={(e) => e.key === 'Enter' && (unfiledOpen = !unfiledOpen)}
-            >
-              <Icon name={unfiledOpen ? 'chevronDown' : 'chevronRight'} size={12} />
-              <Icon name="layers" size={13} />
-              <span class="fname">Unfiled</span>
-              <span class="fcount">{unfiledData.items.length}{unfiledData.done ? '' : '+'}</span>
-            </div>
-            {#if unfiledOpen}
-              {#each unfiledData.items as e (e.id)}
-                {@render entityRow(e, 1)}
-              {/each}
-              {#if !unfiledData.done}
-                <button class="more" onclick={() => loadUnfiled(true)} disabled={unfiledData.loading}>
-                  Show more
-                </button>
-              {/if}
-            {/if}
-          {/if}
-
-          {#if tree.length === 0 && unfiledData.items.length === 0}
-            <div class="none">
-              Everything you save lands here; create folders to organize it.
-            </div>
-          {/if}
+          <button class="act-btn" onclick={() => (noteModal = { title: '', folder: '' })}>
+            <Icon name="plus" size={12} /><Icon name="note" size={13} /><span>Note</span>
+          </button>
         </div>
-      {/if}
-
-
-      <!-- 4 · Details (selection editor — docs/UI.md §4; shared body) -->
-      {#if infoEntity}
-        <div bind:this={detailsEl}>
-          <div class="section-head-row">
-            <div class="section-head static">
-              <Icon name="note" size={13} />
-              <span>Details</span>
-            </div>
-            <button class="btn btn-ghost btn-sm" title="Close details" onclick={() => (infoEntity = null)}>
-              <Icon name="x" size={13} />
-            </button>
-          </div>
-          <div class="details">
-            <EntityDetails
-              entityId={infoEntity.id}
-              onclose={() => (infoEntity = null)}
-              ondeleted={() => (infoEntity = null)}
+        {#if newFolderOpen}
+          <form class="new-folder" onsubmit={(e) => { e.preventDefault(); submitNewFolder(); }}>
+            <input
+              class="input"
+              placeholder="New folder…"
+              bind:value={newFolder}
+              use:focusInput
+              onkeydown={(e) => e.key === 'Escape' && (newFolderOpen = false)}
             />
-          </div>
-        </div>
-      {/if}
+            <button class="btn btn-sm" type="submit" title="Create folder" disabled={!newFolder.trim()}>
+              <Icon name="plus" size={13} />
+            </button>
+          </form>
+        {/if}
 
+        <SidebarTree
+          {tree}
+          {byFolder}
+          {expanded}
+          {folderData}
+          unfiled={unfiledData}
+          {unfiledOpen}
+          suggested={suggestedData}
+          {suggestedCount}
+          {suggestedOpen}
+          caseId={caseState.current.id}
+          ontoggle={toggle}
+          onmorefolder={(path) => loadFolder(path, true)}
+          ontoggleunfiled={() => (unfiledOpen = !unfiledOpen)}
+          onmoreunfiled={() => loadUnfiled(true)}
+          ontogglesuggested={() => (suggestedOpen = !suggestedOpen)}
+          onmoresuggested={() => loadSuggested(true)}
+          oncreatefolder={createFolder}
+          onremovefolder={askDeleteFolder}
+          onfile={onFileDrop}
+          onactivate={onEntityActivate}
+          oninfo={openInfo}
+          onunfile={askRemoveFromMyWork}
+          onconfirm={confirmEntity}
+          ondismiss={dismissSuggestion}
+          ondragactive={onDragActive}
+        />
+      {/if}
     </div>
+
+    {#if infoEntity}
+      <DetailsDrawer entity={infoEntity} onclose={closeInfo} ondeleted={closeInfo} />
+    {/if}
   {/if}
 </aside>
 
-<!-- one folder node + its subtree (recursive) -->
-{#snippet folderNode(node, depth)}
-  <div
-    class="frow"
-    class:dropping={dragOverFolder === node.path}
-    style="padding-left: {8 + depth * 14}px"
-    role="button"
-    tabindex="0"
-    ondragover={(e) => { e.preventDefault(); dragOverFolder = node.path; }}
-    ondragleave={() => (dragOverFolder = undefined)}
-    ondrop={(e) => onDropFolder(e, node.path)}
-    onclick={() => toggle(node.path)}
-    onkeydown={(e) => e.key === 'Enter' && toggle(node.path)}
-  >
-    <Icon name={isExpanded(node.path) ? 'chevronDown' : 'chevronRight'} size={12} />
-    <Icon name={isExpanded(node.path) ? 'folderOpen' : 'folder'} size={13} />
-    <span class="fname">{node.name}</span>
-    <span class="fcount">{subtreeCountFrom(node, byFolder)}</span>
-    <span
-      class="fact"
-      role="button"
-      tabindex="0"
-      title="Add subfolder"
-      onclick={(e) => { e.stopPropagation(); startAddSub(node.path); }}
-      onkeydown={(e) => e.key === 'Enter' && (e.stopPropagation(), startAddSub(node.path))}
-    >
-      <Icon name="plus" size={12} />
-    </span>
-    <span
-      class="fact fdel"
-      role="button"
-      tabindex="0"
-      title="Remove folder"
-      onclick={(e) => { e.stopPropagation(); askDeleteFolder(node.path); }}
-      onkeydown={(e) => e.key === 'Enter' && (e.stopPropagation(), askDeleteFolder(node.path))}
-    >
-      <Icon name="folderMinus" size={12} />
-    </span>
-  </div>
-  {#if isExpanded(node.path)}
-    {#if addingUnder === node.path}
-      <form
-        class="new-folder sub"
-        style="padding-left: {8 + (depth + 1) * 14}px"
-        onsubmit={(e) => { e.preventDefault(); submitAddSub(); }}
-      >
-        <input
-          class="input"
-          placeholder="Subfolder…"
-          bind:value={newSubName}
-          use:focus
-          onkeydown={(e) => e.key === 'Escape' && (addingUnder = undefined)}
-        />
-        <button class="btn btn-sm" type="submit" title="Create" disabled={!newSubName.trim()}>
-          <Icon name="plus" size={13} />
-        </button>
-      </form>
-    {/if}
-    {#each node.children as child (child.path)}
-      {@render folderNode(child, depth + 1)}
-    {/each}
-    {@const sec = folderData[node.path]}
-    {#if sec}
-      {#each sec.items as e (e.id)}
-        {@render entityRow(e, depth + 1)}
-      {/each}
-      {#if !sec.done}
-        <button
-          class="more"
-          style="margin-left: {8 + (depth + 1) * 14}px"
-          onclick={() => loadFolder(node.path, true)}
-          disabled={sec.loading}
-        >
-          Show more
-        </button>
-      {/if}
-    {/if}
-  {/if}
-{/snippet}
-
-<!-- one entity row (My work): activate, info, unfile -->
-{#snippet entityRow(e, depth)}
-  {@const isClickable = e.type === 'note' || e.type === 'capture' || !!ENTITY_TOOL[e.type]}
-  <!-- The role and tab stop deliberately exist only for activatable entity types. -->
-  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-  <div
-    class="entity"
-    class:clickable={isClickable}
-    class:dragging={dragEntityId === e.id}
-    style="padding-left: {8 + depth * 14}px"
-    draggable="true"
-    ondragstart={(ev) => onDragStart(ev, e)}
-    ondragend={() => { dragEntityId = null; dragEntity = null; dragOverFolder = undefined; }}
-    onclick={() => onEntityActivate(e)}
-    role={isClickable ? 'button' : undefined}
-    tabindex={isClickable ? 0 : undefined}
-    onkeydown={(ev) => ev.key === 'Enter' && onEntityActivate(e)}
-  >
-    <Icon name="grip" size={13} />
-    <Icon name={entityIcon(e)} size={14} />
-    <div class="e-body">
-      <span class="e-label">{e.label}</span>
-      <span class="e-meta">{e.type}</span>
-    </div>
-    {#if e.type === 'capture' && e.attrs?.lat != null}
-      <button
-        class="btn btn-ghost btn-sm act"
-        title="Go to these coordinates on the map"
-        onclick={(ev) => { ev.stopPropagation(); gotoCapture(e); }}
-      >
-        <Icon name="crosshair" size={13} />
-      </button>
-    {/if}
-    {#if e.type === 'media' && e.attrs?.path}
-      <a
-        class="btn btn-ghost btn-sm act"
-        title="Open in new tab"
-        href={`/files/${caseState.current.id}/${e.attrs.path}`}
-        target="_blank"
-        rel="noreferrer"
-        onclick={(ev) => ev.stopPropagation()}
-      >
-        <Icon name="external" size={13} />
-      </a>
-    {/if}
-    <button
-      class="btn btn-ghost btn-sm act"
-      title="Info"
-      onclick={(ev) => { ev.stopPropagation(); openInfo(e); }}
-    >
-      <Icon name="note" size={13} />
-    </button>
-    {#if folderOf(e)}
-      <button
-        class="btn btn-ghost btn-sm act del"
-        title="Unfile from this folder"
-        onclick={(ev) => { ev.stopPropagation(); askRemoveFromMyWork(e); }}
-      >
-        <Icon name="folderMinus" size={13} />
-      </button>
-    {/if}
-  </div>
-{/snippet}
-
-<!-- Note edit / create modal -->
+<!-- Note create modal -->
 {#if noteModal}
-  <Modal
-    title="New note"
-    onclose={() => (noteModal = null)}
-    width="580px"
-  >
+  <Modal title="New note" onclose={() => (noteModal = null)} width="580px">
     <label class="modal-label" for="note-title">Title</label>
-    <input
-      id="note-title"
-      class="input"
-      placeholder="Note title…"
-      bind:value={noteModal.title}
-    />
+    <input id="note-title" class="input" placeholder="Note title…" bind:value={noteModal.title} />
 
     <span class="modal-label" style="margin-top:10px">Folder (in My work)</span>
     <FolderSelect bind:value={noteModal.folder} folders={allFolders} emptyLabel="My work (root)" />
@@ -706,7 +554,6 @@
     </div>
   </Modal>
 {/if}
-
 
 <!-- Confirmation dialog (remove from My work / remove folder) -->
 {#if confirmState}
@@ -758,130 +605,23 @@
   .sidebar.resizing {
     user-select: none;
   }
-  .case-head {
-    padding: 16px 16px 12px;
-    border-bottom: 1px solid var(--border);
-  }
-  .case-head h3 {
-    font-size: var(--fs-md);
-    font-weight: 700;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .path { font-size: var(--fs-xs); color: var(--text-3); }
-  .sections { flex: 1; overflow-y: auto; padding: 8px; }
-  .section-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-    padding: 8px 8px 6px;
-    font-size: var(--fs-xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--text-2);
-  }
-  .section-head:hover { color: var(--text-1); }
-  .section-head-row { display: flex; align-items: center; }
-  .section-head-row .section-head { flex: 1; }
-  .new-note-btn {
-    color: var(--text-3);
-    padding: 4px 6px;
-    margin-right: 4px;
-    display: flex;
-    gap: 2px;
-  }
-  .new-note-btn:hover { color: var(--accent); }
-  .open-note { margin-left: auto; color: var(--text-3); font-weight: 600; }
-  .count { margin-left: auto; color: var(--text-3); font-weight: 600; }
-  /* tool group header (Saved work) */
-  /* folder tree */
-  .new-folder { display: flex; gap: 6px; padding: 2px 8px 8px; }
-  .new-folder.sub { padding: 2px 8px 4px; }
-  .new-folder .input { flex: 1; font-size: var(--fs-xs); }
-  .tree { display: flex; flex-direction: column; gap: 1px; padding: 0 4px 4px; }
-  .frow {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    width: 100%;
-    padding: 6px 8px;
-    border-radius: var(--r-sm);
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-    border: 1px solid transparent;
-    cursor: pointer;
-    text-align: left;
-  }
-  .frow:hover { background: var(--bg-2); }
-  .frow.dropping { border-color: var(--accent); background: var(--accent-soft); }
-  .frow > :global(svg:first-child) { color: var(--text-3); flex-shrink: 0; }
-  .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .fcount { color: var(--text-3); font-size: var(--fs-xs); font-weight: 600; }
-  .fact { opacity: 0; color: var(--text-3); display: flex; padding: 2px; border-radius: 4px; flex-shrink: 0; }
-  .fact:hover { color: var(--text-1); }
-  .fdel:hover { color: var(--danger, #e55); }
-  .more {
-    align-self: flex-start;
-    margin: 2px 8px 6px;
-    padding: 3px 10px;
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    color: var(--text-2);
-    background: var(--bg-2);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    cursor: pointer;
-  }
-  .more:hover { color: var(--text-1); border-color: var(--border-strong); }
-  .more:disabled { opacity: 0.5; cursor: default; }
-  .frow:hover .fact { opacity: 1; }
-  /* entities */
-  .entity {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 6px 8px;
-    border-radius: var(--r-sm);
-    color: var(--text-2);
-  }
-  .entity:hover { background: var(--bg-2); }
-  .entity.clickable { cursor: pointer; }
-  .entity.dragging { opacity: 0.5; }
-  .entity > :global(svg:first-child) { color: var(--text-3); cursor: grab; flex-shrink: 0; }
-  .entity.suggested {
-    background: var(--accent-soft);
-    border: 1px dashed var(--accent);
-    margin-bottom: 4px;
-  }
-  .e-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .e-label {
-    font-size: var(--fs-sm);
-    color: var(--text-1);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .e-meta {
+  /* one scroll region: the header stays put, the drawer covers this */
+  .body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 4px; }
+  .actions { display: flex; gap: 4px; padding: 2px 8px 6px; }
+  .act-btn {
     display: flex;
     align-items: center;
     gap: 3px;
-    font-size: var(--fs-xs);
+    padding: 3px 8px;
+    border-radius: var(--r-sm);
     color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    cursor: pointer;
   }
-  .act { opacity: 0; flex-shrink: 0; }
-  .entity:hover .act { opacity: 1; }
-  .del:hover { color: var(--danger, #e55); }
-  .none { font-size: var(--fs-xs); color: var(--text-3); padding: 4px 8px 12px; line-height: 1.45; }
-  /* note modal */
+  .act-btn:hover { color: var(--text-1); background: var(--bg-2); }
+  .new-folder { display: flex; gap: 6px; padding: 2px 8px 8px; }
+  .new-folder .input { flex: 1; font-size: var(--fs-xs); }
   .modal-label { display: block; font-size: var(--fs-xs); color: var(--text-3); margin: 8px 0 4px; }
-  .section-head.static { cursor: default; }
-  .details {
-    padding: 4px 8px 10px;
-    border-bottom: 1px solid var(--border);
-    font-size: var(--fs-sm);
-  }
   .modal-row { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
 </style>

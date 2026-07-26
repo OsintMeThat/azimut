@@ -175,8 +175,8 @@
       title: 'Delete everywhere?',
       message: `“${e.label}” will be removed from the case and its tool.`,
       detail: FILE_BACKED.has(e.type)
-        ? 'This permanently deletes the underlying file(s) on disk. It cannot be undone.'
-        : 'This permanently removes it from the case. It cannot be undone.',
+        ? 'Deletes the underlying files from disk and cannot be undone.'
+        : 'Removes it from the case and cannot be undone.',
       consequences,
       action: async () => {
         await api.del(`/api/cases/${caseState.current.id}/entities/${e.id}`);
@@ -287,6 +287,14 @@
         {/if}
         {#if infoData?.imagery_date}
           <div class="info-row"><span class="info-k">Imagery</span><span class="mono">{infoData.imagery_date}</span></div>
+        {/if}
+        {#if infoData?.source_url}
+          <div class="info-row">
+            <span class="info-k">Source page</span>
+            <a class="mono src" href={infoData.source_url} target="_blank" rel="noreferrer">
+              {infoData.source_url}
+            </a>
+          </div>
         {/if}
       {:else if entity.type === 'bookmark' && entity.attrs?.url}
         <div class="info-row">

@@ -36,6 +36,7 @@ describe('mapLinks', () => {
   it('rounds zoom and uses lon,lat order for Yandex', () => {
     expect(byId.google.url).toContain(',16z');
     expect(byId.yandex.url).toContain('ll=2.2945,48.8584');
+    expect(byId.apple.url).toContain('map=satellite');
   });
 
   it('every entry has a label and an https url', () => {

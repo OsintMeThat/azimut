@@ -24,6 +24,7 @@ from __future__ import annotations
 import io
 import json
 import secrets
+import warnings
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +40,7 @@ from ..workspace import Case
 from . import events
 from .cases import get_case
 from .limits import MAX_IMAGE_BYTES
+from .satellite import locate_on_save
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
@@ -177,7 +179,13 @@ async def ingest_screenshot(
             detail=f"screenshot must be under {MAX_IMAGE_BYTES // 1024 // 1024} MB",
         )
     try:
-        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        # Keep this edge explicit even when a test runner or embedding process
+        # installs its own warning policy after Azimut starts.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            img = Image.open(io.BytesIO(raw)).convert("RGB")
+    except (Image.DecompressionBombWarning, Image.DecompressionBombError) as exc:
+        raise HTTPException(status_code=413, detail="image exceeds the 100 MP limit") from exc
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"not a readable image: {exc}") from exc
 
@@ -210,6 +218,7 @@ async def ingest_screenshot(
         "provider": site,
         "provider_label": parsed["label"],
         "imagery_date": parsed["imagery_date"],
+        "imagery_mode": parsed["imagery_mode"],
         "lat": lat,
         "lon": lon,
         "zoom": zoom,
@@ -252,6 +261,9 @@ async def ingest_screenshot(
         title=label,
         dedupe=False,
     )
+    # a screenshot whose URL carried no position is settled as `nocoords`: there
+    # is nothing to look up, and the Locate pass must not keep retrying it
+    locate_on_save(case, result["entity"]["id"], lat, lon)
     # nudge any open app tab so the capture shows up without a reload
     events.publish(
         {"type": "capture", "case_id": case.id, "path": result["item"]["path"],
@@ -263,6 +275,60 @@ async def ingest_screenshot(
         "title": label,
         **provenance,
     }
+
+
+@router.post("/place", dependencies=[Depends(require_token)])
+def ingest_place(
+    url: str = Form(min_length=1, max_length=4000),
+    case_id: str = Form(default=""),
+    lat: float | None = Form(default=None, ge=-90, le=90),
+    lon: float | None = Form(default=None, ge=-180, le=180),
+    zoom: float | None = Form(default=None, ge=0, le=23),
+    bearing: float | None = Form(default=None, ge=0, lt=360),
+    title: str = Form(default="", max_length=200),
+    extension: str = Form(default="", max_length=32),
+) -> dict[str, Any]:
+    """File the point you are looking at as a ``place`` — no screenshot.
+
+    The third extension flow, between a capture (map pixels) and a bookmark (a
+    page with no position): a saved point the Saved panel can fly back to. The
+    URL is parsed here as everywhere else, popup values win over the parse, and
+    coordinates are required — without a position there is no place to save,
+    and the page belongs in a bookmark instead. An empty ``case_id`` opens a
+    fresh scratch session.
+    """
+    parsed = mapsites.parse_map_url(url)
+    if parsed is None:
+        raise HTTPException(status_code=422, detail="not a recognized map site")
+
+    lat = lat if lat is not None else parsed["lat"]
+    lon = lon if lon is not None else parsed["lon"]
+    zoom = zoom if zoom is not None else parsed["zoom"]
+    bearing = bearing if bearing is not None else parsed["bearing"]
+    if lat is None or lon is None:
+        raise HTTPException(
+            status_code=422, detail="a place needs both coordinates; save the page as a bookmark"
+        )
+
+    case = get_case(case_id) if case_id else Case.create("Scratch session", scratch=True)
+    # provenance a place saved inside the app has no source for: which page it
+    # came from, and which extension build filed it
+    extra: dict[str, Any] = {"source_url": url, "site": parsed["site"]}
+    if extension.strip():
+        extra["extension"] = extension.strip()
+    entity = satellite_engine.save_place(
+        case, lat, lon, zoom, bearing,
+        title.strip() or (parsed["title"] or ""),
+        by="ingest",
+        extra_attrs=extra,
+    )
+    locate_on_save(case, entity["id"], lat, lon)
+    events.publish(
+        {"type": "place", "case_id": case.id, "entity_id": entity["id"],
+         "title": entity["label"], "site": parsed["site"]}
+    )
+    return {"entity_id": entity["id"], "case_id": case.id, "title": entity["label"],
+            "lat": lat, "lon": lon, "site": parsed["site"]}
 
 
 @router.post("/bookmark", dependencies=[Depends(require_token)])

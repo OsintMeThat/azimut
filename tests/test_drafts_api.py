@@ -33,6 +33,7 @@ def test_save_load_roundtrip(client):
     listed = client.get(f"/api/cases/{cid}/drafts").json()
     assert len(listed) == 1
     assert listed[0]["title"] == "Helicopter formation"
+    assert listed[0]["target"] == "bluesky"
 
     draft = client.get(f"/api/cases/{cid}/drafts/helicopter-formation").json()
     assert draft["title"] == "Helicopter formation"
@@ -49,27 +50,68 @@ def test_draft_filed_as_post_entity_and_updated_on_resave(client):
         json={"title": "First title", "state": STATE},
     ).json()
 
-    # resave under the same name with a new title updates the single entity
+    # resaving the same draft updates the single entity rather than filing a new one
     client.post(
         f"/api/cases/{cid}/drafts",
-        json={"name": saved["name"], "title": "Renamed draft", "state": STATE},
+        json={"rename_from": saved["name"], "title": "First title", "state": STATE},
     )
     posts = [e for e in graph_read.entities(cid) if e["type"] == "post"]
     assert len(posts) == 1
-    assert posts[0]["label"] == "Renamed draft"
     assert posts[0]["attrs"]["draft"] == "exports/first-title.json"
 
 
-def test_created_at_preserved_on_resave(client):
+def test_draft_rename_moves_the_file_and_keeps_one_entity(client):
+    cid = client.post("/api/cases", json={"name": "Drafts"}).json()["id"]
+    saved = client.post(
+        f"/api/cases/{cid}/drafts", json={"title": "Post 1", "state": STATE}
+    ).json()
+    before = next(e for e in graph_read.entities(cid) if e["type"] == "post")
+
+    renamed = client.post(
+        f"/api/cases/{cid}/drafts",
+        json={"rename_from": saved["name"], "title": "Helicopter thread", "state": STATE},
+    ).json()
+    assert renamed["name"] == "helicopter-thread"
+    assert client.get(f"/api/cases/{cid}/drafts/post-1").status_code == 404
+
+    posts = [e for e in graph_read.entities(cid) if e["type"] == "post"]
+    assert len(posts) == 1
+    assert posts[0]["id"] == before["id"]
+    assert posts[0]["label"] == "Helicopter thread"
+    assert posts[0]["attrs"]["draft"] == "exports/helicopter-thread.json"
+
+
+def test_draft_rename_onto_a_taken_name_is_refused(client):
+    cid = client.post("/api/cases", json={"name": "Drafts"}).json()["id"]
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Post 1", "state": STATE})
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Post 2", "state": STATE})
+
+    res = client.post(
+        f"/api/cases/{cid}/drafts",
+        json={"rename_from": "post-2", "title": "Post 1", "state": STATE},
+    )
+    assert res.status_code == 409
+    listed = client.get(f"/api/cases/{cid}/drafts").json()
+    assert sorted(d["name"] for d in listed) == ["post-1", "post-2"]
+
+
+def test_created_at_preserved_on_resave_and_rename(client):
     cid = client.post("/api/cases", json={"name": "Drafts"}).json()["id"]
     client.post(f"/api/cases/{cid}/drafts", json={"title": "Keep created", "state": STATE})
     first = client.get(f"/api/cases/{cid}/drafts/keep-created").json()
     client.post(
         f"/api/cases/{cid}/drafts",
-        json={"name": "keep-created", "title": "Keep created", "state": STATE},
+        json={"rename_from": "keep-created", "title": "Keep created", "state": STATE},
     )
     second = client.get(f"/api/cases/{cid}/drafts/keep-created").json()
     assert first["created_at"] == second["created_at"]
+
+    client.post(
+        f"/api/cases/{cid}/drafts",
+        json={"rename_from": "keep-created", "title": "Moved along", "state": STATE},
+    )
+    third = client.get(f"/api/cases/{cid}/drafts/moved-along").json()
+    assert third["created_at"] == first["created_at"]
 
 
 def test_delete_removes_file_and_entity(client):

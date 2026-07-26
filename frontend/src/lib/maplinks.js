@@ -19,8 +19,8 @@ export function mapLinks(lat, lon, zoom = 17) {
     {
       id: 'apple',
       label: 'Apple Maps',
-      // t=k selects the satellite/hybrid basemap
-      url: `https://maps.apple.com/?ll=${lat},${lon}&z=${z}&t=k`,
+      // map=satellite selects the satellite basemap in Apple's current web URL
+      url: `https://maps.apple.com/?ll=${lat},${lon}&z=${z}&map=satellite`,
     },
     { id: 'bing', label: 'Bing Maps', url: `https://www.bing.com/maps?cp=${lat}~${lon}&lvl=${z}&style=h` },
     {

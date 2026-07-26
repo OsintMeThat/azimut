@@ -44,6 +44,36 @@ def test_satellites_pro_still_parses():
     assert (p["site"], p["lat"], p["lon"], p["zoom"]) == ("satellites-pro", LAT, LON, Z)
 
 
+def test_explicit_satellite_urls_are_classified():
+    urls = [
+        f"https://www.google.com/maps/@{LAT},{LON},2000m/data=!3m1!1e3",
+        f"https://earth.google.com/web/@{LAT},{LON},0a,1000d,35y,0h,0t,0r",
+        f"https://maps.apple.com/?ll={LAT},{LON}&z={Z}&t=k",
+        f"https://maps.apple.com/?ll={LAT},{LON}&z={Z}&map=satellite",
+        f"https://maps.apple.com/?ll={LAT},{LON}&z={Z}&map=hybrid",
+        f"https://www.bing.com/maps?cp={LAT}~{LON}&lvl={Z}&style=h",
+        f"https://yandex.com/maps/?ll={LON},{LAT}&z={Z}&l=sat",
+        f"https://zoom.earth/#view={LAT},{LON},{Z}z",
+        f"https://satellites.pro/#{LAT},{LON},{Z}",
+        f"https://browser.dataspace.copernicus.eu/?zoom={Z}&lat={LAT}&lng={LON}",
+    ]
+
+    assert all(parse_map_url(url)["imagery_mode"] == "satellite" for url in urls)
+
+
+def test_generic_map_urls_are_not_guessed_as_satellite():
+    urls = [
+        f"https://www.google.com/maps/@{LAT},{LON},{Z}z",
+        f"https://www.bing.com/maps?cp={LAT}~{LON}&lvl={Z}&style=r",
+        f"https://yandex.com/maps/?ll={LON},{LAT}&z={Z}&l=map",
+        f"https://maps.apple.com/?ll={LAT},{LON}&z={Z}&t=m",
+        f"https://maps.apple.com/?ll={LAT},{LON}&z={Z}&map=explore",
+        f"https://www.openstreetmap.org/#map={Z}/{LAT}/{LON}",
+    ]
+
+    assert all(parse_map_url(url)["imagery_mode"] is None for url in urls)
+
+
 def test_google_maps_forms():
     p = parse_map_url(
         "https://www.google.com/maps/place/Tour+Eiffel/@48.8583701,2.2944813,17z/data=!3m1!4b1"

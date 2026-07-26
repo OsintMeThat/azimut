@@ -1,9 +1,9 @@
 """The case graph storage boundary.
 
 `CaseRepository` is the interface every tool and route uses to read and mutate
-a case's entities, links, folders and durable jobs. The active implementation
-stores that graph in per-case SQLite; callers do not reach into database tables
-or the legacy ``case.json`` graph shape.
+a case's entities, links, folders, durable jobs and media browse index. The
+active implementation stores that structured state in per-case SQLite; callers
+do not reach into database tables or the legacy ``case.json`` graph shape.
 
 `workspace.Case` owns the case folder and delegates graph operations to the
 SQLite implementation. Legacy JSON cases migrate on open before using this
@@ -11,7 +11,8 @@ contract. Keep the Protocol limited to operations with real consumers.
 
 File-backed content (media bytes, note bodies) is deliberately **not** here: it
 stays on the case shell (`Case`), which owns the filesystem layout, lifecycle
-and path resolution. This Protocol is the graph, not the folder.
+and path resolution. The media index mirrors sidecar fields needed for bounded
+browsing; it is not a second copy of the media bytes.
 """
 
 from __future__ import annotations
@@ -31,17 +32,16 @@ JobState = Literal["queued", "running", "ready", "failed", "cancelled"]
 
 @runtime_checkable
 class CaseRepository(Protocol):
-    """Graph read/write contract for one case. `Case` is the JSON backend."""
+    """Structured-data contract for one SQLite-backed case."""
 
     # -- reads -------------------------------------------------------------
 
     def snapshot(self) -> dict[str, Any]:
         """The full case view — manifest plus graph — in one consistent read.
 
-        The format-agnostic whole-case read behind the current case-open
-        response and the graph algorithms that need entities and links
-        together. The bounded catalog API (Step 5) shrinks the callers of this
-        until only export and migration need the whole graph at once.
+        The format-agnostic whole-case read for graph algorithms that need
+        entities and links together. The case-open response uses the bounded
+        overview instead.
         """
         ...
 
@@ -58,16 +58,19 @@ class CaseRepository(Protocol):
         query: str | None = None,
         folder: str | None = None,
         unfiled: bool = False,
+        recursive: bool = False,
     ) -> dict[str, Any]:
         """A bounded, filtered slice of the catalog (Step 5, "Bounded loading").
 
         Returns ``{"items": [...], "next_cursor": str | None}`` in a stable
         insertion order. ``cursor`` is an opaque token from a previous page;
         ``next_cursor`` is None on the last page. Filters (``types`` set,
-        ``status``, a label ``query``, and folder — ``unfiled`` or an exact
-        ``folder`` path) run in the backend so the caller never materialises the
-        whole graph. The cursor keys on insertion order so a concurrent append
-        never shifts a page already returned.
+        ``status``, a label/type/folder/notes ``query``, and folder —
+        ``unfiled`` or an exact ``folder`` path, optionally including
+        descendants) run in the backend so
+        the caller never materialises the whole graph. The cursor keys on
+        insertion order so a concurrent append never shifts a page already
+        returned.
         """
         ...
 
@@ -90,6 +93,17 @@ class CaseRepository(Protocol):
         """
         ...
 
+    def count_dependents(self, *, link_type: str, from_type: str) -> dict[str, int]:
+        """``{to_id: n}`` — how many entities of ``from_type`` point at each
+        target through ``link_type``, in one grouped query for the whole case.
+
+        The bulk counterpart of ``links_of``: a listing that needs "how much
+        work hangs off each of these rows?" would otherwise pay one query per
+        row on a screen that must stay fast. Targets nothing points at are
+        absent from the map rather than present with a zero.
+        """
+        ...
+
     def get_entity(self, entity_id: str) -> dict[str, Any] | None:
         ...
 
@@ -97,6 +111,36 @@ class CaseRepository(Protocol):
         ...
 
     def list_folders(self) -> list[str]:
+        ...
+
+    # -- media browse index ------------------------------------------------
+
+    def upsert_media_item(self, item: dict[str, Any], *, entity_id: str | None = None) -> None:
+        """Insert or refresh one sidecar-derived media browse row."""
+        ...
+
+    def remove_media_item(self, path: str) -> None:
+        ...
+
+    def list_media_items(self) -> list[dict[str, Any]]:
+        ...
+
+    def media_items_by_paths(self, paths: list[str]) -> list[dict[str, Any]]:
+        ...
+
+    def page_media_items(
+        self,
+        *,
+        q: str | None = None,
+        kind: str | None = None,
+        category: str | None = None,
+        folder: str | None = None,
+        sort: str = "newest",
+        direction: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Filter, sort and page media without scanning sidecar files."""
         ...
 
     # -- entity mutations --------------------------------------------------

@@ -1,8 +1,7 @@
-"""The synthetic large-case generator produces a valid, deterministic case.
+"""The synthetic large-case fixture is valid and deterministic.
 
-These pin the fixture itself (Step 0 of docs/STORAGE_AND_PERFORMANCE.md) so the
-JSON baseline and the later JSON-vs-SQLite contract tests all stress the same
-shape. Counts are kept small here; the bench harness runs the real sizes.
+These tests pin the import shape used by the SQLite storage and release suites.
+Counts stay small here so the fixture contract remains fast to verify.
 """
 
 from __future__ import annotations

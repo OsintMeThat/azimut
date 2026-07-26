@@ -1,17 +1,47 @@
 <script>
   import { api } from '../lib/api.js';
   import { lookupEntity } from '../lib/catalog.js';
+  import { buildMediaQuery } from '../lib/mediaQuery.js';
+  import { createPagedList } from '../lib/pagedList.svelte.js';
+  import { pollWhile } from '../lib/poll.js';
   import { caseState, uiState, ensureCase, reloadCase, toast } from '../lib/state.svelte.js';
-  import { visibleMedia, SORTS } from '../lib/mediaFilter.js';
+  import {
+    hasMediaForFilters,
+    isGenericImage,
+    isSatelliteMedia,
+    mediaDisplayKind,
+    visibleMedia,
+    SORTS,
+  } from '../lib/mediaFilter.js';
   import Icon from '../components/Icon.svelte';
+  import SearchInput from '../components/SearchInput.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
 
-  const KIND_ICONS = { image: 'image', video: 'video', audio: 'audio', file: 'file' };
+  const KIND_ICONS = { image: 'image', satellite: 'satellite', video: 'video', audio: 'audio', file: 'file' };
 
-  let items = $state([]);
-  let loadedFor = $state(null);
+  // Bounded loading: a case that fits one page (the common case, incl. a 3–4
+  // file case) is filtered/sorted entirely client-side below; a large case
+  // pages in and searches server-side. The unbounded `/media` list still backs
+  // the pickers/derivation elsewhere — this browse view uses `/media/page`.
+  const PAGE = 200;
+  const pl = createPagedList({
+    fetchPage: ({ query, cursor }) =>
+      api.get(
+        buildMediaQuery(caseState.current?.id, {
+          q: query,
+          category: catFilter,
+          folder: folderFilter,
+          sort,
+          direction: sortDirection,
+          limit: PAGE,
+          cursor,
+        })
+      ),
+  });
+  const items = $derived(pl.items);
+  let loadedFor = null; // non-reactive: only the load effect reads/writes it
   let url = $state('');
   let picker = $state(null); // multi-item picker: {url, items: [{index, title, thumbnail, kind, selected}]}
   let dragOver = $state(false);
@@ -40,10 +70,10 @@
   // Overlapping filters (a downloaded video matches both Videos and Downloads);
   // clicking one narrows the grid to that facet. Order matches the sidebar bar.
   const CATEGORIES = [
-    { key: 'image', label: 'Images', icon: 'image', match: (i) => i.kind === 'image' },
+    { key: 'image', label: 'Images', icon: 'image', match: isGenericImage },
     { key: 'video', label: 'Videos', icon: 'video', match: (i) => i.kind === 'video' },
     { key: 'collage', label: 'Collages', icon: 'layers', match: (i) => i.source?.op === 'collage' },
-    { key: 'satellite', label: 'Satellite', icon: 'satellite', match: (i) => i.source?.type === 'satellite' },
+    { key: 'satellite', label: 'Satellite', icon: 'satellite', match: isSatelliteMedia },
     { key: 'upload', label: 'Imports', icon: 'upload', match: (i) => i.source?.type === 'upload' },
     { key: 'download', label: 'Downloads', icon: 'download', match: (i) => i.source?.type === 'download' },
     { key: 'other', label: 'Other files', icon: 'file', match: (i) => i.kind !== 'image' && i.kind !== 'video' },
@@ -52,9 +82,10 @@
   let catFilter = $state(null); // null = All types
 
   const activeCats = $derived(
-    CATEGORIES.map((c) => ({ ...c, count: items.filter(c.match).length })).filter(
-      (c) => c.count > 0
-    )
+    CATEGORIES.map((c) => ({
+      ...c,
+      count: pl.facets?.category_counts?.[c.key] ?? items.filter(c.match).length,
+    })).filter((c) => c.count > 0)
   );
   const catMatch = $derived(CATEGORIES.find((c) => c.key === catFilter)?.match ?? null);
 
@@ -63,10 +94,32 @@
 
   // --- free-text search + sort ---
   let query = $state('');
-  let sort = $state('newest');
+  let sort = $state('name');
+  let sortDirection = $state('asc');
+  let headerSort = $state(null);
+  const LIST_SORTS = [
+    { id: 'name', label: 'Name' },
+    { id: 'type', label: 'Type' },
+    { id: 'size', label: 'Size' },
+    { id: 'folder', label: 'Folder' },
+    { id: 'added', label: 'Added' },
+  ];
+  const browseFiltersActive = $derived(
+    query.length > 0 || catFilter !== null || folderFilter !== null
+  );
+  const filtersActive = $derived(
+    query.length > 0 || catFilter !== null || folderFilter !== null || sort !== 'name' || sortDirection !== 'asc'
+  );
+  const showBrowseBar = $derived(items.length > 0 || browseFiltersActive);
 
   const folders = $derived(
-    [...new Set(items.filter((i) => i.folder).map((i) => i.folder))].sort()
+    [
+      ...new Set([
+        ...Object.keys(pl.facets?.folder_counts ?? {}).filter(Boolean),
+        ...items.filter((i) => i.folder).map((i) => i.folder),
+        ...(folderFilter ? [folderFilter] : []),
+      ]),
+    ].sort()
   );
   // Empty when no case is open — the grid cards build file URLs from
   // `caseState.current.id`, so a stale render during case-close (current is
@@ -78,8 +131,76 @@
       folderFilter,
       query,
       sort,
+      direction: sortDirection,
     })
   );
+
+  function reloadIfServerBacked() {
+    if (pl.serverMode || pl.loading) pl.reload();
+  }
+
+  function onSortSelect(event) {
+    sort = event.currentTarget.value;
+    sortDirection = sort === 'newest' || sort === 'size' ? 'desc' : 'asc';
+    headerSort = null;
+    reloadIfServerBacked();
+  }
+
+  function setHeaderSort(next) {
+    if (headerSort === next) {
+      sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+      headerSort = next;
+      sort = next === 'added' ? 'newest' : next;
+      sortDirection = next === 'added' ? 'desc' : 'asc';
+    }
+    reloadIfServerBacked();
+  }
+
+  function onFolderSelect(event) {
+    const nextFolder = event.currentTarget.value || null;
+    const category = CATEGORIES.find((c) => c.key === catFilter);
+    const resetCategory =
+      nextFolder &&
+      catFilter &&
+      !hasMediaForFilters(items, { catMatch: category?.match, folderFilter: nextFolder });
+    folderFilter = nextFolder;
+    if (resetCategory) catFilter = null;
+    reloadIfServerBacked();
+  }
+
+  function onCategorySelect(event) {
+    const nextCategory = event.currentTarget.value || null;
+    const category = CATEGORIES.find((c) => c.key === nextCategory);
+    const resetFolder =
+      nextCategory &&
+      folderFilter &&
+      !hasMediaForFilters(items, { catMatch: category?.match, folderFilter });
+    catFilter = nextCategory;
+    if (resetFolder) {
+      folderFilter = null;
+    }
+    reloadIfServerBacked();
+  }
+
+  function resetFilters() {
+    query = '';
+    catFilter = null;
+    folderFilter = null;
+    sort = 'name';
+    sortDirection = 'asc';
+    headerSort = null;
+    reloadIfServerBacked();
+  }
+
+  // The current card layout is the large view. Small is a denser grid and List
+  // uses the Files-style details table while the grids keep their cards.
+  let view = $state('large');
+  const VIEWS = [
+    { id: 'small', label: 'Small', icon: 'grid' },
+    { id: 'large', label: 'Large', icon: 'image' },
+    { id: 'list', label: 'List', icon: 'note' },
+  ];
 
   // --- details modal (shared EntityDetails, keyed by the file's entity id) ---
   let infoEntityId = $state(null);
@@ -121,9 +242,21 @@
     caseState.rev; // also refetch when the case is reloaded elsewhere (e.g. sidebar edit)
     if (id !== loadedFor) {
       loadedFor = id;
-      items = [];
+      pl.clear(); // drop the old case's page before the new one loads
+      // Drop broken-thumb flags too: the switch briefly renders the new case
+      // id against the old case's items, 404-ing each <img> and marking its
+      // path broken. Left to accumulate, those flags hide the *other* case's
+      // ready thumbnails until a page reload (the reported "must refresh" bug).
+      brokenThumbs = new Set();
     }
-    if (id) refresh(id);
+    if (id) pl.reload();
+  });
+
+  // Drive the paged list from the search box: in a small (single-page) case
+  // this just records the term and `visibleMedia` filters in memory with no
+  // network; in a large case it debounces a server search.
+  $effect(() => {
+    pl.setQuery(query);
   });
 
   // Pick up a "focus this media" handoff from the sidebar: clear filters that
@@ -155,17 +288,19 @@
     });
   });
 
-  async function refresh(id = caseState.current?.id) {
-    if (id) items = await api.get(`/api/cases/${id}/media`);
+  async function refresh() {
+    if (caseState.current?.id) await pl.reload();
   }
 
   // While the single worker is still generating thumbnails (video frames, or a
   // regenerate), re-list to pick up readiness — only while the tool is visible,
-  // and the poll stops on its own once nothing is pending.
+  // and the poll stops on its own once nothing is pending. Uses a repeating
+  // poll, not a one-shot timer: this effect only re-runs when `thumbsPending`
+  // flips, so a `setTimeout` here would fire once and leave a slow thumbnail
+  // stuck until a page reload (e.g. after a case switch reloads pending items).
   $effect(() => {
     if (!thumbsPending || uiState.tool !== 'media' || !caseState.current) return;
-    const t = setTimeout(() => refresh(), 1500);
-    return () => clearTimeout(t);
+    return pollWhile(() => thumbsPending, () => refresh(), 1500);
   });
 
   // Queue (re)generation: a single failed thumbnail (path given) or every
@@ -361,10 +496,18 @@
   }
 
   function fmtSize(bytes) {
+    if (bytes == null) return '—';
     if (bytes >= 1 << 30) return (bytes / (1 << 30)).toFixed(1) + ' GB';
     if (bytes >= 1 << 20) return (bytes / (1 << 20)).toFixed(1) + ' MB';
     if (bytes >= 1 << 10) return (bytes / (1 << 10)).toFixed(0) + ' KB';
     return bytes + ' B';
+  }
+
+  function fmtAdded(item) {
+    const date = new Date(item.added_at);
+    if (Number.isNaN(date.getTime())) return '—';
+    const part = (value) => String(value).padStart(2, '0');
+    return `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())} ${part(date.getHours())}:${part(date.getMinutes())}`;
   }
 
   function onDrop(e) {
@@ -438,61 +581,68 @@
   </div>
 
   <!-- search + sort + category + folder filter bar -->
-  {#if items.length > 0}
+  {#if showBrowseBar}
     <div class="folder-bar">
-      <div class="search-box">
-        <Icon name="search" size={13} />
-        <input
-          class="search-input"
-          placeholder="Search name, notes, source…"
-          bind:value={query}
-        />
-        {#if query}
-          <button class="search-clear" onclick={() => (query = '')} aria-label="Clear search">
-            <Icon name="x" size={12} />
-          </button>
-        {/if}
-      </div>
-      <select class="select sort-select" bind:value={sort} title="Sort order">
+      <SearchInput
+        bind:value={query}
+        placeholder="Search name, source…"
+        count={query ? `${filteredItems.length} shown` : null}
+      />
+      <select class="select sort-select" value={sort} onchange={onSortSelect} title="Sort order">
         {#each SORTS as s (s.id)}
           <option value={s.id}>{s.label}</option>
         {/each}
       </select>
+      <div class="view-switch" role="group" aria-label="View">
+        {#each VIEWS as v (v.id)}
+          <button
+            class="view-btn"
+            class:active={view === v.id}
+            title={`${v.label} view`}
+            aria-pressed={view === v.id}
+            onclick={() => (view = v.id)}
+          >
+            <Icon name={v.icon} size={14} /> {v.label}
+          </button>
+        {/each}
+      </div>
       <span class="bar-sep"></span>
-      <!-- type / source facets -->
-      <button
-        class="folder-chip"
-        class:active={catFilter === null}
-        onclick={() => (catFilter = null)}
+      <select
+        class="select category-select"
+        value={catFilter ?? ''}
+        onchange={onCategorySelect}
+        title="Filter by type or source"
       >
-        <Icon name="media" size={13} /> All
-        <span class="chip-count">{items.length}</span>
-      </button>
-      {#each activeCats as c (c.key)}
-        <button
-          class="folder-chip"
-          class:active={catFilter === c.key}
-          onclick={() => (catFilter = catFilter === c.key ? null : c.key)}
-        >
-          <Icon name={c.icon} size={13} />{c.label}
-          <span class="chip-count">{c.count}</span>
-        </button>
-      {/each}
+        <option value="">All types</option>
+        {#each activeCats as c (c.key)}
+          <option value={c.key}>{c.label} ({c.count})</option>
+        {/each}
+      </select>
 
       <!-- user-defined folders (independent facet) -->
       {#if folders.length}
         <span class="bar-sep"></span>
-        {#each folders as f (f)}
-          <button
-            class="folder-chip"
-            class:active={folderFilter === f}
-            onclick={() => (folderFilter = folderFilter === f ? null : f)}
-          >
-            <Icon name="folder" size={13} />{f}
-            <span class="chip-count">{items.filter((i) => i.folder === f).length}</span>
-          </button>
-        {/each}
+        <select
+          class="select folder-select"
+          value={folderFilter ?? ''}
+          onchange={onFolderSelect}
+          title="Filter by folder"
+        >
+          <option value="">All folders</option>
+          {#each folders as f (f)}
+            <option value={f}>{f}</option>
+          {/each}
+        </select>
       {/if}
+      <button
+        class="btn btn-ghost btn-sm reset-filters"
+        type="button"
+        title="Reset filters"
+        disabled={!filtersActive}
+        onclick={resetFilters}
+      >
+        <Icon name="reset" size={13} /> Reset filters
+      </button>
     </div>
   {/if}
 
@@ -515,7 +665,7 @@
       </div>
     {/each}
 
-    {#if !items.length && !jobs.length}
+    {#if !items.length && !jobs.length && !browseFiltersActive}
       <div class="empty" style="height: 100%">
         <div class="empty-icon"><Icon name="media" size={42} /></div>
         <h3>No media yet</h3>
@@ -528,7 +678,104 @@
         <p>No media matches this filter.</p>
       </div>
     {:else}
-      <div class="grid">
+      {#if view === 'list'}
+        <div class="media-list" role="table" aria-label="Media files">
+          <div class="media-row media-head" role="row">
+            <span aria-hidden="true"></span>
+            {#each LIST_SORTS as column (column.id)}
+              <button
+                class={`media-head-button media-col-${column.id}`}
+                class:active={headerSort === column.id}
+                type="button"
+                title={`Sort by ${column.label}`}
+                aria-label={`Sort by ${column.label}${headerSort === column.id ? `, ${sortDirection === 'asc' ? 'ascending' : 'descending'}` : ''}`}
+                onclick={() => setHeaderSort(column.id)}
+              >
+                {column.label}
+                {#if headerSort === column.id}
+                  <Icon name={sortDirection === 'asc' ? 'chevronUp' : 'chevronDown'} size={12} />
+                {/if}
+              </button>
+            {/each}
+            <span class="media-col-actions" aria-label="Actions"></span>
+          </div>
+          {#each filteredItems as item (item.path)}
+            <div class="media-row" class:focused={item.path === focusedPath} data-path={item.path} role="row">
+              <!-- The preview remains an image-only control; the row itself is not a card. -->
+              <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+              <div
+                class="list-preview"
+                class:clickable={item.kind === 'image'}
+                onclick={() => item.kind === 'image' && (lightboxItem = item)}
+                role={item.kind === 'image' ? 'button' : undefined}
+                tabindex={item.kind === 'image' ? 0 : undefined}
+                onkeydown={(e) => e.key === 'Enter' && item.kind === 'image' && (lightboxItem = item)}
+                aria-label={item.kind === 'image' ? `Preview ${item.filename}` : undefined}
+              >
+                {#if item.thumbnail && item.thumb_state === 'ready' && !brokenThumbs.has(item.path)}
+                  <img
+                    src={`/files/${caseState.current.id}/${item.thumbnail}`}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    onerror={() => (brokenThumbs = new Set(brokenThumbs).add(item.path))}
+                  />
+                {:else if item.thumb_state === 'failed'}
+                  <button
+                    class="thumb-status thumb-retry"
+                    title="Retry thumbnail"
+                    onclick={() => regenerateThumbs(item.path)}
+                  >
+                    <Icon name="reset" size={16} />
+                  </button>
+                {:else if item.thumb_state === 'queued' || item.thumb_state === 'running'}
+                  <Icon name="clock" size={16} />
+                {:else}
+                  <Icon name={KIND_ICONS[mediaDisplayKind(item)] ?? 'file'} size={18} />
+                {/if}
+              </div>
+              <span class="media-col-name" title={item.filename}>
+                <span class="list-name">{item.title ?? item.filename}</span>
+                {#if item.title}
+                  <span class="list-filename">{item.filename}</span>
+                {/if}
+              </span>
+              <span class="media-col-type">{mediaDisplayKind(item)}</span>
+              <span class="media-col-size">{fmtSize(item.size)}</span>
+              <span class="media-col-folder" title={item.folder ?? ''}>{item.folder || '—'}</span>
+              <span class="media-col-added">{fmtAdded(item)}</span>
+              <div class="media-col-actions actions" aria-label={`Actions for ${item.title ?? item.filename}`}>
+                <button class="btn btn-ghost btn-sm" title="Info / Edit notes" onclick={() => openInfo(item)}>
+                  <Icon name="note" size={14} />
+                </button>
+                <a
+                  class="btn btn-ghost btn-sm"
+                  href={`/files/${caseState.current.id}/${item.path}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Open file"
+                >
+                  <Icon name="external" size={14} />
+                </a>
+                {#if item.kind === 'image' || item.kind === 'video'}
+                  <button class="btn btn-ghost btn-sm" title="Open in Inspect" onclick={() => inspect(item)}>
+                    <Icon name="inspect" size={14} />
+                  </button>
+                {/if}
+                {#if item.kind === 'image'}
+                  <button class="btn btn-ghost btn-sm" title="Send to Geo Proof" onclick={() => sendToComposer(item)}>
+                    <Icon name="proof" size={14} />
+                  </button>
+                {/if}
+                <button class="btn btn-ghost btn-sm del" title="Delete" onclick={() => (deleteTarget = item)}>
+                  <Icon name="trash" size={14} />
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {:else}
+      <div class="grid" class:compact={view === 'small'}>
         {#each filteredItems as item (item.path)}
           <div
             class="media-card card"
@@ -573,9 +820,9 @@
                   <span>Retry</span>
                 </button>
               {:else}
-                <Icon name={KIND_ICONS[item.kind] ?? 'file'} size={34} />
+                <Icon name={KIND_ICONS[mediaDisplayKind(item)] ?? 'file'} size={34} />
               {/if}
-              <span class="kind badge">{item.kind}</span>
+              <span class="kind badge">{mediaDisplayKind(item)}</span>
               {#if item.folder}
                 <span class="folder-badge badge">
                   <Icon name="folder" size={10} />{item.folder}
@@ -637,6 +884,14 @@
           </div>
         {/each}
       </div>
+      {/if}
+      {#if pl.hasMore}
+        <div class="show-more">
+          <button class="btn" onclick={() => pl.loadMore()} disabled={pl.loading}>
+            {pl.loading ? 'Loading…' : 'Show more'}
+          </button>
+        </div>
+      {/if}
     {/if}
   </div>
 
@@ -806,7 +1061,7 @@
   <ConfirmDialog
     title="Delete this media?"
     message={`“${deleteTarget.title ?? deleteTarget.filename}” and its entity will be removed from the case.`}
-    detail="This permanently deletes the file on disk. It cannot be undone."
+    detail="Deletes the file from disk and cannot be undone."
     confirmLabel="Delete"
     tone="danger"
     busy={deleteBusy}
@@ -830,41 +1085,17 @@
 
   /* folder filter bar */
   .folder-bar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
     display: flex;
     align-items: center;
     gap: 6px;
     padding: 8px 20px;
     border-bottom: 1px solid var(--border);
+    background: var(--bg-1);
     overflow-x: auto;
     flex-shrink: 0;
-  }
-  .folder-chip {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 10px;
-    border-radius: var(--r-sm);
-    border: 1px solid var(--border);
-    background: var(--bg-2);
-    color: var(--text-2);
-    font-size: var(--fs-xs);
-    white-space: nowrap;
-    cursor: pointer;
-    transition: border-color 0.12s, color 0.12s, background 0.12s;
-  }
-  .folder-chip:hover {
-    border-color: var(--border-strong);
-    color: var(--text-1);
-  }
-  .folder-chip.active {
-    border-color: var(--border-strong);
-    background: var(--bg-3);
-    color: var(--text-1);
-  }
-  .chip-count {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    margin-left: 2px;
   }
   .bar-sep {
     width: 1px;
@@ -873,43 +1104,61 @@
     background: var(--border);
     flex-shrink: 0;
   }
-  .search-box {
+  .show-more {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    background: var(--bg-2);
-    color: var(--text-3);
-    flex-shrink: 0;
-  }
-  .search-box:focus-within {
-    border-color: var(--accent);
-  }
-  .search-input {
-    width: 180px;
-    border: none;
-    background: none;
-    outline: none;
-    color: var(--text-1);
-    font-size: var(--fs-xs);
-  }
-  .search-clear {
-    display: inline-flex;
-    color: var(--text-3);
-    padding: 1px;
-    border-radius: 50%;
-  }
-  .search-clear:hover {
-    color: var(--text-1);
-    background: var(--bg-3);
+    justify-content: center;
+    padding: 16px 0 4px;
   }
   .sort-select {
     width: auto;
     font-size: var(--fs-xs);
     padding: 4px 8px;
     flex-shrink: 0;
+  }
+  .folder-select {
+    width: auto;
+    min-width: 150px;
+    font-size: var(--fs-xs);
+    padding: 4px 8px;
+    flex-shrink: 0;
+  }
+  .category-select {
+    width: auto;
+    min-width: 130px;
+    font-size: var(--fs-xs);
+    padding: 4px 8px;
+    flex-shrink: 0;
+  }
+  .reset-filters {
+    margin-left: auto;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .view-switch {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--bg-2);
+    flex-shrink: 0;
+  }
+  .view-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
+  }
+  .view-btn:hover {
+    color: var(--text-1);
+  }
+  .view-btn.active {
+    background: var(--bg-3);
+    color: var(--text-1);
   }
 
   .job {
@@ -958,6 +1207,10 @@
     grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
     gap: 14px;
     padding: 18px 20px;
+  }
+  .grid.compact {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 10px;
   }
   .media-card {
     overflow: hidden;
@@ -1086,6 +1339,123 @@
   }
   .del {
     margin-left: auto;
+  }
+  /* Details list: deliberately plain rows, not card-shaped mini tiles. */
+  .media-list {
+    /* Every row, including the header, must share this exact grid. An `auto`
+       actions column is empty in the header but wide in a data row, which
+       shifts every sortable heading out of alignment. */
+    --media-columns: 54px minmax(180px, 1fr) 90px 82px minmax(100px, 0.45fr) 132px 168px;
+    padding: 6px 20px 18px;
+  }
+  .media-row {
+    display: grid;
+    grid-template-columns: var(--media-columns);
+    align-items: center;
+    min-width: 790px;
+    min-height: 54px;
+    gap: 10px;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
+  .media-row:not(.media-head):hover {
+    background: var(--bg-2);
+  }
+  .media-row.focused {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    animation: focus-flash 0.9s var(--ease) 2;
+  }
+  .media-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    min-height: 32px;
+    background: var(--bg-1);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .media-head-button {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 4px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-align: left;
+    text-transform: inherit;
+    cursor: pointer;
+  }
+  .media-head-button:hover,
+  .media-head-button.active {
+    color: var(--text-1);
+  }
+  .media-col-name {
+    min-width: 0;
+  }
+  .media-col-type,
+  .media-col-size,
+  .media-col-folder,
+  .media-col-added {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .list-preview {
+    width: 46px;
+    height: 34px;
+    border-radius: var(--r-sm);
+    background: var(--bg-2);
+    color: var(--text-3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .list-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .list-preview.clickable {
+    cursor: zoom-in;
+  }
+  .list-name,
+  .list-filename {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .list-name {
+    color: var(--text-1);
+    font-weight: 600;
+  }
+  .list-filename {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .media-col-actions {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 2px;
+  }
+  .media-row:not(.media-head) .media-col-actions {
+    opacity: 0.72;
+  }
+  .media-row:not(.media-head):hover .media-col-actions,
+  .media-row.focused .media-col-actions {
+    opacity: 1;
   }
   .drop-overlay {
     position: absolute;

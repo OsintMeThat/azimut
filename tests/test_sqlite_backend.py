@@ -11,6 +11,7 @@ that must never leave a half-built database or touch the legacy `case.json`.
 from __future__ import annotations
 
 import sqlite3
+import threading
 
 import pytest
 from bigcase import build_big_case
@@ -142,13 +143,13 @@ INSERT INTO entities(id, type, label, attrs_json, prov_by, prov_at)
 
 def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
     """A schema-1 case.db is upgraded on open through the whole chain: the folder
-    column is added and backfilled (1->2) and the jobs table is created (2->3),
-    reaching the current schema — and a second open re-applies nothing."""
+    column is added and backfilled (1->2), the jobs table is created (2->3), and
+    search/media browse indexes arrive in schema 4. A second open applies nothing."""
     db = tmp_path / "case.db"
     with sqlite3.connect(db) as conn:
         conn.executescript(_SCHEMA_V1)
 
-    store = SqliteCase.open(db)  # runs 1 -> 2 -> 3 in place
+    store = SqliteCase.open(db)  # runs 1 -> 2 -> 3 -> 4 in place
 
     # 1 -> 2: the folder column is backfilled and pages by folder.
     assert [e["id"] for e in store.page_entities(folder="Sources/Telegram")["items"]] == ["e1"]
@@ -157,18 +158,137 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
     store.enqueue_job("thumbnail", key="media/x.jpg")
     assert store.count_jobs() == {"queued": 1}
     with sqlite3.connect(db) as conn:
-        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "3"
+        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "4"
         applied = {
             r[0] for r in conn.execute("SELECT version FROM schema_migrations").fetchall()
         }
-        assert {2, 3} <= applied
+        assert {2, 3, 4} <= applied
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(entities)").fetchall()
+        }
+        assert "search_text" in columns
+        assert conn.execute(
+            "SELECT value FROM meta WHERE key='media_index_ready'"
+        ).fetchone()[0] == "1"
 
     SqliteCase.open(db)  # idempotent — the second open applies nothing
     with sqlite3.connect(db) as conn:
-        for version in (2, 3):
+        for version in (2, 3, 4):
             assert conn.execute(
                 "SELECT COUNT(*) FROM schema_migrations WHERE version = ?", (version,)
             ).fetchone()[0] == 1
+
+
+def test_media_browse_index_pages_searches_and_counts_categories(tmp_path):
+    store = SqliteCase.create(tmp_path / "case.db", name="Media index")
+    store.upsert_media_item(
+        {
+            "path": "media/photo.png",
+            "filename": "photo.png",
+            "kind": "image",
+            "size": 12,
+            "added_at": "2026-01-01T00:00:00Z",
+            "title": "Bridge",
+            "notes": "river crossing",
+            "folder": "Sources",
+            "source": {"type": "upload"},
+        },
+        entity_id="e_photo",
+    )
+    store.upsert_media_item(
+        {
+            "path": "media/map.png",
+            "filename": "map.png",
+            "kind": "image",
+            "size": 30,
+            "added_at": "2026-01-02T00:00:00Z",
+            "source": {"type": "satellite"},
+        },
+        entity_id="e_map",
+    )
+    store.upsert_media_item(
+        {
+            "path": "media/clip.mp4",
+            "filename": "clip.mp4",
+            "kind": "video",
+            "size": 50,
+            "added_at": "2026-01-03T00:00:00Z",
+            "source": {"type": "download"},
+        },
+        entity_id="e_clip",
+    )
+
+    first = store.page_media_items(limit=2)
+    assert [item["path"] for item in first["items"]] == [
+        "media/clip.mp4",
+        "media/map.png",
+    ]
+    assert first["next_cursor"] == "2"
+    assert first["facets"]["category_counts"] == {
+        "image": 1,
+        "video": 1,
+        "collage": 0,
+        "satellite": 1,
+        "upload": 1,
+        "download": 1,
+        "other": 0,
+    }
+
+    hit = store.page_media_items(q="bridge river", category="image")
+    assert [item["path"] for item in hit["items"]] == ["media/photo.png"]
+    assert hit["facets"]["folder_counts"] == {"Sources": 1}
+    assert store.page_media_items(category="satellite")["total"] == 1
+    assert store.media_items_by_paths(
+        ["media/map.png", "media/photo.png", "media/missing.png"]
+    ) == [
+        store.page_media_items(category="satellite")["items"][0],
+        store.page_media_items(q="bridge")["items"][0],
+    ]
+
+
+def test_concurrent_first_open_cannot_replace_registered_media_rows(tmp_path):
+    db = tmp_path / "case.db"
+    SqliteCase.create(db, name="Concurrent index")
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    for i in range(8):
+        name = f"item-{i}.png"
+        (media_dir / name).write_bytes(bytes([i]))
+        (media_dir / f"{name}.azimut.json").write_text(
+            (
+                '{"filename": "%s", "kind": "image", "size": 1,'
+                ' "added_at": "2026", "source": {"type": "upload"}}'
+            )
+            % name,
+            encoding="utf-8",
+        )
+
+    errors: list[BaseException] = []
+
+    def open_and_register(i: int) -> None:
+        try:
+            store = SqliteCase.open(db)
+            store.upsert_media_item(
+                {
+                    "path": f"media/live-{i}.png",
+                    "filename": f"live-{i}.png",
+                    "kind": "image",
+                    "size": 1,
+                    "added_at": "2026",
+                    "source": {"type": "upload"},
+                }
+            )
+        except BaseException as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    workers = [threading.Thread(target=open_and_register, args=(i,)) for i in range(8)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+
+    assert errors == []
+    assert len(SqliteCase.open(db).list_media_items()) == 16
 
 
 def test_pagination_keys_on_rowid_so_a_deletion_does_not_skip(tmp_path):

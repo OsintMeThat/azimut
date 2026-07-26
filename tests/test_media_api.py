@@ -102,6 +102,184 @@ def test_listing_carries_category_fields(client):
     assert item["source"]["type"] == "upload"  # drives the Imports facet
 
 
+def test_listing_derives_satellite_mode_for_legacy_extension_capture(client):
+    from azimut.engine import media as media_engine
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Legacy satellite"}).json()["id"]
+    media_engine.import_image(
+        Case.open(cid),
+        Image.new("RGB", (32, 24), (20, 80, 20)),
+        "legacy-screenshot.png",
+        {
+            "type": "screenshot",
+            "source_url": "https://www.google.com/maps/@48.8584,2.2945,2000m/data=!3m1!1e3",
+        },
+        entity_type="capture",
+        dedupe=False,
+    )
+
+    item = client.get(f"/api/cases/{cid}/media").json()[0]
+    assert item["source"]["imagery_mode"] == "satellite"
+
+
+def _set(client, cid, path, **patch):
+    return client.patch(f"/api/cases/{cid}/media", json={"path": path, **patch}).json()
+
+
+def test_media_page_paginates(client):
+    cid = client.post("/api/cases", json={"name": "Page"}).json()["id"]
+    for i in range(5):
+        _upload(client, cid, f"shot{i}.png", _png_bytes(color=(i, 0, 0)))
+
+    first = client.get(f"/api/cases/{cid}/media/page", params={"limit": 2}).json()
+    assert len(first["items"]) == 2
+    assert first["total"] == 5
+    assert first["next_cursor"] == "2"
+
+    mid = client.get(
+        f"/api/cases/{cid}/media/page", params={"limit": 2, "cursor": first["next_cursor"]}
+    ).json()
+    assert len(mid["items"]) == 2
+    assert mid["next_cursor"] == "4"
+
+    last = client.get(
+        f"/api/cases/{cid}/media/page", params={"limit": 2, "cursor": mid["next_cursor"]}
+    ).json()
+    assert len(last["items"]) == 1
+    assert last["next_cursor"] is None
+
+
+def test_media_page_query_matches_title_notes_folder(client):
+    cid = client.post("/api/cases", json={"name": "Q"}).json()["id"]
+    a = _upload(client, cid, "alpha.png", _png_bytes(color=(1, 0, 0))).json()["item"]
+    b = _upload(client, cid, "beta.png", _png_bytes(color=(2, 0, 0))).json()["item"]
+    _set(client, cid, a["path"], notes="bridge over the river", folder="ukraine")
+    _set(client, cid, b["path"], title="Harbour view")
+
+    hit = client.get(f"/api/cases/{cid}/media/page", params={"q": "bridge"}).json()
+    assert [i["path"] for i in hit["items"]] == [a["path"]]
+    # folder + a source/title term both match
+    assert client.get(f"/api/cases/{cid}/media/page", params={"q": "harbour"}).json()["total"] == 1
+    # two space-split terms must both be present (AND)
+    assert client.get(f"/api/cases/{cid}/media/page", params={"q": "bridge river"}).json()["total"] == 1
+    assert client.get(f"/api/cases/{cid}/media/page", params={"q": "bridge harbour"}).json()["total"] == 0
+
+
+def test_media_page_kind_and_folder_filters(client):
+    cid = client.post("/api/cases", json={"name": "Filt"}).json()["id"]
+    a = _upload(client, cid, "a.png", _png_bytes(color=(3, 0, 0))).json()["item"]
+    _upload(client, cid, "b.png", _png_bytes(color=(4, 0, 0)))
+    _set(client, cid, a["path"], folder="kyiv")
+
+    assert client.get(f"/api/cases/{cid}/media/page", params={"kind": "image"}).json()["total"] == 2
+    assert client.get(f"/api/cases/{cid}/media/page", params={"folder": "kyiv"}).json()["total"] == 1
+
+
+def test_media_page_sort_name_and_size(client):
+    cid = client.post("/api/cases", json={"name": "Sort"}).json()["id"]
+    small = _upload(client, cid, "s.png", _png_bytes(color=(5, 0, 0), size=(16, 16))).json()["item"]
+    big = _upload(client, cid, "b.png", _png_bytes(color=(6, 0, 0), size=(256, 256))).json()["item"]
+    _set(client, cid, small["path"], title="Zebra")
+    _set(client, cid, big["path"], title="Alpha")
+
+    by_name = client.get(f"/api/cases/{cid}/media/page", params={"sort": "name"}).json()
+    assert [i["title"] for i in by_name["items"]] == ["Alpha", "Zebra"]
+
+    by_size = client.get(f"/api/cases/{cid}/media/page", params={"sort": "size"}).json()
+    assert by_size["items"][0]["path"] == big["path"]
+
+    name_desc = client.get(
+        f"/api/cases/{cid}/media/page", params={"sort": "name", "direction": "desc"}
+    ).json()
+    assert [item["title"] for item in name_desc["items"]] == ["Zebra", "Alpha"]
+
+    size_asc = client.get(
+        f"/api/cases/{cid}/media/page", params={"sort": "size", "direction": "asc"}
+    ).json()
+    assert size_asc["items"][0]["path"] == small["path"]
+
+
+def test_media_page_facets_count_full_set(client):
+    cid = client.post("/api/cases", json={"name": "Facets2"}).json()["id"]
+    a = _upload(client, cid, "a.png", _png_bytes(color=(7, 0, 0))).json()["item"]
+    _upload(client, cid, "b.png", _png_bytes(color=(8, 0, 0)))
+    _set(client, cid, a["path"], folder="kyiv")
+
+    # facets reflect the whole filtered set even when a page slices it
+    page = client.get(f"/api/cases/{cid}/media/page", params={"limit": 1}).json()
+    assert len(page["items"]) == 1  # only one item on the page
+    assert page["facets"]["kind_counts"]["image"] == 2  # ...but both counted
+    assert page["facets"]["folder_counts"]["kyiv"] == 1
+    assert page["facets"]["category_counts"]["image"] == 2
+    assert page["facets"]["category_counts"]["upload"] == 2
+
+
+def test_media_page_filters_categories_without_page_local_counts(client):
+    from azimut.engine import media as media_engine
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Categories"}).json()["id"]
+    generic = _upload(client, cid, "generic.png", _png_bytes()).json()["item"]
+    satellite = media_engine.import_image(
+        Case.open(cid),
+        Image.new("RGB", (32, 24)),
+        "map.png",
+        {"type": "satellite"},
+        entity_type="capture",
+        dedupe=False,
+    )["item"]
+
+    images = client.get(
+        f"/api/cases/{cid}/media/page", params={"category": "image", "limit": 1}
+    ).json()
+    assert images["total"] == 1
+    assert [item["path"] for item in images["items"]] == [generic["path"]]
+    # Counts describe all matching media, not only the selected page/category.
+    assert images["facets"]["category_counts"]["image"] == 1
+    assert images["facets"]["category_counts"]["satellite"] == 1
+
+    maps = client.get(
+        f"/api/cases/{cid}/media/page", params={"category": "satellite"}
+    ).json()
+    assert [item["path"] for item in maps["items"]] == [satellite["path"]]
+
+
+def test_media_page_does_not_scan_sidecars_for_each_request(client, monkeypatch):
+    from azimut.engine import media as media_engine
+
+    cid = client.post("/api/cases", json={"name": "Indexed page"}).json()["id"]
+    _upload(client, cid, "shot.png", _png_bytes())
+    monkeypatch.setattr(
+        media_engine,
+        "list_media",
+        lambda _case: (_ for _ in ()).throw(AssertionError("sidecar list called")),
+    )
+
+    page = client.get(f"/api/cases/{cid}/media/page").json()
+    assert page["total"] == 1
+
+
+def test_media_metadata_returns_only_requested_paths(client):
+    cid = client.post("/api/cases", json={"name": "Metadata"}).json()["id"]
+    first = _upload(client, cid, "first.png", _png_bytes(color=(10, 0, 0))).json()["item"]
+    second = _upload(client, cid, "second.png", _png_bytes(color=(20, 0, 0))).json()["item"]
+
+    items = client.post(
+        f"/api/cases/{cid}/media/metadata",
+        json={"paths": [second["path"], "media/missing.png", first["path"]]},
+    ).json()
+    assert [item["path"] for item in items] == [second["path"], first["path"]]
+    assert all(item["thumb_state"] == "ready" for item in items)
+
+
+def test_media_page_items_carry_thumb_state(client):
+    cid = client.post("/api/cases", json={"name": "PageThumb"}).json()["id"]
+    _upload(client, cid, "shot.png", _png_bytes())
+    page = client.get(f"/api/cases/{cid}/media/page").json()
+    assert page["items"][0]["thumb_state"] == "ready"
+
+
 def test_duplicate_detection(client):
     cid = client.post("/api/cases", json={"name": "Dup"}).json()["id"]
     data = _png_bytes(color=(1, 2, 3))

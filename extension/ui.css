@@ -54,6 +54,9 @@ p { margin: 6px 0; }
 .row input:focus, .row select:focus { outline: 1px solid var(--accent); }
 
 .actions { display: flex; gap: 8px; margin-top: 12px; }
+/* two full-width choices for the same page, stacked so neither label truncates */
+.actions.stacked { flex-direction: column; }
+.actions.stacked button { width: 100%; }
 button {
   padding: 6px 12px;
   background: var(--bg-2);

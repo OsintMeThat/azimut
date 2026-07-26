@@ -6,19 +6,20 @@ import {
   docSize, legendColumns, legendRowCount, toSpec, offsetShape, copyShapeSpec, autoLayoutRows, TWEET_GUIDES,
   autoCoords, formatCoords, resolveSourceUrls, autoSource, autoSourceUrls,
   proofCoordsText, proofSource, orderedFeatureColors, legendLines,
-  dedupeBySrc, isSatelliteCapture, satPanelInput, mediaPanelInput,
+  dedupeBySrc, satPanelInput, mediaPanelInput,
   SIG_MARGIN, SIG_SCALE, newSignature, signatureBox, signatureOffset, signaturePairPositions,
-  proofSlug, uniqueProofTitle, proofTitleFromCase, DEFAULT_PROOF_TITLE,
-  filterProofPanelItems, hasProofCanvasContent,
+  filterProofPanelItems, hasProofCanvasContent, panelPreview,
   remapPanelXY, panelHitTest, groupNeighborIndex, hasGroupNeighbor,
   denseRowValues, clampPanelScale, trimClosingDuplicate, smoothFreehandPoints,
   freehandShape, canReassignLegendNote,
-  savedProofEntities, savedProofSlugs, savedProofTitles, savedProofTitle,
   BG, ANNO_COLORS, MAX_ANNO_COLORS, normSpace, isLightColor, textColors,
   normalizePreferredColors, replacePreferredColor,
   TEXT_MAIN, TEXT_MAIN_LIGHT, templateFromProof, applyProofStyle, normalizeProofStyle,
   anchoredPos, anchoredOffset, newSignatureText, SIG_TEXT_SIZE,
   orientFirstPanels, proofExportOptions,
+  normalizeFrame, newFrame, FRAME_COLOR, FRAME_WIDTH, FRAME_WIDTH_MAX,
+  newPaste, pasteBoxes, pasteInsertScale, clampPasteScale, clampPaste,
+  surfaces, surfaceHitTest, PASTE_SCALE_MAX, PASTE_SHARE,
 } from './composer.js';
 
 // natural is [width, height]; PANEL_H drives the per-row scale.
@@ -737,27 +738,6 @@ describe('dedupeBySrc — picker items collapse on shared src', () => {
   });
 });
 
-describe('isSatelliteCapture — a capture is a media image flagged by its source', () => {
-  it('is true for a media item whose source.type is satellite', () => {
-    expect(isSatelliteCapture({ kind: 'image', source: { type: 'satellite' } })).toBe(true);
-  });
-
-  it('is false for an ordinary image, and tolerates a missing source', () => {
-    expect(isSatelliteCapture({ kind: 'image', source: { type: 'download' } })).toBe(false);
-    expect(isSatelliteCapture({ kind: 'image' })).toBe(false);
-    expect(isSatelliteCapture({})).toBe(false);
-  });
-
-  it('lets the picker drop captures from the media half so nothing double-lists', () => {
-    const media = [
-      { path: 'media/sat_1.png', kind: 'image', source: { type: 'satellite' } },
-      { path: 'media/photo.jpg', kind: 'image', source: { type: 'download' } },
-    ];
-    const kept = media.filter((m) => m.kind === 'image' && !isSatelliteCapture(m));
-    expect(kept.map((m) => m.path)).toEqual(['media/photo.jpg']);
-  });
-});
-
 describe('coordinate format threading — the reader’s format reaches captions, not provenance', () => {
   const capture = {
     path: 'media/sat_1.png',
@@ -901,50 +881,6 @@ describe('orientFirstPanels — template direction', () => {
   });
 });
 
-describe('proofSlug — mirrors the backend _slug', () => {
-  it('lowercases, hyphenates runs of non-alphanumerics, trims edges', () => {
-    expect(proofSlug('Untitled proof')).toBe('untitled-proof');
-    expect(proofSlug('  Rooftop! @ 12:30  ')).toBe('rooftop-12-30');
-    expect(proofSlug('Café déjà')).toBe('caf-d-j');
-  });
-
-  it('falls back to "proof" when nothing survives, and caps at 80 chars', () => {
-    expect(proofSlug('')).toBe('proof');
-    expect(proofSlug('!!!')).toBe('proof');
-    expect(proofSlug(null)).toBe('proof');
-    expect(proofSlug('a'.repeat(200))).toHaveLength(80);
-  });
-});
-
-describe('uniqueProofTitle — a fresh proof reads apart from the case', () => {
-  it('returns the base when no proof carries it', () => {
-    expect(uniqueProofTitle(DEFAULT_PROOF_TITLE, new Set())).toBe('Untitled proof');
-    expect(uniqueProofTitle(DEFAULT_PROOF_TITLE, ['Rooftop'])).toBe('Untitled proof');
-  });
-
-  it('numbers past the base and any run already taken', () => {
-    expect(uniqueProofTitle(DEFAULT_PROOF_TITLE, new Set(['Untitled proof']))).toBe('Untitled proof 2');
-    const taken = ['Untitled proof', 'Untitled proof 2', 'Untitled proof 3'];
-    expect(uniqueProofTitle(DEFAULT_PROOF_TITLE, taken)).toBe('Untitled proof 4');
-  });
-
-  it('the numbered title still slugs to a distinct filename', () => {
-    expect(proofSlug(uniqueProofTitle(DEFAULT_PROOF_TITLE, ['Untitled proof']))).toBe('untitled-proof-2');
-  });
-});
-
-describe('proofTitleFromCase — new-proof name', () => {
-  it('uses the trimmed case name and keeps it unique among saved proofs', () => {
-    expect(proofTitleFromCase('  Harbour review  ', [])).toBe('Harbour review');
-    expect(proofTitleFromCase('Harbour review', ['Harbour review'])).toBe('Harbour review 2');
-  });
-
-  it('falls back to the normal untitled name when no case name is available', () => {
-    expect(proofTitleFromCase('', [])).toBe(DEFAULT_PROOF_TITLE);
-    expect(proofTitleFromCase(null, [DEFAULT_PROOF_TITLE])).toBe('Untitled proof 2');
-  });
-});
-
 describe('filterProofPanelItems — new-proof panel selector', () => {
   const items = [
     {
@@ -953,23 +889,29 @@ describe('filterProofPanelItems — new-proof panel selector', () => {
       kind: 'satellite',
       meta: { provider: 'Esri World Imagery', imagery_date: '2026-07-01' },
     },
-    { src: 'media/storefront.jpg', label: 'Storefront.jpg', kind: 'media', meta: {} },
-    { src: 'media/roof.png', label: 'Red roof.png', kind: 'media', meta: {} },
+    { src: 'media/IMG_4821.jpg', label: 'Storefront', folder: 'street', kind: 'media', meta: {} },
+    { src: 'media/roof.png', label: 'Red roof', kind: 'media', meta: {} },
   ];
 
   it('filters satellite captures independently from other images', () => {
     expect(filterProofPanelItems(items, '', 'satellite').map((item) => item.src))
       .toEqual(['media/satellite-city.png']);
     expect(filterProofPanelItems(items, '', 'media').map((item) => item.src))
-      .toEqual(['media/storefront.jpg', 'media/roof.png']);
+      .toEqual(['media/IMG_4821.jpg', 'media/roof.png']);
   });
 
-  it('searches the active category by label, path, and satellite metadata', () => {
+  it('searches the active category by title, folder, and satellite metadata', () => {
     expect(filterProofPanelItems(items, 'roof', 'media').map((item) => item.src))
       .toEqual(['media/roof.png']);
+    expect(filterProofPanelItems(items, 'street', 'media').map((item) => item.src))
+      .toEqual(['media/IMG_4821.jpg']);
     expect(filterProofPanelItems(items, 'esri', 'satellite').map((item) => item.src))
       .toEqual(['media/satellite-city.png']);
     expect(filterProofPanelItems(items, 'storefront', 'satellite')).toEqual([]);
+  });
+
+  it('ignores the file name, so a camera name cannot crowd out the titles', () => {
+    expect(filterProofPanelItems(items, 'img_4821', 'all')).toEqual([]);
   });
 });
 
@@ -1125,33 +1067,6 @@ describe('canReassignLegendNote — move a note with a recolored shape', () => {
   it('is false when the old color had no note', () => {
     const moving = { color: 'red' };
     expect(canReassignLegendNote({}, 'red', 'blue', [moving], moving)).toBe(false);
-  });
-});
-
-describe('saved-proof case queries', () => {
-  const entities = [
-    { label: 'Rooftop', attrs: { spec: 'proofs/rooftop.json' } },
-    { label: 'Bridge', attrs: { spec: 'proofs/bridge.json' } },
-    { label: 'A place', attrs: { spec: 'places/x.json' } }, // not a proof
-    { label: 'No spec' },
-  ];
-
-  it('picks only entities filed as proofs/*.json', () => {
-    expect(savedProofEntities(entities).map((e) => e.label)).toEqual(['Rooftop', 'Bridge']);
-    expect(savedProofEntities(undefined)).toEqual([]);
-  });
-
-  it('lists the slugs (filename without proofs/ and .json)', () => {
-    expect(savedProofSlugs(entities)).toEqual(new Set(['rooftop', 'bridge']));
-  });
-
-  it('lists the titles', () => {
-    expect(savedProofTitles(entities)).toEqual(new Set(['Rooftop', 'Bridge']));
-  });
-
-  it('resolves a title by slug, falling back to the slug itself', () => {
-    expect(savedProofTitle(entities, 'bridge')).toBe('Bridge');
-    expect(savedProofTitle(entities, 'unknown')).toBe('unknown');
   });
 });
 
@@ -1607,5 +1522,147 @@ describe('anchoredPos / anchoredOffset — the text-signature placement', () => 
     expect(SIG_TEXT_SIZE).toBe(28);
     expect(s).toMatchObject({ anchor: 'br', size: SIG_TEXT_SIZE, opacity: 1 });
     expect(s).not.toHaveProperty('text');
+  });
+});
+
+describe('panelPreview', () => {
+  it('uses the cached thumbnail, never the full-size original', () => {
+    const preview = panelPreview({
+      path: 'media/big.jpg',
+      thumbnail: 'media/.thumbs/abc-g2.jpg',
+      thumb_state: 'ready',
+    });
+
+    expect(preview).toEqual({ thumb: 'media/.thumbs/abc-g2.jpg', thumbPending: false });
+  });
+
+  it('reports a thumbnail the worker has not produced yet as pending', () => {
+    for (const state of ['queued', 'running']) {
+      expect(panelPreview({ path: 'media/clip.mp4', thumbnail: null, thumb_state: state }))
+        .toEqual({ thumb: null, thumbPending: true });
+    }
+  });
+
+  it('offers no preview at all when the thumbnail failed or cannot exist', () => {
+    for (const state of ['failed', 'none']) {
+      expect(panelPreview({ path: 'media/x.wav', thumbnail: null, thumb_state: state }))
+        .toEqual({ thumb: null, thumbPending: false });
+    }
+  });
+
+  it('treats an untagged item as having no preview rather than showing the original', () => {
+    // an older listing (or one that lost its cached file) must not make the
+    // picker decode a multi-megabyte capture per cell
+    expect(panelPreview({ path: 'media/sat.png' })).toEqual({ thumb: null, thumbPending: false });
+  });
+});
+
+describe('frames', () => {
+  it('a frame is a colour and a thickness, and width 0 means no frame', () => {
+    expect(newFrame()).toEqual({ color: FRAME_COLOR, width: FRAME_WIDTH });
+    expect(normalizeFrame({ color: '#40C4FF', width: 4 })).toEqual({ color: '#40c4ff', width: 4 });
+    expect(normalizeFrame({ color: '#40c4ff', width: 0 })).toBeNull();
+    expect(normalizeFrame(null)).toBeNull();
+  });
+
+  it('falls back on a garbled colour and bounds the thickness', () => {
+    expect(normalizeFrame({ color: 'red', width: 3 })).toEqual({ color: FRAME_COLOR, width: 3 });
+    expect(normalizeFrame({ color: '#ffffff', width: 999 }).width).toBe(FRAME_WIDTH_MAX);
+    expect(normalizeFrame({ color: '#ffffff', width: 2.6 }).width).toBe(3);
+  });
+
+  it('stays out of the legend: framing a panel explains nothing on its own', () => {
+    const shapes = [{ id: 's1', panel: 'p1', kind: 'rect', color: '#ff5252' }];
+    const framed = [{ ...landscape(), id: 'p1', frame: { color: '#69f0ae', width: 8 } }];
+    const spec = toSpec({ title: 'x', panels: framed, shapes, notes: {} });
+
+    expect(spec.panels[0].frame).toEqual({ color: '#69f0ae', width: 8 });
+    expect(orderedFeatureColors(spec.shapes)).toEqual(['#ff5252']); // not the frame colour
+  });
+});
+
+describe('pasted images', () => {
+  const paste = (extra = {}) => ({ id: 'x1', asset: 'a1.png', natural: [800, 400], x: 0, y: 0, scale: 1, ...extra });
+
+  it('a paste carries no source, so nothing in the case can claim it', () => {
+    const p = newPaste('deadbeefdeadbeef.png', [640, 480]);
+    expect(p).toMatchObject({ asset: 'deadbeefdeadbeef.png', natural: [640, 480], scale: 1, frame: null });
+    expect(p).not.toHaveProperty('src');
+    expect(p.id).toBeTruthy();
+  });
+
+  it('lands at a share of the document width, never blown up past life size', () => {
+    expect(pasteInsertScale([2000, 1000], 1000)).toBeCloseTo((1000 * PASTE_SHARE) / 2000, 3);
+    expect(pasteInsertScale([100, 100], 4000)).toBe(1); // small image stays 1:1
+    expect(clampPasteScale(99)).toBe(PASTE_SCALE_MAX);
+    expect(clampPasteScale(undefined)).toBe(1);
+  });
+
+  it('boxes look like panel boxes, so an annotation binds to either', () => {
+    const [box] = pasteBoxes([paste({ x: 40, y: 60, scale: 0.5 })]);
+    expect(box).toEqual({ x: 40, y: 60, w: 400, h: 200, scale: 0.5, baseScale: 1, row: 0 });
+  });
+
+  it('stays inside the document however far it is dragged', () => {
+    const inside = clampPaste(paste({ x: 5000, y: -300, scale: 1 }), 1000, 800);
+    expect(inside).toEqual({ x: 200, y: 0 }); // 1000-800 wide, 800-400 tall → pinned at the edge
+
+    // one wider than the document is held so it covers the whole of it
+    const wide = clampPaste(paste({ x: 500, y: 0, natural: [2000, 400] }), 1000, 800);
+    expect(wide.x).toBe(0);
+    expect(clampPaste(paste({ x: -5000, y: 0, natural: [2000, 400] }), 1000, 800).x).toBe(-1000);
+  });
+
+  it('sits in front of the panels for hit-testing', () => {
+    const proof = {
+      captionSize: 20,
+      layout: 'grid',
+      panels: [{ ...landscape(1000, 500), id: 'p1' }],
+      pastes: [paste({ x: PAD, y: PAD, natural: [200, 200] })],
+    };
+    const list = surfaces(proof);
+    expect(list.map((s) => s.kind)).toEqual(['paste', 'panel']);
+
+    // a point over both resolves to the paste, in the paste's own pixels
+    const hit = surfaceHitTest(list, { x: PAD + 10, y: PAD + 20 });
+    expect(hit.kind).toBe('paste');
+    expect(hit.id).toBe('x1');
+    expect([hit.nx, hit.ny]).toEqual([10, 20]);
+
+    // a point past the paste still finds the panel underneath
+    expect(surfaceHitTest(list, { x: PAD + 500, y: PAD + 300 }).kind).toBe('panel');
+    expect(surfaceHitTest(list, { x: -50, y: -50 })).toBeNull();
+  });
+
+  it('never changes the size of the document', () => {
+    const panels = [{ ...landscape(1000, 500), id: 'p1', row: 0 }];
+    const bare = docSize(panels, [], {}, {}, [], 'grid');
+    // a paste is not passed to docSize at all — it cannot grow or move the doc
+    expect(docSize(panels, [], {}, {}, [], 'grid')).toEqual(bare);
+    expect(pasteBoxes([paste({ x: 9999 })])[0].x).toBe(9999); // stored as-is; clamping is the caller's
+  });
+
+  it('round-trips through the spec with its frame and its z-order', () => {
+    const spec = toSpec({
+      title: 'x',
+      panels: [{ ...landscape(), id: 'p1' }],
+      shapes: [{ id: 's1', panel: 'x1', kind: 'rect', color: '#ff5252' }],
+      pastes: [
+        paste({ id: 'x1', x: 12, y: 34, scale: 0.25, frame: { color: '#ffd740', width: 5 } }),
+        paste({ id: 'x2', asset: 'b2.png' }),
+      ],
+      notes: {},
+    });
+
+    expect(spec.pastes).toEqual([
+      { id: 'x1', asset: 'a1.png', natural: [800, 400], x: 12, y: 34, scale: 0.25, frame: { color: '#ffd740', width: 5 } },
+      { id: 'x2', asset: 'b2.png', natural: [800, 400], x: 0, y: 0, scale: 1, frame: null },
+    ]);
+    // a shape bound to a paste survives, exactly like one bound to a panel
+    expect(spec.shapes[0].panel).toBe('x1');
+  });
+
+  it('a proof with no pastes still writes an empty list, so reloads are uniform', () => {
+    expect(toSpec({ title: 'x', panels: [], shapes: [], notes: {} }).pastes).toEqual([]);
   });
 });

@@ -50,8 +50,8 @@ notes.md       # free-form case notes (markdown)
 notes/         # filed note bodies (Markdown)
 media/         # source + captured + extracted media, with metadata + sha256
 proofs/        # composed proofs: exported PNGs + editable JSON specs
+               #   <name>.assets/ holds images pasted into that proof only
 exports/       # post drafts, reports, shared bundles
-evidence.jsonl # append-only journal (v4)
 inspect/       # saved Inspect session specs
 ```
 
@@ -88,11 +88,12 @@ proof for publication.
 | ✅ **Media Library** | Imports or downloads case media with metadata, SHA-256, notes, provenance and multi-attachment selection. |
 | ✅ **Inspect** | Reviews images and video, including saved orientation (±90°/±180°), frame selection, adjustments, crops, collages, auto-stitch, ELA hints and sessions. |
 | ✅ **Satellite** | Saves places and attributed map captures with provider, date, rotation, measure and reference tools. |
-| ✅ **Geo Proof** | Composes templated grid or free-layout panels with annotations and exports a PNG with an editable spec. |
+| ✅ **Saved work navigation** | Groups a case's places, captures and filed screenshots by continent/country/region (labelled in English and the local language) or by My-work folder, searchable in either spelling with previews and shown on the map. |
+| ✅ **Geo Proof** | Composes templated grid or free-layout panels with annotations, coloured frames and pasted overlays that stay out of the case, and exports a PNG with an editable spec. |
 | ✅ **Geo Report** | Prepares sourced proof threads and saved drafts without posting automatically. |
-| ✅ **Case sidebar** | Manages cases, notes, suggestions, folders, details and synchronized artifact deletion. |
+| ✅ **Case sidebar** | Searches and filters the case, manages notes, suggestions, folders, multi-row filing, a details drawer and synchronized artifact deletion. |
 | ✅ **Imagery providers** | Supports Esri, OSM, OpenTopoMap, Sentinel-2 and optional Mapbox/Google with usage controls. |
-| ✅ **Capture extension** | Files user-initiated map screenshots with URL metadata, attribution and provenance. |
+| ✅ **Capture extension** | Files user-initiated map screenshots with URL metadata, attribution and provenance; also saves a map's point as a place, or any page as a bookmark. |
 | ✅ **Distribution** | Bundles the browser UI, launcher, cross-platform binaries, ffmpeg, locked builds and server hardening. |
 
 ### v2 GEOINT suite (shipped as GitHub `v0.2.0+`)
@@ -108,6 +109,11 @@ proof for publication.
 | ✅ **Canvas tests** | Exercises Leaflet and Konva interactions in Chromium and Firefox. |
 | ✅ **Storage platform** | Uses per-case SQLite, bounded catalog queries and a durable one-worker job queue. |
 | ✅ **Gated downloads** | Fetches login-walled media by borrowing a browser session or cookies.txt, cookie-less by default and prompted only on a wall. |
+| ✅ **Find at scale** | Bounded, paged loading with a shared search box and sort across the Media Library and Files, plus case-name search in the switcher. |
+| ✅ **Searchable pickers** | Pickers in Inspect, Reverse Search, Geo Proof and the Notebook notes menu search past six entries and browse case folders behind the "…". |
+| ✅ **Named saves** | Inspect's Save gate names each item or numbers a batch from one base name, carries a shared note, and gives the file on disk the same name; a collage keeps one name across its tab and the gate. |
+| ✅ **Named documents** | Inspect, Geo Proof and Geo Report name their work in the tool header ("Inspect 1", "Proof 1", "Post 1" until renamed), save under that name in one click, and move the file when it is renamed. |
+| ✅ **Proofs on the map** | A fourth position of the Saved switch places each proof by its own coordinates, then by the captures it composes; `All` marks a worked capture with a dot rather than doubling it. |
 
 
 ---
@@ -118,6 +124,22 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 §7. New tools become tabs or modes in an existing workspace (see
 [UI.md](UI.md)). Releases ship as GitHub `v0.x` tags.
 
+### v2: still to finish (next `v0.2.x`)
+
+| Tool | What it does |
+|------|--------------|
+| **Case bundle** | Exports a case to one ZIP (clean SQLite copy, keys excluded) and imports it back. |
+| **Trash** | Undoes a delete and holds removed artifacts before they go for good. |
+| **Import enrichment** | Queues EXIF/GPS, perceptual hash and OCR on import; results arrive as Suggestions. |
+| **EXIF in Media** | Shows parsed GPS in the Media list and turns it into a place in one click. |
+| **Case Board / Relations** | Browses, creates and merges entities; typed links; graph view over the schema filled since v1. |
+| **Case Sheet** | The same case as a table: a row is an entity, columns are its attributes plus free ones the analyst adds, sorted, filtered and edited in place. Imports a CSV as loose rows that stay out of the graph until promoted, and exports back to CSV or GeoJSON. |
+| **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. |
+| **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
+| **Sun and local time** | Local time, sunrise/sunset and solar azimuth for a point and date, in Coordinates. |
+| **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. |
+| **Report an issue** | Opens a pre-filled GitHub issue with version, OS and recent log lines. |
+
 ### v3: GEOINT expansion
 
 | Tool | What it does |
@@ -125,59 +147,80 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Satellite Compare** | Same coords across providers (Esri / Sentinel-2 date slider / Bing / keyed), synced pan/zoom. Copernicus easy link. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
 | **EXIF & Metadata** | GPS/timestamps/device/codecs parsed locally + a "what was stripped" hint; suggests place/event. |
-| **Shadow Clock** | Mark a shadow to estimate possible capture times; show sun times and azimuth for a place and date; pair with weather/METAR history. |
+| **Edit Provenance** | Reads a rendered video's own edit history: which source clips it was cut from, in what order, and the GPS, dates and cameras those clips still carry. |
+| **Shadow Clock** | Mark a shadow to estimate possible capture times, and render the year as a day × hour heatmap of the slots that fit. |
+| **Imagery Wayback** | Esri World Imagery archive as a date slider: one view across every published release, key-less. |
+| **Event layers** | Date-stamped overlays that support or contradict an event: NASA FIRMS thermal hotspots, archived weather and METAR. |
+| **Shot contact sheet** | Splits a video into shots (ffmpeg scene detection) and picks frames from a clickable grid of timecodes. |
 | **OCR** | Read signs/plates (tesseract), detect script/language. |
 | **Audio Transcript** | Transcribe and translate speech offline; flag acoustic context such as bells, adhan, aircraft or language. |
 | **Ground Imagery** | Ground-level photos: Panoramax/Mapillary/KartaView key-less first; Street View easy link, optional keyed in-app view. |
 | **Panorama** | Stitch a video window / frame set. Auto-stitch already in Inspect; still to do: sample a video window directly, seam blending. |
 | **Proof annotation** | Grow the Geo Proof toolbox: shape fill + dashed strokes, numbered markers, a redaction/blur box; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
 
-Toward v3: GIF maker; curated tool links; command palette (Ctrl+K); full-text
-case search; timezone and local time at coordinates; clipboard image/URL capture
-with provenance; preference-controlled scale bar, north arrow and graticule on
-app or extension captures; EXIF/GPS import suggestions for place and time.
+Edit Provenance rests on three facts about Adobe renders, kept here so the tool
+can be rebuilt from the spec alone:
+
+- A Premiere or After Effects export carries an XMP `Ingredients` array: one row
+  per source asset, with its original file path, document and instance IDs,
+  `From Part` (the range taken from the source) and `To Part` (where it sits in
+  the render), counted in ticks of 254,016,000,000 per second.
+- `Pantry` blocks embed each source asset's own XMP — GPS, capture date, camera,
+  lens — and, when that asset was itself a sequence or comp, its own
+  `Ingredients`, which project into render time under an assumed linear playback.
+- `To Part` values may be elapsed render time, absolute display timecode, or the
+  coordinates of a longer sequence the export was cut from; the origin has to be
+  detected before anything is drawn.
+
+The result is one track per source file over the render's timecode, with
+GPS-tagged clips promotable to places.
+
+Toward v3: GIF maker; curated tool links; full-text case search; clipboard
+image/URL capture with provenance; EXIF/GPS import suggestions for place and
+time.
 
 ### v4: investigation layer
 
 | Tool | What it does |
 |------|--------------|
-| **Case Board / Relations** | Browse/create/merge entities; typed links; graph/timeline/map views over the schema filling since v1. |
 | **Map Board (MyMaps-style)** | Editable case map: custom pins + notes/links, shapes, layers; import/export KML/KMZ/GeoJSON; pins bind to `place`. |
-| **Evidence Locker** | Track SHA-256, timestamps, source and notes; archive with Wayback and export `evidence.jsonl`. |
+| **Evidence Locker** | Track SHA-256, timestamps, source and notes; archive with Wayback; export `evidence.jsonl` under a hash-chained manifest, so any later edit to an exported file is detectable. |
 | **Timeline Builder** | Timestamped events from mixed sources aligned on timeline + map. |
-| **Report Builder** | Assemble proofs/maps/timeline/entities/notes into HTML/PDF. |
+| **Report Builder** | Assemble proofs/maps/timeline/entities/notes into PDF or one self-contained HTML file with its media embedded, readable offline. |
+| **Case Sync (Git)** | Push a case to a private or public Git remote, pull it back, and diff two revisions, so two analysts can work the same case. |
 
 Toward v4: dependency-aware delete (partly done);
 archive-on-download and a Wayback CDX snapshot timeline with diff; web-page save
-extension; case bundle import/export; editable places table with CSV/GeoJSON;
-imagery-date change detection; source location pattern-of-life map and timeline;
-shadow/sun/weather chronolocation solver; journaled hashes and timestamps for
-every export; cross-case handle/coordinate/face search; optional quota-aware X
-publishing.
+extension; provenance stamp on exports (short hash, optionally visible) that
+re-identifies a shared PNG in its case;
+Sentinel-2 change detection with an NDVI difference over a date range; source
+location pattern-of-life map and timeline; cross-case handle/coordinate/face
+search; optional quota-aware X publishing.
 
 ### v5: orchestration and advanced
 
 | Tool | What it does |
 |------|--------------|
 | **Search Orchestrator** | Run username/alias/email across services, analyst selects → entities. Integrations, not clones. |
-| **OSM Query (Overpass)** | Form-based feature search → map, no Overpass QL. |
+| **OSM Query (Overpass)** | Feature search from a form, and a described pattern ("filling station, roundabout, railway within 300 m") turned into candidates on the map; clicking a point looks it up in OSM, Wikidata and geolocated Commons photos. No Overpass QL. |
 | **Viewshed / Line of Sight** | What terrain is visible from a point (public DEM tiles). |
-| **Camera Resection (GCP)** | Mark matching points photo↔map → solve camera position, viewing azimuth and rough FOV (OpenCV solvePnP); saves the match as evidence. Inverse of Viewshed. |
+| **Skyline Matching** | Trace a horizon in a photo, compare it against the DEM profile seen from candidate points. |
+| **Vessel and Aircraft Tracks** | Historic ADS-B and AIS tracks on the map for a date, plus a watchlist that follows chosen callsigns or MMSIs. |
 | **Map Measures** | Distance, bearing/azimuth, area, FOV cone; includes measure-on-imagery. |
 | **Déjà Vu** | Perceptual-hash index flags recycled footage (local first; community index later). |
 | **Manipulation Hints** | Add JPEG quantization, noise and AI-media hints alongside Inspect's ELA. |
 | **Channel Monitor** | Watch Telegram channels, auto-archive media, queue for geolocation (rate limits, ToS care). |
 
-Toward v5: DEM skyline matching from a terrain silhouette; real-world
-measurement from a resected photo and its GCP camera pose; Overpass road-topology
-search from a junction sketch; satellite-pass search from public TLEs.
+Toward v5: real-world measurement from a resected photo and its GCP camera pose;
+satellite-pass search from public TLEs.
 
 ### After the MapLibre migration
 
 Phase 1 replaces Leaflet with MapLibre GL at 2D feature parity, with no 3D and
-capture tests that verify the pixels. Phase 2 adds pitch, terrain and oblique 3D
-capture, with pitch and bearing in provenance. Later work covers 3D satellite
-capture and user-keyed Google Photorealistic 3D Tiles.
+capture tests that verify the pixels. Phase 2 makes the map itself 3D — pitch,
+public DEM terrain, extruded OSM buildings — and captures obliques with pitch and
+bearing in provenance. Later work covers 3D satellite capture and user-keyed
+Google Photorealistic 3D Tiles.
 
 ## 7. Loose ideas
 
@@ -192,6 +235,8 @@ stops making sense.
 - No cloud, accounts, hosted service, or telemetry.
 - No automated geolocation verdict; Azimut files facts for the analyst.
 - No rebuilding specialized OSINT services; Azimut orchestrates them.
+- No spreadsheet engine. The Case Sheet is a view of the graph, not a workbook:
+  no formulas, no cell types, no second copy of the case.
 - No block-evasion scraping. User session cookies are in scope; third-party
   downloader proxies are not because they re-encode media and expose targets.
 - No auto-posting by default. An optional, opt-in X/Twitter API key (Settings,
@@ -200,8 +245,8 @@ stops making sense.
 
 ## 9. Architecture
 
-- **Backend**: Python 3.11+, FastAPI on `localhost`; all processing (ffmpeg,
-  yt-dlp, gallery-dl, OpenCV, tesseract) runs server-side.
+- **Backend**: Python 3.11+, FastAPI on `localhost`; current processing (ffmpeg,
+  yt-dlp, gallery-dl, OpenCV) runs server-side.
 - **Frontend**: Svelte + Leaflet (→ MapLibre) + Konva/canvas, served by the
   backend, opened in the default browser. Rail = workspaces in pipeline order,
   tools are tabs inside them (see [UI.md](UI.md)).
@@ -211,9 +256,9 @@ stops making sense.
   "don't show again"). Display preferences affect presentation only; artifacts keep
   decimal degrees + metres on disk.
 - **Distribution:** `pip install azimut` plus PyInstaller single-file binaries
-  (Windows/Linux/macOS) that bundle a static ffmpeg/ffprobe (works out of the
-  box; pip installs still want ffmpeg on `PATH`) and carry the app icon on the
-  Windows `.exe`.
+  for Windows x86_64, Linux x86_64 and Apple Silicon macOS. Binaries bundle a
+  static ffmpeg/ffprobe; pip installs still want ffmpeg on `PATH`. Intel macOS
+  uses the Python package.
 - **Dependencies:** ranges in `pyproject.toml`, exact pins in `uv.lock`; yt-dlp
   + gallery-dl unbounded on purpose; scraper self-update keeps an old binary useful.
 - **Storage:** per-case SQLite `case.db` is the authoritative graph (files for
@@ -222,14 +267,17 @@ stops making sense.
   background work run through a durable, recoverable per-case job queue drained by
   one worker. Details in [STORAGE_AND_PERFORMANCE.md](STORAGE_AND_PERFORMANCE.md).
 - **Security posture** (single-user localhost): `127.0.0.1` bind + Host/Origin
-  guard (DNS rebinding), 0600/0700 perms, 100 MP Pillow clamp, token-gated ingest
-  island for the extension. Accepted risks recorded here: cleartext keys over
+  guard (DNS rebinding), 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
+  names for images pasted into a proof (no client-chosen path), token-gated
+  ingest island for the extension. Accepted risks recorded here: cleartext keys over
   localhost, the hash-verified scraper updater, and tile/media URL fetches (SSRF
   only matters if the localhost assumption breaks). The startup update check is
   the one on-mount network call: opt-out and read-only against GitHub's releases
   feed, notes rendered as text (no HTML injection). Remote images embedded in a
   Notebook note contact their host whenever the preview opens; Notebook warns
-  about that behavior and local Case media avoids it.
+  about that behavior and local Case media avoids it. User-initiated imports,
+  downloads and generated files have no app quota and can fill the workspace
+  filesystem; disk capacity remains the user's responsibility.
 
 ## 10. Open questions
 
