@@ -48,6 +48,7 @@ CLAUDE.md
 .claude/
 AGENTS.md
 .codex/
+.agents/
 .cheatsheet
 
 # PyInstaller local output

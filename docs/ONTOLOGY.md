@@ -7,7 +7,8 @@
 **Storage schema: `3`.** The manifest carries `{"azimut": {"schema": 3,
 "storage": "sqlite"}}`; schema 3 moved the graph from `case.json` to per-case
 `case.db`. The entity/link shape is unchanged since v1. Breaking changes require
-a schema bump and migration.
+a manifest schema bump and migration. The internal SQLite schema is version 4;
+it adds search and media browse indexes without changing this logical model.
 
 Legend: ✅ implemented in code · 🔶 machinery exists, unused · ⬜ proposed.
 
@@ -26,8 +27,9 @@ presents it as this logical shape:
 - **Links** are typed directed edges. Every save records its inputs; see §3. ✅
 - **Folders** are `/`-nested analyst buckets in `attrs.folder`, not semantic
   links. ✅
-- Media sidecars hold kind, size, uploader, duration and thumbnail data. Entities
-  retain only what the graph needs for identity, links and deduplication.
+- Media sidecars hold kind, size, uploader, duration and thumbnail data. A
+  SQLite browse index mirrors searchable fields. Entities retain only what the
+  graph needs for identity, links and deduplication.
 
 ## 2. Entity
 
@@ -43,13 +45,22 @@ presents it as this logical shape:
 `type` is extensible: unknown strings are stored but receive no custom renderer.
 `label` is editable and never defines identity.
 
+`geo` is the country a saved point falls in, resolved once and kept:
+`{state, country_code, country, region?, region_en?}` with `state` one of `ok`,
+`nocoords` (no position to look up), `nocountry` (open sea) or `failed` (the
+lookup did not answer — the only state a later pass retries). `country` and
+`region` are the local-language names; `region_en` is a second lookup in English
+and is absent when it failed or matched the native name. Continent and the
+English country name are *not* stored: both are derived from `country_code` at
+read time, so extending those tables repairs existing cases with no migration.
+
 ### Entity type registry
 
 | Type | State | Produced by | Key `attrs` | File-backed |
 |---|---|---|---|---|
 | `media` | ✅ | media-library | `path`, `sha256`, `source_url?` | yes (+ sidecar) |
-| `capture` | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `path` | yes (image) |
-| `place` | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?` | no (a point) |
+| `capture` | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `path`, `geo?` | yes (image) |
+| `place` | ✅ | satellite, ingest | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?` | no (a point) |
 | `proof` | ✅ | proof-composer | `spec` (json), `path` (png) | yes |
 | `post` | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | ✅ | inspect | `spec` (json) | yes |
@@ -66,6 +77,11 @@ New types coming from the roadmap (declare here when built): `panorama`,
 
 Per-type attribute schemas remain open work. Today attribute keys are conventions,
 not a validated contract between tools.
+
+The file-backed pointers of `proof`, `post` and `inspect-session` (`spec`,
+`draft`, `path`) are not stable: the file's name follows the label, so renaming
+one in its tool rewrites the pointer on the same entity. Look these up by id, or
+re-read the pointer — never cache one across a save.
 
 ## 3. Link
 
@@ -106,6 +122,13 @@ A tool selects one of two deletion behaviours through its link type:
 
 - `derived-from` never cascades into an output. A post keeps its text when its
   proof is deleted; a frame keeps its pixels when its video is deleted.
+- It is also read backwards, as geography. The Saved panel counts the proofs
+  hanging off each saved point through this edge, and a proof with no point of
+  its own is placed at the point of every capture it composes, one hop back.
+  A proof does carry its own point first, though: `coordsText` (what the analyst
+  typed, in any supported format) then `coords` (what the panels gave it, frozen
+  at save). That is what keeps a proof on the map once its capture is deleted —
+  a tombstone records the path, the sha256 and the URL, never coordinates.
 - `attrs.lost_sources[]` stores `{label, type, path, sha256, source_url, at}`.
   Tombstones are keyed by path and never stacked.
 - Every UI deletion uses the same dependency-aware service. The confirmation
@@ -133,6 +156,9 @@ How it is wired (`engine/links.py`):
   resolves path → entity and emits the edge.
 - Every save restates sources through `sync`. Removing a panel removes its edge;
   repeated saves keep one edge per panel.
+- A proof's pasted images are read as decoration, not sources: they carry no case
+  path, so they file no entity and earn no edge. Only panels put a proof in a
+  chain.
 - A missing source path produces a tombstone instead of a link.
 - Media derivatives are all filed through one registration point, so any future
   tool producing imagery gets its chain for free. A derivative that **dedupes**

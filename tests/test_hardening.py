@@ -3,6 +3,7 @@
 import os
 import stat
 import sys
+import warnings
 
 import pytest
 from PIL import Image
@@ -11,9 +12,20 @@ from azimut import config
 
 
 def test_decompression_bomb_guard_is_set():
-    import azimut  # noqa: F401  (importing the package installs the clamp)
+    import importlib
+
+    import azimut
+
+    # Pytest resets warning filters after package import. Reloading reproduces
+    # normal process startup and proves the package installs its policy.
+    importlib.reload(azimut)
 
     assert Image.MAX_IMAGE_PIXELS == 100_000_000
+    assert any(
+        action == "error"
+        and category is Image.DecompressionBombWarning
+        for action, _message, category, _module, _line in warnings.filters
+    )
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")

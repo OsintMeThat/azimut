@@ -11,7 +11,7 @@ overridable with the ``AZIMUT_HOME`` environment variable):
     ├── settings.json
     └── templates.json  # reusable proof and post styles
 
-No database server — plain files only (spec §4).
+No external database server; the workspace remains self-contained (spec §4).
 """
 
 from __future__ import annotations
@@ -423,7 +423,7 @@ def record_usage(meter: str, count: int = 1, when: datetime | None = None) -> in
 
     Local bookkeeping only (docs/IMAGERY_PROVIDERS.md): billed keyed providers
     (Mapbox, Google) get a per-month tally so the user can watch their quota.
-    No telemetry — the counter never leaves settings.json.
+    The counter stays in settings.json and is never transmitted as telemetry.
     """
     with _usage_lock:
         settings = load_settings()

@@ -40,15 +40,8 @@ class Provider:
     url: str  # template with {x} {y} {z}, optionally {key}
     attribution: str
     max_zoom: int = 19
-    # Deepest zoom the provider has *pixels* for, when that is shallower than
-    # the deepest zoom worth showing. None = they're the same (the usual case).
-    # Sentinel-2 resolves 10 m/px and stops at z14, but a z14 ceiling makes the
-    # basemap unusable for its actual job — you cannot look at a ship at 10 m/px
-    # from three levels out. So the view runs to z18 while requests stop at 14
-    # and the last native tile is upscaled: identical pixels, magnified, for
-    # zero extra requests. Asking Sentinel Hub for z18 instead would buy their
-    # upsampling of the same pixels at 256× the quota (16× the tiles, each
-    # billed) — the same image, paid for.
+    # Deepest zoom with native pixels. The view may continue farther by upscaling
+    # the last native tile without issuing higher-zoom provider requests.
     max_native_zoom: int | None = None
     needs_key: bool = False
     subdomains: tuple[str, ...] = field(default_factory=tuple)  # for {s} templates
@@ -62,18 +55,11 @@ class Provider:
     # usage-counter bucket in settings.json (docs/IMAGERY_PROVIDERS.md);
     # None = unmetered. Billed keyed providers count every tile request.
     meter: str | None = None
-    # px per tile edge. Providers billing per request regardless of tile size
-    # get the biggest tile that keeps full imagery detail: Mapbox 512 (its @2x
-    # 1024 variant is upsampled — verified softer, not used), Google 1024
-    # (hi-DPI 4x, verified pixel-identical). The visual zoom stays the
-    # caller's; the URL z is offset down (512 → z-1, 1024 → z-2).
+    # Tile edge in pixels. Larger native tiles reduce billed requests; URL zoom
+    # is offset while the visual zoom remains unchanged.
     tile_size: int = 256
-    # Live-map display oversampling: 2 = the map shows tiles from one zoom
-    # deeper, downscaled 2× in CSS. Google's mid-zoom mosaics are genuinely
-    # softer than its deep ones (verified 2026-07: z18-detail downscaled to a
-    # z16 footprint beats the native z16 tile), so the layer trades 4× the
-    # requests (still ¼ of plain 256px tiles) for crisp imagery. Captures are
-    # unaffected: they stay 1:1 provider pixels for evidential integrity.
+    # Live-map oversampling fetches one deeper zoom and downscales it in CSS.
+    # Captures remain at native provider resolution.
     oversample: int = 1
     # Levels to re-add to the URL z after tile_size shifted it down. WMTS
     # services number their 512px levels by *resolution* where Mapbox numbers
@@ -85,13 +71,7 @@ class Provider:
     # no tiles, no proxy, no fetch_crop — `url` is the widget's script loader
     # and the frontend does the rest. Backend still owns key storage + meter.
     widget: str | None = None
-    # Eco-mode threshold for *this* provider: the visual zoom at or below which
-    # free imagery replaces it. None = the user's global eco_max_zoom, which is
-    # tuned for providers that run to z22. A shallow provider needs its own: at
-    # Sentinel-2's z14 ceiling the global z15 rule would fire everywhere and the
-    # basemap could never be seen at all. Its threshold is instead set where its
-    # imagery stops earning the quota — the swap costs a known date for an
-    # unknown one, which is only worth it where 10 m/px adds nothing anyway.
+    # Provider-specific eco threshold; None uses the global setting.
     eco_max_zoom: int | None = None
 
 

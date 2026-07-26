@@ -20,10 +20,10 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | Workspace | Tools today | Future tools land here |
 |---|---|---|
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
-| **Examine** | Inspect (Selection / Frame / Collage / Analyze) | EXIF, OCR, Image Compare, Hints, Shadow Clock, audio |
-| **Map** | Satellite, Coordinates | **one map, many modes**: Compare, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
+| **Examine** | Inspect (Selection / Frame / Collage / Analyze) | EXIF, Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Shadow Clock, audio |
+| **Map** | Satellite, Coordinates | **one map, many modes**: Compare, Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
 | **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
-| *(Case)* | Sidebar | v4: Notes, Relations, Timeline; v5: Orchestrator |
+| *(Case)* | Sidebar | v2: Relations, Sheet; v4: Notes, Timeline; v5: Orchestrator |
 
 Rules:
 
@@ -37,23 +37,114 @@ Rules:
 
 ## Case sidebar
 
-The sidebar has four sections. Tools keep their own saved-artifact lists; the
-sidebar does not duplicate them. Its left edge resizes from 240 to 640 px, capped
-at half the window. Double-click resets the persisted width.
+The sidebar has three zones: a fixed header, one scrolling body, and a details
+drawer over both. Tools keep their own saved-artifact lists; the sidebar does not
+duplicate them. Its left edge resizes from 240 to 640 px, capped at half the
+window. Double-click resets the persisted width.
 
 The sidebar defaults to collapsed in Map and open elsewhere. Open state is
 remembered per workspace for the current session. Reloading restores the defaults.
 
-- **Case Notes** opens `notes.md` in the Notebook. Filed notes open there too.
-- **Suggestions** lists tool-proposed entities for confirmation or dismissal and
-  stays hidden when empty.
-- **My work** contains nested analyst folders and an **Unfiled** inbox. Rows can
-  be filed by drag-and-drop or through Details. Unfiling does not delete data.
-  The **Files** tab presents the same tree with tiles, multi-select and context
-  actions.
-- **Details** edits an artifact's preview, title, notes, provenance, derivation
-  chain and folder. It also provides open, locate and delete actions. The sidebar
-  and Media Library modal share `EntityDetails.svelte`.
+- **Header** — the case name (its id is a tooltip), a **Notes** button opening
+  `notes.md` in the Notebook, a search field, and one filter chip per entity type
+  present, counted from the catalog summary. The chips wrap; past the fifth they
+  fold behind `+N`, and the active one always shows.
+- **Body** — one rule: no filter shows the tree, a query or a chip shows a flat
+  result list. A filtered tree would have to badge folders with per-type counts
+  the summary cannot give, so the modes are exclusive. Result rows carry their
+  folder as meta, and clearing the filter restores the tree with the same folders
+  still open. Search matches labels (plus folder and type in a case small enough
+  to filter in memory), not note contents — the **Files** tab searches those.
+  Browse order is **Suggestions** (tool-proposed entities to confirm or dismiss,
+  a node only when non-empty), the analyst's nested folders, then the **Unfiled**
+  inbox. `+ Folder` and `+ Note` sit above them.
+- **Filing** — drag rows onto a folder, or drop them on Unfiled to unfile.
+  Ctrl/cmd-click and shift-click select several rows first, and the drag carries
+  all of them; folders are targets, never cargo. The tree scrolls itself when the
+  pointer nears an edge mid-drag, since a native drag swallows the wheel.
+  Unfiling does not delete data. The **Files** tab presents the same tree with
+  tiles, multi-select and context actions.
+- **Details** — a drawer over the sidebar, closed with the back arrow or Escape,
+  so selecting a row never pushes the case out of view. It edits an artifact's
+  preview, title, notes, provenance, derivation chain and folder, and provides
+  open, locate and delete actions. The sidebar and Media Library modal share
+  `EntityDetails.svelte`.
+
+## Map
+
+Saved work — places, captures and screenshots filed by the extension — lives in
+one right-hand **Saved** panel, grouped by geography rather than by date. The
+tree's depth follows the case: one country opens straight on its regions, a
+worldwide case opens on continents. A filter and an
+`All / Places / Captures | Proofs` switch stay pinned above it; a screenshot
+counts as a capture. The first three positions filter, and `All` shows
+everything: a proof usually stands on the capture it composes, so that capture
+wears a dot rather than carrying a second mark. **Proofs** past the rule is a
+mode — it swaps the panel to the proofs index (`GET /proofs/index`, read the first time
+that position is opened) and hides places and captures so the two never stack.
+A proof is placed by the coordinates written in its own spec — the composer's
+coordinate field first, then the point its panels gave it — and only failing
+that by every capture it composes, which is why deleting a capture does not
+unpin the proofs built on it. A proof is filed in My work like any other
+artifact, so the folder grouping works there too; **Locate** does not appear,
+since a proof states or borrows its point and the pass has nothing to look up.
+Items with
+no country collect under **Unlocated**, where **Locate** looks them up a batch at
+a time and can be stopped mid-pass. Its left edge resizes from 260 to 560 px,
+capped at 40% of the window, and the width is remembered locally.
+
+Branches read `English (native)` — `Russia (Россия)` — and search matches either
+spelling. Proofs and posts keep the native name only.
+
+Saving a place or a capture resolves its country as part of the save, so the item
+appears already grouped. Offline it lands under Unlocated for a later Locate.
+
+A globe/folder switch beside the filter regroups the same set by My-work folder:
+the case's whole folder tree, empty folders included, with unfiled items under
+**Unfiled**. The filter and the kind switch keep working, counts cover the whole
+subtree, and the mode is remembered locally. Only there are rows draggable —
+dropping one on a folder files it, dropping it on **Unfiled** unfiles it.
+
+The `…` button beside the filter opens the same set at full width, with previews,
+search across title, note, place and provider, and three sorts. It is a modal, so
+it works over a fullscreen map. Folder browsing lives in the panel, not here.
+
+Editing a place or a capture (**Edit** on any row) sets its title, note and
+My-work folder in one dialog, and is the only place a new folder is created from
+the map.
+
+Map controls sit in two clusters. **Tools** (measure, grid search, reference
+image) float top-left. **View** — fullscreen, OSM labels, saved work — continues
+the zoom column beneath `+`/`−`, because none of them changes what you are doing,
+only what you see. The saved-work layer is off by default and session-only:
+places draw as outlined pins, captures and screenshots as filled ones, items at
+the same spot collapse into one counted mark, and clicking any mark opens a card
+with its preview, provider, dates and note. A mark whose capture carries proofs
+wears a dot up-left; its card names the count and offers **Show proofs**, which
+switches the panel and the layer to the proofs view. In that view the card opens
+the proof in Geo Proof and lists the saved posts written from it. Two post titles
+fit directly in the card; additional posts expand in place, and selecting one
+opens its draft in Geo Report. Hovering a card, a tree row or a search result
+lights the others.
+
+## Geo Proof
+
+A proof is composed of panels: case images, each carrying its source. Two things
+in the composer are not panels.
+
+**Overlays.** Ctrl+V, a drop on the canvas, or `+ Add overlay` put an image
+straight into the proof. It lands in the `Overlays` section of the side column,
+sits above the panels and the legend, and is moved,
+resized from its corners and framed like anything else on the canvas — you can
+annotate it too. It claims no source: no media is filed, no entity, no
+`derived-from` edge. The file lives in `proofs/<name>.assets/` under its own
+content hash, travels with a rename, and goes when the proof does. A proof needs
+a panel first, since the panels are what give the document its size — moving an
+overlay never resizes the export.
+
+**Frames.** Any panel or overlay takes a coloured border, its own colour and
+thickness, drawn inset so the layout does not shift. A frame is decoration: it
+stays out of the legend, which is still built from annotation colours alone.
 
 ## Notebook
 

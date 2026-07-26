@@ -232,8 +232,29 @@ def test_release_binary_runs_the_application_smoke_test():
     root = Path(__file__).resolve().parent.parent
     workflow = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     smoke = (root / "scripts" / "smoke_binary.py").read_text(encoding="utf-8")
+    vendor = (root / "scripts" / "vendor_ffmpeg.py").read_text(encoding="utf-8")
 
     assert "scripts/smoke_binary.py" in workflow
     assert "/api/health" in smoke
     assert "/api/settings/ffmpeg" in smoke
     assert 'ffmpeg.get("source") != "bundled"' in smoke
+    assert "scripts/vendor_ffmpeg.py" in workflow
+    assert "/redirect/" not in vendor
+    assert "/latest/" not in vendor
+    assert "SHA-256 mismatch" in vendor
+    for target in ("windows-x86_64", "linux-x86_64", "macos-arm64"):
+        assert f"ffmpeg_target: {target}" in workflow
+
+
+def test_intel_macos_package_support_floor_matches_the_lock():
+    root = Path(__file__).resolve().parent.parent
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    lock = (root / "uv.lock").read_text(encoding="utf-8")
+    opencv = lock.split(
+        '[[package]]\nname = "opencv-python-headless"',
+        maxsplit=1,
+    )[1]
+    opencv = opencv.split("[[package]]", maxsplit=1)[0]
+
+    assert "macOS (Intel, 14+)" in readme
+    assert "macosx_14_0_x86_64.whl" in opencv
