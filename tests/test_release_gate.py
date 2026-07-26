@@ -141,12 +141,11 @@ def test_wheel_bundles_the_frontend_and_leaves_dev_tooling_out():
     cfg = _pyproject()
     assert "src/azimut/static/**" in cfg["tool"]["hatch"]["build"]["artifacts"]
     assert cfg["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["src/azimut"]
-    # the synthetic fixture and the benchmark live outside the packaged tree, so
-    # hatchling never ships them (doc "dev-only tooling stays out of the artifact")
+    # The synthetic fixture lives outside the packaged tree, so hatchling never
+    # ships it (doc "dev-only tooling stays out of the artifact").
     root = Path(__file__).resolve().parent.parent
     assert (root / "tests" / "bigcase.py").exists()
     assert not (root / "src" / "azimut" / "bigcase.py").exists()
-    assert (root / "bench").is_dir() and not (root / "src" / "azimut" / "bench").exists()
 
 
 def test_storage_and_jobs_add_no_new_runtime_dependency():

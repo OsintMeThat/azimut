@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import zipfile
 from pathlib import Path
 
@@ -68,7 +69,8 @@ def test_vendor_verifies_and_extracts_exact_members(tmp_path, monkeypatch):
 
     assert (output / "ffmpeg").read_bytes() == b"ffmpeg"
     assert (output / "ffprobe").read_bytes() == b"ffprobe"
-    assert (output / "ffmpeg").stat().st_mode & 0o111
+    if os.name != "nt":
+        assert (output / "ffmpeg").stat().st_mode & 0o111
     assert provenance["target"] == "test"
     assert json.loads((output / "ffmpeg-provenance.json").read_text()) == provenance
 
