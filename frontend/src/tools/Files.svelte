@@ -16,7 +16,8 @@
   import { openNotebook } from '../lib/navigate.js';
   import { createBookmark } from '../lib/bookmarks.js';
   import { marqueeRect, marqueeHits, toggleSelection } from '../lib/gridSelect.js';
-  import { buildCatalogQuery } from '../lib/catalog.js';
+  import { buildCatalogQuery, fetchAllEntities } from '../lib/catalog.js';
+  import { sortFileEntities } from '../lib/fileSort.js';
   import { createPagedList } from '../lib/pagedList.svelte.js';
   import Icon from '../components/Icon.svelte';
   import SearchInput from '../components/SearchInput.svelte';
@@ -41,8 +42,18 @@
   // gives the honest total. Re-read on case change or a save/delete elsewhere.
   const PAGE = 200;
   const pl = createPagedList({
-    fetchPage: ({ cursor }) =>
-      api.get(buildCatalogQuery(caseState.current?.id, { status: 'confirmed', limit: PAGE, cursor })),
+    fetchPage: ({ query: serverQuery, cursor }) =>
+      api.get(
+        buildCatalogQuery(caseState.current?.id, {
+          status: 'confirmed',
+          query: serverQuery,
+          folder: serverQuery && cwd ? cwd : undefined,
+          unfiled: Boolean(serverQuery && showUnfiled),
+          recursive: Boolean(serverQuery && cwd),
+          limit: PAGE,
+          cursor,
+        })
+      ),
   });
   const confirmed = $derived(pl.items);
   let summary = $state(null); // { total, by_type, by_status, by_folder }
@@ -65,47 +76,30 @@
       .then((s) => (summary = s))
       .catch(() => (summary = null));
   });
-  const total = $derived(summary?.total ?? confirmed.length);
+  $effect(() => {
+    pl.setQuery(query);
+  });
   const tree = $derived(buildTree(caseState.current?.folders ?? [], confirmed));
   const allFolders = $derived(flattenPaths(tree));
   const unfiled = $derived(confirmed.filter((e) => !folderOf(e)));
 
-  // Thumbnails: the media + satellite shelves, indexed by path. Same lists the
-  // Media Library reads — a local call to our own backend, nothing external.
-  let pathInfo = $state(new Map());
-  $effect(() => {
-    const id = caseState.current?.id;
-    caseState.rev; // refetch after a save/move elsewhere
-    if (!id) {
-      pathInfo = new Map();
-      return;
-    }
-    loadThumbs(id);
-  });
-  async function loadThumbs(id) {
-    try {
-      const [media, sat] = await Promise.all([
-        api.get(`/api/cases/${id}/media`),
-        api.get(`/api/cases/${id}/satellite`),
-      ]);
-      const m = new Map();
-      for (const it of [...media, ...sat]) m.set(it.path, { thumbnail: it.thumbnail, kind: it.kind });
-      pathInfo = m;
-    } catch {
-      pathInfo = new Map();
-    }
-  }
-
   function tileIcon(e) {
     if (e.type === 'media') {
-      const kind = pathInfo.get(e.attrs?.path)?.kind;
+      const kind = pathInfo.get(e.attrs?.path)?.kind ?? e.attrs?.kind;
       if (kind === 'video') return 'video';
       const ext = e.attrs?.path?.split('.').pop()?.toLowerCase();
       if (ext && VIDEO_EXTS.has(ext)) return 'video';
     }
     return TYPE_ICON[e.type] ?? 'file';
   }
-  const tileThumb = (e) => pathInfo.get(e.attrs?.path)?.thumbnail ?? null;
+  // Proofs keep their rendered PNG directly at attrs.path rather than in the
+  // media thumbnail index. Use it as their preview, while spec-only proofs
+  // continue to show the proof icon.
+  const tileThumb = (e) => {
+    const path = e.attrs?.path;
+    if (e.type === 'proof' && typeof path === 'string' && /\.png$/i.test(path)) return path;
+    return pathInfo.get(path)?.thumbnail ?? null;
+  };
 
   // ── navigation ──────────────────────────────────────────────────────────────
   let cwd = $state(''); // '' = root ("All")
@@ -127,6 +121,9 @@
   // one intentional exception: it represents all of My work.
   let query = $state('');
   const searching = $derived(!!query.trim());
+  const total = $derived(
+    searching && pl.serverMode ? pl.total : (summary?.total ?? confirmed.length)
+  );
   function matches(e) {
     const q = query.trim().toLowerCase();
     return (
@@ -137,30 +134,118 @@
     );
   }
 
-  // Sort the current grid. Files had no sort at all — a plain desktop gap.
+  // Sort the current view. The list headers use the same state as the grid
+  // selector, so changing view does not silently change the order.
   let sort = $state('name');
+  let sortDirection = $state('asc');
+  let headerSort = $state(null);
   const SORTS = [
     { id: 'name', label: 'Name A–Z' },
     { id: 'type', label: 'Type' },
     { id: 'recent', label: 'Recent' },
   ];
+  const LIST_SORTS = [
+    { id: 'name', label: 'Name' },
+    { id: 'type', label: 'Type' },
+    { id: 'size', label: 'Size' },
+    { id: 'recent', label: 'Added' },
+  ];
+  function onSortSelect(event) {
+    sort = event.currentTarget.value;
+    sortDirection = sort === 'recent' ? 'desc' : 'asc';
+    headerSort = null;
+  }
+  function setHeaderSort(next) {
+    if (headerSort === next) {
+      sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+      return;
+    }
+    headerSort = next;
+    sort = next;
+    // Recent is useful in newest-first order; the other columns start low to
+    // high, matching the first Name click requested for the list view.
+    sortDirection = next === 'recent' ? 'desc' : 'asc';
+  }
+  function sortFolders(list) {
+    if (sort !== 'name') return list;
+    const out = [...list].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    );
+    return sortDirection === 'desc' ? out.reverse() : out;
+  }
   function sortEntities(list) {
-    const out = [...list];
-    const name = (e) => (e.label ?? '').toLowerCase();
-    if (sort === 'type') out.sort((a, b) => a.type.localeCompare(b.type) || name(a).localeCompare(name(b)));
-    else if (sort === 'recent') out.sort((a, b) => (b.provenance?.at ?? '').localeCompare(a.provenance?.at ?? ''));
-    else out.sort((a, b) => name(a).localeCompare(name(b)));
-    return out;
+    return sortFileEntities(list, {
+      sort,
+      direction: sortDirection,
+      sizeOf: (e) => pathInfo.get(e.attrs?.path)?.size ?? null,
+    });
+  }
+
+  function sortOptionLabel(option) {
+    if (option.id === 'name') return `Name ${sort === 'name' && sortDirection === 'desc' ? 'Z–A' : 'A–Z'}`;
+    if (option.id === 'recent') return sort === 'recent' && sortDirection === 'asc' ? 'Oldest' : 'Recent';
+    return option.label;
+  }
+
+  let completeFolderEntities = $state(null);
+  let completeFolderLoading = $state(false);
+  let completeFolderError = $state(false);
+  let completeFolderRun = 0;
+
+  // Query metadata only for rows this view can render. The backend reads the
+  // SQLite media index, so opening Files never scans every media sidecar.
+  let pathInfo = $state(new Map());
+  $effect(() => {
+    const id = caseState.current?.id;
+    caseState.rev;
+    const rows = completeFolderEntities ?? confirmed;
+    const paths = rows
+      .filter((entity) => entity.type === 'media' || entity.type === 'capture')
+      .map((entity) => entity.attrs?.path)
+      .filter(Boolean);
+    if (!id) {
+      pathInfo = new Map();
+      return;
+    }
+    loadThumbs(id, paths);
+  });
+  async function loadThumbs(id, paths) {
+    try {
+      const unique = [...new Set(paths)];
+      const batches = [];
+      for (let i = 0; i < unique.length; i += 500) {
+        batches.push(
+          api.post(`/api/cases/${id}/media/metadata`, { paths: unique.slice(i, i + 500) })
+        );
+      }
+      const pages = await Promise.all(batches);
+      if (caseState.current?.id !== id) return;
+      const next = new Map();
+      for (const item of pages.flat()) {
+        next.set(item.path, {
+          thumbnail: item.thumbnail,
+          kind: item.kind,
+          size: item.size,
+        });
+      }
+      pathInfo = next;
+    } catch {
+      if (caseState.current?.id === id) pathInfo = new Map();
+    }
   }
 
   const current = $derived(showUnfiled ? { path: '', children: [], entities: unfiled } : nodeAt(cwd));
   const searchScope = $derived(
     showUnfiled ? unfiled : cwd ? confirmed.filter((e) => isInFolderSubtree(e, cwd)) : confirmed
   );
-  const curFolders = $derived(searching ? [] : current.children);
-  const curEntities = $derived(
-    sortEntities(searching ? searchScope.filter(matches) : current.entities)
+  const visibleEntities = $derived(searching ? searchScope.filter(matches) : current.entities);
+  const completeVisibleEntities = $derived(
+    completeFolderEntities === null
+      ? visibleEntities
+      : (searching ? completeFolderEntities.filter(matches) : completeFolderEntities)
   );
+  const curFolders = $derived(searching ? [] : sortFolders(current.children));
+  const curEntities = $derived(sortEntities(completeVisibleEntities));
   const entityOrder = $derived(curEntities.map((e) => e.id));
   const crumbs = $derived(cwd ? cwd.split('/') : []);
   // the Unfiled bucket shows as a tile at the root, even when empty (drop here
@@ -171,9 +256,11 @@
   function openFolder(path) {
     showUnfiled = false;
     cwd = path;
+    if (searching && pl.serverMode) pl.reload();
   }
   function openUnfiled() {
     showUnfiled = true;
+    if (searching && pl.serverMode) pl.reload();
   }
 
   // ── selection ────────────────────────────────────────────────────────────────
@@ -199,7 +286,16 @@
   let marquee = $state(null); // {left, top, width, height} in the grid's content space
 
   function onGridPointerDown(e) {
-    if (e.button !== 0 || e.target.closest('.tile')) return;
+    if (e.button !== 0) return;
+    // List view has no rubber-band; a click on empty space just clears.
+    if (view === 'list') {
+      if (!e.target.closest('.lrow')) {
+        selected = [];
+        anchor = null;
+      }
+      return;
+    }
+    if (e.target.closest('.tile')) return;
     const rect = gridEl.getBoundingClientRect();
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
     const base = additive ? [...selected] : [];
@@ -359,8 +455,8 @@
         ? `${ents.length} items will be removed from the case and their tools.`
         : `“${ents[0].label}” will be removed from the case and its tool.`,
       detail: ents.some((e) => FILE_BACKED.has(e.type))
-        ? 'This permanently deletes the underlying file(s) on disk. It cannot be undone.'
-        : 'This permanently removes it from the case. It cannot be undone.',
+        ? 'Deletes the underlying files from disk and cannot be undone.'
+        : `${multi ? 'Removes them' : 'Removes it'} from the case and cannot be undone.`,
       consequences,
       confirmLabel: multi ? 'Delete all' : 'Delete everywhere',
       tone: 'danger',
@@ -501,7 +597,85 @@
 
   // ── details ────────────────────────────────────────────────────────────────
   let infoEntityId = $state(null);
-  let dense = $state(true); // small thumbnails by default — this view's whole point
+
+  // View mode: small/large icon grids, plus a details list with columns.
+  let view = $state('small');
+  const dense = $derived(view === 'small');
+  const VIEWS = [
+    { id: 'small', label: 'Small', icon: 'grid' },
+    { id: 'large', label: 'Large', icon: 'image' },
+    { id: 'list', label: 'List', icon: 'note' },
+  ];
+
+  const tileSize = (e) => pathInfo.get(e.attrs?.path)?.size ?? null;
+  function fmtSize(bytes) {
+    if (bytes == null) return '—';
+    if (bytes >= 1 << 30) return (bytes / (1 << 30)).toFixed(1) + ' GB';
+    if (bytes >= 1 << 20) return (bytes / (1 << 20)).toFixed(1) + ' MB';
+    if (bytes >= 1 << 10) return (bytes / (1 << 10)).toFixed(0) + ' KB';
+    return bytes + ' B';
+  }
+  // Compact local timestamp (MM-DD HH:mm) from an entity's provenance.
+  function fmtAdded(e) {
+    const iso = e.provenance?.at;
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  // List view must not sort only the first catalog page. Fetch the exact open
+  // folder, or every descendant folder while searching, through the bounded
+  // endpoint and merge the pages before applying the local column sort.
+  $effect(() => {
+    const id = caseState.current?.id;
+    const folders = caseState.current?.folders ?? [];
+    caseState.rev;
+    const needsCompleteList = view === 'list' && (Boolean(cwd) || showUnfiled || searching);
+    if (!id || !needsCompleteList) {
+      completeFolderRun += 1;
+      completeFolderEntities = null;
+      completeFolderLoading = false;
+      completeFolderError = false;
+      return;
+    }
+
+    const folderPaths = cwd && searching
+      ? [cwd, ...folders.filter((path) => path.startsWith(`${cwd}/`))]
+      : cwd
+        ? [cwd]
+        : [];
+    const scopes = showUnfiled
+      ? [{ unfiled: true }]
+      : folderPaths.length
+        ? folderPaths.map((folder) => ({ folder }))
+        : [{}];
+    const run = ++completeFolderRun;
+    completeFolderEntities = null;
+    completeFolderLoading = true;
+    completeFolderError = false;
+
+    Promise.all(
+      scopes.map((scope) => fetchAllEntities(id, { status: 'confirmed', ...scope }))
+    )
+      .then((pages) => {
+        if (run !== completeFolderRun) return;
+        const seen = new Set();
+        completeFolderEntities = pages.flat().filter((entity) => {
+          if (seen.has(entity.id)) return false;
+          seen.add(entity.id);
+          return true;
+        });
+      })
+      .catch(() => {
+        if (run !== completeFolderRun) return;
+        completeFolderError = true;
+      })
+      .finally(() => {
+        if (run === completeFolderRun) completeFolderLoading = false;
+      });
+  });
 </script>
 
 <div class="tool">
@@ -514,18 +688,27 @@
       placeholder={cwd ? 'Search this folder…' : 'Search My work…'}
       width="160px"
     />
-    <select class="select sort-select" bind:value={sort} title="Sort order">
-      {#each SORTS as s (s.id)}
-        <option value={s.id}>{s.label}</option>
+    {#if view !== 'list'}
+      <select class="select sort-select" value={sort} onchange={onSortSelect} title="Sort order">
+        {#each SORTS as s (s.id)}
+        <option value={s.id}>{sortOptionLabel(s)}</option>
+        {/each}
+      </select>
+    {/if}
+    <div class="view-switch" role="group" aria-label="View">
+      {#each VIEWS as v (v.id)}
+        <button
+          class="view-btn"
+          class:active={view === v.id}
+          title={`${v.label} view`}
+          aria-pressed={view === v.id}
+          onclick={() => (view = v.id)}
+        >
+          <Icon name={v.icon} size={14} /> {v.label}
+        </button>
       {/each}
-    </select>
-    <button
-      class="btn btn-ghost btn-sm"
-      title={dense ? 'Larger thumbnails' : 'Smaller thumbnails'}
-      onclick={() => (dense = !dense)}
-    >
-      <Icon name="grip" size={15} /> {dense ? 'Small' : 'Large'}
-    </button>
+    </div>
+    <span class="bar-sep"></span>
     <form class="new-folder" onsubmit={(e) => { e.preventDefault(); createFolder(); }}>
       <input class="input" placeholder="New folder…" bind:value={newFolder} />
       <button class="btn" type="submit" disabled={!newFolder.trim()}>
@@ -608,6 +791,119 @@
           {/if}
         </div>
 
+        {#if view === 'list'}
+          <!-- Details list: rows with columns (Name · Type · Size · Added). -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="list"
+            bind:this={gridEl}
+            onpointerdown={onGridPointerDown}
+            oncontextmenu={(e) => openCtx(e, ctxParent)}
+          >
+            <div class="lrow lhead" role="row">
+              {#each LIST_SORTS as column (column.id)}
+                <button
+                  class={`lhead-button lcol-${column.id === 'recent' ? 'added' : column.id}`}
+                  class:active={headerSort === column.id}
+                  type="button"
+                  title={`Sort by ${column.label}`}
+                  aria-label={`Sort by ${column.label}${headerSort === column.id ? `, ${sortDirection === 'asc' ? 'ascending' : 'descending'}` : ''}`}
+                  onclick={() => setHeaderSort(column.id)}
+                >
+                  {column.label}
+                  {#if headerSort === column.id}
+                    <Icon name={sortDirection === 'asc' ? 'chevronUp' : 'chevronDown'} size={12} />
+                  {/if}
+                </button>
+              {/each}
+            </div>
+            {#if completeFolderLoading}
+              <div class="list-status" role="status">Loading all files in this folder…</div>
+            {:else if completeFolderError}
+              <div class="list-status error" role="status">Could not load the complete folder. Showing loaded items.</div>
+            {/if}
+            {#if !showUnfiled}
+              {#each curFolders as node (node.path)}
+                <div
+                  class="lrow folder"
+                  class:dropping={dropTarget === node.path}
+                  role="button"
+                  tabindex="0"
+                  title={node.name}
+                  ondblclick={() => openFolder(node.path)}
+                  onkeydown={(e) => e.key === 'Enter' && openFolder(node.path)}
+                  oncontextmenu={(e) => openCtx(e, node.path, true)}
+                  ondragover={(e) => { e.preventDefault(); dropTarget = node.path; }}
+                  ondragleave={() => (dropTarget = dropTarget === node.path ? null : dropTarget)}
+                  ondrop={(e) => { e.preventDefault(); dropInto(node.path); }}
+                >
+                  <span class="lcol-name"><Icon name="folder" size={15} /><span class="ltext">{node.name}</span></span>
+                  <span class="lcol-type">folder</span>
+                  <span class="lcol-size">—</span>
+                  <span class="lcol-added">{subtreeCount(node)} item{subtreeCount(node) === 1 ? '' : 's'}</span>
+                </div>
+              {/each}
+              {#if showRootUnfiled}
+                <div
+                  class="lrow folder"
+                  class:dropping={dropTarget === UNFILED}
+                  role="button"
+                  tabindex="0"
+                  title="Unfiled"
+                  ondblclick={openUnfiled}
+                  onkeydown={(e) => e.key === 'Enter' && openUnfiled()}
+                  ondragover={(e) => { e.preventDefault(); dropTarget = UNFILED; }}
+                  ondragleave={() => (dropTarget = dropTarget === UNFILED ? null : dropTarget)}
+                  ondrop={(e) => { e.preventDefault(); dropInto(''); }}
+                >
+                  <span class="lcol-name"><Icon name="file" size={15} /><span class="ltext">Unfiled</span></span>
+                  <span class="lcol-type">—</span>
+                  <span class="lcol-size">—</span>
+                  <span class="lcol-added">{unfiled.length} item{unfiled.length === 1 ? '' : 's'}</span>
+                </div>
+              {/if}
+            {/if}
+            {#each completeFolderLoading ? [] : curEntities as e (e.id)}
+              <div
+                class="lrow entity"
+                class:selected={selected.includes(e.id)}
+                data-id={e.id}
+                draggable="true"
+                role="button"
+                tabindex="0"
+                title={e.label}
+                onclick={(ev) => onTileClick(ev, e.id)}
+                ondblclick={() => openEntityTile(e)}
+                onkeydown={(ev) => ev.key === 'Enter' && openEntityTile(e)}
+                oncontextmenu={(ev) => openEntityCtx(ev, e)}
+                ondragstart={(ev) => onTileDragStart(ev, e.id)}
+                ondragend={() => { draggingIds = []; dropTarget = null; }}
+              >
+                <span class="lcol-name">
+                  {#if tileThumb(e)}
+                    <img class="lrow-thumb" src={`/files/${caseState.current.id}/${tileThumb(e)}`} alt="" loading="lazy" />
+                  {:else}
+                    <Icon name={tileIcon(e)} size={15} />
+                  {/if}
+                  <span class="ltext">{e.label}</span>
+                </span>
+                <span class="lcol-type">{e.type}</span>
+                <span class="lcol-size">{fmtSize(tileSize(e))}</span>
+                <span class="lcol-added">{fmtAdded(e)}</span>
+              </div>
+            {/each}
+            {#if !curFolders.length && !curEntities.length && !showRootUnfiled}
+              <div class="grid-empty">
+                <Icon name="folder" size={34} />
+                <p>
+                  {#if searching}No files match “{query.trim()}”.
+                  {:else if showUnfiled}Nothing unfiled.
+                  {:else}This folder is empty. Drag items here, or right-click to add a subfolder or note.{/if}
+                </p>
+              </div>
+            {/if}
+          </div>
+        {:else}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="grid"
@@ -710,6 +1006,7 @@
             ></div>
           {/if}
         </div>
+        {/if}
         {#if pl.hasMore}
           <div class="show-more">
             <button class="btn" onclick={() => pl.loadMore()} disabled={pl.loading}>
@@ -898,11 +1195,23 @@
     gap: 6px;
   }
   .new-folder .input {
-    width: 160px;
+    width: 150px;
     font-size: var(--fs-sm);
   }
+  /* The global .select is width:100%; without this the sort control balloons
+     across the toolbar. Keep it sized to its content, like the Media bar. */
   .sort-select {
-    font-size: var(--fs-sm);
+    width: auto;
+    flex-shrink: 0;
+    font-size: var(--fs-xs);
+    padding: 4px 8px;
+  }
+  .bar-sep {
+    width: 1px;
+    align-self: stretch;
+    margin: 4px 2px;
+    background: var(--border);
+    flex-shrink: 0;
   }
   .show-more {
     display: flex;
@@ -1090,6 +1399,144 @@
     font-size: var(--fs-xs);
     color: var(--accent);
     font-weight: 600;
+  }
+
+  /* segmented view switch (Small · Large · List) */
+  .view-switch {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--bg-2);
+    flex-shrink: 0;
+  }
+  .view-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
+  }
+  .view-btn:hover {
+    color: var(--text-1);
+  }
+  .view-btn.active {
+    background: var(--bg-3);
+    color: var(--text-1);
+  }
+
+  /* details list view */
+  .list {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 6px 8px 14px;
+    user-select: none;
+  }
+  .lrow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 120px 90px 110px;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    border-radius: var(--r-sm);
+    border: 1px solid transparent;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .lrow.lhead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--bg-1);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+    cursor: default;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+  }
+  .lhead-button {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 4px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-align: left;
+    text-transform: inherit;
+    cursor: pointer;
+  }
+  .lhead-button:hover,
+  .lhead-button.active {
+    color: var(--text-1);
+  }
+  .lhead-button :global(svg) {
+    flex-shrink: 0;
+  }
+  .list-status {
+    padding: 5px 10px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .list-status.error {
+    color: var(--danger);
+  }
+  .lrow.entity:hover,
+  .lrow.folder:hover {
+    background: var(--bg-1);
+  }
+  .lrow.entity.selected {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+  .lrow.dropping {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .lcol-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    color: var(--text-1);
+  }
+  .lcol-name > :global(svg) {
+    color: var(--text-3);
+    flex-shrink: 0;
+  }
+  .lrow-thumb {
+    width: 30px;
+    height: 24px;
+    flex: 0 0 auto;
+    border-radius: var(--r-sm);
+    object-fit: cover;
+    background: var(--bg-2);
+  }
+  .ltext {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .lcol-type,
+  .lcol-size,
+  .lcol-added {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .grid {

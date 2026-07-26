@@ -10,7 +10,7 @@ export function settleCatalogSummary(current, next, isCurrent) {
  *  `unfiled` (no folder) wins over an exact `folder` path when both are given. */
 export function buildCatalogQuery(
   caseId,
-  { cursor, limit, types, status, query, folder, unfiled } = {}
+  { cursor, limit, types, status, query, folder, unfiled, recursive } = {}
 ) {
   const params = new URLSearchParams();
   if (limit != null) params.set('limit', String(limit));
@@ -20,6 +20,7 @@ export function buildCatalogQuery(
   if (query) params.set('q', query);
   if (unfiled) params.set('unfiled', 'true');
   else if (folder != null) params.set('folder', folder);
+  if (recursive) params.set('recursive', 'true');
   const qs = params.toString();
   return `/api/cases/${caseId}/catalog/entities${qs ? `?${qs}` : ''}`;
 }
@@ -35,13 +36,15 @@ export function buildCatalogQuery(
  */
 export async function fetchAllEntities(
   caseId,
-  { types, status, query, get = api.get, signal, pageSize = 500 } = {}
+  { types, status, query, folder, unfiled, recursive, get = api.get, signal, pageSize = 500 } = {}
 ) {
   if (!caseId) return [];
   const out = [];
   let cursor = null;
   do {
-    const path = buildCatalogQuery(caseId, { cursor, limit: pageSize, types, status, query });
+    const path = buildCatalogQuery(caseId, {
+      cursor, limit: pageSize, types, status, query, folder, unfiled, recursive,
+    });
     const page = await get(path, signal ? { signal } : undefined);
     out.push(...(page.items ?? []));
     cursor = page.next_cursor ?? null;

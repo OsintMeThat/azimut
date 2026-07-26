@@ -28,6 +28,10 @@ const media = [{
   notes: '',
 }];
 
+// Saved work as the Map panel reads it (GET /satellite/index). Empty by
+// default: each spec that needs saved items overrides this route itself.
+const savedIndex = [];
+
 const caseOverview = {
   id: CASE_ID,
   name: 'Browser Test',
@@ -75,10 +79,18 @@ function json(route, body, status = 200) {
  * local API and files with deterministic fixtures. Any unexpected request is
  * recorded so a passing interaction test cannot silently depend on the network.
  */
-export async function installAppFixture(page) {
+export async function installAppFixture(page, options = {}) {
   const unexpected = [];
   const captures = [];
   const proofSaves = [];
+  const fixtureSavedIndex = options.savedIndex ?? savedIndex;
+  const fixtureProofIndex = options.proofIndex ?? [];
+  const fixtureCases = options.cases ?? [caseOverview];
+  const fixtureSavedIndexes = options.savedIndexes ?? { [CASE_ID]: fixtureSavedIndex };
+  const fixtureProofIndexes = options.proofIndexes ?? { [CASE_ID]: fixtureProofIndex };
+  const savedIndexDelays = options.savedIndexDelays ?? {};
+  const proofIndexDelays = options.proofIndexDelays ?? {};
+  const fixtureDrafts = options.drafts ?? {};
 
   await page.addInitScript((caseId) => {
     localStorage.setItem('azimut:lastCase', caseId);
@@ -114,22 +126,54 @@ export async function installAppFixture(page) {
     }
     if (path === '/api/settings') return json(route, settings);
     if (path === '/api/templates') return json(route, { proof: [], post: [] });
-    if (path === '/api/cases') return json(route, [{ ...caseOverview, entity_count: 1 }]);
-    if (path === `/api/cases/${CASE_ID}`) return json(route, caseOverview);
-    if (path === `/api/cases/${CASE_ID}/media`) return json(route, media);
-    if (path === `/api/cases/${CASE_ID}/satellite`) return json(route, []);
-    if (path === `/api/cases/${CASE_ID}/notes`) return json(route, { text: '' });
-    if (path === `/api/cases/${CASE_ID}/catalog/summary`) {
+    if (path === '/api/cases') {
+      return json(route, fixtureCases.map((item) => ({ entity_count: 1, ...item })));
+    }
+    const overview = fixtureCases.find((item) => path === `/api/cases/${item.id}`);
+    if (overview) return json(route, overview);
+    const caseId = fixtureCases.find((item) => path.startsWith(`/api/cases/${item.id}/`))?.id;
+    if (caseId && path === `/api/cases/${caseId}/satellite/index`) {
+      if (savedIndexDelays[caseId]) {
+        await new Promise((resolve) => setTimeout(resolve, savedIndexDelays[caseId]));
+      }
+      return json(route, fixtureSavedIndexes[caseId] ?? []);
+    }
+    if (caseId && path === `/api/cases/${caseId}/proofs/index`) {
+      if (proofIndexDelays[caseId]) {
+        await new Promise((resolve) => setTimeout(resolve, proofIndexDelays[caseId]));
+      }
+      return json(route, fixtureProofIndexes[caseId] ?? []);
+    }
+    if (caseId && path === `/api/cases/${caseId}/catalog/summary`) {
       return json(route, { total: 1, by_type: { media: 1 }, by_status: { confirmed: 1 }, by_folder: {} });
     }
-    if (path === `/api/cases/${CASE_ID}/catalog/entities`) {
+    if (caseId && path === `/api/cases/${caseId}/catalog/entities`) {
       return json(route, { items: [], next_cursor: null });
     }
+    if (caseId && path === `/api/cases/${caseId}/search-grids`) return json(route, []);
+    if (path === `/api/cases/${CASE_ID}/media`) return json(route, media);
+    // Two different reads: the capture shelf (pickers list it beside media) and
+    // the geo index the Map panel groups. Both are needed — a picker whose
+    // shelf 404s shows no panels at all.
+    if (path === `/api/cases/${CASE_ID}/satellite`) return json(route, []);
+    if (path === `/api/cases/${CASE_ID}/drafts`) {
+      return json(route, Object.entries(fixtureDrafts).map(([name, draft]) => ({
+        name,
+        title: draft.title,
+        updated_at: draft.updated_at,
+        target: draft.state?.target,
+      })));
+    }
+    if (path.startsWith(`/api/cases/${CASE_ID}/drafts/`)) {
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      const draft = fixtureDrafts[name];
+      return draft ? json(route, draft) : json(route, { detail: 'Draft not found' }, 404);
+    }
+    if (path === `/api/cases/${CASE_ID}/notes`) return json(route, { text: '' });
     if (path === `/api/cases/${CASE_ID}/entities/lookup`) {
       return json(route, { entity: null });
     }
     if (path === '/api/satellite/providers') return json(route, providers);
-    if (path === `/api/cases/${CASE_ID}/search-grids`) return json(route, []);
     if (path === '/api/satellite/imagery-date') {
       return json(route, { supported: false, date: null, source: null });
     }

@@ -125,6 +125,10 @@
     toast(`Bookmark saved: ${ev.title}`, 'ok', 5000);
     if (caseState.current?.id === ev.case_id) reloadCase();
   });
+  onEvent('place', (ev) => {
+    toast(`Place saved from ${ev.site}: ${ev.title}`, 'ok', 5000);
+    if (caseState.current?.id === ev.case_id) reloadCase();
+  });
 </script>
 
 <div class="shell">

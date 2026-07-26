@@ -244,6 +244,29 @@ def test_catalog_filters_by_folder(client):
     assert client.get(f"/api/cases/{cid}/catalog/summary").json()["by_folder"] == {"Alpha": 1}
 
 
+def test_catalog_searches_notes_and_descendant_folders(client):
+    cid = client.post("/api/cases", json={"name": "Search"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/entities",
+        json={
+            "type": "media",
+            "label": "frame",
+            "attrs": {"folder": "Sources/Telegram", "notes": "bridge crossing"},
+        },
+    )
+    client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "media", "label": "other", "attrs": {"folder": "Research"}},
+    )
+
+    page = client.get(
+        f"/api/cases/{cid}/catalog/entities",
+        params={"folder": "Sources", "recursive": "true", "q": "bridge"},
+    ).json()
+    assert page["total"] == 1
+    assert [entity["label"] for entity in page["items"]] == ["frame"]
+
+
 def test_catalog_rejects_a_bad_cursor(client):
     cid = client.post("/api/cases", json={"name": "BadCursor"}).json()["id"]
     res = client.get(f"/api/cases/{cid}/catalog/entities", params={"cursor": "not-an-int"})

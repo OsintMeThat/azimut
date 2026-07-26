@@ -11,6 +11,8 @@
     toggleTools,
     gridMode,
     toggleGridMode,
+    savedOverlay = $bindable(),
+    savedCount,
     referenceCount,
     openRefPicker,
     setMeasureMode,
@@ -20,24 +22,8 @@
   } = $props();
 </script>
 
+<!-- Tools: things that change what you are *doing* on the map. -->
 <div class="tool-cluster card">
-  <button
-    class="mtbtn"
-    class:on={fullscreen}
-    onclick={toggleFullscreen}
-    title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen map'}
-    aria-label="Toggle fullscreen"
-  ><Icon name={fullscreen ? 'minimize' : 'maximize'} size={16} /></button>
-  <button
-    class="mtbtn"
-    class:on={osmOverlay}
-    onclick={() => (osmOverlay = !osmOverlay)}
-    disabled={!baseIsImagery}
-    title={baseIsImagery
-      ? 'Overlay OSM labels (roads, place names) on the imagery'
-      : 'Labels overlay is only useful over satellite imagery'}
-    aria-label="Toggle OSM labels overlay"
-  ><Icon name="layers" size={16} /></button>
   <button
     class="mtbtn"
     class:on={toolsOpen || measureMode}
@@ -59,6 +45,39 @@
     title="Add a reference image or video over the map"
     aria-label="Add reference"
   ><Icon name="image" size={16} /></button>
+</div>
+
+<!-- View: what the map *shows you* — the frame, the labels over the imagery,
+     the case's own saved work. None of them is a tool, so they continue the
+     zoom column instead of sitting among the tools. -->
+<div class="view-cluster card">
+  <button
+    class="mtbtn"
+    class:on={fullscreen}
+    onclick={toggleFullscreen}
+    title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen map'}
+    aria-label="Toggle fullscreen"
+  ><Icon name={fullscreen ? 'minimize' : 'maximize'} size={16} /></button>
+  <button
+    class="mtbtn"
+    class:on={osmOverlay}
+    onclick={() => (osmOverlay = !osmOverlay)}
+    disabled={!baseIsImagery}
+    title={baseIsImagery
+      ? 'Overlay OSM labels (roads, place names) on the imagery'
+      : 'Labels overlay is only useful over satellite imagery'}
+    aria-label="Toggle OSM labels overlay"
+  ><Icon name="layers" size={16} /></button>
+  <button
+    class="mtbtn"
+    class:on={savedOverlay}
+    onclick={() => (savedOverlay = !savedOverlay)}
+    disabled={!savedCount}
+    title={savedCount
+      ? 'Show this case\'s saved places and captures on the map'
+      : 'Nothing is saved in this case yet'}
+    aria-label="Show saved work on the map"
+  ><Icon name="pin" size={16} /></button>
 </div>
 
 {#if toolsOpen}
@@ -94,6 +113,19 @@
     display: flex;
     gap: 2px;
     padding: 4px;
+    background: rgba(24, 24, 24, 0.88);
+    backdrop-filter: blur(6px);
+  }
+  /* stacked directly under Leaflet's zoom bar (top 58px + 64px tall + its 8px
+     margin), same width, so +/- and these read as one column of view controls */
+  .view-cluster {
+    position: absolute;
+    top: 118px;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 2px;
     background: rgba(24, 24, 24, 0.88);
     backdrop-filter: blur(6px);
   }

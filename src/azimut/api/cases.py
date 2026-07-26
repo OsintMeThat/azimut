@@ -259,13 +259,15 @@ def catalog_entities(
     q: str | None = None,
     folder: str | None = None,
     unfiled: bool = False,
+    recursive: bool = False,
 ) -> dict[str, Any]:
     """A bounded page of the entity catalog (Step 5, "Bounded loading").
 
     Stable cursor order, server-side filters (a comma-separated ``type`` set,
     ``status``, a label substring ``q``, and folder — ``unfiled=true`` or an
-    exact ``folder`` path) and a ``next_cursor`` that is null on the last page.
-    ``limit`` is clamped so no request can ask for the whole graph at once.
+    ``folder`` path, optionally including descendants) and a ``next_cursor``
+    that is null on the last page. ``limit`` is clamped so no request can ask
+    for the whole graph at once.
     """
     case = get_case(case_id)
     limit = max(1, min(limit, 500))
@@ -276,7 +278,7 @@ def catalog_entities(
     try:
         return case.page_entities(
             limit=limit, cursor=cursor, types=types, status=valid_status,
-            query=q, folder=folder, unfiled=unfiled,
+            query=q, folder=folder, unfiled=unfiled, recursive=recursive,
         )
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

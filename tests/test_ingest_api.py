@@ -8,6 +8,8 @@ of those walls.
 """
 
 import io
+import struct
+import zlib
 
 import graph_read
 
@@ -20,6 +22,16 @@ def _png_bytes(w=320, h=200, color=(30, 90, 30)):
     buf = io.BytesIO()
     Image.new("RGB", (w, h), color).save(buf, format="PNG")
     return buf.getvalue()
+
+
+def _png_header(w: int, h: int) -> bytes:
+    """A complete PNG header whose dimensions Pillow reads before pixel data."""
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        payload = kind + data
+        return struct.pack(">I", len(data)) + payload + struct.pack(">I", zlib.crc32(payload))
+
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IEND", b"")
 
 
 def _token(client):
@@ -81,6 +93,7 @@ def test_screenshot_files_as_a_capture_with_provenance(client):
     assert body["method"] == "screenshot"
     assert body["framed"] is False  # URL-derived view coords, not a crop frame
     assert body["site"] == "google-maps"
+    assert body["imagery_mode"] is None
     assert body["source_url"].startswith("https://www.google.com/maps/")
     assert body["attribution"] == "Map data © Google"
     assert body["attribution_burned"] is True
@@ -91,6 +104,34 @@ def test_screenshot_files_as_a_capture_with_provenance(client):
     assert len(listed) == 1
     assert listed[0]["lat"] == 48.8584
     assert listed[0]["method"] == "screenshot"
+
+
+def test_screenshot_over_100_mp_is_rejected_before_decode(client):
+    token = _token(client)
+    response = _post(client, token=token, image=_png_header(10_001, 10_000))
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "image exceeds the 100 MP limit"
+
+
+def test_satellite_extension_url_is_marked_for_media_library(client):
+    token = _token(client)
+    cid = client.post("/api/cases", json={"name": "Satellite ingest"}).json()["id"]
+    body = _post(
+        client,
+        token=token,
+        case_id=cid,
+        url="https://www.google.com/maps/@48.8584,2.2945,2000m/data=!3m1!1e3",
+        lat=None,
+        lon=None,
+        zoom=None,
+    ).json()
+
+    assert body["imagery_mode"] == "satellite"
+    item = client.get(f"/api/cases/{cid}/media").json()[0]
+    assert item["kind"] == "image"
+    assert item["source"]["type"] == "screenshot"
+    assert item["source"]["imagery_mode"] == "satellite"
 
 
 def test_coords_are_optional_but_only_as_a_pair(client):
@@ -260,6 +301,93 @@ def test_bookmark_empty_case_files_into_a_scratch_session(client):
     cases = client.get("/api/cases").json()
     match = [c for c in cases if c["id"] == body["case_id"]]
     assert match and match[0]["scratch"] is True
+
+
+def _place(client, token=None, **overrides):
+    data = {"url": "https://www.google.com/maps/@48.8584,2.2945,17z"}
+    data.update(overrides)
+    data = {k: v for k, v in data.items() if v is not None}
+    headers = {"X-Azimut-Token": token} if token else {}
+    return client.post("/api/ingest/place", data=data, headers=headers)
+
+
+def test_place_needs_the_token(client):
+    _token(client)
+    assert _place(client).status_code == 401
+    assert _place(client, token="wrong").status_code == 401
+
+
+def test_place_files_a_point_from_the_url_alone(client):
+    """Same thin-extension contract as a screenshot: the URL carries the
+    coordinates, the title and the site — the popup may send nothing else."""
+    token = _token(client)
+    cid = client.post("/api/cases", json={"name": "Points"}).json()["id"]
+    r = _place(
+        client, token=token, case_id=cid,
+        url="https://www.google.com/maps/place/Tour+Eiffel/@48.8583701,2.2944813,17z/data=!3m1",
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["case_id"] == cid and body["title"] == "Tour Eiffel"
+    places = [e for e in graph_read.entities(cid) if e["type"] == "place"]
+    assert len(places) == 1
+    attrs = places[0]["attrs"]
+    assert (attrs["lat"], attrs["lon"], attrs["zoom"]) == (48.8583701, 2.2944813, 17)
+    assert attrs["plus_code"] and attrs["coords"]
+    # provenance the app's own place saves have no source for
+    assert attrs["source_url"].startswith("https://www.google.com/maps/place/")
+    assert attrs["site"] == "google-maps"
+    # a place is a point: nothing was downloaded
+    assert client.get(f"/api/cases/{cid}/media").json() == []
+
+
+def test_place_popup_values_win_over_the_url(client):
+    token = _token(client)
+    cid = client.post("/api/cases", json={"name": "Corrections"}).json()["id"]
+    _place(client, token=token, case_id=cid, lat="48.9", lon="2.4",
+           zoom="12", bearing="90", title="Corrected spot")
+    place = [e for e in graph_read.entities(cid) if e["type"] == "place"][0]
+    assert place["label"] == "Corrected spot"
+    assert (place["attrs"]["lat"], place["attrs"]["lon"]) == (48.9, 2.4)
+    assert (place["attrs"]["zoom"], place["attrs"]["bearing"]) == (12, 90)
+
+
+def test_place_needs_coordinates_and_a_map_url(client):
+    token = _token(client)
+    # a map URL with no position: there is no point to save (bookmark is that flow)
+    assert _place(client, token=token,
+                  url="https://www.google.com/maps").status_code == 422
+    # half a coordinate is never a point
+    assert _place(client, token=token, url="https://www.google.com/maps",
+                  lat="48.9").status_code == 422
+    # not a map at all
+    assert _place(client, token=token,
+                  url="https://twitter.com/somebody/status/1").status_code == 422
+
+
+def test_place_empty_case_files_into_a_scratch_session(client):
+    token = _token(client)
+    body = _place(client, token=token).json()
+    cases = client.get("/api/cases").json()
+    match = [c for c in cases if c["id"] == body["case_id"]]
+    assert match and match[0]["scratch"] is True
+
+
+def test_place_shows_up_in_the_saved_index_and_nudges_open_tabs(client, monkeypatch):
+    from azimut.api import ingest as ingest_api
+
+    seen = []
+    monkeypatch.setattr(ingest_api.events, "publish", seen.append)
+    token = _token(client)
+    cid = client.post("/api/cases", json={"name": "Saved"}).json()["id"]
+    body = _place(client, token=token, case_id=cid, title="Watchpoint").json()
+    assert [e for e in seen if e["type"] == "place"] == [
+        {"type": "place", "case_id": cid, "entity_id": body["entity_id"],
+         "title": "Watchpoint", "site": "google-maps"}
+    ]
+    # the Saved panel reads this one index and nothing else
+    index = client.get(f"/api/cases/{cid}/satellite/index").json()
+    assert [(row["kind"], row["title"]) for row in index] == [("place", "Watchpoint")]
 
 
 def test_extension_zip_serves_the_packaged_runtime_files(client):

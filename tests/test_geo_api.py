@@ -4,6 +4,11 @@ import pytest
 
 from azimut.engine import geo
 
+# The suite's autouse fixture replaces geo.reverse_geocode with an offline stub,
+# so the two tests below — the ones that care about what goes out on the wire —
+# hold on to the real function, captured at import time.
+_REAL_REVERSE = geo.reverse_geocode
+
 
 class _FakeResponse:
     def __init__(self, payload):
@@ -43,6 +48,37 @@ def test_geocode_returns_top_match(client, monkeypatch):
     assert calls["params"]["q"] == "tour eiffel"
     assert calls["params"]["limit"] == 1
     assert calls["headers"]["User-Agent"]
+
+
+def test_geocode_answers_in_english(client, monkeypatch):
+    # the query goes out in whatever language it was typed; only the answer is
+    # pinned, so "Москва" comes back as a name the analyst can read
+    fake, calls = _fake_get([{"lat": "55.75", "lon": "37.61", "display_name": "Moscow, Russia"}])
+    monkeypatch.setattr(geo.httpx, "get", fake)
+
+    result = client.get("/api/geo/geocode", params={"q": "Москва"}).json()
+    assert calls["params"]["q"] == "Москва"
+    assert calls["params"]["accept-language"] == "en"
+    assert result["display_name"] == "Moscow, Russia"
+
+
+def test_reverse_stays_in_the_local_language(monkeypatch):
+    # the Post and Proof composers read this endpoint and name a place the way
+    # it is named where it is — asking for English here would change their copy
+    fake, calls = _fake_get({"display_name": "Москва, Россия", "address": {"country": "Россия"}})
+    monkeypatch.setattr(geo.httpx, "get", fake)
+
+    result = _REAL_REVERSE(55.75, 37.61)
+    assert "accept-language" not in calls["params"]
+    assert result["display_name"] == "Москва, Россия"
+
+
+def test_reverse_asks_for_a_language_only_when_told_to(monkeypatch):
+    fake, calls = _fake_get({"display_name": "Moscow, Russia", "address": {}})
+    monkeypatch.setattr(geo.httpx, "get", fake)
+
+    _REAL_REVERSE(55.75, 37.61, language="en")
+    assert calls["params"]["accept-language"] == "en"
 
 
 def test_geocode_no_match_is_404(client, monkeypatch):

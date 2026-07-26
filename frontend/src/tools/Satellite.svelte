@@ -3,7 +3,7 @@
   import L from 'leaflet';
   import 'leaflet/dist/leaflet.css';
   import { api } from '../lib/api.js';
-  import { fetchAllEntities } from '../lib/catalog.js';
+  import { filterSaved, isMode, pendingLocate } from '../lib/geoTree.js';
   import {
     caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords, prefsReady,
   } from '../lib/state.svelte.js';
@@ -12,6 +12,8 @@
   import * as gridSearch from '../lib/gridSearch.js';
   import { dragBearing, pivotPanOffset } from '../lib/satRotate.js';
   import { clampSize, scaledCapture } from '../lib/captureSize.js';
+  import { panelWidth } from '../lib/panelWidth.js';
+  import { assignFolder } from '../lib/filing.js';
   import { isRegistered, sourceRect, frameFitsView } from '../lib/screenCrop.js';
   import { extensionVersion, captureTab, onActivated } from '../lib/extBridge.js';
   import {
@@ -40,44 +42,73 @@
   } from '../lib/sentinel.js';
   import { createViewer, nextZ, restack } from '../lib/refViewers.js';
   import { loadGoogleMaps, createSatelliteMutant } from '../lib/gmaps.js';
+  import { matchesQuery } from '../lib/mediaFilter.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
+  import SearchInput from '../components/SearchInput.svelte';
+  import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
+  import FolderSelect from '../components/FolderSelect.svelte';
   import RefViewer from './RefViewer.svelte';
   import MapToolCluster from './satellite/MapToolCluster.svelte';
   import GridSearchPanel from './satellite/GridSearchPanel.svelte';
   import SentinelPicker from './satellite/SentinelPicker.svelte';
   import CaptureOptions from './satellite/CaptureOptions.svelte';
+  import SavedTree from './satellite/SavedTree.svelte';
+  import SavedSearch from './satellite/SavedSearch.svelte';
+  import SavedOverlay from './satellite/SavedOverlay.svelte';
 
   let mapEl;
-  let toolEl; // tool root — target of the real (browser) fullscreen (item 5)
-  let map;
+  let toolEl; // Browser fullscreen target.
+  let map = $state.raw(null);
   let tileLayer;
   let providers = $state([]);
   let providerId = $state('esri-world-imagery');
   let coordsText = $state('');
-  // opens on the user's home view (Settings → Preferences) until a case
-  // artifact or a "go to coords" handoff points the map somewhere else.
-  // Seeded from the defaults, then re-read under `prefsReady` in onMount —
-  // a deep link to #satellite mounts this before the settings fetch lands.
+  // Start at the saved home view unless case navigation supplies a position.
+  // Re-read after preferences load because deep links can mount first.
   let center = $state({ ...prefs.homeView });
-  let markerStyle = $state('none'); // 'crosshair' | 'pin' | 'none' — clean view by default (item 4)
+  let markerStyle = $state('none'); // 'crosshair' | 'pin' | 'none'
   let moveMode = $state(false); // pin decoupled from center, draggable
   let marker = null; // Leaflet marker instance while in move mode
   let markerLatLng = $state(null); // {lat, lon} of the moved pin
   let bearing = $state(0);
-  // Middle-drag rotation: a sober "target" marks the grabbed point and the map
-  // turns around it (Google-Earth style, mirrors the Frame viewer).
+  // Middle-drag rotates the map around the grabbed point.
   let rotating = $state(false);
   let rotatePivot = $state({ x: 0, y: 0 }); // grabbed point, map-wrap-local px
   let capturing = $state(false);
   let captureHover = $state(false); // previewing the crop frame (capture group hover)
   let hideOverlays = $state(false); // frame/marquee outlines must not land in a screen crop
-  let captures = $state([]);
-  let capturesFor = $state(null);
+  // One compact Saved index for places, captures and filed screenshots.
+  let saved = $state([]);
+  let savedKind = $state('all');
+  let savedQuery = $state('');
+  let savedSearchOpen = $state(false);
+  let savedOverlay = $state(false); // map layer: off by default, session only
+  // Persist geography or My-work folder grouping across reloads.
+  const GROUP_KEY = 'azimut:satelliteSavedGroup';
+  let savedGroup = $state(loadSavedGroup());
+  let hoveredSavedId = $state(null); // shared by the tree, the modal and the map
+  // Proofs use a separate mode because they can borrow capture coordinates.
+  // Fetch them only when that mode opens.
+  let savedProofs = $state([]);
+  let savedFor = null; // case id held by both Saved indexes
+  let proofsFor = null; // the case id savedProofs was loaded for
+  const savedRows = $derived(isMode(savedKind) ? savedProofs : saved);
+  // The map layer follows the Saved panel filter.
+  const savedShown = $derived(filterSaved(savedRows, { kind: savedKind, query: savedQuery }));
+  let revealSavedId = $state(null);
   let capturesCollapsed = $state(false);
-  let capturesSubCollapsed = $state(false);
-  let focusedCapturePath = $state(null);
+  // the Saved panel's left edge is a drag handle; the width sticks across reloads
+  const savedPanel = panelWidth({
+    key: 'azimut:satelliteSavedW',
+    min: 260,
+    max: 560,
+    def: 300,
+    fraction: 0.4,
+  });
+  let savedW = $state(savedPanel.loadWidth());
+  let savedResizing = $state(false);
   let mapReady = $state(false);
 
   // OSM labels overlay: a transparent labels-only layer laid over the imagery so
@@ -280,10 +311,27 @@
   let refPicker = $state(false); // the "pick an image" modal
   let refMedia = $state([]); // case images available to reference
   let refLoading = $state(false);
+  let refQuery = $state('');
+  let refBrowserOpen = $state(false); // "…" swaps the grid for the folder browser
+  let refBrowsePath = $state('');
+  let refBrowseSelection = $state(null);
   let refSeq = 0; // id source for spawned windows
+  const REF_SEARCH_MIN = 6; // below that, the grid is easier to scan than to search
+
+  // Same free-text match as the Media Library (filename, title, notes, folder,
+  // download source), so what works there works here.
+  const visibleRefMedia = $derived(
+    caseState.current ? refMedia.filter((m) => matchesQuery(m, refQuery)) : []
+  );
+  const refBrowserEntries = $derived(
+    refMedia.map((m) => ({ ...m, id: m.path, attrs: { folder: m.folder ?? '' } }))
+  );
 
   async function openRefPicker() {
     refPicker = true;
+    refQuery = '';
+    resetRefBrowser();
+    refBrowserOpen = false;
     refLoading = true;
     try {
       const id = caseState.current?.id;
@@ -295,6 +343,31 @@
     } finally {
       refLoading = false;
     }
+  }
+
+  function resetRefBrowser() {
+    refBrowsePath = '';
+    refBrowseSelection = null;
+  }
+
+  function toggleRefBrowser() {
+    if (refBrowserOpen) {
+      refBrowserOpen = false;
+      return;
+    }
+    refQuery = '';
+    resetRefBrowser();
+    refBrowserOpen = true;
+  }
+
+  function openRefFolder(path) {
+    refBrowsePath = path;
+    refBrowseSelection = null;
+  }
+
+  function confirmRefBrowser() {
+    const item = refBrowserEntries.find((entry) => entry.path === refBrowseSelection);
+    if (item) addRef(item);
   }
 
   function addRef(item) {
@@ -881,11 +954,16 @@
   const externalLinks = $derived(mapLinks(displayCoords.lat, displayCoords.lon, center.zoom));
 
   // fly the map to a capture's recorded point (item 7)
-  function flyToCapture(item) {
-    // ingest captures can arrive without coordinates (nothing in the URL)
-    if (!map || item.lat == null || item.lon == null) return;
-    map.setView([item.lat, item.lon], item.zoom || map.getZoom());
-    setBearing(item.bearing || 0);
+  /** Open one saved item: fly the map to it, or — for a screenshot of a site we
+   *  cannot embed, filed without coordinates — reopen the page it came from. */
+  function openSaved(row) {
+    if (row.lat == null || row.lon == null) {
+      if (row.source_url && !fullscreen) window.open(row.source_url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (!map) return;
+    map.setView([row.lat, row.lon], Number(row.zoom) || map.getZoom());
+    setBearing(Number(row.bearing) || 0);
   }
 
   // --- tile seam fix ---
@@ -1054,23 +1132,60 @@
   $effect(() => {
     const id = caseState.current?.id;
     caseState.rev; // re-fetch when the case is reloaded elsewhere (e.g. sidebar delete)
+    if (savedFor !== id) {
+      savedFor = id;
+      saved = [];
+      savedProofs = [];
+      proofsFor = null;
+      savedSearchOpen = false;
+      hoveredSavedId = null;
+      revealSavedId = null;
+      deleteTarget = null;
+      notesItem = null;
+      placeModal = null;
+      locateStopped = true;
+      locateGeneration += 1;
+      locating = null;
+    }
     if (!id) {
-      capturesFor = null;
-      captures = [];
       return;
     }
-    capturesFor = id;
-    api.get(`/api/cases/${id}/satellite`).then((r) => (captures = r));
+    let live = true;
+    api
+      .get(`/api/cases/${id}/satellite/index`)
+      .then((rows) => { if (live) saved = rows; })
+      .catch(() => { if (live) saved = []; });
+    return () => { live = false; };
   });
 
+  // The proofs index, read the first time the Proofs position is opened. Keyed
+  // on the case *and its revision*: filing or saving a proof reloads the case,
+  // and a stale list would still show the folder the proof just left.
+  $effect(() => {
+    const id = caseState.current?.id;
+    const stamp = `${id}:${caseState.rev}`;
+    if (!id || !isMode(savedKind) || proofsFor === stamp) return;
+    proofsFor = stamp;
+    let live = true;
+    api
+      .get(`/api/cases/${id}/proofs/index`)
+      .then((rows) => { if (live) savedProofs = rows; })
+      .catch(() => { if (live) { savedProofs = []; proofsFor = null; } });
+    return () => { live = false; };
+  });
+
+  // another workspace asked to show one capture: clear whatever filter is on so
+  // it can't be hidden, then let the tree open its branch and scroll to it
   $effect(() => {
     const path = uiState.focusCapture;
-    if (!path || !captures.some((capture) => capture.path === path)) return;
+    if (!path) return;
+    const row = saved.find((item) => item.path === path);
+    if (!row) return;
     uiState.focusCapture = null;
     capturesCollapsed = false;
-    capturesSubCollapsed = false;
-    focusedCapturePath = path;
-    requestAnimationFrame(() => document.querySelector(`[data-capture-path="${CSS.escape(path)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+    savedKind = 'all';
+    savedQuery = '';
+    revealSavedId = row.id;
   });
 
   // the map container resizes when the sidebar toggles or is dragged wider, and
@@ -1297,7 +1412,6 @@
         // other provider's is Esri's best-effort estimate or nothing
         imagery_date: s2PinnedDate ?? imageryDate?.date ?? null,
       });
-      captures = [result, ...captures];
       await reloadCase();
       toast(
         result.tiles_missing
@@ -1461,7 +1575,6 @@
     form.append('provider', currentProvider.id);
     form.append('framed', String(!!framed));
     const result = await api.post(`/api/cases/${c.id}/satellite/screenshot`, form);
-    captures = [result, ...captures];
     await reloadCase();
     toast(
       framed
@@ -2212,27 +2325,25 @@
     }
   }
 
-  // Deletions drop a file / an entity — always behind a confirm.
-  // { kind: 'capture', item } | { kind: 'place', item }
+  // Deletions drop a file / an entity — always behind a confirm. The target is
+  // a saved-index row; its kind says which of the two it is.
   let deleteTarget = $state(null);
   let deleteBusy = $state(false);
-
-  async function removeCapture(item) {
-    await api.del(
-      `/api/cases/${caseState.current.id}/satellite?path=${encodeURIComponent(item.path)}`
-    );
-    captures = captures.filter((c) => c.path !== item.path);
-    // the capture's place entity may have gone with it — refresh the sidebar
-    await reloadCase();
-  }
 
   async function confirmDelete() {
     if (!deleteTarget || deleteBusy) return;
     deleteBusy = true;
+    const row = deleteTarget;
     try {
-      if (deleteTarget.kind === 'capture') await removeCapture(deleteTarget.item);
-      else await removePlace(deleteTarget.item);
+      if (row.kind === 'place') {
+        await api.del(`/api/cases/${caseState.current.id}/entities/${row.id}`);
+      } else {
+        await api.del(
+          `/api/cases/${caseState.current.id}/satellite?path=${encodeURIComponent(row.path)}`
+        );
+      }
       deleteTarget = null;
+      await reloadCase(); // re-reads the saved index and the case sidebar
     } catch (e) {
       toast(e.message, 'danger');
     } finally {
@@ -2240,28 +2351,34 @@
     }
   }
 
+  /** The edit action, for whichever kind of row it was pressed on. */
+  function editSaved(row) {
+    if (row.kind === 'place') openEditPlace(row);
+    else openNotes(row);
+  }
+
   // --- details modal (title + notes) ---
   let notesItem = $state(null);
   let notesText = $state('');
   let notesTitle = $state('');
+  let notesFolder = $state('');
   let notesSaving = $state(false);
 
-  function openNotes(item) {
-    notesItem = item;
-    notesText = item.notes ?? '';
-    notesTitle = item.title ?? coordsLabel(item);
+  function openNotes(row) {
+    notesItem = row;
+    notesText = row.notes ?? '';
+    notesTitle = row.title ?? coordsLabel(row);
+    notesFolder = row.folder ?? '';
   }
 
   async function saveNotes() {
     if (!notesItem) return;
     notesSaving = true;
     try {
-      const updated = await api.patch(
+      await api.patch(
         `/api/cases/${caseState.current.id}/satellite`,
-        { path: notesItem.path, notes: notesText, title: notesTitle }
+        { path: notesItem.path, notes: notesText, title: notesTitle, folder: notesFolder }
       );
-      const idx = captures.findIndex((c) => c.path === notesItem.path);
-      if (idx !== -1) captures[idx] = updated;
       notesItem = null;
       // the mirrored place entity was retitled too — refresh the sidebar
       await reloadCase();
@@ -2277,9 +2394,21 @@
     return fmtCoords(item.lat, item.lon);
   }
 
+  // One action, two directions: a capture goes *into* a new proof, a proof row
+  // opens the proof it already is.
   function sendToComposer(item) {
-    if (!uiState.composeQueue.includes(item.path)) uiState.composeQueue.push(item.path);
+    if (item.kind === 'proof') {
+      uiState.openProof = item.name;
+    } else if (!uiState.composeQueue.includes(item.path)) {
+      uiState.composeQueue.push(item.path);
+    }
     uiState.tool = 'proof';
+  }
+
+  function openLinkedPost(post) {
+    if (!post.name) return;
+    uiState.openDraft = post.name;
+    uiState.tool = 'post';
   }
 
   // the HUD readout and everything copied out of it follow the user's
@@ -2298,41 +2427,164 @@
     map?.invalidateSize();
   }
 
-  // saved places (navigable points) live on the case as `place` entities, read
-  // a page at a time off the bounded catalog rather than the case-open payload.
-  let places = $state([]);
-  $effect(() => {
-    const id = caseState.current?.id;
-    caseState.rev; // re-read after a place is added/removed here or elsewhere
-    if (!id) {
-      places = [];
-      return;
+  function loadSavedGroup() {
+    try {
+      return localStorage.getItem(GROUP_KEY) === 'folders' ? 'folders' : 'geo';
+    } catch {
+      return 'geo'; // localStorage unavailable (private mode) — non-fatal
     }
-    let live = true;
-    fetchAllEntities(id, { types: ['place'] })
-      .then((list) => { if (live) places = list; })
-      .catch(() => { if (live) places = []; });
-    return () => { live = false; };
+  }
+
+  $effect(() => {
+    try {
+      localStorage.setItem(GROUP_KEY, savedGroup);
+    } catch {
+      /* ignore */
+    }
   });
 
-  function flyToPlace(p) {
-    const lat = Number(p.attrs?.lat);
-    const lon = Number(p.attrs?.lon);
-    if (!map || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
-    map.setView([lat, lon], Number(p.attrs?.zoom) || map.getZoom());
-    setBearing(Number(p.attrs?.bearing) || 0);
+  // File a saved item into a My-work folder, dropped onto a folder in the
+  // panel. One PATCH through the shared filing route (a capture's sidecar is
+  // the authority, a place carries the folder itself), then the case reload
+  // every other edit here does: the index, the sidebar and the map overlay all
+  // read the new filing from it.
+  async function moveSaved(row, folder) {
+    // the row's kind *is* its entity type, bar the screenshot that rides the
+    // capture type. Filing a proof as a capture would route it to PATCH /media,
+    // the sidecar of an image it is not.
+    const entity = {
+      id: row.id,
+      type: row.kind === 'place' ? 'place' : row.kind === 'proof' ? 'proof' : 'capture',
+      attrs: { path: row.path },
+    };
+    try {
+      await assignFolder(caseState.current.id, entity, folder);
+      await reloadCase();
+      toast(folder ? `Filed in ${folder}` : 'Removed from My work', 'ok', 1600);
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
   }
 
-  async function removePlace(p) {
-    await api.del(`/api/cases/${caseState.current.id}/entities/${p.id}`);
-    await reloadCase();
+  // --- resize: the Saved panel's left edge is a drag handle ---
+  const SAVED_KEY_STEP = 16;
+
+  function setSavedWidth(w) {
+    savedW = savedPanel.clampWidth(w, window.innerWidth);
   }
 
-  // collapse state for the two saved-work sections
-  let placesCollapsed = $state(false);
+  function startSavedResize(e) {
+    if (e.button !== 0) return;
+    e.preventDefault(); // don't start a text selection under the cursor
+    const startX = e.clientX;
+    const startW = savedW;
+    savedResizing = true;
+    let frame = 0;
+    // dragging left (a smaller clientX) widens the panel — it grows into the map
+    const move = (ev) => {
+      setSavedWidth(startW + startX - ev.clientX);
+      // the map container shrank with it; one redraw per frame, not per event
+      if (!frame) {
+        frame = requestAnimationFrame(() => {
+          frame = 0;
+          map?.invalidateSize({ animate: false });
+        });
+      }
+    };
+    const up = () => {
+      savedResizing = false;
+      if (frame) cancelAnimationFrame(frame);
+      map?.invalidateSize({ animate: false });
+      savedPanel.saveWidth(savedW); // one write per drag, not one per frame
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  async function onSavedResizeKey(e) {
+    const step = { ArrowLeft: SAVED_KEY_STEP, ArrowRight: -SAVED_KEY_STEP }[e.key];
+    if (step === undefined) return;
+    e.preventDefault();
+    setSavedWidth(savedW + step);
+    savedPanel.saveWidth(savedW);
+    await tick();
+    map?.invalidateSize({ animate: false });
+  }
+
+  async function resetSavedWidth() {
+    setSavedWidth(savedPanel.DEFAULT_W);
+    savedPanel.saveWidth(savedW);
+    await tick();
+    map?.invalidateSize({ animate: false });
+  }
+
+  // A width dragged out on a wide screen would eat a narrower window whole, so
+  // re-clamp against the viewport as it changes. The clamped-down value is not
+  // written back — what the user actually chose is what a later session restores.
+  $effect(() => {
+    const onWindowResize = () => setSavedWidth(savedW);
+    window.addEventListener('resize', onWindowResize);
+    return () => window.removeEventListener('resize', onWindowResize);
+  });
+
+  // --- Locate: fill in the country of everything that still has none ---------
+  // One batch per request (Nominatim is one lookup a second), looped until the
+  // backlog is empty. Progress is the stored geography itself, so cancelling
+  // keeps whatever was already resolved and a later pass picks up where this
+  // one stopped.
+  const LOCATE_BATCH = 10;
+  let locating = $state(null); // { done, total } while a pass runs
+  let locateStopped = false;
+  let locateGeneration = 0;
+
+  async function runLocate() {
+    if (locating || !caseState.current) return;
+    const id = caseState.current.id;
+    const generation = ++locateGeneration;
+    locateStopped = false;
+    const total = pendingLocate(saved);
+    locating = { done: 0, total };
+    let located = 0;
+    let failed = 0;
+    try {
+      let remaining = total;
+      while (remaining > 0 && !locateStopped && generation === locateGeneration) {
+        const batch = await api.post(
+          `/api/cases/${id}/satellite/locate?limit=${LOCATE_BATCH}`
+        );
+        if (generation !== locateGeneration) return;
+        located += batch.located;
+        failed += batch.failed;
+        // A batch that resolved nothing means the network is down, not that the
+        // next one will do better: stop instead of hammering Nominatim forever.
+        const stalled = batch.remaining >= remaining;
+        remaining = batch.remaining;
+        locating = { done: total - remaining, total };
+        if (stalled) break;
+      }
+      if (generation !== locateGeneration) return;
+      const rows = await api.get(`/api/cases/${id}/satellite/index`);
+      if (generation !== locateGeneration) return;
+      saved = rows;
+      toast(
+        failed
+          ? `Located ${located} of ${total}. ${failed} lookup(s) failed; run Locate again to retry`
+          : `Located ${located} of ${total}`,
+        failed ? 'warn' : 'ok'
+      );
+    } catch (e) {
+      if (generation === locateGeneration) {
+        toast(`Locate stopped: ${e.message}`, 'danger', 6000);
+      }
+    } finally {
+      if (generation === locateGeneration) locating = null;
+    }
+  }
 
   // --- place edit modal (title + notes), used for both save & later edits ---
-  // { id: string|null, title, notes, lat, lon, zoom, bearing }; id null = new
+  // { id: string|null, title, notes, folder, lat, lon, zoom, bearing }; id null = new
   let placeModal = $state(null);
   let placeSaving = $state(false);
 
@@ -2341,6 +2593,7 @@
       id: null,
       title: '',
       notes: '',
+      folder: '',
       lat: displayCoords.lat,
       lon: displayCoords.lon,
       zoom: center.zoom,
@@ -2348,15 +2601,16 @@
     };
   }
 
-  function openEditPlace(p) {
+  function openEditPlace(row) {
     placeModal = {
-      id: p.id,
-      title: p.label ?? '',
-      notes: p.attrs?.notes ?? '',
-      lat: Number(p.attrs?.lat),
-      lon: Number(p.attrs?.lon),
-      zoom: p.attrs?.zoom,
-      bearing: p.attrs?.bearing,
+      id: row.id,
+      title: row.title ?? '',
+      notes: row.notes ?? '',
+      folder: row.folder ?? '',
+      lat: Number(row.lat),
+      lon: Number(row.lon),
+      zoom: row.zoom,
+      bearing: row.bearing,
     };
   }
 
@@ -2374,7 +2628,7 @@
         const title = m.title.trim() || placeCoordsLabel(m);
         await api.patch(`/api/cases/${caseState.current.id}/entities/${m.id}`, {
           label: title,
-          attrs: { notes: m.notes.trim() },
+          attrs: { notes: m.notes.trim(), folder: m.folder ?? '' },
         });
       } else {
         const c = await ensureCase();
@@ -2385,6 +2639,7 @@
           bearing: m.bearing,
           title: m.title,
           notes: m.notes,
+          folder: m.folder,
         });
       }
       placeModal = null;
@@ -2431,6 +2686,24 @@
     >
       <div class="map" bind:this={mapEl}></div>
 
+      <!-- saved work on the map: navigation only, off by default, session-only.
+           It draws the panel's current selection, not the whole index. -->
+      {#if savedOverlay}
+        <SavedOverlay
+          map={mapReady ? map : null}
+          items={savedShown}
+          caseId={caseState.current?.id}
+          coords={coordsLabel}
+          {fullscreen}
+          bind:hoveredId={hoveredSavedId}
+          onopen={openSaved}
+          onedit={editSaved}
+          onproof={sendToComposer}
+          onpost={openLinkedPost}
+          onshowproofs={() => (savedKind = 'proofs')}
+        />
+      {/if}
+
       <!-- top-left control cluster: fullscreen, OSM labels overlay, measure tools -->
       <div class="map-tools">
         <MapToolCluster
@@ -2443,6 +2716,8 @@
           {toggleTools}
           {gridMode}
           {toggleGridMode}
+          bind:savedOverlay
+          savedCount={saved.length}
           referenceCount={uiState.refViewers.length}
           {openRefPicker}
           {setMeasureMode}
@@ -2755,16 +3030,34 @@
       {/each}
     </div>
 
-    <aside class="captures" class:collapsed={capturesCollapsed}>
+    <aside
+      class="captures"
+      class:collapsed={capturesCollapsed}
+      class:resizing={savedResizing}
+      style={capturesCollapsed ? undefined : `width: ${savedW}px`}
+    >
+      {#if !capturesCollapsed}
+        <!-- a <button> rather than a bare div: the handle must be focusable and
+             keyboard-driven (arrows resize), and the element carries that for free -->
+        <button
+          type="button"
+          class="resizer"
+          aria-label="Resize the saved panel"
+          title="Drag to resize · double-click to reset"
+          onpointerdown={startSavedResize}
+          ondblclick={resetSavedWidth}
+          onkeydown={onSavedResizeKey}
+        ></button>
+      {/if}
       <button
         type="button"
         class="cap-head"
         onclick={toggleCaptures}
-        title={capturesCollapsed ? 'Show captures' : 'Hide captures'}
+        title={capturesCollapsed ? 'Show saved work' : 'Hide saved work'}
       >
         <Icon name={capturesCollapsed ? 'chevronLeft' : 'chevronRight'} size={15} />
         <span class="label" style="margin:0">Saved</span>
-        <span class="count">{places.length + captures.length}</span>
+        <span class="count">{saved.length}</span>
       </button>
       {#if capturesCollapsed}
         <!-- collapsed: header acts as the toggle back to the list -->
@@ -2809,177 +3102,27 @@
             </button>
           {/if}
 
-          <!-- Places: navigable points (no image) -->
-          <button
-            type="button"
-            class="sub-head"
-            onclick={() => (placesCollapsed = !placesCollapsed)}
-          >
-            <Icon name={placesCollapsed ? 'chevronRight' : 'chevronDown'} size={12} />
-            <Icon name="pin" size={13} />
-            <span>Places</span>
-            <span class="count">{places.length}</span>
-          </button>
-          {#if !placesCollapsed}
-            {#if !places.length}
-              <div class="none">Use “Save place” to drop a point you can fly back to.</div>
-            {:else}
-              <div class="place-list">
-                {#each places as p (p.id)}
-                  <div class="place-row card">
-                    <div class="place-main">
-                      <button
-                        type="button"
-                        class="place-goto"
-                        title="Fly the map to this point"
-                        onclick={() => flyToPlace(p)}
-                      >
-                        <Icon name="pin" size={15} />
-                        <div class="place-meta">
-                          <span class="title">{p.label}</span>
-                          <span class="prov">
-                            z{p.attrs?.zoom}{p.attrs?.bearing ? ` · ${Math.round(p.attrs.bearing)}°` : ''}
-                          </span>
-                        </div>
-                      </button>
-                      <button
-                        class="btn btn-ghost btn-sm"
-                        title="Edit title & note"
-                        onclick={() => openEditPlace(p)}
-                      >
-                        <Icon name="note" size={14} />
-                      </button>
-                      <button
-                        class="btn btn-ghost btn-sm"
-                        title="Delete place"
-                        onclick={() => (deleteTarget = { kind: 'place', item: p })}
-                      >
-                        <Icon name="trash" size={14} />
-                      </button>
-                    </div>
-                    {#if p.attrs?.notes}
-                      <div class="place-notes">{p.attrs.notes}</div>
-                    {/if}
-                  </div>
-                {/each}
-              </div>
-            {/if}
-          {/if}
-
-          <!-- Captures: sourced imagery crops (images) -->
-          <button
-            type="button"
-            class="sub-head"
-            onclick={() => (capturesSubCollapsed = !capturesSubCollapsed)}
-          >
-            <Icon name={capturesSubCollapsed ? 'chevronRight' : 'chevronDown'} size={12} />
-            <Icon name="satellite" size={13} />
-            <span>Captures</span>
-            <span class="count">{captures.length}</span>
-          </button>
-          {#if !capturesSubCollapsed}
-            {#if !captures.length}
-              <div class="none">
-                Captured crops land in the case with full provenance: provider, zoom, date,
-                attribution.
-              </div>
-            {:else}
-              <div class="cap-list">
-              {#each (caseState.current ? captures : []) as item (item.path)}
-                <div class="cap card" class:focused={focusedCapturePath === item.path} data-capture-path={item.path}>
-                  <a
-                    class="cap-goto"
-                    class:disabled={fullscreen}
-                    href={fullscreen ? undefined : `/files/${caseState.current.id}/${item.path}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-disabled={fullscreen}
-                    title={leavesFullscreen ?? 'Open the full image'}
-                  >
-                    <img
-                      src={`/files/${caseState.current.id}/${item.path}`}
-                      alt={item.filename}
-                      loading="lazy"
-                    />
-                    <div class="cap-meta">
-                      <span class="title">{item.title ?? coordsLabel(item)}</span>
-                      <span class="mono coords">{coordsLabel(item)}</span>
-                      <!-- ingest captures may have no zoom (URL carried none) -->
-                      <span class="prov">{item.zoom != null ? `z${item.zoom}` : '—'}{item.bearing ? ` · ${Math.round(item.bearing)}°` : ''} · {item.provider_label ?? item.site}</span>
-                      <span class="prov dates" title="Capture date · imagery acquisition date">
-                        <Icon name="crosshair" size={10} /> {item.fetched_at?.slice(0, 10)}
-                        {#if item.imagery_date}<span class="img-date"><Icon name="satellite" size={10} /> {item.imagery_date}</span>{/if}
-                      </span>
-                    </div>
-                  </a>
-                  <div class="cap-actions">
-                    <button
-                      class="btn btn-ghost btn-sm"
-                      disabled={item.lat == null}
-                      title={item.lat == null
-                        ? 'No coordinates recorded for this capture'
-                        : 'Go to these coordinates on the map'}
-                      onclick={() => flyToCapture(item)}
-                    >
-                      <Icon name="crosshair" size={14} />
-                    </button>
-                    {#if item.source_url}
-                      <!-- straight back to the page this was captured from — the
-                           recorded URL itself, not a reconstruction -->
-                      <a
-                        class="btn btn-ghost btn-sm"
-                        class:disabled={fullscreen}
-                        href={fullscreen ? undefined : item.source_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-disabled={fullscreen}
-                        title={leavesFullscreen ?? `Open the source page (${item.site})`}
-                      >
-                        <Icon name="external" size={13} />
-                      </a>
-                    {/if}
-                    <button
-                      class="btn btn-ghost btn-sm"
-                      title="Edit title & note"
-                      onclick={() => openNotes(item)}
-                    >
-                      <Icon name="note" size={14} />
-                    </button>
-                    <button
-                      class="btn btn-ghost btn-sm"
-                      disabled={fullscreen}
-                      title={leavesFullscreen ?? 'Send to Geo Proof'}
-                      onclick={() => sendToComposer(item)}
-                    >
-                      <Icon name="proof" size={14} />
-                    </button>
-                    <a
-                      class="btn btn-ghost btn-sm"
-                      class:disabled={fullscreen}
-                      href={fullscreen ? undefined : `/files/${caseState.current.id}/${item.path}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-disabled={fullscreen}
-                      title={leavesFullscreen ?? 'Open'}
-                    >
-                      <Icon name="external" size={14} />
-                    </a>
-                    <button
-                      class="btn btn-ghost btn-sm"
-                      title="Delete"
-                      onclick={() => (deleteTarget = { kind: 'capture', item })}
-                    >
-                      <Icon name="trash" size={14} />
-                    </button>
-                  </div>
-                  {#if item.notes}
-                    <div class="cap-notes">{item.notes}</div>
-                  {/if}
-                </div>
-              {/each}
-              </div>
-            {/if}
-          {/if}
+          <SavedTree
+            rows={savedRows}
+            folders={caseState.current?.folders ?? []}
+            caseId={caseState.current?.id}
+            coords={coordsLabel}
+            {fullscreen}
+            bind:kind={savedKind}
+            bind:query={savedQuery}
+            bind:group={savedGroup}
+            bind:hoveredId={hoveredSavedId}
+            onmove={moveSaved}
+            revealId={revealSavedId}
+            {locating}
+            onopen={openSaved}
+            onedit={editSaved}
+            ondelete={(row) => (deleteTarget = row)}
+            onproof={sendToComposer}
+            onbrowse={() => (savedSearchOpen = true)}
+            onlocate={runLocate}
+            oncancelLocate={() => (locateStopped = true)}
+          />
         </div>
       {/if}
     </aside>
@@ -2989,13 +3132,11 @@
 <!-- delete confirm: a capture drops its image file, a place its entity -->
 {#if deleteTarget}
   <ConfirmDialog
-    title={deleteTarget.kind === 'capture' ? 'Delete this capture?' : 'Delete this place?'}
-    message={deleteTarget.kind === 'capture'
-      ? `“${deleteTarget.item.title ?? coordsLabel(deleteTarget.item)}” will be removed from the case.`
-      : `“${deleteTarget.item.label}” will be removed from the case.`}
-    detail={deleteTarget.kind === 'capture'
-      ? 'This permanently deletes the image file on disk. It cannot be undone.'
-      : 'This permanently removes the saved point. It cannot be undone.'}
+    title={deleteTarget.kind === 'place' ? 'Delete this place?' : 'Delete this capture?'}
+    message={`“${deleteTarget.title || coordsLabel(deleteTarget)}” will be removed from the case.`}
+    detail={deleteTarget.kind === 'place'
+      ? 'Removes the saved point and cannot be undone.'
+      : 'Deletes the image from disk and cannot be undone.'}
     confirmLabel="Delete"
     tone="danger"
     busy={deleteBusy}
@@ -3014,6 +3155,13 @@
       placeholder={coordsLabel(notesItem)}
       bind:value={notesTitle}
     />
+    <label for="capture-folder" style="display:block;font-size:var(--fs-xs);color:var(--text-3);margin:10px 0 5px">Folder</label>
+    <FolderSelect
+      id="capture-folder"
+      bind:value={notesFolder}
+      folders={caseState.current?.folders ?? []}
+      emptyLabel="My work (root)"
+    />
     <hr style="border:none;border-top:1px solid var(--border);margin:12px 0" />
     <div class="sat-info-rows">
       <div class="sat-info-row">
@@ -3022,11 +3170,11 @@
       </div>
       <div class="sat-info-row">
         <span class="sat-info-label">Provider</span>
-        <span>{notesItem.provider_label}</span>
+        <span>{notesItem.provider ?? notesItem.site ?? '—'}</span>
       </div>
       <div class="sat-info-row">
         <span class="sat-info-label">Zoom</span>
-        <span>{notesItem.zoom}</span>
+        <span>{notesItem.zoom ?? '—'}</span>
       </div>
       <div class="sat-info-row">
         <span class="sat-info-label">Captured</span>
@@ -3035,6 +3183,18 @@
       <div class="sat-info-row">
         <span class="sat-info-label">Imagery date</span>
         <span class="mono">{notesItem.imagery_date ?? '—'}</span>
+      </div>
+      <div class="sat-info-row">
+        <span class="sat-info-label">Image</span>
+        <a
+          class="link-out"
+          class:disabled={fullscreen}
+          href={fullscreen ? undefined : `/files/${caseState.current?.id}/${notesItem.path}`}
+          target="_blank"
+          rel="noreferrer"
+          aria-disabled={fullscreen}
+          title={leavesFullscreen ?? 'Open the full image'}
+        >Open the full image <Icon name="external" size={12} /></a>
       </div>
     </div>
     <hr style="border:none;border-top:1px solid var(--border);margin:12px 0" />
@@ -3053,6 +3213,26 @@
       </button>
     </div>
   </Modal>
+{/if}
+
+<!-- Search every saved item at full width: the same index the tree reads, with
+     thumbnails and a sort. No fetch, no network. -->
+{#if savedSearchOpen}
+  <SavedSearch
+    rows={savedRows}
+    caseId={caseState.current?.id}
+    coords={coordsLabel}
+    {fullscreen}
+    centre={{ lat: center.lat, lon: center.lon }}
+    bind:kind={savedKind}
+    bind:query={savedQuery}
+    bind:hoveredId={hoveredSavedId}
+    onclose={() => (savedSearchOpen = false)}
+    onopen={openSaved}
+    onedit={editSaved}
+    ondelete={(row) => (deleteTarget = row)}
+    onproof={sendToComposer}
+  />
 {/if}
 
 <!-- The manual way in, for when the Capture button's extension grab can't be
@@ -3147,6 +3327,13 @@
       placeholder={placeCoordsLabel(placeModal)}
       bind:value={placeModal.title}
     />
+    <label for="place-folder" style="display:block;font-size:var(--fs-xs);color:var(--text-3);margin:10px 0 5px">Folder</label>
+    <FolderSelect
+      id="place-folder"
+      bind:value={placeModal.folder}
+      folders={caseState.current?.folders ?? []}
+      emptyLabel="My work (root)"
+    />
     <hr style="border:none;border-top:1px solid var(--border);margin:12px 0" />
     <div class="sat-info-rows">
       <div class="sat-info-row">
@@ -3191,23 +3378,61 @@
         No images or videos in this case yet. Import one in the Media Library first.
       </div>
     {:else}
-      <div class="ref-grid">
-        {#each (caseState.current ? refMedia : []) as m (m.path)}
-          <button class="ref-pick" onclick={() => addRef(m)} title={m.title ?? m.filename}>
-            <div class="ref-thumb">
-              {#if m.thumbnail}
-                <img src={`/files/${caseState.current.id}/${m.thumbnail}`} alt={m.filename} loading="lazy" />
-              {:else}
-                <Icon name={m.kind === 'video' ? 'video' : 'image'} size={26} />
-              {/if}
-              {#if m.kind === 'video'}
-                <span class="ref-kind"><Icon name="video" size={11} /></span>
-              {/if}
-            </div>
-            <span class="ref-name">{m.title ?? m.filename}</span>
+      {#if refBrowserOpen || refMedia.length > REF_SEARCH_MIN}
+        <div class="ref-search">
+          <SearchInput
+            bind:value={refQuery}
+            placeholder="Search media…"
+            count={`${visibleRefMedia.length}/${refMedia.length}`}
+            width="100%"
+          />
+          <button
+            class="btn btn-ghost btn-sm browse-btn"
+            title={refBrowserOpen ? 'Show every image' : 'Browse folders'}
+            onclick={toggleRefBrowser}
+          >…</button>
+        </div>
+      {/if}
+      {#if refBrowserOpen}
+        <FolderBrowser
+          entries={refBrowserEntries}
+          path={refBrowsePath}
+          rootLabel="Case media"
+          selectedId={refBrowseSelection}
+          matches={(entry) => matchesQuery(entry, refQuery)}
+          emptyText="This folder has no matching media."
+          icon={(entry) => (entry.kind === 'video' ? 'video' : 'image')}
+          label={(entry) => entry.title ?? entry.filename}
+          onnavigate={openRefFolder}
+          onselect={(entry) => (refBrowseSelection = entry.path)}
+          onconfirm={(entry) => addRef(entry)}
+        />
+        <div class="ref-actions">
+          <button class="btn btn-primary btn-sm" disabled={!refBrowseSelection} onclick={confirmRefBrowser}>
+            Add selected
           </button>
-        {/each}
-      </div>
+        </div>
+      {:else if !visibleRefMedia.length}
+        <div class="ref-empty">No media matches this search.</div>
+      {:else}
+        <div class="ref-grid">
+          {#each visibleRefMedia as m (m.path)}
+            <button class="ref-pick" onclick={() => addRef(m)} title={m.title ?? m.filename}>
+              <div class="ref-thumb">
+                {#if m.thumbnail}
+                  <img src={`/files/${caseState.current.id}/${m.thumbnail}`} alt={m.filename} loading="lazy" />
+                {:else}
+                  <Icon name={m.kind === 'video' ? 'video' : 'image'} size={26} />
+                {/if}
+                {#if m.kind === 'video'}
+                  <span class="ref-kind"><Icon name="video" size={11} /></span>
+                {/if}
+              </div>
+              <span class="ref-name">{m.title ?? m.filename}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
     {/if}
   </Modal>
 {/if}
@@ -3618,7 +3843,8 @@
     }
   }
   .captures {
-    width: 300px;
+    position: relative;
+    width: 300px; /* the inline style carries the dragged width */
     flex-shrink: 0;
     border-left: 1px solid var(--border);
     background: var(--bg-1);
@@ -3627,6 +3853,30 @@
   }
   .captures.collapsed {
     width: 42px;
+  }
+  /* the grab strip sits just inside the left edge, over the panel's padding */
+  .resizer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 5px;
+    height: 100%;
+    z-index: 2;
+    cursor: col-resize;
+    background: transparent;
+    border: none;
+    padding: 0;
+    transition: background 0.12s;
+  }
+  .resizer:hover,
+  .resizer:focus-visible,
+  .captures.resizing .resizer {
+    background: var(--accent);
+    outline: none;
+  }
+  /* a drag reads as one gesture — no text selection on the way */
+  .captures.resizing {
+    user-select: none;
   }
   .cap-head {
     display: flex;
@@ -3660,11 +3910,6 @@
     font-size: var(--fs-xs);
     color: var(--text-3);
     font-weight: 600;
-  }
-  .none {
-    padding: 8px 14px;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
   }
   .panel-scroll {
     flex: 1;
@@ -3759,125 +4004,6 @@
   .links-advert:hover {
     color: var(--accent);
   }
-  .place-notes {
-    padding: 0 10px 8px 30px;
-    font-size: var(--fs-xs);
-    color: var(--text-2);
-    font-style: italic;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-  .place-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .place-row {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .place-main {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 6px 4px 4px;
-  }
-  .place-goto {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    flex: 1;
-    min-width: 0;
-    padding: 5px 6px;
-    background: none;
-    border: none;
-    color: var(--text-2);
-    text-align: left;
-    cursor: pointer;
-  }
-  .place-goto:hover,
-  .place-goto:hover .title {
-    color: var(--accent);
-  }
-  .place-meta {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-  .cap-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  .cap {
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-  .cap.focused { outline: 1px solid var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-  .cap-goto {
-    display: block;
-    width: 100%;
-    padding: 0;
-    background: none;
-    border: none;
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .cap img {
-    width: 100%;
-    aspect-ratio: 10 / 7;
-    object-fit: cover;
-    background: var(--bg-2);
-  }
-  .cap-goto.disabled {
-    cursor: not-allowed;
-  }
-  .cap-goto:hover:not(.disabled) img {
-    opacity: 0.9;
-  }
-  .cap-goto:hover:not(.disabled) .coords {
-    color: var(--accent);
-  }
-  .cap-meta {
-    padding: 8px 10px 2px;
-    display: flex;
-    flex-direction: column;
-  }
-  .title {
-    font-size: var(--fs-sm);
-    color: var(--text-1);
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .coords {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-  .cap-goto:hover .title {
-    color: var(--accent);
-  }
-  .prov {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-  .cap-actions {
-    display: flex;
-    gap: 2px;
-    padding: 4px 6px 6px;
-  }
-  .cap-notes {
-    padding: 0 10px 8px;
-    font-size: var(--fs-xs);
-    color: var(--text-2);
-    font-style: italic;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
 
   .sat-info-rows {
     display: flex;
@@ -3963,6 +4089,25 @@
     font-size: var(--fs-sm);
     color: var(--text-2);
     margin: 0 0 12px;
+  }
+  .ref-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .ref-search :global(.search-box) {
+    flex: 1;
+  }
+  .browse-btn {
+    min-width: 30px;
+    font-size: var(--fs-lg);
+    line-height: 1;
+  }
+  .ref-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 10px;
   }
   .shot-hint {
     font-size: var(--fs-sm);

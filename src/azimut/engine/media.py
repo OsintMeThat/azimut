@@ -1,8 +1,7 @@
-"""Media engine: import local files, download by URL (yt-dlp), hash, thumbnail.
+"""Import, download, hash and thumbnail case media.
 
-Every media item gets a *sidecar* JSON (``<name>.azimut.json``) recording how it
-entered the case — source, timestamps, hashes (spec §3.6 honest output) — and a
-``media`` entity in ``case.json``.
+Each item has a sidecar recording its source, timestamps and hashes, plus a
+media entity in the case graph.
 """
 
 from __future__ import annotations
@@ -31,20 +30,15 @@ from . import thumbnails as thumbnail_engine
 # test fixtures that build a case's `.thumbs/` directly.
 THUMB_DIR = thumbnail_engine.THUMB_DIR
 SIDECAR_SUFFIX = ".azimut.json"
-# a post's attachments (photos on a tweet, an album, …) fit comfortably under
-# this; above it, treat the link as a real playlist and just grab its first
-# item, same as the old noplaylist behavior — no picker with hundreds of rows
+# Attachment collections fit under this limit. Larger collections use the
+# playlist path and select the first item.
 MAX_PICKER_ITEMS = 20
 
-# Chromium-family browsers whose cookie store is OS-encrypted and locked while
-# the browser runs. On Windows they're also app-bound-encrypted (Chrome 127+),
-# so yt-dlp can't read them even when closed — we route those to the cookies.txt
-# how-to instead of attempting the read.
+# Chromium cookie stores are OS-encrypted and locked while the browser runs.
+# Windows app-bound encryption routes these browsers to cookies.txt.
 _CHROMIUM_BROWSERS = {"chrome", "chromium", "edge", "brave", "vivaldi", "opera", "whale"}
 
-# Substrings that mark a download failure as "you need to be logged in", as
-# opposed to a dead link or a network hiccup. Best-effort: a miss just means the
-# cookie prompt doesn't appear (no worse than before the feature existed).
+# Best-effort phrases that identify an authentication failure.
 _AUTH_FAILURE_PHRASES = (
     "log in",
     "login",
@@ -85,8 +79,7 @@ def _resolve_cookie_file(file: str) -> Path:
 
 
 def _cookie_ydl_opts(cookies: dict[str, Any] | None) -> dict[str, Any]:
-    """Translate a cookie source into yt-dlp options. Empty when no source —
-    the first attempt is always cookie-less (local-first)."""
+    """Translate a cookie source into yt-dlp options; empty means cookie-less."""
     if not cookies:
         return {}
     if cookies.get("browser"):
@@ -256,12 +249,14 @@ def _register(
         by=by,
         source=source.get("url"),
     )
+    indexed = {**sidecar, "path": rel_path}
+    case.upsert_media_item(indexed, entity_id=entity["id"])
     # Every media derivative is filed through here, so the derivation chain is
     # wired once for every tool that produces imagery — present and future.
     link_engine.link_all(
         case, entity["id"], link_engine.DERIVED_FROM, _source_paths(source), by=by
     )
-    return {"duplicate": False, "entity": entity, "item": {**sidecar, "path": rel_path}}
+    return {"duplicate": False, "entity": entity, "item": indexed}
 
 
 def import_stream(case: Case, filename: str, stream: BinaryIO) -> dict[str, Any]:
@@ -711,6 +706,7 @@ def set_thumbnail(case: Case, rel_path: str, thumb_rel: str | None) -> None:
     data = json.loads(sidecar.read_text(encoding="utf-8"))
     data["thumbnail"] = thumb_rel
     _write_sidecar(media_path, data)
+    case.upsert_media_item({**data, "path": rel_path})
 
 
 def read_item(case: Case, rel_path: str) -> dict[str, Any] | None:
@@ -724,91 +720,7 @@ def read_item(case: Case, rel_path: str) -> dict[str, Any] | None:
 
 
 def list_media(case: Case) -> list[dict[str, Any]]:
-    media_dir = case.subdir("media")
-    items = []
-    for sidecar in sorted(media_dir.glob(f"*{SIDECAR_SUFFIX}")):
-        media_name = sidecar.name[: -len(SIDECAR_SUFFIX)]
-        if not (media_dir / media_name).exists():
-            continue
-        data = json.loads(sidecar.read_text(encoding="utf-8"))
-        data["path"] = f"media/{media_name}"
-        items.append(data)
-    items.sort(key=lambda d: d.get("added_at") or "", reverse=True)
-    return items
-
-
-def _matches_media(item: dict[str, Any], q: str, kind: str | None, folder: str | None) -> bool:
-    if kind and item.get("kind") != kind:
-        return False
-    if folder is not None and (item.get("folder") or "") != folder:
-        return False
-    if q:
-        src = item.get("source") or {}
-        haystack = "\n".join(
-            str(v)
-            for v in (
-                item.get("filename"),
-                item.get("title"),
-                item.get("notes"),
-                item.get("folder"),
-                src.get("title"),
-                src.get("uploader"),
-                src.get("webpage_url") or src.get("url"),
-            )
-            if v
-        ).lower()
-        if not all(term in haystack for term in q.lower().split()):
-            return False
-    return True
-
-
-def _media_sort_key(item: dict[str, Any], sort: str) -> Any:
-    name = (item.get("title") or item.get("filename") or "").lower()
-    added = item.get("added_at") or ""
-    size = item.get("size") or 0
-    if sort == "name":
-        return name
-    if sort == "size":
-        return -size
-    return added  # newest / oldest both key on added_at (direction below)
-
-
-def paginate_media(
-    items: list[dict[str, Any]],
-    *,
-    q: str | None = None,
-    kind: str | None = None,
-    folder: str | None = None,
-    sort: str = "newest",
-    limit: int = 200,
-    offset: int = 0,
-) -> dict[str, Any]:
-    """Filter, sort, and slice a media listing server-side, with facet counts
-    over the whole filtered set so the browse UI's chips stay accurate under
-    paging. ``offset``/``limit`` page a stable sorted list; the caller turns the
-    returned ``next_cursor`` back into the next ``offset``."""
-    filtered = [it for it in items if _matches_media(it, q or "", kind, folder)]
-
-    kind_counts: dict[str, int] = {}
-    folder_counts: dict[str, int] = {}
-    for it in filtered:
-        k = it.get("kind") or "other"
-        kind_counts[k] = kind_counts.get(k, 0) + 1
-        f = it.get("folder") or ""
-        folder_counts[f] = folder_counts.get(f, 0) + 1
-
-    filtered.sort(key=lambda it: _media_sort_key(it, sort), reverse=(sort == "newest"))
-
-    total = len(filtered)
-    page = filtered[offset : offset + limit]
-    next_offset = offset + limit
-    next_cursor = str(next_offset) if next_offset < total else None
-    return {
-        "items": page,
-        "next_cursor": next_cursor,
-        "total": total,
-        "facets": {"kind_counts": kind_counts, "folder_counts": folder_counts},
-    }
+    return case.list_media_items()
 
 
 def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, Any]:
@@ -848,7 +760,9 @@ def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, 
         if entity_patch:
             case.update_entity(entity["id"], entity_patch)
 
-    return {**data, "path": rel_path}
+    indexed = {**data, "path": rel_path}
+    case.upsert_media_item(indexed, entity_id=entity["id"] if entity else None)
+    return indexed
 
 
 def delete_media_files(case: Case, rel_path: str) -> None:
@@ -862,6 +776,7 @@ def delete_media_files(case: Case, rel_path: str) -> None:
     data = None
     if sidecar.exists():
         data = json.loads(sidecar.read_text(encoding="utf-8"))
+    case.remove_media_item(rel_path)
     media_path.unlink(missing_ok=True)
     sidecar.unlink(missing_ok=True)
     if data and data.get("thumbnail"):

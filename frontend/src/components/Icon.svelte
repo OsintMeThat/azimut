@@ -1,8 +1,8 @@
-<script>
-  /** Inline icon set (24×24, stroke-based, lucide-style). No external assets. */
-  let { name, size = 18, stroke = 1.8 } = $props();
-
-  const paths = {
+<script module>
+  /** Inline icon set (24×24, stroke-based, lucide-style). No external assets.
+   *  Exported so code that has to build SVG outside a component (the Leaflet
+   *  marker icons) draws from this one set instead of copying paths. */
+  export const paths = {
     // navigation / tools
     media: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm0 11 4.5-4.5a1 1 0 0 1 1.4 0L14 15.5m-1.5-1.5 2.6-2.6a1 1 0 0 1 1.4 0L21 15M9 9.5h.01',
     satellite: 'M9 4.2 3.6 6.4a1 1 0 0 0-.6.9v11.2a1 1 0 0 0 1.4.9L9 17.4l6 2.4 5.4-2.2a1 1 0 0 0 .6-.9V5.5a1 1 0 0 0-1.4-.9L15 6.6 9 4.2Zm0 0v13.2M15 6.6v13.2',
@@ -68,6 +68,7 @@
     hand: 'M8 12V6a1.5 1.5 0 0 1 3 0v5m0-6.5a1.5 1.5 0 0 1 3 0V11m0-5a1.5 1.5 0 0 1 3 0v9a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L3.5 15A1.6 1.6 0 0 1 6 13.2l2 1.8',
     inspect: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm9 16-4.35-4.35M8 11h6m-3-3v6',
     crop: 'M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14',
+    screen: 'M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm5 15h6m-3-4v4',
     reset: 'M4 9a8 8 0 1 1-1.6 4.7M4 9H1m3 0V6',
     undo: 'M8 5 4 9l4 4M4 9h10a6 6 0 0 1 0 12h-4',
     redo: 'm16 5 4 4-4 4m4-4H10a6 6 0 0 0 0 12h4',
@@ -82,6 +83,10 @@
     sun: 'M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10ZM12 1v3M12 20v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1 12h3M20 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1',
     moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z',
   };
+</script>
+
+<script>
+  let { name, size = 18, stroke = 1.8 } = $props();
 </script>
 
 <svg

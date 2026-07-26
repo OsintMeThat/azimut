@@ -261,6 +261,28 @@ a:hover {
   border-color: transparent;
 }
 
+.btn-ok {
+  background: var(--ok);
+  border-color: transparent;
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.btn-ok:hover:not(:disabled, .disabled) {
+  background: color-mix(in srgb, var(--ok) 84%, white);
+  border-color: transparent;
+}
+
+.btn-info {
+  background: var(--info);
+  border-color: transparent;
+  color: var(--bg-1);
+  font-weight: 600;
+}
+.btn-info:hover:not(:disabled, .disabled) {
+  background: color-mix(in srgb, var(--info) 84%, white);
+  border-color: transparent;
+}
+
 .btn-danger {
   color: var(--danger);
 }
@@ -408,6 +430,13 @@ a:hover {
 .tool-header .sub {
   font-size: var(--fs-sm);
   color: var(--text-3);
+}
+/* The name of what the tool is editing, next to the tool's own title. Inspect,
+   the Proof Composer and the Post Composer all name their work this way, and
+   the name is the filename it saves under. */
+.tool-header .title-input {
+  width: min(320px, 26vw);
+  font-weight: 600;
 }
 .tool-body {
   flex: 1;

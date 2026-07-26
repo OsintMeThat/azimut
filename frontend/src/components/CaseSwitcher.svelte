@@ -168,7 +168,7 @@
           <Icon name="x" size={15} /> Close case (one-shot mode)
         </button>
       {/if}
-      {#if named.length + scratches.length > 6}
+      {#if named.length + scratches.length > 6 || search.trim()}
         <div class="search-row">
           <SearchInput bind:value={search} placeholder="Find a case…" width="100%" />
         </div>
@@ -264,8 +264,7 @@
           You will lose everything in “{delTarget.name}”.
         </p>
         <p class="warn-body">
-          This permanently deletes the whole case folder, including its media,
-          satellite crops, proofs, exports and notes. It cannot be undone.
+          This deletes the case folder and all its contents; it cannot be undone.
         </p>
       </div>
     </div>

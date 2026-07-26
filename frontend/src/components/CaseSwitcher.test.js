@@ -20,6 +20,12 @@ describe('CaseSwitcher search', () => {
   it('debounces a server query so a long list is searchable end to end', () => {
     expect(source).toContain('refreshCaseList({ q })');
   });
+
+  it('keeps the search box while a query is active, even if it filters below the threshold', () => {
+    // the server query rewrites caseState.list to the filtered result, so a
+    // gate reading only the (now-shrunk) list would hide its own box mid-search
+    expect(source).toContain('named.length + scratches.length > 6 || search.trim()');
+  });
 });
 
 describe('refreshCaseList', () => {

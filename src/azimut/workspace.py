@@ -1,16 +1,17 @@
-"""Case workspace: create/list/open cases, scratch cases, entities and links.
+"""Create, list and open case and scratch workspaces.
 
 A case is a plain directory (spec §4):
 
     <case>/
-    ├── case.json      # metadata + entities + links
+    ├── case.json      # case manifest
+    ├── case.db        # entities, links, folders and jobs
     ├── notes.md       # free-form case notes
     ├── media/         # imported/downloaded media + satellite crops + sidecars
     ├── proofs/        # composed proofs (PNG + editable JSON spec)
     └── exports/       # post drafts, reports
 
-One-shot mode uses a *scratch* case under ``scratch/`` — same layout, same code
-path — which can be promoted (moved) into ``cases/`` at any time (spec §3.3).
+One-shot mode uses the same layout under ``scratch/`` and can be promoted into
+``cases/`` (spec §3.3).
 """
 
 from __future__ import annotations
@@ -35,17 +36,11 @@ if TYPE_CHECKING:
 
 CASE_SUBDIRS = ("media", "notes", "proofs", "exports", "inspect", "search")
 
-# On-disk schema. A newer Azimut opens an older case by running the migrations
-# below up to the current number on first open; a case written by a *newer*
-# Azimut (higher schema) is refused rather than mangled (spec §7, forward
-# compatibility). Bump CASE_SCHEMA in the same change that adds a migration.
+# On-disk schema. Older cases migrate on open; newer schemas are refused.
+# Bump CASE_SCHEMA with every migration.
 #
-# The graph lived inside case.json through schema 2 ("json" storage). Schema 3
-# moves it into a per-case SQLite `case.db` ("sqlite" storage) and shrinks
-# case.json to a manifest. JSON_SCHEMA is the last json-storage schema: migrate()
-# runs the json-shape migrations up to it, then activates SQLite to reach
-# CASE_SCHEMA. An older Azimut that predates schema 3 sees a higher number and
-# refuses, the same guarantee the schema check has always given.
+# Schema 3 moves the graph from case.json into case.db. JSON_SCHEMA marks the
+# last JSON graph schema used by migration.
 JSON_SCHEMA = 2
 CASE_SCHEMA = 3
 
@@ -446,9 +441,9 @@ class Case:
     # -- graph reads (CaseRepository boundary) ------------------------------
     #
     # The one way engine and API code reads the graph: no caller reaches into
-    # the raw case.json shape any more, so the SQLite backend (Step 2) can
-    # answer these without materialising the whole file. `read()` above stays
-    # the JSON implementation detail, used internally and by storage tests.
+    # the raw case.json shape. The SQLite backend answers these without
+    # materialising the manifest. `read()` above stays the JSON implementation
+    # detail used internally and by storage tests.
 
     def _graph(self) -> "SqliteCase":
         """The SQLite graph backend. Every opened case is on the sqlite storage
@@ -497,12 +492,13 @@ class Case:
         query: str | None = None,
         folder: str | None = None,
         unfiled: bool = False,
+        recursive: bool = False,
     ) -> dict[str, Any]:
         """A bounded, filtered page of the catalog (Step 5), paged with an indexed
         rowid keyset."""
         return self._graph().page_entities(
             limit=limit, cursor=cursor, types=types, status=status,
-            query=query, folder=folder, unfiled=unfiled,
+            query=query, folder=folder, unfiled=unfiled, recursive=recursive,
         )
 
     def catalog_summary(self) -> dict[str, Any]:
@@ -512,8 +508,48 @@ class Case:
     def list_links(self) -> list[dict[str, Any]]:
         return self._graph().list_links()
 
+    def upsert_media_item(
+        self, item: dict[str, Any], *, entity_id: str | None = None
+    ) -> None:
+        self._graph().upsert_media_item(item, entity_id=entity_id)
+
+    def remove_media_item(self, path: str) -> None:
+        self._graph().remove_media_item(path)
+
+    def list_media_items(self) -> list[dict[str, Any]]:
+        return self._graph().list_media_items()
+
+    def media_items_by_paths(self, paths: list[str]) -> list[dict[str, Any]]:
+        return self._graph().media_items_by_paths(paths)
+
+    def page_media_items(
+        self,
+        *,
+        q: str | None = None,
+        kind: str | None = None,
+        category: str | None = None,
+        folder: str | None = None,
+        sort: str = "newest",
+        direction: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        return self._graph().page_media_items(
+            q=q,
+            kind=kind,
+            category=category,
+            folder=folder,
+            sort=sort,
+            direction=direction,
+            limit=limit,
+            offset=offset,
+        )
+
     def links_of(self, entity_id: str) -> list[dict[str, Any]]:
         return self._graph().links_of(entity_id)
+
+    def count_dependents(self, *, link_type: str, from_type: str) -> dict[str, int]:
+        return self._graph().count_dependents(link_type=link_type, from_type=from_type)
 
     def get_entity(self, entity_id: str) -> dict[str, Any] | None:
         return self._graph().get_entity(entity_id)

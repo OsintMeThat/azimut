@@ -71,6 +71,7 @@ describe('Media Library bounded loading', () => {
     expect(source).toContain('buildMediaQuery(caseState.current?.id');
     // the browse view must not fetch the whole media list on mount
     expect(source).not.toMatch(/api\.get\(`\/api\/cases\/\$\{[^}]+\}\/media`\)/);
+    expect(source).toContain('category: catFilter');
   });
 
   it('shares the SearchInput and pages the rest in with Show more', () => {
@@ -82,6 +83,109 @@ describe('Media Library bounded loading', () => {
 
   it('clears the previous case before loading the next', () => {
     expect(source).toContain('pl.clear()');
+  });
+
+  it('resets broken-thumbnail flags on case change so they never leak across cases', () => {
+    // During a case switch there is one render where the new case id is paired
+    // with the old case's items, so each <img> 404s and reports into
+    // brokenThumbs. Those flags must not survive into the next case or they hide
+    // that case's ready thumbnails until a page reload.
+    const effect = source.slice(
+      source.indexOf('const id = caseState.current?.id;'),
+      source.indexOf('if (id) pl.reload();')
+    );
+    expect(effect).toContain('pl.clear()');
+    expect(effect).toContain('brokenThumbs = new Set()');
+  });
+});
+
+describe('Media Library search empty state', () => {
+  it('keeps the search bar available when a search has no matches', () => {
+    expect(source).toContain('const browseFiltersActive = $derived(');
+    expect(source).toContain('query.length > 0 || catFilter !== null || folderFilter !== null');
+    expect(source).toContain('const showBrowseBar = $derived(items.length > 0 || browseFiltersActive)');
+    expect(source).toContain('{#if showBrowseBar}');
+    expect(source).toContain('{#if !items.length && !jobs.length && !browseFiltersActive}');
+  });
+
+  it('describes media fields without mentioning notes', () => {
+    expect(source).toContain('placeholder="Search name, source…"');
+    expect(source).not.toContain('placeholder="Search name, notes, source…"');
+  });
+});
+
+describe('Media Library browse controls', () => {
+  it('separates satellite captures from generic Images', () => {
+    expect(source).toContain("match: isGenericImage");
+    expect(source).toContain("match: isSatelliteMedia");
+    expect(source).toContain('mediaDisplayKind(item)');
+  });
+
+  it('offers grids plus a plain, sortable details list', () => {
+    expect(source).toContain("let sort = $state('name')");
+    expect(source).toContain("let view = $state('large')");
+    expect(source).toContain("{ id: 'small', label: 'Small'");
+    expect(source).toContain("{ id: 'large', label: 'Large'");
+    expect(source).toContain("{ id: 'list', label: 'List'");
+    expect(source).toContain('onSortSelect');
+    expect(source).toContain('class:compact={view === \'small\'}');
+    expect(source).toContain("{#if view === 'list'}");
+    expect(source).toContain('class="media-list"');
+    expect(source).toContain('const LIST_SORTS = [');
+    expect(source).toContain('function setHeaderSort(next)');
+    expect(source).toContain('class="media-row media-head"');
+    expect(source).toContain('class="media-row" class:focused={item.path === focusedPath}');
+    expect(source).not.toContain('.list-view .media-card');
+  });
+
+  it('keeps the browse bar and list headers visible while the results scroll', () => {
+    expect(source).toContain('.folder-bar {\n    position: sticky;\n    top: 0;');
+    expect(source).toContain('.media-head {\n    position: sticky;\n    top: 0;');
+    // The outer tool body owns vertical scrolling, so the header must not be
+    // trapped in a nested scrolling container.
+    expect(source).not.toContain('.media-list {\n    overflow-x: auto;');
+  });
+
+  it('uses one fixed grid definition for the header and each media row', () => {
+    expect(source).toContain('--media-columns: 54px minmax(180px, 1fr) 90px 82px minmax(100px, 0.45fr) 132px 168px;');
+    expect(source).toContain('grid-template-columns: var(--media-columns);');
+    expect(source).not.toContain('132px auto;');
+  });
+
+  it('uses one folder dropdown and keeps its default unfiltered', () => {
+    expect(source).toContain('class="select folder-select"');
+    expect(source).toContain("value={folderFilter ?? ''}");
+    expect(source).toContain('<option value="">All folders</option>');
+    expect(source).toContain('onFolderSelect');
+    expect(source).toContain('folder: folderFilter');
+    expect(source).toContain('pl.facets?.folder_counts');
+  });
+
+  it('uses one dropdown for type and source filters', () => {
+    expect(source).toContain('class="select category-select"');
+    expect(source).toContain("value={catFilter ?? ''}");
+    expect(source).toContain('<option value="">All types</option>');
+    expect(source).toContain('onCategorySelect');
+    expect(source).toContain('{c.label} ({c.count})');
+    expect(source).toContain('pl.facets?.category_counts?.[c.key]');
+    expect(source).toContain('reloadIfServerBacked();');
+    expect(source).not.toContain('class="folder-chip"');
+  });
+
+  it('resets the other facet when a folder/type combination is empty', () => {
+    expect(source).toContain('hasMediaForFilters(items');
+    expect(source).toContain('if (resetCategory) catFilter = null');
+    expect(source).toContain('if (resetFolder) {');
+    expect(source).toContain('folderFilter = null;');
+  });
+
+  it('offers a right-side reset button for all browse filters', () => {
+    expect(source).toContain('function resetFilters()');
+    expect(source).toContain("query = '';\n    catFilter = null;\n    folderFilter = null;\n    sort = 'name';\n    sortDirection = 'asc';");
+    expect(source).toContain('class="btn btn-ghost btn-sm reset-filters"');
+    expect(source).toContain('Reset filters');
+    expect(source).toContain('<Icon name="reset" size={13} /> Reset filters');
+    expect(source).toContain('disabled={!filtersActive}');
   });
 });
 

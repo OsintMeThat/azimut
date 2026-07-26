@@ -11,13 +11,15 @@ describe('buildMediaQuery', () => {
       buildMediaQuery('c1', {
         q: 'bridge kyiv',
         kind: 'image',
+        category: 'satellite',
         folder: 'Sources/Telegram',
         sort: 'name',
+        direction: 'desc',
         limit: 50,
         cursor: '2',
       })
     ).toBe(
-      '/api/cases/c1/media/page?q=bridge+kyiv&kind=image&folder=Sources%2FTelegram&sort=name&limit=50&cursor=2'
+      '/api/cases/c1/media/page?q=bridge+kyiv&kind=image&category=satellite&folder=Sources%2FTelegram&sort=name&direction=desc&limit=50&cursor=2'
     );
   });
 

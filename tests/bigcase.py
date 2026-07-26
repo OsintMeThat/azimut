@@ -1,14 +1,8 @@
-"""Synthetic large-case generator for the storage/performance baseline.
+"""Synthetic large-case generator for storage and migration tests.
 
-Step 0 of docs/STORAGE_AND_PERFORMANCE.md: a repeatable fixture that stresses
-the current monolithic ``case.json`` the way a real large investigation would,
-so the JSON baseline (bench/case_baseline.py) and the later JSON-vs-SQLite
-contract tests measure the same shape.
-
-Deliberately built by writing ``case.json`` **once** rather than by calling
-``Case.add_entity`` per item: the whole point of the migration is that each such
-call rewrites the entire file, so building 10k entities that way would itself be
-O(n²). The generator constructs the graph in memory and writes it in one go.
+The fixture builds a repeatable legacy graph for the one-way SQLite importer.
+It writes the import source once so large tests stay fast, then callers open it
+through the same migration boundary as the application.
 
 Standard library only, and it lives under ``tests/`` so hatchling never packages
 it into the wheel or the frozen binaries (see the doc's packaging constraints).
@@ -39,7 +33,7 @@ _BASE_TIME = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
 @dataclass
 class BigCaseSummary:
-    """What was planted, so tests and the bench can assert against it."""
+    """What was planted so storage and release tests can assert against it."""
 
     case_id: str
     entities: int = 0
@@ -94,10 +88,9 @@ def build_big_case(
     seeded, so the same arguments always produce byte-identical graph rows.
     """
     rng = random.Random(seed)
-    # A legacy json case: build the directory skeleton, then write the whole graph
-    # into case.json in one pass (the migration source, and what the JSON baseline
-    # benchmarks). `Case.create` only makes sqlite cases now, so the skeleton is
-    # built directly; opening this case migrates it to sqlite.
+    # Build the legacy import source in one write. `Case.create` only makes
+    # SQLite cases, so this fixture creates the directory directly and callers
+    # open it through the one-way migration path.
     parent = config.cases_dir()
     parent.mkdir(parents=True, exist_ok=True)
     path = parent / _slugify(name)

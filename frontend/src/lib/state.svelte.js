@@ -288,7 +288,7 @@ export async function ensureCase() {
   const scratch = await api.post('/api/cases/scratch');
   await refreshCaseList();
   await openCase(scratch.id);
-  toast('Scratch session started — “Keep as case…” to save it for good', 'info');
+  toast('Scratch session started. Use “Keep as case…” to save it', 'info');
   return caseState.current;
 }
 

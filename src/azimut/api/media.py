@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, UploadFile
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl
 
 from .. import config, jobs
 from ..engine import media as media_engine
@@ -40,7 +40,11 @@ class ThumbRegenIn(BaseModel):
     path: str | None = None
 
 
-def _with_thumb_state(case: Case, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+class MediaMetadataIn(BaseModel):
+    paths: list[str] = Field(max_length=500)
+
+
+def with_thumb_state(case: Case, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Tag each media item with a ``thumb_state`` the grid renders: ``ready`` when
     the cached file is present, ``queued``/``running``/``failed`` from its
     thumbnail job while the worker is on it, else ``none`` (no thumbnail, e.g. an
@@ -67,7 +71,7 @@ def _with_thumb_state(case: Case, items: list[dict[str, Any]]) -> list[dict[str,
 @router.get("/cases/{case_id}/media")
 def list_media(case_id: str) -> list[dict[str, Any]]:
     case = get_case(case_id)
-    return _with_thumb_state(case, media_engine.list_media(case))
+    return with_thumb_state(case, media_engine.list_media(case))
 
 
 @router.get("/cases/{case_id}/media/page")
@@ -75,8 +79,10 @@ def page_media(
     case_id: str,
     q: str | None = None,
     kind: str | None = None,
+    category: str | None = None,
     folder: str | None = None,
     sort: str = "newest",
+    direction: str | None = None,
     limit: int = 200,
     cursor: str | None = None,
 ) -> dict[str, Any]:
@@ -84,23 +90,35 @@ def page_media(
     (Media Library, Files). Small cases return one page with a null
     ``next_cursor``, so the client filters in memory with no further calls; a
     large case pages via ``cursor`` and searches server-side via ``q``.
-    ``facets`` counts the whole filtered set so category/folder chips stay
+    ``facets`` counts the whole filtered set so category/folder controls stay
     accurate. The unbounded ``GET .../media`` stays for consumers that need the
-    full list (pickers, satellite crops, derivation)."""
+    full index (pickers, satellite crops, derivation)."""
     case = get_case(case_id)
     limit = max(1, min(limit, 500))
     offset = int(cursor) if cursor and cursor.isdigit() else 0
-    result = media_engine.paginate_media(
-        media_engine.list_media(case),
+    result = case.page_media_items(
         q=q,
         kind=kind,
+        category=category,
         folder=folder,
         sort=sort,
+        direction=direction,
         limit=limit,
         offset=offset,
     )
-    result["items"] = _with_thumb_state(case, result["items"])
+    result["items"] = with_thumb_state(case, result["items"])
     return result
+
+
+@router.post("/cases/{case_id}/media/metadata")
+def media_metadata(case_id: str, body: MediaMetadataIn) -> list[dict[str, Any]]:
+    """Thumbnail, kind and size metadata for the paths on the current Files page."""
+    case = get_case(case_id)
+    try:
+        items = case.media_items_by_paths(body.paths)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return with_thumb_state(case, items)
 
 
 @router.post("/cases/{case_id}/media/thumbnails/regenerate")

@@ -156,6 +156,45 @@ async function init() {
 
   const paired = await loadCases($("case"), stored);
 
+  // Saving the point needs no pixels — only a position. It stays out of reach
+  // until both coordinates are there, parsed from the URL or typed above.
+  const placeBtn = $("save-place");
+  const syncPlaceButton = () => {
+    placeBtn.disabled =
+      !paired || numOrNull("lat") === null || numOrNull("lon") === null;
+  };
+  for (const id of ["lat", "lon"]) $(id).addEventListener("input", syncPlaceButton);
+  syncPlaceButton();
+
+  placeBtn.addEventListener("click", async () => {
+    placeBtn.disabled = true;
+    const body = new FormData();
+    body.append("url", tab.url);
+    body.append("case_id", $("case").value);
+    body.append("title", $("title").value.trim());
+    for (const k of ["lat", "lon", "zoom", "bearing"]) {
+      const v = numOrNull(k);
+      if (v !== null) body.append(k, String(v));
+    }
+    body.append("extension", api.runtime.getManifest().version);
+    try {
+      const r = await fetch(`${stored.backendUrl}/api/ingest/place`, {
+        method: "POST",
+        headers: { "X-Azimut-Token": stored.token },
+        body,
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
+      // reuse whatever case this landed in, including a freshly minted scratch
+      const saved = await r.json().catch(() => ({}));
+      if (saved.case_id) api.storage.local.set({ lastCaseId: saved.case_id });
+      status("Place saved.", "ok");
+      setTimeout(() => window.close(), 700);
+    } catch (e) {
+      syncPlaceButton();
+      status(`Could not save: ${e.message}`, "error");
+    }
+  });
+
   $("capture-area").addEventListener("click", async () => {
     if (!paired) return;
     // half a coordinate would 422 server-side; catch it where it's fixable
