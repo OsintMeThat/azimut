@@ -111,13 +111,19 @@ def generate(case: "CaseType", rel_media: str, sha256: str, kind: str) -> str | 
     thumb_rel = thumb_relpath(sha256, kind)
     if thumb_rel is None:
         return None
+    # Create .thumbs before resolving into it: several threads can race to render
+    # distinct thumbnails for the same case at once, and Path.resolve() walking a
+    # not-yet-fully-created directory concurrently with its own mkdir is exactly
+    # the Windows CreateDirectory race ensure_dir works around elsewhere, except
+    # here it surfaces as a bogus "path escapes the case directory" instead of a
+    # retryable PermissionError.
+    ensure_dir(_thumb_dir(case))
     thumb_path = case.resolve_inside(thumb_rel)
     if thumb_path.exists():
         return thumb_rel
     media_path = case.resolve_inside(rel_media)
     if not media_path.exists():
         raise ThumbnailError(f"media file missing: {rel_media}")
-    ensure_dir(thumb_path.parent)
     tmp = thumb_path.with_name(f".{uuid.uuid4().hex}.tmp.jpg")
     try:
         produced = _render(media_path, tmp, kind)
