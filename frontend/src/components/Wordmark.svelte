@@ -1,19 +1,29 @@
 <script>
-  export let height = 13;
+  let { height = 13 } = $props();
 </script>
 
-<!-- AZIMUT lettering from the brand logo (frontend/src/assets/logo-source.svg),
-     kept as vector so it scales with the mark. Coordinates verbatim from the source. -->
-<svg {height} viewBox="285 1200 1225 194" aria-label="Azimut">
-  <g fill="var(--brand-ink, rgb(203,193,181))">
-    <path d="M 386.806 1206.85 L 406.791 1206.65 C 438.322 1267.19 471.856 1327.3 502.947 1387.95 L 476.826 1388 L 399.896 1244.09 C 398.633 1241.84 398.212 1241.38 396.679 1239.3 C 394.17 1241.25 322.694 1375.93 316.247 1388.03 L 290.282 1388 C 322.057 1327.4 354.232 1267.02 386.806 1206.85 z" />
-    <path transform="translate(-35 0)" d="M 593.024 1206.88 C 645.808 1205.92 701.57 1206.88 754.594 1206.92 L 754.545 1221.64 C 712.636 1269.72 668.106 1318.07 625.616 1365.98 L 755.368 1366.15 L 755.514 1388.04 C 700.985 1387 643.129 1388.01 588.33 1388.08 L 588.281 1373.82 C 630.958 1325.33 673.893 1277.08 717.085 1229.05 C 676.116 1228.57 634.048 1228.98 593.005 1228.97 L 593.024 1206.88 z" />
-    <path transform="translate(-92 0)" d="M 862.025 1206.82 L 884.691 1206.83 L 884.787 1387.97 L 862.017 1387.98 L 862.025 1206.82 z" />
-    <path transform="translate(-157 0)" d="M 1193.47 1206.69 L 1215.03 1206.77 L 1214.96 1387.94 L 1192.03 1388.11 L 1192 1275.5 L 1191.97 1243.2 C 1167.25 1269.32 1138.9 1301.68 1115.46 1328.96 L 1100.14 1328.98 C 1074.61 1301.76 1048.9 1271.14 1023.71 1243.12 C 1022.8 1290.98 1023.59 1340.01 1023.45 1388.02 L 1000.77 1388 L 1000.52 1206.69 L 1022.44 1206.87 C 1049.64 1235.2 1081.23 1273.04 1107.65 1302.94 C 1136.31 1272.08 1164.78 1238.14 1193.47 1206.69 z" />
-    <path transform="translate(-218 0)" d="M 1326.08 1206.7 L 1349.39 1206.82 C 1350 1237.2 1349.71 1270.97 1349.27 1301.77 C 1346.75 1346.04 1365.31 1366.48 1409.68 1366.63 C 1479.42 1366.86 1477.23 1334.68 1477.18 1280.26 L 1477.09 1206.85 L 1499.94 1206.77 L 1499.9 1227.93 L 1500 1282.31 C 1500.04 1311.23 1503.24 1344.94 1481.12 1367.19 C 1450.39 1398.23 1375.76 1398.01 1344.91 1367.57 C 1322.02 1344.98 1326.06 1307.84 1326.09 1278.03 L 1326.08 1206.7 z" />
-    <path transform="translate(-261 0)" d="M 1596.67 1206.82 L 1764.23 1206.8 L 1764.33 1228.97 L 1691.95 1229.02 L 1691.77 1318.25 C 1691.84 1341.5 1691.8 1364.75 1691.64 1388 L 1668.84 1388.14 L 1668.88 1228.99 L 1596.58 1228.98 C 1596.41 1221.66 1596.58 1214.15 1596.67 1206.82 z" />
+<!-- AZIMUT, drawn rather than set: five of the six letters are pure straight
+     lines, so the construction lives here instead of in a licensed font.
+     Cap height 100, stroke 15, butt caps and mitre joins. The A's apex is cut
+     flat: a mitred point there goes thin and sharp next to the squared-off M,
+     U and T. Letter positions carry pair kerning, not uniform spacing — evenly
+     spaced, the T's centred stem leaves a hole and it reads "AZIMU T". -->
+<svg {height} viewBox="-7.5 -7.5 503.3 115" aria-label="Azimut">
+  <g
+    fill="none"
+    stroke="var(--brand-ink, #e3e3e3)"
+    stroke-width="15"
+    stroke-linecap="butt"
+    stroke-linejoin="miter"
+  >
+    <path d="M0 100 25 0h13.3l25 100" />
+    <path d="M13 69h37.3" />
+    <path transform="translate(96.3 0)" d="M0 7.5h58L0 92.5h58" />
+    <path transform="translate(193.3 0)" d="M0 0v100" />
+    <path transform="translate(232.3 0)" d="M0 100V0l38 58 38-58v100" />
+    <path transform="translate(347.3 0)" d="M0 0v69a31 31 0 0 0 62 0V0" />
+    <path transform="translate(430.3 0)" d="M0 7.5h58M29 7.5V100" />
   </g>
-  <path fill="rgb(83,103,125)" d="M 366.62 1329.5 C 382.927 1329.25 399.236 1329.19 415.544 1329.31 C 418.249 1334.81 432.067 1356.51 430.802 1360.35 L 383.002 1360.66 C 380.02 1355.42 367.61 1334.32 366.62 1329.5 z" />
 </svg>
 
 <style>

@@ -187,9 +187,10 @@ instrument style of QGIS, Google Earth Pro, Resolve and Lightroom.
   exception.
 - **Copy**: no slogans or self-explanation in chrome. Empty states use one short
   sentence. Visible UI strings use `·`, `:` or a period instead of em dashes.
-- **Brand**: compass rose (`Logo.svelte`) + vector wordmark
-  (`Wordmark.svelte`), both extracted from
-  `frontend/src/assets/logo-source.svg`; favicon derives from the same rose.
+- **Brand**: north arrow (`Logo.svelte`) + drawn wordmark (`Wordmark.svelte`),
+  both defined in the components themselves. The arrow repeats in
+  `public/favicon.svg` and in the plated PNG/ICO icons that
+  `packaging/icons/render_icons.py` redraws; move those together.
   No other place uses brand lettering.
 
 ## Adding a tool (checklist for future work)
