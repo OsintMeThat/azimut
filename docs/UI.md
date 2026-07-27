@@ -151,9 +151,11 @@ stays out of the legend, which is still built from annotation colours alone.
 The Notebook places a GitHub-flavored Markdown editor beside its preview. The
 resizable split is stored locally, and Preview-only hides the editor. A note
 with a remote inline image warns that its host is contacted on every open;
-adding the image to the Case keeps it local. Markdown
-help covers supported syntax, image layout and aligned text. The Preview toolbar
-opens an A4 print view that keeps local images and omits remote media.
+adding the image to the Case keeps it local. A ```mermaid fence is drawn as a
+diagram, always light so it prints, and keeps its source with a note when the
+syntax fails. Markdown help covers supported syntax, diagrams, image layout and
+aligned text. The Preview toolbar opens an A4 print view that keeps local images
+and diagrams and omits remote media.
 
 Case Notes stays pinned while filed notes open in session tabs. Paste, drop or
 pick case media to insert it; the reference menu links case entities. Deleted

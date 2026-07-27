@@ -77,6 +77,10 @@ export function notebookPdfHtml({ title, content, origin, document = globalThis.
       th { background: #f1ece5; font-family: Arial, sans-serif; }
       tr { break-inside: avoid; page-break-inside: avoid; }
       img { display: block; max-width: 100%; height: auto; margin: 0 0 4mm; border-radius: 2pt; break-inside: avoid; page-break-inside: avoid; }
+      .mermaid-diagram { margin: 0 0 4mm; padding: 3mm; border: .5pt solid #ddd6cc; border-radius: 2pt; text-align: center; break-inside: avoid; page-break-inside: avoid; }
+      .mermaid-diagram svg { max-width: 100%; height: auto; }
+      .mermaid-diagram pre { margin: 0; padding: 0; border: 0; background: transparent; text-align: left; }
+      .mermaid-error { color: #777; font-style: italic; text-align: left; }
       .markdown-image.align-center { margin-right: auto; margin-left: auto; }
       .markdown-image.align-right { margin-right: 0; margin-left: auto; }
       .markdown-align.align-center { text-align: center; }

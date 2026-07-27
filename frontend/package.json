@@ -29,6 +29,7 @@
     "leaflet": "^1.9.4",
     "leaflet-rotate": "^0.2.8",
     "leaflet.gridlayer.googlemutant": "^0.16.0",
-    "marked": "^17.0.6"
+    "marked": "^17.0.6",
+    "mermaid": "^11.16.0"
   }
 }

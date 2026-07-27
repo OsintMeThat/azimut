@@ -55,6 +55,26 @@ describe('markdownHtml', () => {
   });
 });
 
+describe('mermaid fences', () => {
+  it('wraps the diagram source instead of rendering it as code', () => {
+    const html = markdownHtml('```mermaid\nflowchart LR\n  A --> B\n```');
+    expect(html).toContain('<div class="mermaid-diagram"><pre class="mermaid-source">');
+    expect(html).not.toContain('language-mermaid');
+    expect(html).toContain('flowchart LR');
+  });
+
+  it('escapes the source so a diagram cannot inject markup', () => {
+    const html = markdownHtml('```mermaid\nflowchart LR\n  A["<img src=x onerror=alert(1)>"] --> B\n```');
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+  });
+
+  it('leaves other fenced languages alone', () => {
+    expect(markdownHtml('```mermaidjs\nnot a diagram\n```')).toContain('language-mermaidjs');
+    expect(markdownHtml('```\nplain\n```')).toContain('<pre><code>');
+  });
+});
+
 describe('remoteImageUrls', () => {
   it('reports external inline images but not links or case media', () => {
     const source = [

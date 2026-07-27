@@ -3,6 +3,7 @@
   import { fetchAllEntities } from '../lib/catalog.js';
   import { caseState, uiState, toast, reloadCase } from '../lib/state.svelte.js';
   import { entityReference, markdownHtml, remoteImageUrls } from '../lib/markdown.js';
+  import { drawMermaidDiagrams } from '../lib/mermaid.js';
   import { createNote, deleteNote, resetCaseNotes } from '../lib/notes.js';
   import {
     clampNotebookHelpPosition, clampNotebookSplit, loadNotebookSplit, loadNotebookText,
@@ -43,6 +44,7 @@
   let markdownHelpOpen = $state(false);
   let markdownHelpCollapsed = $state(false);
   let notebookEl = $state(null);
+  let previewEl = $state(null);
   let markdownHelpEl = $state(null);
   let markdownHelpPosition = $state(null);
   let imageUploading = $state(false);
@@ -103,6 +105,13 @@
   }));
   const remoteImages = $derived(remoteImageUrls(text));
   const saving = $derived(pendingSaves > 0);
+
+  // Svelte has swapped the preview HTML by the time this runs, so any Mermaid
+  // fence in it is back to undrawn text.
+  $effect(() => {
+    preview;
+    if (previewEl) drawMermaidDiagrams(previewEl);
+  });
 
   function resetTabs(caseId) {
     tabsCaseId = caseId;
@@ -362,7 +371,10 @@
   }
 
   function downloadPdf() {
-    if (!downloadNotebookPdf({ title, content: preview })) {
+    // Read the live preview, not the sanitized string: diagrams are drawn into
+    // the DOM afterwards and would otherwise print as their source.
+    const content = previewEl?.innerHTML ?? preview;
+    if (!downloadNotebookPdf({ title, content })) {
       toast('Allow popups to save the PDF.', 'warn');
     }
   }
@@ -632,6 +644,19 @@ console.log(status);</code></pre></div>
 | Post | Pending |</code></pre>
                   <div class="example-result table-demo"><table><thead><tr><th>Source</th><th>Status</th></tr></thead><tbody><tr><td>Photo</td><td>Verified</td></tr><tr><td>Post</td><td>Pending</td></tr></tbody></table></div>
                 </div>
+                <div class="example-card">
+                  <span class="example-name">Diagram</span>
+                  <pre><code>```mermaid
+flowchart LR
+  A[Tip] --&gt; B[Check]
+  B --&gt; C[Confirmed]
+```</code></pre>
+                  <div class="example-result diagram-demo"><i>Tip</i><b></b><i>Check</i><b></b><i>Confirmed</i></div>
+                  <p class="example-note">
+                    <code>LR</code> runs left to right; <code>TD</code>, <code>RL</code> and <code>BT</code> are the
+                    other directions. Sequence, state, pie, Gantt and mindmap diagrams work too.
+                  </p>
+                </div>
               </div>
               </div>
               <div class="help-section">
@@ -702,7 +727,7 @@ console.log(status);</code></pre></div>
       <button class="splitter" aria-label="Resize writer and preview" title="Drag to resize · double-click to reset" onpointerdown={startResize} ondblclick={resetSplit} onkeydown={onSplitterKey}></button>
       <article class="pane reader">
         <div class="pane-title"><span>Preview</span><div class="preview-actions"><button class="btn btn-ghost btn-sm" title="Download PDF" aria-label="Download PDF" onclick={downloadPdf}><Icon name="download" size={14} /></button><button class="btn btn-ghost btn-sm preview-toggle" title={previewOnly ? 'Show writer' : 'Preview only'} onclick={() => (previewOnly = !previewOnly)}><Icon name={previewOnly ? 'minimize' : 'maximize'} size={14} /></button></div></div>
-        <div class="markdown" aria-label="Markdown preview" use:bindEntityLinks>{@html preview}</div>
+        <div bind:this={previewEl} class="markdown" aria-label="Markdown preview" use:bindEntityLinks>{@html preview}</div>
       </article>
     </div>
   </section>
@@ -795,6 +820,11 @@ console.log(status);</code></pre></div>
   .list-demo label { display: block; margin-top: 4px; }
   .list-demo input { margin-right: 5px; accent-color: var(--accent); }
   .rendered-code { margin: 0; padding: 9px; overflow: auto; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-2); line-height: 1.5; }
+  .diagram-demo { min-height: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 7px; }
+  .diagram-demo i { padding: 5px 9px; border: 1px solid var(--accent); border-radius: 4px; background: var(--accent-soft); font-style: normal; }
+  .diagram-demo b { position: relative; width: 22px; height: 1px; background: var(--text-3); }
+  .diagram-demo b::after { content: ''; position: absolute; top: -3px; right: -1px; border: 3.5px solid transparent; border-right: 0; border-left-color: var(--text-3); }
+  .example-note { margin: 0; padding: 0 10px 10px; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; }
   .table-demo table { width: 100%; border-collapse: collapse; }
   .table-demo th, .table-demo td { padding: 6px 7px; border: 1px solid var(--border); text-align: left; }
   .table-demo th { background: var(--bg-2); }
@@ -855,6 +885,12 @@ console.log(status);</code></pre></div>
   .markdown :global(.markdown-align.align-center) { text-align: center; }
   .markdown :global(.markdown-align.align-right) { text-align: right; }
   .markdown :global(a) { color: var(--accent); }
+  /* Diagrams are drawn light so they stay readable in the PDF export. */
+  .markdown :global(.mermaid-diagram) { margin: 0 0 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: #fff; text-align: center; overflow-x: auto; }
+  .markdown :global(.mermaid-diagram svg) { max-width: 100%; height: auto; }
+  .markdown :global(.mermaid-diagram .mermaid-source) { margin: 0; padding: 0; border: 0; background: transparent; color: #202124; text-align: left; }
+  .markdown :global(.mermaid-diagram.mermaid-failed) { border-color: var(--warn); }
+  .markdown :global(.mermaid-error) { margin: 0 0 8px; color: var(--warn); font-size: var(--fs-xs); text-align: left; }
   .preview-only { grid-template-columns: 1fr !important; }
   .preview-only .writer, .preview-only .splitter { display: none; }
   .empty { padding: 28px; color: var(--text-2); }

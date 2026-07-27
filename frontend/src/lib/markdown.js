@@ -6,7 +6,17 @@ const MEDIA_REF = /\[\[media:([A-Za-z0-9_-]+)\|([^\]]+)\]\](?:\{([^}\n]+)\})?/g;
 const IMAGE_ATTRS = /!\[([^\]]*)\]\((\S+?)(?:\s+["']([^"']*)["'])?\)\s*\{([^}\n]+)\}/g;
 const ALIGNMENT_BLOCK = /^:::\s*(left|center|right)\s*\n([\s\S]*?)^:::\s*$/gm;
 const ATTR_PARAM = '__azimut_attrs';
+/** Wrapper a ```mermaid fence renders to, and the hook lib/mermaid.js draws into. */
+export const MERMAID_CLASS = 'mermaid-diagram';
 const purify = typeof window === 'undefined' ? null : DOMPurify(window);
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
 
 function sanitize(rendered) {
   if (purify) return purify.sanitize(rendered, {
@@ -98,6 +108,16 @@ function renderer({ entities, caseId }) {
     .filter((entity) => (entity.type === 'media' || entity.type === 'capture') && entity.attrs?.path)
     .map((entity) => [entity.attrs.path, entity]));
   const value = new Renderer();
+
+  // A ```mermaid fence stays text here. Drawing it means inserting an <svg>,
+  // which the sanitizer below would strip, so the diagram is drawn later
+  // against the live preview DOM — see lib/mermaid.js.
+  value.code = function code(token) {
+    if (String(token.lang ?? '').trim().split(/\s+/)[0] === 'mermaid') {
+      return `<div class="${MERMAID_CLASS}"><pre class="mermaid-source">${escapeHtml(token.text)}</pre></div>`;
+    }
+    return Renderer.prototype.code.call(this, token);
+  };
 
   value.link = function link(token) {
     const body = this.parser.parseInline(token.tokens);

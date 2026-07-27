@@ -106,6 +106,7 @@ proof for publication.
 | ✅ **Templates** | Stores reusable proof styles and post-thread structures at workspace level. |
 | ✅ **Geo Report outputs** | Targets X, Bluesky or Mastodon and saves structured Markdown notes with evidence links. |
 | ✅ **Case Notebook** | Edits tabbed Markdown notes with local media, entity links, broken-reference markers and PDF output. |
+| ✅ **Notebook diagrams** | Draws ```mermaid fences in the preview and the PDF, loading the library only when a note holds one. |
 | ✅ **Canvas tests** | Exercises Leaflet and Konva interactions in Chromium and Firefox. |
 | ✅ **Storage platform** | Uses per-case SQLite, bounded catalog queries and a durable one-worker job queue. |
 | ✅ **Gated downloads** | Fetches login-walled media by borrowing a browser session or cookies.txt, cookie-less by default and prompted only on a wall. |
@@ -275,7 +276,10 @@ stops making sense.
   the one on-mount network call: opt-out and read-only against GitHub's releases
   feed, notes rendered as text (no HTML injection). Remote images embedded in a
   Notebook note contact their host whenever the preview opens; Notebook warns
-  about that behavior and local Case media avoids it. User-initiated imports,
+  about that behavior and local Case media avoids it. Notebook diagrams are the
+  one markup DOMPurify does not clear: Mermaid draws its SVG into the preview
+  after sanitizing, under its own `strict` level, which escapes labels and drops
+  click handlers. User-initiated imports,
   downloads and generated files have no app quota and can fill the workspace
   filesystem; disk capacity remains the user's responsibility.
 

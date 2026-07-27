@@ -22,6 +22,18 @@ describe('notebook PDF export', () => {
     expect(content).toContain('Video not included in PDF.');
   });
 
+  it('prints drawn diagrams as inline SVG', () => {
+    const document = new Window().document;
+    const content = prepareNotebookPdfContent(
+      '<div class="mermaid-diagram" data-processed="true"><svg><text>Confirmed</text></svg></div>',
+      origin,
+      document,
+    );
+
+    expect(content).toContain('<svg>');
+    expect(content).toContain('Confirmed');
+  });
+
   it('builds a print-ready A4 document with the note title', () => {
     const document = new Window().document;
     const html = notebookPdfHtml({
