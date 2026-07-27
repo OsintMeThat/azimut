@@ -151,9 +151,11 @@ stays out of the legend, which is still built from annotation colours alone.
 The Notebook places a GitHub-flavored Markdown editor beside its preview. The
 resizable split is stored locally, and Preview-only hides the editor. A note
 with a remote inline image warns that its host is contacted on every open;
-adding the image to the Case keeps it local. Markdown
-help covers supported syntax, image layout and aligned text. The Preview toolbar
-opens an A4 print view that keeps local images and omits remote media.
+adding the image to the Case keeps it local. A ```mermaid fence is drawn as a
+diagram, always light so it prints, and keeps its source with a note when the
+syntax fails. Markdown help covers supported syntax, diagrams, image layout and
+aligned text. The Preview toolbar opens an A4 print view that keeps local images
+and diagrams and omits remote media.
 
 Case Notes stays pinned while filed notes open in session tabs. Paste, drop or
 pick case media to insert it; the reference menu links case entities. Deleted
@@ -185,9 +187,10 @@ instrument style of QGIS, Google Earth Pro, Resolve and Lightroom.
   exception.
 - **Copy**: no slogans or self-explanation in chrome. Empty states use one short
   sentence. Visible UI strings use `·`, `:` or a period instead of em dashes.
-- **Brand**: compass rose (`Logo.svelte`) + vector wordmark
-  (`Wordmark.svelte`), both extracted from
-  `frontend/src/assets/logo-source.svg`; favicon derives from the same rose.
+- **Brand**: north arrow (`Logo.svelte`) + drawn wordmark (`Wordmark.svelte`),
+  both defined in the components themselves. The arrow repeats in
+  `public/favicon.svg` and in the plated PNG/ICO icons that
+  `packaging/icons/render_icons.py` redraws; move those together.
   No other place uses brand lettering.
 
 ## Adding a tool (checklist for future work)

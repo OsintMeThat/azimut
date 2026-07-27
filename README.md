@@ -20,7 +20,7 @@ to fix a point on the map.*
 | **Coordinates** | Convert common coordinate formats, copy the result, and open map or geocoding links. |
 | **Geo Proof** | Start a named proof from a reusable house style, select case panels with search, compose them in a grid or free layout, annotate with colored shapes/freehand/text, and export `proof.png` plus a re-editable spec. |
 | **Geo Report** | Turn a proof into a prepared thread for X, Bluesky, or Mastodon: coordinates, plus code, attribution, target-specific character counts, media, and a structured Markdown case note with linked evidence. |
-| **Notebook** | Tabbed Markdown notes with local media, linked case evidence, broken-reference markers and a print-ready PDF view. |
+| **Notebook** | Tabbed Markdown notes with local media, Mermaid diagrams, linked case evidence, broken-reference markers and a print-ready PDF view. |
 
 Under the hood: reusable proof and thread templates, per-case SQLite with a
 bounded catalog, a durable one-worker thumbnail queue, the map-capture browser

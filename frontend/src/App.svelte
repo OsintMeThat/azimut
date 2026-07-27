@@ -134,8 +134,8 @@
 <div class="shell">
   <header class="topbar">
     <div class="brand">
-      <Logo size={28} />
-      <span class="brand-name"><Wordmark height={12} /></span>
+      <Logo size={27} />
+      <span class="brand-name"><Wordmark height={13} /></span>
     </div>
     <CaseSwitcher />
     <div class="spacer"></div>
@@ -249,7 +249,7 @@
   .brand {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 11px;
     padding-right: 6px;
   }
   .brand-name {
