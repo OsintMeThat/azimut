@@ -9,14 +9,18 @@ case is a plain folder that can be reopened, archived or shared.
 *The name is the French word for azimuth, the compass bearing you sight along
 to fix a point on the map.*
 
-## v0.2.4: Saved work and scalable browsing
+## v0.2.5: Notebook diagrams and clearer Sentinel imagery
+
+<video src="https://github.com/OsintMeThat/azimut/releases/download/v0.2.5/azimut-demo-1920x1080.mp4" controls muted playsinline width="880"></video>
+
+[Watch the tour](https://github.com/OsintMeThat/azimut/releases/download/v0.2.5/azimut-demo-1920x1080.mp4) (2 min 30).
 
 | Tool | What it does |
 |------|--------------|
 | **Media** | Import local files or download by URL (X, Telegram, TikTok, YouTube, Instagram and more via yt-dlp, with a gallery-dl fallback for image-only posts). Public media is fetched cookie-less; a login-walled post prompts once for a browser session or an exported `cookies.txt`. Each item gets a clean local file, metadata and a SHA-256. Multi-photo posts open a picker. |
 | **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services. Nothing uploads on its own. |
 | **Inspect** | A scratch workspace over any photo or video: frame adjustments, editable crop, sharpest-frame capture, hand-made collage with per-piece warp/scale/rotate, auto-stitch to solve a panorama's layout, and ELA hints. Nothing enters the case until you save. |
-| **Satellite** | Coordinates or a place name become an imagery crop, with select-area capture, map rotation, measurement tools, reference overlays and editable AOI grids for area review. Esri/OSM by default; add a Mapbox or Google key for more basemaps. |
+| **Satellite** | Coordinates or a place name become an imagery crop, with select-area capture, map rotation, measurement tools, reference overlays and editable AOI grids for area review. Esri/OSM by default, plus Sentinel-2 with a date calendar and a cloud-ceiling slider; add a Mapbox or Google key for more basemaps. |
 | **Coordinates** | Convert common coordinate formats, copy the result, and open map or geocoding links. |
 | **Geo Proof** | Start a named proof from a reusable house style, select case panels with search, compose them in a grid or free layout, annotate with colored shapes/freehand/text, and export `proof.png` plus a re-editable spec. |
 | **Geo Report** | Turn a proof into a prepared thread for X, Bluesky, or Mastodon: coordinates, plus code, attribution, target-specific character counts, media, and a structured Markdown case note with linked evidence. |
@@ -29,18 +33,15 @@ extension, and cross-platform binaries with a bundled ffmpeg.
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
 
-New in v0.2.4:
+New in v0.2.5:
 
-- Saved places, captures, filed screenshots and proofs are easier to find,
-  preview and place on the map.
-- The case sidebar and Files now support search, filters, folder browsing,
-  multi-select filing and a details list.
-- Media and Files use bounded SQLite queries, including complete category
-  counts and search results beyond the first page.
-- Inspect, Geo Proof and Geo Report use named saves. Their pickers can search
-  and browse folders.
-- Release binaries now fetch pinned, SHA-256-verified ffmpeg archives. Images
-  above 100 MP are rejected before decode.
+- Notebook notes render `mermaid` fences as diagrams, in the preview and in the
+  PDF. The library loads only when a note holds one, and it draws offline.
+- Sentinel-2 imagery shows cloudy passes by default, with a slider to set the
+  cloud ceiling. The tiles, the date calendar and "most recent" all follow it.
+- The logo is redrawn as a north arrow that stays legible at favicon size.
+- Thumbnails no longer fail with a path error when several downloads finish at
+  once on Windows.
 
 ## Install & run
 

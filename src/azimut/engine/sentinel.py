@@ -94,22 +94,40 @@ DEFAULT_LAYER = LAYERS[0].id
 # surprises on any of the three OSes we ship.
 _LAYER_RE = re.compile(r"^[A-Z0-9_]{1,40}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# The cloud ceiling as a variant token: CC0 … CC100, and nothing else.
+_MAXCC_RE = re.compile(r"^CC(100|[0-9]{1,2})$")
 
 VARIANT_SEP = "~"
 
+# Every request states its cloud ceiling, and the default states "no ceiling".
+# A configuration instance carries a cloud-coverage data filter of its own (the
+# standard Sentinel-2 template ships 20%), and a scene above it is dropped
+# *before* rendering: the tile comes back empty, not cloudy. Left implicit, that
+# reads as the app hiding cloudy days — a date the calendar offered renders
+# black, and the coverage probe calls it a gap. So MAXCC is always sent, and
+# what filters a date is our number, not the instance's.
+DEFAULT_MAXCC = 100
 
-def wmts_url(layer: str = DEFAULT_LAYER, start: str | None = None, end: str | None = None) -> str:
+
+def wmts_url(
+    layer: str = DEFAULT_LAYER,
+    start: str | None = None,
+    end: str | None = None,
+    maxcc: int = DEFAULT_MAXCC,
+) -> str:
     """The WMTS GetTile template for one layer and window: ``{key}``/``{z}``/``{x}``/``{y}``.
 
     ``start``/``end`` (YYYY-MM-DD) become the ``TIME`` mosaicking window, which
     is inclusive of both days. Omitted, no TIME is sent and the layer's own
     default applies — "most recent", the honest default for "just show me it".
+    ``maxcc`` is the cloud ceiling in percent; scenes above it are not rendered.
     """
     url = (
         f"{BASE}/wmts/{{key}}"
         "?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0"
         f"&LAYER={layer}&TILEMATRIXSET=PopularWebMercator512"
         "&TILEMATRIX={z}&TILECOL={x}&TILEROW={y}&FORMAT=image/jpeg"
+        f"&MAXCC={int(maxcc)}"
     )
     if start and end:
         url += f"&TIME={start}/{end}"
@@ -117,43 +135,56 @@ def wmts_url(layer: str = DEFAULT_LAYER, start: str | None = None, end: str | No
 
 
 def variant_id(base_id: str, layer: str | None = None, start: str | None = None,
-               end: str | None = None) -> str:
-    """Pack a layer + window into a provider id. Mirror of ``parse_variant``.
+               end: str | None = None, maxcc: int | None = None) -> str:
+    """Pack a layer + window + cloud ceiling into a provider id. Mirror of
+    ``parse_variant``.
 
-    The default layer with no window is just the base id: the plain basemap must
-    not get a second name, or it would cache twice and read as two providers in
-    provenance.
+    The default layer with no window and no ceiling is just the base id: the
+    plain basemap must not get a second name, or it would cache twice and read
+    as two providers in provenance.
     """
     layer = layer or DEFAULT_LAYER
-    if layer == DEFAULT_LAYER and not (start and end):
+    ceiling = DEFAULT_MAXCC if maxcc is None else int(maxcc)
+    windowed = bool(start and end)
+    if layer == DEFAULT_LAYER and not windowed and ceiling == DEFAULT_MAXCC:
         return base_id
     parts = [base_id, layer]
-    if start and end:
-        parts += [start, end]
+    if windowed:
+        parts += [str(start), str(end)]
+    if ceiling != DEFAULT_MAXCC:
+        parts.append(f"CC{ceiling}")
     return VARIANT_SEP.join(parts)
 
 
-def parse_variant(spec: str) -> tuple[str, str | None, str | None]:
-    """``"SWIR~2026-05-01~2026-05-31"`` → ``("SWIR", "2026-05-01", "2026-05-31")``.
+def parse_variant(spec: str) -> tuple[str, str | None, str | None, int]:
+    """``"SWIR~2026-05-01~2026-05-31~CC20"`` → ``("SWIR", "2026-05-01", "2026-05-31", 20)``.
 
-    Raises ValueError on anything that isn't a layer-shaped name and a pair of
-    ISO dates in order. This is the validation boundary for a string that
-    arrives from a URL path and ends up as a directory name, so the *shape* is
-    an allowlist: no separators, no traversal, no free-form text, no reversed
-    windows. Membership of LAYERS deliberately isn't checked — an instance
-    serves whatever its configuration says (capabilities_layers), and a layer
-    the catalogue never heard of is the user's to ask for. A wrong one comes
-    back as Sentinel Hub's own 400, which says more than we could.
+    Raises ValueError on anything that isn't a layer-shaped name, an optional
+    pair of ISO dates in order and an optional ``CCnn`` ceiling. This is the
+    validation boundary for a string that arrives from a URL path and ends up as
+    a directory name, so the *shape* is an allowlist: no separators, no
+    traversal, no free-form text, no reversed windows. Membership of LAYERS
+    deliberately isn't checked — an instance serves whatever its configuration
+    says (capabilities_layers), and a layer the catalogue never heard of is the
+    user's to ask for. A wrong one comes back as Sentinel Hub's own 400, which
+    says more than we could.
     """
     parts = spec.split(VARIANT_SEP)
-    if len(parts) not in (1, 3):
+    if not 1 <= len(parts) <= 4:
         raise ValueError(f"malformed Sentinel-2 variant '{spec}'")
     layer = parts[0]
     if not _LAYER_RE.match(layer):
         raise ValueError(f"malformed Sentinel-2 layer '{layer}'")
-    if len(parts) == 1:
-        return layer, None, None
-    start, end = parts[1], parts[2]
+    rest = parts[1:]
+    maxcc = DEFAULT_MAXCC
+    # a ceiling only ever sits last, and no ISO date can be read as one
+    if rest and _MAXCC_RE.match(rest[-1]):
+        maxcc = int(rest.pop()[2:])
+    if not rest:
+        return layer, None, None, maxcc
+    if len(rest) != 2:
+        raise ValueError(f"malformed Sentinel-2 variant '{spec}'")
+    start, end = rest
     for value in (start, end):
         if not _DATE_RE.match(value):
             raise ValueError(f"malformed date '{value}' (expected YYYY-MM-DD)")
@@ -163,16 +194,22 @@ def parse_variant(spec: str) -> tuple[str, str | None, str | None]:
             raise ValueError(f"impossible date '{value}'") from exc
     if start > end:
         raise ValueError(f"window ends before it starts ({start} → {end})")
-    return layer, start, end
+    return layer, start, end, maxcc
 
 
-def variant_label(layer: str, start: str | None, end: str | None) -> str:
-    """How a variant reads to a human: "SWIR · 2026-05-01 → 2026-05-31"."""
+def variant_label(
+    layer: str, start: str | None, end: str | None, maxcc: int = DEFAULT_MAXCC
+) -> str:
+    """How a variant reads to a human: "SWIR · 2026-05-01 → 2026-05-31 · ≤20% cloud"."""
     known = next((entry.label for entry in LAYERS if entry.id == layer), layer)
     if start and end:
         window = start if start == end else f"{start} → {end}"
-        return f"{known} · {window}"
-    return f"{known} · most recent"
+        label = f"{known} · {window}"
+    else:
+        label = f"{known} · most recent"
+    if maxcc != DEFAULT_MAXCC:
+        label += f" · ≤{int(maxcc)}% cloud"
+    return label
 
 
 # -- date discovery (WFS) ------------------------------------------------------
@@ -308,6 +345,10 @@ def dates(
         "BBOX": f"{lat - _BBOX_PAD},{lon - _BBOX_PAD},{lat + _BBOX_PAD},{lon + _BBOX_PAD}",
         "TIME": f"{start}/{end}",
         "MAXFEATURES": str(_MAX_FEATURES),
+        # every pass, cloudy ones included: the calendar shows cover per day and
+        # the user's own ceiling decides what to grey out. A list already cut by
+        # the instance's filter would hide passes we never said we hid.
+        "MAXCC": str(DEFAULT_MAXCC),
     }
     response = fetch(
         f"{BASE}/wfs/{instance}", params=params,
@@ -340,6 +381,7 @@ def coverage(
     lon: float,
     layer: str,
     day: str,
+    maxcc: int = DEFAULT_MAXCC,
     *,
     get: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
@@ -348,13 +390,15 @@ def coverage(
     WFS supplies candidate acquisition dates. This WMS dataMask probe is the
     final authority before the UI replaces a working map with a dated layer.
     It uses the configured layer, so a custom layer is checked against its own
-    collection rather than the date catalogue's L2A assumption.
+    collection rather than the date catalogue's L2A assumption, and the same
+    cloud ceiling the tiles will carry — the probe has to be answering the
+    question the map is about to ask.
     """
     if not (-90 <= lat <= 90 and -180 <= lon <= 180):
         raise ValueError("coordinates are outside WGS84 bounds")
-    # Reuse the variant parser as the validation boundary for both URL values.
-    checked_layer, checked_day, _ = parse_variant(
-        f"{layer}{VARIANT_SEP}{day}{VARIANT_SEP}{day}"
+    # Reuse the variant parser as the validation boundary for all three values.
+    checked_layer, checked_day, _, checked_maxcc = parse_variant(
+        f"{layer}{VARIANT_SEP}{day}{VARIANT_SEP}{day}{VARIANT_SEP}CC{int(maxcc)}"
     )
 
     earth_radius = 6_378_137.0
@@ -373,6 +417,7 @@ def coverage(
         "HEIGHT": str(_COVERAGE_SIZE),
         "FORMAT": "image/png",
         "TIME": f"{checked_day}/{checked_day}",
+        "MAXCC": str(checked_maxcc),
         "EVALSCRIPT": _COVERAGE_EVALSCRIPT,
     }
     fetch = get or httpx.get
@@ -398,6 +443,7 @@ def coverage(
         "coverage": round(valid / len(values), 3),
         "date": checked_day,
         "layer": checked_layer,
+        "maxcc": checked_maxcc,
     }
 
 

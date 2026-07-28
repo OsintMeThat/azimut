@@ -12,6 +12,10 @@ function props(overrides = {}) {
     layersSource: 'instance',
     loadLayers: vi.fn(),
     date: '',
+    maxcc: 100,
+    setMaxcc: vi.fn(),
+    maxccLabel: (v) => (v >= 100 ? 'Any cloud' : `Up to ${v}%`),
+    filtered: () => false,
     month: '2026-05',
     monthLabel: () => 'May 2026',
     stepMonth: vi.fn(),
@@ -45,6 +49,26 @@ describe('SentinelPicker date safety', () => {
     expect(body).toMatch(/class="cal-day clear [^"]*has unavailable"/);
     expect(body).toContain('No imagery at the crosshair on 2026-05-11');
     expect(body).toMatch(/<button[^>]*class="cal-day clear [^"]*has unavailable"[^>]*disabled/);
+  });
+
+  it('greys out a pass over the cloud ceiling', () => {
+    const { body } = render(SentinelPicker, {
+      props: props({ maxcc: 20, passes: { '2026-05-11': { cloud: 38, granules: 1 } },
+        cloudLabel: () => '38% cloud', filtered: () => true }),
+    });
+    // above the ceiling Sentinel Hub renders nothing, so the day says why
+    // rather than costing a tile to find out
+    expect(body).toContain('over the 20% ceiling');
+    expect(body).toMatch(/<button[^>]*class="cal-day[^"]*unavailable"[^>]*disabled/);
+  });
+
+  it('shows the ceiling and only commits it on release', () => {
+    const setMaxcc = vi.fn();
+    const { body } = render(SentinelPicker, { props: props({ maxcc: 20, setMaxcc }) });
+    expect(body).toContain('Up to 20%');
+    expect(body).toMatch(/<input[^>]*type="range"/);
+    // dragging must not spend a tile per step: nothing fires from rendering
+    expect(setMaxcc).not.toHaveBeenCalled();
   });
 
   it('shows which date is being checked', () => {

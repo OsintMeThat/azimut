@@ -236,9 +236,14 @@ def sentinel_dates(lat: float, lon: float, start: str, end: str) -> dict[str, An
 
 @router.get("/satellite/sentinel/coverage")
 def sentinel_coverage(
-    lat: float, lon: float, layer: str, date: str
+    lat: float, lon: float, layer: str, date: str, maxcc: int = sentinel.DEFAULT_MAXCC
 ) -> dict[str, Any]:
-    """Verify a candidate date against the configured layer at the crosshair."""
+    """Verify a candidate date against the configured layer at the crosshair.
+
+    ``maxcc`` is the cloud ceiling the map will render with: above it Sentinel
+    Hub returns nothing, so a probe run at a different ceiling would answer a
+    question the user didn't ask.
+    """
     instance = _sentinel_instance()
     if config.usage_blocked("sentinelhub"):
         raise HTTPException(
@@ -247,7 +252,7 @@ def sentinel_coverage(
             "free tier is used; enable the override in Settings to keep going",
         )
     try:
-        result = sentinel.coverage(instance, lat, lon, layer, date)
+        result = sentinel.coverage(instance, lat, lon, layer, date, maxcc)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:

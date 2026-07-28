@@ -92,9 +92,10 @@ GOOGLE_SATELLITE_URL = "https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?sessi
 GOOGLE_JS_LOADER_URL = "https://maps.googleapis.com/maps/api/js?key={key}&v=weekly"
 # Sentinel Hub OGC WMTS (docs/IMAGERY_PROVIDERS.md): {key} is the user's
 # configuration-instance UUID, which is the whole credential — no token to mint.
-# The layer and the mosaicking window are choices, not constants, so the
-# template is built per variant in engine/sentinel.py; this is the plain one
-# (TRUE_COLOR, the layer's own default window = most recent).
+# The layer, the mosaicking window and the cloud ceiling are choices, not
+# constants, so the template is built per variant in engine/sentinel.py; this is
+# the plain one (TRUE_COLOR, the layer's own default window = most recent, and
+# no cloud filter — the instance's own would silently drop cloudy passes).
 SENTINELHUB_WMTS_URL = sentinel.wmts_url()
 
 BUILTIN_PROVIDERS: tuple[Provider, ...] = (
@@ -291,14 +292,14 @@ def get_provider(provider_id: str) -> Provider:
             if provider.id != "sentinel2":
                 raise KeyError(f"provider '{base_id}' has no variants")
             try:
-                layer, start, end = sentinel.parse_variant(spec)
+                layer, start, end, maxcc = sentinel.parse_variant(spec)
             except ValueError as exc:
                 raise KeyError(str(exc)) from exc
             return replace(
                 provider,
                 id=provider_id,
-                label=f"{provider.label} · {sentinel.variant_label(layer, start, end)}",
-                url=sentinel.wmts_url(layer, start, end).replace(
+                label=f"{provider.label} · {sentinel.variant_label(layer, start, end, maxcc)}",
+                url=sentinel.wmts_url(layer, start, end, maxcc).replace(
                     "{key}", _sentinel_key_from(provider.url)
                 ),
             )

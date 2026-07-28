@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   variantId,
+  DEFAULT_MAXCC,
+  validMaxcc,
+  maxccLabel,
+  overCloudCeiling,
+  latestAllowedPass,
   isoDay,
   daysBefore,
   validWindow,
@@ -47,6 +52,53 @@ describe('variantId', () => {
 
   it('never touches another provider', () => {
     expect(variantId('esri-world-imagery', { layer: 'SWIR' })).toBe('esri-world-imagery');
+  });
+});
+
+describe('cloud ceiling', () => {
+  it('leaves the default ceiling off the id', () => {
+    // 100 is "no filter", which is the plain basemap — naming it would file the
+    // same tiles under a second id
+    expect(variantId(SENTINEL_ID, { maxcc: DEFAULT_MAXCC })).toBe('sentinel2');
+  });
+
+  it('packs a ceiling last, after any window', () => {
+    expect(variantId(SENTINEL_ID, { maxcc: 20 })).toBe('sentinel2~TRUE_COLOR~CC20');
+    expect(
+      variantId(SENTINEL_ID, { layer: 'SWIR', from: '2026-05-01', to: '2026-05-01', maxcc: 0 })
+    ).toBe('sentinel2~SWIR~2026-05-01~2026-05-01~CC0');
+  });
+
+  it('ignores a ceiling the backend would refuse', () => {
+    expect(variantId(SENTINEL_ID, { maxcc: 150 })).toBe('sentinel2');
+    expect(variantId(SENTINEL_ID, { maxcc: 12.5 })).toBe('sentinel2');
+    expect(validMaxcc(20)).toBe(true);
+    expect(validMaxcc(-1)).toBe(false);
+  });
+
+  it('reads as a ceiling, or as no ceiling at all', () => {
+    expect(maxccLabel(100)).toBe('Any cloud');
+    expect(maxccLabel(20)).toBe('Up to 20%');
+  });
+
+  it('filters a pass over the ceiling but never one with no figure', () => {
+    expect(overCloudCeiling(38, 20)).toBe(true);
+    expect(overCloudCeiling(20, 20)).toBe(false);
+    // an unknown is not a reason to hide real imagery
+    expect(overCloudCeiling(null, 20)).toBe(false);
+  });
+
+  it('names the newest pass the ceiling still allows as "most recent"', () => {
+    const days = {
+      '2026-05-03': { cloud: 80 },
+      '2026-05-08': { cloud: 12 },
+      '2026-05-13': { cloud: 60 },
+    };
+    expect(latestAllowedPass(days, '2026-05-31', 100)).toBe('2026-05-13');
+    expect(latestAllowedPass(days, '2026-05-31', 20)).toBe('2026-05-08');
+    // a future pass is not "most recent", whatever the ceiling
+    expect(latestAllowedPass(days, '2026-05-10', 100)).toBe('2026-05-08');
+    expect(latestAllowedPass(days, '2026-05-31', 0)).toBe('');
   });
 });
 
@@ -190,7 +242,16 @@ describe('coverage checks', () => {
       lon: '2.2945',
       layer: 'FALSE_COLOR',
       date: '2026-05-11',
+      maxcc: '100',
     });
+  });
+
+  it('probes at the cloud ceiling the map will render with', () => {
+    const url = new URL(
+      coverageRequestPath({ lat: 48, lon: 2, layer: 'TRUE_COLOR', date: '2026-05-11', maxcc: 20 }),
+      'http://localhost'
+    );
+    expect(url.searchParams.get('maxcc')).toBe('20');
   });
 
   it('keeps the working date when the candidate has no imagery', () => {

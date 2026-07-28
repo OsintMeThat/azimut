@@ -11,6 +11,10 @@
     layersSource,
     loadLayers,
     date = $bindable(),
+    maxcc,
+    setMaxcc,
+    maxccLabel,
+    filtered,
     month,
     monthLabel,
     stepMonth,
@@ -27,6 +31,12 @@
     clearDate,
     loadPasses,
   } = $props();
+
+  // The readout tracks the drag; the ceiling only moves on release. Every step
+  // in between would be a provider id of its own, and Sentinel-2 tiles are
+  // billed — you pay for the number you stopped on, not the ones you passed.
+  let dragging = $state(null);
+  const shown = $derived(dragging ?? maxcc);
 </script>
 
 <div class="s2-wrap" bind:this={menuEl}>
@@ -58,6 +68,31 @@
       <div class="menu-sep" aria-hidden="true"></div>
 
       <div class="menu-row">
+        <span class="menu-label">Cloud</span>
+        <div class="cc">
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="5"
+            value={shown}
+            oninput={(e) => (dragging = Number(e.currentTarget.value))}
+            onchange={(e) => {
+              dragging = null;
+              setMaxcc(Number(e.currentTarget.value));
+            }}
+            aria-label="Maximum cloud cover"
+          />
+          <span class="cc-value mono">{maxccLabel(shown)}</span>
+        </div>
+      </div>
+      <div class="menu-hint dim">
+        Passes cloudier than this are not rendered, and drop out of the calendar.
+      </div>
+
+      <div class="menu-sep" aria-hidden="true"></div>
+
+      <div class="menu-row">
         <span class="menu-label">Date</span>
         <div class="chips">
           <button class="chip" class:on={!date} onclick={clearDate}>Most recent</button>
@@ -84,7 +119,8 @@
             {:else}
               {@const pass = passes[day]}
               {@const status = dateStatus(day)}
-              {@const unavailable = status === false}
+              {@const overCeiling = filtered(day)}
+              {@const unavailable = status === false || overCeiling}
               {@const verifying = verifyingDate === day}
               <button
                 class="cal-day {pass ? cloudClass(pass.cloud) : ''}"
@@ -94,15 +130,17 @@
                 class:verifying
                 disabled={date !== day && (!pass || passesStale || passesBusy || unavailable || !!verifyingDate)}
                 onclick={() => pickDate(day)}
-                title={unavailable
-                  ? `No imagery at the crosshair on ${day}`
-                  : verifying
-                    ? `Checking imagery for ${day}`
-                    : passesStale
-                      ? `Refreshing dates for this location`
-                      : pass
-                        ? `${day}: ${cloudLabel(pass.cloud) || 'cloud cover unknown'}`
-                        : `${day}: no Sentinel-2 pass`}
+                title={overCeiling
+                  ? `${day}: ${cloudLabel(pass.cloud)}, over the ${maxcc}% ceiling`
+                  : unavailable
+                    ? `No imagery at the crosshair on ${day}`
+                    : verifying
+                      ? `Checking imagery for ${day}`
+                      : passesStale
+                        ? `Refreshing dates for this location`
+                        : pass
+                          ? `${day}: ${cloudLabel(pass.cloud) || 'cloud cover unknown'}`
+                          : `${day}: no Sentinel-2 pass`}
               >{Number(day.slice(8))}</button>
             {/if}
           {/each}
@@ -161,6 +199,9 @@
   }
   .chip:hover { color: var(--text-1); border-color: var(--border-strong); }
   .chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .cc { display: flex; align-items: center; gap: 8px; }
+  .cc input[type='range'] { width: 120px; accent-color: var(--accent); cursor: pointer; }
+  .cc-value { font-size: 10px; color: var(--text-2); min-width: 58px; text-align: right; }
   .menu-hint { font-size: 10px; color: var(--text-3); margin: -1px 0 5px; }
   .menu-hint.dim { opacity: 0.75; }
   .menu-hint .warn, .menu-hint.warn { color: var(--warn, #e2a03f); }

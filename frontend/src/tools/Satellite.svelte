@@ -26,8 +26,13 @@
   import {
     SENTINEL_ID,
     DEFAULT_LAYER,
+    DEFAULT_MAXCC,
     variantId,
     validDay,
+    validMaxcc,
+    maxccLabel,
+    overCloudCeiling,
+    latestAllowedPass,
     cloudLabel,
     cloudClass,
     isoDay,
@@ -138,6 +143,11 @@
   // window underneath is a range, so we send day/day — but a range is a mosaic
   // of several passes, which is not a thing you can point at and date.)
   let s2Date = $state(''); // '' = the layer's default, i.e. the most recent pass
+  // Cloud ceiling, in percent. 100 = render whatever passed overhead, which is
+  // the default because the *instance* has a filter of its own (20% in the
+  // standard template) and a scene above it renders as nothing at all: without
+  // saying MAXCC=100 we would be hiding cloudy days without ever saying so.
+  let s2Maxcc = $state(DEFAULT_MAXCC);
   let s2MenuOpen = $state(false);
   let s2MenuEl = $state(); // bound to the popover wrapper — outside-click detection
   let s2Layers = $state([]); // [{id,label,hint}] — catalogue until the instance is asked
@@ -232,7 +242,9 @@
   // disk cache. For Sentinel-2 the layer and window ride *on the id*
   // (lib/sentinel.js), so none of them can be rendered from one window and
   // filed as another.
-  const displayedProviderId = $derived(variantId(displayedBaseId, { layer: s2Layer, ...s2Window }));
+  const displayedProviderId = $derived(
+    variantId(displayedBaseId, { layer: s2Layer, ...s2Window, maxcc: s2Maxcc })
+  );
   // memoized so the layer is only rebuilt when the cell actually changes
   // (i.e. crossing the z17 boost bracket), not on every zoom step
   const displayedCell = $derived(
@@ -559,8 +571,10 @@
   const s2PassPending = new Map();
   const s2CoverageCache = new Map();
   const s2PlaceKey = () => sentinelPlaceKey(center.lat, center.lon);
-  const s2CoverageKey = (day, place = s2PlaceKey(), layer = s2Layer) =>
-    `${layer}@${day}@${place}`;
+  // the ceiling is part of the question: the same day is available under 100%
+  // and a gap under 20%, so a cached answer must not outlive the number
+  const s2CoverageKey = (day, place = s2PlaceKey(), layer = s2Layer, maxcc = s2Maxcc) =>
+    `${layer}@${maxcc}@${day}@${place}`;
   let s2PassRequestId = 0;
   let s2PickRequestId = 0;
 
@@ -646,22 +660,26 @@
    */
   async function resolveS2Latest() {
     const place = s2PlaceKey();
-    if (s2LatestFor === place) return;
+    const maxcc = s2Maxcc;
+    const key = `${place}@${maxcc}`;
+    if (s2LatestFor === key) return;
     const today = isoDay(new Date());
     for (const month of [monthOf(today), addMonths(monthOf(today), -1)]) {
       const days = await fetchS2Month(month, place);
       if (days === null) return; // lookup failed — say nothing rather than guess
-      const past = Object.keys(days).filter((d) => d <= today).sort();
-      if (past.length) {
-        s2Latest = past.at(-1);
-        s2LatestFor = place;
+      // the ceiling drops cloudy passes from the tiles, so "most recent" is the
+      // newest pass it still allows, not the newest pass there is
+      const latest = latestAllowedPass(days, today, maxcc);
+      if (latest) {
+        s2Latest = latest;
+        s2LatestFor = key;
         return;
       }
     }
     // no pass in ~2 months: real (deep polar winter, persistent gaps) — the
     // pill falls back to "most recent" rather than inventing a date
     s2Latest = '';
-    s2LatestFor = place;
+    s2LatestFor = key;
   }
 
   function clearS2Date() {
@@ -675,18 +693,46 @@
     return s2CoverageCache.get(s2CoverageKey(day));
   }
 
+  /** Is this day's pass above the ceiling, i.e. filtered out of the tiles? */
+  function s2Filtered(day) {
+    return overCloudCeiling(s2Passes[day]?.cloud, s2Maxcc);
+  }
+
+  /**
+   * A new cloud ceiling. It reaches the tiles through the provider id, so the
+   * only thing left to settle is a pinned date the new ceiling excludes: that
+   * day renders nothing, so it goes back to most recent rather than to a blank
+   * map nobody asked for.
+   */
+  function setS2Maxcc(value) {
+    const ceiling = Math.round(Number(value));
+    if (!validMaxcc(ceiling) || ceiling === s2Maxcc) return;
+    s2Maxcc = ceiling;
+    if (s2Date && overCloudCeiling(s2Passes[s2Date]?.cloud, ceiling)) {
+      const cloud = cloudLabel(s2Passes[s2Date].cloud);
+      const day = s2Date;
+      clearS2Date();
+      toast(`${day} is ${cloud}, over the ${ceiling}% ceiling. Back to most recent.`, 'warn');
+    }
+  }
+
   async function pickS2Date(day) {
     if (day === s2Date) {
       clearS2Date();
       return;
     }
     if (!s2Passes[day] || s2PassesStale || s2PassesBusy || s2VerifyingDate) return;
+    if (s2Filtered(day)) {
+      toast(`${day} is ${cloudLabel(s2Passes[day].cloud)}, over the ${s2Maxcc}% ceiling.`, 'warn');
+      return;
+    }
 
     const lat = center.lat;
     const lon = center.lon;
     const place = s2PlaceKey();
     const layer = s2Layer;
-    const key = s2CoverageKey(day, place, layer);
+    const maxcc = s2Maxcc;
+    const key = s2CoverageKey(day, place, layer, maxcc);
     const known = s2CoverageCache.get(key);
     if (known === true) {
       s2Date = day;
@@ -700,13 +746,13 @@
     const requestId = ++s2PickRequestId;
     s2VerifyingDate = day;
     try {
-      const result = await api.get(coverageRequestPath({ lat, lon, layer, date: day }));
+      const result = await api.get(coverageRequestPath({ lat, lon, layer, date: day, maxcc }));
       s2CoverageCache.set(key, result.available === true);
       s2CoverageRev += 1;
       refreshUsage();
       if (requestId !== s2PickRequestId) return;
-      if (place !== s2PlaceKey() || layer !== s2Layer) {
-        toast('The map moved. Pick the date again.', 'warn');
+      if (place !== s2PlaceKey() || layer !== s2Layer || maxcc !== s2Maxcc) {
+        toast('The view changed. Pick the date again.', 'warn');
         return;
       }
       s2Date = dateAfterCoverage(s2Date, day, result.available);
@@ -746,6 +792,7 @@
     if (!mapReady || displayedBaseId !== SENTINEL_ID) return;
     center.lat;
     center.lon;
+    s2Maxcc; // a new ceiling can make a different pass the most recent one
     clearTimeout(s2LatestTimer);
     // debounced: panning must not spend a request per frame
     s2LatestTimer = setTimeout(() => resolveS2Latest().catch(() => {}), 900);
@@ -2854,6 +2901,11 @@
           {#if s2Layer !== DEFAULT_LAYER}
             <span class="tag layer">{s2LayerShort}</span>
           {/if}
+          {#if s2Maxcc !== DEFAULT_MAXCC}
+            <span class="tag" title="Passes over this cloud cover are not rendered"
+              >≤{s2Maxcc}% cloud</span
+            >
+          {/if}
         </span>
       {:else if imageryDate?.supported}
         <span
@@ -2924,6 +2976,10 @@
             layersSource={s2LayersSource}
             loadLayers={loadS2Layers}
             bind:date={s2Date}
+            maxcc={s2Maxcc}
+            setMaxcc={setS2Maxcc}
+            {maxccLabel}
+            filtered={s2Filtered}
             month={s2Month}
             {monthLabel}
             stepMonth={stepS2Month}
