@@ -282,9 +282,24 @@ def test_get_provider_variant_without_a_window_keeps_the_default_time(monkeypatc
     assert "TIME=" not in p.url
 
 
+def test_get_provider_carries_the_cloud_ceiling_into_the_url(monkeypatch, tmp_path):
+    provider = _sentinel(monkeypatch, tmp_path)
+    # the plain basemap states the default explicitly: without it the instance's
+    # own filter applies and cloudy passes render as nothing
+    assert "MAXCC=100" in provider.url
+    p = tiles.get_provider("sentinel2~TRUE_COLOR~2026-05-01~2026-05-01~CC20")
+    assert "MAXCC=20" in p.url
+    assert "TIME=2026-05-01/2026-05-01" in p.url
+    # the ceiling changes the pixels, so it is in the id the cache and a
+    # capture's provenance key on
+    assert p.id == "sentinel2~TRUE_COLOR~2026-05-01~2026-05-01~CC20"
+    assert "≤20% cloud" in p.label
+
+
 def test_get_provider_refuses_a_malformed_variant(monkeypatch, tmp_path):
     _sentinel(monkeypatch, tmp_path)
-    for bad in ("sentinel2~../etc", "sentinel2~SWIR~2026-99-01~2026-05-31", "sentinel2~a b"):
+    for bad in ("sentinel2~../etc", "sentinel2~SWIR~2026-99-01~2026-05-31", "sentinel2~a b",
+                "sentinel2~SWIR~CC101"):
         with pytest.raises(KeyError):
             tiles.get_provider(bad)
 

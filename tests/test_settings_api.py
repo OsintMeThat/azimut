@@ -529,25 +529,53 @@ def test_sentinel_coverage_checks_the_layer_and_counts_the_request(client, monke
     client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
     calls = []
 
-    def check(instance, lat, lon, layer, day):
-        calls.append((instance, lat, lon, layer, day))
+    def check(instance, lat, lon, layer, day, maxcc):
+        calls.append((instance, lat, lon, layer, day, maxcc))
         return {
             "available": False,
             "coverage": 0.0,
             "date": day,
             "layer": layer,
+            "maxcc": maxcc,
         }
 
     monkeypatch.setattr(sentinel, "coverage", check)
     body = client.get(
         "/api/satellite/sentinel/coverage"
-        "?lat=48.8584&lon=2.2945&layer=SWIR&date=2026-05-11"
+        "?lat=48.8584&lon=2.2945&layer=SWIR&date=2026-05-11&maxcc=20"
     ).json()
 
     assert body["available"] is False
-    assert calls == [("inst-uuid", 48.8584, 2.2945, "SWIR", "2026-05-11")]
+    # the probe answers for the ceiling the tiles will carry, not for 100%
+    assert calls == [("inst-uuid", 48.8584, 2.2945, "SWIR", "2026-05-11", 20)]
     settings = client.get("/api/settings").json()
     assert settings["usage"]["sentinelhub"][settings["month"]] == 1
+
+
+def test_sentinel_coverage_defaults_to_no_cloud_filter(client, monkeypatch):
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    calls = []
+
+    def check(instance, lat, lon, layer, day, maxcc):
+        calls.append(maxcc)
+        return {"available": True, "coverage": 1.0, "date": day, "layer": layer, "maxcc": maxcc}
+
+    monkeypatch.setattr(sentinel, "coverage", check)
+    client.get(
+        "/api/satellite/sentinel/coverage?lat=48&lon=2&layer=SWIR&date=2026-05-11"
+    )
+    assert calls == [100]
+
+
+def test_sentinel_coverage_refuses_a_ceiling_outside_the_scale(client):
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    # refused before anything is sent: no request, no charge
+    response = client.get(
+        "/api/satellite/sentinel/coverage"
+        "?lat=48&lon=2&layer=SWIR&date=2026-05-11&maxcc=150"
+    )
+    assert response.status_code == 422
+    assert client.get("/api/settings").json()["usage"] == {}
 
 
 def test_sentinel_coverage_rejects_bad_input_without_counting(client, monkeypatch):

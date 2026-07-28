@@ -167,7 +167,7 @@ Satellite Compare.
 ```
 https://sh.dataspace.copernicus.eu/ogc/wmts/{key}?SERVICE=WMTS&REQUEST=GetTile
   &VERSION=1.0.0&LAYER=TRUE_COLOR&TILEMATRIXSET=PopularWebMercator512
-  &TILEMATRIX={z}&TILECOL={x}&TILEROW={y}&FORMAT=image/jpeg
+  &TILEMATRIX={z}&TILECOL={x}&TILEROW={y}&FORMAT=image/jpeg&MAXCC=100
 ```
 
 `{key}` is a configuration-instance UUID from Dashboard → Configuration Utility.
@@ -179,8 +179,16 @@ because the server burns both into every tile.
 `TIME` is a **mosaicking window**, so this layer is "mosaic over range X", not "the
 imagery". Omitted, the layer's own default applies (the most recent pass).
 
-The provider id carries the layer and window:
-`sentinel2~SWIR~2026-05-01~2026-05-31`
+**`MAXCC` is always sent, and defaults to 100.** A configuration instance carries
+a cloud-coverage data filter of its own — the standard template ships 20% — and a
+scene above it is dropped before rendering, so the tile comes back empty rather
+than cloudy. Left implicit that reads as the app hiding cloudy days: a date the
+calendar offered renders black, and the dataMask probe calls it a coverage gap.
+Stating the ceiling on every request (tiles, the probe, the WFS date list) means
+what filters a date is our number, not the instance's.
+
+The provider id carries the layer, the window and the ceiling:
+`sentinel2~SWIR~2026-05-01~2026-05-31~CC20`
 (`engine/sentinel.py`, mirrored in `frontend/src/lib/sentinel.js`). That is what
 solves the cache trap this section used to warn about: the disk cache keys on
 `provider.id`, so a window in the id *is* a window in the cache key and two dates
@@ -194,6 +202,7 @@ window and file under another. `tiles.get_provider()` parses the variant;
 |--------|----|-------|
 | Layer | picker populated from **GetCapabilities** on first open | `LAYERS` in `engine/sentinel.py` is a four-entry fallback; the instance is authoritative, so unsupported layers are not offered |
 | Date | a **calendar**: candidate pass days are coloured by cloud, then checked at the crosshair | one day, not a range. Sent as `TIME=day/day` |
+| Cloud | a **slider**, 0–100%, default 100 (no filter) | lower it and cloudier passes leave the tiles, the calendar and "most recent" together. Commits on release, so a drag is not a tile per step |
 
 ### Dates come from WFS, and cost one request
 

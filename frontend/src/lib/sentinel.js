@@ -16,16 +16,68 @@ const SEP = '~';
 export const DEFAULT_LAYER = 'TRUE_COLOR';
 
 /**
- * Pack a layer + window into a provider id. The plain default (true colour,
- * most recent) stays the bare id: it must not read as a second provider.
+ * The cloud ceiling in percent, sent on every request. 100 means no filter,
+ * which is the default because a configuration instance ships one of its own
+ * (20% in the standard template) and a scene above it renders as nothing at
+ * all. Lower it and cloudy passes drop out of the calendar, out of "most
+ * recent" and out of the tiles together — one number, one meaning.
  */
-export function variantId(baseId, { layer = DEFAULT_LAYER, from = '', to = '' } = {}) {
+export const DEFAULT_MAXCC = 100;
+
+/**
+ * Pack a layer + window + cloud ceiling into a provider id. The plain default
+ * (true colour, most recent, no ceiling) stays the bare id: it must not read as
+ * a second provider.
+ */
+export function variantId(
+  baseId,
+  { layer = DEFAULT_LAYER, from = '', to = '', maxcc = DEFAULT_MAXCC } = {}
+) {
   if (baseId !== SENTINEL_ID) return baseId;
   const windowed = from && to;
-  if ((layer || DEFAULT_LAYER) === DEFAULT_LAYER && !windowed) return baseId;
+  const ceiling = validMaxcc(maxcc) ? Math.round(maxcc) : DEFAULT_MAXCC;
+  if ((layer || DEFAULT_LAYER) === DEFAULT_LAYER && !windowed && ceiling === DEFAULT_MAXCC) {
+    return baseId;
+  }
   const parts = [baseId, layer || DEFAULT_LAYER];
   if (windowed) parts.push(from, to);
+  if (ceiling !== DEFAULT_MAXCC) parts.push(`CC${ceiling}`);
   return parts.join(SEP);
+}
+
+/** True for a cloud ceiling the backend will accept: a whole 0…100. */
+export function validMaxcc(value) {
+  return Number.isFinite(value) && value >= 0 && value <= 100 && Number.isInteger(value);
+}
+
+/** How a ceiling reads in the UI. */
+export function maxccLabel(maxcc) {
+  return maxcc >= DEFAULT_MAXCC ? 'Any cloud' : `Up to ${maxcc}%`;
+}
+
+/**
+ * Is this pass above the ceiling? Sentinel Hub drops such a scene before
+ * rendering, so the day is not selectable — the calendar says so rather than
+ * spending a tile on a black square. A pass the service gave no figure for is
+ * never filtered: an unknown is not a reason to hide real imagery.
+ */
+export function overCloudCeiling(cloud, maxcc = DEFAULT_MAXCC) {
+  if (cloud === null || cloud === undefined) return false;
+  return cloud > maxcc;
+}
+
+/**
+ * The newest pass at or before `today` that the ceiling still allows — what
+ * "most recent" actually renders once a ceiling is set. `days` is the
+ * `{ 'YYYY-MM-DD': {cloud} }` map a month lookup returns.
+ */
+export function latestAllowedPass(days, today, maxcc = DEFAULT_MAXCC) {
+  return (
+    Object.keys(days || {})
+      .filter((day) => day <= today && !overCloudCeiling(days[day]?.cloud, maxcc))
+      .sort()
+      .at(-1) ?? ''
+  );
 }
 
 /** ISO date (YYYY-MM-DD) for a Date, in UTC — the calendar Sentinel-2 passes
@@ -133,12 +185,13 @@ export function sentinelPlaceKey(lat, lon) {
 }
 
 /** Local API request that verifies rendered coverage for one candidate day. */
-export function coverageRequestPath({ lat, lon, layer, date }) {
+export function coverageRequestPath({ lat, lon, layer, date, maxcc = DEFAULT_MAXCC }) {
   const query = new URLSearchParams({
     lat: String(lat),
     lon: String(lon),
     layer,
     date,
+    maxcc: String(validMaxcc(maxcc) ? maxcc : DEFAULT_MAXCC),
   });
   return `/api/satellite/sentinel/coverage?${query}`;
 }

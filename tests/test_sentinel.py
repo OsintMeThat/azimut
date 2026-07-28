@@ -44,6 +44,13 @@ def test_wmts_url_ignores_a_half_open_window():
     assert "TIME=" not in sentinel.wmts_url("SWIR", "2026-05-01", None)
 
 
+def test_wmts_url_always_states_the_cloud_ceiling():
+    # left unsaid, the instance's own filter applies (20% in the standard
+    # template) and cloudy passes come back empty rather than cloudy
+    assert "MAXCC=100" in sentinel.wmts_url()
+    assert "MAXCC=20" in sentinel.wmts_url("TRUE_COLOR", None, None, 20)
+
+
 # -- variant ids ---------------------------------------------------------------
 
 
@@ -59,7 +66,7 @@ def test_variant_id_round_trips_through_parse_variant():
     assert packed == "sentinel2~SWIR~2026-05-01~2026-05-31"
     base, _, spec = packed.partition("~")
     assert base == "sentinel2"
-    assert sentinel.parse_variant(spec) == ("SWIR", "2026-05-01", "2026-05-31")
+    assert sentinel.parse_variant(spec) == ("SWIR", "2026-05-01", "2026-05-31", 100)
 
 
 def test_variant_id_keeps_a_windowed_default_layer():
@@ -68,13 +75,13 @@ def test_variant_id_keeps_a_windowed_default_layer():
 
 
 def test_parse_variant_takes_a_bare_layer():
-    assert sentinel.parse_variant("FALSE_COLOR") == ("FALSE_COLOR", None, None)
+    assert sentinel.parse_variant("FALSE_COLOR") == ("FALSE_COLOR", None, None, 100)
 
 
 def test_parse_variant_accepts_a_layer_the_catalogue_never_heard_of():
     # an instance serves whatever its configuration says; the catalogue is a
     # default, not a gate (a wrong one comes back as Sentinel Hub's own 400)
-    assert sentinel.parse_variant("MY_CUSTOM_SCRIPT") == ("MY_CUSTOM_SCRIPT", None, None)
+    assert sentinel.parse_variant("MY_CUSTOM_SCRIPT") == ("MY_CUSTOM_SCRIPT", None, None, 100)
 
 
 @pytest.mark.parametrize(
@@ -96,11 +103,40 @@ def test_parse_variant_refuses_anything_ill_shaped(spec):
         sentinel.parse_variant(spec)
 
 
+def test_variant_id_carries_a_cloud_ceiling():
+    packed = sentinel.variant_id("sentinel2", "SWIR", "2026-05-01", "2026-05-31", 20)
+    assert packed == "sentinel2~SWIR~2026-05-01~2026-05-31~CC20"
+    assert sentinel.parse_variant(packed.partition("~")[2]) == (
+        "SWIR", "2026-05-01", "2026-05-31", 20
+    )
+
+
+def test_variant_id_carries_a_ceiling_without_a_window():
+    packed = sentinel.variant_id("sentinel2", "TRUE_COLOR", None, None, 0)
+    assert packed == "sentinel2~TRUE_COLOR~CC0"
+    assert sentinel.parse_variant(packed.partition("~")[2]) == ("TRUE_COLOR", None, None, 0)
+
+
+def test_variant_id_leaves_the_default_ceiling_off_the_id():
+    # 100 is "no filter", which is the plain basemap: naming it would cache the
+    # same tiles twice under two ids
+    assert sentinel.variant_id("sentinel2", "TRUE_COLOR", None, None, 100) == "sentinel2"
+
+
+@pytest.mark.parametrize("spec", ["SWIR~CC101", "SWIR~CC-5", "SWIR~CC", "SWIR~CC20~CC20"])
+def test_parse_variant_refuses_an_impossible_ceiling(spec):
+    with pytest.raises(ValueError):
+        sentinel.parse_variant(spec)
+
+
 def test_variant_label_reads_like_a_human_wrote_it():
     assert sentinel.variant_label("SWIR", None, None).endswith("most recent")
     assert "2026-05-01 → 2026-05-31" in sentinel.variant_label("SWIR", "2026-05-01", "2026-05-31")
     # a single-day window is a day, not a range from a day to itself
     assert sentinel.variant_label("SWIR", "2026-05-01", "2026-05-01").endswith("2026-05-01")
+    # a ceiling changes the pixels, so it is part of what the capture was from
+    assert sentinel.variant_label("SWIR", None, None, 20).endswith("≤20% cloud")
+    assert "cloud" not in sentinel.variant_label("SWIR", None, None, 100)
 
 
 # -- date discovery ------------------------------------------------------------
@@ -213,6 +249,19 @@ def test_dates_sends_a_latitude_first_bbox():
     assert lon_min < 2.0 < lon_max
 
 
+def test_dates_asks_for_every_pass_however_cloudy():
+    captured = {}
+
+    def get(url, params=None, **kwargs):
+        captured.update(params)
+        return _response(url, {"features": []})
+
+    sentinel.dates("inst-uuid", 48.0, 2.0, "2026-05-01", "2026-05-31", get=get)
+    # the calendar colours days by cloud and the user's own ceiling greys them
+    # out; a list already cut upstream would hide passes we never said we hid
+    assert captured["MAXCC"] == "100"
+
+
 def test_dates_reports_a_day_the_service_gave_no_cloud_figure_for():
     def get(url, params=None, **kwargs):
         return _response(url, {"features": [{"properties": {"date": "2026-05-01"}}]})
@@ -261,12 +310,35 @@ def test_coverage_uses_the_selected_layer_and_day():
         "coverage": 0.016,
         "date": "2026-05-11",
         "layer": "SWIR",
+        "maxcc": 100,
     }
     assert captured["url"].endswith("/ogc/wms/inst-uuid")
     assert captured["params"]["LAYERS"] == "SWIR"
     assert captured["params"]["TIME"] == "2026-05-11/2026-05-11"
     assert captured["params"]["FORMAT"] == "image/png"
     assert captured["params"]["EVALSCRIPT"]
+
+
+def test_coverage_probes_at_the_ceiling_the_map_will_render_with():
+    captured = {}
+
+    def get(url, params=None, **kwargs):
+        captured.update(params)
+        return _mask_response(url, [0] * 64)
+
+    result = sentinel.coverage(
+        "inst-uuid", 48.0, 2.0, "TRUE_COLOR", "2026-05-11", 20, get=get
+    )
+    # above the ceiling Sentinel Hub renders nothing, so a probe at 100% would
+    # promise imagery the tiles are not going to show
+    assert captured["MAXCC"] == "20"
+    assert result["maxcc"] == 20
+
+
+@pytest.mark.parametrize("maxcc", [101, -1])
+def test_coverage_rejects_an_impossible_ceiling(maxcc):
+    with pytest.raises(ValueError):
+        sentinel.coverage("inst-uuid", 48.0, 2.0, "TRUE_COLOR", "2026-05-11", maxcc)
 
 
 def test_coverage_reports_no_source_pixels():
