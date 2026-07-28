@@ -110,3 +110,78 @@ def test_dhash_separates_two_different_pictures(tmp_path):
     Image.new("RGB", (64, 48), (10, 200, 90)).save(flat, "JPEG")
 
     assert enrich.hamming(enrich.dhash(ramp), enrich.dhash(flat)) > enrich.DHASH_MATCH
+
+
+def test_importing_an_image_queues_enrichment_and_lands_the_facts(tmp_workspace, monkeypatch, tmp_path):
+    from azimut.engine import media as media_engine
+    from azimut.engine import workqueue
+    from azimut.workspace import Case
+
+    monkeypatch.setattr(workqueue, "start_workers", False)
+    case = Case.create("Enrich")
+    exif = _exif_with_gps((48, 51, 30.0), "N", (2, 21, 3.0), "E", "2023:06:11 14:22:31")
+    source = _image(tmp_path, exif=exif)
+
+    with source.open("rb") as fh:
+        result = media_engine.import_stream(case, "shot.jpg", fh)
+    rel = result["item"]["path"]
+
+    assert [j["kind"] for j in case.list_jobs(state="queued")].count(enrich.ENRICH_KIND) == 1
+    workqueue.drain(case)
+
+    item = media_engine.read_item(case, rel)
+    assert item["gps"]["lat"] == pytest.approx(48.858333, abs=1e-5)
+    assert item["gps"]["lon"] == pytest.approx(2.350833, abs=1e-5)
+    assert item["taken_at"] == "2023-06-11T14:22:31"
+    assert len(item["dhash"]) == 16
+    assert item["enriched_at"]
+
+
+def test_enrichment_is_recorded_even_when_the_image_carries_nothing(tmp_workspace, monkeypatch, tmp_path):
+    from azimut.engine import media as media_engine
+    from azimut.engine import workqueue
+    from azimut.workspace import Case
+
+    monkeypatch.setattr(workqueue, "start_workers", False)
+    case = Case.create("Enrich")
+    with _image(tmp_path).open("rb") as fh:
+        rel = media_engine.import_stream(case, "plain.jpg", fh)["item"]["path"]
+
+    workqueue.drain(case)
+
+    item = media_engine.read_item(case, rel)
+    assert item["enriched_at"]  # we looked
+    assert "gps" not in item and "taken_at" not in item  # and found nothing
+    assert item["dhash"]  # pixels always hash
+
+
+def test_a_deleted_media_cancels_its_enrich_job(tmp_workspace, monkeypatch, tmp_path):
+    from azimut.engine import media as media_engine
+    from azimut.engine import workqueue
+    from azimut.workspace import Case
+
+    monkeypatch.setattr(workqueue, "start_workers", False)
+    case = Case.create("Enrich")
+    with _image(tmp_path).open("rb") as fh:
+        rel = media_engine.import_stream(case, "gone.jpg", fh)["item"]["path"]
+    media_path = case.resolve_inside(rel)
+    media_path.unlink()
+    media_path.with_suffix(media_path.suffix + ".json").unlink(missing_ok=True)
+
+    workqueue.drain(case)
+
+    assert case.list_jobs(kind=enrich.ENRICH_KIND)[0]["state"] == "cancelled"
+
+
+def test_a_video_import_is_not_queued_for_enrichment(tmp_workspace, monkeypatch):
+    import io
+
+    from azimut.engine import media as media_engine
+    from azimut.engine import workqueue
+    from azimut.workspace import Case
+
+    monkeypatch.setattr(workqueue, "start_workers", False)
+    case = Case.create("Enrich")
+    media_engine.import_stream(case, "clip.mp4", io.BytesIO(b"not really a video"))
+
+    assert case.list_jobs(kind=enrich.ENRICH_KIND) == []

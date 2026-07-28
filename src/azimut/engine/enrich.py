@@ -16,12 +16,17 @@ metadata is a claim, and a claim the analyst has not looked at is not a fact.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from PIL import Image
+
+from . import workqueue
+
+if TYPE_CHECKING:
+    from ..workspace import Case as CaseType
 
 #: Only these media kinds are enriched. Video metadata needs ffprobe and is a
 #: separate piece of work; audio and generic files carry nothing to read.
@@ -132,3 +137,52 @@ def hamming(a: str, b: str) -> int:
     if len(a) != len(b):
         return _HASH_SIDE * _HASH_SIDE
     return bin(int(a, 16) ^ int(b, 16)).count("1")
+
+
+# -- the enrich job ---------------------------------------------------------
+
+#: Job kind for the durable queue. Enrichment is queued, never inline: an import
+#: must stay as fast as the copy it performs.
+ENRICH_KIND = "enrich"
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def on_register(case: "CaseType", rel_media: str, kind: str, entity_id: str) -> None:
+    """Queue enrichment for a freshly imported item. Keyed on the media path, so
+    a re-import or a backfill never stacks duplicates."""
+    if kind not in ENRICHED_KINDS:
+        return
+    workqueue.enqueue(
+        case,
+        ENRICH_KIND,
+        key=rel_media,
+        payload={"path": rel_media, "entity_id": entity_id},
+    )
+
+
+def _handle(case: "CaseType", job: dict[str, Any]) -> None:
+    """Run one enrichment job: read the file's own claims, record them on the
+    sidecar. A media file that is gone cancels the job."""
+    from . import media as media_engine
+
+    rel = job["payload"].get("path")
+    item = media_engine.read_item(case, rel) if rel else None
+    if item is None:
+        raise workqueue.JobCancelled(f"media gone: {rel}")
+    path = case.resolve_inside(rel)
+    if not path.exists():
+        raise workqueue.JobCancelled(f"media gone: {rel}")
+
+    facts: dict[str, Any] = {"enriched_at": _now()}
+    facts.update(exif_facts(path))
+    try:
+        facts["dhash"] = dhash(path)
+    except Exception:  # unreadable pixels: the EXIF still stands on its own
+        pass
+    media_engine.merge_item(case, rel, facts)
+
+
+workqueue.register(ENRICH_KIND, _handle)

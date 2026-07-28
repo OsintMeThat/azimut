@@ -1156,14 +1156,20 @@ def test_download_use_cookies_threads_saved_preference(client, monkeypatch):
     assert seen == [None, {"browser": "firefox"}]
 
 
-def test_concurrent_sidecar_merges_do_not_drop_each_other(client):
+def test_concurrent_sidecar_merges_do_not_drop_each_other(client, monkeypatch):
     """Two background writers touching one sidecar keep both fields: the merge is
-    a read-modify-write under the case lock, not a last-writer-wins overwrite."""
+    a read-modify-write under the case lock, not a last-writer-wins overwrite.
+
+    The real worker is off: this is about the lock, not about when enrichment
+    happens to land.
+    """
     import threading
 
     from azimut.engine import media as media_engine
+    from azimut.engine import workqueue
     from azimut.workspace import Case
 
+    monkeypatch.setattr(workqueue, "start_workers", False)
     cid = client.post("/api/cases", json={"name": "Merge"}).json()["id"]
     rel = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]["path"]
     case = Case.open(cid)
@@ -1186,4 +1192,43 @@ def test_concurrent_sidecar_merges_do_not_drop_each_other(client):
 
     item = media_engine.read_item(case, rel)
     assert item["thumbnail"] == "media/.thumbs/x.jpg"
+    assert item["dhash"] == "ff00ff00ff00ff00"
+
+
+def test_naming_an_item_survives_the_enrichment_of_the_same_sidecar(client, monkeypatch):
+    """The Save gate names an item just after filing it, while the enrichment job
+    that filing queued is writing the file's own facts to the same sidecar. Both
+    writes have to survive: the regression this guards dropped the typed name.
+    """
+    import threading
+
+    from azimut.engine import media as media_engine
+    from azimut.engine import workqueue
+    from azimut.workspace import Case
+
+    monkeypatch.setattr(workqueue, "start_workers", False)
+    cid = client.post("/api/cases", json={"name": "Naming"}).json()["id"]
+    rel = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]["path"]
+    case = Case.open(cid)
+
+    start = threading.Barrier(2)
+
+    def name_it():
+        start.wait(timeout=5)
+        for _ in range(20):
+            media_engine.update_media(case, rel, {"title": "Yard panorama"})
+
+    def enrich_it():
+        start.wait(timeout=5)
+        for _ in range(20):
+            media_engine.merge_item(case, rel, {"dhash": "ff00ff00ff00ff00"})
+
+    threads = [threading.Thread(target=name_it), threading.Thread(target=enrich_it)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    item = media_engine.read_item(case, rel)
+    assert item["title"] == "Yard panorama"
     assert item["dhash"] == "ff00ff00ff00ff00"
