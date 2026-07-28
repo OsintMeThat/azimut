@@ -1,4 +1,4 @@
-# Azimut v0.2.4
+# Azimut v0.2.5
 
 ## OSINT toolkit at a glance
 
@@ -13,7 +13,29 @@
 - **Publishing:** build annotated Geo Proofs and prepare evidence-linked Geo
   Reports for X, Bluesky or Mastodon without posting automatically.
 
-## What changed
+## What changed in v0.2.5
+
+Mostly additions, with two fixes.
+
+- **Diagrams in case notes.** A ```` ```mermaid ```` fence in a Notebook note
+  renders as a diagram, in the preview and in the exported PDF, so a movement
+  timeline or a chain of inference stays in the case instead of moving to an
+  external drawing tool. The library loads the first time a note holds a
+  diagram, never on open, and it draws offline.
+- **Sentinel-2 cloud ceiling.** Cloudy passes now render by default, and a
+  slider sets the ceiling. The tiles, the date calendar and "most recent" all
+  follow the same number. Previously a configuration instance could apply its
+  own cloud filter, so a date the calendar offered came back as an empty tile
+  and read as a coverage gap.
+- **New logo.** The mark is redrawn as a cartographic north arrow, split on the
+  north-south axis, and stays legible at favicon size on both themes. The app
+  icon, the favicon, the extension icons and the Windows `.exe` icon are all
+  generated from one geometry definition.
+- **Windows thumbnail fix.** Several downloads finishing at once could raise a
+  path error instead of retrying, because the thumbnail directory was resolved
+  before it existed. It is created first now.
+
+## Also in v0.2.4
 
 - **Saved work on the map.** Places, captures and filed screenshots can be
   browsed by geography or case folder, searched in English or the local name,

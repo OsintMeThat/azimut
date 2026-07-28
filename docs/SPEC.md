@@ -93,6 +93,7 @@ proof for publication.
 | ✅ **Geo Report** | Prepares sourced proof threads and saved drafts without posting automatically. |
 | ✅ **Case sidebar** | Searches and filters the case, manages notes, suggestions, folders, multi-row filing, a details drawer and synchronized artifact deletion. |
 | ✅ **Imagery providers** | Supports Esri, OSM, OpenTopoMap, Sentinel-2 and optional Mapbox/Google with usage controls. |
+| ✅ **Sentinel-2 cloud ceiling** | Renders cloudy passes by default and lets a slider set the ceiling, which the tiles, the calendar and "most recent" all follow. |
 | ✅ **Capture extension** | Files user-initiated map screenshots with URL metadata, attribution and provenance; also saves a map's point as a place, or any page as a bookmark. |
 | ✅ **Distribution** | Bundles the browser UI, launcher, cross-platform binaries, ffmpeg, locked builds and server hardening. |
 
@@ -137,7 +138,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Case Sheet** | The same case as a table: a row is an entity, columns are its attributes plus free ones the analyst adds, sorted, filtered and edited in place. Imports a CSV as loose rows that stay out of the graph until promoted, and exports back to CSV or GeoJSON. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
-| **Sun and local time** | Local time, sunrise/sunset and solar azimuth for a point and date, in Coordinates. |
+| **Sun, moon and local time** | Sunrise/sunset, solar and lunar azimuth, moon phase and bright-limb angle for a point and date, in Coordinates, each time in civil local time and UTC. Polar day/night and days with no moonrise are states, not errors; the moon needs topocentric parallax and sampled rise/set, and civil time adds `timezonefinder` + `tzdata` to bundle. |
 | **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. |
 | **Report an issue** | Opens a pre-filled GitHub issue with version, OS and recent log lines. |
 
