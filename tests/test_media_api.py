@@ -52,12 +52,12 @@ def test_media_list_reports_thumb_state(client):
 
 
 def test_video_thumbnail_is_queued_then_regenerated(client, monkeypatch):
-    from azimut.engine import thumbnails
+    from azimut.engine import thumbnails, workqueue
     from azimut.workspace import Case
 
     # drive the queue by hand: disable the background worker, force a rendering
     # that always succeeds so the test never depends on a real ffmpeg.
-    monkeypatch.setattr(thumbnails, "start_workers", False)
+    monkeypatch.setattr(workqueue, "start_workers", False)
     monkeypatch.setattr(
         thumbnails, "_render", lambda mp, out, kind: (out.write_bytes(b"\xff\xd8jpg"), True)[1]
     )
@@ -70,15 +70,15 @@ def test_video_thumbnail_is_queued_then_regenerated(client, monkeypatch):
     item = client.get(f"/api/cases/{cid}/media").json()[0]
     assert item["thumbnail"] is None and item["thumb_state"] == "queued"
 
-    thumbnails.drain(Case.open(cid))  # the worker's work, run synchronously
+    workqueue.drain(Case.open(cid))  # the worker's work, run synchronously
     item = client.get(f"/api/cases/{cid}/media").json()[0]
     assert item["thumb_state"] == "ready" and item["thumbnail"]
 
 
 def test_regenerate_queues_missing_thumbnails(client, monkeypatch):
-    from azimut.engine import thumbnails
+    from azimut.engine import workqueue
 
-    monkeypatch.setattr(thumbnails, "start_workers", False)
+    monkeypatch.setattr(workqueue, "start_workers", False)
     cid = client.post("/api/cases", json={"name": "Regen"}).json()["id"]
     # an image whose cached thumbnail is then removed (as budget eviction would)
     item = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]

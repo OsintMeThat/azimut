@@ -18,7 +18,7 @@ import pytest
 from PIL import Image
 
 from azimut.engine import media as media_engine
-from azimut.engine import thumbnails
+from azimut.engine import thumbnails, workqueue
 from azimut.workspace import Case
 
 
@@ -26,7 +26,7 @@ from azimut.workspace import Case
 def case(tmp_workspace, monkeypatch):
     """A fresh case with the background worker disabled, so tests drain the queue
     explicitly and deterministically."""
-    monkeypatch.setattr(thumbnails, "start_workers", False)
+    monkeypatch.setattr(workqueue, "start_workers", False)
     return Case.create("Thumbs")
 
 
@@ -73,7 +73,7 @@ def test_drain_generates_the_queued_thumbnail_and_updates_the_sidecar(case, monk
     monkeypatch.setattr(thumbnails, "_render", fake_render)
     item = _register_video(case)["item"]
 
-    assert thumbnails.drain(case) == 1
+    assert workqueue.drain(case) == 1
     job = case.list_jobs(kind=thumbnails.THUMB_KIND)[0]
     assert job["state"] == "ready"
     # the sidecar now points at the freshly generated, content-addressed file
@@ -86,7 +86,7 @@ def test_a_failing_render_retries_then_fails_without_looping(case, monkeypatch):
     monkeypatch.setattr(thumbnails, "_render", lambda *a: False)  # produces nothing
     _register_video(case)
 
-    handled = thumbnails.drain(case)  # claims, fails, requeues, up to the budget
+    handled = workqueue.drain(case)  # claims, fails, requeues, up to the budget
     assert handled == 3  # default max_attempts
     job = case.list_jobs(kind=thumbnails.THUMB_KIND)[0]
     assert job["state"] == "failed" and job["attempts"] == 3
@@ -97,7 +97,7 @@ def test_drain_cancels_a_job_whose_media_is_gone(case):
     (case.subdir("media") / "clip.mp4").unlink()
     (case.subdir("media") / ("clip.mp4" + media_engine.SIDECAR_SUFFIX)).unlink()
 
-    thumbnails.drain(case)
+    workqueue.drain(case)
     assert case.list_jobs(kind=thumbnails.THUMB_KIND)[0]["state"] == "cancelled"
 
 
@@ -188,7 +188,7 @@ def test_startup_recovers_interrupted_jobs(case, monkeypatch):
 
 
 def test_worker_wakes_and_drains_in_the_background(tmp_workspace, monkeypatch):
-    monkeypatch.setattr(thumbnails, "start_workers", True)
+    monkeypatch.setattr(workqueue, "start_workers", True)
 
     def fake_render(media_path, out_path, kind):
         out_path.write_bytes(b"\xff\xd8\xff\xe0jpeg")
@@ -205,4 +205,4 @@ def test_worker_wakes_and_drains_in_the_background(tmp_workspace, monkeypatch):
         time.sleep(0.05)
     refreshed = media_engine.read_item(c, item["path"])
     assert refreshed["thumbnail"] and c.resolve_inside(refreshed["thumbnail"]).exists()
-    assert thumbnails.wait_until_idle()
+    assert workqueue.wait_until_idle()
