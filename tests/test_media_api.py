@@ -1154,3 +1154,36 @@ def test_download_use_cookies_threads_saved_preference(client, monkeypatch):
         assert job["status"] == "done"
 
     assert seen == [None, {"browser": "firefox"}]
+
+
+def test_concurrent_sidecar_merges_do_not_drop_each_other(client):
+    """Two background writers touching one sidecar keep both fields: the merge is
+    a read-modify-write under the case lock, not a last-writer-wins overwrite."""
+    import threading
+
+    from azimut.engine import media as media_engine
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Merge"}).json()["id"]
+    rel = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]["path"]
+    case = Case.open(cid)
+
+    start = threading.Barrier(2)
+
+    def write(patch):
+        start.wait(timeout=5)
+        for _ in range(20):
+            media_engine.merge_item(case, rel, patch)
+
+    threads = [
+        threading.Thread(target=write, args=({"thumbnail": "media/.thumbs/x.jpg"},)),
+        threading.Thread(target=write, args=({"dhash": "ff00ff00ff00ff00"},)),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    item = media_engine.read_item(case, rel)
+    assert item["thumbnail"] == "media/.thumbs/x.jpg"
+    assert item["dhash"] == "ff00ff00ff00ff00"

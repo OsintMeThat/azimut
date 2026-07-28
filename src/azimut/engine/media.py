@@ -695,18 +695,32 @@ def download_url(
     return result
 
 
+def merge_item(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, Any] | None:
+    """Merge ``patch`` into a media item's sidecar and mirror it onto the index
+    row. Returns the merged item, or None when the sidecar is gone.
+
+    Held under the case lock: several background handlers patch different fields
+    of the same sidecar (a thumbnail path, then enrichment facts), and an
+    unguarded read-modify-write would drop whichever landed first.
+    """
+    with case.lock:
+        media_path = case.resolve_inside(rel_path)
+        sidecar = _sidecar_path(media_path)
+        if not sidecar.exists():
+            return None
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        data.update(patch)
+        _write_sidecar(media_path, data)
+        indexed = {**data, "path": rel_path}
+        case.upsert_media_item(indexed)
+        return indexed
+
+
 def set_thumbnail(case: Case, rel_path: str, thumb_rel: str | None) -> None:
     """Record (or clear) a media item's thumbnail path in its sidecar. The
     thumbnail worker calls this once it finishes a queued (e.g. video) render, so
     the next media listing reports the thumbnail as ready."""
-    media_path = case.resolve_inside(rel_path)
-    sidecar = _sidecar_path(media_path)
-    if not sidecar.exists():
-        return
-    data = json.loads(sidecar.read_text(encoding="utf-8"))
-    data["thumbnail"] = thumb_rel
-    _write_sidecar(media_path, data)
-    case.upsert_media_item({**data, "path": rel_path})
+    merge_item(case, rel_path, {"thumbnail": thumb_rel})
 
 
 def read_item(case: Case, rel_path: str) -> dict[str, Any] | None:

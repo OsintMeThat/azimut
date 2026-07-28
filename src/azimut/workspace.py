@@ -191,6 +191,15 @@ class Case:
         self._sqlite_cache: Any = _UNSET
 
     @property
+    def lock(self) -> threading.RLock:
+        """The per-case reentrant lock guarding read-modify-write of the case's
+        files. Public because the media sidecars need the same serialisation the
+        case database already gets: two background handlers can patch different
+        fields of one sidecar, and an unguarded read-modify-write loses one of
+        them."""
+        return self._lock
+
+    @property
     def _sqlite(self) -> "SqliteCase | None":
         """The SQLite graph backend if this case is on the sqlite storage
         format, else None (a legacy json case handled in-file).
