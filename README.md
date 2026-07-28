@@ -11,9 +11,9 @@ to fix a point on the map.*
 
 ## v0.2.5: Notebook diagrams and clearer Sentinel imagery
 
-<video src="https://github.com/OsintMeThat/azimut/releases/download/v0.2.5/azimut-demo-1920x1080.mp4" controls muted playsinline width="880"></video>
+[![Searching the imagery, composing the proof](https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.gif)](https://github.com/OsintMeThat/azimut/releases/download/v0.2.5/azimut-demo-1920x1080.mp4)
 
-[Watch the tour](https://github.com/OsintMeThat/azimut/releases/download/v0.2.5/azimut-demo-1920x1080.mp4) (2 min 30).
+[Watch the full tour](https://github.com/OsintMeThat/azimut/releases/download/v0.2.5/azimut-demo-1920x1080.mp4) (2 min 30).
 
 | Tool | What it does |
 |------|--------------|
