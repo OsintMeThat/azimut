@@ -5,6 +5,8 @@ Keys and branding stay beside settings.json, outside cases and exports.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import re
 from typing import Annotated, Any, Literal
@@ -12,11 +14,16 @@ from typing import Annotated, Any, Literal
 import httpx
 from fastapi import APIRouter, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .. import __version__, config
-from ..engine import ffmpeg, google_tiles, scrapers, sentinel, tiles, updates
+from ..engine import diagnostics, ffmpeg, google_tiles, scrapers, sentinel, tiles, updates
 from .ingest import bundled_extension_version
+from .templates import MAX_PER_KIND as MAX_TEMPLATES_PER_KIND
+
+# A backup carries the signature logo as base64: 4 characters per 3 bytes, plus
+# slack for padding and any line breaks a hand-edited file picked up.
+SIGNATURE_B64_MAX_CHARS = 4 * (config.SIGNATURE_MAX_BYTES // 3 + 1) + 1024
 
 router = APIRouter(prefix="/api", tags=["settings"])
 
@@ -287,15 +294,32 @@ def mint_ingest_token() -> dict[str, Any]:
 
 @router.get("/settings/export")
 def export_settings() -> Response:
-    """Download the whole settings.json (keys, providers, preferences) so it can
-    be restored on another machine (POST /settings/import). It carries the
-    user's own keys by design — it's a local download to their own disk, the
-    same secrets that already live in the workspace."""
-    payload = json.dumps(config.load_settings(), indent=2, ensure_ascii=False)
+    """Download everything app-wide that isn't a case, so another machine can be
+    set up identically (POST /settings/import).
+
+    Three files in one: settings.json verbatim (so a key added to
+    ``DEFAULT_SETTINGS`` travels without anyone remembering to list it here),
+    templates.json, and the signature logo base64-encoded. It carries the user's
+    own API keys by design — it's a local download of secrets that already live
+    in their workspace.
+
+    Deliberately absent: ``cookies.txt`` (a live login session, tied to one
+    machine's browser) and the cases themselves, which are portable folders
+    already.
+    """
+    signature = config.signature_path()
+    bundle = {
+        "settings": config.load_settings(),
+        "templates": config.load_templates(),
+        "signature_png": (
+            base64.b64encode(signature.read_bytes()).decode("ascii") if signature.is_file() else ""
+        ),
+    }
+    payload = json.dumps(bundle, indent=2, ensure_ascii=False)
     return Response(
         content=payload,
         media_type="application/json",
-        headers={"Content-Disposition": 'attachment; filename="azimut-settings.json"'},
+        headers={"Content-Disposition": 'attachment; filename="azimut-backup.json"'},
     )
 
 
@@ -335,6 +359,35 @@ class ImportedHomeView(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
     zoom: int = Field(ge=1, le=21)
+
+
+class ImportedDownloadCookies(BaseModel):
+    """The gated-download login source, as a backup can legitimately carry it.
+
+    ``browser`` travels — the analyst's choice of browser is a preference, and
+    the second machine reads that browser's own live cookies. ``file`` does not:
+    the backup deliberately leaves ``cookies.txt`` behind (a live session), so a
+    restore that pointed at it would select a file that isn't there. It lands on
+    ``none`` instead, which is the state the app is built to work in.
+    """
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    source: Literal["none", "browser", "file"] = "none"
+    browser: str | None = Field(default=None, max_length=32)
+
+    @field_validator("browser")
+    @classmethod
+    def known_browser(cls, value: str | None) -> str | None:
+        return value if value in config.COOKIE_BROWSERS else None
+
+    @model_validator(mode="after")
+    def resolvable_source(self) -> ImportedDownloadCookies:
+        if self.source == "browser" and self.browser is None:
+            return ImportedDownloadCookies(source="none")
+        if self.source == "file":
+            return ImportedDownloadCookies(source="none")
+        return self
 
 
 class ImportedSettings(BaseModel):
@@ -378,6 +431,7 @@ class ImportedSettings(BaseModel):
     ingest_token: str = Field(default="", max_length=128, pattern=r"^[A-Za-z0-9_-]*$")
     update_check_on_start: bool = True
     update_dismissed_version: str = Field(default="", max_length=64)
+    download_cookies: ImportedDownloadCookies = Field(default_factory=ImportedDownloadCookies)
 
     @field_validator("api_keys")
     @classmethod
@@ -406,11 +460,20 @@ class ImportedSettings(BaseModel):
 
 
 class ImportIn(BaseModel):
-    """A previously exported settings blob. Only keys Azimut recognises are
-    applied — anything else in the file is ignored, so a hand-edited or foreign
-    JSON can't inject arbitrary state."""
+    """A previously exported backup. Only keys Azimut recognises are applied —
+    anything else in the file is ignored, so a hand-edited or foreign JSON can't
+    inject arbitrary state.
 
-    settings: ImportedSettings
+    Every part is optional: a backup written before that part existed restores
+    the parts it does have.
+    """
+
+    settings: ImportedSettings = Field(default_factory=ImportedSettings)
+    templates: dict[str, Any] = Field(default_factory=dict)
+    # Base64 of the signature PNG. Bounded as a string first — decoding a
+    # megabytes-long field only to reject it is work an untrusted body shouldn't
+    # get. The decoded bytes then face config.valid_signature().
+    signature_png: str = Field(default="", max_length=SIGNATURE_B64_MAX_CHARS)
 
 
 @router.post("/settings/import")
@@ -423,7 +486,30 @@ def import_settings(body: ImportIn) -> dict[str, Any]:
             settings[key] = canonical[key]
 
     config.update_settings(apply)
-    return {"imported": applied}
+
+    # Templates pass the same validation as a templates.json read off disk, so a
+    # restored preset can't be shaped differently from a saved one.
+    templates = 0
+    if body.templates:
+        restored = config.canonical_templates(body.templates, max_per_kind=MAX_TEMPLATES_PER_KIND)
+        templates = sum(len(restored[kind]) for kind in config.TEMPLATE_KINDS)
+        if templates:
+            config.save_templates(restored)
+
+    # A malformed logo is dropped rather than failing the whole restore: the keys
+    # and presets are the valuable part, and the user can re-upload a PNG.
+    signature = False
+    if body.signature_png:
+        try:
+            data = base64.b64decode(body.signature_png, validate=True)
+        except (ValueError, binascii.Error):
+            data = b""
+        if config.valid_signature(data):
+            path = config.signature_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            signature = True
+    return {"imported": applied, "templates": templates, "signature": signature}
 
 
 @router.post("/settings/keys/{provider}/status")
@@ -524,7 +610,7 @@ async def put_signature(file: UploadFile) -> dict[str, Any]:
             detail=f"signature must be under {config.SIGNATURE_MAX_BYTES // 1024 // 1024} MB",
         )
     # sniff the bytes rather than trust the filename or the browser's content-type
-    if not data.startswith(config.PNG_MAGIC):
+    if not config.valid_signature(data):
         raise HTTPException(status_code=422, detail="signature must be a PNG image")
     path = config.signature_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -601,6 +687,21 @@ def check_app_update(check: bool = False) -> dict[str, Any]:
     if not check:
         return {"current": __version__, "latest": None, "update_available": False}
     return updates.check(__version__)
+
+
+@router.get("/settings/diagnostics")
+def get_diagnostics(summary: str = "", kind: str = diagnostics.DEFAULT_KIND) -> dict[str, str]:
+    """The bug-report body and a pre-filled GitHub issue link for it.
+
+    Pure local text: version, OS and the in-memory warning tail, with the home
+    path and account name scrubbed (engine/diagnostics.py). Touches no network —
+    the user's browser opens the returned link on a click, so About can show the
+    exact report first. ``summary`` is what the user typed; the engine caps it
+    (``MAX_SUMMARY_CHARS``) rather than refusing it — losing a typed paragraph to
+    a 422 is worse than shortening it, and the HTTP layer bounds the request line
+    long before a summary could grow into a payload.
+    """
+    return diagnostics.payload(summary, kind=kind)
 
 
 @router.post("/settings/scrapers/{dist}/update")
