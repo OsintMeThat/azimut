@@ -13,7 +13,7 @@ describe('Files bounded loading', () => {
   });
 
   it('offers Show more with an honest filtered total', () => {
-    expect(source).toContain('{#if pl.hasMore}');
+    expect(source).toContain('{#if !showTrash && pl.hasMore}');
     expect(source).toContain('pl.loadMore()');
     expect(source).toContain('Showing {confirmed.length} of {total}');
     expect(source).toContain('/catalog/summary');
@@ -70,7 +70,7 @@ describe('Files desktop affordances', () => {
   });
 
   it('renders the list view with Name/Type/Size/Added columns', () => {
-    expect(source).toContain("{#if view === 'list'}");
+    expect(source).toContain("{:else if view === 'list'}");
     expect(source).toContain("{ id: 'name', label: 'Name' }");
     expect(source).toContain("{ id: 'type', label: 'Type' }");
     expect(source).toContain("{ id: 'size', label: 'Size' }");
@@ -101,5 +101,46 @@ describe('Files desktop affordances', () => {
     expect(source).toContain('class="lrow-thumb"');
     expect(source).toContain('src={`/files/${caseState.current.id}/${tileThumb(e)}`}');
     expect(source).toContain('{#if tileThumb(e)}');
+  });
+});
+
+describe('Files trash', () => {
+  it('shows the trash as a first-class Files location', () => {
+    expect(source).toContain('onclick={openTrash}');
+    expect(source).toContain('<span class="tname">Trash</span>');
+    expect(source).toContain('{#if showTrash}');
+    expect(source).toContain('{formatSize(trashData.size_bytes)}');
+  });
+
+  it('offers the same restore and permanent actions as the sidebar', () => {
+    expect(source).toContain('restoreGroup(caseState.current.id, group.id)');
+    expect(source).toContain('purgeGroup(caseState.current.id, group.id)');
+    expect(source).toContain('emptyTrash(caseState.current.id)');
+    expect(source).toContain('onclick={() => restoreTrashItem(group)}');
+    expect(source).toContain('onclick={() => askPurgeTrashItem(group)}');
+    expect(source).toContain('onclick={askEmptyFilesTrash}');
+  });
+
+  it('keeps permanent deletion behind the danger confirmation', () => {
+    expect(source).toContain("title: 'Delete permanently?'");
+    expect(source).toContain("title: 'Empty the trash?'");
+    expect(source).toContain("detail: 'The files will be deleted from disk.'");
+    expect(source).toContain("tone: 'danger'");
+  });
+});
+
+describe('Files delete shortcut', () => {
+  it('routes Delete through the existing grouped confirmation', () => {
+    expect(source).toContain('<svelte:window onkeydown={onFilesKeydown} />');
+    expect(source).toContain("event.key !== 'Delete'");
+    expect(source).toContain('askDeleteEntities([...selected])');
+    expect(source).toContain('event.preventDefault()');
+  });
+
+  it('does nothing in fields, Trash, or outside Files', () => {
+    expect(source).toContain("uiState.tool !== 'files'");
+    expect(source).toContain('showTrash');
+    expect(source).toContain("target.matches('input, textarea, select')");
+    expect(source).toContain('target.isContentEditable');
   });
 });

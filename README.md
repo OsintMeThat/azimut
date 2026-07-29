@@ -9,7 +9,7 @@ case is a plain folder that can be reopened, archived or shared.
 *The name is the French word for azimuth, the compass bearing you sight along
 to fix a point on the map.*
 
-## v0.2.5: Notebook diagrams and clearer Sentinel imagery
+## v0.2.6: Portable cases and recoverable deletion
 
 [![Searching the imagery, composing the proof](https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.gif)](https://github.com/OsintMeThat/azimut/releases/download/v0.2.5/azimut-demo-1920x1080.mp4)
 
@@ -33,15 +33,14 @@ extension, and cross-platform binaries with a bundled ffmpeg.
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
 
-New in v0.2.5:
+New in v0.2.6:
 
-- Notebook notes render `mermaid` fences as diagrams, in the preview and in the
-  PDF. The library loads only when a note holds one, and it draws offline.
-- Sentinel-2 imagery shows cloudy passes by default, with a slider to set the
-  cloud ceiling. The tiles, the date calendar and "most recent" all follow it.
-- The logo is redrawn as a north arrow that stays legible at favicon size.
-- Thumbnails no longer fail with a path error when several downloads finish at
-  once on Windows.
+- Export a complete case as an integrity-checked bundle, then import it as a
+  new case on another machine. Bundles can be protected with a password.
+- Delete files, notes, proofs and their dependent records into Trash, then
+  restore them or remove them permanently when the work is no longer needed.
+- Select several Files entries before deleting them, with one confirmation and
+  one restore point for the complete action.
 
 ## Install & run
 

@@ -145,12 +145,13 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
     """A schema-1 case.db is upgraded on open through the whole chain: the folder
     column is added and backfilled (1->2), the jobs table is created (2->3),
     search/media browse indexes arrive in schema 4, the position flag in 5 and
-    the trash journal in 6. A second open applies nothing."""
+    the trash journal in 6 and its recovery state in 7. A second open applies
+    nothing."""
     db = tmp_path / "case.db"
     with sqlite3.connect(db) as conn:
         conn.executescript(_SCHEMA_V1)
 
-    store = SqliteCase.open(db)  # runs 1 -> 2 -> 3 -> 4 -> 5 -> 6 in place
+    store = SqliteCase.open(db)  # runs 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 in place
 
     # 1 -> 2: the folder column is backfilled and pages by folder.
     assert [e["id"] for e in store.page_entities(folder="Sources/Telegram")["items"]] == ["e1"]
@@ -159,11 +160,11 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
     store.enqueue_job("thumbnail", key="media/x.jpg")
     assert store.count_jobs() == {"queued": 1}
     with sqlite3.connect(db) as conn:
-        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "6"
+        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "7"
         applied = {
             r[0] for r in conn.execute("SELECT version FROM schema_migrations").fetchall()
         }
-        assert {2, 3, 4, 5, 6} <= applied
+        assert {2, 3, 4, 5, 6, 7} <= applied
         columns = {
             row[1] for row in conn.execute("PRAGMA table_info(entities)").fetchall()
         }
@@ -173,10 +174,15 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
         ).fetchone()[0] == "1"
         # 5 -> 6: the trash journal is there, and empty.
         assert store.trash_summary() == {"groups": 0, "items": 0, "size_bytes": 0}
+        # 6 -> 7: interrupted moves have a durable recovery state.
+        trash_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(trash)").fetchall()
+        }
+        assert "state" in trash_columns
 
     SqliteCase.open(db)  # idempotent — the second open applies nothing
     with sqlite3.connect(db) as conn:
-        for version in (2, 3, 4, 5):
+        for version in (2, 3, 4, 5, 6, 7):
             assert conn.execute(
                 "SELECT COUNT(*) FROM schema_migrations WHERE version = ?", (version,)
             ).fetchone()[0] == 1

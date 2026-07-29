@@ -16,6 +16,7 @@
   import { assignFolder } from '../lib/filing.js';
   import { saveRelation } from '../lib/relations.svelte.js';
   import { openEntity } from '../lib/navigate.js';
+  import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { isRegistered, sourceRect, frameFitsView } from '../lib/screenCrop.js';
   import { extensionVersion, captureTab, onActivated } from '../lib/extBridge.js';
   import {
@@ -2386,15 +2387,18 @@
     deleteBusy = true;
     const row = deleteTarget;
     try {
+      const caseId = caseState.current.id;
+      let result;
       if (row.kind === 'place') {
-        await api.del(`/api/cases/${caseState.current.id}/entities/${row.id}`);
+        result = await api.del(`/api/cases/${caseId}/entities/${row.id}`);
       } else {
-        await api.del(
-          `/api/cases/${caseState.current.id}/satellite?path=${encodeURIComponent(row.path)}`
+        result = await api.del(
+          `/api/cases/${caseId}/satellite?path=${encodeURIComponent(row.path)}`
         );
       }
       deleteTarget = null;
       await reloadCase(); // re-reads the saved index and the case sidebar
+      deletedToast(caseId, result, row.title || coordsLabel(row));
     } catch (e) {
       toast(e.message, 'danger');
     } finally {
@@ -3220,10 +3224,11 @@
     title={deleteTarget.kind === 'place' ? 'Delete this place?' : 'Delete this capture?'}
     message={`“${deleteTarget.title || coordsLabel(deleteTarget)}” will be removed from the case.`}
     detail={deleteTarget.kind === 'place'
-      ? 'Removes the saved point and cannot be undone.'
-      : 'Deletes the image from disk and cannot be undone.'}
+      ? 'Moves the saved point to the case trash.'
+      : 'Moves the capture and its image to the case trash.'}
+    restorable={RESTORABLE}
     confirmLabel="Delete"
-    tone="danger"
+    tone="default"
     busy={deleteBusy}
     onconfirm={confirmDelete}
     oncancel={() => (deleteTarget = null)}

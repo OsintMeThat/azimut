@@ -249,6 +249,7 @@ def test_intel_macos_package_support_floor_matches_the_lock():
     root = Path(__file__).resolve().parent.parent
     readme = (root / "README.md").read_text(encoding="utf-8")
     lock = (root / "uv.lock").read_text(encoding="utf-8")
+    dependencies = _pyproject()["project"]["dependencies"]
     opencv = lock.split(
         '[[package]]\nname = "opencv-python-headless"',
         maxsplit=1,
@@ -257,3 +258,19 @@ def test_intel_macos_package_support_floor_matches_the_lock():
 
     assert "macOS (Intel, 14+)" in readme
     assert "macosx_14_0_x86_64.whl" in opencv
+
+    crypto = [dependency for dependency in dependencies if dependency.startswith("cryptography")]
+    assert len(crypto) == 2
+    assert any(
+        "<49" in dependency
+        and "sys_platform == 'darwin'" in dependency
+        and "platform_machine == 'x86_64'" in dependency
+        for dependency in crypto
+    )
+    assert any(
+        "<50" in dependency
+        and "sys_platform != 'darwin' or platform_machine != 'x86_64'" in dependency
+        for dependency in crypto
+    )
+    assert "cryptography-48.0.1-cp311-abi3-macosx_10_9_universal2.whl" in lock
+    assert "cryptography-49.0.0-cp311-abi3-macosx_11_0_arm64.whl" in lock

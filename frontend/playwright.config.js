@@ -5,7 +5,10 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // Canvas-heavy browser specs compete for CPU under Playwright's default of
+  // one worker per core. Four keeps local runs parallel without turning normal
+  // Leaflet/Konva startup into a timeout; CI stays fully deterministic.
+  workers: process.env.CI ? 1 : 4,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
     baseURL: 'http://127.0.0.1:18477',

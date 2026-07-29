@@ -28,6 +28,39 @@ describe('CaseSwitcher search', () => {
   });
 });
 
+describe('Case bundles', () => {
+  it('offers import globally and export for the open case', () => {
+    expect(source).toContain("openBundle('import')");
+    expect(source).toContain('Import case…');
+    expect(source).toContain("openBundle('export')");
+    expect(source).toContain('Export this case…');
+  });
+
+  it('pre-flights an import before it creates the new case', () => {
+    expect(source).toContain('type="file"');
+    expect(source).toContain('accept=".zip,.enc"');
+    expect(source).toContain('bundlePreview = await inspectBundle(bundleFile');
+    expect(source).toContain('{#if bundlePreview}');
+    expect(source).toContain('Imports as a new case.');
+    expect(source).toContain('disabled={bundleBusy || !bundlePreview.space_ok}');
+  });
+
+  it('keeps password protection optional and states the recovery limit once', () => {
+    expect(source).toContain('bind:checked={protectBundle}');
+    expect(source).toContain('protectBundle ? bundlePassword');
+    expect(source).toContain('A lost password cannot be recovered.');
+  });
+
+  it('waits for durable export and import jobs', () => {
+    expect(source).toContain('waitForBundle(current.id, started.job_id, {');
+    expect(source).toContain('waitForBundle(started.case_id, started.job_id, {');
+    expect(source).toContain('signal: bundleJobController.signal');
+    expect(source).toContain('triggerBundleDownload(current.id, started.job_id)');
+    expect(source).toContain("toast(error.message || 'Could not export the case'");
+    expect(source).toContain("toast(error.message || 'Could not import the case'");
+  });
+});
+
 describe('refreshCaseList', () => {
   it('passes a name query through to the API, or omits it when empty', async () => {
     vi.resetModules();

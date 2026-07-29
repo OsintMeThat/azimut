@@ -15,6 +15,7 @@
     SORTS,
   } from '../lib/mediaFilter.js';
   import { gotoPoint } from '../lib/navigate.js';
+  import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import Icon from '../components/Icon.svelte';
   import SearchInput from '../components/SearchInput.svelte';
   import Modal from '../components/Modal.svelte';
@@ -267,8 +268,14 @@
   // render) falls back to the type icon, reported once by dropping the path in
   // here — it does not retry on every render.
   let brokenThumbs = $state(new Set());
+  const mediaKey = (item) => `${caseState.current?.id ?? ''}/${item.path}`;
+  function markBrokenThumb(event) {
+    const key = event.currentTarget.dataset.mediaKey;
+    if (key) brokenThumbs = new Set(brokenThumbs).add(key);
+  }
   const thumbsPending = $derived(
-    items.some((i) => i.thumb_state === 'queued' || i.thumb_state === 'running')
+    (pl.facets?.thumbnail_pending ?? 0) > 0 ||
+      items.some((i) => i.thumb_state === 'queued' || i.thumb_state === 'running')
   );
   const enrichmentPending = $derived(
     items.some((i) => i.enrich_state === 'queued' || i.enrich_state === 'running')
@@ -527,7 +534,7 @@
     }
   }
 
-  // Deleting media drops the file (evidence!) — always behind a confirm.
+  // Deleting media moves the file to the case trash.
   let deleteTarget = $state(null);
   let deleteBusy = $state(false);
 
@@ -535,11 +542,12 @@
     if (!deleteTarget || deleteBusy) return;
     deleteBusy = true;
     try {
-      await api.del(
+      const caseId = caseState.current.id;
+      const result = await api.del(
         `/api/cases/${caseState.current.id}/media?path=${encodeURIComponent(deleteTarget.path)}`
       );
       await Promise.all([refresh(), reloadCase()]);
-      toast(`Removed ${deleteTarget.filename}`, 'info');
+      deletedToast(caseId, result, deleteTarget.title ?? deleteTarget.filename);
       deleteTarget = null;
     } catch (e) {
       toast(e.message, 'danger');
@@ -785,7 +793,7 @@
             {/each}
             <span class="media-col-actions" aria-label="Actions"></span>
           </div>
-          {#each filteredItems as item (item.path)}
+          {#each filteredItems as item (mediaKey(item))}
             <div class="media-row" class:focused={item.path === focusedPath} data-path={item.path} role="row">
               <!-- The preview remains an image-only control; the row itself is not a card. -->
               <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -798,13 +806,14 @@
                 onkeydown={(e) => e.key === 'Enter' && item.kind === 'image' && (lightboxItem = item)}
                 aria-label={item.kind === 'image' ? `Preview ${item.filename}` : undefined}
               >
-                {#if item.thumbnail && item.thumb_state === 'ready' && !brokenThumbs.has(item.path)}
+                {#if item.thumbnail && item.thumb_state === 'ready' && !brokenThumbs.has(mediaKey(item))}
                   <img
                     src={`/files/${caseState.current.id}/${item.thumbnail}`}
+                    data-media-key={mediaKey(item)}
                     alt=""
                     loading="lazy"
                     decoding="async"
-                    onerror={() => (brokenThumbs = new Set(brokenThumbs).add(item.path))}
+                    onerror={markBrokenThumb}
                   />
                 {:else if item.thumb_state === 'failed'}
                   <button
@@ -871,7 +880,7 @@
         </div>
       {:else}
       <div class="grid" class:compact={view === 'small'}>
-        {#each filteredItems as item (item.path)}
+        {#each filteredItems as item (mediaKey(item))}
           <div
             class="media-card card"
             class:focused={item.path === focusedPath}
@@ -889,13 +898,14 @@
               onkeydown={(e) => e.key === 'Enter' && item.kind === 'image' && (lightboxItem = item)}
               aria-label={item.kind === 'image' ? `Preview ${item.filename}` : undefined}
             >
-              {#if item.thumbnail && item.thumb_state === 'ready' && !brokenThumbs.has(item.path)}
+              {#if item.thumbnail && item.thumb_state === 'ready' && !brokenThumbs.has(mediaKey(item))}
                 <img
                   src={`/files/${caseState.current.id}/${item.thumbnail}`}
+                  data-media-key={mediaKey(item)}
                   alt={item.filename}
                   loading="lazy"
                   decoding="async"
-                  onerror={() => (brokenThumbs = new Set(brokenThumbs).add(item.path))}
+                  onerror={markBrokenThumb}
                 />
               {:else if item.thumb_state === 'queued' || item.thumb_state === 'running'}
                 <div class="thumb-status">
@@ -1161,14 +1171,15 @@
   </div>
 {/if}
 
-<!-- delete confirm: the file on disk goes with the entity -->
+<!-- delete confirm: the file waits in the case trash with the entity -->
 {#if deleteTarget}
   <ConfirmDialog
     title="Delete this media?"
     message={`“${deleteTarget.title ?? deleteTarget.filename}” and its entity will be removed from the case.`}
-    detail="Deletes the file from disk and cannot be undone."
+    detail="Moves the media and its file to the case trash."
+    restorable={RESTORABLE}
     confirmLabel="Delete"
-    tone="danger"
+    tone="default"
     busy={deleteBusy}
     onconfirm={confirmDelete}
     oncancel={() => (deleteTarget = null)}

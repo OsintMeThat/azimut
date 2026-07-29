@@ -9,7 +9,7 @@
    * lib/filing.js); the selection math is pure and unit-tested (lib/gridSelect.js).
    */
   import { api } from '../lib/api.js';
-  import { caseState, reloadCase, toast } from '../lib/state.svelte.js';
+  import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import { buildTree, subtreeCount, folderOf, flattenPaths, isInFolderSubtree } from '../lib/folderTree.js';
   import { assignFolderBatch } from '../lib/filing.js';
   import { createNote } from '../lib/notes.js';
@@ -18,6 +18,15 @@
   import { marqueeRect, marqueeHits, toggleSelection } from '../lib/gridSelect.js';
   import { buildCatalogQuery, fetchAllEntities } from '../lib/catalog.js';
   import { sortFileEntities } from '../lib/fileSort.js';
+  import {
+    deletedToast,
+    emptyTrash,
+    formatSize,
+    purgeGroup,
+    readTrash,
+    restoreGroup,
+    RESTORABLE,
+  } from '../lib/trash.js';
   import { createPagedList } from '../lib/pagedList.svelte.js';
   import Icon from '../components/Icon.svelte';
   import SearchInput from '../components/SearchInput.svelte';
@@ -57,6 +66,9 @@
   });
   const confirmed = $derived(pl.items);
   let summary = $state(null); // { total, by_type, by_status, by_folder }
+  const emptyTrashState = () => ({ groups: [], items: 0, size_bytes: 0 });
+  let trashData = $state(emptyTrashState());
+  let trashRun = 0;
   let loadedFor = null; // non-reactive: only the load effect reads/writes it
   $effect(() => {
     const id = caseState.current?.id;
@@ -64,18 +76,32 @@
     if (!id) {
       pl.clear();
       summary = null;
+      trashData = emptyTrashState();
+      showTrash = false;
       return;
     }
     if (id !== loadedFor) {
       loadedFor = id;
       pl.clear();
+      showTrash = false;
     }
     pl.reload();
     api
       .get(`/api/cases/${id}/catalog/summary`)
       .then((s) => (summary = s))
       .catch(() => (summary = null));
+    loadTrash(id);
   });
+
+  async function loadTrash(id) {
+    const run = ++trashRun;
+    try {
+      const listed = await readTrash(id);
+      if (run === trashRun && caseState.current?.id === id) trashData = listed;
+    } catch {
+      if (run === trashRun && caseState.current?.id === id) trashData = emptyTrashState();
+    }
+  }
   $effect(() => {
     pl.setQuery(query);
   });
@@ -104,6 +130,7 @@
   // ── navigation ──────────────────────────────────────────────────────────────
   let cwd = $state(''); // '' = root ("All")
   let showUnfiled = $state(false);
+  let showTrash = $state(false);
 
   function nodeAt(path) {
     if (!path) return { path: '', children: tree, entities: [] };
@@ -254,22 +281,33 @@
   const ctxParent = $derived(showUnfiled || searching ? '' : cwd);
 
   function openFolder(path) {
+    showTrash = false;
     showUnfiled = false;
     cwd = path;
     if (searching && pl.serverMode) pl.reload();
   }
   function openUnfiled() {
+    showTrash = false;
     showUnfiled = true;
     if (searching && pl.serverMode) pl.reload();
+  }
+
+  function openTrash() {
+    showTrash = true;
+    showUnfiled = false;
+    cwd = '';
+    query = '';
   }
 
   // ── selection ────────────────────────────────────────────────────────────────
   let selected = $state([]);
   let anchor = null;
+  let deleteShortcutPending = false;
   // clear the selection whenever the view changes
   $effect(() => {
     cwd;
     showUnfiled;
+    showTrash;
     query;
     selected = [];
     anchor = null;
@@ -279,6 +317,32 @@
     const r = toggleSelection(selected, id, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey }, entityOrder, anchor);
     selected = r.selected;
     anchor = r.anchor;
+  }
+
+  function onFilesKeydown(event) {
+    if (
+      event.key !== 'Delete' ||
+      event.repeat ||
+      uiState.tool !== 'files' ||
+      showTrash ||
+      !selected.length ||
+      confirmState ||
+      deleteShortcutPending
+    ) {
+      return;
+    }
+    const target = event.target;
+    if (
+      target instanceof HTMLElement &&
+      (target.matches('input, textarea, select') || target.isContentEditable)
+    ) {
+      return;
+    }
+    event.preventDefault();
+    deleteShortcutPending = true;
+    Promise.resolve(askDeleteEntities([...selected])).finally(() => {
+      deleteShortcutPending = false;
+    });
   }
 
   // ── marquee (rubber-band) ─────────────────────────────────────────────────────
@@ -433,6 +497,46 @@
     }
   }
 
+  async function restoreTrashItem(group) {
+    try {
+      await restoreGroup(caseState.current.id, group.id);
+      toast(`Restored “${group.label}”`, 'ok', 2200);
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  }
+
+  function askPurgeTrashItem(group) {
+    confirmState = {
+      title: 'Delete permanently?',
+      message: `“${group.label}” will be gone for good.`,
+      detail: 'The files will be deleted from disk.',
+      confirmLabel: 'Delete permanently',
+      tone: 'danger',
+      icon: 'trash',
+      action: async () => {
+        await purgeGroup(caseState.current.id, group.id);
+        await reloadCase();
+      },
+    };
+  }
+
+  function askEmptyFilesTrash() {
+    const noun = trashData.items === 1 ? 'item' : 'items';
+    confirmState = {
+      title: 'Empty the trash?',
+      message: `${trashData.items} ${noun} will be gone for good.`,
+      detail: 'The files will be deleted from disk.',
+      confirmLabel: 'Empty the trash',
+      tone: 'danger',
+      icon: 'trash',
+      action: async () => {
+        await emptyTrash(caseState.current.id);
+        await reloadCase();
+      },
+    };
+  }
+
   async function askDeleteEntities(ids) {
     const ents = confirmed.filter((e) => ids.includes(e.id));
     if (!ents.length) return;
@@ -455,17 +559,21 @@
         ? `${ents.length} items will be removed from the case and their tools.`
         : `“${ents[0].label}” will be removed from the case and its tool.`,
       detail: ents.some((e) => FILE_BACKED.has(e.type))
-        ? 'Deletes the underlying files from disk and cannot be undone.'
-        : `${multi ? 'Removes them' : 'Removes it'} from the case and cannot be undone.`,
+        ? `Moves ${multi ? 'the items and their files' : 'the item and its files'} to the case trash.`
+        : `Moves ${multi ? 'the items' : 'the item'} to the case trash.`,
       consequences,
+      restorable: RESTORABLE,
       confirmLabel: multi ? 'Delete all' : 'Delete everywhere',
-      tone: 'danger',
+      tone: 'default',
       icon: 'trash',
       action: async () => {
-        for (const e of ents) await api.del(`/api/cases/${caseState.current.id}/entities/${e.id}`);
+        const caseId = caseState.current.id;
+        const result = multi
+          ? await api.post(`/api/cases/${caseId}/entities/delete`, { ids: ents.map((e) => e.id) })
+          : await api.del(`/api/cases/${caseId}/entities/${ents[0].id}`);
         await reloadCase();
         selected = [];
-        toast(multi ? `Deleted ${ents.length} items` : `Deleted “${ents[0].label}”`, 'info');
+        deletedToast(caseId, result, ents[0].label);
       },
     };
   }
@@ -678,43 +786,53 @@
   });
 </script>
 
+<svelte:window onkeydown={onFilesKeydown} />
+
 <div class="tool">
   <div class="tool-header">
     <h2>Files</h2>
     <span class="sub">Organize My work</span>
     <div class="spacer"></div>
-    <SearchInput
-      bind:value={query}
-      placeholder={cwd ? 'Search this folder…' : 'Search My work…'}
-      width="160px"
-    />
-    {#if view !== 'list'}
-      <select class="select sort-select" value={sort} onchange={onSortSelect} title="Sort order">
-        {#each SORTS as s (s.id)}
-        <option value={s.id}>{sortOptionLabel(s)}</option>
-        {/each}
-      </select>
-    {/if}
-    <div class="view-switch" role="group" aria-label="View">
-      {#each VIEWS as v (v.id)}
-        <button
-          class="view-btn"
-          class:active={view === v.id}
-          title={`${v.label} view`}
-          aria-pressed={view === v.id}
-          onclick={() => (view = v.id)}
-        >
-          <Icon name={v.icon} size={14} /> {v.label}
+    {#if showTrash}
+      {#if trashData.groups.length}
+        <button class="btn btn-danger" onclick={askEmptyFilesTrash}>
+          <Icon name="trash" size={14} /> Empty trash
         </button>
-      {/each}
-    </div>
-    <span class="bar-sep"></span>
-    <form class="new-folder" onsubmit={(e) => { e.preventDefault(); createFolder(); }}>
-      <input class="input" placeholder="New folder…" bind:value={newFolder} />
-      <button class="btn" type="submit" disabled={!newFolder.trim()}>
-        <Icon name="folder" size={14} /> Add
-      </button>
-    </form>
+      {/if}
+    {:else}
+      <SearchInput
+        bind:value={query}
+        placeholder={cwd ? 'Search this folder…' : 'Search My work…'}
+        width="160px"
+      />
+      {#if view !== 'list'}
+        <select class="select sort-select" value={sort} onchange={onSortSelect} title="Sort order">
+          {#each SORTS as s (s.id)}
+          <option value={s.id}>{sortOptionLabel(s)}</option>
+          {/each}
+        </select>
+      {/if}
+      <div class="view-switch" role="group" aria-label="View">
+        {#each VIEWS as v (v.id)}
+          <button
+            class="view-btn"
+            class:active={view === v.id}
+            title={`${v.label} view`}
+            aria-pressed={view === v.id}
+            onclick={() => (view = v.id)}
+          >
+            <Icon name={v.icon} size={14} /> {v.label}
+          </button>
+        {/each}
+      </div>
+      <span class="bar-sep"></span>
+      <form class="new-folder" onsubmit={(e) => { e.preventDefault(); createFolder(); }}>
+        <input class="input" placeholder="New folder…" bind:value={newFolder} />
+        <button class="btn" type="submit" disabled={!newFolder.trim()}>
+          <Icon name="folder" size={14} /> Add
+        </button>
+      </form>
+    {/if}
   </div>
 
   {#if !caseState.current}
@@ -729,7 +847,7 @@
       <aside class="tree-rail">
         <div
           class="trow"
-          class:active={cwd === '' && !showUnfiled}
+          class:active={cwd === '' && !showUnfiled && !showTrash}
           class:dropping={dropTarget === ''}
           role="button"
           tabindex="0"
@@ -766,13 +884,30 @@
             <span class="tname">Unfiled</span>
             <span class="tcount">{unfiled.length}</span>
           </div>
+
+        <div
+          class="trow"
+          class:active={showTrash}
+          role="button"
+          tabindex="0"
+          onclick={openTrash}
+          onkeydown={(e) => e.key === 'Enter' && openTrash()}
+        >
+          <Icon name="trash" size={14} />
+          <span class="tname">Trash</span>
+          <span class="tcount">{trashData.items}</span>
+        </div>
       </aside>
 
       <!-- right: the desktop surface -->
       <section class="grid-pane">
         <div class="crumbs">
           <button class="crumb" onclick={() => openFolder('')}>All</button>
-          {#if showUnfiled}
+          {#if showTrash}
+            <Icon name="chevronRight" size={12} />
+            <span class="crumb here">Trash</span>
+            <span class="trash-summary">{trashData.items} item{trashData.items === 1 ? '' : 's'} · {formatSize(trashData.size_bytes)}</span>
+          {:else if showUnfiled}
             <Icon name="chevronRight" size={12} />
             <span class="crumb here">Unfiled</span>
           {:else}
@@ -791,7 +926,39 @@
           {/if}
         </div>
 
-        {#if view === 'list'}
+        {#if showTrash}
+          <div class="trash-pane">
+            {#if trashData.groups.length}
+              {#each trashData.groups as group (group.id)}
+                <div class="trash-item">
+                  <span class="trash-icon"><Icon name="trash" size={18} /></span>
+                  <div class="trash-copy">
+                    <strong>{group.label}</strong>
+                    <span>
+                      {group.item_count} item{group.item_count === 1 ? '' : 's'}
+                      · {formatSize(group.size_bytes)}
+                      · {group.type}
+                    </span>
+                  </div>
+                  <button class="btn btn-sm" onclick={() => restoreTrashItem(group)}>
+                    <Icon name="undo" size={13} /> Restore
+                  </button>
+                  <button
+                    class="btn btn-danger btn-sm"
+                    onclick={() => askPurgeTrashItem(group)}
+                  >
+                    <Icon name="trash" size={13} /> Delete permanently
+                  </button>
+                </div>
+              {/each}
+            {:else}
+              <div class="grid-empty">
+                <Icon name="trash" size={34} />
+                <p>Trash is empty.</p>
+              </div>
+            {/if}
+          </div>
+        {:else if view === 'list'}
           <!-- Details list: rows with columns (Name · Type · Size · Added). -->
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
@@ -1007,7 +1174,7 @@
           {/if}
         </div>
         {/if}
-        {#if pl.hasMore}
+        {#if !showTrash && pl.hasMore}
           <div class="show-more">
             <button class="btn" onclick={() => pl.loadMore()} disabled={pl.loading}>
               {pl.loading ? 'Loading…' : 'Show more'}
@@ -1122,6 +1289,7 @@
     message={confirmState.message}
     detail={confirmState.detail}
     consequences={confirmState.consequences}
+    restorable={confirmState.restorable}
     confirmLabel={confirmState.confirmLabel}
     tone={confirmState.tone}
     icon={confirmState.icon}
@@ -1395,10 +1563,57 @@
   .crumbs > :global(svg) {
     color: var(--text-3);
   }
+  .trash-summary {
+    margin-left: 8px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
   .sel-count {
     font-size: var(--fs-xs);
     color: var(--accent);
     font-weight: 600;
+  }
+
+  .trash-pane {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px 14px;
+  }
+  .trash-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .trash-icon {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    flex: 0 0 auto;
+    border-radius: var(--r-sm);
+    background: var(--bg-2);
+    color: var(--text-3);
+  }
+  .trash-copy {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .trash-copy strong {
+    overflow: hidden;
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .trash-copy span {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
   }
 
   /* segmented view switch (Small · Large · List) */

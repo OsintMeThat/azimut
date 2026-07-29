@@ -326,6 +326,10 @@ def test_enqueue_is_idempotent_on_key(repo):
     # a different key is a distinct job
     repo.enqueue_job("thumbnail", key="media/b.jpg")
     assert repo.count_jobs() == {"queued": 2}
+    repo.enqueue_job("enrich", key="media/a.jpg")
+    assert repo.count_jobs() == {"queued": 3}
+    assert repo.count_jobs(kind="thumbnail") == {"queued": 2}
+    assert repo.count_jobs(kind="enrich") == {"queued": 1}
 
 
 def test_claim_takes_one_queued_job_oldest_first(repo):

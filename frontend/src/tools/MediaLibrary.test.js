@@ -35,10 +35,11 @@ describe('Media Library thumbnail layout', () => {
 
 describe('Media Library thumbnail states', () => {
   it('shows the image only when its thumbnail is ready and not broken', () => {
-    // the ready branch is gated on thumb_state and the broken-thumb fallback set
-    expect(source).toContain("item.thumb_state === 'ready' && !brokenThumbs.has(item.path)");
-    // a broken <img> reports once into brokenThumbs rather than retrying
-    expect(source).toContain('onerror={() => (brokenThumbs = new Set(brokenThumbs).add(item.path))}');
+    // The ready branch and broken-thumb key include the case id: two cases may
+    // legitimately use the same relative media path.
+    expect(source).toContain("item.thumb_state === 'ready' && !brokenThumbs.has(mediaKey(item))");
+    expect(source).toContain('data-media-key={mediaKey(item)}');
+    expect(source).toContain('onerror={markBrokenThumb}');
     // lazy + async decode per the doc's UI failure behaviour
     expect(source).toContain('loading="lazy"');
     expect(source).toContain('decoding="async"');
@@ -52,9 +53,14 @@ describe('Media Library thumbnail states', () => {
   });
 
   it('polls while thumbnails are pending and only while the tool is visible', () => {
+    expect(source).toContain("(pl.facets?.thumbnail_pending ?? 0) > 0");
     expect(source).toContain("i.thumb_state === 'queued' || i.thumb_state === 'running'");
     expect(source).toContain("if (!thumbsPending || uiState.tool !== 'media' || !caseState.current) return;");
     expect(source).toContain('/media/thumbnails/regenerate');
+  });
+
+  it('keeps polling for jobs outside the loaded media page', () => {
+    expect(source).toContain('pl.facets?.thumbnail_pending');
   });
 
   it('repeats the poll (not a one-shot timer that leaves a slow thumbnail stuck)', () => {
@@ -147,6 +153,11 @@ describe('Media Library bounded loading', () => {
     );
     expect(effect).toContain('pl.clear()');
     expect(effect).toContain('brokenThumbs = new Set()');
+  });
+
+  it('recreates media rows when the case changes even if relative paths match', () => {
+    expect(source).toContain('{#each filteredItems as item (mediaKey(item))}');
+    expect(source).toContain("const mediaKey = (item) => `${caseState.current?.id ?? ''}/${item.path}`");
   });
 });
 

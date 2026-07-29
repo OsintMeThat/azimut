@@ -279,6 +279,9 @@ class Case:
             if (path / "case.json").exists():
                 case = cls(path)
                 case.migrate()
+                from .engine import trash as trash_engine
+
+                trash_engine.recover(case)
                 return case
         raise CaseError(f"case '{case_id}' not found")
 
@@ -839,12 +842,29 @@ class Case:
         item_count: int,
         size_bytes: int,
         payload: dict[str, Any],
+        state: str = "ready",
     ) -> dict[str, Any]:
         return self._graph().add_trash_group(
             group_id,
             label=label,
             type_=type_,
             item_count=item_count,
+            size_bytes=size_bytes,
+            payload=payload,
+            state=state,
+        )
+
+    def update_trash_group(
+        self,
+        group_id: str,
+        *,
+        state: str | None = None,
+        size_bytes: int | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._graph().update_trash_group(
+            group_id,
+            state=state,
             size_bytes=size_bytes,
             payload=payload,
         )
@@ -854,6 +874,9 @@ class Case:
 
     def get_trash_group(self, group_id: str) -> dict[str, Any] | None:
         return self._graph().get_trash_group(group_id)
+
+    def list_incomplete_trash(self) -> list[dict[str, Any]]:
+        return self._graph().list_incomplete_trash()
 
     def remove_trash_group(self, group_id: str) -> None:
         self._graph().remove_trash_group(group_id)
@@ -910,8 +933,8 @@ class Case:
     ) -> list[dict[str, Any]]:
         return self._graph().list_jobs(kind=kind, state=state)
 
-    def count_jobs(self) -> dict[str, int]:
-        return self._graph().count_jobs()
+    def count_jobs(self, *, kind: str | None = None) -> dict[str, int]:
+        return self._graph().count_jobs(kind=kind)
 
     def recover_jobs(self) -> int:
         return self._graph().recover_jobs()

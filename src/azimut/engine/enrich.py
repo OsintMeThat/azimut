@@ -394,8 +394,17 @@ def _suggest_place(case: "CaseType", entity_id: str, gps: dict[str, float]) -> N
     is an attribute of the places enrichment mints; a place the analyst pinned
     by hand has none and is left alone, because merging the two is a judgement
     the Suggestions panel exists to let them make.
+
+    A relation already stated for this media wins over a later backfill. This is
+    especially important after importing a case from an older Azimut release:
+    its media may need the current enrichment pass, but its confirmed
+    ``Relate to`` choices are investigation state and must not return as a new
+    GPS suggestion.
     """
     from . import satellite as satellite_engine
+
+    if any(link["type"] == LOCATED_AT for link in case.links_of(entity_id)):
+        return
 
     key = f"{gps['lat']:.5f},{gps['lon']:.5f}"
     place = case.find_entity(attr="enrich_coord_key", value=key)

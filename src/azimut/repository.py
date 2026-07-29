@@ -304,7 +304,7 @@ class CaseRepository(Protocol):
     ) -> list[dict[str, Any]]:
         ...
 
-    def count_jobs(self) -> dict[str, int]:
+    def count_jobs(self, *, kind: str | None = None) -> dict[str, int]:
         ...
 
     def recover_jobs(self) -> int:

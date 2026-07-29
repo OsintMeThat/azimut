@@ -51,13 +51,15 @@ notes/         # filed note bodies (Markdown)
 media/         # source + captured + extracted media, with metadata + sha256
 proofs/        # composed proofs: exported PNGs + editable JSON specs
                #   <name>.assets/ holds images pasted into that proof only
-exports/       # post drafts, reports, shared bundles
+exports/       # post drafts and reports
 inspect/       # saved Inspect session specs
+.trash/        # recoverable artifact payloads
 ```
 
 Tools use `CaseRepository` for structured state. Media, notes and proofs remain
 files. Legacy JSON graphs migrate to SQLite on open with a retained backup.
-One-shot work uses the same code path in a promotable scratch case.
+One-shot work uses the same code path in a promotable scratch case. Exported
+case bundles live in the workspace-level `bundles/` directory.
 
 ## 4. Data model
 
@@ -110,6 +112,8 @@ proof for publication.
 | ✅ **Notebook diagrams** | Draws ```mermaid fences in the preview and the PDF, loading the library only when a note holds one. |
 | ✅ **Canvas tests** | Exercises Leaflet and Konva interactions in Chromium and Firefox. |
 | ✅ **Storage platform** | Uses per-case SQLite, bounded catalog queries and a durable one-worker job queue. |
+| ✅ **Case bundle** | Exports and imports integrity-checked case snapshots, with optional whole-bundle password protection. |
+| ✅ **Trash** | Holds deleted artifacts for restore or explicit permanent deletion. |
 | ✅ **Gated downloads** | Fetches login-walled media by borrowing a browser session or cookies.txt, cookie-less by default and prompted only on a wall. |
 | ✅ **Find at scale** | Bounded, paged loading with a shared search box and sort across the Media Library and Files, plus case-name search in the switcher. |
 | ✅ **Searchable pickers** | Pickers in Inspect, Reverse Search, Geo Proof and the Notebook notes menu search past six entries and browse case folders behind the "…". |
@@ -132,8 +136,6 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 
 | Tool | What it does |
 |------|--------------|
-| **Case bundle** | Exports a case to one ZIP (clean SQLite copy, keys excluded) and imports it back. |
-| **Trash** | Undoes a delete and holds removed artifacts before they go for good. |
 | **Case Board / Relations** | Browses, creates and merges entities; graph view over the schema filled since v1, on the shipped relation vocabulary. |
 | **Case Sheet** | The same case as a table: a row is an entity, columns are its attributes plus free ones the analyst adds, sorted, filtered and edited in place. Imports a CSV as loose rows that stay out of the graph until promoted, and exports back to CSV or GeoJSON. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. |
@@ -263,10 +265,12 @@ stops making sense.
 - **Dependencies:** ranges in `pyproject.toml`, exact pins in `uv.lock`; yt-dlp
   + gallery-dl unbounded on purpose; scraper self-update keeps an old binary useful.
 - **Storage:** per-case SQLite `case.db` is the authoritative graph (files for
-  media/notes/proofs; a closed folder is a complete copy); legacy `case.json` cases migrate
-  on open; case open and lists use bounded, cursor-paged queries; thumbnails and
-  background work run through a durable, recoverable per-case job queue drained by
-  one worker. Details in [STORAGE_AND_PERFORMANCE.md](STORAGE_AND_PERFORMANCE.md).
+  media/notes/proofs); deleted artifacts wait in `.trash/`, and portable case
+  bundles carry a cleaned database plus declared files under a SHA-256 manifest.
+  Legacy `case.json` cases migrate on open; case open and lists use bounded,
+  cursor-paged queries; thumbnails and background work run through a durable,
+  recoverable per-case job queue drained by one worker. Details in
+  [STORAGE_AND_PERFORMANCE.md](STORAGE_AND_PERFORMANCE.md).
 - **Security posture** (single-user localhost): `127.0.0.1` bind + Host/Origin
   guard (DNS rebinding), 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
   names for images pasted into a proof (no client-chosen path), token-gated
@@ -279,9 +283,13 @@ stops making sense.
   about that behavior and local Case media avoids it. Notebook diagrams are the
   one markup DOMPurify does not clear: Mermaid draws its SVG into the preview
   after sanitizing, under its own `strict` level, which escapes labels and drops
-  click handlers. User-initiated imports,
-  downloads and generated files have no app quota and can fill the workspace
-  filesystem; disk capacity remains the user's responsibility.
+  click handlers. Case imports extract only unique, non-symlink members declared
+  by the manifest and matching its SHA-256. Password-protected bundles seal the
+  complete ZIP with chunked AES-256-GCM and a scrypt-derived key; filenames stay
+  encrypted and the password is never persisted in a job. Import temporarily
+  stages a decrypted ZIP inside the incoming case directory. Imports validate
+  declared and actual sizes, reserve filesystem headroom and warn above 10 GiB;
+  downloads and generated files still have no app quota.
 
 ## 10. Open questions
 

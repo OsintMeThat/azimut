@@ -46,6 +46,10 @@ class JobFailed(Exception):
     """The job failed this time and deserves another attempt."""
 
 
+class JobRemoved(Exception):
+    """The handler removed its owning case, so no row remains to settle."""
+
+
 def register(kind: str, handler: Handler) -> None:
     HANDLERS[kind] = handler
 
@@ -70,13 +74,16 @@ def has_queued(case: "CaseType") -> bool:
     return bool(case.list_jobs(state="queued"))
 
 
-def _settle(case: "CaseType", job: dict[str, Any]) -> None:
+def _settle(case: "CaseType", job: dict[str, Any]) -> bool:
+    """Settle one job. ``True`` means the handler removed the owning case."""
     handler = HANDLERS.get(job["kind"])
     if handler is None:
         case.cancel_job(job["id"])
-        return
+        return False
     try:
         handler(case, job)
+    except JobRemoved:
+        return True
     except JobCancelled:
         case.cancel_job(job["id"])
     except JobFailed as exc:
@@ -85,6 +92,7 @@ def _settle(case: "CaseType", job: dict[str, Any]) -> None:
         case.fail_job(job["id"], f"{type(exc).__name__}: {exc}")
     else:
         case.complete_job(job["id"])
+    return False
 
 
 def drain(case: "CaseType") -> int:
@@ -96,8 +104,10 @@ def drain(case: "CaseType") -> int:
         job = case.claim_job()
         if job is None:
             return handled
-        _settle(case, job)
+        removed = _settle(case, job)
         handled += 1
+        if removed:
+            return handled
 
 
 # -- the single background worker -----------------------------------------

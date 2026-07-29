@@ -13,6 +13,7 @@
   import { insertNotebookText, notebookImageMarkdown, notebookMediaMarkdown } from '../lib/notebookContent.js';
   import { caseTab, closeNotebookTab, openNotebookTab } from '../lib/notebookTabs.js';
   import { openEntity } from '../lib/navigate.js';
+  import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { matchesTerms } from '../lib/folderBrowse.js';
   import Icon from '../components/Icon.svelte';
   import SearchInput from '../components/SearchInput.svelte';
@@ -283,10 +284,11 @@
     cancelPendingSave();
     try {
       if (action.kind === 'delete') {
-        await deleteNote(caseState.current.id, action.noteId);
+        const caseId = caseState.current.id;
+        const result = await deleteNote(caseId, action.noteId);
         closeDeletedNote(action.noteId);
         await reloadCase();
-        toast(`Deleted "${action.label}"`, 'info');
+        deletedToast(caseId, result, action.label);
       } else {
         await resetCaseNotes(caseState.current.id);
         text = '';
@@ -755,10 +757,11 @@ flowchart LR
         ? `Are you sure you want to delete “${noteAction.label}”?`
         : 'Are you sure you want to reset the content of this note?'}
       detail={noteAction.kind === 'delete'
-        ? 'Removes the note and its contents and cannot be undone.'
+        ? 'Moves the note and its contents to the case trash.'
         : 'The case note will remain, but its content will be cleared.'}
+      restorable={noteAction.kind === 'delete' ? RESTORABLE : ''}
       confirmLabel={noteAction.kind === 'delete' ? 'Delete' : 'Reset'}
-      tone={noteAction.kind === 'delete' ? 'danger' : 'default'}
+      tone="default"
       icon={noteAction.kind === 'delete' ? 'trash' : 'reset'}
       busy={noteActionBusy}
       onconfirm={confirmNoteAction}

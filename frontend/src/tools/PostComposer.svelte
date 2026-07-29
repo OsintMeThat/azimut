@@ -5,6 +5,7 @@
   import { templatesState } from '../lib/state.svelte.js';
   import { createNote } from '../lib/notes.js';
   import { openNotebook } from '../lib/navigate.js';
+  import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { proofCoordsText, proofSource } from '../lib/composer.js';
   import { isDefaultName, nextName, savedSlugs, savedTitles, savedTitle, slugify } from '../lib/naming.js';
   import {
@@ -715,9 +716,10 @@
     const entry = deleteEntry;
     deleteEntry = null;
     try {
-      await api.del(`/api/cases/${caseState.current.id}/drafts/${entry.name}`);
+      const caseId = caseState.current.id;
+      const result = await api.del(`/api/cases/${caseId}/drafts/${entry.name}`);
       await Promise.all([openDraftList(), reloadCase()]);
-      toast(`Deleted "${entry.title}"`, 'info');
+      deletedToast(caseId, result, entry.title);
     } catch (e) {
       toast(e.message, 'danger');
     }
@@ -1375,9 +1377,10 @@
   <ConfirmDialog
     title="Delete this draft?"
     message={`“${deleteEntry.title}” will be removed from the case.`}
-    detail="Deletes the saved draft and cannot be undone."
+    detail="Moves the saved draft to the case trash."
+    restorable={RESTORABLE}
     confirmLabel="Delete"
-    tone="danger"
+    tone="default"
     icon="trash"
     onconfirm={deleteSavedDraft}
     oncancel={() => (deleteEntry = null)}

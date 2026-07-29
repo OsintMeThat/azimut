@@ -18,6 +18,7 @@
   import { loadRelationTypes, relatableTypes, saveRelation } from '../lib/relations.svelte.js';
   import { openEntity, gotoCapture, ENTITY_TOOL } from '../lib/navigate.js';
   import { pollWhile } from '../lib/poll.js';
+  import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import Icon from './Icon.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import FolderSelect from './FolderSelect.svelte';
@@ -206,7 +207,7 @@
     }
   }
 
-  // ── delete everywhere (irreversible; spells out what it touches) ───────────
+  // ── delete everywhere (recoverable from the case trash) ───────────────────
   let confirmState = $state(null);
   let confirmBusy = $state(false);
 
@@ -227,13 +228,15 @@
       title: 'Delete everywhere?',
       message: `“${e.label}” will be removed from the case and its tool.`,
       detail: FILE_BACKED.has(e.type)
-        ? 'Deletes the underlying files from disk and cannot be undone.'
-        : 'Removes it from the case and cannot be undone.',
+        ? 'Moves the item and its files to the case trash.'
+        : 'Moves the item to the case trash.',
       consequences,
+      restorable: RESTORABLE,
       action: async () => {
-        await api.del(`/api/cases/${caseState.current.id}/entities/${e.id}`);
+        const caseId = caseState.current.id;
+        const result = await api.del(`/api/cases/${caseId}/entities/${e.id}`);
         await reloadCase();
-        toast(`Deleted "${e.label}"`, 'info');
+        deletedToast(caseId, result, e.label);
         ondeleted?.();
       },
     };
@@ -507,8 +510,9 @@
     message={confirmState.message}
     detail={confirmState.detail}
     consequences={confirmState.consequences}
+    restorable={confirmState.restorable}
     confirmLabel="Delete everywhere"
-    tone="danger"
+    tone="default"
     icon="trash"
     busy={confirmBusy}
     onconfirm={runConfirm}

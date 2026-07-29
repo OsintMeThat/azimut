@@ -49,18 +49,10 @@ def _dir_size(path: Path) -> int:
 
 
 def _move(src: Path, dst: Path) -> None:
-    """Move a file or a directory, making room for it first.
-
-    Windows cannot rename onto an existing directory and refuses to delete an
-    open file, so the destination is cleared before the move rather than
-    overwritten by it.
-    """
+    """Move one path without ever overwriting an unrelated artifact."""
     ensure_dir(dst.parent)
     if dst.exists():
-        if dst.is_dir():
-            shutil.rmtree(dst, ignore_errors=True)
-        else:
-            dst.unlink(missing_ok=True)
+        raise CaseError(f"'{dst}' already exists")
     shutil.move(str(src), str(dst))
 
 
@@ -79,48 +71,77 @@ def collect_links(case: Case, entity_ids: set[str]) -> list[dict[str, Any]]:
     return list(seen.values())
 
 
+def _travelling_files(case: Case, entities: list[dict[str, Any]]) -> list[str]:
+    """Return existing owned paths without children already covered by a folder."""
+    paths = list(
+        dict.fromkeys(
+            rel
+            for entity in entities
+            for rel in artifact_engine.owned(case, entity)
+        )
+    )
+    kept: list[str] = []
+    for rel in sorted(paths, key=lambda value: len(Path(value).parts)):
+        parts = Path(rel).parts
+        if any(parts[: len(Path(parent).parts)] == Path(parent).parts for parent in kept):
+            continue
+        kept.append(rel)
+    return kept
+
+
 def send(
     case: Case,
     entities: list[dict[str, Any]],
     tombstones: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Move one delete action's artifacts aside and journal how to undo it.
+    """Journal a delete before changing files, indexes or graph rows."""
+    with case.lock:
+        group_id = _new_id("t")
+        root = _group_dir(case, group_id)
+        ids = {e["id"] for e in entities}
+        links = collect_links(case, ids)
+        files = _travelling_files(case, entities)
+        target = entities[0]
+        payload = {
+            "entities": entities,
+            "links": links,
+            "files": files,
+            "tombstones": tombstones,
+        }
+        group = case.add_trash_group(
+            group_id,
+            label=str(target.get("label") or target.get("id")),
+            type_=str(target.get("type") or ""),
+            item_count=len(entities),
+            size_bytes=0,
+            payload=payload,
+            state="preparing",
+        )
+        try:
+            for entity in entities:
+                artifact_engine.unfile(case, entity)
+            for rel in files:
+                source = case.resolve_inside(rel)
+                if source.exists():
+                    _move(source, root / rel)
+            return case.update_trash_group(group_id, size_bytes=_dir_size(root))
+        except Exception:
+            _rollback_delete(case, group)
+            raise
 
-    Called by the delete chokepoint once it has scarred the survivors, with the
-    entities about to leave the graph and the tombstones it just wrote. The
-    entities are still in the graph here, so their links can still be read.
 
-    Returns the journal row.
-    """
-    group_id = _new_id("t")
-    root = _group_dir(case, group_id)
-    ids = {e["id"] for e in entities}
-    links = collect_links(case, ids)
+def commit(case: Case, group_id: str) -> dict[str, Any]:
+    """Publish a fully completed delete in the user-visible trash."""
+    with case.lock:
+        return case.update_trash_group(group_id, state="ready")
 
-    moved: list[str] = []
-    for entity in entities:
-        for rel in artifact_engine.owned(case, entity):
-            source = case.resolve_inside(rel)
-            if not source.exists():
-                continue
-            _move(source, root / rel)
-            moved.append(rel)
 
-    target = entities[0]
-    payload = {
-        "entities": entities,
-        "links": links,
-        "files": moved,
-        "tombstones": tombstones,
-    }
-    return case.add_trash_group(
-        group_id,
-        label=str(target.get("label") or target.get("id")),
-        type_=str(target.get("type") or ""),
-        item_count=len(entities),
-        size_bytes=_dir_size(root),
-        payload=payload,
-    )
+def rollback(case: Case, group_id: str) -> None:
+    """Undo a delete that did not reach its durable ready state."""
+    with case.lock:
+        group = case.get_trash_group(group_id)
+        if group is not None:
+            _rollback_delete(case, group)
 
 
 def restore(case: Case, group_id: str) -> dict[str, Any]:
@@ -139,61 +160,111 @@ def restore(case: Case, group_id: str) -> dict[str, Any]:
     5. restored media are filed in the browse index again and their thumbnails
        re-queued, because a thumbnail was dropped rather than moved.
     """
-    group = case.get_trash_group(group_id)
-    if group is None:
-        raise CaseError(f"trash group '{group_id}' not found")
-    payload = group.get("payload") or {}
-    root = _group_dir(case, group_id)
-
-    files: list[str] = list(payload.get("files") or [])
-    occupied = [rel for rel in files if case.resolve_inside(rel).exists()]
-    if occupied:
-        raise CaseError(
-            f"'{occupied[0]}' is back in the case; rename or delete it before restoring"
-        )
-    for rel in files:
-        source = root / rel
-        if source.exists():
-            _move(source, case.resolve_inside(rel))
-
-    entities: list[dict[str, Any]] = list(payload.get("entities") or [])
-    result = case.reinsert(entities, list(payload.get("links") or []))
-
-    for scar in payload.get("tombstones") or []:
-        link_engine.remove_tombstone(case, scar["entity"], scar["path"])
-
-    for entity in entities:
-        refiled = artifact_engine.refile(case, entity)
-        if refiled:
-            thumbnail_engine.enqueue(case, refiled)
-
-    _drop_dir(case, group_id)
-    case.remove_trash_group(group_id)
-    return {"status": "restored", **result, "group": group_id}
+    with case.lock:
+        group = case.get_trash_group(group_id)
+        if group is None or group.get("state") != "ready":
+            raise CaseError(f"trash group '{group_id}' not found")
+        payload = group.get("payload") or {}
+        root = _group_dir(case, group_id)
+        files: list[str] = list(payload.get("files") or [])
+        occupied = [
+            rel for rel in files
+            if (root / rel).exists() and case.resolve_inside(rel).exists()
+        ]
+        if occupied:
+            raise CaseError(
+                f"'{occupied[0]}' is back in the case; rename or delete it before restoring"
+            )
+        group = case.update_trash_group(group_id, state="restoring")
+        return _finish_restore(case, group)
 
 
 def purge(case: Case, group_id: str) -> None:
     """Drop one group for good. The entity left the graph when it was deleted,
     so this is a directory and a row, never a second trip through the delete
     chokepoint."""
-    if case.get_trash_group(group_id) is None:
-        raise CaseError(f"trash group '{group_id}' not found")
-    _drop_dir(case, group_id)
-    case.remove_trash_group(group_id)
+    with case.lock:
+        group = case.get_trash_group(group_id)
+        if group is None or group.get("state") != "ready":
+            raise CaseError(f"trash group '{group_id}' not found")
+        _drop_dir(case, group_id)
+        case.remove_trash_group(group_id)
 
 
 def empty(case: Case) -> int:
     """Purge every group. Returns how many were dropped."""
-    ids = case.clear_trash()
-    for group_id in ids:
-        _drop_dir(case, group_id)
-    return len(ids)
+    with case.lock:
+        ids = [group["id"] for group in case.list_trash()]
+        for group_id in ids:
+            purge(case, group_id)
+        return len(ids)
+
+
+def recover(case: Case) -> None:
+    """Resolve interrupted filesystem operations whenever a case is opened."""
+    with case.lock:
+        for group in case.list_incomplete_trash():
+            state = group.get("state")
+            if state == "restoring":
+                _finish_restore(case, group)
+                continue
+            if state != "preparing":
+                raise CaseError(
+                    f"trash group '{group['id']}' has an unknown state '{state}'"
+                )
+            entities = list((group.get("payload") or {}).get("entities") or [])
+            if any(case.get_entity(entity["id"]) is not None for entity in entities):
+                _rollback_delete(case, group)
+            else:
+                case.update_trash_group(group["id"], state="ready")
+
+
+def _restore_files(case: Case, group: dict[str, Any]) -> None:
+    payload = group.get("payload") or {}
+    root = _group_dir(case, group["id"])
+    for rel in payload.get("files") or []:
+        source = root / rel
+        destination = case.resolve_inside(rel)
+        if source.exists():
+            _move(source, destination)
+        elif not destination.exists():
+            raise CaseError(f"trash artifact '{rel}' is missing")
+
+
+def _restore_records(case: Case, group: dict[str, Any]) -> dict[str, int]:
+    payload = group.get("payload") or {}
+    entities: list[dict[str, Any]] = list(payload.get("entities") or [])
+    result = case.reinsert(entities, list(payload.get("links") or []))
+    for scar in payload.get("tombstones") or []:
+        link_engine.remove_tombstone(case, scar["entity"], scar["path"])
+    for entity in entities:
+        refiled = artifact_engine.refile(case, entity)
+        if refiled:
+            thumbnail_engine.enqueue(case, refiled)
+    return result
+
+
+def _finish_restore(case: Case, group: dict[str, Any]) -> dict[str, Any]:
+    _restore_files(case, group)
+    result = _restore_records(case, group)
+    _drop_dir(case, group["id"])
+    case.remove_trash_group(group["id"])
+    return {"status": "restored", **result, "group": group["id"]}
+
+
+def _rollback_delete(case: Case, group: dict[str, Any]) -> None:
+    _restore_files(case, group)
+    _restore_records(case, group)
+    _drop_dir(case, group["id"])
+    case.remove_trash_group(group["id"])
 
 
 def _drop_dir(case: Case, group_id: str) -> None:
     """Remove one group's directory, and the trash root once it holds nothing —
     an emptied trash leaves a case exactly as it was born."""
-    shutil.rmtree(_group_dir(case, group_id), ignore_errors=True)
+    group = _group_dir(case, group_id)
+    if group.exists():
+        shutil.rmtree(group)
     root = case.trash_dir
     if root.is_dir() and not any(root.iterdir()):
         root.rmdir()
