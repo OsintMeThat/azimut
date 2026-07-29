@@ -223,6 +223,50 @@ class CaseRepository(Protocol):
     def remove_folder(self, name: str) -> list[str]:
         ...
 
+    # -- trash journal -----------------------------------------------------
+    #
+    # A delete keeps hard-deleting the graph rows and records the recipe to put
+    # them back, one row per delete action. Nothing else in the app filters on a
+    # "deleted" state, because nothing else has to know.
+
+    def add_trash_group(
+        self,
+        group_id: str,
+        *,
+        label: str,
+        type_: str,
+        item_count: int,
+        size_bytes: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        ...
+
+    def list_trash(self) -> list[dict[str, Any]]:
+        """Every group, newest first, without its payload."""
+        ...
+
+    def get_trash_group(self, group_id: str) -> dict[str, Any] | None:
+        """One group with the payload needed to restore it, or None."""
+        ...
+
+    def remove_trash_group(self, group_id: str) -> None:
+        ...
+
+    def clear_trash(self) -> list[str]:
+        """Drop every group, returning their ids."""
+        ...
+
+    def trash_summary(self) -> dict[str, int]:
+        """``{"groups": n, "items": n, "size_bytes": n}`` in one query."""
+        ...
+
+    def reinsert(
+        self, entities: list[dict[str, Any]], links: list[dict[str, Any]]
+    ) -> dict[str, int]:
+        """Re-insert deleted entities with their original ids, plus the links
+        whose two endpoints still exist."""
+        ...
+
     # -- durable jobs ------------------------------------------------------
     #
     # Local background work (thumbnails today; EXIF, OCR, transcripts later) that

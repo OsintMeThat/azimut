@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from ..engine import artifacts as artifact_engine
 from ..engine import links as link_engine
+from ..engine import trash as trash_engine
 from ..repository import EntityStatus
 from ..workspace import Case, CaseError
 
@@ -44,6 +45,11 @@ def delete_entity_deep(case: Case, entity_id: str) -> dict[str, Any]:
       is only adjustments over a video), transitively;
     - artifacts ``derived-from`` it are never touched, and are scarred with a
       tombstone first, while the target can still describe itself.
+
+    The whole action lands in the trash as one group, so undoing it brings the
+    cascade back together or not at all. The graph rows are still hard-deleted:
+    what is kept is the recipe, not a hidden state every other query would have
+    to filter out.
     """
     plan = link_engine.plan_delete(case, entity_id)
     target = case.get_entity(entity_id)
@@ -52,16 +58,23 @@ def delete_entity_deep(case: Case, entity_id: str) -> dict[str, Any]:
     going = [target, *plan["cascade"]]
 
     # Scar the survivors first, while the doomed can still describe themselves.
+    # Only the scars this delete writes are recorded, so an undo never lifts one
+    # an earlier delete left.
+    scars: list[dict[str, str]] = []
     for survivor_id, lost_sources in link_engine.losses(
         case, {e["id"] for e in going}
     ).items():
         for lost in lost_sources:
             info = link_engine.tombstone_of(lost)
-            if info.get("path"):
-                link_engine.add_tombstone(case, survivor_id, info)
+            if info.get("path") and link_engine.add_tombstone(case, survivor_id, info):
+                scars.append({"entity": survivor_id, "path": info["path"]})
 
     for entity in going:
-        artifact_engine.delete(case, entity)
+        artifact_engine.unfile(case, entity)
+    # Before the rows go: the group's files move aside and its incident links are
+    # read, both of which need the entities still in the graph.
+    group = trash_engine.send(case, going, scars)
+    for entity in going:
         try:
             case.remove_entity(entity["id"])
         except CaseError:
@@ -71,6 +84,7 @@ def delete_entity_deep(case: Case, entity_id: str) -> dict[str, Any]:
         "status": "deleted",
         "deleted": [e["id"] for e in going],
         "tombstoned": [e["id"] for e in plan["tombstone"]],
+        "trash": group["id"],
     }
 
 
@@ -436,6 +450,55 @@ def remove_entity(case_id: str, entity_id: str) -> dict[str, Any]:
         return delete_entity_deep(case, entity_id)
     except CaseError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/{case_id}/trash")
+def list_trash(case_id: str) -> dict[str, Any]:
+    """What the case is holding for you, newest first.
+
+    Head columns only — no payload is read here, so the node costs one indexed
+    query however much is waiting in it.
+    """
+    case = get_case(case_id)
+    summary = case.trash_summary()
+    return {
+        "groups": case.list_trash(),
+        "items": summary["items"],
+        "size_bytes": summary["size_bytes"],
+    }
+
+
+@router.post("/{case_id}/trash/{group_id}/restore")
+def restore_trash(case_id: str, group_id: str) -> dict[str, Any]:
+    """Take one delete back, all of it or none.
+
+    A 409 means a file is back at a path the group wants: restoring would have to
+    rename an artifact behind the analyst, so it refuses and names the path
+    instead.
+    """
+    case = get_case(case_id)
+    try:
+        return trash_engine.restore(case, group_id)
+    except CaseError as exc:
+        message = str(exc)
+        status = 404 if "not found" in message else 409
+        raise HTTPException(status_code=status, detail=message) from exc
+
+
+@router.delete("/{case_id}/trash/{group_id}")
+def purge_trash(case_id: str, group_id: str) -> dict[str, str]:
+    """Drop one group for good. This is where the bytes actually go."""
+    case = get_case(case_id)
+    try:
+        trash_engine.purge(case, group_id)
+    except CaseError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "purged"}
+
+
+@router.delete("/{case_id}/trash")
+def empty_trash(case_id: str) -> dict[str, int]:
+    return {"purged": trash_engine.empty(get_case(case_id))}
 
 
 @router.get("/{case_id}/folders")

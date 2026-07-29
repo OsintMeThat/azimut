@@ -62,6 +62,9 @@ def test_deleting_everything_returns_the_case_to_its_birth_state(client):
     # Grids are not entities, so nothing deletes them for us (a gap the trash
     # work records rather than closes).
     client.delete(f"/api/cases/{full.case_id}/search-grids/north-sweep")
+    # Deleting is reversible now, so the bytes are still in the trash: this is
+    # the second half of the gate, and where they are actually reclaimed.
+    client.delete(f"/api/cases/{full.case_id}/trash")
 
     emptied = Case.open(full.case_id)
     assert tree(emptied.path) == tree(born.path)

@@ -199,12 +199,35 @@ def _remove(path: Path) -> None:
         path.unlink(missing_ok=True)
 
 
-def delete(case: "Case", entity: dict[str, Any]) -> None:
-    """Drop everything an entity owns on disk, leaving the graph alone.
+def refile(case: "Case", entity: dict[str, Any]) -> str | None:
+    """File a restored artifact back into whatever index tracks it.
 
-    The order matters: the caches are read while the sidecar is still there, and
-    the browse index row goes before the sharing check, so a thumbnail this media
-    was the last user of is actually reclaimed.
+    Today that is the media browse index, whose row a delete unfiled. The
+    sidecar travelled with the file, so the row is rebuilt from it rather than
+    from anything the trash had to remember. Returns the media path when one was
+    refiled, so the caller can re-queue its thumbnail.
+    """
+    found = _main_path(entity)
+    if found is None:
+        return None
+    kind, main = found
+    if not kind.indexed:
+        return None
+    item = media_engine.read_item(case, main)
+    if item is None:
+        return None
+    case.upsert_media_item(item, entity_id=entity.get("id"))
+    return main
+
+
+def unfile(case: "Case", entity: dict[str, Any]) -> None:
+    """Take an artifact out of the indexes and caches that track it, without
+    touching the files it owns.
+
+    What a delete does before the files go anywhere — dropped, or moved into the
+    trash. The order matters: the caches are read while the sidecar is still
+    there, and the browse index row goes before the sharing check, so a
+    thumbnail this media was the last user of is actually reclaimed.
     """
     found = _main_path(entity)
     if found is None:
@@ -215,6 +238,17 @@ def delete(case: "Case", entity: dict[str, Any]) -> None:
         case.remove_media_item(main)
     for rel in shared:
         _drop_cache(case, rel)
+
+
+def delete(case: "Case", entity: dict[str, Any]) -> None:
+    """Drop everything an entity owns on disk, leaving the graph alone.
+
+    The hard delete, for an artifact the graph never claimed — a file a tool
+    wrote and no entity points at. Anything the graph does hold goes through the
+    delete chokepoint instead, which moves the same files into the trash so the
+    analyst can take the delete back.
+    """
+    unfile(case, entity)
     for rel in owned(case, entity):
         path = _resolve(case, rel)
         if path is not None:

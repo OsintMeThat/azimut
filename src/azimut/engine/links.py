@@ -326,31 +326,55 @@ def tombstone_of(entity: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in fields.items() if v}
 
 
-def add_tombstone(case: CaseRepository, entity_id: str, info: dict[str, Any]) -> None:
+def add_tombstone(case: CaseRepository, entity_id: str, info: dict[str, Any]) -> bool:
     """Record on an artifact that one of its sources is gone.
 
     Keyed by path, so re-saving or a second delete never stacks duplicates.
+    False means this scar was already there — which is what the trash needs to
+    know, so an undo only lifts the scars its own delete wrote.
     """
-    add_tombstones(case, entity_id, [info])
+    return bool(add_tombstones(case, entity_id, [info]))
 
 
-def add_tombstones(case: CaseRepository, entity_id: str, infos: list[dict[str, Any]]) -> None:
-    """Record several lost sources with one case read and at most one write."""
+def add_tombstones(
+    case: CaseRepository, entity_id: str, infos: list[dict[str, Any]]
+) -> list[str]:
+    """Record several lost sources with one case read and at most one write.
+
+    Returns the paths actually written, skipping the ones already scarred.
+    """
     if not infos:
-        return
+        return []
     entity = _entity(case, entity_id)
     lost = list(entity.get("attrs", {}).get(LOST, []))
     paths = {item.get("path") for item in lost}
-    changed = False
+    added: list[str] = []
     for info in infos:
         path = info.get("path")
         if path in paths:
             continue
         lost.append({**info, "at": info.get("at") or _now()})
         paths.add(path)
-        changed = True
-    if changed:
+        added.append(str(path))
+    if added:
         case.update_entity(entity_id, {"attrs": {LOST: lost}})
+    return added
+
+
+def remove_tombstone(case: CaseRepository, entity_id: str, path: str) -> None:
+    """Lift a scar, because the source it recorded came back.
+
+    Keyed by path like `add_tombstone`, and silent when the entity or the scar is
+    already gone: restoring a group whose survivor was deleted in the meantime is
+    not an error, there is simply nothing left to unscar.
+    """
+    entity = case.get_entity(entity_id)
+    if entity is None:
+        return
+    lost = list(entity.get("attrs", {}).get(LOST, []))
+    kept = [item for item in lost if item.get("path") != path]
+    if len(kept) != len(lost):
+        case.update_entity(entity_id, {"attrs": {LOST: kept}})
 
 
 def losses(case: CaseRepository, doomed_ids: set[str]) -> dict[str, list[dict[str, Any]]]:
