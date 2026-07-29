@@ -286,14 +286,23 @@ def _case_files(case: Case) -> Iterator[tuple[str, Path]]:
 
 def _clean_database(source: Path, target: Path) -> None:
     """Take a consistent copy, remove local machine state, then compact it."""
-    with sqlite3.connect(source) as src, sqlite3.connect(target) as dst:
+    src = sqlite3.connect(source)
+    dst = sqlite3.connect(target)
+    try:
         src.backup(dst)
-    with sqlite3.connect(target) as conn:
+    finally:
+        dst.close()
+        src.close()
+
+    conn = sqlite3.connect(target)
+    try:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("DELETE FROM trash")
         conn.execute("DELETE FROM jobs WHERE state IN ('queued', 'running')")
         conn.commit()
         conn.execute("VACUUM")
+    finally:
+        conn.close()
 
 
 def _zip_info(name: str, *, compressed: bool) -> zipfile.ZipInfo:

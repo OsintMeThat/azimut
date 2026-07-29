@@ -40,6 +40,26 @@ def bundle_case(tmp_workspace, monkeypatch) -> Case:
     return case
 
 
+def test_clean_database_closes_every_sqlite_handle(monkeypatch, tmp_path):
+    connections: list[SimpleNamespace] = []
+
+    def connect(_path):
+        connection = SimpleNamespace(closed=False)
+        connection.backup = lambda _target: None
+        connection.execute = lambda _sql: None
+        connection.commit = lambda: None
+        connection.close = lambda: setattr(connection, "closed", True)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(bundles.sqlite3, "connect", connect)
+
+    bundles._clean_database(tmp_path / "source.db", tmp_path / "target.db")
+
+    assert len(connections) == 3
+    assert all(connection.closed for connection in connections)
+
+
 def test_plain_bundle_has_ordered_manifests_and_a_clean_database(bundle_case):
     exported = bundles.export_case(bundle_case)
 
