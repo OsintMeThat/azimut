@@ -6,6 +6,17 @@
  */
 import { uiState } from './state.svelte.js';
 
+/**
+ * A number an entity actually recorded, or NaN when it recorded nothing.
+ *
+ * `Number(null)` is 0, and a zoom of 0 is the whole globe — so a place minted
+ * from a photo's EXIF (which knows coordinates but no zoom) would fly the map
+ * all the way out instead of falling back to the Satellite tool's own default.
+ */
+function recorded(value) {
+  return value === null || value === undefined || value === '' ? NaN : Number(value);
+}
+
 /** Tool a given entity type opens in (also gates the "Open in tool" button). */
 export const ENTITY_TOOL = {
   media: 'media',
@@ -50,8 +61,8 @@ export function openEntity(entity) {
       uiState.gotoCoords = {
         lat,
         lon,
-        zoom: Number(entity.attrs?.zoom),
-        bearing: Number(entity.attrs?.bearing),
+        zoom: recorded(entity.attrs?.zoom),
+        bearing: recorded(entity.attrs?.bearing),
       };
     }
     uiState.tool = 'satellite';
@@ -72,8 +83,8 @@ export function openEntity(entity) {
       uiState.gotoCoords = {
         lat,
         lon,
-        zoom: Number(entity.attrs?.zoom),
-        bearing: Number(entity.attrs?.bearing),
+        zoom: recorded(entity.attrs?.zoom),
+        bearing: recorded(entity.attrs?.bearing),
         provider: entity.attrs?.provider,
       };
       uiState.focusCapture = entity.attrs?.path ?? null;
@@ -117,8 +128,8 @@ export function gotoCapture(entity) {
   uiState.gotoCoords = {
     lat,
     lon,
-    zoom: Number(entity.attrs?.zoom),
-    bearing: Number(entity.attrs?.bearing),
+    zoom: recorded(entity.attrs?.zoom),
+    bearing: recorded(entity.attrs?.bearing),
   };
   uiState.tool = 'satellite';
 }

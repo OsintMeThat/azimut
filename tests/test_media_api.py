@@ -331,6 +331,23 @@ def test_media_page_items_carry_thumb_state(client):
     assert page["items"][0]["thumb_state"] == "ready"
 
 
+def test_media_page_reports_pending_thumbnails_beyond_the_loaded_page(client, monkeypatch):
+    from azimut.engine import workqueue
+
+    monkeypatch.setattr(workqueue, "start_workers", False)
+    cid = client.post("/api/cases", json={"name": "Paged thumbnail jobs"}).json()["id"]
+    for index, name in enumerate(("a.mp4", "b.mp4")):
+        client.post(
+            f"/api/cases/{cid}/media/upload",
+            files={"file": (name, io.BytesIO(f"video {index}".encode()), "video/mp4")},
+        )
+
+    page = client.get(f"/api/cases/{cid}/media/page", params={"limit": 1}).json()
+
+    assert len(page["items"]) == 1
+    assert page["facets"]["thumbnail_pending"] == 2
+
+
 def test_duplicate_detection(client):
     cid = client.post("/api/cases", json={"name": "Dup"}).json()["id"]
     data = _png_bytes(color=(1, 2, 3))

@@ -17,6 +17,7 @@
   import { assignFolder as fileEntity, assignFolderBatch } from '../lib/filing.js';
   import { createNote } from '../lib/notes.js';
   import { openEntity, openNotebook } from '../lib/navigate.js';
+  import { emptyTrash, purgeGroup, readTrash, restoreGroup, undoAction } from '../lib/trash.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
@@ -76,6 +77,62 @@
     return loadSection(folderData[path], { status: 'confirmed', folder: path }, { more });
   }
 
+  // ── the trash node ────────────────────────────────────────────────────────
+  // Head rows only: the recipe to undo a delete never leaves the backend, so
+  // this stays one indexed query however much is waiting in there.
+  const emptyTrashState = () => ({ groups: [], items: 0, size_bytes: 0 });
+  let trashData = $state(emptyTrashState());
+  let trashOpen = $state(false);
+
+  async function loadTrash(id, mySeq) {
+    try {
+      const listed = await readTrash(id);
+      if (mySeq === seq) trashData = listed;
+    } catch {
+      if (mySeq === seq) trashData = emptyTrashState();
+    }
+  }
+
+  async function restoreTrashGroup(group) {
+    try {
+      await restoreGroup(caseState.current.id, group.id);
+      toast(`Restored “${group.label}”`, 'ok', 2200);
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  }
+
+  function askPurge(group) {
+    confirmState = {
+      title: 'Delete permanently?',
+      message: `“${group.label}” will be gone for good.`,
+      detail: 'The files will be deleted from disk.',
+      confirmLabel: 'Delete permanently',
+      tone: 'danger',
+      icon: 'trash',
+      action: async () => {
+        await purgeGroup(caseState.current.id, group.id);
+        await reloadCase();
+      },
+    };
+  }
+
+  function askEmptyTrash() {
+    const noun = trashData.items === 1 ? 'item' : 'items';
+    confirmState = {
+      title: 'Empty the trash?',
+      message: `${trashData.items} ${noun} will be gone for good.`,
+      detail: 'The files will be deleted from disk.',
+      confirmLabel: 'Empty the trash',
+      tone: 'danger',
+      icon: 'trash',
+      action: async () => {
+        await emptyTrash(caseState.current.id);
+        await reloadCase();
+      },
+    };
+  }
+
   async function loadSummary(id, mySeq) {
     try {
       const s = await api.get(`/api/cases/${id}/catalog/summary`);
@@ -103,12 +160,15 @@
       typeFilter = null;
       suggestedData = emptySection();
       unfiledData = emptySection();
+      trashData = emptyTrashState();
+      trashOpen = false;
     }
     if (!id) {
       summary = null;
       return;
     }
     loadSummary(id, seq);
+    loadTrash(id, seq);
     loadSuggested();
     loadUnfiled();
     for (const path of Object.keys(expanded)) if (expanded[path]) loadFolder(path);
@@ -168,10 +228,13 @@
   }
 
   // Dismiss a suggestion outright (quick triage — no heavy confirmation).
+  // It goes through the same delete as everything else, so a dismissal that
+  // turns out to have been a good lead comes back from the toast.
   async function dismissSuggestion(entity) {
-    await api.del(`/api/cases/${caseState.current.id}/entities/${entity.id}`);
+    const caseId = caseState.current.id;
+    const result = await api.del(`/api/cases/${caseId}/entities/${entity.id}`);
     await reloadCase();
-    toast(`Dismissed "${entity.label}"`, 'info');
+    toast(`Dismissed “${entity.label}”`, 'info', 7000, undoAction(caseId, result));
   }
 
   // Clicking a row opens its owning workspace; notes share the Notebook.
@@ -526,6 +589,12 @@
           onconfirm={confirmEntity}
           ondismiss={dismissSuggestion}
           ondragactive={onDragActive}
+          trash={trashData}
+          {trashOpen}
+          ontoggletrash={() => (trashOpen = !trashOpen)}
+          onrestore={restoreTrashGroup}
+          onpurge={askPurge}
+          onempty={askEmptyTrash}
         />
       {/if}
     </div>
@@ -562,6 +631,7 @@
     message={confirmState.message}
     detail={confirmState.detail}
     consequences={confirmState.consequences}
+    restorable={confirmState.restorable ?? ''}
     confirmLabel={confirmState.confirmLabel}
     tone={confirmState.tone}
     icon={confirmState.icon}

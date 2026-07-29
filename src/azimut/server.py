@@ -99,6 +99,15 @@ def create_app() -> FastAPI:
     except OSError:
         pass
 
+    # Bundle handlers must exist before crash recovery sees their queued jobs.
+    # The same pass removes browser uploads abandoned by a previous run.
+    from .engine import bundles
+
+    try:
+        bundles.cleanup_uploads()
+    except OSError:
+        pass
+
     # Reclaim background jobs a previous run left mid-flight and resume any
     # pending thumbnail work through the single worker. Best-effort: housekeeping
     # must never block or crash startup.

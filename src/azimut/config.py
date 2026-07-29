@@ -164,6 +164,11 @@ def scratch_dir() -> Path:
     return workspace_root() / "scratch"
 
 
+def bundles_dir() -> Path:
+    """Portable case bundles exported by the user."""
+    return workspace_root() / "bundles"
+
+
 def runtime_dir() -> Path:
     """Where updated scrapers land (engine/scrapers.py).
 
@@ -235,6 +240,7 @@ def ensure_workspace() -> None:
     """Create the workspace skeleton if missing (idempotent)."""
     cases_dir().mkdir(parents=True, exist_ok=True)
     scratch_dir().mkdir(parents=True, exist_ok=True)
+    bundles_dir().mkdir(parents=True, exist_ok=True)
     # The workspace holds API keys and the pairing token — keep it owner-only
     # so another account on a shared machine can't read them. Best-effort:
     # Windows ignores POSIX modes, which is fine (its ACLs already scope $HOME).

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, cast
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from .. import config
+from ..engine import bundles as bundle_engine
 from ..engine import links as link_engine
-from ..engine import media as media_engine
+from ..engine import trash as trash_engine
 from ..repository import EntityStatus
 from ..workspace import Case, CaseError
 
@@ -34,36 +38,8 @@ def _ensure_name_free(name: str, *, exclude_id: str | None = None) -> None:
             raise HTTPException(status_code=409, detail=f"a case named '{name}' already exists")
 
 
-def _unlink_inside(case: Case, rel_path: str) -> None:
-    try:
-        case.resolve_inside(rel_path).unlink(missing_ok=True)
-    except CaseError:
-        pass
-
-
-def _delete_artifact_files(case: Case, entity: dict[str, Any]) -> None:
-    """Drop the on-disk artifact an entity stands for (spec §6 delete/edit sync).
-
-    A bare ``place`` has no file; an unknown (free-typed) entity is assumed to
-    have none either, so a future type files its own deletion here or not at all.
-    """
-    etype = entity.get("type")
-    attrs = entity.get("attrs", {})
-    if etype in ("media", "capture") and attrs.get("path"):
-        media_engine.delete_media_files(case, attrs["path"])
-    elif etype == "proof" and attrs.get("spec"):
-        _unlink_inside(case, attrs["spec"])
-        _unlink_inside(case, attrs["spec"].removesuffix(".json") + ".png")
-    elif etype == "post" and attrs.get("draft"):
-        _unlink_inside(case, attrs["draft"])
-    elif etype == "inspect-session" and attrs.get("spec"):
-        _unlink_inside(case, attrs["spec"])
-    elif etype == "note" and attrs.get("path"):
-        _unlink_inside(case, attrs["path"])
-
-
-def delete_entity_deep(case: Case, entity_id: str) -> dict[str, Any]:
-    """Delete an entity, its artifact, and whatever cannot outlive it.
+def delete_entities_deep(case: Case, entity_ids: list[str]) -> dict[str, Any]:
+    """Delete one UI action and everything that cannot outlive its targets.
 
     The one door every delete goes through — sidebar, Media Library, a tool's
     own list — so the rules hold wherever the click came from:
@@ -72,34 +48,65 @@ def delete_entity_deep(case: Case, entity_id: str) -> dict[str, Any]:
       is only adjustments over a video), transitively;
     - artifacts ``derived-from`` it are never touched, and are scarred with a
       tombstone first, while the target can still describe itself.
+
+    The whole action lands in the trash as one group, so undoing it brings the
+    cascade back together or not at all. The graph rows are still hard-deleted:
+    what is kept is the recipe, not a hidden state every other query would have
+    to filter out.
     """
-    plan = link_engine.plan_delete(case, entity_id)
-    target = case.get_entity(entity_id)
-    if target is None:
-        raise CaseError(f"entity '{entity_id}' not found")
-    going = [target, *plan["cascade"]]
+    with case.lock:
+        going_by_id: dict[str, dict[str, Any]] = {}
+        tombstoned: set[str] = set()
+        for entity_id in dict.fromkeys(entity_ids):
+            plan = link_engine.plan_delete(case, entity_id)
+            target = case.get_entity(entity_id)
+            if target is None:
+                raise CaseError(f"entity '{entity_id}' not found")
+            for entity in (target, *plan["cascade"]):
+                going_by_id[entity["id"]] = entity
+            tombstoned.update(entity["id"] for entity in plan["tombstone"])
+        going = list(going_by_id.values())
 
-    # Scar the survivors first, while the doomed can still describe themselves.
-    for survivor_id, lost_sources in link_engine.losses(
-        case, {e["id"] for e in going}
-    ).items():
-        for lost in lost_sources:
-            info = link_engine.tombstone_of(lost)
-            if info.get("path"):
-                link_engine.add_tombstone(case, survivor_id, info)
+        scars: list[dict[str, str]] = []
+        losses = link_engine.losses(case, {e["id"] for e in going})
+        for survivor_id, lost_sources in losses.items():
+            survivor = case.get_entity(survivor_id)
+            existing = {
+                item.get("path")
+                for item in (survivor or {}).get("attrs", {}).get(link_engine.LOST, [])
+            }
+            for lost in lost_sources:
+                path = link_engine.tombstone_of(lost).get("path")
+                if path and path not in existing:
+                    scars.append({"entity": survivor_id, "path": path})
+                    existing.add(path)
 
-    for entity in going:
-        _delete_artifact_files(case, entity)
+        group = trash_engine.send(case, going, scars)
         try:
-            case.remove_entity(entity["id"])
-        except CaseError:
-            pass  # a cascade may already have taken it
+            for survivor_id, lost_sources in losses.items():
+                link_engine.add_tombstones(
+                    case,
+                    survivor_id,
+                    [link_engine.tombstone_of(source) for source in lost_sources],
+                )
+            for entity in going:
+                if case.get_entity(entity["id"]) is not None:
+                    case.remove_entity(entity["id"])
+            trash_engine.commit(case, group["id"])
+        except Exception:
+            trash_engine.rollback(case, group["id"])
+            raise
 
-    return {
-        "status": "deleted",
-        "deleted": [e["id"] for e in going],
-        "tombstoned": [e["id"] for e in plan["tombstone"]],
-    }
+        return {
+            "status": "deleted",
+            "deleted": [e["id"] for e in going],
+            "tombstoned": sorted(tombstoned - set(going_by_id)),
+            "trash": group["id"],
+        }
+
+
+def delete_entity_deep(case: Case, entity_id: str) -> dict[str, Any]:
+    return delete_entities_deep(case, [entity_id])
 
 
 def _summary(entity: dict[str, Any]) -> dict[str, Any]:
@@ -160,6 +167,10 @@ class EntityPatch(BaseModel):
     status: EntityStatus | None = None
 
 
+class EntityDeleteIn(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=200)
+
+
 class LinkIn(BaseModel):
     # `from`/`to` are the link's own field names, but `from` is a Python keyword;
     # the request spells them out rather than aliasing around it.
@@ -175,6 +186,14 @@ class LinkPatch(BaseModel):
 
 class FolderIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+
+
+class BundlePassword(BaseModel):
+    password: str | None = Field(default=None, max_length=1024)
+
+
+class BundleUpload(BundlePassword):
+    upload_id: str = Field(min_length=32, max_length=32)
 
 
 @router.get("")
@@ -196,6 +215,51 @@ def create_case(body: CreateCase) -> dict[str, Any]:
 def create_scratch() -> dict[str, Any]:
     case = Case.create("Scratch session", scratch=True)
     return {"id": case.id, **case.overview()}
+
+
+@router.post("/bundles/inspect")
+def inspect_bundle(
+    file: UploadFile = File(),
+    password: str | None = Form(default=None, max_length=1024),
+) -> dict[str, Any]:
+    upload_id: str | None = None
+    try:
+        upload_id, path = bundle_engine.stage_upload(file.file)
+        preview = bundle_engine.inspect_bundle(path, password=password)
+    except CaseError as exc:
+        if upload_id is not None:
+            bundle_engine.discard_upload(upload_id)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    preview.pop("path", None)
+    return {**preview, "upload_id": upload_id}
+
+
+@router.post("/bundles/import")
+def import_bundle(body: BundleUpload) -> dict[str, Any]:
+    try:
+        source = bundle_engine.uploaded_bundle(body.upload_id)
+        case, job = bundle_engine.queue_import(
+            source,
+            password=body.password,
+            cleanup_source=True,
+        )
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "case_id": case.id,
+        "name": case.read().get("name", case.id),
+        "job_id": job["id"],
+        "state": job["state"],
+    }
+
+
+@router.delete("/bundles/uploads/{upload_id}")
+def discard_bundle_upload(upload_id: str) -> dict[str, str]:
+    try:
+        bundle_engine.discard_upload(upload_id)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "discarded"}
 
 
 @router.get("/relation-types")
@@ -248,6 +312,59 @@ def rename_case(case_id: str, body: CreateCase) -> dict[str, Any]:
 def delete_case(case_id: str) -> dict[str, str]:
     get_case(case_id).delete()
     return {"status": "deleted"}
+
+
+@router.post("/{case_id}/bundle/export")
+def export_bundle(case_id: str, body: BundlePassword) -> dict[str, Any]:
+    case = get_case(case_id)
+    try:
+        job = bundle_engine.queue_export(case, password=body.password)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "case_id": case.id,
+        "job_id": job["id"],
+        "state": job["state"],
+    }
+
+
+@router.get("/{case_id}/bundle/jobs/{job_id}")
+def bundle_job(case_id: str, job_id: str) -> dict[str, Any]:
+    job = bundle_engine.job_status(case_id, job_id)
+    if job is None or job.get("kind") not in {
+        bundle_engine.EXPORT_JOB,
+        bundle_engine.IMPORT_JOB,
+    }:
+        raise HTTPException(status_code=404, detail=f"bundle job '{job_id}' not found")
+    return {
+        "id": job["id"],
+        "kind": job["kind"],
+        "state": job["state"],
+        "error": job.get("error"),
+    }
+
+
+@router.get("/{case_id}/bundle/jobs/{job_id}/download")
+def download_bundle(case_id: str, job_id: str) -> FileResponse:
+    job = bundle_engine.job_status(case_id, job_id)
+    if (
+        job is None
+        or job.get("kind") != bundle_engine.EXPORT_JOB
+        or job.get("state") != "ready"
+    ):
+        raise HTTPException(status_code=404, detail="bundle download not ready")
+    path = Path(job.get("payload", {}).get("output", ""))
+    try:
+        allowed = path.resolve().parent == config.bundles_dir().resolve()
+    except OSError:
+        allowed = False
+    if not allowed or not path.is_file():
+        raise HTTPException(status_code=404, detail="bundle download not found")
+    return FileResponse(
+        path,
+        filename=path.name,
+        media_type="application/octet-stream",
+    )
 
 
 @router.get("/{case_id}/notes")
@@ -464,6 +581,65 @@ def remove_entity(case_id: str, entity_id: str) -> dict[str, Any]:
         return delete_entity_deep(case, entity_id)
     except CaseError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{case_id}/entities/delete")
+def remove_entities(case_id: str, body: EntityDeleteIn) -> dict[str, Any]:
+    """Delete a multi-selection as one recoverable trash group."""
+    case = get_case(case_id)
+    try:
+        return delete_entities_deep(case, body.ids)
+    except CaseError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/{case_id}/trash")
+def list_trash(case_id: str) -> dict[str, Any]:
+    """What the case is holding for you, newest first.
+
+    Head columns only — no payload is read here, so the node costs one indexed
+    query however much is waiting in it.
+    """
+    case = get_case(case_id)
+    summary = case.trash_summary()
+    return {
+        "groups": case.list_trash(),
+        "items": summary["items"],
+        "size_bytes": summary["size_bytes"],
+    }
+
+
+@router.post("/{case_id}/trash/{group_id}/restore")
+def restore_trash(case_id: str, group_id: str) -> dict[str, Any]:
+    """Take one delete back, all of it or none.
+
+    A 409 means a file is back at a path the group wants: restoring would have to
+    rename an artifact behind the analyst, so it refuses and names the path
+    instead.
+    """
+    case = get_case(case_id)
+    try:
+        return trash_engine.restore(case, group_id)
+    except CaseError as exc:
+        message = str(exc)
+        status = 404 if "not found" in message else 409
+        raise HTTPException(status_code=status, detail=message) from exc
+
+
+@router.delete("/{case_id}/trash/{group_id}")
+def purge_trash(case_id: str, group_id: str) -> dict[str, str]:
+    """Drop one group for good. This is where the bytes actually go."""
+    case = get_case(case_id)
+    try:
+        trash_engine.purge(case, group_id)
+    except CaseError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "purged"}
+
+
+@router.delete("/{case_id}/trash")
+def empty_trash(case_id: str) -> dict[str, int]:
+    return {"purged": trash_engine.empty(get_case(case_id))}
 
 
 @router.get("/{case_id}/folders")

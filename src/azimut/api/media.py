@@ -128,6 +128,10 @@ def page_media(
         offset=offset,
     )
     result["items"] = with_thumb_state(case, result["items"])
+    thumb_jobs = case.count_jobs(kind=thumbnail_engine.THUMB_KIND)
+    result.setdefault("facets", {})["thumbnail_pending"] = (
+        thumb_jobs.get("queued", 0) + thumb_jobs.get("running", 0)
+    )
     return result
 
 

@@ -813,21 +813,12 @@ def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, 
 def delete_media_files(case: Case, rel_path: str) -> None:
     """Drop a media's file, sidecar and thumbnail, leaving its entity alone.
 
-    The entity side is the delete chokepoint's business (``api.cases``), which
-    has to tombstone the dependents before anything is removed.
+    For a media the case never filed as an entity — the caller found no graph to
+    honour and drops the files itself. What those files are is the artifact
+    registry's answer, not this module's, so the two paths cannot drift; the
+    entity side is the delete chokepoint's business (``api.cases``), which has to
+    tombstone the dependents before anything is removed.
     """
-    media_path = case.resolve_inside(rel_path)
-    sidecar = _sidecar_path(media_path)
-    data = None
-    if sidecar.exists():
-        data = json.loads(sidecar.read_text(encoding="utf-8"))
-    case.remove_media_item(rel_path)
-    media_path.unlink(missing_ok=True)
-    sidecar.unlink(missing_ok=True)
-    if data and data.get("thumbnail"):
-        # Thumbnails are content-addressed, so identical-bytes captures can share
-        # one file (satellite re-captures dedupe to the same sha). Drop the cached
-        # thumbnail only when no surviving sidecar still points at it.
-        thumb = data["thumbnail"]
-        if not any(it.get("thumbnail") == thumb for it in list_media(case)):
-            case.resolve_inside(thumb).unlink(missing_ok=True)
+    from . import artifacts
+
+    artifacts.delete(case, {"type": "media", "attrs": {"path": rel_path}})

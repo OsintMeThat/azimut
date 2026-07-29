@@ -422,6 +422,53 @@ def test_media_from_an_older_release_still_gets_its_suggestions(tmp_workspace, m
     assert [ln["type"] for ln in case.links_of(media["id"])] == [enrich.LOCATED_AT]
 
 
+def test_backfill_keeps_an_imported_confirmed_gps_relation(
+    tmp_workspace, monkeypatch, tmp_path
+):
+    """A bundle may bring old media that needs the current enrichment version
+    together with an analyst's confirmed Relate-to choice. The facts may be
+    refreshed, but that choice must not come back as another suggestion."""
+    from azimut.engine import links as link_engine
+    from azimut.engine import media as media_engine
+    from azimut.engine import workqueue
+    from azimut.workspace import Case
+
+    monkeypatch.setattr(workqueue, "start_workers", False)
+    case = Case.create("Imported relation")
+    exif = _exif_with_gps((48, 51, 30.0), "N", (2, 21, 3.0), "E")
+    rel = _import_image(case, "related.jpg", tmp_path, exif)
+    workqueue.drain(case)
+
+    media = case.find_entity(attr="path", value=rel)
+    for link in case.links_of(media["id"]):
+        case.remove_link(link["id"])
+    place = case.add_entity(
+        "place",
+        "Chosen place",
+        {"lat": 48.858333, "lon": 2.350833},
+        by="user",
+    )
+    stated = link_engine.add_relation(
+        case,
+        media["id"],
+        place["id"],
+        enrich.LOCATED_AT,
+        by="user",
+    )
+
+    sidecar = media_engine.read_item(case, rel)
+    sidecar.pop("enrich_version", None)
+    media_engine._write_sidecar(case.resolve_inside(rel), sidecar)
+    enrich.on_register(case, rel, "image", media["id"])
+    workqueue.drain(case)
+
+    located = [
+        link for link in case.links_of(media["id"]) if link["type"] == enrich.LOCATED_AT
+    ]
+    assert located == [stated]
+    assert located[0]["provenance"]["status"] == "confirmed"
+
+
 def test_a_probe_that_never_ran_is_left_for_the_backfill_to_retry(tmp_workspace, monkeypatch, tmp_path):
     """A timed-out or crashed ffprobe is not an answer about the file. Stamping the
     enrichment version on it would take it out of the backfill's reach for good."""

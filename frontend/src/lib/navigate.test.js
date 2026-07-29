@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { uiState } from './state.svelte.js';
-import { gotoPoint, openEntity } from './navigate.js';
+import { gotoCapture, gotoPoint, openEntity } from './navigate.js';
 
 beforeEach(() => {
   uiState.tool = 'media';
@@ -29,6 +29,33 @@ describe('openEntity', () => {
     expect(uiState.gotoCoords).toEqual({
       lat: 48.8584, lon: 2.2945, zoom: 17, bearing: 30, provider: 'esri-world-imagery',
     });
+  });
+
+  it('leaves the zoom to the map when a place records none', () => {
+    // enrichment mints a place from a photo's EXIF: coordinates, no zoom. A
+    // zoom of 0 is the whole globe, so an absent one must stay absent (NaN)
+    // and let the Satellite tool pick its own close-in default.
+    openEntity({ type: 'place', attrs: { lat: 48.8584, lon: 2.2945, zoom: null, bearing: null } });
+
+    expect(uiState.tool).toBe('satellite');
+    expect(uiState.gotoCoords.lat).toBe(48.8584);
+    expect(uiState.gotoCoords.zoom).toBeNaN();
+    expect(uiState.gotoCoords.bearing).toBeNaN();
+  });
+
+  it('keeps the zoom a place did record', () => {
+    openEntity({ type: 'place', attrs: { lat: 48.8584, lon: 2.2945, zoom: 19, bearing: 0 } });
+
+    expect(uiState.gotoCoords).toEqual({ lat: 48.8584, lon: 2.2945, zoom: 19, bearing: 0 });
+  });
+});
+
+describe('gotoCapture', () => {
+  it('leaves the zoom to the map when the capture records none', () => {
+    gotoCapture({ type: 'capture', attrs: { lat: 48.8584, lon: 2.2945, zoom: null } });
+
+    expect(uiState.tool).toBe('satellite');
+    expect(uiState.gotoCoords.zoom).toBeNaN();
   });
 });
 

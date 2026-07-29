@@ -45,7 +45,10 @@ if TYPE_CHECKING:
 # `item_json` and need no column; presence does, because filtering "only the
 # files that carry a position" has to happen in SQL over the whole case rather
 # than in the page the client already holds.
-SQLITE_SCHEMA = 5
+# Schema 6 adds the `trash` journal: one row per delete action, holding the
+# recipe to put it back. Schema 7 adds its recovery state so interrupted
+# filesystem moves can be completed or rolled back on the next case open.
+SQLITE_SCHEMA = 7
 
 _SCHEMA = """
 CREATE TABLE meta (
@@ -93,6 +96,16 @@ CREATE TABLE jobs (
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL
 );
+CREATE TABLE trash (
+    id           TEXT PRIMARY KEY,
+    deleted_at   TEXT NOT NULL,
+    label        TEXT NOT NULL,
+    type         TEXT NOT NULL,
+    item_count   INTEGER NOT NULL DEFAULT 0,
+    size_bytes   INTEGER NOT NULL DEFAULT 0,
+    state        TEXT NOT NULL DEFAULT 'ready',
+    payload_json TEXT NOT NULL DEFAULT '{}'
+);
 CREATE TABLE media_items (
     path         TEXT PRIMARY KEY,
     entity_id    TEXT UNIQUE,
@@ -124,6 +137,7 @@ CREATE INDEX idx_media_size     ON media_items(size);
 CREATE INDEX idx_media_added    ON media_items(added_at);
 CREATE INDEX idx_media_source   ON media_items(source_type);
 CREATE INDEX idx_media_gps      ON media_items(has_gps);
+CREATE INDEX idx_trash_deleted  ON trash(deleted_at);
 """
 
 # Job lifecycle (doc "Job states"): a fresh job is `queued`; the worker claims it
@@ -234,6 +248,30 @@ def _migrate_4_to_5(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX idx_media_gps ON media_items(has_gps)")
 
 
+def _migrate_5_to_6(conn: sqlite3.Connection) -> None:
+    """Add the ``trash`` journal.
+
+    One row per delete action, not per entity: deleting a video that carries
+    three Inspect sessions writes a single group that comes back as a whole. The
+    payload holds the recipe (entities, their incident links, the files moved
+    aside, the tombstones the delete wrote); the head columns are what the
+    sidebar node reads, so listing the trash never touches a payload.
+    """
+    conn.execute(
+        "CREATE TABLE trash ("
+        " id TEXT PRIMARY KEY, deleted_at TEXT NOT NULL, label TEXT NOT NULL,"
+        " type TEXT NOT NULL, item_count INTEGER NOT NULL DEFAULT 0,"
+        " size_bytes INTEGER NOT NULL DEFAULT 0,"
+        " payload_json TEXT NOT NULL DEFAULT '{}')"
+    )
+    conn.execute("CREATE INDEX idx_trash_deleted ON trash(deleted_at)")
+
+
+def _migrate_6_to_7(conn: sqlite3.Connection) -> None:
+    """Track interrupted delete and restore operations for crash recovery."""
+    conn.execute("ALTER TABLE trash ADD COLUMN state TEXT NOT NULL DEFAULT 'ready'")
+
+
 # from_version -> function(conn) applying the in-place upgrade to from_version + 1.
 # Runs inside one transaction per step in `SqliteCase._upgrade`, which stamps the
 # new schema_version and records the migration; the step only reshapes the db.
@@ -242,6 +280,8 @@ _SQLITE_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _migrate_2_to_3,
     3: _migrate_3_to_4,
     4: _migrate_4_to_5,
+    5: _migrate_5_to_6,
+    6: _migrate_6_to_7,
 }
 
 _MEDIA_CATEGORIES = (
@@ -1291,6 +1331,213 @@ class SqliteCase:
 
         return self._write(op)
 
+    # -- trash journal -----------------------------------------------------
+    #
+    # The live graph keeps hard-deleting: a deleted entity is gone from
+    # `entities`, so no query anywhere needs a "not deleted" filter. What is kept
+    # is the recipe to put it back, in one row per delete action.
+
+    @staticmethod
+    def _trash(row: sqlite3.Row, *, payload: bool = False) -> dict[str, Any]:
+        group = {
+            "id": row["id"],
+            "deleted_at": row["deleted_at"],
+            "label": row["label"],
+            "type": row["type"],
+            "item_count": row["item_count"],
+            "size_bytes": row["size_bytes"],
+        }
+        if payload:
+            group["state"] = row["state"]
+            group["payload"] = json.loads(row["payload_json"])
+        return group
+
+    def add_trash_group(
+        self,
+        group_id: str,
+        *,
+        label: str,
+        type_: str,
+        item_count: int,
+        size_bytes: int,
+        payload: dict[str, Any],
+        state: str = "ready",
+    ) -> dict[str, Any]:
+        """Record one delete action before its filesystem move begins."""
+        now = _now()
+
+        def op(conn: sqlite3.Connection) -> dict[str, Any]:
+            conn.execute(
+                "INSERT INTO trash"
+                "(id, deleted_at, label, type, item_count, size_bytes, state, payload_json)"
+                " VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    group_id, now, label, type_, item_count, size_bytes,
+                    state,
+                    json.dumps(payload, ensure_ascii=False),
+                ),
+            )
+            self._touch(conn)
+            row = conn.execute("SELECT * FROM trash WHERE id = ?", (group_id,)).fetchone()
+            return self._trash(row, payload=True)
+
+        return self._write(op)
+
+    def update_trash_group(
+        self,
+        group_id: str,
+        *,
+        state: str | None = None,
+        size_bytes: int | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        def op(conn: sqlite3.Connection) -> dict[str, Any]:
+            row = conn.execute("SELECT * FROM trash WHERE id = ?", (group_id,)).fetchone()
+            if row is None:
+                raise CaseError(f"trash group '{group_id}' not found")
+            conn.execute(
+                "UPDATE trash SET state = ?, size_bytes = ?, payload_json = ? WHERE id = ?",
+                (
+                    state if state is not None else row["state"],
+                    size_bytes if size_bytes is not None else row["size_bytes"],
+                    json.dumps(payload, ensure_ascii=False)
+                    if payload is not None
+                    else row["payload_json"],
+                    group_id,
+                ),
+            )
+            self._touch(conn)
+            updated = conn.execute("SELECT * FROM trash WHERE id = ?", (group_id,)).fetchone()
+            return self._trash(updated, payload=True)
+
+        return self._write(op)
+
+    def list_trash(self) -> list[dict[str, Any]]:
+        """Every group, newest first, without its payload — the sidebar node
+        reads this and stays within the bounded-loading rule."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, deleted_at, label, type, item_count, size_bytes"
+                ", state FROM trash WHERE state = 'ready'"
+                " ORDER BY deleted_at DESC, rowid DESC"
+            ).fetchall()
+        return [self._trash(r) for r in rows]
+
+    def list_incomplete_trash(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM trash WHERE state != 'ready' ORDER BY deleted_at, rowid"
+            ).fetchall()
+        return [self._trash(row, payload=True) for row in rows]
+
+    def get_trash_group(self, group_id: str) -> dict[str, Any] | None:
+        """One group with its payload — read only when restoring or purging."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM trash WHERE id = ?", (group_id,)).fetchone()
+        return self._trash(row, payload=True) if row is not None else None
+
+    def remove_trash_group(self, group_id: str) -> None:
+        def op(conn: sqlite3.Connection) -> None:
+            cur = conn.execute("DELETE FROM trash WHERE id = ?", (group_id,))
+            if cur.rowcount == 0:
+                raise CaseError(f"trash group '{group_id}' not found")
+            self._touch(conn)
+
+        self._write(op)
+
+    def clear_trash(self) -> list[str]:
+        """Drop every group, returning the ids so the caller can remove their
+        directories."""
+
+        def op(conn: sqlite3.Connection) -> list[str]:
+            ids = [
+                r["id"]
+                for r in conn.execute("SELECT id FROM trash WHERE state = 'ready'")
+            ]
+            if ids:
+                conn.execute("DELETE FROM trash WHERE state = 'ready'")
+                self._touch(conn)
+            return ids
+
+        return self._write(op)
+
+    def trash_summary(self) -> dict[str, int]:
+        """Groups, items and bytes held — what the node shows, in one query."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS groups, COALESCE(SUM(item_count), 0) AS items,"
+                " COALESCE(SUM(size_bytes), 0) AS size"
+                " FROM trash WHERE state = 'ready'"
+            ).fetchone()
+        return {
+            "groups": int(row["groups"]),
+            "items": int(row["items"]),
+            "size_bytes": int(row["size"]),
+        }
+
+    def reinsert(
+        self, entities: list[dict[str, Any]], links: list[dict[str, Any]]
+    ) -> dict[str, int]:
+        """Put deleted rows back with their original ids, in one transaction.
+
+        The ids were freed by the delete, so they are taken again rather than
+        minted — every path, spec and draft recorded elsewhere still points at
+        them. A link is re-inserted only when both endpoints exist: foreign keys
+        forbid the rest, and an endpoint deleted separately is a real loss, so it
+        is counted and reported instead of hidden.
+        """
+
+        def op(conn: sqlite3.Connection) -> dict[str, int]:
+            for entity in entities:
+                attrs = entity.get("attrs") or {}
+                prov = entity.get("provenance") or {}
+                conn.execute(
+                    "INSERT OR REPLACE INTO entities"
+                    "(id, type, label, attrs_json, folder, search_text,"
+                    " prov_by, prov_at, prov_status, prov_source)"
+                    " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        entity["id"],
+                        entity["type"],
+                        entity["label"],
+                        json.dumps(attrs, ensure_ascii=False),
+                        _folder_of(attrs),
+                        _entity_search_text(entity["type"], entity["label"], attrs),
+                        prov.get("by", "user"),
+                        prov.get("at", _now()),
+                        prov.get("status", "confirmed"),
+                        prov.get("source"),
+                    ),
+                )
+            present = {
+                r["id"]
+                for r in conn.execute("SELECT id FROM entities")
+            }
+            kept = 0
+            for link in links:
+                if link["from"] not in present or link["to"] not in present:
+                    continue
+                prov = link.get("provenance") or {}
+                conn.execute(
+                    "INSERT OR REPLACE INTO links"
+                    "(id, from_id, to_id, type, prov_by, prov_at, prov_status, prov_source)"
+                    " VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        link["id"], link["from"], link["to"], link["type"],
+                        prov.get("by", "user"), prov.get("at", _now()),
+                        prov.get("status", "confirmed"), prov.get("source"),
+                    ),
+                )
+                kept += 1
+            self._touch(conn)
+            return {
+                "entities": len(entities),
+                "links": kept,
+                "links_lost": len(links) - kept,
+            }
+
+        return self._write(op)
+
     # -- durable jobs (thumbnail and background-job model) -----------------
 
     def enqueue_job(
@@ -1425,10 +1672,19 @@ class SqliteCase:
             rows = conn.execute(f"SELECT * FROM jobs{clause} ORDER BY rowid", params).fetchall()
         return [self._job(r) for r in rows]
 
-    def count_jobs(self) -> dict[str, int]:
+    def count_jobs(self, *, kind: str | None = None) -> dict[str, int]:
         """Per-state job counts — the queue's badge without listing every row."""
         with self._connect() as conn:
-            rows = conn.execute("SELECT state, COUNT(*) AS n FROM jobs GROUP BY state").fetchall()
+            if kind is None:
+                rows = conn.execute(
+                    "SELECT state, COUNT(*) AS n FROM jobs GROUP BY state"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT state, COUNT(*) AS n FROM jobs"
+                    " WHERE kind = ? GROUP BY state",
+                    (kind,),
+                ).fetchall()
         return {r["state"]: r["n"] for r in rows}
 
     def recover_jobs(self) -> int:

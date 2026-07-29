@@ -4,11 +4,12 @@ A case is a plain directory (spec §4):
 
     <case>/
     ├── case.json      # case manifest
-    ├── case.db        # entities, links, folders and jobs
+    ├── case.db        # entities, links, folders, jobs and the trash journal
     ├── notes.md       # free-form case notes
     ├── media/         # imported/downloaded media + satellite crops + sidecars
     ├── proofs/        # composed proofs (PNG + editable JSON spec)
-    └── exports/       # post drafts, reports
+    ├── exports/       # post drafts, reports
+    └── .trash/        # deleted artifacts, one directory per delete action
 
 One-shot mode uses the same layout under ``scratch/`` and can be promoted into
 ``cases/`` (spec §3.3).
@@ -35,6 +36,11 @@ if TYPE_CHECKING:
     from .sqlite_backend import SqliteCase
 
 CASE_SUBDIRS = ("media", "notes", "proofs", "exports", "inspect", "search")
+
+#: Deleted artifacts wait here, mirroring the case tree under one directory per
+#: delete action. Outside `CASE_SUBDIRS` on purpose: it is not case content, and
+#: the bundle leaves it behind.
+TRASH_DIR = ".trash"
 
 # On-disk schema. Older cases migrate on open; newer schemas are refused.
 # Bump CASE_SCHEMA with every migration.
@@ -273,6 +279,9 @@ class Case:
             if (path / "case.json").exists():
                 case = cls(path)
                 case.migrate()
+                from .engine import trash as trash_engine
+
+                trash_engine.recover(case)
                 return case
         raise CaseError(f"case '{case_id}' not found")
 
@@ -350,7 +359,13 @@ class Case:
         renames into place (``engine/media._write_sidecar``); a power cut in that
         window strands one, and treating it as content would keep an otherwise
         empty scratch case alive forever.
+
+        The trash does count. What is in it was content a moment ago and can be
+        brought back, so reaping the case around it would delete recoverable work
+        without anyone asking.
         """
+        if (path / TRASH_DIR).is_dir() and any((path / TRASH_DIR).iterdir()):
+            return True
         for sub in CASE_SUBDIRS:
             directory = path / sub
             if not directory.is_dir():
@@ -816,6 +831,74 @@ class Case:
     def remove_folder(self, name: str) -> list[str]:
         return self._graph().remove_folder(name)
 
+    # -- trash journal (engine/trash.py owns the files) ----------------------
+
+    def add_trash_group(
+        self,
+        group_id: str,
+        *,
+        label: str,
+        type_: str,
+        item_count: int,
+        size_bytes: int,
+        payload: dict[str, Any],
+        state: str = "ready",
+    ) -> dict[str, Any]:
+        return self._graph().add_trash_group(
+            group_id,
+            label=label,
+            type_=type_,
+            item_count=item_count,
+            size_bytes=size_bytes,
+            payload=payload,
+            state=state,
+        )
+
+    def update_trash_group(
+        self,
+        group_id: str,
+        *,
+        state: str | None = None,
+        size_bytes: int | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._graph().update_trash_group(
+            group_id,
+            state=state,
+            size_bytes=size_bytes,
+            payload=payload,
+        )
+
+    def list_trash(self) -> list[dict[str, Any]]:
+        return self._graph().list_trash()
+
+    def get_trash_group(self, group_id: str) -> dict[str, Any] | None:
+        return self._graph().get_trash_group(group_id)
+
+    def list_incomplete_trash(self) -> list[dict[str, Any]]:
+        return self._graph().list_incomplete_trash()
+
+    def remove_trash_group(self, group_id: str) -> None:
+        self._graph().remove_trash_group(group_id)
+
+    def clear_trash(self) -> list[str]:
+        return self._graph().clear_trash()
+
+    def trash_summary(self) -> dict[str, int]:
+        return self._graph().trash_summary()
+
+    def reinsert(
+        self, entities: list[dict[str, Any]], links: list[dict[str, Any]]
+    ) -> dict[str, int]:
+        return self._graph().reinsert(entities, links)
+
+    @property
+    def trash_dir(self) -> Path:
+        """Where deleted artifacts wait. Hidden, at the case root, and never a
+        `CASE_SUBDIRS` member: nothing that walks a case's content should walk
+        into it."""
+        return self.path / TRASH_DIR
+
     # -- durable jobs (thumbnail and background-job model) -------------------
 
     def enqueue_job(
@@ -850,8 +933,8 @@ class Case:
     ) -> list[dict[str, Any]]:
         return self._graph().list_jobs(kind=kind, state=state)
 
-    def count_jobs(self) -> dict[str, int]:
-        return self._graph().count_jobs()
+    def count_jobs(self, *, kind: str | None = None) -> dict[str, int]:
+        return self._graph().count_jobs(kind=kind)
 
     def recover_jobs(self) -> int:
         return self._graph().recover_jobs()

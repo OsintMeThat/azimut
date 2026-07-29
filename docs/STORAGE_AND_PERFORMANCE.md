@@ -21,6 +21,7 @@ proofs/         # editable proof specs and rendered PNGs
 exports/        # post drafts and reports
 inspect/        # saved Inspect session specs
 search/         # saved Grid Search state
+.trash/         # deleted artifacts grouped by delete action
 ```
 
 `case.json` is the discovery manifest: name, creation date, and the storage and
@@ -45,11 +46,10 @@ graph.
 
 ## Source of truth
 
-`case.db` owns the graph. Portability currently means copying the complete case
-folder while it is closed; rollback journaling leaves no WAL checkpoint outside
-that folder. Media, proofs and note bodies remain inspectable files. A future
-case ZIP workflow will package and import this same folder without creating a
-second writable copy.
+`case.db` owns the graph. A case bundle is the portable snapshot: a cleaned
+database plus declared files under a SHA-256 manifest. Rollback journaling leaves
+no WAL checkpoint outside the case folder. Media, proofs and note bodies remain
+inspectable files.
 
 ## Ownership rules
 
@@ -67,6 +67,8 @@ carry enough information to detect staleness.
 | Acquisition provenance | Media sidecar | Immutable after registration |
 | Media browse fields | `case.db` (`media_items`) | Search index mirrored from sidecars |
 | Background jobs | `case.db` (`jobs`) | Durable, recoverable, one worker |
+| Trash journal | `case.db` (`trash`) | One row per delete action; payload loaded only for restore |
+| Deleted artifact bytes | `.trash/<group>/` | Original relative paths, retained until purge |
 | Thumbnails | `media/.thumbs/` | Cache; safe to remove at any time |
 | Note bodies | `notes.md`, `notes/<id>.md` | Graph keeps only id, title, folder, path |
 
@@ -75,10 +77,10 @@ carry enough information to detect staleness.
 The same storage layer serves `pip install azimut` and PyInstaller binaries for
 Windows, macOS and Linux:
 
-- **No runtime dependency was added.** SQLite is the stdlib `sqlite3` module,
-  already bundled by PyInstaller; the durable queue and thumbnail worker use only
-  `threading`/`subprocess`/`sqlite3` plus the already-declared Pillow. The three
-  binaries build unchanged. `tests/test_release_gate.py` guards this.
+- **Bundle encryption uses `cryptography`.** Intel macOS resolves the latest
+  compatible 48.x universal wheel; other platforms resolve 49.x. Both ranges
+  are bounded below the next untested major. SQLite remains the stdlib
+  `sqlite3` module.
 - **Feature availability is per-binary, not per-Python.** `sqlite3` links whatever
   SQLite the build environment provides, so FTS5, JSON1 and RTree can be present
   on the dev machine yet missing from a shipped binary. The store stays on core
@@ -109,7 +111,7 @@ review.
 
 ## Database shape
 
-`case.db` is at SQLite schema 5. The schema counter is independent of the JSON
+`case.db` is at SQLite schema 7. The schema counter is independent of the JSON
 `CASE_SCHEMA`: the manifest's `azimut.storage` field selects the backend, and each
 format counts its own shape upgrades.
 
@@ -141,6 +143,11 @@ format counts its own shape upgrades.
   `attempts`, `max_attempts`, `payload_json`, `error` and timestamps. See
   "Thumbnails and background jobs".
 
+`trash`
+: One head row per delete action (`id`, time, label, type, item count and byte
+  size), a recovery state and a JSON restore recipe. Sidebar listing reads only
+  completed groups and never loads the recipe.
+
 `media_items`
 : Queryable browse metadata mirrored from each media sidecar. It indexes path,
   kind, folder, display name, size, date, source, imagery mode, the media entity
@@ -164,7 +171,8 @@ through `_SQLITE_MIGRATIONS`, each step in its own immediate transaction, re-rea
 the version inside the transaction so a raced second opener applies nothing; a
 newer schema is refused rather than mangled. The shipped migrations add the
 indexed `folder` column (1→2), the `jobs` table (2→3), entity search text and
-the media browse index (3→4), then the `has_gps` flag (4→5). The 4→5 backfill
+the media browse index (3→4), the `has_gps` flag (4→5), the trash journal
+(5→6), then interrupted-operation recovery state (6→7). The 4→5 backfill
 reads the sidecar JSON already held in each index row, so a case enriched before
 the column existed gains its position filter on open with no file scan.
 
@@ -172,6 +180,46 @@ The schema-4 media backfill scans sidecars once on first open. Its completion
 marker and index rows commit together, so an interrupted backfill retries safely.
 Normal media creation, edits, thumbnail changes and deletion keep the index in
 sync.
+
+## Trash and artifact ownership
+
+`engine/artifacts.py` is the single declaration of files owned by each entity
+type. Delete writes a recovery journal before moving files to `.trash/<group>/`
+and removing graph rows. Restore refuses occupied destinations, then restores
+the original entity ids, surviving links and tombstones. An interrupted delete
+is rolled back or published on the next case open; an interrupted restore is
+completed. Shared thumbnails do not move; they are discarded and queued again
+after restore. Purge removes the journal only after its directory is gone, so a
+Windows file lock leaves a retryable group instead of orphaned bytes.
+
+## Case bundles
+
+Exports run as `bundle-export` jobs and write atomically to
+`<workspace>/bundles/`, then stream to the browser as an attachment. The first
+ZIP member is `bundle-header.json`; the last is `bundle.json`, which lists every
+other member with its size and SHA-256. The database is copied consistently,
+its trash and unfinished jobs are removed, and it is vacuumed before packaging.
+`.trash/`, `media/.thumbs/` and `media/.dl/` never travel.
+Export also reserves filesystem headroom before writing its temporary output.
+
+Password protection encrypts the complete ZIP in 1 MiB AES-256-GCM chunks. The
+key comes from scrypt (`n=2^15`, `r=8`, `p=1`), and only the envelope parameters
+remain clear. Passwords live in a process-memory map keyed by job id, never in
+the durable payload.
+
+Import pre-flights format and database versions before creating a destination.
+The browser file picker uploads to `<workspace>/bundles/.imports/`; rejected and
+cancelled uploads are removed immediately, completed imports remove their source,
+and abandoned uploads expire after 24 hours.
+It verifies unique safe member names, declared and actual byte counts, archive
+member count, and rejects symlinks. It extracts only the manifest allowlist
+after each hash matches. There is no small fixed case-size cap: preview and
+import compare the required temporary space with current filesystem capacity,
+keep a safety reserve, and warn for imports above 10 GiB. Work is staged under
+`cases/<id>.incoming/`; the existing shell and completed staging directory are
+swapped by rename for Windows compatibility. Every import creates a new case and
+records `origin_case_id` plus `imported_at` in database metadata.
+Entities and links keep their original ids, provenance and confirmation status.
 
 Geographic, temporal and full-text projections are deferred until a query needs
 them. Each projection requires its own migration and tests.

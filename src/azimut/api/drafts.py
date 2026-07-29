@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ..engine import artifacts as artifact_engine
 from ..engine import links as link_engine
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
@@ -218,11 +219,12 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
 @router.delete("/cases/{case_id}/drafts/{name}")
 def delete_draft(case_id: str, name: str) -> dict[str, Any]:
     case = get_case(case_id)
+    rel = f"exports/{name}.json"
     try:
-        path = case.resolve_inside(f"exports/{name}.json")
+        case.resolve_inside(rel)
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-    result = delete_by_path(case, f"exports/{name}.json")
+    result = delete_by_path(case, rel)
     if not result["deleted"]:  # never filed as an entity: drop the file anyway
-        path.unlink(missing_ok=True)
+        artifact_engine.delete(case, {"type": "post", "attrs": {"draft": rel}})
     return result

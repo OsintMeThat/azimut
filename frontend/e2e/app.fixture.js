@@ -98,6 +98,11 @@ export async function installAppFixture(page, options = {}) {
   const savedIndexDelays = options.savedIndexDelays ?? {};
   const proofIndexDelays = options.proofIndexDelays ?? {};
   const fixtureDrafts = options.drafts ?? {};
+  const trashGroups = [...(options.trashGroups ?? [])];
+  const trashWrites = [];
+  const bundleCalls = [];
+  const bundlePreview = options.bundlePreview;
+  const bundleJob = options.bundleJob ?? { state: 'ready' };
   // Relations, keyed by entity id: what the bounded chain endpoint answers for
   // the row whose relations a surface asked for.
   const fixtureChains = options.chains ?? {};
@@ -138,6 +143,10 @@ export async function installAppFixture(page, options = {}) {
     if (path === '/api/settings') return json(route, settings);
     if (path === '/api/templates') return json(route, { proof: [], post: [] });
     if (path === '/api/cases/relation-types') return json(route, relationTypes);
+    if (path === '/api/cases/bundles/inspect' && request.method() === 'POST') {
+      bundleCalls.push({ kind: 'inspect' });
+      return json(route, bundlePreview ?? { detail: 'No bundle fixture' }, bundlePreview ? 200 : 400);
+    }
     if (path === '/api/cases') {
       return json(route, fixtureCases.map((item) => ({ entity_count: 1, ...item })));
     }
@@ -161,6 +170,37 @@ export async function installAppFixture(page, options = {}) {
     }
     if (caseId && path === `/api/cases/${caseId}/catalog/entities`) {
       return json(route, { items: [], next_cursor: null });
+    }
+    if (caseId && path === `/api/cases/${caseId}/trash`) {
+      if (request.method() === 'DELETE') {
+        trashWrites.push({ kind: 'empty' });
+        const purged = trashGroups.length;
+        trashGroups.splice(0);
+        return json(route, { purged });
+      }
+      return json(route, {
+        groups: trashGroups,
+        items: trashGroups.reduce((total, group) => total + group.item_count, 0),
+        size_bytes: trashGroups.reduce((total, group) => total + group.size_bytes, 0),
+      });
+    }
+    const trashMatch = caseId && path.match(new RegExp(`^/api/cases/${caseId}/trash/([^/]+)(/restore)?$`));
+    if (trashMatch) {
+      const groupId = trashMatch[1];
+      const index = trashGroups.findIndex((group) => group.id === groupId);
+      if (index < 0) return json(route, { detail: 'Trash group not found' }, 404);
+      const kind = trashMatch[2] ? 'restore' : 'purge';
+      trashWrites.push({ kind, groupId });
+      trashGroups.splice(index, 1);
+      return json(route, kind === 'restore' ? { status: 'restored' } : { status: 'purged' });
+    }
+    if (caseId && path === `/api/cases/${caseId}/bundle/export` && request.method() === 'POST') {
+      bundleCalls.push({ kind: 'export', body: request.postDataJSON() });
+      return json(route, { job_id: 'bundle-job' });
+    }
+    if (caseId && path === `/api/cases/${caseId}/bundle/jobs/bundle-job`) {
+      bundleCalls.push({ kind: 'job' });
+      return json(route, bundleJob);
     }
     if (caseId && path === `/api/cases/${caseId}/search-grids`) return json(route, []);
     const chainMatch = caseId && path.match(new RegExp(`^/api/cases/${caseId}/entities/(.+)/chain$`));
@@ -238,6 +278,8 @@ export async function installAppFixture(page, options = {}) {
     captures,
     proofSaves,
     linkWrites,
+    trashWrites,
+    bundleCalls,
     expectNoUnexpectedRequests: () => expect(unexpected).toEqual([]),
   };
 }

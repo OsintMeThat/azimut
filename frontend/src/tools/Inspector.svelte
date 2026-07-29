@@ -10,6 +10,7 @@
   } from '../lib/inspect.js';
   import { isDefaultName, nextName, savedSlugs, savedTitles, savedTitle, slugify } from '../lib/naming.js';
   import { createHistory } from '../lib/history.js';
+  import { deletedToast } from '../lib/trash.js';
   import { IDENTITY, matrixCss, rotateAbout, isIdentity, matrixAngleDeg, pointerAngleDeg } from '../lib/frameRotate.js';
   import Icon from '../components/Icon.svelte';
   import SearchInput from '../components/SearchInput.svelte';
@@ -1193,10 +1194,13 @@
 
   async function deleteSession(name) {
     try {
-      await api.del(`/api/cases/${caseState.current.id}/inspect/sessions/${name}`);
+      const caseId = caseState.current.id;
+      const session = sessionModal.list.find((item) => item.name === name);
+      const result = await api.del(`/api/cases/${caseId}/inspect/sessions/${name}`);
       sessionModal.list = sessionModal.list.filter((s) => s.name !== name);
       if (openedSession?.name === name) openedSession = null;
       await reloadCase();
+      deletedToast(caseId, result, session?.title ?? name);
     } catch (e) {
       toast(e.message, 'danger');
     }

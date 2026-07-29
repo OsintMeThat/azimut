@@ -3,6 +3,7 @@
   // foldable row. Suggestions is a node here, not a section above the tree, so
   // nothing below it shifts when its count crosses zero.
   import { subtreeCountFrom } from '../../lib/folderTree.js';
+  import { formatSize } from '../../lib/trash.js';
   import { dragPayload, rangeSelected, toggleSelected } from '../../lib/rowSelect.js';
   import Icon from '../Icon.svelte';
   import EntityRow from './EntityRow.svelte';
@@ -33,6 +34,12 @@
     onconfirm = () => {},
     ondismiss = () => {},
     ondragactive = () => {},
+    trash = { groups: [], items: 0, size_bytes: 0 },
+    trashOpen = false,
+    ontoggletrash = () => {},
+    onrestore = () => {},
+    onpurge = () => {},
+    onempty = () => {},
   } = $props();
 
   let addingUnder = $state(undefined); // folder path currently gaining a child
@@ -196,7 +203,63 @@
     {/if}
   {/if}
 
-  {#if tree.length === 0 && unfiled.items.length === 0 && suggestedCount === 0}
+  <!-- Deleted work waits here until it is restored or the trash is emptied.
+       Rendered only when it holds something, so an untouched case shows nothing
+       about deletion. -->
+  {#if trash.groups.length > 0}
+    <div class="trash-head">
+      <button
+        class="frow trash-toggle"
+        type="button"
+        onclick={ontoggletrash}
+        aria-expanded={trashOpen}
+      >
+        <Icon name={trashOpen ? 'chevronDown' : 'chevronRight'} size={12} />
+        <Icon name="trash" size={13} />
+        <span class="fname">Trash</span>
+        <span class="fcount">{trash.items} · {formatSize(trash.size_bytes)}</span>
+      </button>
+      <button
+        class="fact fdel trash-empty"
+        type="button"
+        title="Empty the trash"
+        aria-label="Empty the trash"
+        onclick={onempty}
+      >
+        <Icon name="trash" size={12} />
+      </button>
+    </div>
+    {#if trashOpen}
+      {#each trash.groups as group (group.id)}
+        <div class="trow">
+          <span class="tname" title={group.label}>{group.label}</span>
+          {#if group.item_count > 1}
+            <span class="tcount">+{group.item_count - 1}</span>
+          {/if}
+          <button
+            class="tact"
+            type="button"
+            title="Restore"
+            aria-label={`Restore ${group.label}`}
+            onclick={() => onrestore(group)}
+          >
+            <Icon name="undo" size={12} />
+          </button>
+          <button
+            class="tact tdel"
+            type="button"
+            title="Delete permanently"
+            aria-label={`Delete ${group.label} permanently`}
+            onclick={() => onpurge(group)}
+          >
+            <Icon name="trash" size={12} />
+          </button>
+        </div>
+      {/each}
+    {/if}
+  {/if}
+
+  {#if tree.length === 0 && unfiled.items.length === 0 && suggestedCount === 0 && trash.groups.length === 0}
     <div class="none">Everything you save lands here; create folders to organize it.</div>
   {/if}
 </div>
@@ -316,6 +379,12 @@
   .fact:hover { color: var(--text-1); }
   .fdel:hover { color: var(--danger, #e55); }
   .frow:hover .fact { opacity: 1; }
+  .trash-head { display: flex; align-items: center; position: relative; }
+  .trash-toggle { padding-right: 34px; }
+  .trash-empty { position: absolute; right: 12px; }
+  .trash-head:hover .trash-empty,
+  .trash-head:focus-within .trash-empty,
+  .trash-empty:focus-visible { opacity: 1; }
   .new-folder { display: flex; gap: 6px; padding: 2px 8px 4px; }
   .new-folder .input { flex: 1; font-size: var(--fs-xs); }
   .more {
@@ -333,4 +402,22 @@
   .more:hover { color: var(--text-1); border-color: var(--border-strong); }
   .more:disabled { opacity: 0.5; cursor: default; }
   .none { font-size: var(--fs-xs); color: var(--text-3); padding: 4px 8px 12px; line-height: 1.45; }
+  .trow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px 5px 30px;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .trow:hover { background: var(--bg-2); }
+  .tname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tcount { font-weight: 600; }
+  .tact { opacity: 0; color: var(--text-3); display: flex; padding: 2px; border-radius: 4px; cursor: pointer; }
+  .trow:hover .tact,
+  .trow:focus-within .tact,
+  .tact:focus-visible { opacity: 1; }
+  .tact:hover { color: var(--text-1); }
+  .tdel:hover { color: var(--danger, #e55); }
 </style>

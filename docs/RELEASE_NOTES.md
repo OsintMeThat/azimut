@@ -1,4 +1,4 @@
-# Azimut v0.2.5
+# Azimut v0.2.6
 
 ## OSINT toolkit at a glance
 
@@ -13,7 +13,70 @@
 - **Publishing:** build annotated Geo Proofs and prepare evidence-linked Geo
   Reports for X, Bluesky or Mastodon without posting automatically.
 
-## What changed in v0.2.5
+## What changed in v0.2.6
+
+### Portable case bundles
+
+- **Export a complete case.** The Case switcher now exports a portable
+  `.azimut.zip` snapshot containing the case database and its declared files.
+  The bundle has a SHA-256 manifest, so import rejects incomplete or modified
+  content rather than opening it as a plausible-looking case.
+- **Import without overwriting.** Choose a bundle from the Case switcher to
+  inspect its name, size, temporary-space requirement and protection state,
+  then import it as a new case. Existing cases remain untouched; imported
+  entities, links and confirmation state stay intact.
+- **Optional password protection.** A password encrypts the complete bundle,
+  including filenames. Passwords are not retained by Azimut and cannot be
+  recovered. Thumbnails, deleted files and unfinished background jobs stay out
+  of bundles.
+
+### Recoverable deletion
+
+- **Trash for case artifacts.** Deleting a note, media item, proof or related
+  record now moves its registered files and recovery record to Trash. Restore
+  returns the artifact and its surviving links; permanent deletion and Empty
+  Trash remain explicit actions.
+- **One undo point for multi-select.** Files can delete a selection together,
+  with one confirmation, one Trash entry and one restore action for the whole
+  operation.
+- **Safer interrupted work.** Delete and restore actions record their progress
+  before moving data, so opening a case resolves an interrupted action instead
+  of leaving a half-deleted artifact behind.
+
+### Reliability
+
+- **Case-aware media refresh.** Thumbnail polling follows pending work after a
+  bundle import and reloads previews when switching cases, even where relative
+  file paths match.
+- **Preserved confirmed locations.** Metadata backfill does not replace a
+  location relation the analyst has already confirmed.
+- **Predictable map opening.** A saved place without its own recorded zoom now
+  keeps the map's normal starting zoom instead of unexpectedly changing it.
+
+### Media evidence and relations
+
+- **Automatic media enrichment.** Image imports read EXIF and a perceptual
+  hash locally; video imports read container, stream and tag metadata. Details
+  keeps the readable fields together, and media with stated coordinates can be
+  filtered and opened on the map.
+- **GPS suggestions that respect analyst work.** Parsed coordinates propose a
+  linked place for review. A confirmed location always wins over a later
+  backfill.
+- **Shared relation vocabulary.** Details and saved-place cards can create,
+  review, confirm or remove the same typed relations, with a consistent reading
+  of each edge.
+
+### Support and continuity
+
+- **Settings backups keep presets.** Exporting and importing Settings now
+  carries reusable proof and post presets with the workspace configuration.
+- **Report an issue from About.** The form opens a prepared GitHub issue with
+  the version, operating system and recent warnings. Workspace paths and account
+  details are scrubbed before it leaves the app.
+- **A working product tour.** The README walkthrough now renders on GitHub and
+  PyPI instead of leaving an empty video element.
+
+## Also in v0.2.5
 
 Mostly additions, with two fixes.
 

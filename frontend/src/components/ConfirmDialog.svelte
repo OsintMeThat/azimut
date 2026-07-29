@@ -3,19 +3,22 @@
   import { portal } from '../lib/fullscreen.js';
 
   // A small, styled confirmation dialog — replaces the browser confirm() popup.
-  // Tone drives the accent so a destructive action reads differently from a
-  // reversible one.
-  //   tone: 'danger'  → deletes everywhere (irreversible, drops files)
-  //   tone: 'default' → reversible (unfile, remove a folder)
-  // `consequences` spells out what else a delete touches, so an irreversible
-  // click is never a guess: what goes with it, and what stays behind scarred.
-  // The two lists carry their own tone — "kept" must not read as a warning.
+  // Tone drives the accent so an irreversible action reads differently from one
+  // that can be taken back.
+  //   tone: 'danger'  → nothing comes back (purge, empty the trash, delete a case)
+  //   tone: 'default' → reversible (delete an artifact, unfile, remove a folder)
+  // Deleting an artifact left this tone when the trash arrived: it still drops
+  // files, but the case holds them until someone empties it.
+  // `consequences` spells out what else a delete touches, so the click is never
+  // a guess: what goes with it, what stays behind scarred, and what can be
+  // brought back.
   //   { cascade: [{ label }], tombstone: [{ label }] }
   let {
     title,
     message,
     detail = '',
     consequences = null,
+    restorable = '',
     confirmLabel = 'Confirm',
     tone = 'default', // 'danger' | 'default'
     icon = tone === 'danger' ? 'trash' : 'folderMinus',
@@ -75,6 +78,14 @@
             <li>{item.label}</li>
           {/each}
         </ul>
+      </div>
+    {/if}
+    {#if restorable}
+      <div class="conseq restorable">
+        <div class="conseq-h">
+          <Icon name="undo" size={12} />
+          <span>{restorable}</span>
+        </div>
       </div>
     {/if}
     <div class="actions">
@@ -168,6 +179,8 @@
   .conseq.danger {
     background: color-mix(in srgb, var(--danger, #e5484d) 9%, transparent);
   }
+  /* what can be brought back reads as reassurance, not as a warning */
+  .conseq.restorable .conseq-h { color: var(--text-2); }
   .conseq-h {
     display: flex;
     align-items: center;

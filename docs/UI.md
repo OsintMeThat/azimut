@@ -56,14 +56,18 @@ remembered per workspace for the current session. Reloading restores the default
   still open. Search matches labels (plus folder and type in a case small enough
   to filter in memory), not note contents — the **Files** tab searches those.
   Browse order is **Suggestions** (tool-proposed entities to confirm or dismiss,
-  a node only when non-empty), the analyst's nested folders, then the **Unfiled**
-  inbox. `+ Folder` and `+ Note` sit above them.
+  a node only when non-empty), the analyst's nested folders, **Unfiled**, then
+  **Trash** when it holds a delete. Trash shows its item count and size; each
+  group can be restored or deleted permanently, and the node can be emptied.
+  `+ Folder` and `+ Note` sit above the tree.
 - **Filing** — drag rows onto a folder, or drop them on Unfiled to unfile.
   Ctrl/cmd-click and shift-click select several rows first, and the drag carries
   all of them; folders are targets, never cargo. The tree scrolls itself when the
   pointer nears an edge mid-drag, since a native drag swallows the wheel.
   Unfiling does not delete data. The **Files** tab presents the same tree with
-  tiles, multi-select and context actions.
+  tiles, multi-select and context actions. It also exposes Trash with the same
+  restore, permanent-delete and empty actions as the sidebar. Delete sends the
+  current selection through the standard confirmation.
 - **Details** — a drawer over the sidebar, closed with the back arrow or Escape,
   so selecting a row never pushes the case out of view. It edits an artifact's
   preview, title, notes, provenance, derivation chain and folder, and provides
@@ -71,6 +75,24 @@ remembered per workspace for the current session. Reloading restores the default
   `EntityDetails.svelte`. Image Details include a closed EXIF section with the
   parsed capture date, GPS and every readable tag. Video Details use the same
   pattern for local ffprobe container, stream and tag fields.
+- **Delete** — deleting an artifact moves its registered files and cascade into
+  Trash and shows an **Undo** toast. The confirmation uses the neutral tone and
+  states what can be restored. Red is reserved for deleting a case, purging a
+  trash group and emptying Trash.
+
+## Case switcher
+
+The switcher creates, renames, opens and deletes cases. **Export this case**
+starts a durable job, then downloads the `.azimut.zip` through the browser.
+Optional password protection downloads `.azimut.enc`; the dialog states once
+that a lost password cannot be recovered.
+
+**Import case** opens the browser's file picker for `.zip` and `.enc`, uploads
+the selected bundle for a pre-flight check, and shows its case name, size,
+temporary disk requirement, available space and protection state. Confirmation
+always creates a new case, waits for the durable
+import job, then opens it. It never replaces or merges an existing case.
+Confirmed entities and relations remain confirmed in the imported case.
 
 ## Relations
 
@@ -98,7 +120,10 @@ current version. A **GPS** toggle beside the type and folder filters narrows the
 list to the files whose own metadata states a position, and appears only in a case
 that holds some; how many is in its tooltip, not in its label. Those rows carry
 one pin glyph — coordinates in the tooltip, not in the title — and clicking it
-flies the map there.
+flies the map there. Thumbnail polling follows all pending case jobs, including
+files beyond the loaded page after a case import. Thumbnail failures are scoped
+to their case, so switching cases always reloads previews even when relative
+paths match. Enrich respects an existing confirmed GPS relation during backfill.
 
 ## Map
 

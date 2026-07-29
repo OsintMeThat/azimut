@@ -25,6 +25,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ..engine import artifacts as artifact_engine
 from ..engine import links as link_engine
 from ..engine import media as media_engine
 from ..engine import satellite as satellite_engine
@@ -350,15 +351,14 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
 @router.delete("/cases/{case_id}/proofs/{name}")
 def delete_proof(case_id: str, name: str) -> dict[str, Any]:
     case = get_case(case_id)
+    rel = f"proofs/{name}.json"
     try:
-        spec_path = case.resolve_inside(f"proofs/{name}.json")
+        case.resolve_inside(rel)
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-    result = delete_by_path(case, f"proofs/{name}.json")
+    result = delete_by_path(case, rel)
     if not result["deleted"]:  # never filed as an entity: drop the files anyway
-        spec_path.unlink(missing_ok=True)
-        spec_path.with_suffix(".png").unlink(missing_ok=True)
-    # The graph knows the spec and the export; the pasted images are known only
-    # by where they sit, so they are dropped here either way.
-    shutil.rmtree(spec_path.with_suffix(ASSETS_SUFFIX), ignore_errors=True)
+        # The registry knows what a proof owns — spec, export and the pasted
+        # images beside them — so this path and the chokepoint cannot drift.
+        artifact_engine.delete(case, {"type": "proof", "attrs": {"spec": rel}})
     return result

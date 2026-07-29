@@ -46,9 +46,31 @@ describe('sidebar shell', () => {
       'typeFilter = null',
       'suggestedData = emptySection()',
       'unfiledData = emptySection()',
+      'trashData = emptyTrashState()',
+      'trashOpen = false',
     ]) {
       expect(reset).toContain(line);
     }
+  });
+});
+
+describe('trash node', () => {
+  it('loads bounded head rows on every case refresh', () => {
+    expect(shell).toContain('loadTrash(id, seq)');
+    expect(shell).toContain('readTrash(id)');
+    expect(tree).toContain('{#if trash.groups.length > 0}');
+    expect(tree).toContain('{formatSize(trash.size_bytes)}');
+  });
+
+  it('offers restore, permanent deletion and emptying', () => {
+    expect(tree).toContain('onclick={() => onrestore(group)}');
+    expect(tree).toContain('onclick={() => onpurge(group)}');
+    expect(tree).toContain('title="Empty the trash"');
+    expect(shell).toContain('tone: \'danger\'');
+  });
+
+  it('offers undo after dismissing a suggestion', () => {
+    expect(shell).toContain('undoAction(caseId, result)');
   });
 });
 

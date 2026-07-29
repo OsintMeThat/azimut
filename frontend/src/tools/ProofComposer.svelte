@@ -5,6 +5,7 @@
   import { lookupEntity, fetchAllEntities } from '../lib/catalog.js';
   import { matchesTerms } from '../lib/folderBrowse.js';
   import { isSatelliteMedia } from '../lib/mediaFilter.js';
+  import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords } from '../lib/state.svelte.js';
   import { templatesState } from '../lib/state.svelte.js';
   import Icon from '../components/Icon.svelte';
@@ -2344,9 +2345,10 @@
     const entry = deleteEntry;
     deleteEntry = null;
     try {
-      await api.del(`/api/cases/${caseState.current.id}/proofs/${entry.name}`);
+      const caseId = caseState.current.id;
+      const result = await api.del(`/api/cases/${caseId}/proofs/${entry.name}`);
       await Promise.all([openProofList(), reloadCase()]);
-      toast(`Deleted "${entry.title}"`, 'info');
+      deletedToast(caseId, result, entry.title);
     } catch (e) {
       toast(e.message, 'danger');
     }
@@ -2886,9 +2888,10 @@
   <ConfirmDialog
     title="Delete this proof?"
     message={`“${deleteEntry.title}” will be removed from the case.`}
-    detail="Deletes the PNG and editable proof and cannot be undone."
+    detail="Moves the PNG and editable proof to the case trash."
+    restorable={RESTORABLE}
     confirmLabel="Delete"
-    tone="danger"
+    tone="default"
     icon="trash"
     onconfirm={deleteSavedProof}
     oncancel={() => (deleteEntry = null)}
