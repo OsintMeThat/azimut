@@ -554,11 +554,17 @@ class Case:
             offset=offset,
         )
 
+    def get_link(self, link_id: str) -> dict[str, Any] | None:
+        return self._graph().get_link(link_id)
+
     def links_of(self, entity_id: str) -> list[dict[str, Any]]:
         return self._graph().links_of(entity_id)
 
     def count_dependents(self, *, link_type: str, from_type: str) -> dict[str, int]:
         return self._graph().count_dependents(link_type=link_type, from_type=from_type)
+
+    def count_incident_links(self, *, exclude_types: list[str]) -> dict[str, int]:
+        return self._graph().count_incident_links(exclude_types=exclude_types)
 
     def get_entity(self, entity_id: str) -> dict[str, Any] | None:
         return self._graph().get_entity(entity_id)
@@ -738,6 +744,9 @@ class Case:
         targets and a self-reference are ignored.
         """
         return self._graph().sync_links(from_id, type_, to_ids, by=by, status=status)
+
+    def update_link(self, link_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        return self._graph().update_link(link_id, patch)
 
     def remove_link(self, link_id: str) -> None:
         self._graph().remove_link(link_id)

@@ -580,6 +580,11 @@ class SqliteCase:
         with self._connect() as conn:
             return [self._link(r) for r in conn.execute("SELECT * FROM links ORDER BY rowid")]
 
+    def get_link(self, link_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM links WHERE id = ?", (link_id,)).fetchone()
+        return self._link(row) if row is not None else None
+
     def links_of(self, entity_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -598,6 +603,22 @@ class SqliteCase:
                 (link_type, from_type),
             ).fetchall()
         return {r["to_id"]: int(r["n"]) for r in rows}
+
+    def count_incident_links(self, *, exclude_types: list[str]) -> dict[str, int]:
+        skipped = list(dict.fromkeys(exclude_types))
+        where = ""
+        if skipped:
+            where = f" WHERE type NOT IN ({', '.join('?' * len(skipped))})"
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, COUNT(*) AS n FROM ("
+                f" SELECT from_id AS id FROM links{where}"
+                " UNION ALL"
+                f" SELECT to_id AS id FROM links{where}"
+                ") GROUP BY id",
+                (*skipped, *skipped),
+            ).fetchall()
+        return {r["id"]: int(r["n"]) for r in rows}
 
     def page_entities(
         self,
@@ -1100,6 +1121,33 @@ class SqliteCase:
                 (from_id, type_),
             ).fetchall()
             return [self._link(r) for r in rows]
+
+        return self._write(op)
+
+    def update_link(self, link_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Update a link's status or type without rebuilding the edge.
+
+        Restating the type keeps the edge's id and provenance: the two entities
+        were always related, only the reading was wrong. Which types may be
+        restated is the vocabulary's call (``engine/links.py``), not the store's.
+        """
+
+        def op(conn: sqlite3.Connection) -> dict[str, Any]:
+            row = conn.execute("SELECT * FROM links WHERE id = ?", (link_id,)).fetchone()
+            if row is None:
+                raise CaseError(f"link '{link_id}' not found")
+            status = patch.get("status")
+            if status not in ("confirmed", "suggested"):
+                status = row["prov_status"]
+            type_ = patch.get("type") or row["type"]
+            conn.execute(
+                "UPDATE links SET prov_status = ?, type = ? WHERE id = ?",
+                (status, type_, link_id),
+            )
+            self._touch(conn)
+            updated = conn.execute("SELECT * FROM links WHERE id = ?", (link_id,)).fetchone()
+            assert updated is not None
+            return self._link(updated)
 
         return self._write(op)
 

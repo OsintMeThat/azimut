@@ -58,6 +58,13 @@ const settings = {
   month: '2026-07',
 };
 
+// The relation vocabulary as engine/links.py serves it (ONTOLOGY §3).
+const relationTypes = [
+  { type: 'located-at', label: 'was shot at', from_types: ['capture', 'media'], to_types: ['place'], manual: true },
+  { type: 'depicts', label: 'shows', from_types: ['capture', 'media'], to_types: ['place'], manual: true },
+  { type: 'same-image-as', label: 'is the same picture as', from_types: ['media'], to_types: ['media'], manual: false },
+];
+
 const providers = [{
   id: 'esri-world-imagery',
   label: 'Esri World Imagery',
@@ -91,6 +98,10 @@ export async function installAppFixture(page, options = {}) {
   const savedIndexDelays = options.savedIndexDelays ?? {};
   const proofIndexDelays = options.proofIndexDelays ?? {};
   const fixtureDrafts = options.drafts ?? {};
+  // Relations, keyed by entity id: what the bounded chain endpoint answers for
+  // the row whose relations a surface asked for.
+  const fixtureChains = options.chains ?? {};
+  const linkWrites = [];
 
   await page.addInitScript((caseId) => {
     localStorage.setItem('azimut:lastCase', caseId);
@@ -126,6 +137,7 @@ export async function installAppFixture(page, options = {}) {
     }
     if (path === '/api/settings') return json(route, settings);
     if (path === '/api/templates') return json(route, { proof: [], post: [] });
+    if (path === '/api/cases/relation-types') return json(route, relationTypes);
     if (path === '/api/cases') {
       return json(route, fixtureCases.map((item) => ({ entity_count: 1, ...item })));
     }
@@ -151,6 +163,20 @@ export async function installAppFixture(page, options = {}) {
       return json(route, { items: [], next_cursor: null });
     }
     if (caseId && path === `/api/cases/${caseId}/search-grids`) return json(route, []);
+    const chainMatch = caseId && path.match(new RegExp(`^/api/cases/${caseId}/entities/(.+)/chain$`));
+    if (chainMatch) {
+      const chain = fixtureChains[chainMatch[1]];
+      return json(route, chain ?? { entity: null, sources: [], lost: [], dependents: [], relations: [], empty: true });
+    }
+    const linkMatch = caseId && path.match(new RegExp(`^/api/cases/${caseId}/links(?:/(.+))?$`));
+    if (linkMatch && request.method() !== 'GET') {
+      linkWrites.push({
+        method: request.method(),
+        id: linkMatch[1] ?? null,
+        body: request.method() === 'DELETE' ? null : request.postDataJSON(),
+      });
+      return json(route, request.method() === 'DELETE' ? { status: 'deleted' } : { id: 'link-new' });
+    }
     if (path === `/api/cases/${CASE_ID}/media`) return json(route, media);
     // Two different reads: the capture shelf (pickers list it beside media) and
     // the geo index the Map panel groups. Both are needed — a picker whose
@@ -204,6 +230,7 @@ export async function installAppFixture(page, options = {}) {
   return {
     captures,
     proofSaves,
+    linkWrites,
     expectNoUnexpectedRequests: () => expect(unexpected).toEqual([]),
   };
 }

@@ -14,6 +14,8 @@
   import { clampSize, scaledCapture } from '../lib/captureSize.js';
   import { panelWidth } from '../lib/panelWidth.js';
   import { assignFolder } from '../lib/filing.js';
+  import { saveRelation } from '../lib/relations.svelte.js';
+  import { openEntity } from '../lib/navigate.js';
   import { isRegistered, sourceRect, frameFitsView } from '../lib/screenCrop.js';
   import { extensionVersion, captureTab, onActivated } from '../lib/extBridge.js';
   import {
@@ -54,6 +56,8 @@
   import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import FolderSelect from '../components/FolderSelect.svelte';
+  import RelationList from '../components/RelationList.svelte';
+  import RelationPicker from '../components/RelationPicker.svelte';
   import RefViewer from './RefViewer.svelte';
   import MapToolCluster from './satellite/MapToolCluster.svelte';
   import GridSearchPanel from './satellite/GridSearchPanel.svelte';
@@ -2645,6 +2649,7 @@
       lon: displayCoords.lon,
       zoom: center.zoom,
       bearing,
+      relation: null, // collected by the gate, filed once the place exists
     };
   }
 
@@ -2658,7 +2663,23 @@
       lon: Number(row.lon),
       zoom: row.zoom,
       bearing: row.bearing,
+      relation: null,
+      relations: [],
     };
+    loadPlaceRelations(row.id);
+  }
+
+  /** The relations a place already holds, from the bounded chain endpoint. The
+   *  dialog edits everything else about the point, so hiding them here would make
+   *  it the one surface where a relation can be added but never taken back. */
+  async function loadPlaceRelations(placeId) {
+    if (!placeId) return;
+    try {
+      const chain = await api.get(`/api/cases/${caseState.current.id}/entities/${placeId}/chain`);
+      if (placeModal?.id === placeId) placeModal.relations = chain?.relations ?? [];
+    } catch {
+      if (placeModal?.id === placeId) placeModal.relations = [];
+    }
   }
 
   function placeCoordsLabel(m) {
@@ -2670,16 +2691,19 @@
     placeSaving = true;
     try {
       const m = placeModal;
+      let caseId = caseState.current.id;
+      let placeId = m.id;
       if (m.id) {
         // edit existing place: retitle + set/clear the note
         const title = m.title.trim() || placeCoordsLabel(m);
-        await api.patch(`/api/cases/${caseState.current.id}/entities/${m.id}`, {
+        await api.patch(`/api/cases/${caseId}/entities/${m.id}`, {
           label: title,
           attrs: { notes: m.notes.trim(), folder: m.folder ?? '' },
         });
       } else {
         const c = await ensureCase();
-        await api.post(`/api/cases/${c.id}/satellite/place`, {
+        caseId = c.id;
+        const entity = await api.post(`/api/cases/${c.id}/satellite/place`, {
           lat: m.lat,
           lon: m.lon,
           zoom: m.zoom,
@@ -2688,7 +2712,11 @@
           notes: m.notes,
           folder: m.folder,
         });
+        placeId = entity.id;
       }
+      // The relation is filed last: it needs a place that exists, and saving the
+      // point is worth keeping even if the edge is refused.
+      if (m.relation && placeId) await saveRelation(caseId, placeId, m.relation);
       placeModal = null;
       await reloadCase();
       toast('Place saved', 'ok', 1600);
@@ -2748,6 +2776,7 @@
           onproof={sendToComposer}
           onpost={openLinkedPost}
           onshowproofs={() => (savedKind = 'proofs')}
+          onrefresh={reloadCase}
         />
       {/if}
 
@@ -3401,6 +3430,24 @@
         <span>z{placeModal.zoom}{placeModal.bearing ? ` · ${Math.round(placeModal.bearing)}°` : ''}</span>
       </div>
     </div>
+    <hr style="border:none;border-top:1px solid var(--border);margin:12px 0" />
+    <!-- what this point already claims, and why it is being saved — said while
+         the analyst still knows: the photo it geolocates, the video whose
+         metadata pointed here -->
+    <span style="display:block;font-size:var(--fs-xs);color:var(--text-3);margin-bottom:5px">Relations</span>
+    {#if placeModal.relations?.length}
+      <RelationList
+        caseId={caseState.current.id}
+        relations={placeModal.relations}
+        subjectType="place"
+        onwalk={(entity) => { placeModal = null; openEntity(entity); }}
+        onchanged={async () => {
+          await loadPlaceRelations(placeModal?.id);
+          await reloadCase();
+        }}
+      />
+    {/if}
+    <RelationPicker subjectType="place" bind:value={placeModal.relation} />
     <hr style="border:none;border-top:1px solid var(--border);margin:12px 0" />
     <label for="place-notes" style="display:block;font-size:var(--fs-xs);color:var(--text-3);margin-bottom:5px">Notes</label>
     <textarea

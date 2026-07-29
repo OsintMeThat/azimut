@@ -9,6 +9,9 @@
    * the ground rather than of your clicks.
    */
   import Icon from '../../components/Icon.svelte';
+  import RelationList from '../../components/RelationList.svelte';
+  import { api } from '../../lib/api.js';
+  import { toast } from '../../lib/state.svelte.js';
   import { postTarget } from '../../lib/post.js';
   import { stackOrder } from '../../lib/savedMarkers.js';
 
@@ -22,6 +25,8 @@
     onproof,
     onpost,
     onshowproofs,
+    onentity, // a related entity was picked: leave for its own tool
+    onrefresh, // a relation was settled: sync the other surfaces
   } = $props();
 
   const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', proof: 'proof' };
@@ -51,6 +56,62 @@
   const here = $derived(ordered[0]);
 
   const day = (stamp) => (stamp ? String(stamp).slice(0, 10) : null);
+
+
+  // Relations: the saved index carries the count, never the edges — it is loaded
+  // whole on case open. The edges come from the bounded chain endpoint, per row,
+  // and only for a row whose relations are on screen. A single mark opens them
+  // straight away (clicking a place to see which photos claim it is the point of
+  // the gesture); a stack waits to be asked, so five marks are not five fetches.
+  //
+  // Settling one reloads this row's edges, then asks the host to sync the rest —
+  // confirming a proposed relation confirms its point, which the Suggestions list
+  // shows too. The refreshed index cannot rebuild the layer under an open card
+  // (SavedOverlay defers that), so the count reads the loaded list meanwhile.
+  let openRows = $state([]);
+  let relationsByRow = $state({});
+  const relationCount = (row) =>
+    relationsByRow[rowKey(row)]?.length ?? Number(row.relations ?? 0);
+  const relationsShown = (row) => openRows.includes(rowKey(row));
+
+  $effect(() => {
+    const only = ordered.length === 1 ? ordered[0] : null;
+    // guarded on "already open": this effect writes the state it reads, so
+    // without it the row would be fetched a second time on the re-run
+    if (!only || !relationCount(only) || relationsShown(only)) return;
+    showRelations(null, only);
+  });
+
+  async function loadRelations(row) {
+    if (!caseId || !row.id) return;
+    try {
+      const chain = await api.get(`/api/cases/${caseId}/entities/${row.id}/chain`);
+      relationsByRow = { ...relationsByRow, [rowKey(row)]: chain?.relations ?? [] };
+    } catch (e) {
+      // A read that failed is not an answer: caching it as an empty list would
+      // have the card claim this point holds no relations. Fold the row back so
+      // the count still says there are some, and a second click retries.
+      openRows = openRows.filter((key) => key !== rowKey(row));
+      toast(`Could not read the relations: ${e.message}`, 'danger', 5000);
+    }
+  }
+
+  function showRelations(event, row) {
+    // Leaflet decides whether a click was "on the map" by walking up from the
+    // event target to find the popup container. This control replaces itself with
+    // the loaded list, so by then the clicked button can already be detached from
+    // the document — the walk finds nothing and the map closes the card under us.
+    // Keeping the event inside the card is what makes that impossible.
+    event?.stopPropagation();
+    if (!relationsShown(row)) openRows = [...openRows, rowKey(row)];
+    loadRelations(row);
+  }
+
+  async function relationSettled(row) {
+    await loadRelations(row);
+    await onrefresh?.();
+  }
+
 </script>
 
 <div class="pop">
@@ -85,6 +146,9 @@
             <span class="kind"><Icon name={GLYPH[row.kind] ?? 'pin'} size={10} /> {KIND[row.kind]}</span>
             {#if row.provider ?? row.site}<span>{row.provider ?? row.site}</span>{/if}
             {#if row.zoom != null}<span>z{Math.round(row.zoom)}</span>{/if}
+            {#if row.status === 'suggested'}
+              <span class="proposed" title="Proposed from a file's own metadata">suggested</span>
+            {/if}
           </p>
           <p class="meta">
             {#if row.imagery_date}<span>Imagery {row.imagery_date}</span>{/if}
@@ -100,6 +164,29 @@
             </p>
           {/if}
           {#if row.notes}<p class="note">{row.notes}</p>{/if}
+          {#if relationCount(row)}
+            <section class="relations">
+              {#if relationsShown(row)}
+                <p class="rel-heading">
+                  <Icon name="link" size={11} />
+                  {relationCount(row) === 1 ? 'Relation' : `Relations · ${relationCount(row)}`}
+                </p>
+                <RelationList
+                  {caseId}
+                  relations={relationsByRow[rowKey(row)] ?? []}
+                  subjectType={row.kind === 'place' ? 'place' : 'capture'}
+                  max={3}
+                  onwalk={(entity) => onentity?.(entity)}
+                  onchanged={() => relationSettled(row)}
+                />
+              {:else}
+                <button type="button" class="link" onclick={(event) => showRelations(event, row)}>
+                  <Icon name="link" size={11} />
+                  {relationCount(row)} relation{relationCount(row) > 1 ? 's' : ''}
+                </button>
+              {/if}
+            </section>
+          {/if}
           {#if rowPosts.length}
             <section class="linked-posts">
               <p class="post-heading">
@@ -297,11 +384,25 @@
     color: var(--text-2);
     overflow-wrap: anywhere;
   }
-  .linked-posts {
+  .proposed {
+    padding: 0 4px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: color-mix(in srgb, var(--accent) 85%, var(--text-2));
+    font-size: 9px;
+  }
+  /* the dot separator the meta line inserts between its bits would read as part
+     of the chip, so this one stands on its own */
+  .meta > .proposed::before {
+    content: none;
+  }
+  .linked-posts,
+  .relations {
     margin-top: 4px;
     padding-top: 5px;
     border-top: 1px solid var(--border);
   }
+  .rel-heading,
   .post-heading {
     display: flex;
     align-items: center;

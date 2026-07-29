@@ -1071,3 +1071,31 @@ def test_locate_clamps_its_batch_size(client):
     cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
     assert client.post(f"/api/cases/{cid}/satellite/locate", params={"limit": 26}).status_code == 422
     assert client.post(f"/api/cases/{cid}/satellite/locate", params={"limit": 0}).status_code == 422
+
+
+def test_index_counts_relations_and_marks_a_proposed_point(client):
+    """What the map popup needs to offer relations without the index carrying the
+    edges: a count per row, and whether the point is a machine's proposal.
+    Enrichment mints one suggested place per GPS-tagged file, so an index that
+    could not tell them apart would let a camera's reading pass for analyst work.
+    """
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Relations index"}).json()["id"]
+    case = Case.open(cid)
+    photo = case.add_entity("media", "Photo", {"path": "media/photo.jpg"}, by="user")
+    proposed = case.add_entity(
+        "place", "48.858370, 2.294481", {"lat": 48.85837, "lon": 2.294481},
+        by="enrich", status="suggested",
+    )
+    mine = case.add_entity("place", "Checkpoint", {"lat": 50.4, "lon": 30.5}, by="user")
+    case.add_link(photo["id"], proposed["id"], "located-at", by="enrich", status="suggested")
+
+    rows = {row["title"]: row for row in _index(client, cid)}
+
+    assert rows["48.858370, 2.294481"]["relations"] == 1
+    assert rows["48.858370, 2.294481"]["status"] == "suggested"
+    # a point the analyst pinned by hand carries neither mark
+    assert rows["Checkpoint"]["relations"] == 0
+    assert rows["Checkpoint"]["status"] == "confirmed"
+    assert mine["id"] == rows["Checkpoint"]["id"]

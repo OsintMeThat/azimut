@@ -116,6 +116,7 @@ proof for publication.
 | ✅ **Named saves** | Inspect's Save gate names each item or numbers a batch from one base name, carries a shared note, and gives the file on disk the same name; a collage keeps one name across its tab and the gate. |
 | ✅ **Named documents** | Inspect, Geo Proof and Geo Report name their work in the tool header ("Inspect 1", "Proof 1", "Post 1" until renamed), save under that name in one click, and move the file when it is renamed. |
 | ✅ **Proofs on the map** | A fourth position of the Saved switch places each proof by its own coordinates, then by the captures it composes; `All` marks a worked capture with a dot rather than doubling it. |
+| ✅ **Relation vocabulary** | One registry for the non-chain edges, stated or settled from Details and from a point's card on the map. |
 
 
 ---
@@ -134,7 +135,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Trash** | Undoes a delete and holds removed artifacts before they go for good. |
 | **Import enrichment** | Queues EXIF/GPS, perceptual hash and OCR on import; results arrive as Suggestions. |
 | **EXIF in Media** | Shows parsed GPS in the Media list and turns it into a place in one click. |
-| **Case Board / Relations** | Browses, creates and merges entities; typed links; graph view over the schema filled since v1. |
+| **Case Board / Relations** | Browses, creates and merges entities; graph view over the schema filled since v1, on the shipped relation vocabulary. |
 | **Case Sheet** | The same case as a table: a row is an entity, columns are its attributes plus free ones the analyst adds, sorted, filtered and edited in place. Imports a CSV as loose rows that stay out of the graph until promoted, and exports back to CSV or GeoJSON. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |

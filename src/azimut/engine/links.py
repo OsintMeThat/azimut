@@ -24,10 +24,16 @@ The test a new tool applies: *delete the target — is anything usable left in m
 file?* Yes → ``derived-from``. No → ``depends-on``. Emitted at save time with
 ``status: "confirmed"``: a derivation is a mechanical fact of the analyst's own
 click, not a tool's guess (ONTOLOGY §4).
+
+Everything else is a **relation**: a statement about the world rather than about
+how a file was made. ``RELATION_TYPES`` below is the registry the UI offers and
+the API validates against, so one vocabulary serves the Details panel, the map
+and the case board rather than one per tool.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -46,6 +52,188 @@ TOMBSTONE_TYPES = (DERIVED_FROM,)
 
 #: ``attrs`` key holding the tombstones. Additive — schema stays 0.
 LOST = "lost_sources"
+
+# -- relations: the non-chain edges (ONTOLOGY §3) -----------------------------
+#
+# A relation says something about the world — this photo was shot there, these
+# two files are the same picture — where a chain edge says something about how a
+# file was produced. Nothing here cascades a delete or leaves a tombstone:
+# removing either endpoint just drops the edge.
+
+LOCATED_AT = "located-at"
+SAME_IMAGE_AS = "same-image-as"
+DEPICTS = "depicts"
+
+
+@dataclass(frozen=True)
+class RelationType:
+    """One relation the vocabulary knows, and what it may join.
+
+    ``from_types``/``to_types`` are the entity types each end accepts, so the
+    picker can only offer edges the ontology has a reading for and the API can
+    refuse the rest. ``label`` completes the sentence *"<from> … <to>"* and is
+    what every surface displays instead of the type slug. ``manual`` is whether
+    an analyst may state it: some relations are only ever a machine's claim.
+    """
+
+    type: str
+    label: str
+    from_types: frozenset[str]
+    to_types: frozenset[str]
+    manual: bool = True
+
+
+#: The relation vocabulary, in menu order. Deliberately not every type in the
+#: ONTOLOGY §3 table: a type reaches this tuple once an entity type exists at both
+#: ends, so nothing is offered that cannot be filed.
+RELATION_TYPES: tuple[RelationType, ...] = (
+    RelationType(
+        LOCATED_AT,
+        "was shot at",
+        from_types=frozenset({"media", "capture"}),
+        to_types=frozenset({"place"}),
+    ),
+    RelationType(
+        DEPICTS,
+        "shows",
+        from_types=frozenset({"media", "capture"}),
+        to_types=frozenset({"place"}),
+    ),
+    # Enrichment's own claim: two files whose perceptual hashes are within
+    # DHASH_MATCH bits. Named here so the UI can say it in words, never offered
+    # by hand — a person comparing two pictures is not measuring a hash.
+    RelationType(
+        SAME_IMAGE_AS,
+        "is the same picture as",
+        from_types=frozenset({"media"}),
+        to_types=frozenset({"media"}),
+        manual=False,
+    ),
+)
+
+
+def relation_type(type_: str) -> RelationType | None:
+    """The registry entry for a relation type, or None if it has no reading."""
+    return next((entry for entry in RELATION_TYPES if entry.type == type_), None)
+
+
+def add_relation(
+    case: CaseRepository, from_id: str, to_id: str, type_: str, *, by: str
+) -> dict[str, Any]:
+    """State one relation between two entities, as the analyst's own claim.
+
+    ``status`` is always ``confirmed``: a suggestion is what a tool proposes for
+    review (ONTOLOGY §4), so an analyst clicking "relate these" would have
+    nothing left to review. Chain types are refused — a derivation is recorded by
+    the save that produced it, never asserted after the fact — and so is any pair
+    the registry has no reading for. Repeats are idempotent rather than stacked.
+    """
+    spec = _statable(type_)
+    if from_id == to_id:
+        raise CaseError("an entity cannot relate to itself")
+    _check_endpoints(case, spec, from_id, to_id)
+    return case.add_link(from_id, to_id, type_, by=by, unique=True)
+
+
+def set_relation_type(case: CaseRepository, link_id: str, type_: str) -> dict[str, Any]:
+    """Correct which relation an existing edge states.
+
+    The same two entities, a different reading — "shows this place" where the
+    analyst first said "was shot at" — so it is one edge corrected rather than a
+    delete and a re-statement, and the wrong reading leaves no trace. Same
+    validation as stating one, plus a refusal to collapse onto a relation the pair
+    already holds.
+    """
+    spec = _statable(type_)
+    link = case.get_link(link_id)
+    if link is None:
+        raise CaseError(f"link '{link_id}' not found")
+    _statable(link["type"])  # a machine's claim is not the analyst's to reword
+    _check_endpoints(case, spec, link["from"], link["to"])
+    twin = any(
+        other["id"] != link_id
+        and other["from"] == link["from"]
+        and other["to"] == link["to"]
+        and other["type"] == type_
+        for other in case.links_of(link["from"])
+    )
+    if twin:
+        raise CaseError("those two already hold that relation")
+    return case.update_link(link_id, {"type": type_})
+
+
+def confirm_relation(case: CaseRepository, link_id: str) -> dict[str, Any]:
+    """Accept a proposed relation, and with it the entities it joins.
+
+    The two halves of an enrichment suggestion are one claim: "this file was shot
+    at this point" cannot be true while the point itself is still only proposed.
+    So confirming the edge confirms whichever endpoint is still `suggested` — the
+    mirror of confirming an entity, which confirms its incident suggestions
+    (api/cases.update_entity). Without both directions the Suggestions list and
+    the relation rows disagree about the same click.
+    """
+    link = case.get_link(link_id)
+    if link is None:
+        raise CaseError(f"link '{link_id}' not found")
+    for endpoint in (link["from"], link["to"]):
+        entity = case.get_entity(endpoint)
+        if entity is not None and entity["provenance"]["status"] == "suggested":
+            case.update_entity(endpoint, {"status": "confirmed"})
+    return case.update_link(link_id, {"status": "confirmed"})
+
+
+def remove_relation(case: CaseRepository, link_id: str) -> None:
+    """Take back one relation.
+
+    Chain edges are refused here as they are everywhere else in this module: a
+    derivation is recorded by the save that produced it, and dropping one behind
+    the delete path would lose it without the tombstone `losses` relies on
+    (``TOMBSTONE_TYPES``). A relation, by contrast, is a statement, and taking a
+    statement back is the only way to correct one.
+    """
+    link = case.get_link(link_id)
+    if link is None:
+        raise CaseError(f"link '{link_id}' not found")
+    if link["type"] in CHAIN_TYPES:
+        raise CaseError(f"'{link['type']}' is a derivation, not a relation to take back")
+    case.remove_link(link_id)
+
+
+def confirm_incident_relations(case: CaseRepository, entity_id: str) -> None:
+    """Accept the suggestions hanging off an entity the analyst just confirmed.
+
+    The mirror of :func:`confirm_relation`, and it has to carry the same
+    invariant: an edge is confirmed together with the entity at its far end, or
+    the map still chips a point "suggested" while the relation row beside it reads
+    as a finding. One hop only — accepting a photo's own point is a reading of
+    that photo, not a licence to accept whatever that point was separately
+    proposed to be.
+    """
+    for link in case.links_of(entity_id):
+        if link["provenance"]["status"] != "suggested":
+            continue
+        far = link["to"] if link["from"] == entity_id else link["from"]
+        neighbour = case.get_entity(far)
+        if neighbour is not None and neighbour["provenance"]["status"] == "suggested":
+            case.update_entity(far, {"status": "confirmed"})
+        case.update_link(link["id"], {"status": "confirmed"})
+
+
+def _statable(type_: str) -> RelationType:
+    spec = relation_type(type_)
+    if spec is None or not spec.manual:
+        raise CaseError(f"'{type_}' is not a relation the analyst can state")
+    return spec
+
+
+def _check_endpoints(
+    case: CaseRepository, spec: RelationType, from_id: str, to_id: str
+) -> None:
+    source, target = _entity(case, from_id), _entity(case, to_id)
+    if source["type"] not in spec.from_types:
+        raise CaseError(f"a {source['type']} cannot be the subject of '{spec.type}'")
+    if target["type"] not in spec.to_types:
+        raise CaseError(f"a {target['type']} cannot be the object of '{spec.type}'")
 
 
 def _now() -> str:
@@ -186,22 +374,33 @@ def losses(case: CaseRepository, doomed_ids: set[str]) -> dict[str, list[dict[st
 
 
 def chain_of(case: CaseRepository, entity_id: str) -> dict[str, Any] | None:
-    """One entity's derivation chain (ONTOLOGY §3), for the Details panel.
+    """One entity's derivation chain and direct relations, for Details.
 
     Mirrors the frontend ``chainOf``: its direct ``sources`` (outgoing
     ``derived-from`` / ``depends-on`` edges), its direct ``dependents`` (the
-    incoming ones), and the tombstoned ``lost_sources`` it still carries. Reads
-    only the edges incident to this entity (``links_of``) plus each neighbour, so
-    it never materialises the whole graph. Returns ``None`` if the entity is
-    gone.
+    incoming ones), direct non-chain ``relations``, and the tombstoned
+    ``lost_sources`` it still carries. Reads only the edges incident to this
+    entity (``links_of``) plus each neighbour, so it never materialises the whole
+    graph. Returns ``None`` if the entity is gone.
     """
     entity = case.get_entity(entity_id)
     if entity is None:
         return None
     sources: list[dict[str, Any]] = []
     dependents: list[dict[str, Any]] = []
+    relations: list[dict[str, Any]] = []
     for link in case.links_of(entity_id):
         if link["type"] not in CHAIN_TYPES:
+            neighbour_id = link["to"] if link["from"] == entity_id else link["from"]
+            neighbour = case.get_entity(neighbour_id)
+            if neighbour is not None:
+                relations.append(
+                    {
+                        "entity": neighbour,
+                        "link": link,
+                        "direction": "out" if link["from"] == entity_id else "in",
+                    }
+                )
             continue
         if link["from"] == entity_id:
             neighbour = case.get_entity(link["to"])
@@ -217,7 +416,8 @@ def chain_of(case: CaseRepository, entity_id: str) -> dict[str, Any] | None:
         "sources": sources,
         "lost": lost,
         "dependents": dependents,
-        "empty": not sources and not lost and not dependents,
+        "relations": relations,
+        "empty": not sources and not lost and not dependents and not relations,
     }
 
 

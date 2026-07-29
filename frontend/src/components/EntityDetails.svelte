@@ -15,10 +15,13 @@
   import { buildTree, flattenPaths, folderOf } from '../lib/folderTree.js';
   import { assignFolder as fileEntity } from '../lib/filing.js';
   import { DEPENDS_ON } from '../lib/chain.js';
+  import { loadRelationTypes, relatableTypes, saveRelation } from '../lib/relations.svelte.js';
   import { openEntity, gotoCapture, ENTITY_TOOL } from '../lib/navigate.js';
   import Icon from './Icon.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import FolderSelect from './FolderSelect.svelte';
+  import RelationList from './RelationList.svelte';
+  import RelationPicker from './RelationPicker.svelte';
 
   let { entityId, onclose, ondeleted } = $props();
 
@@ -124,6 +127,18 @@
     }
   }
 
+  // A relation stated here rides along with Save, like the title and the notes:
+  // the panel's model is "edit the fields, press Save", and a second commit
+  // button beside it would be one gesture too many.
+  let pendingRelation = $state(null);
+  loadRelationTypes();
+  const canRelate = $derived(!!entity && relatableTypes(entity.type).length > 0);
+
+  $effect(() => {
+    currentId; // a different entity means a different subject
+    pendingRelation = null;
+  });
+
   async function saveInfo() {
     if (!entity || infoSaving) return;
     infoSaving = true;
@@ -144,6 +159,10 @@
       }
       if ((infoFolder.trim() || '') !== (folderOf(entity) ?? '')) {
         await fileEntity(cid, entity, infoFolder.trim());
+      }
+      if (pendingRelation) {
+        await saveRelation(cid, entity.id, pendingRelation);
+        pendingRelation = null;
       }
       await reloadCase();
       toast('Saved', 'ok', 1600);
@@ -308,7 +327,7 @@
     </div>
 
     <!-- derivation chain: click a row to walk to that entity's details -->
-    {#if chain && !chain.empty}
+    {#if chain && (chain.sources.length || chain.lost.length || chain.dependents.length)}
       <div class="chain">
         {#if chain.sources.length || chain.lost.length}
           <div class="chain-h">Made from</div>
@@ -346,6 +365,21 @@
             </button>
           {/each}
         {/if}
+      </div>
+    {/if}
+
+    <!-- relations: what this entity says about the world, not how it was made -->
+    {#if canRelate}
+      <div class="chain">
+        <div class="chain-h">Relations</div>
+        <RelationList
+          caseId={caseState.current.id}
+          relations={chain?.relations ?? []}
+          subjectType={entity.type}
+          onwalk={(target) => (walkedId = target.id)}
+          onchanged={reloadCase}
+        />
+        <RelationPicker subjectType={entity.type} bind:value={pendingRelation} />
       </div>
     {/if}
 
