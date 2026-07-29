@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from .. import jobs
+from ..engine import artifacts as artifact_engine
 from ..engine import inspect as inspect_engine
 from ..engine import links as link_engine
 from ..workspace import CaseError
@@ -383,11 +384,12 @@ def save_session(case_id: str, body: SessionIn) -> dict[str, Any]:
 @router.delete("/cases/{case_id}/inspect/sessions/{name}")
 def delete_session(case_id: str, name: str) -> dict[str, Any]:
     case = get_case(case_id)
+    rel = f"inspect/{name}.json"
     try:
-        spec_path = case.resolve_inside(f"inspect/{name}.json")
+        case.resolve_inside(rel)
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-    result = delete_by_path(case, f"inspect/{name}.json")
+    result = delete_by_path(case, rel)
     if not result["deleted"]:  # never filed as an entity: drop the file anyway
-        spec_path.unlink(missing_ok=True)
+        artifact_engine.delete(case, {"type": "inspect-session", "attrs": {"spec": rel}})
     return result

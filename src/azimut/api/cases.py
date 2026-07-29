@@ -7,8 +7,8 @@ from typing import Any, cast
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ..engine import artifacts as artifact_engine
 from ..engine import links as link_engine
-from ..engine import media as media_engine
 from ..repository import EntityStatus
 from ..workspace import Case, CaseError
 
@@ -32,34 +32,6 @@ def _ensure_name_free(name: str, *, exclude_id: str | None = None) -> None:
             continue
         if str(c.get("name", "")).strip().casefold() == wanted:
             raise HTTPException(status_code=409, detail=f"a case named '{name}' already exists")
-
-
-def _unlink_inside(case: Case, rel_path: str) -> None:
-    try:
-        case.resolve_inside(rel_path).unlink(missing_ok=True)
-    except CaseError:
-        pass
-
-
-def _delete_artifact_files(case: Case, entity: dict[str, Any]) -> None:
-    """Drop the on-disk artifact an entity stands for (spec §6 delete/edit sync).
-
-    A bare ``place`` has no file; an unknown (free-typed) entity is assumed to
-    have none either, so a future type files its own deletion here or not at all.
-    """
-    etype = entity.get("type")
-    attrs = entity.get("attrs", {})
-    if etype in ("media", "capture") and attrs.get("path"):
-        media_engine.delete_media_files(case, attrs["path"])
-    elif etype == "proof" and attrs.get("spec"):
-        _unlink_inside(case, attrs["spec"])
-        _unlink_inside(case, attrs["spec"].removesuffix(".json") + ".png")
-    elif etype == "post" and attrs.get("draft"):
-        _unlink_inside(case, attrs["draft"])
-    elif etype == "inspect-session" and attrs.get("spec"):
-        _unlink_inside(case, attrs["spec"])
-    elif etype == "note" and attrs.get("path"):
-        _unlink_inside(case, attrs["path"])
 
 
 def delete_entity_deep(case: Case, entity_id: str) -> dict[str, Any]:
@@ -89,7 +61,7 @@ def delete_entity_deep(case: Case, entity_id: str) -> dict[str, Any]:
                 link_engine.add_tombstone(case, survivor_id, info)
 
     for entity in going:
-        _delete_artifact_files(case, entity)
+        artifact_engine.delete(case, entity)
         try:
             case.remove_entity(entity["id"])
         except CaseError:
