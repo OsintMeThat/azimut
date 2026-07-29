@@ -20,6 +20,7 @@ import time
 import unicodedata
 import uuid
 import zipfile
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, Iterator
@@ -768,7 +769,7 @@ def _prepare_import_database(
     origin_case_id: str,
     name: str,
 ) -> None:
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
         if row is None or int(row[0]) != declared_schema:
             raise BundleError("the case database does not match the bundle header")
@@ -777,7 +778,7 @@ def _prepare_import_database(
         if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise BundleError("the case database has broken references")
     SqliteCase.open(db_path)
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         for key, value in (
             ("name", name),
             ("origin_case_id", origin_case_id),
@@ -788,6 +789,7 @@ def _prepare_import_database(
                 " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, value),
             )
+        conn.commit()
 
 
 def imported_name(name: str) -> str:
@@ -810,7 +812,7 @@ def create_import_case(name: str) -> Case:
 
 def _install_running_job(db_path: Path, job: dict[str, Any]) -> None:
     """Carry the import job through the final directory swap."""
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO jobs"
             "(id, kind, job_key, state, attempts, max_attempts, payload_json,"
@@ -827,6 +829,7 @@ def _install_running_job(db_path: Path, job: dict[str, Any]) -> None:
                 _now(),
             ),
         )
+        conn.commit()
 
 
 def import_into(

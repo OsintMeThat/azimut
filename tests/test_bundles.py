@@ -6,6 +6,7 @@ import json
 import os
 import sqlite3
 import zipfile
+from contextlib import closing
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -78,7 +79,7 @@ def test_plain_bundle_has_ordered_manifests_and_a_clean_database(bundle_case):
 
         extracted = config.bundles_dir() / "clean.db"
         extracted.write_bytes(archive.read("case.db"))
-    with sqlite3.connect(extracted) as conn:
+    with closing(sqlite3.connect(extracted)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM trash").fetchone()[0] == 0
         assert conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE state IN ('queued', 'running')"
@@ -136,7 +137,7 @@ def test_export_import_round_trip_creates_a_new_case(bundle_case, password):
     assert [entity["label"] for entity in imported.list_entities()] == ["Witness"]
     note_path = imported.list_entities()[0]["attrs"]["path"]
     assert imported.resolve_inside(note_path).read_text(encoding="utf-8") == "# Witness\n"
-    with sqlite3.connect(imported.path / "case.db") as conn:
+    with closing(sqlite3.connect(imported.path / "case.db")) as conn:
         meta = dict(conn.execute("SELECT key, value FROM meta"))
     assert meta["origin_case_id"] == bundle_case.id
     assert meta["imported_at"]
@@ -323,11 +324,11 @@ def test_passwords_never_enter_durable_job_payloads(bundle_case):
     assert "password" not in export_job["payload"]
     assert import_job["payload"]["sealed"] is True
     assert "password" not in import_job["payload"]
-    with sqlite3.connect(bundle_case.path / "case.db") as conn:
+    with closing(sqlite3.connect(bundle_case.path / "case.db")) as conn:
         export_payload = conn.execute(
             "SELECT payload_json FROM jobs WHERE id = ?", (export_job["id"],)
         ).fetchone()[0]
-    with sqlite3.connect(imported.path / "case.db") as conn:
+    with closing(sqlite3.connect(imported.path / "case.db")) as conn:
         import_payload = conn.execute(
             "SELECT payload_json FROM jobs WHERE id = ?", (import_job["id"],)
         ).fetchone()[0]
