@@ -292,6 +292,25 @@ def mint_ingest_token() -> dict[str, Any]:
     return {"ingest_token": config.ingest_token()}
 
 
+def _signature_b64() -> str:
+    """The signature logo as base64, or ``""`` when there is no usable one.
+
+    Size is read from the directory entry before the bytes are: the upload route
+    bounds what Settings accepts, but a file dropped into the workspace by hand
+    has been through no gate at all, and a backup is not the place to discover it.
+    The same ``valid_signature`` check the upload and the restore apply decides
+    whether it travels.
+    """
+    path = config.signature_path()
+    try:
+        if not path.is_file() or path.stat().st_size > config.SIGNATURE_MAX_BYTES:
+            return ""
+        data = path.read_bytes()
+    except OSError:
+        return ""
+    return base64.b64encode(data).decode("ascii") if config.valid_signature(data) else ""
+
+
 @router.get("/settings/export")
 def export_settings() -> Response:
     """Download everything app-wide that isn't a case, so another machine can be
@@ -304,16 +323,13 @@ def export_settings() -> Response:
     in their workspace.
 
     Deliberately absent: ``cookies.txt`` (a live login session, tied to one
-    machine's browser) and the cases themselves, which are portable folders
-    already.
+    machine's browser), the cases themselves (portable folders already), and a
+    signature that isn't a valid PNG within the size gate.
     """
-    signature = config.signature_path()
     bundle = {
         "settings": config.load_settings(),
         "templates": config.load_templates(),
-        "signature_png": (
-            base64.b64encode(signature.read_bytes()).decode("ascii") if signature.is_file() else ""
-        ),
+        "signature_png": _signature_b64(),
     }
     payload = json.dumps(bundle, indent=2, ensure_ascii=False)
     return Response(
@@ -693,8 +709,9 @@ def check_app_update(check: bool = False) -> dict[str, Any]:
 def get_diagnostics(summary: str = "", kind: str = diagnostics.DEFAULT_KIND) -> dict[str, str]:
     """The bug-report body and a pre-filled GitHub issue link for it.
 
-    Pure local text: version, OS and the in-memory warning tail, with the home
-    path and account name scrubbed (engine/diagnostics.py). Touches no network —
+    Pure local text: version, OS and the in-memory warning tail, with paths, the
+    account name, case names and credentials scrubbed (engine/diagnostics.py, which
+    owns the list and why each entry is on it). Touches no network —
     the user's browser opens the returned link on a click, so About can show the
     exact report first. ``summary`` is what the user typed; the engine caps it
     (``MAX_SUMMARY_CHARS``) rather than refusing it — losing a typed paragraph to

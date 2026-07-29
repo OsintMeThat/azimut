@@ -18,6 +18,14 @@ from azimut import __version__
 from azimut.engine import diagnostics
 
 
+@pytest.fixture(autouse=True)
+def fresh_environment(monkeypatch):
+    """The environment block is built once per process. Tests that change what the
+    machine reports need that cache cleared, the same way `ring` gives each test a
+    fresh log buffer."""
+    monkeypatch.setattr(diagnostics, "_environment", None)
+
+
 @pytest.fixture()
 def ring(monkeypatch):
     """A fresh capture buffer, wired the way the server wires it."""
@@ -93,7 +101,10 @@ def test_scrub_replaces_home_and_account_name(monkeypatch, tmp_path):
 
     scrubbed = diagnostics.scrub(f"failed to open {tmp_path}/gwen/Azimut/cases/kyiv — gwen")
     assert "gwen" not in scrubbed
-    assert "~/Azimut/cases/kyiv" in scrubbed
+    # the path stays useful, but the case segment is a name the analyst chose and
+    # this text is on its way to a public tracker
+    assert "~/Azimut/cases/<case>" in scrubbed
+    assert "kyiv" not in scrubbed
     assert "<user>" in scrubbed
 
 
@@ -259,3 +270,149 @@ def test_diagnostics_route_shortens_rather_than_refusing_a_long_summary(client):
     body = client.get("/api/settings/diagnostics", params={"summary": "w" * 9000}).json()
     assert body["kind"] == diagnostics.DEFAULT_KIND
     assert "w" * diagnostics.MAX_SUMMARY_CHARS in body["report"]
+
+
+# -- the link fits without eating the report ------------------------------
+
+
+@pytest.mark.parametrize(
+    "label, summary",
+    [
+        ("latin", "a" * diagnostics.MAX_SUMMARY_CHARS),
+        ("accented latin", "é" * diagnostics.MAX_SUMMARY_CHARS),
+        ("cyrillic", "ж" * 600),
+        ("japanese", "事" * 400),
+        ("emoji", "🛰" * 200),
+    ],
+)
+def test_the_link_keeps_what_the_user_wrote(ring, label, summary, tmp_workspace):
+    """The summary is capped in characters, but the link is measured in encoded
+    characters — nine of them per letter in some scripts. A summary well inside the
+    cap can therefore be several times the link's whole budget, and shedding
+    blindly from the end would deliver a heading, a marker blaming the log, and
+    none of the report."""
+    built = diagnostics.payload(summary)
+    body = body_of(built["url"])
+
+    assert len(built["url"]) <= diagnostics.URL_LIMIT
+    assert summary[0] in body, f"{label}: the user's own words were dropped"
+    # and Copy always carries the whole thing, whatever the link had to drop
+    assert summary in built["report"]
+
+
+def test_context_is_shed_before_content(ring, tmp_workspace):
+    """A summary that fits leaves room for some context; one that does not takes
+    the whole budget. Either way the order is the same: log first, environment
+    next, the user's words last and only if nothing else is left."""
+    log = logging.getLogger("azimut.test")
+    for n in range(diagnostics.LOG_LINES):
+        log.warning("a warning long enough to matter, number %s, %s", n, "x" * 300)
+
+    modest = body_of(diagnostics.payload("It crashed on export.")["url"])
+    assert "It crashed on export." in modest
+    assert "### Environment" in modest
+    assert diagnostics.TRIM_MARKER in modest  # the log tail is what went
+
+    huge = body_of(diagnostics.payload("é" * diagnostics.MAX_SUMMARY_CHARS)["url"])
+    assert "### Recent warnings" not in huge
+    assert "### Environment" not in huge
+    # the marker names the right casualty rather than blaming the log
+    assert diagnostics.SUMMARY_TRIM_MARKER in huge
+    assert diagnostics.TRIM_MARKER not in huge
+
+
+def test_a_report_that_fits_is_left_whole(ring, tmp_workspace):
+    body = body_of(diagnostics.payload("Short and to the point.")["url"])
+
+    assert diagnostics.TRIM_MARKER not in body
+    assert diagnostics.SUMMARY_TRIM_MARKER not in body
+    assert "### Recent warnings" in body
+
+
+# -- the scrub covers what this app's logs actually carry ------------------
+
+
+def test_a_case_name_never_reaches_the_tracker(ring, tmp_workspace):
+    """A case directory is a slug of the name the analyst typed, and in this tool
+    that name is routinely a subject's. The path around it is useful; the segment
+    is not ours to publish."""
+    from azimut import config
+
+    log = logging.getLogger("azimut.test")
+    log.warning("could not open %s", config.cases_dir() / "operation-blue-heron" / "case.db")
+    log.warning("scratch vanished: %s", config.scratch_dir() / "scratch_9f2c" / "media" / "a.jpg")
+
+    captured = "\n".join(diagnostics.log_lines())
+
+    assert "operation-blue-heron" not in captured
+    assert "scratch_9f2c" not in captured
+    assert "cases/<case>/case.db" in captured.replace("\\", "/")
+    assert "scratch/<case>/media/a.jpg" in captured.replace("\\", "/")
+
+
+def test_a_credential_in_a_logged_url_is_redacted(ring, tmp_workspace):
+    """A keyed imagery or geocoding provider is reached over HTTP, so a warning
+    about one names the URL — key included."""
+    log = logging.getLogger("azimut.test")
+    log.warning("provider refused: https://api.example.com/v1?key=SECRET-ABC123&z=4")
+    log.warning("upload rejected: token=eyJhbGciOiJIUzI1NiJ9.payload.sig")
+
+    captured = "\n".join(diagnostics.log_lines())
+
+    assert "SECRET-ABC123" not in captured
+    assert "eyJhbGciOiJIUzI1NiJ9" not in captured
+    assert "key=<redacted>&z=4" in captured
+    assert "token=<redacted>" in captured
+
+
+def test_the_scrub_leaves_ordinary_prose_alone(tmp_workspace):
+    """A blunt scrub that ate the word "cases" or every "key" would make the log
+    tail useless, which is the one thing the report is for."""
+    prose = "Two of the open cases and both API keys behave the same way"
+
+    assert diagnostics.scrub(prose) == prose
+
+
+def test_a_workspace_outside_the_home_directory_is_still_hidden(monkeypatch, tmp_path):
+    """A portable install can live anywhere — on a second disk, on a stick — and
+    then no amount of home-collapsing hides where it is."""
+    from azimut import config
+
+    elsewhere = tmp_path / "volume" / "azimut-portable"
+    monkeypatch.setattr(config, "workspace_root", lambda: elsewhere)
+
+    scrubbed = diagnostics.scrub(f"failed to read {elsewhere / 'settings.json'}")
+
+    assert str(elsewhere) not in scrubbed
+    assert "<workspace>" in scrubbed
+
+
+# -- the environment block is read once -----------------------------------
+
+
+def test_the_environment_is_built_once_per_process(monkeypatch, tmp_workspace):
+    """Reading the ffmpeg line runs `ffmpeg -version`, and About rebuilds the
+    report as the user types. A subprocess per keystroke burst flashes a console
+    window on Windows at someone in the middle of writing a bug report."""
+    monkeypatch.setattr(diagnostics, "_environment", None)
+    calls = []
+
+    def counted() -> dict[str, object]:
+        calls.append(1)
+        return {"available": True, "path": "/x/ffmpeg", "source": "path", "version": "7.1"}
+
+    monkeypatch.setattr(diagnostics.ffmpeg, "info", counted)
+
+    for _ in range(5):
+        diagnostics.payload("still typing…")
+
+    assert len(calls) == 1
+    assert diagnostics.environment()["ffmpeg"] == "7.1 (system PATH)"
+
+
+def test_the_cached_environment_cannot_be_mutated_by_a_caller(monkeypatch, tmp_workspace):
+    monkeypatch.setattr(diagnostics, "_environment", None)
+    first = diagnostics.environment()
+    first["OS"] = "tampered"
+
+    assert diagnostics.environment()["OS"] != "tampered"

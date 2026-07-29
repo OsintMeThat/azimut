@@ -282,3 +282,26 @@ def test_import_rejects_malformed_known_fields_without_partial_write(client, fie
     assert response.status_code == 422
     assert config.settings_path().read_bytes() == before
     assert config.load_settings()["units"] == "metric"
+
+
+def test_a_signature_no_gate_ever_saw_is_left_out_of_the_backup(client):
+    """The upload route bounds what Settings accepts, but a file dropped into the
+    workspace by hand has been through nothing. A backup is not the place to
+    discover it: reading it whole to encode it is the work the gate exists to
+    refuse."""
+    from azimut import config
+
+    path = config.signature_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # too big, even though it really is a PNG
+    path.write_bytes(PNG + b"\x00" * (config.SIGNATURE_MAX_BYTES + 1))
+    assert client.get("/api/settings/export").json()["signature_png"] == ""
+
+    # small enough, but not a PNG at all
+    path.write_bytes(b"GIF89a not really an image")
+    assert client.get("/api/settings/export").json()["signature_png"] == ""
+
+    # the real thing still travels
+    path.write_bytes(PNG)
+    assert base64.b64decode(client.get("/api/settings/export").json()["signature_png"]) == PNG

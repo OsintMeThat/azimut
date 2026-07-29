@@ -19,11 +19,14 @@ tail of the ``WARNING``-and-above log in memory (:class:`RingHandler`, installed
 at server start) — bounded lines, each capped in length, so a long-running app
 holds a few kilobytes and no log file ever grows in the workspace.
 
-**Nothing personal.** A log line or a path can hold the account name and case
-names, and an issue is public, so every string goes through :func:`scrub`: the
-home directory collapses to ``~`` and the account name becomes a placeholder.
-The workspace path is deliberately absent — About shows it locally, a report
-does not need it.
+**Nothing personal.** A log line or a path can hold the account name, a case name
+or a provider key, and an issue is public, so every string goes through
+:func:`scrub`: the home directory and the workspace root collapse to placeholders,
+and so do the account name, the case folder and any credential-shaped query
+parameter. A case folder is a slug of the name the analyst typed, which in this
+tool is routinely a subject's — that one is not a nicety. The workspace path is
+also absent from the report outright: About shows it locally, a report does not
+need it.
 """
 
 from __future__ import annotations
@@ -31,12 +34,13 @@ from __future__ import annotations
 import getpass
 import logging
 import platform
+import re
 import sys
 from collections import deque
 from pathlib import Path
 from urllib.parse import quote
 
-from .. import __version__
+from .. import __version__, config
 from . import ffmpeg
 
 #: Where a report lands. The repo's issue form, filled through query parameters.
@@ -56,9 +60,13 @@ LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
 
 #: Long URLs are silently dropped or truncated by servers and browsers well
 #: before any hard limit, so the link stays under a conservative ceiling and
-#: sheds log lines to fit. The Copy button always carries the whole report.
+#: sheds context to fit. The Copy button always carries the whole report.
 URL_LIMIT = 6000
 TRIM_MARKER = "_(log trimmed to fit the link; use Copy for the full report)_"
+#: Said when the summary itself is what overflowed. Distinct from the marker
+#: above because it must not blame the log for a paragraph the user can see was
+#: cut — a report that quietly drops what someone typed is worse than a long link.
+SUMMARY_TRIM_MARKER = "_(summary trimmed to fit the link; use Copy for the full report)_"
 
 #: What a report is: something broke, or something is missing. The kind picks the
 #: title prefix, the heading the summary sits under, and the tracker label.
@@ -73,6 +81,17 @@ DEFAULT_KIND = "bug"
 MAX_SUMMARY_CHARS = 2000
 
 _PLACEHOLDER = "<user>"
+_CASE_PLACEHOLDER = "<case>"
+_WORKSPACE_PLACEHOLDER = "<workspace>"
+_REDACTED = "<redacted>"
+
+#: Query parameters whose value is a credential. A keyed imagery or geocoding
+#: provider is reached over HTTP, so a warning about one carries the key in the
+#: URL it names — and this text is on its way to a public tracker.
+_CREDENTIAL_PARAM = re.compile(
+    r"(?i)\b(api[_-]?key|access[_-]?token|auth[_-]?token|token|key|secret|password|passwd)"
+    r"=[^&\s\"'<>]+"
+)
 
 
 # ---- the log tail -------------------------------------------------------------
@@ -145,18 +164,57 @@ def _account_name() -> str:
 
 
 def scrub(text: str) -> str:
-    """Replace this machine's home path and account name with placeholders."""
+    """Take this machine and this investigation out of a string bound for a public
+    issue.
+
+    Each pass exists because the report is published:
+
+    - the home directory collapses to ``~``
+    - the workspace root collapses to ``<workspace>``, which catches a portable
+      install living outside the home directory entirely
+    - the account name becomes ``<user>``
+    - a case folder becomes ``<case>``. A case directory is a slug of the name the
+      analyst gave it (``workspace._slugify``), and in this tool that name is
+      routinely a subject's — so the segment goes even though the path around it
+      is useful.
+    - a credential-shaped query parameter becomes ``<redacted>``
+
+    None of this makes an arbitrary string safe to publish; it removes what this
+    app's own log lines are known to carry.
+    """
     try:
         home = str(Path.home())
     except Exception:  # no home to hide
         home = ""
     if home:
         text = text.replace(home, "~")
+    try:
+        root = str(config.workspace_root())
+    except Exception:
+        root = ""
+    if root and root not in ("~", "/"):
+        text = text.replace(root, _WORKSPACE_PLACEHOLDER)
     name = _account_name()
     # Two characters or fewer would match far too much ordinary prose.
     if len(name) > 2:
         text = text.replace(name, _PLACEHOLDER)
-    return text
+    for directory in _case_parents():
+        segment = re.escape(directory.name)
+        text = re.sub(
+            rf"(?<![\w-])({segment})([/\\])[^/\\\s\"'<>]+",
+            rf"\1\2{_CASE_PLACEHOLDER}",
+            text,
+        )
+    return _CREDENTIAL_PARAM.sub(rf"\1={_REDACTED}", text)
+
+
+def _case_parents() -> tuple[Path, ...]:
+    """The workspace directories a case folder sits in. Read from config rather
+    than spelled out, so moving either one keeps the scrub honest."""
+    try:
+        return (config.cases_dir(), config.scratch_dir())
+    except Exception:
+        return ()
 
 
 # ---- the report ---------------------------------------------------------------
@@ -167,8 +225,22 @@ def install_kind() -> str:
     return "standalone binary" if getattr(sys, "frozen", False) else "Python package"
 
 
+_environment: dict[str, str] | None = None
+
+
 def environment() -> dict[str, str]:
-    """The build and machine facts a maintainer needs to reproduce a bug."""
+    """The build and machine facts a maintainer needs to reproduce a bug.
+
+    Built once per process. Not an optimisation for its own sake: reading the
+    ffmpeg line runs ``ffmpeg -version``, and ``ffmpeg.info`` says in as many words
+    that its caller is a dedicated endpoint rather than a hot poll. This one is
+    hot — About rebuilds the report as the user types — and on Windows a
+    subprocess per keystroke burst flashes a console window at someone in the
+    middle of writing a bug report. None of these facts change within a run.
+    """
+    global _environment
+    if _environment is not None:
+        return dict(_environment)
     info = ffmpeg.info()
     if info.get("available"):
         version = str(info.get("version") or "installed")
@@ -176,12 +248,13 @@ def environment() -> dict[str, str]:
         ffmpeg_line = f"{version} ({source})"
     else:
         ffmpeg_line = "not found"
-    return {
+    _environment = {
         "Azimut": f"{__version__} ({install_kind()})",
         "OS": f"{platform.system()} {platform.release()} ({platform.machine()})",
         "Python": platform.python_version(),
         "ffmpeg": ffmpeg_line,
     }
+    return dict(_environment)
 
 
 def _clean_summary(summary: str) -> str:
@@ -213,22 +286,67 @@ def report(summary: str = "", *, kind: str = DEFAULT_KIND) -> str:
     return "\n".join(lines) + "\n"
 
 
-def issue_url(body: str, *, subject: str = "", label: str = "") -> str:
-    """A pre-filled issue link, shedding trailing lines until it fits.
+def _own_section(lines: list[str]) -> int:
+    """How many leading lines are the user's own section: everything before the
+    next heading. The floor the link may not shed past."""
+    for index, line in enumerate(lines[1:], start=1):
+        if line.startswith("### "):
+            return index
+    return len(lines)
 
-    Log lines sit last in the body precisely so this sheds them first and never
-    touches what the user wrote.
+
+def _fit(text: str, budget: int) -> str:
+    """*text*, shortened until its percent-encoded form fits *budget* characters.
+
+    Counted encoded, not in characters, because that is the only measure the link
+    cares about: one letter costs one character in ASCII, six in accented Latin and
+    nine in an emoji, so a cap in letters says nothing about whether the URL fits.
+    """
+    if len(quote(text)) <= budget:
+        return text
+    low, high = 0, len(text)
+    while low < high:  # longest prefix whose encoding fits
+        middle = (low + high + 1) // 2
+        if len(quote(text[:middle])) <= budget:
+            low = middle
+        else:
+            high = middle - 1
+    return text[:low].rstrip()
+
+
+def issue_url(body: str, *, subject: str = "", label: str = "") -> str:
+    """A pre-filled issue link that fits, shedding context before content.
+
+    Two things can overflow. The log tail is the usual one, and it sits last in the
+    body precisely so this reaches it first. The other is the summary itself: it is
+    capped at ``MAX_SUMMARY_CHARS`` *characters*, and a paragraph in Cyrillic or
+    Japanese costs nine characters a letter once percent-encoded, so a summary well
+    inside the cap can be several times the whole link's budget. Shedding blindly
+    from the end would then eat the report and leave a marker blaming the log — the
+    user clicks through and finds their own words gone. So the user's section is a
+    floor: everything after it goes first, and only if that is still too long is the
+    summary itself shortened, with a marker that says which one was cut.
     """
     tag = f"&labels={quote(label)}" if label else ""
+
+    def link(text: str) -> str:
+        return f"{ISSUE_NEW_URL}?title={quote(subject)}{tag}&body={quote(text)}"
+
     lines = body.rstrip("\n").split("\n")
+    floor = _own_section(lines)
     trimmed = False
     while True:
-        text = "\n".join([*lines, TRIM_MARKER] if trimmed else lines)
-        url = f"{ISSUE_NEW_URL}?title={quote(subject)}{tag}&body={quote(text)}"
-        if len(url) <= URL_LIMIT or not lines:
+        url = link("\n".join([*lines, TRIM_MARKER] if trimmed else lines))
+        if len(url) <= URL_LIMIT:
             return url
+        if len(lines) <= floor:
+            break
         lines.pop()
         trimmed = True
+
+    marker = f"\n\n{SUMMARY_TRIM_MARKER}"
+    budget = URL_LIMIT - len(link(marker))
+    return link(_fit("\n".join(lines), max(budget, 0)) + marker)
 
 
 def payload(summary: str = "", *, kind: str = DEFAULT_KIND) -> dict[str, str]:

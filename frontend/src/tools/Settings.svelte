@@ -1252,8 +1252,8 @@
           </div>
           <p class="note">
             Your text, the version, the OS and the last warnings of this run, with your
-            home path and account name removed. Nothing leaves the app until you open
-            the issue.
+            paths, account name, case names and any keys removed. Nothing leaves the app
+            until you open the issue.
           </p>
         </section>
 
