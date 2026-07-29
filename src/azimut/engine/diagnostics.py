@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import getpass
 import logging
+import os
 import platform
 import re
 import sys
@@ -163,6 +164,24 @@ def _account_name() -> str:
         return ""
 
 
+def _path_pattern(path: str) -> re.Pattern[str]:
+    """*path* as a pattern matching it however a log line happened to spell it.
+
+    Either separator at every boundary, because one line legitimately carries
+    both: this app names a file by a relative path that always uses ``/``
+    (``media/photo.jpg``) and joins it to a workspace root that on Windows uses
+    ``\\``. Case-insensitive on Windows for the same reason — that filesystem is,
+    so two spellings name one directory and matching only one of them is a
+    coin toss.
+
+    Not cosmetic. The home prefix is what carries the account name, so a spelling
+    this misses is a real name on its way to a public tracker.
+    """
+    parts = [re.escape(part) for part in re.split(r"[/\\]+", path)]
+    flags = re.IGNORECASE if os.name == "nt" else 0
+    return re.compile(r"[/\\]+".join(parts), flags)
+
+
 def scrub(text: str) -> str:
     """Take this machine and this investigation out of a string bound for a public
     issue.
@@ -187,13 +206,13 @@ def scrub(text: str) -> str:
     except Exception:  # no home to hide
         home = ""
     if home:
-        text = text.replace(home, "~")
+        text = _path_pattern(home).sub("~", text)
     try:
         root = str(config.workspace_root())
     except Exception:
         root = ""
     if root and root not in ("~", "/"):
-        text = text.replace(root, _WORKSPACE_PLACEHOLDER)
+        text = _path_pattern(root).sub(_WORKSPACE_PLACEHOLDER, text)
     name = _account_name()
     # Two characters or fewer would match far too much ordinary prose.
     if len(name) > 2:

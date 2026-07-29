@@ -108,6 +108,25 @@ def test_scrub_replaces_home_and_account_name(monkeypatch, tmp_path):
     assert "<user>" in scrubbed
 
 
+def test_scrub_collapses_a_home_path_spelled_with_either_separator(monkeypatch, tmp_path):
+    """A Windows log line carries both separators at once, and the home prefix is
+    what holds the account name.
+
+    The app names a file by a relative path that always uses `/`
+    (`media/photo.jpg`) and joins it to a root that on Windows uses `\\`, so the
+    boundary between them flips. Matching only the native spelling let the real
+    account name through into a public issue.
+    """
+    monkeypatch.setattr(diagnostics.Path, "home", staticmethod(lambda: tmp_path / "gwen"))
+    monkeypatch.setattr(diagnostics, "_account_name", lambda: "gwen")
+    native = str(tmp_path / "gwen")
+
+    for spelling in (native, native.replace("\\", "/"), native.replace("/", "\\")):
+        scrubbed = diagnostics.scrub(f"failed to open {spelling}/media/photo.jpg")
+        assert "gwen" not in scrubbed
+        assert scrubbed.endswith("photo.jpg")
+
+
 def test_scrub_keeps_a_very_short_account_name(monkeypatch):
     """A one- or two-letter name would match ordinary words all over the report."""
     monkeypatch.setattr(diagnostics, "_account_name", lambda: "an")
@@ -380,6 +399,11 @@ def test_a_workspace_outside_the_home_directory_is_still_hidden(monkeypatch, tmp
 
     elsewhere = tmp_path / "volume" / "azimut-portable"
     monkeypatch.setattr(config, "workspace_root", lambda: elsewhere)
+    # Home has to be pinned somewhere that is not an ancestor of the stick, or the
+    # premise is gone: on Windows the temp directory lives *inside* the user
+    # profile, so the real home would collapse the prefix first and there would be
+    # nothing left for <workspace> to match.
+    monkeypatch.setattr(diagnostics.Path, "home", staticmethod(lambda: tmp_path / "home"))
 
     scrubbed = diagnostics.scrub(f"failed to read {elsewhere / 'settings.json'}")
 
