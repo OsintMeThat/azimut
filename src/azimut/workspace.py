@@ -342,6 +342,28 @@ class Case:
         if not dst.exists():
             shutil.copy2(self.json_path, dst)
 
+    @staticmethod
+    def _holds_content(path: Path) -> bool:
+        """Whether a case directory holds any file the analyst would miss.
+
+        Debris does not count. A sidecar write goes through a scratch file it
+        renames into place (``engine/media._write_sidecar``); a power cut in that
+        window strands one, and treating it as content would keep an otherwise
+        empty scratch case alive forever.
+        """
+        for sub in CASE_SUBDIRS:
+            directory = path / sub
+            if not directory.is_dir():
+                continue
+            for candidate in directory.rglob("*"):
+                if not candidate.is_file():
+                    continue
+                name = candidate.name
+                if name.startswith(".") and name.endswith(".tmp"):
+                    continue
+                return True
+        return False
+
     @classmethod
     def cleanup_scratch(cls, max_age_days: int = SCRATCH_MAX_AGE_DAYS) -> int:
         """Delete scratch cases that hold nothing and haven't been touched in
@@ -375,12 +397,7 @@ class Case:
                 continue
             if when.replace(tzinfo=timezone.utc).timestamp() > cutoff:
                 continue
-            if any(
-                p.is_file()
-                for sub in CASE_SUBDIRS
-                if (path / sub).is_dir()
-                for p in (path / sub).rglob("*")
-            ):
+            if cls._holds_content(path):
                 continue
             try:
                 case.delete()
@@ -538,6 +555,7 @@ class Case:
         kind: str | None = None,
         category: str | None = None,
         folder: str | None = None,
+        gps: bool = False,
         sort: str = "newest",
         direction: str | None = None,
         limit: int = 200,
@@ -548,6 +566,7 @@ class Case:
             kind=kind,
             category=category,
             folder=folder,
+            gps=gps,
             sort=sort,
             direction=direction,
             limit=limit,

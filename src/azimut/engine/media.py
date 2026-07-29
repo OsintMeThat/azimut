@@ -162,10 +162,28 @@ def _sidecar_path(media_path: Path) -> Path:
     return media_path.with_name(media_path.name + SIDECAR_SUFFIX)
 
 
+#: Prefix and suffix of the scratch file a sidecar write goes through. Named so
+#: it can be recognised again: `finally` clears it on any failure this process
+#: sees, but a power cut between the write and the rename leaves one behind, and
+#: whatever walks a case's files has to know it is debris rather than content
+#: (`Case._holds_content`).
+SIDECAR_TMP_PREFIX = "."
+SIDECAR_TMP_SUFFIX = ".tmp"
+
+
 def _write_sidecar(media_path: Path, data: dict[str, Any]) -> None:
-    _sidecar_path(media_path).write_text(
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    sidecar = _sidecar_path(media_path)
+    temporary = sidecar.with_name(
+        f"{SIDECAR_TMP_PREFIX}{sidecar.name}.{uuid.uuid4().hex}{SIDECAR_TMP_SUFFIX}"
     )
+    try:
+        temporary.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(sidecar)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _source_paths(source: dict[str, Any]) -> list[str]:
@@ -728,13 +746,14 @@ def set_thumbnail(case: Case, rel_path: str, thumb_rel: str | None) -> None:
 
 
 def read_item(case: Case, rel_path: str) -> dict[str, Any] | None:
-    media_path = case.resolve_inside(rel_path)
-    sidecar = _sidecar_path(media_path)
-    if not sidecar.exists():
-        return None
-    data = json.loads(sidecar.read_text(encoding="utf-8"))
-    data["path"] = rel_path
-    return data
+    with case.lock:
+        media_path = case.resolve_inside(rel_path)
+        sidecar = _sidecar_path(media_path)
+        if not sidecar.exists():
+            return None
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        data["path"] = rel_path
+        return data
 
 
 def list_media(case: Case) -> list[dict[str, Any]]:

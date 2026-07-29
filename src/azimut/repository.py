@@ -151,12 +151,16 @@ class CaseRepository(Protocol):
         kind: str | None = None,
         category: str | None = None,
         folder: str | None = None,
+        gps: bool = False,
         sort: str = "newest",
         direction: str | None = None,
         limit: int = 200,
         offset: int = 0,
     ) -> dict[str, Any]:
-        """Filter, sort and page media without scanning sidecar files."""
+        """Filter, sort and page media without scanning sidecar files.
+
+        ``gps`` keeps only the items whose own metadata states a position.
+        """
         ...
 
     # -- entity mutations --------------------------------------------------

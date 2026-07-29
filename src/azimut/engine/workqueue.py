@@ -154,4 +154,8 @@ def wait_until_idle(timeout: float = 5.0) -> bool:
             if not _worker_running:
                 return True
         time.sleep(0.01)
-    return False
+    # One last look: the worker may have finished during the final sleep, and
+    # reporting a timeout for work that is actually done would have the caller
+    # refuse to move a case directory it is now free to move.
+    with _worker_lock:
+        return not _worker_running

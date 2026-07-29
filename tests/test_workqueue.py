@@ -77,3 +77,15 @@ def test_has_queued_reports_work_of_any_kind(case):
     assert workqueue.has_queued(case) is True
     workqueue.drain(case)
     assert workqueue.has_queued(case) is False
+
+
+def test_wait_until_idle_looks_once_more_after_the_deadline(case, monkeypatch):
+    """A worker that finishes during the final sleep is idle. Reporting a timeout
+    for work that is done would have the caller refuse to move a case directory it
+    is now free to move."""
+    monkeypatch.setattr(workqueue, "_worker_running", False)
+
+    assert workqueue.wait_until_idle(timeout=0) is True
+
+    monkeypatch.setattr(workqueue, "_worker_running", True)
+    assert workqueue.wait_until_idle(timeout=0) is False

@@ -20,7 +20,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | Workspace | Tools today | Future tools land here |
 |---|---|---|
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
-| **Examine** | Inspect (Selection / Frame / Collage / Analyze) | EXIF, Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Shadow Clock, audio |
+| **Examine** | Inspect (Selection / Frame / Collage / Analyze) | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Shadow Clock, audio |
 | **Map** | Satellite, Coordinates | **one map, many modes**: Compare, Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
 | **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
 | *(Case)* | Sidebar | v2: Relations, Sheet; v4: Notes, Timeline; v5: Orchestrator |
@@ -68,7 +68,9 @@ remembered per workspace for the current session. Reloading restores the default
   so selecting a row never pushes the case out of view. It edits an artifact's
   preview, title, notes, provenance, derivation chain and folder, and provides
   open, locate and delete actions. The sidebar and Media Library modal share
-  `EntityDetails.svelte`.
+  `EntityDetails.svelte`. Image Details include a closed EXIF section with the
+  parsed capture date, GPS and every readable tag. Video Details use the same
+  pattern for local ffprobe container, stream and tag fields.
 
 ## Relations
 
@@ -86,6 +88,17 @@ the types the vocabulary accepts, then the reading if the pair allows more than
 one. Details files it with Save; Satellite's Save-place dialog files it once the
 place exists. Both dialogs show the existing relations above the picker, so
 nowhere can a relation be added but not removed.
+
+## Sources
+
+The Media Library toolbar keeps explicit maintenance actions beside Import:
+**Thumbnails** repairs missing previews; **Enrich** queues local image
+EXIF/perceptual-hash and video metadata backfill for files not processed by the
+current version. A **GPS** toggle beside the type and folder filters narrows the
+list to the files whose own metadata states a position, and appears only in a case
+that holds some; how many is in its tooltip, not in its label. Those rows carry
+one pin glyph — coordinates in the tooltip, not in the title — and clicking it
+flies the map there.
 
 ## Map
 

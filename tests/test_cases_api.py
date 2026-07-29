@@ -497,3 +497,21 @@ def test_cleanup_scratch_reaps_only_old_empty_sessions(tmp_workspace):
     assert with_entity.path.exists()
     assert with_file.path.exists()
     assert empty_new.path.exists()
+
+
+def test_cleanup_scratch_treats_a_stranded_sidecar_temp_file_as_debris(tmp_workspace):
+    """A sidecar write renames a scratch file into place. A power cut in that window
+    strands one, and counting it as content would keep an empty scratch session
+    alive forever — the exact accumulation cleanup exists to stop."""
+    import json as jsonlib
+
+    from azimut.workspace import Case
+
+    stranded = Case.create("Scratch session", scratch=True)
+    (stranded.path / "media" / ".shot.png.azimut.json.deadbeef.tmp").write_bytes(b"{}")
+    data = jsonlib.loads(stranded.json_path.read_text(encoding="utf-8"))
+    data["updated_at"] = "2000-01-01T00:00:00Z"
+    stranded.json_path.write_text(jsonlib.dumps(data), encoding="utf-8")
+
+    assert Case.cleanup_scratch() == 1
+    assert not stranded.path.exists()

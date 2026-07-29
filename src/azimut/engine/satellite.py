@@ -21,6 +21,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from ..repository import EntityStatus
 from ..workspace import Case
 from . import continents
 from . import coords as coords_engine
@@ -59,6 +60,7 @@ def save_place(
     title: str | None = None,
     by: str = "satellite",
     extra_attrs: dict[str, Any] | None = None,
+    status: EntityStatus = "confirmed",
 ) -> dict[str, Any]:
     """Register a point as a navigable ``place`` — no image, no download.
 
@@ -68,6 +70,10 @@ def save_place(
     same way whatever route wrote them. The caller resolves the geography
     afterwards (``locate_on_save``); ``extra_attrs`` carries whatever only one
     of them has, such as the extension's source URL.
+
+    ``status`` is how a place the analyst has not seen yet enters the case:
+    import enrichment proposes one from a photo's EXIF as ``suggested`` (a
+    camera's claim, not a finding), and the map's own pin stays ``confirmed``.
     """
     attrs: dict[str, Any] = {
         "coords": coords_label(lat, lon, "dd"),
@@ -79,7 +85,7 @@ def save_place(
     }
     attrs.update(extra_attrs or {})
     label = (title or "").strip() or coords_label(lat, lon)
-    return case.add_entity("place", label, attrs=attrs, by=by, status="confirmed")
+    return case.add_entity("place", label, attrs=attrs, by=by, status=status)
 
 
 def is_capture(item: dict[str, Any]) -> bool:

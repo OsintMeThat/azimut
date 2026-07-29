@@ -65,6 +65,57 @@ describe('Media Library thumbnail states', () => {
   });
 });
 
+describe('Media Library enrichment', () => {
+  it('offers an explicit local backfill instead of running one on mount', () => {
+    expect(source).toContain('async function enrichMedia()');
+    expect(source).toContain('await api.post(`/api/cases/${id}/media/enrich`, {})');
+    expect(source).toContain('title="Read image EXIF, hashes and video metadata locally"');
+    expect(source).toContain('<Icon name="search" size={15} /> Enrich');
+  });
+
+  it('polls media and Suggestions while enrichment is running', () => {
+    expect(source).toContain("i.enrich_state === 'queued' || i.enrich_state === 'running'");
+    expect(source).toContain(
+      "if (!enrichmentPending || uiState.tool !== 'media' || !caseState.current) return;"
+    );
+    expect(source).toContain('() => Promise.all([refresh(), reloadCase()])');
+    expect(source).toContain('await refresh();');
+  });
+});
+
+describe('Media Library positions', () => {
+  it('filters on the position server-side, so it holds over a paged case', () => {
+    expect(source).toContain('gps: gpsOnly');
+    expect(source).toContain('function toggleGpsOnly()');
+    expect(source).toContain('reloadIfServerBacked();');
+    // ...and client-side too, for the case that fits one page
+    expect(source).toContain('gpsOnly,');
+  });
+
+  it('counts the located files from the server facet, not from the loaded page', () => {
+    expect(source).toContain('pl.facets?.gps_count ?? items.filter((i) => mediaPoint(i)).length');
+  });
+
+  it('hides the filter entirely in a case where nothing carries a position', () => {
+    expect(source).toContain('{#if gpsCount || gpsOnly}');
+  });
+
+  it('marks a located row with one glyph and keeps the coordinates in the tooltip', () => {
+    // the row is read by its filename; coordinates belong in the tooltip and on
+    // the map, not appended to every title
+    expect(source).toContain('function pointLabel(item)');
+    expect(source).toContain('title={`Metadata says ${pointLabel(item)} — show it on the map`}');
+    expect(source).toContain('<Icon name="pin" size={11} />');
+    expect(source).not.toContain('{pointLabel(item)}<');
+  });
+
+  it('sends a stated position to the map without disturbing the thumbnail', () => {
+    expect(source).toContain('function showOnMap(item, event)');
+    expect(source).toContain('event?.stopPropagation();');
+    expect(source).toContain('gotoPoint(point.lat, point.lon)');
+  });
+});
+
 describe('Media Library bounded loading', () => {
   it('browses via the bounded /media/page endpoint, not the unbounded list', () => {
     expect(source).toContain('createPagedList');
@@ -147,9 +198,16 @@ describe('Media Library browse controls', () => {
   });
 
   it('uses one fixed grid definition for the header and each media row', () => {
-    expect(source).toContain('--media-columns: 54px minmax(180px, 1fr) 90px 82px minmax(100px, 0.45fr) 132px 168px;');
+    // still one fixed grid — an `auto` actions column is empty in the header and
+    // wide in a data row, which shifts every sortable heading out of alignment.
+    // The actions width is computed from the button metrics rather than typed;
+    // the literal it replaced fitted exactly five buttons and clipped the sixth.
+    expect(source).toContain(
+      '--media-columns: 54px minmax(180px, 1fr) 90px 82px minmax(100px, 0.45fr) 132px'
+    );
     expect(source).toContain('grid-template-columns: var(--media-columns);');
     expect(source).not.toContain('132px auto;');
+    expect(source).not.toContain('132px 168px;');
   });
 
   it('uses one folder dropdown and keeps its default unfiltered', () => {
@@ -181,7 +239,7 @@ describe('Media Library browse controls', () => {
 
   it('offers a right-side reset button for all browse filters', () => {
     expect(source).toContain('function resetFilters()');
-    expect(source).toContain("query = '';\n    catFilter = null;\n    folderFilter = null;\n    sort = 'name';\n    sortDirection = 'asc';");
+    expect(source).toContain("query = '';\n    catFilter = null;\n    folderFilter = null;\n    gpsOnly = false;\n    sort = 'name';\n    sortDirection = 'asc';");
     expect(source).toContain('class="btn btn-ghost btn-sm reset-filters"');
     expect(source).toContain('Reset filters');
     expect(source).toContain('<Icon name="reset" size={13} /> Reset filters');
@@ -222,5 +280,39 @@ describe('Media Library gated-download cookie affordance', () => {
     expect(source).toContain("authPrompt.guidance === 'windows-chromium'");
     expect(source).toContain("authPrompt.platform === 'win32' && CHROMIUM_BROWSERS.has(authPrompt.browser)");
     expect(source).toContain('disabled={authPrompt.busy || chromiumBlocked}');
+  });
+});
+
+describe('row and card actions fit', () => {
+  const source = readFileSync(new URL('./MediaLibrary.svelte', import.meta.url), 'utf8');
+
+  it('sizes the list actions cell from the widest row, not from a literal', () => {
+    // six at its widest: GPS pin, info, open, inspect, proof, delete. A typed
+    // width goes stale the next time a tool earns a row action, and the symptom
+    // is Delete clipped off the end of the row.
+    expect(source).toContain('--media-action: 32px');
+    expect(source).toContain(
+      '--media-actions: calc(6 * var(--media-action) + 5 * var(--media-action-gap) + 10px)'
+    );
+    // sized to the exact sum, the cell fits only until a sub-pixel of rounding
+    // says otherwise, and then Delete wraps to a line of its own
+    expect(source).toContain('flex-wrap: nowrap;');
+    expect(source).toContain('var(--media-actions);');
+    expect(source).toContain('min-width: calc(624px + var(--media-actions));');
+    // and the cell's own gap is the one the width was computed from
+    expect(source).toContain('gap: var(--media-action-gap);');
+  });
+
+  it('keeps every card action reachable in the 150px small view', () => {
+    // the card clips its overflow, so a row that does not fit loses its last
+    // button — Delete
+    expect(source).toContain('.grid.compact .actions .btn {');
+    expect(source).toContain('padding-inline: 4px;');
+  });
+
+  it('lets a card wrap without letting a list row wrap', () => {
+    // both share the `actions` class; only the card may take a second line
+    expect(source).toContain('.grid .actions {\n    flex-wrap: wrap;');
+    expect(source).not.toMatch(/\n  \.actions \{[^}]*flex-wrap: wrap/);
   });
 });

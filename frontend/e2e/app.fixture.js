@@ -178,6 +178,13 @@ export async function installAppFixture(page, options = {}) {
       return json(route, request.method() === 'DELETE' ? { status: 'deleted' } : { id: 'link-new' });
     }
     if (path === `/api/cases/${CASE_ID}/media`) return json(route, media);
+    // One media file with everything its sidecar holds. The browse index leaves
+    // enrichment's metadata dumps out, so the Details panel reads a file at a time.
+    if (path === `/api/cases/${CASE_ID}/media/item`) {
+      const wanted = url.searchParams.get('path');
+      const found = media.find((item) => item.path === wanted);
+      return found ? json(route, found) : route.fulfill({ status: 404, body: '{}' });
+    }
     // Two different reads: the capture shelf (pickers list it beside media) and
     // the geo index the Map panel groups. Both are needed — a picker whose
     // shelf 404s shows no panels at all.

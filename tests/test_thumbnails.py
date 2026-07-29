@@ -73,7 +73,8 @@ def test_drain_generates_the_queued_thumbnail_and_updates_the_sidecar(case, monk
     monkeypatch.setattr(thumbnails, "_render", fake_render)
     item = _register_video(case)["item"]
 
-    assert workqueue.drain(case) == 1
+    # The generic queue drains both the thumbnail and video-enrichment jobs.
+    assert workqueue.drain(case) == 2
     job = case.list_jobs(kind=thumbnails.THUMB_KIND)[0]
     assert job["state"] == "ready"
     # the sidecar now points at the freshly generated, content-addressed file
@@ -87,7 +88,7 @@ def test_a_failing_render_retries_then_fails_without_looping(case, monkeypatch):
     _register_video(case)
 
     handled = workqueue.drain(case)  # claims, fails, requeues, up to the budget
-    assert handled == 3  # default max_attempts
+    assert handled == 4  # three thumbnail attempts + one video-enrichment job
     job = case.list_jobs(kind=thumbnails.THUMB_KIND)[0]
     assert job["state"] == "failed" and job["attempts"] == 3
 
