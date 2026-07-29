@@ -82,12 +82,13 @@ def test_purge_keeps_the_journal_when_windows_refuses_the_delete(
     note = case.create_note("Note", "", "kept")
     deleted = delete_entities_deep(case, [note["id"]])
 
-    monkeypatch.setattr(
-        trash.shutil,
-        "rmtree",
-        lambda _path, **_kwargs: (_ for _ in ()).throw(PermissionError("locked")),
-    )
-    with pytest.raises(PermissionError, match="locked"):
-        trash.purge(case, deleted["trash"])
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            trash.shutil,
+            "rmtree",
+            lambda _path, **_kwargs: (_ for _ in ()).throw(PermissionError("locked")),
+        )
+        with pytest.raises(PermissionError, match="locked"):
+            trash.purge(case, deleted["trash"])
 
-    assert case.list_trash()[0]["id"] == deleted["trash"]
+        assert case.list_trash()[0]["id"] == deleted["trash"]
