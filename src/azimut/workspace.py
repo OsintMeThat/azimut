@@ -681,6 +681,26 @@ class Case:
             data["name"] = name
             self._write_json(data)
 
+    @staticmethod
+    def _settle_background_work() -> None:
+        """Let the shared worker finish before this case's directory moves.
+
+        Background jobs write inside the case folder — a thumbnail, and
+        enrichment's sidecar — and a directory cannot be moved or removed from
+        under a thread writing into it: POSIX raises ``Directory not empty`` when
+        a file appears between the walk and the ``rmdir``, and Windows refuses
+        outright while a handle is open. Enrichment made the window wide enough to
+        hit, since reading EXIF or probing a video takes far longer than writing a
+        thumbnail.
+
+        Bounded, and it never interrupts work in flight. Nothing re-wakes the
+        worker for a case afterwards, because the only thing that queues work is a
+        request against that case — and this one is on its way out.
+        """
+        from .engine import workqueue
+
+        workqueue.wait_until_idle()
+
     def promote(self, name: str) -> "Case":
         """Move a scratch case into cases/ under a proper name (spec §3.3)."""
         if not self.is_scratch:
@@ -690,12 +710,14 @@ class Case:
         if dest.exists():
             raise CaseError(f"case '{slug}' already exists")
         dest.parent.mkdir(parents=True, exist_ok=True)
+        self._settle_background_work()
         shutil.move(str(self.path), str(dest))
         promoted = Case(dest)
         promoted.rename(name)
         return promoted
 
     def delete(self) -> None:
+        self._settle_background_work()
         shutil.rmtree(self.path)
 
     # -- entities & links (spec §5) -----------------------------------------

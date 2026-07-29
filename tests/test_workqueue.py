@@ -7,6 +7,9 @@ deterministic and no background thread outlives a test.
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 
 from azimut.engine import workqueue
@@ -77,6 +80,49 @@ def test_has_queued_reports_work_of_any_kind(case):
     assert workqueue.has_queued(case) is True
     workqueue.drain(case)
     assert workqueue.has_queued(case) is False
+
+
+@pytest.mark.parametrize("operation", ["delete", "promote"])
+def test_moving_a_case_directory_waits_for_the_background_worker(
+    tmp_workspace, monkeypatch, operation
+):
+    """A job writes inside the case folder, so moving that folder while the worker
+    is still in it is how ``Directory not empty`` happens on POSIX and an outright
+    refusal happens on Windows.
+
+    This one runs a real worker thread (no ``start_workers = False``): the race is
+    the point, and draining by hand would test nothing. Enrichment is what made the
+    window wide enough to hit — probing a video takes far longer than writing a
+    thumbnail — but the two operations that move a directory are the fix's place,
+    not one job kind.
+    """
+    monkeypatch.setattr(workqueue, "HANDLERS", dict(workqueue.HANDLERS))
+    case = Case.create("Doomed", scratch=operation == "promote")
+    started = threading.Event()
+
+    def slow(c, job):
+        started.set()
+        time.sleep(0.3)  # wide enough that an un-drained move lands mid-job
+        (c.path / "media").mkdir(parents=True, exist_ok=True)
+        (c.path / "media" / "late.json").write_text("{}", encoding="utf-8")
+
+    workqueue.register("slow", slow)
+    workqueue.enqueue(case, "slow", payload={})
+    workqueue.wake(case)
+    assert started.wait(2), "the worker never picked the job up"
+
+    if operation == "delete":
+        case.delete()
+        assert not case.path.exists()
+    else:
+        moved = case.promote("Promoted")
+        # the file the worker wrote travelled with the case rather than being
+        # stranded in a half-moved directory
+        assert (moved.path / "media" / "late.json").exists()
+
+    # the operation returned only once the worker was out, so nothing is left
+    # writing into a path that no longer exists
+    assert workqueue.wait_until_idle(timeout=0) is True
 
 
 def test_wait_until_idle_looks_once_more_after_the_deadline(case, monkeypatch):
