@@ -113,6 +113,7 @@ proof for publication.
 | ✅ **Gated downloads** | Fetches login-walled media by borrowing a browser session or cookies.txt, cookie-less by default and prompted only on a wall. |
 | ✅ **Find at scale** | Bounded, paged loading with a shared search box and sort across the Media Library and Files, plus case-name search in the switcher. |
 | ✅ **Searchable pickers** | Pickers in Inspect, Reverse Search, Geo Proof and the Notebook notes menu search past six entries and browse case folders behind the "…". |
+| ✅ **Report an issue** | About writes a bug or a request into a pre-filled GitHub issue, with version, OS and the run's last warnings, home path and account name scrubbed. |
 | ✅ **Proofs on the map** | A fourth position of the Saved switch places each proof by its own coordinates, then by the captures it composes; `All` marks a worked capture with a dot rather than doubling it. |
 | ✅ **Import enrichment** | Reads image EXIF/dHash and video container/stream metadata locally in the background; parsed GPS produces linked Suggestions and all fields appear in Details. |
 | ✅ **GPS in Media** | A GPS filter and a per-row pin in the Media list send a stated position to the map, images and videos alike. |
@@ -139,7 +140,6 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
 | **Sun, moon and local time** | Sunrise/sunset, solar and lunar azimuth, moon phase and bright-limb angle for a point and date, in Coordinates, each time in civil local time and UTC. Polar day/night and days with no moonrise are states, not errors; the moon needs topocentric parallax and sampled rise/set, and civil time adds `timezonefinder` + `tzdata` to bundle. |
 | **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. |
-| **Report an issue** | Opens a pre-filled GitHub issue with version, OS and recent log lines. |
 
 ### v3: GEOINT expansion
 

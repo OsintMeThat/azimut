@@ -209,8 +209,10 @@
   let sigBust = $state(0);
   let sigInput = $state(null);
 
-  // Move settings between machines: export writes settings.json to disk,
-  // import merges a previously exported file back (config keys only).
+  // Move the app's own state between machines: the export writes one JSON file
+  // holding settings, templates and the signature logo; the import merges it
+  // back. A file written before those sections existed is a bare settings blob,
+  // so it gets wrapped into the current shape.
   let settingsFile = $state(null);
 
   async function importSettings(event) {
@@ -218,11 +220,19 @@
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text());
-      await api.post('/api/settings/import', { settings: parsed });
-      toast('Settings imported', 'ok');
+      const bundle = parsed.settings ? parsed : { settings: parsed };
+      const r = await api.post('/api/settings/import', bundle);
+      const restored = [
+        `${r.imported.length} setting${r.imported.length === 1 ? '' : 's'}`,
+        r.templates ? `${r.templates} template${r.templates === 1 ? '' : 's'}` : null,
+        r.signature ? 'signature' : null,
+      ].filter(Boolean);
+      toast(`Backup restored: ${restored.join(', ')}`, 'ok');
       await load();
+      await loadTemplates();
+      sigBust += 1; // the logo changed on disk; re-fetch it past the cache
     } catch (e) {
-      toast(`Could not import settings: ${e.message}`, 'danger');
+      toast(`Could not import the backup: ${e.message}`, 'danger');
     } finally {
       event.currentTarget.value = '';
     }
@@ -271,6 +281,38 @@
       toast(`Could not check for updates: ${e.message}`, 'danger');
     } finally {
       checkingApp = false;
+    }
+  }
+
+  // Report an issue. The server builds the body and the pre-filled link; this
+  // only keeps them fresh as the user types, so the link is a real anchor and no
+  // popup blocker sees a window.open after an await.
+  let reportKind = $state('bug');
+  let reportSummary = $state('');
+  let report = $state(null); // { kind, title, report, url }
+  let reportTimer = null;
+
+  async function loadReport() {
+    const params = new URLSearchParams({ kind: reportKind, summary: reportSummary });
+    try {
+      report = await api.get(`/api/settings/diagnostics?${params}`);
+    } catch {
+      report = null; // the About tab falls back to a plain link to the tracker
+    }
+  }
+
+  // Debounced: typing a paragraph shouldn't rebuild the report on every key.
+  function refreshReport() {
+    clearTimeout(reportTimer);
+    reportTimer = setTimeout(loadReport, 400);
+  }
+
+  async function copyReport() {
+    try {
+      await navigator.clipboard.writeText(report.report);
+      toast('Report copied', 'ok');
+    } catch {
+      toast('Could not copy. Select the report text instead', 'warn');
     }
   }
 
@@ -456,6 +498,12 @@
   onMount(() => {
     load().catch((e) => toast(`Could not load settings: ${e.message}`, 'danger'));
     loadTemplates();
+  });
+
+  // Build the report the first time About is opened: it reads the log buffer and
+  // shells nothing out, but there's no reason to do it for the other tabs.
+  $effect(() => {
+    if (tab === 'about' && !report) loadReport();
   });
 
   $effect(() => {
@@ -1151,16 +1199,76 @@
         </section>
 
         <section class="group">
+          <h3>Report an issue</h3>
+          <p class="note">
+            Opens a new issue on the public GitHub tracker; anyone can read it.
+          </p>
+          <div class="report-kind">
+            <label>
+              <input
+                type="radio"
+                value="bug"
+                bind:group={reportKind}
+                onchange={loadReport}
+              /> Something is broken
+            </label>
+            <label>
+              <input
+                type="radio"
+                value="idea"
+                bind:group={reportKind}
+                onchange={loadReport}
+              /> Something is missing
+            </label>
+          </div>
+          <textarea
+            class="report-summary"
+            rows="3"
+            maxlength="2000"
+            placeholder={reportKind === 'bug'
+              ? 'What you did, what you expected, what you got'
+              : 'What you would like Azimut to do'}
+            bind:value={reportSummary}
+            oninput={refreshReport}
+          ></textarea>
+          {#if report}
+            <details class="report-preview">
+              <summary>What gets sent</summary>
+              <pre class="mono">{report.report}</pre>
+            </details>
+          {/if}
+          <div class="links">
+            <a
+              class="btn btn-sm btn-primary"
+              href={report?.url || `${REPO_URL}/issues/new`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Icon name="link" size={13} /> Open a GitHub issue <Icon name="external" size={11} />
+            </a>
+            <button class="btn btn-sm" onclick={copyReport} disabled={!report}>
+              <Icon name="copy" size={13} /> Copy report
+            </button>
+          </div>
+          <p class="note">
+            Your text, the version, the OS and the last warnings of this run, with your
+            paths, account name, case names and any keys removed. Nothing leaves the app
+            until you open the issue.
+          </p>
+        </section>
+
+        <section class="group">
           <h3>Backup</h3>
           <p class="note">
-            Export settings and keys for another machine; keep the file private.
+            One file with your settings, keys, templates and signature, for another
+            machine; keep it private. Your download login session stays on this machine.
           </p>
           <div class="links">
             <a class="btn btn-sm" href="/api/settings/export" download>
-              <Icon name="save" size={13} /> Export settings
+              <Icon name="save" size={13} /> Export backup
             </a>
             <button class="btn btn-sm" onclick={() => settingsFile?.click()}>
-              <Icon name="file" size={13} /> Import settings
+              <Icon name="file" size={13} /> Import backup
             </button>
             <input
               type="file"
@@ -1587,6 +1695,46 @@
     gap: 8px;
     margin-top: 14px;
     flex-wrap: wrap;
+  }
+
+  /* Report an issue: kind, the user's words, then the report itself folded away. */
+  .report-kind {
+    display: flex;
+    gap: 16px;
+    margin: 10px 0 8px;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+  }
+  .report-kind label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .report-summary {
+    width: 100%;
+    resize: vertical;
+    font: inherit;
+    font-size: var(--fs-sm);
+  }
+  .report-preview {
+    margin-top: 10px;
+    font-size: var(--fs-xs);
+  }
+  .report-preview summary {
+    color: var(--text-3);
+    cursor: pointer;
+  }
+  .report-preview pre {
+    margin: 8px 0 0;
+    padding: 8px 10px;
+    max-height: 240px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    color: var(--text-2);
   }
   .links .btn {
     gap: 6px;

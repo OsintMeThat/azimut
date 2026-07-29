@@ -182,8 +182,10 @@ def signature_path() -> Path:
     """The analyst's optional logo, stamped onto proofs they choose to sign.
 
     App-wide like the API keys, and under the same rule: it lives beside
-    settings.json and is never copied into a case folder or an export bundle.
-    Only the rendered proof PNG ever carries it.
+    settings.json and is never copied into a case folder — only the rendered
+    proof PNG ever carries it out of here. A settings backup does carry it,
+    because that file goes to the user's own second machine, not to a third
+    party (api/settings.py export/import).
     """
     return workspace_root() / "signature.png"
 
@@ -192,8 +194,9 @@ def templates_path() -> Path:
     """Reusable proof-style and post-thread presets, app-wide.
 
     A "house style" spans every case, so it lives beside settings.json rather
-    than inside a case — same rule as the signature. Kept out of settings.json
-    itself so the secrets file stays small and single-purpose.
+    than inside a case — same rule as the signature, and it travels in a settings
+    backup for the same reason. Kept out of settings.json itself so the secrets
+    file stays small and single-purpose.
     """
     return workspace_root() / "templates.json"
 
@@ -217,6 +220,15 @@ def cookies_file_path() -> Path:
 SIGNATURE_MAX_BYTES = 2 * 1024 * 1024
 # PNG only — the format's alpha channel is what lets a logo sit over imagery.
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def valid_signature(data: bytes) -> bool:
+    """Small enough, and actually a PNG — sniffed from the bytes, never a name.
+
+    One gate for both ways a logo arrives: the Settings upload and a restored
+    settings backup.
+    """
+    return 0 < len(data) <= SIGNATURE_MAX_BYTES and data.startswith(PNG_MAGIC)
 
 
 def ensure_workspace() -> None:
@@ -351,6 +363,16 @@ def load_templates() -> dict[str, Any]:
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         logger.warning("Ignoring unreadable templates.json: %s", exc)
         return copy.deepcopy(DEFAULT_TEMPLATES)
+    return canonical_templates(data)
+
+
+def canonical_templates(data: Any, *, max_per_kind: int | None = None) -> dict[str, Any]:
+    """Every well-formed template record in *data*, and nothing else.
+
+    Shared by the file reader above and by a settings-backup import, so a preset
+    restored from another machine passes exactly the checks a preset read off
+    disk does — one gate, not two that can drift apart.
+    """
     if not isinstance(data, dict) or data.get("schema", 1) != 1:
         logger.warning("Ignoring templates.json with an unsupported root or schema")
         return copy.deepcopy(DEFAULT_TEMPLATES)
@@ -360,6 +382,8 @@ def load_templates() -> dict[str, Any]:
         if not isinstance(value, list):
             continue
         seen: set[str] = set()
+        if max_per_kind is not None:
+            value = value[:max_per_kind]
         for item in value:
             if not isinstance(item, dict):
                 continue

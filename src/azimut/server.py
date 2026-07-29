@@ -80,6 +80,11 @@ def _recover_jobs() -> None:
 
 def create_app() -> FastAPI:
     config.ensure_workspace()
+    # Start keeping the tail of the warning log, so "Report an issue" has
+    # something to say about a run that already went wrong (engine/diagnostics).
+    from .engine import diagnostics
+
+    diagnostics.install()
     # Before any router can import a scraper: point yt-dlp/gallery-dl at the
     # newer copies in the workspace, if the user has fetched any. No network.
     from .engine import scrapers
