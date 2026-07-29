@@ -21,6 +21,7 @@ from PIL import Image
 
 from .. import config
 from ..workspace import Case, ensure_dir
+from . import enrich as enrich_engine
 from . import ffmpeg as ffmpeg_engine
 from . import links as link_engine
 from . import thumbnails as thumbnail_engine
@@ -161,10 +162,28 @@ def _sidecar_path(media_path: Path) -> Path:
     return media_path.with_name(media_path.name + SIDECAR_SUFFIX)
 
 
+#: Prefix and suffix of the scratch file a sidecar write goes through. Named so
+#: it can be recognised again: `finally` clears it on any failure this process
+#: sees, but a power cut between the write and the rename leaves one behind, and
+#: whatever walks a case's files has to know it is debris rather than content
+#: (`Case._holds_content`).
+SIDECAR_TMP_PREFIX = "."
+SIDECAR_TMP_SUFFIX = ".tmp"
+
+
 def _write_sidecar(media_path: Path, data: dict[str, Any]) -> None:
-    _sidecar_path(media_path).write_text(
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    sidecar = _sidecar_path(media_path)
+    temporary = sidecar.with_name(
+        f"{SIDECAR_TMP_PREFIX}{sidecar.name}.{uuid.uuid4().hex}{SIDECAR_TMP_SUFFIX}"
     )
+    try:
+        temporary.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(sidecar)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _source_paths(source: dict[str, Any]) -> list[str]:
@@ -251,6 +270,9 @@ def _register(
     )
     indexed = {**sidecar, "path": rel_path}
     case.upsert_media_item(indexed, entity_id=entity["id"])
+    # Enrichment runs after the sidecar and index row exist: the handler reads
+    # the item back, and the worker can claim the job the moment it is queued.
+    enrich_engine.on_register(case, rel_path, kind, entity["id"])
     # Every media derivative is filed through here, so the derivation chain is
     # wired once for every tool that produces imagery — present and future.
     link_engine.link_all(
@@ -695,28 +717,43 @@ def download_url(
     return result
 
 
+def merge_item(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, Any] | None:
+    """Merge ``patch`` into a media item's sidecar and mirror it onto the index
+    row. Returns the merged item, or None when the sidecar is gone.
+
+    Held under the case lock: several background handlers patch different fields
+    of the same sidecar (a thumbnail path, then enrichment facts), and an
+    unguarded read-modify-write would drop whichever landed first.
+    """
+    with case.lock:
+        media_path = case.resolve_inside(rel_path)
+        sidecar = _sidecar_path(media_path)
+        if not sidecar.exists():
+            return None
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        data.update(patch)
+        _write_sidecar(media_path, data)
+        indexed = {**data, "path": rel_path}
+        case.upsert_media_item(indexed)
+        return indexed
+
+
 def set_thumbnail(case: Case, rel_path: str, thumb_rel: str | None) -> None:
     """Record (or clear) a media item's thumbnail path in its sidecar. The
     thumbnail worker calls this once it finishes a queued (e.g. video) render, so
     the next media listing reports the thumbnail as ready."""
-    media_path = case.resolve_inside(rel_path)
-    sidecar = _sidecar_path(media_path)
-    if not sidecar.exists():
-        return
-    data = json.loads(sidecar.read_text(encoding="utf-8"))
-    data["thumbnail"] = thumb_rel
-    _write_sidecar(media_path, data)
-    case.upsert_media_item({**data, "path": rel_path})
+    merge_item(case, rel_path, {"thumbnail": thumb_rel})
 
 
 def read_item(case: Case, rel_path: str) -> dict[str, Any] | None:
-    media_path = case.resolve_inside(rel_path)
-    sidecar = _sidecar_path(media_path)
-    if not sidecar.exists():
-        return None
-    data = json.loads(sidecar.read_text(encoding="utf-8"))
-    data["path"] = rel_path
-    return data
+    with case.lock:
+        media_path = case.resolve_inside(rel_path)
+        sidecar = _sidecar_path(media_path)
+        if not sidecar.exists():
+            return None
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        data["path"] = rel_path
+        return data
 
 
 def list_media(case: Case) -> list[dict[str, Any]]:
@@ -725,44 +762,52 @@ def list_media(case: Case) -> list[dict[str, Any]]:
 
 def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, Any]:
     """Update mutable sidecar fields (notes, folder, title) and mirror them onto
-    the media entity so the case sidebar stays in sync."""
-    media_path = case.resolve_inside(rel_path)
-    sidecar = _sidecar_path(media_path)
-    if not sidecar.exists():
-        raise ValueError(f"no sidecar found for {rel_path!r}")
+    the media entity so the case sidebar stays in sync.
 
-    data = json.loads(sidecar.read_text(encoding="utf-8"))
-    for key in ("notes", "folder", "title"):
-        if key in patch:
-            val = patch[key]
-            if val is None or val == "":
-                data.pop(key, None)
-            else:
-                data[key] = str(val)
+    Under the case lock, like every other sidecar write: the Save gate names an
+    item immediately after filing it, while the enrichment job queued by that
+    same filing may already be writing the file's own facts to the same sidecar.
+    Unguarded, whichever finished second dropped the other's fields — and the one
+    users noticed was the name they had just typed.
+    """
+    with case.lock:
+        media_path = case.resolve_inside(rel_path)
+        sidecar = _sidecar_path(media_path)
+        if not sidecar.exists():
+            raise ValueError(f"no sidecar found for {rel_path!r}")
 
-    _write_sidecar(media_path, data)
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        for key in ("notes", "folder", "title"):
+            if key in patch:
+                val = patch[key]
+                if val is None or val == "":
+                    data.pop(key, None)
+                else:
+                    data[key] = str(val)
 
-    # mirror onto the media entity (label mirrors the title; folder/notes attrs)
-    entity = case.find_entity(attr="path", value=rel_path)
-    if entity:
-        entity_patch: dict[str, Any] = {}
-        if "title" in patch:
-            # a cleared title falls back to the filename, like a fresh import —
-            # the sidebar label must never freeze on a title that no longer exists
-            entity_patch["label"] = str(patch["title"] or "") or media_path.name
-        attrs: dict[str, Any] = {}
-        if "folder" in patch:
-            attrs["folder"] = patch["folder"] or ""
-        if "notes" in patch:
-            attrs["notes"] = patch["notes"] or ""
-        if attrs:
-            entity_patch["attrs"] = attrs
-        if entity_patch:
-            case.update_entity(entity["id"], entity_patch)
+        _write_sidecar(media_path, data)
 
-    indexed = {**data, "path": rel_path}
-    case.upsert_media_item(indexed, entity_id=entity["id"] if entity else None)
-    return indexed
+        # mirror onto the media entity (label mirrors the title; folder/notes attrs)
+        entity = case.find_entity(attr="path", value=rel_path)
+        if entity:
+            entity_patch: dict[str, Any] = {}
+            if "title" in patch:
+                # a cleared title falls back to the filename, like a fresh import —
+                # the sidebar label must never freeze on a title that no longer exists
+                entity_patch["label"] = str(patch["title"] or "") or media_path.name
+            attrs: dict[str, Any] = {}
+            if "folder" in patch:
+                attrs["folder"] = patch["folder"] or ""
+            if "notes" in patch:
+                attrs["notes"] = patch["notes"] or ""
+            if attrs:
+                entity_patch["attrs"] = attrs
+            if entity_patch:
+                case.update_entity(entity["id"], entity_patch)
+
+        indexed = {**data, "path": rel_path}
+        case.upsert_media_item(indexed, entity_id=entity["id"] if entity else None)
+        return indexed
 
 
 def delete_media_files(case: Case, rel_path: str) -> None:

@@ -113,10 +113,11 @@ proof for publication.
 | ✅ **Gated downloads** | Fetches login-walled media by borrowing a browser session or cookies.txt, cookie-less by default and prompted only on a wall. |
 | ✅ **Find at scale** | Bounded, paged loading with a shared search box and sort across the Media Library and Files, plus case-name search in the switcher. |
 | ✅ **Searchable pickers** | Pickers in Inspect, Reverse Search, Geo Proof and the Notebook notes menu search past six entries and browse case folders behind the "…". |
-| ✅ **Named saves** | Inspect's Save gate names each item or numbers a batch from one base name, carries a shared note, and gives the file on disk the same name; a collage keeps one name across its tab and the gate. |
-| ✅ **Named documents** | Inspect, Geo Proof and Geo Report name their work in the tool header ("Inspect 1", "Proof 1", "Post 1" until renamed), save under that name in one click, and move the file when it is renamed. |
 | ✅ **Report an issue** | About writes a bug or a request into a pre-filled GitHub issue, with version, OS and the run's last warnings, home path and account name scrubbed. |
 | ✅ **Proofs on the map** | A fourth position of the Saved switch places each proof by its own coordinates, then by the captures it composes; `All` marks a worked capture with a dot rather than doubling it. |
+| ✅ **Import enrichment** | Reads image EXIF/dHash and video container/stream metadata locally in the background; parsed GPS produces linked Suggestions and all fields appear in Details. |
+| ✅ **GPS in Media** | A GPS filter and a per-row pin in the Media list send a stated position to the map, images and videos alike. |
+| ✅ **Relation vocabulary** | One registry for the non-chain edges, stated or settled from Details and from a point's card on the map. |
 
 
 ---
@@ -133,9 +134,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 |------|--------------|
 | **Case bundle** | Exports a case to one ZIP (clean SQLite copy, keys excluded) and imports it back. |
 | **Trash** | Undoes a delete and holds removed artifacts before they go for good. |
-| **Import enrichment** | Queues EXIF/GPS, perceptual hash and OCR on import; results arrive as Suggestions. |
-| **EXIF in Media** | Shows parsed GPS in the Media list and turns it into a place in one click. |
-| **Case Board / Relations** | Browses, creates and merges entities; typed links; graph view over the schema filled since v1. |
+| **Case Board / Relations** | Browses, creates and merges entities; graph view over the schema filled since v1, on the shipped relation vocabulary. |
 | **Case Sheet** | The same case as a table: a row is an entity, columns are its attributes plus free ones the analyst adds, sorted, filtered and edited in place. Imports a CSV as loose rows that stay out of the graph until promoted, and exports back to CSV or GeoJSON. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
@@ -148,13 +147,13 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 |------|--------------|
 | **Satellite Compare** | Same coords across providers (Esri / Sentinel-2 date slider / Bing / keyed), synced pan/zoom. Copernicus easy link. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
-| **EXIF & Metadata** | GPS/timestamps/device/codecs parsed locally + a "what was stripped" hint; suggests place/event. |
+| **Metadata follow-up** | Explains which common image/video fields were stripped and proposes events from capture times. |
 | **Edit Provenance** | Reads a rendered video's own edit history: which source clips it was cut from, in what order, and the GPS, dates and cameras those clips still carry. |
 | **Shadow Clock** | Mark a shadow to estimate possible capture times, and render the year as a day × hour heatmap of the slots that fit. |
 | **Imagery Wayback** | Esri World Imagery archive as a date slider: one view across every published release, key-less. |
 | **Event layers** | Date-stamped overlays that support or contradict an event: NASA FIRMS thermal hotspots, archived weather and METAR. |
 | **Shot contact sheet** | Splits a video into shots (ffmpeg scene detection) and picks frames from a clickable grid of timecodes. |
-| **OCR** | Read signs/plates (tesseract), detect script/language. |
+| **OCR** | Reads signs and plates on import (tesseract, a native binary rather than a wheel), and detects script and language. |
 | **Audio Transcript** | Transcribe and translate speech offline; flag acoustic context such as bells, adhan, aircraft or language. |
 | **Ground Imagery** | Ground-level photos: Panoramax/Mapillary/KartaView key-less first; Street View easy link, optional keyed in-app view. |
 | **Panorama** | Stitch a video window / frame set. Auto-stitch already in Inspect; still to do: sample a video window directly, seam blending. |

@@ -550,6 +550,63 @@ def test_chain_endpoint_is_empty_for_a_lone_entity(client):
     assert chain["empty"] is True
 
 
+def test_chain_endpoint_exposes_and_triages_a_suggested_location_relation(client):
+    cid = _new_case(client, "Suggested relation")
+    case = Case.open(cid)
+    media = case.add_entity("media", "Photo", {"path": "media/photo.jpg"}, by="user")
+    place = case.add_entity("place", "Point", by="enrich", status="suggested")
+    link = case.add_link(
+        media["id"],
+        place["id"],
+        "located-at",
+        by="enrich",
+        status="suggested",
+    )
+
+    relation = client.get(f"/api/cases/{cid}/entities/{media['id']}/chain").json()[
+        "relations"
+    ][0]
+    assert relation["entity"]["id"] == place["id"]
+    assert relation["link"]["id"] == link["id"]
+    assert relation["direction"] == "out"
+
+    confirmed = client.patch(
+        f"/api/cases/{cid}/links/{link['id']}",
+        json={"status": "confirmed"},
+    ).json()
+    assert confirmed["provenance"]["status"] == "confirmed"
+
+    assert client.delete(f"/api/cases/{cid}/links/{link['id']}").json() == {
+        "status": "deleted"
+    }
+    assert case.links_of(media["id"]) == []
+
+
+def test_confirming_a_suggested_place_confirms_its_location_links(client):
+    cid = _new_case(client, "Confirm location")
+    case = Case.open(cid)
+    media = case.add_entity("media", "Photo", {"path": "media/photo.jpg"}, by="user")
+    place = case.add_entity("place", "Point", by="enrich", status="suggested")
+    link = case.add_link(
+        media["id"],
+        place["id"],
+        "located-at",
+        by="enrich",
+        status="suggested",
+    )
+
+    response = client.patch(
+        f"/api/cases/{cid}/entities/{place['id']}",
+        json={"status": "confirmed"},
+    )
+
+    assert response.json()["provenance"]["status"] == "confirmed"
+    confirmed_link = next(
+        item for item in case.links_of(place["id"]) if item["id"] == link["id"]
+    )
+    assert confirmed_link["provenance"]["status"] == "confirmed"
+
+
 def test_lookup_endpoint_resolves_an_entity_by_attr(client):
     cid = _new_case(client, "Lookup")
     a = _upload(client, cid, "a.png")["item"]["path"]
@@ -574,3 +631,236 @@ def test_derivation_endpoint_returns_the_closure_and_404s(client):
     assert len(sub["links"]) == 2 and all(lk["type"] == "derived-from" for lk in sub["links"])
 
     assert client.get(f"/api/cases/{cid}/entities/e_nope/derivation").status_code == 404
+
+
+# ── relations: the non-chain vocabulary, stated by hand ─────────────────────
+
+
+def test_relation_vocabulary_says_how_each_type_reads_and_who_may_state_it(client):
+    entries = {row["type"]: row for row in client.get("/api/cases/relation-types").json()}
+
+    assert entries["located-at"]["label"] == "was shot at"
+    assert entries["located-at"]["from_types"] == ["capture", "media"]
+    assert entries["located-at"]["to_types"] == ["place"]
+    assert entries["located-at"]["manual"] is True
+    # enrichment's own claim: named so the UI can say it, never offered by hand
+    assert entries["same-image-as"]["manual"] is False
+
+
+def test_the_analyst_can_state_a_relation_and_it_lands_confirmed(client):
+    cid = _new_case(client, "Stated relation")
+    case = Case.open(cid)
+    media = case.add_entity("media", "Photo", {"path": "media/photo.jpg"}, by="user")
+    place = case.add_entity("place", "Checkpoint", {"lat": 48.0, "lon": 37.8}, by="user")
+
+    link = client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": media["id"], "to_id": place["id"], "type": "located-at"},
+    ).json()
+
+    assert link["from"] == media["id"] and link["to"] == place["id"]
+    # a click is not a guess: there is nothing left for the analyst to review
+    assert link["provenance"] == {
+        "by": "user",
+        "at": link["provenance"]["at"],
+        "status": "confirmed",
+    }
+    # stating it twice is the same one edge, not two
+    again = client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": media["id"], "to_id": place["id"], "type": "located-at"},
+    ).json()
+    assert again["id"] == link["id"]
+    assert len(case.links_of(place["id"])) == 1
+
+
+def test_a_stated_relation_is_refused_when_the_ontology_has_no_reading(client):
+    cid = _new_case(client, "Refused relations")
+    case = Case.open(cid)
+    media = case.add_entity("media", "Photo", {"path": "media/photo.jpg"}, by="user")
+    other = case.add_entity("media", "Other", {"path": "media/other.jpg"}, by="user")
+    place = case.add_entity("place", "Checkpoint", {"lat": 48.0, "lon": 37.8}, by="user")
+
+    def post(from_id, to_id, type_):
+        return client.post(
+            f"/api/cases/{cid}/links",
+            json={"from_id": from_id, "to_id": to_id, "type": type_},
+        )
+
+    # a derivation records what a save did; it is never asserted after the fact
+    assert post(media["id"], place["id"], "derived-from").status_code == 400
+    # the wrong way round: a place is not shot at a photo
+    assert post(place["id"], media["id"], "located-at").status_code == 400
+    # a perceptual-hash match is enrichment's claim, not a person's
+    assert post(media["id"], other["id"], "same-image-as").status_code == 400
+    # free-typed labels stay valid in stored data, but nothing outside the
+    # registry can be minted through the API
+    assert post(media["id"], place["id"], "depicts-vaguely").status_code == 400
+    assert post(media["id"], media["id"], "located-at").status_code == 400
+    assert post(media["id"], "e_ghost", "located-at").status_code == 400
+
+    assert case.links_of(media["id"]) == []
+
+
+def test_a_relation_can_be_restated_corrected_and_taken_back(client):
+    """Relations are editable for as long as the case is open: a wrong reading is
+    corrected on the same edge — same id, same provenance — and any relation can be
+    removed, whether a tool proposed it or the analyst stated it."""
+    cid = _new_case(client, "Editable relations")
+    case = Case.open(cid)
+    media = case.add_entity("media", "Photo", {"path": "media/photo.jpg"}, by="user")
+    place = case.add_entity("place", "Checkpoint", {"lat": 48.0, "lon": 37.8}, by="user")
+    link = client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": media["id"], "to_id": place["id"], "type": "located-at"},
+    ).json()
+
+    restated = client.patch(
+        f"/api/cases/{cid}/links/{link['id']}", json={"type": "depicts"}
+    ).json()
+    assert restated["id"] == link["id"]  # one edge corrected, not replaced
+    assert restated["type"] == "depicts"
+    assert restated["provenance"]["at"] == link["provenance"]["at"]
+
+    assert client.delete(f"/api/cases/{cid}/links/{link['id']}").json() == {
+        "status": "deleted"
+    }
+    assert case.links_of(media["id"]) == []
+
+
+def test_restating_a_relation_is_refused_outside_the_vocabulary(client):
+    cid = _new_case(client, "Refused restatements")
+    case = Case.open(cid)
+    media = case.add_entity("media", "Photo", {"path": "media/photo.jpg"}, by="user")
+    other = case.add_entity("media", "Other", {"path": "media/other.jpg"}, by="user")
+    place = case.add_entity("place", "Checkpoint", {"lat": 48.0, "lon": 37.8}, by="user")
+    located = case.add_link(media["id"], place["id"], "located-at", by="user")
+    depicts = case.add_link(media["id"], place["id"], "depicts", by="user")
+    hashed = case.add_link(media["id"], other["id"], "same-image-as", by="enrich")
+    derived = case.add_link(media["id"], other["id"], "derived-from", by="user")
+
+    def patch(link_id, body):
+        return client.patch(f"/api/cases/{cid}/links/{link_id}", json=body)
+
+    # the pair already holds that reading: two identical edges would say it twice
+    assert patch(located["id"], {"type": "depicts"}).status_code == 400
+    # a perceptual-hash match is enrichment's claim, not the analyst's to reword
+    assert patch(hashed["id"], {"type": "located-at"}).status_code == 400
+    # a derivation records what a save did
+    assert patch(derived["id"], {"type": "located-at"}).status_code == 400
+    # ...and nothing outside the registry can be minted through a restatement
+    assert patch(depicts["id"], {"type": "vaguely-near"}).status_code == 400
+    assert patch("l_ghost", {"type": "depicts"}).status_code == 404
+    assert patch(depicts["id"], {}).status_code == 400  # nothing to update
+
+    assert {item["type"] for item in case.links_of(media["id"])} == {
+        "located-at", "depicts", "same-image-as", "derived-from"
+    }
+
+
+def test_confirming_a_relation_confirms_the_point_it_proposes(client):
+    """The two halves of an enrichment suggestion are one claim, so the Suggestions
+    list and the relation rows never disagree about the same click: accepting "this
+    file was shot at this point" accepts the point too."""
+    cid = _new_case(client, "Symmetric confirm")
+    case = Case.open(cid)
+    media = case.add_entity("media", "Photo", {"path": "media/photo.jpg"}, by="user")
+    place = case.add_entity(
+        "place", "48.858370, 2.294481", {"lat": 48.85837, "lon": 2.294481},
+        by="enrich", status="suggested",
+    )
+    link = case.add_link(
+        media["id"], place["id"], "located-at", by="enrich", status="suggested"
+    )
+
+    confirmed = client.patch(
+        f"/api/cases/{cid}/links/{link['id']}", json={"status": "confirmed"}
+    ).json()
+
+    assert confirmed["provenance"]["status"] == "confirmed"
+    assert case.get_entity(place["id"])["provenance"]["status"] == "confirmed"
+    # the media was already the analyst's own import: nothing to change there
+    assert case.get_entity(media["id"])["provenance"]["status"] == "confirmed"
+
+
+def test_dismissing_a_relation_leaves_the_point_it_proposed_alone(client):
+    """Dropping the edge is not a verdict on the point. A place can be real while
+    one file's claim about it is wrong, and deleting entities behind a dismiss
+    would make a one-click triage destructive."""
+    cid = _new_case(client, "Dismiss keeps the point")
+    case = Case.open(cid)
+    media = case.add_entity("media", "Photo", {"path": "media/photo.jpg"}, by="user")
+    place = case.add_entity("place", "Point", {"lat": 1.0, "lon": 2.0}, by="enrich", status="suggested")
+    link = case.add_link(media["id"], place["id"], "located-at", by="enrich", status="suggested")
+
+    client.delete(f"/api/cases/{cid}/links/{link['id']}")
+
+    assert case.get_entity(place["id"])["provenance"]["status"] == "suggested"
+    assert case.links_of(place["id"]) == []
+
+
+def test_a_derivation_cannot_be_taken_back_as_if_it_were_a_relation(client):
+    """A derivation is recorded by the save that produced it, and deleting one here
+    would lose it without the tombstone `losses` reads. The POST and the type
+    correction both refuse chain types; the delete has to agree with them."""
+    cid = _new_case(client, "Chain is not a relation")
+    case = Case.open(cid)
+    crop = case.add_entity("media", "Crop", {"path": "media/crop.png"}, by="user")
+    source = case.add_entity("media", "Source", {"path": "media/source.png"}, by="user")
+    chain = case.add_link(crop["id"], source["id"], "derived-from", by="inspect")
+
+    refused = client.delete(f"/api/cases/{cid}/links/{chain['id']}")
+
+    assert refused.status_code == 400
+    assert "derivation" in refused.json()["detail"]
+    assert case.get_link(chain["id"]) is not None
+
+    # a link that never existed is still a 404, not a 400
+    assert client.delete(f"/api/cases/{cid}/links/l_nope").status_code == 404
+
+
+def test_confirming_an_entity_accepts_the_point_its_suggestion_named(client):
+    """The two halves of an enrichment suggestion are one claim. Confirming the
+    photo cannot leave the place it was proposed at sitting in Suggestions, or the
+    map chips a point "suggested" while the relation row beside it reads as a
+    finding — the same invariant confirming the edge itself carries."""
+    cid = _new_case(client, "Confirm both halves")
+    case = Case.open(cid)
+    photo = case.add_entity(
+        "media", "Photo", {"path": "media/photo.jpg"}, by="enrich", status="suggested"
+    )
+    place = case.add_entity(
+        "place", "Point", {"lat": 1.0, "lon": 2.0}, by="enrich", status="suggested"
+    )
+    link = case.add_link(photo["id"], place["id"], "located-at", by="enrich", status="suggested")
+
+    client.patch(f"/api/cases/{cid}/entities/{photo['id']}", json={"status": "confirmed"})
+
+    assert case.get_entity(photo["id"])["provenance"]["status"] == "confirmed"
+    assert case.get_link(link["id"])["provenance"]["status"] == "confirmed"
+    assert case.get_entity(place["id"])["provenance"]["status"] == "confirmed"
+
+
+def test_confirming_an_entity_stops_at_one_hop(client):
+    """Accepting a photo's own point is a reading of that photo, not a licence to
+    accept whatever else that point was separately proposed to be."""
+    cid = _new_case(client, "One hop")
+    case = Case.open(cid)
+    photo = case.add_entity(
+        "media", "Photo", {"path": "media/photo.jpg"}, by="enrich", status="suggested"
+    )
+    place = case.add_entity(
+        "place", "Point", {"lat": 1.0, "lon": 2.0}, by="enrich", status="suggested"
+    )
+    other = case.add_entity(
+        "media", "Other", {"path": "media/other.jpg"}, by="enrich", status="suggested"
+    )
+    case.add_link(photo["id"], place["id"], "located-at", by="enrich", status="suggested")
+    far = case.add_link(other["id"], place["id"], "located-at", by="enrich", status="suggested")
+
+    client.patch(f"/api/cases/{cid}/entities/{photo['id']}", json={"status": "confirmed"})
+
+    # the place came along, one hop out; the second photo's own claim did not
+    assert case.get_entity(place["id"])["provenance"]["status"] == "confirmed"
+    assert case.get_link(far["id"])["provenance"]["status"] == "suggested"
+    assert case.get_entity(other["id"])["provenance"]["status"] == "suggested"

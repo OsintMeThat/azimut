@@ -183,3 +183,66 @@ describe('SavedOverlay popup wiring', () => {
     expect(overlay).toContain('row.key ?? row.id');
   });
 });
+
+describe('SavedPopup relations', () => {
+  const related = { ...place, relations: 2 };
+
+  it('offers a stack of points its relations without fetching any of them', () => {
+    // the saved index carries a count; five marks must not mean five requests
+    const body = at([related, capture]);
+    expect(body).toContain('2 relations');
+    expect(body).not.toContain('Relations · 2');
+  });
+
+  it('says nothing at all about a point that has none', () => {
+    expect(at([place])).not.toContain('relation');
+  });
+
+  it('marks a point enrichment proposed, so it cannot pass for analyst work', () => {
+    expect(at([{ ...place, status: 'suggested' }])).toContain('suggested');
+    expect(at([place])).not.toContain('suggested');
+  });
+
+  it('loads the edges from the bounded chain endpoint, not from the index', () => {
+    const source = readFileSync(new URL('./SavedPopup.svelte', import.meta.url), 'utf8');
+    expect(source).toContain('api.get(`/api/cases/${caseId}/entities/${row.id}/chain`)');
+    expect(source).toContain('relationsByRow = { ...relationsByRow, [rowKey(row)]: chain?.relations ?? [] }');
+    // a single mark opens them straight away: clicking a place to see which
+    // photos claim it is the whole point of the gesture
+    expect(source).toContain('const only = ordered.length === 1 ? ordered[0] : null;');
+    // the auto-open effect writes the state it reads, so it guards on "already
+    // open" rather than fetching the row twice
+    expect(source).toContain('if (!only || !relationCount(only) || relationsShown(only)) return;');
+    // the toggle keeps its click inside the card, or Leaflet closes it
+    expect(source).toContain('event?.stopPropagation();');
+  });
+
+  it('syncs the other surfaces without the layer taking the card down', () => {
+    // confirming a proposed relation confirms its point, which the Suggestions
+    // list shows too — so the host reloads. The overlay defers rebuilding the
+    // marker layer while a card is open, and the count reads the loaded list
+    // meanwhile rather than the index it just invalidated.
+    const source = readFileSync(new URL('./SavedPopup.svelte', import.meta.url), 'utf8');
+    expect(source).toContain('await onrefresh?.()');
+    expect(source).toContain('relationsByRow[rowKey(row)]?.length ?? Number(row.relations ?? 0)');
+    expect(overlay).toContain('if (held && builtFor === cid) return;');
+    expect(overlay).toContain("map.on('popupopen', opened)");
+    // the layer's teardown is not the data effect's cleanup, which Svelte runs
+    // before every re-run — including one that decides to defer
+    expect(overlay).toContain('function rebuild(rows, precision)');
+  });
+
+  it('never caches a failed read as "this point has no relations"', () => {
+    const source = readFileSync(new URL('./SavedPopup.svelte', import.meta.url), 'utf8');
+    expect(source).toContain('openRows = openRows.filter((key) => key !== rowKey(row));');
+    expect(source).toContain('Could not read the relations');
+  });
+
+  it('leaves for a related entity’s own tool by closing the card first', () => {
+    // every other row in this card closes it before navigating; a popup that
+    // vanishes without saying it would reads as a bug
+    expect(overlay).toContain('onentity: (entity) => {');
+    expect(overlay).toContain('map.closePopup();');
+    expect(overlay).toContain('openEntity(entity);');
+  });
+});

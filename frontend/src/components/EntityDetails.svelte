@@ -15,10 +15,14 @@
   import { buildTree, flattenPaths, folderOf } from '../lib/folderTree.js';
   import { assignFolder as fileEntity } from '../lib/filing.js';
   import { DEPENDS_ON } from '../lib/chain.js';
+  import { loadRelationTypes, relatableTypes, saveRelation } from '../lib/relations.svelte.js';
   import { openEntity, gotoCapture, ENTITY_TOOL } from '../lib/navigate.js';
+  import { pollWhile } from '../lib/poll.js';
   import Icon from './Icon.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import FolderSelect from './FolderSelect.svelte';
+  import RelationList from './RelationList.svelte';
+  import RelationPicker from './RelationPicker.svelte';
 
   let { entityId, onclose, ondeleted } = $props();
 
@@ -102,27 +106,71 @@
     resolve(e, firstSeed);
   });
 
-  async function resolve(e, seedFields) {
-    const endpoint = e.type === 'media' ? 'media' : e.type === 'capture' ? 'satellite' : null;
-    if (!endpoint || !e.attrs?.path) {
+  /** The file behind an entity, with everything the sidecar holds.
+   *
+   *  A media file is read one at a time: the metadata dumps this panel shows
+   *  (EXIF, video fields) are hundreds of rows each and are deliberately kept out
+   *  of the browse index, so asking for the whole list would neither carry them
+   *  nor be cheap. A capture still comes off the satellite list, which is small
+   *  and has no per-item read.
+   *
+   *  ``quiet`` re-reads without the loading banner: the enrichment poll below
+   *  calls this every 1.5s, and flashing "Loading…" at someone reading the panel
+   *  would look like a fault rather than a background job finishing. */
+  async function resolve(e, seedFields, quiet = false) {
+    const path = e.attrs?.path;
+    if (!path || (e.type !== 'media' && e.type !== 'capture')) {
       infoData = null;
       return;
     }
-    infoLoading = true;
+    const cid = caseState.current.id;
+    if (!quiet) infoLoading = true;
     try {
-      const list = await api.get(`/api/cases/${caseState.current.id}/${endpoint}`);
+      const found =
+        e.type === 'media'
+          ? await api.get(`/api/cases/${cid}/media/item?path=${encodeURIComponent(path)}`)
+          : (await api.get(`/api/cases/${cid}/satellite`)).find((m) => m.path === path);
       if (seededId !== e.id) return; // selection moved on mid-fetch
-      infoData = list.find((m) => m.path === e.attrs.path) ?? null;
+      infoData = found ?? null;
       if (infoData && seedFields) {
         infoTitle = infoData.title ?? e.label ?? '';
         infoNotes = infoData.notes ?? infoNotes;
       }
     } catch {
-      infoData = null;
+      // a failed quiet re-read keeps what is on screen: the panel is being read,
+      // and blanking it because one poll missed would lose the analyst's place
+      if (!quiet) infoData = null;
     } finally {
       infoLoading = false;
     }
   }
+
+  // Enrichment runs in a job, so a file opened moments after its import has no
+  // metadata to show yet. The Media Library's own poll covers the modal it hosts,
+  // but this body also lives in the case sidebar, where nothing else is watching:
+  // import, switch to Satellite, open the file from the sidebar, and the EXIF
+  // section would sit empty until something unrelated reloaded the case. The file
+  // itself reports the job's state, so poll on that and stop when it settles.
+  const enriching = $derived(
+    infoData?.enrich_state === 'queued' || infoData?.enrich_state === 'running'
+  );
+
+  $effect(() => {
+    if (!enriching || !entity) return;
+    return pollWhile(() => enriching, () => resolve(entity, false, true), 1500);
+  });
+
+  // A relation stated here rides along with Save, like the title and the notes:
+  // the panel's model is "edit the fields, press Save", and a second commit
+  // button beside it would be one gesture too many.
+  let pendingRelation = $state(null);
+  loadRelationTypes();
+  const canRelate = $derived(!!entity && relatableTypes(entity.type).length > 0);
+
+  $effect(() => {
+    currentId; // a different entity means a different subject
+    pendingRelation = null;
+  });
 
   async function saveInfo() {
     if (!entity || infoSaving) return;
@@ -144,6 +192,10 @@
       }
       if ((infoFolder.trim() || '') !== (folderOf(entity) ?? '')) {
         await fileEntity(cid, entity, infoFolder.trim());
+      }
+      if (pendingRelation) {
+        await saveRelation(cid, entity.id, pendingRelation);
+        pendingRelation = null;
       }
       await reloadCase();
       toast('Saved', 'ok', 1600);
@@ -207,6 +259,11 @@
     if (bytes >= 1 << 20) return (bytes / (1 << 20)).toFixed(1) + ' MB';
     if (bytes >= 1 << 10) return (bytes / (1 << 10)).toFixed(0) + ' KB';
     return bytes + ' B';
+  }
+
+  function formatCoords(gps) {
+    if (gps?.lat == null || gps?.lon == null) return '';
+    return `${Number(gps.lat).toFixed(6)}, ${Number(gps.lon).toFixed(6)}`;
   }
 </script>
 
@@ -307,8 +364,42 @@
       {/if}
     </div>
 
+    {#if infoData?.kind === 'image' && (infoData.taken_at || infoData.gps || Object.keys(infoData.exif ?? {}).length)}
+      <details class="metadata-details">
+        <summary>EXIF metadata <span>{Object.keys(infoData.exif ?? {}).length}</span></summary>
+        <div class="exif-rows">
+          {#if infoData.taken_at}
+            <div class="info-row"><span class="info-k">Captured</span><span class="mono">{infoData.taken_at}</span></div>
+          {/if}
+          {#if infoData.gps}
+            <div class="info-row"><span class="info-k">GPS</span><span class="mono">{formatCoords(infoData.gps)}</span></div>
+          {/if}
+          {#each Object.entries(infoData.exif ?? {}) as [key, value] (key)}
+            <div class="info-row"><span class="info-k">{key}</span><span class="exif-value">{value}</span></div>
+          {/each}
+        </div>
+      </details>
+    {/if}
+
+    {#if infoData?.kind === 'video' && Object.keys(infoData.video_metadata ?? {}).length}
+      <details class="metadata-details">
+        <summary>Video metadata <span>{Object.keys(infoData.video_metadata).length}</span></summary>
+        <div class="exif-rows">
+          {#if infoData.taken_at}
+            <div class="info-row"><span class="info-k">Captured</span><span class="mono">{infoData.taken_at}</span></div>
+          {/if}
+          {#if infoData.gps}
+            <div class="info-row"><span class="info-k">GPS</span><span class="mono">{formatCoords(infoData.gps)}</span></div>
+          {/if}
+          {#each Object.entries(infoData.video_metadata) as [key, value] (key)}
+            <div class="info-row"><span class="info-k">{key}</span><span class="exif-value">{value}</span></div>
+          {/each}
+        </div>
+      </details>
+    {/if}
+
     <!-- derivation chain: click a row to walk to that entity's details -->
-    {#if chain && !chain.empty}
+    {#if chain && (chain.sources.length || chain.lost.length || chain.dependents.length)}
       <div class="chain">
         {#if chain.sources.length || chain.lost.length}
           <div class="chain-h">Made from</div>
@@ -346,6 +437,21 @@
             </button>
           {/each}
         {/if}
+      </div>
+    {/if}
+
+    <!-- relations: what this entity says about the world, not how it was made -->
+    {#if canRelate}
+      <div class="chain">
+        <div class="chain-h">Relations</div>
+        <RelationList
+          caseId={caseState.current.id}
+          relations={chain?.relations ?? []}
+          subjectType={entity.type}
+          onwalk={(target) => (walkedId = target.id)}
+          onchanged={reloadCase}
+        />
+        <RelationPicker subjectType={entity.type} bind:value={pendingRelation} />
       </div>
     {/if}
 
@@ -495,6 +601,36 @@
     word-break: break-word;
     max-height: 8.5em;
     overflow-y: auto;
+  }
+  .metadata-details {
+    margin-top: 12px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+  }
+  .metadata-details summary {
+    cursor: pointer;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+  }
+  .metadata-details summary span {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 400;
+  }
+  .exif-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .exif-rows .info-k {
+    min-width: 120px;
+    overflow-wrap: anywhere;
+  }
+  .exif-value {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
   .textarea {
     width: 100%;

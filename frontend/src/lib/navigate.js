@@ -96,6 +96,19 @@ export function openNotebook(noteId = null) {
   uiState.tool = 'notebook';
 }
 
+/**
+ * Fly the Satellite map to a bare point.
+ *
+ * For a position a file states about itself rather than one the case has filed:
+ * the map is where "is this plausible?" gets answered, and enrichment's proposed
+ * place is already waiting there as a mark.
+ */
+export function gotoPoint(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  uiState.gotoCoords = { lat, lon };
+  uiState.tool = 'satellite';
+}
+
 /** Fly the Satellite map to a capture's recorded coordinates (its marker). */
 export function gotoCapture(entity) {
   const lat = Number(entity.attrs?.lat);

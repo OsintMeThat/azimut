@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { uiState } from './state.svelte.js';
-import { openEntity } from './navigate.js';
+import { gotoPoint, openEntity } from './navigate.js';
 
 beforeEach(() => {
   uiState.tool = 'media';
@@ -29,5 +29,21 @@ describe('openEntity', () => {
     expect(uiState.gotoCoords).toEqual({
       lat: 48.8584, lon: 2.2945, zoom: 17, bearing: 30, provider: 'esri-world-imagery',
     });
+  });
+});
+
+describe('gotoPoint', () => {
+  it('flies the map to a position a file states about itself', () => {
+    // no entity to open: the point comes off a sidecar, and the map is where
+    // "is this plausible?" gets answered
+    gotoPoint(48.8583, 2.2945);
+    expect(uiState.tool).toBe('satellite');
+    expect(uiState.gotoCoords).toEqual({ lat: 48.8583, lon: 2.2945 });
+  });
+
+  it('ignores a point it could not place', () => {
+    uiState.gotoCoords = null;
+    gotoPoint(Number('north'), 2.2945);
+    expect(uiState.gotoCoords).toBeNull();
   });
 });

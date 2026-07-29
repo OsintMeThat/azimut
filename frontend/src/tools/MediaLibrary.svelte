@@ -10,9 +10,11 @@
     isGenericImage,
     isSatelliteMedia,
     mediaDisplayKind,
+    mediaPoint,
     visibleMedia,
     SORTS,
   } from '../lib/mediaFilter.js';
+  import { gotoPoint } from '../lib/navigate.js';
   import Icon from '../components/Icon.svelte';
   import SearchInput from '../components/SearchInput.svelte';
   import Modal from '../components/Modal.svelte';
@@ -33,6 +35,7 @@
           q: query,
           category: catFilter,
           folder: folderFilter,
+          gps: gpsOnly,
           sort,
           direction: sortDirection,
           limit: PAGE,
@@ -92,6 +95,15 @@
   // --- folder filter (user-defined folders) ---
   let folderFilter = $state(null); // null = All
 
+  // --- position filter (independent of type and folder) ---
+  // The one filter a geolocation case asks for constantly: which files told us
+  // where they were taken. Offered only when the case holds some, so it never
+  // adds a dead control to a case of screenshots.
+  let gpsOnly = $state(false);
+  const gpsCount = $derived(
+    pl.facets?.gps_count ?? items.filter((i) => mediaPoint(i)).length
+  );
+
   // --- free-text search + sort ---
   let query = $state('');
   let sort = $state('name');
@@ -105,10 +117,10 @@
     { id: 'added', label: 'Added' },
   ];
   const browseFiltersActive = $derived(
-    query.length > 0 || catFilter !== null || folderFilter !== null
+    query.length > 0 || catFilter !== null || folderFilter !== null || gpsOnly
   );
   const filtersActive = $derived(
-    query.length > 0 || catFilter !== null || folderFilter !== null || sort !== 'name' || sortDirection !== 'asc'
+    browseFiltersActive || sort !== 'name' || sortDirection !== 'asc'
   );
   const showBrowseBar = $derived(items.length > 0 || browseFiltersActive);
 
@@ -129,6 +141,7 @@
       hasCase: !!caseState.current,
       catMatch,
       folderFilter,
+      gpsOnly,
       query,
       sort,
       direction: sortDirection,
@@ -183,10 +196,31 @@
     reloadIfServerBacked();
   }
 
+  function toggleGpsOnly() {
+    gpsOnly = !gpsOnly;
+    reloadIfServerBacked();
+  }
+
+  /** The stated position, spelled out. Lives in the tooltip rather than in the
+   *  row: a filename is what the analyst reads a list by. */
+  function pointLabel(item) {
+    const point = mediaPoint(item);
+    return point ? `${point.lat.toFixed(6)}, ${point.lon.toFixed(6)}` : '';
+  }
+
+  // The map is where a claimed position gets judged, and enrichment's proposed
+  // place is already waiting there as a mark.
+  function showOnMap(item, event) {
+    event?.stopPropagation(); // the thumbnail behind this opens the lightbox
+    const point = mediaPoint(item);
+    if (point) gotoPoint(point.lat, point.lon);
+  }
+
   function resetFilters() {
     query = '';
     catFilter = null;
     folderFilter = null;
+    gpsOnly = false;
     sort = 'name';
     sortDirection = 'asc';
     headerSort = null;
@@ -235,6 +269,9 @@
   let brokenThumbs = $state(new Set());
   const thumbsPending = $derived(
     items.some((i) => i.thumb_state === 'queued' || i.thumb_state === 'running')
+  );
+  const enrichmentPending = $derived(
+    items.some((i) => i.enrich_state === 'queued' || i.enrich_state === 'running')
   );
 
   $effect(() => {
@@ -303,6 +340,17 @@
     return pollWhile(() => thumbsPending, () => refresh(), 1500);
   });
 
+  // Enrichment changes both the media sidecar and the Suggestions graph. Poll
+  // both views until the worker settles, but only while Media is visible.
+  $effect(() => {
+    if (!enrichmentPending || uiState.tool !== 'media' || !caseState.current) return;
+    return pollWhile(
+      () => enrichmentPending,
+      () => Promise.all([refresh(), reloadCase()]),
+      1500
+    );
+  });
+
   // Queue (re)generation: a single failed thumbnail (path given) or every
   // missing/failed one across the case. The worker drains the queue; the poll
   // above reflects each result as it lands.
@@ -326,6 +374,23 @@
           queued ? 'info' : 'ok'
         );
       }
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  }
+
+  // Queue enrichment for media imported by an older version. The worker drains
+  // the queue; Details and Suggestions update as each image lands.
+  async function enrichMedia() {
+    const id = caseState.current?.id;
+    if (!id) return;
+    try {
+      const { queued } = await api.post(`/api/cases/${id}/media/enrich`, {});
+      await refresh();
+      toast(
+        queued ? `Enriching ${queued} file${queued > 1 ? 's' : ''}` : 'Nothing left to enrich',
+        queued ? 'info' : 'ok'
+      );
     } catch (e) {
       toast(e.message, 'danger');
     }
@@ -568,6 +633,14 @@
     >
       <Icon name="reset" size={15} /> Thumbnails
     </button>
+    <button
+      class="btn"
+      onclick={enrichMedia}
+      title="Read image EXIF, hashes and video metadata locally"
+      disabled={!items.length}
+    >
+      <Icon name="search" size={15} /> Enrich
+    </button>
     <input
       type="file"
       multiple
@@ -618,6 +691,19 @@
           <option value={c.key}>{c.label} ({c.count})</option>
         {/each}
       </select>
+
+      {#if gpsCount || gpsOnly}
+        <button
+          class="btn btn-sm gps-filter"
+          class:on={gpsOnly}
+          type="button"
+          aria-pressed={gpsOnly}
+          title={`Show only the ${gpsCount} file${gpsCount > 1 ? 's' : ''} whose own metadata states a position`}
+          onclick={toggleGpsOnly}
+        >
+          <Icon name="pin" size={13} /> GPS
+        </button>
+      {/if}
 
       <!-- user-defined folders (independent facet) -->
       {#if folders.length}
@@ -745,6 +831,15 @@
               <span class="media-col-folder" title={item.folder ?? ''}>{item.folder || '—'}</span>
               <span class="media-col-added">{fmtAdded(item)}</span>
               <div class="media-col-actions actions" aria-label={`Actions for ${item.title ?? item.filename}`}>
+                {#if mediaPoint(item)}
+                  <button
+                    class="btn btn-ghost btn-sm"
+                    title={`Metadata says ${pointLabel(item)} — show it on the map`}
+                    onclick={() => showOnMap(item)}
+                  >
+                    <Icon name="pin" size={14} />
+                  </button>
+                {/if}
                 <button class="btn btn-ghost btn-sm" title="Info / Edit notes" onclick={() => openInfo(item)}>
                   <Icon name="note" size={14} />
                 </button>
@@ -823,6 +918,16 @@
                 <Icon name={KIND_ICONS[mediaDisplayKind(item)] ?? 'file'} size={34} />
               {/if}
               <span class="kind badge">{mediaDisplayKind(item)}</span>
+              {#if mediaPoint(item)}
+                <button
+                  class="gps-badge badge"
+                  title={`Metadata says ${pointLabel(item)} — show it on the map`}
+                  aria-label={`Show ${pointLabel(item)} on the map`}
+                  onclick={(e) => showOnMap(item, e)}
+                >
+                  <Icon name="pin" size={11} />
+                </button>
+              {/if}
               {#if item.folder}
                 <span class="folder-badge badge">
                   <Icon name="folder" size={10} />{item.folder}
@@ -1129,6 +1234,14 @@
     padding: 4px 8px;
     flex-shrink: 0;
   }
+  .gps-filter {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .gps-filter.on {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
   .reset-filters {
     margin-left: auto;
     white-space: nowrap;
@@ -1291,6 +1404,23 @@
     background: rgba(16, 16, 16, 0.75);
     backdrop-filter: blur(4px);
   }
+  /* a stated position, as one glyph: the coordinates are in the tooltip, and the
+     badge is the way to the map rather than a second line of text */
+  .gps-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 3px 5px;
+    border: 0;
+    background: rgba(16, 16, 16, 0.75);
+    backdrop-filter: blur(4px);
+    color: var(--accent);
+    cursor: pointer;
+  }
+  .gps-badge:hover {
+    color: var(--accent-text, #fff);
+    background: var(--accent);
+  }
   .folder-badge {
     position: absolute;
     bottom: 6px;
@@ -1337,6 +1467,24 @@
     gap: 2px;
     padding: 4px 8px 8px;
   }
+  /* Cards only — a list row shares this class and must stay on one line. A card
+     clips its overflow, so a button row that does not fit loses its last button,
+     and the last one is Delete. Wrapping costs a few pixels of card height; a
+     delete button that is there but unclickable costs trust. */
+  .grid .actions {
+    flex-wrap: wrap;
+  }
+  /* Small cards are 150px wide and hold the same five actions a large one does:
+     at the default padding that is 184px of buttons inside 150px of card. Tighten
+     the buttons rather than drop an action — every one of them is the only way to
+     reach what it does from this view. */
+  .grid.compact .actions {
+    gap: 1px;
+    padding-inline: 6px;
+  }
+  .grid.compact .actions .btn {
+    padding-inline: 4px;
+  }
   .del {
     margin-left: auto;
   }
@@ -1344,15 +1492,33 @@
   .media-list {
     /* Every row, including the header, must share this exact grid. An `auto`
        actions column is empty in the header but wide in a data row, which
-       shifts every sortable heading out of alignment. */
-    --media-columns: 54px minmax(180px, 1fr) 90px 82px minmax(100px, 0.45fr) 132px 168px;
+       shifts every sortable heading out of alignment.
+
+       So the actions cell is a fixed width, and it is computed rather than typed:
+       one ghost icon button is a 14px glyph plus 8px of padding and a 1px border
+       on each side, and the widest row holds six of them — GPS pin, info, open,
+       inspect, proof, delete. A literal here goes stale the next time a tool earns
+       a row action, and the symptom is the delete button quietly clipped off the
+       end of the row. */
+    --media-action: 32px;
+    --media-action-gap: 2px;
+    /* the six buttons plus slack. Sized to the exact sum, the cell fits only
+       until a sub-pixel of rounding says otherwise, and then Delete — which
+       `margin-left: auto` holds at the right edge — is the one that goes. The
+       slack is also where that auto margin lives, so the row still reads as
+       "actions, then delete". */
+    --media-actions: calc(6 * var(--media-action) + 5 * var(--media-action-gap) + 10px);
+    --media-columns: 54px minmax(180px, 1fr) 90px 82px minmax(100px, 0.45fr) 132px
+      var(--media-actions);
     padding: 6px 20px 18px;
   }
   .media-row {
     display: grid;
     grid-template-columns: var(--media-columns);
     align-items: center;
-    min-width: 790px;
+    /* the sum of the columns above, so the row scrolls rather than crushing its
+       last cell when the panel is narrow */
+    min-width: calc(624px + var(--media-actions));
     min-height: 54px;
     gap: 10px;
     padding: 5px 8px;
@@ -1448,7 +1614,14 @@
     display: flex;
     align-items: center;
     min-width: 0;
-    gap: 2px;
+    gap: var(--media-action-gap);
+    /* a row is one line. The cell is sized to hold every button, so wrapping here
+       would only ever mean the width calculation is wrong — and it would hide the
+       error by dropping Delete onto a second line instead of showing it. */
+    flex-wrap: nowrap;
+  }
+  .media-col-actions > * {
+    flex: 0 0 auto;
   }
   .media-row:not(.media-head) .media-col-actions {
     opacity: 0.72;

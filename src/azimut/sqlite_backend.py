@@ -41,7 +41,11 @@ if TYPE_CHECKING:
 # Schema 4 adds a browse index for sidecar-backed media. Sidecars remain the
 # file-level record; the index avoids opening and sorting every sidecar for each
 # bounded Media Library page.
-SQLITE_SCHEMA = 4
+# Schema 5 adds `has_gps` to that index. The coordinates themselves travel in
+# `item_json` and need no column; presence does, because filtering "only the
+# files that carry a position" has to happen in SQL over the whole case rather
+# than in the page the client already holds.
+SQLITE_SCHEMA = 5
 
 _SCHEMA = """
 CREATE TABLE meta (
@@ -102,7 +106,8 @@ CREATE TABLE media_items (
     search_text  TEXT NOT NULL,
     source_type  TEXT,
     source_op    TEXT,
-    imagery_mode TEXT
+    imagery_mode TEXT,
+    has_gps      INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_entities_type   ON entities(type);
 CREATE INDEX idx_entities_status ON entities(prov_status);
@@ -118,6 +123,7 @@ CREATE INDEX idx_media_name     ON media_items(name_sort);
 CREATE INDEX idx_media_size     ON media_items(size);
 CREATE INDEX idx_media_added    ON media_items(added_at);
 CREATE INDEX idx_media_source   ON media_items(source_type);
+CREATE INDEX idx_media_gps      ON media_items(has_gps);
 """
 
 # Job lifecycle (doc "Job states"): a fresh job is `queued`; the worker claims it
@@ -214,6 +220,20 @@ def _migrate_3_to_4(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX idx_media_source ON media_items(source_type)")
 
 
+def _migrate_4_to_5(conn: sqlite3.Connection) -> None:
+    """Add ``media_items.has_gps`` and backfill it from each indexed item.
+
+    The sidecar JSON is already in the row, so this reads no files: a case
+    enriched before the column existed gains its GPS filter on open, and one that
+    was never enriched simply has every flag at zero.
+    """
+    conn.execute("ALTER TABLE media_items ADD COLUMN has_gps INTEGER NOT NULL DEFAULT 0")
+    for row in conn.execute("SELECT path, item_json FROM media_items").fetchall():
+        if _has_gps(json.loads(row["item_json"])):
+            conn.execute("UPDATE media_items SET has_gps = 1 WHERE path = ?", (row["path"],))
+    conn.execute("CREATE INDEX idx_media_gps ON media_items(has_gps)")
+
+
 # from_version -> function(conn) applying the in-place upgrade to from_version + 1.
 # Runs inside one transaction per step in `SqliteCase._upgrade`, which stamps the
 # new schema_version and records the migration; the step only reshapes the db.
@@ -221,6 +241,7 @@ _SQLITE_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
     3: _migrate_3_to_4,
+    4: _migrate_4_to_5,
 }
 
 _MEDIA_CATEGORIES = (
@@ -247,9 +268,38 @@ _MEDIA_CATEGORY_SQL = {
 }
 
 
+def _has_gps(item: dict[str, Any]) -> bool:
+    """Whether an indexed media item carries a usable position.
+
+    Enrichment writes ``gps`` as ``{lat, lon}`` when a file's own metadata states
+    one (engine/enrich.py). Anything else — absent, half-filled, non-numeric —
+    counts as no position, so the filter can never offer a row it cannot place.
+    """
+    gps = item.get("gps")
+    if not isinstance(gps, dict):
+        return False
+    try:
+        float(gps["lat"]), float(gps["lon"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return True
+
+
+#: Sidecar fields the browse index deliberately does not mirror. Enrichment's
+#: full metadata dumps (engine/enrich.py) are hundreds of rows per file, and this
+#: index is read 200 items at a time by the grid and whole by the pickers — one
+#: fat field would multiply every one of those responses by ten. They stay in the
+#: sidecar, which is the file-level record, and reach the UI one file at a time
+#: through ``GET .../media/item``. Parsed facts (``gps``, ``taken_at``,
+#: ``dhash``) are small and stay indexed.
+_UNINDEXED_MEDIA_FIELDS = ("exif", "video_metadata")
+
+
 def _normalise_media_item(item: dict[str, Any]) -> tuple[dict[str, Any], tuple[Any, ...]]:
     """Return a JSON-safe browse item plus its indexed column values."""
     clean = json.loads(json.dumps(item, ensure_ascii=False))
+    for field_name in _UNINDEXED_MEDIA_FIELDS:
+        clean.pop(field_name, None)
     source = clean.get("source")
     if not isinstance(source, dict):
         source = {}
@@ -302,6 +352,7 @@ def _normalise_media_item(item: dict[str, Any]) -> tuple[dict[str, Any], tuple[A
         source.get("type"),
         source.get("op"),
         source.get("imagery_mode"),
+        int(_has_gps(clean)),
     )
 
 
@@ -580,6 +631,11 @@ class SqliteCase:
         with self._connect() as conn:
             return [self._link(r) for r in conn.execute("SELECT * FROM links ORDER BY rowid")]
 
+    def get_link(self, link_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM links WHERE id = ?", (link_id,)).fetchone()
+        return self._link(row) if row is not None else None
+
     def links_of(self, entity_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -598,6 +654,22 @@ class SqliteCase:
                 (link_type, from_type),
             ).fetchall()
         return {r["to_id"]: int(r["n"]) for r in rows}
+
+    def count_incident_links(self, *, exclude_types: list[str]) -> dict[str, int]:
+        skipped = list(dict.fromkeys(exclude_types))
+        where = ""
+        if skipped:
+            where = f" WHERE type NOT IN ({', '.join('?' * len(skipped))})"
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, COUNT(*) AS n FROM ("
+                f" SELECT from_id AS id FROM links{where}"
+                " UNION ALL"
+                f" SELECT to_id AS id FROM links{where}"
+                ") GROUP BY id",
+                (*skipped, *skipped),
+            ).fetchall()
+        return {r["id"]: int(r["n"]) for r in rows}
 
     def page_entities(
         self,
@@ -735,8 +807,9 @@ class SqliteCase:
         conn.execute(
             "INSERT INTO media_items("
             " path, entity_id, item_json, filename, kind, folder, name_sort,"
-            " size, added_at, search_text, source_type, source_op, imagery_mode"
-            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " size, added_at, search_text, source_type, source_op, imagery_mode,"
+            " has_gps"
+            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(path) DO UPDATE SET"
             " entity_id = COALESCE(excluded.entity_id, media_items.entity_id),"
             " item_json = excluded.item_json,"
@@ -744,7 +817,8 @@ class SqliteCase:
             " folder = excluded.folder, name_sort = excluded.name_sort,"
             " size = excluded.size, added_at = excluded.added_at,"
             " search_text = excluded.search_text, source_type = excluded.source_type,"
-            " source_op = excluded.source_op, imagery_mode = excluded.imagery_mode",
+            " source_op = excluded.source_op, imagery_mode = excluded.imagery_mode,"
+            " has_gps = excluded.has_gps",
             (values[0], entity_id, *values[1:]),
         )
 
@@ -764,12 +838,18 @@ class SqliteCase:
 
     @staticmethod
     def _media_item(row: sqlite3.Row) -> dict[str, Any]:
-        return json.loads(row["item_json"])
+        """One browse item, with the media entity it belongs to.
+
+        ``entity_id`` is the column, not a sidecar field: the row already holds
+        the link, so a caller that needs the entity behind a path reads it here
+        instead of scanning the graph for an attribute match.
+        """
+        return {**json.loads(row["item_json"]), "entity_id": row["entity_id"]}
 
     def list_media_items(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT item_json FROM media_items"
+                "SELECT item_json, entity_id FROM media_items"
                 " ORDER BY added_at DESC, path COLLATE NOCASE"
             ).fetchall()
         return [self._media_item(row) for row in rows]
@@ -783,7 +863,7 @@ class SqliteCase:
         placeholders = ", ".join("?" for _ in unique)
         with self._connect() as conn:
             rows = conn.execute(
-                f"SELECT item_json FROM media_items WHERE path IN ({placeholders})",
+                f"SELECT item_json, entity_id FROM media_items WHERE path IN ({placeholders})",
                 unique,
             ).fetchall()
         by_path = {
@@ -798,6 +878,7 @@ class SqliteCase:
         kind: str | None = None,
         category: str | None = None,
         folder: str | None = None,
+        gps: bool = False,
         sort: str = "newest",
         direction: str | None = None,
         limit: int = 200,
@@ -818,10 +899,16 @@ class SqliteCase:
             base_where.append("search_text LIKE ? ESCAPE '\\'")
             base_params.append(_like_contains(term))
 
+        # Category and GPS are two independent refinements of that base. Each
+        # one's own facet count leaves itself out and applies the other, so a
+        # chooser always reports what clicking it would actually yield.
+        category_sql = _MEDIA_CATEGORY_SQL.get(category or "")
         selected_where = list(base_where)
         selected_params = list(base_params)
-        if category in _MEDIA_CATEGORY_SQL:
-            selected_where.append(_MEDIA_CATEGORY_SQL[category])
+        if category_sql:
+            selected_where.append(category_sql)
+        if gps:
+            selected_where.append("has_gps = 1")
 
         def clause(parts: list[str]) -> str:
             return (" WHERE " + " AND ".join(parts)) if parts else ""
@@ -849,7 +936,7 @@ class SqliteCase:
                 ).fetchone()[0]
             )
             rows = conn.execute(
-                f"SELECT item_json FROM media_items{selected_clause}"
+                f"SELECT item_json, entity_id FROM media_items{selected_clause}"
                 f" ORDER BY {order_col} {order}, path COLLATE NOCASE {order}"
                 " LIMIT ? OFFSET ?",
                 [*selected_params, limit, offset],
@@ -872,16 +959,24 @@ class SqliteCase:
                 ).fetchall()
             }
             # The category chooser remains useful after one category is
-            # selected, so its counts use the text/kind/folder base but exclude
-            # the current category.
+            # selected, so its counts exclude the current category but keep the
+            # rest of the filter, GPS included.
+            gps_scope = [*base_where, "has_gps = 1"] if gps else base_where
             category_counts: dict[str, int] = {}
             for key in _MEDIA_CATEGORIES:
                 category_counts[key] = int(
                     conn.execute(
-                        f"SELECT COUNT(*) FROM media_items{clause([*base_where, _MEDIA_CATEGORY_SQL[key]])}",
+                        f"SELECT COUNT(*) FROM media_items{clause([*gps_scope, _MEDIA_CATEGORY_SQL[key]])}",
                         base_params,
                     ).fetchone()[0]
                 )
+            gps_count = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM media_items"
+                    f"{clause([*base_where, *([category_sql] if category_sql else []), 'has_gps = 1'])}",
+                    base_params,
+                ).fetchone()[0]
+            )
 
         next_offset = offset + len(rows)
         return {
@@ -892,6 +987,7 @@ class SqliteCase:
                 "kind_counts": kind_counts,
                 "folder_counts": folder_counts,
                 "category_counts": category_counts,
+                "gps_count": gps_count,
             },
         }
 
@@ -1100,6 +1196,33 @@ class SqliteCase:
                 (from_id, type_),
             ).fetchall()
             return [self._link(r) for r in rows]
+
+        return self._write(op)
+
+    def update_link(self, link_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Update a link's status or type without rebuilding the edge.
+
+        Restating the type keeps the edge's id and provenance: the two entities
+        were always related, only the reading was wrong. Which types may be
+        restated is the vocabulary's call (``engine/links.py``), not the store's.
+        """
+
+        def op(conn: sqlite3.Connection) -> dict[str, Any]:
+            row = conn.execute("SELECT * FROM links WHERE id = ?", (link_id,)).fetchone()
+            if row is None:
+                raise CaseError(f"link '{link_id}' not found")
+            status = patch.get("status")
+            if status not in ("confirmed", "suggested"):
+                status = row["prov_status"]
+            type_ = patch.get("type") or row["type"]
+            conn.execute(
+                "UPDATE links SET prov_status = ?, type = ? WHERE id = ?",
+                (status, type_, link_id),
+            )
+            self._touch(conn)
+            updated = conn.execute("SELECT * FROM links WHERE id = ?", (link_id,)).fetchone()
+            assert updated is not None
+            return self._link(updated)
 
         return self._write(op)
 
