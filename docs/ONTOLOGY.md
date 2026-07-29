@@ -2,12 +2,13 @@
 
 > This is the filing contract for every tool and the detailed companion to
 > [SPEC.md §5](SPEC.md). Extend and version it only when implemented tools need
-> new vocabulary. Nothing enters a case without analyst confirmation.
+> new vocabulary. Tool proposals enter as `suggested` and remain distinct from
+> analyst-confirmed findings.
 
 **Storage schema: `3`.** The manifest carries `{"azimut": {"schema": 3,
 "storage": "sqlite"}}`; schema 3 moved the graph from `case.json` to per-case
 `case.db`. The entity/link shape is unchanged since v1. Breaking changes require
-a manifest schema bump and migration. The internal SQLite schema is version 4;
+a manifest schema bump and migration. The internal SQLite schema is version 5;
 it adds search and media browse indexes without changing this logical model.
 
 Legend: ✅ implemented in code · 🔶 machinery exists, unused · ⬜ proposed.
@@ -27,9 +28,12 @@ presents it as this logical shape:
 - **Links** are typed directed edges. Every save records its inputs; see §3. ✅
 - **Folders** are `/`-nested analyst buckets in `attrs.folder`, not semantic
   links. ✅
-- Media sidecars hold kind, size, uploader, duration and thumbnail data. A
-  SQLite browse index mirrors searchable fields. Entities retain only what the
-  graph needs for identity, links and deduplication.
+- Media sidecars hold kind, size, uploader, duration, thumbnail data, image EXIF
+  and perceptual hashes, plus ffprobe's video container and stream metadata. A
+  stated position lands on one field, `gps`, whichever of the two read it. A
+  SQLite browse index mirrors searchable fields, plus whether that position
+  exists. Entities retain only what the graph needs for identity, links and
+  deduplication.
 
 ## 2. Entity
 
@@ -60,7 +64,7 @@ read time, so extending those tables repairs existing cases with no migration.
 |---|---|---|---|---|
 | `media` | ✅ | media-library | `path`, `sha256`, `source_url?` | yes (+ sidecar) |
 | `capture` | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `path`, `geo?` | yes (image) |
-| `place` | ✅ | satellite, ingest | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?` | no (a point) |
+| `place` | ✅ | satellite, ingest, enrich | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?` | no (a point) |
 | `proof` | ✅ | proof-composer | `spec` (json), `path` (png) | yes |
 | `post` | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | ✅ | inspect | `spec` (json) | yes |
@@ -100,8 +104,10 @@ incident links. The link type decides whether dependent entities also disappear.
 |---|---|---|---|
 | `derived-from` | artifact → source | made from that, and outlives it | ✅ |
 | `depends-on` | session → subject | only a pointer at that: dies with it | ✅ |
-| `located-at` | media/proof/event → place | happened / shot at this point | ⬜ |
-| `depicts` / `appears-in` | media → place/vehicle/person | subject shown in the media | ⬜ |
+| `located-at` | media/capture → place | shot at this point | ✅ |
+| `depicts` | media/capture → place | the place is shown in the file | ✅ |
+| `same-image-as` | media → media | perceptual hashes are within 10 bits | ✅ |
+| `appears-in` | media → vehicle/person | subject shown in the media | ⬜ |
 | `same-as` | entity → entity | two records, one real thing (merge) | ⬜ |
 | `owns` | person/org → account/asset | ownership | ⬜ |
 | `posted` | account → media/post | authorship | ⬜ |
@@ -135,9 +141,49 @@ A tool selects one of two deletion behaviours through its link type:
   lists cascading deletions and surviving outputs before the action.
 - Losing a secondary source leaves a placeholder. Only losing the subject can
   invalidate a dependent session.
+- Relations are not chain types. Deleting either endpoint removes the edge but
+  never cascades and never leaves a tombstone: a claim nobody has looked at must
+  not decide what a delete destroys.
+- Exact-byte duplicates never produce `same-image-as`: import deduplicates them
+  on SHA-256 before perceptual hashing runs.
 
-Free-typed labels remain valid. The registry defines what the UI understands,
-not a closed list.
+Free-typed labels remain valid in stored data. The registry defines what the UI
+understands and what the API will mint, not what a case may hold.
+
+### Relations
+
+Everything outside the two chain types is a **relation**: a statement about the
+world rather than about how a file was produced. `engine/links.py` holds the one
+registry — how each type reads in words, the entity types either end accepts, and
+whether an analyst may state it — and `GET /api/cases/relation-types` serves it to
+every surface, so the vocabulary is never copied per screen.
+
+| | Chain (`derived-from`, `depends-on`) | Relation (`located-at`, `depicts`, …) |
+|---|---|---|
+| Says | how the file was made | what is true of the subject |
+| Written by | the save that produced the artifact | enrichment, or the analyst |
+| Status | always `confirmed` | `suggested` from a tool, `confirmed` by hand |
+| Delete | cascades or tombstones | drops the edge, nothing else |
+
+- A relation stated by hand is `confirmed` and validated against the registry: the
+  API refuses a chain type, an unregistered type, a self-link, and any pair of
+  endpoint types the table above has no reading for.
+- **Relations stay editable.** Add one, correct its reading, or take it back at any
+  time, from any surface that shows them. Correcting the reading keeps the edge —
+  same id, same provenance — because the two entities were always related and only
+  the verb was wrong; the same validation applies, plus a refusal to collapse onto
+  a relation the pair already holds. Removal is one gesture whatever the status:
+  dismissing a proposal and retracting an accepted statement are the same act on
+  the graph, and a statement that cannot be taken back is a trap. A chain edge is
+  refused there too — dropping a derivation behind the relation path would lose it
+  without the tombstone the delete rules depend on.
+- `same-image-as` is registered but **machine-only**. It is a claim about
+  perceptual hashes, which is enrichment's to make; a person comparing two
+  pictures is not measuring a hash. It is also narrower than `same-as`: two files
+  showing the same pixels, never one merged graph identity.
+- Where they appear: the Details panel, the map popup, and the case board next.
+  One component renders all three (`RelationList.svelte`), one collects a new one
+  (`RelationPicker.svelte`).
 
 ### The derivation chain
 
@@ -175,13 +221,30 @@ How it is wired (`engine/links.py`):
   (UTC), `status` and optional source URL. It borrows the entity/activity/agent
   shape of W3C PROV without implementing the full standard.
 - **Confidence** = `status`: `confirmed` (analyst-made or analyst-accepted) vs
-  `suggested` (a tool proposed it, awaiting a click). 🔶 `suggested` has no
-  producer yet. The sidebar and PATCH validator exist, but no tool emits it until
-  the v3 EXIF/OCR tools land. Keep the status binary until a real workflow needs
-  finer grading. ✅
+  `suggested` (a tool proposed it, awaiting a click). Import enrichment emits
+  suggested places and `located-at` / `same-image-as` links from image or video
+  metadata.
+  Keep the status binary until a real workflow needs finer grading. ✅
+  Confirming a suggested entity confirms its incident suggested relations *and the
+  entity at each far end*; a relation is also confirmed or dismissed on its own,
+  from Details, from the point's own card on the map, or from the dialog that edits
+  it. Confirming a relation likewise confirms whichever endpoint is still
+  `suggested`. Both directions carry one rule — "this file was shot at this point"
+  cannot be true while the point is only proposed — and without both, the
+  Suggestions list and the relation rows would disagree about the same click. The
+  spread stops at one hop: accepting a photo's own point is a reading of that
+  photo, not a licence to accept whatever else that point was separately proposed
+  to be. Dismissing is not the reverse — the edge goes, the entities stay, because
+  a place can be real while one file's claim about it is wrong. A dismissal also
+  sticks: re-reading a file refreshes its facts without re-proposing edges it has
+  already been through, so the Enrich button never undoes a triage. Anything still `suggested` is marked as such
+  wherever it appears — a proposed place reads as a proposal in the Saved tree and
+  in its card, never as work the analyst did.
   **A derivation is `confirmed`**: `derived-from`/`depends-on` record what the
   analyst's own click just made, not what a tool inferred. `suggested` is for
-  inference, such as OCR reading a street name or EXIF proposing a `place`.
+  inference, such as OCR reading a street name or EXIF proposing a `place`. A
+  relation stated by hand is `confirmed` for the same reason: there is nothing
+  left to review.
 - **`same-as` / merge** (⬜ open, SPEC §10): when two entities are one real thing,
   link `same-as` rather than destructively merging; a resolver treats a `same-as`
   cluster as one node in views and unions its attributes and links. Collapse rules

@@ -27,3 +27,13 @@ describe('buildMediaQuery', () => {
     expect(buildMediaQuery('c1', { folder: '' })).toBe('/api/cases/c1/media/page?folder=');
   });
 });
+
+describe('buildMediaQuery — position filter', () => {
+  it('asks for only the located files when the filter is on', () => {
+    expect(buildMediaQuery('c1', { gps: true })).toBe('/api/cases/c1/media/page?gps=true');
+  });
+
+  it('says nothing when it is off, so the default page is unfiltered', () => {
+    expect(buildMediaQuery('c1', { gps: false })).toBe('/api/cases/c1/media/page');
+  });
+});

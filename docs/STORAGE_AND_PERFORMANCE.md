@@ -109,7 +109,7 @@ review.
 
 ## Database shape
 
-`case.db` is at SQLite schema 4. The schema counter is independent of the JSON
+`case.db` is at SQLite schema 5. The schema counter is independent of the JSON
 `CASE_SCHEMA`: the manifest's `azimut.storage` field selects the backend, and each
 format counts its own shape upgrades.
 
@@ -143,8 +143,17 @@ format counts its own shape upgrades.
 
 `media_items`
 : Queryable browse metadata mirrored from each media sidecar. It indexes path,
-  kind, folder, display name, size, date, source and imagery mode. The original
-  files and sidecars remain the file-level records.
+  kind, folder, display name, size, date, source, imagery mode, the media entity
+  it belongs to and whether the file states a position (`has_gps`). The
+  coordinates themselves travel in the mirrored sidecar JSON and need no column;
+  presence does, because "only the files that carry a position" has to filter over
+  the whole case rather than over the page the client holds. Enrichment's full
+  metadata dumps (`exif`, `video_metadata` — hundreds of rows per file) are the
+  one thing the mirror leaves out: this index is read 200 rows at a time by the
+  grid and whole by the pickers, and one fat field would multiply every one of
+  those responses. A surface showing a single file reads it from the sidecar
+  through `GET /api/cases/{id}/media/item`. The original files and sidecars remain
+  the file-level records.
 
 ### Indexes and migrations
 
@@ -154,8 +163,10 @@ job from being enqueued twice. `SqliteCase.open` upgrades an older `case.db` in 
 through `_SQLITE_MIGRATIONS`, each step in its own immediate transaction, re-reading
 the version inside the transaction so a raced second opener applies nothing; a
 newer schema is refused rather than mangled. The shipped migrations add the
-indexed `folder` column (1→2), the `jobs` table (2→3), then entity search text and
-the media browse index (3→4).
+indexed `folder` column (1→2), the `jobs` table (2→3), entity search text and
+the media browse index (3→4), then the `has_gps` flag (4→5). The 4→5 backfill
+reads the sidecar JSON already held in each index row, so a case enriched before
+the column existed gains its position filter on open with no file scan.
 
 The schema-4 media backfill scans sidecars once on first open. Its completion
 marker and index rows commit together, so an interrupted backfill retries safely.

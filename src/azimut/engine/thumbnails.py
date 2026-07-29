@@ -12,9 +12,10 @@ to the original file. This module owns their whole lifecycle.
   then renamed into `.thumbs/` — a reader never sees a half-written thumbnail, and
   the Windows rename rules are respected.
 - **Cheap image thumbnails run inline** for instant feedback; the **CPU-heavy
-  path (ffmpeg video frames) goes through the durable per-case `jobs` queue** and
-  is drained by a single worker, so several imports never spawn several ffmpegs at
-  once. A failed inline render is enqueued for the worker to retry.
+  path (ffmpeg video frames) goes through the durable per-case `jobs` queue**
+  drained by the shared single worker (`engine/workqueue.py`), so several imports
+  never spawn several ffmpegs at once. A failed inline render is enqueued for the
+  worker to retry.
 - **Recovery**: a job left `running` by a crashed process is reclaimed on case
   open (`Case.recover_jobs`), so work resumes instead of stalling.
 - **Budget**: `prune_cache` evicts least-recently-used thumbnails past a size
@@ -25,8 +26,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import threading
-import time
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -35,6 +34,7 @@ from PIL import Image
 
 from ..workspace import ensure_dir
 from . import ffmpeg as ffmpeg_engine
+from . import workqueue
 
 if TYPE_CHECKING:
     from ..workspace import Case as CaseType
@@ -142,9 +142,7 @@ def generate(case: "CaseType", rel_media: str, sha256: str, kind: str) -> str | 
 def enqueue(case: "CaseType", rel_media: str) -> dict[str, Any]:
     """Queue a thumbnail job for one media file and wake the worker. Keyed on the
     media path, so re-enqueue (a retry or a regenerate) never stacks duplicates."""
-    job = case.enqueue_job(THUMB_KIND, key=rel_media, payload={"path": rel_media})
-    wake(case)
-    return job
+    return workqueue.enqueue(case, THUMB_KIND, key=rel_media, payload={"path": rel_media})
 
 
 def on_register(case: "CaseType", rel_media: str, sha256: str, kind: str) -> str | None:
@@ -164,102 +162,33 @@ def on_register(case: "CaseType", rel_media: str, sha256: str, kind: str) -> str
     return None
 
 
-# -- durable worker --------------------------------------------------------
+# -- the enqueued (CPU-heavy) path -----------------------------------------
 #
-# One background worker across all cases: a single daemon thread drains queued
-# thumbnail jobs one at a time, so ffmpeg (CPU-heavy) never runs several at once
-# — the doc's "default to one CPU-heavy worker". Work only ever starts from a
-# user action (an import, a regenerate) or crash recovery, never from merely
-# opening a case or tab.
-
-_worker_lock = threading.Lock()
-_pending: dict[str, "CaseType"] = {}
-_worker_running = False
-
-# When False, `wake` does not start the background thread — the queue is drained
-# explicitly instead (tests, and any caller that wants deterministic draining).
-start_workers = True
+# Video frames go through the shared durable queue (engine/workqueue.py) so
+# ffmpeg never runs several instances at once. This module supplies the handler;
+# the queue owns the thread and the settlement.
 
 
-def _process_one(case: "CaseType", job: dict[str, Any]) -> None:
-    """Run one claimed thumbnail job: render the file, update its sidecar, and
-    settle the job. A missing media file cancels the job (nothing to render); any
-    other failure is recorded and retried until the attempt budget is spent."""
+def _handle(case: "CaseType", job: dict[str, Any]) -> None:
+    """Run one thumbnail job: render the file and record it on the sidecar.
+
+    A missing media file cancels the job (nothing to render); a render failure is
+    retried by the queue until the attempt budget is spent.
+    """
     from . import media as media_engine
 
     rel = job["payload"].get("path")
     item = media_engine.read_item(case, rel) if rel else None
     if item is None:  # the media (or its sidecar) is gone — nothing to do
-        case.cancel_job(job["id"])
-        return
+        raise workqueue.JobCancelled(f"media gone: {rel}")
     try:
         thumb_rel = generate(case, rel, item.get("sha256", ""), item.get("kind", ""))
     except ThumbnailError as exc:
-        case.fail_job(job["id"], str(exc))
-        return
+        raise workqueue.JobFailed(str(exc)) from exc
     media_engine.set_thumbnail(case, rel, thumb_rel)
-    case.complete_job(job["id"])
 
 
-def drain(case: "CaseType") -> int:
-    """Process every queued thumbnail job for one case, one at a time, in the
-    calling thread. Returns how many jobs were handled. Synchronous and
-    deterministic — the worker loop and the tests both call it."""
-    handled = 0
-    while True:
-        job = case.claim_job(kinds=[THUMB_KIND])
-        if job is None:
-            return handled
-        _process_one(case, job)
-        handled += 1
-
-
-def _run_loop() -> None:
-    global _worker_running
-    while True:
-        with _worker_lock:
-            if not _pending:
-                _worker_running = False
-                return
-            case_id, case = next(iter(_pending.items()))
-        try:
-            drain(case)
-        except Exception:  # a worker must never die on one case's failure
-            pass
-        with _worker_lock:
-            _pending.pop(case_id, None)
-
-
-def wake(case: "CaseType") -> None:
-    """Ensure the single background worker is draining ``case``'s queue. Registers
-    the case and starts the worker thread if it isn't already running; a no-op if
-    the case is already pending."""
-    global _worker_running
-    if not start_workers:
-        return
-    with _worker_lock:
-        _pending[case.id] = case
-        if _worker_running:
-            return
-        _worker_running = True
-    threading.Thread(target=_run_loop, name="thumbnail-worker", daemon=True).start()
-
-
-def wait_until_idle(timeout: float = 5.0) -> bool:
-    """Wait for the shared worker to finish its current queue, if any.
-
-    This is mainly useful for orderly shutdown and deterministic callers that
-    need to remove a case directory after queuing work. It never interrupts an
-    active render; ``False`` means the caller's timeout elapsed first.
-    """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        with _worker_lock:
-            if not _worker_running:
-                return True
-        time.sleep(0.01)
-    with _worker_lock:
-        return not _worker_running
+workqueue.register(THUMB_KIND, _handle)
 
 
 # -- cache maintenance -----------------------------------------------------

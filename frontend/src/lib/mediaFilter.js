@@ -59,7 +59,15 @@ export const SORTS = [
  */
 export function visibleMedia(
   items,
-  { hasCase = true, catMatch = null, folderFilter = null, query = '', sort = 'newest', direction } = {}
+  {
+    hasCase = true,
+    catMatch = null,
+    folderFilter = null,
+    gpsOnly = false,
+    query = '',
+    sort = 'newest',
+    direction,
+  } = {}
 ) {
   if (!hasCase) return [];
   return sortItems(
@@ -67,11 +75,25 @@ export function visibleMedia(
       (i) =>
         (!catMatch || catMatch(i)) &&
         (!folderFilter || i.folder === folderFilter) &&
+        (!gpsOnly || hasPosition(i)) &&
         matchesQuery(i, query)
     ),
     sort,
     direction
   );
+}
+
+/** The position a file's own metadata states, or null. Enrichment writes it from
+ *  image EXIF or a video's container tags; both land on the same field. */
+export function mediaPoint(item) {
+  const lat = Number(item?.gps?.lat);
+  const lon = Number(item?.gps?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return { lat, lon };
+}
+
+export function hasPosition(item) {
+  return mediaPoint(item) !== null;
 }
 
 /** Whether a folder and category can produce at least one media item.

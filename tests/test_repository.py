@@ -72,6 +72,24 @@ def test_add_link_validates_endpoints_and_dedupes(repo):
     assert len(repo.list_links()) == 1
 
 
+def test_update_link_changes_suggestion_status_without_rebuilding_edge(repo):
+    media = repo.add_entity("media", "Photo", by="user")
+    place = repo.add_entity("place", "Point", by="enrich", status="suggested")
+    link = repo.add_link(
+        media["id"],
+        place["id"],
+        "located-at",
+        by="enrich",
+        status="suggested",
+    )
+
+    updated = repo.update_link(link["id"], {"status": "confirmed"})
+
+    assert updated["id"] == link["id"]
+    assert updated["provenance"]["by"] == "enrich"
+    assert updated["provenance"]["status"] == "confirmed"
+
+
 def test_sync_links_restates_a_source_set(repo):
     src = repo.add_entity("proof", "P", {"spec": "proofs/p.json"}, by="user")
     m1 = repo.add_entity("media", "m1", by="user")
@@ -375,3 +393,30 @@ def test_prune_drops_only_terminal_jobs(repo):
 
     assert repo.prune_jobs() == 1  # the ready one goes, the queued one stays
     assert [j["id"] for j in repo.list_jobs()] == [live["id"]]
+
+
+def test_count_incident_links_groups_relations_in_either_direction(repo):
+    """The bulk "has this row relations?" read behind the map popup: the saved
+    index is loaded whole on case open, so it carries a count and lets the popup
+    fetch the edges. Excluding the chain types leaves exactly what `chain_of`
+    reports as relations, which is what keeps the two from disagreeing."""
+    photo = repo.add_entity("media", "photo", {"path": "media/x.jpg"}, by="user")
+    other = repo.add_entity("media", "other", {"path": "media/y.jpg"}, by="user")
+    place = repo.add_entity("place", "point", {"lat": 48.0}, by="user")
+    quiet = repo.add_entity("place", "untouched", {"lat": 49.0}, by="user")
+    proof = repo.add_entity("proof", "P", {"spec": "proofs/p.json"}, by="user")
+
+    repo.add_link(photo["id"], place["id"], "located-at", by="enrich", status="suggested")
+    repo.add_link(photo["id"], other["id"], "same-image-as", by="enrich", status="suggested")
+    repo.add_link(proof["id"], photo["id"], "derived-from", by="user")  # chain, excluded
+
+    counts = repo.count_incident_links(exclude_types=["derived-from", "depends-on"])
+
+    assert counts[photo["id"]] == 2  # counted at either end
+    assert counts[place["id"]] == 1
+    assert counts[other["id"]] == 1
+    assert quiet["id"] not in counts  # untouched rows are absent, not zero
+    assert proof["id"] not in counts
+
+    # excluding nothing counts every edge, chain included
+    assert repo.count_incident_links(exclude_types=[])[proof["id"]] == 1

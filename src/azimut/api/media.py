@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, UploadFile
 from pydantic import BaseModel, Field, HttpUrl
 
 from .. import config, jobs
+from ..engine import enrich as enrich_engine
 from ..engine import media as media_engine
 from ..engine import thumbnails as thumbnail_engine
 from ..workspace import Case, CaseError
@@ -40,31 +41,48 @@ class ThumbRegenIn(BaseModel):
     path: str | None = None
 
 
+class EnrichIn(BaseModel):
+    path: str | None = None
+
+
 class MediaMetadataIn(BaseModel):
     paths: list[str] = Field(max_length=500)
 
 
 def with_thumb_state(case: Case, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Tag each media item with a ``thumb_state`` the grid renders: ``ready`` when
-    the cached file is present, ``queued``/``running``/``failed`` from its
-    thumbnail job while the worker is on it, else ``none`` (no thumbnail, e.g. an
-    audio file, or one pruned from the cache). A referenced-but-missing thumbnail
-    (evicted by the budget) is reported as absent so the grid falls back cleanly.
+    """Tag each media item with the background states the UI polls.
+
+    ``thumb_state`` is ``ready`` when the cached file is present,
+    ``queued``/``running``/``failed`` from its thumbnail job, else ``none``.
+    ``enrich_state`` follows the enrichment job and is ``ready`` once the current
+    enrichment version has landed. A referenced-but-missing thumbnail (evicted
+    by the budget) is reported as absent so the grid falls back cleanly.
     """
-    jobs_by_path = {j["key"]: j for j in case.list_jobs(kind=thumbnail_engine.THUMB_KIND)}
+    thumb_jobs = {j["key"]: j for j in case.list_jobs(kind=thumbnail_engine.THUMB_KIND)}
+    enrich_jobs = {j["key"]: j for j in case.list_jobs(kind=enrich_engine.ENRICH_KIND)}
     for item in items:
         thumb = item.get("thumbnail")
         if thumb and case.resolve_inside(thumb).exists():
             item["thumb_state"] = "ready"
-            continue
-        item["thumbnail"] = None
-        if item.get("kind") not in thumbnail_engine.THUMBNAILED_KINDS:
-            item["thumb_state"] = "none"
         else:
-            job = jobs_by_path.get(item["path"])
-            item["thumb_state"] = (
-                job["state"] if job and job["state"] in ("queued", "running", "failed") else "none"
-            )
+            item["thumbnail"] = None
+            if item.get("kind") not in thumbnail_engine.THUMBNAILED_KINDS:
+                item["thumb_state"] = "none"
+            else:
+                job = thumb_jobs.get(item["path"])
+                item["thumb_state"] = (
+                    job["state"]
+                    if job and job["state"] in ("queued", "running", "failed")
+                    else "none"
+                )
+
+        enrich_job = enrich_jobs.get(item["path"])
+        if enrich_job and enrich_job["state"] in ("queued", "running", "failed"):
+            item["enrich_state"] = enrich_job["state"]
+        elif item.get("enrich_version") == enrich_engine.ENRICH_VERSION:
+            item["enrich_state"] = "ready"
+        else:
+            item["enrich_state"] = "none"
     return items
 
 
@@ -81,6 +99,7 @@ def page_media(
     kind: str | None = None,
     category: str | None = None,
     folder: str | None = None,
+    gps: bool = False,
     sort: str = "newest",
     direction: str | None = None,
     limit: int = 200,
@@ -90,7 +109,8 @@ def page_media(
     (Media Library, Files). Small cases return one page with a null
     ``next_cursor``, so the client filters in memory with no further calls; a
     large case pages via ``cursor`` and searches server-side via ``q``.
-    ``facets`` counts the whole filtered set so category/folder controls stay
+    ``gps=true`` keeps only the files whose metadata states a position.
+    ``facets`` counts the whole filtered set so category/folder/GPS controls stay
     accurate. The unbounded ``GET .../media`` stays for consumers that need the
     full index (pickers, satellite crops, derivation)."""
     case = get_case(case_id)
@@ -101,6 +121,7 @@ def page_media(
         kind=kind,
         category=category,
         folder=folder,
+        gps=gps,
         sort=sort,
         direction=direction,
         limit=limit,
@@ -108,6 +129,28 @@ def page_media(
     )
     result["items"] = with_thumb_state(case, result["items"])
     return result
+
+
+@router.get("/cases/{case_id}/media/item")
+def read_media_item(case_id: str, path: str) -> dict[str, Any]:
+    """One media file, read from its sidecar — the whole record, enrichment's full
+    metadata dumps included.
+
+    The browse index leaves those dumps out on purpose (they are hundreds of rows
+    per file, and the listings are read 200 at a time), so this is where a surface
+    that shows one file gets them. ``entity_id`` comes off the index row rather
+    than a graph lookup, so opening one file never scans the case.
+    """
+    case = get_case(case_id)
+    try:
+        item = media_engine.read_item(case, path)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"no media at {path!r}")
+    indexed = case.media_items_by_paths([path])
+    entity_id = indexed[0].get("entity_id") if indexed else None
+    return with_thumb_state(case, [{**item, "entity_id": entity_id}])[0]
 
 
 @router.post("/cases/{case_id}/media/metadata")
@@ -142,6 +185,41 @@ def regenerate_thumbnails(case_id: str, body: ThumbRegenIn) -> dict[str, int]:
     for path in targets:
         thumbnail_engine.enqueue(case, path)
     return {"queued": len(targets)}
+
+
+@router.post("/cases/{case_id}/media/enrich")
+def enrich_media(case_id: str, body: EnrichIn) -> dict[str, int]:
+    """Queue local image and video enrichment.
+
+    With a ``path`` this re-reads that one item. Without one it queues images
+    that have not reached the current enrichment version, including media from
+    older Azimut releases. Merely opening a case never starts this backfill.
+
+    ``queued`` counts jobs the queue actually took, not items considered: naming a
+    path whose kind carries no enrichment (an audio file, a PDF) queues nothing,
+    and reporting one would have the toast announce work that will never run.
+    """
+    case = get_case(case_id)
+    items = media_engine.list_media(case)
+    if body.path is not None:
+        targets = [item for item in items if item["path"] == body.path]
+    else:
+        targets = [
+            item
+            for item in items
+            if item.get("kind") in enrich_engine.ENRICHED_KINDS
+            and item.get("enrich_version") != enrich_engine.ENRICH_VERSION
+        ]
+    queued = 0
+    for item in targets:
+        if enrich_engine.on_register(
+            case,
+            item["path"],
+            item.get("kind", ""),
+            item.get("entity_id") or "",
+        ):
+            queued += 1
+    return {"queued": queued}
 
 
 @router.post("/cases/{case_id}/media/upload")

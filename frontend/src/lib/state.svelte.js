@@ -10,6 +10,7 @@ import { formatCoords as renderCoords } from './coords.js';
 import { loadWidth, saveWidth, clampWidth } from './sidebar.js';
 import { loadTheme, saveTheme, applyTheme } from './theme.js';
 import { shouldShowUpdate } from './appUpdate.js';
+import { loadRelationTypes } from './relations.svelte.js';
 
 /**
  * App-wide display preferences (Settings → Preferences), mirrored from
@@ -249,6 +250,10 @@ export async function initSession() {
   // in the wrong format; a settings read failure is never fatal to a session
   await loadPrefs().catch(() => {});
   await loadTemplates().catch(() => {});
+  // The relation vocabulary is code, not case data, and several surfaces name an
+  // edge with it on their first paint. Reading it here means no relation row ever
+  // renders a type slug it would replace a moment later.
+  await loadRelationTypes().catch(() => {});
   await refreshCaseList();
   let lastId = null;
   try {

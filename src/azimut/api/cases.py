@@ -160,6 +160,19 @@ class EntityPatch(BaseModel):
     status: EntityStatus | None = None
 
 
+class LinkIn(BaseModel):
+    # `from`/`to` are the link's own field names, but `from` is a Python keyword;
+    # the request spells them out rather than aliasing around it.
+    from_id: str = Field(min_length=1, max_length=64)
+    to_id: str = Field(min_length=1, max_length=64)
+    type: str = Field(min_length=1, max_length=40)
+
+
+class LinkPatch(BaseModel):
+    status: EntityStatus | None = None
+    type: str | None = Field(default=None, min_length=1, max_length=40)
+
+
 class FolderIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
@@ -183,6 +196,27 @@ def create_case(body: CreateCase) -> dict[str, Any]:
 def create_scratch() -> dict[str, Any]:
     case = Case.create("Scratch session", scratch=True)
     return {"id": case.id, **case.overview()}
+
+
+@router.get("/relation-types")
+def relation_types() -> list[dict[str, Any]]:
+    """The relation vocabulary (ONTOLOGY §3): how each type reads in words, the
+    entity types each end accepts, and whether an analyst may state it.
+
+    Every surface reads this instead of keeping its own copy — the picker offers
+    the ``manual`` ones, the relation rows use ``label`` to name an edge. Declared
+    above ``/{case_id}`` so the literal path wins.
+    """
+    return [
+        {
+            "type": entry.type,
+            "label": entry.label,
+            "from_types": sorted(entry.from_types),
+            "to_types": sorted(entry.to_types),
+            "manual": entry.manual,
+        }
+        for entry in link_engine.RELATION_TYPES
+    ]
 
 
 @router.get("/{case_id}")
@@ -321,9 +355,63 @@ def update_entity(case_id: str, entity_id: str, body: EntityPatch) -> dict[str, 
     case = get_case(case_id)
     patch = {k: v for k, v in body.model_dump().items() if v is not None}
     try:
-        return case.update_entity(entity_id, patch)
+        entity = case.update_entity(entity_id, patch)
+        if body.status == "confirmed":
+            link_engine.confirm_incident_relations(case, entity_id)
+        return entity
     except CaseError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{case_id}/links")
+def create_link(case_id: str, body: LinkIn) -> dict[str, Any]:
+    """State one relation by hand. Confirmed, and only from the registry."""
+    try:
+        return link_engine.add_relation(
+            get_case(case_id), body.from_id, body.to_id, body.type, by="user"
+        )
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.patch("/{case_id}/links/{link_id}")
+def update_link(case_id: str, link_id: str, body: LinkPatch) -> dict[str, Any]:
+    """Confirm a suggestion, or correct which relation an edge states.
+
+    Restating the type goes through the vocabulary, so a 400 means the ontology
+    has no such reading for those two entities; a missing link is a 404.
+    """
+    if body.status is None and body.type is None:
+        raise HTTPException(status_code=400, detail="nothing to update")
+    case = get_case(case_id)
+    try:
+        link = case.get_link(link_id)
+        if link is None:
+            raise HTTPException(status_code=404, detail=f"link '{link_id}' not found")
+        if body.type is not None and body.type != link["type"]:
+            link = link_engine.set_relation_type(case, link_id, body.type)
+        if body.status == "confirmed":
+            link = link_engine.confirm_relation(case, link_id)
+        elif body.status is not None:
+            link = case.update_link(link_id, {"status": body.status})
+        return link
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/{case_id}/links/{link_id}")
+def remove_link(case_id: str, link_id: str) -> dict[str, str]:
+    """Take back one relation. Dismissing a proposal and retracting a confirmed
+    statement are the same gesture; a derivation is neither, and is refused with a
+    400 rather than dropped without its tombstone."""
+    case = get_case(case_id)
+    if case.get_link(link_id) is None:
+        raise HTTPException(status_code=404, detail=f"link '{link_id}' not found")
+    try:
+        link_engine.remove_relation(case, link_id)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "deleted"}
 
 
 @router.get("/{case_id}/entities/{entity_id}/dependents")
@@ -346,9 +434,8 @@ def entity_dependents(case_id: str, entity_id: str) -> dict[str, Any]:
 
 @router.get("/{case_id}/entities/{entity_id}/chain")
 def entity_chain(case_id: str, entity_id: str) -> dict[str, Any]:
-    """One entity plus its derivation chain (sources, dependents, lost sources),
-    read from its incident links only — the Details panel's relations without
-    shipping the whole graph (Step 5)."""
+    """One entity plus its derivation chain and direct relations, read from its
+    incident links only without shipping the whole graph."""
     case = get_case(case_id)
     chain = link_engine.chain_of(case, entity_id)
     if chain is None:

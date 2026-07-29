@@ -63,9 +63,9 @@ def install_local_guard(app: FastAPI) -> None:
 
 def _recover_jobs() -> None:
     """On startup, return jobs a crashed process left ``running`` to the queue and
-    wake the worker for any case with pending thumbnail work. A `running` row
+    wake the worker for any case that still has pending work. A `running` row
     nothing owns would otherwise stall forever; recovery resumes it."""
-    from .engine import thumbnails
+    from .engine import workqueue
     from .workspace import Case
 
     for row in Case.list_all():
@@ -74,8 +74,8 @@ def _recover_jobs() -> None:
             case.recover_jobs()
         except Exception:
             continue
-        if any(j["state"] == "queued" for j in case.list_jobs(kind=thumbnails.THUMB_KIND)):
-            thumbnails.wake(case)
+        if workqueue.has_queued(case):
+            workqueue.wake(case)
 
 
 def create_app() -> FastAPI:

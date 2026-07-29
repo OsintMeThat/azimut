@@ -5,6 +5,8 @@ import {
   isSatelliteMedia,
   mediaDisplayKind,
   matchesQuery,
+  mediaPoint,
+  hasPosition,
   sortItems,
   visibleMedia,
 } from './mediaFilter.js';
@@ -184,5 +186,37 @@ describe('hasMediaForFilters', () => {
 
   it('ignores the text query because it only validates the two filter facets', () => {
     expect(hasMediaForFilters(items, { folderFilter: 'sources' })).toBe(true);
+  });
+});
+
+describe('mediaPoint', () => {
+  it('reads the position a file states about itself, whatever wrote it', () => {
+    // EXIF for an image, container tags for a video: enrichment lands both here
+    expect(mediaPoint({ gps: { lat: 48.8583, lon: 2.2945 } })).toEqual({ lat: 48.8583, lon: 2.2945 });
+    expect(mediaPoint({ kind: 'video', gps: { lat: -33.86, lon: 151.21 } })).toEqual({
+      lat: -33.86,
+      lon: 151.21,
+    });
+  });
+
+  it('refuses a point the map could not place', () => {
+    expect(mediaPoint({})).toBeNull();
+    expect(mediaPoint({ gps: null })).toBeNull();
+    expect(mediaPoint({ gps: { lat: 48.0 } })).toBeNull();
+    expect(mediaPoint({ gps: { lat: 'north', lon: 'east' } })).toBeNull();
+    expect(hasPosition({ gps: { lat: 0, lon: 0 } })).toBe(true); // enrichment already dropped 0,0
+  });
+});
+
+describe('visibleMedia — position filter', () => {
+  const located = item({ filename: 'gps.jpg', gps: { lat: 1, lon: 2 } });
+  const bare = item({ filename: 'plain.jpg' });
+
+  it('keeps only the files that state one, and composes with the other filters', () => {
+    expect(visibleMedia([located, bare], { gpsOnly: true }).map((i) => i.filename)).toEqual([
+      'gps.jpg',
+    ]);
+    expect(visibleMedia([located, bare], { gpsOnly: false }).length).toBe(2);
+    expect(visibleMedia([located, bare], { gpsOnly: true, query: 'plain' })).toEqual([]);
   });
 });

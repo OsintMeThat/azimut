@@ -51,13 +51,26 @@ def test_media_list_reports_thumb_state(client):
     assert item["thumb_state"] == "ready"  # image thumbnails render inline
 
 
+def test_media_list_reports_enrichment_state(client, monkeypatch):
+    from azimut.engine import workqueue
+    from azimut.workspace import Case
+
+    monkeypatch.setattr(workqueue, "start_workers", False)
+    cid = client.post("/api/cases", json={"name": "Enrichment state"}).json()["id"]
+    _upload(client, cid, "shot.png", _png_bytes())
+
+    assert client.get(f"/api/cases/{cid}/media").json()[0]["enrich_state"] == "queued"
+    workqueue.drain(Case.open(cid))
+    assert client.get(f"/api/cases/{cid}/media").json()[0]["enrich_state"] == "ready"
+
+
 def test_video_thumbnail_is_queued_then_regenerated(client, monkeypatch):
-    from azimut.engine import thumbnails
+    from azimut.engine import thumbnails, workqueue
     from azimut.workspace import Case
 
     # drive the queue by hand: disable the background worker, force a rendering
     # that always succeeds so the test never depends on a real ffmpeg.
-    monkeypatch.setattr(thumbnails, "start_workers", False)
+    monkeypatch.setattr(workqueue, "start_workers", False)
     monkeypatch.setattr(
         thumbnails, "_render", lambda mp, out, kind: (out.write_bytes(b"\xff\xd8jpg"), True)[1]
     )
@@ -70,15 +83,15 @@ def test_video_thumbnail_is_queued_then_regenerated(client, monkeypatch):
     item = client.get(f"/api/cases/{cid}/media").json()[0]
     assert item["thumbnail"] is None and item["thumb_state"] == "queued"
 
-    thumbnails.drain(Case.open(cid))  # the worker's work, run synchronously
+    workqueue.drain(Case.open(cid))  # the worker's work, run synchronously
     item = client.get(f"/api/cases/{cid}/media").json()[0]
     assert item["thumb_state"] == "ready" and item["thumbnail"]
 
 
 def test_regenerate_queues_missing_thumbnails(client, monkeypatch):
-    from azimut.engine import thumbnails
+    from azimut.engine import workqueue
 
-    monkeypatch.setattr(thumbnails, "start_workers", False)
+    monkeypatch.setattr(workqueue, "start_workers", False)
     cid = client.post("/api/cases", json={"name": "Regen"}).json()["id"]
     # an image whose cached thumbnail is then removed (as budget eviction would)
     item = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]
@@ -89,6 +102,44 @@ def test_regenerate_queues_missing_thumbnails(client, monkeypatch):
     res = client.post(f"/api/cases/{cid}/media/thumbnails/regenerate", json={}).json()
     assert res["queued"] == 1  # the now-missing thumbnail is re-queued
     assert client.get(f"/api/cases/{cid}/media").json()[0]["thumb_state"] == "queued"
+
+
+def test_enrich_backfill_queues_only_items_below_the_current_version(client, monkeypatch):
+    from azimut.engine import enrich as enrich_engine
+    from azimut.engine import media as media_engine
+    from azimut.engine import workqueue
+    from azimut.workspace import Case
+
+    monkeypatch.setattr(workqueue, "start_workers", False)
+    cid = client.post("/api/cases", json={"name": "Enrich backfill"}).json()["id"]
+    rel = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]["path"]
+    case = Case.open(cid)
+
+    workqueue.drain(case)
+    assert client.post(f"/api/cases/{cid}/media/enrich", json={}).json() == {"queued": 0}
+
+    # Simulate a sidecar written by an older enrichment version.
+    media_engine.merge_item(case, rel, {"enrich_version": None})
+
+    assert client.post(f"/api/cases/{cid}/media/enrich", json={}).json() == {"queued": 1}
+    queued = case.list_jobs(kind=enrich_engine.ENRICH_KIND, state="queued")
+    assert [job["payload"]["path"] for job in queued] == [rel]
+
+
+def test_enrich_backfill_can_force_one_known_path(client, monkeypatch):
+    from azimut.engine import workqueue
+    from azimut.workspace import Case
+
+    monkeypatch.setattr(workqueue, "start_workers", False)
+    cid = client.post("/api/cases", json={"name": "Enrich one"}).json()["id"]
+    rel = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]["path"]
+    case = Case.open(cid)
+    workqueue.drain(case)
+
+    response = client.post(f"/api/cases/{cid}/media/enrich", json={"path": rel})
+
+    assert response.json() == {"queued": 1}
+    assert case.list_jobs(kind="enrich", state="queued")[0]["payload"]["path"] == rel
 
 
 def test_listing_carries_category_fields(client):
@@ -1154,3 +1205,197 @@ def test_download_use_cookies_threads_saved_preference(client, monkeypatch):
         assert job["status"] == "done"
 
     assert seen == [None, {"browser": "firefox"}]
+
+
+def test_concurrent_sidecar_merges_do_not_drop_each_other(client, monkeypatch):
+    """Two background writers touching one sidecar keep both fields: the merge is
+    a read-modify-write under the case lock, not a last-writer-wins overwrite.
+
+    The real worker is off: this is about the lock, not about when enrichment
+    happens to land.
+    """
+    import threading
+
+    from azimut.engine import media as media_engine
+    from azimut.engine import workqueue
+    from azimut.workspace import Case
+
+    monkeypatch.setattr(workqueue, "start_workers", False)
+    cid = client.post("/api/cases", json={"name": "Merge"}).json()["id"]
+    rel = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]["path"]
+    case = Case.open(cid)
+
+    start = threading.Barrier(2)
+
+    def write(patch):
+        start.wait(timeout=5)
+        for _ in range(20):
+            media_engine.merge_item(case, rel, patch)
+
+    threads = [
+        threading.Thread(target=write, args=({"thumbnail": "media/.thumbs/x.jpg"},)),
+        threading.Thread(target=write, args=({"dhash": "ff00ff00ff00ff00"},)),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    item = media_engine.read_item(case, rel)
+    assert item["thumbnail"] == "media/.thumbs/x.jpg"
+    assert item["dhash"] == "ff00ff00ff00ff00"
+
+
+def test_naming_an_item_survives_the_enrichment_of_the_same_sidecar(client, monkeypatch):
+    """The Save gate names an item just after filing it, while the enrichment job
+    that filing queued is writing the file's own facts to the same sidecar. Both
+    writes have to survive: the regression this guards dropped the typed name.
+    """
+    import threading
+
+    from azimut.engine import media as media_engine
+    from azimut.engine import workqueue
+    from azimut.workspace import Case
+
+    monkeypatch.setattr(workqueue, "start_workers", False)
+    cid = client.post("/api/cases", json={"name": "Naming"}).json()["id"]
+    rel = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]["path"]
+    case = Case.open(cid)
+
+    start = threading.Barrier(2)
+
+    def name_it():
+        start.wait(timeout=5)
+        for _ in range(20):
+            media_engine.update_media(case, rel, {"title": "Yard panorama"})
+
+    def enrich_it():
+        start.wait(timeout=5)
+        for _ in range(20):
+            media_engine.merge_item(case, rel, {"dhash": "ff00ff00ff00ff00"})
+
+    threads = [threading.Thread(target=name_it), threading.Thread(target=enrich_it)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    item = media_engine.read_item(case, rel)
+    assert item["title"] == "Yard panorama"
+    assert item["dhash"] == "ff00ff00ff00ff00"
+
+
+def test_media_page_filters_and_counts_the_files_that_state_a_position(client):
+    """The GPS facet is the browse-time half of import enrichment: a case of four
+    hundred files, and the question is which ones told us where they were taken.
+    A video's container tags count exactly like an image's EXIF — both land on the
+    same sidecar field."""
+    from azimut.engine import media as media_engine
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Positions"}).json()["id"]
+    case = Case.open(cid)
+    photo = _upload(client, cid, "photo.png", _png_bytes(color=(9, 0, 0))).json()["item"]
+    clip = _upload(client, cid, "clip.png", _png_bytes(color=(10, 0, 0))).json()["item"]
+    _upload(client, cid, "plain.png", _png_bytes(color=(11, 0, 0)))
+
+    media_engine.merge_item(case, photo["path"], {"gps": {"lat": 48.8583, "lon": 2.2945}})
+    # a video states its position in the container tags, not in EXIF
+    media_engine.merge_item(
+        case, clip["path"], {"kind": "video", "gps": {"lat": -33.86, "lon": 151.21}}
+    )
+
+    everything = client.get(f"/api/cases/{cid}/media/page").json()
+    assert everything["total"] == 3
+    assert everything["facets"]["gps_count"] == 2
+
+    located = client.get(f"/api/cases/{cid}/media/page", params={"gps": "true"}).json()
+    assert located["total"] == 2
+    assert {item["path"] for item in located["items"]} == {photo["path"], clip["path"]}
+    # the type chooser keeps counting inside the GPS filter, so its numbers say
+    # what clicking one would actually give
+    assert located["facets"]["category_counts"]["video"] == 1
+    assert located["facets"]["category_counts"]["image"] == 1
+
+    # ...and the GPS count follows the selected category the same way
+    videos = client.get(
+        f"/api/cases/{cid}/media/page", params={"gps": "true", "category": "video"}
+    ).json()
+    assert videos["total"] == 1
+    assert videos["facets"]["gps_count"] == 1
+
+
+def test_media_page_ignores_a_half_written_position(client):
+    """Enrichment never writes a partial point, but a hand-edited sidecar can hold
+    one. A row the map could not place must not be offered as locatable."""
+    from azimut.engine import media as media_engine
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Half position"}).json()["id"]
+    case = Case.open(cid)
+    item = _upload(client, cid, "odd.png", _png_bytes(color=(12, 0, 0))).json()["item"]
+
+    for broken in ({"lat": 48.0}, {"lat": 48.0, "lon": None}, {"lat": "north", "lon": "east"}):
+        media_engine.merge_item(case, item["path"], {"gps": broken})
+        page = client.get(f"/api/cases/{cid}/media/page").json()
+        assert page["facets"]["gps_count"] == 0, broken
+
+
+def test_the_browse_index_leaves_the_metadata_dumps_to_the_per_item_read(client):
+    """Enrichment's full EXIF/video dumps are hundreds of rows per file. The
+    listings are read 200 at a time (and whole, by the pickers), so a fat field on
+    every row would multiply every one of those responses. They live in the
+    sidecar and reach the UI one file at a time."""
+    from azimut.engine import media as media_engine
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Fat metadata"}).json()["id"]
+    case = Case.open(cid)
+    item = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]
+    exif = {f"Tag{n:03d}": "v" * 64 for n in range(120)}
+    media_engine.merge_item(case, item["path"], {"exif": exif, "gps": {"lat": 1.0, "lon": 2.0}})
+
+    page = client.get(f"/api/cases/{cid}/media/page").json()
+    listed = client.get(f"/api/cases/{cid}/media").json()
+    assert "exif" not in page["items"][0]
+    assert "exif" not in listed[0]
+    # the parsed facts are small and stay indexed: the grid's pin and the GPS
+    # filter both read them off the page
+    assert page["items"][0]["gps"] == {"lat": 1.0, "lon": 2.0}
+    assert page["facets"]["gps_count"] == 1
+
+    one = client.get(f"/api/cases/{cid}/media/item", params={"path": item["path"]}).json()
+    assert one["exif"] == exif
+    assert one["path"] == item["path"]
+    # the states the UI polls come along, so one read serves the whole panel
+    assert one["thumb_state"] == "ready"
+    assert one["entity_id"] == graph_read.entities(cid)[0]["id"]
+
+
+def test_the_per_item_read_refuses_a_path_outside_the_case(client):
+    cid = client.post("/api/cases", json={"name": "Traversal"}).json()["id"]
+
+    assert client.get(f"/api/cases/{cid}/media/item", params={"path": "../../etc/passwd"}).status_code == 400
+    assert client.get(f"/api/cases/{cid}/media/item", params={"path": "media/gone.png"}).status_code == 404
+
+
+def test_enrich_counts_the_jobs_the_queue_took(client):
+    """Naming a file whose kind carries no enrichment queues nothing, and the
+    toast must not announce work that will never run."""
+    from azimut.engine import workqueue
+
+    cid = client.post("/api/cases", json={"name": "Enrich count"}).json()["id"]
+    image = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]
+    audio = client.post(
+        f"/api/cases/{cid}/media/upload",
+        files={"file": ("note.mp3", io.BytesIO(b"ID3\x04\x00\x00\x00\x00\x00\x00"), "audio/mpeg")},
+    ).json()["item"]
+
+    assert audio["kind"] not in ("image", "video")
+    assert client.post(
+        f"/api/cases/{cid}/media/enrich", json={"path": audio["path"]}
+    ).json() == {"queued": 0}
+    assert client.post(
+        f"/api/cases/{cid}/media/enrich", json={"path": image["path"]}
+    ).json() == {"queued": 1}
+    workqueue.wait_until_idle()

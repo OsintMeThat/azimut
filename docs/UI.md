@@ -20,7 +20,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | Workspace | Tools today | Future tools land here |
 |---|---|---|
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
-| **Examine** | Inspect (Selection / Frame / Collage / Analyze) | EXIF, Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Shadow Clock, audio |
+| **Examine** | Inspect (Selection / Frame / Collage / Analyze) | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Shadow Clock, audio |
 | **Map** | Satellite, Coordinates | **one map, many modes**: Compare, Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
 | **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
 | *(Case)* | Sidebar | v2: Relations, Sheet; v4: Notes, Timeline; v5: Orchestrator |
@@ -68,7 +68,37 @@ remembered per workspace for the current session. Reloading restores the default
   so selecting a row never pushes the case out of view. It edits an artifact's
   preview, title, notes, provenance, derivation chain and folder, and provides
   open, locate and delete actions. The sidebar and Media Library modal share
-  `EntityDetails.svelte`.
+  `EntityDetails.svelte`. Image Details include a closed EXIF section with the
+  parsed capture date, GPS and every readable tag. Video Details use the same
+  pattern for local ffprobe container, stream and tag fields.
+
+## Relations
+
+Relations (ONTOLOGY §3) render through one component wherever they appear — the
+Details panel, the point's card on the map, and the case board next. One row per
+relation: the neighbour, how the edge reads in words, and, while it is only
+suggested, confirm. Any row can be taken back, whatever its status. Where the pair
+reads more than one way the verb is a select, so a wrong reading is corrected in
+place instead of deleted and restated. A neighbour that carries a point offers the
+map, because confirming "shot here" without seeing where is signing blind. Past six
+rows the list hides the rest behind one click, suggestions first.
+
+Stating one is a second component: pick the other entity from a bounded search of
+the types the vocabulary accepts, then the reading if the pair allows more than
+one. Details files it with Save; Satellite's Save-place dialog files it once the
+place exists. Both dialogs show the existing relations above the picker, so
+nowhere can a relation be added but not removed.
+
+## Sources
+
+The Media Library toolbar keeps explicit maintenance actions beside Import:
+**Thumbnails** repairs missing previews; **Enrich** queues local image
+EXIF/perceptual-hash and video metadata backfill for files not processed by the
+current version. A **GPS** toggle beside the type and folder filters narrows the
+list to the files whose own metadata states a position, and appears only in a case
+that holds some; how many is in its tooltip, not in its label. Those rows carry
+one pin glyph — coordinates in the tooltip, not in the title — and clicking it
+flies the map there.
 
 ## Map
 
@@ -109,9 +139,9 @@ The `…` button beside the filter opens the same set at full width, with previe
 search across title, note, place and provider, and three sorts. It is a modal, so
 it works over a fullscreen map. Folder browsing lives in the panel, not here.
 
-Editing a place or a capture (**Edit** on any row) sets its title, note and
-My-work folder in one dialog, and is the only place a new folder is created from
-the map.
+Editing a place or a capture (**Edit** on any row) sets its title, note, relation
+and My-work folder in one dialog, and is the only place a new folder is created
+from the map.
 
 Map controls sit in two clusters. **Tools** (measure, grid search, reference
 image) float top-left. **View** — fullscreen, OSM labels, saved work — continues
@@ -126,6 +156,15 @@ the proof in Geo Proof and lists the saved posts written from it. Two post title
 fit directly in the card; additional posts expand in place, and selecting one
 opens its draft in Geo Report. Hovering a card, a tree row or a search result
 lights the others.
+
+A card also holds the point's relations. The Saved index carries their count only,
+so a stack of five marks is never five requests: a lone mark opens its relations
+straight away — clicking a place to see which photos claim it is the point of the
+gesture — and a stack waits to be asked. A point enrichment proposed from a file's
+metadata is marked `suggested` in both the card and the tree, so a camera's reading
+never passes for analyst work. The Save-place dialog carries the matching write:
+one **Relate to…** field says why the point is being saved while the analyst still
+knows.
 
 ## Geo Proof
 

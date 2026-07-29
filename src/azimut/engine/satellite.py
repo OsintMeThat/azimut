@@ -21,6 +21,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from ..repository import EntityStatus
 from ..workspace import Case
 from . import continents
 from . import coords as coords_engine
@@ -59,6 +60,7 @@ def save_place(
     title: str | None = None,
     by: str = "satellite",
     extra_attrs: dict[str, Any] | None = None,
+    status: EntityStatus = "confirmed",
 ) -> dict[str, Any]:
     """Register a point as a navigable ``place`` — no image, no download.
 
@@ -68,6 +70,10 @@ def save_place(
     same way whatever route wrote them. The caller resolves the geography
     afterwards (``locate_on_save``); ``extra_attrs`` carries whatever only one
     of them has, such as the extension's source URL.
+
+    ``status`` is how a place the analyst has not seen yet enters the case:
+    import enrichment proposes one from a photo's EXIF as ``suggested`` (a
+    camera's claim, not a finding), and the map's own pin stays ``confirmed``.
     """
     attrs: dict[str, Any] = {
         "coords": coords_label(lat, lon, "dd"),
@@ -79,7 +85,7 @@ def save_place(
     }
     attrs.update(extra_attrs or {})
     label = (title or "").strip() or coords_label(lat, lon)
-    return case.add_entity("place", label, attrs=attrs, by=by, status="confirmed")
+    return case.add_entity("place", label, attrs=attrs, by=by, status=status)
 
 
 def is_capture(item: dict[str, Any]) -> bool:
@@ -167,7 +173,11 @@ def _saved_when(entity: dict[str, Any], capture: dict[str, Any] | None) -> str:
 
 
 def _saved_row(
-    case: Case, entity: dict[str, Any], capture: dict[str, Any] | None, proofs: int = 0
+    case: Case,
+    entity: dict[str, Any],
+    capture: dict[str, Any] | None,
+    proofs: int = 0,
+    relations: int = 0,
 ) -> dict[str, Any]:
     attrs = entity.get("attrs") or {}
     source = capture or {}
@@ -218,6 +228,13 @@ def _saved_row(
         # once, so a worked row is marked rather than doubled by a proof
         # marker landing on the capture it composes.
         "proofs": proofs,
+        # how many relations (non-chain edges) touch this point, so the popup can
+        # offer to load them without the index carrying the edges themselves.
+        "relations": relations,
+        # `suggested` means a tool proposed this point and nobody has looked yet —
+        # enrichment mints one per GPS-tagged file. The tree and the popup mark
+        # those rather than letting them read as the analyst's own work.
+        "status": (entity.get("provenance") or {}).get("status") or "confirmed",
     }
 
 
@@ -225,21 +242,32 @@ def saved_index(case: Case) -> list[dict[str, Any]]:
     """Places and captures as one flat list, newest first.
 
     Everything the Saved tree, the search modal and the map overlay read, and
-    nothing else: no media rows, no derivation, no provenance. Hundreds of rows
-    stay in the tens of KB, which is what lets the panel load the whole set on
-    case open instead of paging it.
+    nothing else: no media rows, no derivation, no edges. Work that hangs off a
+    point is a count (proofs, relations) rather than a list, so hundreds of rows
+    stay in the tens of KB — which is what lets the panel load the whole set on
+    case open instead of paging it. The popup loads the edges themselves from the
+    bounded chain endpoint when it opens.
     """
     by_path = {c["path"]: c for c in list_captures(case)}
-    # one grouped query for the whole case rather than one per row: this list
+    # two grouped queries for the whole case rather than one per row: this list
     # is read on case open and must not walk the graph row by row
     worked = case.count_dependents(link_type=links.DERIVED_FROM, from_type="proof")
+    related = case.count_incident_links(exclude_types=list(links.CHAIN_TYPES))
     rows = []
     for entity in saved_entities(case):
         is_image = entity["type"] == "capture"
         capture = by_path.get((entity.get("attrs") or {}).get("path")) if is_image else None
         if is_image and capture is None:
             continue  # the image is gone; the media listing is the authority
-        rows.append(_saved_row(case, entity, capture, worked.get(entity["id"], 0)))
+        rows.append(
+            _saved_row(
+                case,
+                entity,
+                capture,
+                worked.get(entity["id"], 0),
+                related.get(entity["id"], 0),
+            )
+        )
     # newest first, and within one second the later save wins — saving a place
     # and capturing it are one gesture, and they must not come back shuffled
     order = {row["id"]: i for i, row in enumerate(rows)}

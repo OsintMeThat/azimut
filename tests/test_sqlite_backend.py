@@ -143,13 +143,14 @@ INSERT INTO entities(id, type, label, attrs_json, prov_by, prov_at)
 
 def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
     """A schema-1 case.db is upgraded on open through the whole chain: the folder
-    column is added and backfilled (1->2), the jobs table is created (2->3), and
-    search/media browse indexes arrive in schema 4. A second open applies nothing."""
+    column is added and backfilled (1->2), the jobs table is created (2->3),
+    search/media browse indexes arrive in schema 4 and the position flag in 5. A
+    second open applies nothing."""
     db = tmp_path / "case.db"
     with sqlite3.connect(db) as conn:
         conn.executescript(_SCHEMA_V1)
 
-    store = SqliteCase.open(db)  # runs 1 -> 2 -> 3 -> 4 in place
+    store = SqliteCase.open(db)  # runs 1 -> 2 -> 3 -> 4 -> 5 in place
 
     # 1 -> 2: the folder column is backfilled and pages by folder.
     assert [e["id"] for e in store.page_entities(folder="Sources/Telegram")["items"]] == ["e1"]
@@ -158,11 +159,11 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
     store.enqueue_job("thumbnail", key="media/x.jpg")
     assert store.count_jobs() == {"queued": 1}
     with sqlite3.connect(db) as conn:
-        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "4"
+        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "5"
         applied = {
             r[0] for r in conn.execute("SELECT version FROM schema_migrations").fetchall()
         }
-        assert {2, 3, 4} <= applied
+        assert {2, 3, 4, 5} <= applied
         columns = {
             row[1] for row in conn.execute("PRAGMA table_info(entities)").fetchall()
         }
@@ -173,10 +174,69 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
 
     SqliteCase.open(db)  # idempotent — the second open applies nothing
     with sqlite3.connect(db) as conn:
-        for version in (2, 3, 4):
+        for version in (2, 3, 4, 5):
             assert conn.execute(
                 "SELECT COUNT(*) FROM schema_migrations WHERE version = ?", (version,)
             ).fetchone()[0] == 1
+
+
+# A schema-4 media index: the browse table as it shipped, before the position
+# flag. `media_index_ready` is set because a real v4 case has already backfilled;
+# without it, open would rescan the (absent) media folder and clear these rows.
+_SCHEMA_V4_MEDIA = """
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+CREATE TABLE entities (
+    id TEXT PRIMARY KEY, type TEXT NOT NULL, label TEXT NOT NULL,
+    attrs_json TEXT NOT NULL DEFAULT '{}', folder TEXT,
+    search_text TEXT NOT NULL DEFAULT '',
+    prov_by TEXT NOT NULL, prov_at TEXT NOT NULL,
+    prov_status TEXT NOT NULL DEFAULT 'confirmed', prov_source TEXT
+);
+CREATE TABLE links (
+    id TEXT PRIMARY KEY, from_id TEXT NOT NULL REFERENCES entities(id),
+    to_id TEXT NOT NULL REFERENCES entities(id), type TEXT NOT NULL,
+    prov_by TEXT NOT NULL, prov_at TEXT NOT NULL,
+    prov_status TEXT NOT NULL DEFAULT 'confirmed', prov_source TEXT
+);
+CREATE TABLE folders (path TEXT PRIMARY KEY);
+CREATE TABLE jobs (
+    id TEXT PRIMARY KEY, kind TEXT NOT NULL, job_key TEXT,
+    state TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3, payload_json TEXT NOT NULL DEFAULT '{}',
+    error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE media_items (
+    path TEXT PRIMARY KEY, entity_id TEXT UNIQUE, item_json TEXT NOT NULL,
+    filename TEXT NOT NULL, kind TEXT NOT NULL, folder TEXT,
+    name_sort TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0,
+    added_at TEXT NOT NULL, search_text TEXT NOT NULL,
+    source_type TEXT, source_op TEXT, imagery_mode TEXT
+);
+INSERT INTO meta(key, value) VALUES('schema_version', '4');
+INSERT INTO meta(key, value) VALUES('media_index_ready', '1');
+INSERT INTO media_items(path, item_json, filename, kind, name_sort, added_at, search_text)
+    VALUES('media/photo.jpg',
+           '{"path": "media/photo.jpg", "kind": "image", "gps": {"lat": 48.85, "lon": 2.29}}',
+           'photo.jpg', 'image', 'photo.jpg', '2026-01-01T00:00:00Z', 'photo.jpg');
+INSERT INTO media_items(path, item_json, filename, kind, name_sort, added_at, search_text)
+    VALUES('media/plain.jpg', '{"path": "media/plain.jpg", "kind": "image"}',
+           'plain.jpg', 'image', 'plain.jpg', '2026-01-02T00:00:00Z', 'plain.jpg');
+"""
+
+
+def test_open_backfills_the_position_flag_from_already_indexed_items(tmp_path):
+    """4 -> 5 reads the sidecar JSON already in the row, so a case enriched before
+    the column existed gains its GPS filter on open — no file scan, no re-enrich."""
+    db = tmp_path / "case.db"
+    with sqlite3.connect(db) as conn:
+        conn.executescript(_SCHEMA_V4_MEDIA)
+
+    store = SqliteCase.open(db)
+
+    page = store.page_media_items(gps=True)
+    assert [item["path"] for item in page["items"]] == ["media/photo.jpg"]
+    assert store.page_media_items()["facets"]["gps_count"] == 1
 
 
 def test_media_browse_index_pages_searches_and_counts_categories(tmp_path):
@@ -405,3 +465,25 @@ def test_convert_a_large_case_is_intact(tmp_workspace, tmp_path):
     ids = {e["id"] for e in store.list_entities()}
     for link in store.list_links():
         assert link["from"] in ids and link["to"] in ids
+
+
+def test_a_media_row_carries_the_entity_it_belongs_to(tmp_workspace):
+    """The link is already a column. A caller that needs the entity behind a path
+    reads it off the row instead of scanning the entities table for an attribute
+    match — which is what enrichment does for every near-duplicate it finds."""
+    from azimut.workspace import Case
+
+    case = Case.create("Media rows")
+    photo = case.add_entity("media", "Photo", attrs={"path": "media/photo.jpg"}, by="test")
+    case.upsert_media_item(
+        {"path": "media/photo.jpg", "filename": "photo.jpg", "kind": "image"},
+        entity_id=photo["id"],
+    )
+    case.upsert_media_item({"path": "media/loose.jpg", "filename": "loose.jpg", "kind": "image"})
+
+    by_path = {item["path"]: item for item in case.list_media_items()}
+    assert by_path["media/photo.jpg"]["entity_id"] == photo["id"]
+    # a row nothing filed says so rather than pointing at the wrong entity
+    assert by_path["media/loose.jpg"]["entity_id"] is None
+    assert case.media_items_by_paths(["media/photo.jpg"])[0]["entity_id"] == photo["id"]
+    assert case.page_media_items()["items"][0]["entity_id"] in (photo["id"], None)

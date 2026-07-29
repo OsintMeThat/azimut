@@ -89,6 +89,10 @@
              say so rather than printing 0°, 0° -->
         {#if flyable}<span class="mono">{coords(row)}</span>{:else}<span>No coordinates</span>{/if}
         {#if meta}<span class="bits">{meta}</span>{/if}
+        <!-- a point enrichment proposed from a file's metadata, not analyst work -->
+        {#if row.status === 'suggested'}
+          <span class="proposed" title="Proposed from a file's own metadata">suggested</span>
+        {/if}
       </span>
       {#if row.notes}<span class="note">{row.notes}</span>{/if}
     </span>
@@ -249,6 +253,14 @@
     content: '·';
     margin-right: 6px;
     color: var(--border-strong);
+  }
+  .proposed {
+    flex-shrink: 0;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: color-mix(in srgb, var(--accent) 85%, var(--text-2));
+    font-size: 9px;
   }
   .note {
     font-size: var(--fs-xs);

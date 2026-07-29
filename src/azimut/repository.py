@@ -86,6 +86,11 @@ class CaseRepository(Protocol):
     def list_links(self) -> list[dict[str, Any]]:
         ...
 
+    def get_link(self, link_id: str) -> dict[str, Any] | None:
+        """One edge by id, or None. The single-row read behind editing a relation,
+        so correcting one never walks the graph."""
+        ...
+
     def links_of(self, entity_id: str) -> list[dict[str, Any]]:
         """Every link incident to ``entity_id`` (either endpoint), in stable
         order. The bounded neighbour read behind the derivation chain — reads only
@@ -101,6 +106,17 @@ class CaseRepository(Protocol):
         work hangs off each of these rows?" would otherwise pay one query per
         row on a screen that must stay fast. Targets nothing points at are
         absent from the map rather than present with a zero.
+        """
+        ...
+
+    def count_incident_links(self, *, exclude_types: list[str]) -> dict[str, int]:
+        """``{entity_id: n}`` — links incident to each entity in either
+        direction, skipping ``exclude_types``, in one grouped query.
+
+        The bulk "does this row have relations?" read. Callers own the
+        vocabulary: passing the chain types leaves exactly the relations, which
+        is what the derivation chain excludes too. Entities with none are absent
+        rather than present with a zero.
         """
         ...
 
@@ -135,12 +151,16 @@ class CaseRepository(Protocol):
         kind: str | None = None,
         category: str | None = None,
         folder: str | None = None,
+        gps: bool = False,
         sort: str = "newest",
         direction: str | None = None,
         limit: int = 200,
         offset: int = 0,
     ) -> dict[str, Any]:
-        """Filter, sort and page media without scanning sidecar files."""
+        """Filter, sort and page media without scanning sidecar files.
+
+        ``gps`` keeps only the items whose own metadata states a position.
+        """
         ...
 
     # -- entity mutations --------------------------------------------------
@@ -186,6 +206,10 @@ class CaseRepository(Protocol):
         by: str,
         status: EntityStatus = "confirmed",
     ) -> list[dict[str, Any]]:
+        ...
+
+    def update_link(self, link_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Set a link's ``status`` and/or ``type``, keeping its id and provenance."""
         ...
 
     def remove_link(self, link_id: str) -> None:

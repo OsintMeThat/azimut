@@ -7,6 +7,7 @@
   import L from 'leaflet';
   import { paths } from '../../components/Icon.svelte';
   import { groupSavedMarkers, markerPrecision } from '../../lib/savedMarkers.js';
+  import { openEntity } from '../../lib/navigate.js';
   import SavedPopup from './SavedPopup.svelte';
 
   let {
@@ -21,6 +22,7 @@
     onproof,
     onpost,
     onshowproofs,
+    onrefresh,
   } = $props();
 
   const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', proof: 'proof' };
@@ -88,6 +90,14 @@
           map.closePopup();
           onshowproofs?.();
         },
+        // opening a related media leaves the map, so close the card first — the
+        // same gesture as every other row here, rather than a popup that
+        // vanishes without saying it would
+        onentity: (entity) => {
+          map.closePopup();
+          openEntity(entity);
+        },
+        onrefresh: () => onrefresh?.(),
       },
     });
     return host;
@@ -101,11 +111,59 @@
     return () => map.off('zoomend', sync);
   });
 
+  // Is a card open? Rebuilding the layer destroys it, and the card is a surface
+  // the analyst works in — settling relations, reading a stack. So a refreshed
+  // index waits for the card to close rather than pulling it out from under them.
+  let popupOpen = $state(false);
   $effect(() => {
     if (!map) return;
-    const marks = groupSavedMarkers(items, markerPrecision(zoom));
+    const opened = () => (popupOpen = true);
+    const closed = () => (popupOpen = false);
+    map.on('popupopen', opened);
+    map.on('popupclose', closed);
+    return () => {
+      map.off('popupopen', opened);
+      map.off('popupclose', closed);
+    };
+  });
+
+  // The group is replaced by `rebuild` and torn down when the overlay itself goes
+  // away — deliberately not through the data effect's cleanup, which Svelte runs
+  // before every re-run, including one that decides to defer.
+  let group = null;
+  let builtFor = null; // the case the current layer was built for
+
+  $effect(() => {
+    if (!map) return;
+    return () => {
+      group?.remove();
+      group = null;
+      elements = new Map();
+      if (mounted) {
+        unmount(mounted);
+        mounted = null;
+      }
+    };
+  });
+
+  $effect(() => {
+    const rows = items;
+    const cid = caseId;
+    const precision = markerPrecision(zoom);
+    const held = popupOpen; // tracked, so closing the card applies what waited
+    if (!map) return;
+    // A different case is never deferred: leaving another case's marks on the map
+    // would be worse than closing a card.
+    if (held && builtFor === cid) return;
+    builtFor = cid;
+    rebuild(rows, precision);
+  });
+
+  function rebuild(rows, precision) {
+    const marks = groupSavedMarkers(rows, precision);
     const next = new Map();
-    const group = L.layerGroup(
+    group?.remove();
+    group = L.layerGroup(
       marks.map((mark) => {
         const marker = L.marker([mark.lat, mark.lon], {
           icon: icon(mark),
@@ -131,15 +189,7 @@
       })
     ).addTo(map);
     elements = next;
-    return () => {
-      elements = new Map();
-      group.remove();
-      if (mounted) {
-        unmount(mounted);
-        mounted = null;
-      }
-    };
-  });
+  }
 
   // hover sync, both directions: the tree and the modal set hoveredId, the
   // markers above set it too, and this is the one place that paints it
