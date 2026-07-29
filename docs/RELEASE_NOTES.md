@@ -50,6 +50,31 @@
   file paths match.
 - **Preserved confirmed locations.** Metadata backfill does not replace a
   location relation the analyst has already confirmed.
+- **Predictable map opening.** A saved place without its own recorded zoom now
+  keeps the map's normal starting zoom instead of unexpectedly changing it.
+
+### Media evidence and relations
+
+- **Automatic media enrichment.** Image imports read EXIF and a perceptual
+  hash locally; video imports read container, stream and tag metadata. Details
+  keeps the readable fields together, and media with stated coordinates can be
+  filtered and opened on the map.
+- **GPS suggestions that respect analyst work.** Parsed coordinates propose a
+  linked place for review. A confirmed location always wins over a later
+  backfill.
+- **Shared relation vocabulary.** Details and saved-place cards can create,
+  review, confirm or remove the same typed relations, with a consistent reading
+  of each edge.
+
+### Support and continuity
+
+- **Settings backups keep presets.** Exporting and importing Settings now
+  carries reusable proof and post presets with the workspace configuration.
+- **Report an issue from About.** The form opens a prepared GitHub issue with
+  the version, operating system and recent warnings. Workspace paths and account
+  details are scrubbed before it leaves the app.
+- **A working product tour.** The README walkthrough now renders on GitHub and
+  PyPI instead of leaving an empty video element.
 
 ## Also in v0.2.5
 
