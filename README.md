@@ -41,6 +41,11 @@ New in v0.2.6:
   restore them or remove them permanently when the work is no longer needed.
 - Select several Files entries before deleting them, with one confirmation and
   one restore point for the complete action.
+- Enrich imported images and videos locally with readable metadata, GPS
+  suggestions and media filters that open stated locations on the map.
+- Create and review typed relations from Details or a saved place on the map.
+- Keep reusable proof and post presets in Settings backups, and report an issue
+  from About with scrubbed diagnostics.
 
 ## Install & run
 
@@ -197,7 +202,7 @@ wheel + Windows/Linux/macOS binaries, attaches them to a GitHub release, and
 publishes to PyPI. **Don't publish by hand.**
 
 ```bash
-git tag v0.2.4 && git push origin v0.2.4
+git tag v0.2.6 && git push origin v0.2.6
 ```
 
 One-time setup: register the repo as a

@@ -85,7 +85,7 @@ def test_purge_keeps_the_journal_when_windows_refuses_the_delete(
     monkeypatch.setattr(
         trash.shutil,
         "rmtree",
-        lambda _path: (_ for _ in ()).throw(PermissionError("locked")),
+        lambda _path, **_kwargs: (_ for _ in ()).throw(PermissionError("locked")),
     )
     with pytest.raises(PermissionError, match="locked"):
         trash.purge(case, deleted["trash"])
