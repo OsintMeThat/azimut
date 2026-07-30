@@ -4,7 +4,7 @@ import {
   QUAD_SIDES, quadEdgeMidpoints, moveQuadEdge, quadCentroid,
   quadsBounds, translateQuad, moveQuads, rotateQuads, scaleQuads, pinholeOps,
   buildFrameOps, hasVideoEdits, normalizeRightAngleRotation, rotationOps,
-  sourceStem, timecode, autoSaveNames, saveNameOf,
+  sourceStem, timecode, frameSaveName, frameSaveNames, autoSaveNames, saveNameOf,
 } from './inspect.js';
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -308,9 +308,22 @@ describe('scaleQuads — the block grows as one', () => {
 
 describe('sourceStem', () => {
   it('prefers the title, then the filename, then the path', () => {
-    expect(sourceStem({ label: 'Hangar clip', filename: 'dsc_1.mp4' })).toBe('Hangar clip');
+    expect(sourceStem({ title: 'Hangar clip', filename: 'dsc_1.mp4' })).toBe('Hangar clip');
     expect(sourceStem({ filename: 'dsc_1.mp4', path: 'media/dsc_1.mp4' })).toBe('dsc_1');
     expect(sourceStem({ path: 'media/sub/roof.png' })).toBe('roof');
+  });
+
+  it('reads the title the analyst gave a download, not what the site called the file', () => {
+    expect(sourceStem({ title: 'Convoy dashcam', filename: 'convoy_dashcam_20240612-181455.mp4' }))
+      .toBe('Convoy dashcam');
+  });
+
+  it('takes a title whole, since free text has no extension to strip', () => {
+    expect(sourceStem({ title: 'Convoy no. 3', filename: 'x.mp4' })).toBe('Convoy no. 3');
+  });
+
+  it('ignores a blank title rather than naming the frame Capture', () => {
+    expect(sourceStem({ title: '   ', filename: 'dsc_1.mp4' })).toBe('dsc_1');
   });
 
   it('strips only the extension, keeping dots inside the name', () => {
@@ -341,14 +354,93 @@ describe('timecode', () => {
   });
 });
 
+describe('frameSaveName', () => {
+  it('leads with the timecode so a folder of frames sorts in playback order', () => {
+    expect(frameSaveName('roof', 19)).toBe('00-00-19 roof');
+    expect(frameSaveName('roof', 3725)).toBe('01-02-05 roof');
+  });
+
+  it('sorts a video in playback order rather than by however the frames were taken', () => {
+    const taken = [90, 12, 3600];
+    const names = taken.map((t) => frameSaveName('roof', t));
+    expect([...names].sort()).toEqual(['00-00-12 roof', '00-01-30 roof', '01-00-00 roof']);
+  });
+
+  it('keeps the source name up front for an edited still, which has no timecode', () => {
+    expect(frameSaveName('roof', null)).toBe('roof (edited)');
+    expect(frameSaveName('roof', undefined)).toBe('roof (edited)');
+  });
+
+  it('names the first frame of a video rather than dropping a zero timecode', () => {
+    expect(frameSaveName('roof', 0)).toBe('00-00-00 roof');
+  });
+});
+
+describe('frameSaveNames', () => {
+  const names = (frames) => frameSaveNames(frames);
+
+  it('names by the second while no two frames share one', () => {
+    expect(names([{ stem: 'roof', time: 12 }, { stem: 'roof', time: 90 }]))
+      .toEqual(['00-00-12 roof', '00-01-30 roof']);
+  });
+
+  it('numbers the frames that would collide, and only those', () => {
+    expect(names([
+      { stem: 'Convoy dashcam', time: 0 },
+      { stem: 'Convoy dashcam', time: 1.1 },
+      { stem: 'Convoy dashcam', time: 1.4 },
+      { stem: 'Convoy dashcam', time: 21 },
+    ])).toEqual([
+      '00-00-00 Convoy dashcam',
+      '00-00-01 Convoy dashcam 1',
+      '00-00-01 Convoy dashcam 2',
+      '00-00-21 Convoy dashcam',
+    ]);
+  });
+
+  it('numbers a shared second in playback order, not tray order', () => {
+    expect(names([{ stem: 'roof', time: 19.4 }, { stem: 'roof', time: 19.1 }]))
+      .toEqual(['00-00-19 roof 2', '00-00-19 roof 1']);
+  });
+
+  it('keeps a name sort walking the video forward', () => {
+    const out = names([
+      { stem: 'roof', time: 19.4 },
+      { stem: 'roof', time: 12 },
+      { stem: 'roof', time: 19.1 },
+    ]);
+    expect([...out].sort()).toEqual(['00-00-12 roof', '00-00-19 roof 1', '00-00-19 roof 2']);
+  });
+
+  it('reads the same second across two sources as two different names', () => {
+    expect(names([{ stem: 'roof', time: 19.1 }, { stem: 'street', time: 19.4 }]))
+      .toEqual(['00-00-19 roof', '00-00-19 street']);
+  });
+
+  it('numbers two edits of one still, which carry no timecode at all', () => {
+    expect(names([{ stem: 'roof', time: null }, { stem: 'roof', time: null }]))
+      .toEqual(['roof (edited) 1', 'roof (edited) 2']);
+  });
+
+  it('numbers frames that sit in the same thousandth rather than naming both alike', () => {
+    const out = names([{ stem: 'roof', time: 19.001 }, { stem: 'roof', time: 19.004 }]);
+    expect(out).toEqual(['00-00-19 roof 1', '00-00-19 roof 2']);
+    expect(new Set(out).size).toBe(2);
+  });
+
+  it('holds a tray of one frame to the plain second', () => {
+    expect(names([{ stem: 'roof', time: 19.4 }])).toEqual(['00-00-19 roof']);
+  });
+});
+
 describe('autoSaveNames', () => {
   const items = [
-    { key: 'a', defaultName: 'roof 00-01-00' },
-    { key: 'b', defaultName: 'roof 00-02-00' },
+    { key: 'a', defaultName: '00-01-00 roof' },
+    { key: 'b', defaultName: '00-02-00 roof' },
   ];
 
   it('starts every field on the item default', () => {
-    expect(autoSaveNames(items)).toEqual(['roof 00-01-00', 'roof 00-02-00']);
+    expect(autoSaveNames(items)).toEqual(['00-01-00 roof', '00-02-00 roof']);
   });
 
   it('numbers the gallery under a base name', () => {
@@ -365,12 +457,12 @@ describe('autoSaveNames', () => {
   });
 
   it('ignores a whitespace-only base name', () => {
-    expect(autoSaveNames(items, '   ')).toEqual(['roof 00-01-00', 'roof 00-02-00']);
+    expect(autoSaveNames(items, '   ')).toEqual(['00-01-00 roof', '00-02-00 roof']);
   });
 });
 
 describe('saveNameOf', () => {
-  const item = { key: 'a', defaultName: 'roof 00-01-00' };
+  const item = { key: 'a', defaultName: '00-01-00 roof' };
 
   it('files under what stands in the field', () => {
     expect(saveNameOf(item, 'Front door')).toBe('Front door');
@@ -381,8 +473,8 @@ describe('saveNameOf', () => {
   });
 
   it('falls back to the default rather than filing something nameless', () => {
-    expect(saveNameOf(item, '   ')).toBe('roof 00-01-00');
-    expect(saveNameOf(item, '')).toBe('roof 00-01-00');
-    expect(saveNameOf(item)).toBe('roof 00-01-00');
+    expect(saveNameOf(item, '   ')).toBe('00-01-00 roof');
+    expect(saveNameOf(item, '')).toBe('00-01-00 roof');
+    expect(saveNameOf(item)).toBe('00-01-00 roof');
   });
 });

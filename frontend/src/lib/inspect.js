@@ -19,8 +19,20 @@ export const uid = (prefix = 'id') => `${prefix}_${Date.now().toString(36)}_${_s
 // What the user types at the Save gate becomes the media title *and* the stem of
 // the file on disk, so these defaults have to read as names, not placeholders.
 
+/**
+ * The name a savable inherits from what it was made out of.
+ *
+ * `title` is what the analyst called that media and what the library shows, so it
+ * comes first: a frame cut from "Convoy dashcam" should read as that, not as the
+ * download's own `convoy_dashcam_20240612-181455.mp4`. The filename and the path
+ * are fallbacks for media nobody has titled.
+ */
 export function sourceStem(source) {
-  const raw = source?.label || source?.filename || source?.path || '';
+  // A title is already a name, so it is taken whole: stripping a trailing
+  // extension off free text would cut "Convoy no. 3" down to "Convoy no".
+  const title = String(source?.title ?? '').trim();
+  if (title) return title;
+  const raw = source?.filename || source?.path || '';
   const base = String(raw).split(/[\\/]/).pop() ?? '';
   return base.replace(/\.[^.]+$/, '') || 'Capture';
 }
@@ -30,6 +42,44 @@ export function timecode(seconds) {
   const t = Math.max(0, Math.round(Number(seconds) || 0));
   const pad = (n) => String(n).padStart(2, '0');
   return `${pad(Math.floor(t / 3600))}-${pad(Math.floor((t % 3600) / 60))}-${pad(t % 60)}`;
+}
+
+/**
+ * A captured frame's default name, timecode first.
+ *
+ * The timecode leads because these files end up side by side in a folder, where
+ * sorting by name should walk the video in playback order. Trailing it sorted
+ * frames from several videos into interleaved blocks instead. An edited still has
+ * no timecode, so it keeps the source name up front.
+ */
+export function frameSaveName(stem, time) {
+  return time == null ? `${stem} (edited)` : `${timecode(time)} ${stem}`;
+}
+
+/**
+ * Default names for every frame in the tray, numbered only where they'd collide.
+ *
+ * Naming by the second reads best, but two frames grabbed a few tenths apart
+ * round to one name. Those get a counter, and only those, so the common one
+ * frame per second stays clean. Inside a second the counter follows playback
+ * order rather than the order the tray was filled in, which keeps a name sort
+ * walking the video forward even when frames were taken back to front.
+ */
+export function frameSaveNames(frames) {
+  const key = (f) => (f.time == null ? `edit ${f.stem}` : `${timecode(f.time)} ${f.stem}`);
+  const groups = new Map();
+  frames.forEach((f, i) => {
+    const k = key(f);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(i);
+  });
+  const counter = frames.map(() => '');
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+    const byTime = [...members].sort((a, b) => (frames[a].time ?? 0) - (frames[b].time ?? 0));
+    byTime.forEach((index, rank) => { counter[index] = ` ${rank + 1}`; });
+  }
+  return frames.map((f, i) => `${frameSaveName(f.stem, f.time)}${counter[i]}`);
 }
 
 /**

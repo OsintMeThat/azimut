@@ -6,7 +6,7 @@
   import {
     adjustDefaults, buildFrameOps, previewStyle, uid, videoSeed, initialQuad, VIDEO_ADJUST_IDS,
     collageBounds, quadFromCropRect, cropImgStyle, cropAspect, styleText, hasVideoEdits,
-    normalizeRightAngleRotation, rotationOps, sourceStem, timecode, autoSaveNames, saveNameOf,
+    normalizeRightAngleRotation, rotationOps, sourceStem, frameSaveNames, autoSaveNames, saveNameOf,
   } from '../lib/inspect.js';
   import { isDefaultName, nextName, savedSlugs, savedTitles, savedTitle, slugify } from '../lib/naming.js';
   import { createHistory } from '../lib/history.js';
@@ -249,10 +249,17 @@
     [videoPreview.transform, videoRotation ? `rotate(${videoRotation}deg)` : ''].filter(Boolean).join(' ')
   );
 
+  // A frame carries the path it was cut from and nothing else, so the title has
+  // to be looked back up: without this, every frame of a downloaded video is named
+  // after the download's filename instead of what the analyst called it.
+  const titleByPath = $derived(new Map(mediaList.map((m) => [m.path, m.title])));
+  const stemFor = (path, item = null) =>
+    sourceStem({ ...item, path, title: titleByPath.get(path) ?? item?.title });
+
   const savables = $derived.by(() => {
     const out = [];
     const cid = caseState.current?.id;
-    const stem = sourceStem(session.source);
+    const stem = stemFor(session.source?.path, session.source);
     if (session.source?.kind === 'video' && hasVideoEdits(videoFilters, session.videoAdjust, videoRotation)) {
       const t = session.source.thumbnail ? `/files/${cid}/${session.source.thumbnail}` : null;
       out.push({
@@ -261,11 +268,15 @@
         saved: !!session.saved.video,
       });
     }
-    for (const fr of session.frames) {
-      const frameStem = sourceStem({ path: fr.path }) || stem;
+    // Named as a set, not one by one: a frame only needs sub-second digits when
+    // another frame in the tray lands in the same second.
+    const frameNames = frameSaveNames(
+      session.frames.map((fr) => ({ stem: stemFor(fr.path), time: fr.time })),
+    );
+    for (const [i, fr] of session.frames.entries()) {
       out.push({
         key: `frame:${fr.id}`, kind: 'frame', frame: fr, thumb: fr.url,
-        defaultName: fr.time == null ? `${frameStem} (edited)` : `${frameStem} ${timecode(fr.time)}`,
+        defaultName: frameNames[i],
         filter: previewStyle(filters, fr.adjust).filter,
         saved: !!session.saved[`frame:${fr.id}`],
       });

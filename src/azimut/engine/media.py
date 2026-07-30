@@ -137,9 +137,21 @@ def media_kind(filename: str) -> str:
     return "file"
 
 
+# Windows refuses these as a filename whatever the extension follows, and a case
+# folder has to open on all three platforms: an item someone titles "AUX" files
+# happily on Linux and then breaks the copy opened on Windows.
+_WINDOWS_RESERVED = frozenset(
+    ["con", "prn", "aux", "nul"]
+    + [f"com{n}" for n in range(1, 10)]
+    + [f"lpt{n}" for n in range(1, 10)]
+)
+
+
 def safe_filename(name: str) -> str:
     name = Path(name).name  # strip any path component
     name = re.sub(r"[^\w.\- ]+", "_", name).strip(" .") or "file"
+    if name.split(".", 1)[0].lower() in _WINDOWS_RESERVED:
+        name = f"_{name}"
     return name[:150]
 
 

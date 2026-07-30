@@ -290,6 +290,44 @@ def test_save_frames_files_selected_images_into_folder(client):
     assert entity["provenance"]["by"] == "inspect"
 
 
+def test_saved_frame_is_filed_under_its_name_alone(client):
+    """The tray's name is the filename: no wall-clock stamp trailing it.
+
+    The name the tray sends already carries the timecode, and the analyst reads
+    these files in a folder outside the app, so anything else added here is noise.
+    """
+    cid = client.post("/api/cases", json={"name": "Named"}).json()["id"]
+    item = _upload(client, cid, "orig.png")
+
+    res = client.post(
+        f"/api/cases/{cid}/inspect/save-frames",
+        json={"items": [{"path": item["path"],
+                         "ops": [{"op": "brightness", "params": {"amount": 1.5}}],
+                         "label": "00-00-19 Convoy dashcam"}]},
+    ).json()
+
+    assert res["saved"][0]["item"]["path"] == "media/00-00-19 Convoy dashcam.png"
+
+
+def test_two_frames_saved_under_one_name_keep_both_files(client):
+    """Dropping the stamp must not let the second save land on the first."""
+    cid = client.post("/api/cases", json={"name": "Twice"}).json()["id"]
+    item = _upload(client, cid, "orig.png")
+
+    paths = []
+    for amount in (1.5, 0.5):  # different pixels, so neither is deduped away
+        res = client.post(
+            f"/api/cases/{cid}/inspect/save-frames",
+            json={"items": [{"path": item["path"],
+                             "ops": [{"op": "brightness", "params": {"amount": amount}}],
+                             "label": "00-00-19 Convoy dashcam"}]},
+        ).json()
+        paths.append(res["saved"][0]["item"]["path"])
+
+    assert paths == ["media/00-00-19 Convoy dashcam.png", "media/00-00-19 Convoy dashcam-1.png"]
+    assert len({m["path"] for m in client.get(f"/api/cases/{cid}/media").json()}) == 3
+
+
 def test_compose_perspective_files_one_collage(client):
     cid = client.post("/api/cases", json={"name": "Compose"}).json()["id"]
     a = _upload(client, cid, "a.png", _png_bytes(color=(10, 20, 30), size=(80, 60)))
@@ -983,7 +1021,7 @@ def test_saved_frame_filename_follows_the_typed_name(client):
     ).json()["saved"][0]
 
     name = res["item"]["path"].rsplit("/", 1)[-1]
-    assert name.startswith("Hangar_roof_") and name.endswith(".png")
+    assert name == "Hangar roof.png"
     assert "dsc_00421" not in name
 
     media = next(
@@ -1032,7 +1070,7 @@ def test_unnamed_frame_keeps_the_source_stem_and_tag(client):
     ).json()["saved"][0]
 
     name = res["item"]["path"].rsplit("/", 1)[-1]
-    assert name.startswith("orig_edit_")
+    assert name == "orig_edit.png"
 
 
 def test_composed_collage_filename_follows_the_typed_name(client):
@@ -1053,7 +1091,7 @@ def test_composed_collage_filename_follows_the_typed_name(client):
         },
     ).json()
 
-    assert res["item"]["path"].rsplit("/", 1)[-1].startswith("Yard_panorama_")
+    assert res["item"]["path"].rsplit("/", 1)[-1] == "Yard panorama.png"
     media = next(
         m for m in client.get(f"/api/cases/{cid}/media").json()
         if m["path"] == res["item"]["path"]
