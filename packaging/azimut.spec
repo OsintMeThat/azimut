@@ -36,6 +36,20 @@ if sys.platform == "linux":
 # Grabs azimut/static/** (index.html, assets, favicon) from the installed package.
 datas = collect_data_files("azimut")
 
+# The IANA timezone database, which `zoneinfo` falls back to when the OS has none
+# — that is Windows. Nothing imports `tzdata` by name, so PyInstaller cannot
+# discover it, and a missing database would not crash: engine/localtime.py would
+# quietly answer UTC and every local time in the sun and moon panel would be wrong
+# on Windows only. Collected explicitly for all three platforms, at 3 MB.
+#
+# Both halves are needed. `zoneinfo` reaches a zone as
+# `importlib.resources.files("tzdata.zoneinfo.Europe")`, so every region folder has
+# to be an importable package (the submodules) as well as a file on disk (the data)
+# — naming `tzdata` alone would ship the TZif files under a package Python cannot
+# import, which is the same silent UTC.
+datas += collect_data_files("tzdata")
+hiddenimports += collect_submodules("tzdata")
+
 # Static ffmpeg / ffprobe, when the release CI has dropped them in
 # packaging/vendor/. They land at the bundle root, where engine/ffmpeg.py looks
 # for them (sys._MEIPASS). Absent (a plain local build), the binary just falls

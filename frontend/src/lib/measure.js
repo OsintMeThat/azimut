@@ -15,6 +15,28 @@ export function haversine(a, b) {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
 }
 
+/**
+ * The point reached from `from` on a bearing (degrees from north) after
+ * travelling `metres` along a great circle. Draws the sun and moon azimuth rays
+ * on the map, and is the primitive a bearing measure needs.
+ */
+export function destination(from, bearing, metres) {
+  const angular = metres / R;
+  const lat1 = rad(from.lat);
+  const lon1 = rad(from.lon);
+  const theta = rad(bearing);
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(angular) + Math.cos(lat1) * Math.sin(angular) * Math.cos(theta)
+  );
+  const lon2 =
+    lon1 +
+    Math.atan2(
+      Math.sin(theta) * Math.sin(angular) * Math.cos(lat1),
+      Math.cos(angular) - Math.sin(lat1) * Math.sin(lat2)
+    );
+  return { lat: (lat2 * 180) / Math.PI, lon: (((lon2 * 180) / Math.PI + 540) % 360) - 180 };
+}
+
 /** Total length of a polyline through the points, in metres. */
 export function pathLength(points) {
   let total = 0;

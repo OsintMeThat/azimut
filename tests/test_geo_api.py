@@ -132,3 +132,184 @@ def test_parse_accepts_the_formats_it_emits(client):
 
 def test_parse_rejects_gibberish_with_422(client):
     assert client.post("/api/geo/parse", json={"text": "hello world"}).status_code == 422
+
+
+# -- /api/geo/sky ---------------------------------------------------------------
+#
+# The geometry itself is covered in tests/test_sky.py. What matters here is the
+# contract the panel reads: local and UTC side by side, states instead of errors,
+# a curve that spans the day, and validation at the edge.
+
+
+def test_sky_reports_every_instant_in_local_time_and_utc(client):
+    response = client.get(
+        "/api/geo/sky",
+        params={"lat": 48.8584, "lon": 2.2945, "date": "2026-07-30", "time": "14:20"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["zone"]["name"] == "Europe/Paris"
+    assert body["zone"]["abbreviation"] == "CEST"
+    assert body["moment"]["local"].startswith("2026-07-30T14:20")
+    assert body["moment"]["utc"] == "2026-07-30T12:20:00Z"
+    for stamp in (body["sun"]["rise"], body["sun"]["set"], body["sun"]["transit"]):
+        assert stamp["utc"].endswith("Z")
+        assert stamp["offset"] == "+02:00"
+        assert stamp["abbreviation"] == "CEST"
+
+
+def test_sky_gives_the_positions_at_the_moment_asked_for(client):
+    response = client.get(
+        "/api/geo/sky",
+        params={"lat": 48.8584, "lon": 2.2945, "date": "2026-07-30", "time": "14:20"},
+    )
+    body = response.json()
+    assert 180 < body["sun"]["azimuth"] < 220  # early afternoon, past due south
+    assert body["sun"]["altitude"] > 50
+    assert 0 <= body["moon"]["illuminated"] <= 1
+    assert body["moon"]["phase"]
+    assert isinstance(body["moon"]["waxing"], bool)
+    assert body["moon"]["distance_km"] > 300_000
+
+
+def test_sky_defaults_to_local_midday_today(client):
+    """No date and no time: the point's own today, read at local noon."""
+    body = client.get("/api/geo/sky", params={"lat": 48.8584, "lon": 2.2945}).json()
+    assert body["moment"]["local"][11:16] == "12:00"
+    assert body["date"] == body["moment"]["local"][:10]
+
+
+def test_sky_reports_the_midnight_sun_as_a_state(client):
+    body = client.get(
+        "/api/geo/sky", params={"lat": 69.6492, "lon": 18.9553, "date": "2026-06-21"}
+    ).json()
+    assert body["sun"]["state"] == "always_up"
+    assert body["sun"]["rise"] is None
+    assert body["sun"]["set"] is None
+    assert body["sun"]["transit_altitude"] > 40
+
+
+def test_sky_reports_polar_night_as_a_state(client):
+    body = client.get(
+        "/api/geo/sky", params={"lat": -89.0, "lon": 0.0, "date": "2026-06-21"}
+    ).json()
+    assert body["sun"]["state"] == "always_down"
+    assert body["twilight"]["astronomical"]["state"] == "always_down"
+
+
+def test_sky_carries_the_moon_events_as_lists(client):
+    body = client.get(
+        "/api/geo/sky", params={"lat": 48.8584, "lon": 2.2945, "date": "2026-07-30"}
+    ).json()
+    assert isinstance(body["moon"]["rises"], list)
+    assert len(body["moon"]["rise_azimuths"]) == len(body["moon"]["rises"])
+    assert len(body["moon"]["set_azimuths"]) == len(body["moon"]["sets"])
+
+
+def test_sky_curve_spans_the_day_in_minutes_from_local_midnight(client):
+    body = client.get(
+        "/api/geo/sky", params={"lat": 48.8584, "lon": 2.2945, "date": "2026-07-30"}
+    ).json()
+    curve = body["curve"]
+    assert curve["minutes"][0] == 0
+    assert curve["minutes"][-1] == 1440
+    for key in ("sun_altitude", "sun_azimuth", "moon_altitude", "moon_azimuth"):
+        assert len(curve[key]) == len(curve["minutes"])
+
+
+def test_sky_curve_follows_a_daylight_saving_day(client):
+    """The x axis is minutes of the local day, so it is 23 hours long in March."""
+    body = client.get(
+        "/api/geo/sky", params={"lat": 48.8584, "lon": 2.2945, "date": "2026-03-29"}
+    ).json()
+    assert body["curve"]["minutes"][-1] == 1380
+    assert body["zone"]["abbreviation"] == "CEST"
+
+
+def test_sky_curve_carries_the_wall_clock_of_each_sample(client):
+    """Anything that labels a sample to the reader reads this, because the wall
+    clock cannot be divided out of the minute count."""
+    body = client.get(
+        "/api/geo/sky", params={"lat": 48.8584, "lon": 2.2945, "date": "2026-07-30"}
+    ).json()
+    curve = body["curve"]
+    assert len(curve["clock"]) == len(curve["minutes"])
+    assert curve["clock"][0] == "00:00"
+    assert curve["clock"][6] == "01:00"
+    assert curve["clock"][-1] == "00:00"  # the following midnight
+
+
+def test_sky_clock_skips_the_hour_daylight_saving_took(client):
+    """On the spring-forward day the local clock jumps from 02:00 to 03:00, so no
+    sample reads 02:xx while the minute count runs straight through."""
+    body = client.get(
+        "/api/geo/sky", params={"lat": 48.8584, "lon": 2.2945, "date": "2026-03-29"}
+    ).json()
+    curve = body["curve"]
+    assert not [stamp for stamp in curve["clock"] if stamp.startswith("02:")]
+    assert "03:00" in curve["clock"]
+    # the sample two hours of elapsed time in reads 03:00, not 02:00
+    assert curve["clock"][curve["minutes"].index(120)] == "03:00"
+
+
+def test_sky_clock_repeats_the_hour_daylight_saving_gave_back(client):
+    """And on the autumn day 02:00 to 03:00 happens twice."""
+    body = client.get(
+        "/api/geo/sky", params={"lat": 48.8584, "lon": 2.2945, "date": "2026-10-25"}
+    ).json()
+    assert body["curve"]["clock"].count("02:00") == 2
+
+
+def test_sky_accepts_a_zone_override(client):
+    body = client.get(
+        "/api/geo/sky",
+        params={
+            "lat": 48.8584,
+            "lon": 2.2945,
+            "date": "2026-07-30",
+            "time": "12:00",
+            "zone": "UTC",
+        },
+    ).json()
+    assert body["zone"]["name"] == "UTC"
+    assert body["moment"]["utc"] == "2026-07-30T12:00:00Z"
+
+
+@pytest.mark.parametrize("zone", ["Mars/Olympus", "../../../etc/passwd", "A" * 5000])
+def test_sky_refuses_a_zone_it_cannot_load(client, zone):
+    """Rather than answering in UTC under the name that was asked for, which would
+    put every time in the response an offset out with nothing saying so."""
+    response = client.get(
+        "/api/geo/sky",
+        params={"lat": 48.8584, "lon": 2.2945, "date": "2026-07-30", "zone": zone},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"lat": 91, "lon": 0},
+        {"lat": 0, "lon": 181},
+        {"lat": 0, "lon": 0, "date": "30-07-2026"},
+        {"lat": 0, "lon": 0, "time": "25h"},
+    ],
+)
+def test_sky_validates_at_the_edge(client, params):
+    assert client.get("/api/geo/sky", params=params).status_code == 422
+
+
+def test_sky_never_touches_the_network(client, monkeypatch):
+    """Opening the panel must not phone out. The reverse geocode beside it in the
+    same tool does; this route is pure computation, and stays that way."""
+    import httpx
+
+    def explode(*args, **kwargs):
+        raise AssertionError("the sky is computed locally")
+
+    monkeypatch.setattr(httpx.Client, "get", explode)
+    monkeypatch.setattr(httpx.Client, "send", explode)
+    response = client.get(
+        "/api/geo/sky", params={"lat": 48.8584, "lon": 2.2945, "date": "2026-07-30"}
+    )
+    assert response.status_code == 200

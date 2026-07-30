@@ -37,6 +37,13 @@ dependencies = [
     "numpy>=1.26,<3",
     "requests>=2.31,<3",
     "python-multipart>=0.0.9,<1.0",
+    # Timezone from a latitude/longitude, for the civil local time the sun and
+    # moon panel shows beside UTC (engine/sky.py). Chosen over timezonefinder,
+    # which carries 65 MB of tz polygons into each of the three binaries where
+    # this ships prebuilt abi3 wheels at 9 MB. tzdata is what zoneinfo reads on
+    # Windows, which has no system tz database.
+    "tzfpy>=1.3,<2",
+    "tzdata>=2024.1,<2027",
     # Whole-bundle AES-GCM encryption. Version 49 dropped Intel macOS wheels,
     # while the other release targets can stay current within the tested major.
     "cryptography>=45,<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",

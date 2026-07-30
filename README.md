@@ -21,7 +21,7 @@ to fix a point on the map.*
 | **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services. Nothing uploads on its own. |
 | **Inspect** | A scratch workspace over any photo or video: frame adjustments, editable crop, sharpest-frame capture, hand-made collage with per-piece warp/scale/rotate, auto-stitch to solve a panorama's layout, and ELA hints. Nothing enters the case until you save. |
 | **Satellite** | Coordinates or a place name become an imagery crop, with select-area capture, map rotation, measurement tools, reference overlays and editable AOI grids for area review. Esri/OSM by default, plus Sentinel-2 with a date calendar and a cloud-ceiling slider; add a Mapbox or Google key for more basemaps. |
-| **Coordinates** | Convert common coordinate formats, copy the result, and open map or geocoding links. |
+| **Coords & Sky** | Convert common coordinate formats, copy the result, open map or geocoding links, and read the sun and moon at that point on a date: rise, set, azimuth, altitude, twilights, moon phase and bright-limb angle, in local time and UTC, computed offline. |
 | **Geo Proof** | Start a named proof from a reusable house style, select case panels with search, compose them in a grid or free layout, annotate with colored shapes/freehand/text, and export `proof.png` plus a re-editable spec. |
 | **Geo Report** | Turn a proof into a prepared thread for X, Bluesky, or Mastodon: coordinates, plus code, attribution, target-specific character counts, media, and a structured Markdown case note with linked evidence. |
 | **Notebook** | Tabbed Markdown notes with local media, Mermaid diagrams, linked case evidence, broken-reference markers and a print-ready PDF view. |

@@ -1,15 +1,18 @@
 <script>
-  // Coordinates — paste one point in any notation, read it back in every
-  // other, and jump to the nine external maps. Conversion runs on the local
-  // backend; converting also triggers a Nominatim reverse-geocode for the
-  // place name (the app's local-first rule names geocoding as one of the
-  // actions that inherently needs the network), reported as "Not available"
-  // if that call fails.
+  // Coords & Sky — paste one point in any notation, read it back in every
+  // other, jump to the nine external maps, and read what the sun and the moon
+  // did there on a date. Conversion runs on the local backend; converting also
+  // triggers a Nominatim reverse-geocode for the place name (the app's
+  // local-first rule names geocoding as one of the actions that inherently
+  // needs the network), reported as "Not available" if that call fails. The
+  // sky panel below is pure local computation and never goes out.
   import { api } from '../lib/api.js';
-  import { toast, uiState } from '../lib/state.svelte.js';
+  import { caseState, toast, uiState } from '../lib/state.svelte.js';
   import { mapLinks } from '../lib/maplinks.js';
   import { bidiSafe } from '../lib/bidi.js';
   import Icon from '../components/Icon.svelte';
+  import SkyPanel from './coordinates/SkyPanel.svelte';
+  import PointPicker from './coordinates/PointPicker.svelte';
 
   // Mirrors the label order of engine/geo.py's all_formats(), so the empty
   // state can preview the field list before any coordinate is parsed.
@@ -24,6 +27,7 @@
   ];
 
   let text = $state('');
+  let pickerRows = $state(null); // the case's saved points, loaded when asked for
   let point = $state(null); // { lat, lon, formats: [{id,label,value}] }
   let parsing = $state(false);
   let place = $state(null); // reverse-geocode result
@@ -66,6 +70,28 @@
     }
   }
 
+  // Borrow a coordinate from the case's own saved work rather than retyping it.
+  // The index is fetched when the picker is opened, not on mount: a tab that has
+  // not been asked anything stays quiet.
+  async function openPicker() {
+    if (!caseState.current) {
+      toast('Open a case to pick one of its points', 'warn');
+      return;
+    }
+    try {
+      pickerRows = await api.get(`/api/cases/${caseState.current.id}/satellite/index`);
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  }
+
+  // The row's own position, read back through the same parser as typed input, so
+  // one code path fills every notation and the sky panel below.
+  function usePoint(row) {
+    text = `${row.lat}, ${row.lon}`;
+    parse();
+  }
+
   // Hand the point to the Satellite map and switch tabs; it consumes
   // uiState.gotoCoords on the next tick and flies there (lib/navigate.js).
   function openInSatellite() {
@@ -77,7 +103,7 @@
 
 <div class="tool">
   <div class="tool-header">
-    <h2>Coordinates</h2>
+    <h2>Coords &amp; Sky</h2>
   </div>
 
   <div class="tool-body">
@@ -95,15 +121,22 @@
         title="Decimal, DMS, DDM, UTM, MGRS, plus code or geohash"
       />
       <button type="submit" class="btn" disabled={!text.trim() || parsing}>
-        <Icon name="search" size={15} /> {parsing ? '…' : 'Convert'}
+        <Icon name="search" size={15} /> {parsing ? '…' : 'Look up'}
       </button>
+      <button
+        type="button"
+        class="btn btn-ghost"
+        title="Open a place or a capture saved in this case"
+        onclick={openPicker}>…</button
+      >
     </form>
 
     <div class="sheet">
       <div class="head-row">
         <span class="place" class:muted={!point || placeLoading}>
           {#if !point}
-            Paste a coordinate to read it back in every notation.
+            Paste a coordinate, or open one this case has saved, to read it back
+            in every notation.
           {:else if placeLoading}
             Resolving place…
           {:else}
@@ -153,8 +186,17 @@
           {/each}
         </div>
       </div>
+
+      <!-- Mounted with or without a point: with none it previews what it will
+           answer, so the sun and moon read as available rather than absent. -->
+      {#key point ? `${point.lat},${point.lon}` : 'empty'}
+        <SkyPanel {point} />
+      {/key}
     </div>
   </div>
+  {#if pickerRows}
+    <PointPicker rows={pickerRows} onpick={usePoint} onclose={() => (pickerRows = null)} />
+  {/if}
 </div>
 
 <style>
@@ -172,7 +214,7 @@
     display: flex;
     flex-direction: column;
     padding: 16px;
-    max-width: 720px;
+    max-width: 1120px;
   }
   .head-row {
     display: flex;
@@ -203,7 +245,10 @@
   }
   .row {
     display: grid;
-    grid-template-columns: 150px 1fr auto;
+    /* The value column is capped rather than free: a row spans the whole sheet,
+       so the copy icon that follows it would otherwise land an arm's length from
+       the text it copies. */
+    grid-template-columns: 170px minmax(0, 480px) auto;
     align-items: center;
     gap: 12px;
     padding: 7px 8px;

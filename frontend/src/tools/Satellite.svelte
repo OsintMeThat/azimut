@@ -9,6 +9,7 @@
   } from '../lib/state.svelte.js';
   import { mapLinks } from '../lib/maplinks.js';
   import * as measure from '../lib/measure.js';
+  import { litPath, glyphRotation } from '../lib/moonphase.js';
   import * as gridSearch from '../lib/gridSearch.js';
   import { dragBearing, pivotPanOffset } from '../lib/satRotate.js';
   import { clampSize, scaledCapture } from '../lib/captureSize.js';
@@ -61,6 +62,7 @@
   import RelationPicker from '../components/RelationPicker.svelte';
   import RefViewer from './RefViewer.svelte';
   import MapToolCluster from './satellite/MapToolCluster.svelte';
+  import SunPanel from './satellite/SunPanel.svelte';
   import GridSearchPanel from './satellite/GridSearchPanel.svelte';
   import SentinelPicker from './satellite/SentinelPicker.svelte';
   import CaptureOptions from './satellite/CaptureOptions.svelte';
@@ -499,6 +501,8 @@
     if (reviewKey) return stopReview();
     if (selectArmed) toggleSelect();
     else if (sizeMenuOpen) sizeMenuOpen = false;
+    else if (sunPlacing) sunPlacing = false;
+    else if (sunMode) toggleSunMode();
     else if (measureMode) setMeasureMode(null);
     // native fullscreen already exits on Esc (handled by onFullscreenChange);
     // only the CSS fallback needs an explicit toggle here
@@ -931,6 +935,13 @@
       renderDraft();
       return;
     }
+    // Sun & moon: one click plants the anchor the day's path is drawn from
+    if (sunPlacing) {
+      sunAnchor = { lat: e.latlng.lat, lon: e.latlng.lng };
+      sunSky = null;
+      sunPlacing = false;
+      return;
+    }
     if (!measureMode) return;
     const pt = { lat: e.latlng.lat, lon: e.latlng.lng };
     // an angle is exactly three points; a fourth click starts a fresh angle
@@ -1264,6 +1275,255 @@
       map.setView([target.lat, target.lon], zoom);
       setBearing(Number.isFinite(target.bearing) ? target.bearing : 0);
     }
+  });
+
+  // --- sun and moon mode ---
+  //
+  // One anchored point, one date, and an hour you drag: the day's path drawn as
+  // the arc the body sweeps while it is up, hour ticks along it, and the bearing
+  // at the chosen moment. Everything drawn is an azimuth, which is the only
+  // celestial quantity a plan view can state honestly; altitude stays in the
+  // panel. Map Measures will absorb this as its general bearing layer.
+  let sunMode = $state(false);
+  let sunAnchor = $state.raw(null); // { lat, lon } — fixed, never the moving view
+  let sunDay = $state(''); // empty: the backend's today at that point
+  let sunIndex = $state(0); // sample of the day the slider is on
+  let sunSky = $state(null);
+  let sunLoading = $state(false);
+  let sunPlacing = $state(false);
+  let sunLayer = null;
+  let sunTicket = 0;
+
+  function toggleSunMode() {
+    sunMode = !sunMode;
+    if (sunMode) {
+      if (selectArmed) toggleSelect(); // exclusive with the capture marquee…
+      if (measureMode) setMeasureMode(null); // …the measure tools…
+      if (gridMode) toggleGridMode(); // …and Grid Search
+      if (!sunAnchor) sunAnchor = markerLatLng ?? { lat: center.lat, lon: center.lon };
+    } else {
+      sunPlacing = false;
+      sunLayer?.clearLayers();
+    }
+  }
+
+  // Wall clock to land the slider on, once the day's samples are in.
+  let handedClock = null;
+
+  // Coords & Sky hands over a point, a date and a time: same mode, second way in,
+  // so there is only ever one rendering of this to keep right.
+  $effect(() => {
+    const handed = uiState.skyAt;
+    if (!mapReady || !handed) return;
+    uiState.skyAt = null;
+    sunAnchor = { lat: handed.lat, lon: handed.lon };
+    sunDay = handed.date ?? '';
+    sunSky = null;
+    sunIndex = 0;
+    handedClock = handed.time ?? null;
+    if (!sunMode) toggleSunMode();
+  });
+
+  $effect(() => {
+    if (!sunMode || !sunAnchor) return;
+    const params = new URLSearchParams({ lat: sunAnchor.lat, lon: sunAnchor.lon });
+    if (sunDay) params.set('date', sunDay);
+    const ticket = ++sunTicket;
+    sunLoading = true;
+    api
+      .get(`/api/geo/sky?${params}`)
+      .then((result) => {
+        if (ticket !== sunTicket) return;
+        sunSky = result;
+        sunDay = result.date;
+        sunIndex = nearestSample(result.curve.clock, handedClock ?? result.moment.local.slice(11, 16));
+        handedClock = null;
+      })
+      .catch(() => {
+        if (ticket === sunTicket) toast('Could not read the sky for that point', 'danger');
+      })
+      .finally(() => {
+        if (ticket === sunTicket) sunLoading = false;
+      });
+  });
+
+  // Match a wall clock against the day's own labels rather than dividing minutes
+  // by 60, which is wrong by an hour on the days daylight saving moves.
+  function nearestSample(clock, wanted) {
+    const target = Number(wanted.slice(0, 2)) * 60 + Number(wanted.slice(3, 5));
+    let best = 0;
+    let closest = Infinity;
+    clock.forEach((stamp, i) => {
+      const minutes = Number(stamp.slice(0, 2)) * 60 + Number(stamp.slice(3, 5));
+      const gap = Math.abs(minutes - target);
+      if (gap < closest) {
+        closest = gap;
+        best = i;
+      }
+    });
+    return best;
+  }
+
+  function themeColour(name, fallback) {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  }
+
+  // Runs of consecutive samples with the body above the horizon: the arc it
+  // actually sweeps in the sky. Drawing the whole 24 hours would close the circle
+  // through the bearings it holds while it is down, which says nothing.
+  function upRuns(altitudes) {
+    const runs = [];
+    let run = null;
+    altitudes.forEach((altitude, i) => {
+      if (altitude >= 0) {
+        run = run ?? [];
+        run.push(i);
+      } else if (run) {
+        runs.push(run);
+        run = null;
+      }
+    });
+    if (run) runs.push(run);
+    return runs.filter((r) => r.length > 1);
+  }
+
+  // The body itself, as a mark on its own ray: it rides between the anchor, which
+  // stands for the zenith, and the arc, which stands for the horizon, so how far
+  // up it is reads as how close to you it is. The same radial convention as the
+  // compass rosette in Coords & Sky.
+  function bodyIcon(kind, colour, illuminated, waxing) {
+    const size = 20;
+    const r = size / 2 - 2;
+    let inner = `<circle r="${r}" fill="${colour}" />`;
+    if (kind === 'moon') {
+      // Phase angle back out of the lit fraction: k = (1 + cos i) / 2 by
+      // definition, so nothing extra has to be fetched to draw it.
+      const phaseAngle = (Math.acos(Math.min(1, Math.max(-1, 2 * illuminated - 1))) * 180) / Math.PI;
+      // The bright-limb angle belongs to a view of the sky and says nothing in a
+      // plan view, so the map uses the table convention: lit side right when waxing.
+      inner =
+        `<circle r="${r}" fill="${colour}" opacity="0.25" />` +
+        `<g transform="rotate(${glyphRotation(waxing)})">` +
+        `<path d="${litPath(r, illuminated, phaseAngle)}" fill="${colour}" /></g>`;
+    }
+    return L.divIcon({
+      className: 'sky-body', // replaces Leaflet's boxed default
+      html:
+        `<svg width="${size}" height="${size}" viewBox="${-size / 2} ${-size / 2} ${size} ${size}">` +
+        `<circle r="${r + 1.5}" fill="rgba(0,0,0,0.45)" />${inner}` +
+        `<circle r="${r}" fill="none" stroke="#fff" stroke-opacity="0.85" stroke-width="1.5" />` +
+        `</svg>`,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+    });
+  }
+
+  function drawSun() {
+    if (!map) return;
+    if (!sunLayer) sunLayer = L.layerGroup().addTo(map);
+    sunLayer.clearLayers();
+    if (!sunMode || !sunSky || !sunAnchor) return;
+    const origin = sunAnchor;
+    const bounds = map.getBounds();
+    // Sized off the *shorter* side of the view, not its diagonal: the arc is a
+    // circle around the anchor, so a radius set by the diagonal runs off the top
+    // and bottom of a wide window.
+    const across = map.distance(bounds.getNorthWest(), bounds.getNorthEast());
+    const down = map.distance(bounds.getNorthWest(), bounds.getSouthWest());
+    const reach = Math.min(across, down) * 0.22;
+    const at = (azimuth, scale = 1) => {
+      const point = measure.destination(origin, azimuth, reach * scale);
+      return [point.lat, point.lon];
+    };
+    const curve = sunSky.curve;
+
+    for (const body of [
+      {
+        key: 'sun',
+        label: 'Sun',
+        colour: themeColour('--sky-sun', '#bd8721'),
+        azimuth: curve.sun_azimuth,
+        altitude: curve.sun_altitude,
+      },
+      {
+        key: 'moon',
+        label: 'Moon',
+        colour: themeColour('--sky-moon', '#4a93cc'),
+        azimuth: curve.moon_azimuth,
+        altitude: curve.moon_altitude,
+      },
+    ]) {
+      // Thin and translucent: the imagery underneath is what is being read.
+      for (const run of upRuns(body.altitude)) {
+        L.polyline(
+          run.map((i) => at(body.azimuth[i])),
+          { color: body.colour, weight: 2.5, opacity: 0.9 }
+        ).addTo(sunLayer);
+      }
+      curve.minutes.forEach((minute, i) => {
+        if (minute % 60 || body.altitude[i] < 0) return;
+        const long = minute % 180 === 0; // longer every three hours
+        L.polyline([at(body.azimuth[i], 0.94), at(body.azimuth[i], long ? 1.1 : 1.03)], {
+          color: body.colour,
+          weight: 2.5,
+          opacity: 0.9,
+        })
+          .bindTooltip(`${body.label} ${curve.clock[i]} · az ${Math.round(body.azimuth[i])}°`)
+          .addTo(sunLayer);
+      });
+      const altitude = body.altitude[sunIndex];
+      const below = altitude < 0;
+      const reading = `${body.label} ${curve.clock[sunIndex]} · az ${Math.round(body.azimuth[sunIndex])}° · alt ${Math.round(altitude)}°`;
+      L.polyline([[origin.lat, origin.lon], at(body.azimuth[sunIndex])], {
+        color: body.colour,
+        weight: 3.5,
+        opacity: below ? 0.6 : 1,
+        dashArray: below ? '6 6' : null,
+      })
+        .bindTooltip(reading, { sticky: true })
+        .addTo(sunLayer);
+      // Nothing rides the ray while the body is under the horizon: the dashed
+      // ray already says where it is, and a mark on it would claim it is visible.
+      if (!below) {
+        L.marker(at(body.azimuth[sunIndex], (90 - altitude) / 90), {
+          icon: bodyIcon(
+            body.key,
+            body.colour,
+            curve.moon_illuminated[sunIndex],
+            sunSky.moon.waxing
+          ),
+          keyboard: false,
+        })
+          .bindTooltip(body.key === 'moon' ? `${reading} · ${sunSky.moon.phase}` : reading)
+          .addTo(sunLayer);
+      }
+    }
+
+    L.circleMarker([origin.lat, origin.lon], {
+      radius: 4,
+      color: '#fff',
+      weight: 2,
+      fillColor: themeColour('--accent', '#e8a33d'),
+      fillOpacity: 1,
+    }).addTo(sunLayer);
+  }
+
+  // Redraw on any of: a new day, a new hour, a new anchor, the mode closing.
+  $effect(() => {
+    sunMode;
+    sunSky;
+    sunIndex;
+    sunAnchor;
+    if (mapReady) drawSun();
+  });
+
+  // The arc is drawn in metres, so a zoom or a pan has to restretch it.
+  $effect(() => {
+    if (!mapReady || !sunMode) return;
+    const redraw = () => drawSun();
+    map.on('zoomend moveend', redraw);
+    return () => map.off('zoomend moveend', redraw);
   });
 
   let searching = $state(false);
@@ -2804,7 +3064,27 @@
           {measureReadout}
           measureHint={MEASURE_HINT}
           {clearMeasure}
+          {sunMode}
+          {toggleSunMode}
         />
+
+        {#if sunMode}
+          <SunPanel
+            sky={sunSky}
+            loading={sunLoading}
+            day={sunDay}
+            index={sunIndex}
+            anchor={sunAnchor}
+            placing={sunPlacing}
+            ondate={(value) => {
+              sunDay = value;
+              sunSky = null;
+            }}
+            onindex={(value) => (sunIndex = value)}
+            onplace={() => (sunPlacing = !sunPlacing)}
+            onclose={toggleSunMode}
+          />
+        {/if}
 
         {#if gridMode}
           <GridSearchPanel

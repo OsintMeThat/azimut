@@ -21,7 +21,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 |---|---|---|
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect (Selection / Frame / Collage / Analyze) | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
-| **Map** | Satellite, Coordinates | **one map, many modes**: Compare, Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
+| **Map** | Satellite, Coords & Sky | **one map, many modes**: Compare, Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
 | **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
 | *(Case)* | Sidebar | v2: Relations, Sheet; v4: Notes, Timeline; v5: Orchestrator |
 
@@ -168,12 +168,26 @@ Editing a place or a capture (**Edit** on any row) sets its title, note, relatio
 and My-work folder in one dialog, and is the only place a new folder is created
 from the map.
 
-Map controls sit in two clusters. **Tools** (measure, grid search, reference
-image) float top-left. **View** — fullscreen, OSM labels, saved work — continues
-the zoom column beneath `+`/`−`, because none of them changes what you are doing,
-only what you see. The saved-work layer is off by default and session-only:
-places draw as outlined pins, captures and screenshots as filled ones, items at
-the same spot collapse into one counted mark, and clicking any mark opens a card
+Map controls sit in two clusters. **Tools** (measure, sun & moon, grid search,
+reference image) float top-left. A tool with settings opens its panel beside that
+cluster, never beneath it, because beneath it is where Leaflet's own controls
+live. **View** — fullscreen, OSM labels, saved work — continues the zoom column
+beneath `+`/`−`, because none of them changes what you are doing, only what you
+see.
+
+**Sun & moon** draws one date's path from an anchored point: the arc each body
+sweeps while it is up, hour ticks along it, and the bearing at an hour you drag.
+Only azimuths are drawn, since a plan view cannot state an altitude. Height reads
+instead from where the body's own mark sits on its ray: the anchor stands for the
+zenith and the arc for the horizon, so a high sun rides close to you. The mark
+names its altitude on hover, carries the moon's phase, and is absent while the
+body is under the horizon. The anchor is a point and not the map centre, so panning
+leaves the path alone. Coords & Sky opens the same mode with its own point, date
+and time, and hands over no computed value.
+
+The saved-work layer is off by default and session-only: places draw as outlined
+pins, captures and screenshots as filled ones, items at the same spot collapse
+into one counted mark, and clicking any mark opens a card
 with its preview, provider, dates and note. A mark whose capture carries proofs
 wears a dot up-left; its card names the count and offers **Show proofs**, which
 switches the panel and the layer to the proofs view. In that view the card opens
