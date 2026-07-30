@@ -20,7 +20,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | Workspace | Tools today | Future tools land here |
 |---|---|---|
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
-| **Examine** | Inspect (Selection / Frame / Collage / Analyze) | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Shadow Clock, audio |
+| **Examine** | Inspect (Selection / Frame / Collage / Analyze) | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
 | **Map** | Satellite, Coordinates | **one map, many modes**: Compare, Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
 | **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
 | *(Case)* | Sidebar | v2: Relations, Sheet; v4: Notes, Timeline; v5: Orchestrator |
