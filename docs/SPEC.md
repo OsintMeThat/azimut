@@ -139,10 +139,14 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 |------|--------------|
 | **Case Board / Relations** | Browses, creates and merges entities; graph view over the schema filled since v1, on the shipped relation vocabulary. |
 | **Case Sheet** | The same case as a table: a row is an entity, columns are its attributes plus free ones the analyst adds, sorted, filtered and edited in place. Imports a CSV as loose rows that stay out of the graph until promoted, and exports back to CSV or GeoJSON. |
-| **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. |
+| **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
-| **Sun, moon and local time** | Sunrise/sunset, solar and lunar azimuth, moon phase and bright-limb angle for a point and date, in Coordinates, each time in civil local time and UTC. Polar day/night and days with no moonrise are states, not errors; the moon needs topocentric parallax and sampled rise/set, and civil time adds `timezonefinder` + `tzdata` to bundle. |
+| **Sun, moon and local time** | Sunrise/sunset, solar and lunar azimuth, moon phase and bright-limb angle for a point and date, in Coordinates, each time in civil local time and UTC, plus a day chart of elevation against time and the two azimuths drawn as rays from the map marker. Polar day/night and days with no moonrise are states, not errors; the moon needs topocentric parallax and sampled rise/set, and civil time adds `timezonefinder` + `tzdata` to bundle. |
 | **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. |
+| **Notes to PDF** | Ticks notes in a dialog and writes them to the case's `exports/`, either one file per note or a single paginated document. The paginated form reuses the existing print path; per-note files need a generator that writes without a print dialog. |
+
+Toward v2: a Settings-chosen workspace folder, once Azimut survives a user
+editing or deleting case files under it.
 
 ### v3: GEOINT expansion
 
@@ -152,7 +156,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
 | **Metadata follow-up** | Explains which common image/video fields were stripped and proposes events from capture times. |
 | **Edit Provenance** | Reads a rendered video's own edit history: which source clips it was cut from, in what order, and the GPS, dates and cameras those clips still carry. |
-| **Shadow Clock** | Mark a shadow to estimate possible capture times, and render the year as a day × hour heatmap of the slots that fit. |
+| **Sky Clock** | Marks a shadow, the sun or the moon in an image or a video frame, with the horizon and north giving the angles, then renders the year as a day × hour heatmap of the slots that fit. A visible moon also carries phase and bright-limb angle, which usually cuts a year down to a few instants. |
 | **Imagery Wayback** | Esri World Imagery archive as a date slider: one view across every published release, key-less. |
 | **Event layers** | Date-stamped overlays that support or contradict an event: NASA FIRMS thermal hotspots, archived weather and METAR. |
 | **Shot contact sheet** | Splits a video into shots (ffmpeg scene detection) and picks frames from a clickable grid of timecodes. |
@@ -209,13 +213,29 @@ search; optional quota-aware X publishing.
 | **OSM Query (Overpass)** | Feature search from a form, and a described pattern ("filling station, roundabout, railway within 300 m") turned into candidates on the map; clicking a point looks it up in OSM, Wikidata and geolocated Commons photos. No Overpass QL. |
 | **Viewshed / Line of Sight** | What terrain is visible from a point (public DEM tiles). |
 | **Skyline Matching** | Trace a horizon in a photo, compare it against the DEM profile seen from candidate points. |
+| **Camera Track (video SfM)** | Solves a moving camera's path from a video: frames sampled from a window, position and viewing azimuth per keyframe, and a sparse point cloud. Reports insufficient parallax instead of guessing. Bundles a native SfM binary (COLMAP/GLOMAP), CPU-capable. |
 | **Vessel and Aircraft Tracks** | Historic ADS-B and AIS tracks on the map for a date, plus a watchlist that follows chosen callsigns or MMSIs. |
-| **Map Measures** | Distance, bearing/azimuth, area, FOV cone; includes measure-on-imagery. |
+| **Map Measures** | Distance, bearing/azimuth, area, FOV cone; includes measure-on-imagery, and its bearing layer absorbs the v2 sun/moon rays. |
 | **Déjà Vu** | Perceptual-hash index flags recycled footage (local first; community index later). |
 | **Manipulation Hints** | Add JPEG quantization, noise and AI-media hints alongside Inspect's ELA. |
 | **Channel Monitor** | Watch Telegram channels, auto-archive media, queue for geolocation (rate limits, ToS care). |
 
-Toward v5: real-world measurement from a resected photo and its GCP camera pose;
+Camera Track rests on three facts, kept here so the tool can be scoped from the
+spec alone:
+
+- Parallax, not motion, is the requirement: a pan from a fixed point yields
+  nothing, and rolling shutter or a re-encoded low bitrate breaks matching. The
+  tool fails early and says why.
+- SfM output is scale-free. Metres come only from an injected reference: the GCP
+  camera pose from Camera Resection, or a known length. Every distance stays a
+  labelled estimate.
+- Photorealistic rendering stays external. The case exports a COLMAP-format
+  folder for a WebGPU gaussian-splatting trainer, which needs no CUDA and so runs
+  on all three shipped platforms, and reimports the result as an artifact with
+  provenance.
+
+Toward v5: real-world measurement from a resected photo or a solved camera track
+and its GCP camera pose; a gaussian-splat round trip for a solved camera track;
 satellite-pass search from public TLEs.
 
 ### After the MapLibre migration

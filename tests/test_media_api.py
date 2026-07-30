@@ -7,6 +7,8 @@ import time
 
 from PIL import Image
 
+from azimut.engine.media import safe_filename
+
 
 def _png_bytes(color=(200, 30, 30), size=(64, 48)) -> bytes:
     buf = io.BytesIO()
@@ -18,6 +20,21 @@ def _upload(client, cid, name, data):
     return client.post(
         f"/api/cases/{cid}/media/upload", files={"file": (name, io.BytesIO(data), "image/png")}
     )
+
+
+def test_safe_filename_sidesteps_the_windows_device_names():
+    """A name reserved by Windows cannot be created there, extension or not.
+
+    Nothing stops an analyst titling a frame "AUX", and the file would land fine
+    on Linux and macOS. The case folder is meant to be copied between the three,
+    so the name is defused here rather than at whichever platform breaks.
+    """
+    assert safe_filename("AUX.png") == "_AUX.png"
+    assert safe_filename("con.mp4") == "_con.mp4"
+    assert safe_filename("COM1.roof.png") == "_COM1.roof.png"
+    # only the exact device names, not anything starting with one
+    assert safe_filename("console.png") == "console.png"
+    assert safe_filename("aux room.png") == "aux room.png"
 
 
 def test_upload_and_list(client):

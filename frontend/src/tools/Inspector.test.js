@@ -115,11 +115,17 @@ describe('Inspect sessions', () => {
 
   it('names each savable after its source instead of Image 1', () => {
     expect(source).toContain('defaultName: `${stem} (enhanced)`');
-    expect(source).toContain(
-      "defaultName: fr.time == null ? `${frameStem} (edited)` : `${frameStem} ${timecode(fr.time)}`"
-    );
+    expect(source).toContain('defaultName: frameNames[i]');
+    expect(source).toContain('const frameNames = frameSaveNames(');
     expect(source).not.toContain('label: `Image ${imgN}`');
     expect(source).not.toContain("label: 'Video 1'");
+  });
+
+  it('names a frame after its media title, which only its path can reach', () => {
+    expect(source).toContain('const titleByPath = $derived(new Map(mediaList.map((m) => [m.path, m.title])))');
+    expect(source).toContain('stem: stemFor(fr.path)');
+    // the old shape read the file on disk and could never see a title
+    expect(source).not.toContain('sourceStem({ path: fr.path })');
   });
 
   it('keeps typed names outside the derived list so a slider move cannot wipe them', () => {

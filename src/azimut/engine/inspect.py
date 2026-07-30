@@ -466,10 +466,13 @@ def _stamp() -> str:
 def _name_stem(label: str | None, fallback: str) -> str:
     """Filename stem for a filed item: the name the user typed, else the source's.
 
+    The typed name is kept as typed, spaces included, so the file in the folder
+    reads as the same thing the Media Library shows. Uploads have always kept
+    their spaces, so nothing downstream is surprised by one.
     ``media_engine.safe_filename`` still scrubs what comes out of here, so this
-    only has to fold whitespace and keep the stem short enough to read.
+    only has to collapse runs of whitespace and keep the stem short enough to read.
     """
-    stem = re.sub(r"\s+", "_", (label or "").strip())
+    stem = re.sub(r"\s+", " ", (label or "").strip())
     return stem[:60] if stem else fallback[:40]
 
 
@@ -664,9 +667,12 @@ def save_frame(
         tag, op = f"_t{time_s:.2f}s", "frame"
     else:
         tag, op = "_edit", "adjust"
-    # A named item keeps its name on disk; the timecode tag only makes sense on
-    # the fallback stem, where nothing else says which instant this is.
-    name = f"{stem}{'' if label else tag}_{_stamp()}.png"
+    # A named item keeps its name on disk, and nothing else: the tray already
+    # spells the instant into the name it sends, and `unique_path` settles a
+    # collision, so a wall-clock stamp would only clutter the folder the analyst
+    # opens. The timecode tag stands in on the fallback stem, where nothing else
+    # says which instant this is.
+    name = f"{stem}{'' if label else tag}.png"
     source = _derivation(
         rel_path, _source_sha(case, rel_path), op=op,
         **({"time": round(time_s, 3)} if time_s is not None else {}),
@@ -806,7 +812,7 @@ def compose_perspective(
         case, width=width, height=height, nodes=nodes, background=background
     )
     source = _derivation("", None, op="collage", sources=sources, perspective=True)
-    name = f"{_name_stem(label, 'collage')}_{_stamp()}.png"
+    name = f"{_name_stem(label, 'collage')}.png"
     result = media_engine.import_image(case, canvas, name, source, by="inspect")
     _apply_meta(case, result, label=label, folder=folder, notes=notes)
     return result
@@ -933,7 +939,7 @@ def enhance_video(
             raise RuntimeError(
                 (proc.stderr or b"").decode("utf-8", "replace").strip() or "video enhance failed"
             )
-        name = f"{stem}{'' if label else '_enhanced'}_{_stamp()}.mp4"
+        name = f"{stem}{'' if label else '_enhanced'}.mp4"
         source = _derivation(
             video_rel, _source_sha(case, video_rel), op="enhance-video",
             params=params, rotation=rotation,
