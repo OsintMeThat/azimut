@@ -7,6 +7,7 @@ import {
   formatDistance,
   formatArea,
   formatAngle,
+  destination,
 } from './measure.js';
 
 describe('haversine', () => {
@@ -123,5 +124,31 @@ describe('imperial units', () => {
     // 1 km is 0.62 mi — the same measurement, two labels
     expect(formatDistance(1000)).toBe('1.00 km');
     expect(formatDistance(1000, 'imperial')).toBe('3281 ft');
+  });
+});
+
+describe('destination', () => {
+  const paris = { lat: 48.8584, lon: 2.2945 };
+
+  it('lands the requested distance away, on the requested bearing', () => {
+    for (const bearing of [0, 47, 90, 168, 270, 359]) {
+      const there = destination(paris, bearing, 5000);
+      expect(haversine(paris, there)).toBeCloseTo(5000, 0);
+    }
+  });
+
+  it('goes north, east, south and west as the compass says', () => {
+    expect(destination(paris, 0, 10000).lat).toBeGreaterThan(paris.lat);
+    expect(destination(paris, 180, 10000).lat).toBeLessThan(paris.lat);
+    expect(destination(paris, 90, 10000).lon).toBeGreaterThan(paris.lon);
+    expect(destination(paris, 270, 10000).lon).toBeLessThan(paris.lon);
+    // due east and west stay on the parallel, near enough over 10 km
+    expect(destination(paris, 90, 10000).lat).toBeCloseTo(paris.lat, 2);
+  });
+
+  it('wraps the antimeridian instead of running past 180°', () => {
+    const east = destination({ lat: 0, lon: 179.9 }, 90, 40000);
+    expect(east.lon).toBeLessThan(0);
+    expect(east.lon).toBeGreaterThan(-180);
   });
 });

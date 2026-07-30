@@ -39,6 +39,14 @@
   --anno-5: #e040fb;
   --anno-6: #ff9e40;
 
+  /* Two data series, sun and moon, for the sky chart and the map rays. Their own
+     tokens rather than --accent (reserved for selection and primary actions) or
+     the annotation palette (sized for contrast over imagery, not for chart marks
+     on a panel). Each theme gets its own step: these are the dark ones, checked
+     for lightness, chroma, contrast and colour-vision separation against --bg-1. */
+  --sky-sun: #bd8721;
+  --sky-moon: #4a93cc;
+
   /* -- typography --------------------------------------------- */
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
@@ -98,6 +106,10 @@
   --danger-soft: rgba(192, 57, 43, 0.12);
   --info: #3b73b8;
   --info-soft: rgba(59, 115, 184, 0.12);
+
+  /* sky series, stepped for a white surface rather than flipped from the dark set */
+  --sky-sun: #cc9526;
+  --sky-moon: #3f97d2;
 
   --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.12);
   --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.16);

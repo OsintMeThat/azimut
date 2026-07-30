@@ -103,7 +103,9 @@ proof for publication.
 
 | Tool | What it does |
 |------|--------------|
-| ✅ **Coordinates** | Converts common coordinate formats, copies results and opens map or geocoding links. |
+| ✅ **Coords & Sky** | Converts common coordinate formats, copies results, opens map or geocoding links, and borrows a point already saved in the case instead of retyping it. |
+| ✅ **Sun, moon and local time** | Rise, set, azimuth, altitude, twilights, moon phase and bright-limb angle for a point and date, each instant in civil local time and UTC, with a day chart and a compass rosette. Polar day, polar night and a date without a moonrise are states. |
+| ✅ **Sun & moon on the map** | A map mode: one date's path from an anchored point, as the arc each body sweeps while up, hour ticks, and the bearing at a draggable hour. |
 | ✅ **Reverse Search** | Prepares image or video frames for keyless reverse-image services without uploading automatically. |
 | ✅ **Grid Search** | Saves editable AOI grids with keyboard review states and place promotion. |
 | ✅ **Templates** | Stores reusable proof styles and post-thread structures at workspace level. |
@@ -141,12 +143,14 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Case Sheet** | The same case as a table: a row is an entity, columns are its attributes plus free ones the analyst adds, sorted, filtered and edited in place. Imports a CSV as loose rows that stay out of the graph until promoted, and exports back to CSV or GeoJSON. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
-| **Sun, moon and local time** | Sunrise/sunset, solar and lunar azimuth, moon phase and bright-limb angle for a point and date, in Coordinates, each time in civil local time and UTC, plus a day chart of elevation against time and the two azimuths drawn as rays from the map marker. Polar day/night and days with no moonrise are states, not errors; the moon needs topocentric parallax and sampled rise/set, and civil time adds `timezonefinder` + `tzdata` to bundle. |
 | **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. |
-| **Notes to PDF** | Ticks notes in a dialog and writes them to the case's `exports/`, either one file per note or a single paginated document. The paginated form reuses the existing print path; per-note files need a generator that writes without a print dialog. |
+| **Notes to PDF** | Ticks notes in a dialog and writes one file per note, named after the note, into the case's export destination. Rendered server-side so no print dialog is involved, which means carrying fonts: a bundled Noto set, the system font for CJK, and a named error rather than empty boxes for a script nobody covers. |
+| **Export destination** | A folder of the analyst's own, remembered per case, where notes, proofs and map exports land instead of only the case's `exports/`. Validated when set, never deleted from, and a re-export overwrites rather than accumulates. |
+| **Case doctor** | Compares a case folder against its graph — missing `case.db`, files unknown to it, entities pointing at deleted files — and offers each repair as a choice. Prerequisite for letting the workspace move. |
+| **Workspace folder** | Settings moves the whole workspace, keys and presets included, by copying, verifying, switching a pointer kept outside it, then keeping the old copy until the analyst drops it. Covers adopting a hand-moved folder and a root that has gone missing. |
 
-Toward v2: a Settings-chosen workspace folder, once Azimut survives a user
-editing or deleting case files under it.
+Toward v2: reveal a case's folder in the system file manager; a lock so two
+Azimut instances can't share one workspace.
 
 ### v3: GEOINT expansion
 
@@ -157,6 +161,7 @@ editing or deleting case files under it.
 | **Metadata follow-up** | Explains which common image/video fields were stripped and proposes events from capture times. |
 | **Edit Provenance** | Reads a rendered video's own edit history: which source clips it was cut from, in what order, and the GPS, dates and cameras those clips still carry. |
 | **Sky Clock** | Marks a shadow, the sun or the moon in an image or a video frame, with the horizon and north giving the angles, then renders the year as a day × hour heatmap of the slots that fit. A visible moon also carries phase and bright-limb angle, which usually cuts a year down to a few instants. |
+| **Case KMZ** | One self-contained file per case: a pin per place, carrying the notes and proof images it is linked to, opened in Google Earth. Frozen rather than live, because only the web Earth remains and it follows no network link. |
 | **Imagery Wayback** | Esri World Imagery archive as a date slider: one view across every published release, key-less. |
 | **Event layers** | Date-stamped overlays that support or contradict an event: NASA FIRMS thermal hotspots, archived weather and METAR. |
 | **Shot contact sheet** | Splits a video into shots (ffmpeg scene detection) and picks frames from a clickable grid of timecodes. |
@@ -215,7 +220,7 @@ search; optional quota-aware X publishing.
 | **Skyline Matching** | Trace a horizon in a photo, compare it against the DEM profile seen from candidate points. |
 | **Camera Track (video SfM)** | Solves a moving camera's path from a video: frames sampled from a window, position and viewing azimuth per keyframe, and a sparse point cloud. Reports insufficient parallax instead of guessing. Bundles a native SfM binary (COLMAP/GLOMAP), CPU-capable. |
 | **Vessel and Aircraft Tracks** | Historic ADS-B and AIS tracks on the map for a date, plus a watchlist that follows chosen callsigns or MMSIs. |
-| **Map Measures** | Distance, bearing/azimuth, area, FOV cone; includes measure-on-imagery, and its bearing layer absorbs the v2 sun/moon rays. |
+| **Map Measures** | Distance, bearing/azimuth, area, FOV cone; includes measure-on-imagery, and its bearing layer absorbs the v2 sun/moon arcs. |
 | **Déjà Vu** | Perceptual-hash index flags recycled footage (local first; community index later). |
 | **Manipulation Hints** | Add JPEG quantization, noise and AI-media hints alongside Inspect's ELA. |
 | **Channel Monitor** | Watch Telegram channels, auto-archive media, queue for geolocation (rate limits, ToS care). |

@@ -8,7 +8,9 @@ import os
 import re
 import tempfile
 import time
-from datetime import datetime, timezone
+# Aliased: this module already imports the ``time`` module for tile timing, and
+# the sky routes need the datetime classes of the same names.
+from datetime import date as calendar_date, datetime, time as wall_clock, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,9 +24,11 @@ from .. import config
 from ..engine import (
     geo,
     google_tiles,
+    localtime,
     media as media_engine,
     satellite as satellite_engine,
     sentinel,
+    sky,
     tilecache,
     tiles,
 )
@@ -483,6 +487,131 @@ def reverse(lat: float, lon: float) -> dict[str, Any]:
     if not result:
         raise HTTPException(status_code=502, detail="reverse geocoding unavailable")
     return result
+
+
+def _dated(moment: datetime | None, zone: str) -> dict[str, Any] | None:
+    return localtime.both(moment, zone)
+
+
+@router.get("/geo/sky")
+def sky_for_point(
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+    day: str | None = Query(default=None, alias="date"),
+    at: str | None = Query(default=None, alias="time"),
+    zone: str | None = None,
+) -> dict[str, Any]:
+    """Sun and moon for a point on one local day, plus the track of that day.
+
+    Pure computation, unlike the reverse geocode two routes up: nothing here goes
+    to the network, so the panel works offline.
+
+    ``date`` and ``time`` are read as local wall-clock readings in the point's own
+    zone, since that is how the analyst writes them. Every instant comes back in
+    both civil local time and UTC, and polar day, polar night and a day without a
+    moonrise arrive as a ``state`` rather than as an error.
+    """
+    # A zone resolved from the coordinate always loads. One the caller named is
+    # checked here rather than falling back to UTC, which would answer in UTC
+    # under the name that was asked for — every time in the response wrong, and
+    # nothing saying so.
+    if zone and not localtime.known_zone(zone):
+        raise HTTPException(status_code=422, detail="zone must be an IANA zone name")
+    zone_name = zone or localtime.zone_for(lat, lon)
+    tz = localtime.zone_info(zone_name)
+    try:
+        target = calendar_date.fromisoformat(day) if day else datetime.now(tz=tz).date()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD") from exc
+    if at:
+        try:
+            clock = wall_clock.fromisoformat(at)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="time must be HH:MM") from exc
+        moment = localtime.at_local(target, clock, zone_name)
+    else:
+        # No time asked for: read the sky at local midday, a neutral instant that
+        # is inside the day the caller named whatever the zone does.
+        moment = localtime.local_noon(target, zone_name)
+
+    start, end = localtime.day_bounds(target, zone_name)
+    events = sky.day_events(lat, lon, start, end)
+    now = sky.position_at(lat, lon, moment)
+    curve = sky.day_curve(lat, lon, start, end, step_minutes=10)
+    # The offset is the one in force at the moment asked about, not the zone's
+    # standard one, so the local column can be labelled CEST rather than CET.
+    stamped = localtime.both(moment, zone_name) or {}
+
+    return {
+        "lat": lat,
+        "lon": lon,
+        "date": target.isoformat(),
+        "zone": {
+            "name": zone_name,
+            "abbreviation": stamped.get("abbreviation"),
+            "offset": stamped.get("offset"),
+            "offset_minutes": stamped.get("offset_minutes"),
+        },
+        "moment": _dated(moment, zone_name),
+        "sun": {
+            "rise": _dated(events["sun"]["rise"], zone_name),
+            "rise_azimuth": events["sun"]["rise_azimuth"],
+            "set": _dated(events["sun"]["set"], zone_name),
+            "set_azimuth": events["sun"]["set_azimuth"],
+            "transit": _dated(events["sun"]["transit"], zone_name),
+            "transit_altitude": events["sun"]["transit_altitude"],
+            "state": events["sun"]["state"],
+            "azimuth": round(now["sun_azimuth"], 1),
+            "altitude": round(now["sun_altitude"], 1),
+            "apparent_altitude": round(now["sun_apparent_altitude"], 1),
+        },
+        "twilight": {
+            name: {
+                "dawn": _dated(phase["dawn"], zone_name),
+                "dusk": _dated(phase["dusk"], zone_name),
+                "state": phase["state"],
+            }
+            for name, phase in events["twilight"].items()
+        },
+        "moon": {
+            "rises": [_dated(m, zone_name) for m in events["moon"]["rises"]],
+            "rise_azimuths": events["moon"]["rise_azimuths"],
+            "sets": [_dated(m, zone_name) for m in events["moon"]["sets"]],
+            "set_azimuths": events["moon"]["set_azimuths"],
+            "transit": _dated(events["moon"]["transit"], zone_name),
+            "transit_altitude": events["moon"]["transit_altitude"],
+            "state": events["moon"]["state"],
+            "azimuth": round(now["moon_azimuth"], 1),
+            "altitude": round(now["moon_altitude"], 1),
+            "apparent_altitude": round(now["moon_apparent_altitude"], 1),
+            "illuminated": round(now["moon_illuminated"], 4),
+            "phase": now["moon_phase"],
+            "phase_angle": round(now["moon_phase_angle"], 1),
+            "waxing": now["moon_waxing"],
+            "limb_angle": round(now["moon_limb_angle"], 1),
+            "limb_from_vertical": round(now["moon_limb_from_vertical"], 1),
+            "distance_km": round(now["moon_distance_km"]),
+        },
+        "curve": {
+            # Minutes from local midnight: the x axis of the chart, which has to
+            # stay right on the 23- and 25-hour days.
+            "minutes": [
+                round((point - start).total_seconds() / 60) for point in curve["times"]
+            ],
+            # …and the wall clock at each of those samples, which is not derivable
+            # from the minute: on the spring-forward day, 120 minutes after local
+            # midnight reads 03:00, not 02:00. Whatever labels a time to the reader
+            # takes it from here rather than dividing by 60.
+            "clock": [
+                point.astimezone(tz).strftime("%H:%M") for point in curve["times"]
+            ],
+            "sun_altitude": curve["sun_altitude"],
+            "sun_azimuth": curve["sun_azimuth"],
+            "moon_altitude": curve["moon_altitude"],
+            "moon_azimuth": curve["moon_azimuth"],
+            "moon_illuminated": curve["moon_illuminated"],
+        },
+    }
 
 
 @router.post("/cases/{case_id}/satellite/capture")

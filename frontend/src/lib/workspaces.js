@@ -22,7 +22,7 @@ export const TOOL_LABELS = {
   reverse: 'Reverse Search',
   inspect: 'Inspect',
   satellite: 'Satellite',
-  coordinates: 'Coordinates',
+  coordinates: 'Coords & Sky',
   proof: 'Geo Proof',
   post: 'Geo Report',
   notebook: 'Notebook',

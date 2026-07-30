@@ -164,6 +164,10 @@ export const uiState = $state({
   focusMedia: null, // media path to highlight & scroll to in the Media Library
   openInspect: null, // inspect-session name to reopen in the Inspect tool
   gotoCoords: null, // { lat, lon } to fly to in the Satellite tool
+  // A point, a date and a time handed over by Coords & Sky: the Satellite tab
+  // opens its Sun & moon mode there. Session-only, and never part of a capture
+  // or a proof.
+  skyAt: null, // { lat, lon, date, time }
   focusCapture: null, // case-relative capture path selected from another workspace
   // Satellite reference viewers: floating scratch windows holding a media image
   // over the map to eyeball against the imagery. Session-only — never captured
@@ -332,6 +336,7 @@ export function closeCase() {
   uiState.focusMedia = null;
   uiState.openInspect = null;
   uiState.gotoCoords = null;
+  uiState.skyAt = null;
   uiState.refViewers = [];
 }
 

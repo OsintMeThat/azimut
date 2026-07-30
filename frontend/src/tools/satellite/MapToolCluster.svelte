@@ -16,6 +16,8 @@
     referenceCount,
     openRefPicker,
     setMeasureMode,
+    sunMode,
+    toggleSunMode,
     measureReadout,
     measureHint,
     clearMeasure,
@@ -38,6 +40,13 @@
     title="Sweep an area cell by cell"
     aria-label="Grid Search"
   ><Icon name="grid" size={16} /></button>
+  <button
+    class="mtbtn"
+    class:on={sunMode}
+    onclick={toggleSunMode}
+    title="Sun and moon path for a date"
+    aria-label="Sun and moon"
+  ><Icon name="sun" size={16} /></button>
   <button
     class="mtbtn"
     class:on={referenceCount}

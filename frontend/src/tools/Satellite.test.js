@@ -253,3 +253,95 @@ describe('filing saved work by dragging it in the panel', () => {
     expect(source).not.toContain('bind:path=');
   });
 });
+
+describe('sun and moon mode', () => {
+  it('is a map mode in the tool cluster, exclusive with the others', () => {
+    expect(source).toContain('let sunMode = $state(false)');
+    expect(source).toContain('{toggleSunMode}');
+    // the same exclusivity the grid mode declares
+    expect(source).toContain('if (selectArmed) toggleSelect()');
+    expect(source).toContain('if (gridMode) toggleGridMode()');
+    expect(source).toContain('else if (sunMode) toggleSunMode()'); // the Esc cascade
+  });
+
+  it('anchors the path to a fixed point, never to the moving view', () => {
+    expect(source).toContain('let sunAnchor = $state.raw(null)');
+    expect(source).toContain('sunAnchor = markerLatLng ?? { lat: center.lat, lon: center.lon }');
+    // and a click can move it
+    expect(source).toContain('if (sunPlacing) {');
+  });
+
+  it('draws only the arc the body sweeps while it is up', () => {
+    expect(source).toContain('function upRuns(altitudes)');
+    expect(source).toContain('if (altitude >= 0)');
+    expect(source).toContain('measure.destination(origin, azimuth, reach * scale)');
+  });
+
+  it('ticks the arc hourly, longer every three hours', () => {
+    expect(source).toContain('if (minute % 60 || body.altitude[i] < 0) return');
+    expect(source).toContain('const long = minute % 180 === 0');
+  });
+
+  it('rides the body along its own ray, as close to the anchor as it is high', () => {
+    // the anchor stands for the zenith and the arc for the horizon, the same
+    // radial convention as the compass rosette
+    expect(source).toContain('at(body.azimuth[sunIndex], (90 - altitude) / 90)');
+    expect(source).toContain('function bodyIcon(kind, colour, illuminated, waxing)');
+  });
+
+  it('leaves the ray bare while the body is under the horizon', () => {
+    // a mark on it would claim the body is visible
+    expect(source).toContain('if (!below) {');
+  });
+
+  it('draws the moon mark at its phase, worked out of the lit fraction', () => {
+    expect(source).toContain('Math.acos(Math.min(1, Math.max(-1, 2 * illuminated - 1)))');
+    expect(source).toContain('litPath(r, illuminated, phaseAngle)');
+    // a plan view has no vertical, so the bright-limb angle is not used here
+    expect(source).toContain('glyphRotation(waxing)');
+    expect(source).not.toContain('glyphRotation(waxing, ');
+  });
+
+  it('names the altitude on the mark and on the ray', () => {
+    expect(source).toContain('alt ${Math.round(altitude)}°');
+    expect(source).toContain("bindTooltip(body.key === 'moon'");
+  });
+
+  it('keeps a body below the horizon on the map, dashed', () => {
+    expect(source).toContain('const altitude = body.altitude[sunIndex]');
+    expect(source).toContain('const below = altitude < 0');
+    expect(source).toContain("dashArray: below ? '6 6' : null");
+  });
+
+  it('scrubs the hour without asking the backend again', () => {
+    // the whole day arrived in one response, so the slider reads an array
+    expect(source).toContain('function nearestSample(clock, wanted)');
+    expect(source).toContain('onindex={(value) => (sunIndex = value)}');
+    expect(source).toMatch(/if \(sunDay\) params\.set\('date', sunDay\)/);
+  });
+
+  it('labels a moment from the payload clock, not from arithmetic on minutes', () => {
+    expect(source).toContain('curve.clock[sunIndex]');
+    expect(source).not.toContain('Math.floor(minute / 60)');
+  });
+
+  it('sizes the arc off the shorter side of the view, so it stays on screen', () => {
+    // a radius set by the diagonal runs off the top and bottom of a wide window
+    expect(source).toContain('Math.min(across, down) * 0.22');
+    expect(source).toContain('bounds.getNorthWest(), bounds.getNorthEast()');
+  });
+
+  it('restretches the arc when the view moves, since it is drawn in metres', () => {
+    expect(source).toContain("map.on('zoomend moveend', redraw)");
+    expect(source).toContain("map.off('zoomend moveend', redraw)");
+    expect(source).toContain('bounds.getNorthWest(), bounds.getSouthWest()');
+  });
+
+  it('takes the handoff from Coords & Sky into the same mode', () => {
+    expect(source).toContain('const handed = uiState.skyAt');
+    expect(source).toContain('uiState.skyAt = null'); // consumed once, like gotoCoords
+    expect(source).toContain('if (!sunMode) toggleSunMode()');
+    // no computed value travels: the map asks for its own
+    expect(source).not.toContain('handed.sun');
+  });
+});
