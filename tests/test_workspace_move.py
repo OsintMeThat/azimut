@@ -50,7 +50,7 @@ def tmp_path():
     below, which builds a deep path on purpose, and `tests/test_layout.py`,
     which recomputes the number from the tree.
     """
-    base = Path(tempfile.mkdtemp())
+    base = Path(tempfile.mkdtemp()).resolve()
     try:
         yield base
     finally:
@@ -315,6 +315,25 @@ def test_a_move_does_not_carry_the_tile_cache(workspace, tmp_path):
 
     assert config.tile_cache_dir().is_dir()
     assert not (target / ".azimut" / "cache" / "tiles" / "esri" / "12" / "2048.png").exists()
+
+
+def test_a_move_does_not_carry_the_lock(workspace, tmp_path):
+    """The lock names a process on this machine, so it says nothing true in the
+    new folder. It is also the one file that cannot be read while it is held:
+    Windows makes the locked range mandatory, and copying it failed the move
+    there with "another process has locked a portion of the file"."""
+    workspacelock.acquire(8477)
+    target = tmp_path / "elsewhere"
+    carried = [path.name for path in workspacemove._copyable_files(workspace)]
+
+    workspacemove.start(str(target))
+    move = _finish()
+
+    assert workspacelock.LOCK_NAME not in carried
+    # The destination holds a lock of its own afterwards, taken when the new
+    # location was opened. What must not happen is the copy, which is why the
+    # move completing at all is half of what this asserts.
+    assert not move["error"], move["error"]
 
 
 def test_a_move_carries_settings_keys_and_presets(workspace, tmp_path):

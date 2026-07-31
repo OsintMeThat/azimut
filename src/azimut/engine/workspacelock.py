@@ -98,6 +98,25 @@ def lock_path(root: Path | None = None) -> Path:
     return base / LOCK_NAME
 
 
+def _root_key(root: Path) -> Path:
+    """A root in the one spelling two of them can be compared in.
+
+    Every question here is "is this the workspace I already hold", and the two
+    sides arrive differently: what this process locked comes from the pointer,
+    while a folder being inspected has been through `resolve()`. One symlink
+    above the workspace makes those different strings for one directory — macOS
+    reaches `/tmp` and every temporary directory as `/private/var`, and a synced
+    or linked folder does it anywhere — and the mismatch answers "not mine".
+    Which is the worst possible answer: the lock file is then opened a second
+    time, our *own* handle refuses the second lock, and the analyst is told
+    another Azimut has the workspace they are already using.
+    """
+    try:
+        return root.expanduser().resolve()
+    except OSError:  # pragma: no cover - a path the OS refuses to resolve
+        return root.expanduser()
+
+
 # -- the operating system's half ----------------------------------------------
 #
 # Resolved once, by what imports, rather than per call by `sys.platform`. Two
@@ -117,6 +136,25 @@ except ImportError:  # pragma: no cover - exercised on POSIX
     msvcrt = None  # type: ignore[assignment]
 
 
+#: Where the Windows byte-range lock sits: far past the payload, and past the
+#: end of the file.
+#:
+#: `flock` on POSIX is advisory — it excludes another *locker* and lets everyone
+#: else read the bytes. `msvcrt.locking` is **mandatory**: the range it holds is
+#: unreadable and unwritable to every other handle, including this process's own.
+#: Locking byte 0, where the payload begins, therefore broke the two things the
+#: payload exists for. A second instance could not read who holds the workspace,
+#: so Windows lost the one message that names the other Azimut. And a workspace
+#: move, which copies the folder file by file, could not read its own lock:
+#: `copy2` came back with "another process has locked a portion of the file" and
+#: the move failed on Windows and nowhere else.
+#:
+#: A region beyond EOF can be locked and does not extend the file, so the lock
+#: keeps excluding a second instance while the bytes anyone actually reads stay
+#: outside it.
+LOCK_REGION_OFFSET = 1 << 30
+
+
 def _try_lock(handle: Any) -> bool:
     """Take the OS lock without waiting. False means someone else holds it.
 
@@ -127,7 +165,7 @@ def _try_lock(handle: Any) -> bool:
         if fcntl is not None:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         elif msvcrt is not None:
-            handle.seek(0)
+            handle.seek(LOCK_REGION_OFFSET)
             msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
     except OSError:
         return False
@@ -139,7 +177,7 @@ def _unlock(handle: Any) -> None:
         if fcntl is not None:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         elif msvcrt is not None:
-            handle.seek(0)
+            handle.seek(LOCK_REGION_OFFSET)  # the region taken above, exactly
             msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
     except OSError:  # pragma: no cover - the close below releases it anyway
         pass
@@ -235,12 +273,12 @@ def held() -> bool:
     """Whether this process holds the workspace in use. Memory only, no I/O:
     it is asked on the way into every request."""
     with _guard:
-        return _held is not None and _held.root == config.workspace_root()
+        return _held is not None and _held.root == _root_key(config.workspace_root())
 
 
 def holder(root: Path | None = None) -> dict[str, Any] | None:
     """Who holds a workspace, when it isn't us. None means it is free."""
-    target = root if root is not None else config.workspace_root()
+    target = _root_key(root if root is not None else config.workspace_root())
     with _guard:
         if _held is not None and _held.root == target:
             return None
@@ -267,7 +305,9 @@ def acquire(port: int | None = None, *, force: bool = False) -> None:
     come first.
     """
     global _held
-    root = config.workspace_root()
+    # Stored resolved, so `held()` and `holder()` compare like with like whatever
+    # spelling of the root they are handed (`_root_key`).
+    root = _root_key(config.workspace_root())
     with _guard:
         if _held is not None:
             if _held.root == root:

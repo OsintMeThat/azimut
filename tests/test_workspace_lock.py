@@ -154,6 +154,29 @@ def test_our_own_crashed_run_is_taken_over_whatever_its_heartbeat_says(workspace
     assert _payload(workspace)["pid"] == os.getpid()
 
 
+def test_the_workspace_we_hold_is_ours_under_any_spelling_of_its_path(monkeypatch, tmp_path):
+    """A folder reached through a symlink is the same folder.
+
+    `holder()` is asked about a path that has been resolved, while what this
+    process locked came from the pointer. If those two spellings are not brought
+    together, the lock file is opened a second time, our own handle refuses the
+    second lock, and Settings tells the analyst another Azimut is using the
+    workspace they are working in. macOS reaches every temporary directory that
+    way (`/var` → `/private/var`), and so does a synced or linked folder anywhere.
+    """
+    real = tmp_path / "real"
+    (real / ".azimut").mkdir(parents=True)
+    linked = tmp_path / "linked"
+    linked.symlink_to(real, target_is_directory=True)
+    monkeypatch.setenv("AZIMUT_HOME", str(linked))
+
+    workspacelock.acquire(8477)
+
+    assert workspacelock.held()
+    assert workspacelock.holder(linked) is None
+    assert workspacelock.holder(real) is None, "the resolved path is the same workspace"
+
+
 def test_an_unreadable_lock_file_never_stops_the_app(workspace):
     workspacelock.lock_path(workspace).write_bytes(b"\x00\xff not json at all")
 

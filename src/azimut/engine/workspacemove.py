@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .. import config, layout
+from . import workspacelock
 from .bundles import disk_reserve
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,14 @@ CLOUD_MARKERS = (
 #: contract (STORAGE_AND_PERFORMANCE), and it is also the largest thing in a
 #: workspace that nobody would miss. Rebuilt by browsing the map.
 SKIPPED_DIRS = ("cache",)
+
+#: Not copied either, and this one is not optional. The lock names the process
+#: using *this* folder on *this* machine, so carrying it to the destination would
+#: copy a statement that stops being true on arrival. It is also the one file in
+#: the workspace that cannot be read while it is held: on Windows the lock is a
+#: mandatory range lock, and `copy2` on it failed the whole move with "another
+#: process has locked a portion of the file".
+SKIPPED_FILES = (workspacelock.LOCK_NAME,)
 
 
 # -- comparing two paths on three operating systems ---------------------------
@@ -195,6 +204,7 @@ def _walk(root: Path):
     the same reason.
     """
     skip = {root / ".azimut" / name for name in SKIPPED_DIRS}
+    skip_files = {root / ".azimut" / name for name in SKIPPED_FILES}
     for directory, subdirs, names in os.walk(root, followlinks=False):
         here = Path(directory)
         subdirs[:] = sorted(
@@ -207,6 +217,8 @@ def _walk(root: Path):
         files = []
         for name in sorted(names):
             candidate = here / name
+            if candidate in skip_files:
+                continue
             if not candidate.is_symlink() and candidate.is_file():
                 files.append(candidate)
         yield here, files
@@ -263,7 +275,6 @@ def inspect_target(raw: str) -> dict[str, Any]:
         problems.append("that folder already holds other files")
 
     if state == "workspace":
-        from . import workspacelock
 
         if (busy := workspacelock.holder(root)) is not None:
             problems.append(workspacelock.describe(busy))
@@ -377,7 +388,6 @@ def adopt(raw: str) -> dict[str, Any]:
     wants to start fresh in. The cases in the *current* workspace stay where
     they are, which is why the caller has to have said so out loud first.
     """
-    from . import workspacelock
 
     verdict = inspect_target(raw)
     if not verdict["ok"]:
@@ -396,7 +406,6 @@ def adopt(raw: str) -> dict[str, Any]:
 
 def use_default() -> dict[str, Any]:
     """Forget a configured location and go back to ``~/Azimut``."""
-    from . import workspacelock
 
     config.clear_pointer()
     try:
@@ -413,7 +422,6 @@ def take_the_lock() -> dict[str, Any]:
     clocks disagree, or a sync client leaving a file nobody will ever clear.
     Without a way to overrule it, either would make a workspace unopenable.
     """
-    from . import workspacelock
 
     workspacelock.take_over(_serving_port())
     from ..workspace import open_workspace
@@ -430,7 +438,6 @@ def _settle_into_new_root() -> None:
     `mkdir`. Local import: `workspace` sits above the engine.
     """
     from ..workspace import open_workspace
-    from . import workspacelock
 
     config.forget_workspace_root()
     # The lock belongs to a folder, not to the process, so it moves with the
@@ -492,7 +499,6 @@ def in_progress() -> bool:
 
 def status() -> dict[str, Any]:
     """Where the workspace is, and how the last move went."""
-    from . import workspacelock
 
     root = config.workspace_root().expanduser()
     with _move_lock:

@@ -36,7 +36,7 @@ def tmp_path():
     path budget leaves for a workspace root, so every folder these routes are
     offered would be refused as too long rather than exercised.
     """
-    base = Path(tempfile.mkdtemp())
+    base = Path(tempfile.mkdtemp()).resolve()
     try:
         yield base
     finally:
