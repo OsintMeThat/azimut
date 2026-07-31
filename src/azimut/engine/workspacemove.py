@@ -102,7 +102,16 @@ def _same_folder(left: Path, right: Path) -> bool:
 
 
 def _inside(child: Path, parent: Path) -> bool:
-    inner, outer = _normal(child), _normal(parent)
+    """Whether *child* sits under *parent*, in the same spelling of both.
+
+    Resolved first, because a candidate folder always arrives resolved
+    (`_resolve`) while the current root is whatever the pointer says. One symlink
+    above the workspace makes those two spellings of one path — `/var` and
+    `/private/var` on macOS, a linked or synced folder anywhere — and the string
+    comparison would then answer "not inside" about a folder that is, which is
+    how a workspace ends up nested in itself.
+    """
+    inner, outer = _normal(child.resolve()), _normal(parent.resolve())
     return inner == outer or inner.startswith(outer.rstrip(os.sep) + os.sep)
 
 

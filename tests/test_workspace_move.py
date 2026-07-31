@@ -12,13 +12,14 @@ the very thing under test.
 from __future__ import annotations
 
 import shutil
+import tempfile
 import time
 from pathlib import Path
 
 import pytest
 
 from azimut import config
-from azimut.engine import workspacemove
+from azimut.engine import workspacelock, workspacemove
 from azimut.engine.workspacemove import MoveError
 from azimut.workspace import Case
 
@@ -34,6 +35,29 @@ def forget_the_last_move():
 
 
 @pytest.fixture()
+def tmp_path():
+    """A base directory short enough that a case fits under it on Windows.
+
+    Deliberately shadows pytest's own `tmp_path` for this module. That one spends
+    around 100 characters on the test's name before the workspace even begins,
+    and `layout.room_for_workspace_root()` leaves 84 — so on Windows every folder
+    offered here would be refused as too long, correctly, and these tests would
+    only ever exercise the refusal. A real root is short: `C:\\Users\\alice\\Azimut`
+    is 21 characters, which is what this imitates.
+
+    The budget stays live and enforced. What holds it is
+    `test_a_path_too_long_for_windows_is_refused_there_and_named_elsewhere`
+    below, which builds a deep path on purpose, and `tests/test_layout.py`,
+    which recomputes the number from the tree.
+    """
+    base = Path(tempfile.mkdtemp())
+    try:
+        yield base
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+@pytest.fixture()
 def workspace(monkeypatch, tmp_path):
     """A workspace Azimut found through its pointer, as it does in the field."""
     monkeypatch.delenv("AZIMUT_HOME", raising=False)
@@ -41,7 +65,10 @@ def workspace(monkeypatch, tmp_path):
     root.mkdir(parents=True)
     config.write_pointer(root)
     config.ensure_workspace()
-    return root
+    yield root
+    # Adopting a folder or finishing a move takes the workspace lock, and the
+    # lock is an open file handle: Windows cannot delete the directory around it.
+    workspacelock.release()
 
 
 def _finish(timeout: float = 20.0) -> dict:
@@ -161,7 +188,7 @@ def test_a_synced_folder_is_flagged_and_still_allowed(workspace, tmp_path):
     verdict = workspacemove.inspect_target(str(target))
 
     assert verdict["ok"]
-    assert "synced folder" in verdict["warnings"][0]
+    assert any("synced folder" in warning for warning in verdict["warnings"])
 
 
 def test_a_path_too_long_for_windows_is_refused_there_and_named_elsewhere(
@@ -353,7 +380,11 @@ def test_a_second_move_is_refused_while_one_runs(workspace, tmp_path, monkeypatc
 
     monkeypatch.setattr(workspacemove, "_step_copy", slow_copy)
     workspacemove.start(str(tmp_path / "first"))
+    # Bounded, like `_finish`: a move that never reaches the copy step must fail
+    # this test rather than hang the run.
+    deadline = time.monotonic() + 20
     while not started["copying"]:
+        assert time.monotonic() < deadline, "the move never reached the copy step"
         time.sleep(0.01)
 
     assert workspacemove.in_progress()

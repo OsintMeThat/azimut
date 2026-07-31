@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import graph_read
+from fastapi.testclient import TestClient
 
 from azimut import layout
 from azimut.workspace import Case
@@ -561,6 +562,38 @@ def test_moving_a_note_between_folders_moves_its_file(client):
     # the emptied folder does not linger: a mirror that keeps every directory a
     # note passed through stops being a mirror
     assert not case.resolve_inside("notes/Video 1").exists()
+
+
+def test_a_note_moves_cleanly_under_a_symlinked_workspace(monkeypatch, tmp_path):
+    """The same move, reached through a symlink, still prunes what it emptied.
+
+    macOS reaches every temporary directory as `/var` → `/private/var`, and a
+    workspace under a linked or synced folder does the same anywhere. The case
+    knows its directory by the path it was given while `resolve_inside` hands
+    back the resolved one, so a containment check comparing the two spellings
+    answers "outside" about a directory that is inside — and the pruning it
+    guards silently stops happening.
+    """
+    real = tmp_path / "real"
+    real.mkdir()
+    linked = tmp_path / "linked"
+    linked.symlink_to(real, target_is_directory=True)
+    monkeypatch.setenv("AZIMUT_HOME", str(linked))
+    from azimut.server import create_app
+
+    with TestClient(create_app(), base_url="http://127.0.0.1") as client:
+        cid = client.post("/api/cases", json={"name": "Filing"}).json()["id"]
+        note = client.post(
+            f"/api/cases/{cid}/notes", json={"title": "Summary", "folder": "Video 1"}
+        ).json()
+        case = Case.open(cid)
+        assert case.resolve_inside(note["attrs"]["path"]).is_file()
+
+        client.patch(
+            f"/api/cases/{cid}/entities/{note['id']}", json={"attrs": {"folder": "Video 2"}}
+        )
+
+        assert not case.resolve_inside("notes/Video 1").exists()
 
 
 def test_the_same_title_lives_in_two_folders(client):

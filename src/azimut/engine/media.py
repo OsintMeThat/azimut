@@ -1008,6 +1008,21 @@ def recover_media_rename(case: Case) -> None:
     _finish_media_rename(case, record)
 
 
+#: How long a rename waits for the background worker to put the file down.
+#:
+#: The wait itself is required: a thumbnail or enrichment job holds the media
+#: open, and Windows cannot move a file another handle has open. What the number
+#: has to cover is a slow machine — `wait_until_idle`'s own default is 5 seconds,
+#: which is right for the shutdown it was written for and too short here. An
+#: import queues enrichment, and the Save gate names the item it just filed, so
+#: the two meet on every single save; 5 seconds turned that into "try the rename
+#: again" on a name the analyst had already committed to, and the same
+#: contention surfaced as a locked database in the write that followed. Matches
+#: the workspace move's settle step, which waits for the worker for the same
+#: reason.
+RENAME_SETTLE_SECONDS = 30.0
+
+
 def rename_media(
     case: Case,
     rel_path: str,
@@ -1018,7 +1033,7 @@ def rename_media(
     """Rename a media file and every stored reference to its canonical stem."""
     from . import workqueue
 
-    if settle_worker and not workqueue.wait_until_idle():
+    if settle_worker and not workqueue.wait_until_idle(timeout=RENAME_SETTLE_SECONDS):
         raise CaseError("background media work is still running; try the rename again")
     with case.lock:
         recover_media_rename(case)

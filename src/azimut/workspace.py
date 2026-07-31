@@ -1574,7 +1574,18 @@ def _prune_empty_note_dirs(root: Path, directory: Path) -> None:
 
     A mirrored tree that keeps every directory a note ever passed through stops
     being a mirror. Stops at `notes/` itself, which is born with the case.
+
+    Both paths are resolved before they are compared. Callers hand in the note
+    directory as the case knows it and the note's own parent as
+    `resolve_inside` returned it, which are the same directory in two spellings
+    the moment a symlink sits anywhere above the workspace: macOS reaches every
+    temporary directory through `/var` → `/private/var`, and a workspace under a
+    synced or linked folder does the same on any platform. Comparing the two
+    spellings makes the containment check say "outside", and the loop that
+    should prune then does nothing at all.
     """
+    root = root.resolve()
+    directory = directory.resolve()
     while directory != root and directory.is_relative_to(root):
         try:
             if any(directory.iterdir()):

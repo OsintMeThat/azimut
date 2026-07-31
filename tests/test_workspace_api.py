@@ -7,7 +7,10 @@ browser can say what happened and offer the way out.
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,6 +25,22 @@ def forget_the_last_move():
     workspacemove._move = None
     yield
     workspacemove._move = None
+
+
+@pytest.fixture()
+def tmp_path():
+    """A base directory short enough that a case fits under it on Windows.
+
+    Shadows pytest's own for this module, for the reason spelled out in
+    `tests/test_workspace_move.py`: pytest's temp path is longer than the Windows
+    path budget leaves for a workspace root, so every folder these routes are
+    offered would be refused as too long rather than exercised.
+    """
+    base = Path(tempfile.mkdtemp())
+    try:
+        yield base
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
 
 
 @pytest.fixture()
@@ -266,8 +285,13 @@ def test_case_work_is_refused_while_the_workspace_is_being_moved(
         real_copy(move, staging)
 
     monkeypatch.setattr(workspacemove, "_step_copy", slow_copy)
-    client.post("/api/settings/workspace/move", json={"path": str(tmp_path / "volume")})
+    queued = client.post("/api/settings/workspace/move", json={"path": str(tmp_path / "volume")})
+    assert queued.status_code == 200, queued.json()
+    # Bounded: a move refused before it copies would spin here forever, and a
+    # hung test costs a whole CI job rather than one red line.
+    deadline = time.monotonic() + 20
     while not reached["copying"]:
+        assert time.monotonic() < deadline, "the move never reached the copy step"
         time.sleep(0.01)
 
     refused = client.get("/api/cases")
