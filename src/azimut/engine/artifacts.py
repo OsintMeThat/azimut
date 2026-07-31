@@ -20,10 +20,12 @@ would blank a surviving row.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from .. import layout
 from ..workspace import CaseError
 from . import media as media_engine
 
@@ -45,22 +47,25 @@ class Companion:
 
 @dataclass(frozen=True)
 class Sidecar(Companion):
-    """The media sidecar sitting beside the file, ``<name>.azimut.json``."""
+    """The media sidecar, out of the listing in ``media/.meta/``."""
 
     def resolve(self, case: "Case", main: str) -> str | None:
-        return main + media_engine.SIDECAR_SUFFIX
+        return layout.sidecar_rel(main)
 
 
 @dataclass(frozen=True)
-class Swap(Companion):
-    """A companion named after the main artifact with its suffix swapped —
-    ``proofs/x.json`` → ``proofs/x.png``, or the ``proofs/x.assets`` folder."""
+class Named(Companion):
+    """A companion the layout names after the main artifact's stem.
 
-    old: str
-    new: str
+    A proof's spec lives in ``proofs/.meta/`` while the PNG it renders stays
+    visible in ``proofs/``, so "same name, swapped suffix" stopped being enough
+    — where each one goes is `layout`'s answer, not a string operation.
+    """
+
+    build: Callable[[str], str]
 
     def resolve(self, case: "Case", main: str) -> str | None:
-        return main.removesuffix(self.old) + self.new
+        return self.build(PurePosixPath(main).stem)
 
 
 @dataclass(frozen=True)
@@ -97,7 +102,10 @@ KINDS: dict[str, Kind] = {
     "capture": Kind(path_attr="path", companions=(Sidecar(), SharedThumb()), indexed=True),
     "proof": Kind(
         path_attr="spec",
-        companions=(Swap(".json", ".png"), Swap(".json", ".assets")),
+        companions=(
+            Named(layout.proof_export_rel),
+            Named(layout.proof_assets_rel),
+        ),
     ),
     "post": Kind(path_attr="draft"),
     "inspect-session": Kind(path_attr="spec"),
@@ -253,3 +261,4 @@ def delete(case: "Case", entity: dict[str, Any]) -> None:
         path = _resolve(case, rel)
         if path is not None:
             _remove(path)
+        case.prune_note_dirs(rel)

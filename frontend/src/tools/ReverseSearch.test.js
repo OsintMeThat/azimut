@@ -13,6 +13,7 @@ describe('Reverse Search case picker', () => {
     expect(source).toContain('placeholder="Search names…"');
     expect(source).toContain('function matchesMediaName(item, query)');
     expect(source).toContain("matchesTerms(item.title || item.filename || '', query)");
+    expect(source).not.toContain("item.filename !== item.title");
   });
 
   it('separates reverse-search sources by media type and provenance', () => {

@@ -455,3 +455,86 @@ a:hover {
   min-height: 0;
   overflow: auto;
 }
+
+/* Rendered Markdown, from lib/markdown.js. Shared by the Notebook preview and
+   the release notes in the update pop-up; anything specific to one of them
+   (entity references, diagrams) stays in that component. */
+.markdown {
+  color: var(--text-1);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  margin: 0 0 12px;
+  line-height: 1.25;
+}
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote {
+  margin: 0 0 12px;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 20px;
+}
+.markdown blockquote {
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+  color: var(--text-2);
+}
+.markdown code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bg-2);
+  font-family: var(--mono);
+}
+.markdown pre {
+  margin: 0 0 12px;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-1);
+}
+.markdown pre code {
+  padding: 0;
+  background: transparent;
+}
+.markdown table {
+  width: 100%;
+  margin: 0 0 12px;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+.markdown th,
+.markdown td {
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.markdown th {
+  background: var(--bg-2);
+}
+.markdown input[type='checkbox'] {
+  margin-right: 6px;
+  accent-color: var(--accent);
+}
+.markdown img,
+.markdown video {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 0 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+}
+.markdown a {
+  color: var(--accent);
+}
+.markdown > :last-child {
+  margin-bottom: 0;
+}

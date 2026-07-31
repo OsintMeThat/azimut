@@ -1,6 +1,7 @@
 """REST API for app-wide keys, preferences, usage and proof branding.
 
-Keys and branding stay beside settings.json, outside cases and exports.
+Keys and branding stay together under ``.azimut/settings/`` in the workspace
+directory, outside cases and exports.
 """
 
 from __future__ import annotations
@@ -17,7 +18,17 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .. import __version__, config
-from ..engine import diagnostics, ffmpeg, google_tiles, scrapers, sentinel, tiles, updates
+from ..engine import (
+    diagnostics,
+    ffmpeg,
+    google_tiles,
+    reveal,
+    scrapers,
+    sentinel,
+    tiles,
+    updates,
+    workspacemove,
+)
 from .ingest import bundled_extension_version
 from .templates import MAX_PER_KIND as MAX_TEMPLATES_PER_KIND
 
@@ -186,7 +197,9 @@ def put_prefs(body: PrefsIn) -> dict[str, Any]:
 def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
     if body.providers_enabled is not None:
         merged = dict(settings.get("providers_enabled", {}))
-        merged.update({k: bool(v) for k, v in body.providers_enabled.items() if k in KEYED_PROVIDERS})
+        merged.update(
+            {k: bool(v) for k, v in body.providers_enabled.items() if k in KEYED_PROVIDERS}
+        )
         settings["providers_enabled"] = merged
     if body.usage_overrides is not None:
         merged = dict(settings.get("usage_overrides", {}))
@@ -273,6 +286,95 @@ class StatusIn(BaseModel):
 
     ok: bool
     detail: str = ""
+
+
+@router.post("/settings/reveal-workspace")
+def reveal_workspace() -> dict[str, str]:
+    """Open the workspace folder in the system file manager.
+
+    About already prints the path; this saves copying it into a file manager by
+    hand, which is what the first analyst to ask ended up doing with a shortcut.
+    """
+    root = config.workspace_root()
+    try:
+        reveal.reveal(root)
+    except reveal.RevealError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"path": str(root)}
+
+
+class FolderIn(BaseModel):
+    """A folder the analyst typed. There is no native picker — the GUI-toolkit
+    rule forbids one and a browser cannot hand back a real path — so the path
+    arrives as text and every check happens server-side."""
+
+    path: str
+
+
+@router.get("/settings/workspace")
+def workspace_status() -> dict[str, Any]:
+    """Where the workspace is, and how a move in progress is going."""
+    return workspacemove.status()
+
+
+@router.post("/settings/workspace/inspect")
+def inspect_workspace_target(body: FolderIn) -> dict[str, Any]:
+    """Read a candidate folder without touching it: what Azimut would do with
+    it, what it refuses, and what it wants to warn about first."""
+    return workspacemove.inspect_target(body.path)
+
+
+@router.post("/settings/workspace/use")
+def use_workspace_folder(body: FolderIn) -> dict[str, Any]:
+    """Use a folder as it is, moving nothing.
+
+    The likely path: someone who already moved the folder by hand, or who wants
+    a second workspace. Cases in the current folder stay where they are.
+    """
+    try:
+        return workspacemove.adopt(body.path)
+    except workspacemove.MoveError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/settings/workspace/default")
+def use_default_workspace() -> dict[str, Any]:
+    """Forget the configured location and go back to the default folder."""
+    return workspacemove.use_default()
+
+
+@router.post("/settings/workspace/move")
+def move_workspace(body: FolderIn) -> dict[str, Any]:
+    """Copy the workspace to a new folder, then switch to it.
+
+    Returns as soon as the work is queued; `GET /settings/workspace` reports
+    each step. The old folder is kept until the analyst drops it.
+    """
+    try:
+        return workspacemove.start(body.path)
+    except workspacemove.MoveError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/settings/workspace/take")
+def take_the_workspace_lock() -> dict[str, Any]:
+    """Open a workspace another Azimut appears to hold.
+
+    The last word on a verdict this side of a network share cannot always get
+    right: two machines' clocks, or a lock file nobody is left to clear.
+    """
+    return workspacemove.take_the_lock()
+
+
+@router.post("/settings/workspace/discard-old")
+def discard_old_workspace() -> dict[str, str]:
+    """Delete the folder the last move set aside."""
+    try:
+        return {"path": workspacemove.discard_old()}
+    except workspacemove.MoveError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=409, detail=f"could not remove it: {exc}") from exc
 
 
 @router.post("/settings/ingest-token/rotate")
@@ -424,9 +526,7 @@ class ImportedSettings(BaseModel):
     )
     tile_providers: list[ImportedTileProvider] = Field(default_factory=list, max_length=100)
     api_keys: dict[ShortId, SecretValue] = Field(default_factory=dict, max_length=128)
-    usage: dict[ShortId, dict[UsageMonth, UsageCount]] = Field(
-        default_factory=dict, max_length=128
-    )
+    usage: dict[ShortId, dict[UsageMonth, UsageCount]] = Field(default_factory=dict, max_length=128)
     providers_enabled: dict[ShortId, bool] = Field(default_factory=dict, max_length=128)
     usage_overrides: dict[ShortId, bool] = Field(default_factory=dict, max_length=128)
     free_tiers: dict[ShortId, FreeTier] = Field(default_factory=dict, max_length=128)

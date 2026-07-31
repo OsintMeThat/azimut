@@ -22,7 +22,7 @@ from pathlib import Path
 from bigcase import build_big_case
 from legacy_case import write_legacy_json_case
 
-from azimut import workspace
+from azimut import layout, workspace
 from azimut.engine import links as link_engine
 from azimut.engine import media as media_engine
 from azimut.engine import thumbnails
@@ -51,7 +51,7 @@ def test_legacy_json_case_migrates_and_every_workflow_answers(tmp_workspace):
     )
     # a real media file + sidecar so the media listing has something to read
     (legacy.path / "media" / "shot.jpg").write_bytes(b"\xff\xd8\xff\xe0jpeg")
-    (legacy.path / "media" / ("shot.jpg" + media_engine.SIDECAR_SUFFIX)).write_text(
+    (legacy.path / "media" / ("shot.jpg" + layout.PRE_HIDDEN_SIDECAR_SUFFIX)).write_text(
         '{"filename": "shot.jpg", "kind": "image", "sha256": "%s", "size": 5,'
         ' "added_at": "2026-01-01T00:00:00Z", "source": {}, "thumbnail": null}' % ("a" * 64),
         encoding="utf-8",
@@ -61,7 +61,7 @@ def test_legacy_json_case_migrates_and_every_workflow_answers(tmp_workspace):
 
     # storage flipped, graph preserved, backup recoverable
     assert case.read()["azimut"] == {"schema": workspace.CASE_SCHEMA, "storage": "sqlite"}
-    assert (case.path / "case.pre-migrate-v2.json").exists()
+    assert (case.tool_root / "case.pre-migrate-v2.json").exists()
     assert {e["id"] for e in case.snapshot()["entities"]} == {"e_p", "e_m", "e_pr"}
 
     # bounded reads
@@ -184,7 +184,7 @@ def test_chromium_cookie_decrypt_dependency_ships_on_linux():
 def test_case_db_lives_under_the_workspace_root(tmp_workspace):
     case = Case.create("Where")
     assert case.path.is_relative_to(workspace.config.workspace_root())
-    assert (case.path / "case.db").exists()  # beside the case, never beside the binary
+    assert case.db_path.exists()  # beside the case, never beside the binary
     # thumbnails cache under the case's media dir, also inside the workspace
     assert thumbnails._thumb_dir(case).is_relative_to(workspace.config.workspace_root())
 

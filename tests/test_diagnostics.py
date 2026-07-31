@@ -98,12 +98,17 @@ def test_install_is_idempotent(monkeypatch):
 def test_scrub_replaces_home_and_account_name(monkeypatch, tmp_path):
     monkeypatch.setattr(diagnostics.Path, "home", staticmethod(lambda: tmp_path / "gwen"))
     monkeypatch.setattr(diagnostics, "_account_name", lambda: "gwen")
+    monkeypatch.setattr(
+        diagnostics.config,
+        "workspace_root",
+        lambda: tmp_path / "gwen" / "Azimut",
+    )
 
-    scrubbed = diagnostics.scrub(f"failed to open {tmp_path}/gwen/Azimut/cases/kyiv — gwen")
+    scrubbed = diagnostics.scrub(f"failed to open {tmp_path}/gwen/Azimut/kyiv — gwen")
     assert "gwen" not in scrubbed
     # the path stays useful, but the case segment is a name the analyst chose and
     # this text is on its way to a public tracker
-    assert "~/Azimut/cases/<case>" in scrubbed
+    assert "<workspace>/<case>" in scrubbed
     assert "kyiv" not in scrubbed
     assert "<user>" in scrubbed
 
@@ -132,6 +137,42 @@ def test_scrub_keeps_a_very_short_account_name(monkeypatch):
     monkeypatch.setattr(diagnostics, "_account_name", lambda: "an")
 
     assert diagnostics.scrub("an unexpected answer") == "an unexpected answer"
+
+
+def test_scrub_replaces_this_machines_name(monkeypatch):
+    """The workspace lock names the host holding a folder, and that warning goes
+    into the log tail a bug report publishes. On a work laptop it is an asset tag
+    and an internal domain."""
+    monkeypatch.setattr(diagnostics.socket, "gethostname", lambda: "lt-4471.corp.example")
+
+    scrubbed = diagnostics.scrub(
+        "another Azimut has this workspace open on lt-4471.corp.example:8477"
+    )
+
+    assert scrubbed == "another Azimut has this workspace open on <machine>:8477"
+
+
+def test_scrub_replaces_the_short_form_of_the_machine_name_too(monkeypatch):
+    """The lock records `gethostname()`, but a log line elsewhere may carry only
+    the leading label — replacing the long form first must not leave it behind."""
+    monkeypatch.setattr(diagnostics.socket, "gethostname", lambda: "lt-4471.corp.example")
+
+    assert diagnostics.scrub("connecting to lt-4471") == "connecting to <machine>"
+    assert "corp.example" not in diagnostics.scrub("host lt-4471.corp.example")
+
+
+def test_scrub_keeps_a_very_short_machine_name(monkeypatch):
+    monkeypatch.setattr(diagnostics.socket, "gethostname", lambda: "pc")
+
+    assert diagnostics.scrub("a pc somewhere") == "a pc somewhere"
+
+
+def test_scrub_survives_a_nameless_machine(monkeypatch):
+    monkeypatch.setattr(
+        diagnostics.socket, "gethostname", lambda: (_ for _ in ()).throw(OSError)
+    )
+
+    assert diagnostics.scrub("plain text") == "plain text"
 
 
 def test_scrub_survives_a_homeless_environment(monkeypatch):
@@ -365,8 +406,8 @@ def test_a_case_name_never_reaches_the_tracker(ring, tmp_workspace):
 
     assert "operation-blue-heron" not in captured
     assert "scratch_9f2c" not in captured
-    assert "cases/<case>/case.db" in captured.replace("\\", "/")
-    assert "scratch/<case>/media/a.jpg" in captured.replace("\\", "/")
+    assert "<workspace>/<case>/case.db" in captured.replace("\\", "/")
+    assert ".azimut/scratch/<case>/media/a.jpg" in captured.replace("\\", "/")
 
 
 def test_a_credential_in_a_logged_url_is_redacted(ring, tmp_workspace):

@@ -122,6 +122,13 @@ describe('Media Library positions', () => {
   });
 });
 
+describe('Media Library names', () => {
+  it('shows the canonical stem once and keeps the extension out of the title', () => {
+    expect(source).toContain('<span class="list-name">{item.title ?? item.filename}</span>');
+    expect(source).not.toContain('class="list-filename"');
+  });
+});
+
 describe('Media Library bounded loading', () => {
   it('browses via the bounded /media/page endpoint, not the unbounded list', () => {
     expect(source).toContain('createPagedList');

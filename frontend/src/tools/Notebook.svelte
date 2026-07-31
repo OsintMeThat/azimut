@@ -868,26 +868,16 @@ flowchart LR
   .reference-row small { color: var(--text-3); font-size: var(--fs-xs); }
   .preview-toggle { margin: -6px -7px -6px 0; }
   .preview-actions { display: flex; align-items: center; gap: 2px; }
-  .markdown { margin-top: 10px; color: var(--text-1); line-height: 1.65; overflow-wrap: anywhere; }
-  .markdown :global(h1), .markdown :global(h2), .markdown :global(h3) { margin: 0 0 12px; line-height: 1.25; }
-  .markdown :global(p), .markdown :global(ul), .markdown :global(ol), .markdown :global(blockquote) { margin: 0 0 12px; }
-  .markdown :global(blockquote) { padding-left: 12px; border-left: 2px solid var(--border); color: var(--text-2); }
-  .markdown :global(code) { padding: 1px 4px; border-radius: 3px; background: var(--bg-2); font-family: var(--mono); }
-  .markdown :global(pre) { margin: 0 0 12px; padding: 12px; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-1); }
-  .markdown :global(pre code) { padding: 0; background: transparent; }
-  .markdown :global(table) { width: 100%; margin: 0 0 12px; border-collapse: collapse; font-size: var(--fs-sm); }
-  .markdown :global(th), .markdown :global(td) { padding: 7px 9px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
-  .markdown :global(th) { background: var(--bg-2); }
-  .markdown :global(input[type='checkbox']) { margin-right: 6px; accent-color: var(--accent); }
+  /* The shared rendered-Markdown rules live in app.css; what follows is what
+     only the Notebook preview shows. */
+  .markdown { margin-top: 10px; }
   .markdown :global(.entity-ref) { color: var(--accent); font-weight: 600; }
   .markdown :global(.broken-ref) { color: var(--text-3); font-style: italic; text-decoration: line-through; }
-  .markdown :global(img), .markdown :global(video) { display: block; max-width: 100%; height: auto; margin: 0 0 12px; border-radius: var(--r-sm); border: 1px solid var(--border); }
   .markdown :global(video) { background: #000; }
   .markdown :global(.markdown-image.align-center) { margin-right: auto; margin-left: auto; }
   .markdown :global(.markdown-image.align-right) { margin-right: 0; margin-left: auto; }
   .markdown :global(.markdown-align.align-center) { text-align: center; }
   .markdown :global(.markdown-align.align-right) { text-align: right; }
-  .markdown :global(a) { color: var(--accent); }
   /* Diagrams are drawn light so they stay readable in the PDF export. */
   .markdown :global(.mermaid-diagram) { margin: 0 0 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: #fff; text-align: center; overflow-x: auto; }
   .markdown :global(.mermaid-diagram svg) { max-width: 100%; height: auto; }

@@ -1,8 +1,10 @@
 """Media Library: upload, dedupe, listing, file serving, deletion."""
 
 import io
+import json
 
 import graph_read
+import pytest
 import time
 
 from PIL import Image
@@ -44,6 +46,8 @@ def test_upload_and_list(client):
     assert res["duplicate"] is False
     item = res["item"]
     assert item["kind"] == "image"
+    assert item["title"] == "frame one"
+    assert item["filename"] == "frame one.png"
     assert len(item["sha256"]) == 64
     assert item["thumbnail"]  # Pillow thumbnail for images always works
 
@@ -53,6 +57,7 @@ def test_upload_and_list(client):
     # media entity was filed with provenance
     entities = graph_read.entities(cid)
     assert entities[0]["type"] == "media"
+    assert entities[0]["label"] == "frame one"
     assert entities[0]["provenance"]["by"] == "media-library"
 
     # the file and its thumbnail are served
@@ -230,8 +235,14 @@ def test_media_page_query_matches_title_notes_folder(client):
     # folder + a source/title term both match
     assert client.get(f"/api/cases/{cid}/media/page", params={"q": "harbour"}).json()["total"] == 1
     # two space-split terms must both be present (AND)
-    assert client.get(f"/api/cases/{cid}/media/page", params={"q": "bridge river"}).json()["total"] == 1
-    assert client.get(f"/api/cases/{cid}/media/page", params={"q": "bridge harbour"}).json()["total"] == 0
+    assert (
+        client.get(f"/api/cases/{cid}/media/page", params={"q": "bridge river"}).json()["total"]
+        == 1
+    )
+    assert (
+        client.get(f"/api/cases/{cid}/media/page", params={"q": "bridge harbour"}).json()["total"]
+        == 0
+    )
 
 
 def test_media_page_kind_and_folder_filters(client):
@@ -241,15 +252,17 @@ def test_media_page_kind_and_folder_filters(client):
     _set(client, cid, a["path"], folder="kyiv")
 
     assert client.get(f"/api/cases/{cid}/media/page", params={"kind": "image"}).json()["total"] == 2
-    assert client.get(f"/api/cases/{cid}/media/page", params={"folder": "kyiv"}).json()["total"] == 1
+    assert (
+        client.get(f"/api/cases/{cid}/media/page", params={"folder": "kyiv"}).json()["total"] == 1
+    )
 
 
 def test_media_page_sort_name_and_size(client):
     cid = client.post("/api/cases", json={"name": "Sort"}).json()["id"]
     small = _upload(client, cid, "s.png", _png_bytes(color=(5, 0, 0), size=(16, 16))).json()["item"]
     big = _upload(client, cid, "b.png", _png_bytes(color=(6, 0, 0), size=(256, 256))).json()["item"]
-    _set(client, cid, small["path"], title="Zebra")
-    _set(client, cid, big["path"], title="Alpha")
+    small = _set(client, cid, small["path"], title="Zebra")
+    big = _set(client, cid, big["path"], title="Alpha")
 
     by_name = client.get(f"/api/cases/{cid}/media/page", params={"sort": "name"}).json()
     assert [i["title"] for i in by_name["items"]] == ["Alpha", "Zebra"]
@@ -307,9 +320,7 @@ def test_media_page_filters_categories_without_page_local_counts(client):
     assert images["facets"]["category_counts"]["image"] == 1
     assert images["facets"]["category_counts"]["satellite"] == 1
 
-    maps = client.get(
-        f"/api/cases/{cid}/media/page", params={"category": "satellite"}
-    ).json()
+    maps = client.get(f"/api/cases/{cid}/media/page", params={"category": "satellite"}).json()
     assert [item["path"] for item in maps["items"]] == [satellite["path"]]
 
 
@@ -421,6 +432,9 @@ def test_update_media_notes_and_folder(client):
 
 
 def test_update_media_title(client):
+    from azimut import layout
+    from azimut.workspace import Case
+
     cid = client.post("/api/cases", json={"name": "Title"}).json()["id"]
     item = _upload(client, cid, "img.png", _png_bytes()).json()["item"]
 
@@ -430,21 +444,154 @@ def test_update_media_title(client):
     ).json()
     # the media's own title lives on the sidecar (shown in the Media tab)
     assert updated["title"] == "Strike video — Kharkiv"
+    assert updated["filename"] == "Strike video — Kharkiv.png"
+    assert updated["path"] == "media/Strike video — Kharkiv.png"
+    case = Case.open(cid)
+    assert not case.resolve_inside(item["path"]).exists()
+    assert not case.resolve_inside(layout.sidecar_rel("img.png")).exists()
+    assert case.resolve_inside(updated["path"]).is_file()
+    assert case.resolve_inside(layout.sidecar_rel(updated["filename"])).is_file()
 
     # the entity label mirrors the title so the case sidebar stays in sync
     entities = graph_read.entities(cid)
     assert entities[0]["label"] == "Strike video — Kharkiv"
 
-    # clearing the title reverts to no custom title
+    # An empty edit keeps the current filename stem: media no longer have a
+    # second, nullable display name that can drift from the file.
     cleared = client.patch(
-        f"/api/cases/{cid}/media", json={"path": item["path"], "title": ""}
+        f"/api/cases/{cid}/media", json={"path": updated["path"], "title": ""}
     ).json()
-    assert "title" not in cleared
+    assert cleared["title"] == "Strike video — Kharkiv"
+    assert cleared["filename"] == "Strike video — Kharkiv.png"
+    assert cleared["path"] == "media/Strike video — Kharkiv.png"
 
-    # the entity label falls back to the filename — it must not freeze on the
-    # old title once that title is gone
+    # The graph label is the same stem too.
     entities = graph_read.entities(cid)
-    assert entities[0]["label"] == item["path"].rsplit("/", 1)[-1]
+    assert entities[0]["label"] == "Strike video — Kharkiv"
+
+
+def test_media_rename_rewrites_exact_references_everywhere(client):
+    from azimut import layout
+    from azimut.engine import media as media_engine
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Rename references"}).json()["id"]
+    source = _upload(client, cid, "source.png", _png_bytes()).json()["item"]
+    derived = _upload(client, cid, "derived.png", _png_bytes(color=(20, 40, 60))).json()["item"]
+    case = Case.open(cid)
+    old = source["path"]
+    sentence = f"Analyst prose mentions {old} but is not a path field."
+    media_engine.merge_item(
+        case,
+        derived["path"],
+        {
+            "source": {
+                "type": "inspect",
+                "from": old,
+                "sources": [old],
+                "description": sentence,
+            }
+        },
+    )
+    reference = case.add_entity(
+        "bookmark",
+        "Reference",
+        {"path": old, "nested": [old], "notes": sentence},
+        by="user",
+    )
+    job = case.enqueue_job(
+        "thumbnail",
+        key=old,
+        payload={"path": old, "nested": [old], "notes": sentence},
+    )
+    records = {
+        layout.proof_spec_rel("Ref proof"): {"panels": [{"src": old}], "notes": sentence},
+        layout.session_rel("Ref inspect"): {"source": {"path": old}, "notes": sentence},
+        layout.draft_rel("Ref post"): {
+            "state": {"mediaPath": old, "mediaPaths": [old]},
+            "notes": sentence,
+        },
+        layout.grid_rel("ref-search"): {"source": old, "notes": sentence},
+    }
+    for rel, data in records.items():
+        path = case.resolve_inside(rel)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+    renamed = media_engine.update_media(case, old, {"title": "Canonical source"})
+    new = renamed["path"]
+
+    dependent = media_engine.read_item(case, derived["path"])
+    assert dependent["source"]["from"] == new
+    assert dependent["source"]["sources"] == [new]
+    assert dependent["source"]["description"] == sentence
+    entity = case.get_entity(reference["id"])
+    assert entity["attrs"]["path"] == new
+    assert entity["attrs"]["nested"] == [new]
+    assert entity["attrs"]["notes"] == sentence
+    queued = case.get_job(job["id"])
+    assert queued["key"] == new
+    assert queued["payload"]["path"] == new
+    assert queued["payload"]["nested"] == [new]
+    assert queued["payload"]["notes"] == sentence
+    proof = json.loads(
+        case.resolve_inside(layout.proof_spec_rel("Ref proof")).read_text(encoding="utf-8")
+    )
+    inspect = json.loads(
+        case.resolve_inside(layout.session_rel("Ref inspect")).read_text(encoding="utf-8")
+    )
+    post = json.loads(case.resolve_inside(layout.draft_rel("Ref post")).read_text(encoding="utf-8"))
+    search = json.loads(
+        case.resolve_inside(layout.grid_rel("ref-search")).read_text(encoding="utf-8")
+    )
+    assert proof["panels"][0]["src"] == new
+    assert inspect["source"]["path"] == new
+    assert post["state"]["mediaPath"] == new
+    assert post["state"]["mediaPaths"] == [new]
+    assert search["source"] == new
+    assert {proof["notes"], inspect["notes"], post["notes"], search["notes"]} == {sentence}
+
+
+def test_media_rename_recovers_after_files_moved_before_database_update(client, monkeypatch):
+    from azimut import layout
+    from azimut.engine import media as media_engine
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Rename recovery"}).json()["id"]
+    item = _upload(client, cid, "before.png", _png_bytes()).json()["item"]
+    case = Case.open(cid)
+    real_replace = Case.replace_path_references
+
+    def interrupt(_case, _old, _new):
+        raise RuntimeError("simulated interruption")
+
+    monkeypatch.setattr(Case, "replace_path_references", interrupt)
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        media_engine.rename_media(case, item["path"], "After")
+
+    journal = case.resolve_inside(f"{layout.DATA_DIR}/rename.json")
+    assert journal.is_file()
+    assert case.resolve_inside("media/After.png").is_file()
+    assert not case.resolve_inside(item["path"]).exists()
+
+    monkeypatch.setattr(Case, "replace_path_references", real_replace)
+    media_engine.recover_media_rename(case)
+
+    recovered = media_engine.read_item(case, "media/After.png")
+    assert recovered["title"] == "After"
+    assert case.find_entity(attr="path", value="media/After.png")["label"] == "After"
+    assert not journal.exists()
+
+
+def test_media_rename_uses_portable_case_insensitive_collisions(client):
+    cid = client.post("/api/cases", json={"name": "Portable names"}).json()["id"]
+    _upload(client, cid, "Clip.png", _png_bytes()).json()["item"]
+    other = _upload(client, cid, "other.png", _png_bytes(color=(90, 80, 70))).json()["item"]
+
+    renamed = _set(client, cid, other["path"], title="clip")
+
+    assert renamed["title"] == "clip-1"
+    assert renamed["filename"] == "clip-1.png"
 
 
 def test_update_media_clear_notes(client):
@@ -584,7 +731,10 @@ def test_download_reports_multi_without_downloading(client, monkeypatch):
             "id": "p2",
             "title": "photo 2",
             "ext": "jpg",
-            "thumbnails": [{"url": "https://x.test/p2-small.jpg"}, {"url": "https://x.test/p2.jpg"}],
+            "thumbnails": [
+                {"url": "https://x.test/p2-small.jpg"},
+                {"url": "https://x.test/p2.jpg"},
+            ],
         },
         {"id": "p3", "title": None, "ext": "mp4"},
     ]
@@ -894,7 +1044,10 @@ def test_download_picks_telegram_photo_from_mixed_post(client, monkeypatch):
     cid = client.post("/api/cases", json={"name": "TelegramPickPhoto"}).json()["id"]
     case = Case.open(cid)
 
-    entries = [{"id": "v1", "title": "clip one", "ext": "mp4"}, {"id": "v2", "title": "clip two", "ext": "mp4"}]
+    entries = [
+        {"id": "v1", "title": "clip one", "ext": "mp4"},
+        {"id": "v2", "title": "clip two", "ext": "mp4"},
+    ]
     _install_fake_ydl(
         monkeypatch, lambda ydl, url, download: {"_type": "playlist", "entries": entries}
     )
@@ -926,7 +1079,10 @@ def test_download_picks_yt_dlp_video_from_mixed_post(client, monkeypatch):
     cid = client.post("/api/cases", json={"name": "TelegramPickVideo"}).json()["id"]
     case = Case.open(cid)
 
-    entries = [{"id": "v1", "title": "clip one", "ext": "mp4"}, {"id": "v2", "title": "clip two", "ext": "mp4"}]
+    entries = [
+        {"id": "v1", "title": "clip one", "ext": "mp4"},
+        {"id": "v2", "title": "clip two", "ext": "mp4"},
+    ]
     _install_fake_ydl(
         monkeypatch, lambda ydl, url, download: {"_type": "playlist", "entries": entries}
     )
@@ -965,7 +1121,9 @@ def test_concurrent_downloads_dont_lose_entities(client, monkeypatch):
     # via sha256 and mask what this test is actually checking (entity loss,
     # not the separate dedup-check race)
     _install_fake_ydl(
-        monkeypatch, extract_info, content_fn=lambda info: _png_bytes(color=(int(info["id"][4:]), 0, 0))
+        monkeypatch,
+        extract_info,
+        content_fn=lambda info: _png_bytes(color=(int(info["id"][4:]), 0, 0)),
     )
 
     errors = []
@@ -1140,10 +1298,10 @@ def test_windows_chromium_returns_guidance(client, monkeypatch):
 
 
 def test_cookies_file_threads_absolute_cookiefile(client, monkeypatch):
-    """A cookies.txt source hands yt-dlp an absolute cookiefile path (resolved
-    against the workspace when relative)."""
+    """A cookies.txt source hands yt-dlp its protected absolute path."""
     import os
 
+    from azimut import config
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
@@ -1152,7 +1310,7 @@ def test_cookies_file_threads_absolute_cookiefile(client, monkeypatch):
 
     def extract_info(ydl, url, download):
         assert os.path.isabs(ydl.opts["cookiefile"])
-        assert ydl.opts["cookiefile"].endswith("cookies.txt")
+        assert ydl.opts["cookiefile"] == str(config.cookies_file_path())
         return {"id": "abc123", "title": "Gated via file"}
 
     _install_fake_ydl(monkeypatch, extract_info)
@@ -1296,25 +1454,41 @@ def test_naming_an_item_survives_the_enrichment_of_the_same_sidecar(client, monk
     rel = _upload(client, cid, "shot.png", _png_bytes()).json()["item"]["path"]
     case = Case.open(cid)
 
-    start = threading.Barrier(2)
+    enrichment_started = threading.Event()
+    let_enrichment_finish = threading.Event()
+    real_write = media_engine._write_sidecar
+    blocked_once = False
+
+    def block_enrichment_write(path, data):
+        nonlocal blocked_once
+        if data.get("dhash") and not blocked_once:
+            blocked_once = True
+            enrichment_started.set()
+            assert let_enrichment_finish.wait(timeout=5)
+        real_write(path, data)
+
+    monkeypatch.setattr(media_engine, "_write_sidecar", block_enrichment_write)
+    enrich_thread = threading.Thread(
+        target=media_engine.merge_item,
+        args=(case, rel, {"dhash": "ff00ff00ff00ff00"}),
+    )
+    enrich_thread.start()
+    assert enrichment_started.wait(timeout=5)
+
+    renamed = {}
 
     def name_it():
-        start.wait(timeout=5)
-        for _ in range(20):
-            media_engine.update_media(case, rel, {"title": "Yard panorama"})
+        renamed.update(media_engine.update_media(case, rel, {"title": "Yard panorama"}))
 
-    def enrich_it():
-        start.wait(timeout=5)
-        for _ in range(20):
-            media_engine.merge_item(case, rel, {"dhash": "ff00ff00ff00ff00"})
+    name_thread = threading.Thread(target=name_it)
+    name_thread.start()
+    let_enrichment_finish.set()
+    enrich_thread.join(timeout=10)
+    name_thread.join(timeout=10)
+    assert not enrich_thread.is_alive()
+    assert not name_thread.is_alive()
 
-    threads = [threading.Thread(target=name_it), threading.Thread(target=enrich_it)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=10)
-
-    item = media_engine.read_item(case, rel)
+    item = media_engine.read_item(case, renamed["path"])
     assert item["title"] == "Yard panorama"
     assert item["dhash"] == "ff00ff00ff00ff00"
 
@@ -1409,8 +1583,14 @@ def test_the_browse_index_leaves_the_metadata_dumps_to_the_per_item_read(client)
 def test_the_per_item_read_refuses_a_path_outside_the_case(client):
     cid = client.post("/api/cases", json={"name": "Traversal"}).json()["id"]
 
-    assert client.get(f"/api/cases/{cid}/media/item", params={"path": "../../etc/passwd"}).status_code == 400
-    assert client.get(f"/api/cases/{cid}/media/item", params={"path": "media/gone.png"}).status_code == 404
+    assert (
+        client.get(f"/api/cases/{cid}/media/item", params={"path": "../../etc/passwd"}).status_code
+        == 400
+    )
+    assert (
+        client.get(f"/api/cases/{cid}/media/item", params={"path": "media/gone.png"}).status_code
+        == 404
+    )
 
 
 def test_enrich_counts_the_jobs_the_queue_took(client):
@@ -1426,10 +1606,10 @@ def test_enrich_counts_the_jobs_the_queue_took(client):
     ).json()["item"]
 
     assert audio["kind"] not in ("image", "video")
-    assert client.post(
-        f"/api/cases/{cid}/media/enrich", json={"path": audio["path"]}
-    ).json() == {"queued": 0}
-    assert client.post(
-        f"/api/cases/{cid}/media/enrich", json={"path": image["path"]}
-    ).json() == {"queued": 1}
+    assert client.post(f"/api/cases/{cid}/media/enrich", json={"path": audio["path"]}).json() == {
+        "queued": 0
+    }
+    assert client.post(f"/api/cases/{cid}/media/enrich", json={"path": image["path"]}).json() == {
+        "queued": 1
+    }
     workqueue.wait_until_idle()

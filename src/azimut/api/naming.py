@@ -4,29 +4,21 @@ Inspect sessions, proofs, post drafts and satellite grids all turn a free-text
 title into the filename that holds it. They must agree: a session and a proof
 called "Rooftop angle" land on the same stem, and the frontend mirrors this in
 ``lib/naming.js`` so it can predict a collision before it posts.
+
+`slugify` and its length cap live in `layout.py` with the rest of the path
+budget: how a name becomes a path, and how long it may be, are facts about the
+case folder's shape.
 """
 
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any
 
-# Long enough to stay readable, short enough that the path survives Windows'
-# 260-character limit under a deep workspace root.
-MAX_SLUG = 80
+from ..layout import MAX_SLUG, slugify
 
-
-def slugify(text: str | None, fallback: str) -> str:
-    """URL- and filesystem-safe stem from free text.
-
-    Everything outside ``[a-z0-9]`` collapses to a single dash, so accents and
-    punctuation drop out rather than reaching the filesystem. Text that leaves
-    nothing behind ("!!!", "") falls back to the caller's word.
-    """
-    slug = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
-    return slug[:MAX_SLUG] or fallback
+__all__ = ["MAX_SLUG", "slugify", "read_created_at"]
 
 
 def read_created_at(path: Path) -> str | None:

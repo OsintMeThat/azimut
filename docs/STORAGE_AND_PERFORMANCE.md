@@ -7,36 +7,142 @@ SQLite is complete.
 Structured case data lives in SQLite. Images, videos, proof PNGs, drafts, saved
 Inspect sessions and note bodies remain ordinary files inside the case folder.
 
+## The shape of the workspace
+
+```text
+<workspace>/
+  <case>/                    # one visible folder per permanent investigation
+  .azimut/                   # hidden application machinery
+    bundles/                 # exported bundles and transient imports
+    cache/tiles/             # disposable map tile cache
+    lock                     # held by the one Azimut using this workspace
+    runtime/                 # updated scraper distributions
+    scratch/                 # complete, promotable one-shot cases
+    settings/                # preferences, templates, branding and cookies
+```
+
+Startup migrates the former `cases/`, `scratch/`, `bundles/`, `runtime/` and
+`tile-cache/` directories with restartable renames. Permanent cases move to the
+workspace root; scratch cases move under `.azimut/scratch/` and then run through
+the same case-schema migration as permanent cases before cleanup. Different
+entries at the same destination stop the move without overwriting either copy.
+
+## Where the workspace is
+
+Nothing inside a workspace records where it is: media are stored as
+`media/photo.png`, and settings hold keys and preferences. So the answer lives
+outside it, in a one-line pointer file at the platform's own configuration
+location — `$XDG_CONFIG_HOME/azimut/location` on Linux, `~/Library/Application
+Support/Azimut/location` on macOS, `%APPDATA%\Azimut\location` on Windows.
+Resolution order is `AZIMUT_HOME`, then that pointer, then `~/Azimut`. The
+environment variable stays in front so a workspace on a stick keeps working
+without rewriting the machine's configuration, and a stale pointer cannot stop a
+run that was told where to look.
+
+A lost or unreadable pointer costs an address, not data: Azimut falls back to
+the default root, and pointing it at the real folder again is one action. A
+pointer naming a folder that is *not there* is the other case, and it stops
+startup: nothing is created, case routes answer 503, and the browser shows where
+the folder was expected. Recreating it silently is how someone concludes their
+work is gone.
+
+### One Azimut per workspace
+
+A workspace holds `.azimut/lock`, and the process that opens it holds an advisory
+lock on that file — `fcntl.flock` on Linux and macOS, `msvcrt.locking` on
+Windows. The reason it is an OS lock rather than a file Azimut writes and deletes
+is that **the kernel drops it when the process dies**, so a crash can never leave
+a workspace nobody can open. It is taken before startup migrates anything, since
+two processes renaming case directories at once is the damage it exists to
+prevent, and it moves with the root when a folder is adopted or a move finishes.
+
+That lock is unreliable on exactly the filesystems this matters for, NFS, SMB and
+cloud-sync folders, so the file also carries who holds it and a heartbeat rewritten
+every 30 seconds. The two are read together: a refused lock means someone holds
+it; a granted lock over a payload from *another* machine whose heartbeat is under
+five minutes old means the lock was probably a no-op, so the payload wins; an
+older heartbeat, or any payload naming this machine, is a corpse to take over.
+Two machines' clocks can disagree in a way nothing here can fix, so Settings can
+always overrule the verdict.
+
+The port was never this guarantee. A second instance on the same machine failed
+to bind 8477 and died, which protects the port; `azimut --port 8478` and two
+machines on one share never noticed. What breaks without the lock is not SQLite,
+whose own locking and `busy_timeout` hold on a local disk, but everything around
+it: `settings.json` read-modify-written per process loses an API key to the last
+writer, and startup migrations race over the same renames.
+
+Settings can adopt a folder as it is, or move the workspace into it. Adopting
+writes the pointer and nothing else, which is what a folder moved by hand needs.
+A move copies, verifies file names and sizes, renames the copy into place, then
+writes the pointer — that write is the whole switch, so an interruption before
+it leaves the old folder authoritative and one after leaves the new one, both
+complete. The old folder is then renamed `<name>.old-<date>` and kept until the
+analyst drops it. The tile cache is not copied, being disposable by contract,
+and a destination that already holds other files gets an `Azimut` subfolder
+rather than settling among them. Choosing a root is also where the path budget
+below is enforced: `layout.room_for_workspace_root()` refuses a root too long
+for a case to fit under it on Windows, and names it as a warning elsewhere.
+
 ## The shape of a case
 
 ```text
-case.json       # small manifest: name, dates, storage format and schema
-case.db         # entities, links, folders, catalog and jobs (SQLite)
-notes.md        # case-wide Markdown note
-notes/          # filed Markdown note bodies (one file per note entity)
-media/          # imported, downloaded and derived media + sidecars
-  .dl/          #   in-progress downloads (transient)
-  .thumbs/      #   disposable thumbnail cache
-proofs/         # editable proof specs and rendered PNGs
-exports/        # post drafts and reports
-inspect/        # saved Inspect session specs
-search/         # saved Grid Search state
-.trash/         # deleted artifacts grouped by delete action
+<case>/           # the analyst's: Azimut writes nothing here but azimut/
+  README.txt      # which half of the folder is whose
+  azimut/
+    case.json     # small manifest: name, dates, storage format and schema
+    notes.md      # case-wide Markdown note
+    notes/        # note bodies, named after their title, filed as in the notebook
+    media/        # imported, downloaded and derived media
+      .meta/      #   one sidecar per media
+      .dl/        #   in-progress downloads (transient)
+      .thumbs/    #   disposable thumbnail cache
+    proofs/       # rendered PNGs
+      .meta/      #   editable specs and pasted assets
+    exports/      # what the analyst exports; empty until they do
+    .data/        # case.db: entities, links, folders, catalog and jobs (SQLite)
+    .drafts/      # post drafts
+    .inspect/     # saved Inspect session specs
+    .search/      # saved Grid Search state
+    .trash/       # deleted artifacts grouped by delete action, in numbered slots
 ```
+
+Paths are stored relative to `azimut/`, not to the case folder: a media is
+`media/x.png` in the graph, in its sidecar and in a bundle. That is what let the
+wrapper arrive without rewriting a stored path, and what keeps bundles written
+before it importable after it.
+
+Visible means openable and useful in another program; a dot-directory means only
+Azimut reads it. `ensure_dir` sets `FILE_ATTRIBUTE_HIDDEN` on those, since a
+leading dot means nothing to Windows Explorer.
+
+`layout.py` owns this shape. It answers where each file goes for a given case
+root and carries the path budget — the caps on case, media, document and folder
+names that keep a case's longest path inside Windows' 260-character limit.
+`tests/test_layout.py` recomputes the budget from those caps and fails when a
+new directory level or a raised cap breaks it.
 
 `case.json` is the discovery manifest: name, creation date, and the storage and
 schema fields. It no longer holds the graph, so the case switcher can identify a
 case without opening its database. `case.db` is the source of truth for mutable
 structured state (entities, links, folders, jobs). The files under `media/`,
-`proofs/`, `exports/`, `inspect/` and `notes/` are the source of truth for their
+`proofs/`, `.drafts/`, `.inspect/` and `notes/` are the source of truth for their
 own content.
 
-Under `proofs/`, `exports/` and `inspect/`, a file's stem is the name shown at the
-top of its tool, slugified (`api/naming.slugify`, mirrored in `lib/naming.js`).
-Renaming therefore moves the file: the save carries the slug it was bound to, and
-the endpoint writes the new one, moves the proof's PNG with it, rebinds the same
-entity and deletes the old file. A rename onto a name another item holds is
-refused (409) — two entities pointing at one spec has no sane merge.
+App-wide preferences stay outside cases under `<workspace>/.azimut/settings/`:
+`settings.json`, `templates.json`, `signature.png` and the optional
+`cookies.txt`. Startup moves the former workspace-root or `.settings/` files
+there with independent atomic renames, so a partial move resumes. If both
+locations differ, the current hidden file wins and the legacy copy is retained
+beside it under a `.legacy` name.
+
+For media, proof PNGs, notes, drafts and Inspect sessions, the human-readable
+filename stem is the name Azimut shows. Spaces, case and Unicode survive;
+characters forbidden by Windows are replaced and the returned canonical stem
+is written back to the UI. Renaming moves the file and its companions, rewrites
+exact stored paths in the graph, jobs, sidecars and tool specs, and rebinds the
+same entity. A rename onto a name another item holds is refused before anything
+moves.
 
 Every mutation used to re-read and rewrite the whole `case.json` under a per-case
 lock. At 10k entities that rewrote megabytes per edit and shipped the entire
@@ -51,6 +157,26 @@ database plus declared files under a SHA-256 manifest. Rollback journaling leave
 no WAL checkpoint outside the case folder. Media, proofs and note bodies remain
 inspectable files.
 
+## Case Doctor
+
+The case switcher can inspect a permanent or scratch case without opening its
+database. Discovery reads `case.json`, so renaming the outer case folder does
+not orphan it. Diagnosis is read-only and reports:
+
+- a missing or unreadable `case.db`;
+- media and capture entities whose file no longer exists;
+- visible files placed directly in `media/` without a graph entity.
+
+Repairs are separate API actions. A deleted database is rebuilt in a temporary
+SQLite file from media sidecars, note files and proof specs, then renamed into
+place only after the rebuild completes. Relations, catalog folders and
+database-only provenance cannot be recovered and the dialog says so first.
+Missing media can be removed through the normal Trash path or rebound to an
+unregistered file already inside `media/`. An unknown file goes through the
+normal media registration pipeline, gaining a hash, sidecar, index row and
+provenance. None of these actions runs at startup, on case open or during a
+diagnostic request.
+
 ## Ownership rules
 
 Each value has one owner. Cached copies may exist, but they are disposable and
@@ -60,17 +186,18 @@ carry enough information to detect staleness.
 |---|---|---|
 | Case name and storage version | `case.json` | Small manifest, atomically replaced |
 | Entities, links and folders | `case.db` | Transactional and versioned |
-| Entity labels and notes | `case.db` | Indexed for catalog search |
-| Media title, notes and folder | Media sidecar | Mirrored to the graph and browse index |
+| Entity labels and notes | `case.db` | Indexed for catalog search; file-backed labels mirror their filename stem |
+| Media visible name | Media filename stem | Mirrored as `title` to the sidecar, graph and browse index |
+| Media notes and folder | Media sidecar | Mirrored to the graph and browse index |
 | Image, video and audio bytes | Filesystem | Never stored as database blobs |
 | Proof and session content | Their JSON/PNG files | Registered as artifacts in the database |
 | Acquisition provenance | Media sidecar | Immutable after registration |
 | Media browse fields | `case.db` (`media_items`) | Search index mirrored from sidecars |
 | Background jobs | `case.db` (`jobs`) | Durable, recoverable, one worker |
 | Trash journal | `case.db` (`trash`) | One row per delete action; payload loaded only for restore |
-| Deleted artifact bytes | `.trash/<group>/` | Original relative paths, retained until purge |
+| Deleted artifact bytes | `.trash/<group>/` | Numbered slots paired to their origin by the journal, retained until purge |
 | Thumbnails | `media/.thumbs/` | Cache; safe to remove at any time |
-| Note bodies | `notes.md`, `notes/<id>.md` | Graph keeps only id, title, folder, path |
+| Note bodies | `notes.md`, `notes/<folder>/<title>.md` | Graph keeps only id, title, folder, path; uniqueness is per folder |
 
 ## Packaging and frozen-binary constraints
 
@@ -114,6 +241,15 @@ review.
 `case.db` is at SQLite schema 7. The schema counter is independent of the JSON
 `CASE_SCHEMA`: the manifest's `azimut.storage` field selects the backend, and each
 format counts its own shape upgrades.
+
+The case manifest is at `CASE_SCHEMA` 9. Schema 3 is the last released folder
+shape before the `azimut/` boundary; schemas 4–8 were development checkpoints
+and never became public formats. `FolderMigration` therefore declares a target
+schema instead of assuming `+1`: every schema-3 case and any development case at
+4–8 runs the same idempotent normalizer and is stamped 9 only after the whole
+layout and visible-name contract are valid. A stopped migration keeps its older
+stamp and resumes the same normalizer on the next open. Media moves additionally
+use `.data/rename.json`, so a restart can finish references after the bytes moved.
 
 ### Tables
 
@@ -185,22 +321,34 @@ sync.
 
 `engine/artifacts.py` is the single declaration of files owned by each entity
 type. Delete writes a recovery journal before moving files to `.trash/<group>/`
-and removing graph rows. Restore refuses occupied destinations, then restores
-the original entity ids, surviving links and tombstones. An interrupted delete
-is rolled back or published on the next case open; an interrupted restore is
-completed. Shared thumbnails do not move; they are discarded and queued again
+and removing graph rows. The group directory is flat: each file waits under a
+number, and the journal's `slots` list says where it came from, so the trash
+never stacks a second copy of the case tree under itself. Restore refuses
+occupied destinations, then restores the original entity ids, surviving links
+and tombstones. An interrupted delete is rolled back or published on the next
+case open; an interrupted restore is completed.
+Shared thumbnails do not move; they are discarded and queued again
 after restore. Purge removes the journal only after its directory is gone, so a
 Windows file lock leaves a retryable group instead of orphaned bytes.
 
 ## Case bundles
 
 Exports run as `bundle-export` jobs and write atomically to
-`<workspace>/bundles/`, then stream to the browser as an attachment. The first
+`<workspace>/.azimut/bundles/`, then stream to the browser as an attachment. The first
 ZIP member is `bundle-header.json`; the last is `bundle.json`, which lists every
 other member with its size and SHA-256. The database is copied consistently,
 its trash and unfinished jobs are removed, and it is vacuumed before packaging.
 `.trash/`, `media/.thumbs/` and `media/.dl/` never travel.
 Export also reserves filesystem headroom before writing its temporary output.
+
+Bundle format 2 carries the complete case under a `case/` member prefix:
+`case/azimut/` for application state and every regular entry beside it for the
+analyst's free zone. The prefix keeps the bundle metadata outside that free
+zone, so even analyst files called `bundle.json` or `bundle-header.json` round
+trip. A case-root name that case-insensitively collides with `azimut/` is
+refused, as are symbolic links on both export and import. There is no fixed size
+ceiling: exports and imports use current free space plus a safety reserve, and
+the import dialog warns when the temporary requirement reaches 10 GiB.
 
 Password protection encrypts the complete ZIP in 1 MiB AES-256-GCM chunks. The
 key comes from scrypt (`n=2^15`, `r=8`, `p=1`), and only the envelope parameters
@@ -208,7 +356,7 @@ remain clear. Passwords live in a process-memory map keyed by job id, never in
 the durable payload.
 
 Import pre-flights format and database versions before creating a destination.
-The browser file picker uploads to `<workspace>/bundles/.imports/`; rejected and
+The browser file picker uploads to `<workspace>/.azimut/bundles/.imports/`; rejected and
 cancelled uploads are removed immediately, completed imports remove their source,
 and abandoned uploads expire after 24 hours.
 It verifies unique safe member names, declared and actual byte counts, archive
@@ -216,7 +364,7 @@ member count, and rejects symlinks. It extracts only the manifest allowlist
 after each hash matches. There is no small fixed case-size cap: preview and
 import compare the required temporary space with current filesystem capacity,
 keep a safety reserve, and warn for imports above 10 GiB. Work is staged under
-`cases/<id>.incoming/`; the existing shell and completed staging directory are
+`<workspace>/<id>.incoming/`; the existing shell and completed staging directory are
 swapped by rename for Windows compatibility. Every import creates a new case and
 records `origin_case_id` plus `imported_at` in database metadata.
 Entities and links keep their original ids, provenance and confirmation status.

@@ -21,6 +21,7 @@ import io
 from dataclasses import dataclass, field
 
 from PIL import Image
+from azimut import layout
 
 
 def _png(size: tuple[int, int] = (80, 60), color: tuple[int, int, int] = (120, 60, 30)) -> bytes:
@@ -43,6 +44,7 @@ class FullCase:
     proof_asset: str = ""
     draft: str = ""
     note_id: str = ""
+    note: str = ""  # its case-relative path
     place_id: str = ""
     grid: str = ""
     entity_types: set[str] = field(default_factory=set)
@@ -110,7 +112,7 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
         },
     )
     assert session.status_code == 200, session.text
-    full.session = f"inspect/{session.json()['name']}.json"
+    full.session = f".inspect/{session.json()['name']}.json"
 
     # -- a place, and a relation to the photo ---------------------------------
     place = client.post(
@@ -147,7 +149,7 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     )
     assert proof.status_code == 200, proof.text
     full.proof = proof.json()["spec_path"]
-    full.proof_asset = f"proofs/{proof.json()['name']}.assets/{asset_name}"
+    full.proof_asset = f"{layout.proof_assets_rel(proof.json()['name'])}/{asset_name}"
 
     # -- post: derived from the proof and the photo ---------------------------
     draft = client.post(
@@ -168,6 +170,7 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     )
     assert note.status_code == 200, note.text
     full.note_id = note.json()["id"]
+    full.note = note.json()["attrs"]["path"]
     client.put(f"/api/cases/{case_id}/notes", json={"text": "# Full case\n\nRunning notes.\n"})
 
     grid = client.put(
@@ -187,7 +190,7 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
         },
     )
     assert grid.status_code == 200, grid.text
-    full.grid = f"search/{grid.json()['name']}.json"
+    full.grid = f".search/{grid.json()['name']}.json"
 
     # Enrichment and thumbnails were queued along the way; let them land, or the
     # caller's first delete races a background write into the same case.

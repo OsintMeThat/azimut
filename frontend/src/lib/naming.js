@@ -2,27 +2,38 @@
  * Naming rules shared by everything the analyst saves under a name: inspect
  * sessions, proofs and post drafts.
  *
- * The rule is one line: **the name is the filename**. What the header shows is
- * slugified into the file that holds it, so renaming moves the file (the
- * backend does the move — see `api/naming.py`, which mirrors `slugify` exactly).
- * That is why the collision checks here matter: the frontend can tell before it
- * posts whether a name is free.
+ * The rule is one line: **the name is the filename stem**. The human-readable
+ * text in the header becomes the file stem, with only cross-platform forbidden
+ * characters replaced. Renaming moves the file (the backend does the move —
+ * see `api/naming.py`, which mirrors `slugify` exactly). That is why collision
+ * checks here matter: the frontend can tell before it posts whether a name is
+ * free.
  */
 
-// Long enough to stay readable, short enough that the path survives Windows'
-// 260-character limit under a deep workspace root. Mirrors api/naming.py.
-export const MAX_SLUG = 80;
+// Long enough to stay readable, short enough that the case's longest path stays
+// inside Windows' 260-character limit. Mirrors MAX_SLUG in azimut/layout.py,
+// which owns the whole path budget.
+export const MAX_SLUG = 68;
 
 /** What a fresh item of each kind is called until the analyst renames it. */
-export const NAME_PREFIX = { session: 'Inspect', proof: 'Proof', draft: 'Post' };
+export const NAME_PREFIX = { session: 'Inspect', proof: 'Proof', draft: 'Post', note: 'Note' };
 
-/** URL- and filesystem-safe stem from free text — mirror of the backend `slugify`. */
+/** Human-readable cross-platform filename stem — mirror of backend `slugify`. */
 export function slugify(text, fallback) {
-  const slug = (text ?? '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return slug.slice(0, MAX_SLUG) || fallback;
+  let name = String(text ?? '')
+    .normalize('NFC')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '_')
+    .replace(/^[ .]+|[ .]+$/g, '')
+    .replace(/\.{2,}/g, '_')
+    .slice(0, MAX_SLUG)
+    .replace(/[ .]+$/g, '');
+  if (!name) name = String(fallback ?? 'file').slice(0, MAX_SLUG).replace(/[ .]+$/g, '') || 'file';
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) {
+    name = `_${name}`.slice(0, MAX_SLUG).replace(/[ .]+$/g, '');
+  }
+  return name;
 }
 
 /**

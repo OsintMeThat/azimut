@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Any, cast
 
@@ -9,14 +10,24 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import config
+from .. import config, workspace
 from ..engine import bundles as bundle_engine
+from ..engine import doctor as doctor_engine
 from ..engine import links as link_engine
+from ..engine import media as media_engine
+from ..engine import reveal as reveal_engine
 from ..engine import trash as trash_engine
 from ..repository import EntityStatus
 from ..workspace import Case, CaseError
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
+
+#: Folders in the workspace that are not cases yet. Deliberately *not* under
+#: `/api/cases`: a case's id is its folder name, so a literal segment there is a
+#: name someone can give a folder — `/api/cases/folders` is already the case
+#: named "Folders" (`tests/test_cases_api.py`). These operate on the workspace
+#: anyway, one level above any case.
+workspace_router = APIRouter(prefix="/api/workspace", tags=["cases"])
 
 
 def get_case(case_id: str) -> Case:
@@ -188,12 +199,26 @@ class FolderIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
 
+class FolderName(BaseModel):
+    """A directory name in the workspace root, never a path: what it may hold is
+    `layout.usable_case_name`'s answer, checked where the folder is opened."""
+
+    name: str = Field(min_length=1, max_length=120)
+
+
 class BundlePassword(BaseModel):
     password: str | None = Field(default=None, max_length=1024)
 
 
 class BundleUpload(BundlePassword):
     upload_id: str = Field(min_length=32, max_length=32)
+
+
+class DoctorRepair(BaseModel):
+    action: str = Field(min_length=1, max_length=20)
+    entity_id: str | None = Field(default=None, max_length=64)
+    path: str | None = Field(default=None, max_length=300)
+    replacement: str | None = Field(default=None, max_length=300)
 
 
 @router.get("")
@@ -209,6 +234,37 @@ def create_case(body: CreateCase) -> dict[str, Any]:
     except CaseError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"id": case.id, **case.overview()}
+
+
+@workspace_router.get("/folders")
+def list_workspace_folders() -> list[dict[str, Any]]:
+    """Folders sitting in the workspace that are not cases yet, and their state."""
+    return workspace.list_workspace_folders()
+
+
+@workspace_router.post("/folders/adopt")
+def adopt_folder(body: FolderName) -> dict[str, Any]:
+    """Make a case out of one of those folders, where it already is."""
+    _ensure_name_free(body.name)
+    try:
+        case = Case.adopt(body.name)
+    except CaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"id": case.id, **case.overview()}
+
+
+@workspace_router.post("/folders/recover")
+def recover_folder(body: FolderName) -> dict[str, Any]:
+    """Write back the manifest of a folder holding a case that lost it.
+
+    The manifest and nothing else: the case is reachable again after this, and
+    anything still damaged belongs to the Doctor, which the caller opens next.
+    """
+    try:
+        case = workspace.restore_manifest(body.name)
+    except CaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"id": case.id, "name": case.read().get("name", case.id)}
 
 
 @router.post("/scratch")
@@ -283,6 +339,46 @@ def relation_types() -> list[dict[str, Any]]:
     ]
 
 
+@router.get("/{case_id}/doctor")
+def doctor_report(case_id: str) -> dict[str, Any]:
+    """Inspect a case even when its database is missing."""
+    try:
+        return doctor_engine.scan(Case.locate(case_id))
+    except CaseError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{case_id}/doctor/repair")
+def doctor_repair(case_id: str, body: DoctorRepair) -> dict[str, Any]:
+    """Apply one repair that the current Doctor report explicitly offers."""
+    try:
+        located = Case.locate(case_id)
+        if body.action == "rebuild":
+            result = doctor_engine.rebuild_database(located)
+            case = located
+        else:
+            case = Case.open(case_id)
+            if body.action == "import" and body.path:
+                doctor_engine.require_unknown_media(case, body.path)
+                result = media_engine.register_existing(case, body.path)
+            elif body.action == "drop" and body.entity_id:
+                doctor_engine.require_missing_media(case, body.entity_id)
+                result = delete_entity_deep(case, body.entity_id)
+            elif body.action == "relink" and body.entity_id and body.replacement:
+                doctor_engine.require_missing_media(case, body.entity_id)
+                doctor_engine.require_unknown_media(case, body.replacement)
+                result = media_engine.relink_existing(
+                    case,
+                    body.entity_id,
+                    body.replacement,
+                )
+            else:
+                raise CaseError("this repair action is not valid")
+        return {"repair": result, "report": doctor_engine.scan(case)}
+    except (CaseError, OSError, ValueError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.get("/{case_id}")
 def read_case(case_id: str) -> dict[str, Any]:
     case = get_case(case_id)
@@ -312,6 +408,21 @@ def rename_case(case_id: str, body: CreateCase) -> dict[str, Any]:
 def delete_case(case_id: str) -> dict[str, str]:
     get_case(case_id).delete()
     return {"status": "deleted"}
+
+
+@router.post("/{case_id}/reveal")
+def reveal_case_folder(case_id: str) -> dict[str, str]:
+    """Open this case's folder in the system file manager.
+
+    The route takes no path: the case id is enough to find the folder, so nothing
+    the browser sends can point somewhere else.
+    """
+    case = get_case(case_id)
+    try:
+        reveal_engine.reveal(case.path)
+    except reveal_engine.RevealError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"path": str(case.path)}
 
 
 @router.post("/{case_id}/bundle/export")

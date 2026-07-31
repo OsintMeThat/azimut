@@ -2265,12 +2265,13 @@
         if (entry) entry.pending = false;
       }
       savedName = result.name;
+      proof.title = result.title;
       dirty = false;
       await reloadCase();
       toast(`Proof saved: ${result.png}`, 'ok');
       if (andPost) {
         uiState.postProof = {
-          title: proof.title,
+          title: result.title,
           coordsText: displayedCoords,
           source: displayedSource,
           attribution: attributionLine(proof.panels),

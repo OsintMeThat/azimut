@@ -75,12 +75,19 @@ def test_keys_never_reach_a_case_folder(client, monkeypatch):
     cid = client.post("/api/cases", json={"name": "K"}).json()["id"]
     client.post(
         f"/api/cases/{cid}/satellite/capture",
-        json={"lat": 48.85, "lon": 2.29, "zoom": 15, "width": 512, "height": 512,
-              "provider": "mapbox-satellite"},
+        json={
+            "lat": 48.85,
+            "lon": 2.29,
+            "zoom": 15,
+            "width": 512,
+            "height": 512,
+            "provider": "mapbox-satellite",
+        },
     )
     case_dir = config.cases_dir() / cid
     hits = [
-        p for p in case_dir.rglob("*")
+        p
+        for p in case_dir.rglob("*")
         if p.is_file() and p.suffix in (".json", ".md") and "pk.SECRET" in p.read_text()
     ]
     assert hits == []
@@ -90,7 +97,8 @@ def _upstream(status=200, content=b"JPEGDATA", headers=None):
     def get(url, **kwargs):
         get.urls.append(url)
         return httpx.Response(
-            status, content=content,
+            status,
+            content=content,
             headers={"content-type": "image/jpeg", **(headers or {})},
             request=httpx.Request("GET", url),
         )
@@ -170,7 +178,9 @@ def test_tile_proxy_google_remints_session_on_403(client, monkeypatch):
     def get(url, **kwargs):
         status = 403 if "session=tok-stale" in url else 200
         return httpx.Response(
-            status, content=b"TILE", headers={"content-type": "image/jpeg"},
+            status,
+            content=b"TILE",
+            headers={"content-type": "image/jpeg"},
             request=httpx.Request("GET", url),
         )
 
@@ -268,6 +278,7 @@ def test_tile_proxy_disk_cache_serves_repeats_without_rebilling(client, monkeypa
     assert r.status_code == 200
     assert r.content == b"JPEGDATA"
     assert len(upstream.urls) == 1  # second hit came from the disk cache
+    assert (config.tile_cache_dir() / "mapbox-satellite").is_dir()
     body = client.get("/api/settings").json()
     assert body["usage"]["mapbox"][body["month"]] == 1  # cache hits aren't billed
 
@@ -283,7 +294,7 @@ def test_tile_proxy_never_caches_google(client, monkeypatch):
     client.get("/api/tiles/google-satellite/15/16597/11278")
     client.get("/api/tiles/google-satellite/15/16597/11278")
     assert len(upstream.urls) == 2  # terms forbid a disk cache — always upstream
-    assert not (config.workspace_root() / "tile-cache" / "google-satellite").exists()
+    assert not (config.tile_cache_dir() / "google-satellite").exists()
     body = client.get("/api/settings").json()
     assert body["usage"]["google"][body["month"]] == 2
 
@@ -307,7 +318,9 @@ def test_tile_proxy_overzoom_fills_coverage_gaps(client, monkeypatch):
         if "/tile/19/" in url:
             return httpx.Response(404, content=b"", request=httpx.Request("GET", url))
         return httpx.Response(
-            200, content=parent_png, headers={"content-type": "image/png"},
+            200,
+            content=parent_png,
+            headers={"content-type": "image/png"},
             request=httpx.Request("GET", url),
         )
 
@@ -343,7 +356,9 @@ def test_tile_proxy_placeholder_tile_triggers_overzoom(client, monkeypatch):
             (placeholder, "image/jpeg") if "/tile/19/" in url else (parent_png, "image/png")
         )
         return httpx.Response(
-            200, content=body, headers={"content-type": ctype},
+            200,
+            content=body,
+            headers={"content-type": ctype},
             request=httpx.Request("GET", url),
         )
 
@@ -499,9 +514,7 @@ def test_sentinel_layers_check_falls_back_to_the_catalogue_and_says_why(client, 
 
 def test_sentinel_dates_lists_passes_and_counts_the_request(client, monkeypatch):
     client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
-    payload = (
-        '{"features": [{"properties": {"date": "2026-05-11", "cloudCoverPercentage": 4}}]}'
-    )
+    payload = '{"features": [{"properties": {"date": "2026-05-11", "cloudCoverPercentage": 4}}]}'
 
     def get(url, **kwargs):
         assert "/ogc/wfs/inst-uuid" in url
@@ -509,8 +522,7 @@ def test_sentinel_dates_lists_passes_and_counts_the_request(client, monkeypatch)
 
     monkeypatch.setattr(httpx, "get", get)
     body = client.get(
-        "/api/satellite/sentinel/dates"
-        "?lat=48.8584&lon=2.2945&start=2026-05-01&end=2026-05-31"
+        "/api/satellite/sentinel/dates?lat=48.8584&lon=2.2945&start=2026-05-01&end=2026-05-31"
     ).json()
     assert body["dates"] == [{"date": "2026-05-11", "cloud": 4.0, "granules": 1}]
     # a WFS query is ~0.01 PU but one whole request against the request quota —
@@ -520,9 +532,12 @@ def test_sentinel_dates_lists_passes_and_counts_the_request(client, monkeypatch)
 
 
 def test_sentinel_dates_without_a_key_is_a_404(client):
-    assert client.get(
-        "/api/satellite/sentinel/dates?lat=1&lon=1&start=2026-05-01&end=2026-05-31"
-    ).status_code == 404
+    assert (
+        client.get(
+            "/api/satellite/sentinel/dates?lat=1&lon=1&start=2026-05-01&end=2026-05-31"
+        ).status_code
+        == 404
+    )
 
 
 def test_sentinel_coverage_checks_the_layer_and_counts_the_request(client, monkeypatch):
@@ -561,9 +576,7 @@ def test_sentinel_coverage_defaults_to_no_cloud_filter(client, monkeypatch):
         return {"available": True, "coverage": 1.0, "date": day, "layer": layer, "maxcc": maxcc}
 
     monkeypatch.setattr(sentinel, "coverage", check)
-    client.get(
-        "/api/satellite/sentinel/coverage?lat=48&lon=2&layer=SWIR&date=2026-05-11"
-    )
+    client.get("/api/satellite/sentinel/coverage?lat=48&lon=2&layer=SWIR&date=2026-05-11")
     assert calls == [100]
 
 
@@ -571,8 +584,7 @@ def test_sentinel_coverage_refuses_a_ceiling_outside_the_scale(client):
     client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
     # refused before anything is sent: no request, no charge
     response = client.get(
-        "/api/satellite/sentinel/coverage"
-        "?lat=48&lon=2&layer=SWIR&date=2026-05-11&maxcc=150"
+        "/api/satellite/sentinel/coverage?lat=48&lon=2&layer=SWIR&date=2026-05-11&maxcc=150"
     )
     assert response.status_code == 422
     assert client.get("/api/settings").json()["usage"] == {}
@@ -586,8 +598,7 @@ def test_sentinel_coverage_rejects_bad_input_without_counting(client, monkeypatc
 
     monkeypatch.setattr(sentinel, "coverage", reject)
     response = client.get(
-        "/api/satellite/sentinel/coverage"
-        "?lat=48.8584&lon=2.2945&layer=bad&date=2026-05-11"
+        "/api/satellite/sentinel/coverage?lat=48.8584&lon=2.2945&layer=bad&date=2026-05-11"
     )
     assert response.status_code == 422
     assert client.get("/api/settings").json()["usage"] == {}
@@ -601,8 +612,7 @@ def test_sentinel_coverage_failure_is_upstream_error(client, monkeypatch):
 
     monkeypatch.setattr(sentinel, "coverage", fail)
     response = client.get(
-        "/api/satellite/sentinel/coverage"
-        "?lat=48.8584&lon=2.2945&layer=SWIR&date=2026-05-11"
+        "/api/satellite/sentinel/coverage?lat=48.8584&lon=2.2945&layer=SWIR&date=2026-05-11"
     )
     assert response.status_code == 502
     assert client.get("/api/settings").json()["usage"] == {}
@@ -668,7 +678,8 @@ def test_google_key_test_speaks_googles_own_words(client, monkeypatch):
 
     def blocked(url, **kwargs):
         return httpx.Response(
-            403, content=eea.encode(),
+            403,
+            content=eea.encode(),
             headers={"content-type": "application/json"},
             request=httpx.Request("POST", url),
         )
@@ -696,15 +707,18 @@ def test_google_js_key_is_tested_in_the_browser(client):
     ids = {p["id"] for p in client.get("/api/satellite/providers").json()}
     assert "google-js" not in ids  # benched by the browser's verdict
 
-    assert client.post(
-        "/api/settings/keys/nope/status", json={"ok": True, "detail": ""}
-    ).status_code == 404
+    assert (
+        client.post("/api/settings/keys/nope/status", json={"ok": True, "detail": ""}).status_code
+        == 404
+    )
 
 
 def test_per_provider_eco_thresholds(client):
     """Each tile API gets its own eco threshold; the widget is not tunable
     (an eco swap re-bills a map load) and unknown names are ignored."""
-    client.put("/api/settings/keys", json={"mapbox": "pk.x", "sentinelhub": "inst", "google_js": "AIza.js"})
+    client.put(
+        "/api/settings/keys", json={"mapbox": "pk.x", "sentinelhub": "inst", "google_js": "AIza.js"}
+    )
     r = client.put(
         "/api/settings/prefs",
         json={"eco_max_zooms": {"mapbox": 12, "sentinelhub": 0, "google_js": 9, "bogus": 3}},
@@ -844,7 +858,9 @@ def test_signature_delete_is_idempotent(client):
 
 def test_signature_rejects_non_png(client):
     # the bytes are what count, not the name or the content-type the browser sent
-    body = client.post("/api/settings/signature", files={"file": ("logo.png", b"GIF89a...", "image/png")})
+    body = client.post(
+        "/api/settings/signature", files={"file": ("logo.png", b"GIF89a...", "image/png")}
+    )
     assert body.status_code == 422
     assert "PNG" in body.json()["detail"]
     assert client.get("/api/settings").json()["signature"] is False
@@ -938,7 +954,7 @@ def test_signature_never_lands_in_a_case(client):
     """It is workspace-level, like the API keys — a case folder never sees it."""
     client.post("/api/settings/signature", files={"file": ("logo.png", PNG, "image/png")})
     assert config.signature_path().is_file()
-    assert config.signature_path().parent == config.workspace_root()
+    assert config.signature_path().parent == config.settings_dir()
     case_id = client.post("/api/cases", json={"name": "Signed"}).json()["id"]
     case_dir = config.cases_dir() / case_id
     assert not list(case_dir.rglob("signature.png"))
@@ -1015,4 +1031,4 @@ def test_update_then_reset_round_trip(client, monkeypatch):
 
 def test_scrapers_live_in_the_workspace_not_the_install(client):
     """The runtime dir has to be somewhere writable — the binary's own dir isn't."""
-    assert config.runtime_dir().parent == config.workspace_root()
+    assert config.runtime_dir().parent == config.internal_dir()

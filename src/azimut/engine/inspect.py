@@ -493,7 +493,7 @@ def _apply_meta(
     """
     patch = {k: v for k, v in (("title", label), ("folder", folder), ("notes", notes)) if v}
     if patch:
-        media_engine.update_media(case, result["item"]["path"], patch)
+        result["item"] = media_engine.update_media(case, result["item"]["path"], patch)
 
 
 def scan_focus(

@@ -5,15 +5,15 @@ import {
 } from './naming.js';
 
 describe('slugify — mirrors the backend api/naming.slugify', () => {
-  it('lowercases, hyphenates runs of non-alphanumerics, trims edges', () => {
-    expect(slugify('Inspect 1', 'session')).toBe('inspect-1');
-    expect(slugify('  Rooftop! @ 12:30  ', 'proof')).toBe('rooftop-12-30');
-    expect(slugify('Café déjà', 'proof')).toBe('caf-d-j');
+  it('preserves human text and replaces only forbidden filename characters', () => {
+    expect(slugify('Inspect 1', 'session')).toBe('Inspect 1');
+    expect(slugify('  Rooftop! @ 12:30  ', 'proof')).toBe('Rooftop! @ 12_30');
+    expect(slugify('Café déjà', 'proof')).toBe('Café déjà');
   });
 
   it('falls back to the caller word when nothing survives, and caps the length', () => {
     expect(slugify('', 'proof')).toBe('proof');
-    expect(slugify('!!!', 'session')).toBe('session');
+    expect(slugify('!!!', 'session')).toBe('!!!');
     expect(slugify(null, 'draft')).toBe('draft');
     expect(slugify('a'.repeat(200), 'proof')).toHaveLength(MAX_SLUG);
   });
@@ -36,7 +36,7 @@ describe('nextName — the default name of a fresh item', () => {
   });
 
   it('numbers a name that still slugs to a distinct filename', () => {
-    expect(slugify(nextName('proof', ['Proof 1']), 'proof')).toBe('proof-2');
+    expect(slugify(nextName('proof', ['Proof 1']), 'proof')).toBe('Proof 2');
   });
 });
 
@@ -113,6 +113,8 @@ describe('saved-item case queries', () => {
 
 describe('every kind names its work the same way', () => {
   it('has one prefix per kind and no other', () => {
-    expect(Object.keys(NAME_PREFIX).sort()).toEqual(['draft', 'proof', 'session']);
+    // Notes joined the convention: their file is named after the title too,
+    // so a fresh one is 'Note 1' the way a fresh session is 'Inspect 1'.
+    expect(Object.keys(NAME_PREFIX).sort()).toEqual(['draft', 'note', 'proof', 'session']);
   });
 });

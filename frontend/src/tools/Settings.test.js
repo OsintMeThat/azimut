@@ -53,3 +53,16 @@ describe('Backup', () => {
     expect(source).toContain('Import backup');
   });
 });
+
+describe('Workspace folder', () => {
+  it('puts an Open button beside the path About already prints', () => {
+    expect(source).toContain("import { revealWorkspaceFolder } from '../lib/reveal.js'");
+    expect(source).toContain('<dt>Workspace</dt>');
+    expect(source).toContain('onclick={revealWorkspace}');
+  });
+
+  it('reports the outcome, since the window opens outside the browser', () => {
+    expect(source).toContain("toast('Opened the workspace folder'");
+    expect(source).toContain("toast(e.message || 'Could not open the folder'");
+  });
+});

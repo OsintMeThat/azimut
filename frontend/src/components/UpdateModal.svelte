@@ -1,22 +1,25 @@
 <script>
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
+  import { markdownHtml } from '../lib/markdown.js';
   import { updateState, dismissUpdate } from '../lib/state.svelte.js';
 
   let mute = $state(false);
+
+  const notes = $derived(markdownHtml(updateState.notes));
 
   function close() {
     dismissUpdate(mute);
   }
 </script>
 
-<Modal title="{updateState.latest} is live" onclose={close} width="520px">
+<Modal title="{updateState.latest} is live" onclose={close} width="600px">
   <p class="lead">A newer version of Azimut is out. Grab it to stay current.</p>
 
   {#if updateState.notes}
-    <!-- release body from our own GitHub release; rendered as plain text, never
-         as HTML, so there is nothing to inject -->
-    <pre class="notes">{updateState.notes}</pre>
+    <!-- Release body from our own GitHub release, written in Markdown. It goes
+         through the same renderer as the Notebook, which strips unsafe HTML. -->
+    <div class="notes markdown">{@html notes}</div>
   {/if}
 
   <div class="actions">
@@ -48,7 +51,7 @@
   }
   .notes {
     margin: 12px 0;
-    padding: 10px 12px;
+    padding: 12px 14px;
     max-height: 40vh;
     overflow: auto;
     background: var(--bg-0);
@@ -56,9 +59,17 @@
     border-radius: var(--r-md);
     color: var(--text-2);
     font-size: var(--fs-sm);
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
+  }
+  /* A release note leads with its own headings, which would otherwise shout
+     over the modal title. */
+  .notes :global(h1),
+  .notes :global(h2) {
+    font-size: var(--fs-md);
+    font-weight: 600;
+  }
+  .notes :global(h3) {
+    font-size: var(--fs-sm);
+    font-weight: 600;
   }
   .actions {
     display: flex;

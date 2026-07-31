@@ -10,7 +10,9 @@ import json
 
 from azimut.engine import links as link_engine
 from azimut.workspace import Case
+from azimut.layout import PRE_HIDDEN_SIDECAR_SUFFIX
 from bigcase import build_big_case
+from legacy_case import read_legacy_manifest
 
 
 def _build(**kw):
@@ -35,7 +37,7 @@ def test_builds_a_case_that_opens_with_matching_counts(tmp_workspace):
 
 def test_folder_tree_is_well_formed(tmp_workspace):
     case, _ = _build()
-    data = case.read()
+    data = read_legacy_manifest(case)
     folders = set(data["folders"])
     # every folder an entity is filed under exists as a node
     for entity in data["entities"]:
@@ -51,7 +53,9 @@ def test_folder_tree_is_well_formed(tmp_workspace):
 
 def test_notes_are_file_backed_not_inline(tmp_workspace):
     case, _ = _build()
-    note_entities = [e for e in case.read()["entities"] if e["type"] == "note"]
+    note_entities = [
+        e for e in read_legacy_manifest(case)["entities"] if e["type"] == "note"
+    ]
     assert note_entities
     for note in note_entities:
         assert "content" not in note["attrs"]  # body lives on disk, not in the graph
@@ -63,9 +67,9 @@ def test_media_sidecars_present_and_some_files_missing(tmp_workspace):
     case, summary = _build(seed=7)
     # the fixture deliberately models missing source files
     assert summary.media_files_missing > 0
-    media_dir = case.subdir("media")
+    media_dir = case.path / "media"  # not opened yet, so still unwrapped
     present = list(media_dir.glob("img_*.jpg"))
-    sidecars = list(media_dir.glob("*.azimut.json"))
+    sidecars = list(media_dir.glob("*" + PRE_HIDDEN_SIDECAR_SUFFIX))  # legacy fixture
     assert present and len(sidecars) == len(present)
     assert len(present) == summary.media - summary.media_files_missing
 
@@ -91,7 +95,7 @@ def test_generation_is_deterministic_for_a_seed(tmp_workspace):
                           notes=10, artifacts=20, seed=42)
     b, _ = build_big_case(name="Case B", entities=200, links=250, media=60,
                           notes=10, artifacts=20, seed=42)
-    da, db = a.read(), b.read()
+    da, db = read_legacy_manifest(a), read_legacy_manifest(b)
     # identical graph regardless of the case name
     assert json.dumps(da["entities"]) == json.dumps(db["entities"])
     assert json.dumps(da["links"]) == json.dumps(db["links"])

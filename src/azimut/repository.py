@@ -312,3 +312,7 @@ class CaseRepository(Protocol):
 
     def prune_jobs(self, *, kind: str | None = None) -> int:
         ...
+
+    def replace_path_references(self, old: str, new: str) -> None:
+        """Replace one exact case-relative path in entity attrs and job records."""
+        ...

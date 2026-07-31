@@ -1,6 +1,13 @@
 """Case lifecycle, notes, entities and links through the REST API."""
 
+import json
+from pathlib import Path
+
 import graph_read
+from fastapi.testclient import TestClient
+
+from azimut import layout
+from azimut.workspace import Case
 
 
 def test_health(client):
@@ -123,7 +130,6 @@ def test_notes_roundtrip(client):
 
 
 def test_filed_notes_are_markdown_files(client):
-    import azimut.config as cfg
 
     cid = client.post("/api/cases", json={"name": "Notebook"}).json()["id"]
     note = client.post(
@@ -131,8 +137,11 @@ def test_filed_notes_are_markdown_files(client):
         json={"title": "Lead", "folder": "Research", "content": "# First lead"},
     ).json()
 
-    assert note["attrs"] == {"folder": "Research", "path": f"notes/{note['id']}.md"}
-    assert (cfg.cases_dir() / cid / note["attrs"]["path"]).read_text(encoding="utf-8") == "# First lead"
+    # the name is the filename, and the notebook's folder is mirrored on disk
+    assert note["attrs"] == {"folder": "Research", "path": "notes/Research/Lead.md"}
+    assert Case.open(cid).resolve_inside(note["attrs"]["path"]).read_text(
+        encoding="utf-8"
+    ) == "# First lead"
     assert client.get(f"/api/cases/{cid}/notes/{note['id']}").json()["text"] == "# First lead"
 
     client.put(f"/api/cases/{cid}/notes/{note['id']}", json={"text": "Updated"})
@@ -140,11 +149,10 @@ def test_filed_notes_are_markdown_files(client):
 
 
 def test_deleting_filed_note_removes_markdown_file(client):
-    import azimut.config as cfg
 
     cid = client.post("/api/cases", json={"name": "Notebook delete"}).json()["id"]
     note = client.post(f"/api/cases/{cid}/notes", json={"title": "Disposable"}).json()
-    path = cfg.cases_dir() / cid / note["attrs"]["path"]
+    path = Case.open(cid).resolve_inside(note["attrs"]["path"])
     assert path.exists()
 
     client.delete(f"/api/cases/{cid}/entities/{note['id']}")
@@ -487,7 +495,7 @@ def test_cleanup_scratch_reaps_only_old_empty_sessions(tmp_workspace):
     _age(with_entity)
     # old but holding a media file → kept
     with_file = Case.create("Scratch session", scratch=True)
-    (with_file.path / "media" / "shot.png").write_bytes(b"png")
+    (with_file.subdir("media") / "shot.png").write_bytes(b"png")
     _age(with_file)
     # fresh and empty → kept (it may be in use right now)
     empty_new = Case.create("Scratch session", scratch=True)
@@ -508,10 +516,167 @@ def test_cleanup_scratch_treats_a_stranded_sidecar_temp_file_as_debris(tmp_works
     from azimut.workspace import Case
 
     stranded = Case.create("Scratch session", scratch=True)
-    (stranded.path / "media" / ".shot.png.azimut.json.deadbeef.tmp").write_bytes(b"{}")
+    (stranded.subdir("media") / ".shot.png.azimut.json.deadbeef.tmp").write_bytes(b"{}")
     data = jsonlib.loads(stranded.json_path.read_text(encoding="utf-8"))
     data["updated_at"] = "2000-01-01T00:00:00Z"
     stranded.json_path.write_text(jsonlib.dumps(data), encoding="utf-8")
 
     assert Case.cleanup_scratch() == 1
     assert not stranded.path.exists()
+
+
+def test_renaming_a_note_moves_its_file(client):
+    """The name is the filename, as it already is for proofs, sessions and
+    drafts. Notes were the last holdout."""
+    cid = client.post("/api/cases", json={"name": "Renames"}).json()["id"]
+    note = client.post(
+        f"/api/cases/{cid}/notes",
+        json={"title": "Draft lead", "folder": "Research", "content": "# body"},
+    ).json()
+    case = Case.open(cid)
+    assert note["attrs"]["path"] == "notes/Research/Draft lead.md"
+
+    renamed = client.patch(
+        f"/api/cases/{cid}/entities/{note['id']}", json={"label": "Confirmed lead"}
+    ).json()
+
+    assert renamed["attrs"]["path"] == "notes/Research/Confirmed lead.md"
+    assert case.resolve_inside(renamed["attrs"]["path"]).read_text(encoding="utf-8") == "# body"
+    assert not case.resolve_inside(note["attrs"]["path"]).exists()
+
+
+def test_moving_a_note_between_folders_moves_its_file(client):
+    """The notebook's tree is mirrored on disk, so filing a note is a move."""
+    cid = client.post("/api/cases", json={"name": "Filing"}).json()["id"]
+    note = client.post(
+        f"/api/cases/{cid}/notes", json={"title": "Summary", "folder": "Video 1"}
+    ).json()
+    case = Case.open(cid)
+    assert note["attrs"]["path"] == "notes/Video 1/Summary.md"
+
+    moved = client.patch(
+        f"/api/cases/{cid}/entities/{note['id']}", json={"attrs": {"folder": "Video 2"}}
+    ).json()
+
+    assert moved["attrs"]["path"] == "notes/Video 2/Summary.md"
+    # the emptied folder does not linger: a mirror that keeps every directory a
+    # note passed through stops being a mirror
+    assert not case.resolve_inside("notes/Video 1").exists()
+
+
+def test_a_note_moves_cleanly_under_a_symlinked_workspace(monkeypatch, tmp_path):
+    """The same move, reached through a symlink, still prunes what it emptied.
+
+    macOS reaches every temporary directory as `/var` → `/private/var`, and a
+    workspace under a linked or synced folder does the same anywhere. The case
+    knows its directory by the path it was given while `resolve_inside` hands
+    back the resolved one, so a containment check comparing the two spellings
+    answers "outside" about a directory that is inside — and the pruning it
+    guards silently stops happening.
+    """
+    real = tmp_path / "real"
+    real.mkdir()
+    linked = tmp_path / "linked"
+    linked.symlink_to(real, target_is_directory=True)
+    monkeypatch.setenv("AZIMUT_HOME", str(linked))
+    from azimut.server import create_app
+
+    with TestClient(create_app(), base_url="http://127.0.0.1") as client:
+        cid = client.post("/api/cases", json={"name": "Filing"}).json()["id"]
+        note = client.post(
+            f"/api/cases/{cid}/notes", json={"title": "Summary", "folder": "Video 1"}
+        ).json()
+        case = Case.open(cid)
+        assert case.resolve_inside(note["attrs"]["path"]).is_file()
+
+        client.patch(
+            f"/api/cases/{cid}/entities/{note['id']}", json={"attrs": {"folder": "Video 2"}}
+        )
+
+        assert not case.resolve_inside("notes/Video 1").exists()
+
+
+def test_the_same_title_lives_in_two_folders(client):
+    """Uniqueness is scoped to the folder. This is why the tree is mirrored at
+    all: one folder per video is the analyst's whole workflow."""
+    cid = client.post("/api/cases", json={"name": "Two videos"}).json()["id"]
+    first = client.post(
+        f"/api/cases/{cid}/notes", json={"title": "Summary", "folder": "Video 1"}
+    ).json()
+    second = client.post(
+        f"/api/cases/{cid}/notes", json={"title": "Summary", "folder": "Video 2"}
+    ).json()
+
+    assert first["attrs"]["path"] == "notes/Video 1/Summary.md"
+    assert second["attrs"]["path"] == "notes/Video 2/Summary.md"
+
+
+def test_the_same_title_twice_in_one_folder_takes_a_suffix(client):
+    """A note is the most frequent thing an analyst creates, so a taken name is
+    numbered rather than refused."""
+    cid = client.post("/api/cases", json={"name": "Same name"}).json()["id"]
+    first = client.post(f"/api/cases/{cid}/notes", json={"title": "Lead", "folder": ""}).json()
+    second = client.post(f"/api/cases/{cid}/notes", json={"title": "Lead", "folder": ""}).json()
+
+    assert first["attrs"]["path"] == "notes/Lead.md"
+    assert second["attrs"]["path"] == "notes/Lead-2.md"
+    assert Case.open(cid).resolve_inside(second["attrs"]["path"]).exists()
+
+
+def test_details_title_edit_moves_every_named_tool_file(client):
+    """The shared Details editor bypasses the tool-specific save routes, so its
+    generic entity patch must still keep labels and filenames aligned."""
+    cid = client.post("/api/cases", json={"name": "Details renames"}).json()["id"]
+    case = Case.open(cid)
+    fixtures = [
+        (
+            "proof",
+            "spec",
+            layout.proof_spec_rel("Old proof"),
+            "New proof",
+            layout.proof_spec_rel("New proof"),
+        ),
+        (
+            "inspect-session",
+            "spec",
+            layout.session_rel("Old inspect"),
+            "New inspect",
+            layout.session_rel("New inspect"),
+        ),
+        (
+            "post",
+            "draft",
+            layout.draft_rel("Old post"),
+            "New post",
+            layout.draft_rel("New post"),
+        ),
+    ]
+    entities = []
+    for type_, attribute, old, new_label, new in fixtures:
+        path = case.resolve_inside(old)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"title": Path(old).stem}), encoding="utf-8")
+        attrs = {attribute: old}
+        if type_ == "proof":
+            export = layout.proof_export_rel("Old proof")
+            case.resolve_inside(export).write_bytes(b"png")
+            attrs["path"] = export
+        entity = case.add_entity(type_, Path(old).stem, attrs, by="user")
+        entities.append((entity, old, new_label, new))
+
+    for entity, old, new_label, new in entities:
+        updated = client.patch(
+            f"/api/cases/{cid}/entities/{entity['id']}",
+            json={"label": new_label},
+        ).json()
+        attribute = "draft" if entity["type"] == "post" else "spec"
+        assert updated["label"] == new_label
+        assert updated["attrs"][attribute] == new
+        assert not case.resolve_inside(old).exists()
+        assert case.resolve_inside(new).is_file()
+        body = json.loads(case.resolve_inside(new).read_text(encoding="utf-8"))
+        assert body["title"] == new_label
+
+    proof = next(entity for entity in case.list_entities() if entity["type"] == "proof")
+    assert proof["attrs"]["path"] == layout.proof_export_rel("New proof")
+    assert case.resolve_inside(proof["attrs"]["path"]).is_file()

@@ -7,6 +7,7 @@ import io
 
 import pytest
 from PIL import Image
+from azimut import layout
 
 
 def _png_b64() -> str:
@@ -42,14 +43,14 @@ def test_save_load_roundtrip(client):
         f"/api/cases/{cid}/proofs",
         json={"title": "Kharkiv strike proof", "spec": SPEC, "png_base64": _png_b64()},
     ).json()
-    assert saved["name"] == "kharkiv-strike-proof"
-    assert saved["png"] == "proofs/kharkiv-strike-proof.png"
+    assert saved["name"] == "Kharkiv strike proof"
+    assert saved["png"] == "proofs/Kharkiv strike proof.png"
 
     listed = client.get(f"/api/cases/{cid}/proofs").json()
     assert len(listed) == 1
     assert listed[0]["panels"] == 2 and listed[0]["shapes"] == 1
 
-    spec = client.get(f"/api/cases/{cid}/proofs/kharkiv-strike-proof").json()
+    spec = client.get(f"/api/cases/{cid}/proofs/{saved['name']}").json()
     assert spec["title"] == "Kharkiv strike proof"
     assert spec["shapes"][0]["comment"] == "blue roof"
     assert spec["notes"] == {"#ff5252": "blue roof matches"}  # legend text is per color
@@ -101,7 +102,7 @@ def test_resave_with_png_adds_the_path_to_the_entity(client):
     entity = next(
         e for e in graph_read.entities(cid) if e["type"] == "proof"
     )
-    assert entity["attrs"]["path"] == f"proofs/{saved['name']}.png"
+    assert entity["attrs"]["path"] == layout.proof_export_rel(saved['name'])
 
 
 def test_invalid_png_rejected(client):
@@ -134,17 +135,17 @@ def test_rename_moves_the_spec_and_the_export(client):
             "png_base64": _png_b64(),
         },
     ).json()
-    assert renamed["name"] == "rooftop-angle"
-    assert renamed["png"] == "proofs/rooftop-angle.png"
-    assert client.get(f"/api/cases/{cid}/proofs/proof-1").status_code == 404
-    assert client.get(f"/files/{cid}/proofs/proof-1.png").status_code == 404
-    assert client.get(f"/files/{cid}/proofs/rooftop-angle.png").status_code == 200
+    assert renamed["name"] == "Rooftop angle"
+    assert renamed["png"] == "proofs/Rooftop angle.png"
+    assert client.get(f"/api/cases/{cid}/proofs/{saved['name']}").status_code == 404
+    assert client.get(f"/files/{cid}/proofs/{saved['name']}.png").status_code == 404
+    assert client.get(f"/files/{cid}/proofs/{renamed['name']}.png").status_code == 200
 
     proofs = [e for e in graph_read.entities(cid) if e["type"] == "proof"]
     assert len(proofs) == 1
     assert proofs[0]["id"] == before["id"]
-    assert proofs[0]["attrs"]["spec"] == "proofs/rooftop-angle.json"
-    assert proofs[0]["attrs"]["path"] == "proofs/rooftop-angle.png"
+    assert proofs[0]["attrs"]["spec"] == "proofs/.meta/Rooftop angle.json"
+    assert proofs[0]["attrs"]["path"] == "proofs/Rooftop angle.png"
     assert proofs[0]["attrs"]["folder"] == "Reports"
 
 
@@ -152,20 +153,20 @@ def test_rename_without_fresh_pixels_carries_the_export_along(client):
     # A save that ships no PNG (spec-only) must not strand the export under the
     # old name — the proof would lose its picture on a pure rename.
     cid = client.post("/api/cases", json={"name": "CarryPng"}).json()["id"]
-    client.post(
+    saved = client.post(
         f"/api/cases/{cid}/proofs",
         json={"title": "Proof 1", "spec": SPEC, "png_base64": _png_b64()},
-    )
+    ).json()
     renamed = client.post(
         f"/api/cases/{cid}/proofs",
-        json={"rename_from": "proof-1", "title": "Carried", "spec": SPEC},
+        json={"rename_from": saved["name"], "title": "Carried", "spec": SPEC},
     ).json()
 
-    assert renamed["png"] == "proofs/carried.png"
-    assert client.get(f"/files/{cid}/proofs/carried.png").status_code == 200
-    assert client.get(f"/files/{cid}/proofs/proof-1.png").status_code == 404
+    assert renamed["png"] == "proofs/Carried.png"
+    assert client.get(f"/files/{cid}/proofs/Carried.png").status_code == 200
+    assert client.get(f"/files/{cid}/proofs/{saved['name']}.png").status_code == 404
     entity = next(e for e in graph_read.entities(cid) if e["type"] == "proof")
-    assert entity["attrs"]["path"] == "proofs/carried.png"
+    assert entity["attrs"]["path"] == "proofs/Carried.png"
 
 
 def test_rename_onto_a_taken_name_is_refused(client):
@@ -174,15 +175,15 @@ def test_rename_onto_a_taken_name_is_refused(client):
         f"/api/cases/{cid}/proofs",
         json={"title": "Proof 1", "spec": SPEC, "png_base64": _png_b64()},
     )
-    client.post(
+    second = client.post(
         f"/api/cases/{cid}/proofs",
         json={"title": "Proof 2", "spec": SPEC, "png_base64": _png_b64()},
-    )
+    ).json()
 
     res = client.post(
         f"/api/cases/{cid}/proofs",
         json={
-            "rename_from": "proof-2",
+            "rename_from": second["name"],
             "title": "Proof 1",
             "spec": SPEC,
             "png_base64": _png_b64(),
@@ -190,20 +191,22 @@ def test_rename_onto_a_taken_name_is_refused(client):
     )
     assert res.status_code == 409
     listed = sorted(p["name"] for p in client.get(f"/api/cases/{cid}/proofs").json())
-    assert listed == ["proof-1", "proof-2"]
-    assert client.get(f"/files/{cid}/proofs/proof-2.png").status_code == 200
+    assert listed == ["Proof 1", "Proof 2"]
+    assert client.get(f"/files/{cid}/proofs/{second['name']}.png").status_code == 200
 
 
 def test_rename_keeps_the_creation_date(client):
     cid = client.post("/api/cases", json={"name": "BornProof"}).json()["id"]
-    client.post(f"/api/cases/{cid}/proofs", json={"title": "Proof 1", "spec": SPEC})
-    born = client.get(f"/api/cases/{cid}/proofs/proof-1").json()["created_at"]
+    saved = client.post(
+        f"/api/cases/{cid}/proofs", json={"title": "Proof 1", "spec": SPEC}
+    ).json()
+    born = client.get(f"/api/cases/{cid}/proofs/{saved['name']}").json()["created_at"]
 
     client.post(
         f"/api/cases/{cid}/proofs",
-        json={"rename_from": "proof-1", "title": "Renamed", "spec": SPEC},
+        json={"rename_from": saved["name"], "title": "Renamed", "spec": SPEC},
     )
-    assert client.get(f"/api/cases/{cid}/proofs/renamed").json()["created_at"] == born
+    assert client.get(f"/api/cases/{cid}/proofs/Renamed").json()["created_at"] == born
 
 
 def test_delete_proof(client):
@@ -349,7 +352,7 @@ def test_index_inherits_the_point_from_the_capture_it_composes(client, sat_tiles
     row = _proof_index(client, cid)[0]
     assert row["kind"] == "proof"
     assert row["title"] == "Kyiv bridge"
-    assert row["name"] == "kyiv-bridge"
+    assert row["name"] == "Kyiv bridge"
     assert (row["lat"], row["lon"]) == (50.4501, 30.5234)
     assert row["notes"] == ""
     assert row["folder"] == ""  # unfiled, never null
@@ -450,8 +453,8 @@ def test_index_lists_the_posts_written_from_a_proof(client, sat_tiles):
         "mastodon",
     }
     assert {post["name"] for post in row["linked_posts"]} == {
-        "first-thread",
-        "follow-up",
+        "First thread",
+        "Follow-up",
     }
 
 

@@ -37,6 +37,7 @@ from .cases import delete_by_path, get_case
 from .limits import MAX_IMAGE_BYTES
 from .naming import slugify
 from .media import with_thumb_state
+from .. import layout
 
 router = APIRouter(prefix="/api", tags=["satellite"])
 
@@ -994,7 +995,7 @@ def list_search_grids(case_id: str) -> list[dict[str, Any]]:
     """Summaries of every saved grid, newest first, for the picker."""
     case = get_case(case_id)
     out = []
-    for spec_path in case.subdir("search").glob("*.json"):
+    for spec_path in case.subdir(layout.SEARCH_DIR).glob("*.json"):
         try:
             spec = _read_grid(spec_path)
         except ValueError:
@@ -1017,7 +1018,7 @@ def get_search_grid(case_id: str, name: str) -> dict[str, Any]:
     """One saved grid's full spec."""
     case = get_case(case_id)
     try:
-        spec_path = case.resolve_inside(f"search/{name}.json")
+        spec_path = case.resolve_inside(layout.grid_rel(name))
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     if not spec_path.exists():
@@ -1055,7 +1056,7 @@ def save_search_grid(case_id: str, name: str, body: GridSaveIn) -> dict[str, Any
         _validate_grid_spec(spec)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    spec_path = case.subdir("search") / f"{slug}.json"
+    spec_path = case.resolve_inside(layout.grid_rel(slug))
     _write_grid_atomic(spec_path, spec)
     return {"name": slug, "title": spec["title"], "updated_at": spec["updated_at"]}
 
@@ -1065,7 +1066,7 @@ def delete_search_grid(case_id: str, name: str) -> dict[str, Any]:
     """Discard one saved grid."""
     case = get_case(case_id)
     try:
-        spec_path = case.resolve_inside(f"search/{name}.json")
+        spec_path = case.resolve_inside(layout.grid_rel(name))
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     existed = spec_path.exists()

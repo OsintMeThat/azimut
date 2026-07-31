@@ -30,10 +30,11 @@ from ..engine import links as link_engine
 from ..engine import media as media_engine
 from ..engine import satellite as satellite_engine
 from ..engine import thumbnails as thumbnail_engine
-from ..workspace import Case, CaseError
+from ..workspace import Case, CaseError, ensure_dir
 from .cases import delete_by_path, get_case
 from .drafts import list_drafts
 from .naming import read_created_at, slugify
+from .. import layout
 
 router = APIRouter(prefix="/api", tags=["proofs"])
 
@@ -58,7 +59,7 @@ class AssetIn(BaseModel):
 
 class ProofIn(BaseModel):
     # The filename always follows the title, so renaming a saved proof moves its
-    # spec and its export. ``rename_from`` is the slug the composer is currently
+    # spec and its export. ``rename_from`` is the stem the composer is currently
     # bound to (absent on a first save); a save that lands elsewhere renames
     # those files in place instead of leaving a copy under the old name.
     rename_from: str | None = None
@@ -76,6 +77,7 @@ def _now() -> str:
 
 
 def _write_spec(path: Path, spec: dict[str, Any]) -> None:
+    ensure_dir(path.parent)
     path.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
@@ -88,7 +90,7 @@ def _proof_thumb(case: Case, name: str, data: bytes | None = None) -> str | None
     URL, and disposable, so eviction just means the next listing regenerates it.
     ``data`` skips re-reading bytes we already hold (the save path).
     """
-    png_rel = f"proofs/{name}.png"
+    png_rel = layout.proof_export_rel(name)
     path = case.resolve_inside(png_rel)
     if not path.is_file():
         return None
@@ -189,7 +191,7 @@ def proof_index(case_id: str) -> list[dict[str, Any]]:
 def list_proofs(case_id: str) -> list[dict[str, Any]]:
     case = get_case(case_id)
     proofs = []
-    for spec_path in sorted(case.subdir("proofs").glob("*.json")):
+    for spec_path in sorted(case.subdir("proofs").joinpath(layout.META_DIR).glob("*.json")):
         try:
             spec = json.loads(spec_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -197,7 +199,7 @@ def list_proofs(case_id: str) -> list[dict[str, Any]]:
         if spec.get("azimut_proof") != 1:
             continue
         name = spec_path.stem
-        png = spec_path.with_suffix(".png")
+        png = case.resolve_inside(layout.proof_export_rel(name))
         # Proofs saved before thumbnails existed (or whose cached file was
         # evicted) produce one here and record it, so this costs a hash of the
         # export once per proof rather than a full-size download per open.
@@ -219,9 +221,9 @@ def list_proofs(case_id: str) -> list[dict[str, Any]]:
                 # the point the proof states for itself, read before its
                 # derivation so it keeps it when the capture is deleted
                 "coords": satellite_engine.own_point(spec),
-                "png": f"proofs/{png.name}" if png.exists() else None,
+                "png": layout.proof_export_rel(png.stem) if png.exists() else None,
                 "thumb": thumb,
-                "spec_path": f"proofs/{spec_path.name}",
+                "spec_path": layout.proof_spec_rel(spec_path.stem),
             }
         )
     proofs.sort(key=lambda p: p.get("updated_at") or "", reverse=True)
@@ -232,7 +234,7 @@ def list_proofs(case_id: str) -> list[dict[str, Any]]:
 def load_proof(case_id: str, name: str) -> dict[str, Any]:
     case = get_case(case_id)
     try:
-        spec_path = case.resolve_inside(f"proofs/{name}.json")
+        spec_path = case.resolve_inside(layout.proof_spec_rel(name))
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     if not spec_path.exists():
@@ -243,17 +245,17 @@ def load_proof(case_id: str, name: str) -> dict[str, Any]:
 @router.post("/cases/{case_id}/proofs")
 def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     case = get_case(case_id)
-    name = slugify(body.title, "proof")
-    proofs_dir = case.subdir("proofs")
-    rel = f"proofs/{name}.json"
-    spec_path = proofs_dir / f"{name}.json"
+    name = slugify(body.title, "Proof")
+    case.subdir("proofs")  # born on first save, so the visible folder exists
+    rel = layout.proof_spec_rel(name)
+    spec_path = case.resolve_inside(rel)
 
     # A rename lands on a free name or not at all: taking a name another proof
     # holds would leave two entities pointing at one spec, and there is no sane
     # merge of the two. The first save of an unbound composer still writes over
     # a same-named proof — there the analyst is updating that one.
     old = slugify(body.rename_from, "proof") if body.rename_from else None
-    old_rel = f"proofs/{old}.json" if old and old != name else None
+    old_rel = layout.proof_spec_rel(old) if old and old != name else None
     if old_rel and spec_path.exists():
         raise HTTPException(status_code=409, detail="another proof already uses that name")
 
@@ -262,16 +264,17 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
 
     # The export moves with the spec, so a rename saved without fresh pixels
     # keeps the PNG the proof already had rather than dropping it.
-    if old_rel:
-        old_png = proofs_dir / f"{old}.png"
+    if old_rel and old:
+        old_png = case.resolve_inside(layout.proof_export_rel(old))
         if old_png.exists():
             if body.png_base64:
                 old_png.unlink()
             else:
-                old_png.replace(proofs_dir / f"{name}.png")
+                old_png.replace(case.resolve_inside(layout.proof_export_rel(name)))
         # the pasted images follow the proof, exactly as its export does
         _move_assets(
-            proofs_dir / f"{old}{ASSETS_SUFFIX}", proofs_dir / f"{name}{ASSETS_SUFFIX}"
+            case.resolve_inside(layout.proof_assets_rel(old)),
+            case.resolve_inside(layout.proof_assets_rel(name)),
         )
 
     # the export lands first: its thumbnail is recorded in the spec written below
@@ -281,17 +284,18 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
             png_bytes = base64.b64decode(body.png_base64, validate=True)
         except (binascii.Error, ValueError) as exc:
             raise HTTPException(status_code=422, detail="invalid PNG payload") from exc
-        (proofs_dir / f"{name}.png").write_bytes(png_bytes)
-        png_rel = f"proofs/{name}.png"
+        case.resolve_inside(layout.proof_export_rel(name)).write_bytes(png_bytes)
+        png_rel = layout.proof_export_rel(name)
         thumb_rel = _proof_thumb(case, name, png_bytes)
-    elif old_rel and (proofs_dir / f"{name}.png").exists():
-        png_rel = f"proofs/{name}.png"
+    elif old_rel and case.resolve_inside(layout.proof_export_rel(name)).exists():
+        png_rel = layout.proof_export_rel(name)
         thumb_rel = _proof_thumb(case, name)
 
     spec = dict(body.spec)
     spec["azimut_proof"] = 1
-    spec["title"] = body.title
-    spec.setdefault("created_at", read_created_at(proofs_dir / f"{old or name}.json") or _now())
+    spec["title"] = name
+    previous = case.resolve_inside(layout.proof_spec_rel(old or name))
+    spec.setdefault("created_at", read_created_at(previous) or _now())
     spec["updated_at"] = _now()
     if png_rel:
         spec["thumb"] = thumb_rel
@@ -301,7 +305,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     # The spec is the truth about which pasted images the proof shows, so its
     # folder is reconciled against what we just wrote.
     _write_assets(
-        proofs_dir / f"{name}{ASSETS_SUFFIX}", incoming, _referenced_assets(spec)
+        case.resolve_inside(layout.proof_assets_rel(name)), incoming, _referenced_assets(spec)
     )
 
     # upsert the proof entity (analyst action → confirmed). A rename rebinds the
@@ -309,7 +313,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     # keeps its folder, notes and links.
     existing = case.find_entity(attr="spec", value=old_rel or rel)
     if existing:
-        patch: dict[str, Any] = {"label": body.title}
+        patch: dict[str, Any] = {"label": name}
         attrs: dict[str, Any] = {"spec": rel} if old_rel else {}
         if png_rel and existing["attrs"].get("path") != png_rel:
             # a spec-only proof exported later gains its PNG here — without the
@@ -322,12 +326,12 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     else:
         entity_id = case.add_entity(
             "proof",
-            body.title,
+            name,
             attrs={"spec": rel, **({"path": png_rel} if png_rel else {})},
             by="proof-composer",
         )["id"]
     if old_rel:
-        (proofs_dir / f"{old}.json").unlink(missing_ok=True)
+        case.resolve_inside(layout.proof_spec_rel(str(old))).unlink(missing_ok=True)
 
     # A proof is derived from the panels it composes: the same click that saves
     # it files the chain (ONTOLOGY §3). Restated on every save, so a panel
@@ -342,6 +346,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
 
     return {
         "name": name,
+        "title": name,
         "png": png_rel,
         "thumb": thumb_rel,
         "spec_path": rel,
@@ -351,7 +356,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
 @router.delete("/cases/{case_id}/proofs/{name}")
 def delete_proof(case_id: str, name: str) -> dict[str, Any]:
     case = get_case(case_id)
-    rel = f"proofs/{name}.json"
+    rel = layout.proof_spec_rel(name)
     try:
         case.resolve_inside(rel)
     except CaseError as exc:

@@ -33,6 +33,20 @@ extension, and cross-platform binaries with a bundled ffmpeg.
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
 
+Inside a case, Azimut owns only the `azimut/` directory. `README.txt` explains
+the boundary; anything else at the case root is yours and travels with the case
+bundle.
+
+The workspace root stays equally readable: permanent case folders sit directly
+under `~/Azimut`. Azimut keeps scratch sessions, bundles, settings, runtime
+tools and tile caches under the hidden `~/Azimut/.azimut/` directory. Settings →
+About moves that folder anywhere you like, or adopts one you moved yourself; the
+old copy is kept until you delete it.
+
+The Case Doctor checks that a case's database and media records still match its
+files. It only changes a case after you choose a repair, and states what a
+database rebuild cannot recover before it starts.
+
 New in v0.2.6:
 
 - Export a complete case as an integrity-checked bundle, then import it as a
@@ -214,7 +228,8 @@ One-time setup: register the repo as a
 1. No account, telemetry or automatic upload. The server binds to
    `127.0.0.1`, and Azimut never posts on your behalf.
 2. A case contains the investigation's files and SQLite graph. A closed case
-   folder is complete and portable; ZIP import/export is planned.
+   folder is complete and portable; bundle export carries both Azimut's files
+   and anything kept beside them.
 3. One tab = one tool, useful in 30 seconds.
 4. Azimut integrates specialized services instead of recreating them.
 5. The analyst decides; tools do not produce automated verdicts.

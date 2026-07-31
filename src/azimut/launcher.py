@@ -14,6 +14,7 @@ the browser anyway.
 
 from __future__ import annotations
 
+import atexit
 import threading
 import time
 import webbrowser
@@ -52,6 +53,15 @@ def _open_when_ready(server: uvicorn.Server, url: str) -> None:
 
 def serve(port: int, *, open_browser: bool = True) -> None:
     """Run the server (blocking) and, unless told not to, open the browser tab."""
+    from . import server as server_module
+    from .engine import workspacelock
+
+    # The app is built by uvicorn's factory, which takes no arguments, so the
+    # port is left here for it: a second instance names the holder by host and
+    # port, and "on this machine, port 8477" is what sends someone to the right
+    # tab.
+    server_module.SERVE_PORT = port
+    atexit.register(workspacelock.release)
     server = _build_server(port)
     if open_browser:
         _open_when_ready(server, f"http://127.0.0.1:{port}")

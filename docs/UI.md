@@ -82,7 +82,15 @@ remembered per workspace for the current session. Reloading restores the default
 
 ## Case switcher
 
-The switcher creates, renames, opens and deletes cases. **Export this case**
+The switcher creates, renames, opens and deletes cases. The menu leads with the
+list, since switching is what it is opened for: search on top, cases and scratch
+sessions in one scrolling list, and every action in a one-line footer — **New
+case** labelled, then import, open folder, export and close as icons, each with
+its tooltip. The Case Doctor shield sits with those case-level actions. A case
+whose database cannot be opened stays in the list with **Needs attention** and
+its own Doctor button, so repairing it does not require opening it first.
+Five stacked verbs no longer push the list below the fold.
+**Export this case**
 starts a durable job, then downloads the `.azimut.zip` through the browser.
 Optional password protection downloads `.azimut.enc`; the dialog states once
 that a lost password cannot be recovered.
@@ -93,6 +101,38 @@ temporary disk requirement, available space and protection state. Confirmation
 always creates a new case, waits for the durable
 import job, then opens it. It never replaces or merges an existing case.
 Confirmed entities and relations remain confirmed in the imported case.
+
+**Folders in the workspace** that are not cases sit at the end of the same
+list, dimmed, marked **Not a case yet**. Clicking one makes it a case where it
+is: nothing moves, and what was already in the folder stays in the analyst's
+half. A folder holding a case that lost its manifest reads **Case to recover**
+and opens the Doctor once the manifest is back. A name no case folder can carry
+reads **Rename to use** and does nothing until it is renamed.
+
+**Case Doctor** checks without writing. A healthy case gets one short result;
+damage is listed one item at a time with only the repairs that apply. Database
+rebuild states what cannot be recovered before the button. Removing a missing
+media record takes a second click, while relinking only accepts an unregistered
+file already placed in that case's `media/` folder.
+
+## Workspace folder
+
+Settings → About holds the folder. There is no native picker, so the path is
+typed and **Check** reads it before anything is offered: refusals in red,
+warnings in amber, and the folder Azimut would actually use when that differs
+from the one typed. Two actions follow, never merged, because their outcomes
+differ. **Use this folder** switches and moves nothing, and says how many cases
+would stay behind. **Move everything here** copies, and while it runs the tab
+shows the step and the bytes while Azimut refuses other work. Afterwards the old
+folder is named, with one button to delete it. A folder set through
+`AZIMUT_HOME` is shown without any of this: the variable wins every launch.
+
+A full-screen panel replaces the app when the workspace can't be worked in, with
+the same picker inside it and a different sentence for each reason. **Gone**:
+where it was expected, and that nothing has been deleted or recreated.
+**Held by another Azimut**: which machine and port has it, what two instances
+would cost, and Reload. **Take it anyway** is there for a lock that outlived its
+process, warned once and never presented as the ordinary way out.
 
 ## Relations
 
@@ -124,6 +164,12 @@ flies the map there. Thumbnail polling follows all pending case jobs, including
 files beyond the loaded page after a case import. Thumbnail failures are scoped
 to their case, so switching cases always reloads previews even when relative
 paths match. Enrich respects an existing confirmed GPS relation during backfill.
+
+Every media row and card shows the file's human-readable stem, without its
+extension and without a second title line. Editing that name in Details renames
+the file; the backend returns the portable stem after replacing forbidden
+characters or resolving a case-insensitive collision. Downloads keep dates and
+remote ids in provenance instead of appending them to the visible name.
 
 ## Map
 

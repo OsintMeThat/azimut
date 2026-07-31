@@ -5,7 +5,10 @@ still hard-deletes, so nothing else has to filter deleted rows out, and the undo
 puts back the entity, its files, its links and the scars its delete wrote.
 """
 
+from pathlib import Path
+
 import fullcase
+from azimut import layout
 from azimut.engine import workqueue
 from azimut.workspace import Case
 
@@ -23,7 +26,7 @@ def trash_of(client, case_id: str) -> dict:
 def test_a_deleted_artifact_waits_in_the_trash_instead_of_going(client):
     full = fullcase.build_full_case(client)
     case = Case.open(full.case_id)
-    note = entity_of(client, full.case_id, "path", f"notes/{full.note_id}.md")
+    note = entity_of(client, full.case_id, "path", full.note)
 
     deleted = client.delete(f"/api/cases/{full.case_id}/entities/{note['id']}").json()
 
@@ -36,7 +39,11 @@ def test_a_deleted_artifact_waits_in_the_trash_instead_of_going(client):
     assert listed["groups"][0]["label"] == note["label"]
     assert listed["items"] == 1
     assert listed["size_bytes"] > 0
-    assert (case.trash_dir / deleted["trash"] / note["attrs"]["path"]).is_file()
+    # ...under a numbered slot, not under a copy of the case tree: the group
+    # directory is flat, so the trash can never be the longest path in the case.
+    group_dir = case.trash_dir / deleted["trash"]
+    assert [p.name for p in group_dir.iterdir()] == ["0"]
+    assert (group_dir / "0").is_file()
 
 
 def test_undo_brings_back_the_entity_its_id_and_its_file(client):
@@ -52,7 +59,7 @@ def test_undo_brings_back_the_entity_its_id_and_its_file(client):
     # the same id: every spec, draft and link recorded elsewhere still points at it
     assert back["id"] == photo["id"]
     assert case.resolve_inside(full.photo).is_file()
-    assert case.resolve_inside(full.photo + ".azimut.json").is_file()
+    assert case.resolve_inside(layout.sidecar_rel(full.photo)).is_file()
     # and it is browsable again — the media index row came back with it
     listed = client.get(f"/api/cases/{full.case_id}/media").json()
     assert any(item["path"] == full.photo for item in listed)
@@ -117,7 +124,11 @@ def test_a_proof_takes_its_pasted_images_into_the_trash_and_back(client):
     proof = entity_of(client, full.case_id, "spec", full.proof)
 
     group = client.delete(f"/api/cases/{full.case_id}/entities/{proof['id']}").json()["trash"]
-    assert (case.trash_dir / group / full.proof_asset).is_file()
+    # The assets folder travels whole, as one slot — a directory the group holds
+    # under a number, with the pasted image still inside it.
+    group_dir = case.trash_dir / group
+    asset_name = Path(full.proof_asset).name
+    assert [p.name for p in sorted(group_dir.rglob(asset_name))] == [asset_name]
     assert not case.resolve_inside(full.proof_asset).exists()
 
     client.post(f"/api/cases/{full.case_id}/trash/{group}/restore")
@@ -129,11 +140,15 @@ def test_restoring_onto_an_occupied_path_refuses_rather_than_renames(client):
     clear failure, so the whole group refuses and names the file."""
     full = fullcase.build_full_case(client)
     case = Case.open(full.case_id)
-    note = entity_of(client, full.case_id, "path", f"notes/{full.note_id}.md")
+    note = entity_of(client, full.case_id, "path", full.note)
     rel = note["attrs"]["path"]
 
     group = client.delete(f"/api/cases/{full.case_id}/entities/{note['id']}").json()["trash"]
-    case.resolve_inside(rel).write_text("something else wrote here", encoding="utf-8")
+    # the delete pruned the note's mirrored folder, so re-make it to put
+    # something in the way
+    occupied = case.resolve_inside(rel)
+    occupied.parent.mkdir(parents=True, exist_ok=True)
+    occupied.write_text("something else wrote here", encoding="utf-8")
 
     refused = client.post(f"/api/cases/{full.case_id}/trash/{group}/restore")
     assert refused.status_code == 409
@@ -147,7 +162,7 @@ def test_restoring_onto_an_occupied_path_refuses_rather_than_renames(client):
 def test_purging_is_where_the_bytes_go(client):
     full = fullcase.build_full_case(client)
     case = Case.open(full.case_id)
-    note = entity_of(client, full.case_id, "path", f"notes/{full.note_id}.md")
+    note = entity_of(client, full.case_id, "path", full.note)
 
     group = client.delete(f"/api/cases/{full.case_id}/entities/{note['id']}").json()["trash"]
     assert client.delete(f"/api/cases/{full.case_id}/trash/{group}").status_code == 200
@@ -194,7 +209,7 @@ def test_deleting_a_case_takes_its_trash_with_it(client):
     there is nothing left to hold anything for."""
     full = fullcase.build_full_case(client)
     case = Case.open(full.case_id)
-    note = entity_of(client, full.case_id, "path", f"notes/{full.note_id}.md")
+    note = entity_of(client, full.case_id, "path", full.note)
     client.delete(f"/api/cases/{full.case_id}/entities/{note['id']}")
 
     assert client.delete(f"/api/cases/{full.case_id}").status_code == 200

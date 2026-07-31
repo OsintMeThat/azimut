@@ -831,9 +831,6 @@
               </div>
               <span class="media-col-name" title={item.filename}>
                 <span class="list-name">{item.title ?? item.filename}</span>
-                {#if item.title}
-                  <span class="list-filename">{item.filename}</span>
-                {/if}
               </span>
               <span class="media-col-type">{mediaDisplayKind(item)}</span>
               <span class="media-col-size">{fmtSize(item.size)}</span>
@@ -1606,20 +1603,13 @@
   .list-preview.clickable {
     cursor: zoom-in;
   }
-  .list-name,
-  .list-filename {
+  .list-name {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .list-name {
     color: var(--text-1);
     font-weight: 600;
-  }
-  .list-filename {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
   }
   .media-col-actions {
     display: flex;

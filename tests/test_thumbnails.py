@@ -17,6 +17,7 @@ import time
 import pytest
 from PIL import Image
 
+from azimut import layout
 from azimut.engine import media as media_engine
 from azimut.engine import thumbnails, workqueue
 from azimut.workspace import Case
@@ -96,7 +97,7 @@ def test_a_failing_render_retries_then_fails_without_looping(case, monkeypatch):
 def test_drain_cancels_a_job_whose_media_is_gone(case):
     _register_video(case)
     (case.subdir("media") / "clip.mp4").unlink()
-    (case.subdir("media") / ("clip.mp4" + media_engine.SIDECAR_SUFFIX)).unlink()
+    case.resolve_inside(layout.sidecar_rel("media/clip.mp4")).unlink()
 
     workqueue.drain(case)
     assert case.list_jobs(kind=thumbnails.THUMB_KIND)[0]["state"] == "cancelled"
@@ -176,15 +177,15 @@ def test_deleting_one_of_two_media_sharing_a_thumbnail_keeps_it(case):
 
 
 def test_startup_recovers_interrupted_jobs(case, monkeypatch):
-    """The server's startup pass returns a job an earlier run left `running` back
-    to the queue, so pending thumbnail work resumes instead of stalling."""
-    from azimut import server
-
+    """The startup pass returns a job an earlier run left `running` back to the
+    queue, so pending thumbnail work resumes instead of stalling. Also runs when
+    the workspace root changes, which is why it belongs to the queue rather than
+    to the server."""
     _register_video(case)
     running = case.claim_job()  # simulate a crash mid-render
     assert running["state"] == "running"
 
-    server._recover_jobs()  # what create_app runs on boot (worker disabled here)
+    workqueue.recover_all()  # what opening a workspace runs (worker disabled here)
     assert case.get_job(running["id"])["state"] == "queued"
 
 

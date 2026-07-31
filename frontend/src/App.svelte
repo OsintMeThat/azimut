@@ -25,6 +25,8 @@
   import CaseSidebar from './components/CaseSidebar.svelte';
   import Toasts from './components/Toasts.svelte';
   import UpdateModal from './components/UpdateModal.svelte';
+  import WorkspaceStopped from './components/WorkspaceStopped.svelte';
+  import { readStatus, stoppedBecause } from './lib/workspace.js';
 
   // The rail holds workspaces (docs/UI.md §3); tools are tabs inside them.
   // Settings lives behind the topbar gear instead — app plumbing, not part
@@ -104,6 +106,18 @@
     visited[id] = true;
     void ensureTool(id);
   });
+
+  // A workspace that can't be worked in replaces the app rather than letting
+  // every tool fail one request at a time: a folder that is gone, or one
+  // another Azimut holds. The backend refuses case work in both states and
+  // touches neither folder, so what is left to do is explain and offer the way
+  // out.
+  let workspaceStopped = $state(null);
+  readStatus()
+    .then((status) => {
+      workspaceStopped = stoppedBecause(status);
+    })
+    .catch(() => {});
 
   // Load the case list and reopen the last-used case (survives reloads), then
   // — once preferences have landed — see whether a newer release is out and
@@ -221,6 +235,10 @@
 </div>
 
 <Toasts />
+
+{#if workspaceStopped}
+  <WorkspaceStopped {...workspaceStopped} />
+{/if}
 
 {#if updateState.show}
   <UpdateModal />

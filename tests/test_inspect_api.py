@@ -788,7 +788,7 @@ def test_session_save_list_load_delete_roundtrip(client):
     saved = client.post(
         f"/api/cases/{cid}/inspect/sessions", json={"title": "My session", "spec": spec}
     ).json()
-    assert saved["name"] == "my-session"
+    assert saved["name"] == "My session"
 
     listing = client.get(f"/api/cases/{cid}/inspect/sessions").json()
     assert len(listing) == 1 and listing[0]["title"] == "My session" and listing[0]["frames"] == 1
@@ -796,9 +796,9 @@ def test_session_save_list_load_delete_roundtrip(client):
     # an inspect-session entity is upserted so it reopens from the sidebar
     entities = graph_read.entities(cid)
     ent = next(e for e in entities if e["type"] == "inspect-session")
-    assert ent["attrs"]["spec"] == "inspect/my-session.json"
+    assert ent["attrs"]["spec"] == ".inspect/My session.json"
 
-    loaded = client.get(f"/api/cases/{cid}/inspect/sessions/my-session").json()
+    loaded = client.get(f"/api/cases/{cid}/inspect/sessions/{saved['name']}").json()
     assert loaded["azimut_inspect"] == 1
     assert loaded["frames"][0]["adjust"]["brightness"] == 1.4
 
@@ -807,7 +807,7 @@ def test_session_save_list_load_delete_roundtrip(client):
     entities = graph_read.entities(cid)
     assert sum(1 for e in entities if e["type"] == "inspect-session") == 1
 
-    client.delete(f"/api/cases/{cid}/inspect/sessions/my-session")
+    client.delete(f"/api/cases/{cid}/inspect/sessions/{saved['name']}")
     assert client.get(f"/api/cases/{cid}/inspect/sessions").json() == []
     entities = graph_read.entities(cid)
     assert not any(e["type"] == "inspect-session" for e in entities)
@@ -880,7 +880,7 @@ def test_session_rename_moves_the_spec_and_keeps_one_entity(client):
     first = client.post(
         f"/api/cases/{cid}/inspect/sessions", json={"title": "Original", "spec": spec}
     ).json()
-    assert first["name"] == "original"
+    assert first["name"] == "Original"
     before = next(e for e in graph_read.entities(cid) if e["type"] == "inspect-session")
     client.patch(f"/api/cases/{cid}/entities/{before['id']}", json={"attrs": {"folder": "Angles"}})
 
@@ -888,17 +888,17 @@ def test_session_rename_moves_the_spec_and_keeps_one_entity(client):
         f"/api/cases/{cid}/inspect/sessions",
         json={"rename_from": first["name"], "title": "Rooftop angle", "spec": spec},
     ).json()
-    assert renamed["name"] == "rooftop-angle"
+    assert renamed["name"] == "Rooftop angle"
 
     listing = client.get(f"/api/cases/{cid}/inspect/sessions").json()
     assert len(listing) == 1
-    assert listing[0]["name"] == "rooftop-angle" and listing[0]["title"] == "Rooftop angle"
-    assert client.get(f"/api/cases/{cid}/inspect/sessions/original").status_code == 404
+    assert listing[0]["name"] == "Rooftop angle" and listing[0]["title"] == "Rooftop angle"
+    assert client.get(f"/api/cases/{cid}/inspect/sessions/{first['name']}").status_code == 404
 
     after = [e for e in graph_read.entities(cid) if e["type"] == "inspect-session"]
     assert len(after) == 1
     assert after[0]["id"] == before["id"]  # same entity, so its filing survives
-    assert after[0]["attrs"]["spec"] == "inspect/rooftop-angle.json"
+    assert after[0]["attrs"]["spec"] == ".inspect/Rooftop angle.json"
     assert after[0]["attrs"]["folder"] == "Angles"
 
 
@@ -907,14 +907,20 @@ def test_session_rename_keeps_the_creation_date(client):
     item = _upload(client, cid, "clip.png")
     spec = {"source": {"path": item["path"], "kind": "image"}, "frames": [], "collage": {"nodes": []}}
 
-    client.post(f"/api/cases/{cid}/inspect/sessions", json={"title": "Original", "spec": spec})
-    born = client.get(f"/api/cases/{cid}/inspect/sessions/original").json()["created_at"]
+    original = client.post(
+        f"/api/cases/{cid}/inspect/sessions", json={"title": "Original", "spec": spec}
+    ).json()
+    born = client.get(
+        f"/api/cases/{cid}/inspect/sessions/{original['name']}"
+    ).json()["created_at"]
 
     client.post(
         f"/api/cases/{cid}/inspect/sessions",
-        json={"rename_from": "original", "title": "Renamed", "spec": spec},
+        json={"rename_from": original["name"], "title": "Renamed", "spec": spec},
     )
-    assert client.get(f"/api/cases/{cid}/inspect/sessions/renamed").json()["created_at"] == born
+    assert client.get(
+        f"/api/cases/{cid}/inspect/sessions/Renamed"
+    ).json()["created_at"] == born
 
 
 def test_session_rename_onto_a_taken_name_is_refused(client):
@@ -925,16 +931,18 @@ def test_session_rename_onto_a_taken_name_is_refused(client):
     spec = {"source": {"path": item["path"], "kind": "image"}, "frames": [], "collage": {"nodes": []}}
 
     client.post(f"/api/cases/{cid}/inspect/sessions", json={"title": "Inspect 1", "spec": spec})
-    client.post(f"/api/cases/{cid}/inspect/sessions", json={"title": "Inspect 2", "spec": spec})
+    second = client.post(
+        f"/api/cases/{cid}/inspect/sessions", json={"title": "Inspect 2", "spec": spec}
+    ).json()
 
     res = client.post(
         f"/api/cases/{cid}/inspect/sessions",
-        json={"rename_from": "inspect-2", "title": "Inspect 1", "spec": spec},
+        json={"rename_from": second["name"], "title": "Inspect 1", "spec": spec},
     )
     assert res.status_code == 409
 
     listing = client.get(f"/api/cases/{cid}/inspect/sessions").json()
-    assert sorted(s["name"] for s in listing) == ["inspect-1", "inspect-2"]
+    assert sorted(s["name"] for s in listing) == ["Inspect 1", "Inspect 2"]
     assert sum(1 for e in graph_read.entities(cid) if e["type"] == "inspect-session") == 2
 
 
@@ -1048,12 +1056,12 @@ def test_saved_frame_name_is_scrubbed_for_the_filesystem(client):
 
     name = res["item"]["path"].rsplit("/", 1)[-1]
     assert not set(name) & set('/:*?"<>|\\')
-    # the title keeps what was typed; only the file on disk is scrubbed
+    # The canonical, portable stem is both the filename and the title.
     media = next(
         m for m in client.get(f"/api/cases/{cid}/media").json()
         if m["path"] == res["item"]["path"]
     )
-    assert media["title"] == 'a/b:c*d?"e'
+    assert media["title"] == "a_b_c_d_e"
 
 
 def test_unnamed_frame_keeps_the_source_stem_and_tag(client):
@@ -1121,11 +1129,12 @@ def test_duplicate_save_renames_the_media_it_landed_on(client):
     body["label"] = "Second name"
     again = client.post(f"/api/cases/{cid}/inspect/compose", json=body).json()
     assert again["duplicate"] is True
-    assert again["item"]["path"] == first["item"]["path"]
+    assert again["item"]["path"] == "media/Second name.png"
+    assert again["item"]["path"] != first["item"]["path"]
 
     media = next(
         m for m in client.get(f"/api/cases/{cid}/media").json()
-        if m["path"] == first["item"]["path"]
+        if m["path"] == again["item"]["path"]
     )
     assert media["title"] == "Second name"
 

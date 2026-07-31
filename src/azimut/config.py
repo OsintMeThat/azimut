@@ -1,15 +1,24 @@
 """Application configuration and workspace-root resolution.
 
-Everything Azimut persists lives under one root directory (default ``~/Azimut``,
-overridable with the ``AZIMUT_HOME`` environment variable):
+Everything Azimut persists lives under one root directory. Where that root is
+cannot be recorded inside it, so the answer comes from three places, in order:
+``AZIMUT_HOME`` in the environment, then the pointer file this module writes at
+the platform's conventional location, then ``~/Azimut``. Nothing else in the app
+asks the question — every path is built from :func:`workspace_root`.
 
     ~/Azimut/
-    ├── cases/       # named investigations
-    ├── scratch/     # one-shot sessions (promotable to cases)
-    ├── runtime/     # newer scrapers fetched at runtime (engine/scrapers.py)
-    ├── signature.png  # optional analyst logo, stamped onto proofs
-    ├── settings.json
-    └── templates.json  # reusable proof and post styles
+    ├── named-investigation/  # one folder per permanent case
+    └── .azimut/              # app machinery, hidden from normal browsing
+        ├── bundles/
+        ├── cache/tiles/
+        ├── lock              # held by the one Azimut using this workspace
+        ├── runtime/          # newer scrapers fetched at runtime
+        ├── scratch/          # one-shot sessions, promotable to cases
+        └── settings/
+            ├── cookies.txt
+            ├── signature.png
+            ├── settings.json
+            └── templates.json
 
 No external database server; the workspace remains self-contained (spec §4).
 """
@@ -21,6 +30,7 @@ import json
 import logging
 import os
 import re
+import sys
 import tempfile
 import threading
 from datetime import datetime, timezone
@@ -116,7 +126,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # - {"source": "none"}                     — off (default)
     # - {"source": "browser", "browser": name} — read the browser's live cookies
     #   (yt-dlp's names: firefox, chrome, chromium, edge, brave, opera, safari, …)
-    # - {"source": "file", "file": "cookies.txt"} — a workspace-relative export,
+    # - {"source": "file", "file": "cookies.txt"} — an export kept in settings,
     #   the fallback where reading the browser can't work (Chromium on Windows).
     "download_cookies": {"source": "none"},
 }
@@ -151,22 +161,162 @@ BLOCK_SHARE = 0.9
 ECO_MAX_ZOOM = 15
 
 
+# -- where the workspace is ---------------------------------------------------
+#
+# The workspace can be moved anywhere the analyst likes, so its address is the
+# one piece of state that cannot live inside it. It goes in a one-line file at
+# the platform's conventional configuration location, and writing that file is
+# the entire act of switching workspaces: die just before it and the old folder
+# is authoritative, die just after and the new one is. Both are complete, and
+# there is no third state to interpret.
+#
+# `AZIMUT_HOME` stays ahead of the pointer. It is an instruction given on every
+# launch, which is what makes a workspace on a USB stick or a second profile
+# work without touching the machine's configuration.
+
+#: Where a workspace is created when nobody has said otherwise.
+DEFAULT_ROOT = Path("~/Azimut")
+
+#: The pointer's filename. Its directory is platform-specific (`pointer_path`).
+POINTER_NAME = "location"
+
+
+def _pointer_dir() -> Path:
+    """The platform's own place for a small application configuration file.
+
+    Deliberately outside the workspace and outside the program: the frozen
+    binary may sit on read-only media, and a pointer stored in the folder it
+    points at answers nothing.
+    """
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA")
+        return Path(base) / "Azimut" if base else Path("~/AppData/Roaming/Azimut").expanduser()
+    if sys.platform == "darwin":
+        return Path("~/Library/Application Support/Azimut").expanduser()
+    base = os.environ.get("XDG_CONFIG_HOME")
+    return (Path(base) if base else Path("~/.config").expanduser()) / "azimut"
+
+
+def pointer_path() -> Path:
+    return _pointer_dir() / POINTER_NAME
+
+
+def read_pointer() -> Path | None:
+    """The workspace the pointer names, or None when there is no usable pointer.
+
+    Unreadable, empty or missing all mean the same thing on purpose. A lost
+    pointer costs an address, never data: Azimut falls back to the default root
+    and "use an existing folder" re-points the real one.
+    """
+    try:
+        raw = pointer_path().read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    return Path(raw).expanduser() if raw else None
+
+
+def write_pointer(root: Path) -> None:
+    """Point Azimut at *root*, atomically. This is the switch, and the whole of it."""
+    path = pointer_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(f"{Path(root)}\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        _restrict(tmp_path, 0o600)
+        os.replace(tmp_path, path)
+        _restrict(path, 0o600)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+    forget_workspace_root()
+
+
+def clear_pointer() -> None:
+    """Forget a configured location and go back to the default root."""
+    pointer_path().unlink(missing_ok=True)
+    forget_workspace_root()
+
+
+# Resolved once per process rather than per path lookup: `workspace_root()` is
+# called on the way to every file Azimut touches, and reading a file each time
+# to learn where the other files are would be absurd. Only our own writes change
+# the answer, and they invalidate this.
+_root_cache: Path | None = None
+_root_pointed = False
+_root_lock = threading.Lock()
+
+
+def forget_workspace_root() -> None:
+    """Re-resolve the root on the next call. Follows a pointer write."""
+    global _root_cache
+    with _root_lock:
+        _root_cache = None
+
+
 def workspace_root() -> Path:
-    root = Path(os.environ.get("AZIMUT_HOME", "~/Azimut")).expanduser()
-    return root
+    global _root_cache, _root_pointed
+    override = os.environ.get("AZIMUT_HOME")
+    if override:
+        return Path(override).expanduser()
+    cached = _root_cache
+    if cached is not None:
+        return cached
+    with _root_lock:
+        if _root_cache is None:
+            pointed = read_pointer()
+            _root_pointed = pointed is not None
+            _root_cache = pointed or DEFAULT_ROOT.expanduser()
+        return _root_cache
+
+
+def workspace_missing() -> bool:
+    """True when a workspace was configured and is not there any more.
+
+    Only the pointer can say this. It is written after a folder has been
+    verified, so a pointer naming nothing means the folder was renamed, deleted
+    or is on a drive that is not plugged in — never a first run. Recreating it
+    silently would be the fastest way to make someone believe they lost
+    everything, so startup stops instead (`server.py`).
+
+    ``AZIMUT_HOME`` keeps its create-on-demand behaviour: it is given again on
+    every launch, which is what makes a portable workspace work. It also settles
+    the question by itself — when it is set the pointer is not consulted at all,
+    so a stale one left by an earlier run must not stop this one.
+
+    Asked on every API request (`server.install_availability_guard`), so it
+    reads the resolved root rather than the pointer file: one stat, and the
+    answer stays stable for the run the way a startup decision should.
+    """
+    if os.environ.get("AZIMUT_HOME"):
+        return False
+    root = workspace_root()
+    return _root_pointed and not root.is_dir()
 
 
 def cases_dir() -> Path:
-    return workspace_root() / "cases"
+    """Parent of permanent cases.
+
+    Cases live directly under the workspace so opening it in a file manager
+    shows the analyst's investigations rather than Azimut's machinery.
+    """
+    return workspace_root()
+
+
+def internal_dir() -> Path:
+    """Hidden root for every workspace-wide implementation detail."""
+    return workspace_root() / ".azimut"
 
 
 def scratch_dir() -> Path:
-    return workspace_root() / "scratch"
+    return internal_dir() / "scratch"
 
 
 def bundles_dir() -> Path:
     """Portable case bundles exported by the user."""
-    return workspace_root() / "bundles"
+    return internal_dir() / "bundles"
 
 
 def runtime_dir() -> Path:
@@ -176,11 +326,21 @@ def runtime_dir() -> Path:
     directory we know is user-writable: the frozen binary can sit in
     /usr/local/bin or Program Files, and its own contents are read-only.
     """
-    return workspace_root() / "runtime"
+    return internal_dir() / "runtime"
+
+
+def settings_dir() -> Path:
+    """Hidden app-wide preferences and branding, outside every case."""
+    return internal_dir() / "settings"
+
+
+def tile_cache_dir() -> Path:
+    """Disposable map imagery cache, outside every case and backup."""
+    return internal_dir() / "cache" / "tiles"
 
 
 def settings_path() -> Path:
-    return workspace_root() / "settings.json"
+    return settings_dir() / "settings.json"
 
 
 def signature_path() -> Path:
@@ -192,7 +352,7 @@ def signature_path() -> Path:
     because that file goes to the user's own second machine, not to a third
     party (api/settings.py export/import).
     """
-    return workspace_root() / "signature.png"
+    return settings_dir() / "signature.png"
 
 
 def templates_path() -> Path:
@@ -203,7 +363,7 @@ def templates_path() -> Path:
     backup for the same reason. Kept out of settings.json itself so the secrets
     file stays small and single-purpose.
     """
-    return workspace_root() / "templates.json"
+    return settings_dir() / "templates.json"
 
 
 # Browsers yt-dlp can read a login session from (cookiesfrombrowser). The
@@ -217,7 +377,7 @@ COOKIE_BROWSERS = frozenset(
 def cookies_file_path() -> Path:
     """A user-exported cookies.txt for gated downloads. Holds a live login
     session, so it stays 0600 beside settings.json, never inside a case."""
-    return workspace_root() / "cookies.txt"
+    return settings_dir() / "cookies.txt"
 
 
 # Refuse anything larger as a signature: a logo is a small badge on a composite,
@@ -237,14 +397,19 @@ def valid_signature(data: bytes) -> bool:
 
 
 def ensure_workspace() -> None:
-    """Create the workspace skeleton if missing (idempotent)."""
-    cases_dir().mkdir(parents=True, exist_ok=True)
-    scratch_dir().mkdir(parents=True, exist_ok=True)
-    bundles_dir().mkdir(parents=True, exist_ok=True)
+    """Create and migrate the workspace skeleton (idempotent and lossless)."""
+    workspace_root().mkdir(parents=True, exist_ok=True)
+    internal_dir().mkdir(parents=True, exist_ok=True)
     # The workspace holds API keys and the pairing token — keep it owner-only
     # so another account on a shared machine can't read them. Best-effort:
     # Windows ignores POSIX modes, which is fine (its ACLs already scope $HOME).
     _restrict(workspace_root(), 0o700)
+    _restrict(internal_dir(), 0o700)
+    _hide_if_dotted(internal_dir())
+    _migrate_workspace_settings()
+    _migrate_workspace_directories()
+    for directory in (scratch_dir(), bundles_dir(), runtime_dir(), tile_cache_dir()):
+        directory.mkdir(parents=True, exist_ok=True)
     if not settings_path().exists():
         save_settings(DEFAULT_SETTINGS)
         return
@@ -265,6 +430,134 @@ def _restrict(path: Path, mode: int) -> None:
         os.chmod(path, mode)
     except OSError:
         pass
+
+
+def _hide_if_dotted(path: Path) -> None:
+    """Make a dot-directory hidden in Windows Explorer too."""
+    if sys.platform != "win32" or not path.name.startswith("."):
+        return
+    import ctypes
+
+    file_attribute_hidden = 0x02
+    try:
+        ctypes.windll.kernel32.SetFileAttributesW(str(path), file_attribute_hidden)
+    except (AttributeError, OSError):  # pragma: no cover - Windows only
+        pass
+
+
+def _legacy_destination(path: Path) -> Path:
+    """A lossless home for a legacy file when the new location already differs."""
+    candidate = path.with_name(f"{path.stem}.legacy{path.suffix}")
+    index = 2
+    while candidate.exists():
+        candidate = path.with_name(f"{path.stem}.legacy-{index}{path.suffix}")
+        index += 1
+    return candidate
+
+
+def _migrate_workspace_settings() -> None:
+    """Move old workspace settings under ``.azimut/settings/``.
+
+    Each file is an independent atomic rename, so a stopped startup simply
+    resumes with whichever legacy names remain. The current location wins if a
+    user somehow has both; a differing legacy file is retained beside it under
+    a ``.legacy`` name rather than overwritten or discarded.
+    """
+    directory = settings_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    _restrict(directory, 0o700)
+    _hide_if_dotted(directory)
+    for source_dir in (workspace_root(), workspace_root() / ".settings"):
+        for name in ("settings.json", "templates.json", "signature.png", "cookies.txt"):
+            source = source_dir / name
+            if not source.is_file():
+                continue
+            destination = directory / name
+            if destination.exists():
+                if source.read_bytes() == destination.read_bytes():
+                    source.unlink()
+                    _restrict(destination, 0o600)
+                    continue
+                destination = _legacy_destination(destination)
+            source.rename(destination)
+            _restrict(destination, 0o600)
+    old_directory = workspace_root() / ".settings"
+    if old_directory.is_dir() and not any(old_directory.iterdir()):
+        old_directory.rmdir()
+
+
+class WorkspaceMigrationError(RuntimeError):
+    """A workspace move stopped because two different entries would collide."""
+
+
+def _merge_legacy_directory(source: Path, destination: Path) -> None:
+    """Move ``source`` into ``destination`` without overwriting anything.
+
+    Moving one child at a time makes a killed migration restartable. Identical
+    files left by a previous partial copy collapse safely; different entries
+    stop the migration with both originals intact for the future doctor.
+    """
+    if not source.exists():
+        return
+    if not source.is_dir() or source.is_symlink():
+        raise WorkspaceMigrationError(f"workspace migration expected a directory: {source}")
+    destination.mkdir(parents=True, exist_ok=True)
+    for child in sorted(source.iterdir(), key=lambda path: path.name):
+        target = destination / child.name
+        if not target.exists():
+            child.rename(target)
+            continue
+        if (
+            child.is_dir()
+            and target.is_dir()
+            and not child.is_symlink()
+            and not target.is_symlink()
+        ):
+            _merge_legacy_directory(child, target)
+            continue
+        if child.is_file() and target.is_file() and child.read_bytes() == target.read_bytes():
+            child.unlink()
+            continue
+        raise WorkspaceMigrationError(
+            f"workspace migration cannot merge different entries: {child} and {target}"
+        )
+    source.rmdir()
+
+
+def _move_case_directories(source: Path, destination: Path) -> None:
+    """Move case folders one by one, refusing even a merge-shaped collision."""
+    if not source.exists():
+        return
+    if not source.is_dir() or source.is_symlink():
+        raise WorkspaceMigrationError(f"workspace migration expected a directory: {source}")
+    destination.mkdir(parents=True, exist_ok=True)
+    for child in sorted(source.iterdir(), key=lambda path: path.name):
+        target = destination / child.name
+        if target.exists():
+            raise WorkspaceMigrationError(
+                f"workspace migration refuses to merge case directories: {child} and {target}"
+            )
+        child.rename(target)
+    source.rmdir()
+
+
+def _migrate_workspace_directories() -> None:
+    """Flatten old ``cases/`` and hide all workspace machinery.
+
+    Directory renames are used rather than replacement or deletion, including
+    for scratch cases, so the operation is portable to Windows and resumes
+    cleanly after an interrupted startup.
+    """
+    root = workspace_root()
+    _move_case_directories(root / "scratch", scratch_dir())
+    for legacy_name, destination in (
+        (".settings", settings_dir()),
+        ("bundles", bundles_dir()),
+        ("runtime", runtime_dir()),
+        ("tile-cache", tile_cache_dir()),
+    ):
+        _merge_legacy_directory(root / legacy_name, destination)
+    _move_case_directories(root / "cases", root)
 
 
 # from_version -> function(data) returning settings reshaped for from_version+1.
@@ -422,9 +715,7 @@ def save_templates(templates: dict[str, Any]) -> None:
     path = templates_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     _restrict(path.parent, 0o700)
-    payload = json.dumps(
-        templates, indent=2, ensure_ascii=False, allow_nan=False
-    ) + "\n"
+    payload = json.dumps(templates, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
     fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     tmp_path = Path(tmp_name)
     try:
