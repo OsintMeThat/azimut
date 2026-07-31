@@ -173,13 +173,29 @@ def test_a_move_onto_an_existing_workspace_is_a_conflict(pointed_client, tmp_pat
 # -- the two closed states -----------------------------------------------------
 
 
+def _make_the_workspace_vanish(root) -> None:
+    """Take the folder away the way an unplugged drive does.
+
+    The lock has to go first, and not to make the test pass: Windows cannot
+    delete a file another handle has open, so the folder could not be removed at
+    all while Azimut held it. That is faithful rather than convenient — a drive
+    that leaves takes the handle with it, and a folder renamed from outside is
+    only possible when nothing inside is open.
+    """
+    import shutil
+
+    from azimut.engine import workspacelock
+
+    workspacelock.release()
+    shutil.rmtree(root)
+
+
 def test_a_workspace_that_is_gone_stops_the_app_without_recreating_it(pointed_client):
     """The drive was unplugged, or the folder renamed. Recreating it silently is
     how someone concludes they lost everything."""
     client, root = pointed_client
-    import shutil
 
-    shutil.rmtree(root)
+    _make_the_workspace_vanish(root)
 
     refused = client.get("/api/cases")
 
@@ -190,9 +206,8 @@ def test_a_workspace_that_is_gone_stops_the_app_without_recreating_it(pointed_cl
 
 def test_the_recovery_routes_stay_reachable_when_the_workspace_is_gone(pointed_client, tmp_path):
     client, root = pointed_client
-    import shutil
 
-    shutil.rmtree(root)
+    _make_the_workspace_vanish(root)
 
     status = client.get("/api/settings/workspace")
 
