@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator, TypeVar
 
 from .engine import mapsites
+from . import layout
 from .repository import EntityStatus
 from .workspace import Case, CaseError, _new_id, _now, _parse_cursor, _replace_with_retry
 
@@ -177,6 +178,17 @@ def _entity_search_text(type_: str, label: str, attrs: dict[str, Any] | None) ->
         for value in (label, type_, attrs.get("folder"), attrs.get("notes"))
         if value
     ).casefold()
+
+
+def _replace_exact(value: Any, old: str, new: str) -> Any:
+    """Recursively replace strings equal to ``old``; never edit prose."""
+    if isinstance(value, str):
+        return new if value == old else value
+    if isinstance(value, list):
+        return [_replace_exact(item, old, new) for item in value]
+    if isinstance(value, dict):
+        return {key: _replace_exact(item, old, new) for key, item in value.items()}
+    return value
 
 
 def _migrate_1_to_2(conn: sqlite3.Connection) -> None:
@@ -396,6 +408,24 @@ def _normalise_media_item(item: dict[str, Any]) -> tuple[dict[str, Any], tuple[A
     )
 
 
+def read_meta(db_path: Path) -> dict[str, str]:
+    """The `meta` table of a case database, without opening the case.
+
+    `SqliteCase.open` would upgrade the schema on the way in, which is the wrong
+    move on a database whose case cannot even be read yet — the caller is
+    `workspace.restore_manifest`, recovering the name and dates of a case that
+    lost its manifest. So this is a peek, read-only and best effort: a missing
+    file, a foreign format or a database that needs recovery all answer with
+    nothing, and the caller falls back to the folder's own name.
+    """
+    try:
+        with closing(sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)) as conn:
+            rows = conn.execute("SELECT key, value FROM meta")
+            return {str(key): str(value) for key, value in rows}
+    except (sqlite3.Error, ValueError, OSError):
+        return {}
+
+
 class SqliteCase:
     """SQLite implementation of `CaseRepository` over one `case.db` file."""
 
@@ -440,13 +470,17 @@ class SqliteCase:
         return store
 
     @classmethod
-    def open(cls, db_path: Path) -> "SqliteCase":
+    def open(cls, db_path: Path, *, media_dir: Path | None = None) -> "SqliteCase":
         """Open an existing `case.db`, upgrading an older schema and refusing a
         newer one.
 
         Mirrors `Case.migrate`'s forward-compat guarantee for the JSON format: a
         database written by a newer Azimut is refused rather than mangled, and an
         older one is brought up to `SQLITE_SCHEMA` in order before use.
+
+        `media_dir` is where the one-time sidecar backfill reads from. The
+        backend is not told the case layout anywhere else and must not guess it,
+        so an open without it leaves the backfill for a later open that has it.
         """
         db_path = Path(db_path)
         if not db_path.exists():
@@ -462,7 +496,8 @@ class SqliteCase:
             )
         if version < SQLITE_SCHEMA:
             store._upgrade()
-        store._ensure_media_index()
+        if media_dir is not None:
+            store._ensure_media_index(media_dir)
         return store
 
     def _upgrade(self) -> None:
@@ -494,12 +529,29 @@ class SqliteCase:
                 conn.execute("ROLLBACK")
                 raise
 
-    def _ensure_media_index(self) -> None:
+    def forget_media_index(self) -> None:
+        """Drop the one-time backfill marker so the next open rebuilds the index.
+
+        The folder migration moves the sidecars, and the backfill may already
+        have run — and stamped itself done — while they were still at their old
+        location. Without this the browse index of every migrating case would
+        come out empty, silently.
+        """
+
+        def op(conn: sqlite3.Connection) -> None:
+            conn.execute("DELETE FROM meta WHERE key = 'media_index_ready'")
+
+        self._write(op)
+
+    def _ensure_media_index(self, media_dir: Path) -> None:
         """Backfill media sidecars once after schema 4 reaches a case.
 
         The marker is written in the same transaction as the rows, so an
         interrupted scan is retried rather than leaving a partial index active.
         Normal media writes keep the index current after this one-time pass.
+
+        `media_dir` comes from the caller: where media live is the case layout's
+        business, not the database's.
         """
         with self._connect() as conn:
             ready = conn.execute(
@@ -515,9 +567,8 @@ class SqliteCase:
                     entity_by_path[path] = row["id"]
 
         rows: list[tuple[dict[str, Any], str | None]] = []
-        media_dir = self.db_path.parent / "media"
-        for sidecar in sorted(media_dir.glob("*.azimut.json")):
-            media_name = sidecar.name[: -len(".azimut.json")]
+        for sidecar in sorted((media_dir / layout.META_DIR).glob("*.json")):
+            media_name = sidecar.stem
             if not (media_dir / media_name).is_file():
                 continue
             try:
@@ -1724,6 +1775,54 @@ class SqliteCase:
             return cur.rowcount
 
         return self._write(op)
+
+    def replace_path_references(self, old: str, new: str) -> None:
+        """Rewrite an exact case-relative path in graph attrs and durable jobs.
+
+        One SQLite transaction keeps structured references coherent. File specs
+        and sidecars live outside the database and are handled by the artifact
+        rename journal that calls this method.
+        """
+        def op(conn: sqlite3.Connection) -> None:
+            for row in conn.execute(
+                "SELECT id, type, label, attrs_json FROM entities"
+            ).fetchall():
+                attrs = json.loads(row["attrs_json"])
+                replaced = _replace_exact(attrs, old, new)
+                if replaced == attrs:
+                    continue
+                conn.execute(
+                    "UPDATE entities SET attrs_json = ?, folder = ?, search_text = ?"
+                    " WHERE id = ?",
+                    (
+                        json.dumps(replaced, ensure_ascii=False),
+                        _folder_of(replaced),
+                        _entity_search_text(row["type"], row["label"], replaced),
+                        row["id"],
+                    ),
+                )
+
+            for row in conn.execute(
+                "SELECT id, job_key, payload_json FROM jobs"
+            ).fetchall():
+                payload = json.loads(row["payload_json"])
+                replaced = _replace_exact(payload, old, new)
+                key = new if row["job_key"] == old else row["job_key"]
+                if key == row["job_key"] and replaced == payload:
+                    continue
+                conn.execute(
+                    "UPDATE jobs SET job_key = ?, payload_json = ?, updated_at = ?"
+                    " WHERE id = ?",
+                    (
+                        key,
+                        json.dumps(replaced, ensure_ascii=False),
+                        _now(),
+                        row["id"],
+                    ),
+                )
+            self._touch(conn)
+
+        self._write(op)
 
 
 # -- JSON -> SQLite conversion ---------------------------------------------

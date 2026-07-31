@@ -2,10 +2,17 @@
 
 The live graph keeps hard-deleting. What a delete leaves behind is a journal
 row holding the recipe to undo it, and the files moved aside into
-``.trash/<group_id>/`` under their original case-relative names. Nothing else
-in the app learns that a trash exists — no catalog query, no search, no picker,
-no future tool has to remember to filter out deleted rows. That is the whole
-reason a journal was chosen over a ``trashed`` status.
+``.trash/<group_id>/`` under numbered slots. Nothing else in the app learns that
+a trash exists — no catalog query, no search, no picker, no future tool has to
+remember to filter out deleted rows. That is the whole reason a journal was
+chosen over a ``trashed`` status.
+
+**Slots, not mirrored paths.** The group directory used to reproduce each
+artifact's case-relative path under itself, which stacked two case trees on top
+of each other and made the trash the longest path the app could produce — enough
+to break the 260-character Windows limit on its own. The journal already records
+where every file came from, so the directory holds ``0``, ``1``, ``2`` and the
+payload's ``slots`` list says which is which.
 
 One row is one **delete action**, not one entity: deleting a video that carries
 three Inspect sessions writes a single group, and restoring it brings the whole
@@ -23,6 +30,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from .. import layout
 from ..workspace import Case, CaseError, _new_id, ensure_dir
 from . import artifacts as artifact_engine
 from . import links as link_engine
@@ -37,9 +45,29 @@ def _group_dir(case: Case, group_id: str) -> Path:
     """
     if not group_id or "/" in group_id or "\\" in group_id or group_id.startswith("."):
         raise CaseError(f"invalid trash group '{group_id}'")
-    from ..workspace import TRASH_DIR
+    return case.resolve_inside(f"{layout.TRASH_DIR}/{group_id}")
 
-    return case.resolve_inside(f"{TRASH_DIR}/{group_id}")
+
+def slots_for(files: list[str]) -> list[str]:
+    """The in-group name each file waits under. Positional, so the payload's
+    ``files`` and ``slots`` lists line up index for index."""
+    return [str(index) for index, _ in enumerate(files)]
+
+
+def _moved(payload: dict[str, Any]) -> list[tuple[str, str]]:
+    """(case-relative path, slot) pairs for one group.
+
+    A group written before the slots existed is not readable here — the schema-4
+    migration flattens every one of them on open, so a payload without ``slots``
+    means the migration did not run and silence would restore nothing.
+    """
+    files: list[str] = list(payload.get("files") or [])
+    if not files:
+        return []
+    slots: list[str] = list(payload.get("slots") or [])
+    if len(slots) != len(files):
+        raise CaseError("trash group predates numbered slots and was not migrated")
+    return list(zip(files, slots))
 
 
 def _dir_size(path: Path) -> int:
@@ -106,6 +134,7 @@ def send(
             "entities": entities,
             "links": links,
             "files": files,
+            "slots": slots_for(files),
             "tombstones": tombstones,
         }
         group = case.add_trash_group(
@@ -120,10 +149,11 @@ def send(
         try:
             for entity in entities:
                 artifact_engine.unfile(case, entity)
-            for rel in files:
+            for rel, slot in _moved(payload):
                 source = case.resolve_inside(rel)
                 if source.exists():
-                    _move(source, root / rel)
+                    _move(source, root / slot)
+                case.prune_note_dirs(rel)
             return case.update_trash_group(group_id, size_bytes=_dir_size(root))
         except Exception:
             _rollback_delete(case, group)
@@ -166,10 +196,9 @@ def restore(case: Case, group_id: str) -> dict[str, Any]:
             raise CaseError(f"trash group '{group_id}' not found")
         payload = group.get("payload") or {}
         root = _group_dir(case, group_id)
-        files: list[str] = list(payload.get("files") or [])
         occupied = [
-            rel for rel in files
-            if (root / rel).exists() and case.resolve_inside(rel).exists()
+            rel for rel, slot in _moved(payload)
+            if (root / slot).exists() and case.resolve_inside(rel).exists()
         ]
         if occupied:
             raise CaseError(
@@ -222,8 +251,8 @@ def recover(case: Case) -> None:
 def _restore_files(case: Case, group: dict[str, Any]) -> None:
     payload = group.get("payload") or {}
     root = _group_dir(case, group["id"])
-    for rel in payload.get("files") or []:
-        source = root / rel
+    for rel, slot in _moved(payload):
+        source = root / slot
         destination = case.resolve_inside(rel)
         if source.exists():
             _move(source, destination)

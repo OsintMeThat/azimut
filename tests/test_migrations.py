@@ -5,12 +5,14 @@ migrations to prove the runners, and pin the "same schema doesn't rewrite" and
 "newer is refused" invariants that hold with zero migrations."""
 
 import json
+import shutil
 
 import pytest
-from legacy_case import write_legacy_json_case
+from legacy_case import rewind_case, unwrap_case, write_legacy_json_case
 
-from azimut import config, workspace
-from azimut.workspace import Case, CaseError
+from azimut import config, layout, workspace
+from azimut.engine import trash as trash_engine
+from azimut.workspace import Case, CaseError, ensure_dir
 
 
 # -- case.json ------------------------------------------------------------
@@ -25,8 +27,34 @@ def test_open_current_schema_does_not_rewrite(tmp_workspace):
     reopened = Case.open(case.id)
 
     assert reopened.read()["updated_at"] == before
-    backups = list(case.path.glob("case.pre-migrate*.json"))
+    backups = list(case.tool_root.glob("case.pre-migrate*.json"))
     assert backups == []
+
+
+def test_startup_migrates_old_permanent_and_scratch_cases_as_one_pass(tmp_workspace):
+    permanent = write_legacy_json_case("Old permanent")
+    scratch = write_legacy_json_case("Old scratch", scratch=True)
+    root = config.workspace_root()
+    old_cases = root / "cases"
+    old_scratch = root / "scratch"
+    old_cases.mkdir()
+    old_scratch.mkdir()
+    permanent.path.rename(old_cases / permanent.id)
+    scratch.path.rename(old_scratch / scratch.id)
+
+    from azimut.server import create_app
+
+    create_app()
+
+    migrated_permanent = Case.open(permanent.id)
+    migrated_scratch = Case.open(scratch.id)
+    assert migrated_permanent.path == root / permanent.id
+    assert migrated_scratch.path == config.scratch_dir() / scratch.id
+    assert migrated_scratch.is_scratch is True
+    assert migrated_permanent.read()["azimut"]["schema"] == workspace.CASE_SCHEMA
+    assert migrated_scratch.read()["azimut"]["schema"] == workspace.CASE_SCHEMA
+    assert not (root / "cases").exists()
+    assert not (root / "scratch").exists()
 
 
 def test_open_newer_schema_is_refused(tmp_workspace):
@@ -56,7 +84,7 @@ def test_open_older_schema_migrates_and_backs_up(tmp_workspace, monkeypatch):
 
     assert migrated["azimut"]["schema"] == 2
     assert migrated["attrs"]["migrated"] is True
-    backup = case.path / "case.pre-migrate-v1.json"
+    backup = case.tool_root / "case.pre-migrate-v1.json"
     assert backup.exists()
     assert json.loads(backup.read_text())["azimut"]["schema"] == 1
 
@@ -71,7 +99,7 @@ def test_migration_backup_is_not_overwritten(tmp_workspace, monkeypatch):
     monkeypatch.setattr(workspace, "CASE_MIGRATIONS", {1: lambda d: d})
 
     Case.open(case.id)
-    backup = case.path / "case.pre-migrate-v1.json"
+    backup = case.tool_root / "case.pre-migrate-v1.json"
     first = backup.read_text()
 
     # Force another migration pass from the same starting schema.
@@ -87,19 +115,25 @@ def test_note_bodies_migrate_out_of_case_json(tmp_workspace):
     case = write_legacy_json_case(
         "Legacy notes",
         schema=1,
-        entities=[{
-            "id": "e_note", "type": "note", "label": "Lead",
-            "attrs": {"folder": "Research", "content": "# Saved lead"},
-            "provenance": {"by": "user", "at": "2026-01-01T00:00:00Z", "status": "confirmed"},
-        }],
+        entities=[
+            {
+                "id": "e_note",
+                "type": "note",
+                "label": "Lead",
+                "attrs": {"folder": "Research", "content": "# Saved lead"},
+                "provenance": {"by": "user", "at": "2026-01-01T00:00:00Z", "status": "confirmed"},
+            }
+        ],
     )
 
     migrated = Case.open(case.id).snapshot()
 
     note = migrated["entities"][0]
-    assert note["attrs"] == {"folder": "Research", "path": "notes/e_note.md"}
-    assert (case.path / "notes/e_note.md").read_text(encoding="utf-8") == "# Saved lead"
-    assert (case.path / "case.pre-migrate-v1.json").exists()
+    # The body left case.json, and the layout normalizer named the file after
+    # the note's title inside its folder.
+    assert note["attrs"] == {"folder": "Research", "path": "notes/Research/Lead.md"}
+    assert case.resolve_inside(note["attrs"]["path"]).read_text(encoding="utf-8") == "# Saved lead"
+    assert (case.tool_root / "case.pre-migrate-v1.json").exists()
 
 
 # -- storage activation: legacy json -> sqlite on open --------------------
@@ -112,7 +146,13 @@ def test_open_activates_sqlite_and_preserves_the_graph(tmp_workspace):
     legacy = write_legacy_json_case(
         "To migrate",
         entities=[
-            {"id": "e_a", "type": "person", "label": "Ada", "attrs": {"handle": "@ada"}, "provenance": prov},
+            {
+                "id": "e_a",
+                "type": "person",
+                "label": "Ada",
+                "attrs": {"handle": "@ada"},
+                "provenance": prov,
+            },
             {"id": "e_b", "type": "account", "label": "acct", "attrs": {}, "provenance": prov},
         ],
         links=[{"id": "l_1", "from": "e_a", "to": "e_b", "type": "owns", "provenance": prov}],
@@ -124,8 +164,8 @@ def test_open_activates_sqlite_and_preserves_the_graph(tmp_workspace):
     manifest = opened.read()
     assert manifest["azimut"] == {"schema": workspace.CASE_SCHEMA, "storage": "sqlite"}
     assert "entities" not in manifest  # case.json is a manifest now
-    assert (opened.path / "case.db").exists()
-    assert (opened.path / "case.pre-migrate-v2.json").exists()
+    assert opened.db_path.exists()
+    assert (opened.tool_root / "case.pre-migrate-v2.json").exists()
 
     snap = opened.snapshot()
     assert {e["id"] for e in snap["entities"]} == {"e_a", "e_b"}
@@ -173,13 +213,271 @@ def test_failed_activation_leaves_the_json_case_usable(tmp_workspace, monkeypatc
     reopened_json = json.loads(legacy.json_path.read_text(encoding="utf-8"))
     assert reopened_json["azimut"]["storage"] == "json"
     assert reopened_json["entities"][0]["label"] == "Ada"
-    assert not (legacy.path / "case.db").exists()
+    assert not legacy.db_path.exists()
 
     # with the fault cleared (restore just the converter, not the whole
     # monkeypatch — undo() would also revert tmp_workspace's AZIMUT_HOME), a
     # retry migrates it and the graph survives
     monkeypatch.setattr(sqlite_backend, "_import_graph", real_import)
     assert [e["label"] for e in Case.open(legacy.id).list_entities()] == ["Ada"]
+
+
+# -- consolidated folder migration: released schema 3 / dev schemas 4–7 ----
+
+
+def _case_at_folder_checkpoint(schema: int) -> tuple[Case, dict[str, str]]:
+    case = Case.create(f"Folder checkpoint {schema}")
+    note = case.create_note("Bridge sighting", "Video 1", "# note")
+    old_paths = {
+        "proof": layout.proof_spec_rel("proof"),
+        "inspect": layout.session_rel("session"),
+        "draft": layout.draft_rel("draft"),
+        "media": "media/clip.jpg",
+        "sidecar": layout.sidecar_rel("clip.jpg"),
+    }
+    for key in ("proof", "inspect", "draft", "sidecar"):
+        path = case.resolve_inside(old_paths[key])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = (
+            {
+                "filename": "clip.jpg",
+                "title": "Clip",
+                "source": {"type": "download"},
+            }
+            if key == "sidecar"
+            else {"title": key}
+        )
+        path.write_text(json.dumps(data) + "\n", encoding="utf-8")
+    case.resolve_inside(old_paths["media"]).write_bytes(b"image")
+    case.add_entity("proof", "Proof", {"spec": old_paths["proof"]}, by="user")
+    case.add_entity("inspect-session", "Session", {"spec": old_paths["inspect"]}, by="user")
+    case.add_entity("post", "Draft", {"draft": old_paths["draft"]}, by="user")
+    rewind_case(case, schema)
+    return case, {
+        "proof": layout.proof_spec_rel("Proof"),
+        "inspect": layout.session_rel("Session"),
+        "draft": layout.draft_rel("Draft"),
+        "media": "media/Clip.jpg",
+        "sidecar": layout.sidecar_rel("Clip.jpg"),
+        "note_id": note["id"],
+    }
+
+
+@pytest.mark.parametrize("schema", range(workspace.STORAGE_SCHEMA, workspace.CASE_SCHEMA))
+def test_every_unreleased_folder_checkpoint_jumps_to_the_final_layout(tmp_workspace, schema):
+    case, expected = _case_at_folder_checkpoint(schema)
+    legacy_manifest = (
+        layout.manifest(case.path)
+        if layout.manifest(case.path).is_file()
+        else layout.unwrapped_manifest(case.path)
+    )
+    assert json.loads(legacy_manifest.read_text(encoding="utf-8"))["azimut"]["schema"] == schema
+
+    opened = Case.open(case.id)
+
+    assert opened.read()["azimut"]["schema"] == workspace.CASE_SCHEMA
+    assert opened.read_note(expected["note_id"]) == "# note"
+    for key in ("proof", "inspect", "draft", "media", "sidecar"):
+        assert opened.resolve_inside(expected[key]).exists()
+    attrs = {
+        entity["type"]: entity["attrs"]
+        for entity in opened.list_entities()
+        if entity["type"] in {"proof", "inspect-session", "post"}
+    }
+    assert attrs["proof"]["spec"] == expected["proof"]
+    assert attrs["inspect-session"]["spec"] == expected["inspect"]
+    assert attrs["post"]["draft"] == expected["draft"]
+    assert sorted(path.name for path in opened.path.iterdir()) == ["README.txt", "azimut"]
+
+
+def test_released_schema_three_is_stamped_only_once(tmp_workspace, monkeypatch):
+    case, _ = _case_at_folder_checkpoint(workspace.STORAGE_SCHEMA)
+    writes = []
+    real_write = Case._write_json
+
+    def remember_write(self, data):
+        if self.path == case.path:
+            writes.append(data["azimut"]["schema"])
+        real_write(self, data)
+
+    monkeypatch.setattr(Case, "_write_json", remember_write)
+
+    Case.open(case.id)
+
+    assert writes == [workspace.CASE_SCHEMA]
+
+
+@pytest.mark.parametrize(
+    "stage",
+    [
+        "_wrap_case_folder",
+        "_flatten_trash",
+        "_hide_the_machinery",
+        "_name_notes_after_their_titles",
+        "_leave_a_readme",
+    ],
+)
+def test_folder_normalizer_resumes_after_each_stage(tmp_workspace, monkeypatch, stage):
+    case, expected = _case_at_folder_checkpoint(workspace.STORAGE_SCHEMA)
+    real_stage = getattr(workspace, stage)
+
+    def stop_after_stage(current):
+        real_stage(current)
+        raise RuntimeError(f"stop after {stage}")
+
+    monkeypatch.setattr(workspace, stage, stop_after_stage)
+    with pytest.raises(RuntimeError, match="stop after"):
+        Case.open(case.id)
+
+    manifest = (
+        layout.manifest(case.path)
+        if layout.manifest(case.path).is_file()
+        else layout.unwrapped_manifest(case.path)
+    )
+    assert json.loads(manifest.read_text(encoding="utf-8"))["azimut"]["schema"] == (
+        workspace.STORAGE_SCHEMA
+    )
+
+    monkeypatch.setattr(workspace, stage, real_stage)
+    opened = Case.open(case.id)
+
+    assert opened.read()["azimut"]["schema"] == workspace.CASE_SCHEMA
+    assert opened.read_note(expected["note_id"]) == "# note"
+    proof = json.loads(opened.resolve_inside(expected["proof"]).read_text(encoding="utf-8"))
+    assert proof["title"] == "Proof"
+
+
+# -- folder normalizer: trash stops mirroring the case tree ----------------
+
+
+def _mirrored_trash_group(case: Case, rel: str, body: bytes) -> str:
+    """Write a schema-3 trash group by hand: the file waits under a copy of its
+    own case-relative path, which is what the app did before slots."""
+    group_id = "t_legacy0001"
+    waiting = case.trash_dir / group_id / rel
+    waiting.parent.mkdir(parents=True, exist_ok=True)
+    waiting.write_bytes(body)
+    case.add_trash_group(
+        group_id,
+        label="Old delete",
+        type_="media",
+        item_count=1,
+        size_bytes=len(body),
+        payload={"entities": [], "links": [], "files": [rel], "tombstones": []},
+        state="ready",
+    )
+    return group_id
+
+
+def test_open_flattens_a_mirrored_trash_group_into_slots(tmp_workspace):
+    """The normalizer moves each waiting file to a numbered slot and records the
+    pairing, so the trash stops stacking a second case tree under itself."""
+    case = Case.create("Has an old delete")
+    rel = "media/clip.mp4"
+    group_id = _mirrored_trash_group(case, rel, b"payload")
+    manifest = case.read()
+    manifest["azimut"]["schema"] = workspace.STORAGE_SCHEMA
+    case._write_json(manifest)
+
+    opened = Case.open(case.id)
+
+    assert opened.read()["azimut"]["schema"] == workspace.CASE_SCHEMA
+    group_dir = opened.trash_dir / group_id
+    assert [p.name for p in group_dir.iterdir()] == ["0"]
+    assert (group_dir / "0").read_bytes() == b"payload"
+    group = opened.get_trash_group(group_id)
+    assert group["payload"]["files"] == [rel]
+    assert group["payload"]["slots"] == ["0"]
+
+
+def test_a_flattened_group_still_restores_to_its_original_path(tmp_workspace):
+    """The point of recording the pairing: the file goes back where it was, not
+    where it waited."""
+    case = Case.create("Restores after migrating")
+    rel = "media/clip.mp4"
+    group_id = _mirrored_trash_group(case, rel, b"payload")
+    manifest = case.read()
+    manifest["azimut"]["schema"] = workspace.STORAGE_SCHEMA
+    case._write_json(manifest)
+
+    opened = Case.open(case.id)
+    trash_engine.restore(opened, group_id)
+
+    assert opened.resolve_inside(rel).read_bytes() == b"payload"
+    assert not (opened.trash_dir / group_id).exists()
+
+
+def test_migrating_twice_leaves_the_slots_alone(tmp_workspace):
+    """Idempotence, because an interrupted upgrade reopens and runs again."""
+    case = Case.create("Migrated twice")
+    group_id = _mirrored_trash_group(case, "media/clip.mp4", b"payload")
+    manifest = case.read()
+    manifest["azimut"]["schema"] = workspace.STORAGE_SCHEMA
+    case._write_json(manifest)
+
+    Case.open(case.id)
+    reopened = Case.open(case.id)
+
+    group_dir = reopened.trash_dir / group_id
+    assert [p.name for p in group_dir.iterdir()] == ["0"]
+    assert (group_dir / "0").read_bytes() == b"payload"
+
+
+# -- folder normalizer: the tool's files move into `azimut/` ----------------
+
+
+def test_open_wraps_a_flat_case_and_keeps_every_artifact(tmp_workspace):
+    """The case root becomes the analyst's, and nothing inside is rewritten:
+    stored paths are relative to the tool root, so they go on meaning the same
+    thing one level down."""
+    case = Case.create("Flat on disk")
+    note = case.create_note("Lead", "Research", "# body")
+    rel = note["attrs"]["path"]
+    unwrap_case(case)
+    assert (case.path / "case.json").is_file()  # genuinely the old shape
+
+    opened = Case.open(case.id)
+
+    assert opened.read()["azimut"]["schema"] == workspace.CASE_SCHEMA
+    assert sorted(entry.name for entry in opened.path.iterdir()) == ["README.txt", "azimut"]
+    assert opened.resolve_inside(rel).read_text(encoding="utf-8") == "# body"
+    assert opened.get_entity(note["id"])["attrs"]["path"] == rel  # untouched
+
+
+def test_an_interrupted_wrap_is_resumed_not_half_applied(tmp_workspace):
+    """The manifest moves last, so its presence at the case root is what says
+    the move never finished. A run that died after carrying the media over must
+    pick up from there rather than refuse or duplicate."""
+    case = Case.create("Interrupted wrap")
+    case.subdir("media").joinpath("clip.mp4").write_bytes(b"payload")
+    unwrap_case(case)
+    # simulate the crash: media carried over, manifest still at the root
+    tool = case.path / "azimut"
+    tool.mkdir()
+    shutil.move(str(case.path / "media"), str(tool / "media"))
+    assert (case.path / "case.json").is_file()
+
+    opened = Case.open(case.id)
+
+    assert sorted(entry.name for entry in opened.path.iterdir()) == ["README.txt", "azimut"]
+    assert opened.resolve_inside("media/clip.mp4").read_bytes() == b"payload"
+
+
+def test_the_analysts_own_files_are_left_at_the_case_root(tmp_workspace):
+    """The whole point of the wrapper. A folder someone keeps beside the case
+    does not get swept into the tool's directory by the migration."""
+    case = Case.create("Has company")
+    unwrap_case(case)
+    (case.path / "my rushes").mkdir()
+    (case.path / "my rushes" / "raw.mp4").write_bytes(b"mine")
+
+    opened = Case.open(case.id)
+
+    assert (opened.path / "my rushes" / "raw.mp4").read_bytes() == b"mine"
+    assert not (opened.tool_root / "my rushes").exists()
+    # and the tool's own files did move, so the case is properly wrapped
+    assert opened.db_path.is_file()
+    assert opened.read()["azimut"]["schema"] == workspace.CASE_SCHEMA
 
 
 # -- settings.json --------------------------------------------------------
@@ -217,3 +515,84 @@ def test_ensure_workspace_upgrades_settings_in_place(monkeypatch, tmp_path):
     saved = json.loads(config.settings_path().read_text(encoding="utf-8"))
     assert saved["schema"] == 2
     assert saved["post_mention"] == "@new"
+
+
+def test_open_names_notes_after_their_titles(tmp_workspace):
+    """A note used to be `notes/<entity-id>.md`: visible in the case folder and
+    illegible, which is the cost of being in the way without the benefit of
+    being readable."""
+    case = Case.create("Notes to rename")
+    note = case.create_note("Bridge sighting", "Video 1", "# body")
+    id_named = f"notes/{note['id']}.md"
+    moved = case.resolve_inside(id_named)
+    ensure_dir(moved.parent)
+    shutil.move(str(case.resolve_inside(note["attrs"]["path"])), str(moved))
+    case.update_entity(note["id"], {"attrs": {"path": id_named}})
+    manifest = case.read()
+    manifest["azimut"]["schema"] = workspace.STORAGE_SCHEMA + 3  # before the note rename
+    case._write_json(manifest)
+
+    opened = Case.open(case.id)
+
+    renamed = opened.get_entity(note["id"])
+    assert renamed["attrs"]["path"] == "notes/Video 1/Bridge sighting.md"
+    assert opened.read_note(note["id"]) == "# body"
+    assert not opened.resolve_inside(id_named).exists()
+
+
+def test_two_notes_with_one_title_survive_the_rename(tmp_workspace):
+    """Titles are not unique and the migration cannot refuse anything, so the
+    second one takes a suffix rather than overwriting the first."""
+    case = Case.create("Duplicate titles")
+    first = case.create_note("Summary", "", "# first")
+    second = case.create_note("Summary", "", "# second")
+    for entity, body in ((first, "# first"), (second, "# second")):
+        rel = f"notes/{entity['id']}.md"
+        shutil.move(
+            str(case.resolve_inside(entity["attrs"]["path"])), str(case.resolve_inside(rel))
+        )
+        case.update_entity(entity["id"], {"attrs": {"path": rel}})
+        assert case.resolve_inside(rel).read_text(encoding="utf-8") == body
+    manifest = case.read()
+    manifest["azimut"]["schema"] = workspace.STORAGE_SCHEMA + 3  # before the note rename
+    case._write_json(manifest)
+
+    opened = Case.open(case.id)
+
+    paths = sorted(opened.get_entity(e["id"])["attrs"]["path"] for e in (first, second))
+    assert paths == ["notes/Summary-2.md", "notes/Summary.md"]
+    assert opened.read_note(first["id"]) == "# first"
+    assert opened.read_note(second["id"]) == "# second"
+
+
+# -- folder normalizer: explain the free zone -------------------------------
+
+
+def test_a_new_case_explains_which_half_of_the_folder_is_free(tmp_workspace):
+    case = Case.create("Readable boundary")
+
+    assert layout.readme(case.path).read_text(encoding="utf-8") == layout.README_TEXT
+    assert "everything else here is yours" in layout.README_TEXT
+
+
+def test_schema_seven_case_gets_a_readme_without_overwriting_one(tmp_workspace):
+    case = Case.create("Readme migration")
+    readme = layout.readme(case.path)
+    readme.unlink()
+    manifest = case.read()
+    manifest["azimut"]["schema"] = workspace.CASE_SCHEMA - 1
+    case._write_json(manifest)
+
+    opened = Case.open(case.id)
+
+    assert readme.read_text(encoding="utf-8") == layout.README_TEXT
+    assert opened.read()["azimut"]["schema"] == workspace.CASE_SCHEMA
+
+    readme.write_text("My own instructions\n", encoding="utf-8")
+    manifest = opened.read()
+    manifest["azimut"]["schema"] = workspace.CASE_SCHEMA - 1
+    opened._write_json(manifest)
+
+    Case.open(case.id)
+
+    assert readme.read_text(encoding="utf-8") == "My own instructions\n"

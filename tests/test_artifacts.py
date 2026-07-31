@@ -14,6 +14,7 @@ there.
 from pathlib import Path
 
 import fullcase
+from azimut import layout
 from azimut.engine import artifacts
 from azimut.workspace import Case
 
@@ -67,7 +68,9 @@ def test_deleting_everything_returns_the_case_to_its_birth_state(client):
     client.delete(f"/api/cases/{full.case_id}/trash")
 
     emptied = Case.open(full.case_id)
-    assert tree(emptied.path) == tree(born.path)
+    # The tool root, not the case folder: what the analyst keeps beside it is
+    # theirs, and a gate on files Azimut never wrote would be meaningless.
+    assert tree(emptied.tool_root) == tree(born.tool_root)
 
 
 def test_deleting_a_proof_takes_its_pasted_images(client):
@@ -111,6 +114,6 @@ def test_the_registry_answers_for_one_media_and_its_companions(client):
 
     owned = artifacts.owned(case, entity)
     assert owned[0] == full.photo
-    assert full.photo + ".azimut.json" in owned
+    assert layout.sidecar_rel(full.photo) in owned
     assert all(not rel.startswith(CACHE) for rel in owned)
     assert all(rel.startswith(CACHE) for rel in artifacts.caches(case, entity))

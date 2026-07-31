@@ -133,6 +133,23 @@ def test_export_leaves_the_login_session_behind(client):
     assert "Netscape" not in raw
 
 
+def test_export_leaves_the_workspace_location_behind(client, tmp_path):
+    """Where the workspace is, is an address on *this* machine.
+
+    A backup exists to carry keys and presets to another computer, where that
+    path may be a drive letter that doesn't exist or someone else's home. So the
+    pointer stays put, and it is deliberately not a settings key — which is why
+    the drift gate above cannot be the thing that catches this.
+    """
+    pointed = tmp_path / "somewhere" / "Azimut"
+    pointed.mkdir(parents=True)
+    config.write_pointer(pointed)
+
+    blob = bundle_of(client)
+
+    assert "somewhere" not in str(blob)
+
+
 def test_the_browser_login_choice_travels_but_a_missing_file_does_not(client):
     client.put(
         "/api/settings/prefs",

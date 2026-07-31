@@ -1,6 +1,6 @@
 """Disk tile cache for providers whose terms allow it (docs/IMAGERY_PROVIDERS.md).
 
-Layout: ``<workspace>/tile-cache/<provider_id>/<z>/<x>_<y>.<ext>`` — plain
+Layout: ``<workspace>/.azimut/cache/tiles/<provider_id>/<z>/<x>_<y>.<ext>`` — plain
 files, rebuildable, safe to delete wholesale. Only providers with
 ``cacheable=True`` land here: Google is excluded by its Map Tiles API terms
 (encoded as ``cacheable=False`` on the provider, enforced by the callers).
@@ -23,7 +23,7 @@ _TYPE = {ext: media for media, ext in _EXT.items()}
 
 
 def _tile_dir(provider_id: str, z: int) -> Path:
-    return config.workspace_root() / "tile-cache" / provider_id / str(int(z))
+    return config.tile_cache_dir() / provider_id / str(int(z))
 
 
 def get(provider_id: str, z: int, x: int, y: int) -> tuple[bytes, str] | None:

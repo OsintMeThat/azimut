@@ -692,6 +692,7 @@
         state: snapshot(),
       });
       draftName = r.name;
+      postName = r.title;
       await reloadCase(); // surface the post entity in the sidebar
       toast('Draft saved', 'ok', 1600);
     } catch (e) {

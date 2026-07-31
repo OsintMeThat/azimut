@@ -10,7 +10,7 @@ the read-only PyInstaller archive.
 So Azimut fetches newer copies into the workspace (config.runtime_dir()) and
 prefers them over whatever is bundled:
 
-    ~/Azimut/runtime/
+    ~/Azimut/.azimut/runtime/
     ├── yt-dlp/                      # one directory per distribution, so an
     │   ├── yt_dlp/                  # update is a whole-directory swap and a
     │   └── yt_dlp-2026.7.4.dist-info/   # half-written one can't shadow anything

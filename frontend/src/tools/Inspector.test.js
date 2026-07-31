@@ -21,6 +21,8 @@ describe('Inspect sessions', () => {
     expect(source).toContain('<input class="input title-input" bind:value={sessionName}');
     expect(source).toContain('aria-label="Session name"');
     expect(source).toContain('rename_from: openedSession?.name ?? null, title, spec: sessionSpec()');
+    expect(source).toContain('sessionName = res.title;');
+    expect(source).toContain('openedSession = { name: res.name, title: res.title };');
     expect(source).not.toContain("sessionModal.mode = 'save'");
     expect(source).not.toContain('placeholder="Session name"');
   });

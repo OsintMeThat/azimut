@@ -29,6 +29,7 @@ from . import countries
 from . import geo as geo_engine
 from . import links
 from . import media as media_engine
+from .. import layout
 
 # Saved work is places plus captures; a screenshot filed by the capture
 # extension is a capture with a different origin, not a third entity type.
@@ -341,7 +342,7 @@ def _linked_posts(
         draft = draft or {}
         draft_name = draft.get("name")
         if not draft_name and isinstance(draft_path, str):
-            draft_name = draft_path.removeprefix("exports/").removesuffix(".json")
+            draft_name = draft_path.removeprefix(layout.DRAFTS_DIR + "/").removesuffix(".json")
         linked.append(
             {
                 "id": entity["id"],
@@ -423,7 +424,7 @@ def proof_index(
     }
     post_entities = {entity["id"]: entity for entity in _page_all(case, ["post"])}
     drafts = {
-        f"exports/{draft['name']}.json": draft for draft in (draft_listing or [])
+        layout.draft_rel(draft["name"]): draft for draft in (draft_listing or [])
     }
     rows: list[dict[str, Any]] = []
     for proof in listing:

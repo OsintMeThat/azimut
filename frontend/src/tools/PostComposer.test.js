@@ -52,6 +52,7 @@ describe('Post naming', () => {
   it('renames in place: saving sends the bound slug so the backend moves the file', () => {
     expect(source).toContain('rename_from: draftName,');
     expect(source).toContain('title: postName.trim(),');
+    expect(source).toContain('postName = r.title;');
   });
 
   it('asks before an unbound draft takes a name another draft holds', () => {

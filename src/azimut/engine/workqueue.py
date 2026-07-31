@@ -151,6 +151,26 @@ def wake(case: "CaseType") -> None:
     threading.Thread(target=_run_loop, name="azimut-worker", daemon=True).start()
 
 
+def recover_all() -> None:
+    """Return jobs a crashed process left ``running`` to the queue, and wake the
+    worker for every case that still has pending work.
+
+    A `running` row nothing owns would otherwise stall forever. Called at
+    startup, and again whenever the workspace root changes: the cases at a new
+    location have their own queues, and this process has never seen them.
+    """
+    from ..workspace import Case
+
+    for row in Case.list_all():
+        try:
+            case = Case.open(row["id"])
+            case.recover_jobs()
+        except Exception:  # one unreadable case must not stall every other queue
+            continue
+        if has_queued(case):
+            wake(case)
+
+
 def wait_until_idle(timeout: float = 5.0) -> bool:
     """Wait for the shared worker to finish its current queue, if any.
 

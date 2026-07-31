@@ -19,8 +19,8 @@ from typing import Any, BinaryIO
 
 from PIL import Image
 
-from .. import config
-from ..workspace import Case, ensure_dir
+from .. import config, layout
+from ..workspace import Case, CaseError, ensure_dir
 from . import enrich as enrich_engine
 from . import ffmpeg as ffmpeg_engine
 from . import links as link_engine
@@ -30,7 +30,6 @@ from . import thumbnails as thumbnail_engine
 # model and cache budgeting are owned by `thumbnails.py`. Re-exported for the
 # test fixtures that build a case's `.thumbs/` directly.
 THUMB_DIR = thumbnail_engine.THUMB_DIR
-SIDECAR_SUFFIX = ".azimut.json"
 # Attachment collections fit under this limit. Larger collections use the
 # playlist path and select the first item.
 MAX_PICKER_ITEMS = 20
@@ -73,10 +72,18 @@ def _is_gallery_auth_error(exc: BaseException) -> bool:
 
 
 def _resolve_cookie_file(file: str) -> Path:
-    """A stored cookies.txt is referenced by a workspace-relative path; an
-    externally supplied one may be absolute."""
+    """Resolve the stored cookie filename to its protected settings location.
+
+    Absolute paths remain supported for direct engine callers, but the Settings
+    API stores only ``cookies.txt`` and that name must follow the workspace
+    migration rather than resolving back to the now-empty visible root.
+    """
     path = Path(file)
-    return path if path.is_absolute() else config.workspace_root() / path
+    if path.is_absolute():
+        return path
+    if path == Path(config.cookies_file_path().name):
+        return config.cookies_file_path()
+    return config.workspace_root() / path
 
 
 def _cookie_ydl_opts(cookies: dict[str, Any] | None) -> dict[str, Any]:
@@ -137,30 +144,26 @@ def media_kind(filename: str) -> str:
     return "file"
 
 
-# Windows refuses these as a filename whatever the extension follows, and a case
-# folder has to open on all three platforms: an item someone titles "AUX" files
-# happily on Linux and then breaks the copy opened on Windows.
-_WINDOWS_RESERVED = frozenset(
-    ["con", "prn", "aux", "nul"]
-    + [f"com{n}" for n in range(1, 10)]
-    + [f"lpt{n}" for n in range(1, 10)]
-)
-
-
 def safe_filename(name: str) -> str:
-    name = Path(name).name  # strip any path component
-    name = re.sub(r"[^\w.\- ]+", "_", name).strip(" .") or "file"
-    if name.split(".", 1)[0].lower() in _WINDOWS_RESERVED:
-        name = f"_{name}"
-    return name[:150]
+    """Safe imported filename whose stem is also its visible Azimut name."""
+    leaf = Path(name).name
+    return layout.visible_filename(Path(leaf).stem, Path(leaf).suffix)
 
 
-def unique_path(directory: Path, filename: str) -> Path:
-    """Return a non-colliding path in directory for filename."""
+def unique_path(directory: Path, filename: str, *, taken_by: Path | None = None) -> Path:
+    """Return a case-insensitively non-colliding path in ``directory``.
+
+    Linux would allow ``Clip.mp4`` beside ``clip.mp4``; Windows and the default
+    macOS filesystem would merge them. Cases travel between all three, so the
+    stricter rule is the portable one. ``taken_by`` is the file being renamed.
+    """
     stem, suffix = Path(filename).stem, Path(filename).suffix
+    occupied = {
+        path.name.casefold() for path in directory.iterdir() if taken_by is None or path != taken_by
+    }
     candidate = directory / filename
     counter = 1
-    while candidate.exists():
+    while candidate.name.casefold() in occupied:
         candidate = directory / f"{stem}-{counter}{suffix}"
         counter += 1
     return candidate
@@ -171,7 +174,7 @@ def ffmpeg_available() -> bool:
 
 
 def _sidecar_path(media_path: Path) -> Path:
-    return media_path.with_name(media_path.name + SIDECAR_SUFFIX)
+    return media_path.parent / layout.META_DIR / (media_path.name + ".json")
 
 
 #: Prefix and suffix of the scratch file a sidecar write goes through. Named so
@@ -185,6 +188,7 @@ SIDECAR_TMP_SUFFIX = ".tmp"
 
 def _write_sidecar(media_path: Path, data: dict[str, Any]) -> None:
     sidecar = _sidecar_path(media_path)
+    ensure_dir(sidecar.parent)
     temporary = sidecar.with_name(
         f"{SIDECAR_TMP_PREFIX}{sidecar.name}.{uuid.uuid4().hex}{SIDECAR_TMP_SUFFIX}"
     )
@@ -229,8 +233,8 @@ def _register(
     output). ``entity_type`` lets a producer file the item under a more specific
     type than the generic ``media`` (e.g. a satellite ``capture``) while it still
     lives in ``media/`` and shows up in the Media Library; ``extra_attrs`` are
-    merged onto that entity (coordinates, zoom, …) and ``title`` seeds the display
-    label/sidecar title. ``dedupe=False`` keeps every registration a distinct
+    merged onto that entity (coordinates, zoom, …) and ``title`` chooses the
+    canonical filename before registration. ``dedupe=False`` keeps every registration a distinct
     item even when the bytes match an existing one — satellite captures are 1:1
     with their entity (spec §3.5), so re-capturing the same view is two captures.
     """
@@ -245,7 +249,11 @@ def _register(
             link_engine.link_all(
                 case, existing["id"], link_engine.DERIVED_FROM, _source_paths(source), by=by
             )
-            return {"duplicate": True, "entity": existing, "item": read_item(case, existing["attrs"]["path"])}
+            return {
+                "duplicate": True,
+                "entity": existing,
+                "item": read_item(case, existing["attrs"]["path"]),
+            }
 
     rel_path = f"media/{media_path.name}"
     kind = media_kind(media_path.name)
@@ -254,8 +262,10 @@ def _register(
     # fills the sidecar in later via `set_thumbnail`.
     thumb_rel = thumbnail_engine.on_register(case, rel_path, digest, kind)
 
+    display_name = media_path.stem
     sidecar = {
         "filename": media_path.name,
+        "title": display_name,
         "kind": kind,
         "sha256": digest,
         "size": media_path.stat().st_size,
@@ -263,13 +273,11 @@ def _register(
         "source": source,
         "thumbnail": thumb_rel,
     }
-    if title:
-        sidecar["title"] = title
     _write_sidecar(media_path, sidecar)
 
     entity = case.add_entity(
         entity_type,
-        title or media_path.name,
+        display_name,
         attrs={
             "path": rel_path,
             "sha256": digest,
@@ -287,9 +295,7 @@ def _register(
     enrich_engine.on_register(case, rel_path, kind, entity["id"])
     # Every media derivative is filed through here, so the derivation chain is
     # wired once for every tool that produces imagery — present and future.
-    link_engine.link_all(
-        case, entity["id"], link_engine.DERIVED_FROM, _source_paths(source), by=by
-    )
+    link_engine.link_all(case, entity["id"], link_engine.DERIVED_FROM, _source_paths(source), by=by)
     return {"duplicate": False, "entity": entity, "item": indexed}
 
 
@@ -300,6 +306,109 @@ def import_stream(case: Case, filename: str, stream: BinaryIO) -> dict[str, Any]
     with dest.open("wb") as out:
         shutil.copyfileobj(stream, out)
     return _register(case, dest, {"type": "upload", "original_name": filename})
+
+
+def register_existing(case: Case, rel_path: str, *, by: str = "case-doctor") -> dict[str, Any]:
+    """Adopt a file that was placed directly in this case's media directory.
+
+    The Doctor calls this only after showing the file as unknown and receiving
+    an explicit import action. Keeping the registration in the regular media
+    chokepoint gives the adopted file the same hash, sidecar, thumbnail,
+    enrichment and provenance as an upload.
+    """
+    raw_path = case.tool_root / rel_path
+    media_path = case.resolve_inside(rel_path)
+    if (
+        raw_path.is_symlink()
+        or media_path.parent.resolve() != case.media_dir.resolve()
+        or not media_path.is_file()
+    ):
+        raise CaseError("the file must be directly inside this case's media folder")
+    if case.find_entity(attr="path", value=rel_path) is not None:
+        raise CaseError(f"media '{rel_path}' is already registered")
+    return _register(
+        case,
+        media_path,
+        {"type": "manual", "original_name": media_path.name},
+        by=by,
+    )
+
+
+def relink_existing(
+    case: Case,
+    entity_id: str,
+    rel_path: str,
+) -> dict[str, Any]:
+    """Point a missing media entity at an unregistered replacement file.
+
+    The entity and its relations survive. Only an existing file directly under
+    ``media/`` is accepted, so the browser cannot turn this repair into an
+    arbitrary filesystem read.
+    """
+    with case.lock:
+        entity = case.get_entity(entity_id)
+        if entity is None or entity.get("type") not in {"media", "capture"}:
+            raise CaseError(f"media entity '{entity_id}' not found")
+        old_rel = str((entity.get("attrs") or {}).get("path") or "")
+        if not old_rel:
+            raise CaseError(f"media entity '{entity_id}' has no path")
+        if case.resolve_inside(old_rel).is_file():
+            raise CaseError(f"media '{old_rel}' is not missing")
+
+        raw_path = case.tool_root / rel_path
+        media_path = case.resolve_inside(rel_path)
+        if (
+            raw_path.is_symlink()
+            or media_path.parent.resolve() != case.media_dir.resolve()
+            or not media_path.is_file()
+        ):
+            raise CaseError("the replacement must be directly inside this case's media folder")
+        claimed = case.find_entity(attr="path", value=rel_path)
+        if claimed is not None and claimed.get("id") != entity_id:
+            raise CaseError(f"media '{rel_path}' is already registered")
+
+        replacement_item = read_item(case, rel_path)
+        old_item = read_item(case, old_rel)
+        previous = replacement_item or old_item or {}
+        source = previous.get("source")
+        if not isinstance(source, dict):
+            source = {"type": "manual", "original_name": media_path.name}
+
+        digest = sha256_file(media_path)
+        kind = media_kind(media_path.name)
+        thumbnail = previous.get("thumbnail")
+        if not thumbnail or not case.resolve_inside(str(thumbnail)).is_file():
+            thumbnail = thumbnail_engine.on_register(case, rel_path, digest, kind)
+        sidecar = {
+            **previous,
+            "filename": media_path.name,
+            "title": media_path.stem,
+            "kind": kind,
+            "sha256": digest,
+            "size": media_path.stat().st_size,
+            "added_at": previous.get("added_at") or _now(),
+            "source": source,
+            "thumbnail": thumbnail,
+        }
+        sidecar.pop("path", None)
+        _write_sidecar(media_path, sidecar)
+
+        case.replace_path_references(old_rel, rel_path)
+        updated = case.update_entity(
+            entity_id,
+            {
+                "label": media_path.stem,
+                "attrs": {"path": rel_path, "sha256": digest, "kind": kind},
+            },
+        )
+        case.remove_media_item(old_rel)
+        indexed = {**sidecar, "path": rel_path}
+        case.upsert_media_item(indexed, entity_id=entity_id)
+        old_sidecar = _sidecar_path(case.resolve_inside(old_rel))
+        if old_sidecar != _sidecar_path(media_path):
+            old_sidecar.unlink(missing_ok=True)
+        enrich_engine.on_register(case, rel_path, kind, entity_id)
+        return {"entity": updated, "item": indexed}
 
 
 def import_image(
@@ -324,16 +433,24 @@ def import_image(
     carrying its coordinates while still landing in ``media/``.
     """
     media_dir = case.subdir("media")
-    name = safe_filename(filename)
-    if not name.lower().endswith(".png"):
-        name = f"{Path(name).stem}.png"
+    name = (
+        layout.visible_filename(title, ".png")
+        if title
+        else layout.visible_filename(Path(safe_filename(filename)).stem, ".png")
+    )
     dest = unique_path(media_dir, name)
     # Preserve an alpha channel (e.g. a transparent collage canvas); everything
     # else is flattened to RGB. The thumbnail stage composites alpha over black.
     image.save(dest, "PNG") if image.mode == "RGBA" else image.convert("RGB").save(dest, "PNG")
     return _register(
-        case, dest, source, by=by, entity_type=entity_type,
-        extra_attrs=extra_attrs, title=title, dedupe=dedupe,
+        case,
+        dest,
+        source,
+        by=by,
+        entity_type=entity_type,
+        extra_attrs=extra_attrs,
+        title=title,
+        dedupe=dedupe,
     )
 
 
@@ -383,10 +500,16 @@ def _register_downloaded_item(
     and apply the display title — same bookkeeping ``download_url`` does for
     its own yt-dlp path, minus the yt-dlp-specific extraction bits."""
     media_dir = case.subdir("media")
-    tmp_dir = media_dir / ".dl" / uuid.uuid4().hex
+    tmp_dir = media_dir / ".dl" / uuid.uuid4().hex[: layout.DOWNLOAD_ID_LENGTH]
     ensure_dir(tmp_dir)
+    display_title = (title or "").strip() or source_extra.get("title")
     try:
-        fname = safe_filename(filename)
+        original = safe_filename(filename)
+        fname = (
+            layout.visible_filename(str(display_title), Path(original).suffix)
+            if display_title
+            else original
+        )
         tmp_path = tmp_dir / fname
         tmp_path.write_bytes(content)
         dest = unique_path(media_dir, fname)
@@ -396,9 +519,6 @@ def _register_downloaded_item(
 
     source = {"type": "download", "url": post_url, "webpage_url": post_url, **source_extra}
     result = _register(case, dest, source)
-    display_title = (title or "").strip() or source_extra.get("title")
-    if not result["duplicate"] and display_title:
-        result["item"] = update_media(case, result["item"]["path"], {"title": display_title})
     result["multi"] = False
     return result
 
@@ -418,7 +538,9 @@ def _gallery_dl_item(file_url: str, kwdict: dict[str, Any]) -> dict[str, Any]:
         "title": first_line or filename,
         "description": content or None,
         "uploader": author.get("nick") or author.get("name"),
-        "upload_date": date.strftime("%Y%m%d") if date is not None and hasattr(date, "strftime") else None,
+        "upload_date": date.strftime("%Y%m%d")
+        if date is not None and hasattr(date, "strftime")
+        else None,
     }
 
 
@@ -521,7 +643,9 @@ def _register_telegram_photo(
 
     resp = requests.get(photo["url"], headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
     resp.raise_for_status()
-    ext = mimetypes.guess_extension((resp.headers.get("content-type") or "").split(";")[0]) or ".jpg"
+    ext = (
+        mimetypes.guess_extension((resp.headers.get("content-type") or "").split(";")[0]) or ".jpg"
+    )
     return _register_downloaded_item(
         case,
         post_url,
@@ -598,7 +722,7 @@ def download_url(
     # a unique subdir per call — concurrent downloads (the multi-item picker
     # fires one per selected item) must not share a scratch dir, or the first
     # one to finish rmtree()s it out from under the others still writing to it
-    tmp_dir = media_dir / ".dl" / uuid.uuid4().hex
+    tmp_dir = media_dir / ".dl" / uuid.uuid4().hex[: layout.DOWNLOAD_ID_LENGTH]
     ensure_dir(tmp_dir)
 
     extra_photos = _telegram_extra_photos(url)  # [] — and free — for non-Telegram links
@@ -675,7 +799,12 @@ def download_url(
                 else:
                     yt_items = []
                 photo_items = [
-                    {"index": yt_count + i, "title": "Telegram photo", "thumbnail": p["url"], "kind": "image"}
+                    {
+                        "index": yt_count + i,
+                        "title": "Telegram photo",
+                        "thumbnail": p["url"],
+                        "kind": "image",
+                    }
                     for i, p in enumerate(extra_photos, start=1)
                 ]
                 return {"multi": True, "items": yt_items + photo_items}
@@ -703,11 +832,18 @@ def download_url(
             raise RuntimeError("yt-dlp reported success but no file was produced")
         downloaded = candidates[-1]
 
-    dest = unique_path(media_dir, safe_filename(downloaded.name))
+    extracted_title = info.get("title")
+    display_title = (title or "").strip() or extracted_title
+    original = safe_filename(downloaded.name)
+    filename = (
+        layout.visible_filename(str(display_title), Path(original).suffix)
+        if display_title
+        else original
+    )
+    dest = unique_path(media_dir, filename)
     shutil.move(str(downloaded), str(dest))
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    extracted_title = info.get("title")
     source = {
         "type": "download",
         "url": url,
@@ -721,12 +857,184 @@ def download_url(
         "duration": info.get("duration"),
     }
     result = _register(case, dest, source)
-
-    display_title = (title or "").strip() or extracted_title
-    if not result["duplicate"] and display_title:
-        result["item"] = update_media(case, result["item"]["path"], {"title": display_title})
     result["multi"] = False
     return result
+
+
+def _replace_exact(value: Any, old: str, new: str) -> Any:
+    """Recursively replace strings equal to ``old``; never edit prose."""
+    if isinstance(value, str):
+        return new if value == old else value
+    if isinstance(value, list):
+        return [_replace_exact(item, old, new) for item in value]
+    if isinstance(value, dict):
+        return {key: _replace_exact(item, old, new) for key, item in value.items()}
+    return value
+
+
+def write_json_atomic(path: Path, data: dict[str, Any]) -> None:
+    ensure_dir(path.parent)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def rename_path(source: Path, destination: Path) -> None:
+    """Rename one file, including a case-only rename on Windows/macOS."""
+    if source == destination:
+        return
+    ensure_dir(destination.parent)
+    if (
+        source.name.casefold() == destination.name.casefold()
+        and source.parent == destination.parent
+    ):
+        temporary = source.with_name(f".azimut-rename-{uuid.uuid4().hex}.tmp")
+        source.rename(temporary)
+        try:
+            temporary.rename(destination)
+        except Exception:
+            temporary.rename(source)
+            raise
+        return
+    if destination.exists():
+        raise CaseError(f"a file named '{destination.name}' already exists")
+    source.rename(destination)
+
+
+def _rename_journal(case: Case) -> Path:
+    return case.resolve_inside(f"{layout.DATA_DIR}/rename.json")
+
+
+def _structured_record_paths(case: Case) -> list[Path]:
+    tool = case.tool_root
+    roots = (
+        layout.subdir(case.path, "proofs") / layout.META_DIR,
+        tool / layout.INSPECT_DIR,
+        tool / layout.DRAFTS_DIR,
+        tool / layout.SEARCH_DIR,
+    )
+    return [path for root in roots if root.is_dir() for path in sorted(root.glob("*.json"))]
+
+
+def rewrite_file_references(case: Case, old: str, new: str) -> None:
+    """Rewrite exact paths in sidecars and tool specs after a media move."""
+    media_dir = case.subdir("media")
+    sidecars = media_dir / layout.META_DIR
+    if sidecars.is_dir():
+        for sidecar in sorted(sidecars.glob("*.json")):
+            try:
+                data = json.loads(sidecar.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            replaced = _replace_exact(data, old, new)
+            if replaced == data:
+                continue
+            write_json_atomic(sidecar, replaced)
+            media_name = sidecar.name.removesuffix(".json")
+            entity = case.find_entity(attr="path", value=f"media/{media_name}")
+            case.upsert_media_item(
+                {**replaced, "path": f"media/{media_name}"},
+                entity_id=entity["id"] if entity else None,
+            )
+
+    for path in _structured_record_paths(case):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        replaced = _replace_exact(data, old, new)
+        if replaced != data:
+            write_json_atomic(path, replaced)
+
+
+def _finish_media_rename(case: Case, record: dict[str, str]) -> dict[str, Any]:
+    """Complete one journalled media rename. Safe to call repeatedly."""
+    old = record["old"]
+    new = record["new"]
+    title = record["title"]
+    old_path = case.resolve_inside(old)
+    new_path = case.resolve_inside(new)
+    old_sidecar = _sidecar_path(old_path)
+    new_sidecar = _sidecar_path(new_path)
+
+    if old != new:
+        if old_path.exists():
+            rename_path(old_path, new_path)
+        elif not new_path.exists():
+            raise CaseError(f"media rename lost both '{old}' and '{new}'")
+        if old_sidecar.exists():
+            rename_path(old_sidecar, new_sidecar)
+        elif not new_sidecar.exists():
+            raise CaseError(f"media rename lost the sidecar for '{old}'")
+
+    if not new_path.exists() or not new_sidecar.exists():
+        raise CaseError(f"media rename is incomplete for '{new}'")
+
+    data = json.loads(new_sidecar.read_text(encoding="utf-8"))
+    data["filename"] = new_path.name
+    data["title"] = title
+    _write_sidecar(new_path, data)
+
+    owner = case.find_entity(attr="path", value=old) or case.find_entity(attr="path", value=new)
+    owner_id = owner["id"] if owner else None
+    case.remove_media_item(old)
+    case.replace_path_references(old, new)
+    if owner_id:
+        case.update_entity(owner_id, {"label": title})
+    indexed = {**data, "path": new}
+    case.upsert_media_item(indexed, entity_id=owner_id)
+    rewrite_file_references(case, old, new)
+    _rename_journal(case).unlink(missing_ok=True)
+    return indexed
+
+
+def recover_media_rename(case: Case) -> None:
+    """Finish a rename interrupted between filesystem and database updates."""
+    journal = _rename_journal(case)
+    if not journal.exists():
+        return
+    try:
+        record = json.loads(journal.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CaseError("the media rename journal is unreadable") from exc
+    if not all(isinstance(record.get(key), str) for key in ("old", "new", "title")):
+        raise CaseError("the media rename journal is invalid")
+    _finish_media_rename(case, record)
+
+
+def rename_media(
+    case: Case,
+    rel_path: str,
+    requested_title: str | None,
+    *,
+    settle_worker: bool = True,
+) -> dict[str, Any]:
+    """Rename a media file and every stored reference to its canonical stem."""
+    from . import workqueue
+
+    if settle_worker and not workqueue.wait_until_idle():
+        raise CaseError("background media work is still running; try the rename again")
+    with case.lock:
+        recover_media_rename(case)
+        media_path = case.resolve_inside(rel_path)
+        if not media_path.exists():
+            raise ValueError(f"no media found for {rel_path!r}")
+        requested = (requested_title or "").strip() or media_path.stem
+        filename = layout.visible_filename(requested, media_path.suffix)
+        destination = unique_path(media_path.parent, filename, taken_by=media_path)
+        record = {
+            "old": rel_path,
+            "new": f"media/{destination.name}",
+            "title": destination.stem,
+        }
+        write_json_atomic(_rename_journal(case), record)
+        return _finish_media_rename(case, record)
 
 
 def merge_item(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, Any] | None:
@@ -773,8 +1081,7 @@ def list_media(case: Case) -> list[dict[str, Any]]:
 
 
 def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, Any]:
-    """Update mutable sidecar fields (notes, folder, title) and mirror them onto
-    the media entity so the case sidebar stays in sync.
+    """Update mutable sidecar fields and mirror them onto the media entity.
 
     Under the case lock, like every other sidecar write: the Save gate names an
     item immediately after filing it, while the enrichment job queued by that
@@ -782,14 +1089,22 @@ def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, 
     Unguarded, whichever finished second dropped the other's fields — and the one
     users noticed was the name they had just typed.
     """
+    if "title" in patch:
+        renamed = rename_media(case, rel_path, patch["title"])
+        rel_path = renamed["path"]
+        patch = {key: value for key, value in patch.items() if key != "title"}
+        if not patch:
+            return renamed
+
     with case.lock:
+        recover_media_rename(case)
         media_path = case.resolve_inside(rel_path)
         sidecar = _sidecar_path(media_path)
         if not sidecar.exists():
             raise ValueError(f"no sidecar found for {rel_path!r}")
 
         data = json.loads(sidecar.read_text(encoding="utf-8"))
-        for key in ("notes", "folder", "title"):
+        for key in ("notes", "folder"):
             if key in patch:
                 val = patch[key]
                 if val is None or val == "":
@@ -803,10 +1118,6 @@ def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, 
         entity = case.find_entity(attr="path", value=rel_path)
         if entity:
             entity_patch: dict[str, Any] = {}
-            if "title" in patch:
-                # a cleared title falls back to the filename, like a fresh import —
-                # the sidebar label must never freeze on a title that no longer exists
-                entity_patch["label"] = str(patch["title"] or "") or media_path.name
             attrs: dict[str, Any] = {}
             if "folder" in patch:
                 attrs["folder"] = patch["folder"] or ""

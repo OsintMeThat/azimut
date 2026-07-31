@@ -36,6 +36,7 @@ import logging
 import os
 import platform
 import re
+import socket
 import sys
 from collections import deque
 from pathlib import Path
@@ -84,6 +85,7 @@ MAX_SUMMARY_CHARS = 2000
 _PLACEHOLDER = "<user>"
 _CASE_PLACEHOLDER = "<case>"
 _WORKSPACE_PLACEHOLDER = "<workspace>"
+_MACHINE_PLACEHOLDER = "<machine>"
 _REDACTED = "<redacted>"
 
 #: Query parameters whose value is a credential. A keyed imagery or geocoding
@@ -188,10 +190,13 @@ def scrub(text: str) -> str:
 
     Each pass exists because the report is published:
 
-    - the home directory collapses to ``~``
     - the workspace root collapses to ``<workspace>``, which catches a portable
       install living outside the home directory entirely
+    - the remaining home directory collapses to ``~``
     - the account name becomes ``<user>``
+    - this machine's name becomes ``<machine>``. The workspace lock names the
+      host holding a folder, which on a corporate laptop is an asset tag and a
+      company domain.
     - a case folder becomes ``<case>``. A case directory is a slug of the name the
       analyst gave it (``workspace._slugify``), and in this tool that name is
       routinely a subject's — so the segment goes even though the path around it
@@ -202,21 +207,31 @@ def scrub(text: str) -> str:
     app's own log lines are known to carry.
     """
     try:
-        home = str(Path.home())
-    except Exception:  # no home to hide
-        home = ""
-    if home:
-        text = _path_pattern(home).sub("~", text)
-    try:
         root = str(config.workspace_root())
     except Exception:
         root = ""
     if root and root not in ("~", "/"):
         text = _path_pattern(root).sub(_WORKSPACE_PLACEHOLDER, text)
+        # Permanent cases now sit directly below the workspace root. The one
+        # reserved first segment is `.azimut`; every other directory there is
+        # an analyst-named case and must not reach a public issue report.
+        workspace = re.escape(_WORKSPACE_PLACEHOLDER)
+        text = re.sub(
+            rf"({workspace})([/\\])(?!\.azimut(?:[/\\]|$))[^/\\\s\"'<>]+",
+            rf"\1\2{_CASE_PLACEHOLDER}",
+            text,
+        )
+    try:
+        home = str(Path.home())
+    except Exception:  # no home to hide
+        home = ""
+    if home:
+        text = _path_pattern(home).sub("~", text)
     name = _account_name()
     # Two characters or fewer would match far too much ordinary prose.
     if len(name) > 2:
         text = text.replace(name, _PLACEHOLDER)
+    text = _hide_machine_name(text)
     for directory in _case_parents():
         segment = re.escape(directory.name)
         text = re.sub(
@@ -227,11 +242,30 @@ def scrub(text: str) -> str:
     return _CREDENTIAL_PARAM.sub(rf"\1={_REDACTED}", text)
 
 
+def _hide_machine_name(text: str) -> str:
+    """Replace this host's name, and the bare form of it.
+
+    The workspace lock reports which machine holds a folder, so a "close the
+    other Azimut" warning carries the hostname into the log tail a bug report
+    publishes. On a work laptop that is an asset tag and an internal domain.
+    """
+    try:
+        host = socket.gethostname()
+    except Exception:  # pragma: no cover - no name to hide
+        return text
+    # Longest first, so `laptop.corp.example` never leaves `.corp.example`
+    # behind after `laptop` was replaced inside it.
+    for candidate in sorted({host, host.split(".", 1)[0]}, key=len, reverse=True):
+        if len(candidate) > 2:
+            text = text.replace(candidate, _MACHINE_PLACEHOLDER)
+    return text
+
+
 def _case_parents() -> tuple[Path, ...]:
     """The workspace directories a case folder sits in. Read from config rather
     than spelled out, so moving either one keeps the scrub honest."""
     try:
-        return (config.cases_dir(), config.scratch_dir())
+        return (config.scratch_dir(),)
     except Exception:
         return ()
 

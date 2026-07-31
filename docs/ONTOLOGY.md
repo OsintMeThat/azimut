@@ -5,11 +5,15 @@
 > new vocabulary. Tool proposals enter as `suggested` and remain distinct from
 > analyst-confirmed findings.
 
-**Storage schema: `3`.** The manifest carries `{"azimut": {"schema": 3,
-"storage": "sqlite"}}`; schema 3 moved the graph from `case.json` to per-case
-`case.db`. The entity/link shape is unchanged since v1. Breaking changes require
-a manifest schema bump and migration. The internal SQLite schema is version 5;
-it adds search and media browse indexes without changing this logical model.
+**Storage schema: `9`.** The manifest carries `{"azimut": {"schema": 9,
+"storage": "sqlite"}}`. Schema 3 moved the graph from `case.json` to per-case
+`case.db`; schema 9 gives that case its final folder layout and aligns each
+file-backed visible name with its filename stem in one idempotent migration.
+Schemas 4–8 were unreleased development checkpoints and normalize through the
+same jump. The entity/link shape is unchanged since v1. Breaking changes require
+a manifest schema bump and migration. The internal SQLite schema is version 7;
+it adds indexes, durable jobs and recoverable trash without changing this
+logical model.
 
 Legend: ✅ implemented in code · 🔶 machinery exists, unused · ⬜ proposed.
 

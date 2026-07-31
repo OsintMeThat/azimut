@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from azimut import config
+from azimut import config, layout
 from azimut.engine import bundles, workqueue
 from azimut.workspace import Case
 
@@ -25,10 +25,10 @@ def bundle_case(tmp_workspace, monkeypatch) -> Case:
     case.create_note("Witness", "", content="# Witness\n")
     (case.trash_dir / "old").mkdir(parents=True)
     (case.trash_dir / "old" / "gone.txt").write_text("gone", encoding="utf-8")
-    (case.path / "media" / ".thumbs").mkdir()
-    (case.path / "media" / ".thumbs" / "cache.jpg").write_bytes(b"cache")
-    (case.path / "media" / ".dl").mkdir()
-    (case.path / "media" / ".dl" / "partial").write_bytes(b"partial")
+    (case.subdir("media") / ".thumbs").mkdir()
+    (case.subdir("media") / ".thumbs" / "cache.jpg").write_bytes(b"cache")
+    (case.subdir("media") / ".dl").mkdir()
+    (case.subdir("media") / ".dl" / "partial").write_bytes(b"partial")
     case.add_trash_group(
         "old",
         label="Gone",
@@ -70,15 +70,20 @@ def test_plain_bundle_has_ordered_manifests_and_a_clean_database(bundle_case):
         names = archive.namelist()
         assert names[0] == bundles.HEADER_NAME
         assert names[-1] == bundles.MANIFEST_NAME
-        assert not any(name.startswith(".trash/") for name in names)
-        assert not any(name.startswith("media/.thumbs/") for name in names)
-        assert not any(name.startswith("media/.dl/") for name in names)
+        prefix = f"{bundles.BUNDLE_ROOT}/azimut/"
+        assert not any(name.startswith(prefix + ".trash/") for name in names)
+        assert not any(name.startswith(prefix + "media/.thumbs/") for name in names)
+        assert not any(name.startswith(prefix + "media/.dl/") for name in names)
 
         manifest = json.loads(archive.read(bundles.MANIFEST_NAME))
         assert [member["path"] for member in manifest["members"]] == names[:-1]
 
         extracted = config.bundles_dir() / "clean.db"
-        extracted.write_bytes(archive.read("case.db"))
+        member = (
+            f"{bundles.BUNDLE_ROOT}/"
+            f"{bundle_case.db_path.relative_to(bundle_case.path).as_posix()}"
+        )
+        extracted.write_bytes(archive.read(member))
     with closing(sqlite3.connect(extracted)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM trash").fetchone()[0] == 0
         assert conn.execute(
@@ -111,7 +116,7 @@ def test_sealed_bundle_hides_the_zip_and_rejects_a_wrong_password(bundle_case):
 
 def test_sealed_chunks_detect_truncation_before_any_case_swap(bundle_case):
     payload = os.urandom(2 * bundles.CHUNK_SIZE + 123)
-    (bundle_case.path / "media" / "large.bin").write_bytes(payload)
+    (bundle_case.subdir("media") / "large.bin").write_bytes(payload)
     exported = bundles.export_case(bundle_case, password="secret")
     truncated = config.bundles_dir() / "truncated.azimut.enc"
     truncated.write_bytes(exported.read_bytes()[:-1])
@@ -137,10 +142,66 @@ def test_export_import_round_trip_creates_a_new_case(bundle_case, password):
     assert [entity["label"] for entity in imported.list_entities()] == ["Witness"]
     note_path = imported.list_entities()[0]["attrs"]["path"]
     assert imported.resolve_inside(note_path).read_text(encoding="utf-8") == "# Witness\n"
-    with closing(sqlite3.connect(imported.path / "case.db")) as conn:
+    with closing(sqlite3.connect(imported.db_path)) as conn:
         meta = dict(conn.execute("SELECT key, value FROM meta"))
     assert meta["origin_case_id"] == bundle_case.id
     assert meta["imported_at"]
+
+
+def test_format_one_bundle_still_imports(bundle_case):
+    """The new `case/` prefix must not strand bundles written before it."""
+    exported = bundles.export_case(bundle_case)
+    legacy = config.bundles_dir() / "legacy-format-one.azimut.zip"
+    tool_prefix = f"{bundles.BUNDLE_ROOT}/azimut/"
+    with zipfile.ZipFile(exported) as source:
+        header = json.loads(source.read(bundles.HEADER_NAME))
+        members = [
+            (name.removeprefix(tool_prefix), source.read(name))
+            for name in source.namelist()
+            if name.startswith(tool_prefix)
+        ]
+    header["format_version"] = 1
+    header["total_size"] = sum(len(body) for _, body in members)
+    records = []
+    with zipfile.ZipFile(legacy, "w") as archive:
+        bundles._write_bytes(
+            archive,
+            bundles.HEADER_NAME,
+            bundles._json_bytes(header),
+            records,
+        )
+        for name, body in members:
+            bundles._write_bytes(archive, name, body, records)
+        archive.writestr(
+            bundles._zip_info(bundles.MANIFEST_NAME, compressed=True),
+            bundles._json_bytes({"format_version": 1, "members": records}),
+        )
+
+    destination = Case.create("Legacy format import")
+    imported = Case.open(bundles.import_into(destination, legacy)["case_id"])
+
+    assert imported.read()["name"] == "Legacy format import"
+    assert [entity["label"] for entity in imported.list_entities()] == ["Witness"]
+    assert imported.read_note(imported.list_entities()[0]["id"]) == "# Witness\n"
+
+
+def test_import_reapplies_the_hidden_attribute_to_the_data_directory(
+    bundle_case, monkeypatch
+):
+    exported = bundles.export_case(bundle_case)
+    destination = Case.create("Hidden database import")
+    ensured = []
+    real_ensure_dir = bundles.ensure_dir
+
+    def remember(path):
+        ensured.append(path)
+        return real_ensure_dir(path)
+
+    monkeypatch.setattr(bundles, "ensure_dir", remember)
+
+    imported = Case.open(bundles.import_into(destination, exported)["case_id"])
+
+    assert layout.data_dir(imported.path) in ensured
 
 
 def test_export_import_round_trip_keeps_confirmed_relations(bundle_case):
@@ -172,6 +233,52 @@ def test_export_import_round_trip_keeps_confirmed_relations(bundle_case):
     assert imported.get_link(relation["id"])["provenance"]["status"] == "confirmed"
 
 
+def test_export_import_round_trip_keeps_the_analysts_free_zone(bundle_case):
+    materials = bundle_case.path / "Source material" / "Interview"
+    materials.mkdir(parents=True)
+    (materials / "transcript.txt").write_text("Unedited source\n", encoding="utf-8")
+    # These names belong to the ZIP container too. The `case/` member prefix
+    # keeps them valid in the analyst's half of the folder.
+    (bundle_case.path / bundles.HEADER_NAME).write_text("analyst file\n", encoding="utf-8")
+    (bundle_case.path / bundles.MANIFEST_NAME).write_text("analyst file\n", encoding="utf-8")
+
+    exported = bundles.export_case(bundle_case)
+    with zipfile.ZipFile(exported) as archive:
+        assert (
+            f"{bundles.BUNDLE_ROOT}/Source material/Interview/transcript.txt"
+            in archive.namelist()
+        )
+        assert f"{bundles.BUNDLE_ROOT}/{bundles.HEADER_NAME}" in archive.namelist()
+        assert f"{bundles.BUNDLE_ROOT}/{bundles.MANIFEST_NAME}" in archive.namelist()
+    destination = Case.create(bundles.imported_name("Source case"))
+    imported = Case.open(bundles.import_into(destination, exported)["case_id"])
+
+    assert (
+        imported.path / "Source material" / "Interview" / "transcript.txt"
+    ).read_text(encoding="utf-8") == "Unedited source\n"
+    assert (imported.path / bundles.HEADER_NAME).read_text(encoding="utf-8") == "analyst file\n"
+    assert (imported.path / bundles.MANIFEST_NAME).read_text(encoding="utf-8") == "analyst file\n"
+
+
+def test_export_refuses_a_symbolic_link_in_the_free_zone(bundle_case, tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("must not be followed\n", encoding="utf-8")
+    link = bundle_case.path / "linked-source.txt"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symbolic links are unavailable on this filesystem")
+
+    with pytest.raises(bundles.BundleError, match="symbolic link"):
+        bundles.export_case(bundle_case)
+
+
+@pytest.mark.parametrize("name", ["Azimut", "AZIMUT"])
+def test_free_zone_refuses_a_portable_tool_folder_collision(name):
+    with pytest.raises(bundles.BundleError, match="collides"):
+        bundles._check_free_name(name)
+
+
 def test_manifest_is_an_allowlist_not_a_hint(bundle_case):
     exported = bundles.export_case(bundle_case)
     tampered = config.bundles_dir() / "tampered.azimut.zip"
@@ -192,7 +299,11 @@ def test_manifest_sizes_are_checked_before_extraction(bundle_case):
     with zipfile.ZipFile(exported) as source, zipfile.ZipFile(tampered, "w") as target:
         infos = source.infolist()
         manifest = json.loads(source.read(bundles.MANIFEST_NAME))
-        record = next(item for item in manifest["members"] if item["path"] == "case.db")
+        db_member = (
+            f"{bundles.BUNDLE_ROOT}/"
+            f"{bundle_case.db_path.relative_to(bundle_case.path).as_posix()}"
+        )
+        record = next(item for item in manifest["members"] if item["path"] == db_member)
         record["size"] += 1
         for info in infos[:-1]:
             target.writestr(info, source.read(info))
@@ -202,6 +313,27 @@ def test_manifest_sizes_are_checked_before_extraction(bundle_case):
     with pytest.raises(bundles.BundleError, match="manifest member"):
         bundles.import_into(destination, tampered)
 
+    assert destination.list_entities() == []
+
+
+def test_import_refuses_a_bundle_member_marked_as_a_symbolic_link(bundle_case):
+    free_file = bundle_case.path / "source.txt"
+    free_file.write_text("source\n", encoding="utf-8")
+    exported = bundles.export_case(bundle_case)
+    tampered = config.bundles_dir() / "symlink.azimut.zip"
+    member_name = f"{bundles.BUNDLE_ROOT}/source.txt"
+    with zipfile.ZipFile(exported) as source, zipfile.ZipFile(tampered, "w") as target:
+        for info in source.infolist():
+            body = source.read(info)
+            if info.filename == member_name:
+                info.external_attr = 0o120777 << 16
+            target.writestr(info, body)
+
+    destination = Case.create("Symlink import")
+    with pytest.raises(bundles.BundleError, match="symbolic link"):
+        bundles.import_into(destination, tampered)
+
+    assert destination.path.exists()
     assert destination.list_entities() == []
 
 
@@ -274,7 +406,7 @@ def test_staged_upload_stops_before_consuming_the_disk_reserve(
     tmp_workspace, monkeypatch
 ):
     total = 10 * 1024 * 1024 * 1024
-    reserve = bundles._disk_reserve(total)
+    reserve = bundles.disk_reserve(total)
     monkeypatch.setattr(
         bundles.shutil,
         "disk_usage",
@@ -290,7 +422,7 @@ def test_staged_upload_stops_before_consuming_the_disk_reserve(
 
 def test_export_stops_before_consuming_the_disk_reserve(bundle_case, monkeypatch):
     total = 10 * 1024 * 1024 * 1024
-    reserve = bundles._disk_reserve(total)
+    reserve = bundles.disk_reserve(total)
     monkeypatch.setattr(
         bundles.shutil,
         "disk_usage",
@@ -304,9 +436,16 @@ def test_export_stops_before_consuming_the_disk_reserve(bundle_case, monkeypatch
 
 
 def test_every_top_level_case_entry_has_a_bundle_decision(bundle_case):
+    """The drift gate: a new directory in the case ships in the bundle or is
+    listed as deliberately left behind, never silently dropped.
+
+    It reads the tool root, because that is what a bundle carries and how it
+    names its members. What sits beside it in the case folder is the analyst's
+    and answers to its own rule.
+    """
     assert all(
         bundles.classify_case_entry(path.name) is not None
-        for path in bundle_case.path.iterdir()
+        for path in bundle_case.tool_root.iterdir()
     )
 
 
@@ -324,11 +463,11 @@ def test_passwords_never_enter_durable_job_payloads(bundle_case):
     assert "password" not in export_job["payload"]
     assert import_job["payload"]["sealed"] is True
     assert "password" not in import_job["payload"]
-    with closing(sqlite3.connect(bundle_case.path / "case.db")) as conn:
+    with closing(sqlite3.connect(bundle_case.db_path)) as conn:
         export_payload = conn.execute(
             "SELECT payload_json FROM jobs WHERE id = ?", (export_job["id"],)
         ).fetchone()[0]
-    with closing(sqlite3.connect(imported.path / "case.db")) as conn:
+    with closing(sqlite3.connect(imported.db_path)) as conn:
         import_payload = conn.execute(
             "SELECT payload_json FROM jobs WHERE id = ?", (import_job["id"],)
         ).fetchone()[0]

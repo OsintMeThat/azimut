@@ -16,8 +16,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from azimut import config
-from azimut.engine.media import SIDECAR_SUFFIX, THUMB_DIR
-from azimut.workspace import CASE_SUBDIRS, Case, _slugify
+from azimut.engine.media import THUMB_DIR
+from azimut.layout import PRE_HIDDEN_SIDECAR_SUFFIX
+from legacy_case import LEGACY_SUBDIRS
+from azimut.workspace import Case, _slugify
 
 # Well-known + deliberately unknown types, so the fixture exercises the "unknown
 # entity/link types stay valid" rule the ontology promises.
@@ -95,7 +97,9 @@ def build_big_case(
     parent.mkdir(parents=True, exist_ok=True)
     path = parent / _slugify(name)
     path.mkdir()
-    for sub in CASE_SUBDIRS:
+    # The flat, unwrapped shape on purpose: this is a legacy import source, and
+    # opening it is what exercises the wrapper migration.
+    for sub in LEGACY_SUBDIRS:
         (path / sub).mkdir()
     (path / "notes.md").write_text(f"# {name}\n\n", encoding="utf-8")
     case = Case(path)
@@ -126,7 +130,7 @@ def build_big_case(
         # ~30% unfiled, the rest spread across the tree.
         return None if rng.random() < 0.3 else rng.choice(_FOLDER_TREE)
 
-    media_dir = case.subdir("media")
+    media_dir = path / "media"  # flat: this fixture predates the wrapper
     thumb_dir = media_dir / THUMB_DIR
 
     # -- media entities (+ sidecars, placeholder bytes, thumbnail states) -----
@@ -161,7 +165,7 @@ def build_big_case(
                 "source": {"url": attrs.get("source_url")} if "source_url" in attrs else {},
                 "thumbnail": f"media/{THUMB_DIR}/{fname}.jpg",
             }
-            (media_dir / (fname + SIDECAR_SUFFIX)).write_text(
+            (media_dir / (fname + PRE_HIDDEN_SIDECAR_SUFFIX)).write_text(  # legacy shape
                 json.dumps(sidecar, ensure_ascii=False), encoding="utf-8"
             )
             roll = rng.random()
@@ -175,12 +179,12 @@ def build_big_case(
     summary.media = media
 
     # -- file-backed notes ----------------------------------------------------
-    note_dir = case.note_dir
+    note_dir = path / "notes"
     note_dir.mkdir(parents=True, exist_ok=True)
     for i in range(notes):
         eid = f"e_note_{i:06d}"
         rel = f"notes/{eid}.md"
-        (case.path / rel).write_text(f"# Note {i}\n\nSynthetic body {i}.\n", encoding="utf-8")
+        (path / rel).write_text(f"# Note {i}\n\nSynthetic body {i}.\n", encoding="utf-8")
         attrs = {"folder": pick_folder() or "", "path": rel}
         add({"id": eid, "type": "note", "label": f"Note {i}", "attrs": attrs})
     summary.notes = notes
@@ -280,7 +284,8 @@ def build_big_case(
         "entities": rows,
         "links": links_rows,
     }
-    case.json_path.write_text(
+    # `path` is shadowed by the folder loop above; the case root is `case.path`.
+    (case.path / "case.json").write_text(  # still the unwrapped location
         json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
 

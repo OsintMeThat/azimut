@@ -58,6 +58,23 @@ const settings = {
   month: '2026-07',
 };
 
+// A workspace that is present and nobody else's, so the app runs instead of
+// showing the stopped screen (GET /settings/workspace), and no folder in it is
+// waiting to become a case (GET /workspace/folders).
+const workspaceStatus = {
+  locked_by: null,
+  locked_detail: '',
+  root: '/tmp/azimut-browser-fixture',
+  default_root: '/tmp/azimut-browser-fixture',
+  pointed: false,
+  environment: false,
+  missing: false,
+  moving: false,
+  cases: 1,
+  move: null,
+};
+const workspaceFolders = [];
+
 // The relation vocabulary as engine/links.py serves it (ONTOLOGY §3).
 const relationTypes = [
   { type: 'located-at', label: 'was shot at', from_types: ['capture', 'media'], to_types: ['place'], manual: true },
@@ -141,6 +158,10 @@ export async function installAppFixture(page, options = {}) {
       return route.fulfill({ status: 404, body: '' });
     }
     if (path === '/api/settings') return json(route, settings);
+    // Asked on mount, before any tool: the app has to know the workspace is
+    // there and whether a folder in it is still waiting to become a case.
+    if (path === '/api/settings/workspace') return json(route, workspaceStatus);
+    if (path === '/api/workspace/folders') return json(route, workspaceFolders);
     if (path === '/api/templates') return json(route, { proof: [], post: [] });
     if (path === '/api/cases/relation-types') return json(route, relationTypes);
     if (path === '/api/cases/bundles/inspect' && request.method() === 'POST') {

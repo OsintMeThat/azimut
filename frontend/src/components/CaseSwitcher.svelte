@@ -5,6 +5,8 @@
     refreshCaseList,
     openCase,
     createCase,
+    adoptFolder,
+    recoverFolder,
     promoteCase,
     renameCase,
     closeCase,
@@ -19,6 +21,8 @@
     startBundleImport,
     waitForBundle,
   } from '../lib/bundles.js';
+  import { checkCase, repairCase } from '../lib/doctor.js';
+  import { revealCaseFolder } from '../lib/reveal.js';
   import { formatSize } from '../lib/trash.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
@@ -38,8 +42,84 @@
   let bundlePreview = $state(null);
   let bundleError = $state('');
   let bundleJobController = null;
+  let doctorTarget = $state(null);
+  let doctorReport = $state(null);
+  let doctorBusy = $state(false);
+  let doctorError = $state('');
+  let doctorReplacements = $state({});
+  let doctorConfirm = $state(null);
 
   onDestroy(() => bundleJobController?.abort());
+
+  // Nothing opens in the tab, so say something either way: a file manager window
+  // can land behind the browser, and a headless box has none at all.
+  async function revealFolder() {
+    open = false;
+    const id = caseState.current?.id;
+    if (!id) return;
+    try {
+      await revealCaseFolder(id);
+      toast('Opened the case folder', 'ok', 2500);
+    } catch (error) {
+      toast(error.message || 'Could not open the folder', 'danger', 7000);
+    }
+  }
+
+  async function openDoctor(c = caseState.current) {
+    if (!c) return;
+    open = false;
+    doctorTarget = { id: c.id, name: c.name ?? c.id };
+    doctorReport = null;
+    doctorError = '';
+    doctorReplacements = {};
+    doctorConfirm = null;
+    doctorBusy = true;
+    try {
+      doctorReport = await checkCase(c.id);
+    } catch (error) {
+      doctorError = error.message || 'Could not check this case';
+    } finally {
+      doctorBusy = false;
+    }
+  }
+
+  function closeDoctor() {
+    if (doctorBusy) return;
+    doctorTarget = null;
+    doctorReport = null;
+    doctorError = '';
+  }
+
+  async function runDoctorRepair(issue, action) {
+    if (!doctorTarget || doctorBusy) return;
+    if (action.id === 'drop' && doctorConfirm !== issue.id) {
+      doctorConfirm = issue.id;
+      return;
+    }
+    const repair = { action: action.id };
+    if (issue.entity_id) repair.entity_id = issue.entity_id;
+    if (action.id === 'import') repair.path = issue.path;
+    if (action.id === 'relink') {
+      repair.replacement = doctorReplacements[issue.id];
+      if (!repair.replacement) return;
+    }
+    doctorBusy = true;
+    doctorError = '';
+    try {
+      const result = await repairCase(doctorTarget.id, repair);
+      doctorReport = result.report;
+      doctorConfirm = null;
+      await refreshCaseList();
+      if (caseState.current?.id === doctorTarget.id) {
+        await openCase(doctorTarget.id);
+      }
+      toast('Case repair complete', 'ok', 3000);
+    } catch (error) {
+      doctorError = error.message || 'Could not repair this case';
+    } finally {
+      doctorBusy = false;
+    }
+  }
 
   function openBundle(kind) {
     open = false;
@@ -260,8 +340,49 @@
     }
   }
 
+  // A folder the analyst made in the workspace from their file manager. Using
+  // it fills in `azimut/` and leaves everything else exactly where it is; one
+  // that lost its manifest is recovered instead, then handed to the Doctor.
+  let folderBusy = $state(false);
+
+  const folderNote = (f) =>
+    f.state === 'broken'
+      ? 'Case to recover'
+      : f.state === 'unusable-name'
+        ? 'Rename to use'
+        : 'Not a case yet';
+
+  const folderTitle = (f) =>
+    f.state === 'broken'
+      ? 'Recover the case in this folder'
+      : f.state === 'unusable-name'
+        ? 'Rename this folder to use it'
+        : 'Make this folder a case';
+
+  async function useFolder(folder) {
+    if (folderBusy || folder.state === 'unusable-name') return;
+    folderBusy = true;
+    try {
+      if (folder.state === 'broken') {
+        const recovered = await recoverFolder(folder.name);
+        toast(`Recovered “${recovered.name}”`, 'ok');
+        await openDoctor({ id: recovered.id, name: recovered.name });
+      } else {
+        open = false;
+        const adopted = await adoptFolder(folder.name);
+        toast(`Case “${adopted.name ?? folder.name}” created`, 'ok');
+      }
+    } catch (error) {
+      toast(error.message || 'Could not use this folder', 'danger', 7000);
+    } finally {
+      folderBusy = false;
+    }
+  }
+
   const named = $derived(caseState.list.filter((c) => !c.scratch));
   const scratches = $derived(caseState.list.filter((c) => c.scratch));
+  const folders = $derived(caseState.folders);
+  const visibleFolders = $derived(folders.filter(matchesSearch));
   // Filtered views for the menu list (the unfiltered `named` still backs the
   // duplicate-name guard below, which must see every case).
   const visibleNamed = $derived(named.filter(matchesSearch));
@@ -306,41 +427,31 @@
   {#if open}
     <button class="backdrop" onclick={() => (open = false)} aria-label="Close menu"></button>
     <div class="menu card">
-      <button
-        class="item new"
-        onclick={() => {
-          open = false;
-          modal = 'create';
-          nameInput = '';
-        }}
-      >
-        <Icon name="plus" size={15} /> New case…
-      </button>
-      <button class="item" onclick={() => openBundle('import')}>
-        <Icon name="upload" size={15} /> Import case…
-      </button>
-      {#if caseState.current}
-        <button class="item" onclick={() => openBundle('export')}>
-          <Icon name="download" size={15} /> Export this case…
-        </button>
-        <button class="item" onclick={() => { closeCase(); open = false; }}>
-          <Icon name="x" size={15} /> Close case (one-shot mode)
-        </button>
-      {/if}
       {#if named.length + scratches.length > 6 || search.trim()}
         <div class="search-row">
           <SearchInput bind:value={search} placeholder="Find a case…" width="100%" />
         </div>
       {/if}
-      {#if visibleNamed.length}
-        <div class="section">Cases</div>
+      <div class="list">
         {#each visibleNamed as c (c.id)}
           <div class="row" class:active={c.id === caseState.current?.id}>
             <button class="item" onclick={() => pick(c.id)}>
               <Icon name="folder" size={15} />
               <span class="grow">{c.name}</span>
-              <span class="meta">{c.entity_count} entities</span>
+              <span class="meta">
+                {c.health === 'needs-attention' ? 'Needs attention' : `${c.entity_count} entities`}
+              </span>
             </button>
+            {#if c.health === 'needs-attention'}
+              <button
+                class="del doctor attention"
+                title="Check case"
+                aria-label="Check case"
+                onclick={() => openDoctor(c)}
+              >
+                <Icon name="alert" size={14} />
+              </button>
+            {/if}
             <button class="del rename" title="Rename case" onclick={() => askRename(c)}>
               <Icon name="edit" size={14} />
             </button>
@@ -349,26 +460,106 @@
             </button>
           </div>
         {/each}
-      {/if}
-      {#if visibleScratches.length}
-        <div class="section">Scratch sessions</div>
         {#each visibleScratches as c (c.id)}
           <div class="row" class:active={c.id === caseState.current?.id}>
             <button class="item" onclick={() => pick(c.id)}>
               <Icon name="clock" size={15} />
               <span class="grow">{c.id}</span>
+              <span class="badge accent">scratch</span>
             </button>
+            {#if c.health === 'needs-attention'}
+              <button
+                class="del doctor attention"
+                title="Check session"
+                aria-label="Check session"
+                onclick={() => openDoctor(c)}
+              >
+                <Icon name="alert" size={14} />
+              </button>
+            {/if}
             <button class="del" title="Delete session" onclick={() => askDelete(c)}>
               <Icon name="trash" size={14} />
             </button>
           </div>
         {/each}
-      {/if}
-      {#if !named.length && !scratches.length}
-        <div class="hint">No cases yet. Tools work without one.</div>
-      {:else if !visibleNamed.length && !visibleScratches.length}
-        <div class="hint">No case matches “{search.trim()}”.</div>
-      {/if}
+        {#each visibleFolders as f (f.name)}
+          <div class="row folder">
+            <button
+              class="item"
+              title={folderTitle(f)}
+              disabled={folderBusy || f.state === 'unusable-name'}
+              onclick={() => useFolder(f)}
+            >
+              <Icon name="folder" size={15} />
+              <span class="grow">{f.name}</span>
+              <span class="meta">{folderNote(f)}</span>
+            </button>
+          </div>
+        {/each}
+        {#if !named.length && !scratches.length && !folders.length}
+          <div class="hint">No cases yet. Tools work without one.</div>
+        {:else if !visibleNamed.length && !visibleScratches.length && !visibleFolders.length}
+          <div class="hint">No case matches “{search.trim()}”.</div>
+        {/if}
+      </div>
+      <div class="foot">
+        <button
+          class="foot-btn new"
+          onclick={() => {
+            open = false;
+            modal = 'create';
+            nameInput = '';
+          }}
+        >
+          <Icon name="plus" size={15} /> New case
+        </button>
+        <!-- Icon-only past this point: the labels ride in the tooltip so the
+             whole row fits on one line. Keep every one of them titled. -->
+        <div class="foot-icons">
+          <button
+            class="foot-btn icon"
+            title="Import case…"
+            aria-label="Import case…"
+            onclick={() => openBundle('import')}
+          >
+            <Icon name="upload" size={16} />
+          </button>
+          {#if caseState.current}
+            <button
+              class="foot-btn icon"
+              title="Check this case"
+              aria-label="Check this case"
+              onclick={() => openDoctor()}
+            >
+              <Icon name="shield" size={16} />
+            </button>
+            <button
+              class="foot-btn icon"
+              title="Open case folder"
+              aria-label="Open case folder"
+              onclick={revealFolder}
+            >
+              <Icon name="folderOpen" size={16} />
+            </button>
+            <button
+              class="foot-btn icon"
+              title="Export this case…"
+              aria-label="Export this case…"
+              onclick={() => openBundle('export')}
+            >
+              <Icon name="download" size={16} />
+            </button>
+            <button
+              class="foot-btn icon"
+              title="Close case (one-shot mode)"
+              aria-label="Close case (one-shot mode)"
+              onclick={() => { closeCase(); open = false; }}
+            >
+              <Icon name="x" size={16} />
+            </button>
+          {/if}
+        </div>
+      </div>
     </div>
   {/if}
 </div>
@@ -514,6 +705,94 @@
   </Modal>
 {/if}
 
+{#if doctorTarget}
+  <Modal title="Case Doctor" onclose={closeDoctor}>
+    <p class="doctor-intro">Checks “{doctorTarget.name}” without changing it.</p>
+    {#if doctorBusy && !doctorReport}
+      <div class="doctor-empty">Checking…</div>
+    {:else if doctorError && !doctorReport}
+      <p class="err">{doctorError}</p>
+    {:else if doctorReport?.status === 'healthy'}
+      <div class="doctor-healthy">
+        <span><Icon name="check" size={18} /></span>
+        <div>
+          <strong>No problems found</strong>
+          <p>The database and media records match the case files.</p>
+        </div>
+      </div>
+    {:else if doctorReport}
+      <div class="doctor-list">
+        {#each doctorReport.issues as issue (issue.id)}
+          <section class="doctor-issue" class:error={issue.severity === 'error'}>
+            <div class="doctor-heading">
+              <Icon name={issue.severity === 'error' ? 'alert' : 'info'} size={17} />
+              <div>
+                <strong>{issue.title}</strong>
+                <p>{issue.detail}</p>
+              </div>
+            </div>
+            {#if issue.losses?.length}
+              <div class="doctor-losses">
+                <span>Cannot be recovered:</span>
+                <ul>
+                  {#each issue.losses as loss}<li>{loss}</li>{/each}
+                </ul>
+              </div>
+            {/if}
+            {#if issue.actions.some((action) => action.id === 'relink')}
+              <label class="label" for={`doctor-replacement-${issue.entity_id}`}>
+                Replacement file
+              </label>
+              <select
+                id={`doctor-replacement-${issue.entity_id}`}
+                class="input"
+                value={doctorReplacements[issue.id] ?? ''}
+                onchange={(event) => {
+                  doctorReplacements[issue.id] = event.currentTarget.value;
+                }}
+              >
+                <option value="">Choose a file from media…</option>
+                {#each issue.replacements ?? [] as replacement}
+                  <option value={replacement}>{replacement.replace('media/', '')}</option>
+                {/each}
+              </select>
+              {#if !issue.replacements?.length}
+                <p class="doctor-help">Add the replacement to the media folder, then check again.</p>
+              {/if}
+            {/if}
+            <div class="doctor-actions">
+              {#each issue.actions as action}
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  class:btn-primary={action.tone === 'primary'}
+                  class:btn-danger={action.tone === 'danger'}
+                  disabled={doctorBusy ||
+                    (action.id === 'relink' && !doctorReplacements[issue.id])}
+                  onclick={() => runDoctorRepair(issue, action)}
+                >
+                  {action.id === 'drop' && doctorConfirm === issue.id
+                    ? 'Remove record?'
+                    : action.label}
+                </button>
+              {/each}
+            </div>
+          </section>
+        {/each}
+      </div>
+      {#if doctorError}<p class="err">{doctorError}</p>{/if}
+    {/if}
+    <div class="actions">
+      {#if doctorReport?.status === 'issues'}
+        <button type="button" class="btn" disabled={doctorBusy} onclick={() => openDoctor(doctorTarget)}>
+          Check again
+        </button>
+      {/if}
+      <button type="button" class="btn" disabled={doctorBusy} onclick={closeDoctor}>Close</button>
+    </div>
+  </Modal>
+{/if}
+
 {#if delTarget}
   <Modal title="Delete case" onclose={() => (delTarget = null)}>
     <div class="warn">
@@ -595,23 +874,60 @@
     position: absolute;
     top: calc(100% + 6px);
     left: 0;
-    min-width: 300px;
-    max-height: 420px;
-    overflow: auto;
+    min-width: 320px;
+    max-height: 460px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     z-index: 100;
     box-shadow: var(--shadow-2);
+    padding: 0;
+  }
+  /* Only the list scrolls: the search stays reachable at the top and the
+     actions stay reachable at the bottom, however long the list gets. */
+  .list {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
     padding: 6px;
   }
   .search-row {
-    padding: 6px 6px 8px;
+    padding: 8px 8px 4px;
   }
-  .section {
-    font-size: var(--fs-xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
+  .foot {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px;
+    border-top: 1px solid var(--border);
+  }
+  .foot-btn {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 10px;
+    border-radius: var(--r-sm);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    white-space: nowrap;
+  }
+  .foot-btn:hover {
+    background: var(--bg-2);
+    color: var(--text-1);
+  }
+  .foot-btn.new {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .foot-icons {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+  }
+  .foot-btn.icon {
+    padding: 7px 9px;
     color: var(--text-3);
-    padding: 10px 10px 4px;
   }
   .row {
     display: flex;
@@ -649,6 +965,20 @@
   }
   .del:hover {
     color: var(--danger, #e5484d);
+  }
+  /* A folder is not a case yet: dimmed until using it makes one. */
+  .row.folder .item {
+    color: var(--text-2);
+  }
+  .row.folder .item:disabled {
+    color: var(--text-3);
+  }
+  .row .doctor.attention {
+    opacity: 1;
+    color: var(--warn, #d8a03d);
+  }
+  .row .doctor:hover {
+    color: var(--text-1);
   }
   .item {
     display: flex;
@@ -699,10 +1029,6 @@
   }
   .btn-danger:hover:not(:disabled) {
     filter: brightness(1.08);
-  }
-  .item.new {
-    color: var(--accent);
-    font-weight: 600;
   }
   .grow {
     flex: 1;
@@ -757,6 +1083,57 @@
   }
   .bundle-preview .bundle-space.warn { color: var(--warn); }
   .bundle-preview .bundle-space.danger { color: var(--danger); }
+  .doctor-intro {
+    margin: 0 0 14px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .doctor-empty {
+    padding: 18px 0;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+  }
+  .doctor-healthy {
+    display: flex;
+    align-items: flex-start;
+    gap: 11px;
+    padding: 12px;
+    border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--border));
+    border-radius: var(--r-sm);
+    color: var(--ok);
+  }
+  .doctor-healthy strong { color: var(--text-1); font-size: var(--fs-sm); }
+  .doctor-healthy p { margin: 3px 0 0; color: var(--text-3); font-size: var(--fs-xs); }
+  .doctor-list {
+    display: grid;
+    gap: 10px;
+    max-height: 52vh;
+    overflow: auto;
+  }
+  .doctor-issue {
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+  }
+  .doctor-issue.error { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+  .doctor-heading { display: flex; align-items: flex-start; gap: 9px; color: var(--warn); }
+  .doctor-heading strong { color: var(--text-1); font-size: var(--fs-sm); }
+  .doctor-heading p {
+    margin: 3px 0 0;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    overflow-wrap: anywhere;
+  }
+  .doctor-losses {
+    margin: 10px 0;
+    padding: 8px 10px;
+    background: var(--bg-2);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+  .doctor-losses ul { margin: 5px 0 0; padding-left: 18px; }
+  .doctor-help { margin: 6px 0 0; color: var(--text-3); font-size: var(--fs-xs); }
+  .doctor-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 10px; }
   .actions {
     display: flex;
     justify-content: flex-end;

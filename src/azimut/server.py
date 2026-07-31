@@ -2,15 +2,27 @@
 
 from __future__ import annotations
 
+import logging
+import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__, config
+from .engine import workspacelock, workspacemove
+
+logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+#: The port this run serves on, set by `launcher.serve` before the app is built.
+#: Only used to name ourselves in the workspace lock, so another instance can
+#: say *which* Azimut has the folder rather than only that one does.
+SERVE_PORT: int | None = None
 
 # The server binds localhost only, but that alone doesn't stop a web page the
 # browser has open from reaching it — a page can hit 127.0.0.1 directly (its
@@ -61,66 +73,106 @@ def install_local_guard(app: FastAPI) -> None:
         return await call_next(request)
 
 
-def _recover_jobs() -> None:
-    """On startup, return jobs a crashed process left ``running`` to the queue and
-    wake the worker for any case that still has pending work. A `running` row
-    nothing owns would otherwise stall forever; recovery resumes it."""
-    from .engine import workqueue
-    from .workspace import Case
+#: Reachable while the workspace is not: everything the stop screen and the
+#: recovery dialog need, and nothing that would touch a case.
+ALWAYS_AVAILABLE = ("/api/health", "/api/settings/workspace")
 
-    for row in Case.list_all():
+_opening = threading.Lock()
+
+
+def open_workspace_if_free() -> dict[str, Any] | None:
+    """Hold the workspace and open it, or say who has it instead.
+
+    Asked on the way into every case request, and cheap once it has succeeded —
+    holding the lock is a fact in memory. Retrying matters because the answer
+    changes without this process restarting: someone closes the other Azimut,
+    presses reload, and the tab has to come back to life. Until then nothing is
+    served, because a workspace this process never opened is one whose
+    migrations never ran.
+    """
+    if workspacelock.held():
+        return None
+    with _opening:
+        if workspacelock.held():
+            return None
         try:
-            case = Case.open(row["id"])
-            case.recover_jobs()
-        except Exception:
-            continue
-        if workqueue.has_queued(case):
-            workqueue.wake(case)
+            workspacelock.acquire(SERVE_PORT)
+        except workspacelock.WorkspaceBusy as busy:
+            return busy.holder or {}
+        from .workspace import open_workspace
+
+        open_workspace()
+    return None
+
+
+def install_availability_guard(app: FastAPI) -> None:
+    """Refuse case work while there is no workspace to do it in.
+
+    Three states share one answer. A configured folder that is gone must never
+    be silently recreated — that is the fastest way to make someone believe they
+    lost everything. A workspace being copied to a new volume must not be
+    written to half way through. And a workspace another Azimut holds is not
+    ours to touch. All three leave the recovery routes reachable, so the browser
+    can show what happened and offer the way out.
+    """
+
+    @app.middleware("http")
+    async def guard(request, call_next):  # type: ignore[no-untyped-def]
+        path = request.url.path
+        if path.startswith("/api/") and not path.startswith(ALWAYS_AVAILABLE):
+            if config.workspace_missing():
+                return JSONResponse(
+                    {"detail": "the workspace folder is not available", "workspace": "missing"},
+                    status_code=503,
+                )
+            if workspacemove.in_progress():
+                return JSONResponse(
+                    {"detail": "the workspace is being moved", "workspace": "moving"},
+                    status_code=503,
+                )
+            if (busy := open_workspace_if_free()) is not None:
+                return JSONResponse(
+                    {"detail": workspacelock.describe(busy), "workspace": "locked"},
+                    status_code=503,
+                )
+        return await call_next(request)
 
 
 def create_app() -> FastAPI:
-    config.ensure_workspace()
     # Start keeping the tail of the warning log, so "Report an issue" has
     # something to say about a run that already went wrong (engine/diagnostics).
     from .engine import diagnostics
 
     diagnostics.install()
-    # Before any router can import a scraper: point yt-dlp/gallery-dl at the
-    # newer copies in the workspace, if the user has fetched any. No network.
-    from .engine import scrapers
 
-    scrapers.activate()
+    # A configured folder that is gone stops here: no skeleton is created, no
+    # case is migrated, and the browser gets the stop screen instead of an empty
+    # workspace that looks like lost work.
+    #
+    # The lock comes before the housekeeping for the same reason it exists: two
+    # processes running the case migrations at once is renames racing over the
+    # same directories. A workspace another Azimut holds is left exactly as it
+    # is, and the tab that opens explains who has it.
+    if not config.workspace_missing() and (busy := open_workspace_if_free()):
+        logger.warning("workspace not opened: %s", workspacelock.describe(busy))
 
-    # Reap stale empty scratch sessions; never let housekeeping block startup.
-    from .workspace import Case
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        yield
+        # Give the workspace back on the way out. The OS would drop the lock
+        # when the process dies anyway; releasing it here clears the payload, so
+        # the next run has nothing to judge the staleness of, and closes the
+        # handle, which is what lets Windows delete the folder afterwards.
+        workspacelock.release()
 
-    try:
-        Case.cleanup_scratch()
-    except OSError:
-        pass
-
-    # Bundle handlers must exist before crash recovery sees their queued jobs.
-    # The same pass removes browser uploads abandoned by a previous run.
-    from .engine import bundles
-
-    try:
-        bundles.cleanup_uploads()
-    except OSError:
-        pass
-
-    # Reclaim background jobs a previous run left mid-flight and resume any
-    # pending thumbnail work through the single worker. Best-effort: housekeeping
-    # must never block or crash startup.
-    try:
-        _recover_jobs()
-    except Exception:
-        pass
-
-    app = FastAPI(title="Azimut", version=__version__, docs_url="/api/docs")
+    app = FastAPI(
+        title="Azimut", version=__version__, docs_url="/api/docs", lifespan=lifespan
+    )
 
     from .api import cases, drafts, events, files, ingest, inspect, media, proofs, satellite, settings, templates
 
     app.include_router(cases.router)
+    app.include_router(cases.workspace_router)
     app.include_router(media.router)
     app.include_router(inspect.router)
     app.include_router(satellite.router)
@@ -133,6 +185,9 @@ def create_app() -> FastAPI:
     app.include_router(templates.router)
     # extension-origin CORS, /api/ingest/* only (see ingest.install_cors)
     ingest.install_cors(app)
+    # Inside the local guard: a request that isn't allowed to reach the app at
+    # all should not learn whether the workspace is there.
+    install_availability_guard(app)
     # last, so it wraps everything: refuse non-loopback Host / cross-origin web
     install_local_guard(app)
 

@@ -62,7 +62,11 @@ def test_recovery_finishes_a_partially_moved_restore(tmp_workspace):
     note = case.create_note("Note", "", "kept")
     deleted = delete_entities_deep(case, [note["id"]])
     rel = note["attrs"]["path"]
-    source = case.trash_dir / deleted["trash"] / rel
+    # The file waits under its numbered slot, and the journal is what pairs the
+    # two — so a half-finished restore is simulated by moving the slot back.
+    payload = case.get_trash_group(deleted["trash"])["payload"]
+    slot = payload["slots"][payload["files"].index(rel)]
+    source = case.trash_dir / deleted["trash"] / slot
     destination = case.resolve_inside(rel)
 
     case.update_trash_group(deleted["trash"], state="restoring")

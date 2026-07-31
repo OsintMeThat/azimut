@@ -407,7 +407,7 @@
                 <span class="picker-copy">
                   <span class="picker-title">{item.title || item.filename}</span>
                   <span class="picker-meta">
-                    {mediaCategory(item)}{item.folder ? ` · ${item.folder}` : ''}{item.title && item.filename !== item.title ? ` · ${item.filename}` : ''}
+                    {mediaCategory(item)}{item.folder ? ` · ${item.folder}` : ''}
                   </span>
                 </span>
               </button>

@@ -41,25 +41,32 @@ Key constraints:
 
 ## 3. The case workspace
 
-A directory per investigation (`~/Azimut/cases/<case>/` by default):
+The workspace is `~/Azimut` unless it was moved: `AZIMUT_HOME` wins, then a
+one-line pointer file at the platform's configuration location, then the
+default. A directory per investigation (`~/Azimut/<case>/` by default):
 
 ```
-case.json      # small manifest: name, dates, storage format + schema
-case.db        # authoritative SQLite graph: entities, links, folders
-notes.md       # free-form case notes (markdown)
-notes/         # filed note bodies (Markdown)
-media/         # source + captured + extracted media, with metadata + sha256
-proofs/        # composed proofs: exported PNGs + editable JSON specs
-               #   <name>.assets/ holds images pasted into that proof only
-exports/       # post drafts and reports
-inspect/       # saved Inspect session specs
-.trash/        # recoverable artifact payloads
+README.txt     # which half of the folder is whose
+azimut/        # everything Azimut owns; the rest of the folder is yours
+  case.json    # small manifest: name, dates, storage format + schema
+  notes.md     # free-form case notes (markdown)
+  notes/       # note bodies, named after their title, filed as in the notebook
+  media/       # source + captured + extracted media; .meta/ holds the sidecars
+  proofs/      # exported PNGs; .meta/ holds the specs and pasted images
+  exports/     # yours to fill
+  .data/       # case.db: authoritative SQLite graph
+  .drafts/     # post drafts
+  .inspect/    # saved Inspect session specs
+  .search/     # saved Grid Search state
+  .trash/      # recoverable artifact payloads, in numbered slots
 ```
 
 Tools use `CaseRepository` for structured state. Media, notes and proofs remain
 files. Legacy JSON graphs migrate to SQLite on open with a retained backup.
 One-shot work uses the same code path in a promotable scratch case. Exported
-case bundles live in the workspace-level `bundles/` directory.
+case bundles live under the workspace's hidden `.azimut/` directory.
+App-wide settings, scratch cases, caches and runtime tools also stay under
+`.azimut/`, so the visible workspace root contains only permanent cases.
 
 ## 4. Data model
 
@@ -114,17 +121,23 @@ proof for publication.
 | ✅ **Notebook diagrams** | Draws ```mermaid fences in the preview and the PDF, loading the library only when a note holds one. |
 | ✅ **Canvas tests** | Exercises Leaflet and Konva interactions in Chromium and Firefox. |
 | ✅ **Storage platform** | Uses per-case SQLite, bounded catalog queries and a durable one-worker job queue. |
-| ✅ **Case bundle** | Exports and imports integrity-checked case snapshots, with optional whole-bundle password protection. |
+| ✅ **Case bundle** | Exports and imports the whole case folder, including the analyst's free zone, with integrity checks and optional whole-bundle password protection. |
 | ✅ **Trash** | Holds deleted artifacts for restore or explicit permanent deletion. |
 | ✅ **Gated downloads** | Fetches login-walled media by borrowing a browser session or cookies.txt, cookie-less by default and prompted only on a wall. |
 | ✅ **Find at scale** | Bounded, paged loading with a shared search box and sort across the Media Library and Files, plus case-name search in the switcher. |
 | ✅ **Searchable pickers** | Pickers in Inspect, Reverse Search, Geo Proof and the Notebook notes menu search past six entries and browse case folders behind the "…". |
 | ✅ **Report an issue** | About writes a bug or a request into a pre-filled GitHub issue, with version, OS and the run's last warnings, home path and account name scrubbed. |
 | ✅ **Settings backup** | Carries workspace-level proof and post presets through export and import. |
+| ✅ **Open the folder** | A case's folder, or the whole workspace, opened in the system file manager. |
 | ✅ **Proofs on the map** | A fourth position of the Saved switch places each proof by its own coordinates, then by the captures it composes; `All` marks a worked capture with a dot rather than doubling it. |
 | ✅ **Import enrichment** | Reads image EXIF/dHash and video container/stream metadata locally in the background; parsed GPS produces linked Suggestions and all fields appear in Details. |
 | ✅ **GPS in Media** | A GPS filter and a per-row pin in the Media list send a stated position to the map, images and videos alike. |
 | ✅ **Relation vocabulary** | One registry for the non-chain edges, stated or settled from Details and from a point's card on the map. |
+| ✅ **Visible file names** | Shows each file-backed artifact under its filename stem and moves the file when that name changes. |
+| ✅ **Case doctor** | Checks a case without changing it, then offers explicit repairs for a missing database, missing media and files dropped into `media/`. |
+| ✅ **Workspace folder** | Settings adopts a folder as it is, or copies the workspace to it, verifies, switches a pointer kept outside it and keeps the old copy until dropped. A configured folder that has gone stops startup instead of being recreated. |
+| ✅ **One Azimut per workspace** | An OS-held lock the kernel drops on exit, with a heartbeat so a folder shared between machines can tell a live holder from a crashed one. The second instance opens to a screen naming the first, and can overrule it. |
+| ✅ **Adopt a case folder** | A folder made in the workspace from the file manager becomes a case on one click, where it is, without reading or moving what it holds. One holding a case that lost its manifest is recovered instead, then handed to the Doctor. |
 
 
 ---
@@ -146,11 +159,6 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. |
 | **Notes to PDF** | Ticks notes in a dialog and writes one file per note, named after the note, into the case's export destination. Rendered server-side so no print dialog is involved, which means carrying fonts: a bundled Noto set, the system font for CJK, and a named error rather than empty boxes for a script nobody covers. |
 | **Export destination** | A folder of the analyst's own, remembered per case, where notes, proofs and map exports land instead of only the case's `exports/`. Validated when set, never deleted from, and a re-export overwrites rather than accumulates. |
-| **Case doctor** | Compares a case folder against its graph — missing `case.db`, files unknown to it, entities pointing at deleted files — and offers each repair as a choice. Prerequisite for letting the workspace move. |
-| **Workspace folder** | Settings moves the whole workspace, keys and presets included, by copying, verifying, switching a pointer kept outside it, then keeping the old copy until the analyst drops it. Covers adopting a hand-moved folder and a root that has gone missing. |
-
-Toward v2: reveal a case's folder in the system file manager; a lock so two
-Azimut instances can't share one workspace.
 
 ### v3: GEOINT expansion
 
@@ -256,6 +264,7 @@ Google Photorealistic 3D Tiles.
 No version yet. Promote an idea when its workflow is clear; delete it when it
 stops making sense.
 
+- **Media in the analyst's half:** a button that looks for media beside `azimut/` and offers to bring them into the case, rather than waiting for them to be moved into `media/` by hand.
 - **Free-form montage editor:** consider only if it stays distinct from Geo Proof and Inspect collage.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 
@@ -300,11 +309,15 @@ stops making sense.
 - **Security posture** (single-user localhost): `127.0.0.1` bind + Host/Origin
   guard (DNS rebinding), 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
   names for images pasted into a proof (no client-chosen path), token-gated
-  ingest island for the extension. Accepted risks recorded here: cleartext keys over
+  ingest island for the extension. The workspace pointer is the one file written
+  outside the workspace, 0600 and holding a path; deleting the copy a move set
+  aside acts on this process's own memory, never on a path from the request.
+  Accepted risks recorded here: cleartext keys over
   localhost, the hash-verified scraper updater, and tile/media URL fetches (SSRF
   only matters if the localhost assumption breaks). The startup update check is
   the one on-mount network call: opt-out and read-only against GitHub's releases
-  feed, notes rendered as text (no HTML injection). Remote images embedded in a
+  feed, notes rendered through the Notebook's DOMPurify-sanitized Markdown
+  renderer rather than as raw HTML. Remote images embedded in a
   Notebook note contact their host whenever the preview opens; Notebook warns
   about that behavior and local Case media avoids it. Notebook diagrams are the
   one markup DOMPurify does not clear: Mermaid draws its SVG into the preview

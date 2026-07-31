@@ -35,6 +35,7 @@ from PIL import Image
 from ..workspace import ensure_dir
 from . import ffmpeg as ffmpeg_engine
 from . import workqueue
+from .. import layout
 
 if TYPE_CHECKING:
     from ..workspace import Case as CaseType
@@ -211,7 +212,7 @@ def _proof_thumbs(case: "CaseType") -> set[str]:
     their exports share this cache, so the sweep below has to count them as
     referenced or it would delete every one of them."""
     names = set()
-    for spec_path in case.subdir("proofs").glob("*.json"):
+    for spec_path in case.subdir("proofs").joinpath(layout.META_DIR).glob("*.json"):
         try:
             spec = json.loads(spec_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):

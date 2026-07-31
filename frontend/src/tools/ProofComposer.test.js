@@ -44,6 +44,12 @@ describe('Proof Composer header', () => {
   });
 });
 
+describe('Proof Composer naming', () => {
+  it('adopts the canonical filename stem returned by the backend', () => {
+    expect(source).toContain('proof.title = result.title;');
+  });
+});
+
 describe('Proof Composer pickers', () => {
   it('searches the panel picker and the saved-proof list only past six entries', () => {
     expect(source).toContain("import SearchInput from '../components/SearchInput.svelte'");

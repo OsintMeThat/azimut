@@ -23,6 +23,19 @@ RELEASES_PAGE_URL = "https://github.com/OsintMeThat/azimut/releases/latest"
 NOTES_LIMIT = 4000
 
 
+def _clip(notes: str) -> str:
+    """Cap the release body so a runaway note never bloats the response.
+
+    Cutting mid-line would leave the pop-up rendering half a heading or an
+    unclosed code fence, so an over-long note is trimmed back to its last
+    complete line."""
+    if len(notes) <= NOTES_LIMIT:
+        return notes
+    clipped = notes[:NOTES_LIMIT]
+    head, newline, _ = clipped.rpartition("\n")
+    return (head if newline else clipped).rstrip()
+
+
 def _parse(version: str) -> tuple[int, ...]:
     """A tag like ``v0.1.2`` (or a bare ``0.1.2``) as a comparable tuple.
 
@@ -71,7 +84,7 @@ def check(current: str, *, timeout: float = 6.0) -> dict[str, object]:
         if body.get("html_url"):
             result["url"] = str(body["html_url"])
         # The release body, shown in the startup pop-up. Markdown from our own
-        # releases; the UI renders it as plain text (no HTML injection), so we
-        # just cap the length to keep the payload sane.
-        result["notes"] = str(body.get("body") or "").strip()[:NOTES_LIMIT]
+        # releases, rendered by the UI through the same sanitizing renderer as
+        # the Notebook.
+        result["notes"] = _clip(str(body.get("body") or "").strip())
     return result

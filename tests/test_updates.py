@@ -64,16 +64,27 @@ def test_check_reports_a_newer_release(monkeypatch):
 
 
 def test_check_carries_release_notes_capped(monkeypatch):
+    body = "  ## What's new\n- stuff\n" + "".join(f"- entry {i}\n" for i in range(900))
     monkeypatch.setattr(
         updates.httpx,
         "get",
-        lambda *a, **k: FakeResponse(
-            {"tag_name": "v9.9.9", "body": "  ## What's new\n- stuff  " + "x" * 9000}
-        ),
+        lambda *a, **k: FakeResponse({"tag_name": "v9.9.9", "body": body}),
     )
     result = updates.check("0.1.1")
-    assert result["notes"].startswith("## What's new")  # stripped
-    assert len(result["notes"]) == updates.NOTES_LIMIT  # capped
+    notes = result["notes"]
+    assert notes.startswith("## What's new")  # stripped
+    assert len(notes) <= updates.NOTES_LIMIT  # capped
+    # cut on a line boundary, so the pop-up never renders half a line
+    assert notes.splitlines()[-1] in body.splitlines()
+
+
+def test_check_caps_a_release_note_with_no_line_break(monkeypatch):
+    monkeypatch.setattr(
+        updates.httpx,
+        "get",
+        lambda *a, **k: FakeResponse({"tag_name": "v9.9.9", "body": "x" * 9000}),
+    )
+    assert len(updates.check("0.1.1")["notes"]) == updates.NOTES_LIMIT
 
 
 def test_check_up_to_date(monkeypatch):

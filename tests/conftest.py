@@ -3,7 +3,29 @@ import tempfile
 import pytest
 from fastapi.testclient import TestClient
 
+from azimut import config
 from azimut.engine import geo
+
+
+@pytest.fixture(autouse=True)
+def isolated_workspace_pointer(monkeypatch, tmp_path_factory):
+    """No test may read or write this machine's real workspace.
+
+    Two addresses have to be redirected, because the app resolves its root from
+    both. The pointer deliberately lives outside the workspace, so a temporary
+    ``AZIMUT_HOME`` does not contain it: without this, one test writing a pointer
+    would re-point the developer's own Azimut at a directory pytest deletes on
+    the way out. ``DEFAULT_ROOT`` is the fallback the app lands on the moment a
+    test clears that pointer, and opening a workspace migrates every case in it —
+    so leaving it at ``~/Azimut`` would run the suite's migrations over the
+    developer's real cases.
+    """
+    directory = tmp_path_factory.mktemp("pointer")
+    monkeypatch.setattr(config, "_pointer_dir", lambda: directory)
+    monkeypatch.setattr(config, "DEFAULT_ROOT", tmp_path_factory.mktemp("default-root"))
+    config.forget_workspace_root()
+    yield
+    config.forget_workspace_root()
 
 
 @pytest.fixture(autouse=True)

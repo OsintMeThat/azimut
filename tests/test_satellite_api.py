@@ -7,6 +7,7 @@ import pytest
 import graph_read
 from PIL import Image
 
+from azimut import layout
 from azimut.api import satellite as satellite_api
 from azimut.engine import geo, tiles
 
@@ -358,7 +359,10 @@ def test_edit_title_renames_capture_entity(client, monkeypatch):
     assert listed[0]["title"] == "Eiffel Tower"
 
     # clearing the title falls back to the coordinates on both sides
-    client.patch(f"/api/cases/{cid}/satellite", json={"path": cap["path"], "title": "  "})
+    client.patch(
+        f"/api/cases/{cid}/satellite",
+        json={"path": updated["path"], "title": "  "},
+    )
     assert _captures(client, cid)[0]["label"] == "48.858400, 2.294500"
 
 
@@ -406,7 +410,7 @@ def test_changing_the_format_never_rewrites_existing_titles(client, monkeypatch)
         json={"lat": 40.6892, "lon": -74.0445, "zoom": 16, "width": 512, "height": 512},
     )
     titles = {c["title"] for c in client.get(f"/api/cases/{cid}/satellite").json()}
-    assert titles == {"48.858370, 2.294481", "40°41'21.12\"N 74°02'40.20\"W"}
+    assert titles == {"48.858370, 2.294481", "40°41'21.12_N 74°02'40.20_W"}
 
 
 def test_place_label_follows_the_coordinate_format(client):
@@ -699,7 +703,7 @@ def test_search_grid_corruption_is_skipped_in_picker_and_reported_on_open(client
     from azimut.workspace import Case
 
     cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
-    path = Case.open(cid).subdir("search") / "broken.json"
+    path = Case.open(cid).subdir(layout.SEARCH_DIR) / "broken.json"
     path.write_text('["not", "an", "object"]', encoding="utf-8")
 
     assert client.get(f"/api/cases/{cid}/search-grids").json() == []
@@ -714,7 +718,7 @@ def test_search_grid_write_is_atomic(client, monkeypatch):
 
     cid = client.post("/api/cases", json={"name": "Grid"}).json()["id"]
     client.put(f"/api/cases/{cid}/search-grids/g", json=_rect_grid(title="Before"))
-    path = Case.open(cid).subdir("search") / "g.json"
+    path = Case.open(cid).subdir(layout.SEARCH_DIR) / "g.json"
     before = path.read_bytes()
 
     def fail_replace(_source, _target):

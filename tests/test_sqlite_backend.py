@@ -15,8 +15,9 @@ import threading
 
 import pytest
 from bigcase import build_big_case
-from legacy_case import write_legacy_json_case
+from legacy_case import legacy_manifest_path, read_legacy_manifest, write_legacy_json_case
 
+from azimut import layout
 from azimut.sqlite_backend import SqliteCase, convert_json_to_sqlite
 from azimut.workspace import CaseError
 
@@ -151,7 +152,10 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
     with sqlite3.connect(db) as conn:
         conn.executescript(_SCHEMA_V1)
 
-    store = SqliteCase.open(db)  # runs 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 in place
+    # runs 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 in place. The media directory is
+    # passed because the backend never guesses the case layout; it is empty
+    # here, so the schema-4 backfill marks itself done with no rows.
+    store = SqliteCase.open(db, media_dir=tmp_path / "media")
 
     # 1 -> 2: the folder column is backfilled and pages by folder.
     assert [e["id"] for e in store.page_entities(folder="Sources/Telegram")["items"]] == ["e1"]
@@ -180,7 +184,7 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
         }
         assert "state" in trash_columns
 
-    SqliteCase.open(db)  # idempotent — the second open applies nothing
+    SqliteCase.open(db, media_dir=tmp_path / "media")  # idempotent — applies nothing
     with sqlite3.connect(db) as conn:
         for version in (2, 3, 4, 5, 6, 7):
             assert conn.execute(
@@ -245,6 +249,34 @@ def test_open_backfills_the_position_flag_from_already_indexed_items(tmp_path):
     page = store.page_media_items(gps=True)
     assert [item["path"] for item in page["items"]] == ["media/photo.jpg"]
     assert store.page_media_items()["facets"]["gps_count"] == 1
+
+
+def test_open_without_a_media_dir_defers_the_backfill(tmp_path):
+    """The backend is never told the case layout, so it must not invent one.
+
+    An open with no media directory leaves the sidecar backfill undone and its
+    marker unset, and a later open that knows where media live performs it.
+    Anything else would silently index the wrong folder once the case tree
+    moves.
+    """
+    db = tmp_path / "case.db"
+    with sqlite3.connect(db) as conn:
+        conn.executescript(_SCHEMA_V1)  # predates the index, so it needs the backfill
+    media_dir = tmp_path / "elsewhere"
+    (media_dir / layout.META_DIR).mkdir(parents=True)
+    (media_dir / "shot.png").write_bytes(b"x")
+    (media_dir / layout.META_DIR / "shot.png.json").write_text(
+        '{"filename": "shot.png", "kind": "image", "size": 1,'
+        ' "added_at": "2026", "source": {"type": "upload"}}',
+        encoding="utf-8",
+    )
+
+    SqliteCase.open(db)
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT value FROM meta WHERE key='media_index_ready'").fetchone() is None
+
+    store = SqliteCase.open(db, media_dir=media_dir)
+    assert [item["path"] for item in store.list_media_items()] == ["media/shot.png"]
 
 
 def test_media_browse_index_pages_searches_and_counts_categories(tmp_path):
@@ -318,11 +350,11 @@ def test_concurrent_first_open_cannot_replace_registered_media_rows(tmp_path):
     db = tmp_path / "case.db"
     SqliteCase.create(db, name="Concurrent index")
     media_dir = tmp_path / "media"
-    media_dir.mkdir()
+    (media_dir / layout.META_DIR).mkdir(parents=True)
     for i in range(8):
         name = f"item-{i}.png"
         (media_dir / name).write_bytes(bytes([i]))
-        (media_dir / f"{name}.azimut.json").write_text(
+        (media_dir / layout.META_DIR / f"{name}.json").write_text(
             (
                 '{"filename": "%s", "kind": "image", "size": 1,'
                 ' "added_at": "2026", "source": {"type": "upload"}}'
@@ -335,7 +367,7 @@ def test_concurrent_first_open_cannot_replace_registered_media_rows(tmp_path):
 
     def open_and_register(i: int) -> None:
         try:
-            store = SqliteCase.open(db)
+            store = SqliteCase.open(db, media_dir=media_dir)
             store.upsert_media_item(
                 {
                     "path": f"media/live-{i}.png",
@@ -356,7 +388,7 @@ def test_concurrent_first_open_cannot_replace_registered_media_rows(tmp_path):
         worker.join()
 
     assert errors == []
-    assert len(SqliteCase.open(db).list_media_items()) == 16
+    assert len(SqliteCase.open(db, media_dir=media_dir).list_media_items()) == 16
 
 
 def test_pagination_keys_on_rowid_so_a_deletion_does_not_skip(tmp_path):
@@ -449,12 +481,12 @@ def test_convert_writes_only_the_target_db(tmp_workspace, tmp_path):
         "Live",
         entities=[{"id": "e_a", "type": "person", "label": "Ada", "attrs": {}, "provenance": prov}],
     )
-    before = case.json_path.read_bytes()
+    before = legacy_manifest_path(case).read_bytes()
 
-    convert_json_to_sqlite(case.read(), tmp_path / "case.db")
+    convert_json_to_sqlite(read_legacy_manifest(case), tmp_path / "case.db")
 
     # the converter only reads the graph; it never rewrites the source case.json
-    assert case.json_path.read_bytes() == before
+    assert legacy_manifest_path(case).read_bytes() == before
     assert (tmp_path / "case.db").exists()
 
 
@@ -463,7 +495,7 @@ def test_convert_a_large_case_is_intact(tmp_workspace, tmp_path):
         name="Big", entities=300, links=400, media=100, notes=20, artifacts=30,
         write_media_files=False,
     )
-    report = convert_json_to_sqlite(case.read(), tmp_path / "case.db")
+    report = convert_json_to_sqlite(read_legacy_manifest(case), tmp_path / "case.db")
 
     assert report.integrity_ok
     assert report.entities == summary.entities

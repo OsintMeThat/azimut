@@ -21,11 +21,13 @@
     FREE_TIER,
   } from '../lib/usage.js';
   import { probeKey, googleMapsLoadedKey } from '../lib/gmaps.js';
+  import { revealWorkspaceFolder } from '../lib/reveal.js';
   import { extensionVersion, extensionOutdated } from '../lib/extBridge.js';
   import Icon from '../components/Icon.svelte';
   import ProofTemplateEditor from '../components/ProofTemplateEditor.svelte';
   import PostTemplateEditor from '../components/PostTemplateEditor.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
+  import WorkspaceFolder from '../components/WorkspaceFolder.svelte';
 
   // Imagery keys and their usage meters share one card per provider.
   const TABS = [
@@ -487,6 +489,17 @@
         lon: String(saved.home_view.lon),
         zoom: String(saved.home_view.zoom),
       };
+    }
+  }
+
+  // The path is printed right there, but copying it into a file manager by hand
+  // is exactly what the first analyst to ask ended up doing.
+  async function revealWorkspace() {
+    try {
+      await revealWorkspaceFolder();
+      toast('Opened the workspace folder', 'ok', 2500);
+    } catch (e) {
+      toast(e.message || 'Could not open the folder', 'danger', 7000);
     }
   }
 
@@ -1123,7 +1136,12 @@
             <dt>Version</dt>
             <dd class="mono">{about.version || '—'}</dd>
             <dt>Workspace</dt>
-            <dd class="mono">{about.workspace_root || '—'}</dd>
+            <dd class="mono workspace-fact">
+              <span>{about.workspace_root || '—'}</span>
+              <button class="btn btn-ghost btn-sm" onclick={revealWorkspace} title="Open this folder">
+                <Icon name="folderOpen" size={13} /> Open
+              </button>
+            </dd>
             <dt>ffmpeg</dt>
             <dd class="mono" title={ffmpeg.path || ''}>
               {#if ffmpeg.available}
@@ -1149,6 +1167,8 @@
             </a>
           </div>
         </section>
+
+        <WorkspaceFolder onchange={(status) => (about.workspace_root = status.root)} />
 
         <section class="group">
           <h3>Updates</h3>
@@ -1689,6 +1709,13 @@
     margin: 0;
     color: var(--text-1);
     overflow-wrap: anywhere;
+  }
+  /* The path can be long, so the button sits after it and never squeezes it. */
+  .workspace-fact {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
   }
   .links {
     display: flex;

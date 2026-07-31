@@ -91,7 +91,7 @@ def test_update_link_changes_suggestion_status_without_rebuilding_edge(repo):
 
 
 def test_sync_links_restates_a_source_set(repo):
-    src = repo.add_entity("proof", "P", {"spec": "proofs/p.json"}, by="user")
+    src = repo.add_entity("proof", "P", {"spec": "proofs/.meta/p.json"}, by="user")
     m1 = repo.add_entity("media", "m1", by="user")
     m2 = repo.add_entity("media", "m2", by="user")
     m3 = repo.add_entity("media", "m3", by="user")
@@ -134,7 +134,7 @@ def test_links_of_returns_only_incident_edges(repo):
 def test_derivation_subgraph_walks_the_derived_from_closure(repo):
     from azimut.engine import links as link_engine
 
-    proof = repo.add_entity("proof", "P", {"spec": "proofs/p.json"}, by="user")
+    proof = repo.add_entity("proof", "P", {"spec": "proofs/.meta/p.json"}, by="user")
     frame = repo.add_entity("media", "frame", {"path": "media/f.jpg"}, by="user")
     video = repo.add_entity("media", "clip", {"path": "media/c.mp4"}, by="user")
     other = repo.add_entity("media", "unrelated", {"path": "media/o.jpg"}, by="user")
@@ -158,10 +158,10 @@ def test_count_dependents_groups_incoming_edges_by_target(repo):
     quiet = repo.add_entity("capture", "untouched", {"lat": 51.5}, by="user")
     photo = repo.add_entity("media", "photo", {"path": "media/x.jpg"}, by="user")
     for name in ("P1", "P2"):
-        proof = repo.add_entity("proof", name, {"spec": f"proofs/{name}.json"}, by="user")
+        proof = repo.add_entity("proof", name, {"spec": f"proofs/.meta/{name}.json"}, by="user")
         repo.add_link(proof["id"], capture["id"], "derived-from", by="user")
     repo.add_link(photo["id"], capture["id"], "derived-from", by="user")  # wrong source type
-    post = repo.add_entity("post", "draft", {"draft": "exports/d.json"}, by="user")
+    post = repo.add_entity("post", "draft", {"draft": ".drafts/d.json"}, by="user")
     repo.add_link(post["id"], capture["id"], "mentions", by="user")  # wrong link type
 
     counts = repo.count_dependents(link_type="derived-from", from_type="proof")
@@ -332,6 +332,33 @@ def test_enqueue_is_idempotent_on_key(repo):
     assert repo.count_jobs(kind="enrich") == {"queued": 1}
 
 
+def test_replace_path_references_updates_exact_structured_values(repo):
+    old = "media/before.png"
+    new = "media/After.png"
+    sentence = f"Prose mentions {old} and must remain unchanged."
+    entity = repo.add_entity(
+        "bookmark",
+        "Reference",
+        {"path": old, "nested": [old, {"again": old}], "notes": sentence},
+        by="user",
+    )
+    job = repo.enqueue_job(
+        "thumbnail",
+        key=old,
+        payload={"path": old, "nested": [old], "notes": sentence},
+    )
+
+    repo.replace_path_references(old, new)
+
+    attrs = repo.get_entity(entity["id"])["attrs"]
+    assert attrs["path"] == new
+    assert attrs["nested"] == [new, {"again": new}]
+    assert attrs["notes"] == sentence
+    queued = repo.get_job(job["id"])
+    assert queued["key"] == new
+    assert queued["payload"] == {"path": new, "nested": [new], "notes": sentence}
+
+
 def test_claim_takes_one_queued_job_oldest_first(repo):
     a = repo.enqueue_job("thumbnail", key="media/a.jpg")
     repo.enqueue_job("thumbnail", key="media/b.jpg")
@@ -408,7 +435,7 @@ def test_count_incident_links_groups_relations_in_either_direction(repo):
     other = repo.add_entity("media", "other", {"path": "media/y.jpg"}, by="user")
     place = repo.add_entity("place", "point", {"lat": 48.0}, by="user")
     quiet = repo.add_entity("place", "untouched", {"lat": 49.0}, by="user")
-    proof = repo.add_entity("proof", "P", {"spec": "proofs/p.json"}, by="user")
+    proof = repo.add_entity("proof", "P", {"spec": "proofs/.meta/p.json"}, by="user")
 
     repo.add_link(photo["id"], place["id"], "located-at", by="enrich", status="suggested")
     repo.add_link(photo["id"], other["id"], "same-image-as", by="enrich", status="suggested")

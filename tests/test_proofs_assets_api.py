@@ -1,6 +1,6 @@
 """Pasted images: pixels a proof shows that the case does not hold.
 
-A paste rides along with the save, lands in ``proofs/<name>.assets/`` under its
+A paste rides along with the save, lands in ``proofs/.meta/<name>.assets/`` under its
 own hash, follows the proof through a rename, and goes away with it. What it must
 never do is claim a source: no media, no entity, no ``derived-from`` edge.
 """
@@ -11,6 +11,7 @@ import io
 
 import graph_read
 from PIL import Image
+from azimut import layout
 
 
 def _png(size=(60, 40), color=(90, 30, 30)) -> bytes:
@@ -60,7 +61,7 @@ def test_a_pasted_image_lands_beside_the_proof_and_is_served(client):
         json={"title": "Pasted proof", "spec": _spec(asset["name"]), "assets": [asset]},
     ).json()
 
-    rel = f"proofs/{saved['name']}.assets/{asset['name']}"
+    rel = f"{layout.proof_assets_rel(saved['name'])}/{asset['name']}"
     served = client.get(f"/files/{cid}/{rel}")
     assert served.status_code == 200
     assert served.content == data  # the exact bytes, so reopening renders the paste
@@ -96,7 +97,7 @@ def test_dropping_a_paste_takes_its_file_and_its_folder(client):
     saved = client.post(
         f"/api/cases/{cid}/proofs", json={**body, "assets": [keep, drop]}
     ).json()
-    folder = f"proofs/{saved['name']}.assets"
+    folder = layout.proof_assets_rel(saved['name'])
     assert client.get(f"/files/{cid}/{folder}/{drop['name']}").status_code == 200
 
     # resave with only one paste left: the other file goes, no new upload needed
@@ -120,20 +121,22 @@ def test_dropping_a_paste_takes_its_file_and_its_folder(client):
 def test_rename_carries_the_pasted_images(client):
     cid = _case(client, "RenamePastes")
     asset = _asset(_png())
-    client.post(
+    saved = client.post(
         f"/api/cases/{cid}/proofs",
         json={"title": "Before", "spec": _spec(asset["name"]), "assets": [asset]},
-    )
+    ).json()
 
     # renamed with no fresh upload: the folder moves rather than the paste dying
     renamed = client.post(
         f"/api/cases/{cid}/proofs",
-        json={"rename_from": "before", "title": "After", "spec": _spec(asset["name"])},
+        json={"rename_from": saved["name"], "title": "After", "spec": _spec(asset["name"])},
     ).json()
 
-    assert renamed["name"] == "after"
-    assert client.get(f"/files/{cid}/proofs/after.assets/{asset['name']}").status_code == 200
-    assert client.get(f"/files/{cid}/proofs/before.assets/{asset['name']}").status_code == 404
+    assert renamed["name"] == "After"
+    after = layout.proof_assets_rel("After")
+    before = layout.proof_assets_rel("Before")
+    assert client.get(f"/files/{cid}/{after}/{asset['name']}").status_code == 200
+    assert client.get(f"/files/{cid}/{before}/{asset['name']}").status_code == 404
 
 
 def test_delete_removes_the_pasted_images(client):
@@ -147,26 +150,27 @@ def test_delete_removes_the_pasted_images(client):
     ).json()
 
     client.delete(f"/api/cases/{cid}/proofs/{saved['name']}")
-    assert not get_case(cid).resolve_inside(f"proofs/{saved['name']}.assets").exists()
+    assert not get_case(cid).resolve_inside(layout.proof_assets_rel(saved['name'])).exists()
 
 
 def test_the_same_paste_reuploaded_lands_once(client):
     cid = _case(client, "Idempotent")
     asset = _asset(_png())
+    saved = None
     for _ in range(2):
-        client.post(
+        saved = client.post(
             f"/api/cases/{cid}/proofs",
             json={
-                "rename_from": "same",
+                "rename_from": saved["name"] if saved else None,
                 "title": "Same",
                 "spec": _spec(asset["name"]),
                 "assets": [asset],
             },
-        )
+        ).json()
 
     from azimut.api.cases import get_case
 
-    folder = get_case(cid).resolve_inside("proofs/same.assets")
+    folder = get_case(cid).resolve_inside(layout.proof_assets_rel("Same"))
     assert [p.name for p in folder.iterdir()] == [asset["name"]]
 
 
@@ -214,25 +218,26 @@ def test_a_refused_batch_writes_nothing(client):
     """Assets are decoded before the spec is touched, so a bad save is a no-op."""
     cid = _case(client, "AllOrNothing")
     good = _asset(_png())
-    client.post(
+    saved = client.post(
         f"/api/cases/{cid}/proofs",
         json={"title": "Kept", "spec": _spec(good["name"]), "assets": [good]},
-    )
-    before = client.get(f"/api/cases/{cid}/proofs/kept").json()
+    ).json()
+    before = client.get(f"/api/cases/{cid}/proofs/{saved['name']}").json()
 
     res = client.post(
         f"/api/cases/{cid}/proofs",
         json={
-            "rename_from": "kept",
+            "rename_from": saved["name"],
             "title": "Kept",
             "spec": _spec(good["name"], "0123456789abcdef.png"),
             "assets": [good, {"name": "0123456789abcdef.png", "data": "not base64!!"}],
         },
     )
     assert res.status_code == 422
-    after = client.get(f"/api/cases/{cid}/proofs/kept").json()
+    after = client.get(f"/api/cases/{cid}/proofs/{saved['name']}").json()
     assert after == before  # untouched, down to updated_at
-    assert client.get(f"/files/{cid}/proofs/kept.assets/{good['name']}").status_code == 200
+    kept = layout.proof_assets_rel("Kept")
+    assert client.get(f"/files/{cid}/{kept}/{good['name']}").status_code == 200
 
 
 def test_a_proof_without_pastes_keeps_no_assets_folder(client):
@@ -242,4 +247,4 @@ def test_a_proof_without_pastes_keeps_no_assets_folder(client):
     client.post(
         f"/api/cases/{cid}/proofs", json={"title": "Plain", "spec": _spec(panels=["media/a.jpg"])}
     )
-    assert not get_case(cid).resolve_inside("proofs/plain.assets").exists()
+    assert not get_case(cid).resolve_inside(layout.proof_assets_rel("Plain")).exists()

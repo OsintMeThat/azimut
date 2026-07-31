@@ -4,6 +4,14 @@ A plain bundle is a ZIP whose first member is a small compatibility header and
 whose last member is the SHA-256 manifest. A sealed bundle encrypts that whole
 ZIP as an AES-256-GCM stream, so filenames and sizes are not left in the ZIP
 central directory for other programs to read.
+
+**A bundle is the case folder.** Format 2 puts it under one `case/` member
+prefix, so unzipping one by hand gives back one directory: `azimut/` holding the
+tool's state, and beside it whatever the analyst keeps there. The prefix also
+keeps the bundle's own two metadata members outside the case, so files called
+`bundle.json` and `bundle-header.json` remain valid analyst files. Format 1
+named members relative to the tool root and carried only the tool's half; those
+bundles still import, and the folder migration reshapes them on first open.
 """
 
 from __future__ import annotations
@@ -23,17 +31,21 @@ import zipfile
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO, Iterator
+from typing import Any, BinaryIO, Callable, Iterable, Iterator
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from .. import __version__, config
+from .. import __version__, config, layout
 from ..sqlite_backend import SQLITE_SCHEMA, SqliteCase
-from ..workspace import Case, CaseError, _now, _replace_with_retry
+from ..workspace import Case, CaseError, _now, _replace_with_retry, ensure_dir
 from . import workqueue
 
-BUNDLE_FORMAT = 1
+BUNDLE_FORMAT = 2
+#: The format from which members are named relative to the case root rather than
+#: the tool root, which is what lets a bundle carry the analyst's own folders.
+WRAPPED_MEMBERS = 2
+BUNDLE_ROOT = "case"
 HEADER_NAME = "bundle-header.json"
 MANIFEST_NAME = "bundle.json"
 MAGIC = b"AZIMUT-BUNDLE\0"
@@ -56,14 +68,35 @@ _ZIP_LOCAL = struct.Struct("<4s5H3I2H")
 _ZIP_LOCAL_MAGIC = b"PK\x03\x04"
 _ZIP_DESCRIPTOR_MAGIC = b"PK\x07\x08"
 
+#: What the *tool root* holds that travels. Anything else there is a cache or
+#: the trash, and `classify_case_entry` must have an answer for it.
 BUNDLED_ROOTS = frozenset(
-    {"case.json", "case.db", "notes.md", "notes", "media", "proofs", "exports", "inspect", "search"}
+    {"case.json", "notes.md", layout.DATA_DIR, *layout.CASE_SUBDIRS}
 )
+
+#: What a format-1 *import* accepts on top of that: the names the tool root used
+#: before the database and the session directories were hidden. A bundle written
+#: by an older Azimut must still land, and the folder migration reshapes it on
+#: first open — refusing the member outright would strand every bundle already
+#: exported. Format 2 never uses these, so this set dies with format 1.
+IMPORTABLE_ROOTS = BUNDLED_ROOTS | {"case.db", "exports", "inspect", "search"}
 NOT_BUNDLED = {
     ".trash": "deleted artifacts do not travel",
     "media/.thumbs": "content-addressed thumbnails are rebuilt",
     "media/.dl": "in-progress downloads belong to this machine",
 }
+
+#: Extensions whose bytes are already compressed. Deflating them burns CPU on
+#: every export and saves nothing, and the free zone is where a case's largest
+#: files land.
+_PRECOMPRESSED = frozenset(
+    {
+        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic",
+        ".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi",
+        ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".flac",
+        ".zip", ".gz", ".bz2", ".xz", ".zst", ".7z", ".rar",
+    }
+)
 
 EXPORT_JOB = "bundle-export"
 IMPORT_JOB = "bundle-import"
@@ -118,7 +151,7 @@ def stage_upload(source: BinaryIO) -> tuple[str, Path]:
     directory.mkdir(parents=True, exist_ok=True)
     cleanup_uploads()
     usage = shutil.disk_usage(directory)
-    reserve = _disk_reserve(usage.total)
+    reserve = disk_reserve(usage.total)
     budget = max(0, usage.free - reserve)
     upload_id = uuid.uuid4().hex
     destination = _upload_path(upload_id)
@@ -194,6 +227,14 @@ def _portable_member_key(name: str) -> str:
 
 
 def _validate_member_names(names: list[str]) -> None:
+    # Checked on the way out as well as on the way in: an export that produced
+    # more members than an import accepts would write a bundle nobody could
+    # open, and the free zone is where a case first gets enough files for that
+    # to be reachable.
+    if len(names) > MAX_BUNDLE_MEMBERS:
+        raise BundleError(
+            f"a bundle carries at most {MAX_BUNDLE_MEMBERS} files, and this case has {len(names)}"
+        )
     if any(not _safe_member(name) for name in names):
         raise BundleError("the bundle contains a path that is not portable")
     portable = [_portable_member_key(name) for name in names]
@@ -201,7 +242,7 @@ def _validate_member_names(names: list[str]) -> None:
         raise BundleError("the bundle contains paths that collide on another operating system")
 
 
-def _disk_reserve(total: int) -> int:
+def disk_reserve(total: int) -> int:
     """Leave a small recovery margin without imposing a fixed bundle-size cap."""
     return min(MAX_DISK_RESERVE, max(MIN_DISK_RESERVE, total // 100))
 
@@ -217,7 +258,7 @@ def _space_preview(source: Path, header: dict[str, Any]) -> dict[str, Any]:
     # A sealed bundle is decrypted to a temporary ZIP before extraction. A plain
     # ZIP is read in place, so only its extracted payload needs additional space.
     estimated = payload + (source_size if header.get("sealed") else 0)
-    reserve = _disk_reserve(usage.total)
+    reserve = disk_reserve(usage.total)
     return {
         "estimated_import_bytes": estimated,
         "free_space_bytes": usage.free,
@@ -240,7 +281,7 @@ def _require_extract_space(target: Path, total_size: int) -> None:
         usage = shutil.disk_usage(target)
     except OSError as exc:
         raise BundleError("could not check free space for bundle extraction") from exc
-    if total_size + _disk_reserve(usage.total) > usage.free:
+    if total_size + disk_reserve(usage.total) > usage.free:
         raise BundleError(
             "not enough free space to extract this bundle while keeping a disk safety reserve"
         )
@@ -251,7 +292,7 @@ def _require_export_space(target: Path, total_size: int) -> None:
         usage = shutil.disk_usage(target.parent)
     except OSError as exc:
         raise BundleError("could not check free space for bundle export") from exc
-    if total_size + _disk_reserve(usage.total) > usage.free:
+    if total_size + disk_reserve(usage.total) > usage.free:
         raise BundleError(
             "not enough free space to export this case while keeping a disk safety reserve"
         )
@@ -267,6 +308,20 @@ def _included(rel: str) -> bool:
     return PurePosixPath(rel).parts[0] in BUNDLED_ROOTS
 
 
+def _importable(rel: str, version: int) -> bool:
+    """Whether a bundle member may land, at the naming its format declares."""
+    if version < WRAPPED_MEMBERS:
+        return PurePosixPath(rel).parts[0] in IMPORTABLE_ROOTS
+    parts = PurePosixPath(rel).parts
+    if len(parts) < 2 or parts[0] != BUNDLE_ROOT:
+        return False
+    head = parts[1]
+    inside = "/".join(parts[2:])
+    if head == layout.TOOL_DIR:
+        return bool(inside) and _included(inside)
+    return not layout.is_tool_dir(head)
+
+
 def classify_case_entry(rel: str) -> str | None:
     """Return ``bundled``/``not-bundled`` for declared case state."""
     if _included(rel):
@@ -276,13 +331,67 @@ def classify_case_entry(rel: str) -> str | None:
     return None
 
 
-def _case_files(case: Case) -> Iterator[tuple[str, Path]]:
-    for path in sorted(case.path.rglob("*")):
-        if not path.is_file():
+def _walk(
+    entries: Iterable[Path], base: Path, keep: Callable[[str], bool]
+) -> Iterator[tuple[str, Path]]:
+    """(`base`-relative name, path) for every file under `entries` that `keep` keeps.
+
+    A directory `keep` rejects is never descended into, so skipping a cache
+    costs nothing.
+
+    Symlinks are refused rather than followed. `rglob` walks into a linked
+    directory and `is_file()` follows a linked file, so the previous walk would
+    have copied a link's *target* into the bundle under a name saying it was the
+    analyst's own file — which turns "the free zone travels" into a way to read
+    anything the account can reach. A bundle carries what the folder holds.
+    """
+    for entry in sorted(entries):
+        rel = entry.relative_to(base).as_posix()
+        if not keep(rel):
             continue
-        rel = path.relative_to(case.path).as_posix()
-        if _included(rel) and rel not in {"case.json", "case.db"}:
-            yield rel, path
+        if entry.is_symlink():
+            raise BundleError(f"'{rel}' is a symbolic link; a bundle carries files, not links")
+        if entry.is_dir():
+            yield from _walk(entry.iterdir(), base, keep)
+        elif entry.is_file():
+            yield rel, entry
+        else:
+            raise BundleError(f"'{rel}' is not a regular file")
+
+
+def _check_free_name(name: str) -> None:
+    """The one name the analyst's half of a case folder cannot use."""
+    if layout.is_tool_dir(name):
+        raise BundleError(
+            f"'{name}' collides with Azimut's own folder on Windows and macOS; "
+            "rename it before exporting"
+        )
+
+
+def _case_files(case: Case) -> Iterator[tuple[str, Path]]:
+    """Every file a bundle carries, named the way the bundle names it.
+
+    Members sit under the bundle's `case/` prefix: `case/azimut/media/x.png` for
+    the tool's own state, and the analyst's folders under the names they gave
+    them. A bundle should carry the whole investigation rather than the half
+    Azimut happened to author. The prefix makes an unzipped bundle one folder
+    and leaves the bundle's metadata names outside the analyst's free zone.
+
+    The manifest and the database are not in here. The export writes them
+    itself, the database after cleaning this machine's state out of it.
+    """
+    tool = case.tool_root
+    written_apart = {
+        path.relative_to(tool).as_posix() for path in (case.json_path, case.db_path)
+    }
+    for rel, path in _walk(tool.iterdir(), tool, _included):
+        if rel not in written_apart:
+            yield f"{BUNDLE_ROOT}/{layout.TOOL_DIR}/{rel}", path
+    free = case.free_entries()
+    for entry in free:
+        _check_free_name(entry.name)
+    for rel, path in _walk(free, case.path, lambda _rel: True):
+        yield f"{BUNDLE_ROOT}/{rel}", path
 
 
 def _clean_database(source: Path, target: Path) -> None:
@@ -314,7 +423,11 @@ def _zip_info(name: str, *, compressed: bool) -> zipfile.ZipInfo:
 
 
 def _compress_member(name: str) -> bool:
-    return name != HEADER_NAME and not name.startswith("media/")
+    if name == HEADER_NAME:
+        return False
+    if name.startswith(f"{BUNDLE_ROOT}/{layout.TOOL_DIR}/media/"):
+        return False
+    return PurePosixPath(name).suffix.lower() not in _PRECOMPRESSED
 
 
 def _write_bytes(
@@ -464,11 +577,17 @@ def export_case(
     clean_db = Path(db_name)
 
     try:
-        _clean_database(case.path / "case.db", clean_db)
+        _clean_database(case.db_path, clean_db)
         case_json = case.json_path.read_bytes()
         files = list(_case_files(case))
+        # The two members the export writes itself, named the way every other
+        # member is: where they sit in the case folder.
+        manifest_member = (
+            f"{BUNDLE_ROOT}/{case.json_path.relative_to(case.path).as_posix()}"
+        )
+        db_member = f"{BUNDLE_ROOT}/{case.db_path.relative_to(case.path).as_posix()}"
         _validate_member_names(
-            [HEADER_NAME, "case.json", "case.db", *(rel for rel, _ in files), MANIFEST_NAME]
+            [HEADER_NAME, manifest_member, db_member, *(rel for rel, _ in files), MANIFEST_NAME]
         )
         total_size = len(case_json) + clean_db.stat().st_size
         total_size += sum(path.stat().st_size for _, path in files)
@@ -492,8 +611,8 @@ def export_case(
             records: list[dict[str, Any]] = []
             with zipfile.ZipFile(target, "w", allowZip64=True) as archive:
                 _write_bytes(archive, HEADER_NAME, _json_bytes(header), records)
-                _write_bytes(archive, "case.json", case_json, records)
-                _write_file(archive, "case.db", clean_db, records)
+                _write_bytes(archive, manifest_member, case_json, records)
+                _write_file(archive, db_member, clean_db, records)
                 for rel, path in files:
                     _write_file(archive, rel, path, records)
                 archive.writestr(
@@ -654,18 +773,19 @@ def _decrypt_to(source: Path, target: Path, password: str) -> None:
             stream.write(chunk)
 
 
-def _manifest(archive: zipfile.ZipFile) -> tuple[list[zipfile.ZipInfo], dict[str, Any]]:
+def _manifest(
+    archive: zipfile.ZipFile, version: int
+) -> tuple[list[zipfile.ZipInfo], dict[str, Any]]:
     infos = archive.infolist()
-    if len(infos) > MAX_BUNDLE_MEMBERS:
-        raise BundleError("the bundle contains too many members")
     names = [info.filename for info in infos]
     if len(names) != len(set(names)):
         raise BundleError("the bundle contains duplicate member names")
     if not names or names[0] != HEADER_NAME or names[-1] != MANIFEST_NAME:
         raise BundleError("the bundle header or manifest is out of place")
     _validate_member_names(names)
-    if any(name != HEADER_NAME and not _included(name) for name in names[:-1]):
-        raise BundleError("the bundle contains undeclared case state")
+    for name in names[1:-1]:
+        if not _importable(name, version):
+            raise BundleError("the bundle contains undeclared case state")
     if any((info.external_attr >> 16) & 0o170000 == 0o120000 for info in infos):
         raise BundleError("the bundle contains a symbolic link")
     if any(info.is_dir() for info in infos):
@@ -681,7 +801,7 @@ def _manifest(archive: zipfile.ZipFile) -> tuple[list[zipfile.ZipInfo], dict[str
     records = manifest.get("members") if isinstance(manifest, dict) else None
     if not isinstance(records, list):
         raise BundleError("invalid bundle manifest")
-    if manifest.get("format_version") != BUNDLE_FORMAT:
+    if manifest.get("format_version") != version:
         raise BundleError("unsupported bundle manifest")
     by_name: dict[str, dict[str, Any]] = {}
     for record in records:
@@ -696,9 +816,18 @@ def _manifest(archive: zipfile.ZipFile) -> tuple[list[zipfile.ZipInfo], dict[str
     return infos[:-1], by_name
 
 
-def _verify_and_extract(archive_path: Path, target: Path) -> dict[str, Any]:
+def _verify_and_extract(
+    archive_path: Path, case_root: Path, *, declared: int
+) -> dict[str, Any]:
+    """Check every member against the manifest, then write them out.
+
+    `declared` is the format the pre-flight header announced, and it decides
+    both which member names are legal and where they land. It is not trusted on
+    that word alone: the header is verified against the manifest below, and the
+    version it really carries has to be the one the names were checked against.
+    """
     with zipfile.ZipFile(archive_path) as archive:
-        infos, records = _manifest(archive)
+        infos, records = _manifest(archive, declared)
         for info in infos:
             record = records[info.filename]
             expected_size = record.get("size")
@@ -729,6 +858,12 @@ def _verify_and_extract(archive_path: Path, target: Path) -> dict[str, Any]:
             header = _validate_header(json.loads(data))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise BundleError("invalid bundle header") from exc
+        if header["format_version"] != declared:
+            raise BundleError("the bundle format does not match its verified header")
+        # Format 1 named its members relative to the tool root and carried only
+        # the tool's half of the case; format 2 names them relative to the case
+        # folder and carries all of it.
+        target = case_root if declared >= WRAPPED_MEMBERS else layout.tool_root(case_root)
 
         declared_total = sum(records[info.filename]["size"] for info in infos[1:])
         if declared_total != header["total_size"]:
@@ -741,7 +876,11 @@ def _verify_and_extract(archive_path: Path, target: Path) -> dict[str, Any]:
             expected_size = record["size"]
             digest = hashlib.sha256()
             size = 0
-            destination = target / PurePosixPath(info.filename)
+            relative = PurePosixPath(info.filename)
+            if declared >= WRAPPED_MEMBERS:
+                # `_importable` proved the first component is exactly `case`.
+                relative = PurePosixPath(*relative.parts[1:])
+            destination = target / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(info) as src:
                 sink: BinaryIO = destination.open("wb")
@@ -765,6 +904,7 @@ def _verify_and_extract(archive_path: Path, target: Path) -> dict[str, Any]:
 def _prepare_import_database(
     db_path: Path,
     *,
+    media_dir: Path,
     declared_schema: int,
     origin_case_id: str,
     name: str,
@@ -777,7 +917,7 @@ def _prepare_import_database(
             raise BundleError("the case database failed its integrity check")
         if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise BundleError("the case database has broken references")
-    SqliteCase.open(db_path)
+    SqliteCase.open(db_path, media_dir=media_dir)
     with closing(sqlite3.connect(db_path)) as conn:
         for key, value in (
             ("name", name),
@@ -848,34 +988,52 @@ def import_into(
     if staging.exists():
         raise BundleError(f"import staging path '{staging.name}' already exists")
     staging.mkdir()
+    # A format-1 bundle names its members relative to the tool root, so the
+    # directory they extract into has to exist first. A format-2 bundle carries
+    # `azimut/` itself and this is a no-op it does not mind.
+    layout.tool_root(staging).mkdir()
     archive_path = source
     decrypted = staging / ".bundle.zip"
     try:
         if header["sealed"]:
             _decrypt_to(source, decrypted, password or "")
             archive_path = decrypted
-        verified = _verify_and_extract(archive_path, staging)
+        verified = _verify_and_extract(
+            archive_path, staging, declared=int(header["format_version"])
+        )
         decrypted.unlink(missing_ok=True)
-        if not (staging / "case.json").is_file() or not (staging / "case.db").is_file():
+        # The staging directory is a case shell, not a case yet, so it is
+        # addressed through `layout` against its own root rather than through a
+        # `Case`.
+        staged_manifest = layout.manifest(staging)
+        staged_db = layout.extracted_database(staging)
+        if not staged_manifest.is_file() or not staged_db.is_file():
             raise BundleError("the bundle does not contain a complete case")
         name = case.read().get("name", imported_name(verified["case_name"]))
-        manifest = json.loads((staging / "case.json").read_text(encoding="utf-8"))
+        manifest = json.loads(staged_manifest.read_text(encoding="utf-8"))
         manifest["name"] = name
         manifest["updated_at"] = _now()
-        (staging / "case.json").write_bytes(_json_bytes(manifest))
+        staged_manifest.write_bytes(_json_bytes(manifest))
         _prepare_import_database(
-            staging / "case.db",
+            staged_db,
+            media_dir=layout.media(staging),
             declared_schema=verified["case_db_schema"],
             origin_case_id=str(verified.get("origin_case_id") or ""),
             name=name,
         )
         if job is not None:
-            _install_running_job(staging / "case.db", job)
-        for subdir in ("notes", "media", "proofs", "exports", "inspect", "search"):
-            (staging / subdir).mkdir(exist_ok=True)
+            _install_running_job(staged_db, job)
         case.path.rename(old)
         staging.rename(case.path)
         imported = Case.open(case.id)
+        # After the open, because opening is what migrates a case from an older
+        # release: a `.inspect/` created here first would sit in the way of the
+        # `inspect/` that step still has to rename. A ZIP carries no empty
+        # directories, so this is also what gives the case the ones it is born
+        # with — through `ensure_dir`, so the dot-directories are hidden.
+        ensure_dir(layout.data_dir(imported.path))
+        for directory in layout.content_dirs(imported.path):
+            ensure_dir(directory)
         from . import thumbnails
 
         for item in imported.list_media_items():

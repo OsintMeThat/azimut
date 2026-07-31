@@ -55,8 +55,7 @@ def _new_case(client, name):
     return client.post("/api/cases", json={"name": name}).json()["id"]
 
 
-# The filename follows the title everywhere (api/naming.slugify), so these pass
-# short titles and read the slug straight off them.
+# The filename stem is the title everywhere, preserving its readable spelling.
 def _save_proof(client, cid, title, srcs):
     spec = {"panels": [{"id": f"p{i}", "src": s} for i, s in enumerate(srcs)]}
     body = {"title": title, "spec": spec, "png_base64": _png_b64()}
@@ -78,7 +77,7 @@ def test_proof_save_links_to_its_panels(client):
 
     _save_proof(client, cid, "Strike proof", [a, b])
 
-    proof = _entity(client, cid, spec="proofs/strike-proof.json")
+    proof = _entity(client, cid, spec="proofs/.meta/Strike proof.json")
     targets = {lk["to"] for lk in _links(client, cid, "derived-from") if lk["from"] == proof["id"]}
     assert targets == {_entity(client, cid, path=a)["id"], _entity(client, cid, path=b)["id"]}
 
@@ -129,13 +128,13 @@ def test_post_save_links_to_its_proof_and_media(client):
 
     client.post(
         f"/api/cases/{cid}/drafts",
-        json={"title": "Thread", "state": {"proofPng": "proofs/p.png", "mediaPath": a}},
+        json={"title": "Thread", "state": {"proofPng": "proofs/P.png", "mediaPath": a}},
     )
 
-    post = _entity(client, cid, draft="exports/thread.json")
+    post = _entity(client, cid, draft=".drafts/Thread.json")
     targets = {lk["to"] for lk in _links(client, cid, "derived-from") if lk["from"] == post["id"]}
     assert targets == {
-        _entity(client, cid, spec="proofs/p.json")["id"],
+        _entity(client, cid, spec="proofs/.meta/P.json")["id"],
         _entity(client, cid, path=a)["id"],
     }
 
@@ -156,7 +155,7 @@ def test_post_save_links_to_every_selected_media_file(client):
         },
     )
 
-    post = _entity(client, cid, draft="exports/thread.json")
+    post = _entity(client, cid, draft=".drafts/Thread.json")
     targets = {lk["to"] for lk in _links(client, cid, "derived-from") if lk["from"] == post["id"]}
     assert targets == {_entity(client, cid, path=a)["id"], _entity(client, cid, path=b)["id"]}
 
@@ -167,7 +166,7 @@ def test_session_save_depends_on_its_subject(client):
 
     _save_session(client, cid, "Look at a", a)
 
-    session = _entity(client, cid, spec="inspect/look-at-a.json")
+    session = _entity(client, cid, spec=".inspect/Look at a.json")
     depends = _links(client, cid, "depends-on")
     assert len(depends) == 1
     assert depends[0]["from"] == session["id"]
@@ -241,7 +240,7 @@ def test_a_source_deleted_before_the_save_leaves_a_tombstone(client):
 
     _save_proof(client, cid, "P", [a])
 
-    proof = _entity(client, cid, spec="proofs/p.json")
+    proof = _entity(client, cid, spec="proofs/.meta/P.json")
     assert _links(client, cid) == []
     assert proof["attrs"]["lost_sources"] == [
         {"path": a, "at": proof["attrs"]["lost_sources"][0]["at"]}
@@ -288,12 +287,12 @@ def test_deleting_a_subject_deletes_its_session_but_spares_its_outputs(client):
 
     assert res["status"] == "deleted"
     # the session is nothing without its subject: it goes, file and all
-    assert _entity(client, cid, spec="inspect/s.json") is None
-    assert client.get(f"/api/cases/{cid}/inspect/sessions/s").status_code == 404
+    assert _entity(client, cid, spec=".inspect/S.json") is None
+    assert client.get(f"/api/cases/{cid}/inspect/sessions/S").status_code == 404
     # the proof stands on its own: it stays, and its export is untouched
-    proof = _entity(client, cid, spec="proofs/p.json")
+    proof = _entity(client, cid, spec="proofs/.meta/P.json")
     assert proof is not None
-    assert client.get(f"/files/{cid}/proofs/p.png").status_code == 200
+    assert client.get(f"/files/{cid}/proofs/P.png").status_code == 200
 
 
 def test_a_survivor_keeps_a_tombstone_of_what_it_lost(client):
@@ -305,12 +304,12 @@ def test_a_survivor_keeps_a_tombstone_of_what_it_lost(client):
 
     client.delete(f"/api/cases/{cid}/entities/{subject['id']}")
 
-    lost = _entity(client, cid, spec="proofs/p.json")["attrs"]["lost_sources"]
+    lost = _entity(client, cid, spec="proofs/.meta/P.json")["attrs"]["lost_sources"]
     assert len(lost) == 1
     # sha256 + path are what make the loss auditable six months later
     assert lost[0]["sha256"] == sha
     assert lost[0]["path"] == a
-    assert lost[0]["label"] == "strike.png"
+    assert lost[0]["label"] == "strike"
     assert lost[0]["at"].endswith("Z")
 
 
@@ -325,7 +324,7 @@ def test_a_survivor_is_only_scarred_by_what_it_derived_from(client):
 
     client.delete(f"/api/cases/{cid}/entities/{_entity(client, cid, path=a)['id']}")
 
-    lost = _entity(client, cid, spec="proofs/p.json")["attrs"]["lost_sources"]
+    lost = _entity(client, cid, spec="proofs/.meta/P.json")["attrs"]["lost_sources"]
     assert [t["path"] for t in lost] == [a]
 
 
@@ -339,7 +338,7 @@ def test_tombstones_never_stack_on_a_second_delete(client):
     _save_proof(client, cid, "P", [a, b])  # re-save still names the dead path
     client.delete(f"/api/cases/{cid}/entities/{_entity(client, cid, path=b)['id']}")
 
-    lost = _entity(client, cid, spec="proofs/p.json")["attrs"]["lost_sources"]
+    lost = _entity(client, cid, spec="proofs/.meta/P.json")["attrs"]["lost_sources"]
     assert sorted(t["path"] for t in lost) == [a, b]
 
 
@@ -351,16 +350,16 @@ def test_deleting_a_proof_spares_the_post_that_announces_it(client):
     _save_proof(client, cid, "P", [a])
     client.post(
         f"/api/cases/{cid}/drafts",
-        json={"title": "T", "state": {"proofPng": "proofs/p.png", "description": "kept"}},
+        json={"title": "T", "state": {"proofPng": "proofs/P.png", "description": "kept"}},
     )
 
-    client.delete(f"/api/cases/{cid}/entities/{_entity(client, cid, spec='proofs/p.json')['id']}")
+    client.delete(f"/api/cases/{cid}/entities/{_entity(client, cid, spec='proofs/.meta/P.json')['id']}")
 
-    post = _entity(client, cid, draft="exports/t.json")
+    post = _entity(client, cid, draft=".drafts/T.json")
     assert post is not None
-    assert post["attrs"]["lost_sources"][0]["path"] == "proofs/p.png"
+    assert post["attrs"]["lost_sources"][0]["path"] == "proofs/P.png"
     # the thread text itself is untouched
-    assert client.get(f"/api/cases/{cid}/drafts/t").json()["state"]["description"] == "kept"
+    assert client.get(f"/api/cases/{cid}/drafts/T").json()["state"]["description"] == "kept"
 
 
 def test_cascade_is_transitive_through_depends_on(client):
@@ -369,17 +368,17 @@ def test_cascade_is_transitive_through_depends_on(client):
     _save_session(client, cid, "S1", a)
     # a second session opened over the first one's spec — contrived, but it is
     # what a future tool nesting sessions would produce, and it must follow.
-    s1 = _entity(client, cid, spec="inspect/s1.json")
+    s1 = _entity(client, cid, spec=".inspect/S1.json")
     s2 = client.post(
         f"/api/cases/{cid}/entities",
-        json={"type": "inspect-session", "label": "S2", "attrs": {"spec": "inspect/s2.json"}},
+        json={"type": "inspect-session", "label": "S2", "attrs": {"spec": ".inspect/s2.json"}},
     ).json()
     _add_link(cid, s2["id"], s1["id"], "depends-on")
 
     client.delete(f"/api/cases/{cid}/entities/{_entity(client, cid, path=a)['id']}")
 
-    assert _entity(client, cid, spec="inspect/s1.json") is None
-    assert _entity(client, cid, spec="inspect/s2.json") is None
+    assert _entity(client, cid, spec=".inspect/S1.json") is None
+    assert _entity(client, cid, spec=".inspect/s2.json") is None
 
 
 def test_a_session_over_a_frame_survives_the_frames_video_going(client):
@@ -400,8 +399,8 @@ def test_a_session_over_a_frame_survives_the_frames_video_going(client):
 
     client.delete(f"/api/cases/{cid}/entities/{_entity(client, cid, path=video)['id']}")
 
-    assert _entity(client, cid, spec="inspect/on-the-video.json") is None
-    assert _entity(client, cid, spec="inspect/on-the-frame.json") is not None
+    assert _entity(client, cid, spec=".inspect/On the video.json") is None
+    assert _entity(client, cid, spec=".inspect/On the frame.json") is not None
     assert _entity(client, cid, path=frame) is not None
 
 
@@ -428,8 +427,8 @@ def test_the_media_library_delete_honours_the_graph(client):
 
     client.delete(f"/api/cases/{cid}/media?path={a}")
 
-    assert _entity(client, cid, spec="inspect/s.json") is None
-    assert _entity(client, cid, spec="proofs/p.json")["attrs"]["lost_sources"][0]["path"] == a
+    assert _entity(client, cid, spec=".inspect/S.json") is None
+    assert _entity(client, cid, spec="proofs/.meta/P.json")["attrs"]["lost_sources"][0]["path"] == a
 
 
 def test_the_inspect_delete_honours_the_graph(client):
@@ -437,10 +436,10 @@ def test_the_inspect_delete_honours_the_graph(client):
     a = _upload(client, cid, "a.png")["item"]["path"]
     _save_session(client, cid, "S", a)
 
-    client.delete(f"/api/cases/{cid}/inspect/sessions/s")
+    client.delete(f"/api/cases/{cid}/inspect/sessions/S")
 
     # a session deleted on its own takes nothing with it: its subject stands
-    assert _entity(client, cid, spec="inspect/s.json") is None
+    assert _entity(client, cid, spec=".inspect/S.json") is None
     assert _entity(client, cid, path=a) is not None
     assert _links(client, cid) == []
 
@@ -452,7 +451,7 @@ def test_the_satellite_delete_honours_the_graph(client):
 
     client.delete(f"/api/cases/{cid}/satellite?path={a}")
 
-    assert _entity(client, cid, spec="inspect/s.json") is None
+    assert _entity(client, cid, spec=".inspect/S.json") is None
 
 
 def test_a_tool_delete_still_drops_an_unfiled_artifact(client):
@@ -460,13 +459,13 @@ def test_a_tool_delete_still_drops_an_unfiled_artifact(client):
     cid = _new_case(client, "Orphan")
     case = client.get(f"/api/cases/{cid}").json()
     client.post(f"/api/cases/{cid}/proofs", json={"title": "P", "spec": {"panels": []}, "name": "p"})
-    proof = _entity(client, cid, spec="proofs/p.json")
+    proof = _entity(client, cid, spec="proofs/.meta/P.json")
     client.delete(f"/api/cases/{cid}/entities/{proof['id']}")  # entity + files gone
 
     # re-create the file alone, with no entity behind it
     client.post(f"/api/cases/{cid}/proofs", json={"title": "P", "spec": {"panels": []}, "name": "p"})
-    client.delete(f"/api/cases/{cid}/entities/{_entity(client, cid, spec='proofs/p.json')['id']}")
-    assert client.get(f"/api/cases/{cid}/proofs/p").status_code == 404
+    client.delete(f"/api/cases/{cid}/entities/{_entity(client, cid, spec='proofs/.meta/P.json')['id']}")
+    assert client.get(f"/api/cases/{cid}/proofs/P").status_code == 404
     assert case["id"] == cid
 
 
@@ -511,7 +510,7 @@ def test_chain_endpoint_reads_sources_and_dependents(client):
     _save_proof(client, cid, "P", [a])
 
     media = _entity(client, cid, path=a)
-    proof = _entity(client, cid, spec="proofs/p.json")
+    proof = _entity(client, cid, spec="proofs/.meta/P.json")
 
     proof_chain = client.get(f"/api/cases/{cid}/entities/{proof['id']}/chain").json()
     assert proof_chain["entity"]["id"] == proof["id"]
@@ -532,7 +531,7 @@ def test_chain_endpoint_includes_lost_sources_and_404s(client):
     client.delete(f"/api/cases/{cid}/media?path={a}")
     _save_proof(client, cid, "P", [a])  # source gone → tombstone, no edge
 
-    proof = _entity(client, cid, spec="proofs/p.json")
+    proof = _entity(client, cid, spec="proofs/.meta/P.json")
     chain = client.get(f"/api/cases/{cid}/entities/{proof['id']}/chain").json()
     assert [t["path"] for t in chain["lost"]] == [a]
     assert chain["empty"] is False
@@ -623,7 +622,7 @@ def test_derivation_endpoint_returns_the_closure_and_404s(client):
     a = _upload(client, cid, "a.png", _png_bytes((1, 2, 3)))["item"]["path"]
     b = _upload(client, cid, "b.png", _png_bytes((4, 5, 6)))["item"]["path"]
     _save_proof(client, cid, "P", [a, b])
-    proof = _entity(client, cid, spec="proofs/p.json")
+    proof = _entity(client, cid, spec="proofs/.meta/P.json")
 
     sub = client.get(f"/api/cases/{cid}/entities/{proof['id']}/derivation").json()
     ids = {e["id"] for e in sub["entities"]}

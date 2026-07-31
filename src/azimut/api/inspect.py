@@ -21,6 +21,7 @@ from ..engine import links as link_engine
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
 from .naming import read_created_at, slugify
+from .. import layout
 
 router = APIRouter(prefix="/api", tags=["inspect"])
 
@@ -106,7 +107,7 @@ class AnalyzeIn(BaseModel):
 
 class SessionIn(BaseModel):
     # The filename always follows the title, so renaming a saved session moves
-    # its file. ``rename_from`` is the slug the workspace is currently bound to
+    # its file. ``rename_from`` is the stem the workspace is currently bound to
     # (absent on a first save); a save that lands elsewhere renames that file in
     # place instead of leaving a copy behind under the old name.
     rename_from: str | None = None
@@ -290,7 +291,7 @@ def _now() -> str:
 def list_sessions(case_id: str) -> list[dict[str, Any]]:
     case = get_case(case_id)
     out = []
-    for spec_path in sorted(case.subdir("inspect").glob("*.json")):
+    for spec_path in sorted(case.subdir(layout.INSPECT_DIR).glob("*.json")):
         try:
             spec = json.loads(spec_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -319,7 +320,7 @@ def list_sessions(case_id: str) -> list[dict[str, Any]]:
 def load_session(case_id: str, name: str) -> dict[str, Any]:
     case = get_case(case_id)
     try:
-        spec_path = case.resolve_inside(f"inspect/{name}.json")
+        spec_path = case.resolve_inside(layout.session_rel(name))
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     if not spec_path.exists():
@@ -330,24 +331,25 @@ def load_session(case_id: str, name: str) -> dict[str, Any]:
 @router.post("/cases/{case_id}/inspect/sessions")
 def save_session(case_id: str, body: SessionIn) -> dict[str, Any]:
     case = get_case(case_id)
-    sessions_dir = case.subdir("inspect")
-    name = slugify(body.title, "session")
-    rel = f"inspect/{name}.json"
-    spec_path = sessions_dir / f"{name}.json"
+    case.subdir(layout.INSPECT_DIR)  # born on first save, so the folder exists
+    name = slugify(body.title, "Inspect")
+    rel = layout.session_rel(name)
+    spec_path = case.resolve_inside(rel)
 
     # A rename lands on a free name or not at all: taking a name another session
     # holds would leave two entities pointing at one file, and there is no sane
     # merge of the two. The first save of an unbound workspace still writes over
     # a same-named session — there the analyst is updating that one.
     old = slugify(body.rename_from, "session") if body.rename_from else None
-    old_rel = f"inspect/{old}.json" if old and old != name else None
+    old_rel = layout.session_rel(old) if old and old != name else None
     if old_rel and spec_path.exists():
         raise HTTPException(status_code=409, detail="another session already uses that name")
 
     spec = dict(body.spec)
     spec["azimut_inspect"] = 1
-    spec["title"] = body.title
-    spec.setdefault("created_at", read_created_at(sessions_dir / f"{old or name}.json") or _now())
+    spec["title"] = name
+    previous = case.resolve_inside(layout.session_rel(old or name))
+    spec.setdefault("created_at", read_created_at(previous) or _now())
     spec["updated_at"] = _now()
     spec_path.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
@@ -355,17 +357,17 @@ def save_session(case_id: str, body: SessionIn) -> dict[str, Any]:
     # rename keeps the session's folder, notes and links.
     existing = case.find_entity(attr="spec", value=old_rel or rel)
     if existing:
-        patch: dict[str, Any] = {"label": body.title}
+        patch: dict[str, Any] = {"label": name}
         if old_rel:
             patch["attrs"] = {"spec": rel}
         case.update_entity(existing["id"], patch)
         entity_id = existing["id"]
     else:
         entity_id = case.add_entity(
-            "inspect-session", body.title, attrs={"spec": rel}, by="inspect"
+            "inspect-session", name, attrs={"spec": rel}, by="inspect"
         )["id"]
     if old_rel:
-        (sessions_dir / f"{old}.json").unlink(missing_ok=True)
+        case.resolve_inside(layout.session_rel(str(old))).unlink(missing_ok=True)
 
     # A session is only adjustments and crops over its subject — nothing usable
     # is left of it once the subject is gone, so it depends on it and is deleted
@@ -378,13 +380,13 @@ def save_session(case_id: str, body: SessionIn) -> dict[str, Any]:
         [spec.get("source", {}).get("path")],
         by="inspect",
     )
-    return {"name": name, "spec_path": rel}
+    return {"name": name, "title": name, "spec_path": rel}
 
 
 @router.delete("/cases/{case_id}/inspect/sessions/{name}")
 def delete_session(case_id: str, name: str) -> dict[str, Any]:
     case = get_case(case_id)
-    rel = f"inspect/{name}.json"
+    rel = layout.session_rel(name)
     try:
         case.resolve_inside(rel)
     except CaseError as exc:

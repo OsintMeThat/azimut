@@ -1099,7 +1099,8 @@
       const res = await api.post(`/api/cases/${caseState.current.id}/inspect/sessions`, {
         rename_from: openedSession?.name ?? null, title, spec: sessionSpec(),
       });
-      openedSession = { name: res.name, title };
+      sessionName = res.title;
+      openedSession = { name: res.name, title: res.title };
       savedSignature = signature();
       await reloadCase();
       toast('Session saved. Reopen it from the sidebar', 'ok');
@@ -1538,7 +1539,7 @@
                   <span class="source-copy">
                     <span class="source-title">{m.title || m.filename}</span>
                     <span class="source-meta">
-                      {sourceCategory(m)}{m.folder ? ` · ${m.folder}` : ''}{m.title && m.filename !== m.title ? ` · ${m.filename}` : ''}
+                      {sourceCategory(m)}{m.folder ? ` · ${m.folder}` : ''}
                     </span>
                   </span>
                 </button>

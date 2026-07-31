@@ -36,7 +36,7 @@ export const updateState = $state({
   show: false,
   latest: '', // the newer release tag, e.g. "v0.2.0"
   url: '', // where to download it
-  notes: '', // the release body (rendered as plain text)
+  notes: '', // the release body, Markdown
 });
 
 /** Render a lat/lon the way the user asked for it. The tools' one entry point. */
@@ -112,6 +112,7 @@ export async function dismissUpdate(mute = false) {
 export const caseState = $state({
   current: null, // { id, name, scratch, entities, links, ... }
   list: [],
+  folders: [], // workspace folders that are not cases yet: { name, state }
   loading: false,
   rev: 0, // bumped on every reload so tools can re-fetch their own artifacts
 });
@@ -215,6 +216,31 @@ export function toast(message, kind = 'info', timeout = 3800, action = null) {
 export async function refreshCaseList({ q } = {}) {
   const query = q?.trim();
   caseState.list = await api.get(`/api/cases${query ? `?q=${encodeURIComponent(query)}` : ''}`);
+  // Folders the analyst made in the workspace and Azimut has not been told
+  // about yet. Not a case list, so it takes no query; the switcher filters it.
+  try {
+    caseState.folders = await api.get('/api/workspace/folders');
+  } catch {
+    caseState.folders = []; // never keep the switcher from listing real cases
+  }
+}
+
+/**
+ * Make a case out of a workspace folder, in place. Nothing inside it moves:
+ * the files stay in the analyst's half of the case folder.
+ */
+export async function adoptFolder(name) {
+  const adopted = await api.post('/api/workspace/folders/adopt', { name });
+  await refreshCaseList();
+  await openCase(adopted.id);
+  return adopted;
+}
+
+/** Write back the manifest of a folder holding a case that lost it. */
+export async function recoverFolder(name) {
+  const recovered = await api.post('/api/workspace/folders/recover', { name });
+  await refreshCaseList();
+  return recovered;
 }
 
 // Remember the last open case across page reloads so work is never "lost".
