@@ -9,7 +9,8 @@
     clampNotebookHelpPosition, clampNotebookSplit, loadNotebookSplit, loadNotebookText,
     saveNotebookSplit,
   } from '../lib/notebook.js';
-  import { downloadNotebookPdf } from '../lib/notebookPdf.js';
+  import { exportNotes, revealExports } from '../lib/notesExport.js';
+  import { destinationLabel, readDestinations } from '../lib/exportDest.js';
   import { insertNotebookText, notebookImageMarkdown, notebookMediaMarkdown } from '../lib/notebookContent.js';
   import { caseTab, closeNotebookTab, openNotebookTab } from '../lib/notebookTabs.js';
   import { openEntity } from '../lib/navigate.js';
@@ -19,6 +20,7 @@
   import SearchInput from '../components/SearchInput.svelte';
   import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
+  import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import Modal from '../components/Modal.svelte';
   import FolderSelect from '../components/FolderSelect.svelte';
 
@@ -53,6 +55,16 @@
   let noteModalSaving = $state(false);
   let noteAction = $state(null);
   let noteActionBusy = $state(false);
+  let exportOpen = $state(false);
+  let singleExportOpen = $state(false);
+  let singleExportId = $state('case');
+  let exportBusy = $state(false);
+  let exportQuery = $state('');
+  let exportSelection = $state(new Set());
+  // Where the PDFs land, app-wide and remembered. Empty = the case's own
+  // exports folder, so a fresh install exports without being asked anything.
+  let exportDir = $state('');
+  let exportPicker = $state(false);
 
   let text = $state('');
   let loadedKey = $state('');
@@ -84,6 +96,17 @@
     .filter((entity) => entity.type === 'note')
     .sort((a, b) => a.label.localeCompare(b.label)));
   const filteredNotes = $derived(noteEntities.filter((entity) => matchesNote(entity, query)));
+  // What the export dialog ticks: the case's own scratchpad first, then every
+  // filed note. The scratchpad has no entity, so it carries the same id the
+  // export route reads it under.
+  const exportChoices = $derived([
+    { id: 'case', label: 'Case notes', folder: '' },
+    ...noteEntities.map((entity) => ({
+      id: entity.id,
+      label: entity.label,
+      folder: entity.attrs?.folder ?? '',
+    })),
+  ].filter((choice) => matchesTerms(`${choice.label} ${choice.folder}`, exportQuery)));
   const referenceEntities = $derived(graphEntities
     .filter((entity) => entity.provenance?.status !== 'suggested')
     .filter((entity) => `${entity.label} ${entity.type}`.toLowerCase().includes(referenceQuery.trim().toLowerCase()))
@@ -372,13 +395,71 @@
     saveNotebookSplit(split);
   }
 
-  function downloadPdf() {
-    // Read the live preview, not the sanitized string: diagrams are drawn into
-    // the DOM afterwards and would otherwise print as their source.
-    const content = previewEl?.innerHTML ?? preview;
-    if (!downloadNotebookPdf({ title, content })) {
-      toast('Allow popups to save the PDF.', 'warn');
+  /**
+   * Export a selection of notes, one PDF each, into the notes export folder.
+   *
+   * The backend renders from what is on disk, so a pending edit is flushed
+   * first — otherwise the analyst exports the note as it was 700 ms ago.
+   */
+  async function runExport(noteIds) {
+    if (!caseState.current || exportBusy) return;
+    const caseId = caseState.current.id;
+    exportBusy = true;
+    try {
+      clearTimeout(saveTimer);
+      if (!saved) await save(endpoint, key, text, editVersion);
+      const result = await exportNotes(caseId, noteIds);
+      exportOpen = false;
+      singleExportOpen = false;
+      const count = result.written.length;
+      toast(
+        `${count} PDF${count > 1 ? 's' : ''} written to ${destinationLabel(result.path)}`,
+        'ok',
+        5200,
+        {
+          label: 'Show',
+          onClick: () => revealExports(caseId).catch((error) => toast(error.message, 'warn')),
+        },
+      );
+      for (const warning of result.warnings) toast(warning, 'warn', 6500);
+    } catch (error) {
+      toast(`Export failed: ${error.message}`, 'danger');
+    } finally {
+      exportBusy = false;
     }
+  }
+
+  function readExportDestination() {
+    readDestinations()
+      .then((dirs) => (exportDir = dirs.notes))
+      .catch(() => {});
+  }
+
+  function openCurrentExportDialog() {
+    singleExportId = noteId ?? 'case';
+    singleExportOpen = true;
+    readExportDestination();
+  }
+
+  function openExportDialog() {
+    exportSelection = new Set([noteId ?? 'case']);
+    exportQuery = '';
+    exportOpen = true;
+    closeNotesMenu();
+    // Read it here rather than on mount: the destination only matters once the
+    // analyst is looking at the dialog that shows it.
+    readExportDestination();
+  }
+
+  function toggleExportNote(id) {
+    const next = new Set(exportSelection);
+    if (!next.delete(id)) next.add(id);
+    exportSelection = next;
+  }
+
+  function toggleExportAll() {
+    const all = exportChoices.map((choice) => choice.id);
+    exportSelection = new Set(exportSelection.size === all.length ? [] : all);
   }
 
   function toggleMarkdownHelp() {
@@ -577,8 +658,11 @@
           </div>
         {/each}
       </div>
-      <button class="btn btn-ghost btn-sm new-note-button" title="New note" aria-label="New note" onclick={openNewNote}>
+      <button class="btn btn-ghost btn-sm bar-button" title="New note" aria-label="New note" onclick={openNewNote}>
         <Icon name="plus" size={15} />
+      </button>
+      <button class="btn btn-ghost btn-sm bar-button" title="Export several notes as PDF" aria-label="Export several notes as PDF" onclick={openExportDialog}>
+        <Icon name="layers" size={15} />
       </button>
 
       <div class="bar-actions">
@@ -728,7 +812,7 @@ flowchart LR
       </section>
       <button class="splitter" aria-label="Resize writer and preview" title="Drag to resize · double-click to reset" onpointerdown={startResize} ondblclick={resetSplit} onkeydown={onSplitterKey}></button>
       <article class="pane reader">
-        <div class="pane-title"><span>Preview</span><div class="preview-actions"><button class="btn btn-ghost btn-sm" title="Download PDF" aria-label="Download PDF" onclick={downloadPdf}><Icon name="download" size={14} /></button><button class="btn btn-ghost btn-sm preview-toggle" title={previewOnly ? 'Show writer' : 'Preview only'} onclick={() => (previewOnly = !previewOnly)}><Icon name={previewOnly ? 'minimize' : 'maximize'} size={14} /></button></div></div>
+        <div class="pane-title"><span>Preview</span><div class="preview-actions"><button class="btn btn-ghost btn-sm" title="Export this note as PDF" aria-label="Export this note as PDF" disabled={exportBusy} onclick={openCurrentExportDialog}><Icon name="download" size={14} /></button><button class="btn btn-ghost btn-sm preview-toggle" title={previewOnly ? 'Show writer' : 'Preview only'} onclick={() => (previewOnly = !previewOnly)}><Icon name={previewOnly ? 'minimize' : 'maximize'} size={14} /></button></div></div>
         <div bind:this={previewEl} class="markdown" aria-label="Markdown preview" use:bindEntityLinks>{@html preview}</div>
       </article>
     </div>
@@ -749,6 +833,82 @@ flowchart LR
         </button>
       </div>
     </Modal>
+  {/if}
+  {#if singleExportOpen}
+    <Modal title="Export note as PDF" onclose={() => (singleExportOpen = false)} width="560px">
+      <div class="export-dest">
+        <span class="dest-label">Destination</span>
+        <span class="dest-path mono" title={exportDir || "The case's own exports folder"}>
+          {exportDir || "the case's exports folder"}
+        </span>
+        <button class="btn btn-ghost btn-sm" onclick={() => (exportPicker = true)}>Change</button>
+      </div>
+      <p class="export-note">
+        One PDF will be written.
+        {#if exportDir}Files already there are kept.{:else}An existing file with the same name is replaced.{/if}
+      </p>
+      <div class="modal-row">
+        <div style="flex:1"></div>
+        <button class="btn" onclick={() => (singleExportOpen = false)}>Cancel</button>
+        <button class="btn btn-primary" disabled={exportBusy} onclick={() => runExport([singleExportId])}>
+          {exportBusy ? 'Exporting…' : 'Export PDF'}
+        </button>
+      </div>
+    </Modal>
+  {/if}
+  {#if exportOpen}
+    <Modal title="Export notes as PDF" onclose={() => (exportOpen = false)} width="560px">
+      {#if exportChoices.length > NOTE_SEARCH_MIN}
+        <SearchInput bind:value={exportQuery} placeholder="Find a note…" />
+      {/if}
+      <div class="export-list">
+        {#each exportChoices as choice (choice.id)}
+          <label class="export-row">
+            <input
+              type="checkbox"
+              checked={exportSelection.has(choice.id)}
+              onchange={() => toggleExportNote(choice.id)}
+            />
+            <span class="export-name">{choice.label}</span>
+            {#if choice.folder}<small>{choice.folder}</small>{/if}
+          </label>
+        {/each}
+        {#if !exportChoices.length}<p class="export-empty">No matching notes.</p>{/if}
+      </div>
+      <div class="export-dest">
+        <span class="dest-label">Destination</span>
+        <span class="dest-path mono" title={exportDir || "The case's own exports folder"}>
+          {exportDir || "the case's exports folder"}
+        </span>
+        <button class="btn btn-ghost btn-sm" onclick={() => (exportPicker = true)}>Change</button>
+      </div>
+      <p class="export-note">
+        One PDF per note.
+        {#if exportDir}Files already there are kept.{:else}Existing files are replaced.{/if}
+      </p>
+      <div class="modal-row">
+        <button class="btn btn-ghost btn-sm" onclick={toggleExportAll}>
+          {exportSelection.size === exportChoices.length ? 'Clear' : 'Select all'}
+        </button>
+        <div style="flex:1"></div>
+        <button class="btn" onclick={() => (exportOpen = false)}>Cancel</button>
+        <button
+          class="btn btn-primary"
+          disabled={exportBusy || !exportSelection.size}
+          onclick={() => runExport([...exportSelection])}
+        >
+          {exportBusy ? 'Exporting…' : `Export ${exportSelection.size || ''}`}
+        </button>
+      </div>
+    </Modal>
+  {/if}
+  {#if exportPicker}
+    <ExportFolderPicker
+      kind="notes"
+      current={exportDir}
+      onclose={() => (exportPicker = false)}
+      onchosen={(path) => (exportDir = path)}
+    />
   {/if}
   {#if noteAction}
     <ConfirmDialog
@@ -788,8 +948,8 @@ flowchart LR
   .menu-empty { margin: 8px; color: var(--text-3); font-size: var(--fs-sm); }
   .tabs { flex: 1; min-width: 0; display: flex; align-items: stretch; overflow-x: auto; scrollbar-width: none; }
   .tabs::-webkit-scrollbar { display: none; }
-  .new-note-button { flex-shrink: 0; align-self: center; color: var(--text-2); }
-  .new-note-button:hover { color: var(--accent); }
+  .bar-button { flex-shrink: 0; align-self: center; color: var(--text-2); }
+  .bar-button:hover { color: var(--accent); }
   .tab { display: flex; align-items: center; max-width: 180px; color: var(--text-3); border-bottom: 2px solid transparent; font-size: var(--fs-sm); white-space: nowrap; }
   .tab:hover { color: var(--text-1); background: var(--bg-2); }
   .tab.active { color: var(--text-1); border-bottom-color: var(--accent); }
@@ -868,6 +1028,16 @@ flowchart LR
   .reference-row small { color: var(--text-3); font-size: var(--fs-xs); }
   .preview-toggle { margin: -6px -7px -6px 0; }
   .preview-actions { display: flex; align-items: center; gap: 2px; }
+  .export-list { max-height: 46vh; margin: 10px 0 0; overflow-y: auto; }
+  .export-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px; border-radius: var(--r-sm); color: var(--text-2); font-size: var(--fs-sm); cursor: pointer; }
+  .export-row:hover { background: var(--bg-2); color: var(--text-1); }
+  .export-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .export-row small { color: var(--text-3); font-size: var(--fs-xs); }
+  .export-empty { padding: 14px 7px; color: var(--text-3); font-size: var(--fs-sm); }
+  .export-note { margin: 6px 0 0; color: var(--text-3); font-size: var(--fs-xs); }
+  .export-dest { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .dest-label { color: var(--text-3); font-size: var(--fs-xs); }
+  .dest-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); }
   /* The shared rendered-Markdown rules live in app.css; what follows is what
      only the Notebook preview shows. */
   .markdown { margin-top: 10px; }

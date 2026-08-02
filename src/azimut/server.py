@@ -11,6 +11,7 @@ from typing import Any, AsyncIterator
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__, config
 from .engine import workspacelock, workspacemove
@@ -32,6 +33,67 @@ SERVE_PORT: int | None = None
 # web Origin is turned away on every route except the token-gated ingest
 # island, which opens itself to browser-extension origins on purpose.
 LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
+
+class NotesPdfBodyLimit:
+    """Bound the one JSON route that can carry binary images before parsing."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    @staticmethod
+    def _matches(scope: Scope) -> bool:
+        parts = str(scope.get("path", "")).split("/")
+        return scope.get("method") == "POST" and len(parts) == 6 and (
+            parts[1], parts[2], parts[4], parts[5]
+        ) == ("api", "cases", "notes", "pdf")
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not self._matches(scope):
+            await self.app(scope, receive, send)
+            return
+
+        # Import lazily so the route owns the limit and tests can lower it
+        # without rebuilding the application.
+        from .api import notes
+
+        headers = dict(scope.get("headers", []))
+        raw_length = headers.get(b"content-length", b"")
+        try:
+            content_length = int(raw_length) if raw_length else None
+        except ValueError:
+            content_length = None
+        if content_length is not None and content_length > notes.MAX_PDF_BODY_BYTES:
+            await JSONResponse(
+                {"detail": "request body too large"}, status_code=413
+            )(scope, receive, send)
+            return
+
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                break
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > notes.MAX_PDF_BODY_BYTES:
+                await JSONResponse(
+                    {"detail": "request body too large"}, status_code=413
+                )(scope, receive, send)
+                return
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+
+        sent = False
+
+        async def replay() -> Message:
+            nonlocal sent
+            if sent:
+                return {"type": "http.disconnect"}
+            sent = True
+            return {"type": "http.request", "body": bytes(body), "more_body": False}
+
+        await self.app(scope, replay, send)
 
 
 def _hostname(value: str) -> str:
@@ -169,16 +231,21 @@ def create_app() -> FastAPI:
         title="Azimut", version=__version__, docs_url="/api/docs", lifespan=lifespan
     )
 
-    from .api import cases, drafts, events, files, ingest, inspect, media, proofs, satellite, settings, templates
+    from .api import (
+        cases, drafts, events, files, folders, ingest, inspect, media, notes, proofs,
+        satellite, settings, templates,
+    )
 
     app.include_router(cases.router)
     app.include_router(cases.workspace_router)
+    app.include_router(notes.router)
     app.include_router(media.router)
     app.include_router(inspect.router)
     app.include_router(satellite.router)
     app.include_router(proofs.router)
     app.include_router(drafts.router)
     app.include_router(files.router)
+    app.include_router(folders.router)
     app.include_router(settings.router)
     app.include_router(ingest.router)
     app.include_router(events.router)
@@ -188,6 +255,8 @@ def create_app() -> FastAPI:
     # Inside the local guard: a request that isn't allowed to reach the app at
     # all should not learn whether the workspace is there.
     install_availability_guard(app)
+    # Bound diagram-carrying JSON before FastAPI/Pydantic materialises it.
+    app.add_middleware(NotesPdfBodyLimit)
     # last, so it wraps everything: refuse non-loopback Host / cross-origin web
     install_local_guard(app)
 

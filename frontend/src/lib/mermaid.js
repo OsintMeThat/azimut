@@ -34,6 +34,16 @@ const CONFIG = {
   },
 };
 
+/**
+ * Per-diagram config for the PDF export, prepended to the source rather than
+ * initialised globally so the preview keeps its own settings. HTML labels are a
+ * `<foreignObject>` — HTML nested inside the picture — and a browser will not
+ * rasterise one out of an image element, so a diagram exported that way comes
+ * back with empty boxes where its text should be.
+ */
+const PLAIN_LABELS = '%%{init: {"flowchart": {"htmlLabels": false}, '
+  + '"class": {"htmlLabels": false}, "er": {"htmlLabels": false}} }%%\n';
+
 let loading = null;
 let sequence = 0;
 
@@ -44,6 +54,29 @@ function loadMermaid() {
     return mermaid;
   });
   return loading;
+}
+
+/**
+ * One diagram drawn to a standalone SVG, with the size it wants to be.
+ *
+ * Mermaid sizes its output through a `max-width` style and a viewBox, neither of
+ * which a canvas reads, so the intrinsic size is put back on the element before
+ * the caller rasterises it.
+ */
+export async function renderMermaidSvg(source, { load = loadMermaid } = {}) {
+  const mermaid = await load();
+  const id = `azimut-mermaid-export-${(sequence += 1)}`;
+  const { svg } = await mermaid.render(id, `${PLAIN_LABELS}${source}`);
+  const element = new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement;
+  const [, , boxWidth, boxHeight] = (element.getAttribute('viewBox') ?? '0 0 800 600')
+    .split(/[\s,]+/)
+    .map(Number);
+  const width = boxWidth || 800;
+  const height = boxHeight || 600;
+  element.setAttribute('width', String(width));
+  element.setAttribute('height', String(height));
+  element.removeAttribute('style');
+  return { svg: new XMLSerializer().serializeToString(element), width, height };
 }
 
 function failed(node, message) {

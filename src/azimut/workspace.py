@@ -819,6 +819,9 @@ class Case:
     def get_entity(self, entity_id: str) -> dict[str, Any] | None:
         return self._graph().get_entity(entity_id)
 
+    def note_ids_by_titles(self, titles: set[str]) -> dict[str, list[str]]:
+        return self._graph().note_ids_by_titles(titles)
+
     def entity_count(self) -> int:
         """Entity total for the case switcher — one indexed count."""
         return self._graph().count_entities()
@@ -1133,6 +1136,8 @@ class Case:
         attrs = entity.get("attrs") or {}
         incoming = patch.get("attrs") or {}
         if incoming.get("path"):
+            if "label" in patch:
+                patch["label"] = layout.slugify(str(patch["label"]), "Note")
             return  # the caller is stating where the file is, not renaming it
         label = patch.get("label", entity.get("label"))
         folder = incoming.get("folder", attrs.get("folder") or "")

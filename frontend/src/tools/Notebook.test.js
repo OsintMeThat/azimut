@@ -55,13 +55,25 @@ describe('Notebook note creation', () => {
     expect(body).not.toContain('aria-label="Delete note"');
   });
 
-  it('places PDF download beside the preview-only control', () => {
+  it('offers both PDF exports beside the preview-only control', () => {
     caseState.current = { id: 'case-1', entities: [] };
 
     const { body } = render(Notebook);
 
-    expect(body).toContain('aria-label="Download PDF"');
-    expect(body.indexOf('aria-label="Download PDF"')).toBeLessThan(body.indexOf('title="Preview only"'));
+    // The open note has its own destination dialog; another dialog selects several.
+    expect(body).toContain('aria-label="Export this note as PDF"');
+    expect(body).toContain('aria-label="Export several notes as PDF"');
+    expect(body.indexOf('aria-label="Export this note as PDF"'))
+      .toBeLessThan(body.indexOf('title="Preview only"'));
+  });
+
+  it('opens a destination dialog before exporting the current note', () => {
+    expect(source).toContain('onclick={openCurrentExportDialog}');
+    expect(source).toContain('<Modal title="Export note as PDF"');
+    expect(source).toContain('singleExportId = noteId ?? \'case\';');
+    expect(source).toContain('onclick={() => (exportPicker = true)}>Change</button>');
+    expect(source).toContain('onclick={() => runExport([singleExportId])}');
+    expect(source).toContain("{exportBusy ? 'Exporting…' : 'Export PDF'}");
   });
 
 });

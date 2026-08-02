@@ -1,7 +1,7 @@
 import { Window } from 'happy-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { markdownHtml } from './markdown.js';
-import { drawMermaidDiagrams } from './mermaid.js';
+import { drawMermaidDiagrams, renderMermaidSvg } from './mermaid.js';
 
 function preview(markdown) {
   const { document } = new Window();
@@ -65,5 +65,42 @@ describe('drawMermaidDiagrams', () => {
     expect(await drawMermaidDiagrams(root, { load })).toBe(1);
     expect(root.querySelector('.mermaid-error').textContent)
       .toBe('Diagram not drawn: diagram support could not be loaded');
+  });
+});
+
+describe('renderMermaidSvg', () => {
+  const window = new Window();
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  function browser() {
+    vi.stubGlobal('DOMParser', window.DOMParser);
+    vi.stubGlobal('XMLSerializer', window.XMLSerializer);
+  }
+
+  it('gives the diagram the size a canvas can read', async () => {
+    browser();
+    const render = vi.fn().mockResolvedValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" style="max-width: 320px"></svg>',
+    });
+
+    const drawn = await renderMermaidSvg('flowchart LR\n  A --> B', { load: async () => ({ render }) });
+
+    expect(drawn).toMatchObject({ width: 320, height: 180 });
+    expect(drawn.svg).toContain('width="320"');
+    expect(drawn.svg).toContain('height="180"');
+    // The style is what mermaid sizes itself with on screen, and what would
+    // shrink the diagram to nothing once it is drawn onto a canvas.
+    expect(drawn.svg).not.toContain('max-width');
+  });
+
+  it('turns HTML labels off, which an image element cannot rasterise', async () => {
+    browser();
+    const render = vi.fn().mockResolvedValue({ svg: '<svg viewBox="0 0 10 10"></svg>' });
+
+    await renderMermaidSvg('flowchart LR\n  A --> B', { load: async () => ({ render }) });
+
+    expect(render.mock.calls[0][1]).toContain('"htmlLabels": false');
+    expect(render.mock.calls[0][1]).toContain('flowchart LR');
   });
 });
