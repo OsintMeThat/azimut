@@ -20,6 +20,7 @@ the workspace" — that is `config`'s pointer file, and writing it is the switch
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import shutil
@@ -80,6 +81,10 @@ SKIPPED_DIRS = ("cache",)
 #: mandatory range lock, and `copy2` on it failed the whole move with "another
 #: process has locked a portion of the file".
 SKIPPED_FILES = (workspacelock.LOCK_NAME,)
+
+#: One megabyte keeps hashing memory flat while avoiding tiny reads on a large
+#: media workspace.
+VERIFY_CHUNK_SIZE = 1024 * 1024
 
 
 # -- comparing two paths on three operating systems ---------------------------
@@ -589,9 +594,26 @@ def _step_copy(move: Move, staging: Path) -> None:
         move.copied_bytes += destination.stat().st_size
 
 
+def _file_identity(path: Path) -> tuple[int, int, int, int, int]:
+    stat = path.stat()
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+
+def _verified_digest(path: Path) -> tuple[bytes, tuple[int, int, int, int, int]]:
+    """SHA-256 plus the identity that stayed stable for the whole read."""
+    before = _file_identity(path)
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(VERIFY_CHUNK_SIZE), b""):
+            digest.update(chunk)
+    after = _file_identity(path)
+    if after != before:
+        raise MoveError(f"{path.name} changed while it was being verified")
+    return digest.digest(), before
+
+
 def _step_verify(move: Move, staging: Path) -> None:
-    """Every file, by name and by size. Until this passes the old folder is
-    still the workspace, and nothing has been switched."""
+    """Every file, by name, size and content before the pointer switches."""
     move.step = "verifying"
     for source_dir in _copyable_dirs(move.source):
         if not (staging / source_dir.relative_to(move.source)).is_dir():
@@ -605,6 +627,17 @@ def _step_verify(move: Move, staging: Path) -> None:
             raise MoveError(f"the copy is missing {source_file.name}") from exc
         if expected != actual:
             raise MoveError(f"the copy of {source_file.name} is a different size")
+        try:
+            expected_digest, source_identity = _verified_digest(source_file)
+            actual_digest, copied_identity = _verified_digest(copied)
+            if _file_identity(source_file) != source_identity:
+                raise MoveError(f"{source_file.name} changed while it was being verified")
+            if _file_identity(copied) != copied_identity:
+                raise MoveError(f"{copied.name} changed while it was being verified")
+        except OSError as exc:
+            raise MoveError(f"the copy could not verify {source_file.name}") from exc
+        if expected_digest != actual_digest:
+            raise MoveError(f"the copy of {source_file.name} has different contents")
 
 
 def _step_switch(move: Move, staging: Path) -> None:

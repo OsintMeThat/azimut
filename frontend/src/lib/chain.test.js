@@ -17,7 +17,7 @@ const link = (from, to, type = 'derived-from') => ({ id: `l_${from}${to}`, from,
 const entities = [
   ent('video', 'media', { path: 'media/v.mp4', sha256: 'abc', source_url: 'https://x/1' }),
   ent('frame', 'media', { path: 'media/f.png' }),
-  ent('proof', 'proof', { spec: 'proofs/p.json', path: 'proofs/p.png' }),
+  ent('proof', 'proof', { spec: 'proofs/.meta/p.json', path: 'proofs/p.png' }),
   ent('post', 'post', { draft: 'exports/d.json' }),
   ent('session', 'inspect-session', { spec: 'inspect/s.json' }),
 ];
