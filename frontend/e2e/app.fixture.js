@@ -22,8 +22,12 @@ const media = [{
   kind: 'image',
   width: 640,
   height: 360,
+  size: 256,
+  sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
   source: { type: 'upload' },
   thumbnail: null,
+  thumb_state: 'ready',
+  enrich_state: 'ready',
   folder: '',
   notes: '',
 }];
@@ -48,6 +52,17 @@ const settings = {
   post_mention: '@GeoConfirmed',
   post_target: 'x',
   signature_handle: '',
+  signature: false,
+  export_dirs: { notes: '', media: '', proofs: '' },
+  api_keys: {},
+  providers_enabled: {},
+  free_tiers: {},
+  eco_max_zooms: {},
+  provider_status: {},
+  ingest_token: '',
+  version: '0.2.7',
+  workspace_root: '/tmp/azimut-browser-fixture',
+  extension_version: '0.2.7',
   update_check_on_start: false,
   update_dismissed_version: '',
   usage: {},
@@ -115,6 +130,16 @@ export async function installAppFixture(page, options = {}) {
   const savedIndexDelays = options.savedIndexDelays ?? {};
   const proofIndexDelays = options.proofIndexDelays ?? {};
   const fixtureDrafts = options.drafts ?? {};
+  const fixtureSettings = {
+    ...settings,
+    export_dirs: { ...settings.export_dirs, ...(options.exportDirs ?? {}) },
+  };
+  const settingsWrites = [];
+  const folderWrites = [];
+  const exportWrites = [];
+  const fixtureFolderRoots = options.folderRoots ?? [];
+  const fixtureFolderViews = { ...(options.folderViews ?? {}) };
+  const fixtureLookupEntities = options.lookupEntities ?? {};
   const trashGroups = [...(options.trashGroups ?? [])];
   const trashWrites = [];
   const bundleCalls = [];
@@ -157,7 +182,46 @@ export async function installAppFixture(page, options = {}) {
     if (path === '/api/settings/signature.png') {
       return route.fulfill({ status: 404, body: '' });
     }
-    if (path === '/api/settings') return json(route, settings);
+    if (path === '/api/settings') return json(route, fixtureSettings);
+    if (path === '/api/settings/prefs' && request.method() === 'PUT') {
+      const payload = request.postDataJSON();
+      const previousExportDirs = fixtureSettings.export_dirs;
+      settingsWrites.push(payload);
+      Object.assign(fixtureSettings, payload);
+      if (payload.export_dirs) {
+        fixtureSettings.export_dirs = { ...previousExportDirs, ...payload.export_dirs };
+      }
+      return json(route, fixtureSettings);
+    }
+    if (path === '/api/folders/roots') return json(route, { roots: fixtureFolderRoots });
+    if (path === '/api/folders') {
+      const wanted = url.searchParams.get('path');
+      const view = fixtureFolderViews[wanted];
+      return view ? json(route, view) : json(route, { detail: 'Folder not found' }, 404);
+    }
+    if (path === '/api/folders/create' && request.method() === 'POST') {
+      const payload = request.postDataJSON();
+      const separator = payload.parent.endsWith('/') ? '' : '/';
+      const made = `${payload.parent}${separator}${payload.name}`;
+      folderWrites.push({ ...payload, path: made });
+      fixtureFolderViews[made] = {
+        path: made,
+        name: payload.name,
+        parent: payload.parent,
+        crumbs: [{ name: payload.name, path: made }],
+        folders: [],
+        truncated: false,
+        writable: true,
+      };
+      return json(route, { name: payload.name, path: made });
+    }
+    if (path === '/api/settings/scrapers') return json(route, { scrapers: [] });
+    if (path === '/api/settings/ffmpeg') {
+      return json(route, { available: true, version: 'fixture', source: 'bundled', path: '/tmp/ffmpeg' });
+    }
+    if (path === '/api/settings/diagnostics') {
+      return json(route, { kind: 'bug', title: 'Issue', report: 'Fixture report', url: 'https://example.invalid/issue' });
+    }
     // Asked on mount, before any tool: the app has to know the workspace is
     // there and whether a folder in it is still waiting to become a case.
     if (path === '/api/settings/workspace') return json(route, workspaceStatus);
@@ -238,6 +302,19 @@ export async function installAppFixture(page, options = {}) {
       });
       return json(route, request.method() === 'DELETE' ? { status: 'deleted' } : { id: 'link-new' });
     }
+    if (path === `/api/cases/${CASE_ID}/media/page`) {
+      return json(route, {
+        items: media,
+        next_cursor: null,
+        total: media.length,
+        facets: {
+          category_counts: { image: media.length, upload: media.length },
+          folder_counts: {},
+          gps_count: 0,
+          thumbnail_pending: 0,
+        },
+      });
+    }
     if (path === `/api/cases/${CASE_ID}/media`) return json(route, media);
     // One media file with everything its sidecar holds. The browse index leaves
     // enrichment's metadata dumps out, so the Details panel reads a file at a time.
@@ -245,6 +322,14 @@ export async function installAppFixture(page, options = {}) {
       const wanted = url.searchParams.get('path');
       const found = media.find((item) => item.path === wanted);
       return found ? json(route, found) : route.fulfill({ status: 404, body: '{}' });
+    }
+    if (path === `/api/cases/${CASE_ID}/media/export` && request.method() === 'POST') {
+      const payload = request.postDataJSON();
+      exportWrites.push(payload);
+      return json(route, {
+        file: 'panel.svg',
+        folder: fixtureSettings.export_dirs.media || "the case's exports folder",
+      });
     }
     // Two different reads: the capture shelf (pickers list it beside media) and
     // the geo index the Map panel groups. Both are needed — a picker whose
@@ -265,7 +350,7 @@ export async function installAppFixture(page, options = {}) {
     }
     if (path === `/api/cases/${CASE_ID}/notes`) return json(route, { text: '' });
     if (path === `/api/cases/${CASE_ID}/entities/lookup`) {
-      return json(route, { entity: null });
+      return json(route, { entity: fixtureLookupEntities[url.searchParams.get('value')] ?? null });
     }
     if (path === '/api/satellite/providers') return json(route, providers);
     if (path === '/api/satellite/imagery-date') {
@@ -301,6 +386,9 @@ export async function installAppFixture(page, options = {}) {
     linkWrites,
     trashWrites,
     bundleCalls,
+    settingsWrites,
+    folderWrites,
+    exportWrites,
     expectNoUnexpectedRequests: () => expect(unexpected).toEqual([]),
   };
 }

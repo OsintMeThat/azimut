@@ -16,7 +16,7 @@ describe('Report an issue', () => {
     expect(source).toContain("api.get(`/api/settings/diagnostics?${params}`)");
     expect(source).toContain('clearTimeout(reportTimer)');
     expect(source).toContain('setTimeout(loadReport, 400)');
-    expect(source).toContain("if (tab === 'about' && !report) loadReport()");
+    expect(source).toContain("if (tab === 'system' && !report) loadReport()");
   });
 
   it('files through a real anchor, so no popup blocker sees a deferred open', () => {
@@ -47,22 +47,45 @@ describe('Backup', () => {
   });
 
   it('says what the file holds, and what it leaves behind', () => {
-    expect(source).toContain('settings, keys, templates and signature');
-    expect(source).toContain('login session stays on this machine');
+    expect(source).toContain('settings, keys, templates and your signature');
+    expect(source).toContain('export folders and');
+    expect(source).toContain('download logins stay here');
+    expect(source).toContain('keep this backup private');
     expect(source).toContain('Export backup');
     expect(source).toContain('Import backup');
+  });
+
+  it('keeps the download and import controls wired after moving to Storage', () => {
+    expect(source).toContain("{#if tab === 'storage'}");
+    expect(source).toContain('href="/api/settings/export" download');
+    expect(source).toContain('onchange={importSettings}');
   });
 });
 
 describe('Workspace folder', () => {
-  it('puts an Open button beside the path About already prints', () => {
-    expect(source).toContain("import { revealWorkspaceFolder } from '../lib/reveal.js'");
-    expect(source).toContain('<dt>Workspace</dt>');
-    expect(source).toContain('onclick={revealWorkspace}');
+  it('keeps workspace management in Storage', () => {
+    expect(source).toContain("{#if tab === 'storage'}");
+    expect(source).toContain('<WorkspaceFolder onchange={(status) => (about.workspace_root = status.root)} />');
+  });
+});
+
+describe('Settings sections', () => {
+  it('separates workflow preferences from app maintenance', () => {
+    for (const id of ['general', 'publishing', 'imagery', 'templates', 'extension', 'storage', 'system']) {
+      expect(source).toContain(`id: '${id}'`);
+    }
+    expect(source).toContain("let tab = $state('general')");
   });
 
-  it('reports the outcome, since the window opens outside the browser', () => {
-    expect(source).toContain("toast('Opened the workspace folder'");
-    expect(source).toContain("toast(e.message || 'Could not open the folder'");
+  it('keeps old direct links useful while callers migrate', () => {
+    expect(source).toContain("const aliases = { preferences: 'general', about: 'system' }");
+  });
+
+  it('manages all three export folders from Storage', () => {
+    expect(source).toContain("{ id: 'notes', label: 'Note PDFs' }");
+    expect(source).toContain("{ id: 'media', label: 'Media copies' }");
+    expect(source).toContain("{ id: 'proofs', label: 'Proof PNGs' }");
+    expect(source).toContain('<ExportFolderPicker');
+    expect(source).toContain("await saveDestination(kind, '')");
   });
 });

@@ -42,11 +42,48 @@ describe('Proof Composer header', () => {
     expect(source).toContain('align-items: baseline;');
     expect(source).toContain('font-weight: 700;');
   });
+
+  it('exports the current proof and exposes its remembered destination', () => {
+    const header = source.slice(source.indexOf('<div class="tool-header">'), source.indexOf('</div>\n\n  <div class="body">'));
+
+    expect(header).toContain("exporting ? 'Exporting…' : 'Export PNG'");
+    expect(header).toContain('onclick={exportProofPng}');
+    expect(header).toContain('onclick={toggleExportMenu}');
+    expect(source).toContain('exportDir = (await readDestinations()).proofs;');
+    expect(source).toContain('kind="proofs"');
+    expect(source).toContain('confirmLabel="Export here"');
+    expect(source).toContain('onchosen={useExportFolder}');
+    expect(source).toContain('api.post(`/api/cases/${cid}/proofs/${savedName}/export`)');
+    expect(source).toContain('/proofs/export/reveal`');
+    expect(source).toContain('if (dirty || !savedName) await save();');
+    expect(source).toContain('if (dirty || !savedName) return;');
+  });
+
+  it('uses Copy as the main action and keeps export choices in the compact menu', () => {
+    const split = source.slice(source.indexOf('<div class="export-split">'), source.indexOf('</div>\n    <button class="btn btn-ok'));
+    const menu = source.slice(source.indexOf('<div class="export-menu card"'), source.indexOf('<div class="export-destination"'));
+
+    expect(split).toContain('onclick={copyPng}');
+    expect(split).toContain("copying ? 'Copying…' : 'Copy'");
+    expect(menu.indexOf("onclick={exportProofPng}")).toBeLessThan(menu.indexOf('onclick={openExportPicker}'));
+    expect(menu.indexOf('onclick={openExportPicker}')).toBeLessThan(menu.indexOf('onclick={revealProofExports}'));
+    expect(menu).toContain('<span>{exporting ? \'Exporting…\' : \'Export PNG\'}</span>');
+    expect(menu).toContain('<span>Export to another folder…</span>');
+    expect(menu).toContain('<span>Show export folder</span>');
+    expect(source).toContain('await exportProof();');
+    expect(source).toContain('.export-main {');
+    expect(source).toContain('.export-toggle {');
+  });
 });
 
 describe('Proof Composer naming', () => {
   it('adopts the canonical filename stem returned by the backend', () => {
     expect(source).toContain('proof.title = result.title;');
+  });
+
+  it('checks the current hidden spec path before claiming a saved proof was deleted', () => {
+    expect(source).toContain("lookupEntity(id, 'spec', `proofs/.meta/${name}.json`)");
+    expect(source).not.toContain("lookupEntity(id, 'spec', `proofs/${name}.json`)");
   });
 });
 

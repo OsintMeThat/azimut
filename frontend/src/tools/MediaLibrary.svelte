@@ -21,6 +21,8 @@
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
+  import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
+  import { destinationLabel, readDestinations } from '../lib/exportDest.js';
 
   const KIND_ICONS = { image: 'image', satellite: 'satellite', video: 'video', audio: 'audio', file: 'file' };
 
@@ -239,6 +241,11 @@
 
   // --- details modal (shared EntityDetails, keyed by the file's entity id) ---
   let infoEntityId = $state(null);
+  let infoItem = $state(null); // the media row behind the details modal, for Export
+  // Where a media copy lands, app-wide and remembered. Empty = the case folder.
+  let exportDir = $state('');
+  let exportPicker = $state(false);
+  let exportBusy = $state(false);
 
   // --- lightbox (←/→ flips through the filtered images) ---
   let lightboxItem = $state(null);
@@ -593,8 +600,50 @@
   // file's case entity — full provenance, derivation chain, title/notes/folder.
   async function openInfo(item) {
     const ent = await lookupEntity(caseState.current?.id, 'path', item.path);
-    if (ent) infoEntityId = ent.id;
-    else toast('This file has no case entity yet', 'warn');
+    if (ent) {
+      infoEntityId = ent.id;
+      infoItem = item;
+      readDestinations()
+        .then((dirs) => (exportDir = dirs.media))
+        .catch(() => {});
+    } else toast('This file has no case entity yet', 'warn');
+  }
+
+  /**
+   * Copy this file out to the media export folder.
+   *
+   * A copy: the case keeps the original with its hash and its provenance, and
+   * the analyst gets the file where they actually work with it.
+   */
+  async function exportMedia() {
+    const item = infoItem;
+    if (!item || exportBusy) return;
+    exportBusy = true;
+    try {
+      const result = await api.post(`/api/cases/${caseState.current.id}/media/export`, {
+        path: item.path,
+      });
+      toast(`${result.file} copied to ${destinationLabel(result.folder)}`, 'ok', 5200, {
+        label: 'Show',
+        onClick: () =>
+          api
+            .post(`/api/cases/${caseState.current.id}/media/export/reveal`)
+            .catch((error) => toast(error.message, 'warn')),
+      });
+    } catch (error) {
+      toast(`Export failed: ${error.message}`, 'danger');
+    } finally {
+      exportBusy = false;
+    }
+  }
+
+  async function openMediaExportPicker() {
+    try {
+      exportDir = (await readDestinations()).media;
+    } catch {
+      // The picker still has its case-folder default if Settings cannot load.
+    }
+    exportPicker = true;
   }
 </script>
 
@@ -1119,8 +1168,32 @@
       entityId={infoEntityId}
       onclose={() => (infoEntityId = null)}
       ondeleted={() => (infoEntityId = null)}
-    />
+    >
+      {#snippet previewActions()}
+        <button class="btn btn-sm" onclick={exportMedia} disabled={exportBusy}>
+          <Icon name="download" size={14} />
+          {exportBusy ? 'Exporting…' : 'Export'}
+        </button>
+        <button
+          class="btn btn-ghost btn-sm"
+          onclick={openMediaExportPicker}
+          title="Change export folder"
+          aria-label="Change export folder"
+        >
+          <Icon name="folder" size={14} />
+        </button>
+      {/snippet}
+    </EntityDetails>
   </Modal>
+{/if}
+
+{#if exportPicker}
+  <ExportFolderPicker
+    kind="media"
+    current={exportDir}
+    onclose={() => (exportPicker = false)}
+    onchosen={(path) => (exportDir = path)}
+  />
 {/if}
 
 <!-- lightbox -->
@@ -1504,13 +1577,13 @@
 
        So the actions cell is a fixed width, and it is computed rather than typed:
        one ghost icon button is a 14px glyph plus 8px of padding and a 1px border
-       on each side, and the widest row holds six of them — GPS pin, info, open,
-       inspect, proof, delete. A literal here goes stale the next time a tool earns
+       on each side, and the widest row holds six of them — GPS pin, info,
+       open, inspect, proof, delete. A literal here goes stale the next time a tool earns
        a row action, and the symptom is the delete button quietly clipped off the
        end of the row. */
     --media-action: 32px;
     --media-action-gap: 2px;
-    /* the six buttons plus slack. Sized to the exact sum, the cell fits only
+    /* the seven buttons plus slack. Sized to the exact sum, the cell fits only
        until a sub-pixel of rounding says otherwise, and then Delete — which
        `margin-left: auto` holds at the right edge — is the one that goes. The
        slack is also where that auto margin lives, so the row still reads as

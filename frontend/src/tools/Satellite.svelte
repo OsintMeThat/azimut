@@ -2727,7 +2727,7 @@
   }
 
   // the HUD readout and everything copied out of it follow the user's
-  // coordinate format (Settings → Preferences); captures keep decimal degrees
+  // coordinate format (Settings → General); captures keep decimal degrees
   const readout = $derived(fmtCoords(displayCoords.lat, displayCoords.lon));
 
   async function copyCoords() {
@@ -3461,7 +3461,10 @@
             <div class="links-note mono">{readout}</div>
             <!-- the way back: the capture extension files what you find over
                  there straight into the case, coordinates parsed from the URL -->
-            <button type="button" class="links-advert" onclick={() => (uiState.tool = 'settings')}>
+            <button type="button" class="links-advert" onclick={() => {
+              uiState.settingsTab = 'extension';
+              uiState.tool = 'settings';
+            }}>
               <Icon name="crop" size={12} />
               <span>
                 {extensionVersion()
@@ -3674,6 +3677,7 @@
         class="btn btn-primary"
         onclick={() => {
           extGateOpen = false;
+          uiState.settingsTab = 'extension';
           uiState.tool = 'settings';
         }}
       >

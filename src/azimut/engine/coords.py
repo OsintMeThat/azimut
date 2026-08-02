@@ -3,7 +3,7 @@
 
 The app stores decimal degrees in its SQLite graph, sidecars and proof specs.
 This module only decides how a pair is *written out* in a human-facing label,
-following the user's ``coord_format`` preference (Settings → Preferences).
+following the user's ``coord_format`` preference (Settings → General).
 
 Both implementations must agree: a title minted here has to read exactly like
 the same point rendered in the browser, so they are tested against the same

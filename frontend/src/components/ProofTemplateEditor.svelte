@@ -233,9 +233,9 @@
             </label>
           </div>
           {#if logoMissing}
-            <p class="warn"><Icon name="alert" /> No logo saved yet. Add one in Settings → Preferences.</p>
+            <p class="warn"><Icon name="alert" /> No logo saved yet. Add one in Settings → Publishing.</p>
           {:else}
-            <p class="hint">The logo comes from Settings → Preferences; drag it in the preview.</p>
+            <p class="hint">The logo comes from Settings → Publishing; drag it in the preview.</p>
           {/if}
         {/if}
       </fieldset>
@@ -262,7 +262,7 @@
                 oninput={(e) => setSigText('color', e.target.value)} />
             </label>
           </div>
-          <p class="hint">The account handle comes from Settings → Preferences; drag it into place in the preview.</p>
+          <p class="hint">The account handle comes from Settings → Publishing; drag it into place in the preview.</p>
         {/if}
       </fieldset>
 

@@ -41,15 +41,20 @@ def _within_workspace(target: Path) -> bool:
     return True
 
 
-def reveal(path: Path) -> None:
+def reveal(path: Path, *, workspace_only: bool = True) -> None:
     """Open ``path`` in Explorer, Finder or the Linux desktop's file manager.
 
     Raises :class:`RevealError` for a folder outside the workspace, a folder that
     isn't there, or a Linux box with no ``xdg-open`` — a headless server being the
     one place this genuinely cannot work.
+
+    ``workspace_only=False`` is for the one folder that is legitimately elsewhere:
+    an export destination the analyst browsed to and Azimut saved. The caller
+    resolves it from settings, never from the request, so opening it still shows
+    a folder the app chose.
     """
     target = Path(path).expanduser().resolve()
-    if not _within_workspace(target):
+    if workspace_only and not _within_workspace(target):
         raise RevealError("that folder is outside the workspace")
     if not target.is_dir():
         raise RevealError("that folder no longer exists")

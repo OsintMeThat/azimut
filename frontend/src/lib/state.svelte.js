@@ -13,7 +13,7 @@ import { shouldShowUpdate } from './appUpdate.js';
 import { loadRelationTypes } from './relations.svelte.js';
 
 /**
- * App-wide display preferences (Settings → Preferences), mirrored from
+ * App-wide display preferences (Settings → General), mirrored from
  * settings.json. Presentation only — every tool keeps filing decimal degrees
  * and metres, so changing these never rewrites what's on disk.
  */

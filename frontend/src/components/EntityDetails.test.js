@@ -58,6 +58,13 @@ describe('import enrichment details', () => {
 });
 
 describe('reading the file behind an entity', () => {
+  it('can place host actions directly below the media preview', () => {
+    expect(source).toContain('let { entityId, onclose, ondeleted, previewActions } = $props();');
+    expect(source).toContain('{@render previewActions()}');
+    expect(source).toContain('.info-preview-actions {');
+    expect(source).toContain('justify-content: flex-end;');
+  });
+
   it('reads one media file, not the whole case, to show its metadata', () => {
     // the EXIF and video dumps this panel renders are hundreds of rows each and
     // are deliberately absent from the browse index, so the list would neither

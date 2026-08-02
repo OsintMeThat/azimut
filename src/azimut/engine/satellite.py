@@ -42,7 +42,7 @@ _ENTITY_PAGE = 500
 
 def coords_label(lat: float, lon: float, fmt: str | None = None) -> str:
     """Default capture title / place label: the point's coordinates, written in
-    the user's coordinate format (Settings → Preferences).
+    the user's coordinate format (Settings → General).
 
     Only *new* labels are minted here — a title already stored keeps whatever it
     was named, so switching format never rewrites the case's existing titles.

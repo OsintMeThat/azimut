@@ -1,9 +1,9 @@
 """Settings backup (export/import) and the lazy pairing-token mint.
 
-The backup is one JSON file carrying everything app-wide that isn't a case:
-settings.json, templates.json and the signature logo. Two invariants are worth
-more than the individual cases below — every setting that can be exported can be
-imported back (the drift gate), and ``cookies.txt`` never travels.
+The backup is one JSON file carrying everything portable that isn't a case:
+settings, templates and the signature logo. Two invariants are worth more than
+the individual cases below — every exported setting can be imported back (the
+drift gate), and machine-bound paths never travel.
 """
 
 import base64
@@ -22,29 +22,28 @@ def bundle_of(client) -> dict:
 
 # -- the drift gate ---------------------------------------------------------
 
-# Keys that settings.json holds but a backup deliberately does not restore.
-# Empty on purpose: an entry here is a decision, and it needs a reason next to
-# it. Anything else showing up in the gate below is an oversight, not a policy.
-NOT_RESTORED: dict[str, str] = {}
+# Keys that settings.json holds but a backup deliberately does not export.
+# Each entry is a deliberate portability decision. Anything else showing up in
+# the gate below is an oversight, not a policy.
+NOT_EXPORTED: dict[str, str] = {
+    "export_dirs": "absolute export paths belong to the machine that selected them",
+}
 
 
 def test_every_exported_setting_can_be_imported_back():
-    """The export dumps settings.json verbatim, so it can never fall behind; the
-    import is an allowlist, so it can. This is the gate that says when it did.
+    """Export and import deliberately meet at one typed portability boundary.
 
     A new key in DEFAULT_SETTINGS fails here until it is either typed into
-    ImportedSettings or listed in NOT_RESTORED with a reason. Without it, a
-    forgotten key is exported and then silently dropped on the way back — which
-    is exactly how `download_cookies` went missing.
+    ImportedSettings or listed in NOT_EXPORTED with a reason.
     """
-    exported = set(config.DEFAULT_SETTINGS)
+    exported = set(config.DEFAULT_SETTINGS) - set(NOT_EXPORTED)
     importable = {
         field.alias or name for name, field in ImportedSettings.model_fields.items()
     }
-    unhandled = exported - importable - set(NOT_RESTORED)
+    unhandled = exported - importable
     assert not unhandled, (
         f"settings key(s) {sorted(unhandled)} are exported but not importable: type them "
-        "in ImportedSettings, or list them in NOT_RESTORED with the reason"
+        "in ImportedSettings, or list them in NOT_EXPORTED with the reason"
     )
     # And nothing claims to import a setting the app doesn't have.
     assert not importable - exported
@@ -148,6 +147,19 @@ def test_export_leaves_the_workspace_location_behind(client, tmp_path):
     blob = bundle_of(client)
 
     assert "somewhere" not in str(blob)
+
+
+def test_export_leaves_absolute_export_destinations_behind(client, tmp_path):
+    chosen = tmp_path / "reports"
+    chosen.mkdir()
+    client.put(
+        "/api/settings/prefs", json={"export_dirs": {"notes": str(chosen)}}
+    )
+
+    blob = bundle_of(client)
+
+    assert "export_dirs" not in blob["settings"]
+    assert str(chosen) not in str(blob)
 
 
 def test_the_browser_login_choice_travels_but_a_missing_file_does_not(client):

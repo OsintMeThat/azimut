@@ -129,6 +129,12 @@ describe('Satellite saved work', () => {
   });
 });
 
+describe('Capture extension settings handoff', () => {
+  it('opens the extension section from both Satellite entry points', () => {
+    expect(source.match(/uiState\.settingsTab = 'extension'/g)).toHaveLength(2);
+  });
+});
+
 describe('filing saved work from its details dialog', () => {
   it('offers the same folder picker the rest of the app uses, in both dialogs', () => {
     expect(source).toContain("import FolderSelect from '../components/FolderSelect.svelte'");
