@@ -53,7 +53,7 @@ azimut/        # everything Azimut owns; the rest of the folder is yours
   notes/       # note bodies, named after their title, filed as in the notebook
   media/       # source + captured + extracted media; .meta/ holds the sidecars
   proofs/      # exported PNGs; .meta/ holds the specs and pasted images
-  exports/     # yours to fill
+  exports/     # notes exported to PDF, and yours to fill
   .data/       # case.db: authoritative SQLite graph
   .drafts/     # post drafts
   .inspect/    # saved Inspect session specs
@@ -117,8 +117,10 @@ proof for publication.
 | ✅ **Grid Search** | Saves editable AOI grids with keyboard review states and place promotion. |
 | ✅ **Templates** | Stores reusable proof styles and post-thread structures at workspace level. |
 | ✅ **Geo Report outputs** | Targets X, Bluesky or Mastodon and saves structured Markdown notes with evidence links. |
-| ✅ **Case Notebook** | Edits tabbed Markdown notes with local media, entity links, broken-reference markers and PDF output. |
+| ✅ **Case Notebook** | Edits tabbed Markdown notes with local media, entity links and broken-reference markers. |
 | ✅ **Notebook diagrams** | Draws ```mermaid fences in the preview and the PDF, loading the library only when a note holds one. |
+| ✅ **Notes to PDF** | Exports the open note or a ticked selection as one server-rendered file per note, with stable homonym names, bounded diagrams and bundled faces for living scripts including CJK. |
+| ✅ **Export destinations** | Remembers separate app-wide folders for note PDFs, media copies and proof PNGs, defaults to the case's `exports/` and atomically avoids overwrites elsewhere. |
 | ✅ **Canvas tests** | Exercises Leaflet and Konva interactions in Chromium and Firefox. |
 | ✅ **Storage platform** | Uses per-case SQLite, bounded catalog queries and a durable one-worker job queue. |
 | ✅ **Case bundle** | Exports and imports the whole case folder, including the analyst's free zone, with integrity checks and optional whole-bundle password protection. |
@@ -126,8 +128,8 @@ proof for publication.
 | ✅ **Gated downloads** | Fetches login-walled media by borrowing a browser session or cookies.txt, cookie-less by default and prompted only on a wall. |
 | ✅ **Find at scale** | Bounded, paged loading with a shared search box and sort across the Media Library and Files, plus case-name search in the switcher. |
 | ✅ **Searchable pickers** | Pickers in Inspect, Reverse Search, Geo Proof and the Notebook notes menu search past six entries and browse case folders behind the "…". |
-| ✅ **Report an issue** | About writes a bug or a request into a pre-filled GitHub issue, with version, OS and the run's last warnings, home path and account name scrubbed. |
-| ✅ **Settings backup** | Carries workspace-level proof and post presets through export and import. |
+| ✅ **Report an issue** | System writes a bug or a request into a pre-filled GitHub issue, with version, OS and the run's last warnings, home path and account name scrubbed. |
+| ✅ **Settings backup** | Carries portable settings, keys, presets and the signature while leaving machine paths and download sessions behind. |
 | ✅ **Open the folder** | A case's folder, or the whole workspace, opened in the system file manager. |
 | ✅ **Proofs on the map** | A fourth position of the Saved switch places each proof by its own coordinates, then by the captures it composes; `All` marks a worked capture with a dot rather than doubling it. |
 | ✅ **Import enrichment** | Reads image EXIF/dHash and video container/stream metadata locally in the background; parsed GPS produces linked Suggestions and all fields appear in Details. |
@@ -135,7 +137,7 @@ proof for publication.
 | ✅ **Relation vocabulary** | One registry for the non-chain edges, stated or settled from Details and from a point's card on the map. |
 | ✅ **Visible file names** | Shows each file-backed artifact under its filename stem and moves the file when that name changes. |
 | ✅ **Case doctor** | Checks a case without changing it, then offers explicit repairs for a missing database, missing media and files dropped into `media/`. |
-| ✅ **Workspace folder** | Settings adopts a folder as it is, or copies the workspace to it, verifies, switches a pointer kept outside it and keeps the old copy until dropped. A configured folder that has gone stops startup instead of being recreated. |
+| ✅ **Workspace folder** | Settings adopts a folder as it is, or copies and SHA-256-verifies every file before switching an external pointer and keeping the old copy. A missing configured folder stops startup. |
 | ✅ **One Azimut per workspace** | An OS-held lock the kernel drops on exit, with a heartbeat so a folder shared between machines can tell a live holder from a crashed one. The second instance opens to a screen naming the first, and can overrule it. |
 | ✅ **Adopt a case folder** | A folder made in the workspace from the file manager becomes a case on one click, where it is, without reading or moving what it holds. One holding a case that lost its manifest is recovered instead, then handed to the Doctor. |
 
@@ -157,13 +159,16 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
 | **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. |
-| **Notes to PDF** | Ticks notes in a dialog and writes one file per note, named after the note, into the case's export destination. Rendered server-side so no print dialog is involved, which means carrying fonts: a bundled Noto set, the system font for CJK, and a named error rather than empty boxes for a script nobody covers. |
-| **Export destination** | A folder of the analyst's own, remembered per case, where notes, proofs and map exports land instead of only the case's `exports/`. Validated when set, never deleted from, and a re-export overwrites rather than accumulates. |
+
+Toward v2: split Satellite.svelte into `lib/` modules, before the map engine
+changes under it.
 
 ### v3: GEOINT expansion
 
 | Tool | What it does |
 |------|--------------|
+| **Map engine (MapLibre)** | Replaces Leaflet with MapLibre GL at 2D parity: same providers, same captures, and the capture tests still verify the pixels. Ships before the 3D map, which builds on it. |
+| **3D map** | Pitch, public DEM terrain and extruded OSM buildings on the MapLibre map. An oblique capture records its pitch beside the bearing, so the view can be reproduced. |
 | **Satellite Compare** | Same coords across providers (Esri / Sentinel-2 date slider / Bing / keyed), synced pan/zoom. Copernicus easy link. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
 | **Metadata follow-up** | Explains which common image/video fields were stripped and proposes events from capture times. |
@@ -198,12 +203,14 @@ GPS-tagged clips promotable to places.
 
 Toward v3: GIF maker; curated tool links; full-text case search; clipboard
 image/URL capture with provenance; EXIF/GPS import suggestions for place and
-time.
+time; sun and moon times read against the terrain horizon the 3D map's DEM
+supplies, since a ridge ends the day well before the flat horizon does.
 
 ### v4: investigation layer
 
 | Tool | What it does |
 |------|--------------|
+| **Skyline Matching** | Traces a horizon in a photo and compares it against the DEM profile seen from candidate points, in the same azimuth and elevation frame Camera Resection and Sky Clock already use. Terrain-occluded sun times then split candidates a matching horizon leaves tied. |
 | **Map Board (MyMaps-style)** | Editable case map: custom pins + notes/links, shapes, layers; import/export KML/KMZ/GeoJSON; pins bind to `place`. |
 | **Evidence Locker** | Track SHA-256, timestamps, source and notes; archive with Wayback; export `evidence.jsonl` under a hash-chained manifest, so any later edit to an exported file is detectable. |
 | **Timeline Builder** | Timestamped events from mixed sources aligned on timeline + map. |
@@ -225,7 +232,6 @@ search; optional quota-aware X publishing.
 | **Search Orchestrator** | Run username/alias/email across services, analyst selects → entities. Integrations, not clones. |
 | **OSM Query (Overpass)** | Feature search from a form, and a described pattern ("filling station, roundabout, railway within 300 m") turned into candidates on the map; clicking a point looks it up in OSM, Wikidata and geolocated Commons photos. No Overpass QL. |
 | **Viewshed / Line of Sight** | What terrain is visible from a point (public DEM tiles). |
-| **Skyline Matching** | Trace a horizon in a photo, compare it against the DEM profile seen from candidate points. |
 | **Camera Track (video SfM)** | Solves a moving camera's path from a video: frames sampled from a window, position and viewing azimuth per keyframe, and a sparse point cloud. Reports insufficient parallax instead of guessing. Bundles a native SfM binary (COLMAP/GLOMAP), CPU-capable. |
 | **Vessel and Aircraft Tracks** | Historic ADS-B and AIS tracks on the map for a date, plus a watchlist that follows chosen callsigns or MMSIs. |
 | **Map Measures** | Distance, bearing/azimuth, area, FOV cone; includes measure-on-imagery, and its bearing layer absorbs the v2 sun/moon arcs. |
@@ -249,15 +255,8 @@ spec alone:
 
 Toward v5: real-world measurement from a resected photo or a solved camera track
 and its GCP camera pose; a gaussian-splat round trip for a solved camera track;
-satellite-pass search from public TLEs.
-
-### After the MapLibre migration
-
-Phase 1 replaces Leaflet with MapLibre GL at 2D feature parity, with no 3D and
-capture tests that verify the pixels. Phase 2 makes the map itself 3D — pitch,
-public DEM terrain, extruded OSM buildings — and captures obliques with pitch and
-bearing in provenance. Later work covers 3D satellite capture and user-keyed
-Google Photorealistic 3D Tiles.
+satellite-pass search from public TLEs; 3D satellite capture; Google
+Photorealistic 3D Tiles on the user's own key.
 
 ## 7. Loose ideas
 
@@ -288,7 +287,8 @@ stops making sense.
 - **Frontend**: Svelte + Leaflet (→ MapLibre) + Konva/canvas, served by the
   backend, opened in the default browser. Rail = workspaces in pipeline order,
   tools are tabs inside them (see [UI.md](UI.md)).
-- **Settings and secrets:** in-app tabs (Preferences / Imagery / About), keys
+- **Settings and secrets:** in-app tabs group general preferences, publishing,
+  imagery, templates, the capture extension, storage and system tools; keys
   stored locally and never bundled into a shared case, monthly usage counters,
   backup export/import, opt-out "new release is live" pop-up on load (per-version
   "don't show again"). Display preferences affect presentation only; artifacts keep
@@ -322,7 +322,11 @@ stops making sense.
   about that behavior and local Case media avoids it. Notebook diagrams are the
   one markup DOMPurify does not clear: Mermaid draws its SVG into the preview
   after sanitizing, under its own `strict` level, which escapes labels and drops
-  click handlers. Case imports extract only unique, non-symlink members declared
+  click handlers. The PDF export is the one place a picture drawn in the browser
+  is posted back: the request, each diagram and their decoded total are bounded
+  before rendering, and every diagram is read as an image,
+  and the note's own text is re-read from disk rather than trusted from the
+  request. Case imports extract only unique, non-symlink members declared
   by the manifest and matching its SHA-256. Password-protected bundles seal the
   complete ZIP with chunked AES-256-GCM and a scrypt-derived key; filenames stay
   encrypted and the password is never persisted in a job. Import temporarily

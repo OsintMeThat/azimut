@@ -1,4 +1,5 @@
-"""REST API for the Media Library: upload, URL download (async job), list, delete."""
+"""REST API for the Media Library: upload, URL download (async job), list, delete,
+and copying one file back out to a folder of the analyst's own."""
 
 from __future__ import annotations
 
@@ -9,7 +10,9 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from .. import config, jobs
 from ..engine import enrich as enrich_engine
+from ..engine import exportdir
 from ..engine import media as media_engine
+from ..engine import reveal as reveal_engine
 from ..engine import thumbnails as thumbnail_engine
 from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
@@ -27,6 +30,13 @@ class DownloadIn(BaseModel):
 
 
 class DeleteIn(BaseModel):
+    path: str
+
+
+class ExportIn(BaseModel):
+    """One media file to copy out. Where it goes is the folder saved for media
+    (engine/exportdir.py), never something the request names."""
+
     path: str
 
 
@@ -272,6 +282,41 @@ def job_status(job_id: str) -> dict[str, Any]:
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
     return job
+
+
+@router.post("/cases/{case_id}/media/export")
+def export_media_item(case_id: str, body: ExportIn) -> dict[str, str]:
+    """Copy one media file out of the case, into the media export folder.
+
+    A copy, never a move: the case keeps the original, hashes and all. The name
+    it lands under is the one on disk, and an existing file is never overwritten.
+    """
+    case = get_case(case_id)
+    try:
+        item = media_engine.read_item(case, body.path)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if item is None:
+        raise HTTPException(status_code=404, detail="media not found")
+    source = case.resolve_inside(item["path"])
+    try:
+        folder = exportdir.destination("media", case.path)
+        written = exportdir.copy_out(source, folder, source.name)
+    except exportdir.ExportDirError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"file": written.name, "folder": str(folder), "path": str(written)}
+
+
+@router.post("/cases/{case_id}/media/export/reveal")
+def reveal_media_exports(case_id: str) -> dict[str, str]:
+    """Open the media export folder, resolved here rather than sent by the browser."""
+    case = get_case(case_id)
+    try:
+        folder = exportdir.destination("media", case.path)
+        reveal_engine.reveal(folder, workspace_only=False)
+    except (exportdir.ExportDirError, reveal_engine.RevealError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"path": str(folder)}
 
 
 @router.delete("/cases/{case_id}/media")

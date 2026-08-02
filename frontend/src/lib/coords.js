@@ -1,6 +1,6 @@
 // Latitude/longitude presentation. The app stores decimal degrees everywhere
 // (case.json, proof specs, exports) — this module only decides how a pair is
-// *shown*, per the user's Settings → Preferences choice. Nothing here ever
+// *shown*, per the user's Settings → General choice. Nothing here ever
 // changes what lands on disk, so a case reads the same for every reader.
 //
 // Kept pure and Leaflet-free so it can be unit-tested.

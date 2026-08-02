@@ -418,6 +418,41 @@ def test_there_is_nothing_to_discard_before_a_move(workspace):
         workspacemove.discard_old()
 
 
+def test_verify_refuses_same_size_content_damage(workspace, tmp_path):
+    source = workspace / "evidence.bin"
+    source.write_bytes(b"trusted evidence")
+    move = workspacemove.Move(source=workspace, root=tmp_path / "moved")
+    staging = tmp_path / "moved.azimut-incoming"
+    workspacemove._step_copy(move, staging)
+    (staging / "evidence.bin").write_bytes(b"altered evidence")
+
+    with pytest.raises(MoveError, match="different contents"):
+        workspacemove._step_verify(move, staging)
+
+
+def test_verify_hashes_files_larger_than_one_chunk(workspace, tmp_path):
+    (workspace / "large.bin").write_bytes(
+        b"a" * (workspacemove.VERIFY_CHUNK_SIZE + 37)
+    )
+    move = workspacemove.Move(source=workspace, root=tmp_path / "moved")
+    staging = tmp_path / "moved.azimut-incoming"
+    workspacemove._step_copy(move, staging)
+
+    workspacemove._step_verify(move, staging)
+
+
+def test_digest_refuses_a_file_that_changes_while_reading(tmp_path, monkeypatch):
+    path = tmp_path / "moving.bin"
+    path.write_bytes(b"content")
+    identity = workspacemove._file_identity(path)
+    changed = (*identity[:-1], identity[-1] + 1)
+    identities = iter((identity, changed))
+    monkeypatch.setattr(workspacemove, "_file_identity", lambda _path: next(identities))
+
+    with pytest.raises(MoveError, match="changed while it was being verified"):
+        workspacemove._verified_digest(path)
+
+
 # -- killed part way through ---------------------------------------------------
 #
 # The steps are driven by hand here rather than through the worker thread, so a

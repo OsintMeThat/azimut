@@ -25,7 +25,7 @@
   import RelationList from './RelationList.svelte';
   import RelationPicker from './RelationPicker.svelte';
 
-  let { entityId, onclose, ondeleted } = $props();
+  let { entityId, onclose, ondeleted, previewActions } = $props();
 
   // Chain rows walk the details to another entity in place; that override sticks
   // until the host selects a different entity, when it clears back to the prop.
@@ -288,6 +288,12 @@
     {:else if entity.type === 'capture' && entity.attrs?.path}
       <div class="info-preview">
         <img src={`/files/${caseState.current.id}/${entity.attrs.path}`} alt={entity.label} />
+      </div>
+    {/if}
+
+    {#if previewActions}
+      <div class="info-preview-actions">
+        {@render previewActions()}
       </div>
     {/if}
 
@@ -566,6 +572,13 @@
     max-height: 240px;
     object-fit: contain;
     display: block;
+  }
+  .info-preview-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 6px;
+    margin: -6px 0 14px;
   }
   .info-rows {
     display: flex;

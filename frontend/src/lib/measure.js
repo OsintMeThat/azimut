@@ -72,7 +72,7 @@ export function angleAt(a, vertex, b) {
 }
 
 // Measurements are computed and stored in metres; `units` only picks how they
-// read (Settings → Preferences). International feet/miles/acres.
+// read (Settings → General). International feet/miles/acres.
 const FT_PER_M = 3.28084;
 const FT_PER_MI = 5280;
 const SQFT_PER_ACRE = 43560;

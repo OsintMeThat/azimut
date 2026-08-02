@@ -26,8 +26,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..engine import artifacts as artifact_engine
+from ..engine import exportdir
 from ..engine import links as link_engine
 from ..engine import media as media_engine
+from ..engine import reveal as reveal_engine
 from ..engine import satellite as satellite_engine
 from ..engine import thumbnails as thumbnail_engine
 from ..workspace import Case, CaseError, ensure_dir
@@ -240,6 +242,40 @@ def load_proof(case_id: str, name: str) -> dict[str, Any]:
     if not spec_path.exists():
         raise HTTPException(status_code=404, detail="proof not found")
     return json.loads(spec_path.read_text(encoding="utf-8"))
+
+
+@router.post("/cases/{case_id}/proofs/{name}/export")
+def export_proof_png(case_id: str, name: str) -> dict[str, str]:
+    """Copy a saved proof's PNG into the proofs export folder.
+
+    The proof itself does not move: this is the publishable picture, handed to
+    wherever the analyst files finished work.
+    """
+    case = get_case(case_id)
+    try:
+        png = case.resolve_inside(layout.proof_export_rel(name))
+    except CaseError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if not png.exists():
+        raise HTTPException(status_code=404, detail="this proof has no export yet")
+    try:
+        folder = exportdir.destination("proofs", case.path)
+        written = exportdir.copy_out(png, folder, png.name)
+    except exportdir.ExportDirError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"file": written.name, "folder": str(folder), "path": str(written)}
+
+
+@router.post("/cases/{case_id}/proofs/export/reveal")
+def reveal_proof_exports(case_id: str) -> dict[str, str]:
+    """Open the proofs export folder, resolved here rather than sent by the browser."""
+    case = get_case(case_id)
+    try:
+        folder = exportdir.destination("proofs", case.path)
+        reveal_engine.reveal(folder, workspace_only=False)
+    except (exportdir.ExportDirError, reveal_engine.RevealError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"path": str(folder)}
 
 
 @router.post("/cases/{case_id}/proofs")

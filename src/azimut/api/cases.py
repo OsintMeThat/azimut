@@ -1,4 +1,7 @@
-"""REST API for case lifecycle, notes, entities and links."""
+"""REST API for case lifecycle, entities and links.
+
+The note bodies and their PDF export live next door in `api/notes.py`.
+"""
 
 from __future__ import annotations
 
@@ -154,16 +157,6 @@ class PromoteCase(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
 
-class Notes(BaseModel):
-    text: str
-
-
-class NoteIn(BaseModel):
-    title: str = Field(min_length=1, max_length=300)
-    folder: str = Field(default="", max_length=120)
-    content: str = ""
-
-
 class EntityIn(BaseModel):
     type: str = Field(min_length=1, max_length=40)
     label: str = Field(min_length=1, max_length=300)
@@ -173,7 +166,7 @@ class EntityIn(BaseModel):
 
 class EntityPatch(BaseModel):
     type: str | None = None
-    label: str | None = None
+    label: str | None = Field(default=None, min_length=1, max_length=300)
     attrs: dict[str, Any] | None = None
     status: EntityStatus | None = None
 
@@ -476,39 +469,6 @@ def download_bundle(case_id: str, job_id: str) -> FileResponse:
         filename=path.name,
         media_type="application/octet-stream",
     )
-
-
-@router.get("/{case_id}/notes")
-def read_notes(case_id: str) -> dict[str, str]:
-    return {"text": get_case(case_id).read_notes()}
-
-
-@router.put("/{case_id}/notes")
-def write_notes(case_id: str, body: Notes) -> dict[str, str]:
-    get_case(case_id).write_notes(body.text)
-    return {"status": "saved"}
-
-
-@router.post("/{case_id}/notes")
-def create_note(case_id: str, body: NoteIn) -> dict[str, Any]:
-    return get_case(case_id).create_note(body.title.strip(), body.folder.strip(), body.content)
-
-
-@router.get("/{case_id}/notes/{note_id}")
-def read_note(case_id: str, note_id: str) -> dict[str, str]:
-    try:
-        return {"text": get_case(case_id).read_note(note_id)}
-    except CaseError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.put("/{case_id}/notes/{note_id}")
-def write_note(case_id: str, note_id: str, body: Notes) -> dict[str, str]:
-    try:
-        get_case(case_id).write_note(note_id, body.text)
-    except CaseError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"status": "saved"}
 
 
 @router.get("/{case_id}/catalog/entities")

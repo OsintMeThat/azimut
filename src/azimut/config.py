@@ -88,7 +88,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Maps JS widget is not configurable here — swapping it out and back
     # re-bills a map load, so eco is pinned off for it in engine/tiles.py.
     "eco_max_zooms": {},
-    # Display preferences, app-wide (Settings → Preferences):
+    # Display preferences, app-wide (Settings → General):
     # - coord_format: how every tool renders a latitude/longitude — "dd"
     #   (decimal degrees), "dms" (degrees/minutes/seconds), "mgrs" (grid ref).
     # - units: "metric" (m/km/ha) or "imperial" (ft/mi/acre) for measurements.
@@ -129,6 +129,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # - {"source": "file", "file": "cookies.txt"} — an export kept in settings,
     #   the fallback where reading the browser can't work (Chromium on Windows).
     "download_cookies": {"source": "none"},
+    # Where each kind of export lands (engine/exportdir.py), as an absolute path
+    # the analyst browsed to: {"notes": "", "media": "", "proofs": ""}. An empty
+    # entry means the case's own `exports/` folder, which is the default and the
+    # one destination that always exists.
+    "export_dirs": {},
 }
 
 # Accepted values for the display preferences above — mirror of

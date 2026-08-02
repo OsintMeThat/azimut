@@ -58,14 +58,24 @@ jobs:
         run: |
           uv sync --frozen --no-dev --group release --no-install-project
           uv run --no-sync python -m build --no-isolation
-      - name: Sanity-check the wheel bundles the UI
+      - name: Sanity-check the wheel bundles the UI and PDF assets
         run: |
           python - <<'PY'
           import glob, zipfile
           whl = sorted(glob.glob("dist/*.whl"))[-1]
-          n = [x for x in zipfile.ZipFile(whl).namelist() if x.startswith("azimut/static/")]
-          assert n, "wheel is missing azimut/static/** — did the frontend build run?"
-          print(f"{whl}: {len(n)} static files bundled")
+          names = set(zipfile.ZipFile(whl).namelist())
+          static = [name for name in names if name.startswith("azimut/static/")]
+          assert static, "wheel is missing azimut/static/** — did the frontend build run?"
+          required = {
+              "azimut/assets/fonts/NotoSerif-Regular.ttf",
+              "azimut/assets/fonts/APACHE-2.0.txt",
+              "azimut/assets/fonts/OFL.txt",
+              "azimut/assets/fonts/BITSTREAM-VERA.txt",
+              "azimut/assets/fonts/README.md",
+          }
+          missing = sorted(required - names)
+          assert not missing, f"wheel is missing PDF font assets: {missing}"
+          print(f"{whl}: {len(static)} static files and PDF font assets bundled")
           PY
       - uses: actions/upload-artifact@v4
         with:

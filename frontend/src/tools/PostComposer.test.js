@@ -38,6 +38,23 @@ describe('Geo Report actions', () => {
   });
 });
 
+describe('Proof handoff', () => {
+  it('files the current thread and starts a fresh one when a new proof arrives', () => {
+    expect(source).toContain("import { filingName, planProofHandoff } from './post/handoff.js';");
+    expect(source).toContain(
+      'const plan = planProofHandoff({ incomingPng: p.png, currentPng: proofPng, hasContent });'
+    );
+    expect(source).toContain("if (plan === 'file-then-apply') {");
+    expect(source).toContain('if (!(await fileCurrentDraft())) return;');
+    expect(source).toContain('resetDraft();\n    }\n    applyProof(p);');
+  });
+
+  it('keeps the outgoing thread when its save fails, rather than losing it', () => {
+    expect(source).toContain('const saved = await performDraftSave(`Post saved: ${postName.trim()}`);');
+    expect(source).toContain('if (!saved) return false;');
+  });
+});
+
 describe('Post naming', () => {
   it('names the draft in the header, like Inspect and the Proof Composer', () => {
     expect(source).toContain('<input class="input title-input" bind:value={postName}');

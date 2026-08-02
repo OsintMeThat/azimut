@@ -21,27 +21,31 @@
     FREE_TIER,
   } from '../lib/usage.js';
   import { probeKey, googleMapsLoadedKey } from '../lib/gmaps.js';
-  import { revealWorkspaceFolder } from '../lib/reveal.js';
   import { extensionVersion, extensionOutdated } from '../lib/extBridge.js';
+  import { CASE_FOLDER_LABEL, saveDestination } from '../lib/exportDest.js';
   import Icon from '../components/Icon.svelte';
+  import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import ProofTemplateEditor from '../components/ProofTemplateEditor.svelte';
   import PostTemplateEditor from '../components/PostTemplateEditor.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import WorkspaceFolder from '../components/WorkspaceFolder.svelte';
 
-  // Imagery keys and their usage meters share one card per provider.
+  // Keep workflow choices above app maintenance in the settings rail.
   const TABS = [
-    { id: 'preferences', label: 'Preferences', icon: 'sliders' },
+    { id: 'general', label: 'General', icon: 'sliders' },
+    { id: 'publishing', label: 'Publishing', icon: 'edit' },
     { id: 'imagery', label: 'Imagery', icon: 'key' },
     { id: 'templates', label: 'Templates', icon: 'layers' },
     { id: 'extension', label: 'Capture extension', icon: 'crop' },
-    { id: 'about', label: 'About', icon: 'compass' },
+    { id: 'storage', label: 'Storage', icon: 'folder' },
+    { id: 'system', label: 'System', icon: 'compass' },
   ];
-  let tab = $state('preferences');
+  let tab = $state('general');
 
   const REPO_URL = 'https://github.com/OsintMeThat/azimut';
   const SITE_URL = 'https://osintmethat.com';
 
+  // Imagery keys and their usage meters share one card per provider.
   // The keyed imagery providers the app knows how to light up (IMAGERY_PROVIDERS.md).
   // Keys are app-wide and stored in settings.json, outside cases and exports.
   //
@@ -216,6 +220,24 @@
   // back. A file written before those sections existed is a bare settings blob,
   // so it gets wrapped into the current shape.
   let settingsFile = $state(null);
+  let exportDirs = $state({ notes: '', media: '', proofs: '' });
+  let exportPickerKind = $state(null);
+
+  const EXPORT_KINDS = [
+    { id: 'notes', label: 'Note PDFs' },
+    { id: 'media', label: 'Media copies' },
+    { id: 'proofs', label: 'Proof PNGs' },
+  ];
+
+  async function resetExportDestination(kind) {
+    try {
+      const saved = await saveDestination(kind, '');
+      exportDirs = saved;
+      toast(`${EXPORT_KINDS.find((entry) => entry.id === kind)?.label} use ${CASE_FOLDER_LABEL}`, 'ok');
+    } catch (e) {
+      toast(`Could not reset the export folder: ${e.message}`, 'danger');
+    }
+  }
 
   async function importSettings(event) {
     const file = event.currentTarget.files?.[0];
@@ -299,7 +321,7 @@
     try {
       report = await api.get(`/api/settings/diagnostics?${params}`);
     } catch {
-      report = null; // the About tab falls back to a plain link to the tracker
+      report = null; // System falls back to a plain link to the tracker
     }
   }
 
@@ -376,6 +398,11 @@
       workspace_root: s.workspace_root ?? '',
       extension_version: s.extension_version ?? '',
     };
+    exportDirs = {
+      notes: s.export_dirs?.notes ?? '',
+      media: s.export_dirs?.media ?? '',
+      proofs: s.export_dirs?.proofs ?? '',
+    };
     ingestToken = s.ingest_token ?? '';
     home = { lat: String(s.home_view.lat), lon: String(s.home_view.lon), zoom: String(s.home_view.zoom) };
     mention = s.post_mention ?? '';
@@ -383,11 +410,11 @@
     updateOnStart = s.update_check_on_start ?? true;
     applyPrefs(s); // the rest of the app reads these live
     await loadScrapers().catch(() => {}); // local disk read; never blocks Settings
-    // shells out to `ffmpeg -version`; non-blocking, About tab only reads it
+    // shells out to `ffmpeg -version`; non-blocking, System only reads it
     api.get('/api/settings/ffmpeg').then((r) => (ffmpeg = r)).catch(() => {});
   }
 
-  // Preferences save on change; the server returns canonical values.
+  // General settings save on change; the server returns canonical values.
   async function savePrefs(patch) {
     try {
       const saved = await api.put('/api/settings/prefs', patch);
@@ -492,17 +519,6 @@
     }
   }
 
-  // The path is printed right there, but copying it into a file manager by hand
-  // is exactly what the first analyst to ask ended up doing.
-  async function revealWorkspace() {
-    try {
-      await revealWorkspaceFolder();
-      toast('Opened the workspace folder', 'ok', 2500);
-    } catch (e) {
-      toast(e.message || 'Could not open the folder', 'danger', 7000);
-    }
-  }
-
   // a live sample so the format choice is legible before it's applied elsewhere
   const coordSample = $derived(
     formatCoords(Number(home.lat) || 48.8584, Number(home.lon) || 2.2945, prefs.coordFormat)
@@ -513,15 +529,16 @@
     loadTemplates();
   });
 
-  // Build the report the first time About is opened: it reads the log buffer and
+  // Build the report the first time System is opened: it reads the log buffer and
   // shells nothing out, but there's no reason to do it for the other tabs.
   $effect(() => {
-    if (tab === 'about' && !report) loadReport();
+    if (tab === 'system' && !report) loadReport();
   });
 
   $effect(() => {
     if (uiState.tool !== 'settings') return;
-    const target = uiState.settingsTab;
+    const aliases = { preferences: 'general', about: 'system' };
+    const target = aliases[uiState.settingsTab] ?? uiState.settingsTab;
     if (!target) return;
     if (TABS.some((t) => t.id === target)) tab = target;
     uiState.settingsTab = null;
@@ -647,6 +664,7 @@
         <button
           class="rail-tab"
           class:active={tab === t.id}
+          class:rail-break={t.id === 'storage'}
           onclick={() => (tab = t.id)}
           aria-current={tab === t.id ? 'page' : undefined}
         >
@@ -657,7 +675,7 @@
     </nav>
 
     <div class="pane">
-      {#if tab === 'preferences'}
+      {#if tab === 'general'}
         <section class="group">
           <h3>Coordinates</h3>
           <div class="row">
@@ -723,7 +741,9 @@
             </label>
           </div>
         </section>
+      {/if}
 
+      {#if tab === 'publishing'}
         <section class="group">
           <h3>Geo Report</h3>
           <div class="row">
@@ -1129,19 +1149,62 @@
         </section>
       {/if}
 
-      {#if tab === 'about'}
+      {#if tab === 'storage'}
+        <WorkspaceFolder onchange={(status) => (about.workspace_root = status.root)} />
+
+        <section class="group">
+          <h3>Export folders</h3>
+          <p class="note">Choose a folder for each export type.</p>
+          {#each EXPORT_KINDS as kind (kind.id)}
+            <div class="row">
+              <div class="row-label">
+                <span>{kind.label}</span>
+                <span class="row-hint mono export-path" title={exportDirs[kind.id] || CASE_FOLDER_LABEL}>
+                  {exportDirs[kind.id] || CASE_FOLDER_LABEL}
+                </span>
+              </div>
+              <div class="scraper-actions">
+                <button class="btn btn-sm" onclick={() => (exportPickerKind = kind.id)}>Change…</button>
+                <button
+                  class="btn btn-ghost btn-sm"
+                  onclick={() => resetExportDestination(kind.id)}
+                  disabled={!exportDirs[kind.id]}
+                >Reset</button>
+              </div>
+            </div>
+          {/each}
+        </section>
+
+        <section class="group">
+          <h3>Settings backup</h3>
+          <p class="note">
+            Carries settings, keys, templates and your signature; export folders and
+            download logins stay here, so keep this backup private.
+          </p>
+          <div class="links">
+            <a class="btn btn-sm" href="/api/settings/export" download>
+              <Icon name="save" size={13} /> Export backup
+            </a>
+            <button class="btn btn-sm" onclick={() => settingsFile?.click()}>
+              <Icon name="file" size={13} /> Import backup
+            </button>
+            <input
+              type="file"
+              accept="application/json,.json"
+              bind:this={settingsFile}
+              onchange={importSettings}
+              hidden
+            />
+          </div>
+        </section>
+      {/if}
+
+      {#if tab === 'system'}
         <section class="group">
           <h3>Azimut</h3>
           <dl class="facts">
             <dt>Version</dt>
             <dd class="mono">{about.version || '—'}</dd>
-            <dt>Workspace</dt>
-            <dd class="mono workspace-fact">
-              <span>{about.workspace_root || '—'}</span>
-              <button class="btn btn-ghost btn-sm" onclick={revealWorkspace} title="Open this folder">
-                <Icon name="folderOpen" size={13} /> Open
-              </button>
-            </dd>
             <dt>ffmpeg</dt>
             <dd class="mono" title={ffmpeg.path || ''}>
               {#if ffmpeg.available}
@@ -1167,8 +1230,6 @@
             </a>
           </div>
         </section>
-
-        <WorkspaceFolder onchange={(status) => (about.workspace_root = status.root)} />
 
         <section class="group">
           <h3>Updates</h3>
@@ -1275,29 +1336,6 @@
             paths, account name, case names and any keys removed. Nothing leaves the app
             until you open the issue.
           </p>
-        </section>
-
-        <section class="group">
-          <h3>Backup</h3>
-          <p class="note">
-            One file with your settings, keys, templates and signature, for another
-            machine; keep it private. Your download login session stays on this machine.
-          </p>
-          <div class="links">
-            <a class="btn btn-sm" href="/api/settings/export" download>
-              <Icon name="save" size={13} /> Export backup
-            </a>
-            <button class="btn btn-sm" onclick={() => settingsFile?.click()}>
-              <Icon name="file" size={13} /> Import backup
-            </button>
-            <input
-              type="file"
-              accept="application/json,.json"
-              bind:this={settingsFile}
-              onchange={importSettings}
-              hidden
-            />
-          </div>
         </section>
 
         <section class="group">
@@ -1415,6 +1453,15 @@
   </div>
 </div>
 
+{#if exportPickerKind}
+  <ExportFolderPicker
+    kind={exportPickerKind}
+    current={exportDirs[exportPickerKind]}
+    onchosen={(path) => (exportDirs = { ...exportDirs, [exportPickerKind]: path })}
+    onclose={() => (exportPickerKind = null)}
+  />
+{/if}
+
 {#if editing}
   <div class="tpl-modal-overlay" role="presentation"
     onclick={(e) => e.target === e.currentTarget && cancelEdit()}>
@@ -1475,7 +1522,7 @@
     font-size: var(--fs-sm);
   }
 
-  /* Preferences use a section rail and one scrolling pane. */
+  /* Settings use a section rail and one scrolling pane. */
   .split {
     flex: 1;
     display: flex;
@@ -1513,6 +1560,13 @@
     background: var(--accent-soft);
     color: var(--accent);
     font-weight: 600;
+  }
+  .rail-tab.rail-break {
+    margin-top: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
   }
 
   .pane {
@@ -1558,6 +1612,13 @@
     color: var(--text-3);
     font-size: var(--fs-xs);
     line-height: 1.4;
+  }
+  .export-path {
+    display: block;
+    max-width: min(380px, 48vw);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   /* Recipe for a provider whose "key" is a configuration you build yourself */
   .key-steps {

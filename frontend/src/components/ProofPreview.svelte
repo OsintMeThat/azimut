@@ -142,7 +142,7 @@
         }));
         g.add(new Konva.Text({
           width: box.w, height: box.h, padding: box.h * 0.12, align: 'center', verticalAlign: 'middle',
-          text: 'Add a logo in\nSettings → Preferences', fontSize: box.h * 0.16, fill: '#111',
+          text: 'Add a logo in\nSettings → Publishing', fontSize: box.h * 0.16, fill: '#111',
           fontFamily: 'system-ui, sans-serif',
         }));
       }

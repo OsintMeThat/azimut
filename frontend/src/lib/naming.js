@@ -71,10 +71,13 @@ export function isDefaultName(name, kind) {
 }
 
 // Where each kind's spec lives, and the entity attribute that points at it.
+// These mirror `layout.session_rel` / `proof_spec_rel` / `draft_rel` — the
+// specs are hidden inside the case folder, so a spec path is not the visible
+// path of the work it describes (a proof's own file is `proofs/<name>.png`).
 const SPEC_ATTR = {
-  session: { dir: 'inspect/', attr: 'spec' },
-  proof: { dir: 'proofs/', attr: 'spec' },
-  draft: { dir: 'exports/', attr: 'draft' },
+  session: { dir: '.inspect/', attr: 'spec' },
+  proof: { dir: 'proofs/.meta/', attr: 'spec' },
+  draft: { dir: '.drafts/', attr: 'draft' },
 };
 
 /** The filed entities of `kind`, read off a case's entity list. */
@@ -84,6 +87,16 @@ export function savedEntities(entities, kind) {
     const spec = e.attrs?.[attr];
     return typeof spec === 'string' && spec.startsWith(dir) && spec.endsWith('.json');
   });
+}
+
+/** The name one filed entity is saved under, or '' if it carries no spec.
+ *  This is the name the tools reopen by, so it has to follow the spec's folder
+ *  wherever the case layout moves it. */
+export function specStem(entity, kind) {
+  const { dir, attr } = SPEC_ATTR[kind];
+  const spec = entity?.attrs?.[attr];
+  if (typeof spec !== 'string' || !spec.startsWith(dir) || !spec.endsWith('.json')) return '';
+  return spec.slice(dir.length, -5);
 }
 
 /** Slugs of everything of `kind` already saved — the collision set. */

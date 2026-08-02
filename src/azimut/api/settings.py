@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .. import __version__, config
 from ..engine import (
     diagnostics,
+    exportdir,
     ffmpeg,
     google_tiles,
     reveal,
@@ -104,6 +105,8 @@ class PrefsIn(BaseModel):
     update_dismissed_version: str | None = None
     # login source for gated media downloads (engine/media.py); None leaves it
     download_cookies: DownloadCookiesIn | None = None
+    # where each kind of export lands (engine/exportdir.py); "" = the case folder
+    export_dirs: dict[str, str] | None = None
 
 
 def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
@@ -125,6 +128,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "update_check_on_start": bool(settings.get("update_check_on_start", True)),
         "update_dismissed_version": settings.get("update_dismissed_version", ""),
         "download_cookies": settings.get("download_cookies", {"source": "none"}),
+        "export_dirs": exportdir.saved_dirs(settings),
     }
 
 
@@ -154,7 +158,7 @@ def get_settings() -> dict[str, Any]:
         # the shipped defaults, so Settings can show what it's departing from
         "free_tier_default": config.FREE_TIER,
         "block_share": config.BLOCK_SHARE,
-        # About tab: what this build is, and where it keeps its files
+        # System: what this build is, and where it keeps its files
         "version": __version__,
         "workspace_root": str(config.workspace_root()),
         # the capture-extension version this build ships — Settings compares it
@@ -169,7 +173,7 @@ def get_settings() -> dict[str, Any]:
 
 @router.get("/settings/ffmpeg")
 def ffmpeg_info() -> dict[str, Any]:
-    """About tab: ffmpeg version + where it resolves from. Separate from the
+    """System: ffmpeg version + where it resolves from. Separate from the
     hot /settings poll because it shells out to ``ffmpeg -version``."""
     return ffmpeg.info()
 
@@ -187,6 +191,12 @@ def put_prefs(body: PrefsIn) -> dict[str, Any]:
         browser = body.download_cookies.browser
         if browser not in config.COOKIE_BROWSERS:
             raise HTTPException(status_code=422, detail=f"unknown browser '{browser}'")
+    for kind, folder in (body.export_dirs or {}).items():
+        if kind in exportdir.KINDS and folder.strip():
+            try:
+                exportdir.resolve(folder)
+            except exportdir.ExportDirError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
     settings = config.update_settings(lambda s: _apply_prefs(s, body))
     # a login session on disk is a liability once it isn't the chosen source
     if body.download_cookies is not None:
@@ -247,6 +257,14 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["update_check_on_start"] = bool(body.update_check_on_start)
     if body.update_dismissed_version is not None:
         settings["update_dismissed_version"] = body.update_dismissed_version.strip()[:64]
+    if body.export_dirs is not None:
+        merged = dict(settings.get("export_dirs", {}))
+        for kind, folder in body.export_dirs.items():
+            if kind not in exportdir.KINDS:
+                continue
+            # "" is how the analyst goes back to the case's own exports folder
+            merged[kind] = str(exportdir.resolve(folder)) if folder.strip() else ""
+        settings["export_dirs"] = merged
     if body.download_cookies is not None:
         dc = body.download_cookies
         settings["download_cookies"] = (
@@ -418,18 +436,19 @@ def export_settings() -> Response:
     """Download everything app-wide that isn't a case, so another machine can be
     set up identically (POST /settings/import).
 
-    Three files in one: settings.json verbatim (so a key added to
-    ``DEFAULT_SETTINGS`` travels without anyone remembering to list it here),
-    templates.json, and the signature logo base64-encoded. It carries the user's
-    own API keys by design — it's a local download of secrets that already live
-    in their workspace.
+    Three files in one: portable settings, templates.json, and the signature
+    logo base64-encoded. It carries the user's own API keys by design — it's a
+    local download of secrets that already live in their workspace.
 
-    Deliberately absent: ``cookies.txt`` (a live login session, tied to one
-    machine's browser), the cases themselves (portable folders already), and a
-    signature that isn't a valid PNG within the size gate.
+    Deliberately absent: export destinations (absolute paths chosen on this
+    machine), ``cookies.txt`` (a live login session), the cases themselves
+    (portable folders already), and a signature that isn't a valid PNG within
+    the size gate.
     """
+    portable_settings = config.load_settings()
+    portable_settings.pop("export_dirs", None)
     bundle = {
-        "settings": config.load_settings(),
+        "settings": portable_settings,
         "templates": config.load_templates(),
         "signature_png": _signature_b64(),
     }

@@ -40,7 +40,7 @@
   </div>
 
   <p class="note">
-    You can always update later from Settings → Updates.
+    You can always update later from Settings → System.
   </p>
 </Modal>
 

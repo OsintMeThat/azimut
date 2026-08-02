@@ -148,6 +148,20 @@ def test_wheel_bundles_the_frontend_and_leaves_dev_tooling_out():
     assert not (root / "src" / "azimut" / "bigcase.py").exists()
 
 
+def test_pdf_font_licenses_are_complete_and_packaged():
+    root = Path(__file__).resolve().parent.parent
+    fonts = root / "src" / "azimut" / "assets" / "fonts"
+    apache = (fonts / "APACHE-2.0.txt").read_text(encoding="utf-8")
+    assert "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION" in apache
+    assert "END OF TERMS AND CONDITIONS" in apache
+    assert len(apache.splitlines()) >= 190
+    for name in ("OFL.txt", "BITSTREAM-VERA.txt", "README.md"):
+        assert (fonts / name).is_file()
+
+    spec = (root / "packaging" / "azimut.spec").read_text(encoding="utf-8")
+    assert 'collect_data_files("azimut")' in spec
+
+
 def test_storage_and_jobs_add_no_new_runtime_dependency():
     """The store, the durable queue and the thumbnail worker stay on the standard
     library plus deps already declared — nothing that would need a new wheel on
@@ -214,6 +228,12 @@ def test_release_tooling_is_bounded_and_built_from_the_lock():
     assert "--no-editable" in workflow
     assert "uv run python" not in workflow
     assert "body_path: docs/RELEASE_NOTES.md" in workflow
+    for font_asset in (
+        "azimut/assets/fonts/APACHE-2.0.txt",
+        "azimut/assets/fonts/OFL.txt",
+        "azimut/assets/fonts/BITSTREAM-VERA.txt",
+    ):
+        assert font_asset in workflow
     # A guard job runs before anything builds: it checks the pushed tag equals
     # __version__ and runs the version-parity gate the release used to skip, so
     # a stale version can never ship again (the 0.2.2 false-update-nag bug).
@@ -225,6 +245,24 @@ def test_release_tooling_is_bounded_and_built_from_the_lock():
         "softprops/action-gh-release@v2"
     )
     assert (root / "docs" / "RELEASE_NOTES.md").is_file()
+
+
+def test_current_settings_docs_name_the_current_sections():
+    root = Path(__file__).resolve().parent.parent
+    current = [
+        root / "docs" / "SPEC.md",
+        root / "docs" / "UI.md",
+        root / "src" / "azimut" / "config.py",
+        root / "src" / "azimut" / "api" / "settings.py",
+        root / "src" / "azimut" / "engine" / "coords.py",
+        root / "src" / "azimut" / "engine" / "diagnostics.py",
+        root / "src" / "azimut" / "engine" / "satellite.py",
+        root / "frontend" / "src" / "components" / "WorkspaceFolder.svelte",
+        root / "frontend" / "src" / "tools" / "Settings.svelte",
+    ]
+    text = "\n".join(path.read_text(encoding="utf-8") for path in current)
+    for stale in ("Settings → Preferences", "About tab", "Preferences tab"):
+        assert stale not in text
 
 
 def test_release_binary_runs_the_application_smoke_test():

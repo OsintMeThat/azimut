@@ -37,6 +37,20 @@ dependencies = [
     "numpy>=1.26,<3",
     "requests>=2.31,<3",
     "python-multipart>=0.0.9,<1.0",
+    # Notes to PDF (engine/notes_pdf.py). fpdf2 and markdown-it-py are pure
+    # Python, so the three binaries get the same renderer and no build step.
+    # WeasyPrint would render nicer CSS but needs Pango and cairo present on the
+    # machine, which is a GTK install on Windows and the end of the one-click
+    # binary. reportlab was tried and dropped: it cannot draw Burmese and Arabic
+    # correctly in one document (see docs, and the shaping note below).
+    "fpdf2>=2.8,<3",
+    "markdown-it-py>=4.0,<5",
+    # Text shaping, and not optional: without it Arabic comes out unjoined and
+    # Burmese mis-stacked — text that looks like text and is wrong, which is
+    # worse than text that is missing. fpdf2 uses it when it is importable,
+    # which is why nothing imports it by name. abi3 wheels cover win_amd64,
+    # macOS universal2 and manylinux x86_64/arm64.
+    "uharfbuzz>=0.50,<1",
     # Timezone from a latitude/longitude, for the civil local time the sun and
     # moon panel shows beside UTC (engine/sky.py). Chosen over timezonefinder,
     # which carries 65 MB of tz polygons into each of the three binaries where
@@ -73,6 +87,9 @@ dev = [
     # Starlette 1.3+ uses HTTPX2 for TestClient; keep the old HTTPX runtime
     # client above because application integrations still import that package.
     "httpx2>=2,<3",
+    # Reads an exported note back, so the PDF tests assert what is on the page
+    # rather than that bytes were written. Test-only: nothing ships it.
+    "pypdf>=6,<7",
     # Static analysis, run in CI (see .github/workflows/ci.yml). ruff is 0.x and
     # ships rule changes between minors, so it's pinned to one minor; mypy to the
     # next major. Both bounds are raised deliberately, after the suite is green.

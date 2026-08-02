@@ -215,7 +215,7 @@
 </section>
 
 <style>
-  /* This block sits inside Settings' About tab and inside the stopped-workspace
+  /* This block sits inside Settings' Storage section and inside the stopped-workspace
      panel. Neither parent's scoped styles reach in here, so the group heading,
      the fact list and the notes are restated with the shared tokens — same
      shape as every other Settings group. */

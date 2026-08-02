@@ -13,6 +13,8 @@
   import SearchInput from '../components/SearchInput.svelte';
   import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
+  import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
+  import { destinationLabel, readDestinations } from '../lib/exportDest.js';
   import ProofToolbar from './proof/ProofToolbar.svelte';
   import ProofCanvas from './proof/ProofCanvas.svelte';
   import ProofLayersPanel from './proof/ProofLayersPanel.svelte';
@@ -108,7 +110,7 @@
     const name = savedName;
     if (!id || !name) return;
     let live = true;
-    lookupEntity(id, 'spec', `proofs/${name}.json`).then((bound) => {
+    lookupEntity(id, 'spec', `proofs/.meta/${name}.json`).then((bound) => {
       if (live && !bound && savedName === name) {
         savedName = null;
         dirty = true;
@@ -2111,6 +2113,10 @@
 
   function onKeydown(e) {
     if (uiState.tool !== 'proof') return;
+    if (e.key === 'Escape' && exportMenuOpen) {
+      exportMenuOpen = false;
+      return;
+    }
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
     if (pathDraft && (e.key === 'Enter' || e.key === 'Escape')) {
       finishPath(e.key === 'Enter');
@@ -2216,8 +2222,86 @@
     }
   }
 
+  // Copy the saved PNG out to the proofs export folder — the same picture, in
+  // the place finished work is filed. Unsaved pixels are saved first, so what
+  // lands there is never a proof ago.
+  let exporting = $state(false);
+  let exportDir = $state('');
+  let exportPicker = $state(false);
+  let exportAfterPick = $state(false);
+  let exportMenuOpen = $state(false);
+  async function exportProof() {
+    if (!proofHasContent || exporting || saving) return;
+    exporting = true;
+    try {
+      if (dirty || !savedName) await save();
+      // A failed save leaves the proof dirty; a title collision opens the
+      // overwrite prompt without binding a name. In either case there is no
+      // confirmed PNG to copy yet.
+      if (dirty || !savedName) return;
+      const cid = caseState.current.id;
+      const result = await api.post(`/api/cases/${cid}/proofs/${savedName}/export`);
+      exportDir = result.folder;
+      toast(`${result.file} written to ${destinationLabel(result.folder)}`, 'ok', 5200, {
+        label: 'Show',
+        onClick: () =>
+          api
+            .post(`/api/cases/${cid}/proofs/export/reveal`)
+            .catch((error) => toast(error.message, 'warn')),
+      });
+    } catch (e) {
+      toast(`Export failed: ${e.message}`, 'danger', 6000);
+    } finally {
+      exporting = false;
+    }
+  }
+
+  async function toggleExportMenu() {
+    exportMenuOpen = !exportMenuOpen;
+    if (!exportMenuOpen) return;
+    try {
+      exportDir = (await readDestinations()).proofs;
+    } catch {
+      // The remembered label can stay on its default when Settings is unavailable.
+    }
+  }
+
+  async function openExportPicker() {
+    exportMenuOpen = false;
+    exportAfterPick = true;
+    try {
+      exportDir = (await readDestinations()).proofs;
+    } catch {
+      // The picker still has its case-folder default if Settings cannot load.
+    }
+    exportPicker = true;
+  }
+
+  async function useExportFolder(path) {
+    exportDir = path;
+    if (!exportAfterPick) return;
+    exportAfterPick = false;
+    await exportProof();
+  }
+
+  async function exportProofPng() {
+    exportMenuOpen = false;
+    await exportProof();
+  }
+
+  async function revealProofExports() {
+    exportMenuOpen = false;
+    const cid = caseState.current?.id;
+    if (!cid) return;
+    try {
+      await api.post(`/api/cases/${cid}/proofs/export/reveal`);
+    } catch (error) {
+      toast(error.message, 'warn');
+    }
+  }
+
   // Every proof already saved in this case, read off the filed entities: the
-  // slugs (filename without `proofs/…​.json`) to catch a filename collision, and
+  // slugs (filename without `proofs/.meta/…​.json`) to catch a filename collision, and
   // the names so a fresh proof can take one that reads apart from them.
   const savedProofNames = () => savedSlugs(proofEntities, 'proof');
   const savedProofTitles = () => savedTitles(proofEntities, 'proof');
@@ -2471,14 +2555,45 @@
       </button>
     {/if}
     <button class="btn btn-sm" onclick={openNewProofDialog}><Icon name="plus" size={14} /> New proof</button>
-    <button
-      class="btn btn-sm"
-      onclick={copyPng}
-      disabled={!proofHasContent || copying}
-      title="Copy the composed PNG to the clipboard"
-    >
-      <Icon name="copy" size={14} /> {copying ? 'Copying…' : 'Copy PNG'}
-    </button>
+    <div class="export-split">
+      <button
+        class="btn btn-sm export-main"
+        onclick={copyPng}
+        disabled={!proofHasContent || copying}
+        title="Copy the proof PNG"
+      >
+        <Icon name="copy" size={14} /> {copying ? 'Copying…' : 'Copy'}
+      </button>
+      <button
+        class="btn btn-sm export-toggle"
+        onclick={toggleExportMenu}
+        aria-label="More export options"
+        aria-haspopup="menu"
+        aria-expanded={exportMenuOpen}
+      >
+        <Icon name="chevronDown" size={13} />
+      </button>
+      {#if exportMenuOpen}
+        <button class="export-backdrop" onclick={() => (exportMenuOpen = false)} aria-label="Close export menu"></button>
+        <div class="export-menu card" role="menu">
+          <button class="export-option" role="menuitem" onclick={exportProofPng} disabled={!proofHasContent || exporting || saving}>
+            <Icon name="download" size={14} />
+            <span>{exporting ? 'Exporting…' : 'Export PNG'}</span>
+          </button>
+          <button class="export-option" role="menuitem" onclick={openExportPicker} disabled={!proofHasContent || exporting || saving}>
+            <Icon name="folder" size={14} />
+            <span>Export to another folder…</span>
+          </button>
+          <button class="export-option" role="menuitem" onclick={revealProofExports} disabled={!caseState.current}>
+            <Icon name="folderOpen" size={14} />
+            <span>Show export folder</span>
+          </button>
+          <div class="export-destination" title={exportDir || "The case's exports folder"}>
+            Destination: {destinationLabel(exportDir)}
+          </div>
+        </div>
+      {/if}
+    </div>
     <button class="btn btn-ok btn-sm" onclick={() => save()} disabled={!proofHasContent || saving}>
       <Icon name="save" size={14} /> {saving ? 'Saving…' : 'Save proof'}
     </button>
@@ -2752,7 +2867,7 @@
               <span>Signature</span>
             </label>
             {#if !sigImg}
-              <div class="adv-hint">Add a logo in Settings → Preferences to sign your proofs.</div>
+              <div class="adv-hint">Add a logo in Settings → Publishing to sign your proofs.</div>
             {:else if proof.signature}
               <div class="sig-anchors">
                 {#each SIG_ANCHORS as a (a.id)}
@@ -2812,7 +2927,7 @@
               <span>Add account handle</span>
             </label>
             {#if !prefs.signatureHandle?.trim()}
-              <div class="adv-hint">Add your account handle in Settings → Preferences to use it on proofs.</div>
+              <div class="adv-hint">Add your account handle in Settings → Publishing to use it on proofs.</div>
             {:else if proof.signatureText}
               <div class="adv-hint">Drag the account handle on the canvas to place it.</div>
             {/if}
@@ -2852,6 +2967,19 @@
     icon="plus"
     onconfirm={() => { replaceWithNewConfirm = false; createNewProof(); }}
     oncancel={() => (replaceWithNewConfirm = false)}
+  />
+{/if}
+
+{#if exportPicker}
+  <ExportFolderPicker
+    kind="proofs"
+    current={exportDir}
+    confirmLabel="Export here"
+    onclose={() => {
+      exportPicker = false;
+      exportAfterPick = false;
+    }}
+    onchosen={useExportFolder}
   />
 {/if}
 
@@ -3035,6 +3163,62 @@
     font-weight: 700;
   }
   .spacer { flex: 1; }
+  .export-split {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+  }
+  .export-main {
+    border-radius: var(--r-sm) 0 0 var(--r-sm);
+  }
+  .export-toggle {
+    min-width: 27px;
+    margin-left: -1px;
+    padding-inline: 5px;
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  }
+  .export-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    cursor: default;
+  }
+  .export-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 100;
+    min-width: 230px;
+    padding: 5px;
+    box-shadow: var(--shadow-2);
+  }
+  .export-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 9px;
+    border-radius: var(--r-sm);
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    text-align: left;
+  }
+  .export-option:hover:not(:disabled) {
+    background: var(--bg-2);
+  }
+  .export-option:disabled {
+    color: var(--text-3);
+  }
+  .export-destination {
+    margin-top: 4px;
+    padding: 6px 9px 3px;
+    border-top: 1px solid var(--border);
+    overflow: hidden;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .tpl-none {
     margin: 0 0 6px;
     font-size: var(--fs-xs);

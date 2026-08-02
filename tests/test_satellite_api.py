@@ -367,7 +367,7 @@ def test_edit_title_renames_capture_entity(client, monkeypatch):
 
 
 def test_capture_title_follows_the_coordinate_format(client, monkeypatch):
-    """A default title is minted in the user's format (Settings → Preferences),
+    """A default title is minted in the user's format (Settings → General),
     while the machine-readable fields stay in decimal degrees."""
     monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
     client.put("/api/settings/prefs", json={"coord_format": "mgrs"})

@@ -866,6 +866,22 @@ class SqliteCase:
             row = conn.execute("SELECT * FROM entities WHERE id = ?", (entity_id,)).fetchone()
         return self._entity(row) if row is not None else None
 
+    def note_ids_by_titles(self, titles: set[str]) -> dict[str, list[str]]:
+        """Note ids grouped by case-folded title, for stable flat exports."""
+        wanted = {title.casefold() for title in titles}
+        grouped: dict[str, list[str]] = {title: [] for title in wanted}
+        if not wanted:
+            return grouped
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, label FROM entities WHERE type = 'note' ORDER BY id"
+            ).fetchall()
+        for row in rows:
+            key = str(row["label"]).casefold()
+            if key in grouped:
+                grouped[key].append(str(row["id"]))
+        return grouped
+
     def find_entity(self, *, attr: str, value: Any) -> dict[str, Any] | None:
         # Scan and match in Python so the store stays on core SQL (no JSON1
         # dependency). A JSON1-indexed lookup is a later optimisation, gated on

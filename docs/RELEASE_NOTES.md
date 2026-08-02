@@ -1,19 +1,100 @@
-# Azimut v0.2.6
+# Azimut v0.2.7
 
 ## OSINT toolkit at a glance
 
-- **Sources:** import or download media, use an existing login when a post
-  requires it, record hashes and provenance, inspect frames, crops, collages,
-  panoramas and ELA, then prepare reverse-image searches.
-- **Maps:** convert coordinates, geocode places, capture attributed imagery,
-  compare providers, rotate and measure maps, save references and review AOI
-  grids.
+- **Sources:** import or download media, preserve hashes and provenance, inspect
+  frames, crops, collages, panoramas and ELA, then prepare reverse-image
+  searches.
+- **Maps and sky:** convert coordinates, geocode places, capture and compare
+  imagery, review AOI grids, and calculate local sun and moon conditions
+  offline.
 - **Evidence:** organise media, places, proofs and notes in portable cases with
-  folders, links, Markdown notebooks and PDF output.
+  folders, relations, Markdown notebooks and PDF exports.
 - **Publishing:** build annotated Geo Proofs and prepare evidence-linked Geo
   Reports for X, Bluesky or Mastodon without posting automatically.
 
-## What changed in v0.2.6
+## What changed in v0.2.7
+
+### Case folders that belong to the analyst
+
+- **A clear ownership boundary.** Azimut now keeps its managed files under the
+  case's `azimut/` directory. Everything beside it belongs to the analyst and
+  travels with the case bundle.
+- **Readable, predictable storage.** The database and editable metadata move
+  into hidden internal directories, while visible files keep the names shown in
+  the app. Existing cases and older bundles migrate automatically.
+- **Adopt an existing folder.** A folder created in the workspace can become a
+  case in place without moving or reading the analyst's files.
+
+### A workspace that can move safely
+
+- **Move or adopt the workspace from Settings.** Azimut verifies every copied
+  file with SHA-256 before switching through a pointer stored outside the
+  workspace, and keeps the old copy until the analyst chooses to remove it.
+- **External drives work too.** Move or adopt the workspace on an external
+  drive. If it is disconnected, Azimut reports the missing location instead of
+  starting an empty workspace.
+- **No silent replacement for missing work.** If a configured workspace
+  disappears, startup shows where it was expected instead of creating an empty
+  replacement.
+- **One Azimut per workspace.** An operating-system lock and heartbeat prevent
+  two instances from writing to the same workspace. A stale or unreliable lock
+  can still be overridden explicitly.
+
+### Case Doctor
+
+- **Read-only diagnosis first.** Case Doctor checks the database, registered
+  media and files placed manually in `media/` without changing the case.
+- **Explicit repairs.** Each applicable repair is offered separately, including
+  restoring a missing manifest, removing or relinking missing media records and
+  rebuilding a lost database with its unrecoverable data stated beforehand.
+
+### Coords & Sky
+
+- **Sun and moon calculations offline.** A coordinate and date now return rise,
+  set, azimuth, altitude, civil and nautical twilights, moon phase and
+  bright-limb angle in local time and UTC.
+- **Visual day review.** The tool adds an altitude chart and compass view, while
+  Satellite can draw the bodies' daily paths, hour marks and a selected bearing
+  on the map.
+- **Polar conditions are first-class results.** Polar day, polar night and days
+  without a moonrise are reported as conditions rather than errors.
+
+### Export finished work
+
+- **Separate export destinations.** Notes, media and proofs can each use a
+  remembered folder chosen from the new folder browser. The case's own
+  `exports/` remains the default.
+- **Notebook PDF export.** Export the open note or a selected batch as one PDF
+  per note without opening a print dialog. Local images, entity references,
+  tables, lists, code and Mermaid diagrams are preserved.
+- **Portable text rendering.** Bundled fonts and text shaping cover CJK,
+  Arabic, Indic and other living scripts consistently across Windows, Linux and
+  macOS. Unsupported characters produce a named warning instead of disappearing.
+- **Media and proof copies.** A media item or saved proof PNG can be copied to
+  its destination and revealed in the system file manager. Files outside the
+  case are never overwritten; concurrent name collisions atomically receive a
+  numbered suffix.
+- **Stable note filenames.** Notes with the same title keep distinct stable PDF
+  names across batch and individual exports, including after long-title
+  truncation.
+- **Portable Settings backup.** Settings, keys, templates and the signature can
+  travel to another machine, while absolute export paths and live download
+  sessions stay behind; the UI marks the backup as private.
+
+### Workflow and interface reliability
+
+- **Frames sort by timecode.** Saved video frames now begin with their timecode,
+  use the media title and receive stable numbering when several frames fall
+  within one second. Windows-reserved filenames are handled safely.
+- **Safe proof-to-report handoff.** Sending a different proof to Geo Report
+  files the thread already on screen before starting the next one, while sending
+  the same proof again keeps editing its existing thread.
+- **Settings are easier to scan.** General, Publishing, Imagery, Templates,
+  Capture extension, Storage and System now have focused sections. Export
+  folders and workspace controls live together under Storage.
+
+## Also in v0.2.6
 
 ### Portable case bundles
 
@@ -134,8 +215,8 @@ disabled in Settings, and offline failures remain silent.
 ## Install or upgrade
 
 Download the ready-to-run asset for Windows x86_64, Linux x86_64 or Apple
-Silicon macOS and run it. Each binary includes the browser UI, `ffmpeg` and
-`ffprobe`; no Python or system FFmpeg is needed.
+Silicon macOS and run it. Each binary includes the browser UI, `ffmpeg`,
+`ffprobe` and the fonts used for note PDFs.
 
 Intel Macs require macOS 14 or newer and the Python package:
 `pipx install azimut` or `pip install azimut`.
@@ -143,4 +224,5 @@ Intel Macs require macOS 14 or newer and the Python package:
 The binaries are unsigned. Follow the operating system prompt described in the
 README on first launch.
 
-Existing cases upgrade in place. No manual export or import is required.
+Existing cases upgrade in place. Older case bundles remain importable, and no
+manual export or migration is required.

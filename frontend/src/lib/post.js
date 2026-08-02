@@ -158,7 +158,7 @@ export function postReportMarkdown({
       entityReference(proofEntity),
       '',
       '::: center',
-      `${mediaReference(proofEntity)}{width=100% align=center}`,
+      `${mediaReference(proofEntity)}{width=70% align=center}`,
       ':::',
     ].join('\n'));
   } else if (cleanAttachments[0]?.startsWith('proofs/')) {

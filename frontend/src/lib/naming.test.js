@@ -71,10 +71,10 @@ describe('isDefaultName — an assigned name is not a description', () => {
 
 describe('saved-item case queries', () => {
   const entities = [
-    { label: 'Rooftop', attrs: { spec: 'proofs/rooftop.json' } },
-    { label: 'Bridge', attrs: { spec: 'proofs/bridge.json' } },
-    { label: 'Angle', attrs: { spec: 'inspect/angle.json' } },
-    { label: 'Thread', attrs: { draft: 'exports/thread.json' } },
+    { label: 'Rooftop', attrs: { spec: 'proofs/.meta/rooftop.json' } },
+    { label: 'Bridge', attrs: { spec: 'proofs/.meta/bridge.json' } },
+    { label: 'Angle', attrs: { spec: '.inspect/angle.json' } },
+    { label: 'Thread', attrs: { draft: '.drafts/thread.json' } },
     { label: 'A place', attrs: { spec: 'places/x.json' } }, // filed, but not one of ours
     { label: 'No spec' },
   ];
@@ -104,8 +104,8 @@ describe('saved-item case queries', () => {
 
   it('numbers a fresh name past what the case already holds', () => {
     const saved = [
-      { label: 'Proof 1', attrs: { spec: 'proofs/proof-1.json' } },
-      { label: 'Rooftop', attrs: { spec: 'proofs/rooftop.json' } },
+      { label: 'Proof 1', attrs: { spec: 'proofs/.meta/proof-1.json' } },
+      { label: 'Rooftop', attrs: { spec: 'proofs/.meta/rooftop.json' } },
     ];
     expect(nextName('proof', savedTitles(saved, 'proof'))).toBe('Proof 2');
   });

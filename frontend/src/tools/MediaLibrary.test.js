@@ -321,6 +321,19 @@ describe('row and card actions fit', () => {
     expect(source).toContain('gap: var(--media-action-gap);');
   });
 
+  it('keeps export only in Details, directly below the preview', () => {
+    expect(source).not.toContain('title="Export file"');
+    expect(source).not.toContain('onclick={() => exportMedia(item)}');
+    expect(source).not.toContain('Export folder');
+    expect(source).toContain('async function exportMedia()');
+    expect(source).toContain('{#snippet previewActions()}');
+    expect(source).toContain("{exportBusy ? 'Exporting…' : 'Export'}");
+    expect(source).toContain('aria-label="Change export folder"');
+    expect(source).toContain('<Icon name="folder" size={14} />');
+    expect(source).not.toContain('>Change folder</button>');
+    expect(source).toContain('exportDir = (await readDestinations()).media;');
+  });
+
   it('keeps every card action reachable in the 150px small view', () => {
     // the card clips its overflow, so a row that does not fit loses its last
     // button — Delete

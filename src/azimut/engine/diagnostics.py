@@ -3,7 +3,7 @@
 A local app has no crash reporter behind it, so the useful facts about a broken
 run only exist on the user's own machine. This module collects them into one
 short Markdown block and turns it into a pre-filled GitHub issue URL, which the
-About tab shows in full before the user decides to open it. Nothing is sent from
+System shows in full before the user decides to open it. Nothing is sent from
 here: the report is text and a link, and the browser does the sending on a
 click.
 
@@ -403,7 +403,7 @@ def issue_url(body: str, *, subject: str = "", label: str = "") -> str:
 
 
 def payload(summary: str = "", *, kind: str = DEFAULT_KIND) -> dict[str, str]:
-    """What the About tab renders: the full report, and the link to file it."""
+    """What Settings → System renders: the full report, and the link to file it."""
     if kind not in KINDS:
         kind = DEFAULT_KIND
     body = report(summary, kind=kind)
