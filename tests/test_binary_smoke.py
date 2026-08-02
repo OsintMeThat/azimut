@@ -55,3 +55,70 @@ def test_check_application_rejects_path_ffmpeg(monkeypatch):
 
     with pytest.raises(RuntimeError, match="bundled ffmpeg"):
         smoke_binary.check_application("http://127.0.0.1:8477")
+
+
+class FakeProcess:
+    """Enough of Popen for stop(): it reports alive, then dies when asked."""
+
+    def __init__(self, alive: bool = True):
+        self.pid = 4242
+        self._alive = alive
+        self.terminated = False
+
+    def poll(self):
+        return None if self._alive else 0
+
+    def terminate(self):
+        self.terminated = True
+        self._alive = False
+
+    def kill(self):  # pragma: no cover - only a hung process reaches this
+        self._alive = False
+
+    def wait(self, timeout=None):
+        self._alive = False
+        return 0
+
+
+def test_stop_kills_the_whole_tree_on_windows(monkeypatch):
+    """The onefile bootloader's child holds the workspace lock open.
+
+    Terminating the bootloader alone leaves it running, and Windows then refuses
+    to delete the temporary workspace it is writing in.
+    """
+    monkeypatch.setattr(smoke_binary.sys, "platform", "win32")
+    calls = []
+    monkeypatch.setattr(
+        smoke_binary.subprocess, "run", lambda cmd, **kw: calls.append(cmd)
+    )
+    process = FakeProcess()
+
+    smoke_binary.stop(process)
+
+    assert calls == [["taskkill", "/F", "/T", "/PID", "4242"]]
+    assert not process.terminated
+
+
+def test_stop_signals_the_bootloader_on_posix(monkeypatch):
+    monkeypatch.setattr(smoke_binary.sys, "platform", "linux")
+    monkeypatch.setattr(
+        smoke_binary.subprocess,
+        "run",
+        lambda *a, **kw: pytest.fail("taskkill is Windows-only"),
+    )
+    process = FakeProcess()
+
+    smoke_binary.stop(process)
+
+    assert process.terminated
+
+
+def test_stop_leaves_an_already_exited_process_alone(monkeypatch):
+    monkeypatch.setattr(smoke_binary.sys, "platform", "win32")
+    monkeypatch.setattr(
+        smoke_binary.subprocess,
+        "run",
+        lambda *a, **kw: pytest.fail("nothing left to kill"),
+    )
+
+    smoke_binary.stop(FakeProcess(alive=False))

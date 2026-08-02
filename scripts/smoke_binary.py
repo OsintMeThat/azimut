@@ -11,6 +11,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -65,9 +66,27 @@ def wait_until_ready(base_url: str, process: subprocess.Popen[bytes], timeout: f
 
 
 def stop(process: subprocess.Popen[bytes]) -> None:
+    """Stop the binary, children included.
+
+    PyInstaller builds this artifact in onefile mode, so the `.exe` is a
+    bootloader that unpacks itself and runs the application as a *child*. On
+    POSIX the bootloader forwards the signal down; on Windows there is nothing
+    to forward it — `terminate()` is `TerminateProcess` on the bootloader alone,
+    and the application keeps running with the workspace lock file still open.
+    Windows cannot delete an open file, so the temporary workspace below refuses
+    to clean up and the release fails after the binary already passed.
+    """
     if process.poll() is not None:
         return
-    process.terminate()
+    if sys.platform == "win32":
+        # taskkill walks the tree; /F because the orphan has no console to ask.
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+        )
+    else:
+        process.terminate()
     try:
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
