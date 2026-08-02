@@ -117,7 +117,7 @@ file already placed in that case's `media/` folder.
 
 ## Workspace folder
 
-Settings → About holds the folder. There is no native picker, so the path is
+Settings → Storage holds the folder. There is no native picker, so the path is
 typed and **Check** reads it before anything is offered: refusals in red,
 warnings in amber, and the folder Azimut would actually use when that differs
 from the one typed. Two actions follow, never merged, because their outcomes
@@ -133,6 +133,20 @@ where it was expected, and that nothing has been deleted or recreated.
 **Held by another Azimut**: which machine and port has it, what two instances
 would cost, and Reload. **Take it anyway** is there for a lock that outlived its
 process, warned once and never presented as the ordinary way out.
+
+## Export folders and backup
+
+Settings → Storage remembers one destination each for note PDFs, media copies
+and proof PNGs. **Change…** opens the shared folder browser, which lists folders
+only and can create one; the case's `exports/` stays the default. Media Details,
+saved proofs and Notebook use those same destinations. Files already outside a
+case are never overwritten, and concurrent exports reserve distinct numbered
+names.
+
+The Settings backup carries portable settings, API keys, templates and the
+signature. It leaves absolute export paths, the workspace pointer and download
+sessions on the machine that created them, and the UI tells the analyst to keep
+the downloaded backup private.
 
 ## Relations
 
@@ -278,8 +292,11 @@ with a remote inline image warns that its host is contacted on every open;
 adding the image to the Case keeps it local. A ```mermaid fence is drawn as a
 diagram, always light so it prints, and keeps its source with a note when the
 syntax fails. Markdown help covers supported syntax, diagrams, image layout and
-aligned text. The Preview toolbar opens an A4 print view that keeps local images
-and diagrams and omits remote media.
+aligned text. The toolbar exports the open note, or a checked selection, as one
+server-rendered PDF per note without a print dialog. Local images and
+browser-rendered Mermaid diagrams travel with it; remote images are omitted.
+Homonymous notes keep stable suffixes even when exported separately, and the
+shared destination defaults to the case's `exports/` folder.
 
 Case Notes stays pinned while filed notes open in session tabs. Paste, drop or
 pick case media to insert it; the reference menu links case entities. Deleted

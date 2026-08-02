@@ -9,11 +9,9 @@ case is a plain folder that can be reopened, archived or shared.
 *The name is the French word for azimuth, the compass bearing you sight along
 to fix a point on the map.*
 
-## v0.2.6: Portable cases and recoverable deletion
+## v0.2.7: Movable workspaces and finished exports
 
-[![Searching the imagery, composing the proof](https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.gif)](https://github.com/OsintMeThat/azimut/releases/download/v0.2.5/azimut-demo-1920x1080.mp4)
-
-[Watch the full tour](https://github.com/OsintMeThat/azimut/releases/download/v0.2.5/azimut-demo-1920x1080.mp4) (2 min 30).
+![Azimut workflows from source review to proof and report](https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.gif)
 
 | Tool | What it does |
 |------|--------------|
@@ -24,7 +22,7 @@ to fix a point on the map.*
 | **Coords & Sky** | Convert common coordinate formats, copy the result, open map or geocoding links, and read the sun and moon at that point on a date: rise, set, azimuth, altitude, twilights, moon phase and bright-limb angle, in local time and UTC, computed offline. |
 | **Geo Proof** | Start a named proof from a reusable house style, select case panels with search, compose them in a grid or free layout, annotate with colored shapes/freehand/text, and export `proof.png` plus a re-editable spec. |
 | **Geo Report** | Turn a proof into a prepared thread for X, Bluesky, or Mastodon: coordinates, plus code, attribution, target-specific character counts, media, and a structured Markdown case note with linked evidence. |
-| **Notebook** | Tabbed Markdown notes with local media, Mermaid diagrams, linked case evidence, broken-reference markers and a print-ready PDF view. |
+| **Notebook** | Tabbed Markdown notes with local media, Mermaid diagrams, linked case evidence, broken-reference markers, and PDF export of one note or a whole selection. |
 
 Under the hood: reusable proof and thread templates, per-case SQLite with a
 bounded catalog, a durable one-worker thumbnail queue, the map-capture browser
@@ -40,26 +38,30 @@ bundle.
 The workspace root stays equally readable: permanent case folders sit directly
 under `~/Azimut`. Azimut keeps scratch sessions, bundles, settings, runtime
 tools and tile caches under the hidden `~/Azimut/.azimut/` directory. Settings →
-About moves that folder anywhere you like, or adopts one you moved yourself; the
-old copy is kept until you delete it.
+Storage moves the workspace anywhere you like, including an external drive, or
+adopts one you moved yourself. The old copy is kept until you delete it.
 
 The Case Doctor checks that a case's database and media records still match its
 files. It only changes a case after you choose a repair, and states what a
 database rebuild cannot recover before it starts.
 
-New in v0.2.6:
+New in v0.2.7:
 
-- Export a complete case as an integrity-checked bundle, then import it as a
-  new case on another machine. Bundles can be protected with a password.
-- Delete files, notes, proofs and their dependent records into Trash, then
-  restore them or remove them permanently when the work is no longer needed.
-- Select several Files entries before deleting them, with one confirmation and
-  one restore point for the complete action.
-- Enrich imported images and videos locally with readable metadata, GPS
-  suggestions and media filters that open stated locations on the map.
-- Create and review typed relations from Details or a saved place on the map.
-- Keep reusable proof and post presets in Settings backups, and report an issue
-  from About with scrubbed diagnostics.
+- Keep analyst-owned files beside Azimut's managed `azimut/` directory in every
+  case. Existing cases and older bundles migrate automatically.
+- Move or adopt the complete workspace from Settings, including on an external
+  drive. Each copied file is SHA-256-verified before the pointer switches, and a
+  missing drive stops startup instead of creating an empty workspace.
+- Diagnose damaged cases without writing to them, then choose each Case Doctor
+  repair explicitly.
+- Calculate local sun and moon conditions offline and review their daily paths
+  on the map.
+- Export selected notes as server-rendered PDFs with local images, diagrams and
+  bundled fonts for scripts used around the world.
+- Choose separate export folders for note PDFs, media copies and proof PNGs;
+  external exports reserve a new name atomically instead of overwriting.
+- Save video frames under timecode-first names and preserve a Geo Report before
+  handing a different proof to the composer.
 
 ## Install & run
 
@@ -98,7 +100,7 @@ open:
 - **Linux**: mark it executable with `chmod +x azimut-linux-x86_64`.
 
 Azimut checks for a newer release on startup by default and links the download.
-Settings can disable that check, and **Settings → About → Check for updates**
+Settings can disable that check, and **Settings → System → Check for updates**
 runs it manually. Replace the old binary with the new one. To uninstall, delete
 the binary. Either way `~/Azimut` stays put, so cases open unchanged.
 
@@ -207,7 +209,7 @@ as a red run of ours rather than a broken install for someone else.
 
 **yt-dlp and gallery-dl are deliberately unbounded**: they track sites that
 change, so pinning them just schedules a breakage. They can also be updated
-from inside the app (Settings → About → Downloaders), which is what keeps a
+from inside the app (Settings → System → Downloaders), which is what keeps a
 months-old binary working.
 
 Releases are automated: push a semver tag and GitHub Actions
@@ -216,7 +218,7 @@ wheel + Windows/Linux/macOS binaries, attaches them to a GitHub release, and
 publishes to PyPI. **Don't publish by hand.**
 
 ```bash
-git tag v0.2.6 && git push origin v0.2.6
+git tag v0.2.7 && git push origin v0.2.7
 ```
 
 One-time setup: register the repo as a

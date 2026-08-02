@@ -74,7 +74,8 @@ writer, and startup migrations race over the same renames.
 
 Settings can adopt a folder as it is, or move the workspace into it. Adopting
 writes the pointer and nothing else, which is what a folder moved by hand needs.
-A move copies, verifies file names and sizes, renames the copy into place, then
+A move copies, verifies every file's name, size and SHA-256 while rejecting a
+source that changes during the read, renames the copy into place, then
 writes the pointer — that write is the whole switch, so an interruption before
 it leaves the old folder authoritative and one after leaves the new one, both
 complete. The old folder is then renamed `<name>.old-<date>` and kept until the
@@ -99,7 +100,7 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
       .thumbs/    #   disposable thumbnail cache
     proofs/       # rendered PNGs
       .meta/      #   editable specs and pasted assets
-    exports/      # what the analyst exports; empty until they do
+    exports/      # what the analyst exports: notes as PDF, and their own files
     .data/        # case.db: entities, links, folders, catalog and jobs (SQLite)
     .drafts/      # post drafts
     .inspect/     # saved Inspect session specs
