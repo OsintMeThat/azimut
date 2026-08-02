@@ -8,6 +8,7 @@
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { proofCoordsText, proofSource } from '../lib/composer.js';
   import { isDefaultName, nextName, savedSlugs, savedTitles, savedTitle, slugify } from '../lib/naming.js';
+  import { filingName, planProofHandoff } from './post/handoff.js';
   import {
     buildTweet1 as buildTweet1Lines, DEFAULT_TWEET_BODY,
     extraPostTweetText, groupPostMedia, MAX_POST_MEDIA, mediaTweetText,
@@ -170,6 +171,48 @@
     const p = uiState.postProof;
     if (!p) return;
     uiState.postProof = null;
+    adoptProof(p);
+  });
+
+  /**
+   * A proof arriving from the Proof Composer opens its own thread. The one on
+   * screen is filed under its own name first and then makes way, so sending a
+   * second proof over does not write over the post the first one produced.
+   * Re-sending the proof this thread already carries stays in place instead —
+   * that is the same piece of work, edited.
+   */
+  async function adoptProof(p) {
+    const plan = planProofHandoff({ incomingPng: p.png, currentPng: proofPng, hasContent });
+    if (plan === 'file-then-apply') {
+      if (!(await fileCurrentDraft())) return;
+      resetDraft();
+    }
+    applyProof(p);
+  }
+
+  /** Save what the composer holds under its own name, before something else
+   *  takes its place. Answers whether the thread is safely on disk. */
+  async function fileCurrentDraft() {
+    if (!caseState.current) return true;
+    const title = postName.trim();
+    if (!title) return true;
+    postName = filingName({
+      title,
+      bound: !!draftName,
+      takenSlugs: savedSlugs(draftEntities, 'draft'),
+      slug: slugify(title, 'draft'),
+      fresh: freshPostName(),
+    });
+    const saved = await performDraftSave(`Post saved: ${postName.trim()}`);
+    if (!saved) return false;
+    // The name for the next thread has to count past the one just written,
+    // which the case-wide list does not know about yet.
+    draftEntities = await fetchAllEntities(caseState.current.id, { types: ['post'] })
+      .catch(() => draftEntities);
+    return true;
+  }
+
+  function applyProof(p) {
     description = isDefaultName(p.title, 'proof') ? '' : (p.title ?? '');
     const proofSourceUrl = p.source ?? p.sources?.[0] ?? '';
     source = proofSourceUrl;
@@ -180,7 +223,7 @@
       ?? (p.coords ? `${p.coords.lat.toFixed(6)}, ${p.coords.lon.toFixed(6)}` : '');
     if (coordsText.trim()) resolveCoords();
     else regenerate();
-  });
+  }
 
   // Consume an "open this draft" handoff from the sidebar
   $effect(() => {
@@ -683,7 +726,7 @@
     return performDraftSave();
   }
 
-  async function performDraftSave() {
+  async function performDraftSave(message = 'Draft saved') {
     saving = true;
     try {
       const r = await api.post(`/api/cases/${caseState.current.id}/drafts`, {
@@ -694,9 +737,11 @@
       draftName = r.name;
       postName = r.title;
       await reloadCase(); // surface the post entity in the sidebar
-      toast('Draft saved', 'ok', 1600);
+      toast(message, 'ok', 1600);
+      return true;
     } catch (e) {
       toast(`Draft not saved: ${e.message}`, 'danger');
+      return false;
     } finally {
       saving = false;
       overwritePrompt = null;
