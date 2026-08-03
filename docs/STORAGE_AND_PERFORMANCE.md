@@ -114,8 +114,11 @@ wrapper arrive without rewriting a stored path, and what keeps bundles written
 before it importable after it.
 
 Visible means openable and useful in another program; a dot-directory means only
-Azimut reads it. `ensure_dir` sets `FILE_ATTRIBUTE_HIDDEN` on those, since a
-leading dot means nothing to Windows Explorer.
+Azimut reads it. `ensure_dir` adds `FILE_ATTRIBUTE_HIDDEN` to those, since a
+leading dot means nothing to Windows Explorer. The attribute belongs to the
+directory rather than to its name, so a rebuilt tree loses it: opening a case
+puts it back over `layout.hidden_dirs()`, which is what covers a workspace
+copied from another machine.
 
 `layout.py` owns this shape. It answers where each file goes for a given case
 root and carries the path budget — the caps on case, media, document and folder

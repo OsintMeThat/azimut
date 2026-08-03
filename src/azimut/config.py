@@ -410,7 +410,7 @@ def ensure_workspace() -> None:
     # Windows ignores POSIX modes, which is fine (its ACLs already scope $HOME).
     _restrict(workspace_root(), 0o700)
     _restrict(internal_dir(), 0o700)
-    _hide_if_dotted(internal_dir())
+    hide_if_dotted(internal_dir())
     _migrate_workspace_settings()
     _migrate_workspace_directories()
     for directory in (scratch_dir(), bundles_dir(), runtime_dir(), tile_cache_dir()):
@@ -437,15 +437,38 @@ def _restrict(path: Path, mode: int) -> None:
         pass
 
 
-def _hide_if_dotted(path: Path) -> None:
-    """Make a dot-directory hidden in Windows Explorer too."""
+#: Windows attribute bits. `INVALID` is what `GetFileAttributesW` answers for a
+#: path it cannot read, including one that is not there.
+_FILE_ATTRIBUTE_HIDDEN = 0x02
+_INVALID_FILE_ATTRIBUTES = -1
+
+
+def hide_if_dotted(path: Path) -> None:
+    """Make a dot-directory hidden in Windows Explorer too.
+
+    A leading dot hides a directory on Linux and macOS and means nothing to
+    Windows Explorer, which needs `FILE_ATTRIBUTE_HIDDEN` set. Without this the
+    whole visible/hidden split in `layout.py` would work on two platforms out of
+    three, and `.data` — the case database — would sit in plain view on the one
+    where people are most likely to go tidying.
+
+    The bit is *added* to whatever the directory already carries rather than
+    written over it: this runs again on paths that already exist, and a
+    wholesale write would drop attributes Windows or the analyst had set.
+
+    Best effort: a filesystem that refuses the attribute (a network share, a FAT
+    stick) is not a reason to fail a directory creation.
+    """
     if sys.platform != "win32" or not path.name.startswith("."):
         return
     import ctypes
 
-    file_attribute_hidden = 0x02
     try:
-        ctypes.windll.kernel32.SetFileAttributesW(str(path), file_attribute_hidden)
+        kernel32 = ctypes.windll.kernel32
+        current = kernel32.GetFileAttributesW(str(path))
+        if current == _INVALID_FILE_ATTRIBUTES or current & _FILE_ATTRIBUTE_HIDDEN:
+            return
+        kernel32.SetFileAttributesW(str(path), current | _FILE_ATTRIBUTE_HIDDEN)
     except (AttributeError, OSError):  # pragma: no cover - Windows only
         pass
 
@@ -471,7 +494,7 @@ def _migrate_workspace_settings() -> None:
     directory = settings_dir()
     directory.mkdir(parents=True, exist_ok=True)
     _restrict(directory, 0o700)
-    _hide_if_dotted(directory)
+    hide_if_dotted(directory)
     for source_dir in (workspace_root(), workspace_root() / ".settings"):
         for name in ("settings.json", "templates.json", "signature.png", "cookies.txt"):
             source = source_dir / name

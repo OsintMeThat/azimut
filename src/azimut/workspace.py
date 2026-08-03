@@ -14,7 +14,6 @@ import json
 import logging
 import re
 import shutil
-import sys
 import sqlite3
 import threading
 import time
@@ -159,7 +158,7 @@ def ensure_dir(path: Path) -> Path:
     for attempt in range(20):
         try:
             path.mkdir(parents=True, exist_ok=True)
-            _hide_if_dotted(path)
+            _hide_dotted_chain(path)
             return path
         except PermissionError:
             if path.is_dir():
@@ -170,27 +169,37 @@ def ensure_dir(path: Path) -> Path:
     return path  # pragma: no cover - loop always returns or raises above
 
 
-def _hide_if_dotted(path: Path) -> None:
-    """Make a dot-directory actually hidden on Windows.
+def _hide_dotted_chain(path: Path) -> None:
+    """Hide *path* on Windows, and the dot-directories `parents=True` just made.
 
-    A leading dot hides a directory on Linux and macOS and means nothing to
-    Windows Explorer, which needs `FILE_ATTRIBUTE_HIDDEN` set. Without this the
-    whole visible/hidden split in `layout.py` would work on two platforms out of
-    three, and `.data` — the case database — would sit in plain view on the one
-    where people are most likely to go tidying.
-
-    Best effort: a filesystem that refuses the attribute (a network share, a FAT
-    stick) is not a reason to fail a directory creation.
+    `media/.meta/<proof>.assets` creates `.meta` on the way to a leaf that is
+    not itself dotted, so hiding the leaf alone would leave the directory that
+    matters visible. The walk stops at the first ancestor without a leading dot,
+    which is always the visible half of the case (`media/`, `proofs/`, the tool
+    root), so it never climbs out of the workspace.
     """
-    if sys.platform != "win32" or not path.name.startswith("."):
-        return
-    import ctypes
+    current = path
+    while True:
+        config.hide_if_dotted(current)
+        parent = current.parent
+        if parent == current or not parent.name.startswith("."):
+            return
+        current = parent
 
-    FILE_ATTRIBUTE_HIDDEN = 0x02
-    try:
-        ctypes.windll.kernel32.SetFileAttributesW(str(path), FILE_ATTRIBUTE_HIDDEN)
-    except (AttributeError, OSError):  # pragma: no cover - Windows only
-        pass
+
+def _follow_hidden_dirs(root: Path) -> None:
+    """Put the hidden attribute back on a case's internal directories.
+
+    `.azimut` gets this at every startup (`config.ensure_workspace`); a case only
+    got it the day it was born, so any copy of a workspace — a move onto another
+    drive, a folder carried between machines, a backup unpacked — showed the
+    analyst directories the layout means to keep out of sight.
+
+    Costs nothing off Windows, where `hide_if_dotted` is what returns early: one
+    guard in one place beats a second copy of the platform test here.
+    """
+    for directory in layout.hidden_dirs(root):
+        config.hide_if_dotted(directory)
 
 
 def write_readme(root: Path) -> None:
@@ -402,6 +411,7 @@ class Case:
     def open(cls, case_id: str) -> "Case":
         case = cls.locate(case_id)
         case.migrate()
+        _follow_hidden_dirs(case.path)
         from .engine import trash as trash_engine
 
         trash_engine.recover(case)
