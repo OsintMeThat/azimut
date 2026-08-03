@@ -10,7 +10,7 @@ from typing import Any, Iterator
 
 from .. import layout
 from ..sqlite_backend import SqliteCase
-from ..workspace import Case, CaseError
+from ..workspace import Case, CaseError, ensure_dir
 from . import media as media_engine
 
 DATABASE_MISSING = "database-missing"
@@ -163,7 +163,7 @@ def rebuild_database(case: Case) -> dict[str, Any]:
         if case.db_path.exists():
             raise CaseError("the case database already exists")
         manifest = case.read()
-        case.db_path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_dir(case.db_path.parent)
         staging = case.db_path.with_name(f".{case.db_path.name}.doctor-{uuid.uuid4().hex}.tmp")
         counts = {"media": 0, "notes": 0, "proofs": 0}
         try:

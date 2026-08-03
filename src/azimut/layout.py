@@ -398,6 +398,23 @@ def content_dirs(root: Path) -> tuple[Path, ...]:
     return tuple(dirs)
 
 
+def hidden_dirs(root: Path) -> tuple[Path, ...]:
+    """The directories a leading dot is supposed to keep out of the way.
+
+    Windows hides by attribute rather than by name, and an attribute only
+    travels with the directory it was set on: a case that arrives by any route
+    other than being born here — a workspace copied to another machine, a folder
+    restored from a backup — has these in plain view. Whoever opens a case walks
+    this list and puts the attribute back.
+
+    The regenerable caches under `media/` are not in it. They are re-created
+    through `ensure_dir` on the next thumbnail or download, which hides them
+    again by itself.
+    """
+    dirs = [path for path in content_dirs(root) if path.name.startswith(".")]
+    return (data_dir(root), trash(root), *dirs)
+
+
 def unwrapped_manifest(root: Path) -> Path:
     """Where the manifest sat before the case gained its `azimut/` wrapper.
 

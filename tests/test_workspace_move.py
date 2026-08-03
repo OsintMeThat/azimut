@@ -370,6 +370,23 @@ def test_a_move_carries_the_empty_directories_a_case_is_born_with(workspace, tmp
     assert (target / ".azimut" / "bundles").is_dir()
 
 
+def test_a_move_rebuilds_the_hidden_directories_hidden(workspace, tmp_path, monkeypatch):
+    """A copy is new directories, and a new directory carries none of the
+    attributes the original had. On Windows that put every case's internals on
+    show in the new folder, which is how the whole thing was noticed."""
+    from azimut import layout
+
+    Case.create("Harbour survey")
+    hidden = []
+    monkeypatch.setattr(config, "hide_if_dotted", hidden.append)
+
+    workspacemove.start(str(tmp_path / "elsewhere"))
+    _finish()
+
+    staged = {path for path in hidden if "harbour-survey" in path.parts}
+    assert {path.name for path in staged} >= {layout.DATA_DIR, layout.INSPECT_DIR}
+
+
 def test_a_move_carries_scratch_cases(workspace, tmp_path):
     Case.create("One shot", scratch=True)
 

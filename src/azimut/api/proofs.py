@@ -163,7 +163,7 @@ def _write_assets(folder: Path, incoming: dict[str, bytes], keep: set[str]) -> N
     pasted images keeps no folder either.
     """
     if incoming:
-        folder.mkdir(parents=True, exist_ok=True)
+        ensure_dir(folder)
         for asset_name, data in incoming.items():
             path = folder / asset_name
             if not path.exists():

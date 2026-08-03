@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .. import config, layout
+from ..workspace import ensure_dir
 from . import workspacelock
 from .bundles import disk_reserve
 
@@ -586,7 +587,10 @@ def _step_copy(move: Move, staging: Path) -> None:
     move.files, move.total_bytes = measure(move.source)
     staging.mkdir(parents=True)
     for source_dir in _copyable_dirs(move.source):
-        (staging / source_dir.relative_to(move.source)).mkdir(parents=True, exist_ok=True)
+        # `ensure_dir`, not `mkdir`: a rebuilt directory carries none of the
+        # attributes the original had, so a plain copy is how a workspace used
+        # to arrive at its new home with every hidden directory on show.
+        ensure_dir(staging / source_dir.relative_to(move.source))
     for source_file in _copyable_files(move.source):
         destination = staging / source_file.relative_to(move.source)
         shutil.copy2(source_file, destination)
