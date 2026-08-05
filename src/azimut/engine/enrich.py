@@ -449,9 +449,12 @@ def _suggest_same_image(case: "CaseType", entity_id: str, rel: str, digest: str)
         match_id = item.get("entity_id")
         if not match_id:
             continue
+        # Symmetric in meaning, canonical in storage. Sorting prevents a later
+        # enrichment pass from filing the same match in the reverse direction.
+        from_id, to_id = sorted((entity_id, match_id))
         case.add_link(
-            entity_id,
-            match_id,
+            from_id,
+            to_id,
             SAME_IMAGE_AS,
             by="enrich",
             status="suggested",

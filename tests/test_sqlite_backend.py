@@ -145,14 +145,15 @@ INSERT INTO entities(id, type, label, attrs_json, prov_by, prov_at)
 def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
     """A schema-1 case.db is upgraded on open through the whole chain: the folder
     column is added and backfilled (1->2), the jobs table is created (2->3),
-    search/media browse indexes arrive in schema 4, the position flag in 5 and
-    the trash journal in 6 and its recovery state in 7. A second open applies
-    nothing."""
+    search/media browse indexes arrive in schema 4, the position flag in 5, the
+    trash journal in 6, its recovery state in 7, link confidence in 8, the
+    connection compatibility pass in 9 and the search-index rebuild in 10. A second
+    open applies nothing."""
     db = tmp_path / "case.db"
     with sqlite3.connect(db) as conn:
         conn.executescript(_SCHEMA_V1)
 
-    # runs 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 in place. The media directory is
+    # runs 1 -> 2 -> ... -> 9 in place. The media directory is
     # passed because the backend never guesses the case layout; it is empty
     # here, so the schema-4 backfill marks itself done with no rows.
     store = SqliteCase.open(db, media_dir=tmp_path / "media")
@@ -164,11 +165,11 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
     store.enqueue_job("thumbnail", key="media/x.jpg")
     assert store.count_jobs() == {"queued": 1}
     with sqlite3.connect(db) as conn:
-        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "7"
+        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "9"
         applied = {
             r[0] for r in conn.execute("SELECT version FROM schema_migrations").fetchall()
         }
-        assert {2, 3, 4, 5, 6, 7} <= applied
+        assert {2, 3, 4, 5, 6, 7, 8, 9} <= applied
         columns = {
             row[1] for row in conn.execute("PRAGMA table_info(entities)").fetchall()
         }
@@ -183,13 +184,160 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
             row[1] for row in conn.execute("PRAGMA table_info(trash)").fetchall()
         }
         assert "state" in trash_columns
+        # 7 -> 8: an edge can carry how sure the analyst is.
+        link_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(links)").fetchall()
+        }
+        assert "confidence" in link_columns
 
     SqliteCase.open(db, media_dir=tmp_path / "media")  # idempotent — applies nothing
     with sqlite3.connect(db) as conn:
-        for version in (2, 3, 4, 5, 6, 7):
+        for version in (2, 3, 4, 5, 6, 7, 8, 9):
             assert conn.execute(
                 "SELECT COUNT(*) FROM schema_migrations WHERE version = ?", (version,)
             ).fetchone()[0] == 1
+
+
+#: The `links` table exactly as schema 7 shipped it, for rewinding a real case to
+#: the version this feature migrates from. Rebuilt with plain `CREATE`/`INSERT`
+#: rather than `ALTER TABLE ... DROP COLUMN`, which needs SQLite 3.35 (2021): the
+#: backend matrix runs the 3.11 floor against whatever libsqlite3 the platform
+#: ships, and a test that needs a newer SQLite than the code does is a false alarm
+#: waiting to fire on one OS.
+_SCHEMA_V7_LINKS = """
+CREATE TABLE links_rewound (
+    id          TEXT PRIMARY KEY,
+    from_id     TEXT NOT NULL REFERENCES entities(id),
+    to_id       TEXT NOT NULL REFERENCES entities(id),
+    type        TEXT NOT NULL,
+    prov_by     TEXT NOT NULL,
+    prov_at     TEXT NOT NULL,
+    prov_status TEXT NOT NULL DEFAULT 'confirmed',
+    prov_source TEXT
+);
+INSERT INTO links_rewound
+    SELECT id, from_id, to_id, type, prov_by, prov_at, prov_status, prov_source FROM links;
+DROP TABLE links;
+ALTER TABLE links_rewound RENAME TO links;
+CREATE INDEX idx_links_from ON links(from_id);
+CREATE INDEX idx_links_to   ON links(to_id);
+CREATE INDEX idx_links_type ON links(type);
+UPDATE meta SET value = '7' WHERE key = 'schema_version';
+DELETE FROM schema_migrations WHERE version >= 8;
+"""
+
+
+def _rewind_to_schema_7(db):
+    with sqlite3.connect(db) as conn:
+        conn.executescript(_SCHEMA_V7_LINKS)
+        conn.commit()
+
+
+def test_a_real_schema_7_case_keeps_every_link_through_the_confidence_migration(tmp_path):
+    """The upgrade people will actually run when they download the next release: a
+    case built by the shipped code, migrated in place. Every edge survives with its
+    id, type and provenance, and none of them acquires a rating — an existing link
+    reads as *not assessed*, which is the truth about it.
+
+    Written as a real case rather than a hand-authored schema-7 dump so it exercises
+    the same `ALTER TABLE` the shipped binary will run, whatever the platform: the
+    step is one SQL statement in one transaction, with no file moved or replaced, so
+    it carries none of the Windows rename-not-delete hazards a file swap would.
+    """
+    db = tmp_path / "case.db"
+    store = SqliteCase.create(db, name="Before the upgrade")
+    a = store.add_entity("media", "clip.mp4", by="user")["id"]
+    b = store.add_entity("place", "the quay", by="user")["id"]
+    edge = store.add_link(a, b, "located-at", by="user")
+    suggested = store.add_link(a, b, "depicts", by="enrich", status="suggested")
+    _rewind_to_schema_7(db)
+
+    reopened = SqliteCase.open(db, media_dir=tmp_path / "media")
+
+    links = {link["id"]: link for link in reopened.list_links()}
+    assert set(links) == {edge["id"], suggested["id"]}
+    assert links[edge["id"]]["type"] == "located-at"
+    assert links[edge["id"]]["provenance"]["status"] == "confirmed"
+    # the enrichment suggestion is still awaiting review: the two axes are separate
+    assert links[suggested["id"]]["provenance"]["status"] == "suggested"
+    assert links[suggested["id"]]["provenance"]["by"] == "enrich"
+    # absent, not null: no reader has to tell unevaluated from rated-as-nothing
+    for link in links.values():
+        assert "confidence" not in link
+
+
+def test_the_confidence_migration_runs_on_a_case_with_no_links_at_all(tmp_path):
+    """The other real shape: most cases hold entities and no relations yet. `ALTER
+    TABLE` on an empty table is still a schema change, and the version has to move
+    or every later open would retry it."""
+    db = tmp_path / "case.db"
+    store = SqliteCase.create(db, name="No relations")
+    store.add_entity("media", "lonely.jpg", by="user")
+    _rewind_to_schema_7(db)
+
+    reopened = SqliteCase.open(db, media_dir=tmp_path / "media")
+
+    assert reopened.list_links() == []
+    with sqlite3.connect(db) as conn:
+        assert conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()[0] == "9"
+
+
+def _rewind_to_schema_8(db):
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE meta SET value = '8' WHERE key = 'schema_version'")
+        conn.execute("DELETE FROM schema_migrations WHERE version >= 9")
+        conn.commit()
+
+
+def test_a_case_search_reaches_the_fields_the_vocabulary_declares(tmp_path):
+    """A vehicle is looked for by its plate and a claim by the words it quotes.
+
+    Both were unfindable while the index stopped at the label, the type, the folder
+    and the notes — the declared fields, the ones the registry went to the trouble
+    of naming, were exactly what search could not see.
+    """
+    db = tmp_path / "case.db"
+    store = SqliteCase.create(db, name="Declared fields")
+    truck = store.add_entity(
+        "vehicle", "Truck 12", {"plate": "AB-123-CD", "make": "Kamaz"}, by="user"
+    )
+    claim = store.add_entity(
+        "claim", "Filmed at the quay", {"verbatim": "on the north jetty"}, by="user"
+    )
+    place = store.add_entity("place", "Quay 4", {"radius_m": 500}, by="user")
+
+    assert [e["id"] for e in store.page_entities(query="AB-123")["items"]] == [truck["id"]]
+    assert [e["id"] for e in store.page_entities(query="kamaz")["items"]] == [truck["id"]]
+    assert [e["id"] for e in store.page_entities(query="north jetty")["items"]] == [claim["id"]]
+    # a stored number is not text to match on: "500" against every radius in the
+    # case would bury the rows that actually say 500
+    assert store.page_entities(query="500")["items"] == []
+    assert [e["id"] for e in store.page_entities(query="quay 4")["items"]] == [place["id"]]
+
+
+def test_schema_9_rebuilds_the_index_for_rows_written_before_it(tmp_path):
+    """The index is a stored column, so widening it only reaches later writes.
+
+    Without the rebuild a case filed last week would go on answering searches from
+    its label alone, which is indistinguishable from the bug being unfixed.
+    """
+    db = tmp_path / "case.db"
+    store = SqliteCase.create(db, name="Old rows")
+    truck = store.add_entity("vehicle", "Truck 12", {"plate": "AB-123-CD"}, by="user")
+    with sqlite3.connect(db) as conn:
+        # exactly what schema 8 stored: label, type, folder, notes
+        conn.execute("UPDATE entities SET search_text = 'truck 12\nvehicle'")
+        conn.commit()
+    assert SqliteCase.open(db, media_dir=tmp_path / "media").page_entities(
+        query="AB-123"
+    )["items"] == []
+
+    _rewind_to_schema_8(db)
+    reopened = SqliteCase.open(db, media_dir=tmp_path / "media")
+
+    assert [e["id"] for e in reopened.page_entities(query="AB-123")["items"]] == [truck["id"]]
 
 
 # A schema-4 media index: the browse table as it shipped, before the position

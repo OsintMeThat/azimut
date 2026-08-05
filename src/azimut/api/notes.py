@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 
 from .. import layout
 from ..engine import exportdir
+from ..engine import links as link_engine
 from ..engine import notes_pdf as pdf_engine
 from ..engine import pdffonts
 from ..engine import reveal as reveal_engine
@@ -59,6 +60,12 @@ class NoteIn(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     folder: str = Field(default="", max_length=120)
     content: str = ""
+    #: Case-relative paths of the artifacts this note was written from, recorded as
+    #: ``derived-from`` edges. A note typed from scratch sends none; a report note
+    #: composed out of a proof and its media sends every one it embeds, so the chain
+    #: is traversable from either end and deleting a source scars the note instead of
+    #: leaving a dead image link nothing accounts for.
+    sources: list[str] = Field(default_factory=list, max_length=200)
 
 
 class NoteSelection(BaseModel):
@@ -90,7 +97,19 @@ def write_notes(case_id: str, body: Notes) -> dict[str, str]:
 
 @router.post("/{case_id}/notes")
 def create_note(case_id: str, body: NoteIn) -> dict[str, Any]:
-    return get_case(case_id).create_note(body.title.strip(), body.folder.strip(), body.content)
+    """File a Markdown note, and record what it was written from.
+
+    ``sources`` goes through the same chain the other composing tools use on save
+    (`api/proofs.py`, `api/drafts.py`): a note assembled out of a proof and its media
+    is an artifact made from case files, so it says so. Without this a report note was
+    the one filed artifact with no chain — its images pointed at case files that
+    nothing in the graph knew it depended on.
+    """
+    case = get_case(case_id)
+    note = case.create_note(body.title.strip(), body.folder.strip(), body.content)
+    if body.sources:
+        link_engine.sync(case, note["id"], link_engine.DERIVED_FROM, body.sources, by="note")
+    return note
 
 
 @router.get("/{case_id}/notes/{note_id}")
@@ -103,10 +122,22 @@ def read_note(case_id: str, note_id: str) -> dict[str, str]:
 
 @router.put("/{case_id}/notes/{note_id}")
 def write_note(case_id: str, note_id: str, body: Notes) -> dict[str, str]:
+    """Save a note's Markdown, and restate what it is made from.
+
+    The body is the note's own statement of which case files it shows, so it is read
+    on every save the way a proof's spec is: an image inserted through the Notebook's
+    Media button gets its ``derived-from`` edge, and one deleted from the text loses
+    it. Only the types the text can name are reconciled — the draft a report was
+    composed in is the composer's to declare, and no wording could restate it.
+    """
+    case = get_case(case_id)
     try:
-        get_case(case_id).write_note(note_id, body.text)
+        case.write_note(note_id, body.text)
     except CaseError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    link_engine.sync_embedded(
+        case, note_id, pdf_engine.embedded_entity_ids(body.text), by="note"
+    )
     return {"status": "saved"}
 
 

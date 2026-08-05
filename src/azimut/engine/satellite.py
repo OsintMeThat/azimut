@@ -18,11 +18,12 @@ to).
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
 from ..repository import EntityStatus
-from ..workspace import Case
+from ..workspace import Case, CaseError
 from . import continents
 from . import coords as coords_engine
 from . import countries
@@ -225,6 +226,12 @@ def _saved_row(
         "fetched_at": _saved_when(entity, capture),
         "imagery_date": source.get("imagery_date"),
         "notes": source.get("notes") or attrs.get("notes") or "",
+        # How tightly the point is pinned (ONTOLOGY §2). Carried in the index
+        # because the map overlay draws it: an approximate place is a circle or a
+        # polygon rather than a pin, and a pin on a guess is the lie this fixes.
+        # Absent stays absent — a point with no radius draws exactly as before.
+        "radius_m": attrs.get("radius_m"),
+        "footprint": attrs.get("footprint"),
         # how many proofs were built on this point. `All` draws every point
         # once, so a worked row is marked rather than doubled by a proof
         # marker landing on the capture it composes.
@@ -253,7 +260,13 @@ def saved_index(case: Case) -> list[dict[str, Any]]:
     # two grouped queries for the whole case rather than one per row: this list
     # is read on case open and must not walk the graph row by row
     worked = case.count_dependents(link_type=links.DERIVED_FROM, from_type="proof")
-    related = case.count_incident_links(exclude_types=list(links.CHAIN_TYPES))
+    related = case.count_incident_links(
+        exclude_types=[
+            *links.CHAIN_TYPES,
+            links.MENTIONS,
+            *links.CLAIM_CONNECTION_TYPES,
+        ]
+    )
     rows = []
     for entity in saved_entities(case):
         is_image = entity["type"] == "capture"
@@ -449,6 +462,158 @@ def proof_index(
         rows.extend(_proof_row(proof, entity, point) for point in points)
     rows.sort(key=lambda r: r["fetched_at"], reverse=True)
     return rows
+
+
+# -- placement: where the chain puts an entity (ONTOLOGY §3) ----------------------
+#
+# The chain is read backwards as geography: a proof with no point of its own stands
+# at the point of every capture it composes. `proof_index` does that one hop back
+# for the map. This walks the same edges in both directions and further, because
+# the artifact holding the point is rarely the one being read: a video reaches its
+# capture through a proof that composed a frame of it, three hops away through a
+# shared descendant. That V is what the geolocation gesture actually looks like —
+# putting a frame beside a satellite view *is* the assertion they are one place.
+
+#: How far a placement walk travels over chain edges. A note sits three hops above a
+#: capture (note → post → proof → capture) and a video three below one
+#: (video ← frame ← proof → capture), so four covers every shape `CHAIN_ENDPOINTS`
+#: declares with one hop to spare.
+PLACEMENT_DEPTH = 4
+#: Entities one walk may read, whatever the depth would allow. A video cut into forty
+#: frames across ten proofs must not turn opening a panel into a graph scan.
+PLACEMENT_NODES = 200
+#: Points one entity reports. Fifteen distinct placements is a case already
+#: contradicting itself; past that the panel is a wall rather than a reading.
+PLACEMENT_LIMIT = 15
+
+
+def _point(lat: Any, lon: Any) -> dict[str, float] | None:
+    if lat is None or lon is None:
+        return None
+    try:
+        return {"lat": float(lat), "lon": float(lon)}
+    except (TypeError, ValueError):
+        return None
+
+
+def _entity_point(case: Case, entity: dict[str, Any]) -> dict[str, float] | None:
+    """The point this entity carries itself, or None if it carries none.
+
+    Two types hold one inside a chain. A ``capture`` records the marker it was taken
+    at. A ``proof`` states its own through the composer, and ``own_point`` is what
+    decides which: what the analyst typed wins over what the panels froze. Reusing it
+    here is what keeps a video from reporting a capture's raw point while the proof
+    beside it shows the corrected one.
+    """
+    attrs = entity.get("attrs") or {}
+    if entity.get("type") == "capture":
+        return _point(attrs.get("lat"), attrs.get("lon"))
+    if entity.get("type") != "proof":
+        return None
+    spec_rel = attrs.get("spec")
+    if not isinstance(spec_rel, str) or not spec_rel:
+        return None
+    try:
+        spec = json.loads(case.resolve_inside(spec_rel).read_text(encoding="utf-8"))
+    except (OSError, ValueError, CaseError):
+        return None  # a spec deleted or half-written places nothing
+    return own_point(spec) if isinstance(spec, dict) else None
+
+
+def _filed_at(entity: dict[str, Any]) -> str:
+    return str((entity.get("provenance") or {}).get("at") or "")
+
+
+def placements(
+    case: Case, entity_id: str, *, limit: int | None = None
+) -> dict[str, Any] | None:
+    """Where the derivation chain puts one entity, nearest placement first.
+
+    Breadth-first over ``derived-from``/``depends-on`` in both directions, so the
+    artifact that placed this one is found however far round the V it sits. Each
+    point comes back with the entity it was read off — the *via* the panel names —
+    and the entity's own point comes back with none, because nothing placed it.
+
+    **An artifact that carries a point is where the walk stops.** ``proof_index``
+    already settles this for the map — a proof that states where it is says it once,
+    rather than also drawing at the panels it overrode — and a panel that listed both
+    would contradict the map about the same proof. Stopping there is also what keeps
+    a video to its own argument: the capture behind its proof is reached, the second
+    proof that happens to reuse that capture is not.
+
+    Points are deduplicated on the exact pair, never on a rounded one: two captures
+    of the same roof are metres apart, and merging them would assert they are one
+    place, which is the analyst's call and not a rounding. The nearest hop wins a
+    repeated point, and the most recently filed artifact wins inside one hop.
+
+    A ``capture`` reports nothing at all. Its point is its own, written at the save
+    and already read under Info, so listing it here would show one datum twice in one
+    panel for the single type that never derived it.
+
+    Returns ``None`` when the entity is gone.
+    """
+    root = case.get_entity(entity_id)
+    if root is None:
+        return None
+    if root.get("type") == "capture":
+        return {"points": [], "truncated": False}
+
+    cap = PLACEMENT_LIMIT if limit is None else limit
+    found: dict[tuple[float, float], dict[str, Any]] = {}
+    seen: set[str] = {entity_id}
+    frontier = [root]
+    reads = 1
+    truncated = False
+    for depth in range(PLACEMENT_DEPTH + 1):
+        if not frontier:
+            break
+        # newest first inside one hop: when two artifacts state the same point, the
+        # freshest reading is the one worth attributing it to
+        frontier.sort(key=_filed_at, reverse=True)
+        neighbours: list[str] = []
+        for node in frontier:
+            point = _entity_point(case, node)
+            if point is not None:
+                key = (point["lat"], point["lon"])
+                if key in found:  # a nearer artifact already stands here
+                    continue
+                if len(found) >= cap:
+                    truncated = True
+                else:
+                    found[key] = {
+                        "lat": point["lat"],
+                        "lon": point["lon"],
+                        "depth": depth,
+                        "via": None
+                        if node["id"] == entity_id
+                        else {
+                            "id": node["id"],
+                            "type": node.get("type"),
+                            "label": node.get("label"),
+                        },
+                    }
+                continue  # this artifact is the placement; what it was made from is not
+            if depth == PLACEMENT_DEPTH:
+                continue
+            for link in case.links_of(node["id"]):
+                if link["type"] not in links.CHAIN_TYPES:
+                    continue
+                other = link["to"] if link["from"] == node["id"] else link["from"]
+                if other in seen:
+                    continue
+                seen.add(other)
+                neighbours.append(other)
+        nxt: list[dict[str, Any]] = []
+        for other_id in neighbours:
+            if reads >= PLACEMENT_NODES:
+                truncated = True  # the walk stopped short, so the list may be partial
+                break
+            neighbour = case.get_entity(other_id)
+            reads += 1
+            if neighbour is not None:
+                nxt.append(neighbour)
+        frontier = nxt
+    return {"points": list(found.values()), "truncated": truncated}
 
 
 def is_unlocated(entity: dict[str, Any]) -> bool:

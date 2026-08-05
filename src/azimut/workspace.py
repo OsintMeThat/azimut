@@ -110,28 +110,6 @@ def _case_lock(path: Path) -> threading.RLock:
         return lock
 
 
-# Extensible vocabulary (spec §5); free strings are accepted, these are the
-# well-known ones the UI knows how to render.
-ENTITY_TYPES = (
-    "person",
-    "organization",
-    "alias",
-    "account",
-    "email",
-    "phone",
-    "domain",
-    "ip",
-    "vehicle",
-    "place",
-    "capture",
-    "event",
-    "media",
-    "proof",
-    "note",
-    "bookmark",
-)
-
-
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 

@@ -117,17 +117,20 @@ KINDS: dict[str, Kind] = {
 #: file, and that tool declares it in `KINDS`.
 NO_FILES: dict[str, str] = {
     "place": "coordinates and a label",
-    "event": "a date and a label",
     "person": "an identity in the graph",
     "organization": "an identity in the graph",
-    "alias": "an identity in the graph",
     "account": "an identity in the graph",
     "email": "an identifier in the graph",
     "phone": "an identifier in the graph",
     "domain": "an identifier in the graph",
     "ip": "an identifier in the graph",
+    "network": "an identifier in the graph",
     "vehicle": "an identity in the graph",
+    "vessel": "an identity in the graph",
+    "aircraft": "an identity in the graph",
+    "structure": "an identity in the graph",
     "bookmark": "a URL in the graph",
+    "claim": "a statement in the graph, and the edges that carry it",
 }
 
 

@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator, TypeVar
 
+from .engine import entities as entity_engine
 from .engine import mapsites
 from . import layout
 from .repository import EntityStatus
@@ -49,7 +50,10 @@ if TYPE_CHECKING:
 # Schema 6 adds the `trash` journal: one row per delete action, holding the
 # recipe to put it back. Schema 7 adds its recovery state so interrupted
 # filesystem moves can be completed or rolled back on the next case open.
-SQLITE_SCHEMA = 7
+# Schema 8 adds relation confidence. Schema 9 rebuilds `search_text` so a case
+# search reaches the declared fields — a plate, an IMO, a claim's wording —
+# instead of stopping at label and notes.
+SQLITE_SCHEMA = 9
 
 _SCHEMA = """
 CREATE TABLE meta (
@@ -80,7 +84,10 @@ CREATE TABLE links (
     prov_by     TEXT NOT NULL,
     prov_at     TEXT NOT NULL,
     prov_status TEXT NOT NULL DEFAULT 'confirmed',
-    prov_source TEXT
+    prov_source TEXT,
+    -- Optional confidence for ordinary semantic relations. Claim connectors,
+    -- mentions and artifact lineage never use it.
+    confidence  INTEGER
 );
 CREATE TABLE folders (
     path TEXT PRIMARY KEY
@@ -172,12 +179,18 @@ def _folder_of(attrs: dict[str, Any] | None) -> str | None:
 
 
 def _entity_search_text(type_: str, label: str, attrs: dict[str, Any] | None) -> str:
+    """What a case search matches an entity against.
+
+    The label, the type, the folder and the notes, plus the type's own declared text
+    fields (``entities.search_values``): a vehicle is looked for by its plate and a
+    claim by the words it quotes, and neither was findable while the index stopped
+    at the notes. Recomputed on every write, and rebuilt for existing rows by the
+    schema-10 migration.
+    """
     attrs = attrs or {}
-    return "\n".join(
-        str(value)
-        for value in (label, type_, attrs.get("folder"), attrs.get("notes"))
-        if value
-    ).casefold()
+    fixed = (label, type_, attrs.get("folder"), attrs.get("notes"))
+    declared = entity_engine.search_values(type_, attrs)
+    return "\n".join(str(value) for value in (*fixed, *declared) if value).casefold()
 
 
 def _replace_exact(value: Any, old: str, new: str) -> Any:
@@ -284,6 +297,30 @@ def _migrate_6_to_7(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE trash ADD COLUMN state TEXT NOT NULL DEFAULT 'ready'")
 
 
+def _migrate_7_to_8(conn: sqlite3.Connection) -> None:
+    """Let an edge say how sure the analyst is (ONTOLOGY §3).
+
+    Nullable and unset, so every link already in the case reads as "not assessed",
+    which is the truth about them rather than a level invented on their behalf.
+    """
+    conn.execute("ALTER TABLE links ADD COLUMN confidence INTEGER")
+
+
+def _migrate_8_to_9(conn: sqlite3.Connection) -> None:
+    """Rebuild every entity's search text so the declared fields are in it.
+
+    The index is a stored column, so widening what goes into it only reaches rows
+    written afterwards: a case filed last week would keep answering searches from
+    its label alone. One pass, no shape change.
+    """
+    for row in conn.execute("SELECT id, type, label, attrs_json FROM entities").fetchall():
+        attrs = json.loads(row["attrs_json"])
+        conn.execute(
+            "UPDATE entities SET search_text = ? WHERE id = ?",
+            (_entity_search_text(row["type"], row["label"], attrs), row["id"]),
+        )
+
+
 # from_version -> function(conn) applying the in-place upgrade to from_version + 1.
 # Runs inside one transaction per step in `SqliteCase._upgrade`, which stamps the
 # new schema_version and records the migration; the step only reshapes the db.
@@ -294,6 +331,8 @@ _SQLITE_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     4: _migrate_4_to_5,
     5: _migrate_5_to_6,
     6: _migrate_6_to_7,
+    7: _migrate_7_to_8,
+    8: _migrate_8_to_9,
 }
 
 _MEDIA_CATEGORIES = (
@@ -673,6 +712,10 @@ class SqliteCase:
         }
         if row["prov_source"] is not None:
             link["provenance"]["source"] = row["prov_source"]
+        # Absent rather than null: "not assessed" is the absence of a key, so no
+        # reader has to tell an unevaluated edge from one someone rated as nothing.
+        if row["confidence"] is not None:
+            link["confidence"] = row["confidence"]
         return link
 
     @staticmethod
@@ -1322,9 +1365,14 @@ class SqliteCase:
             if status not in ("confirmed", "suggested"):
                 status = row["prov_status"]
             type_ = patch.get("type") or row["type"]
+            # Membership, not truthiness: `None` clears the rating back to "not
+            # assessed", and `-1` (refuted) is a value like any other. Which
+            # ordinals are legal, and which edges may carry one at all, is the
+            # vocabulary's call in `engine/links.py`.
+            confidence = patch["confidence"] if "confidence" in patch else row["confidence"]
             conn.execute(
-                "UPDATE links SET prov_status = ?, type = ? WHERE id = ?",
-                (status, type_, link_id),
+                "UPDATE links SET prov_status = ?, type = ?, confidence = ? WHERE id = ?",
+                (status, type_, confidence, link_id),
             )
             self._touch(conn)
             updated = conn.execute("SELECT * FROM links WHERE id = ?", (link_id,)).fetchone()
@@ -1587,12 +1635,16 @@ class SqliteCase:
                 prov = link.get("provenance") or {}
                 conn.execute(
                     "INSERT OR REPLACE INTO links"
-                    "(id, from_id, to_id, type, prov_by, prov_at, prov_status, prov_source)"
-                    " VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                    "(id, from_id, to_id, type, prov_by, prov_at, prov_status,"
+                    " prov_source, confidence)"
+                    " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         link["id"], link["from"], link["to"], link["type"],
                         prov.get("by", "user"), prov.get("at", _now()),
                         prov.get("status", "confirmed"), prov.get("source"),
+                        # restoring an eliminated candidate must bring back the
+                        # elimination: "I ruled these eleven out" is the finding
+                        link.get("confidence"),
                     ),
                 )
                 kept += 1

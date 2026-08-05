@@ -47,6 +47,14 @@ class FullCase:
     note: str = ""  # its case-relative path
     place_id: str = ""
     grid: str = ""
+    person_id: str = ""
+    org_id: str = ""
+    account_id: str = ""
+    network_id: str = ""
+    vessel_id: str = ""
+    structure_id: str = ""
+    bookmark_id: str = ""
+    claim_id: str = ""
     entity_types: set[str] = field(default_factory=set)
 
 
@@ -130,6 +138,39 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     )
     assert related.status_code == 200, related.text
 
+    # -- the hand-made vocabulary: one entity per family, and the verbs ------
+    # These own nothing on disk, so they are here for the registry and bundle
+    # gates rather than for the file ones: a type that reaches the graph without
+    # deciding what it owns fails `test_every_type_in_a_full_case_declares...`.
+    def entity(type_: str, label: str, attrs: dict | None = None) -> str:
+        res = client.post(
+            f"/api/cases/{case_id}/entities",
+            json={"type": type_, "label": label, "attrs": attrs or {}},
+        )
+        assert res.status_code == 200, res.text
+        return res.json()["id"]
+
+    full.person_id = entity("person", "A. Nadeau")
+    full.org_id = entity("organization", "Northwind Shipping")
+    full.account_id = entity("account", "@harbourwatch", {})
+    full.network_id = entity("network", "203.0.113.0/24", {"asn": "AS64496"})
+    full.vessel_id = entity("vessel", "MV Aurora", {"imo": "9074729"})
+    full.structure_id = entity("structure", "Quay 4 warehouse", {"kind": "warehouse"})
+
+    for from_id, to_id, verb in (
+        (full.person_id, full.account_id, "owns"),
+        (full.person_id, full.network_id, "owns"),
+        (full.org_id, full.vessel_id, "owns"),
+        (full.account_id, photo_entity["id"], "posted"),
+        (full.vessel_id, photo_entity["id"], "appears-in"),
+        (full.structure_id, full.place_id, "sited-at"),
+    ):
+        stated = client.post(
+            f"/api/cases/{case_id}/links",
+            json={"from_id": from_id, "to_id": to_id, "type": verb},
+        )
+        assert stated.status_code == 200, f"{verb}: {stated.text}"
+
     # -- proof: one panel from the case, one pasted image ---------------------
     pasted = _png(size=(40, 30), color=(220, 220, 40))
     asset_name = f"{hashlib.sha256(pasted).hexdigest()[:16]}.png"
@@ -172,6 +213,39 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     full.note_id = note.json()["id"]
     full.note = note.json()["attrs"]["path"]
     client.put(f"/api/cases/{case_id}/notes", json={"text": "# Full case\n\nRunning notes.\n"})
+
+    # -- a claim, with its three dedicated connectors --------------------------
+    # The reified statement carries one confidence for the whole assertion. Its
+    # connectors only identify the subject, place and supporting material.
+    # The source it rests on, graded on the axis that is never multiplied into the
+    # edge's own rating: the bundle has to carry both and keep them apart.
+    full.bookmark_id = entity(
+        "bookmark",
+        "Harbour watch thread",
+        {
+            "url": "https://example.test/thread/48",
+            "fetched_at": "2026-08-01T09:12:00+00:00",
+            "archive_url": "https://web.archive.test/web/2026/https://example.test/thread/48",
+            "reliability": "B",
+        },
+    )
+
+    full.claim_id = entity(
+        "claim",
+        "Where was the photo taken?",
+        {"method": "spans counted against Esri imagery", "confidence": "probable"},
+    )
+    for to_id, verb in (
+        (photo_entity["id"], "about"),
+        (full.place_id, "at"),
+        (full.note_id, "cites"),
+        (full.bookmark_id, "cites"),
+    ):
+        stated = client.post(
+            f"/api/cases/{case_id}/links",
+            json={"from_id": full.claim_id, "to_id": to_id, "type": verb},
+        )
+        assert stated.status_code == 200, f"{verb}: {stated.text}"
 
     grid = client.put(
         f"/api/cases/{case_id}/search-grids/north-sweep",

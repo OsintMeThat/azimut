@@ -10,9 +10,10 @@ import base64
 import io
 
 from PIL import Image
+import pytest
 
 from azimut.engine import links as link_engine
-from azimut.workspace import Case
+from azimut.workspace import Case, CaseError
 
 import graph_read
 
@@ -228,6 +229,64 @@ def test_upload_and_download_emit_no_links(client):
     cid = _new_case(client, "No links")
     _upload(client, cid, "a.png")
     assert _links(client, cid) == []
+
+
+def test_lineage_rejects_sources_outside_the_artifact_matrix(client):
+    cid = _new_case(client, "Lineage matrix")
+    case = Case.open(cid)
+    media = case.add_entity("media", "Image", {"path": "media/image.png"}, by="user")
+    proof = case.add_entity("proof", "Proof", {"spec": "proofs/.meta/proof.json"}, by="user")
+    case.add_entity(
+        "proof", "Other proof", {"spec": "proofs/.meta/other.json"}, by="user"
+    )
+    post = case.add_entity("post", "Post", {"draft": ".drafts/post.json"}, by="user")
+    session = case.add_entity(
+        "inspect-session", "Session", {"spec": ".inspect/session.json"}, by="user"
+    )
+
+    link_engine.sync(
+        case, proof["id"], link_engine.DERIVED_FROM, ["media/image.png"], by="proof-composer"
+    )
+    with pytest.raises(CaseError, match="proof cannot be derived-from a proof"):
+        link_engine.sync(
+            case,
+            proof["id"],
+            link_engine.DERIVED_FROM,
+            ["proofs/.meta/other.json"],
+            by="proof-composer",
+        )
+    with pytest.raises(CaseError, match="inspect-session cannot be depends-on a proof"):
+        link_engine.sync(
+            case,
+            session["id"],
+            link_engine.DEPENDS_ON,
+            ["proofs/.meta/proof.json"],
+            by="inspect",
+        )
+    with pytest.raises(CaseError, match="post cannot be derived-from a inspect-session"):
+        link_engine.sync(
+            case,
+            post["id"],
+            link_engine.DERIVED_FROM,
+            [".inspect/session.json"],
+            by="post-composer",
+        )
+    assert {link["to"] for link in case.links_of(proof["id"])} == {media["id"]}
+
+
+def test_lineage_cannot_create_a_cycle(client):
+    cid = _new_case(client, "Lineage cycle")
+    case = Case.open(cid)
+    first = case.add_entity("media", "First", {"path": "media/first.png"}, by="user")
+    second = case.add_entity("media", "Second", {"path": "media/second.png"}, by="user")
+
+    link_engine.link_all(
+        case, first["id"], link_engine.DERIVED_FROM, ["media/second.png"], by="inspect"
+    )
+    with pytest.raises(CaseError, match="cannot create a cycle"):
+        link_engine.link_all(
+            case, second["id"], link_engine.DERIVED_FROM, ["media/first.png"], by="inspect"
+        )
 
 
 def test_a_source_deleted_before_the_save_leaves_a_tombstone(client):
@@ -638,12 +697,19 @@ def test_derivation_endpoint_returns_the_closure_and_404s(client):
 def test_relation_vocabulary_says_how_each_type_reads_and_who_may_state_it(client):
     entries = {row["type"]: row for row in client.get("/api/cases/relation-types").json()}
 
-    assert entries["located-at"]["label"] == "was shot at"
-    assert entries["located-at"]["from_types"] == ["capture", "media"]
+    assert entries["located-at"]["label"] == "was recorded at"
+    assert entries["located-at"]["inverse_label"] == "was recorded here"
+    assert entries["located-at"]["from_types"] == ["media"]
     assert entries["located-at"]["to_types"] == ["place"]
+    assert entries["located-at"]["from_media_kinds"] == ["audio", "image", "video"]
     assert entries["located-at"]["manual"] is True
+    assert entries["in-network"]["from_types"] == ["ip", "network"]
+    assert entries["in-network"]["to_types"] == ["network"]
+    assert entries["mentions"]["action"] == "mention"
+    assert {entries[type_]["action"] for type_ in ("about", "at", "cites")} == {"claim"}
     # enrichment's own claim: named so the UI can say it, never offered by hand
     assert entries["same-image-as"]["manual"] is False
+    assert entries["same-image-as"]["from_media_kinds"] == ["image"]
 
 
 def test_the_analyst_can_state_a_relation_and_it_lands_confirmed(client):
@@ -688,7 +754,7 @@ def test_a_stated_relation_is_refused_when_the_ontology_has_no_reading(client):
 
     # a derivation records what a save did; it is never asserted after the fact
     assert post(media["id"], place["id"], "derived-from").status_code == 400
-    # the wrong way round: a place is not shot at a photo
+    # the wrong way round: a place is not recorded at a photo
     assert post(place["id"], media["id"], "located-at").status_code == 400
     # a perceptual-hash match is enrichment's claim, not a person's
     assert post(media["id"], other["id"], "same-image-as").status_code == 400
@@ -699,6 +765,84 @@ def test_a_stated_relation_is_refused_when_the_ontology_has_no_reading(client):
     assert post(media["id"], "e_ghost", "located-at").status_code == 400
 
     assert case.links_of(media["id"]) == []
+
+
+def test_media_relations_respect_the_file_kind(client):
+    cid = _new_case(client, "Media kinds")
+    case = Case.open(cid)
+    image = case.add_entity("media", "Still", {"path": "media/still.jpg"}, by="user")
+    audio = case.add_entity("media", "Call", {"path": "media/call.wav"}, by="user")
+    document = case.add_entity("media", "Report", {"path": "media/report.pdf"}, by="user")
+    capture = case.add_entity("capture", "Map", {"path": "captures/map.png"}, by="user")
+    person = case.add_entity("person", "Witness", {}, by="user")
+    place = case.add_entity("place", "Station", {"lat": 1.0, "lon": 2.0}, by="user")
+
+    def post(from_id, to_id, type_):
+        return client.post(
+            f"/api/cases/{cid}/links",
+            json={"from_id": from_id, "to_id": to_id, "type": type_},
+        )
+
+    assert post(image["id"], place["id"], "located-at").status_code == 200
+    assert post(audio["id"], place["id"], "located-at").status_code == 200
+    assert post(document["id"], place["id"], "located-at").status_code == 400
+    assert post(capture["id"], place["id"], "located-at").status_code == 400
+    assert post(image["id"], place["id"], "depicts").status_code == 200
+    assert post(audio["id"], place["id"], "depicts").status_code == 400
+    assert post(person["id"], image["id"], "appears-in").status_code == 200
+    assert post(person["id"], audio["id"], "appears-in").status_code == 400
+
+
+def test_networks_link_ips_and_parent_networks_without_cycles(client):
+    cid = _new_case(client, "Networks")
+    case = Case.open(cid)
+    ip = case.add_entity("ip", "203.0.113.42", {}, by="user")
+    subnet = case.add_entity("network", "203.0.113.0/24", {}, by="user")
+    parent = case.add_entity("network", "203.0.112.0/23", {}, by="user")
+
+    assert client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": ip["id"], "to_id": subnet["id"], "type": "in-network"},
+    ).status_code == 200
+    assert client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": subnet["id"], "to_id": parent["id"], "type": "in-network"},
+    ).status_code == 200
+    assert client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": parent["id"], "to_id": subnet["id"], "type": "in-network"},
+    ).status_code == 400
+
+
+def test_organization_containment_cannot_create_a_cycle(client):
+    cid = _new_case(client, "Organization cycle")
+    case = Case.open(cid)
+    unit = case.add_entity("organization", "Unit", {}, by="user")
+    command = case.add_entity("organization", "Command", {}, by="user")
+
+    assert client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": unit["id"], "to_id": command["id"], "type": "part-of"},
+    ).status_code == 200
+    assert client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": command["id"], "to_id": unit["id"], "type": "part-of"},
+    ).status_code == 400
+
+
+def test_an_older_out_of_matrix_connection_is_removable_but_not_rewordable(client):
+    cid = _new_case(client, "Older connection")
+    case = Case.open(cid)
+    person = case.add_entity("person", "Member", {}, by="user")
+    organization = case.add_entity("organization", "Group", {}, by="user")
+    legacy = case.add_link(person["id"], organization["id"], "part-of", by="user")
+
+    refused = client.patch(
+        f"/api/cases/{cid}/links/{legacy['id']}", json={"type": "member-of"}
+    )
+    assert refused.status_code == 400
+    assert client.delete(f"/api/cases/{cid}/links/{legacy['id']}").status_code == 200
+    assert case.links_of(person["id"]) == []
 
 
 def test_a_relation_can_be_restated_corrected_and_taken_back(client):
@@ -760,7 +904,7 @@ def test_restating_a_relation_is_refused_outside_the_vocabulary(client):
 def test_confirming_a_relation_confirms_the_point_it_proposes(client):
     """The two halves of an enrichment suggestion are one claim, so the Suggestions
     list and the relation rows never disagree about the same click: accepting "this
-    file was shot at this point" accepts the point too."""
+    file was recorded at this point" accepts the point too."""
     cid = _new_case(client, "Symmetric confirm")
     case = Case.open(cid)
     media = case.add_entity("media", "Photo", {"path": "media/photo.jpg"}, by="user")

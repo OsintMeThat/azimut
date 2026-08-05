@@ -148,6 +148,139 @@ def test_filed_notes_are_markdown_files(client):
     assert client.get(f"/api/cases/{cid}/notes/{note['id']}").json()["text"] == "Updated"
 
 
+def test_a_report_note_records_the_case_files_it_was_written_from(client):
+    """A note composed out of case files is an artifact made from them, and says so.
+
+    Without this the report note was the one filed artifact with no chain: its images
+    pointed at a proof and its media that nothing in the graph knew it depended on, so
+    Details showed "nothing filed against this" on a page full of evidence.
+    """
+    cid = client.post("/api/cases", json={"name": "Report chain"}).json()["id"]
+    case = Case.open(cid)
+    proof = case.add_entity("proof", "Convoy", {"path": "proofs/convoy.png"}, by="proof-composer")
+    photo = case.add_entity("media", "clip.jpg", {"path": "media/clip.jpg"}, by="user")
+
+    note = client.post(
+        f"/api/cases/{cid}/notes",
+        json={
+            "title": "Convoy report",
+            "content": "![](proofs/convoy.png)",
+            "sources": ["proofs/convoy.png", "media/clip.jpg"],
+        },
+    ).json()
+
+    chain = client.get(f"/api/cases/{cid}/entities/{note['id']}/chain").json()
+    assert {row["entity"]["id"] for row in chain["sources"]} == {proof["id"], photo["id"]}
+    assert {row["type"] for row in chain["sources"]} == {"derived-from"}
+    # and the other way round: the proof knows the report leans on it
+    proof_chain = client.get(f"/api/cases/{cid}/entities/{proof['id']}/chain").json()
+    assert [row["entity"]["id"] for row in proof_chain["dependents"]] == [note["id"]]
+
+
+def test_a_note_typed_by_hand_files_no_chain_at_all(client):
+    """Most notes are written, not composed. Sending no sources must leave the note
+    exactly as it has always been, with no edge invented for it."""
+    cid = client.post("/api/cases", json={"name": "Plain note"}).json()["id"]
+
+    note = client.post(f"/api/cases/{cid}/notes", json={"title": "Lead"}).json()
+
+    chain = client.get(f"/api/cases/{cid}/entities/{note['id']}/chain").json()
+    assert chain["sources"] == [] and chain["lost"] == []
+
+
+def test_a_report_source_that_is_already_gone_is_kept_as_a_tombstone(client):
+    """A proof deleted while the composer was open cannot be linked, but the fact that
+    the report was written from it is not dropped in silence."""
+    cid = client.post("/api/cases", json={"name": "Vanished source"}).json()["id"]
+
+    note = client.post(
+        f"/api/cases/{cid}/notes",
+        json={"title": "Report", "sources": ["proofs/gone.png"]},
+    ).json()
+
+    chain = client.get(f"/api/cases/{cid}/entities/{note['id']}/chain").json()
+    assert chain["sources"] == []
+    assert [lost["path"] for lost in chain["lost"]] == ["proofs/gone.png"]
+
+
+def _sources_of(client, cid, note_id):
+    chain = client.get(f"/api/cases/{cid}/entities/{note_id}/chain").json()
+    return {row["entity"]["id"] for row in chain["sources"]}
+
+
+def test_a_note_restates_its_chain_from_its_own_body_on_every_save(client):
+    """The Notebook inserts case media at any time, so birth is not when a note's
+    chain is settled.
+
+    An image added afterwards was a dependency nothing in the graph knew about —
+    deleting it left the note showing a hole — and one taken out of the text left a
+    scar the note had stopped earning.
+    """
+    cid = client.post("/api/cases", json={"name": "Note body chain"}).json()["id"]
+    case = Case.open(cid)
+    proof = case.add_entity("proof", "Convoy", {"path": "proofs/convoy.png"}, by="proof-composer")
+    photo = case.add_entity("media", "clip.jpg", {"path": "media/clip.jpg"}, by="user")
+    note = client.post(f"/api/cases/{cid}/notes", json={"title": "Lead"}).json()
+    assert _sources_of(client, cid, note["id"]) == set()
+
+    client.put(
+        f"/api/cases/{cid}/notes/{note['id']}",
+        json={"text": f"# Lead\n\n[[media:{proof['id']}|Convoy]]\n[[media:{photo['id']}|clip]]"},
+    )
+    assert _sources_of(client, cid, note["id"]) == {proof["id"], photo["id"]}
+
+    # the photo is taken back out: the edge goes with it
+    client.put(
+        f"/api/cases/{cid}/notes/{note['id']}",
+        json={"text": f"# Lead\n\n[[media:{proof['id']}|Convoy]]"},
+    )
+    assert _sources_of(client, cid, note["id"]) == {proof["id"]}
+
+
+def test_saving_a_report_keeps_the_draft_it_was_composed_in(client):
+    """The body names the files it shows; it cannot name the draft. So a body-driven
+    restatement reconciles only what the text speaks for, or the first edit to a
+    report would quietly drop the post it came out of."""
+    cid = client.post("/api/cases", json={"name": "Report draft"}).json()["id"]
+    case = Case.open(cid)
+    post = case.add_entity("post", "Thread", {"draft": ".drafts/thread.json"}, by="post-composer")
+    proof = case.add_entity("proof", "Convoy", {"path": "proofs/convoy.png"}, by="proof-composer")
+    note = client.post(
+        f"/api/cases/{cid}/notes",
+        json={"title": "Report", "sources": [".drafts/thread.json", "proofs/convoy.png"]},
+    ).json()
+    assert _sources_of(client, cid, note["id"]) == {post["id"], proof["id"]}
+
+    client.put(
+        f"/api/cases/{cid}/notes/{note['id']}",
+        json={"text": f"# Report\n\n[[media:{proof['id']}|Convoy]]"},
+    )
+
+    assert _sources_of(client, cid, note["id"]) == {post["id"], proof["id"]}
+
+
+def test_a_note_body_naming_something_unjoinable_still_saves(client):
+    """A body is prose. A token pointing at a place, at a missing id or at the note
+    itself is skipped, never a 400 that loses the analyst's writing."""
+    cid = client.post("/api/cases", json={"name": "Odd tokens"}).json()["id"]
+    case = Case.open(cid)
+    place = case.add_entity("place", "Quay", {"lat": 1.0, "lon": 2.0}, by="user")
+    note = client.post(f"/api/cases/{cid}/notes", json={"title": "Lead"}).json()
+
+    saved = client.put(
+        f"/api/cases/{cid}/notes/{note['id']}",
+        json={
+            "text": (
+                f"[[media:{place['id']}|Quay]] [[media:e_missing|Gone]] "
+                f"[[media:{note['id']}|Itself]] [[entity:{place['id']}|Quay]]"
+            )
+        },
+    )
+
+    assert saved.status_code == 200
+    assert _sources_of(client, cid, note["id"]) == set()
+
+
 def test_deleting_filed_note_removes_markdown_file(client):
 
     cid = client.post("/api/cases", json={"name": "Notebook delete"}).json()["id"]

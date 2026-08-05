@@ -102,6 +102,17 @@ WIDTH_PIXELS = re.compile(r"^(?:[2-9]\d|[1-9]\d{2}|1[0-5]\d{2}|1600)px$")
 
 ALIGNMENTS = {"left": Align.L, "center": Align.C, "right": Align.R}
 
+
+def embedded_entity_ids(text: str) -> list[str]:
+    """The case artifacts a note shows, in the order they appear, deduplicated.
+
+    ``[[media:…]]`` only, never ``[[entity:…]]``: the first is the note *showing* a
+    file, which is a derivation, where the second is a pointer at a record, which is
+    a mention (ONTOLOGY §3). Reuses the renderer's own pattern, so what the chain
+    records and what the page draws can never become two readings of one note.
+    """
+    return list(dict.fromkeys(match.group(1) for match in MEDIA_REF.finditer(text or "")))
+
 #: Heading sizes, h1 to h6, and the space above each.
 HEADINGS = {
     "h1": (16.0, 7.0),

@@ -344,6 +344,13 @@ def ingest_bookmark(
     Nothing is fetched: we store the URL the user is already on, its title and
     the source site — a pointer, not a copy. An empty ``case_id`` opens a fresh
     scratch session, the same as a screenshot ingest.
+
+    ``fetched_at`` is stamped here, as it is on a capture, and by the server rather
+    than from the request: the extension is standing on the page at this instant, so
+    the moment is known rather than typed, and a browser clock is not a source. A
+    bookmark added by hand in the app carries none — nothing was fetched — and that
+    absence is never flagged. It is what an archived copy is later dated against
+    (ONTOLOGY §2).
     """
     split = urlsplit(url)
     if split.scheme not in ("http", "https") or not split.hostname:
@@ -354,7 +361,12 @@ def ingest_bookmark(
     entity = case.add_entity(
         "bookmark",
         label,
-        {"url": url, "site": split.hostname, "folder": ""},
+        {
+            "url": url,
+            "site": split.hostname,
+            "folder": "",
+            "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        },
         by="ingest",
     )
     events.publish(

@@ -5,9 +5,13 @@ manager. The backend can, the same way ``launcher.py`` already opens the browser
 tab, so "where are my files" is answered by the OS's own window instead of by a
 path the analyst has to copy out of Settings by hand.
 
-Callers never pass a path the browser chose: the routes name *what* to show (a
-case, the workspace) and resolve the path here, so there is nothing to traverse
-out of. The containment check below is the belt on top of that.
+Two kinds of caller reach this, and each has its own guard. Most routes name
+*what* to show — a case, the workspace, the notes export folder — and resolve the
+path themselves, so there is nothing to traverse out of. One route takes a path
+the analyst pointed at (`POST /cases/{id}/media/reveal`); there the path is bounded
+and run through `Case.resolve_inside`, which resolves it and refuses anything
+landing outside the case, before it ever arrives here. The containment check below
+is the belt on top of both.
 """
 
 from __future__ import annotations

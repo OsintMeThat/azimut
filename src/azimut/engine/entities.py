@@ -1,0 +1,656 @@
+"""The entity vocabulary: which types a case may hold, and what each one is.
+
+One registry, read by every surface. A type declares four things: how it reads in
+words, which **family** it belongs to, the icon that stands for it, and the fields
+an analyst may fill on it. ``GET /api/cases/entity-types`` serves it, so a create
+form is generated rather than written per type and no screen keeps its own copy of
+the vocabulary.
+
+The family is the load-bearing part. Relations start from families and may narrow
+an endpoint to explicit types (``engine/links.py``). Broad verbs therefore extend
+to a new family member, while type-specific verbs stay deliberately narrow:
+
+``actor``
+    A person or organization that can act or hold ownership.
+
+``asset``
+    It is owned, it appears in collected material, it sits somewhere. A vehicle, a
+    vessel, an aircraft, a building.
+
+``identifier``
+    A handle on some system, and **the value is the identity**: two ``email``
+    entities holding the same address are a bug, not two objects. This is the one
+    family where ONTOLOGY §2's "the label never defines identity" does not hold.
+
+``collected``
+    Bytes collected into the case: imported, downloaded, extracted or captured. Not
+    named ``imagery``, because ``media_kind`` also answers ``audio`` and ``file`` —
+    a PDF dropped into the Media Library is a ``media`` too — and not ``material``,
+    which was the first name and said nothing a reader could act on: every family
+    holds material of some sort. What unites these is that they were **gathered
+    rather than written**, so one of them may turn out to depict a place.
+
+``document``
+    It is read rather than gathered — made or merely consulted. A proof, a note, a
+    bookmarked URL. Two of its members are also *sources*, and carry how much they
+    are worth: see ``RELIABILITY_GRADES``.
+
+``place``
+    A point, never a thing. A building is an ``asset`` that *sits at* a place; if
+    ``place`` were also a thing, two families would carry geometry and "what is on
+    the map" would have two answers.
+
+``claim``
+    A statement someone makes about the rest of the graph, carrying its own reasoning
+    and its own sources. This is followthemoney's reification: a claim that holds
+    values is a node with edges, never an edge with an attribute bag. It is a family
+    of its own because its verbs are the inverse of everyone else's — it points *at*
+    subjects rather than being pointed at.
+
+Splitting actor from asset is what keeps the layer honest. Held as one "subject"
+family, three verbs out of four would have had to narrow themselves back down —
+the picker would offer "this car owns this person" — and a family layer where
+every verb narrows is decoration. followthemoney draws the same line with
+``LegalEntity`` above ``Person`` and ``Company``; STIX draws it between a domain
+object and an observable.
+
+Adding a type is one entry here and one line in ``artifacts.NO_FILES``: the icon
+travels with the entry, so no screen keeps a list of its own. Adding a *family* is
+not cheap: its verbs have to be decided. The families are the commitment, the types
+are disposable.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any
+
+from ..workspace import CaseError
+
+#: The families, in the order a menu should show them.
+ACTOR = "actor"
+ASSET = "asset"
+IDENTIFIER = "identifier"
+COLLECTED = "collected"
+DOCUMENT = "document"
+PLACE = "place"
+CLAIM = "claim"
+
+FAMILIES: tuple[str, ...] = (ACTOR, ASSET, IDENTIFIER, COLLECTED, DOCUMENT, PLACE, CLAIM)
+
+#: What each family means, in one clause, for the surface that has to explain itself.
+#: The families are the load-bearing idea of the vocabulary and the one part an
+#: analyst never types, so a menu naming them has to say what they are. Served with
+#: the registry for the reason every other reading is: one wording, not one per
+#: screen.
+FAMILY_READS: dict[str, str] = {
+    ACTOR: "a person or organization that can act or hold ownership",
+    ASSET: "a thing that is owned, appears in footage or sits somewhere",
+    IDENTIFIER: "a handle on a system, where the value is the identity",
+    COLLECTED: "bytes gathered into the case rather than written, and one may show a place",
+    DOCUMENT: "something read rather than gathered, made or merely consulted",
+    PLACE: "a point on the map, never a thing standing on it",
+    CLAIM: "a statement about the rest of the case, carrying its own reasoning",
+}
+
+#: What an `attrs` field is edited as, and what the validator checks. Presentation
+#: only in the sense that everything is stored as written; a kind is added here when
+#: a type needs it, never in advance — an editor nothing uses is a screen nobody can
+#: reach. `date` arrives with the claim node's EDTF.
+#:
+#: `longtext` holds the same value as `text` and is checked by the same rule; what it
+#: says is that the field expects sentences. A quoted source and the reasoning behind
+#: a claim run to paragraphs, and a one-line box that scrolls sideways at eighty
+#: characters is a field nobody fills — the reason those two exist at all.
+ATTR_KINDS: tuple[str, ...] = ("text", "longtext", "number", "url", "geojson", "choice")
+
+#: Longest a declared text field may be. Generous: `verbatim` quotes a source and
+#: `method` explains a match, and truncating either would defeat the point of
+#: keeping them.
+MAX_TEXT = 4000
+#: A radius wider than this is not a location. Half of Earth's meridian, so any
+#: honest "somewhere on this continent" still fits.
+MAX_RADIUS_M = 5_000_000
+#: Vertices a footprint may hold, summed over its rings. A drawn AOI uses tens; a
+#: traced coastline can use thousands; past this it is a payload, not a shape.
+MAX_FOOTPRINT_POINTS = 4096
+
+#: Radius shortcuts, coarsest reading last. These exist because metres are the
+#: right thing to store and the wrong thing to ask for: an analyst knows "this
+#: block", not "100 m". Deriving them from Plus Code lengths instead would leave a
+#: hole — the valid lengths jump from 8 (~280 m cells) straight to 6 (~5.6 km),
+#: which is exactly the band a live geolocation lives in. So the rungs are the
+#: input and any Plus Code shown is derived from them, never the other way round.
+PRECISION_RUNGS: tuple[tuple[str, int], ...] = (
+    ("This building", 25),
+    ("This block", 100),
+    ("This neighbourhood", 500),
+    ("This town", 2_000),
+    ("This region", 10_000),
+)
+
+#: How much a source is worth, on the Admiralty/NATO letter scale — and it is a
+#: field of the *source*, never of the edge that cites it. The scheme exists to keep
+#: two axes apart: distrust of a source must not contaminate what it said, and an
+#: implausible claim from a reliable source stays implausible. Storing reliability on
+#: the entity and credibility on the link (``links.confidence``) makes combining them
+#: impossible rather than merely discouraged: they are not on the same object.
+#:
+#: The letters are the analyst's vocabulary, so they are what is stored. **F —
+#: "cannot be judged" — is deliberately left out**: an absent grade already says it,
+#: and a scale that spells one state twice is a scale nobody answers the same way
+#: twice. Same rule as the confidence ordinal, where "not assessed" is the lack of a
+#: value rather than a level.
+RELIABILITY_GRADES: tuple[tuple[str, str], ...] = (
+    ("A", "Completely reliable"),
+    ("B", "Usually reliable"),
+    ("C", "Fairly reliable"),
+    ("D", "Not usually reliable"),
+    ("E", "Unreliable"),
+)
+
+#: Confidence belongs to a rich statement, not to its ``about``/``at``/``cites``
+#: connectors. Strings keep the stored value readable in a case export and avoid
+#: coupling entity attributes to the integer representation used by older edge
+#: ratings.
+CLAIM_CONFIDENCE: tuple[tuple[str, str], ...] = (
+    ("certain", "Certain"),
+    ("probable", "Probable"),
+    ("possible", "Possible"),
+    ("refuted", "Ruled out"),
+)
+
+
+@dataclass(frozen=True)
+class Attr:
+    """One field an analyst may fill on an entity of this type.
+
+    Declaring them is what lets one generated form serve every hand-made type.
+    Nothing here is required: a type and a label are all an entity ever needs, and
+    an empty field means *unknown*, never *to be filled in*.
+
+    ``rungs`` are optional shortcut values for a numeric field, served with the
+    registry so the picker and the validator cannot drift apart. ``minimum`` and
+    ``maximum`` bound a number; both are served too, so the form refuses what the
+    API would refuse rather than finding out on submit.
+
+    ``options`` are the whole of what a ``choice`` field may hold, as
+    ``(stored, reading)`` pairs in scale order. Served for the same reason the rungs
+    are, and it is what makes the field closed: anything else is refused.
+    """
+
+    key: str
+    label: str
+    kind: str = "text"
+    #: One clause saying what the field is for, shown where its label is. Empty
+    #: when the label already says it.
+    hint: str = ""
+    rungs: tuple[tuple[str, int], ...] = ()
+    minimum: float | None = None
+    maximum: float | None = None
+    options: tuple[tuple[str, str], ...] = ()
+    #: Legacy fields remain readable without staying writable. A write may retain
+    #: the exact stored value, but creation and edits cannot introduce a new one.
+    editable: bool = True
+
+
+@dataclass(frozen=True)
+class EntityType:
+    """One type the vocabulary knows.
+
+    ``manual`` is whether an analyst creates these by hand. A ``media`` is born
+    from an import and a ``proof`` from an export, so neither belongs in a create
+    menu; a ``person`` exists only because someone typed it.
+
+    ``group`` heads the declared fields where they read as one subject rather than
+    as the type's own attributes: a place's four fields are all about how tightly
+    the point is pinned, which is worth saying once above them. Empty means no
+    heading, which is right for a vessel's registration numbers.
+    """
+
+    type: str
+    label: str
+    family: str
+    icon: str
+    #: The field that becomes ``entity.label``. Calling every one "Name" hid the
+    #: actual identity field on identifiers: an IP address appeared to have no IP
+    #: box even though its value was stored in the label. These two readings let the
+    #: generated form name the field without duplicating the value into ``attrs``.
+    identity_label: str = "Title"
+    identity_placeholder: str = ""
+    attrs: tuple[Attr, ...] = ()
+    manual: bool = False
+    group: str = ""
+    #: One clause saying what this type is, for the menus that offer it. The
+    #: vocabulary is deliberately terse — `capture`, `claim`, `collected` — and a
+    #: terse word nobody can look up is jargon.
+    hint: str = ""
+
+
+#: The vocabulary, in menu order. Tool-born types are declared here too: the
+#: registry is the single truth for what a family a type sits in, and a relation
+#: cannot be validated against a type it has never heard of.
+ENTITY_TYPES: tuple[EntityType, ...] = (
+    # -- actors ---------------------------------------------------------------
+    EntityType(
+        "person", "Person", ACTOR, "user",
+        identity_label="Full name", identity_placeholder="Name or known alias",
+        attrs=(
+            Attr("aliases", "Other names", hint="aliases, spellings or transliterations"),
+            Attr("role", "Role", hint="job, rank or public role"),
+            Attr("nationality", "Nationality"),
+        ),
+        manual=True, hint="a named individual",
+    ),
+    EntityType(
+        "organization", "Organization", ACTOR, "layers", manual=True,
+        hint="a company, a ministry or a military unit",
+        identity_label="Organization name",
+        identity_placeholder="Name of the organization",
+        # A company, a ministry, and a military unit: all of them own things, post
+        # and turn up somewhere, so none of them needs a type of its own. `echelon`
+        # is what lets an order of battle render and sort — brigade above battalion
+        # above company — and the tree itself is `part-of` edges.
+        attrs=(
+            Attr("echelon", "Echelon",
+                 hint="brigade, battalion, company: what lets an order of battle sort"),
+            Attr("country", "Country"),
+        ),
+    ),
+    # -- assets ---------------------------------------------------------------
+    EntityType(
+        "vehicle", "Vehicle", ASSET, "car", manual=True,
+        hint="one particular vehicle, not a model",
+        identity_label="Vehicle name",
+        identity_placeholder="How this vehicle is known",
+        attrs=(
+            Attr("plate", "Plate", hint="the registration as read, not as guessed"),
+            Attr("make", "Make"),
+            Attr("model", "Model"),
+            Attr("colour", "Colour"),
+        ),
+    ),
+    EntityType(
+        "vessel", "Vessel", ASSET, "ship", manual=True,
+        hint="one ship, identified by its IMO or its MMSI",
+        identity_label="Vessel name",
+        identity_placeholder="Name of the vessel",
+        # The IMO number is permanent, the MMSI changes with the flag. Both are
+        # fields of the vessel: an identifier entity is only worth minting the day
+        # a value turns up without its object, which is the AIS tracker's problem.
+        attrs=(
+            Attr("imo", "IMO number", hint="permanent, unlike the MMSI"),
+            Attr("mmsi", "MMSI", hint="changes with the flag"),
+            Attr("flag", "Flag state"),
+            Attr("kind", "Kind"),
+        ),
+    ),
+    EntityType(
+        "aircraft", "Aircraft", ASSET, "plane", manual=True,
+        hint="one airframe, identified by its registration",
+        identity_label="Aircraft name",
+        identity_placeholder="How this airframe is known",
+        # Registration and the ICAO 24-bit address belong to the airframe. A
+        # callsign belongs to a flight, which is a dated claim and not a field.
+        attrs=(
+            Attr("registration", "Registration"),
+            Attr("icao24", "ICAO 24-bit address",
+                 hint="belongs to the airframe, where a callsign belongs to a flight"),
+            Attr("model", "Model"),
+        ),
+    ),
+    EntityType(
+        "structure", "Structure", ASSET, "building", manual=True,
+        hint="a building, bridge, mast or dam, placed by a relation rather than by coordinates",
+        identity_label="Structure name",
+        identity_placeholder="How this structure is known",
+        # A building, and also a bridge, a mast, a dam. Its position is stated by
+        # `sited-at` rather than held here, so only `place` carries geometry.
+        attrs=(
+            Attr("kind", "Kind"),
+            Attr("address", "Address"),
+        ),
+    ),
+    # -- identifiers ----------------------------------------------------------
+    EntityType(
+        "account", "Account", IDENTIFIER, "at", manual=True,
+        hint="a profile or a bare username, whoever it turns out to belong to",
+        identity_label="Handle",
+        identity_placeholder="@account or username",
+        # `platform` is optional on purpose: a bare username is the same idea as a
+        # platform-bound account, and minting `alias` beside it would be a second
+        # type for one thing — the point where a vocabulary starts to bloat.
+        attrs=(
+            Attr("platform", "Platform"),
+            Attr("url", "Profile URL", kind="url"),
+            # An account is one of the two things a case actually sources from, so
+            # it carries the Admiralty grade. A claim cannot `cites` it directly —
+            # the verb reaches material and documents — but "who said it" is one hop
+            # back along `posted`, which is where the grade is read.
+            Attr(
+                "reliability", "Source reliability",
+                hint="how much this source is worth in general, never how sure one claim is",
+                kind="choice", options=RELIABILITY_GRADES,
+            ),
+        ),
+    ),
+    EntityType(
+        "email", "Email", IDENTIFIER, "mail",
+        identity_label="Email address", identity_placeholder="name@example.org",
+        manual=True, hint="an address, which is its own identity",
+    ),
+    EntityType(
+        "phone", "Phone", IDENTIFIER, "phone",
+        identity_label="Phone number", identity_placeholder="Include the country code",
+        attrs=(Attr("country", "Country"),),
+        manual=True, hint="a number, which is its own identity",
+    ),
+    EntityType(
+        "domain", "Domain", IDENTIFIER, "globe",
+        identity_label="Domain", identity_placeholder="example.org",
+        attrs=(Attr("registrar", "Registrar"),),
+        manual=True, hint="a hostname, which is its own identity",
+    ),
+    EntityType(
+        "ip", "IP address", IDENTIFIER, "hash",
+        identity_label="IP address", identity_placeholder="203.0.113.42",
+        attrs=(
+            Attr(
+                "network", "Legacy network",
+                hint="older free text, replaced by the In network relation",
+                editable=False,
+            ),
+            Attr("asn", "ASN", hint="the autonomous system number, if known"),
+            Attr("provider", "Provider"),
+        ),
+        manual=True, hint="an address, which is its own identity",
+    ),
+    EntityType(
+        "network", "Network", IDENTIFIER, "network",
+        identity_label="Network or CIDR", identity_placeholder="203.0.113.0/24",
+        attrs=(
+            Attr("asn", "ASN", hint="the autonomous system number, if known"),
+            Attr("provider", "Provider"),
+            Attr("country", "Country"),
+        ),
+        manual=True, hint="an IP range, named by its network or CIDR",
+    ),
+    # -- material -------------------------------------------------------------
+    # `media` is whatever the library imported: image, video, audio or plain file.
+    # An imported PDF is one of these today; the `document` type that gives it a
+    # viewer and full-text search waits on text extraction (a native dependency on
+    # three platforms), which is the same gate as OCR.
+    EntityType("media", "Media", COLLECTED, "image",
+               hint="a file the case collected: image, video, audio or document"),
+    EntityType("capture", "Capture", COLLECTED, "satellite",
+               hint="a map screenshot, with the provider and view it was taken from"),
+    # -- documents ------------------------------------------------------------
+    EntityType("proof", "Proof", DOCUMENT, "proof",
+               hint="a composed panel image, exported and still editable"),
+    EntityType("post", "Post", DOCUMENT, "post",
+               hint="a prepared thread or report, saved rather than published"),
+    EntityType("note", "Note", DOCUMENT, "note",
+               hint="a Markdown page in the case notebook"),
+    EntityType("inspect-session", "Inspect session", DOCUMENT, "inspect",
+               hint="saved adjustments over one file, which die with it"),
+    # The page a claim rests on. `url` and `fetched_at` are written by whatever
+    # filed it — the extension is on the page, so the server stamps the moment it
+    # was seen — and are not declared here: a declared attr is a field an analyst
+    # fills, and neither of those is typed. What is typed is the archived copy,
+    # once someone has made one, and how much the source is worth.
+    EntityType(
+        "bookmark", "Bookmark", DOCUMENT, "bookmark",
+        hint="a page the case points at, stored as a link rather than a copy",
+        attrs=(
+            Attr("archive_url", "Archived copy", kind="url",
+                 hint="a snapshot that survives the page being taken down"),
+            Attr(
+                "reliability", "Source reliability",
+                hint="how much this source is worth in general, never how sure one claim is",
+                kind="choice", options=RELIABILITY_GRADES,
+            ),
+        ),
+    ),
+    # -- place ----------------------------------------------------------------
+    # Only the precision fields are declared: `lat`, `lon`, `coords`, `plus_code`,
+    # `zoom`, `bearing`, `geo` and `notes` are the Satellite tool's, written by the
+    # save that made the point. A declared attr means "a field an analyst may fill",
+    # not "everything this type holds", so the tool's keys pass through untouched.
+    EntityType(
+        "place", "Place", PLACE, "pin",
+        hint="a saved point, as exact or as vague as the evidence allows",
+        attrs=(
+            # Darwin Core's rule, kept verbatim: this is the radius of the smallest
+            # circle containing the whole location, not a standard deviation — so
+            # two analysts write the same number. And **zero is not valid**: an
+            # empty radius means *unknown*, which is a different and honest state,
+            # where `0` would claim infinite precision. Hence a minimum of one
+            # metre; below that there is no claim anyone can defend from imagery.
+            Attr(
+                "radius_m", "Uncertainty radius (m)", kind="number",
+                hint="the smallest circle that contains the whole location",
+                rungs=PRECISION_RUNGS, minimum=1, maximum=MAX_RADIUS_M,
+            ),
+            Attr("footprint", "Footprint", kind="geojson",
+                 hint="the shape itself, for a place a circle describes badly"),
+            Attr("verbatim", "As the source put it", kind="longtext",
+                 hint="the original wording, which outlives every reinterpretation"),
+            Attr("method", "How this point was found", kind="longtext",
+                 hint="what was matched against what, so the point can be audited"),
+        ),
+        group="How precise",
+    ),
+    # -- claim ----------------------------------------------------------------
+    # The node that exists so connectors never carry statement metadata. It points
+    # `about` at its subject, `at` at places and `cites` at its sources; confidence
+    # belongs to this node, not to any one connector (`engine/links.py`).
+    #
+    # `edtf` is deliberately absent: the date field arrives with its parser, and a
+    # box that stores `2024-03~` without deriving bounds from it would be a field
+    # that looks like it works.
+    EntityType(
+        "claim", "Claim", CLAIM, "quote", manual=True,
+        hint="something you are saying about the case, with its reasoning and its sources",
+        identity_label="Statement",
+        identity_placeholder="What are you asserting?",
+        attrs=(
+            Attr(
+                "confidence", "Confidence",
+                hint="how strongly the statement is supported",
+                kind="choice", options=CLAIM_CONFIDENCE,
+            ),
+            Attr("method", "How this was worked out", kind="longtext",
+                 hint="the reasoning a reader would need to check this"),
+            Attr("verbatim", "As the source put it", kind="longtext",
+                 hint="the original wording, quoted rather than paraphrased"),
+        ),
+        group="Reasoning",
+    ),
+)
+
+_BY_TYPE: dict[str, EntityType] = {entry.type: entry for entry in ENTITY_TYPES}
+
+
+def entity_type(type_: str) -> EntityType | None:
+    """The registry entry for a type, or None when the vocabulary has none.
+
+    Free-string types stay storable (ONTOLOGY §2): they are a label in the graph
+    until a tool or this registry gives them a meaning. What they cannot be is the
+    end of a relation, since nothing states what they may join.
+    """
+    return _BY_TYPE.get(type_)
+
+
+def family_of(type_: str) -> str | None:
+    """Which family a type sits in, or None for an undeclared free type."""
+    entry = _BY_TYPE.get(type_)
+    return entry.family if entry else None
+
+
+#: Declared kinds whose value is worth finding an entity by. A plate, an IMO, a
+#: handle's platform and a claim's reasoning are what an analyst types into a search
+#: box; a radius in metres, a footprint's coordinates and a stored grade letter are
+#: not — matching "500" against every radius in the case would bury the rows that
+#: actually say 500.
+SEARCHABLE_KINDS: frozenset[str] = frozenset({"text", "longtext", "url"})
+
+
+def search_values(type_: str, attrs: Mapping[str, Any] | None) -> list[str]:
+    """The declared field values an entity should be findable by.
+
+    The label, the type and the notes were the whole index before this, which meant
+    a vehicle could not be found by the plate that identifies it and a claim not by
+    the wording it quotes — the fields the vocabulary went to the trouble of
+    declaring were the ones search could not see. Only declared keys are read, so a
+    tool's own payload (a spec, a sidecar path, a geometry) never enters the index.
+    """
+    entry = _BY_TYPE.get(type_)
+    if entry is None or not attrs:
+        return []
+    return [
+        str(attrs[attr.key])
+        for attr in entry.attrs
+        if attr.kind in SEARCHABLE_KINDS and attrs.get(attr.key) not in (None, "")
+    ]
+
+
+def types_in(*families: str) -> frozenset[str]:
+    """Every declared type in these families.
+
+    This is what turns a relation declared against families into the concrete type
+    set the endpoint check compares against, resolved once at import.
+    """
+    wanted = set(families)
+    return frozenset(e.type for e in ENTITY_TYPES if e.family in wanted)
+
+
+# -- validation ---------------------------------------------------------------
+#
+# Only *declared* fields are checked. A tool's own keys on the same entity — a
+# place's `lat`, `geo` or `notes` — pass through untouched, because a declared attr
+# means "a field an analyst may fill", not "everything this type holds". That is
+# what makes this additive: no existing write can start failing.
+
+
+def check_attrs(
+    type_: str,
+    attrs: Mapping[str, Any],
+    *,
+    current: Mapping[str, Any] | None = None,
+) -> None:
+    """Raise ``CaseError`` on a malformed value in a declared field.
+
+    Clearing is always allowed: ``None`` and ``""`` mean *unknown*, which every
+    field may be, and refusing them would make "I do not know how precise this is"
+    impossible to say.
+    """
+    entry = _BY_TYPE.get(type_)
+    if entry is None:
+        return
+    for attr in entry.attrs:
+        if attr.key not in attrs:
+            continue
+        value = attrs[attr.key]
+        if not attr.editable and value not in (None, ""):
+            previous = (current or {}).get(attr.key)
+            if previous != value:
+                raise CaseError(f"'{attr.key}' is read-only legacy data")
+        if value is None or value == "":
+            continue
+        _CHECKS[attr.kind](attr, value)
+
+
+def _check_text(attr: Attr, value: Any) -> None:
+    if not isinstance(value, str):
+        raise CaseError(f"'{attr.key}' must be text")
+    if len(value) > MAX_TEXT:
+        raise CaseError(f"'{attr.key}' is longer than {MAX_TEXT} characters")
+
+
+def _check_number(attr: Attr, value: Any) -> None:
+    # bool is an int in Python, and `True` metres is not a radius.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise CaseError(f"'{attr.key}' must be a number")
+    if not math.isfinite(value):
+        raise CaseError(f"'{attr.key}' must be a finite number")
+    if attr.minimum is not None and value < attr.minimum:
+        raise CaseError(f"'{attr.key}' must be at least {attr.minimum}")
+    if attr.maximum is not None and value > attr.maximum:
+        raise CaseError(f"'{attr.key}' must be at most {attr.maximum}")
+
+
+def _check_url(attr: Attr, value: Any) -> None:
+    _check_text(attr, value)
+    # A declared url is rendered as a link, so the scheme is checked at the edge
+    # rather than trusted: `javascript:` in an anchor is the whole reason.
+    if not str(value).lower().startswith(("http://", "https://")):
+        raise CaseError(f"'{attr.key}' must be an http or https URL")
+
+
+def _check_geojson(attr: Attr, value: Any) -> None:
+    """A footprint: one GeoJSON Polygon or MultiPolygon, and nothing exotic.
+
+    Darwin Core's `footprintWKT` in the shape the map already speaks. Points and
+    lines are refused because a footprint is an area — a point is what `lat`/`lon`
+    with a radius already says.
+    """
+    if not isinstance(value, dict):
+        raise CaseError(f"'{attr.key}' must be a GeoJSON geometry")
+    if value.get("type") not in ("Polygon", "MultiPolygon"):
+        raise CaseError(f"'{attr.key}' must be a Polygon or MultiPolygon")
+    rings = value.get("coordinates")
+    if not isinstance(rings, list) or not rings:
+        raise CaseError(f"'{attr.key}' has no coordinates")
+    points = _count_positions(rings, attr.key)
+    if points < 3:
+        raise CaseError(f"'{attr.key}' needs at least three points to be an area")
+    if points > MAX_FOOTPRINT_POINTS:
+        raise CaseError(f"'{attr.key}' holds more than {MAX_FOOTPRINT_POINTS} points")
+
+
+def _count_positions(node: Any, key: str, depth: int = 0) -> int:
+    """Count `[lon, lat]` pairs, checking each as it goes.
+
+    Recursive because a Polygon nests one level deeper than a MultiPolygon's rings,
+    and bounded by ``depth`` so a hand-made payload cannot nest its way past the
+    point cap.
+    """
+    if depth > 4:
+        raise CaseError(f"'{key}' is nested too deeply")
+    if not isinstance(node, list):
+        raise CaseError(f"'{key}' has a malformed coordinate")
+    # a position is the innermost list: two numbers, lon then lat
+    if node and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in node):
+        if len(node) < 2:
+            raise CaseError(f"'{key}' has a coordinate that is not a lon/lat pair")
+        lon, lat = float(node[0]), float(node[1])
+        if not (-180 <= lon <= 180 and -90 <= lat <= 90):
+            raise CaseError(f"'{key}' has a coordinate off the globe")
+        return 1
+    return sum(_count_positions(child, key, depth + 1) for child in node)
+
+
+def _check_choice(attr: Attr, value: Any) -> None:
+    """One of the readings the field declares, and nothing else.
+
+    A closed scale is only closed if the store enforces it: a grade the registry has
+    never heard of would render as itself in the panel and read as a sixth level
+    nobody agreed on.
+    """
+    # `isinstance` first: an unhashable body — a list, an object — would raise out
+    # of a set membership test instead of answering the 400 it deserves.
+    if not isinstance(value, str) or value not in {stored for stored, _ in attr.options}:
+        allowed = ", ".join(stored for stored, _ in attr.options)
+        raise CaseError(f"'{attr.key}' must be one of {allowed}, or nothing")
+
+
+_CHECKS: dict[str, Callable[[Attr, Any], None]] = {
+    "text": _check_text,
+    "longtext": _check_text,
+    "number": _check_number,
+    "url": _check_url,
+    "geojson": _check_geojson,
+    "choice": _check_choice,
+}

@@ -88,7 +88,7 @@ def collect_links(case: Case, entity_ids: set[str]) -> list[dict[str, Any]]:
     """Every link incident to the group, deduped — chain edges *and* relations.
 
     Relations are the loss nothing else records: a derivation leaves a tombstone
-    on the survivor, but "this photo was shot at this place" vanishes without a
+    on the survivor, but "this photo was recorded at this place" vanishes without a
     trace. So the payload carries all of them, and a restore puts back whichever
     still has both ends.
     """
