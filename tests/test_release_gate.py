@@ -306,9 +306,9 @@ def test_intel_macos_package_support_floor_matches_the_lock():
         for dependency in crypto
     )
     assert any(
-        "<50" in dependency
+        "<51" in dependency
         and "sys_platform != 'darwin' or platform_machine != 'x86_64'" in dependency
         for dependency in crypto
     )
     assert "cryptography-48.0.1-cp311-abi3-macosx_10_9_universal2.whl" in lock
-    assert "cryptography-49.0.0-cp311-abi3-macosx_11_0_arm64.whl" in lock
+    assert "cryptography-50.0.0-cp311-abi3-macosx_11_0_arm64.whl" in lock
