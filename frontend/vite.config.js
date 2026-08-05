@@ -4,6 +4,12 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 // Builds straight into the Python package so `pip install .` ships the UI.
 export default defineConfig({
   plugins: [svelte()],
+  // Under vitest, resolve Svelte's browser build so a `*.render.test.js` can mount a
+  // component and drive it. Without this, `mount()` gets the server build and every
+  // interaction test fails on import — which is why the suite could only ever read
+  // source strings, and why "these inputs accept nothing" went unnoticed. Gated on
+  // VITEST so the production build keeps resolving exactly as it did.
+  resolve: process.env.VITEST ? { conditions: ['browser'] } : {},
   test: {
     include: ['src/**/*.test.js'],
   },
