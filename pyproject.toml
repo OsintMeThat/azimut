@@ -60,8 +60,8 @@ dependencies = [
     "tzdata>=2024.1,<2027",
     # Whole-bundle AES-GCM encryption. Version 49 dropped Intel macOS wheels,
     # while the other release targets can stay current within the tested major.
-    "cryptography>=45,<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
-    "cryptography>=45,<50; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "cryptography>=45,<51; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "cryptography>=45,<51; sys_platform != 'darwin' or platform_machine != 'x86_64'",
     # Unbounded ON PURPOSE. These two race against sites that change without
     # notice, so an old version is a broken version — the usual "pin for
     # reproducibility" logic inverts here. Azimut can also fetch newer copies
