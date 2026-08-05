@@ -46,8 +46,11 @@ describe('Files desktop affordances', () => {
     expect(source).toContain('sortEntities(');
   });
 
-  it('search also matches notes, not just label/type/folder', () => {
-    expect(source).toContain('e.attrs?.notes');
+  it('searches through the one predicate the server index is mirrored in', () => {
+    // Notes, folder and the declared fields all ride on that shared helper, so this
+    // tool cannot drift from the board or from `search_text`.
+    expect(source).toContain("import { matchesEntity } from '../lib/entitySearch.js'");
+    expect(source).toContain('matchesEntity(e, query)');
   });
 
   it('keeps the sort control compact instead of stretching to full width', () => {

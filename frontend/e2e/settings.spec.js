@@ -5,7 +5,7 @@ test('keeps app settings in focused sections', async ({ page }) => {
   const fixture = await installAppFixture(page);
 
   await page.goto('/#settings');
-  await expect(page.getByTitle('Settings')).toHaveClass(/gear-active/);
+  await expect(page.getByTitle('Settings')).toHaveClass(/topbar-active/);
 
   const rail = page.getByRole('navigation', { name: 'Settings sections' });
   await expect(rail.getByRole('button')).toHaveText([

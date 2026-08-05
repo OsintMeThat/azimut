@@ -17,6 +17,7 @@
   import { createBookmark } from '../lib/bookmarks.js';
   import { marqueeRect, marqueeHits, toggleSelection } from '../lib/gridSelect.js';
   import { buildCatalogQuery, fetchAllEntities } from '../lib/catalog.js';
+  import { matchesEntity } from '../lib/entitySearch.js';
   import { sortFileEntities } from '../lib/fileSort.js';
   import {
     deletedToast,
@@ -151,15 +152,10 @@
   const total = $derived(
     searching && pl.serverMode ? pl.total : (summary?.total ?? confirmed.length)
   );
-  function matches(e) {
-    const q = query.trim().toLowerCase();
-    return (
-      (e.label ?? '').toLowerCase().includes(q) ||
-      e.type.toLowerCase().includes(q) ||
-      (folderOf(e) ?? '').toLowerCase().includes(q) ||
-      (e.attrs?.notes ?? '').toLowerCase().includes(q)
-    );
-  }
+  // The server's own index, restated once in `lib/entitySearch.js` rather than
+  // spelled out per tool: a bookmark's archived copy is a declared field, so it is
+  // searchable here exactly as it is past one page.
+  const matches = (e) => matchesEntity(e, query);
 
   // Sort the current view. The list headers use the same state as the grid
   // selector, so changing view does not silently change the order.
@@ -705,6 +701,15 @@
 
   // ── details ────────────────────────────────────────────────────────────────
   let infoEntityId = $state(null);
+  // The panel's fields wait for Save while its connections file themselves, so
+  // Escape and the backdrop ask before throwing an edit away.
+  let infoDirty = $state(false);
+  let infoDiscarding = $state(false);
+
+  function closeInfo() {
+    if (infoDirty) infoDiscarding = true;
+    else infoEntityId = null;
+  }
 
   // View mode: small/large icon grids, plus a details list with columns.
   let view = $state('small');
@@ -1345,13 +1350,25 @@
 
 <!-- details editor: the shared body, same as the sidebar and Media modal -->
 {#if infoEntityId}
-  <Modal title="Details" onclose={() => (infoEntityId = null)} width="520px">
+  <Modal title="Details" onclose={closeInfo} width="520px">
     <EntityDetails
       entityId={infoEntityId}
+      bind:dirty={infoDirty}
       onclose={() => (infoEntityId = null)}
       ondeleted={() => (infoEntityId = null)}
     />
   </Modal>
+{/if}
+
+{#if infoDiscarding}
+  <ConfirmDialog
+    title="Discard changes?"
+    message="This item has edits that Save has not taken."
+    confirmLabel="Discard"
+    icon="alert"
+    onconfirm={() => { infoDiscarding = false; infoDirty = false; infoEntityId = null; }}
+    oncancel={() => (infoDiscarding = false)}
+  />
 {/if}
 
 <style>

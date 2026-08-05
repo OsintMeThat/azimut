@@ -164,6 +164,10 @@ export const uiState = $state({
   inspectPath: null, // media path to open in the Inspect tool
   focusMedia: null, // media path to highlight & scroll to in the Media Library
   openInspect: null, // inspect-session name to reopen in the Inspect tool
+  // Entity id the Board should open Details on. The graph-only types — a person,
+  // an account, a claim — have no tool of their own to be reopened in, so the
+  // board is where following a relation to one of them lands.
+  openBoardEntity: null,
   gotoCoords: null, // { lat, lon } to fly to in the Satellite tool
   // A point, a date and a time handed over by Coords & Sky: the Satellite tab
   // opens its Sun & moon mode there. Session-only, and never part of a capture

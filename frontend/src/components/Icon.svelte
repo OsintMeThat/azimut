@@ -7,6 +7,10 @@
     media: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm0 11 4.5-4.5a1 1 0 0 1 1.4 0L14 15.5m-1.5-1.5 2.6-2.6a1 1 0 0 1 1.4 0L21 15M9 9.5h.01',
     satellite: 'M9 4.2 3.6 6.4a1 1 0 0 0-.6.9v11.2a1 1 0 0 0 1.4.9L9 17.4l6 2.4 5.4-2.2a1 1 0 0 0 .6-.9V5.5a1 1 0 0 0-1.4-.9L15 6.6 9 4.2Zm0 0v13.2M15 6.6v13.2',
     proof: 'M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm11.5 0v7m-3.5-3.5h7',
+    // the case as its graph: one entity and what it holds onto. The three spokes
+    // sit on the rose's thirds — north, then 210° and 330° — so the case reads in
+    // the same geometry as the mark
+    graph: 'M12 11.6a2.2 2.2 0 1 1 0 4.4 2.2 2.2 0 0 1 0-4.4ZM12 3.5a1.9 1.9 0 1 1 0 3.8 1.9 1.9 0 0 1 0-3.8ZM4.7 16.1a1.9 1.9 0 1 1 0 3.8 1.9 1.9 0 0 1 0-3.8ZM19.3 16.1a1.9 1.9 0 1 1 0 3.8 1.9 1.9 0 0 1 0-3.8ZM12 7.3v4.3M10.1 14.9 6.4 17.1M13.9 14.9l3.7 2.2',
     post: 'M20 4 9 15m11-11-6.5 17-2.7-7.5L3 10.5 20 4Z',
     // ui
     plus: 'M12 5v14m-7-7h14',
@@ -39,6 +43,9 @@
     file: 'M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm8 0v6h6',
     hash: 'M9 4 7 20M17 4l-2 16M4 9h17M3 15h17',
     globe: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-9 9h18M12 3c2.5 2.5 3.8 5.7 3.8 9S14.5 18.5 12 21c-2.5-2.5-3.8-5.7-3.8-9S9.5 5.5 12 3Z',
+    // a page the case points at, not a hostname: `domain` keeps the globe, and the
+    // two stopped being the same row at a glance
+    bookmark: 'M6.5 3.5h11a1 1 0 0 1 1 1V20.5L12 16.4l-6.5 4.1V4.5a1 1 0 0 1 1-1Z',
     leaf: 'M6 21c0-6 2-13 14-15 0 0 1 13-9 14-2.5.3-4-.5-5 1Zm0 0c1.5-5 4-9 9-11',
     settings: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2ZM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z',
     compass: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm3.5 5.5-2 5-5 2 2-5 5-2Z',
@@ -46,6 +53,20 @@
     edit: 'M14 5.5 18.5 10M4 20l1-4.5L16.5 4a2.1 2.1 0 0 1 3 3L8 18.5 4 20Z',
     external: 'M14 4h6v6m0-6L10 14M9 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3',
     grip: 'M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01',
+    // the three assets, each drawn as itself: one shared handle icon made a lorry,
+    // a freighter and an airframe read as the same row in a list of twenty
+    car: 'M5 17h14M4 17v-4.5l2-5A1.5 1.5 0 0 1 7.4 6h9.2a1.5 1.5 0 0 1 1.4 1.5l2 5V17M4 12.5h16M7.5 17v2M16.5 17v2M8 14.5h.01M16 14.5h.01',
+    ship: 'M3 17.5c1.8 0 1.8 2 3.5 2s1.7-2 3.5-2 1.8 2 3.5 2 1.7-2 3.5-2 1.8 2 3.5 2M4.5 15l1.5-5h12l1.5 5M12 10V5M9 5h6',
+    plane: 'M12 3a1.6 1.6 0 0 1 1.5 1.7V9l7 4v2l-7-2v4l2.5 2v1.5L12 19.5 8 20.5V19l2.5-2v-4l-7 2v-2l7-4V4.7A1.6 1.6 0 0 1 12 3Z',
+    // a statement, not a page: the quotation marks say "somebody is asserting this"
+    quote: 'M9 5.5C6 7 4.5 9.5 4.5 12.5V18h6v-6h-3c0-2 .8-3.6 2.4-4.6L9 5.5Zm10 0c-3 1.5-4.5 4-4.5 7V18h6v-6h-3c0-2 .8-3.6 2.4-4.6L19 5.5Z',
+    // the identifiers, told apart: a globe for a domain said nothing about the
+    // account, the address and the range that were drawn with the same glyph
+    at: 'M15.5 12a3.5 3.5 0 1 0-1 2.5M15.5 8.5v5a2.5 2.5 0 0 0 5 0V12a8.5 8.5 0 1 0-3.5 6.9',
+    mail: 'M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Zm-.6.6 8.6 7 8.6-7',
+    phone: 'M7.5 3h-2A2 2 0 0 0 3.5 5 15.5 15.5 0 0 0 19 20.5a2 2 0 0 0 2-2v-2l-4.5-2-2 2.5a12 12 0 0 1-4.5-4.5L12.5 10 10.5 5.5 7.5 3Z',
+    network: 'M12 3.5a2.25 2.25 0 1 1 0 4.5 2.25 2.25 0 0 1 0-4.5ZM5 16a2.25 2.25 0 1 1 0 4.5A2.25 2.25 0 0 1 5 16Zm14 0a2.25 2.25 0 1 1 0 4.5 2.25 2.25 0 0 1 0-4.5ZM12 8v4m0 0-7 4m7-4 7 4',
+    building: 'M5 21V4.5A1 1 0 0 1 6 3.5h7a1 1 0 0 1 1 1V21M14 10h4a1 1 0 0 1 1 1v10M3 21h18M8 7.5h.01M11 7.5h.01M8 11h.01M11 11h.01M8 14.5h3',
     alert: 'M12 3 2.5 19.5h19L12 3Zm0 7v4m0 3.5h.01',
     info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm0-11v6m0-10h.01',
     clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4v5l3.5 2',

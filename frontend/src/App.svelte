@@ -11,6 +11,7 @@
   } from './lib/state.svelte.js';
   import { startEvents, onEvent } from './lib/events.js';
   import {
+    CASE_WORKSPACE,
     WORKSPACES,
     TOOL_LABELS,
     sidebarOpenForWorkspace,
@@ -18,6 +19,7 @@
     toolFromHash,
   } from './lib/workspaces.js';
   import { createToolLoader } from './lib/toolLoader.js';
+  import { loadEntityTypes } from './lib/entityTypes.svelte.js';
   import Icon from './components/Icon.svelte';
   import Logo from './components/Logo.svelte';
   import Wordmark from './components/Wordmark.svelte';
@@ -28,10 +30,12 @@
   import WorkspaceStopped from './components/WorkspaceStopped.svelte';
   import { readStatus, stoppedBecause } from './lib/workspace.js';
 
-  // The rail holds workspaces (docs/UI.md §3); tools are tabs inside them.
-  // Settings lives behind the topbar gear instead — app plumbing, not part
-  // of the working flow.
+  // The rail holds the pipeline workspaces (docs/UI.md §3); tools are tabs
+  // inside them. Two workspaces sit in the topbar rather than the rail: the
+  // case, which is what the stages file into, and Settings, which is app
+  // plumbing and not part of the working flow at all.
   const TOOLS = [
+    { id: 'board', label: TOOL_LABELS.board, load: () => import('./tools/Board.svelte') },
     { id: 'media', label: TOOL_LABELS.media, load: () => import('./tools/MediaLibrary.svelte') },
     { id: 'files', label: TOOL_LABELS.files, load: () => import('./tools/Files.svelte') },
     { id: 'reverse', label: TOOL_LABELS.reverse, load: () => import('./tools/ReverseSearch.svelte') },
@@ -119,6 +123,12 @@
     })
     .catch(() => {});
 
+  // The entity vocabulary: types, families, icons and the fields a form is built
+  // from. It is code rather than case data, so it is fetched once here and shared —
+  // and asking at startup is what keeps a row from painting under a fallback icon
+  // before the first surface that needs the registry happens to ask for it.
+  loadEntityTypes();
+
   // Load the case list and reopen the last-used case (survives reloads), then
   // — once preferences have landed — see whether a newer release is out and
   // pop a notice. The check reads prefs.updateCheckOnStart, so it must follow
@@ -151,11 +161,22 @@
       <Logo size={27} />
       <span class="brand-name"><Wordmark height={13} /></span>
     </div>
-    <CaseSwitcher />
+    <div class="case-group">
+      <CaseSwitcher />
+      <button
+        class="btn btn-ghost case-btn"
+        class:topbar-active={activeWs?.id === CASE_WORKSPACE.id}
+        title="Open the case board"
+        onclick={() => openWorkspace(CASE_WORKSPACE)}
+      >
+        <Icon name={CASE_WORKSPACE.icon} size={16} />
+        <span>{TOOL_LABELS.board}</span>
+      </button>
+    </div>
     <div class="spacer"></div>
     <button
       class="btn btn-ghost btn-sm"
-      class:gear-active={uiState.tool === 'settings'}
+      class:topbar-active={uiState.tool === 'settings'}
       title="Settings"
       onclick={() => (uiState.tool = 'settings')}
     >
@@ -277,7 +298,31 @@
   .spacer {
     flex: 1;
   }
-  .gear-active {
+  /* the switcher and the board button are one control — which case, then open
+     it. Both carry the same weight, and the hairline is what says they belong
+     together: their own padding leaves too much air for proximity alone to. */
+  .case-group {
+    display: flex;
+    align-items: center;
+  }
+  .case-btn {
+    position: relative;
+    margin-left: 13px;
+    gap: 8px;
+    padding: 6px 12px;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+  }
+  .case-btn::before {
+    content: '';
+    position: absolute;
+    left: -7px;
+    top: 5px;
+    bottom: 5px;
+    width: 1px;
+    background: var(--border);
+  }
+  .topbar-active {
     color: var(--text-1);
     background: var(--bg-2);
   }
