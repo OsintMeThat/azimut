@@ -6,7 +6,7 @@ phasing lives in [SPEC.md](SPEC.md).
 ## Layout anatomy
 
 ```
-┌ topbar: rose+wordmark · case switcher · (spacer) · settings gear · sidebar toggle ┐
+┌ topbar: rose+wordmark · case switcher + Board · (spacer) · settings gear · sidebar toggle ┐
 ├ rail ┬ tab strip (only when the workspace has several tools) ┬ case sidebar ┤
 │      │ tool canvas                                           │              │
 └──────┴───────────────────────────────────────────────────────┴──────────────┘
@@ -19,11 +19,19 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 
 | Workspace | Tools today | Future tools land here |
 |---|---|---|
+| **Case** (topbar) | Board | Sheet; v4: Timeline; v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect (Selection / Frame / Collage / Analyze) | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
 | **Map** | Satellite, Coords & Sky | **one map, many modes**: Compare, Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
 | **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
-| *(Case)* | Sidebar | v2: Relations, Sheet; v4: Notes, Timeline; v5: Orchestrator |
+
+**Case is not on the rail.** The rail reads as a sequence of stages, and the case is
+not a stage: it is what every stage files into. It hangs off the case switcher in
+the topbar instead, so the header answers *which case* and the rail answers *what
+am I doing*. It stays a workspace in every other respect — tabs, `#case` deep
+links, its own remembered sidebar — which is where Sheet and Timeline will land.
+That sidebar stays closed by default, because the board already lists the same case
+and two lists side by side only ask which one is real.
 
 Rules:
 
@@ -34,6 +42,43 @@ Rules:
 - Deep links use `#<tool>`, `#<workspace>` or `#<workspace>/<tool>`.
 - Artifact actions can open a tool, locate a place or add an item to a proof.
 - Settings is app plumbing: behind the topbar gear, not on the rail.
+
+## Board
+
+The case as one table: a row per entity, whatever type it is. It is what makes the
+hand-made vocabulary reachable — a `person`, an `account` or a `claim` had no screen
+before it. One view, a table; the graph is a different question and comes as its own
+view. Following a relation to a type with no tool of its own lands here, on that
+row's Details.
+
+- **New entity** offers the types an analyst creates by hand and generates the form
+  from the registry. It opens on the type being filtered for, or the first of the
+  chosen family. The primary field names the value being entered — **IP address**,
+  **Full name**, **Handle** — never a generic **Name**. An identifier the case
+  already holds is flagged with the existing row one click away: a warning, not a
+  block, since merging is not shipped. What it creates opens into its own Details.
+- **Add file** takes a document, scan, plan or image into the case, by the button or
+  by dropping it on the list. It runs the Media Library's import, so the file is
+  hashed, deduplicated, given a sidecar and a thumbnail, and filed as a `media`. One
+  file opens its Details; a batch reports what landed and what was already there.
+- **Search** covers the label, type, folder, notes and declared fields (ONTOLOGY §2),
+  in memory on a case that fits one page and server-side past it — one predicate
+  either side of that threshold.
+- **Filters** narrow by family, then by type inside it, then by review state. Family
+  is server vocabulary and resolves to its types on the way out.
+- **A proposal is settled from its row**: confirm takes its suggested relations with
+  it, dismiss is the standard delete, recoverable from the trash.
+- **Sorting** is a click on any heading, reversed by a second. It orders the rows
+  loaded, and says so beside the count while there are more.
+- **Columns** are the four every entity has — identity, type, folder, created — plus
+  the chosen type's declared fields once a single type is picked. Read-only: editing
+  cells and CSV belong to the Case Sheet.
+- **A row is a control**: focusable, opened with Enter, and the review clicks inside
+  it never open it.
+
+**The vocabulary explains itself on hover.** A family, a type, a verb, a rating and a
+declared field each carry one clause from the registry that declares them, shown
+where the word appears. No screen writes its own wording.
 
 ## Case sidebar
 
@@ -68,13 +113,25 @@ remembered per workspace for the current session. Reloading restores the default
   tiles, multi-select and context actions. It also exposes Trash with the same
   restore, permanent-delete and empty actions as the sidebar. Delete sends the
   current selection through the standard confirmation.
-- **Details** — a drawer over the sidebar, closed with the back arrow or Escape,
-  so selecting a row never pushes the case out of view. It edits an artifact's
-  preview, title, notes, provenance, derivation chain and folder, and provides
-  open, locate and delete actions. The sidebar and Media Library modal share
-  `EntityDetails.svelte`. Image Details include a closed EXIF section with the
-  parsed capture date, GPS and every readable tag. Video Details use the same
-  pattern for local ffprobe container, stream and tag fields.
+- **Details** — a drawer over the sidebar, closed with the back arrow or Escape, so
+  selecting a row never pushes the case out of view. An analyst-entered entity opens
+  as one compact form: typed identity, declared fields, notes, folder, connections.
+  File and tool entities keep two tabs — **Info** is what the file or save reports
+  about itself, **Case** is what the analyst states about it. Case uses a responsive
+  field grid, one light connection list, and a collapsed **Made from & used by**
+  block. A field declared as holding sentences is a box that grows, not a line. A
+  suggested entity says so at the top and carries the click that confirms it.
+  Save commits the entity fields; each connection has its own Add action. Because the
+  two commit differently, closing the panel or following a connection asks first when
+  Save has not taken what is on screen.
+  A file the app has no viewer for — a document, a scan, a spreadsheet — offers
+  **Show in folder** rather than a download link and no tool button: handing it to
+  the browser makes a second copy in Downloads, and the analyst ends up working on a
+  file the case does not know about. Following one from anywhere else does the same.
+  The sidebar and Media Library modal share `EntityDetails.svelte`. Image Details
+  include a closed EXIF section with the parsed capture date, GPS and every readable
+  tag; Video Details use the same pattern for ffprobe container, stream and tag
+  fields.
 - **Delete** — deleting an artifact moves its registered files and cascade into
   Trash and shows an **Undo** toast. The confirmation uses the neutral tone and
   states what can be restored. Red is reserved for deleting a case, purging a
@@ -148,22 +205,34 @@ signature. It leaves absolute export paths, the workspace pointer and download
 sessions on the machine that created them, and the UI tells the analyst to keep
 the downloaded backup private.
 
-## Relations
+## Connections
 
-Relations (ONTOLOGY §3) render through one component wherever they appear — the
-Details panel, the point's card on the map, and the case board next. One row per
-relation: the neighbour, how the edge reads in words, and, while it is only
-suggested, confirm. Any row can be taken back, whatever its status. Where the pair
-reads more than one way the verb is a select, so a wrong reading is corrected in
-place instead of deleted and restated. A neighbour that carries a point offers the
-map, because confirming "shot here" without seeing where is signing blind. Past six
-rows the list hides the rest behind one click, suggestions first.
+Details keeps four concepts visually separate: **Relations**, **Mentions**,
+**Claims**, and the collapsed lineage block. The lineage block is labelled **Made
+from**, **Depends on** or **Used by** from the direction and link type; it is not a
+generic History list.
 
-Stating one is a second component: pick the other entity from a bounded search of
-the types the vocabulary accepts, then the reading if the pair allows more than
-one. Details files it with Save; Satellite's Save-place dialog files it once the
-place exists. Both dialogs show the existing relations above the picker, so
-nowhere can a relation be added but not removed.
+Ordinary relations render through one component wherever they appear. Two lines carry
+the neighbour's name, then what the edge states and how sure of it. A suggested row
+can be confirmed; any row can be removed. Where a pair supports several verbs or both
+directions, the reading is selectable. An older out-of-matrix row stays visible and
+removable but cannot be restated. Past six rows the list hides the rest behind one
+click, suggestions first. The registry's headings only appear where a list runs
+several actions together.
+
+**How sure, and how reliable, are two controls that never merge.** The rating sits
+beside the verb, offering the levels the API serves plus *Not assessed* to clear it.
+Unrated is the normal state, so it stays colourless until it holds a level, and a
+ruled-out row is dimmed and kept rather than struck out. The source's Admiralty grade
+sits on the line above, with the name it belongs to, stated rather than offered: it is
+edited in that source's own panel. An ungraded source shows nothing.
+
+**Add relation** searches only relation targets, **Add mention** the mention action.
+Hovering either button lists the accepted target types; media-specific rules use the
+current file kind. A filed relation cannot be reworded into a mention, and a mention
+has no verb menu or rating. A Claim has its own **About**, **At** and **Cites**
+editor; its confidence is edited with the Claim fields, and those three connectors
+carry no rating of their own.
 
 ## Sources
 
@@ -178,6 +247,10 @@ flies the map there. Thumbnail polling follows all pending case jobs, including
 files beyond the loaded page after a case import. Thumbnail failures are scoped
 to their case, so switching cases always reloads previews even when relative
 paths match. Enrich respects an existing confirmed GPS relation during backfill.
+
+The row action for an image, a video or an audio file opens it; for anything the
+app cannot display it opens the folder the file sits in, so the original is opened
+in whatever program owns it rather than copied into Downloads.
 
 Every media row and card shows the file's human-readable stem, without its
 extension and without a second title line. Editing that name in Details renames

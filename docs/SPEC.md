@@ -1,6 +1,6 @@
 # Azimut product overview
 
-Status: **spec v0.3** (2026-07-18). Read in order: Done → Roadmap → Loose ideas.
+Status: **spec v0.3** (2026-08-03). Read in order: Done → Roadmap → Loose ideas.
 Implementation detail belongs in code and tests; see
 [IMAGERY_PROVIDERS.md](IMAGERY_PROVIDERS.md), [UI.md](UI.md),
 [ONTOLOGY.md](ONTOLOGY.md) and
@@ -73,15 +73,30 @@ App-wide settings, scratch cases, caches and runtime tools also stay under
 The entity/link schema has existed since v1. Full vocabulary lives in
 [ONTOLOGY.md](ONTOLOGY.md).
 
-- **Entity types** (extensible): person, organization, alias/username, account,
-  email, phone, domain, ip, vehicle, place, event, media, proof.
-- **Links**: typed directed edges (owns, appears-in, located-at, same-as, posted,
-  mentions, …) plus free-typed labels.
-- **Provenance on everything**: which tool/action, source, when, confidence
-  (`confirmed` by analyst vs `suggested` by a tool).
+- **Entity types** (extensible) sit in one of seven **families**. Relations start
+  from families and narrow endpoints where a verb is type-specific:
 
-Tools suggest entities and links; analyst confirmation adds them to the graph.
-Relations, graph, map and timeline views are planned for v4.
+  | Family | Types |
+  |---|---|
+  | actor | person, organization |
+  | asset | vehicle, vessel, aircraft, structure |
+  | identifier | account, email, phone, domain, ip, network |
+  | collected | media, capture |
+  | document | proof, post, note, inspect-session, bookmark |
+  | place | place |
+  | claim | claim |
+
+- **Links**: typed directed edges (owns, part-of, member-of, posted, appears-in,
+  sited-at, in-network, located-at, depicts, same-image-as, about, at, cites, …)
+  plus free-typed labels.
+- **Provenance on everything**: which tool/action, source, when and review status
+  (`confirmed` by analyst vs `suggested` by a tool).
+- **Assessment stays separate**: a Claim carries its confidence; a ratable ordinary
+  relation may carry its own ordinal; a source carries Admiralty reliability A–E.
+
+Tools suggest entities and links; the analyst reviews them. Relations, Mentions,
+Claims, lineage and the Board are shipped. The graph view remains v2; temporal
+Claims and their timeline are v4.
 
 ---
 
@@ -132,9 +147,13 @@ proof for publication.
 | ✅ **Settings backup** | Carries portable settings, keys, presets and the signature while leaving machine paths and download sessions behind. |
 | ✅ **Open the folder** | A case's folder, or the whole workspace, opened in the system file manager. |
 | ✅ **Proofs on the map** | A fourth position of the Saved switch places each proof by its own coordinates, then by the captures it composes; `All` marks a worked capture with a dot rather than doubling it. |
+| ✅ **Where the chain places it** | Details reads the derivation chain as geography, so a video shows the point a proof placed it at without a relation being stated; one row per point, each naming what placed it. |
 | ✅ **Import enrichment** | Reads image EXIF/dHash and video container/stream metadata locally in the background; parsed GPS produces linked Suggestions and all fields appear in Details. |
 | ✅ **GPS in Media** | A GPS filter and a per-row pin in the Media list send a stated position to the map, images and videos alike. |
-| ✅ **Relation vocabulary** | One registry for the non-chain edges, stated or settled from Details and from a point's card on the map. |
+| ✅ **Ontology connections** | Keeps Relations, Mentions, Claim connectors and artifact lineage separate; validates exact endpoints, media kinds and cycles; exposes inverse readings and legacy-safe removal in Details. |
+| ✅ **Case Board** | The whole case as one sortable table, with typed identity fields, family/type/review filters, creation and shared Details. |
+| ✅ **How sure, how reliable** | A Claim carries statement confidence, a ratable ordinary relation may carry its own ordinal, and a source carries Admiralty reliability. The assessments are never combined. |
+| ✅ **How precise a place is** | A saved point states its uncertainty radius, its traced footprint, the source's own wording and how it was found; the map draws the spread instead of a pin. |
 | ✅ **Visible file names** | Shows each file-backed artifact under its filename stem and moves the file when that name changes. |
 | ✅ **Case doctor** | Checks a case without changing it, then offers explicit repairs for a missing database, missing media and files dropped into `media/`. |
 | ✅ **Workspace folder** | Settings adopts a folder as it is, or copies and SHA-256-verifies every file before switching an external pointer and keeping the old copy. A missing configured folder stops startup. |
@@ -154,8 +173,8 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 
 | Tool | What it does |
 |------|--------------|
-| **Case Board / Relations** | Browses, creates and merges entities; graph view over the schema filled since v1, on the shipped relation vocabulary. |
-| **Case Sheet** | The same case as a table: a row is an entity, columns are its attributes plus free ones the analyst adds, sorted, filtered and edited in place. Imports a CSV as loose rows that stay out of the graph until promoted, and exports back to CSV or GeoJSON. |
+| **Case graph** | The same entities as a graph rather than a table: what the board lists, drawn as the nodes and edges it already holds. |
+| **Case Sheet** | Adds editable free columns and CSV/GeoJSON round trips to the shipped Board. Imported loose rows stay outside the graph until promoted. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
 
@@ -169,10 +188,13 @@ changes under it.
 | **Map engine (MapLibre)** | Replaces Leaflet with MapLibre GL at 2D parity: same providers, same captures, and the capture tests still verify the pixels. Ships before the 3D map, which builds on it. |
 | **3D map** | Pitch, public DEM terrain and extruded OSM buildings on the MapLibre map. An oblique capture records its pitch beside the bearing, so the view can be reproduced. |
 | **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. Follows the map engine, which redraws what a capture is made of. |
+| **Footprint tracing** | Draws a place's uncertainty as the shape it really is, for a quay, a treeline or an L-shaped block the circle describes badly. The field, its validation and its drawing already ship; only the gesture is missing, and it follows the map engine rather than being written twice. |
 | **Satellite Compare** | Same coords across providers (Esri / Sentinel-2 date slider / Bing / keyed), synced pan/zoom. Copernicus easy link. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
 | **Metadata follow-up** | Explains which common image/video fields were stripped and proposes events from capture times. |
 | **Edit Provenance** | Reads a rendered video's own edit history: which source clips it was cut from, in what order, and the GPS, dates and cameras those clips still carry. |
+| **Sky sessions** | Saves a sun or moon lookup as a case artifact: the point, the date and the time, never the numbers they produce. It reopens where it was left, a proof can show its reading, and a statement can cite it. |
+| **Grid sessions in the graph** | Brings the saved AOI grids into the case as entities, adopting the specs already on disk. Grid Search is the last saved tool state living outside the graph, so today nothing can say "this sweep is how I found it". |
 | **Sky Clock** | Marks a shadow, the sun or the moon in an image or a video frame, with the horizon and north giving the angles, then renders the year as a day × hour heatmap of the slots that fit. A visible moon also carries phase and bright-limb angle, which usually cuts a year down to a few instants. |
 | **Case KMZ** | One self-contained file per case: a pin per place, carrying the notes and proof images it is linked to, opened in Google Earth. Frozen rather than live, because only the web Earth remains and it follows no network link. |
 | **Imagery Wayback** | Esri World Imagery archive as a date slider: one view across every published release, key-less. |
@@ -213,12 +235,11 @@ supplies, since a ridge ends the day well before the flat horizon does.
 | **Skyline Matching** | Traces a horizon in a photo and compares it against the DEM profile seen from candidate points, in the same azimuth and elevation frame Camera Resection and Sky Clock already use. Terrain-occluded sun times then split candidates a matching horizon leaves tied. |
 | **Map Board (MyMaps-style)** | Editable case map: custom pins + notes/links, shapes, layers; import/export KML/KMZ/GeoJSON; pins bind to `place`. |
 | **Evidence Locker** | Track SHA-256, timestamps, source and notes; archive with Wayback; export `evidence.jsonl` under a hash-chained manifest, so any later edit to an exported file is detectable. |
-| **Timeline Builder** | Timestamped events from mixed sources aligned on timeline + map. |
+| **Temporal Claims & Timeline** | Gives a Claim a point or interval in time with parsed EDTF bounds, then aligns dated statements and their places on a timeline and map. Mobile location, roles, DNS observations and other changing facts use this workflow. |
 | **Report Builder** | Assemble proofs/maps/timeline/entities/notes into PDF or one self-contained HTML file with its media embedded, readable offline. |
 | **Case Sync (Git)** | Push a case to a private or public Git remote, pull it back, and diff two revisions, so two analysts can work the same case. |
 
-Toward v4: dependency-aware delete (partly done);
-archive-on-download and a Wayback CDX snapshot timeline with diff; web-page save
+Toward v4: archive-on-download and a Wayback CDX snapshot timeline with diff; web-page save
 extension; provenance stamp on exports (short hash, optionally visible) that
 re-identifies a shared PNG in its case;
 Sentinel-2 change detection with an NDVI difference over a date range; source
@@ -336,8 +357,11 @@ stops making sense.
 
 ## 10. Open questions
 
-- Define entity attribute vocabularies, `same-as` merge semantics and confidence
-  levels before Relations ships.
+- Define `same-as` merge semantics before a resolver ships. The attribute vocabulary
+  and assessment model are settled (ONTOLOGY §2, §3); merge waits on what actually
+  creates duplicates, the v5 Search Orchestrator.
+- Source reliability sits on the `bookmark` or the `account` cited. Reopen it the day
+  a source is neither: a paper document, a testimony.
 - Déjà Vu community index: needs infrastructure and moderation; out of scope
   until v5.
 - Name/handle availability: GitHub org/repo `azimut`, x.com handle, domain.

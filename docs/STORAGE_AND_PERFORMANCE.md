@@ -242,9 +242,11 @@ review.
 
 ## Database shape
 
-`case.db` is at SQLite schema 7. The schema counter is independent of the JSON
-`CASE_SCHEMA`: the manifest's `azimut.storage` field selects the backend, and each
-format counts its own shape upgrades.
+`case.db` is at SQLite schema 9: schema 8 adds the nullable `links.confidence`
+column, schema 9 rebuilds every row's `search_text` so an existing case answers
+searches from its declared fields and not just its label. The schema counter is
+independent of the JSON `CASE_SCHEMA`: the manifest's `azimut.storage` field
+selects the backend, and each format counts its own shape upgrades.
 
 The case manifest is at `CASE_SCHEMA` 9. Schema 3 is the last released folder
 shape before the `azimut/` boundary; schemas 4–8 were development checkpoints
@@ -270,9 +272,13 @@ use `.data/rename.json`, so a restart can finish references after the bytes move
   valid.
 
 `links`
-: `id`, source, target, `type`, provenance and status. Foreign keys forbid a link
-  to a missing entity. The delete policy lives in the dependency-aware service
-  (`engine/links.py`), not in a blind SQL cascade.
+: `id`, source, target, `type`, provenance, status and a nullable `confidence`.
+  Foreign keys forbid a link to a missing entity. The delete policy lives in the
+  dependency-aware service (`engine/links.py`), not in a blind SQL cascade.
+  `confidence` is the closed ordinal used only by ratable ordinary relations;
+  `NULL` means not assessed. Claim confidence lives in the Claim entity, while
+  Claim connectors, mentions, lineage and `same-image-as` reject edge ratings
+  (ONTOLOGY §3).
 
 `folders`
 : Normalized `/`-separated logical paths for the analyst's organisation. Not
@@ -526,11 +532,19 @@ pickers, satellite crops and derivation traces.
 
 The Map's Saved panel opens on `GET /api/cases/{id}/satellite/index`: one compact
 row per place, capture and filed screenshot — id, kind, title, coordinates,
-geography, thumbnail, provider, dates, notes, and nothing else. The tree, the
-search modal and the map overlay all read that one response, so hundreds of saved
-items cost tens of KB instead of every capture's full media row and full-size
-image. Rows come newest first on a single normalised timestamp, and the endpoint
-makes no network call. Geography rides on the entity's `attrs.geo`
+geography, thumbnail, provider, dates, notes, how precise the point is
+(`radius_m`, `footprint`), and nothing else. The tree, the search modal and the
+map overlay all read that one response, so hundreds of saved items cost tens of KB
+instead of every capture's full media row and full-size image. Rows come newest
+first on a single normalised timestamp, and the endpoint makes no network call.
+
+`footprint` is the one field whose size is not fixed per row: it carries the
+place's own geometry so the overlay can draw a traced area rather than a pin,
+and `entities.MAX_FOOTPRINT_POINTS` caps it at 4 096 vertices. Nothing traces one
+today — the field is API-only until the drawing gesture ships with the map engine
+(SPEC §6, v2) — so in practice the row is as compact as the list above. That
+gesture is when to decide whether the index keeps carrying whole geometries or
+sends a bounding box and fetches the shape per place. Geography rides on the entity's `attrs.geo`
 (`ok`/`nocoords`/`nocountry`/`failed`); continent is never stored, it is derived
 from the country code at read time (`engine/continents.py`), so correcting that
 table repairs existing cases with no migration. Countries that span two
