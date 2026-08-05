@@ -4,6 +4,10 @@
 The tool supervises the process it starts and exposes a token-protected local
 control socket. A later invocation can therefore stop that exact process
 without scanning process names or killing unrelated Vite/Azimut instances.
+
+When that handshake finds nothing (a server started by hand, or one whose
+launcher was killed hard), the port itself is reclaimed: whoever still listens
+on it is stopped so the relaunch never hits "address already in use".
 """
 
 from __future__ import annotations
@@ -125,6 +129,121 @@ def _stop_previous(path: Path, timeout: float = 10) -> bool:
     return True
 
 
+def _probe_reuses_address(platform: str = os.name) -> bool:
+    """Whether the probe binds the way the server will.
+
+    On POSIX the server sets SO_REUSEADDR, so the probe must too: connections
+    left in TIME-WAIT block a plain bind long after the server is gone, and the
+    port would look busy forever. On Windows the same option lets a bind steal a
+    live listener, which would report a busy port as free.
+    """
+    return platform != "nt"
+
+
+def _port_is_free(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        if _probe_reuses_address():
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def _command_output(command: list[str]) -> str:
+    if not shutil.which(command[0]):
+        return ""
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=10, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout
+
+
+def _listener_pids(port: int, platform: str = os.name) -> set[int]:
+    """Processes listening on the port, best effort and never fatal."""
+    pids: set[int] = set()
+    if platform == "nt":
+        for line in _command_output(["netstat", "-a", "-n", "-o", "-p", "TCP"]).splitlines():
+            fields = line.split()
+            if len(fields) < 5 or fields[3].upper() != "LISTENING":
+                continue
+            if fields[1].rsplit(":", 1)[-1] != str(port):
+                continue
+            if fields[4].isdigit():
+                pids.add(int(fields[4]))
+        return pids
+
+    output = _command_output(
+        ["lsof", "-t", "-n", "-P", f"-iTCP:{port}", "-sTCP:LISTEN"]
+    )
+    for token in output.split():
+        if token.isdigit():
+            pids.add(int(token))
+    if pids:
+        return pids
+
+    # lsof is missing on plenty of Linux installs; ss ships with iproute2.
+    for line in _command_output(["ss", "-H", "-l", "-t", "-n", "-p", "-a"]).splitlines():
+        fields = line.split()
+        if len(fields) < 4 or fields[3].rsplit(":", 1)[-1] != str(port):
+            continue
+        for chunk in line.split("pid=")[1:]:
+            digits = chunk.split(",")[0].split(")")[0]
+            if digits.isdigit():
+                pids.add(int(digits))
+    return pids
+
+
+def _kill_pid(pid: int, *, force: bool) -> None:
+    if os.name == "nt":
+        command = ["taskkill", "/PID", str(pid), "/T"]
+        if force:
+            command.append("/F")
+        subprocess.run(
+            command, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        return
+    try:
+        os.kill(pid, signal.SIGKILL if force else signal.SIGTERM)
+    except OSError:
+        pass
+
+
+def _free_port(port: int, timeout: float = 10) -> list[int]:
+    """Stop whatever still listens on the port. Returns the PIDs stopped."""
+    if _port_is_free(port):
+        return []
+
+    stopped: list[int] = []
+    deadline = time.monotonic() + timeout
+    forced = False
+    while True:
+        for pid in sorted(_listener_pids(port)):
+            if pid == os.getpid():
+                continue
+            _kill_pid(pid, force=forced)
+            if pid not in stopped:
+                stopped.append(pid)
+        for _ in range(20):
+            if _port_is_free(port):
+                return stopped
+            time.sleep(0.05)
+        if time.monotonic() >= deadline:
+            break
+        forced = True
+
+    if stopped:
+        raise RuntimeError(f"port {port} is still held by {stopped} after a kill")
+    raise RuntimeError(
+        f"port {port} is in use and its owner could not be identified; "
+        "stop it by hand or relaunch with --port"
+    )
+
+
 def _venv_python(root: Path, platform: str = os.name) -> Path:
     relative = Path("Scripts/python.exe") if platform == "nt" else Path("bin/python")
     python = root / ".venv" / relative
@@ -199,6 +318,10 @@ def _run_process(
 def run(*, port: int, no_browser: bool) -> int:
     if _stop_previous(STATE_PATH):
         print("Stopped the previous managed Azimut instance.")
+    stopped = _free_port(port)
+    if stopped:
+        joined = ", ".join(str(pid) for pid in stopped)
+        print(f"Freed port {port} (stopped {joined}).")
 
     control = _ControlServer(STATE_PATH)
     control.start()
