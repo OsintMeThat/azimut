@@ -141,3 +141,47 @@ test('settles a suggested relation from the card, which survives the click', asy
   ]);
   fixture.expectNoUnexpectedRequests();
 });
+
+/** The same place, with a finding and a pointer on it. */
+const mixedChain = {
+  ...suggestedChain,
+  relations: [
+    ...suggestedChain.relations,
+    {
+      entity: { id: 'note-1', type: 'note', label: 'field notes', attrs: {} },
+      direction: 'in',
+      link: {
+        id: 'link-2',
+        from: 'note-1',
+        to: 'place-1',
+        type: 'mentions',
+        provenance: { by: 'user', at: '2026-07-24T10:00:00Z', status: 'confirmed' },
+      },
+    },
+  ],
+};
+
+test('shows the findings on the card and leaves the pointers out', async ({ page }) => {
+  const fixture = await installAppFixture(page, {
+    savedIndex: [stack[0]],
+    chains: { 'place-1': mixedChain },
+  });
+
+  await page.goto('/#satellite');
+  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await page.getByRole('button', { name: 'Show saved work on the map' }).click();
+  await page.locator('.saved-mark').click();
+
+  const popup = page.locator('.saved-popup');
+  await expect(popup.getByText('roadside photo')).toBeVisible({ timeout: 15000 });
+
+  // "a note names this point" and "a camera stood here" are not the same claim. The
+  // card says Relations and asks for that action alone, so the pointer stays in
+  // Details rather than sitting under a heading on a card three rows tall.
+  const rows = await popup.locator('.relation .name').allInnerTexts();
+  expect(rows.map((t) => t.trim())).toEqual(['roadside photo']);
+  await expect(popup.getByText('field notes')).toHaveCount(0);
+  // and with one action on screen the list needs no heading of its own
+  await expect(popup.locator('.group')).toHaveCount(0);
+  fixture.expectNoUnexpectedRequests();
+});

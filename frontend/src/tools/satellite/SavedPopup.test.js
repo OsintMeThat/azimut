@@ -206,7 +206,8 @@ describe('SavedPopup relations', () => {
   it('loads the edges from the bounded chain endpoint, not from the index', () => {
     const source = readFileSync(new URL('./SavedPopup.svelte', import.meta.url), 'utf8');
     expect(source).toContain('api.get(`/api/cases/${caseId}/entities/${row.id}/chain`)');
-    expect(source).toContain('relationsByRow = { ...relationsByRow, [rowKey(row)]: chain?.relations ?? [] }');
+    expect(source).toContain("relationAction(relation.link.type) === 'relation'");
+    expect(source).toContain('relationsByRow = { ...relationsByRow, [rowKey(row)]: ordinary }');
     // a single mark opens them straight away: clicking a place to see which
     // photos claim it is the whole point of the gesture
     expect(source).toContain('const only = ordered.length === 1 ? ordered[0] : null;');
@@ -244,5 +245,25 @@ describe('SavedPopup relations', () => {
     expect(overlay).toContain('onentity: (entity) => {');
     expect(overlay).toContain('map.closePopup();');
     expect(overlay).toContain('openEntity(entity);');
+  });
+});
+
+describe('how precisely a point is pinned', () => {
+  const popup = readFileSync(new URL('./SavedPopup.svelte', import.meta.url), 'utf8');
+
+  it('reads the spread out in the meta line, in the unit that suits it', () => {
+    expect(popup).toContain("`±${(m / 1000).toFixed(m >= 10000 ? 0 : 1)} km`");
+    expect(popup).toContain("`±${Math.round(m)} m`");
+    expect(popup).toContain("if (row.footprint) return 'traced area';");
+  });
+
+  it('says nothing when nothing was stated', () => {
+    expect(popup).toContain('if (!(m > 0)) return null;');
+    expect(popup).toContain('{#if spread(row)}');
+  });
+
+  it('is read-only here, because the drawer owns the field', () => {
+    const card = popup.slice(popup.indexOf('{#if spread(row)}'));
+    expect(card.slice(0, 200)).not.toMatch(/<input|<button/);
   });
 });

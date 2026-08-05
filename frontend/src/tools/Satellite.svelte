@@ -3729,6 +3729,7 @@
         caseId={caseState.current.id}
         relations={placeModal.relations}
         subjectType="place"
+        actionFilter="relation"
         onwalk={(entity) => { placeModal = null; openEntity(entity); }}
         onchanged={async () => {
           await loadPlaceRelations(placeModal?.id);

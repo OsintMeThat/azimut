@@ -4,7 +4,9 @@
  * uiState; the target tool consumes it on mount. Shared so the case sidebar and
  * the Details editor send an analyst to the same place.
  */
-import { uiState } from './state.svelte.js';
+import { caseState, toast, uiState } from './state.svelte.js';
+import { mediaKindOf } from './entityIcon.js';
+import { revealMediaFolder } from './reveal.js';
 
 /**
  * A number an entity actually recorded, or NaN when it recorded nothing.
@@ -26,8 +28,36 @@ export const ENTITY_TOOL = {
   'inspect-session': 'inspect',
 };
 
+/**
+ * Whether the app has to hand this one back to the desktop.
+ *
+ * Azimut displays images, video and audio, and nothing else: a PDF, a scan bundle,
+ * a spreadsheet or a plan has no viewer here and no tool to be reopened in. The
+ * browser's answer for those is a download, which quietly makes a second copy in
+ * Downloads and invites the analyst to work on the file the case no longer knows
+ * about. Showing the folder hands over the original instead.
+ */
+export function opensInFileManager(entity) {
+  return entity?.type === 'media' && mediaKindOf(entity) === 'file';
+}
+
+/** Show a file's own folder, and say so when the desktop refuses. */
+export function showInFolder(entity) {
+  const caseId = caseState.current?.id;
+  const path = entity?.attrs?.path;
+  if (!caseId || !path) return Promise.resolve();
+  return revealMediaFolder(caseId, path).catch((e) => toast(e.message, 'warn', 5000));
+}
+
 /** Reopen an artifact in its tool, loading whatever spec/draft it carries. */
 export function openEntity(entity) {
+  // A file the app cannot show is opened where it actually lives. This runs before
+  // the type branches below, so every surface that follows an entity — a relation
+  // row, a chain row, the sidebar — makes the same call.
+  if (opensInFileManager(entity)) {
+    void showInFolder(entity);
+    return;
+  }
   if (entity.type === 'note') {
     uiState.openNotebook = { noteId: entity.id };
     uiState.tool = 'notebook';
@@ -98,7 +128,18 @@ export function openEntity(entity) {
     return;
   }
   const tool = ENTITY_TOOL[entity.type];
-  if (tool) uiState.tool = tool;
+  if (tool) {
+    uiState.tool = tool;
+    return;
+  }
+  // A person, an account, a claim: the graph-only types have no tool that reopens
+  // them, and until the board existed this call ended here doing nothing at all —
+  // a relation row on the map said "Open …" and swallowed the click. The board is
+  // where they are read, so that is where the jump lands.
+  if (entity.id) {
+    uiState.openBoardEntity = entity.id;
+    uiState.tool = 'board';
+  }
 }
 
 /** Open the case-wide note (null) or one filed note in the shared Notebook. */

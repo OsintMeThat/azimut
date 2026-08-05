@@ -15,6 +15,7 @@
     SORTS,
   } from '../lib/mediaFilter.js';
   import { gotoPoint } from '../lib/navigate.js';
+  import { revealMediaFolder } from '../lib/reveal.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import Icon from '../components/Icon.svelte';
   import SearchInput from '../components/SearchInput.svelte';
@@ -241,6 +242,16 @@
 
   // --- details modal (shared EntityDetails, keyed by the file's entity id) ---
   let infoEntityId = $state(null);
+  // The panel's fields wait for Save while its connections file themselves, so
+  // Escape and the backdrop ask before throwing an edit away.
+  let infoDirty = $state(false);
+  let infoDiscarding = $state(false);
+
+  function closeInfo() {
+    if (infoDirty) infoDiscarding = true;
+    else infoEntityId = null;
+  }
+
   let infoItem = $state(null); // the media row behind the details modal, for Export
   // Where a media copy lands, app-wide and remembered. Empty = the case folder.
   let exportDir = $state('');
@@ -407,6 +418,17 @@
       );
     } catch (e) {
       toast(e.message, 'danger');
+    }
+  }
+
+  /** Hand a file the app cannot display back to the desktop, in its own folder.
+   *  A download would put a second copy in Downloads and invite editing the one
+   *  the case does not know about. */
+  async function revealFolder(item) {
+    try {
+      await revealMediaFolder(caseState.current.id, item.path);
+    } catch (e) {
+      toast(e.message, 'warn', 5000);
     }
   }
 
@@ -898,15 +920,25 @@
                 <button class="btn btn-ghost btn-sm" title="Info / Edit notes" onclick={() => openInfo(item)}>
                   <Icon name="note" size={14} />
                 </button>
-                <a
-                  class="btn btn-ghost btn-sm"
-                  href={`/files/${caseState.current.id}/${item.path}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  title="Open file"
-                >
-                  <Icon name="external" size={14} />
-                </a>
+                {#if item.kind === 'file'}
+                  <button
+                    class="btn btn-ghost btn-sm"
+                    title="Open the folder this file is in"
+                    onclick={() => revealFolder(item)}
+                  >
+                    <Icon name="folderOpen" size={14} />
+                  </button>
+                {:else}
+                  <a
+                    class="btn btn-ghost btn-sm"
+                    href={`/files/${caseState.current.id}/${item.path}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Open file"
+                  >
+                    <Icon name="external" size={14} />
+                  </a>
+                {/if}
                 {#if item.kind === 'image' || item.kind === 'video'}
                   <button class="btn btn-ghost btn-sm" title="Open in Inspect" onclick={() => inspect(item)}>
                     <Icon name="inspect" size={14} />
@@ -1011,15 +1043,25 @@
               >
                 <Icon name="note" size={14} />
               </button>
-              <a
-                class="btn btn-ghost btn-sm"
-                href={`/files/${caseState.current.id}/${item.path}`}
-                target="_blank"
-                rel="noreferrer"
-                title="Open file"
-              >
-                <Icon name="external" size={14} />
-              </a>
+              {#if item.kind === 'file'}
+                <button
+                  class="btn btn-ghost btn-sm"
+                  title="Open the folder this file is in"
+                  onclick={() => revealFolder(item)}
+                >
+                  <Icon name="folderOpen" size={14} />
+                </button>
+              {:else}
+                <a
+                  class="btn btn-ghost btn-sm"
+                  href={`/files/${caseState.current.id}/${item.path}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Open file"
+                >
+                  <Icon name="external" size={14} />
+                </a>
+              {/if}
               {#if item.kind === 'image' || item.kind === 'video'}
                 <button
                   class="btn btn-ghost btn-sm"
@@ -1163,9 +1205,10 @@
 <!-- details modal: the same editor body as the case sidebar (provenance,
      derivation chain, title/notes/folder) so both stay in step -->
 {#if infoEntityId}
-  <Modal title="Details" onclose={() => (infoEntityId = null)} width="520px">
+  <Modal title="Details" onclose={closeInfo} width="520px">
     <EntityDetails
       entityId={infoEntityId}
+      bind:dirty={infoDirty}
       onclose={() => (infoEntityId = null)}
       ondeleted={() => (infoEntityId = null)}
     >
@@ -1185,6 +1228,17 @@
       {/snippet}
     </EntityDetails>
   </Modal>
+{/if}
+
+{#if infoDiscarding}
+  <ConfirmDialog
+    title="Discard changes?"
+    message="This item has edits that Save has not taken."
+    confirmLabel="Discard"
+    icon="alert"
+    onconfirm={() => { infoDiscarding = false; infoDirty = false; infoEntityId = null; }}
+    oncancel={() => (infoDiscarding = false)}
+  />
 {/if}
 
 {#if exportPicker}

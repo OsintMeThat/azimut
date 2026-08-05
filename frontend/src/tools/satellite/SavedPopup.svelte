@@ -13,6 +13,7 @@
   import { api } from '../../lib/api.js';
   import { toast } from '../../lib/state.svelte.js';
   import { postTarget } from '../../lib/post.js';
+  import { loadRelationTypes, relationAction } from '../../lib/relations.svelte.js';
   import { stackOrder } from '../../lib/savedMarkers.js';
 
   let {
@@ -52,10 +53,21 @@
   const worked = (row) =>
     row.proofs > 0 ? `${row.proofs} proof${row.proofs > 1 ? 's' : ''} here` : null;
 
+  /** How tightly this point is pinned, read-only: the shape is already drawn on the
+   *  map behind this card, and editing it belongs to the details drawer. Two forms
+   *  for one field is how they drift apart. */
+  function spread(row) {
+    if (row.footprint) return 'traced area';
+    const m = Number(row.radius_m);
+    if (!(m > 0)) return null;
+    return m >= 1000 ? `±${(m / 1000).toFixed(m >= 10000 ? 0 : 1)} km` : `±${Math.round(m)} m`;
+  }
+
   const ordered = $derived(stackOrder(items));
   const here = $derived(ordered[0]);
 
   const day = (stamp) => (stamp ? String(stamp).slice(0, 10) : null);
+  loadRelationTypes();
 
 
   // Relations: the saved index carries the count, never the edges — it is loaded
@@ -86,7 +98,11 @@
     if (!caseId || !row.id) return;
     try {
       const chain = await api.get(`/api/cases/${caseId}/entities/${row.id}/chain`);
-      relationsByRow = { ...relationsByRow, [rowKey(row)]: chain?.relations ?? [] };
+      await loadRelationTypes();
+      const ordinary = (chain?.relations ?? []).filter(
+        (relation) => relationAction(relation.link.type) === 'relation'
+      );
+      relationsByRow = { ...relationsByRow, [rowKey(row)]: ordinary };
     } catch (e) {
       // A read that failed is not an answer: caching it as an empty list would
       // have the card claim this point holds no relations. Fold the row back so
@@ -146,6 +162,9 @@
             <span class="kind"><Icon name={GLYPH[row.kind] ?? 'pin'} size={10} /> {KIND[row.kind]}</span>
             {#if row.provider ?? row.site}<span>{row.provider ?? row.site}</span>{/if}
             {#if row.zoom != null}<span>z{Math.round(row.zoom)}</span>{/if}
+            {#if spread(row)}
+              <span title="How tightly this point is pinned">{spread(row)}</span>
+            {/if}
             {#if row.status === 'suggested'}
               <span class="proposed" title="Proposed from a file's own metadata">suggested</span>
             {/if}
@@ -175,6 +194,7 @@
                   {caseId}
                   relations={relationsByRow[rowKey(row)] ?? []}
                   subjectType={row.kind === 'place' ? 'place' : 'capture'}
+                  actionFilter="relation"
                   max={3}
                   onwalk={(entity) => onentity?.(entity)}
                   onchanged={() => relationSettled(row)}

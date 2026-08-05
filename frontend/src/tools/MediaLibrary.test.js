@@ -347,3 +347,13 @@ describe('row and card actions fit', () => {
     expect(source).not.toMatch(/\n  \.actions \{[^}]*flex-wrap: wrap/);
   });
 });
+
+describe('a file the library cannot display', () => {
+  it('opens the folder it sits in rather than downloading a copy', () => {
+    expect(source).toContain("import { revealMediaFolder } from '../lib/reveal.js'");
+    expect(source).toContain('async function revealFolder(item)');
+    expect(source).toContain('title="Open the folder this file is in"');
+    // and the images, video and audio it does display keep the direct link
+    expect(source).toContain('title="Open file"');
+  });
+});
