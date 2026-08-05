@@ -7,13 +7,16 @@
  */
 import { api } from './api.js';
 
-export async function createNote(caseId, { title, folder = '', content = '' }) {
+export async function createNote(caseId, { title, folder = '', content = '', sources = [] }) {
   const label = (title ?? '').trim();
   if (!label) throw new Error('Title required');
   return api.post(`/api/cases/${caseId}/notes`, {
     title: label,
     folder: (folder ?? '').trim(),
     content: content ?? '',
+    // case-relative paths the note was written from, filed as derivation edges.
+    // A note typed by hand sends none; a report sends the proof and media it embeds.
+    sources: sources.filter(Boolean),
   });
 }
 

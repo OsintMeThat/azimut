@@ -36,6 +36,14 @@ describe('Geo Report actions', () => {
     expect(body).toContain('Publish on');
     expect(body).not.toContain('Copy report');
   });
+
+  it('files the report note against what it was written from', () => {
+    // the note embeds the proof and its media, so the graph has to say which case
+    // files it depends on — otherwise deleting a proof leaves a dead image link
+    // nothing accounted for, and the note sits in the case with no chain at all
+    expect(source).toContain('...reportAttachmentPaths(),');
+    expect(source).toContain('...(draftName ? [`.drafts/${draftName}.json`] : []),');
+  });
 });
 
 describe('Proof handoff', () => {

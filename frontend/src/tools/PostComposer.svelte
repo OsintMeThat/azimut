@@ -101,7 +101,7 @@
     let live = true;
     (async () => {
       if (draft) {
-        const bound = await lookupEntity(id, 'draft', `exports/${draft}.json`);
+        const bound = await lookupEntity(id, 'draft', `.drafts/${draft}.json`);
         if (live && !bound && draftName === draft) {
           draftName = null;
           toast('The saved draft was deleted. Saving now creates a new one', 'warn');
@@ -934,6 +934,14 @@
         title: reportModal.title,
         folder: reportModal.folder,
         content: reportContent(reportModal.title.trim(), evidence),
+        // What the report was written from: the proof and media it embeds, and the
+        // draft it was composed in when that draft is saved. The note reads as a
+        // page of case files, so the graph has to say which ones — otherwise
+        // deleting a proof leaves a dead image nothing accounted for.
+        sources: [
+          ...reportAttachmentPaths(),
+          ...(draftName ? [`.drafts/${draftName}.json`] : []),
+        ],
       });
       await reloadCase();
       reportModal = null;
