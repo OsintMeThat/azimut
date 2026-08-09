@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@fontsource/oxanium": "^5.2.8",
-    "dompurify": "^3.4.12",
+    "dompurify": "^3.4.13",
     "konva": "^9.3.0",
     "leaflet": "^1.9.4",
     "leaflet-rotate": "^0.2.8",
