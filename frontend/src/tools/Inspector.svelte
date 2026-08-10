@@ -1,5 +1,6 @@
 <script>
   import { api } from '../lib/api.js';
+  import { fileUrl } from '../lib/fileUrl.js';
   import { fetchAllEntities, lookupEntity } from '../lib/catalog.js';
   import { matchesTerms } from '../lib/folderBrowse.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
@@ -8,7 +9,9 @@
     collageBounds, quadFromCropRect, cropImgStyle, cropAspect, styleText, hasVideoEdits,
     normalizeRightAngleRotation, rotationOps, sourceStem, frameSaveNames, autoSaveNames, saveNameOf,
   } from '../lib/inspect.js';
-  import { isDefaultName, nextName, savedSlugs, savedTitles, savedTitle, slugify } from '../lib/naming.js';
+  import {
+    isDefaultName, nextName, savedSlugs, savedTitles, savedTitle, slugify, specAttr, specPath,
+  } from '../lib/naming.js';
   import { createHistory } from '../lib/history.js';
   import { deletedToast } from '../lib/trash.js';
   import { IDENTITY, matrixCss, rotateAbout, isIdentity, matrixAngleDeg, pointerAngleDeg } from '../lib/frameRotate.js';
@@ -261,7 +264,7 @@
     const cid = caseState.current?.id;
     const stem = stemFor(session.source?.path, session.source);
     if (session.source?.kind === 'video' && hasVideoEdits(videoFilters, session.videoAdjust, videoRotation)) {
-      const t = session.source.thumbnail ? `/files/${cid}/${session.source.thumbnail}` : null;
+      const t = session.source.thumbnail ? fileUrl(cid, session.source.thumbnail) : null;
       out.push({
         key: 'video', kind: 'video', defaultName: `${stem} (enhanced)`, thumb: t,
         filter: videoPreview.filter, transform: videoPreviewTransform,
@@ -392,7 +395,7 @@
     let live = true;
     (async () => {
       if (sessionName) {
-        const bound = await lookupEntity(id, 'spec', `inspect/${sessionName}.json`);
+        const bound = await lookupEntity(id, specAttr('session'), specPath('session', sessionName));
         if (live && !bound && openedSession?.name === sessionName) {
           openedSession = null;
           toast('The saved session was deleted. Saving now creates a new one', 'warn');
@@ -584,7 +587,7 @@
       session.videoAdjust = adjustDefaults(videoFilters);
       activeTab = 'selection';
     } else {
-      const frame = makeFrame(item.path, null, `/files/${caseState.current.id}/${item.path}`);
+      const frame = makeFrame(item.path, null, fileUrl(caseState.current.id, item.path));
       session.frames.push(frame);
       session.activeFrameId = frame.id;
       activeTab = 'frame';
@@ -1308,7 +1311,7 @@
         {#if activeTab === 'selection'}
           <VideoPlayer
             bind:video={videoEl}
-            src={`/files/${caseState.current?.id}/${session.source.path}`}
+            src={fileUrl(caseState.current?.id, session.source.path)}
             filter={videoPreview.filter}
             transform={videoPreviewTransform}
             quarterTurn={videoQuarterTurn}
@@ -1531,7 +1534,7 @@
                 <button class="source-open" onclick={() => selectNewSource(m)}>
                   <div class="source-thumb">
                     {#if m.thumbnail}
-                      <img src={`/files/${caseState.current.id}/${m.thumbnail}`} alt="" loading="lazy" />
+                      <img src={fileUrl(caseState.current.id, m.thumbnail)} alt="" loading="lazy" />
                     {:else}
                       <Icon name={m.kind === 'video' ? 'video' : 'image'} size={22} />
                     {/if}

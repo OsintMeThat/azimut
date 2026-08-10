@@ -830,6 +830,54 @@ def test_organization_containment_cannot_create_a_cycle(client):
     ).status_code == 400
 
 
+def test_a_statement_can_be_told_what_stands_against_it(client):
+    """`contradicts` runs claim → claim, both ways, and joins nothing else.
+
+    A `refuted` confidence records that a statement is dead and names nothing that
+    killed it. Ruling out eleven candidates is half of a geolocation, and each of the
+    eleven has its own reasoning — so what stands against a statement is another
+    statement, never a grade and never a subject.
+    """
+    cid = _new_case(client, "Contradiction")
+    case = Case.open(cid)
+    first = case.add_entity("claim", "The bridge at Kerch", {}, by="user")
+    second = case.add_entity("claim", "A different bridge", {}, by="user")
+    person = case.add_entity("person", "Witness", {}, by="user")
+
+    def post(from_id, to_id, type_="contradicts"):
+        return client.post(
+            f"/api/cases/{cid}/links",
+            json={"from_id": from_id, "to_id": to_id, "type": type_},
+        )
+
+    stated = post(first["id"], second["id"])
+    assert stated.status_code == 200, stated.text
+    assert stated.json()["provenance"]["status"] == "confirmed"
+
+    # Two statements contradicting each other is what an open question looks like,
+    # not a loop to refuse — unlike `part-of`, which is containment.
+    assert post(second["id"], first["id"]).status_code == 200
+
+    # "This vehicle is contradicted" is not something anyone can assess.
+    assert post(first["id"], person["id"]).status_code == 400
+    assert post(person["id"], first["id"]).status_code == 400
+    assert post(first["id"], first["id"]).status_code == 400
+
+
+def test_a_contradiction_is_not_what_a_statement_rests_on(client):
+    """It is a claim-action verb and deliberately not a claim *connector*.
+
+    The connectors say what a statement is built out of, and a source fold walks
+    them (`engine/graph._fold`). Walked across this one, an argument between two
+    statements would collapse into a citation.
+    """
+    assert link_engine.CONTRADICTS not in link_engine.CLAIM_CONNECTION_TYPES
+    spec = link_engine.relation_type(link_engine.CONTRADICTS)
+    assert spec is not None
+    assert spec.action == "claim" and spec.manual and not spec.ratable
+    assert spec.from_types == spec.to_types == frozenset({"claim"})
+
+
 def test_an_older_out_of_matrix_connection_is_removable_but_not_rewordable(client):
     cid = _new_case(client, "Older connection")
     case = Case.open(cid)
@@ -1007,3 +1055,92 @@ def test_confirming_an_entity_stops_at_one_hop(client):
     assert case.get_entity(place["id"])["provenance"]["status"] == "confirmed"
     assert case.get_link(far["id"])["provenance"]["status"] == "suggested"
     assert case.get_entity(other["id"])["provenance"]["status"] == "suggested"
+
+
+def test_two_actors_can_be_tied_without_owning_or_containing_each_other(client):
+    """The verb the vocabulary had no way to say.
+
+    `owns` refuses a person as its object, `member-of` and `part-of` both end at an
+    organization — so until this existed, stating that two people are connected, the
+    first thing a case does, cost a whole Claim node.
+    """
+    cid = _new_case(client, "Association")
+    case = Case.open(cid)
+    one = case.add_entity("person", "First", {}, by="user")
+    two = case.add_entity("person", "Second", {}, by="user")
+    unit = case.add_entity("organization", "A unit", {}, by="user")
+    car = case.add_entity("vehicle", "A lorry", {}, by="user")
+
+    def post(from_id, to_id):
+        return client.post(
+            f"/api/cases/{cid}/links",
+            json={"from_id": from_id, "to_id": to_id, "type": "associated-with"},
+        )
+
+    assert post(one["id"], two["id"]).status_code == 200
+    assert post(one["id"], unit["id"]).status_code == 200
+    assert post(unit["id"], one["id"]).status_code == 200
+    # Opened past the actors it becomes the verb that swallows the vocabulary.
+    assert post(one["id"], car["id"]).status_code == 400
+    assert post(one["id"], one["id"]).status_code == 400
+
+
+def test_what_kind_of_tie_belongs_to_the_verb_and_not_to_the_edge(client):
+    """A note every edge could hold would leave nothing saying what an edge *is*.
+
+    So the qualifier is declared by the relation type, exactly as a rating is
+    declared by `ratable`, and the API refuses one anywhere else.
+    """
+    cid = _new_case(client, "Qualified tie")
+    case = Case.open(cid)
+    one = case.add_entity("person", "First", {}, by="user")
+    two = case.add_entity("person", "Second", {}, by="user")
+    unit = case.add_entity("organization", "A unit", {}, by="user")
+
+    tie = client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": one["id"], "to_id": two["id"], "type": "associated-with"},
+    ).json()
+    member = client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": one["id"], "to_id": unit["id"], "type": "member-of"},
+    ).json()
+
+    def qualify(link_id, value):
+        return client.patch(f"/api/cases/{cid}/links/{link_id}", json={"nature": value})
+
+    said = qualify(tie["id"], "  sister  ")
+    assert said.status_code == 200
+    assert said.json()["nature"] == "sister"
+    # unstated is a state to be able to return to, both ways of saying it
+    assert qualify(tie["id"], None).json().get("nature") is None
+    assert qualify(tie["id"], "employer").json()["nature"] == "employer"
+    assert qualify(tie["id"], "   ").json().get("nature") is None
+    # a word, not a notes box
+    assert qualify(tie["id"], "x" * 200).status_code == 400
+    # and no other verb accepts one
+    assert qualify(member["id"], "sister").status_code == 400
+    assert "nature" not in Case.open(cid).get_link(member["id"])
+
+
+def test_rewording_a_tie_into_another_verb_takes_its_qualifier_with_it(client):
+    """Left behind it would be data no surface can show and nobody can clear: the
+    edge would privately hold "sister" while stating that one unit is part of
+    another."""
+    cid = _new_case(client, "Reworded tie")
+    case = Case.open(cid)
+    person = case.add_entity("person", "First", {}, by="user")
+    unit = case.add_entity("organization", "A unit", {}, by="user")
+
+    tie = client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": person["id"], "to_id": unit["id"], "type": "associated-with"},
+    ).json()
+    client.patch(f"/api/cases/{cid}/links/{tie['id']}", json={"nature": "employer"})
+
+    reworded = client.patch(
+        f"/api/cases/{cid}/links/{tie['id']}", json={"type": "member-of"}
+    )
+    assert reworded.status_code == 200
+    assert "nature" not in reworded.json()
+    assert "nature" not in Case.open(cid).get_link(tie["id"])

@@ -110,6 +110,7 @@ def page_media(
     category: str | None = None,
     folder: str | None = None,
     gps: bool = False,
+    collected_only: bool = False,
     sort: str = "newest",
     direction: str | None = None,
     limit: int = 200,
@@ -120,6 +121,9 @@ def page_media(
     ``next_cursor``, so the client filters in memory with no further calls; a
     large case pages via ``cursor`` and searches server-side via ``q``.
     ``gps=true`` keeps only the files whose metadata states a position.
+    ``collected_only=true`` drops what the case made out of its own material — an
+    extracted frame, a collage — and scopes the counts with it; the number it hides
+    comes back as ``facets.made_here_count``.
     ``facets`` counts the whole filtered set so category/folder/GPS controls stay
     accurate. The unbounded ``GET .../media`` stays for consumers that need the
     full index (pickers, satellite crops, derivation)."""
@@ -132,6 +136,7 @@ def page_media(
         category=category,
         folder=folder,
         gps=gps,
+        collected_only=collected_only,
         sort=sort,
         direction=direction,
         limit=limit,

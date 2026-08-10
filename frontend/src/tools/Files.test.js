@@ -102,7 +102,7 @@ describe('Files desktop affordances', () => {
   it('previews rendered proof PNGs in both tiles and list rows', () => {
     expect(source).toContain("e.type === 'proof' && typeof path === 'string' && /\\.png$/i.test(path)");
     expect(source).toContain('class="lrow-thumb"');
-    expect(source).toContain('src={`/files/${caseState.current.id}/${tileThumb(e)}`}');
+    expect(source).toContain('src={fileUrl(caseState.current.id, tileThumb(e))}');
     expect(source).toContain('{#if tileThumb(e)}');
   });
 });

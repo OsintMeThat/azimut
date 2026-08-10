@@ -33,6 +33,7 @@ from typing import Any
 from .. import layout
 from ..workspace import Case, CaseError, _new_id, ensure_dir
 from . import artifacts as artifact_engine
+from . import entity_images as entity_image_engine
 from . import links as link_engine
 from . import thumbnails as thumbnail_engine
 
@@ -128,11 +129,13 @@ def send(
         root = _group_dir(case, group_id)
         ids = {e["id"] for e in entities}
         links = collect_links(case, ids)
+        entity_images = case.entity_images_touching(list(ids))
         files = _travelling_files(case, entities)
         target = entities[0]
         payload = {
             "entities": entities,
             "links": links,
+            "entity_images": entity_images,
             "files": files,
             "slots": slots_for(files),
             "tombstones": tombstones,
@@ -154,10 +157,39 @@ def send(
                 if source.exists():
                     _move(source, root / slot)
                 case.prune_note_dirs(rel)
+            entity_image_engine.prune_empty_dirs(case)
             return case.update_trash_group(group_id, size_bytes=_dir_size(root))
         except Exception:
             _rollback_delete(case, group)
             raise
+
+
+def send_analysis_view(case: Case, view: dict[str, Any]) -> dict[str, Any]:
+    """Journal the deletion of one saved reading.
+
+    A view owns no file and is not an entity, but it is still case state the analyst
+    named. Keeping it in the same Trash journal gives the deletion the same way back
+    without polluting the semantic graph with presentation records.
+    """
+    with case.lock:
+        group_id = _new_id("t")
+        return case.add_trash_group(
+            group_id,
+            label=str(view.get("name") or view.get("id") or "Analysis view"),
+            type_="analysis-view",
+            item_count=1,
+            size_bytes=0,
+            payload={
+                "entities": [],
+                "links": [],
+                "entity_images": [],
+                "analysis_views": [view],
+                "files": [],
+                "slots": [],
+                "tombstones": [],
+            },
+            state="preparing",
+        )
 
 
 def commit(case: Case, group_id: str) -> dict[str, Any]:
@@ -184,8 +216,8 @@ def restore(case: Case, group_id: str) -> dict[str, Any]:
        than renaming an artifact behind the analyst;
     2. the entities come back with their original ids, since the delete freed
        them and every recorded path still points at them;
-    3. the links come back where both ends survived; the rest are counted and
-       reported, not hidden;
+    3. image galleries and links come back where both ends survived; losses are
+       counted rather than hidden;
     4. the tombstones this delete wrote on survivors are lifted;
     5. restored media are filed in the browse index again and their thumbnails
        re-queued, because a thumbnail was dropped rather than moved.
@@ -242,7 +274,14 @@ def recover(case: Case) -> None:
                     f"trash group '{group['id']}' has an unknown state '{state}'"
                 )
             entities = list((group.get("payload") or {}).get("entities") or [])
-            if any(case.get_entity(entity["id"]) is not None for entity in entities):
+            views = list((group.get("payload") or {}).get("analysis_views") or [])
+            if (
+                any(case.get_entity(entity["id"]) is not None for entity in entities)
+                or any(
+                    case.get_analysis_view(str(view.get("id") or "")) is not None
+                    for view in views
+                )
+            ):
                 _rollback_delete(case, group)
             else:
                 case.update_trash_group(group["id"], state="ready")
@@ -264,6 +303,10 @@ def _restore_records(case: Case, group: dict[str, Any]) -> dict[str, int]:
     payload = group.get("payload") or {}
     entities: list[dict[str, Any]] = list(payload.get("entities") or [])
     result = case.reinsert(entities, list(payload.get("links") or []))
+    result.update(case.reinsert_entity_images(list(payload.get("entity_images") or [])))
+    result["analysis_views"] = case.reinsert_analysis_views(
+        list(payload.get("analysis_views") or [])
+    )
     for scar in payload.get("tombstones") or []:
         link_engine.remove_tombstone(case, scar["entity"], scar["path"])
     for entity in entities:

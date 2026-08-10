@@ -42,7 +42,11 @@ describe('Geo Report actions', () => {
     // files it depends on — otherwise deleting a proof leaves a dead image link
     // nothing accounted for, and the note sits in the case with no chain at all
     expect(source).toContain('...reportAttachmentPaths(),');
-    expect(source).toContain('...(draftName ? [`.drafts/${draftName}.json`] : []),');
+    expect(source).toContain("...(draftName ? [specPath('draft', draftName)] : []),");
+  });
+
+  it('checks the current hidden draft path before claiming a saved draft was deleted', () => {
+    expect(source).toContain("lookupEntity(id, specAttr('draft'), specPath('draft', draft))");
   });
 });
 

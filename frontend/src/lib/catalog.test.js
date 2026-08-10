@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildCatalogQuery, fetchAllEntities, lookupEntity, fetchDerivation, settleCatalogSummary,
+  buildCatalogQuery, fetchAllEntities, fetchAttrFacets, lookupEntity, fetchDerivation,
+  settleCatalogSummary,
 } from './catalog.js';
 
 describe('buildCatalogQuery', () => {
@@ -29,6 +30,68 @@ describe('buildCatalogQuery', () => {
     expect(buildCatalogQuery('c1', { folder: 'Sources', recursive: true })).toBe(
       '/api/cases/c1/catalog/entities?folder=Sources&recursive=true'
     );
+  });
+
+  it('asks the sentence: one field holding one value, linked to a type', () => {
+    expect(
+      buildCatalogQuery('c1', {
+        types: ['media'],
+        attr: 'kind',
+        value: 'video',
+        linked: 'place',
+      })
+    ).toBe('/api/cases/c1/catalog/entities?type=media&attr=kind&value=video&linked=place');
+  });
+
+  it('leaves a field with no value out, since half an act is not a term', () => {
+    // The field is picked and its values have just been fetched. Sent as a term, the
+    // table would empty itself between two clicks of one act.
+    expect(buildCatalogQuery('c1', { attr: 'kind' })).toBe('/api/cases/c1/catalog/entities');
+  });
+
+  it('asks what the case connects to nothing, which no column reports', () => {
+    expect(buildCatalogQuery('c1', { unlinked: true })).toBe(
+      '/api/cases/c1/catalog/entities?unlinked=true'
+    );
+  });
+
+  it('asks how a row got here: when it was filed, and by what', () => {
+    expect(
+      buildCatalogQuery('c1', { since: '2026-08-03', until: '2026-08-10', by: ['user', 'satellite'] })
+    ).toBe('/api/cases/c1/catalog/entities?since=2026-08-03&until=2026-08-10&by=user%2Csatellite');
+  });
+
+  it('orders the whole filtered set, and says nothing when it does not', () => {
+    expect(buildCatalogQuery('c1', { order: '-created' })).toBe(
+      '/api/cases/c1/catalog/entities?order=-created'
+    );
+    expect(buildCatalogQuery('c1', { order: '' })).toBe('/api/cases/c1/catalog/entities');
+  });
+
+  it('opens a frozen saved answer by its case-owned view id', () => {
+    expect(buildCatalogQuery('c1', { view: 'v_123' })).toBe(
+      '/api/cases/c1/catalog/entities?view=v_123'
+    );
+  });
+});
+
+describe('fetchAttrFacets — the menus a field filter is chosen from', () => {
+  it('narrows to the types being listed and unwraps the answer', async () => {
+    const asked = [];
+    const rows = await fetchAttrFacets('c1', ['media', 'capture'], {
+      get: async (path) => {
+        asked.push(path);
+        return { attrs: [{ key: 'kind', entities: 3, values: [], truncated: false }] };
+      },
+    });
+
+    expect(asked).toEqual(['/api/cases/c1/catalog/attributes?type=media%2Ccapture']);
+    expect(rows[0].key).toBe('kind');
+  });
+
+  it('answers with nothing rather than throwing when the read fails', async () => {
+    expect(await fetchAttrFacets('', [])).toEqual([]);
+    expect(await fetchAttrFacets('c1', [], { get: async () => null })).toEqual([]);
   });
 });
 

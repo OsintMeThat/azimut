@@ -40,6 +40,7 @@
     onedit,
     ondelete,
     onproof,
+    onaccept = null,
     onbrowse,
     onlocate,
     oncancelLocate,
@@ -173,6 +174,7 @@
         {onedit}
         {ondelete}
         {onproof}
+        {onaccept}
       />
     {/each}
   </div>

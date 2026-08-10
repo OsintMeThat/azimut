@@ -19,7 +19,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 
 | Workspace | Tools today | Future tools land here |
 |---|---|---|
-| **Case** (topbar) | Board | Sheet; v4: Timeline; v5: Orchestrator |
+| **Case** (topbar) | Board, Graph | Sheet; v4: Timeline; v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect (Selection / Frame / Collage / Analyze) | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
 | **Map** | Satellite, Coords & Sky | **one map, many modes**: Compare, Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
@@ -52,8 +52,9 @@ view. Following a relation to a type with no tool of its own lands here, on that
 row's Details.
 
 - **New entity** offers the types an analyst creates by hand and generates the form
-  from the registry. It opens on the type being filtered for, or the first of the
-  chosen family. The primary field names the value being entered — **IP address**,
+  from the registry. It is **one dialog shared with the graph**, so a claim is filed
+  with the same words and the same duplicate warning wherever the analyst is standing.
+  It opens on the type being filtered for, or the first of the chosen family. The primary field names the value being entered — **IP address**,
   **Full name**, **Handle** — never a generic **Name**. An identifier the case
   already holds is flagged with the existing row one click away: a warning, not a
   block, since merging is not shipped. What it creates opens into its own Details.
@@ -61,24 +62,490 @@ row's Details.
   by dropping it on the list. It runs the Media Library's import, so the file is
   hashed, deduplicated, given a sidecar and a thumbnail, and filed as a `media`. One
   file opens its Details; a batch reports what landed and what was already there.
-- **Search** covers the label, type, folder, notes and declared fields (ONTOLOGY §2),
-  in memory on a case that fits one page and server-side past it — one predicate
-  either side of that threshold.
-- **Filters** narrow by family, then by type inside it, then by review state. Family
-  is server vocabulary and resolves to its types on the way out.
+- **Search+** covers the label, type, folder, notes and declared text fields
+  (ONTOLOGY §2), in memory on a case that fits one page and server-side past it.
+  The first matching field is named under the row, so a vehicle found by its plate
+  never looks like an unexplained result. Board and Graph send the same terms to the
+  same case predicate.
+- **The question is a bar that never changes shape**: a search, one **+ Filter** menu,
+  and a removable chip per term. It replaces seven selects, four of which appeared and
+  disappeared as the others were set — so a live term looked exactly like a dead one,
+  and a control that vanished took its own way back with it. An axis that cannot be
+  asked yet stays in the menu **with its reason next to it**, because a control you can
+  see and cannot use teaches something and one that is not there teaches nothing.
+- **The menu opens on four Questions** — *To review · Nothing linked yet · Added this
+  week · Unfiled* — and picking one drops its terms in as ordinary chips. That is the
+  whole of the onboarding: the answer arrives, and the sentence that produced it is
+  sitting there to edit. They are code, not saved state, so nothing new has to reach
+  the backup.
+- **Nine axes, every value chosen from the case and counted**: a stored field and one
+  of its values (*kind = video*), one or several types, one or several families, a
+  folder with or without its subfolders or none at all, review state, a one-hop test
+  for touching a type, having no connection at all, when it was filed, and what filed
+  it. A count that would answer a *different* question is not shown: **Linked to a
+  place** is priced by how many rows touch a place, never by how many places the case
+  holds. A field with no value picked yet asks nothing, and a field the case holds too
+  many distinct values for is not offered — a menu of five thousand paths is not a way
+  to choose.
+- **The field menu is read on the click that opens it.** Gated behind picking a type
+  first, `kind` — the field the importer writes, the vocabulary declares nowhere, and
+  an analyst most wants — was a filter nobody could find. Only a case too large for the
+  menu to be readable still asks for a type first, and says so.
+- **The count is the answer, against the whole case**: *23 of 1 204*. The denominator
+  never shrinks with the numerator, because a proportion is the information a count
+  carries.
+- **Draw these N** hands the question to the graph. The **filter** travels, never the
+  rows it matched: ids would be capped, would bloat the URL and would go stale on the
+  next save, where a question is something the case can be asked again — and both
+  surfaces resolve it through one predicate, so what the drawing holds is what the
+  table counted.
+- **The question is remembered per case**, in the browser rather than in the case: it
+  is how somebody was looking at their material this afternoon, not something a bundle
+  should carry to another machine.
+- **Views** name case-owned analyses. A live view saves the Search+ question and the
+  surface presentation, then recomputes against the current case when opened. Every
+  later filter, sort, fold, hiding, expansion, camera move and graph drag autosaves;
+  the badge says **saving…**, **saved** or **save failed**.
+- **A snapshot freezes a reading, not a second case.** It keeps up to 2,000 captured
+  entities, their fields and provenance, the relations among them and bounded photo
+  previews. Its Search+ controls and every case write are disabled, and its own
+  **Snapshot details** panel reads only the captured copy. A Board snapshot stays in
+  Board and a Graph snapshot stays in Graph. Leaving it closes the captured panel.
+  Snapshots have no standalone import/export: duplicate and Trash stay inside the
+  case, while the complete case bundle is the one transmission boundary.
 - **A proposal is settled from its row**: confirm takes its suggested relations with
   it, dismiss is the standard delete, recoverable from the trash.
-- **Sorting** is a click on any heading, reversed by a second. It orders the rows
-  loaded, and says so beside the count while there are more.
+- **Sorting** is a click on any heading, reversed by a second. Two of them name a
+  column the store can order the **case** by — identity and created — so *newest first*
+  is the newest in the case rather than the newest of the hundred rows loaded. The
+  others sort what is loaded and say so beside the count while there are more. One
+  gesture either way: which of the two it is belongs to the column, not to a second
+  control the analyst has to find.
 - **Columns** are the four every entity has — identity, type, folder, created — plus
   the chosen type's declared fields once a single type is picked. Read-only: editing
-  cells and CSV belong to the Case Sheet.
+  cells and CSV belong to the Case Sheet. A primary entity photo replaces the type
+  icon in the identity column; without one, the icon remains.
 - **A row is a control**: focusable, opened with Enter, and the review clicks inside
   it never open it.
 
 **The vocabulary explains itself on hover.** A family, a type, a verb, a rating and a
 declared field each carry one clause from the registry that declares them, shown
 where the word appears. No screen writes its own wording.
+
+## Graph
+
+The second tab of the same workspace, and a different question from the Board rather
+than a second rendering of it: what sits at the centre of the case, what connects to
+what, and what nothing connects to. It opens on the **whole case**, because a case is
+a subject before it is a set of statements — a conflict followed over months has no
+single root to expand from. Expansion is the drill-down.
+
+- **Lenses** are the readings, and each one chooses both which verbs are drawn and
+  which nodes: **Everything · Subjects · Ground · Statements** read the case, and **My
+  work** reads the filing — what you wrote, what it was made from, and what it points
+  at. They are resolved from the verb registry and the type roles, never listed here,
+  so a relation or a type added to the engine joins its lens with no edit.
+  Narrowing the verbs never hides a subject: an entity with no edge *in this lens* is
+  an answer. What a lens takes out of the drawing is a whole **role** — a post, a note
+  and an Inspect session are the filing rather than the case, and My work is the one
+  click back to them. A node's degree follows the reading, so it never prices a click
+  that could bring nothing in, and a name typed into the search can be brought into
+  every reading except one that does not draw its type: that one says so instead.
+- **A source is an edge, and the edge says what it stands for.** A bookmark between a
+  statement and the account that posted it is drawn as one thicker line reading *cites 3
+  bookmarks · 1 account* rather than as three nodes: the path survives and becomes
+  legible, and the budget goes on the subjects. The edge is read in the panel and hands
+  its sources back with one click — nothing else can be done to it, because it is not a
+  row the case holds. **The sources need not be on screen for the path to be:** a
+  bookmark the budget cut is folded exactly like one it kept, or a statement resting on
+  nine sources and one account would draw as a lone dot with both of its ends visible
+  and nothing joining them — on precisely the cases too large to draw whole, which are
+  the ones that need it. One folded from a type this reading does not draw says where
+  it lives instead of offering sources it could only refuse.
+- **A step is an edge too.** A frame pulled out of a video and built into a proof is
+  drawn as *derived from 1 frame* on the line between the two, not as a node in the
+  middle — the act is what the edge is written with, and the picture stops spending a
+  slot per step. Steps in a row read as one line to the far end. A step that shows a
+  place, that a statement cites, or that the case calls the same picture as its source
+  stays a node: it carries something that line cannot say. So does a node made from
+  **two** sources, since collapsing it would say one of them came out of the other.
+  *My work* draws every step as it is, because what was made out of what is the
+  question that reading exists to answer.
+- **What came out of a node and was used by nothing is its count.** Twelve frames saved
+  off a video and not built on yet are twelve pictures of that video, so the video says
+  *12 frames made from it, used by nothing* instead of drawing them. It is a **statement,
+  not an offer**: the node goes on pricing those twelve among the connections the drawing
+  does not hold, and **Expand** brings them like any other. Two counters for one question
+  is what the split gave — the pill reading `+4` beside a menu offering *1 more
+  connection* for the same five nodes, a difference about the mechanism rather than about
+  the case. Narrow on purpose — one connection, and it has to be a derivation pointing at
+  its source. A node with a single *relation* stays where it is, because thin material is
+  what the case has yet to exploit rather than clutter, and a node joined to nothing
+  stays too.
+- **One finding on the ground is one arrow.** A proof concluding a coordinate states
+  the point of everything behind it, so the frame, the video, the proof and the capture
+  all point at the same dot and a reading of the ground draws nothing saying three of
+  them are one picture. They collapse onto the material the finding is about, and the
+  place says what it rests on: *1 source*, not four. A capture pulled at those very
+  coordinates is the reference the comparison was made against, so it folds in rather
+  than counting; one nobody made a proof from is the only thing saying anything about
+  that point, and it stays. Answering POV writes two different verbs over one material,
+  and they collapse together: the surviving line is **the case's own statement**, it can
+  still be confirmed or withdrawn, and the rest are named on it. A line standing for more
+  than itself is drawn heavier at every zoom and writes its count once the drawing is
+  close enough for the nodes to be cards, since three hundred sentences over a case hide
+  the shape the drawing is for. **A node still standing goes on counting what the arrow
+  took**, and opening it draws exactly those: unlike every other fold here, what this one
+  put away is named on a line that need not touch the node it was taken from, so pricing
+  that node down would leave it claiming connections it visibly has.
+- **`Ctrl+Z` takes back the last change to the drawing**, and `Ctrl+Shift+Z` puts it
+  again; both are offered as buttons too, since a canvas teaches no gesture. It reaches
+  everything that is presentation — expanding, hiding, folding, the lens, the ordering,
+  a node dragged — and **nothing that writes to the case**. That boundary is the point:
+  a single stack mixing *I hid a node* with *I deleted a statement* would rewrite the
+  case on the fourth press to get a view back, and an edge cannot be un-deleted anyway,
+  since re-filing one mints a new id, a new date and a new author. A relation filed by a
+  mis-drop is offered back where it is announced instead.
+- **Independence is read, not computed.** A statement's panel says what it rests on —
+  *3 sources · 1 account*, marked when every one of them traces back to the same
+  account — and the toolbar counts those statements. The count is **pressed to reach
+  them**: it lights those statements and one hop around them, which with the sources
+  folded into the edges is the finding itself. A number naming a set with no way to it
+  sends you opening statements one at a time. It concludes nothing: whether three
+  citations from one account is a problem is the analyst's to say, and a source with no
+  known publisher is left out of the claim rather than assumed.
+- **The legend is the control** for the budget, where the lens is the control for the
+  reading. On a real case one family dwarfs the rest, so leaving `collected` out is
+  what spends the budget on the actors, places and statements instead. A handful of
+  switches, no knowledge of the case needed to use them. The rows are the families the
+  *case* holds rather than the ones drawn, or one switched off would take its own
+  switch with it, and the last one on stays on; a family whose every member this
+  reading leaves out is not offered, since that row would switch nothing. Families
+  resolve to types on the way out, as the Board's family filter does, against the types
+  the case actually holds — a free-typed entity no family speaks for is never dropped
+  by a switch that does not claim to cover it.
+- **Keep** decides which nodes a case too large to draw holds on to — the most
+  connected, or the latest work — and the count says what was left out rather than
+  presenting a slice as the case. It appears only once a case has actually been cut,
+  because that is the only time it changes anything.
+- **Position means connectivity, and repeats.** A ring per family seeds the placement;
+  a relaxation then pulls linked nodes together and pushes the rest apart, so the
+  parts of the case that are about each other end up next to each other and the hubs
+  sit in the middle. What nothing connects to is parked in a captioned column instead
+  of drifting in the cloud. An expansion switches to one column per hop, since
+  distance from the root is then the question. **Nothing reads a clock or a random
+  number**: same case, same pixels, because a graph screenshot goes into a report
+  beside a satellite capture.
+- **A question worked out in the Board is drawn here.** *Draw these N* hands over the
+  filter, not the rows it matched, so the drawing answers what the table answered at
+  any size and goes on answering it as the case changes. It is written over the canvas
+  as the sentence it is, with one press back to the whole case — a picture that
+  silently answers somebody else's question looks broken. The legend still narrows on
+  top of it, and **narrows**: two filters sharing no type is a real answer, and an
+  empty one.
+- **Search+ is the same question here.** Text and every filter axis narrow the graph
+  request itself, including stored entity fields; the graph is not repainting an old
+  payload. A matched field is named in the node panel. Saved live views preserve this
+  question plus lens and presentation. Pins and camera belong to that named reading
+  and never rewrite the case-wide arrangement. Graph snapshots keep their captured
+  fields, relations, photo previews and presentation read-only on this surface.
+- **The drawing can be added to, not only read.** Right-click the empty space for
+  *New entity here* — filed through the same dialog the Board uses, drawn, and pinned
+  where the press landed; saying what it is to something else is the *Connect to…*
+  gesture that was already there. Dropping a file anywhere on the canvas runs the
+  Media Library's import and lands the media where it was dropped. Before this, an
+  analyst who realised the picture was missing an account had to leave for the Board,
+  create it, come back and search for it. The creation is **not** on the drawing's
+  undo stack — that stack never writes to the case — so `Ctrl+Z` takes the node out of
+  the picture and the toast's *Undo* is what takes the entity back, through the
+  standard recoverable delete.
+- **A node reaches its row**, as a row reaches its node: *In the Board* opens the same
+  entity in the table, and *In the graph* in any Details panel opens it here.
+- **Find a node** by name, ranked most-connected first. On a case drawn at a few
+  hundred nodes, hunting one by eye does not work, and a canvas cannot be reached
+  from the keyboard at all — so this is both the way in without a mouse and the only
+  practical way to a particular entity. Picking a result selects it and brings it
+  under the eye at the current zoom.
+- **Typing lights the drawing, and removes nothing from it.** From the first letter
+  every match is outlined and keeps its name at any zoom, an edge lights when both of
+  its ends match, and the rest of the case falls back to context. A filter would have
+  answered the same question by taking the rest away, and the shape of the case is
+  what the analyst is holding their place with. The count is over the drawing —
+  *no match drawn* is a different answer from *no such entity*, which is the list's
+  to give. Pressing on the case puts the list away without giving the search up, so
+  the nodes it just pointed at can be read; the field asks for it back. Escape gives
+  the whole search up.
+- **One question narrows the picture at a time.** A search, the statements on one
+  account and a selected node all dim what they are not about, and composited they are
+  not a third reading but an unreadable one. The most recently asked wins, so typing a
+  name outranks the node already clicked — which still rings itself and opens its
+  panel, since that is what a click is for. Pressing the count gives a typed name up
+  rather than answering with an unchanged picture, and Escape lets a narrowing go
+  before a handful that was gathered node by node.
+- **It searches the case, not the picture of it.** A view is bounded, so past the budget
+  most of the case is not on screen, and a search that read only the drawing answered
+  *no such entity* for entities the case plainly holds — nothing told "not in the case"
+  from "not in this picture". What the drawing does not hold is listed apart and offers
+  to **bring it in**, through the same `expand` that opens a node: it arrives with what
+  touches it, kept whatever the ranking and the narrowing would have done with it, and
+  it is selected and centred so an arrival off screen is not mistaken for nothing
+  happening. The search is asked of the catalog, the read the Board uses, and ignores
+  the narrowing on purpose — a name typed is a question about the case.
+- **Hover reads, selection commits.** Passing over a node lights it and its edges and
+  names them; a click is what narrows the picture. Selecting fades the far context
+  instead of hiding it, and the side panel reads the node's own connections in words,
+  using the registry's inverse wording for an incoming edge. The root of an expansion
+  never fades its own view: asking for three hops and getting two of them greyed
+  would contradict the question. **Expanding is priced on the node**: a degree is
+  shown before the click that spends it.
+- **The panel reads a node, it does not list its edges.** Connections are grouped by
+  what they say — the verb and its direction, since the registry words those apart —
+  under a heading that counts them, biggest group first, because what a node mostly
+  is, is the first thing to say about it. Past eight in one group the rest are asked
+  for rather than listed. Hovering a row singles its edge out on the canvas, verb
+  written on it, and the node's other edges step back: selecting already lit all of
+  them, so *which line is this row* had no answer otherwise. Clicking a row reads the
+  node at the other end, and the view moves only if that node is off screen — the
+  layout puts linked nodes next to each other, and recentring on every step makes the
+  drawing lurch under the reading.
+- **A node states the connections the picture does not hold.** The rows above are
+  built from the edges on screen, so a node with forty connections and three of them
+  drawn read as a node with three. The count underneath is the node's own, against the
+  connections the view holds rather than the ones it can draw — a loop is kept and
+  never drawn, and counting it as missing left a node asking for ever. In a whole-case
+  view, expanding it from there is the same act as the menu's; in a neighbourhood there
+  is nothing to press, because that read is grown by **Hops**, and the line says so.
+- **The focus says how far it reaches, and stays until it is let go.** A strip over
+  the drawing names the node in hand and offers **1, 2 or 3 hops** — on the keys as
+  well, beside the one that fits the case. One hop answers *what touches this*; two
+  answers *what does this sit between*, which is the account two people both cite
+  without either naming the other, invisible at one hop and drowned at the whole
+  case. The rings are walked over the **edges already drawn**, so a wider reach costs
+  no read and can claim no connection the picture cannot show. How far you are
+  looking is kept as you move from node to node — it is a stance, not a property of
+  what you clicked — and goes back to one hop when the focus is let go. Never offered
+  on the root of a neighbourhood, whose own **Hops** asks the case a different
+  question.
+- **Only this** takes the rest of the case off the screen rather than dimming it, and
+  frames what is left. Dimming is the default because the shape behind the reading is
+  what keeps your place, but a subset you mean to work on has to be readable alone. It
+  never touches the layout, so switching back puts every node exactly where it was and
+  the view with it. A name typed while it is on outranks it and the case comes back
+  with the matches lit: an edge needs both of its ends, so hiding everything outside
+  the matches would have answered a search with a scatter of unconnected dots. Escape
+  gives the case back one press before it gives the node up.
+- **A path is walked, not remembered.** *Walk by hand* arms the walk on the node in
+  hand, and from then on the drawing shows only where the path can go: every node it
+  may reach next is lit before the click, so an impossible step cannot be taken
+  rather than being taken and refused — the same bargain the connection gesture
+  makes. Clicking a lit node extends the path; clicking one already on it walks back
+  and drops what came after; the panel's rows do the same, which is how the walk is
+  reached without a mouse. Escape gives it up whole, as it drops a half-drawn
+  relation. Path edges are drawn as ribbons, told apart by **weight and solidity
+  rather than hue** — a graph that reaches a report is printed in grey, and the
+  families already own the palette.
+- **Or the case is asked for the way.** *Path to…* arms the question on a node and
+  waits for the other end: **click any node**, pick a name from the search, or take a
+  row from the panel — an armed gesture owns every way of pointing at a node, and the
+  search is not a convenience but the half a click cannot cover, since the view holds
+  a fraction of a real case and *are these two connected* is asked about things far
+  enough apart to be off screen. **Nothing is dimmed while it waits**, which is where
+  this parts company with *Connect to…*: a relation has a vocabulary that rules a
+  pair out before the press, a route has none — the case is searched, not the
+  drawing, so greying a node would be the picture asserting what only the server can
+  know. That means dropping the focus fade the armed node would otherwise still be
+  carrying, or the drawing says *only these five can be pressed* over a strip saying
+  click anything. *No route within four hops* is that answer, and it is a finding rather than a
+  silence. A route through nodes the budget cut brings them in first.
+- **Every equally short route is drawn, one is read.** The ties are the point: two
+  accounts reaching the same place through two different sources is what independence
+  looks like, and an answer that drew one of them would hide it. The drawing lights
+  them all — *how these are connected* — while the sentence takes them one at a time
+  with a `1 / 3` stepper, because a sentence cannot be read three times over. An
+  answered route is walked onward from and stepped back through like any other, which
+  makes it a place to keep working rather than a result.
+- **The path reads as a sentence**, node by node with the verb of each step between
+  them. An edge crossed against its own arrow takes the registry's inverse wording,
+  so the sentence always reads left to right: the first attempt wrote the plain verb
+  with a reversed arrow, and *A ← made from B ← made from C* has to be walked
+  backwards to be understood. Nothing is stored — a path is derived from edges that
+  can be deleted, so a saved one goes quietly false the day a link in its middle is
+  removed. What gets kept is the sentence, in a note, written by a person.
+- **Right-click a node** and it says what can be done with it, in words: expand the
+  connections it has off screen, collapse what hangs off it, hide it, connect it to
+  something, or read it in Details. A
+  canvas teaches no gesture on its own, so the acts are named rather than hidden in
+  one. The menu selects nothing — asking what a node can do is not choosing it.
+- **Expanding a node grows the picture instead of replacing it.** Its off-screen
+  connections join the case already drawn, marked as arrivals, and **nothing already
+  on screen moves**: everything drawn is a fixed point, so only the arrivals are
+  placed, seeded beside the neighbours that asked for them. That is a promise about
+  the picture before it is one about the clock — twenty nodes expanded into two thousand
+  cost twenty placements instead of two thousand, which is a fifth of a second where
+  it was six. A new *question* — a lens, a filter, a folder — re-places the case
+  outright, since that is a different reading rather than the same one grown. The view
+  does not refit either: losing your place is what following a thread used to cost.
+  The price, taken deliberately: the picture depends on the order things were expanded
+  in, exactly as it already depended on what was dragged. The count offered is what is
+  *missing*, not the degree — when every neighbour is already drawn the menu says so
+  instead of offering an act that would appear to do nothing. The panel's **Around
+  this** is the other act, and is worded apart because it does the opposite: it
+  replaces the case with one node and its hop columns, where **Expand** adds to the
+  case in place.
+- **Three acts on the drawing, three words: Expand, Collapse, Hide.** Expanding brings
+  in what a node has and the picture does not; collapsing puts away what hangs off it;
+  hiding takes it out. They are named that way in the node's menu, in its panel and in
+  the tooltip alike — the tool once said *Open*, *Fold back*, *Fold it back*, *Take it
+  out* and *Bring back* for what is really three things, and a second name for one act
+  leaves the analyst deciding whether it is a second act. One way back for all of them:
+  **Reset view** in the toolbar, offered only once the drawing has actually been
+  edited, draws the case the way it opened without touching the reading or the
+  arrangement. *Drawn as one edge* stays clear of all three: an attestation collapsed
+  into one line is a way of drawing an edge, not an act on the set.
+- **The switch is on the node, and states which act it is before it is pressed.** A
+  pill on the node under the eye reads `+3` or `−3`, double-clicking presses it, and
+  the tooltip spells out what it counts. It grows before it tidies, which is what makes
+  one switch learnable: a node holding collapsed nodes gives them back, a node with
+  neighbours off screen goes and gets them, a node with everything already around it
+  puts that away. **It is never offered where it would do nothing** — a node the case
+  has already expanded cannot be expanded again, so its switch falls through to the
+  fold, and the menu's greyed line says *Expanded, 3 did not fit* rather than greying
+  in silence. The same switch is in the panel in words, since a canvas cannot be
+  reached from the keyboard.
+- **Collapsing reaches the picture the case opened on, which no other act does.**
+  Expanding adds and hiding removes; neither speaks for the two hundred nodes that were
+  on screen before anything was touched, and those are the ones in the way. Collapsing
+  a node puts away **what only hung off it** — pull the node out of the drawing in your
+  head, and whatever falls off with it is what goes. A lone neighbour always goes; among
+  the pieces with a shape of their own the biggest stays, because a control that can
+  take the case away with it is a trapdoor; and a piece holding a node placed by hand
+  never goes. So **a fold never cuts a link between two nodes that both stay**: the
+  picture left behind says what it said before, with fewer dots. Nothing is asked of
+  the case and nothing is given up — the nodes are still in the payload, `N folded` in
+  the toolbar gives every one of them back at once, and a name typed into Find reaches
+  a collapsed node where it is instead of fetching it again. What it does not do is
+  make room: the case still sent those nodes, and **Hide** is the act that frees budget.
+- **The drawing is a set you own.** **Hide**, in the panel and in the node's menu,
+  leaves *any* node out of the picture, not only one you expanded. Nothing is
+  deleted: the case keeps the entity and every connection it has, and the wording keeps
+  clear of the edge panel's *Remove*, which does delete a statement. Three ways back at
+  three sizes: the neighbour it was hanging on gives that one node straight back,
+  **Undo** takes the last change off, and **Reset view** draws the case the way it
+  opened. The removal is applied last, so it survives an expansion that reaches the
+  same node.
+  **The node it was hanging on hands it straight back**: hiding is your own act on your
+  own picture, and undoing one node of it should not cost the whole drawing or the name
+  of a node you have just decided not to look at, so the neighbour counts it among the
+  connections the picture lacks and its switch gives it back. Naming the node again
+  outranks the removal too,
+  whether the name comes from Find, from a route or from a source handed back off an
+  edge. It is offered on the whole case only: a neighbourhood's root is the question
+  being asked, and that read takes no such list.
+- **A hidden node takes what only it was holding.** Hiding the node you had expanded
+  used to leave its neighbourhood behind with no edge to anything. What stays now is
+  what something standing on its own still reaches: a node the ranking drew, one you
+  named, or a second expansion that reached the same node, which is the convergence the
+  drawing exists to show. Reachability rather than a count of edges, because the
+  vocabulary ranks no edge above another and a pair holding only each other is as
+  adrift as a single dot. *Reset view* undoes the whole act, since the removal was one.
+- **Drawing a node is not drawing its neighbourhood.** The two were one act, so
+  anything named arrived with everything it touches: a four-node route came in behind
+  four neighbourhoods and the answer was buried in the crowd it brought. Now a route,
+  an entity picked out of Find and the sources handed back off a folded edge are drawn
+  as themselves, while **Expand** is what asks for the hop around them. A gathered
+  handful does both by the group — **Expand N** and **Hide N** are one read where five
+  clicks were five reads landing in five places.
+- **A comfort number to open on, and no ceiling after it.** A limit that refuses is
+  the app overruling the analyst about their own picture: drawing the case and asking
+  what touches one node shared one budget, the ranking spent it first, and the answer
+  asked for outright was the one refused — in silence, since the node was recorded as
+  expanded and the control that offered to expand it greyed itself. So the first draw
+  opens on **300 nodes**, the most connected, with the case's own total beside it —
+  *300 of 1 050* — and **everything after that is unbounded**: nothing named, expanded
+  or brought in is ever refused for room. An absolute count rather than a share of the
+  case, because a tenth of fifty entities is an empty picture and a tenth of ten
+  thousand is a freeze.
+- **The drawing says what it weighs, since nothing stops it growing.** The placement
+  compares every node against every other, sixty times over, on the main thread: five
+  hundred place in a quarter of a second, a thousand in one, two thousand in four with
+  the tab frozen throughout. So past a thousand the toolbar says *heavy drawing*, past
+  two thousand *very heavy*, each with what the next change will cost. It is a price,
+  not a wall — the acts that answer it are the analyst's own: hide what the picture is
+  not about, collapse what hangs off a hub, or switch a family off.
+- **Connecting is two clicks and a named verb.** "Connect to…" arms the gesture, a
+  dashed arrow follows the pointer, and only the endpoints the vocabulary accepts stay
+  lit — so an illegal pair cannot be drawn rather than being drawn and then refused.
+  The case can still be panned while it is armed, since the two nodes worth joining
+  are rarely near each other. Landing offers the readings that pair allows, each in
+  its own words and under the registry's own heading where it has one, so a pointer is
+  not read as a statement, and files the one chosen through the same route Details
+  uses. Nothing is said when it lands: the new edge appearing is the confirmation, and
+  the only case worded is a lens that does not draw that verb.
+- **An edge is a thing to read and to rule on.** Clicking one names it, says which way
+  it goes, who filed it, and offers *Confirm* on a proposal or *Remove* on any of
+  them. On a worked case the finding is more often on the edge than on either node.
+- **Folder** draws one of the analyst's own buckets instead of the whole case, read the
+  way the Board reads it. It sits in the toolbar rather than behind a menu because it is
+  the closest thing the case has to *what I am working on*. The Board's other two
+  filters are deliberately absent: review state would draw the proposals alone, and a
+  proposal's far end is nearly always confirmed, so the closed link set drops every
+  edge and the picture becomes a column of dots — while the dash already says
+  *proposed* in place. An exact type fails the same way, the verbs running between
+  families; the two that stay inside one are reached by leaving one family on.
+- **Every edge says which way it goes and in what words.** The vocabulary is directed,
+  so each edge carries a head, and the verb is written along the edges of whatever is
+  under the eye. Four strokes — lineage, stated relation, mention, proposal — and the
+  legend names the ones on screen, since an unexplained dash pattern is decoration.
+- **Nodes declutter by zoom.** Wide, they are dots; the few busiest keep their name,
+  because what sits at the centre of the case is the question. Close enough for one
+  to fit, each becomes a **mini card**: family stripe, the preview the case already
+  holds (or the entity's glyph), title, type and degree. The card is held at a fixed
+  size on screen, which is what lets it fit — in canvas units it would cover its
+  neighbours at every zoom.
+- **A node says when the case made it.** A frame, an adjustment, a collage: filed as
+  ordinary media and drawn with the same glyph as a photograph somebody handed over.
+  The card names the act instead of the kind — *Frame*, *Collage* — and the panel adds
+  one line saying it was made out of material the case already holds. Only the tools
+  that compose case material mark their output: an upload carries nothing, since
+  "upload" on an upload says nothing about it.
+- **Previews are the cached thumbnails** the Media Library uses, loaded only for the
+  cards actually on screen and only once each. The graph never generates one: a read
+  that draws does no CPU work, so an entity whose picture was never cached shows its
+  glyph.
+- **Unconnected** counts what nothing in this lens reaches — the case's unexploited
+  material, and the one figure a table has no column for. Counted across the **case**
+  like the total beside it, never over what was drawn: a node with no edge sorts last,
+  so a cut discards it first, and read off the drawing the figure would report zero on
+  exactly the cases large enough to need it.
+- **A node can be put somewhere, and it stays.** Dragging one — as a dot or as a card,
+  identically — pins it: the case records the spot, and the layout then treats it as a
+  fixed point that still pushes and pulls while nothing moves it. Everything else
+  settles around the pins, so a node that arrives later joins the arrangement instead
+  of restarting it, and new arrivals are drawn towards where the work actually is
+  rather than back to the centre. The arrows move the selected node too, since a canvas
+  has no other keyboard path in. A pinned node carries a pushpin, because a node that
+  ignores the layout has to say why. A node held where the drawing already had it
+  carries no pushpin: nobody chose that spot, so there is nothing to let go of. Moves
+  are **saved as they are made** — asking for a keystroke after every drag would put
+  friction on the one gesture this is for — so the way back is a control, not an undo:
+  *Let it go* in the panel for one node, which places that one against a case that
+  stays where it is, and **Reset N pins** in the toolbar, which drops the whole
+  arrangement and lays the case out again. That count is every pin the lens
+  holds, so the way back is offered even when the pinned nodes were cut from the view.
+  **Ctrl-click gathers a handful** — the nodes ringed in amber move together when any
+  one of them is dragged, and Escape lets them go. Moving is not all a handful is for:
+  it is also expanded and hidden by the group. That is a separate act from
+  selection, which stays single because the fade is computed from it and "one hop from
+  the selected node" has to have one answer. **Each lens keeps its own arrangement**,
+  because a lens is a reading: it draws its own nodes and its own edges, so it clusters
+  differently, and one shared arrangement would anchor every reading into the shape of
+  whichever one it was built in. Offered on the whole case only: a neighbourhood gives
+  its horizontal axis to distance from the root, and a node moved off its column would
+  contradict what that view is drawn to show.
+- Drag anywhere to pan, scroll to zoom at the pointer, `+` / `-` / `0` from the
+  keyboard, and the level is on screen. Colour says only which family a node belongs
+  to; the meaning of an edge is on its stroke, so the picture survives being printed.
+  Selection keeps the amber.
 
 ## Case sidebar
 
@@ -121,6 +588,15 @@ remembered per workspace for the current session. Reloading restores the default
   field grid, one light connection list, and a collapsed **Made from & used by**
   block. A field declared as holding sentences is a box that grows, not a line. A
   suggested entity says so at the top and carries the click that confirms it.
+  People, organizations, assets and equipment types add a photo gallery above the
+  form. It accepts several images from the computer or the Media Library, keeps the
+  main preview to a normal panel height, and lets one image become primary. A
+  computer import stays private to the entity and never enters the Media Library;
+  choosing from Media only stores a reference. Removing a private photo deletes its
+  dedicated copy, while removing a Media choice leaves the media in the case. With
+  no photo, only the two add actions remain and other surfaces keep the entity icon.
+  The same two actions appear while creating a supported entity. Photos are staged
+  in the form, where one can be chosen as primary, then attached after creation.
   Save commits the entity fields; each connection has its own Add action. Because the
   two commit differently, closing the panel or following a connection asks first when
   Save has not taken what is on screen.
@@ -234,6 +710,13 @@ has no verb menu or rating. A Claim has its own **About**, **At** and **Cites**
 editor; its confidence is edited with the Claim fields, and those three connectors
 carry no rating of their own.
 
+**A Claim's fields are headed twice**: what it states — how many, in what condition —
+then the reasoning behind it. One heading over all five would file a count as
+reasoning. The count steps by one and starts at one; leaving it empty says *seen, not
+counted*, which is not the same answer as one. An asset carries its own **Condition**
+off the same scale, where it reads as the last known state rather than as one
+observation.
+
 ## Sources
 
 The Media Library toolbar keeps explicit maintenance actions beside Import:
@@ -243,7 +726,16 @@ current version. A **GPS** toggle beside the type and folder filters narrows the
 list to the files whose own metadata states a position, and appears only in a case
 that holds some; how many is in its tooltip, not in its label. Those rows carry
 one pin glyph — coordinates in the tooltip, not in the title — and clicking it
-flies the map there. Thumbnail polling follows all pending case jobs, including
+flies the map there. **Show N working files** sits on the same independent axis: a
+switch rather than another chip, because the chips answer *show me only X* and are
+single-select where this one is *put X back*. The library opens on what the case
+collected, the frames and collages it made itself held back, and the switch says how
+many those are rather than leaving them unannounced; the counts and the paging are
+computed with it so the facets never disagree with the list, and toggling it refetches
+because the loaded page is already the collected subset. It reads how the file
+**entered the case**, which is not everything true about it: one imported and later
+found identical to an extracted frame stays on the side it came in by. A case holding
+nothing but working files says so instead of offering to import. Thumbnail polling follows all pending case jobs, including
 files beyond the loaded page after a case import. Thumbnail failures are scoped
 to their case, so switching cases always reloads previews even when relative
 paths match. Enrich respects an existing confirmed GPS relation during backfill.
@@ -286,6 +778,21 @@ spelling. Proofs and posts keep the native name only.
 
 Saving a place or a capture resolves its country as part of the save, so the item
 appears already grouped. Offline it lands under Unlocated for a later Locate.
+
+Saving a proof turns the coordinates it carries into a place, which is where a
+geolocation stops being text in a spec and joins the map (ONTOLOGY §3). The
+composer's **POV** box beside the coordinates says what the point is: ticked, the
+footage was recorded there; left alone, the footage shows it. Nothing in a
+composition can answer that, which is why it is asked rather than guessed. A capture
+files nothing: ten are taken while hunting one roof, and the point is worth
+minting once, where somebody commits to it. Settings → General → Proofs saves it
+outright or has the composer ask; a point the case already holds is neither
+filed twice nor asked about.
+
+A row the enrichment proposed from a file's GPS carries a `suggested` chip and an
+**accept** action, on the row and in the search modal, so the point is settled
+where the map that decides it is already open. The sidebar's Suggestions list
+keeps working, and both send the same click.
 
 A globe/folder switch beside the filter regroups the same set by My-work folder:
 the case's whole folder tree, empty folders included, with unfiled items under

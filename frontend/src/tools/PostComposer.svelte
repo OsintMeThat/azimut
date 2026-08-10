@@ -1,5 +1,6 @@
 <script>
   import { api } from '../lib/api.js';
+  import { fileUrl } from '../lib/fileUrl.js';
   import { fetchAllEntities, lookupEntity, fetchDerivation } from '../lib/catalog.js';
   import { caseState, uiState, toast, reloadCase, prefs } from '../lib/state.svelte.js';
   import { templatesState } from '../lib/state.svelte.js';
@@ -7,7 +8,9 @@
   import { openNotebook } from '../lib/navigate.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { proofCoordsText, proofSource } from '../lib/composer.js';
-  import { isDefaultName, nextName, savedSlugs, savedTitles, savedTitle, slugify } from '../lib/naming.js';
+  import {
+    isDefaultName, nextName, savedSlugs, savedTitles, savedTitle, slugify, specAttr, specPath,
+  } from '../lib/naming.js';
   import { filingName, planProofHandoff } from './post/handoff.js';
   import {
     buildTweet1 as buildTweet1Lines, DEFAULT_TWEET_BODY,
@@ -101,7 +104,7 @@
     let live = true;
     (async () => {
       if (draft) {
-        const bound = await lookupEntity(id, 'draft', `.drafts/${draft}.json`);
+        const bound = await lookupEntity(id, specAttr('draft'), specPath('draft', draft));
         if (live && !bound && draftName === draft) {
           draftName = null;
           toast('The saved draft was deleted. Saving now creates a new one', 'warn');
@@ -601,7 +604,7 @@
   }
 
   function mediaHref(path) {
-    return path && caseState.current ? `/files/${caseState.current.id}/${path}` : null;
+    return path && caseState.current ? fileUrl(caseState.current.id, path) : null;
   }
 
   function mediaKind(path) {
@@ -610,7 +613,7 @@
 
   const proofHref = $derived(
     proofPng && caseState.current
-      ? `/files/${caseState.current.id}/${proofPng}${proofVer ? `?v=${proofVer}` : ''}`
+      ? `${fileUrl(caseState.current.id, proofPng)}${proofVer ? `?v=${proofVer}` : ''}`
       : null
   );
 
@@ -940,7 +943,7 @@
         // deleting a proof leaves a dead image nothing accounted for.
         sources: [
           ...reportAttachmentPaths(),
-          ...(draftName ? [`.drafts/${draftName}.json`] : []),
+          ...(draftName ? [specPath('draft', draftName)] : []),
         ],
       });
       await reloadCase();
@@ -1499,7 +1502,7 @@
           >
             <div class="picker-thumb">
               {#if item.thumbnail}
-                <img src={`/files/${caseState.current.id}/${item.thumbnail}`} alt={item.path} />
+                <img src={fileUrl(caseState.current.id, item.thumbnail)} alt={item.path} />
               {:else}
                 <Icon name={item.kind === 'video' ? 'video' : item.kind === 'audio' ? 'audio' : 'file'} size={24} />
               {/if}
@@ -1527,7 +1530,7 @@
           <button class="picker-item" onclick={() => pickProof(item)} title={item.title} disabled={!item.png}>
             <div class="picker-thumb">
               {#if item.png}
-                <img src={`/files/${caseState.current.id}/${item.png}`} alt={item.title} />
+                <img src={fileUrl(caseState.current.id, item.png)} alt={item.title} />
               {:else}
                 <Icon name="proof" size={24} />
               {/if}

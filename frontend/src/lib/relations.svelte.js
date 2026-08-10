@@ -37,15 +37,41 @@ export function loadRelationTypes() {
   return pending;
 }
 
+/**
+ * The two edges the app files by itself, and the words they read as.
+ *
+ * They are not in the registry because nobody may state them: an artifact is
+ * recorded as made from its source at save time (`engine/links.py`). The wording
+ * still has to live somewhere shared, since any surface drawing an edge has to
+ * name it, and `derived-from` is a type rather than a sentence.
+ */
+export const CHAIN_TYPES = ['derived-from', 'depends-on'];
+const CHAIN_VERBS = { 'derived-from': 'made from', 'depends-on': 'needs' };
+/**
+ * The same two edges read from the other end.
+ *
+ * A derivation is the one kind of edge an analyst walks in both directions as a
+ * matter of course — a proof is made from a collage made from a video, and the
+ * question is as often "what came out of this" as "what is this made from". Without
+ * these, reading one backwards fell through to the raw type and a panel said
+ * `derived-from` where every other edge said a sentence.
+ */
+const CHAIN_INVERSE = { 'derived-from': 'is the source of', 'depends-on': 'is needed by' };
+
 /** How a link type reads in words, or the raw type until the registry lands. */
 export function relationVerb(type) {
-  return registry.types.find((entry) => entry.type === type)?.label ?? type;
+  return registry.types.find((entry) => entry.type === type)?.label ?? CHAIN_VERBS[type] ?? type;
 }
 
 /** How a relation reads from the entity being viewed. */
 export function relationReading(type, direction = 'out') {
   const entry = registry.types.find((row) => row.type === type);
-  if (!entry) return type;
+  // The two chain types are deliberately absent from the registry — nobody may
+  // state them — so their wording is the fallback rather than the raw type.
+  if (!entry) {
+    const words = direction === 'in' ? CHAIN_INVERSE[type] : CHAIN_VERBS[type];
+    return words ?? type;
+  }
   return direction === 'in' ? (entry.inverse_label ?? entry.label) : entry.label;
 }
 
@@ -97,6 +123,15 @@ export function isRatable(type) {
   return registry.types.find((entry) => entry.type === type)?.ratable ?? false;
 }
 
+/** How a free note on this verb is labelled, or '' when it takes none.
+ *
+ *  It belongs to the verb and not to the edge, so a surface draws the field because
+ *  the registry declares it — never because some edge happens to carry a value. Same
+ *  shape as `isRatable`, and read the same way. */
+export function relationQualifier(type) {
+  return registry.types.find((entry) => entry.type === type)?.qualifier ?? '';
+}
+
 /**
  * The relations an analyst may state between a subject and another entity.
  *
@@ -115,6 +150,28 @@ function endpoint(value) {
 function mediaKindAllowed(end, allowed) {
   if (end.type !== 'media' || !allowed?.length || end.kind == null) return true;
   return allowed.includes(end.kind);
+}
+
+/**
+ * Whether a verb reads the same word in both directions.
+ *
+ * `in-network` does not — a parent *contains* a child while the child *is in* the
+ * parent — so its two readings are two findings. `associated-with` does: two people
+ * are associated with each other, and there is no second sentence to tell apart. So
+ * it is offered once, and asking which way a stored one runs is a question with no
+ * answer.
+ *
+ * The inverse has to be **declared** and equal, never merely missing. The route
+ * always sends one, so the two cases never coincide against a real registry — but
+ * read as symmetric, a verb that simply never spelled its inverse would stop having
+ * its direction checked at all, which is the one thing this decides.
+ */
+function symmetric(entry) {
+  return Boolean(entry?.inverse_label) && entry.inverse_label === entry.label;
+}
+
+export function isSymmetric(type) {
+  return symmetric(registry.types.find((row) => row.type === type));
 }
 
 export function relationOptions(subject, other, action = 'all') {
@@ -141,7 +198,11 @@ export function relationOptions(subject, other, action = 'all') {
     // Equal endpoint types can support both readings. A parent network contains a
     // child network, while that child is in the parent; collapsing this to the
     // first match made one direction impossible from half of the Details panels.
-    if (inward) {
+    //
+    // Unless the two readings are the same word: `associated-with` is symmetric, so
+    // offering it twice puts one sentence in the menu twice and asks the analyst to
+    // choose between two identical lines.
+    if (inward && !(outward && symmetric(entry))) {
       options.push({
         type: entry.type,
         label: entry.inverse_label ?? entry.label,
@@ -156,10 +217,21 @@ export function relationOptions(subject, other, action = 'all') {
   return options.sort((a, b) => Number(Boolean(a.group)) - Number(Boolean(b.group)));
 }
 
-/** Whether a stored row still fits the current endpoint contract. */
+/**
+ * Whether a stored row still fits the current endpoint contract.
+ *
+ * The direction has to match, because the two readings of an asymmetric verb are two
+ * different findings and only one of them may still be legal. **A symmetric verb is
+ * the exception**: it is offered once, so the entity on the far end of one would
+ * find no inward reading to match and every such row read as an older connection —
+ * marked as out-of-matrix and stripped of its controls on exactly one of the two
+ * panels that show it.
+ */
 export function isCurrentConnection(subject, relation) {
   return relationOptions(subject, relation.entity, relationAction(relation.link.type)).some(
-    (option) => option.type === relation.link.type && option.direction === relation.direction
+    (option) =>
+      option.type === relation.link.type &&
+      (option.direction === relation.direction || isSymmetric(option.type))
   );
 }
 

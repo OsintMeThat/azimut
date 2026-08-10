@@ -197,6 +197,12 @@ describe('entity row', () => {
     expect(row).toContain('title="Confirm"');
     expect(row).toContain('title="Dismiss"');
   });
+
+  it('uses the primary photo and keeps the type icon as the fallback', () => {
+    expect(row).toContain('{#if entity.thumb}');
+    expect(row).toContain('src={fileUrl(caseId, entity.thumb)}');
+    expect(row).toContain('<Icon name={entityIcon(entity)} size={14} />');
+  });
 });
 
 describe('details drawer', () => {

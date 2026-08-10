@@ -55,6 +55,18 @@ const VOCABULARY = [
     manual: true,
     ratable: true,
   },
+  // Symmetric, and the one verb carrying a free note: the tie is real, what kind of
+  // tie it is is a word only the analyst has.
+  {
+    type: 'associated-with',
+    label: 'is associated with',
+    inverse_label: 'is associated with',
+    from_types: ['organization', 'person'],
+    to_types: ['organization', 'person'],
+    manual: true,
+    ratable: true,
+    qualifier: 'How they are tied',
+  },
   // The one verb the registry heads apart: a document naming something is a pointer,
   // not a finding about where it is.
   {
@@ -228,6 +240,50 @@ describe('relatableTypes', () => {
       { type: 'in-network', label: 'is in network', group: '', direction: 'out' },
       { type: 'in-network', label: 'contains', group: '', direction: 'in' },
     ]);
+  });
+
+  it('offers a symmetric verb once, not the same sentence twice', () => {
+    // A parent network *contains* a child while the child *is in* the parent: two
+    // readings, two lines. Two people are associated with each other in one word, so
+    // the second line would ask the analyst to choose between two identical options.
+    expect(relations.relationOptions('person', 'person', 'relation')).toEqual([
+      { type: 'associated-with', label: 'is associated with', group: '', direction: 'out' },
+    ]);
+  });
+
+  it('reads a symmetric row as current from the far end too', () => {
+    // The regression the dedup above caused: offered once, the entity on the far end
+    // found no inward reading to match, so every association read as an older
+    // connection — badged out-of-matrix and stripped of its controls on exactly one
+    // of the two panels showing it.
+    const tie = {
+      link: { id: 'l1', type: 'associated-with', provenance: { status: 'confirmed' } },
+      entity: { type: 'person' },
+      direction: 'in',
+    };
+    expect(relations.isCurrentConnection('person', tie)).toBe(true);
+    expect(relations.isCurrentConnection('person', { ...tie, direction: 'out' })).toBe(true);
+    // An asymmetric verb still has to match: its two readings are two findings, and
+    // only one of them may be legal for a given pair.
+    expect(relations.isSymmetric('in-network')).toBe(false);
+    expect(relations.isSymmetric('associated-with')).toBe(true);
+    expect(
+      relations.isCurrentConnection('ip', {
+        link: { id: 'l2', type: 'in-network', provenance: { status: 'confirmed' } },
+        entity: { type: 'network' },
+        direction: 'in',
+      })
+    ).toBe(false);
+  });
+
+  it('says which verb carries a free note, and which do not', () => {
+    // It belongs to the verb, never to the edge: a note every edge could hold would
+    // leave nothing saying what an edge *is*.
+    expect(relations.relationQualifier('associated-with')).toBe('How they are tied');
+    expect(relations.relationQualifier('in-network')).toBe('');
+    expect(relations.relationQualifier('mentions')).toBe('');
+    // an older registry with no such key answers the same as a verb declining one
+    expect(relations.relationQualifier('nothing-like-it')).toBe('');
   });
 });
 

@@ -80,6 +80,23 @@ const SPEC_ATTR = {
   draft: { dir: '.drafts/', attr: 'draft' },
 };
 
+/** The entity attribute holding a kind's spec path: `spec`, or `draft` for posts. */
+export function specAttr(kind) {
+  return SPEC_ATTR[kind].attr;
+}
+
+/**
+ * Case-relative spec path of the item of `kind` saved under `slug` — the exact
+ * value its entity carries. Tools ask the catalog for this before deciding a
+ * saved item was deleted out from under them, so a hand-written literal goes
+ * stale the day the layout moves: sessions lived under `inspect/` and drafts
+ * under `exports/` before they were hidden, and a path that matches nothing
+ * reads as "deleted" on every save.
+ */
+export function specPath(kind, slug) {
+  return `${SPEC_ATTR[kind].dir}${slug}.json`;
+}
+
 /** The filed entities of `kind`, read off a case's entity list. */
 export function savedEntities(entities, kind) {
   const { dir, attr } = SPEC_ATTR[kind];

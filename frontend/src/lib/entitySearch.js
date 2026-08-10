@@ -32,9 +32,38 @@ export function entitySearchText(entity) {
     .toLowerCase();
 }
 
+/** The fields that explain a hit, with the same declared-kind boundary as the index. */
+export function entitySearchMatches(entity, query) {
+  if (!entity) return [];
+  const terms = String(query ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
+  const fields = [
+    { field: 'label', label: 'Name', value: entity.label },
+    { field: 'type', label: 'Type', value: entity.type },
+    { field: 'folder', label: 'Folder', value: folderOf(entity) },
+    { field: 'notes', label: 'Notes', value: entity.attrs?.notes },
+    ...entityFields(entity.type)
+      .filter((field) => SEARCHABLE_KINDS.has(field.kind ?? 'text'))
+      .map((field) => ({ field: field.key, label: field.label, value: entity.attrs?.[field.key] })),
+  ];
+  const covered = new Set();
+  const matches = [];
+  for (const field of fields) {
+    if (field.value === null || field.value === undefined || field.value === '') continue;
+    const value = String(field.value);
+    const folded = value.toLowerCase();
+    const hit = terms.filter((term) => folded.includes(term));
+    if (!hit.length) continue;
+    hit.forEach((term) => covered.add(term));
+    matches.push({ field: field.field, label: field.label, value });
+  }
+  return covered.size === new Set(terms).size ? matches : [];
+}
+
 /** True when the entity answers the term. An empty term matches everything, so a
  *  caller can hand the box straight through without a guard of its own. */
 export function matchesEntity(entity, query) {
-  const term = String(query ?? '').trim().toLowerCase();
-  return !term || entitySearchText(entity).includes(term);
+  const terms = String(query ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const text = entitySearchText(entity);
+  return !terms.length || terms.every((term) => text.includes(term));
 }

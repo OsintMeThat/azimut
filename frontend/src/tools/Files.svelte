@@ -9,6 +9,7 @@
    * lib/filing.js); the selection math is pure and unit-tested (lib/gridSelect.js).
    */
   import { api } from '../lib/api.js';
+  import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import { buildTree, subtreeCount, folderOf, flattenPaths, isInFolderSubtree } from '../lib/folderTree.js';
   import { assignFolderBatch } from '../lib/filing.js';
@@ -1053,7 +1054,7 @@
               >
                 <span class="lcol-name">
                   {#if tileThumb(e)}
-                    <img class="lrow-thumb" src={`/files/${caseState.current.id}/${tileThumb(e)}`} alt="" loading="lazy" />
+                    <img class="lrow-thumb" src={fileUrl(caseState.current.id, tileThumb(e))} alt="" loading="lazy" />
                   {:else}
                     <Icon name={tileIcon(e)} size={15} />
                   {/if}
@@ -1143,7 +1144,7 @@
             >
               <div class="thumb">
                 {#if tileThumb(e)}
-                  <img src={`/files/${caseState.current.id}/${tileThumb(e)}`} alt={e.label} loading="lazy" />
+                  <img src={fileUrl(caseState.current.id, tileThumb(e))} alt={e.label} loading="lazy" />
                 {:else}
                   <Icon name={tileIcon(e)} size={dense ? 24 : 34} />
                 {/if}

@@ -44,6 +44,7 @@ def test_the_vocabulary_says_each_types_family_reading_and_fields(client):
         "registration",
         "icao24",
         "model",
+        "condition",
     ]
     kinds = {attr["key"]: attr["kind"] for attr in rows["account"]["attrs"]}
     assert kinds["url"] == "url"
@@ -97,17 +98,44 @@ def test_the_legacy_ip_network_field_is_read_only(client):
     assert changed.status_code == 400
 
 
-def test_a_type_whose_fields_share_a_subject_says_what_heads_them(client):
+def test_a_field_that_opens_a_subject_says_what_heads_it(client):
     """A place's four fields are all about how tightly the point is pinned, which is
     worth saying once above them. A vessel's registration numbers are just its own
-    fields, so they head nothing — and the panel renders them bare."""
+    fields, so they head nothing — and the panel renders them bare.
+
+    The heading is on the field rather than on the type because one type can hold two
+    subjects: a Claim says *what* it states and *why* that is believed, and running
+    all five under one word would file a count as reasoning."""
     rows = {row["type"]: row for row in client.get("/api/cases/entity-types").json()}
 
-    assert rows["place"]["group"] == "How precise"
-    assert rows["vessel"]["group"] == ""
-    # a heading with no fields under it would render as a lone label
-    for row in rows.values():
-        assert not row["group"] or row["attrs"], row["type"]
+    heads = {attr["key"]: attr["group"] for attr in rows["place"]["attrs"]}
+    assert heads == {"radius_m": "How precise", "footprint": "", "verbatim": "", "method": ""}
+    assert {attr["group"] for attr in rows["vessel"]["attrs"]} == {""}
+    assert [attr["group"] for attr in rows["claim"]["attrs"]] == [
+        "What it states", "", "Reasoning", "", "",
+    ]
+
+
+def test_a_heading_opens_its_block_once():
+    """A field with no group of its own continues whatever heading is open, which is
+    how a place states "How precise" once over four fields. What that costs is order:
+    reopening an earlier heading further down the list would draw it twice, so each
+    one may be opened once."""
+    for entry in entities.ENTITY_TYPES:
+        opened = [attr.group for attr in entry.attrs if attr.group]
+        assert len(opened) == len(set(opened)), (entry.type, opened)
+
+
+def test_a_heading_reads_as_a_heading_not_as_a_clause():
+    """Same rule the relation groups follow: it labels a block rather than
+    completing a label, so it opens upper-case and does not run to a sentence."""
+    headings = {attr.group for e in entities.ENTITY_TYPES for attr in e.attrs if attr.group}
+
+    assert headings
+    for group in headings:
+        assert group == group.strip() and group[0].isupper(), group
+        assert not group.endswith("."), group
+        assert len(group) <= 24, group
 
 
 def test_the_types_saved_through_a_tool_route_declare_no_fields():
@@ -137,6 +165,28 @@ def test_every_declared_type_sits_in_a_declared_family():
     # and every family earns its place: an empty one is a verb nobody can use
     for family in entities.FAMILIES:
         assert entities.types_in(family), family
+
+
+def test_every_declared_type_says_what_it_is_for_when_the_case_is_drawn():
+    """The role is the axis a graph lens narrows nodes on, and it has no default: a
+    type that did not decide would answer "is a picture of the case about this?" by
+    omission. Every role earns its place too — an empty one is a treatment nothing
+    receives."""
+    assert {entry.role for entry in entities.ENTITY_TYPES} == set(entities.ROLES)
+    for role in entities.ROLES:
+        assert entities.types_with_role(role), role
+
+
+def test_the_role_is_not_the_manual_flag_under_another_name():
+    """The two axes are independent, which is why an existing field could not be
+    reused: `media` and `place` are tool-born subjects, `post` is tool-born and a
+    deliverable, `claim` is hand-made and a subject."""
+    roles = {entry.type: (entry.role, entry.manual) for entry in entities.ENTITY_TYPES}
+
+    assert roles["media"] == (entities.SUBJECT, False)
+    assert roles["place"] == (entities.SUBJECT, False)
+    assert roles["post"] == (entities.DELIVERABLE, False)
+    assert roles["claim"] == (entities.SUBJECT, True)
 
 
 def test_every_declared_field_uses_a_known_editor():
@@ -219,7 +269,9 @@ def test_a_new_type_inherits_only_the_family_wide_relations(
     client, monkeypatch
 ):
     """Broad verbs follow a family; narrowed verbs still need an explicit type."""
-    invented = entities.EntityType("drone", "Drone", entities.ASSET, "grip", manual=True)
+    invented = entities.EntityType(
+        "drone", "Drone", entities.ASSET, "grip", entities.SUBJECT, manual=True
+    )
     monkeypatch.setattr(entities, "ENTITY_TYPES", entities.ENTITY_TYPES + (invented,))
 
     cid = _new_case(client, "Inherited verbs")
@@ -235,14 +287,20 @@ def test_a_new_type_inherits_only_the_family_wide_relations(
 
 
 def test_the_shipped_relations_keep_the_endpoints_they_shipped_with():
-    """The material family *is* the old {media, capture} pair. Generalising to
-    families must not have widened these three by a single type — a picker offering
-    "this proof was recorded at this point" would be a regression, not a feature."""
+    """The material family *is* the old {media, capture} pair, and generalising to
+    families must never have widened these three by itself.
+
+    `depicts` gained `proof` since, and that one is a decision rather than a side
+    effect: a proof is a rendered image, so what it shows is a property of its
+    pixels, and it is where a geolocation is concluded (ONTOLOGY §3). The line the
+    guard still holds is the one below it — **`located-at` stays material-only**,
+    because a proof was composed, never recorded anywhere.
+    """
     by_type = {entry.type: entry for entry in link_engine.RELATION_TYPES}
 
     assert by_type["located-at"].from_types == frozenset({"media"})
     assert by_type["located-at"].to_types == frozenset({"place"})
-    assert by_type["depicts"].from_types == frozenset({"media", "capture"})
+    assert by_type["depicts"].from_types == frozenset({"media", "capture", "proof"})
     assert by_type["depicts"].to_types == frozenset({"place"})
     assert by_type["same-image-as"].from_types == frozenset({"media"})
     assert by_type["same-image-as"].to_types == frozenset({"media"})
@@ -270,6 +328,152 @@ def test_the_new_verbs_keep_the_approved_endpoint_matrix():
     assert by_type["member-of"].to_types == frozenset({"organization"})
     assert by_type["in-network"].from_types == frozenset({"ip", "network"})
     assert by_type["in-network"].to_types == frozenset({"network"})
+    assert by_type["instance-of"].from_types == entities.types_in(entities.ASSET)
+    assert by_type["instance-of"].to_types == frozenset({"equipment-type"})
+    assert "equipment-type" in by_type["about"].to_types
+
+
+# -- what state a thing is in, and how many of it ------------------------------
+
+
+def test_every_asset_says_what_state_it_is_in(client):
+    """A bridge, a ship, an airframe and a lorry can all be damaged, so the field is
+    the family's rather than the two types it was first wanted for. One list, because
+    a count that groups by condition has to reach both the asset and the claim."""
+    rows = {row["type"]: row for row in client.get("/api/cases/entity-types").json()}
+
+    for type_ in entities.types_in(entities.ASSET):
+        field = next(a for a in rows[type_]["attrs"] if a["key"] == "condition")
+        assert field["kind"] == "choice"
+        assert [o["value"] for o in field["options"]] == [
+            "intact", "damaged", "destroyed", "abandoned",
+        ]
+
+    claim_condition = next(a for a in rows["claim"]["attrs"] if a["key"] == "condition")
+    assert claim_condition["options"] == field["options"]
+
+
+def test_changing_hands_is_not_a_condition():
+    """"Captured" is a change of owner, which `owns` already states. Folded into the
+    scale it would mix condition with possession, and a mixture does not aggregate."""
+    stored = {value for value, _ in entities.ASSET_CONDITIONS}
+
+    assert "captured" not in stored
+    assert "seized" not in stored
+
+
+def test_a_condition_outside_the_scale_is_refused(client):
+    cid = _new_case(client, "Condition scale")
+    good = client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "structure", "label": "Rail bridge", "attrs": {"condition": "destroyed"}},
+    )
+    invented = client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "structure", "label": "Road bridge", "attrs": {"condition": "scratched"}},
+    )
+    # absent is unknown, and an analyst is entitled to go back to it
+    cleared = client.patch(
+        f"/api/cases/{cid}/entities/{good.json()['id']}",
+        json={"attrs": {"condition": None}},
+    )
+
+    assert good.status_code == 200, good.text
+    assert invented.status_code == 400
+    assert cleared.status_code == 200
+    assert cleared.json()["attrs"].get("condition") in (None, "")
+
+
+def test_a_count_is_a_whole_number_of_at_least_one(client):
+    """Zero is not a count for the same reason zero is not a radius: absent already
+    says "seen, not counted", and half a destroyed tank is not a quantity anyone can
+    defend."""
+    cid = _new_case(client, "Counting")
+
+    def claim(attrs):
+        return client.post(
+            f"/api/cases/{cid}/entities",
+            json={"type": "claim", "label": "Two of these", "attrs": attrs},
+        )
+
+    assert claim({"count": 2}).status_code == 200
+    assert claim({"count": 2.0}).status_code == 200  # JSON has one number type
+    assert claim({"count": 0}).status_code == 400
+    assert claim({"count": -3}).status_code == 400
+    assert claim({"count": 2.5}).status_code == 400
+    assert claim({"count": True}).status_code == 400
+    assert claim({"count": entities.MAX_COUNT + 1}).status_code == 400
+    # absent is "seen, not counted", which is a different answer from one
+    assert claim({}).status_code == 200
+
+
+def test_a_count_says_it_steps_by_one(client):
+    """Served so the spinner and the validator cannot disagree about what a valid
+    quantity is."""
+    rows = {row["type"]: row for row in client.get("/api/cases/entity-types").json()}
+    count = next(a for a in rows["claim"]["attrs"] if a["key"] == "count")
+    radius = next(a for a in rows["place"]["attrs"] if a["key"] == "radius_m")
+
+    assert count["whole"] is True
+    assert count["minimum"] == 1
+    assert radius["whole"] is False  # a metre is not the smallest honest step
+
+
+# -- the class family ----------------------------------------------------------
+
+
+def test_a_model_is_its_own_family_and_not_an_asset(client):
+    """Nobody owns "T-72B3" and it sits nowhere, so the three verbs an asset takes
+    are all wrong for it. Held in `asset` the picker would offer them."""
+    rows = {row["type"]: row for row in client.get("/api/cases/entity-types").json()}
+    by_type = {entry.type: entry for entry in link_engine.RELATION_TYPES}
+
+    assert rows["equipment-type"]["family"] == "class"
+    assert entities.types_in(entities.CLASS) == frozenset({"equipment-type"})
+    for verb in ("owns", "appears-in", "sited-at"):
+        assert "equipment-type" not in by_type[verb].to_types, verb
+        assert "equipment-type" not in by_type[verb].from_types, verb
+
+
+def test_a_named_object_states_which_model_it_is(client):
+    cid = _new_case(client, "Order of battle kit")
+    case = Case.open(cid)
+    tank = case.add_entity("vehicle", "Turret 214", {"plate": "214"}, by="user")
+    model = case.add_entity("equipment-type", "T-72B3", {"category": "tank"}, by="user")
+    crew = case.add_entity("person", "Crew commander", {}, by="user")
+
+    stated = _link(client, cid, tank["id"], model["id"], "instance-of")
+
+    assert stated.status_code == 200, stated.text
+    # and it runs one way: a model is not an instance of the object
+    assert _link(client, cid, model["id"], tank["id"], "instance-of").status_code == 400
+    # a person is not a member of a class either
+    assert _link(client, cid, crew["id"], model["id"], "instance-of").status_code == 400
+    # "probably a T-72B3" is a reading of the footage, so the edge takes a rating
+    assert link_engine.relation_type("instance-of").ratable is True
+
+
+def test_a_statement_counts_a_model_rather_than_minting_anonymous_objects(client):
+    """The whole point of the class family: "two of these were destroyed here" with
+    no second vehicle entity that names nobody."""
+    cid = _new_case(client, "Counted losses")
+    case = Case.open(cid)
+    model = case.add_entity("equipment-type", "ZU-23-2", {"category": "air defence"}, by="user")
+    place = case.add_entity("place", "Crossroads", {"lat": 48.1, "lon": 37.6}, by="user")
+    video = case.add_entity("media", "Drone clip", {"path": "media/clip.mp4"}, by="user")
+    claim = case.add_entity(
+        "claim", "Two ZU-23-2 destroyed at the crossroads",
+        {"count": 2, "condition": "destroyed", "confidence": "probable"}, by="user",
+    )
+
+    for to_id, verb in ((model["id"], "about"), (place["id"], "at"), (video["id"], "cites")):
+        stated = _link(client, cid, claim["id"], to_id, verb)
+        assert stated.status_code == 200, f"{verb}: {stated.text}"
+
+    assert {link["type"] for link in case.links_of(claim["id"])} == {"about", "at", "cites"}
+    assert case.get_entity(claim["id"])["attrs"]["count"] == 2
+    # the count sits on the node, never on the connector it points through
+    assert all(link.get("confidence") is None for link in case.links_of(claim["id"]))
 
 
 def test_each_entity_type_declares_every_field_once():
@@ -285,7 +489,7 @@ def test_mentions_are_a_separate_action_from_relations(client):
     assert rows["mentions"]["group"] == "Mentions"
     assert rows["mentions"]["ratable"] is False
     assert {type_ for type_, row in rows.items() if row["action"] == "claim"} == {
-        "about", "at", "cites"
+        "about", "at", "cites", "contradicts"
     }
     assert rows["owns"]["ratable"] is True
 
@@ -490,3 +694,82 @@ def test_mentioning_is_not_being_made_from(client):
     lost = case.get_entity(proof["id"])["attrs"].get("lost_sources", [])
     assert len(lost) == 1
     assert not case.links_of(proof["id"])
+
+
+# -- when the case already holds the value ------------------------------------
+
+
+@pytest.mark.parametrize(
+    "type_, one, other",
+    [
+        ("account", "@Handle", "handle"),
+        ("email", "Name@Example.org", "name@example.org"),
+        ("phone", "+33 6 12 34 56 78", "+33-612.345678"),
+        ("domain", "Example.org.", "example.org"),
+        ("ip", "203.0.113.42", "203.0.113.42 "),
+        ("network", "203.0.113.0/24", "203.0.113.0/24"),
+    ],
+)
+def test_one_identifier_written_two_ways_is_one_identity(type_, one, other):
+    key = entities.identity_key(type_, one)
+    assert key and key == entities.identity_key(type_, other)
+
+
+@pytest.mark.parametrize(
+    "type_, one, other",
+    [
+        # Supplying a country code is a guess about what the analyst meant.
+        ("phone", "+33612345678", "0612345678"),
+        # A subdomain is its own hostname, not a spelling of the parent.
+        ("domain", "www.example.org", "example.org"),
+        ("email", "a@example.org", "b@example.org"),
+    ],
+)
+def test_two_values_that_only_look_alike_stay_two_identities(type_, one, other):
+    assert entities.identity_key(type_, one) != entities.identity_key(type_, other)
+
+
+def test_only_an_identifier_has_an_identity_a_label_can_duplicate():
+    """Two people really can share a name, and two claims really can be worded alike.
+
+    The `identifier` family is the one place the label *is* the identity (ONTOLOGY
+    §2), so it is the only one that answers here — a guard over the rest would refuse
+    entities that are genuinely different.
+    """
+    for entry in entities.ENTITY_TYPES:
+        answered = bool(entities.identity_key(entry.type, "Some value"))
+        assert answered == (entry.family == entities.IDENTIFIER), entry.type
+    assert entities.identity_key("email", "   ") == ""
+    assert entities.identity_key("not-a-type", "anything") == ""
+
+
+def test_the_case_says_which_row_already_holds_an_identifier(client):
+    """It reports and never refuses: merging is not shipped, so a create that failed
+    would leave the analyst holding a value with nowhere to put it."""
+    cid = _new_case(client, "Twin identifiers")
+    case = Case.open(cid)
+    first = case.add_entity("account", "@osint_handle", {}, by="user")
+    person = case.add_entity("person", "A Name", {}, by="user")
+
+    def twin(type_, label, ignore=""):
+        return client.get(
+            f"/api/cases/{cid}/entities/twin",
+            params={"type": type_, "label": label, "ignore": ignore},
+        ).json()["entity"]
+
+    # the sigil is how the same handle gets filed twice a week apart
+    assert twin("account", "osint_handle")["id"] == first["id"]
+    assert twin("account", "  @OSINT_Handle ")["id"] == first["id"]
+    assert twin("account", "someone_else") is None
+    # an entity is never its own twin, which is what makes this usable on a rename
+    assert twin("account", "@osint_handle", ignore=first["id"]) is None
+    # two people may share a name, so the question is not asked of them
+    assert twin("person", "A Name") is None
+    assert person["id"]
+
+    # and the value really can still be filed: this warns, it does not block
+    again = client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "account", "label": "osint_handle", "attrs": {}},
+    )
+    assert again.status_code == 200

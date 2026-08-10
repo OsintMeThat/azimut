@@ -49,12 +49,19 @@ class FullCase:
     grid: str = ""
     person_id: str = ""
     org_id: str = ""
+    entity_photo_id: str = ""
+    entity_photo: str = ""
+    entity_photo_thumb: str = ""
     account_id: str = ""
     network_id: str = ""
     vessel_id: str = ""
     structure_id: str = ""
+    model_id: str = ""
     bookmark_id: str = ""
     claim_id: str = ""
+    counted_id: str = ""  # the statement that counts a model rather than objects
+    pinned_id: str = ""  # a node placed by hand on the graph canvas
+    analysis_view_id: str = ""  # a named Board reading stored with the case
     entity_types: set[str] = field(default_factory=set)
 
 
@@ -154,8 +161,41 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     full.org_id = entity("organization", "Northwind Shipping")
     full.account_id = entity("account", "@harbourwatch", {})
     full.network_id = entity("network", "203.0.113.0/24", {"asn": "AS64496"})
-    full.vessel_id = entity("vessel", "MV Aurora", {"imo": "9074729"})
-    full.structure_id = entity("structure", "Quay 4 warehouse", {"kind": "warehouse"})
+    full.vessel_id = entity(
+        "vessel", "MV Aurora", {"imo": "9074729", "condition": "intact"}
+    )
+    full.structure_id = entity(
+        "structure", "Quay 4 warehouse", {"kind": "warehouse", "condition": "damaged"}
+    )
+    # A model rather than an object, and the one member of the `class` family: the
+    # bundle has to carry it, and the vessel above has to be able to say it is one.
+    full.model_id = entity(
+        "equipment-type", "Handysize bulker",
+        {"category": "cargo vessel", "aliases": "handy bulker"},
+    )
+
+    gallery = client.post(
+        f"/api/cases/{case_id}/entities/{full.person_id}/images",
+        json={"media_ids": [photo_entity["id"]]},
+    )
+    assert gallery.status_code == 200, gallery.text
+    assert gallery.json()["images"][0]["primary"] is True
+
+    direct_photo = client.post(
+        f"/api/cases/{case_id}/entities/{full.org_id}/images/upload",
+        files={
+            "file": (
+                "organization-logo.png",
+                io.BytesIO(_png(color=(70, 90, 120))),
+                "image/png",
+            )
+        },
+    )
+    assert direct_photo.status_code == 200, direct_photo.text
+    direct_item = direct_photo.json()["images"][0]
+    full.entity_photo_id = direct_item["id"]
+    full.entity_photo = direct_item["path"]
+    full.entity_photo_thumb = direct_item["thumbnail"]
 
     for from_id, to_id, verb in (
         (full.person_id, full.account_id, "owns"),
@@ -163,6 +203,7 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
         (full.org_id, full.vessel_id, "owns"),
         (full.account_id, photo_entity["id"], "posted"),
         (full.vessel_id, photo_entity["id"], "appears-in"),
+        (full.vessel_id, full.model_id, "instance-of"),
         (full.structure_id, full.place_id, "sited-at"),
     ):
         stated = client.post(
@@ -247,6 +288,20 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
         )
         assert stated.status_code == 200, f"{verb}: {stated.text}"
 
+    # The counted statement: how many of one model, in what state. One kind of thing
+    # per claim, so the number on the node is never ambiguous about what it counts.
+    full.counted_id = entity(
+        "claim",
+        "Two Handysize bulkers berthed at Quay 4",
+        {"count": 2, "condition": "intact", "confidence": "possible"},
+    )
+    for to_id, verb in ((full.model_id, "about"), (full.place_id, "at")):
+        stated = client.post(
+            f"/api/cases/{case_id}/links",
+            json={"from_id": full.counted_id, "to_id": to_id, "type": verb},
+        )
+        assert stated.status_code == 200, f"{verb}: {stated.text}"
+
     grid = client.put(
         f"/api/cases/{case_id}/search-grids/north-sweep",
         json={
@@ -265,6 +320,35 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     )
     assert grid.status_code == 200, grid.text
     full.grid = f".search/{grid.json()['name']}.json"
+
+    # -- the graph as the analyst arranged it ---------------------------------
+    # Not an artifact and not an assertion: where a node was dragged to, in one
+    # reading. Planted here so the trash and bundle gates cover it — a pin has to
+    # travel with the case and die with the entity it places.
+    full.pinned_id = full.person_id
+    pinned = client.put(
+        f"/api/cases/{case_id}/graph/pins",
+        json={"lens": "all", "pins": [{"id": full.person_id, "x": -220.5, "y": 118.25}]},
+    )
+    assert pinned.status_code == 200, pinned.text
+
+    saved_view = client.post(
+        f"/api/cases/{case_id}/analysis-views",
+        json={
+            "name": "People in review",
+            "mode": "live",
+            "surface": "board",
+            "spec": {
+                "query": {
+                    "filter": {"families": ["actor"], "status": "suggested"},
+                    "terms": {"type": "person,organization", "status": "suggested"},
+                },
+                "board": {"order": "-created", "sortKey": "created", "sortDesc": True},
+            },
+        },
+    )
+    assert saved_view.status_code == 200, saved_view.text
+    full.analysis_view_id = saved_view.json()["id"]
 
     # Enrichment and thumbnails were queued along the way; let them land, or the
     # caller's first delete races a background write into the same case.

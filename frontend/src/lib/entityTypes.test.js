@@ -8,7 +8,8 @@ vi.mock('./api.js', () => ({ api: { get: (...a) => get(...a) } }));
 
 const VOCABULARY = [
   {
-    type: 'person', label: 'Person', family: 'actor', icon: 'user', manual: true, group: '',
+    type: 'person', label: 'Person', family: 'actor', icon: 'user', manual: true,
+    image_gallery: true,
     hint: 'a named individual', family_reads: 'a person or organization that can act or hold ownership',
     identity_label: 'Full name', identity_placeholder: 'Name or known alias', attrs: [],
   },
@@ -18,7 +19,6 @@ const VOCABULARY = [
     family: 'place',
     icon: 'pin',
     manual: false,
-    group: 'How precise',
     hint: 'a saved point',
     family_reads: 'a point on the map, never a thing standing on it',
     attrs: [
@@ -26,6 +26,7 @@ const VOCABULARY = [
         key: 'radius_m',
         label: 'Uncertainty radius (m)',
         kind: 'number',
+        group: 'How precise',
         rungs: [
           { label: 'This block', value: 100 },
           { label: 'This town', value: 2000 },
@@ -37,14 +38,13 @@ const VOCABULARY = [
       { key: 'verbatim', label: 'As the source put it', kind: 'text', rungs: [], minimum: null, maximum: null },
     ],
   },
-  { type: 'media', label: 'Media', family: 'collected', icon: 'image', manual: false, group: '', attrs: [] },
+  { type: 'media', label: 'Media', family: 'collected', icon: 'image', manual: false, attrs: [] },
   {
     type: 'bookmark',
     label: 'Bookmark',
     family: 'document',
     icon: 'globe',
     manual: false,
-    group: '',
     attrs: [
       { key: 'archive_url', label: 'Archived copy', kind: 'url', rungs: [], options: [] },
       {
@@ -104,12 +104,24 @@ describe('the entity vocabulary', () => {
     expect(fields[0].rungs.map((r) => r.value)).toEqual([100, 2000]);
   });
 
-  it('serves the heading a type gives its field block, and nothing when it gives none', async () => {
-    await mod.loadEntityTypes();
+  it('opens a heading where the registry changes group, and nowhere else', () => {
+    // one type can hold two subjects — a Claim says what it states and why that is
+    // believed — so the heading rides on the field that opens the block, and the
+    // fields after it continue under whatever is open
+    const marked = mod.withHeadings([
+      { key: 'count', group: 'What it states' },
+      { key: 'condition' },
+      { key: 'confidence', group: 'Reasoning' },
+      { key: 'method' },
+    ]);
 
-    expect(mod.entityGroup('place')).toBe('How precise');
-    expect(mod.entityGroup('person')).toBe('');
-    expect(mod.entityGroup('cuneiform-tablet')).toBe('');
+    expect(marked.map((f) => f.heads)).toEqual(['What it states', '', 'Reasoning', '']);
+  });
+
+  it('heads nothing for a type whose fields stand on their own labels', () => {
+    const marked = mod.withHeadings([{ key: 'imo' }, { key: 'mmsi' }]);
+
+    expect(marked.map((f) => f.heads)).toEqual(['', '']);
   });
 
   it('names the families in registry order, which is what the board filters by', async () => {
@@ -144,6 +156,13 @@ describe('the entity vocabulary', () => {
     expect(mod.creatableTypes().map((e) => e.type)).toEqual(['person']);
     expect(mod.isManualEntityType('person')).toBe(true);
     expect(mod.isManualEntityType('media')).toBe(false);
+  });
+
+  it('says which types have presentation photos', async () => {
+    await mod.loadEntityTypes();
+
+    expect(mod.hasImageGallery('person')).toBe(true);
+    expect(mod.hasImageGallery('media')).toBe(false);
   });
 
   it('degrades to the raw slug and no fields before the registry lands', () => {

@@ -6,7 +6,7 @@ const source = readFileSync(new URL('./AttrFields.svelte', import.meta.url), 'ut
 describe('generated fields', () => {
   it('renders whatever the registry declares rather than a form per type', () => {
     expect(source).toContain(
-      "import { entityFields, entityGroup } from '../lib/entityTypes.svelte.js'"
+      "import { entityFields, withHeadings } from '../lib/entityTypes.svelte.js'"
     );
     expect(source).toContain('const fields = $derived(entityFields(type))');
     expect(source).toContain('{#each shown as field (field.key)}');
@@ -102,8 +102,15 @@ describe('a footprint', () => {
 
 describe('one block, not loose inputs', () => {
   it('heads the fields with whatever the registry calls them, and nothing when it calls them nothing', () => {
-    expect(source).toContain('const group = $derived(entityGroup(type))');
-    expect(source).toContain('{#if group}<div class="attrs-h">{group}</div>{/if}');
+    expect(source).toContain('withHeadings(');
+    expect(source).toContain('{#if field.heads}<div class="attrs-h">{field.heads}</div>{/if}');
+  });
+
+  it('resolves the headings after the hidden fields are dropped, not before', () => {
+    // an untraced footprint hides itself, and a heading resolved before that filter
+    // could outlive every field it was heading
+    const filtered = source.indexOf('withHeadings(fields.filter(');
+    expect(filtered).toBeGreaterThan(-1);
   });
 
   it('renders nothing at all when no field has anything to show', () => {

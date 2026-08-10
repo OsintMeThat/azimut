@@ -11,10 +11,38 @@
 file-backed visible name with its filename stem in one idempotent migration.
 Schemas 4–8 were unreleased development checkpoints and normalize through the
 same jump. The entity/link shape is unchanged since v1. Breaking changes require
-a manifest schema bump and migration. The internal SQLite schema is also at
-version 9: 8 adds `links.confidence`, 9 rebuilds the entity search index so a case
+a manifest schema bump and migration. The internal SQLite schema is at version
+14: 8 adds `links.confidence`, 9 rebuilds the entity search index so a case
 search reaches the declared fields (§2) rather than stopping at the label and the
-notes.
+notes, 11 adds `links.nature` — what kind of tie an edge states, in the analyst's
+own words, and only where the verb declares a qualifier (§3) — and 10 adds
+`graph_pins`, where the analyst dragged a node on the graph
+canvas. That is presentation, not an assertion about the case, which is why it is
+a table of its own and not a key in `attrs`: an entity keeps identity, links and
+provenance (§1). It is keyed by **lens** as well as by entity, because a lens is a
+reading — it draws its own nodes and edges and clusters them differently, so one
+shared arrangement would anchor every reading into the shape of whichever one it was
+built in. It cascades with the entity, so a deleted node leaves no pin for a reissued
+id to inherit, and a restore brings the node back placed by the layout.
+Schema 12 adds `entity_images`: ordered presentation images for `person`,
+`organization`, `vehicle`, `vessel`, `aircraft`, `structure` and
+`equipment-type`, with at most one primary image per entity. A row either owns a
+private, bounded presentation file imported from the computer or references an
+existing image `media` or `capture`. A computer import creates no Media entity
+and never enters the Media Library. A Media reference does not state
+`appears-in`, and detaching it does not delete the media. The first attachment
+becomes primary, and the next is promoted when the primary disappears. Trash
+and bundles carry both forms.
+Schema 13 adds `analysis_views`. These are named readings of the graph, not entities
+or findings: a live row stores a Board or Graph recipe, while a snapshot copies the
+captured entities, provenance, closed relations and bounded preview thumbnails. They
+stay tied to their case, travel only with its complete bundle and never create graph
+edges. Live graph pins and camera are presentation owned by that view, separate from
+the case-wide arrangement. Their denormalised snapshot count lets the Views menu avoid parsing or
+transferring a capture merely to say how many entities it holds.
+Schema 14 indexes `label` (under `NOCASE`) and `prov_at`, the two columns the
+catalog orders the whole case by. Nothing about the vocabulary changes: it is the
+index the ordering was already asking for.
 
 Legend: ✅ implemented in code · ⬜ proposed.
 
@@ -26,13 +54,16 @@ Legend: ✅ implemented in code · ⬜ proposed.
 presents it as this logical shape:
 
 ```jsonc
-{ "entities": [ … ], "links": [ … ], "folders": [ … ] }
+{ "entities": [ … ], "links": [ … ], "folders": [ … ], "entity_images": [ … ],
+  "analysis_views": [ … ] }
 ```
 
 - **Entities** are nodes such as files, points, proofs and people. ✅
 - **Links** are typed directed edges. Every save records its inputs; see §3. ✅
 - **Folders** are `/`-nested analyst buckets in `attrs.folder`, not semantic
   links. ✅
+- **Entity images** are ordered presentation attachments, not graph edges. ✅
+- **Analysis views** are case-owned presentation state, not graph assertions. ✅
 - Media sidecars hold kind, size, uploader, duration, thumbnail data, image EXIF
   and perceptual hashes, plus ffprobe's video container and stream metadata. A
   stated position lands on one field, `gps`, whichever of the two read it. A
@@ -84,6 +115,7 @@ to one clause — no full stop, no em-dash, under a hundred characters.
 |---|---|---|
 | `actor` | a person or organization that can act or hold ownership | `person`, `organization` |
 | `asset` | it is owned, appears, sits somewhere | `vehicle`, `vessel`, `aircraft`, `structure` |
+| `class` | a model the case counts with, never one particular object | `equipment-type` |
 | `identifier` | a handle on a system | `account`, `email`, `phone`, `domain`, `ip`, `network` |
 | `collected` | bytes gathered into the case rather than written, so one may depict a place | `media`, `capture` |
 | `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `inspect-session`, `bookmark` |
@@ -104,31 +136,55 @@ types are disposable. Why the families are cut where they are — `actor` apart 
 alone — is argued in `engine/entities.py`'s module docstring, beside the code it
 governs.
 
+### Roles ✅
+
+Beside its family, a type declares a **role**: what it is for once the case is
+*drawn*. A family says what a thing is and decides its verbs; a role says whether a
+picture of the case is about it. The line that matters is between the first two —
+**the file is a subject, its wrapper is an edge**.
+
+| Role | Reads as | Members | In the drawing |
+|---|---|---|---|
+| `subject` | the case is about it | `person`, `organization`, `vehicle`, `vessel`, `aircraft`, `structure`, `equipment-type`, `account`, `email`, `phone`, `domain`, `ip`, `network`, `media`, `place`, `claim` | a node |
+| `attestation` | a wrapper around something the case already holds | `bookmark`, `proof`, `capture` | folded into the edge that carries its provenance, drawn or not (below) |
+| `annex` | consulted rather than seen, hanging off one node | `note`, `inspect-session` | out of the case readings, drawn by **My work** |
+| `deliverable` | what the case produced | `post` | out of the case readings, drawn by **My work** |
+
+A bookmark stays drawn because it is not a leaf: *this account posted it, this
+statement cites it* is a path through it, and that path is a fact about the case. A
+note and a post carry no path, so they are the filing rather than the case.
+
+`manual` was checked first and does not answer this: `media` and `place` are not
+manual and are subjects, `post` is not manual and is a deliverable, `claim` is manual
+and is a subject. A type has **no default role** — a new one decides, or it would
+answer by omission (`tests/test_entities.py`).
+
 ### Entity type registry
 
-| Type | Family | State | Produced by | Key `attrs` | File-backed |
-|---|---|---|---|---|---|
-| `media` | collected | ✅ | media-library | `path`, `sha256`, `source_url?` | yes (+ sidecar) |
-| `capture` | collected | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `path`, `geo?` | yes (image) |
-| `place` | place | ✅ | satellite, ingest, enrich | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?`, plus the precision fields below | no (a point) |
-| `proof` | document | ✅ | proof-composer | `spec` (json), `path` (png) | yes |
-| `post` | document | ✅ | post-composer | `draft` (json) | yes |
-| `inspect-session` | document | ✅ | inspect | `spec` (json) | yes |
-| `note` | document | ✅ | notebook | `path`, `folder?` | yes (Markdown) |
-| `bookmark` | document | ✅ | capture extension | `url`, `fetched_at?`, `archive_url?`, `reliability?` | no (a URL) |
-| `person` | actor | ✅ | analyst | `aliases`, `role`, `nationality` | no |
-| `organization` | actor | ✅ | analyst | `echelon`, `country` | no |
-| `vehicle` | asset | ✅ | analyst | `plate`, `make`, `model`, `colour` | no |
-| `vessel` | asset | ✅ | analyst | `imo`, `mmsi`, `flag`, `kind` | no |
-| `aircraft` | asset | ✅ | analyst | `registration`, `icao24`, `model` | no |
-| `structure` | asset | ✅ | analyst | `kind`, `address` | no |
-| `account` | identifier | ✅ | analyst | handle in the label; `platform?`, `url`, `reliability?` | no |
-| `email` | identifier | ✅ | analyst | address in the label | no |
-| `phone` | identifier | ✅ | analyst | number in the label; `country?` | no |
-| `domain` | identifier | ✅ | analyst | hostname in the label; `registrar?` | no |
-| `ip` | identifier | ✅ | analyst | address in the label; legacy read-only `network?`; `asn?`, `provider?` | no |
-| `network` | identifier | ✅ | analyst | network/CIDR in the label; `asn?`, `provider?`, `country?` | no |
-| `claim` | claim | ✅ | analyst | `confidence`, `method`, `verbatim` | no |
+| Type | Family | Role | State | Produced by | Key `attrs` | File-backed |
+|---|---|---|---|---|---|---|
+| `media` | collected | subject | ✅ | media-library | `path`, `sha256`, `source_url?` | yes (+ sidecar) |
+| `capture` | collected | attestation | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `path`, `geo?` | yes (image) |
+| `place` | place | subject | ✅ | satellite, ingest, enrich | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?`, plus the precision fields below | no (a point) |
+| `proof` | document | attestation | ✅ | proof-composer | `spec` (json), `path` (png) | yes |
+| `post` | document | deliverable | ✅ | post-composer | `draft` (json) | yes |
+| `inspect-session` | document | annex | ✅ | inspect | `spec` (json) | yes |
+| `note` | document | annex | ✅ | notebook | `path`, `folder?` | yes (Markdown) |
+| `bookmark` | document | attestation | ✅ | capture extension | `url`, `fetched_at?`, `archive_url?`, `reliability?` | no (a URL) |
+| `person` | actor | subject | ✅ | analyst | `aliases`, `role`, `nationality` | no |
+| `organization` | actor | subject | ✅ | analyst | `echelon`, `country` | no |
+| `vehicle` | asset | subject | ✅ | analyst | `plate`, `make`, `model`, `colour`, `condition` | no |
+| `vessel` | asset | subject | ✅ | analyst | `imo`, `mmsi`, `flag`, `kind`, `condition` | no |
+| `aircraft` | asset | subject | ✅ | analyst | `registration`, `icao24`, `model`, `condition` | no |
+| `structure` | asset | subject | ✅ | analyst | `kind`, `address`, `condition` | no |
+| `equipment-type` | class | subject | ✅ | analyst | `category`, `aliases` | no |
+| `account` | identifier | subject | ✅ | analyst | handle in the label; `platform?`, `url`, `reliability?` | no |
+| `email` | identifier | subject | ✅ | analyst | address in the label | no |
+| `phone` | identifier | subject | ✅ | analyst | number in the label; `country?` | no |
+| `domain` | identifier | subject | ✅ | analyst | hostname in the label; `registrar?` | no |
+| `ip` | identifier | subject | ✅ | analyst | address in the label; legacy read-only `network?`; `asn?`, `provider?` | no |
+| `network` | identifier | subject | ✅ | analyst | network/CIDR in the label; `asn?`, `provider?`, `country?` | no |
+| `claim` | claim | subject | ✅ | analyst | `count`, `condition`, `confidence`, `method`, `verbatim` | no |
 
 Every row is created by something: the tool-born ones by the save that produces them,
 the analyst's own from the board's **New entity**, which builds its form out of the
@@ -166,13 +222,126 @@ no key a tool already writes is judged by it.
 
 A declared field says how it is edited: `text`, `longtext`, `number`, `url`,
 `choice`, `geojson`. `longtext` stores and validates exactly what `text` does; it
-says the field expects sentences, so it gets a box that grows.
+says the field expects sentences, so it gets a box that grows. A `number` may declare
+its bounds, its shortcut rungs, and whether it is `whole` — a count steps by one,
+where a radius in metres does not.
+
+A field may also declare the `group` that **heads it and the fields after it**, which
+is what lets one type hold two subjects: a Claim says what it states and then why
+that is believed, where a place's four fields all answer how tightly the point is
+pinned. The heading is emitted where the group changes, so the form keeps the
+registry's order rather than regrouping itself, and a heading may be opened once.
 
 **The declared `text`, `longtext` and `url` fields are what a case search matches
 on**, beside the label, the type, the folder and the notes — a vehicle is looked for
 by its plate. Numbers, shapes and stored grades stay out of the index. One predicate
 serves both sides: `sqlite_backend._entity_search_text` for the server,
 `lib/entitySearch.js` for the lists that filter a small case in memory.
+
+### When the case already holds the value ✅
+
+The `identifier` family is the one place where **the value is the identity**: two
+`email` entities holding one address are two records of one thing, where two people
+may genuinely share a name. `entities.identity_key` is what says whether two labels
+are the same identity, and `GET /cases/{id}/entities/twin?type=&label=&ignore=`
+answers it against the case.
+
+| Type | Compared as |
+|---|---|
+| `account` | trimmed, case-folded, a leading `@` dropped |
+| `phone` | trimmed, case-folded, spaces, dashes, dots, brackets and slashes dropped |
+| `domain` | trimmed, case-folded, a trailing root dot dropped |
+| `email`, `ip`, `network` | trimmed and case-folded |
+| every other family | not compared |
+
+Three rules hold it together:
+
+- **It warns, it never refuses.** Merging is not shipped (§4, `same-as`), so a create
+  that failed would leave the analyst holding a value with nowhere to put it. Both the
+  create dialog and Details name the row already holding it and offer to open it.
+- **It catches the same value typed twice, not every spelling that resolves to the
+  same thing.** `+33612345678` is not compared against `0612345678` and
+  `www.example.org` is not compared against `example.org`: supplying a country code or
+  stripping a subdomain is a guess, and a guard that guesses flags two entities that
+  are genuinely different — worse than missing one, since a duplicate is visible and a
+  wrong warning teaches the analyst to ignore the next.
+- **One comparison, served rather than reimplemented.** The create form used to
+  lowercase the raw label in the browser, which let `@handle` and `handle` sit side by
+  side. It is read on create **and on rename**, which is where it actually happens.
+
+### What state a thing is in ✅
+
+`condition` sits on every member of the `asset` family — a lorry, a ship, an
+airframe and a bridge can all be damaged, so the field is the family's rather than
+the two types it was first wanted for.
+
+| Stored | Reads as |
+|---|---|
+| `intact` | Intact |
+| `damaged` | Damaged |
+| `destroyed` | Destroyed |
+| `abandoned` | Abandoned |
+| absent | unknown |
+
+Two rules make it worth having:
+
+- **It is the last known state, and it overwrites.** The field answers *where is this
+  bridge today*, not *tell me about this bridge*. History is a statement, so it lives
+  on Claims, which is why `condition` is also declared there (below) off the same
+  list — same word, two speakers, exactly as `notes`/`verbatim`/`method` already are.
+  One list, because a count that groups by condition has to reach both.
+- **"Captured" is not a condition.** Changing hands is a change of owner, and `owns`
+  already states that. Folding it in would mix condition with possession, and a
+  mixture does not aggregate.
+
+### Counting a model rather than minting objects ✅
+
+A case that follows a conflict records the same thing over and over: *two of these
+were destroyed here, filmed by that*. Stated with the vocabulary above it costs two
+anonymous `vehicle` entities per sighting — hundreds of nodes that name nobody, each
+a fake identity. Two additions fix it, and neither is a new mechanism.
+
+**`equipment-type` is the model.** "T-72B3", not the tank with turret number 214. It
+is its own family because the three verbs an `asset` takes are all wrong for it:
+nobody owns a model, a model sits nowhere, and letting one `appears-in` a video would
+give the case two ways to say the same thing, the easier of which carries no number.
+Its whole vocabulary is being pointed at — `instance-of` from an object somebody
+actually named, `about` from a statement — plus `mentions`, which reaches every
+family. `category` is a field rather than five types, because that is what a count
+groups on. It lives **in the case**, not in the workspace: a closed case folder is
+complete (SPEC §2), and statistics whose labels live elsewhere do not travel. A shared
+catalogue can later seed the field by autocompletion, copying the term into the case
+on use, which changes nothing here.
+
+**The Claim carries the number.** `count` (whole, at least 1) and `condition` join
+`confidence`, `method` and `verbatim` on the node — never on `about`, because a Claim
+may point at several subjects and one number on the node could not say which it
+meant. So **one statement counts one kind of thing**, and a second kind is a second
+Claim with its own confidence. That is the call §3 already makes for competing
+candidates, and it is what keeps every value on the node assessable as one.
+
+Absent `count` means *seen, not counted*, which is a different and honest answer from
+one — the same reasoning that makes zero an invalid radius below.
+
+The shape of a filed observation, then:
+
+```
+claim(count: 2, condition: destroyed, confidence: probable)
+   ├── about ──▶ equipment-type "T-72B3"
+   ├── at    ──▶ place "Crossroads"
+   └── cites ──▶ media (the video)
+```
+
+**A model reaches a video through the statement, and only through it.** That is the
+whole design: the two-hop path carries how many and in what state, where a direct
+edge could carry neither.
+
+Two things this deliberately does not do. It does not date the observation — no verb
+carries a date (§3), and a Claim gains its point or interval in time with Temporal
+Claims (SPEC §6, v4). And **counting Claims counts observations, not objects**: two
+videos of the same destroyed tank are two statements. Deduplicating them is the open
+`same-as` question (§4), and until it is answered a total says *observations* in those
+words rather than implying a fleet.
 
 ### How precise a place is ✅
 
@@ -210,7 +379,7 @@ the radius. Why the ladder is not derived from Plus Code lengths is in
 a place with no radius draws as a pin, with no badge asking for one.
 
 The four fields are edited in Details → **Case**, under the heading the registry
-gives them (`group` on the entity type, `"How precise"` for a place), and committed
+gives them (`group` on the field that opens the block, `"How precise"` here), and committed
 by the panel's Save. They sit under Case rather than Info because Info reports what
 the file or the save says about itself, where precision is the analyst's judgement.
 
@@ -293,18 +462,21 @@ a narrowing can only remove a type, never smuggle one in from elsewhere.
 | `derived-from` | media → media/capture; proof → media/capture; post → proof/media/capture; note → post/proof/media/capture | made from that, and outlives it | ✅ |
 | `depends-on` | inspect-session → media/capture | only a pointer at that: dies with it | ✅ |
 | `located-at` | image/video/audio media → place | where the recording was made | ✅ |
-| `depicts` | image/video media or capture → place | the place is visible | ✅ |
+| `depicts` | image/video media, capture or proof → place | the place is visible | ✅ |
 | `owns` | person/organization → organization/asset/identifier | strict ownership, never membership or mere control | ✅ |
 | `part-of` | organization → organization | internal organizational containment | ✅ |
 | `member-of` | person/organization → organization | membership, not internal containment | ✅ |
+| `associated-with` | actor → actor | a tie that is none of the three above; what kind it is rides on the edge | ✅ |
 | `posted` | account → media/bookmark | the account published the content or URL | ✅ |
 | `appears-in` | actor/asset/identifier → image/video media or capture | the entity or a recognizable representation is visible | ✅ |
 | `sited-at` | structure → place | a permanent site, never a dated presence | ✅ |
+| `instance-of` | asset → equipment-type | this particular object is one of that model | ✅ |
 | `in-network` | IP/network → network | an address or subnet belongs inside the network | ✅ |
 | `same-image-as` | image media → image media | a machine perceptual-hash match | ✅ |
-| `about` | claim → actor/asset/identifier/place/media/capture | what the statement concerns | ✅ |
+| `about` | claim → actor/asset/equipment-type/identifier/place/media/capture | what the statement concerns | ✅ |
 | `at` | claim → place | where the statement puts its subject | ✅ |
 | `cites` | claim → bookmark/note/proof/media/capture | what the statement rests on | ✅ |
+| `contradicts` | claim → claim | the two statements cannot both hold | ✅ |
 | `mentions` | note/post/proof/bookmark → any other declared entity | the document refers to the entity | ✅ |
 | `same-as` | entity → entity | two records, one real thing (merge) | ⬜ |
 
@@ -321,6 +493,39 @@ battalions through `part-of`, a person belongs to an organization through
 `member-of`, a unit's trucks are owned. Keeping them apart is what makes an order of
 battle queryable; a military unit is an `organization`, and `attrs.echelon` sorts the
 tree.
+
+**And `associated-with` is the fourth, for the tie that is none of them.** Until it
+existed the vocabulary had no person-to-person verb at all — `owns` refuses a person
+as its object, `member-of` and `part-of` both end at an organization — so stating that
+two people are connected, which is the first thing a case does, cost a whole Claim
+node. It runs `actor → actor` and no wider: opened to identifiers and assets it becomes
+the verb that swallows the rest, and a registry where one entry answers everything says
+nothing. It is symmetric, so both readings are the same word and a picker offers it
+once.
+
+### What kind of tie ✅
+
+`associated-with` declares a `qualifier` (`RelationType.qualifier`), and the analyst's
+answer is stored on the edge as `links.nature` — "sister", "employer", "business
+partner". Three rules, and they are what keep one field from becoming a note on
+everything:
+
+- **The qualifier belongs to the verb, never to the edge.** Empty means this verb takes
+  none, exactly as `ratable: false` means it takes no grade, and the API refuses one
+  anywhere else. A note every edge could carry would leave nothing saying what an edge
+  *is*. Giving one to another verb later is a word in the registry.
+- **Free text, and deliberately not a closed list.** Maintaining a taxonomy of human
+  relationships is a project of its own, and the first case needing "former
+  sister-in-law" breaks it. Capped at 120 characters (`links.MAX_QUALIFIER`): reasoning
+  that runs to sentences is a Claim, which has a field for it.
+- **It leaves with the verb.** Rewording the edge to one that takes no qualifier clears
+  it, or the edge would privately hold "sister" while stating that one unit is part of
+  another.
+
+Unstated carries no key at all, the same rule the rating follows, so no reader has to
+tell *unstated* from *stated as empty*. The graph writes it on the line —
+`is associated with (sister)` — because the verb alone is the thin half of the
+statement.
 
 **No verb carries a date.** `sited-at` is a permanent site, not a visit. A person's
 whereabouts at a time, or a unit reassigned between corps, is a statement with a
@@ -340,9 +545,9 @@ only reworded inside its action, and a mention carries no rating (`ratable: fals
 ### The claim, and how sure it is ✅
 
 A `claim` is a statement node. It points `about` at subjects, `at` at places and
-`cites` at evidence. The Claim holds `confidence`, `method` and `verbatim`; its three
-connectors carry none of those values. This keeps one statement at one confidence
-even when it has several subjects, places or sources.
+`cites` at evidence. The Claim holds `count`, `condition`, `confidence`, `method` and
+`verbatim`; its three connectors carry none of those values. This keeps one statement
+at one confidence even when it has several subjects, places or sources.
 
 | Claim `attrs.confidence` | Reads as |
 |---|---|
@@ -352,11 +557,35 @@ even when it has several subjects, places or sources.
 | `refuted` | checked and eliminated |
 | absent | not assessed |
 
-The Claim editor owns `about`, `at` and `cites`; they never appear under **Add
-relation** and cannot be reworded into another action. Competing candidates are
-separate Claims, which is how each gets its own confidence — the former `exclusive`
-checkbox tried to do that on connectors instead and is no longer offered, though
-existing `exclusive` attributes stay readable.
+The Claim editor owns `about`, `at`, `cites` and `contradicts`; they never appear
+under **Add relation** and cannot be reworded into another action. Competing
+candidates are separate Claims, which is how each gets its own confidence — the
+former `exclusive` checkbox tried to do that on connectors instead and is no longer
+offered, though existing `exclusive` attributes stay readable.
+
+### What stands against a statement ✅
+
+`contradicts` runs claim → claim and is the fourth verb of that action. It exists
+because `refuted` records that a statement is dead and names nothing that killed it:
+the case kept the verdict and lost the argument. Eliminating a candidate is half the
+work of a geolocation — twelve are checked and eleven ruled out — and each of those
+eleven carries its own reasoning and its own sources, which is a Claim rather than a
+grade.
+
+- **Statement to statement, both ends.** Pointed at a subject it would say "this
+  vehicle is contradicted", which is not something anyone can assess.
+- **No cycle check**, unlike `part-of` and `in-network`. Two statements contradicting
+  each other is not a loop to refuse, it is what an open question looks like, and it
+  reads the same in both directions — so the Claim editor lists the rows under one
+  heading without sorting them by direction.
+- **Not ratable**, like the three connectors above: how strongly each side is held is
+  already on each Claim, and a third grade on the edge between them is exactly the
+  mixture three separate assessments exist to prevent.
+- **It is not a claim connector** (`links.CLAIM_CONNECTION_TYPES`). Those say what a
+  statement rests on and are what a source fold walks; folding across this one would
+  collapse an argument into a citation.
+- The graph draws it as its own stroke, a dash broken by a beat, so a statement
+  cluster shows its arguments before any label is read.
 
 Ordinary semantic relations may carry the nullable `links.confidence` ordinal: `3`
 certain, `2` probable, `1` possible, `-1` ruled out, absent for not assessed. It
@@ -461,6 +690,217 @@ It answers with resolved type lists, so a client never has to know what a family
   component renders all three (`RelationList.svelte`), one collects a new one
   (`RelationPicker.svelte`).
 
+### Where a geolocation becomes a point ✅
+
+Saving a proof files the point it carries as a `place` and states
+`proof --depicts--> place` (`satellite.place_for_proof`). The point is what the
+analyst typed into the composer, or what its panels froze and they left standing
+(`own_point`, §3 placement).
+
+**A capture files nothing.** Ten are taken while hunting one roof and each frames
+a slightly different centre, so filing each would pin the search rather than the
+answer. A capture is already on the map — the Saved index draws places and
+captures alike — and what it lacked was a *node*, which is worth minting once, at
+the moment somebody commits to it. That moment is the proof.
+
+- **Nothing is ever `suggested` here.** Typed or accepted from the panels, the
+  point is the analyst's own answer, and a review step over one's own answer is a
+  step over nothing.
+- **A point the case already holds is neither filed twice nor asked about**
+  (`place_at`, rounded to five decimals, about a metre). Re-saving a proof stays
+  silent, and so does one whose coordinates were never touched — the edges are
+  restated all the same, so a proof concluding on a pin already on the map says
+  so instead of standing beside it unattached. The key is shared with import
+  enrichment (`satellite.COORD_KEY`) so a photo's EXIF point and a proof
+  concluding on the same spot are one node.
+- **A save restates the point rather than adding one**
+  (`satellite.restate_proof_point`), the rule the proof's panels already follow.
+  Reopening a proof and correcting the coordinates is an answer withdrawn: the old
+  edges go, or the case reads as two geolocations. Toggling POV changes the verb
+  the last save wrote, and an emptied coordinate field withdraws the point
+  entirely. Only what the composer itself wrote is reconciled — an edge stated by
+  hand in Details, or proposed by import enrichment, is a separate claim about the
+  same file — and a point another proof still concludes on keeps its material.
+  A place the proof let go of that nothing else holds is **offered for deletion,
+  never swept**: it is on the map, and dropping it is the analyst's call.
+- **The material the proof composes states the same point**, over the derivation
+  closure — the frame, the collage, the video two hops up, the capture. Confirmed,
+  because **composing is the assertion**: putting a frame beside a capture and
+  writing the coordinates *is* the geolocation, and asking the analyst to accept
+  their own act is the review everybody clicks through, which is what makes
+  `suggested` stop meaning anything where it is real. Being wrong costs one
+  removal, since a relation drops alone.
+- **`spec.pov` picks the verb for the material, because the composition cannot.**
+  Recorded-at and shows are independent — a rooftop shot was recorded somewhere it
+  never shows, a skyline is shown from kilometres away — and a match between a
+  frame and an imagery says only that they meet, not whether the camera or its
+  subject was located. The composer asks once (**POV**), and the answer travels in
+  the spec: set, the media are `located-at` the point; unset, they `depicts` it. A
+  `capture` shows it either way, since orbital imagery was recorded nowhere on the
+  ground, and so does the proof, which was composed. POV is also the only reading
+  that reaches an audio file, which has a place it was made and nothing it shows.
+
+`proof_place_auto` (Settings → General → Proofs, on by default) decides whether
+the save files it or the composer asks first. Both write the same thing.
+
+### Lenses ✅
+
+The graph draws one reading at a time, and a reading is **a set of verbs and a set of
+node roles, both resolved from the registries rather than listed a second time**
+(`engine/graph.py`, `GET /api/cases/graph-lenses`). A verb reaches its lens by what it
+joins and a type by its role, so adding either places it with no edit there:
+
+| Lens | Verbs | Derived by | Nodes |
+|---|---|---|---|
+| Everything | all 19 | the whole registry | the case |
+| Subjects | `owns`, `part-of`, `member-of`, `associated-with`, `posted`, `appears-in`, `instance-of`, `in-network`, `same-image-as` | an analyst's relation that is not geography | the case |
+| Ground | `located-at`, `depicts`, `sited-at` | a relation whose object is a `place` | the case |
+| Statements | `about`, `at`, `cites`, `contradicts` | `action = "claim"` | the case |
+| My work | `derived-from`, `depends-on`, `mentions` | the chain types, plus `action = "mention"` | everything |
+
+"The case" is the `subject` and `attestation` roles; **My work** is the switch that
+puts the analyst's own output back on screen. Three calls the table does not show:
+
+- **`same-image-as` reads with subjects, not with the artifact chain.** Two files
+  being one picture is a fact about the case rather than about the filing, and `media`
+  is a subject. Filed with `derived-from` it made one lens hold a derivation and a
+  finding about the world at once.
+- **`mentions` starts at a `document` by construction**, so it has never held one
+  subject-to-subject edge. It, `derived-from` and `depends-on` all answer *what did I
+  write, and out of what* — one question, one lens, named for what it is.
+- **Every verb lands in exactly one lens**, which is a test (`tests/test_graph.py`):
+  a verb in none is unreachable, a verb in two is an ambiguity the analyst would have
+  to resolve.
+
+Narrowing the verbs never hides a subject: a node with no edge in the chosen lens is
+an answer, it is what nobody has connected yet. What a lens does take out is a whole
+**role**, and it takes it out of every read — the ranking, the closed edge set, an
+expansion's arrivals, a neighbourhood's walk, a route's intermediate nodes. Degree
+follows, counted over the edges that reading can show, or a node would price a click
+that brings nothing in. A named node is no exception: a filter is a narrowing set
+earlier and a name outranks it, where a lens *is* the reading. A neighbourhood or a
+route rooted on a type the lens leaves out is refused in words rather than answered
+with an empty picture.
+
+A **free type** the vocabulary has never heard of has no role, so a reading states
+what it *excludes* rather than what it keeps: an allowlist resolved from the registry
+would silently drop an entity nobody agreed to drop.
+
+### The wrapper is an edge ✅
+
+An `attestation` on a statement→source chain is drawn as **one edge, not a node**
+(`engine/graph._fold`, whole-case view only — a neighbourhood gives its axis to
+distance, and a fold changes distance). A bookmark is not a leaf: *this account posted
+it, this statement cites it* is a path through it, and that path is a fact about the
+case rather than about the filing.
+
+```
+before   claim → bookmark → account A          after   claim ──cites (3 sources · 1 account)──▶ account A
+         claim → bookmark → account A
+         claim → bookmark → account A
+```
+
+The rules, each of which exists to keep the fold a reading rather than a loss:
+
+- **Across provenance only** — `posted`, `derived-from`, `depends-on`. The content
+  verbs (`depicts`, `appears-in`, `located-at`) say what is *in* the material, which is
+  a subject-to-subject reading: folding the capture that shows a place and holds a
+  vehicle would state a claim about the two that nobody made.
+- **All of it or none.** A middle whose drawn edges are not every one either a
+  statement's or a provenance verb's stays a node — it carries something the edge
+  cannot say.
+- **Both ends drawn.** The closed set is the invariant, so a middle whose far end the
+  budget cut stays a node instead.
+- **The middle itself need not be drawn.** Two things keep one out of the picture and
+  neither loses the path through it: its **type** is one this reading leaves out — the
+  safeguard for a reconstructed case whose import filed a source under a type meant for
+  the analyst's own output, where shape outranks the type name — or the **budget** cut
+  it. The second is the common one: the ranking cuts the least connected first, which
+  is exactly the sources this folds, so without it the fold only kept its promise below
+  the ceiling. A statement resting on nine sources and one account drew as a lone dot
+  with both of its ends on screen and nothing joining them.
+- **A named node is never folded**, drawn or not, which is the way back: the edge
+  carries the ids it stands for, and asking for one draws it with its own edges again.
+  It is also what makes a route through a bookmark still land. Named *and* absent means
+  the budget refused something asked for outright, and folding it would offer to hand
+  back an id already in the expansion.
+- **Handing back is a question about the type**, not about whether the middle is on
+  screen: a source the budget cut is drawn by the same `expand` that opens a node,
+  where one of a type the lens leaves out could only be refused — so that edge names
+  the lens that does draw it instead.
+- **Its id is not a row.** `folded:<verb>:<from>:<to>` — deterministic, so a selection
+  survives a reload, and prefixed because nothing may be written to it: confirming,
+  rating and removing all refuse it.
+- **Only as confirmed as its weakest part.** One proposed link along the path makes the
+  edge proposed, so a fold cannot launder a proposal into a finding.
+- **The degree follows the drawing.** Three citations that became one edge are one
+  connection now, or the node would price a click at three and bring nothing.
+
+**Independence falls out of it** ✅. Each drawn statement carries
+`rests: {sources, accounts, one}` — how many sources it rests on, how many accounts
+published them, and whether *every* one of them traces back to the same account. That
+last is the finding ("three citations are one source"), and it stays false while any
+source has no known publisher: the untraced half may well be independent, and saying
+otherwise would be a judgement rather than a measurement. The view counts them as
+`single_account`. Both are read over the drawing's own edges, like the match count and
+unlike the case-wide total.
+
+### The derivation reads as three more folds ✅
+
+Derived imagery is ordinary `media` — no new type, no role change, nothing leaves the
+vocabulary (`engine/graph`, whole-case view only, like the fold above). A type for it
+was considered and rejected, for three reasons worth keeping: **hiding cuts paths where
+folding keeps them** (a frame filed as `annex` takes `proof ──derived-from──▶ frame` out
+of every read with nothing replacing it, and a bare geolocation has no claim for the
+safeguard query to rescue it by); **a derivative is often the evidence**, so Ground and
+Statements would lose the very images the case is built on; and **a type is exclusive
+where an origin is not** — a save that dedupes onto existing bytes returns the entity
+already there and adds a `derived-from`, so one file is both imported and derived. What changes is
+**how the same nodes are read**, and the role is what decides: an `annex` is left out of
+a reading of the case, an `attestation` is folded, a `subject` keeps its node. A fold is
+**per lens**, always: what a reading draws decides what it may collapse.
+
+| Fold | Rule | Reads |
+|---|---|---|
+| `_relay` | every drawn edge a chain verb, exactly one of them **outgoing**, and it relays something | `proof ──derived from 1 frame──▶ video` |
+| `_roll` | one drawn edge, a chain verb, and the node is the end that was **derived** | `12 frames made from it, used by nothing`, on the video, which still prices them |
+| `_star` | the nodes stating the same point, grouped by derivation; the arrow stays on the **subject** root | `video ──depicts (3 sources)──▶ place`, `rests on 1 source` |
+
+The family is **every arrow on the point, whatever verb it is written with**. POV splits
+one material across two — the footage was `located-at` the point, the capture `depicts`
+it — so a star grouped by verb cuts the family in half, each half then holds a derivation
+reaching outside itself, the all-or-nothing rule refuses both and nothing collapses at
+all. The surviving line is the material's own statement; the ones folded into it are
+named on it and come back saying exactly what they said.
+
+The calls the table cannot show:
+
+- **One outgoing chain edge, never two.** A node made from a frame *and* an overhead
+  capture is a confluence: collapsed, the line left standing would say the capture came
+  out of the footage.
+- **A leaf with a single relation is not rolled up.** A person with one link is thin
+  material the case has yet to exploit, not clutter — and the direction settles the lone
+  pair, since only the derivative came out of the other.
+- **A capture pulled at the coordinates already suspected is the reference**, not a
+  witness that agrees: its `depicts` is close to a tautology, and counting it would state
+  a corroboration nobody found. Shape cannot tell it from the footage; the roles can.
+  A group with no subject root keeps its own, or the one statement about that point
+  would leave with it.
+- **`_star`'s surviving arrow is the case's own row**, annotated rather than replaced,
+  so confirming or withdrawing it stays possible. The other two build synthetic edges,
+  which nothing may be written to.
+- **`_star` and `_roll` leave the degree alone**, and that is where the way back sits. The others hand their nodes back from a line that *touches* them; this one
+  names a frame and a capture on `video → place`, which does not touch the proof they
+  were derived by. Priced down, that proof would report no further connections while two
+  of them exist — so it keeps counting them, and **what an opened node touches is never
+  folded**, or the click answers with the picture it was pressed on. `_roll` follows for
+  a plainer reason: its count is a fact about the video rather than a second way to open
+  it, and priced down the node offered one number on its pill and another in its menu for
+  the same missing nodes.
+- **The place reports `rests: {sources}`** where more than one arrow arrived: the
+  geographic counterpart of the independence number above, and a count that would only
+  restate the picture is not shown.
+
 ### The derivation chain
 
 The chain is filed with the save action:
@@ -500,7 +940,8 @@ How it is wired (`engine/links.py`):
 - **Review status** is `confirmed` (analyst-made or analyst-accepted) vs
   `suggested` (a tool proposed it, awaiting a click). It is not confidence. Import
   enrichment emits suggested places and `located-at` / `same-image-as` links from
-  media metadata. ✅
+  media metadata. A proof's point is not one of them: it and the `depicts` edges
+  it states over the material composed are the analyst's own act (§3). ✅
   Confirming runs both ways and stops at one hop: a confirmed entity confirms its
   incident suggested relations *and the entity at each far end*, and a confirmed
   relation confirms whichever endpoint is still `suggested`. One rule drives both —

@@ -734,9 +734,17 @@ class Case:
         folder: str | None = None,
         unfiled: bool = False,
         recursive: bool = False,
+        attr: str | None = None,
+        attr_value: str | None = None,
+        linked: str | None = None,
+        unlinked: bool = False,
+        since: str | None = None,
+        until: str | None = None,
+        filed_by: list[str] | None = None,
+        order: str = "",
     ) -> dict[str, Any]:
         """A bounded, filtered page of the catalog (Step 5), paged with an indexed
-        rowid keyset."""
+        keyset over the ordering asked for."""
         return self._graph().page_entities(
             limit=limit,
             cursor=cursor,
@@ -746,14 +754,61 @@ class Case:
             folder=folder,
             unfiled=unfiled,
             recursive=recursive,
+            attr=attr,
+            attr_value=attr_value,
+            linked=linked,
+            unlinked=unlinked,
+            since=since,
+            until=until,
+            filed_by=filed_by,
+            order=order,
         )
 
     def catalog_summary(self) -> dict[str, Any]:
-        """Total plus per-type, per-status and per-folder counts."""
+        """Total plus per-type, per-status, per-folder and per-filer counts."""
         return self._graph().catalog_summary()
+
+    def attr_facets(
+        self, *, types: list[str] | None = None, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Which stored fields these entities hold, and which values, as a menu."""
+        return self._graph().attr_facets(types=types, limit=limit)
 
     def list_links(self) -> list[dict[str, Any]]:
         return self._graph().list_links()
+
+    def entity_images(self, entity_id: str) -> list[dict[str, Any]]:
+        return self._graph().entity_images(entity_id)
+
+    def entity_image_thumbs(self, entity_ids: list[str]) -> dict[str, str]:
+        return self._graph().entity_image_thumbs(entity_ids)
+
+    def entity_images_touching(self, entity_ids: list[str]) -> list[dict[str, Any]]:
+        return self._graph().entity_images_touching(entity_ids)
+
+    def add_entity_images(self, entity_id: str, media_ids: list[str]) -> int:
+        return self._graph().add_entity_images(entity_id, media_ids)
+
+    def add_entity_image_file(
+        self,
+        entity_id: str,
+        image_id: str,
+        path: str,
+        thumbnail: str,
+        title: str,
+    ) -> None:
+        self._graph().add_entity_image_file(
+            entity_id, image_id, path, thumbnail, title
+        )
+
+    def set_primary_entity_image(self, entity_id: str, image_id: str) -> None:
+        self._graph().set_primary_entity_image(entity_id, image_id)
+
+    def remove_entity_image(self, entity_id: str, image_id: str) -> dict[str, Any]:
+        return self._graph().remove_entity_image(entity_id, image_id)
+
+    def reinsert_entity_images(self, rows: list[dict[str, Any]]) -> dict[str, int]:
+        return self._graph().reinsert_entity_images(rows)
 
     def upsert_media_item(self, item: dict[str, Any], *, entity_id: str | None = None) -> None:
         self._graph().upsert_media_item(item, entity_id=entity_id)
@@ -767,6 +822,15 @@ class Case:
     def media_items_by_paths(self, paths: list[str]) -> list[dict[str, Any]]:
         return self._graph().media_items_by_paths(paths)
 
+    def media_thumbs(self, entity_ids: list[str]) -> dict[str, str]:
+        return self._graph().media_thumbs(entity_ids)
+
+    def media_kinds(self, entity_ids: list[str]) -> dict[str, str]:
+        return self._graph().media_kinds(entity_ids)
+
+    def media_origins(self, entity_ids: list[str]) -> dict[str, dict[str, str]]:
+        return self._graph().media_origins(entity_ids)
+
     def page_media_items(
         self,
         *,
@@ -775,6 +839,7 @@ class Case:
         category: str | None = None,
         folder: str | None = None,
         gps: bool = False,
+        collected_only: bool = False,
         sort: str = "newest",
         direction: str | None = None,
         limit: int = 200,
@@ -786,6 +851,7 @@ class Case:
             category=category,
             folder=folder,
             gps=gps,
+            collected_only=collected_only,
             sort=sort,
             direction=direction,
             limit=limit,
@@ -803,6 +869,95 @@ class Case:
 
     def count_incident_links(self, *, exclude_types: list[str]) -> dict[str, int]:
         return self._graph().count_incident_links(exclude_types=exclude_types)
+
+    def rank_entities(
+        self,
+        *,
+        limit: int = 200,
+        types: list[str] | None = None,
+        exclude_types: list[str] | None = None,
+        status: EntityStatus | None = None,
+        query: str | None = None,
+        folder: str | None = None,
+        unfiled: bool = False,
+        recursive: bool = False,
+        attr: str | None = None,
+        attr_value: str | None = None,
+        linked: str | None = None,
+        unlinked_only: bool = False,
+        since: str | None = None,
+        until: str | None = None,
+        filed_by: list[str] | None = None,
+        link_types: list[str] | None = None,
+        order: str = "degree",
+    ) -> dict[str, Any]:
+        return self._graph().rank_entities(
+            limit=limit, types=types, exclude_types=exclude_types, status=status,
+            query=query, folder=folder, unfiled=unfiled, recursive=recursive,
+            attr=attr, attr_value=attr_value, linked=linked, unlinked_only=unlinked_only,
+            since=since, until=until, filed_by=filed_by,
+            link_types=link_types, order=order,
+        )
+
+    def entities_by_ids(self, ids: list[str]) -> list[dict[str, Any]]:
+        return self._graph().entities_by_ids(ids)
+
+    def labels_of_type(self, type_: str) -> list[tuple[str, str]]:
+        return self._graph().labels_of_type(type_)
+
+    def links_among(
+        self, ids: list[str], *, types: list[str] | None = None
+    ) -> list[dict[str, Any]]:
+        return self._graph().links_among(ids, types=types)
+
+    def links_touching(
+        self,
+        ids: list[str],
+        *,
+        types: list[str] | None = None,
+        exclude_types: list[str] | None = None,
+        end_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._graph().links_touching(
+            ids, types=types, exclude_types=exclude_types, end_types=end_types
+        )
+
+    def degrees_of(
+        self,
+        ids: list[str],
+        *,
+        types: list[str] | None = None,
+        exclude_types: list[str] | None = None,
+    ) -> dict[str, int]:
+        return self._graph().degrees_of(ids, types=types, exclude_types=exclude_types)
+
+
+    def graph_pins(self, lens: str) -> dict[str, tuple[float, float]]:
+        return self._graph().graph_pins(lens)
+
+    def pin_entities(self, lens: str, pins: dict[str, tuple[float, float]]) -> int:
+        return self._graph().pin_entities(lens, pins)
+
+    def unpin_entities(self, lens: str, ids: list[str]) -> int:
+        return self._graph().unpin_entities(lens, ids)
+
+    def clear_graph_pins(self, lens: str) -> int:
+        return self._graph().clear_graph_pins(lens)
+
+    def list_analysis_views(self) -> list[dict[str, Any]]:
+        return self._graph().list_analysis_views()
+
+    def get_analysis_view(self, view_id: str) -> dict[str, Any] | None:
+        return self._graph().get_analysis_view(view_id)
+
+    def save_analysis_view(self, view: dict[str, Any]) -> dict[str, Any]:
+        return self._graph().save_analysis_view(view)
+
+    def remove_analysis_view(self, view_id: str) -> dict[str, Any] | None:
+        return self._graph().remove_analysis_view(view_id)
+
+    def reinsert_analysis_views(self, views: list[dict[str, Any]]) -> int:
+        return self._graph().reinsert_analysis_views(views)
 
     def get_entity(self, entity_id: str) -> dict[str, Any] | None:
         return self._graph().get_entity(entity_id)

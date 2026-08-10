@@ -7,7 +7,6 @@ import math
 import os
 import re
 import tempfile
-import time
 # Aliased: this module already imports the ``time`` module for tile timing, and
 # the sky routes need the datetime classes of the same names.
 from datetime import date as calendar_date, datetime, time as wall_clock, timezone
@@ -808,11 +807,6 @@ def saved_index(case_id: str) -> list[dict[str, Any]]:
     return satellite_engine.saved_index(get_case(case_id))
 
 
-# Nominatim asks for at most one request a second. A backfill is the only place
-# we make more than one lookup in a row, so it is the only place that waits.
-NOMINATIM_INTERVAL = 1.1
-
-
 @router.post("/cases/{case_id}/satellite/locate")
 def locate_saved(
     case_id: str, limit: int = Query(default=10, ge=1, le=25)
@@ -822,11 +816,16 @@ def locate_saved(
     Progress is the stored geography itself, so the pass resumes after a restart
     and re-running it is a no-op: ``remaining`` is what the client loops on. The
     cap keeps one request comfortably inside a timeout at Nominatim's one-per-
-    second pace.
+    second pace, which ``engine.geo`` holds in front of every lookup — including
+    the second one ``locate_point`` makes for the English region name, which no
+    caller can see and which used to double the real pace.
+
+    ``throttled`` says Nominatim answered 429. A batch that resolved nothing
+    because the address is in the penalty box is not the same event as a batch of
+    genuine lookup failures, and the client must be able to say which.
     """
     case = get_case(case_id)
     located = failed = 0
-    looked_up = False
     for entity in satellite_engine.unlocated_entities(case, limit):
         attrs = entity.get("attrs") or {}
         lat, lon = attrs.get("lat"), attrs.get("lon")
@@ -835,9 +834,6 @@ def locate_saved(
             satellite_engine.set_geo(case, entity["id"], {"state": "nocoords"})
             located += 1
             continue
-        if looked_up:
-            time.sleep(NOMINATIM_INTERVAL)
-        looked_up = True
         result = geo.locate_point(float(lat), float(lon))
         satellite_engine.set_geo(case, entity["id"], result)
         if result["state"] == "failed":
@@ -848,6 +844,7 @@ def locate_saved(
         "located": located,
         "failed": failed,
         "remaining": len(satellite_engine.unlocated_entities(case)),
+        "throttled": geo.throttled(),
     }
 
 

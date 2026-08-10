@@ -88,11 +88,27 @@ export function entityFields(type) {
   return entryFor(type)?.attrs ?? [];
 }
 
-/** What heads a type's field block, or '' when the fields stand on their own
- *  labels. A place's four fields are one subject — how tightly the point is
- *  pinned — where a vessel's registration numbers are just its own fields. */
-export function entityGroup(type) {
-  return entryFor(type)?.group ?? '';
+/**
+ * Mark the field that opens each heading, over the fields actually being rendered.
+ *
+ * The registry heads a *field*, not a type, because one type can hold two subjects:
+ * a Claim says what it states and why that is believed, where a place's four fields
+ * all answer how tightly the point is pinned. A heading is emitted where the group
+ * changes, so the registry's order is left exactly as it is — a form that regrouped
+ * its own fields would stop being the order the vocabulary declares.
+ *
+ * Takes the shown fields rather than the type, because a field can be hidden — an
+ * untraced footprint, an empty legacy value — and a heading resolved before that
+ * filter could survive every field it was heading.
+ */
+export function withHeadings(fields) {
+  let last = '';
+  return fields.map((field) => {
+    const group = field.group ?? '';
+    const heads = group && group !== last ? group : '';
+    last = group;
+    return { ...field, heads };
+  });
 }
 
 /** Every type the vocabulary knows, in menu order. Empty until the registry lands. */
@@ -101,7 +117,7 @@ export function entityTypes() {
 }
 
 /** The families, in the order the registry lists their types. What the board
- *  filters by first: seven readings are a menu, seventeen types are a list. */
+ *  filters by first: a handful of readings is a menu, every type is a list. */
 export function entityFamilies() {
   return [...new Set(registry.types.map((entry) => entry.family))];
 }
@@ -115,6 +131,11 @@ export function creatableTypes() {
 /** Whether this type is entered as a graph record rather than born from a tool. */
 export function isManualEntityType(type) {
   return Boolean(entryFor(type)?.manual);
+}
+
+/** Whether Details may attach presentation photos to this type. */
+export function hasImageGallery(type) {
+  return Boolean(entryFor(type)?.image_gallery);
 }
 
 /** Where a source's Admiralty grade is stored. The key is a contract, like `url` or

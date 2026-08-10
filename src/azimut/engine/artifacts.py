@@ -6,9 +6,10 @@ chain in ``api/cases.py``, and that chain already had a hole: deleting a proof
 dropped its spec and its export but left ``proofs/<name>.assets/`` behind, so
 pasted images outlived the composition they belonged to.
 
-A type that owns nothing on disk says so in `NO_FILES`, with the reason beside
-it. A type in neither table is an oversight, and `tests/test_artifacts.py` fails
-on it: a new tool declares what it writes, or it does not ship.
+A type with no intrinsic artifact says so in `NO_FILES`, with the reason beside
+it. Optional private entity photos are a cross-cutting ownership rule. A type in
+neither table is an oversight, and `tests/test_artifacts.py` fails on it: a new
+tool declares what it writes, or it does not ship.
 
 Companions are the files named after the main artifact — a media's sidecar, a
 proof's export and its assets folder. A companion that does not `travels` is a
@@ -19,6 +20,7 @@ would blank a surviving row.
 
 from __future__ import annotations
 
+import json
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -112,9 +114,10 @@ KINDS: dict[str, Kind] = {
     "note": Kind(path_attr="path"),
 }
 
-#: Types that own nothing on disk, and why. A free-typed entity the analyst
-#: invents needs no entry — it is a label in the graph until a tool gives it a
-#: file, and that tool declares it in `KINDS`.
+#: Types with no intrinsic main artifact, and why. Supported entities can still
+#: own optional private presentation photos through `_direct_entity_photos`.
+#: A free-typed entity the analyst invents needs no entry — it is a label in the
+#: graph until a tool gives it a file, and that tool declares it in `KINDS`.
 NO_FILES: dict[str, str] = {
     "place": "coordinates and a label",
     "person": "an identity in the graph",
@@ -129,6 +132,7 @@ NO_FILES: dict[str, str] = {
     "vessel": "an identity in the graph",
     "aircraft": "an identity in the graph",
     "structure": "an identity in the graph",
+    "equipment-type": "a model in the graph, which owns no object of its own",
     "bookmark": "a URL in the graph",
     "claim": "a statement in the graph, and the edges that carry it",
 }
@@ -178,12 +182,64 @@ def _paths(case: "Case", entity: dict[str, Any], *, travelling: bool) -> list[st
     return out
 
 
+def _direct_entity_photos(case: "Case", entity: dict[str, Any]) -> list[str]:
+    """Private presentation files owned by this entity, if it has any.
+
+    Gallery rows that point into the Media Library own no bytes here. The Media
+    entity remains the sole owner of those files.
+    """
+    out: list[str] = []
+    for image in case.entity_images(str(entity.get("id") or "")):
+        if not image.get("direct"):
+            continue
+        for rel in (image.get("path"), image.get("thumbnail")):
+            if not isinstance(rel, str) or not rel:
+                continue
+            path = _resolve(case, rel)
+            if path is not None and path.exists():
+                out.append(rel)
+    return list(dict.fromkeys(out))
+
+
 def owned(case: "Case", entity: dict[str, Any]) -> list[str]:
     """The case-relative files and folders this entity owns, that exist now.
 
     These are what a delete removes and what the trash moves aside.
     """
-    return _paths(case, entity, travelling=True)
+    return list(
+        dict.fromkeys(
+            [
+                *_paths(case, entity, travelling=True),
+                *_direct_entity_photos(case, entity),
+            ]
+        )
+    )
+
+
+def spec_thumb(case: "Case", entity: dict[str, Any]) -> str | None:
+    """The cached thumbnail an entity's own spec file records, if it keeps one there.
+
+    A proof is the one kind that does: its preview is written into
+    ``proofs/.meta/<name>.json`` when the export is rendered. That is the wrong place
+    for something a surface might need for a few hundred entities at once — the graph
+    answers from the database alone — so the caller copies what this returns onto the
+    entity, once, and reads it off the row from then on.
+
+    Unreadable, missing or thumbnail-less spec: None. A preview is disposable pixels,
+    and never a reason for a drawing to fail.
+    """
+    spec_rel = entity.get("attrs", {}).get("spec")
+    if not isinstance(spec_rel, str) or not spec_rel:
+        return None
+    path = _resolve(case, spec_rel)
+    if path is None or not path.is_file():
+        return None
+    try:
+        spec = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    thumb = spec.get("thumb") if isinstance(spec, dict) else None
+    return thumb if isinstance(thumb, str) and thumb else None
 
 
 def caches(case: "Case", entity: dict[str, Any]) -> list[str]:

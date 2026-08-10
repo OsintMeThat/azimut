@@ -76,6 +76,48 @@ describe('isVideoEntity', () => {
   });
 });
 
+describe('madeHereLabel / madeHereBy', () => {
+  it('names the act for material the case made out of what it holds', () => {
+    expect(mod.madeHereLabel({ origin: 'inspect', op: 'frame' })).toBe('Frame');
+    expect(mod.madeHereLabel({ origin: 'inspect', op: 'collage' })).toBe('Collage');
+    expect(mod.madeHereLabel({ origin: 'inspect', op: 'adjust' })).toBe('Adjusted image');
+    expect(mod.madeHereLabel({ origin: 'inspect', op: 'enhance-video' })).toBe('Enhanced video');
+  });
+
+  it('says nothing about material the case collected', () => {
+    // The backend leaves `origin` off an upload rather than sending "upload" for
+    // every surface to filter out, so its absence is already the answer.
+    expect(mod.madeHereLabel({ kind: 'image' })).toBeNull();
+    expect(mod.madeHereBy({ kind: 'image' })).toBeNull();
+    expect(mod.madeHereLabel(null)).toBeNull();
+  });
+
+  it('leaves the word to the caller when the act was never stamped', () => {
+    // An older file: the route is on the row, the act is not. It was still made
+    // here, and the caller falls back to the plain kind for what to call it.
+    expect(mod.madeHereLabel({ origin: 'inspect' })).toBeNull();
+    expect(mod.madeHereBy({ origin: 'inspect' })).toBe('Inspect');
+  });
+
+  it('names a tool it has never heard of rather than dropping the line', () => {
+    expect(mod.madeHereBy({ origin: 'somenewtool' })).toBe('somenewtool');
+  });
+
+  it('says the same act mid-sentence, for the edge a folded step becomes', () => {
+    // "derived from 2 frames" is what the collapsed step is for, and the plural is
+    // the caller's, so the word arrives lowercase and bare.
+    expect(mod.madeAsWord('frame')).toBe('frame');
+    expect(mod.madeAsWord('adjust')).toBe('adjusted image');
+    expect(mod.madeAsWord('enhance-video')).toBe('enhanced video');
+  });
+
+  it('writes a step it has no word for as whatever it was sent', () => {
+    // The backend falls back to the entity type where no act was recorded, and that
+    // is still true of the node — "derived from 1 media" reads, where nothing does not.
+    expect(mod.madeAsWord('media')).toBe('media');
+  });
+});
+
 describe('mediaKindOf', () => {
   it('answers what the importer stamped when it is there', () => {
     expect(mod.mediaKindOf({ attrs: { kind: 'file', path: 'media/looks-like.png' } })).toBe('file');

@@ -11,12 +11,11 @@
    * is*, where `0` would claim infinite precision. Nothing here is required and
    * nothing is flagged for being absent.
    */
-  import { entityFields, entityGroup } from '../lib/entityTypes.svelte.js';
+  import { entityFields, withHeadings } from '../lib/entityTypes.svelte.js';
 
   let { type, values = $bindable({}) } = $props();
 
   const fields = $derived(entityFields(type));
-  const group = $derived(entityGroup(type));
 
   /**
    * A shape can only be traced on a map, and no map offers that gesture yet. So an
@@ -25,10 +24,10 @@
    * moment a shape exists — set through the API, or by the drawing tool when it
    * lands — carrying the summary and the Clear that drops it.
    */
-  const shown = $derived(fields.filter((field) => {
+  const shown = $derived(withHeadings(fields.filter((field) => {
     if (field.editable === false) return values?.[field.key] != null && values[field.key] !== '';
     return field.kind !== 'geojson' || values?.[field.key];
-  }));
+  })));
 
   function set(key, raw) {
     // `undefined` would be dropped from the JSON body and read as "leave it be";
@@ -61,9 +60,8 @@
 
 {#if shown.length}
   <div class="attrs">
-    {#if group}<div class="attrs-h">{group}</div>{/if}
-
     {#each shown as field (field.key)}
+      {#if field.heads}<div class="attrs-h">{field.heads}</div>{/if}
       <div class="attr">
         {#if field.editable === false}
           <span class="attr-k" title={field.hint}>{field.label}</span>
@@ -97,6 +95,7 @@
             type="number"
             min={field.minimum ?? undefined}
             max={field.maximum ?? undefined}
+            step={field.whole ? 1 : 'any'}
             value={values?.[field.key] ?? ''}
             placeholder="Unknown"
             oninput={(e) => setNumber(field.key, e.currentTarget.value)}
@@ -167,6 +166,11 @@
     font-weight: 600;
     color: var(--text-2);
     margin-bottom: 6px;
+  }
+  /* A second heading opens a block under one already filled, so it needs the air
+     the first one gets from the block above it. */
+  .attrs-h:not(:first-child) {
+    margin-top: 8px;
   }
   .attr-k {
     display: block;

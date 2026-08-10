@@ -3,6 +3,14 @@ import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('./EntityDetails.svelte', import.meta.url), 'utf8');
 
+describe('entity photos', () => {
+  it('shows the gallery only for types enabled by the registry', () => {
+    expect(source).toContain("import EntityImages from './EntityImages.svelte'");
+    expect(source).toContain('{#if hasImageGallery(entity.type)}');
+    expect(source).toContain('<EntityImages {entity} />');
+  });
+});
+
 describe('capture details', () => {
   it('shows the recorded external capture page as a link', () => {
     expect(source).toContain('{#if infoData?.source_url}');
@@ -93,6 +101,17 @@ describe('import enrichment details', () => {
     expect(source).toContain('mentionTargetTypes.map(entityLabel)');
     expect(source).toContain('title={relationTargetHint}');
     expect(source).toContain('title={mentionTargetHint}');
+  });
+
+  it('warns when a rename walks an identifier onto one the case already holds', () => {
+    // The create dialog has warned since it shipped; renaming is the half where it
+    // actually happens — an account filed as a bare handle gets its `@` typed in a
+    // week later. Same route, same comparison, and it never refuses.
+    expect(source).toContain('/entities/twin?');
+    expect(source).toContain("entityFamily(kind) !== 'identifier'");
+    expect(source).toContain('ignore: entity.id');
+    expect(source).toContain('This case already holds');
+    expect(source).toContain('onclick={() => walkTo(twin.id)}');
   });
 });
 

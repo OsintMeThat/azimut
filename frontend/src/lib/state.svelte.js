@@ -168,6 +168,21 @@ export const uiState = $state({
   // an account, a claim — have no tool of their own to be reopened in, so the
   // board is where following a relation to one of them lands.
   openBoardEntity: null,
+  /**
+   * A question worked out in the Board, handed to the graph to be drawn.
+   *
+   * `{ terms, label }` — the catalog filter as request parameters, and the sentence
+   * it reads as. The **filter** travels rather than the ids it matched, which is what
+   * makes this work at any size: the graph asks the case the same question the table
+   * asked, so nothing is capped, no URL carries five hundred ids, and the drawing
+   * stays live as the case changes under it. Both surfaces resolve it through one
+   * predicate, so they cannot disagree about what it means.
+   */
+  drawInGraph: null,
+  /** One entity the graph should draw and select, wherever it came from. The mirror
+   *  of `openBoardEntity`: a node has to be reachable from the row as much as a row
+   *  from the node. */
+  openGraphEntity: null,
   gotoCoords: null, // { lat, lon } to fly to in the Satellite tool
   // A point, a date and a time handed over by Coords & Sky: the Satellite tab
   // opens its Sun & moon mode there. Session-only, and never part of a capture
@@ -259,7 +274,10 @@ function rememberCase(id) {
   }
 }
 
+let openingCase = 0;
+
 export async function openCase(id) {
+  const run = ++openingCase;
   caseState.loading = true;
   try {
     // reference viewers point at the previous case's media — drop them
@@ -268,10 +286,14 @@ export async function openCase(id) {
       uiState.openNotebook = null;
       uiState.focusCapture = null;
     }
-    caseState.current = await api.get(`/api/cases/${id}`);
+    const opened = await api.get(`/api/cases/${id}`);
+    // Case reads can finish out of order. Only the latest choice may become current,
+    // or a slow first click can put its case back after a faster second one opened.
+    if (run !== openingCase) return;
+    caseState.current = opened;
     rememberCase(id);
   } finally {
-    caseState.loading = false;
+    if (run === openingCase) caseState.loading = false;
   }
 }
 
@@ -304,11 +326,23 @@ export async function initSession() {
   }
 }
 
+let reloadingCase = 0;
+
 export async function reloadCase() {
-  if (caseState.current) {
-    caseState.current = await api.get(`/api/cases/${caseState.current.id}`);
-    caseState.rev++;
-  }
+  const id = caseState.current?.id;
+  if (!id) return;
+  const selection = openingCase;
+  const run = ++reloadingCase;
+  const reloaded = await api.get(`/api/cases/${id}`);
+  // A write may finish while another case is being opened. Its refresh belongs to
+  // the case it started in and must never put that case back under the analyst.
+  if (
+    run !== reloadingCase ||
+    selection !== openingCase ||
+    caseState.current?.id !== id
+  ) return;
+  caseState.current = reloaded;
+  caseState.rev++;
 }
 
 export async function createCase(name) {
@@ -356,6 +390,8 @@ export async function promoteCase(name) {
  * next, since the consuming effects only check that *some* case is open.
  */
 export function closeCase() {
+  // Invalidate an open or refresh still in flight before dropping the current case.
+  openingCase++;
   caseState.current = null;
   rememberCase(null);
   uiState.composeQueue = [];

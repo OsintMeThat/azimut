@@ -47,6 +47,20 @@
   --sky-sun: #bd8721;
   --sky-moon: #4a93cc;
 
+  /* Case-graph families (ONTOLOGY §2). Eight hues that have to separate from each
+     other *and* stay quiet: the graph's meaning rides on the stroke, so colour
+     only says which family a node belongs to. Not --accent, which stays reserved
+     for selection so a selected node reads as selected whatever its family, and
+     not the annotation palette, which is sized for contrast over imagery. */
+  --graph-actor: #7aa2d6;
+  --graph-asset: #6fb3a8;
+  --graph-class: #bfa14e;
+  --graph-identifier: #a892cc;
+  --graph-collected: #c98f6b;
+  --graph-document: #8f9aa8;
+  --graph-place: #7fb069;
+  --graph-claim: #cf8ba0;
+
   /* -- typography --------------------------------------------- */
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
@@ -110,6 +124,16 @@
   /* sky series, stepped for a white surface rather than flipped from the dark set */
   --sky-sun: #cc9526;
   --sky-moon: #3f97d2;
+
+  /* graph families, darkened for a white canvas rather than flipped */
+  --graph-actor: #3f6ea8;
+  --graph-asset: #2f7f72;
+  --graph-class: #85661a;
+  --graph-identifier: #6f57a0;
+  --graph-collected: #a35f34;
+  --graph-document: #5b6674;
+  --graph-place: #4a7f36;
+  --graph-claim: #a35470;
 
   --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.12);
   --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.16);

@@ -339,6 +339,139 @@ def test_media_page_does_not_scan_sidecars_for_each_request(client, monkeypatch)
     assert page["total"] == 1
 
 
+# -- what the case collected, apart from what it made ------------------------
+#
+# A geolocation case ends up with far more extracted frames than collected files,
+# and the chips cannot answer "what did we actually collect": they are
+# single-select and each says "show me only X". This is the other axis, so it is a
+# switch, and it scopes the counts as well as the page — a chooser still
+# advertising rows the switch is hiding is a chooser that lies.
+
+
+def _made_here(client, cid, source_path, *, name=None):
+    """One derivative through the real Inspect route.
+
+    The source colours matter: brightening a near-black pixel rounds back to
+    itself, the bytes match, and dedupe hands back the *upload* — which is correct
+    behaviour and a fixture that would test nothing.
+    """
+    res = client.post(
+        f"/api/cases/{cid}/inspect/save-frames",
+        json={
+            "items": [
+                {
+                    "path": source_path,
+                    "ops": [{"op": "brightness", "params": {"amount": 1.4}}],
+                    **({"label": name} if name else {}),
+                }
+            ]
+        },
+    )
+    assert res.status_code == 200, res.text
+    saved = res.json()["saved"][0]
+    assert saved["duplicate"] is False, "fixture produced bytes the case already held"
+    return saved["item"]
+
+
+def test_media_page_can_leave_out_what_the_case_made(client):
+    cid = client.post("/api/cases", json={"name": "Collected"}).json()["id"]
+    original = _upload(client, cid, "orig.png", _png_bytes()).json()["item"]
+    made = _made_here(client, cid, original["path"])
+
+    everything = client.get(f"/api/cases/{cid}/media/page").json()
+    assert {item["path"] for item in everything["items"]} == {original["path"], made["path"]}
+    # The number is reported whether the switch is on or off: off, it is what
+    # turning it on would hide.
+    assert everything["facets"]["made_here_count"] == 1
+
+    collected = client.get(
+        f"/api/cases/{cid}/media/page", params={"collected_only": "true"}
+    ).json()
+    assert [item["path"] for item in collected["items"]] == [original["path"]]
+    assert collected["total"] == 1
+    assert collected["facets"]["made_here_count"] == 1
+
+
+def test_leaving_them_out_scopes_the_counts_too(client):
+    """Otherwise the Collages chip offers thirty rows and clicking it shows none."""
+    cid = client.post("/api/cases", json={"name": "Scoped counts"}).json()["id"]
+    original = _upload(client, cid, "orig.png", _png_bytes()).json()["item"]
+    _made_here(client, cid, original["path"])
+
+    page = client.get(f"/api/cases/{cid}/media/page", params={"collected_only": "true"}).json()
+    assert page["facets"]["category_counts"]["image"] == 1
+    assert page["facets"]["category_counts"]["upload"] == 1
+    assert page["facets"]["kind_counts"]["image"] == 1
+
+
+def test_leaving_them_out_does_not_touch_collected_material(client):
+    """A satellite capture is original imagery brought into the case, not something
+    composed out of what the case already holds. Same for a download and an import."""
+    from azimut.engine import media as media_engine
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Untouched"}).json()["id"]
+    upload = _upload(client, cid, "orig.png", _png_bytes()).json()["item"]
+    capture = media_engine.import_image(
+        Case.open(cid),
+        Image.new("RGB", (32, 24)),
+        "map.png",
+        {"type": "satellite"},
+        entity_type="capture",
+        dedupe=False,
+    )["item"]
+
+    page = client.get(f"/api/cases/{cid}/media/page", params={"collected_only": "true"}).json()
+    assert {item["path"] for item in page["items"]} == {upload["path"], capture["path"]}
+    assert page["facets"]["made_here_count"] == 0
+
+
+def test_the_switch_reads_how_a_file_entered_not_everything_true_about_it(client):
+    """Dedupe hands back the entity that is already there, and its row with it. Bytes
+    that arrived as an upload stay on the collected side even once Inspect produces
+    the same picture, because that is how they entered the case."""
+    cid = client.post("/api/cases", json={"name": "Entered by"}).json()["id"]
+    original = _upload(client, cid, "orig.png", _png_bytes()).json()["item"]
+    made = _made_here(client, cid, original["path"])
+    same_bytes = client.get(f"/files/{cid}/{made['path']}").content
+
+    again = _upload(client, cid, "handed-over.png", same_bytes).json()
+    assert again["duplicate"] is True
+
+    page = client.get(f"/api/cases/{cid}/media/page", params={"collected_only": "true"}).json()
+    # Still one made-here row, not two, and the import did not resurrect it.
+    assert [item["path"] for item in page["items"]] == [original["path"]]
+    assert page["facets"]["made_here_count"] == 1
+
+
+def test_leaving_them_out_pages_and_counts_together(client):
+    """The page and the total come from the same SQL, so a client-side filter would
+    have produced a right-looking first page and a wrong count under it."""
+    cid = client.post("/api/cases", json={"name": "Paged"}).json()["id"]
+    originals = [
+        _upload(client, cid, f"orig{i}.png", _png_bytes(color=(40 + i * 40, 20, 20))).json()["item"]
+        for i in range(3)
+    ]
+    for original in originals:
+        _made_here(client, cid, original["path"])
+
+    first = client.get(
+        f"/api/cases/{cid}/media/page", params={"collected_only": "true", "limit": 2}
+    ).json()
+    assert first["total"] == 3
+    assert len(first["items"]) == 2
+    assert first["next_cursor"] == "2"
+
+    rest = client.get(
+        f"/api/cases/{cid}/media/page",
+        params={"collected_only": "true", "limit": 2, "cursor": first["next_cursor"]},
+    ).json()
+    assert len(rest["items"]) == 1
+    assert rest["next_cursor"] is None
+    seen = {item["path"] for item in first["items"] + rest["items"]}
+    assert seen == {item["path"] for item in originals}
+
+
 def test_media_metadata_returns_only_requested_paths(client):
     cid = client.post("/api/cases", json={"name": "Metadata"}).json()["id"]
     first = _upload(client, cid, "first.png", _png_bytes(color=(10, 0, 0))).json()["item"]

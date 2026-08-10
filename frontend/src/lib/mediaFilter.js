@@ -36,6 +36,22 @@ export function isGenericImage(item) {
   return item?.kind === 'image' && !isSatelliteMedia(item);
 }
 
+/** The tools that make a file out of material the case already holds. Mirrors
+ *  `links.MADE_HERE`; the server filters on the same set, and this is the
+ *  in-memory pass a case small enough for one page takes instead. */
+const MADE_HERE = new Set(['inspect']);
+
+/** Whether the case made this file rather than collected it: an extracted frame,
+ *  an adjustment, a collage.
+ *
+ *  Reads **how the file entered the case**, not everything true about it. Bytes
+ *  imported first and later found identical to a frame keep `upload`, because that
+ *  is how they arrived — which is the same reason the graph reads the origin off
+ *  the index rather than off the derivation links, where both are true at once. */
+export function isMadeHere(item) {
+  return MADE_HERE.has(item?.source?.type);
+}
+
 /** User-facing kind label for the Media Library card. */
 export function mediaDisplayKind(item) {
   return isSatelliteMedia(item) ? 'satellite' : item?.kind;
@@ -64,6 +80,7 @@ export function visibleMedia(
     catMatch = null,
     folderFilter = null,
     gpsOnly = false,
+    collectedOnly = false,
     query = '',
     sort = 'newest',
     direction,
@@ -76,6 +93,7 @@ export function visibleMedia(
         (!catMatch || catMatch(i)) &&
         (!folderFilter || i.folder === folderFilter) &&
         (!gpsOnly || hasPosition(i)) &&
+        (!collectedOnly || !isMadeHere(i)) &&
         matchesQuery(i, query)
     ),
     sort,

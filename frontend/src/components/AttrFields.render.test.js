@@ -14,6 +14,7 @@ const FIELDS = [
     key: 'radius_m',
     label: 'Uncertainty radius (m)',
     kind: 'number',
+    group: 'How precise',
     rungs: [
       { label: 'This block', value: 100 },
       { label: 'This town', value: 2000 },
@@ -39,12 +40,25 @@ const RELIABILITY = {
   ],
 };
 
+// Two subjects on one type, the shape a Claim has: what it states, then why that is
+// believed. A single heading over all four would file a count as reasoning.
+const COUNTED = [
+  { key: 'count', label: 'How many', kind: 'number', group: 'What it states',
+    rungs: [], minimum: 1, whole: true },
+  { key: 'condition', label: 'Condition', kind: 'choice', rungs: [],
+    options: [{ value: 'destroyed', label: 'Destroyed' }] },
+  { key: 'confidence', label: 'Confidence', kind: 'choice', group: 'Reasoning',
+    rungs: [], options: [{ value: 'probable', label: 'Probable' }] },
+  { key: 'method', label: 'How this was worked out', kind: 'longtext', rungs: [] },
+];
+
 // A media declares nothing, and `traced` stands for a type whose only field is a
 // shape — the one case where a declared field can still leave the block empty.
 const BY_TYPE = {
   place: FIELDS,
   media: [],
   traced: [FIELDS[1]],
+  claim: COUNTED,
   bookmark: [{ key: 'archive_url', label: 'Archived copy', kind: 'url', rungs: [] }, RELIABILITY],
   ip: [
     { key: 'network', label: 'Legacy network', kind: 'text', editable: false, rungs: [] },
@@ -52,9 +66,9 @@ const BY_TYPE = {
   ],
 };
 
-vi.mock('../lib/entityTypes.svelte.js', () => ({
+vi.mock('../lib/entityTypes.svelte.js', async (importOriginal) => ({
+  ...(await importOriginal()),
   entityFields: (type) => BY_TYPE[type] ?? [],
-  entityGroup: (type) => (type === 'place' ? 'How precise' : ''),
 }));
 
 const { default: AttrFields } = await import('./AttrFields.svelte');
@@ -288,5 +302,37 @@ describe('a type with nothing to show', () => {
   it('renders no block, and so no heading, when every declared field hides itself', () => {
     // one geojson field and no shape in it: the heading would be the only thing left
     expect(open({}, 'traced').textContent.trim()).toBe('');
+  });
+});
+
+describe('one type, two subjects', () => {
+  const headings = (root) =>
+    [...root.querySelectorAll('.attrs-h')].map((node) => node.textContent);
+
+  it('opens a heading where the registry changes group, and only there', () => {
+    // four fields, two headings: a count is not reasoning, and a heading per field
+    // would be a form of labels rather than a form of blocks
+    expect(headings(open({}, 'claim'))).toEqual(['What it states', 'Reasoning']);
+  });
+
+  it('leaves the fields in the order the vocabulary declares them', () => {
+    const root = open({}, 'claim');
+    const order = [...root.querySelectorAll('.attr-k')].map((node) => node.textContent);
+
+    expect(order).toEqual([
+      'How many', 'Condition', 'Confidence', 'How this was worked out',
+    ]);
+  });
+
+  it('states one heading over the fields that follow it', () => {
+    // a place says "How precise" once above four fields, not once per field
+    expect(headings(open({ footprint: null }, 'place'))).toEqual(['How precise']);
+  });
+
+  it('counts in whole numbers, because half a destroyed thing is not a quantity', () => {
+    const root = open({}, 'claim');
+
+    expect(field(root, 'count').getAttribute('step')).toBe('1');
+    expect(field(root, 'count').getAttribute('min')).toBe('1');
   });
 });

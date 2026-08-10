@@ -101,7 +101,9 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
     proofs/       # rendered PNGs
       .meta/      #   editable specs and pasted assets
     exports/      # what the analyst exports: notes as PDF, and their own files
-    .data/        # case.db: entities, links, folders, catalog and jobs (SQLite)
+    .data/        # private structured and presentation state
+      case.db     #   entities, links, folders, catalog and jobs (SQLite)
+      entity-images/ # private, bounded entity photos and their thumbnails
     .drafts/      # post drafts
     .inspect/     # saved Inspect session specs
     .search/      # saved Grid Search state
@@ -156,7 +158,7 @@ graph.
 
 ## Source of truth
 
-`case.db` owns the graph. A case bundle is the portable snapshot: a cleaned
+`case.db` owns the graph. A case bundle is the portable case archive: a cleaned
 database plus declared files under a SHA-256 manifest. Rollback journaling leaves
 no WAL checkpoint outside the case folder. Media, proofs and note bodies remain
 inspectable files.
@@ -190,6 +192,8 @@ carry enough information to detect staleness.
 |---|---|---|
 | Case name and storage version | `case.json` | Small manifest, atomically replaced |
 | Entities, links and folders | `case.db` | Transactional and versioned |
+| Entity photo galleries | `case.db` (`entity_images`) | Ordered private photos or Media references, with one primary |
+| Private entity photo bytes | `.data/entity-images/` | Bounded JPEG plus dedicated thumbnail; never indexed as media |
 | Entity labels and notes | `case.db` | Indexed for catalog search; file-backed labels mirror their filename stem |
 | Media visible name | Media filename stem | Mirrored as `title` to the sidecar, graph and browse index |
 | Media notes and folder | Media sidecar | Mirrored to the graph and browse index |
@@ -214,10 +218,20 @@ Windows, macOS and Linux:
   `sqlite3` module.
 - **Feature availability is per-binary, not per-Python.** `sqlite3` links whatever
   SQLite the build environment provides, so FTS5, JSON1 and RTree can be present
-  on the dev machine yet missing from a shipped binary. The store stays on core
-  SQL: `find_entity` scans and matches attributes in Python rather than relying on
-  JSON1. Any future indexed projection (geo, time, full-text) is probed at runtime
-  with a `LIKE`/scan fallback before it enters the contract.
+  on the dev machine yet missing from a shipped binary. Nothing beyond core SQL
+  enters the contract without a runtime probe and a fallback beside it:
+  - `find_entity` scans and matches attributes in Python.
+  - The Board's field filter (`attr`/`value`) is the one JSON1 caller, behind
+    `_has_json1()`. Present, `json_extract` compares the **top-level** field;
+    absent, the same question runs as `LIKE` over the exact text `json.dumps`
+    wrote, which matches the field at **any depth** — a nested object holding the
+    same key and value matches too. `tests/test_repository.py` asserts the probe
+    answers true, so CI proves on all three platforms and the 3.11 floor that the
+    exact path is the one that ships, and exercises the fallback on every platform
+    by forcing it.
+  - The field/value menus behind that filter (`attr_facets`) scan in Python, so a
+    menu never depends on an extension.
+  Any further indexed projection (geo, time, full-text) follows the same rule.
 - **`case.db` lives under the workspace root**, inside the case folder, never
   beside the frozen executable, which may sit on read-only media.
 - **Dev-only tooling stays out of the artifact.** The synthetic fixture
@@ -242,9 +256,11 @@ review.
 
 ## Database shape
 
-`case.db` is at SQLite schema 9: schema 8 adds the nullable `links.confidence`
-column, schema 9 rebuilds every row's `search_text` so an existing case answers
-searches from its declared fields and not just its label. The schema counter is
+`case.db` is at SQLite schema 14: schema 8 adds nullable `links.confidence`,
+schema 9 rebuilds every row's `search_text`, schema 10 stores graph pins per lens,
+schema 11 adds `links.nature`, schema 12 adds entity photo galleries, schema 13
+adds saved analysis views with their bounded-list count, and schema 14 indexes the
+two columns the catalog orders the whole case by. The schema counter is
 independent of the JSON `CASE_SCHEMA`: the manifest's `azimut.storage` field
 selects the backend, and each format counts its own shape upgrades.
 
@@ -268,8 +284,9 @@ use `.data/rename.json`, so a restart can finish references after the bytes move
 `entities`
 : `id`, `type`, `label`, `attrs_json`, an indexed `folder` (denormalised from
   `attrs.folder`), denormalised search text, provenance fields and status.
-  Search covers label, type, folder and notes. Unknown types and attributes stay
-  valid.
+  Search covers label, type, folder and notes. `label` (under `NOCASE`) and
+  `prov_at` are indexed as well, because the catalog orders the whole case by
+  them. Unknown types and attributes stay valid.
 
 `links`
 : `id`, source, target, `type`, provenance, status and a nullable `confidence`.
@@ -279,6 +296,25 @@ use `.data/rename.json`, so a restart can finish references after the bytes move
   `NULL` means not assessed. Claim confidence lives in the Claim entity, while
   Claim connectors, mentions, lineage and `same-image-as` reject edge ratings
   (ONTOLOGY §3).
+
+`graph_pins`
+: Saved graph coordinates keyed by entity and lens. They are presentation state
+  and cascade when the entity is deleted.
+
+`entity_images`
+: Ordered private photos or references from supported hand-made entities to image
+  `media` or `capture` entities. A partial unique index permits one primary image
+  per entity. Direct computer imports are bounded JPEGs under
+  `.data/entity-images/` and create no Media entity or browse-index row. A Media
+  reference owns no duplicate bytes; its original media record remains the owner.
+
+`analysis_views`
+: Case-owned live recipes and immutable Board or Graph snapshots. List reads carry
+  metadata and `snapshot_count`, never the snapshot payload. A live recipe stores
+  Search+ and presentation state, including view-local graph pins and camera, and
+  autosaves after edits. A snapshot stores copied entities, provenance, closed
+  relations and embedded bounded preview thumbnails, without consulting current
+  graph rows or files when read.
 
 `folders`
 : Normalized `/`-separated logical paths for the analyst's organisation. Not
@@ -318,7 +354,10 @@ the version inside the transaction so a raced second opener applies nothing; a
 newer schema is refused rather than mangled. The shipped migrations add the
 indexed `folder` column (1→2), the `jobs` table (2→3), entity search text and
 the media browse index (3→4), the `has_gps` flag (4→5), the trash journal
-(5→6), then interrupted-operation recovery state (6→7). The 4→5 backfill
+(5→6), interrupted-operation recovery state (6→7), relation confidence (7→8),
+search-text rebuilding (8→9), graph pins (9→10), relation qualifiers (10→11),
+entity galleries (11→12), saved analysis views with their denormalised snapshot
+count (12→13) and the catalog's ordering indexes (13→14). The 4→5 backfill
 reads the sidecar JSON already held in each index row, so a case enriched before
 the column existed gains its position filter on open with no file scan.
 
@@ -334,12 +373,20 @@ type. Delete writes a recovery journal before moving files to `.trash/<group>/`
 and removing graph rows. The group directory is flat: each file waits under a
 number, and the journal's `slots` list says where it came from, so the trash
 never stacks a second copy of the case tree under itself. Restore refuses
-occupied destinations, then restores the original entity ids, surviving links
-and tombstones. An interrupted delete is rolled back or published on the next
+occupied destinations, then restores the original entity ids, surviving gallery
+attachments, links and tombstones. An interrupted delete is rolled back or published on the next
 case open; an interrupted restore is completed.
 Shared thumbnails do not move; they are discarded and queued again
 after restore. Purge removes the journal only after its directory is gone, so a
 Windows file lock leaves a retryable group instead of orphaned bytes.
+
+Saved analysis views are case state too. Deleting one writes its full recipe or
+capture to Trash, and restore reinserts the same id. Snapshots are bounded to 2,000
+entities, 10,000 closed relations and an 8 MiB JSON spec. Embedded previews are
+thumbnail copies, at most 512 KiB each and 4 MiB total; they are visual context, not
+original evidence and not a cryptographic attestation. There is no standalone view
+file. Case bundles carry the `analysis_views` rows with the rest of `case.db`, so
+transmission cannot separate a reading from the case it describes.
 
 ## Case bundles
 
@@ -377,7 +424,7 @@ keep a safety reserve, and warn for imports above 10 GiB. Work is staged under
 `<workspace>/<id>.incoming/`; the existing shell and completed staging directory are
 swapped by rename for Windows compatibility. Every import creates a new case and
 records `origin_case_id` plus `imported_at` in database metadata.
-Entities and links keep their original ids, provenance and confirmation status.
+Entities, links and entity photo galleries keep their original ids and state.
 
 Geographic, temporal and full-text projections are deferred until a query needs
 them. Each projection requires its own migration and tests.
@@ -422,12 +469,27 @@ endpoints:
 
 - `GET /api/cases/{id}/catalog/entities` returns `{items, next_cursor}` in stable
   insertion order, with a clamped page size and server-side filters: a
-  comma-separated `type` set, `status`, `q` over label/type/folder/notes, and
-  folder (`unfiled=true` or an exact path, with optional descendants). The cursor keys on `rowid`, so a
-  background import appending rows never shifts a page already scrolled past, and a
-  deletion before the cursor never skips a live row.
+  comma-separated `type` set, `status`, `q` over label/type/folder/notes, folder
+  (`unfiled=true` or an exact path, with optional descendants), one stored field
+  holding one value (`attr` + `value`), having a neighbour of a type (`linked`) or
+  none at all (`unlinked`), and how the row got here (`since`, `until`, a
+  comma-separated `by`). One predicate answers all of them and the graph's own
+  ranking, so the board and the drawing cannot mean two things by one filter.
+- `order` sorts the **whole filtered set** rather than the page — `created` and
+  `label`, each with a `-` prefix for the other direction — because *the newest in
+  this case* and *the newest of the hundred rows loaded* are different answers and
+  only the first is worth having. The default cursor keys on `rowid`, so a background
+  import appending rows never shifts a page already scrolled past and a deletion
+  before the cursor never skips a live row; an ordered one keys on its sort column
+  **and** the rowid, spelled `<rowid>:<key>`, so a hundred rows filed in the same
+  second cannot tie the paging into a loop. Both sort columns are indexed (schema
+  14), so an ordered page walks an index instead of sorting the filtered set in a
+  temp B-tree; `tests/test_repository.py` reads the query plan and holds it there.
 - `GET /api/cases/{id}/catalog/summary` returns `{total, by_type, by_status,
-  by_folder}` without shipping the graph.
+  by_folder, by_source, linked_to, unlinked}` without shipping the graph. `linked_to`
+  counts entities that **have a neighbour** of each type, which is not how many of
+  that type the case holds: it is what the filter menu has to price itself with, and
+  the other number looks like an answer without being one.
 - `GET /api/cases/{id}/entities/{id}/chain` (neighbour derivation),
   `GET /entities/lookup` (one entity by attribute), and
   `GET /entities/{id}/derivation` (transitive `derived-from` closure) are the
@@ -447,6 +509,27 @@ response.
 Deferred to their first consumer: date filters (a timeline filter), links
 pagination (a relations/graph view), and ranked full-text search (gated on
 per-binary FTS5).
+
+### An id set larger than a statement can bind
+
+SQLite's compiled variable ceiling is 999 on the oldest builds still shipped, so
+`_ID_CHUNK` caps an `IN (…)` at 250 ids and `_chunks` splits a wider set. That is
+the right answer for every question a chunk can settle alone — *which of these
+entities exist*, *how many edges does each of these carry* — and it costs one
+statement per chunk, linear in the set.
+
+It is the wrong answer for the closed edge set, which is what the graph draws:
+an edge with **both** ends in the set has ends that can fall in two different
+chunks, so no chunk holds it. Asking every *pair* of chunks closed that hole and
+bought a quadratic one — 9 statements at 650 nodes, 400 at 5 000.
+
+`_scope_table` puts the ids in a `TEMP` table keyed on `id`, and the closed set
+becomes a join on that key: **one statement at any size**, binding no ids at all.
+Measured on a 5 000-node star, 133 ms → 28 ms, and linear rather than square; at
+one chunk the two are within a tenth of a millisecond. Temp tables belong to the
+connection and `_connect` opens a fresh one per operation, so a scope cannot leak
+into the next read. `tests/test_repository.py` traces the statements a read runs
+and holds it to one.
 
 ## Thumbnails and background jobs
 
@@ -506,6 +589,10 @@ original: a proof panel picker rendering full-size captures in 150px cells was
 the slowest surface in the app. The proof pickers poll the listing while
 anything is pending, like the grid does.
 
+Entity galleries reuse the same thumbnails. Details constrains the main image,
+while the Board, sidebar and graph read only the primary thumbnail and fall back
+to the entity glyph when none exists.
+
 A saved proof's export is thumbnailed through the same cache: `POST
 /cases/{id}/proofs` renders one from the bytes it just wrote and records it in
 the spec, and `GET /cases/{id}/proofs` backfills any proof that has none (saved
@@ -519,6 +606,12 @@ anything no media sidecar points at.
 refetching. Thumbnail URLs fold in the content hash and the generator version,
 so they can never change meaning and are served `immutable` — the browser stops
 asking for them at all.
+
+A media file keeps the name it arrived with, and a download can land as
+`#3deenero2025.mp4`, so the path is percent-encoded per segment before it
+reaches this route: raw, that `#` opens a fragment and the request arrives as
+the directory. `lib/fileUrl.js` is the UI's only builder for these URLs, and
+notes store them encoded (the PDF export unquotes them back to a path).
 
 The Media Library and Files browse media through `GET
 /api/cases/{id}/media/page`, a bounded SQLite query with `q`, `kind`,
@@ -564,6 +657,11 @@ removes the file and sidecar, then settles the database. Thumbnail generation
 follows the same temp-then-rename discipline. The rollback journal means a copied
 closed case is always complete.
 
+Direct entity photos follow the same boundary without entering the media pipeline:
+Pillow applies the process-wide pixel clamp, EXIF orientation is normalized, the
+display copy is capped at 2048 px and its thumbnail at 512 px. Detaching one
+removes both private files. A Media Library choice only removes the reference.
+
 ## Performance
 
 The deterministic large-case fixture (`tests/bigcase.py`) builds entities,
@@ -598,6 +696,10 @@ limits instead of machine-specific timings.
   refusal, foreign keys, rollback, the in-place schema upgrade through every
   migration, keyset paging, media browse search/facets, and the atomic converter
   (roundtrip, dangling-link report, failure leaves no db, large-case integrity).
+- **Entity photos** (`tests/test_entity_images.py`, `tests/test_trash.py`,
+  `tests/test_bundles.py`): supported types, primary promotion, API validation,
+  no Media row for computer imports, bounded output, catalog and graph thumbnails,
+  Trash restore and bundle round trips for both storage forms.
 - **Migration** (`tests/test_migrations.py`): legacy json → sqlite on open, backup
   recoverability, a failed activation leaving the json case usable, forward-compat
   refusal.

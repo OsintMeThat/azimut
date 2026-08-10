@@ -1,5 +1,6 @@
 <script>
   import { onMount, tick } from 'svelte';
+  import { fileUrl } from '../lib/fileUrl.js';
   import L from 'leaflet';
   import 'leaflet/dist/leaflet.css';
   import { api } from '../lib/api.js';
@@ -2672,6 +2673,29 @@
     else openNotes(row);
   }
 
+  /** Accept a point a tool proposed, from the panel the analyst is reading it in.
+   *
+   *  The same PATCH the sidebar sends, so the far end of the point's suggested
+   *  relations is accepted with it — the API keeps that invariant, and a point
+   *  confirmed here while the edge tying it to its capture stayed proposed would
+   *  be the two surfaces disagreeing about one click. */
+  let acceptingId = $state(null);
+  async function acceptSaved(row) {
+    if (acceptingId) return;
+    acceptingId = row.id;
+    try {
+      await api.patch(`/api/cases/${caseState.current.id}/entities/${row.id}`, {
+        status: 'confirmed',
+      });
+      await reloadCase(); // re-reads the saved index and the case sidebar
+      toast('Point accepted', 'ok', 1600);
+    } catch (e) {
+      toast(`Could not accept this point: ${e.message}`, 'danger');
+    } finally {
+      acceptingId = null;
+    }
+  }
+
   // --- details modal (title + notes) ---
   let notesItem = $state(null);
   let notesText = $state('');
@@ -2863,6 +2887,7 @@
     locating = { done: 0, total };
     let located = 0;
     let failed = 0;
+    let throttled = false;
     try {
       let remaining = total;
       while (remaining > 0 && !locateStopped && generation === locateGeneration) {
@@ -2872,22 +2897,26 @@
         if (generation !== locateGeneration) return;
         located += batch.located;
         failed += batch.failed;
-        // A batch that resolved nothing means the network is down, not that the
-        // next one will do better: stop instead of hammering Nominatim forever.
+        throttled = Boolean(batch.throttled);
+        // A batch that resolved nothing means the network is down, or that
+        // Nominatim put us in its penalty box — not that the next one will do
+        // better: stop instead of hammering it forever.
         const stalled = batch.remaining >= remaining;
         remaining = batch.remaining;
         locating = { done: total - remaining, total };
-        if (stalled) break;
+        if (stalled || throttled) break;
       }
       if (generation !== locateGeneration) return;
       const rows = await api.get(`/api/cases/${id}/satellite/index`);
       if (generation !== locateGeneration) return;
       saved = rows;
       toast(
-        failed
-          ? `Located ${located} of ${total}. ${failed} lookup(s) failed; run Locate again to retry`
-          : `Located ${located} of ${total}`,
-        failed ? 'warn' : 'ok'
+        throttled
+          ? `Located ${located} of ${total}. OpenStreetMap is rate-limiting this address; wait a minute and run Locate again`
+          : failed
+            ? `Located ${located} of ${total}. ${failed} lookup(s) failed; run Locate again to retry`
+            : `Located ${located} of ${total}`,
+        failed || throttled ? 'warn' : 'ok'
       );
     } catch (e) {
       if (generation === locateGeneration) {
@@ -3491,6 +3520,7 @@
             onedit={editSaved}
             ondelete={(row) => (deleteTarget = row)}
             onproof={sendToComposer}
+            onaccept={acceptSaved}
             onbrowse={() => (savedSearchOpen = true)}
             onlocate={runLocate}
             oncancelLocate={() => (locateStopped = true)}
@@ -3562,7 +3592,7 @@
         <a
           class="link-out"
           class:disabled={fullscreen}
-          href={fullscreen ? undefined : `/files/${caseState.current?.id}/${notesItem.path}`}
+          href={fullscreen ? undefined : fileUrl(caseState.current?.id, notesItem.path)}
           target="_blank"
           rel="noreferrer"
           aria-disabled={fullscreen}
@@ -3605,6 +3635,7 @@
     onedit={editSaved}
     ondelete={(row) => (deleteTarget = row)}
     onproof={sendToComposer}
+    onaccept={acceptSaved}
   />
 {/if}
 
@@ -3813,7 +3844,7 @@
             <button class="ref-pick" onclick={() => addRef(m)} title={m.title ?? m.filename}>
               <div class="ref-thumb">
                 {#if m.thumbnail}
-                  <img src={`/files/${caseState.current.id}/${m.thumbnail}`} alt={m.filename} loading="lazy" />
+                  <img src={fileUrl(caseState.current.id, m.thumbnail)} alt={m.filename} loading="lazy" />
                 {:else}
                   <Icon name={m.kind === 'video' ? 'video' : 'image'} size={26} />
                 {/if}

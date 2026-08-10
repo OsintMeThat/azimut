@@ -57,6 +57,42 @@ async function openBoard(page, options = {}) {
   return fixture;
 }
 
+/** Open one axis in the fixed + Filter menu. */
+async function openFilter(page, axis) {
+  const bar = page.locator('.filter-bar');
+  await bar.getByRole('button', { name: 'Filter', exact: true }).click();
+  await bar
+    .locator('.pop.wide')
+    .getByRole('button', { name: new RegExp(`^${axis}\\b`, 'i') })
+    .click();
+  return bar.locator('.pop').last();
+}
+
+/** Pick one value from one filter axis. */
+async function filterBy(page, axis, value) {
+  const pop = await openFilter(page, axis);
+  await pop.getByRole('button', { name: new RegExp(`^${value}\\b`, 'i') }).click();
+}
+
+/** Ask one of the ready-made questions at the top of + Filter. */
+async function ask(page, question) {
+  const bar = page.locator('.filter-bar');
+  await bar.getByRole('button', { name: 'Filter', exact: true }).click();
+  await bar
+    .locator('.pop.wide')
+    .getByRole('button', { name: new RegExp(`^${question}\\b`, 'i') })
+    .click();
+}
+
+/** The identity cell, excluding the action cell whose accessible name repeats it. */
+function entityCell(page, name) {
+  return page
+    .locator('tbody tr')
+    .filter({ has: page.locator('.name', { hasText: name }) })
+    .locator('td')
+    .first();
+}
+
 test('opens from the case it belongs to, not from the rail of stages', async ({ page }) => {
   await installAppFixture(page, { catalog });
   await page.goto('/#media');
@@ -73,9 +109,9 @@ test('opens from the case it belongs to, not from the rail of stages', async ({ 
 test('lists what the case holds, whatever the type', async ({ page }) => {
   const fixture = await openBoard(page);
 
-  await expect(page.getByRole('cell', { name: /roadside photo/ })).toBeVisible();
-  await expect(page.getByRole('cell', { name: /checkpoint north/ })).toBeVisible();
-  await expect(page.getByRole('cell', { name: /harbour watch thread/ })).toBeVisible();
+  await expect(entityCell(page, 'roadside photo')).toBeVisible();
+  await expect(entityCell(page, 'checkpoint north')).toBeVisible();
+  await expect(entityCell(page, 'harbour watch thread')).toBeVisible();
   fixture.expectNoUnexpectedRequests();
 });
 
@@ -83,10 +119,10 @@ test('filters by family, and asks the server to narrow rather than hiding rows',
   const fixture = await openBoard(page);
   await expect(page.locator('tbody tr')).toHaveCount(3);
 
-  await page.getByTitle('Filter by family').selectOption('collected');
+  await filterBy(page, 'Family', 'Collected');
 
   await expect(page.locator('tbody tr')).toHaveCount(1);
-  await expect(page.getByRole('cell', { name: /roadside photo/ })).toBeVisible();
+  await expect(entityCell(page, 'roadside photo')).toBeVisible();
   // the family resolved to its types on the way out: the endpoint speaks types
   const narrowed = fixture.catalogQueries.filter((q) => q.includes('type='));
   expect(narrowed.at(-1)).toContain('media');
@@ -96,10 +132,52 @@ test('filters by family, and asks the server to narrow rather than hiding rows',
 test('filters by type inside the family', async ({ page }) => {
   await openBoard(page);
 
-  await page.getByTitle('Filter by type').selectOption('place');
+  await filterBy(page, 'Type', 'Place');
 
   await expect(page.locator('tbody tr')).toHaveCount(1);
-  await expect(page.getByRole('cell', { name: /checkpoint north/ })).toBeVisible();
+  await expect(entityCell(page, 'checkpoint north')).toBeVisible();
+});
+
+test('asks which videos have coordinates, as a sentence of selects', async ({ page }) => {
+  // The question no screen could ask: `kind=video` was not expressible anywhere, and
+  // "and it has a place" was a thing the analyst read row by row. Every term chosen
+  // from what the case holds, so nothing is typed and nothing can be spelled wrong.
+  const clip = {
+    id: 'media-2',
+    type: 'media',
+    label: 'quay clip',
+    attrs: { path: 'media/quay.mp4', kind: 'video' },
+    provenance: { by: 'media-library', at: '2026-08-01T09:30:00Z', status: 'confirmed' },
+  };
+  const fixture = await openBoard(page, {
+    catalog: [...catalog, clip],
+    links: [
+      {
+        id: 'l-place',
+        from: 'media-2',
+        to: 'place-1',
+        type: 'located-at',
+        provenance: { by: 'user', at: '2026-08-02T09:00:00Z', status: 'confirmed' },
+      },
+    ],
+  });
+  await expect(page.locator('tbody tr')).toHaveCount(4);
+
+  await filterBy(page, 'Type', 'Media');
+  const field = await openFilter(page, 'Field');
+  await field.getByRole('button', { name: /^kind\b/i }).click();
+  await field.getByRole('button', { name: /^video\b/i }).click();
+
+  await expect(page.locator('tbody tr')).toHaveCount(1);
+  await expect(entityCell(page, 'quay clip')).toBeVisible();
+
+  await filterBy(page, 'Linked to', 'a place');
+
+  await expect(page.locator('tbody tr')).toHaveCount(1);
+  const asked = fixture.catalogQueries.at(-1);
+  expect(asked).toContain('attr=kind');
+  expect(asked).toContain('value=video');
+  expect(asked).toContain('linked=place');
 });
 
 test('creates a claim, which nothing else in the app can do', async ({ page }) => {
@@ -144,7 +222,7 @@ test('shows an entity’s typed fields directly in Details', async ({ page }) =>
     },
   });
 
-  await page.getByRole('cell', { name: /203\.0\.113\.42/ }).click();
+  await entityCell(page, '203.0.113.42').click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByLabel('IP address')).toHaveValue('203.0.113.42');
   await expect(dialog.getByText('Legacy network', { exact: true })).toBeVisible();
@@ -205,7 +283,7 @@ test('opens a row in the same Details panel every other surface uses', async ({ 
     },
   });
 
-  await page.getByRole('cell', { name: /harbour watch thread/ }).click();
+  await entityCell(page, 'harbour watch thread').click();
 
   await expect(page.getByRole('heading', { name: 'Details' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'https://example.test/t' })).toBeVisible();
@@ -234,7 +312,7 @@ test('keeps Add relation and Add mention as separate gestures', async ({ page })
     },
   });
 
-  await page.getByRole('cell', { name: /Witness A/ }).click();
+  await entityCell(page, 'Witness A').click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('button', { name: 'Add relation' })).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Add mention' })).toBeVisible();
@@ -282,7 +360,7 @@ test('offers IP addresses and networks through Add relation', async ({ page }) =
     },
   });
 
-  await page.getByRole('cell', { name: /203\.0\.113\.42/ }).click();
+  await entityCell(page, '203.0.113.42').click();
   const dialog = page.getByRole('dialog');
   const add = dialog.getByRole('button', { name: 'Add relation' });
   await expect(add).toHaveAttribute('title', /Network/);
@@ -316,7 +394,7 @@ test('keeps both readings when relation endpoints share a type', async ({ page }
     },
   });
 
-  await page.getByRole('cell', { name: /203\.0\.112\.0\/23/ }).click();
+  await entityCell(page, '203.0.112.0/23').click();
   const composer = page.getByRole('dialog').locator('.picker.composer');
   await page.getByRole('dialog').getByRole('button', { name: 'Add relation' }).click();
   await composer.getByRole('button', { name: /203\.0\.113\.0\/24/ }).click();
@@ -371,28 +449,36 @@ test('shows a type’s own columns only once one type is picked', async ({ page 
 
   await expect(page.getByRole('columnheader', { name: 'Source reliability' })).toHaveCount(0);
 
-  await page.getByTitle('Filter by type').selectOption('bookmark');
+  await filterBy(page, 'Type', 'Bookmark');
 
   await expect(page.getByRole('columnheader', { name: 'Source reliability' })).toBeVisible();
   await expect(page.getByRole('cell', { name: 'B', exact: true })).toBeVisible();
 });
 
 test('explains the vocabulary where it uses it', async ({ page }) => {
-  await openBoard(page);
+  const statement = {
+    id: 'claim-1',
+    type: 'claim',
+    label: 'A filed statement',
+    attrs: {},
+    provenance: { by: 'user', at: '2026-08-03T09:00:00Z', status: 'confirmed' },
+  };
+  await openBoard(page, { catalog: [...catalog, statement] });
 
   const claimReads = 'a statement about the rest of the case, carrying its own reasoning';
-  // the family filter says what a family is before it is chosen, on the option
-  // itself — a reading only visible afterwards explains it to whoever already knew
-  await expect(page.locator(`option[title="${claimReads}"]`)).toHaveCount(1);
-
-  // and on the control once one is chosen
-  await page.getByTitle('Filter by family').selectOption('claim');
-  await expect(page.locator(`select[title="${claimReads}"]`)).toBeVisible();
+  // The family menu says what its vocabulary means before it is chosen.
+  const families = await openFilter(page, 'Family');
+  await expect(families.getByTitle(claimReads)).toBeVisible();
+  await families.getByTitle(claimReads).click();
+  // And the resulting chip keeps the axis explanation reachable.
+  await expect(page.getByTitle(/the broad reading: who, what, where — click to change it/i)).toBeVisible();
 
   // and the create menu says what the type it is about to file actually is
   await page.getByRole('button', { name: 'New entity' }).click();
   await page.getByLabel('Type').selectOption('claim');
-  await expect(page.getByTitle('something you are saying about the case')).toBeVisible();
+  await expect(
+    page.getByRole('dialog').getByTitle('something you are saying about the case')
+  ).toBeVisible();
   // including on the field the registry generated for it
   await expect(page.getByTitle('the reasoning a reader would need to check this')).toBeVisible();
 });
@@ -408,13 +494,104 @@ test('asks the server when the case is larger than one page', async ({ page }) =
   await page.getByPlaceholder('Search the case…').fill('harbour');
 
   await expect(page.locator('tbody tr')).toHaveCount(1);
-  await expect(page.getByRole('cell', { name: /harbour watch thread/ })).toBeVisible();
+  await expect(entityCell(page, 'harbour watch thread')).toBeVisible();
   expect(fixture.catalogQueries.at(-1)).toContain('q=harbour');
+});
+
+test('autosaves a live Board view and restores its question and sort', async ({ page }) => {
+  const fixture = await openBoard(page);
+  const search = page.getByLabel('Search the case');
+  await search.fill('harbour');
+
+  await page.getByRole('button', { name: /^Views/ }).click();
+  await page.getByRole('button', { name: 'Save view' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Save analysis view' });
+  await dialog.getByLabel('Name').fill('Source watch');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('.views .active')).toContainText('live · saved');
+
+  await page.getByRole('button', { name: 'Name' }).click();
+  await expect(page.locator('.views .active')).toContainText('saving');
+  await expect.poll(
+    () => fixture.analysisWrites.at(-1)?.body?.spec?.board?.sortKey,
+  ).toBe('label');
+  await expect(page.locator('.views .active')).toContainText('saved');
+
+  await search.fill('checkpoint');
+  await expect.poll(
+    () => fixture.analysisWrites.at(-1)?.body?.spec?.query?.terms?.q,
+  ).toBe('checkpoint');
+  await page.getByRole('button', { name: 'Leave saved view' }).click();
+
+  await page.getByRole('button', { name: /^Views/ }).click();
+  await page.getByRole('button', { name: 'Source watch live · board' }).click();
+  await expect(search).toHaveValue('checkpoint');
+  await expect(page.getByRole('columnheader', { name: 'Name' })).toHaveAttribute(
+    'aria-sort', 'ascending',
+  );
+  await expect(page.getByRole('button', { name: 'Update saved view' })).toHaveCount(0);
+});
+
+test('reads retained snapshot details in Board and leaves without a stale live dialog', async ({ page }) => {
+  const snapshot = {
+    id: 'v_board_snapshot',
+    name: 'Witness handover',
+    mode: 'snapshot',
+    surface: 'board',
+    created_at: '2026-08-10T10:00:00Z',
+    updated_at: '2026-08-10T10:00:00Z',
+    spec: {
+      version: 1,
+      query: { filter: {}, terms: {} },
+      board: { order: 'label', sortKey: 'label', sortDesc: false },
+      snapshot: {
+        captured_at: '2026-08-10T10:00:00Z',
+        entities: [
+          {
+            id: 'cap-person', type: 'person', label: 'Archived witness',
+            attrs: { role: 'observer' },
+            provenance: { by: 'analyst', at: '2026-08-10T09:58:00Z', status: 'confirmed' },
+            snapshot_images: [{
+              id: 'photo-a', title: 'Witness portrait', primary: true,
+              data: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            }],
+          },
+          {
+            id: 'cap-group', type: 'organization', label: 'Archived group',
+            attrs: {}, provenance: {},
+          },
+        ],
+        links: [{
+          id: 'cap-link', from: 'cap-person', to: 'cap-group',
+          type: 'member-of', provenance: {},
+        }],
+      },
+    },
+  };
+  await openBoard(page, { analysisViews: [snapshot] });
+
+  await page.getByRole('button', { name: /^Views/ }).click();
+  await page.locator('.views .menu .open', { hasText: 'Witness handover' }).click();
+  await expect(page.getByLabel('Search the case')).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Add file' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'New entity' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: /Show Archived witness in the graph/ })).toHaveCount(0);
+
+  await entityCell(page, 'Archived witness').click();
+  const details = page.getByRole('dialog', { name: 'Snapshot details' });
+  await expect(details).toContainText('observer');
+  await expect(details.getByRole('img', { name: 'Witness portrait' })).toBeVisible();
+  await expect(details).toContainText('Archived group');
+  await details.getByRole('button', { name: 'Close' }).click();
+
+  await page.getByRole('button', { name: 'Leave saved view' }).click();
+  await expect(page.getByRole('dialog', { name: 'Snapshot details' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Details', exact: true })).toHaveCount(0);
 });
 
 test('settles a proposal from the row it is read on', async ({ page }) => {
   const fixture = await openBoard(page);
-  await page.getByTitle('Show what a tool proposed, or what was confirmed').selectOption('suggested');
+  await ask(page, 'To review');
   await expect(page.locator('tbody tr')).toHaveCount(1);
 
   await page.getByTitle('Confirm this item').click();
@@ -434,7 +611,7 @@ test('dismisses a proposal through the delete that can be undone', async ({ page
   await page.getByTitle('Dismiss this item, recoverable from the trash').click();
 
   expect(fixture.entityWrites.at(-1)).toMatchObject({ method: 'DELETE', id: 'bm-1' });
-  await expect(page.getByRole('cell', { name: /harbour watch thread/ })).toHaveCount(0);
+  await expect(entityCell(page, 'harbour watch thread')).toHaveCount(0);
 });
 
 test('takes a file into the case and opens what it filed', async ({ page }) => {
@@ -502,7 +679,7 @@ test('hands a document back to the desktop instead of downloading a copy', async
     },
   });
 
-  await page.getByRole('cell', { name: /harbour plan/ }).click();
+  await entityCell(page, 'harbour plan').click();
   const dialog = page.getByRole('dialog');
 
   // no download link and no tool to send it to: neither exists for a document

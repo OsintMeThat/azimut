@@ -117,3 +117,15 @@ def test_the_registry_answers_for_one_media_and_its_companions(client):
     assert layout.sidecar_rel(full.photo) in owned
     assert all(not rel.startswith(CACHE) for rel in owned)
     assert all(rel.startswith(CACHE) for rel in artifacts.caches(case, entity))
+
+
+def test_private_entity_photos_are_owned_by_their_entity(client):
+    full = fullcase.build_full_case(client)
+    case = Case.open(full.case_id)
+    entity = case.get_entity(full.org_id)
+
+    assert entity is not None
+    assert set(artifacts.owned(case, entity)) == {
+        full.entity_photo,
+        full.entity_photo_thumb,
+    }

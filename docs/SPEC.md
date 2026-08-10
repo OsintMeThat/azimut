@@ -73,30 +73,31 @@ App-wide settings, scratch cases, caches and runtime tools also stay under
 The entity/link schema has existed since v1. Full vocabulary lives in
 [ONTOLOGY.md](ONTOLOGY.md).
 
-- **Entity types** (extensible) sit in one of seven **families**. Relations start
+- **Entity types** (extensible) sit in one of eight **families**. Relations start
   from families and narrow endpoints where a verb is type-specific:
 
   | Family | Types |
   |---|---|
   | actor | person, organization |
   | asset | vehicle, vessel, aircraft, structure |
+  | class | equipment-type |
   | identifier | account, email, phone, domain, ip, network |
   | collected | media, capture |
   | document | proof, post, note, inspect-session, bookmark |
   | place | place |
   | claim | claim |
 
-- **Links**: typed directed edges (owns, part-of, member-of, posted, appears-in,
-  sited-at, in-network, located-at, depicts, same-image-as, about, at, cites, …)
-  plus free-typed labels.
+- **Links**: typed directed edges (owns, part-of, member-of, associated-with, posted,
+  appears-in, sited-at, instance-of, in-network, located-at, depicts, same-image-as,
+  about, at, cites, contradicts, …) plus free-typed labels.
 - **Provenance on everything**: which tool/action, source, when and review status
   (`confirmed` by analyst vs `suggested` by a tool).
 - **Assessment stays separate**: a Claim carries its confidence; a ratable ordinary
   relation may carry its own ordinal; a source carries Admiralty reliability A–E.
 
 Tools suggest entities and links; the analyst reviews them. Relations, Mentions,
-Claims, lineage and the Board are shipped. The graph view remains v2; temporal
-Claims and their timeline are v4.
+Claims, lineage, the Board and the graph are shipped. Temporal Claims and their
+timeline are v4.
 
 ---
 
@@ -112,6 +113,7 @@ proof for publication.
 | ✅ **Media Library** | Imports or downloads case media with metadata, SHA-256, notes, provenance and multi-attachment selection. |
 | ✅ **Inspect** | Reviews images and video, including saved orientation (±90°/±180°), frame selection, adjustments, crops, collages, auto-stitch, ELA hints and sessions. |
 | ✅ **Satellite** | Saves places and attributed map captures with provider, date, rotation, measure and reference tools. |
+| ✅ **A proof files its point** | Saving a proof turns the coordinates it carries into a `place`, and the material it composes says so too; a setting files it outright or asks first. |
 | ✅ **Saved work navigation** | Groups a case's places, captures and filed screenshots by continent/country/region (labelled in English and the local language) or by My-work folder, searchable in either spelling with previews and shown on the map at its default zoom when none was saved. |
 | ✅ **Geo Proof** | Composes templated grid or free-layout panels with annotations, coloured frames and pasted overlays that stay out of the case, and exports a PNG with an editable spec. |
 | ✅ **Geo Report** | Prepares sourced proof threads and saved drafts without posting automatically. |
@@ -151,8 +153,18 @@ proof for publication.
 | ✅ **Import enrichment** | Reads image EXIF/dHash and video container/stream metadata locally in the background; parsed GPS produces linked Suggestions and all fields appear in Details. |
 | ✅ **GPS in Media** | A GPS filter and a per-row pin in the Media list send a stated position to the map, images and videos alike. |
 | ✅ **Ontology connections** | Keeps Relations, Mentions, Claim connectors and artifact lineage separate; validates exact endpoints, media kinds and cycles; exposes inverse readings and legacy-safe removal in Details. |
-| ✅ **Case Board** | The whole case as one sortable table, with typed identity fields, family/type/review filters, creation and shared Details. |
+| ✅ **Case Board** | The whole case as one sortable table, with typed identity fields, creation and shared Details. Two headings order the case itself, the rest order what is loaded and say so. |
+| ✅ **Entity photos** | Attaches private computer photos or existing Media images to an entity, with one primary thumbnail across Board, sidebar and graph. |
+| ✅ **Case graph** | The case drawn rather than listed, opening on the whole of it: lenses resolved from the verb registry and the type roles, clustered nodes, worded verbs on the edges, previews close up, and a first draw of the most connected with the case's own total beside it. |
+| ✅ **Working the drawing** | Expand, collapse and hide from the node itself, undo every presentation change, drag to pin per lens, and reach by name what the picture left out. Nothing here writes to the case. |
+| ✅ **What the drawing measures** | Sources fold onto the edge that carries them, derived imagery says it was made here, and each statement states how many sources and accounts it rests on. |
+| ✅ **One question, two surfaces** | One filter bar of nine axes, every value chosen from the case and priced by what it would answer with; *Draw these N* hands the Board's question to the graph; a saved view names a live recipe or freezes a read-only snapshot. |
 | ✅ **How sure, how reliable** | A Claim carries statement confidence, a ratable ordinary relation may carry its own ordinal, and a source carries Admiralty reliability. The assessments are never combined. |
+| ✅ **What stands against a statement** | A Claim names the Claim it cannot both hold with, ungraded and readable either way, and the drawing gives that line its own stroke. |
+| ✅ **Two people are tied** | Actors are stated as associated where containment, membership and ownership all miss, and that verb alone carries the analyst's word for the tie. |
+| ✅ **The value the case already holds** | An identifier typed a second way names the row already carrying it, compared by the registry rather than by the screen asking. It warns and never refuses. |
+| ✅ **What state a thing is in** | Every asset states its last known condition off one scale, from intact to destroyed. |
+| ✅ **Counting a model** | A model is an entity of its own, an object states which one it is, and a statement counts how many were seen and in what state. |
 | ✅ **How precise a place is** | A saved point states its uncertainty radius, its traced footprint, the source's own wording and how it was found; the map draws the spread instead of a pin. |
 | ✅ **Visible file names** | Shows each file-backed artifact under its filename stem and moves the file when that name changes. |
 | ✅ **Case doctor** | Checks a case without changing it, then offers explicit repairs for a missing database, missing media and files dropped into `media/`. |
@@ -173,7 +185,6 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 
 | Tool | What it does |
 |------|--------------|
-| **Case graph** | The same entities as a graph rather than a table: what the board lists, drawn as the nodes and edges it already holds. |
 | **Case Sheet** | Adds editable free columns and CSV/GeoJSON round trips to the shipped Board. Imported loose rows stay outside the graph until promoted. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
@@ -285,6 +296,7 @@ No version yet. Promote an idea when its workflow is clear; delete it when it
 stops making sense.
 
 - **Media in the analyst's half:** a button that looks for media beside `azimut/` and offers to bring them into the case, rather than waiting for them to be moved into `media/` by hand.
+- **Count a statement's independence by origin, not by wrapper:** three collages made from one video are three sources today, and are arguably one. The graph already answers this for a place; changing it for a statement changes a published number.
 - **Free-form montage editor:** consider only if it stays distinct from Geo Proof and Inspect collage.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 

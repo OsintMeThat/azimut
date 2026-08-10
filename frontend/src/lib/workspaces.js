@@ -13,7 +13,12 @@
  * and the case is not a stage: it is what every stage files into. It hangs off
  * the case switcher in the topbar instead, beside the name of the case it opens.
  */
-export const CASE_WORKSPACE = { id: 'case', label: 'Case', icon: 'graph', tools: ['board'] };
+export const CASE_WORKSPACE = {
+  id: 'case',
+  label: 'Case',
+  icon: 'graph',
+  tools: ['board', 'graph'],
+};
 
 /** The rail, in investigation order. */
 export const WORKSPACES = [
@@ -28,6 +33,7 @@ export const ALL_WORKSPACES = [CASE_WORKSPACE, ...WORKSPACES];
 
 export const TOOL_LABELS = {
   board: 'Board',
+  graph: 'Graph',
   media: 'Media',
   files: 'Files',
   reverse: 'Reverse Search',

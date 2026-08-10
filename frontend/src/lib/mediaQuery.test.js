@@ -37,3 +37,17 @@ describe('buildMediaQuery — position filter', () => {
     expect(buildMediaQuery('c1', { gps: false })).toBe('/api/cases/c1/media/page');
   });
 });
+
+describe('buildMediaQuery — what the case collected', () => {
+  it('asks the server, because the counts and the paging are its', () => {
+    // Filtering this one in the browser would give a right-looking first page
+    // with a wrong total under it and a chooser offering rows it just hid.
+    expect(buildMediaQuery('c1', { collectedOnly: true })).toBe(
+      '/api/cases/c1/media/page?collected_only=true'
+    );
+  });
+
+  it('says nothing when it is off', () => {
+    expect(buildMediaQuery('c1', { collectedOnly: false })).toBe('/api/cases/c1/media/page');
+  });
+});

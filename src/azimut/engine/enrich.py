@@ -391,9 +391,10 @@ def _suggest_place(case: "CaseType", entity_id: str, gps: dict[str, float]) -> N
 
     Places are deduplicated on a rounded coordinate key (about 1 m), so a roll
     of photographs from one spot proposes one place rather than forty. The key
-    is an attribute of the places enrichment mints; a place the analyst pinned
-    by hand has none and is left alone, because merging the two is a judgement
-    the Suggestions panel exists to let them make.
+    is ``satellite.COORD_KEY``, shared with the place a capture files, so a
+    photo's EXIF point and a capture framed on the same spot are one node. A
+    place the analyst pinned by hand carries no key and is left alone, because
+    merging the two is a judgement the Suggestions panel exists to let them make.
 
     A relation already stated for this media wins over a later backfill. This is
     especially important after importing a case from an older Azimut release:
@@ -406,15 +407,18 @@ def _suggest_place(case: "CaseType", entity_id: str, gps: dict[str, float]) -> N
     if any(link["type"] == LOCATED_AT for link in case.links_of(entity_id)):
         return
 
-    key = f"{gps['lat']:.5f},{gps['lon']:.5f}"
-    place = case.find_entity(attr="enrich_coord_key", value=key)
+    place = satellite_engine.place_at(case, gps["lat"], gps["lon"])
     if place is None:
         place = satellite_engine.save_place(
             case,
             gps["lat"],
             gps["lon"],
             by="enrich",
-            extra_attrs={"enrich_coord_key": key},
+            extra_attrs={
+                satellite_engine.COORD_KEY: satellite_engine.coord_key(
+                    gps["lat"], gps["lon"]
+                )
+            },
             status="suggested",
         )
     case.add_link(

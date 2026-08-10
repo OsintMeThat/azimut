@@ -25,6 +25,7 @@
     relationGroup,
     relationHint,
     relationOptions,
+    relationQualifier,
     relationReading,
   } from '../lib/relations.svelte.js';
   import { loadEntityTypes, reliabilityOf } from '../lib/entityTypes.svelte.js';
@@ -183,6 +184,28 @@
     }
   }
 
+  /**
+   * Say what kind of tie this edge states, or clear it.
+   *
+   * On `change` rather than on every keystroke: the value is a word, and a request
+   * per letter would file "s", "si", "sis" before reaching "sister". Empty sends
+   * `null`, so a word typed by mistake is taken back rather than stored blank.
+   */
+  async function qualify(link, raw) {
+    if (busyId) return;
+    const value = raw.trim();
+    if (value === (link.nature ?? '')) return;
+    busyId = link.id;
+    try {
+      await api.patch(`/api/cases/${caseId}/links/${link.id}`, { nature: value || null });
+      await onchanged?.();
+    } catch (e) {
+      toast(e.message, 'danger');
+    } finally {
+      busyId = null;
+    }
+  }
+
   async function confirm(link) {
     if (busyId) return;
     busyId = link.id;
@@ -328,6 +351,22 @@
             <option value={level.value}>{level.label}</option>
           {/each}
         </select>
+      {/if}
+      <!-- What kind of tie, where the verb alone cannot say it. Drawn because the
+           **verb** declares a qualifier, never because this edge happens to carry
+           one — the same rule the rating follows, and what keeps a free note off
+           every other edge in the vocabulary. -->
+      {#if !older && !suggested && relationQualifier(relation.link.type)}
+        <input
+          class="input chip nature"
+          class:set={Boolean(relation.link.nature)}
+          value={relation.link.nature ?? ''}
+          placeholder={relationQualifier(relation.link.type)}
+          title={relationQualifier(relation.link.type)}
+          maxlength="120"
+          disabled={busyId === relation.link.id}
+          onchange={(event) => qualify(relation.link, event.currentTarget.value)}
+        />
       {/if}
     </div>
   </div>
@@ -540,6 +579,16 @@
     color: var(--danger);
     border-color: color-mix(in srgb, var(--danger) 45%, transparent);
     background-color: color-mix(in srgb, var(--danger) 12%, transparent);
+  }
+  /* Sized to a word, because a word is what it holds: wide enough for "business
+     partner", narrow enough that nobody mistakes it for a notes box. */
+  .nature {
+    width: 11ch;
+    min-width: 0;
+    color: var(--text-3);
+  }
+  .nature.set {
+    color: var(--text-1);
   }
   /* A ruled-out candidate stays legible and stays in the list: the elimination is the
      finding, so it is dimmed rather than struck through or hidden. */

@@ -64,3 +64,24 @@ def test_edited_file_is_served_fresh(client):
     res = client.get(f"/files/{cid}/{item['path']}", headers={"If-None-Match": stale})
     assert res.status_code == 200
     assert res.headers["etag"] != stale
+
+
+def test_a_name_holding_a_hash_is_served_under_its_encoded_url(client):
+    """A TikTok download lands as `#3deenero2025.mp4`, and the name is kept.
+
+    Raw in a URL that `#` opens a fragment: the request arrives as the directory
+    and the browser never sees the file, which is how a downloaded video came to
+    play nowhere while its hash-named thumbnail showed fine. The UI encodes the
+    path (`lib/fileUrl.js`); this is the other half — the route resolving it back
+    to the file, rather than reading the escape as traversal.
+    """
+    cid = client.post("/api/cases", json={"name": "Files"}).json()["id"]
+    item = _upload(client, cid, name="#3deenero2025.png")
+    assert item["path"] == "media/#3deenero2025.png"
+
+    served = client.get(f"/files/{cid}/media/%233deenero2025.png")
+    assert served.status_code == 200
+    assert served.content == _png_bytes()
+
+    # what the browser asked for before the encoding: the directory, not a file
+    assert client.get(f"/files/{cid}/media/").status_code == 404

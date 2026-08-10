@@ -1,5 +1,6 @@
 <script>
   import { api } from '../lib/api.js';
+  import { fileUrl } from '../lib/fileUrl.js';
   import { lookupEntity } from '../lib/catalog.js';
   import { buildMediaQuery } from '../lib/mediaQuery.js';
   import { createPagedList } from '../lib/pagedList.svelte.js';
@@ -8,6 +9,7 @@
   import {
     hasMediaForFilters,
     isGenericImage,
+    isMadeHere,
     isSatelliteMedia,
     mediaDisplayKind,
     mediaPoint,
@@ -40,6 +42,7 @@
           category: catFilter,
           folder: folderFilter,
           gps: gpsOnly,
+          collectedOnly,
           sort,
           direction: sortDirection,
           limit: PAGE,
@@ -108,6 +111,18 @@
     pl.facets?.gps_count ?? items.filter((i) => mediaPoint(i)).length
   );
 
+  // --- what the case made, out of the way (independent of type and folder) ---
+  // A geolocation case ends up with 150 extracted frames beside 50 collected
+  // files, and the question "what did we actually collect" has no answer in a
+  // chooser: the chips are single-select and say "show me only X". This is the
+  // other axis, so it is a switch. On by default — the library opens on what the
+  // case collected, and the switch is how the working files come back; it says
+  // how many they are rather than leaving them unannounced.
+  let collectedOnly = $state(true);
+  const madeHereCount = $derived(
+    pl.facets?.made_here_count ?? items.filter(isMadeHere).length
+  );
+
   // --- free-text search + sort ---
   let query = $state('');
   let sort = $state('name');
@@ -121,12 +136,14 @@
     { id: 'added', label: 'Added' },
   ];
   const browseFiltersActive = $derived(
-    query.length > 0 || catFilter !== null || folderFilter !== null || gpsOnly
+    query.length > 0 || catFilter !== null || folderFilter !== null || gpsOnly || !collectedOnly
   );
   const filtersActive = $derived(
     browseFiltersActive || sort !== 'name' || sortDirection !== 'asc'
   );
-  const showBrowseBar = $derived(items.length > 0 || browseFiltersActive);
+  // Also shown for a case whose files are all working ones: the grid is empty
+  // because the switch is on, and the switch is in this bar.
+  const showBrowseBar = $derived(items.length > 0 || browseFiltersActive || madeHereCount > 0);
 
   const folders = $derived(
     [
@@ -146,6 +163,7 @@
       catMatch,
       folderFilter,
       gpsOnly,
+      collectedOnly,
       query,
       sort,
       direction: sortDirection,
@@ -205,6 +223,14 @@
     reloadIfServerBacked();
   }
 
+  function toggleCollectedOnly() {
+    collectedOnly = !collectedOnly;
+    // Always refetch, unlike the other filters: this one is on at load, so the
+    // page in memory is the collected subset and no in-memory pass can put the
+    // working files back. Every other control only ever narrows what was loaded.
+    if (caseState.current) pl.reload();
+  }
+
   /** The stated position, spelled out. Lives in the tooltip rather than in the
    *  row: a filename is what the analyst reads a list by. */
   function pointLabel(item) {
@@ -225,6 +251,7 @@
     catFilter = null;
     folderFilter = null;
     gpsOnly = false;
+    collectedOnly = true;
     sort = 'name';
     sortDirection = 'asc';
     headerSort = null;
@@ -784,6 +811,27 @@
         </button>
       {/if}
 
+      <!-- Offered only where the case made something, so a case of imports never
+           carries a dead control. Resting, it says how many files it is holding
+           back rather than letting them stay out of the grid quietly. -->
+      {#if madeHereCount || !collectedOnly}
+        <button
+          class="btn btn-sm gps-filter"
+          class:on={!collectedOnly}
+          type="button"
+          aria-pressed={!collectedOnly}
+          title={collectedOnly
+            ? `Show the ${madeHereCount} file${madeHereCount > 1 ? 's' : ''} the case made from material it already holds`
+            : 'Show only what the case collected'}
+          onclick={toggleCollectedOnly}
+        >
+          <Icon name="layers" size={13} />
+          {collectedOnly
+            ? `Show ${madeHereCount} working file${madeHereCount > 1 ? 's' : ''}`
+            : 'Hide working files'}
+        </button>
+      {/if}
+
       <!-- user-defined folders (independent facet) -->
       {#if folders.length}
         <span class="bar-sep"></span>
@@ -830,7 +878,17 @@
       </div>
     {/each}
 
-    {#if !items.length && !jobs.length && !browseFiltersActive}
+    {#if !items.length && !jobs.length && !browseFiltersActive && madeHereCount}
+      <!-- A case of nothing but frames and collages opens on an empty grid. It
+           holds files, so say which ones rather than offering to import. -->
+      <div class="empty" style="height: 100%">
+        <div class="empty-icon"><Icon name="layers" size={38} /></div>
+        <h3>Nothing collected yet</h3>
+        <p>
+          {madeHereCount} working file{madeHereCount > 1 ? 's' : ''}, held back by the switch above.
+        </p>
+      </div>
+    {:else if !items.length && !jobs.length && !browseFiltersActive}
       <div class="empty" style="height: 100%">
         <div class="empty-icon"><Icon name="media" size={42} /></div>
         <h3>No media yet</h3>
@@ -879,7 +937,7 @@
               >
                 {#if item.thumbnail && item.thumb_state === 'ready' && !brokenThumbs.has(mediaKey(item))}
                   <img
-                    src={`/files/${caseState.current.id}/${item.thumbnail}`}
+                    src={fileUrl(caseState.current.id, item.thumbnail)}
                     data-media-key={mediaKey(item)}
                     alt=""
                     loading="lazy"
@@ -931,7 +989,7 @@
                 {:else}
                   <a
                     class="btn btn-ghost btn-sm"
-                    href={`/files/${caseState.current.id}/${item.path}`}
+                    href={fileUrl(caseState.current.id, item.path)}
                     target="_blank"
                     rel="noreferrer"
                     title="Open file"
@@ -978,7 +1036,7 @@
             >
               {#if item.thumbnail && item.thumb_state === 'ready' && !brokenThumbs.has(mediaKey(item))}
                 <img
-                  src={`/files/${caseState.current.id}/${item.thumbnail}`}
+                  src={fileUrl(caseState.current.id, item.thumbnail)}
                   data-media-key={mediaKey(item)}
                   alt={item.filename}
                   loading="lazy"
@@ -1054,7 +1112,7 @@
               {:else}
                 <a
                   class="btn btn-ghost btn-sm"
-                  href={`/files/${caseState.current.id}/${item.path}`}
+                  href={fileUrl(caseState.current.id, item.path)}
                   target="_blank"
                   rel="noreferrer"
                   title="Open file"
@@ -1283,7 +1341,7 @@
       </button>
     {/if}
     <img
-      src={`/files/${caseState.current.id}/${lightboxItem.path}`}
+      src={fileUrl(caseState.current.id, lightboxItem.path)}
       alt={lightboxItem.filename}
     />
     <span class="lb-caption">

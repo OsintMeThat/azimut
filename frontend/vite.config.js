@@ -4,6 +4,11 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 // Builds straight into the Python package so `pip install .` ships the UI.
 export default defineConfig({
   plugins: [svelte()],
+  // Vitest's dependency optimiser writes beside the file whose imports it is
+  // resolving, so a suite run left two `node_modules` trees inside `src/`. They
+  // are ignored by git and never shipped, but they shadow module resolution in
+  // an editor and answer every grep over the source with a dozen false hits.
+  cacheDir: 'node_modules/.vite',
   // Under vitest, resolve Svelte's browser build so a `*.render.test.js` can mount a
   // component and drive it. Without this, `mount()` gets the server build and every
   // interaction test fails on import — which is why the suite could only ever read

@@ -7,6 +7,8 @@ from azimut import layout
 from azimut.engine import workqueue
 from azimut.workspace import Case
 
+from fullcase import _png
+
 
 def _new_case(client, name="Doctor case"):
     return client.post("/api/cases", json={"name": name}).json()["id"]
@@ -195,3 +197,71 @@ def test_scratch_case_uses_the_same_doctor_and_rebuild(client):
     ).json()
     assert repaired["report"]["status"] == "healthy"
     assert repaired["report"]["scratch"] is True
+
+
+def test_the_rebuild_states_every_loss_and_leaves_no_photo_behind(client):
+    """A rebuild reads files, so anything that lived only in `case.db` is gone.
+
+    The dialog has to say so before the analyst chooses it, and the private photos
+    have to go with the rows that owned them: kept, they would be files nothing
+    displays, nothing deletes and every later bundle still carries.
+    """
+    case_id = _new_case(client, "Photo loss")
+    subject = client.post(
+        f"/api/cases/{case_id}/entities",
+        json={"type": "person", "label": "Unknown subject"},
+    ).json()
+    added = client.post(
+        f"/api/cases/{case_id}/entities/{subject['id']}/images/upload",
+        files={"file": ("portrait.png", io.BytesIO(_png()), "image/png")},
+    )
+    assert added.status_code == 200, added.text
+    case = Case.open(case_id)
+    photo = case.resolve_inside(added.json()["images"][0]["path"])
+    assert photo.is_file()
+    case.db_path.unlink()
+
+    issue = client.get(f"/api/cases/{case_id}/doctor").json()["issues"][0]
+    assert issue["losses"] == [
+        "Relations between entities",
+        "Catalog filing folders",
+        "Provenance that was not stored in a sidecar",
+        "Entity photo galleries, and the photos added from the computer",
+        "Saved analysis views",
+        "The graph arrangement, per lens",
+    ]
+    assert photo.is_file()  # naming the loss changed nothing
+
+    client.post(f"/api/cases/{case_id}/doctor/repair", json={"action": "rebuild"})
+
+    assert not photo.exists()
+    assert not layout.entity_images(case.path).exists()
+    assert client.get(f"/api/cases/{case_id}/doctor").json()["status"] == "healthy"
+
+
+def test_a_rebuilt_case_is_shaped_like_a_new_one(client):
+    """The birth-state gate, from the other direction: after a rebuild the tool root
+    holds nothing a fresh case would not, so no orphan survives the repair."""
+    case_id = _new_case(client, "Shape after repair")
+    subject = client.post(
+        f"/api/cases/{case_id}/entities",
+        json={"type": "organization", "label": "Northwind"},
+    ).json()
+    client.post(
+        f"/api/cases/{case_id}/entities/{subject['id']}/images/upload",
+        files={"file": ("logo.png", io.BytesIO(_png()), "image/png")},
+    )
+    case = Case.open(case_id)
+    case.db_path.unlink()
+    client.post(f"/api/cases/{case_id}/doctor/repair", json={"action": "rebuild"})
+
+    born = Case.open(client.post("/api/cases", json={"name": "Newborn"}).json()["id"])
+
+    def tree(root):
+        return sorted(
+            path.relative_to(root).as_posix()
+            for path in root.rglob("*")
+            if path.name != "case.db"
+        )
+
+    assert tree(Case.open(case_id).tool_root) == tree(born.tool_root)

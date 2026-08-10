@@ -208,6 +208,8 @@
   let mention = $state('');
   let postTarget = $state('x');
   let updateOnStart = $state(true); // pop a notice on load when a release is out
+  // whether saving a proof files its point as a place, or asks first
+  let proofPlaceAuto = $state(true);
   // The app-wide logo lives beside settings.json and reaches cases only in proof PNGs.
   // `sigBust` refreshes the preview after replacement.
   let signature = $state(false);
@@ -408,6 +410,7 @@
     mention = s.post_mention ?? '';
     postTarget = s.post_target ?? 'x';
     updateOnStart = s.update_check_on_start ?? true;
+    proofPlaceAuto = s.proof_place_auto ?? true;
     applyPrefs(s); // the rest of the app reads these live
     await loadScrapers().catch(() => {}); // local disk read; never blocks Settings
     // shells out to `ffmpeg -version`; non-blocking, System only reads it
@@ -739,6 +742,28 @@
               <span>Zoom</span>
               <input class="input mono" bind:value={home.zoom} onchange={saveHome} type="number" min="1" max="21" />
             </label>
+          </div>
+        </section>
+
+        <section class="group">
+          <h3>Proofs</h3>
+          <p class="intro">
+            Saving a proof turns the coordinates it carries into a place on the map, and
+            says the proof shows it.
+          </p>
+          <div class="row">
+            <div class="row-label">
+              <span>Save the point without asking</span>
+              <span class="row-hint">
+                Off, the composer asks each time. A point already saved is never asked about.
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              bind:checked={proofPlaceAuto}
+              onchange={() => savePrefs({ proof_place_auto: proofPlaceAuto })}
+              aria-label="Save a proof's point without asking"
+            />
           </div>
         </section>
       {/if}

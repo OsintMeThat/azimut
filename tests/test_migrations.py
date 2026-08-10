@@ -6,11 +6,14 @@ migrations to prove the runners, and pin the "same schema doesn't rewrite" and
 
 import json
 import shutil
+import sqlite3
 
 import pytest
+import fullcase
 from legacy_case import rewind_case, unwrap_case, write_legacy_json_case
 
 from azimut import config, layout, workspace
+from azimut.sqlite_backend import SQLITE_SCHEMA
 from azimut.engine import trash as trash_engine
 from azimut.workspace import Case, CaseError, ensure_dir
 
@@ -596,3 +599,79 @@ def test_schema_seven_case_gets_a_readme_without_overwriting_one(tmp_workspace):
     Case.open(case.id)
 
     assert readme.read_text(encoding="utf-8") == "My own instructions\n"
+
+
+def test_a_whole_case_from_the_last_release_opens_on_the_current_schema(client):
+    """The upgrade people actually run: a case filed by the previous release,
+    opened by this one.
+
+    `tests/test_sqlite_backend.py` proves the chain on hand-built databases, one
+    step at a time. This proves it on a case with everything in it — media and
+    their sidecars, notes, proofs, places, claims, folders, links — and then reads
+    the surfaces that depend on what the chain created. A migration that leaves a
+    database technically at the right version but unreadable by the app would pass
+    every step-level test and fail here.
+
+    Schema 7 is what `v0.2.7` shipped, so this is the exact jump an installed copy
+    makes on its first open after the update.
+    """
+    import schema_rewind
+
+    full = fullcase.build_full_case(client)
+    case = Case.open(full.case_id)
+    before = {
+        entity["id"]: entity["label"] for entity in case.list_entities()
+    }
+    assert before, "the fixture planted nothing"
+    schema_rewind.rewind(case.db_path, 7)
+
+    reopened = Case.open(full.case_id)
+
+    with sqlite3.connect(reopened.db_path) as conn:
+        assert conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()[0] == str(SQLITE_SCHEMA)
+
+    # Nothing the case already held was dropped or renamed on the way up.
+    assert {e["id"]: e["label"] for e in reopened.list_entities()} == before
+    assert len(reopened.list_links()) == len(case.list_links())
+
+    # The catalog still pages, still counts, and still orders the whole case by
+    # the two columns schema 14 indexed.
+    page = reopened.page_entities(limit=5, order="label")
+    assert page["total"] == len(before)
+    assert [item["label"] for item in page["items"]] == sorted(
+        (label for label in before.values()), key=str.casefold
+    )[:5]
+    assert reopened.catalog_summary()["total"] == len(before)
+
+    # The tables the chain created answer, rather than raising "no such table".
+    assert reopened.list_analysis_views() == []
+    assert reopened.graph_pins("all") == {}
+    assert reopened.entity_images(full.org_id) == []
+    assert reopened.entity_image_thumbs(list(before)) == {}
+
+    # And the case draws, which is the read that touches most of them at once.
+    drawn = client.get(f"/api/cases/{full.case_id}/graph")
+    assert drawn.status_code == 200, drawn.text
+    assert drawn.json()["nodes"]
+
+
+def test_a_case_from_the_last_release_keeps_its_photos_and_readings_on_disk(client):
+    """The other half: what schema 7 could not hold is gone, and what the *files*
+    hold is not. A rewind drops the gallery rows, so the private photo bytes are
+    still there and the migration must neither resurrect a row for them nor
+    destroy them — only the Case Doctor is allowed to remove them, and it says so
+    first."""
+    import schema_rewind
+
+    full = fullcase.build_full_case(client)
+    case = Case.open(full.case_id)
+    photo = case.resolve_inside(full.entity_photo)
+    assert photo.is_file()
+    schema_rewind.rewind(case.db_path, 7)
+
+    reopened = Case.open(full.case_id)
+
+    assert reopened.entity_images(full.org_id) == []
+    assert photo.is_file()

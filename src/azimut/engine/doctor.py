@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import uuid
 from pathlib import Path
@@ -61,10 +62,17 @@ def _database_issue(*, unreadable: str | None = None) -> dict[str, Any]:
         "detail": (
             "Azimut can rebuild media, notes and proofs from their files and sidecars."
         ),
+        # What a rebuild costs, stated before it is chosen. Every line is case
+        # state that lives only in `case.db`: the rebuild reads files, and these
+        # were never written to one. A new table that cannot be read back from
+        # disk belongs here, or the app is asking for a yes it has not earned.
         "losses": [
             "Relations between entities",
             "Catalog filing folders",
             "Provenance that was not stored in a sidecar",
+            "Entity photo galleries, and the photos added from the computer",
+            "Saved analysis views",
+            "The graph arrangement, per lens",
         ],
         "actions": [{"id": "rebuild", "label": "Rebuild database", "tone": "primary"}],
     }
@@ -247,7 +255,24 @@ def rebuild_database(case: Case) -> dict[str, Any]:
             for path in (staging, Path(f"{staging}-wal"), Path(f"{staging}-shm")):
                 path.unlink(missing_ok=True)
             raise
+        _drop_orphaned_entity_photos(case)
         return {"status": "rebuilt", "counts": counts}
+
+
+def _drop_orphaned_entity_photos(case: Case) -> None:
+    """Remove the private photos the rebuilt database can no longer own.
+
+    A photo added from the computer is bytes under `.data/entity-images/` plus a
+    row saying which entity shows it. The rebuild reads files, and that row was
+    never in one, so it does not come back — and the bytes left behind would be
+    files nothing displays, nothing deletes and every later bundle still carries.
+    The dialog names this loss before the analyst chooses the repair.
+
+    After the database is installed, never before: a crash between the two leaves
+    the case exactly as it was, with the photos and no database, and the next run
+    starts over.
+    """
+    shutil.rmtree(layout.entity_images(case.path), ignore_errors=True)
 
 
 def require_missing_media(case: Case, entity_id: str) -> dict[str, Any]:

@@ -11,14 +11,17 @@
    * juggling. Clicking a chain row walks the details to that entity in place.
    */
   import { api } from '../lib/api.js';
-  import { caseState, reloadCase, toast } from '../lib/state.svelte.js';
+  import { fileUrl } from '../lib/fileUrl.js';
+  import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import { buildTree, flattenPaths, folderOf } from '../lib/folderTree.js';
   import { assignFolder as fileEntity } from '../lib/filing.js';
   import {
+    entityFamily,
     entityFields,
     entityIdentityLabel,
     entityIdentityPlaceholder,
     entityLabel,
+    hasImageGallery,
     isManualEntityType,
     loadEntityTypes,
   } from '../lib/entityTypes.svelte.js';
@@ -47,6 +50,7 @@
   import ClaimReferences from './ClaimReferences.svelte';
   import RelationList from './RelationList.svelte';
   import RelationPicker from './RelationPicker.svelte';
+  import EntityImages from './EntityImages.svelte';
 
   let {
     entityId,
@@ -356,6 +360,50 @@
     else walkedId = id;
   }
 
+  /**
+   * The entity already holding the identifier this one is being renamed onto.
+   *
+   * The create form has warned about this since it shipped; renaming did not, and
+   * renaming is the half where it actually happens — an account filed as a bare
+   * handle gets its `@` typed in a week later, and the case quietly holds the same
+   * profile twice. Same route, same comparison (`entities.identity_key`), and it
+   * warns rather than refusing for the same reason it does there: merging is not
+   * shipped, so a refusal would leave the value nowhere to go.
+   */
+  let twin = $state(null);
+  $effect(() => {
+    const label = infoTitle.trim();
+    const kind = entity?.type;
+    const caseId = caseState.current?.id;
+    // Unchanged is not a duplicate, and `ignore` covers the rest: an entity is never
+    // its own twin, however the label is spelled on the way through.
+    if (!label || !kind || !caseId || entityFamily(kind) !== 'identifier') {
+      twin = null;
+      return;
+    }
+    let live = true;
+    const timer = setTimeout(() => {
+      api
+        .get(
+          `/api/cases/${caseId}/entities/twin?${new URLSearchParams({
+            type: kind,
+            label,
+            ignore: entity.id,
+          })}`
+        )
+        .then((body) => {
+          if (live) twin = body.entity ?? null;
+        })
+        .catch(() => {
+          if (live) twin = null;
+        });
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  });
+
   /** Accept a proposal from here as well as from the board: a suggestion is often
    *  read before it is settled, and the panel is where it is read. Its suggested
    *  relations are confirmed with it, which is the API's own invariant. */
@@ -502,16 +550,16 @@
 
     {#if infoData?.kind === 'image' && infoData.thumbnail}
       <div class="info-preview">
-        <img src={`/files/${caseState.current.id}/${infoData.path}`} alt={entity.label} />
+        <img src={fileUrl(caseState.current.id, infoData.path)} alt={entity.label} />
       </div>
     {:else if infoData?.kind === 'video'}
       <div class="info-preview">
         <!-- svelte-ignore a11y_media_has_caption -->
-        <video src={`/files/${caseState.current.id}/${infoData.path}`} controls preload="metadata"></video>
+        <video src={fileUrl(caseState.current.id, infoData.path)} controls preload="metadata"></video>
       </div>
     {:else if entity.type === 'capture' && entity.attrs?.path}
       <div class="info-preview">
-        <img src={`/files/${caseState.current.id}/${entity.attrs.path}`} alt={entity.label} />
+        <img src={fileUrl(caseState.current.id, entity.attrs.path)} alt={entity.label} />
       </div>
     {/if}
 
@@ -534,6 +582,10 @@
       </div>
     {/if}
 
+    {#if hasImageGallery(entity.type)}
+      <EntityImages {entity} />
+    {/if}
+
     <label class="modal-label" for="ed-title">{identityLabel}</label>
     <input
       id="ed-title"
@@ -541,6 +593,14 @@
       bind:value={infoTitle}
       placeholder={entity.attrs?.coords ?? identityPlaceholder}
     />
+
+    {#if twin}
+      <p class="twin">
+        This case already holds
+        <button class="twin-open" onclick={() => walkTo(twin.id)}>{twin.label}</button>. On an
+        identifier the value is the identity, so this would be a second record of one thing.
+      </p>
+    {/if}
 
     {#if unifiedDetails && declaredFields.length}
       <AttrFields type={entity.type} bind:values={infoAttrs} />
@@ -914,7 +974,7 @@
           <Icon name="folderOpen" size={13} /> Show in folder
         </button>
       {:else if detailsFilePath}
-        <a class="btn btn-ghost btn-sm" href={`/files/${caseState.current.id}/${detailsFilePath}`} target="_blank" rel="noreferrer">
+        <a class="btn btn-ghost btn-sm" href={fileUrl(caseState.current.id, detailsFilePath)} target="_blank" rel="noreferrer">
           <Icon name="external" size={13} /> Open file
         </a>
       {/if}
@@ -940,6 +1000,21 @@
           <Icon name="crosshair" size={13} /> Go to coords
         </button>
       {/if}
+      <!-- Offered wherever an entity is read, which is the point: the panel opens off
+           a row, a map mark and a media tile alike, and every one of them is a place
+           somebody wants to ask *what is this connected to*. The drawing answers that
+           and no list can. -->
+      <button
+        class="btn btn-ghost btn-sm"
+        title="Draw it in the graph, with what it is connected to"
+        onclick={() => {
+          uiState.openGraphEntity = entity.id;
+          uiState.tool = 'graph';
+          onclose?.();
+        }}
+      >
+        <Icon name="graph" size={13} /> In the graph
+      </button>
     </div>
     <div class="details-actions">
       <button
@@ -988,6 +1063,24 @@
 <style>
   .ed {
     font-size: var(--fs-sm);
+  }
+  /* The same warning the create dialog carries, worded and styled the same: one
+     duplicate identifier reads one way whether it was typed into a new row or into
+     an existing one. */
+  .twin {
+    margin: 8px 0 0;
+    color: var(--warn);
+    font-size: var(--fs-xs);
+    line-height: 1.5;
+  }
+  .twin-open {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
   }
   .ed-tabs {
     display: flex;

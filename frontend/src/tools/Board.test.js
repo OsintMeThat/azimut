@@ -9,21 +9,15 @@ describe('the board is what makes the vocabulary reachable', () => {
     // the API: the registry declared them and the verbs accepted them, but no
     // screen made one — so a bookmark had nothing to be related to
     expect(source).toContain('creatableTypes()');
-    expect(source).toContain(`api.post(\`/api/cases/\${caseState.current.id}/entities\``);
     expect(source).toContain('New entity');
+    // the dialog itself is shared with the graph, so a claim is filed with the same
+    // words wherever the analyst is standing (`EntityCreate.test.js`)
+    expect(source).toContain("import EntityCreate from '../components/EntityCreate.svelte'");
   });
 
-  it('builds the create form from the registry instead of a form per type', () => {
-    expect(source).toContain("import AttrFields from '../components/AttrFields.svelte'");
-    expect(source).toContain('<AttrFields type={draft.type} bind:values={draft.attrs} />');
-  });
-
-  it('names the identity field for the chosen type and accepts notes before creation', () => {
-    expect(source).toContain('entityIdentityLabel(draft?.type)');
-    expect(source).toContain('entityIdentityPlaceholder(draft?.type)');
-    expect(source).toContain('for="board-notes"');
-    expect(source).toContain("...(draft.notes.trim() ? { notes: draft.notes.trim() } : {})");
-    expect(source).not.toContain('>Name</label>');
+  it('opens the shared dialog on the type already being looked at', () => {
+    expect(source).toContain('startType={draft.type}');
+    expect(source).toContain('oncreated={(entity) => {');
   });
 
   it('keeps Details compact while typed fields use the available row', () => {
@@ -43,17 +37,25 @@ describe('the board is what makes the vocabulary reachable', () => {
     expect(source).toContain("import { entityIcon } from '../lib/entityIcon.js'");
     expect(source).not.toContain('ENTITY_ICON');
   });
+
+  it('uses the primary photo when an entity has one', () => {
+    expect(source).toContain('{#if entity.thumb}');
+    expect(source).toContain("entity.thumb.startsWith('data:')");
+    expect(source).toContain('fileUrl(caseState.current.id, entity.thumb)');
+    expect(source).toContain('{:else}\n                  <Icon name={entityIcon(entity)}');
+  });
 });
 
 describe('the vocabulary explains itself', () => {
-  it('says what a family is where it offers one', () => {
-    // families are the load-bearing idea and the one part an analyst never types
-    expect(source).toContain("title={familyReads(family) || 'Filter by family'}");
+  it('hands the registry’s own readings to the menus that offer them', () => {
+    // families are the load-bearing idea and the one part an analyst never types, so
+    // the filter menu carries the clause the registry declares rather than one of its
+    // own (`FilterBar.test.js` holds the other half)
+    expect(source).toContain('familyHint={familyReads}');
+    expect(source).toContain('typeHint={entityHint}');
   });
 
-  it('says what a type is where it offers one, including in the create menu', () => {
-    expect(source).toContain("title={entityHint(type) || 'Filter by type'}");
-    expect(source).toContain('title={entityHint(draft.type)}');
+  it('says what a type is where it offers one', () => {
     expect(source).toContain('title={entityHint(entity.type)}');
   });
 
@@ -80,20 +82,25 @@ describe('bounded loading', () => {
   it('offers Show more with an honest total', () => {
     expect(source).toContain('{#if pl.hasMore}');
     expect(source).toContain('pl.loadMore()');
-    expect(source).toContain('Showing {rows.length} of {total}');
+    expect(source).toContain('Showing {rows.length} of {matchCount}');
   });
 
-  it('counts against the filtered page, not the case-wide summary', () => {
-    // "40 of 5000" while showing only places is a denominator from another question
+  it('counts the answer against the whole case, since a proportion is the point', () => {
+    // a denominator that shrinks with the numerator carries no information at all
+    expect(source).toContain('const caseTotal = $derived(summary?.total ?? pl.total)');
+    expect(source).toContain('<strong>{matchCount}</strong> of {caseTotal}');
+  });
+
+  it('counts a memory-filtered page itself, since the server never heard the term', () => {
     expect(source).toContain(
-      'const total = $derived(filtering ? pl.total : summary?.total ?? pl.total)'
+      "pl.serverMode || !filter.q.trim() ? pl.total : matching.length"
     );
   });
 
   it('hands the term to the list, which is what searches past one page', () => {
     // client-side filtering is switched off in server mode, so without this the box
     // goes quiet at exactly the case size that needs it
-    expect(source).toContain('pl.setQuery(query);');
+    expect(source).toContain('pl.setQuery(filter.q);');
   });
 
   it('drops the previous case before loading the next', () => {
@@ -101,34 +108,79 @@ describe('bounded loading', () => {
     expect(source).toContain("if (caseState.current?.id === id) summary = s;");
   });
 
-  it('re-establishes the baseline when a filter changes', () => {
-    // page two of "every type" is not page two of "places"
-    expect(source).toContain('const key = `${family}|${type}|${status}`');
+  it('re-establishes the baseline when the question changes', () => {
+    // page two of "every type" is not page two of "places", and the request itself is
+    // the key: a term that changes nothing about what is asked reloads nothing
+    expect(source).toMatch(
+      /const asked = JSON\.stringify\(\[\s*toQuery\(filter, \{ types: wantedTypes \}\), order, analysisSearch\.snapshotId,\s*\]\)/
+    );
     expect(source).toContain('void pl.reload()');
   });
 
   it('filters a small case in memory, so typing costs no request', () => {
-    expect(source).toContain('pl.serverMode || !query.trim()');
+    expect(source).toContain("pl.serverMode || !filter.q.trim()");
   });
 });
 
-describe('filters', () => {
-  it('filters by family and by type, the family resolved to its types here', () => {
-    // the family layer is server vocabulary; the catalog endpoint speaks types, so
-    // one is turned into the other rather than growing a route
-    expect(source).toContain('entityFamilies()');
-    expect(source).toContain('type ? [type] : family ? typesInFamily.map((entry) => entry.type) : []');
-    expect(source).toContain('types: wantedTypes');
+describe('the question is one value, and one bar that never changes shape', () => {
+  it('holds every term in one filter rather than a state per select', () => {
+    // seven selects, four of which appeared and disappeared as the others were set:
+    // a live term looked exactly like a dead one, and a control that vanished took
+    // its own way back with it
+    expect(source).toContain("import FilterBar from '../components/FilterBar.svelte'");
+    expect(source).toContain('let filter = $state(emptyFilter());');
+    expect(source).toContain('<FilterBar');
+    expect(source).toContain('bind:filter');
+    // and none of the old selects survive in the toolbar
+    const markup = source.slice(source.indexOf('</script>'));
+    expect(markup).not.toContain('Every family');
+    expect(markup).not.toContain('Every type');
+    expect(markup).not.toContain('Any field');
   });
 
-  it('narrows the type menu to the chosen family, and drops a type it leaves behind', () => {
-    expect(source).toContain('entityTypes().filter((entry) => !family || entry.family === family)');
-    expect(source).toContain('function setFamily(value)');
+  it('resolves families to types here, as the catalog endpoint speaks types', () => {
+    expect(source).toContain('const wantedTypes = $derived(');
+    expect(source).toContain('filter.families.length');
+    expect(source).toContain('...toQuery({ ...filter, q }, { types: wantedTypes })');
   });
 
-  it('separates what a tool proposed from what the analyst stated', () => {
-    expect(source).toContain("status: status || undefined");
-    expect(source).toContain('<option value="suggested">Suggested</option>');
+  it('narrows the type menu to the chosen families, and drops a type they leave out', () => {
+    expect(source).toContain(
+      '(entry) => !filter.families.length || filter.families.includes(entry.family)'
+    );
+    expect(source).toContain('if (inside.length !== filter.types.length)');
+  });
+
+  it('offers a family only where the case holds one', () => {
+    // offering a family nothing is filed under is offering an empty answer
+    expect(source).toContain('Object.keys(summary?.by_type ?? {})');
+  });
+
+  it('reads the fields on the click that opens their menu, not on mount', () => {
+    // the scan is what reaches `kind`, which the importer writes and the vocabulary
+    // declares nowhere — gating it behind picking a type first is what made the most
+    // useful filter in the app invisible
+    expect(source).toContain('fetchAttrFacets(id, wantedTypes)');
+    expect(source).toContain('onfields={() => (fieldsWanted = true)}');
+    expect(source).toContain('if (!wantedTypes.length && !fieldsWanted) {');
+  });
+
+  it('asks for a type first only on a case too large for the menu to be read', () => {
+    expect(source).toContain('const FACET_SCAN_MAX = 5000');
+    expect(source).toContain("facetState = 'narrow-first'");
+  });
+
+  it('drops a term the narrowing has left with nothing to answer, and says so', () => {
+    // a filter still on screen that the current rows cannot carry reads as one that
+    // stopped working
+    expect(source).toContain("filter = clearAxis(filter, 'field');");
+    expect(source).toContain('so that term went');
+  });
+
+  it('remembers the question per case, in the browser rather than in the case', () => {
+    // an unnamed question is remembered locally; naming it turns it into case state
+    expect(source).toContain('openAnalysisCase(id);');
+    expect(source).toContain('setAnalysisFilter(caseState.current?.id, filter)');
   });
 });
 
@@ -153,8 +205,10 @@ describe('one table, and it scrolls', () => {
   });
 
   it('adds a type’s own columns only when a single type is picked', () => {
-    // a column blank for four rows out of five is noise
-    expect(source).toContain('const columns = $derived(type ? entityFields(type) : [])');
+    // a column blank for four rows out of five is noise, and two types picked at once
+    // have no shared attributes to head
+    expect(source).toContain("const onlyType = $derived(filter.types.length === 1 ? filter.types[0] : '')");
+    expect(source).toContain('const columns = $derived(onlyType ? entityFields(onlyType) : [])');
   });
 
   it('reads cells rather than editing them, and imports nothing', () => {
@@ -187,10 +241,19 @@ describe('sorting', () => {
     expect(source).toContain('if (sortKey && !keys.includes(sortKey)) sortKey = ');
   });
 
-  it('says the ordering is over the rows loaded while there are more', () => {
+  it('asks the case for the two orderings the store can answer', () => {
+    // "newest first" over a hundred of eight hundred rows is not the newest of
+    // anything, and that is the one sort a worked case needs most
+    expect(source).toContain('const order = $derived(orderFor(sortKey, sortDesc))');
+    expect(source).toContain('order,');
+    expect(source).toContain('if (!sortKey || order) return matching;');
+  });
+
+  it('says the ordering is over the rows loaded only when it really is', () => {
     // an alphabet over the first hundred of eight hundred rows looks exactly like
-    // an alphabet over the case
-    expect(source).toContain("sortKey ? ', sorted over the rows loaded' : ''");
+    // an alphabet over the case — but the headings the store ordered have nothing
+    // to warn about
+    expect(source).toContain("sortKey && !order\n            ? ', sorted over the rows loaded'");
   });
 });
 
@@ -226,26 +289,41 @@ describe('the table answers a keyboard', () => {
 describe('creating one', () => {
   it('starts from the family already being looked at', () => {
     expect(source).toContain(
-      'creatableTypes().filter((entry) => !family || entry.family === family)'
+      '(entry) => !filter.families.length || filter.families.includes(entry.family)'
     );
+    expect(source).toContain('type: onlyType || wanted[0]?.type');
   });
 
   it('names the first column after the chosen type, as the create form does', () => {
-    expect(source).toContain("const identityColumn = $derived(type ? entityIdentityLabel(type) : 'Name')");
+    expect(source).toContain(
+      "const identityColumn = $derived(onlyType ? entityIdentityLabel(onlyType) : 'Name')"
+    );
   });
 
-  it('warns when an identifier value is already in the case', () => {
-    // in that family the value is the identity, so a second record is two rows for
-    // one thing — a warning, never a block: merging is not shipped
-    expect(source).toContain("entityFamily(kind) !== 'identifier'");
-    expect(source).toContain('This case already holds');
-    expect(source).toContain('disabled={saving || !draft.type || !draft.label.trim()}');
+  it('offers the row this case already holds under the same identifier', () => {
+    // the warning itself lives in the shared dialog; what the Board owns is where the
+    // offer lands — the existing row, opened
+    expect(source).toContain('ontwin={(entity) => {');
+    expect(source).toContain('openId = entity.id;');
   });
 
   it('asks before a close would throw away an unsaved field', () => {
     expect(source).toContain('function closeDetails()');
     expect(source).toContain('if (dirty) discarding = true;');
     expect(source).toContain('title="Discard changes?"');
+  });
+});
+
+describe('a frozen analysis snapshot', () => {
+  it('keeps its question and captured rows read-only while retaining details', () => {
+    expect(source).toContain('const snapshotReading = $derived(Boolean(analysisSearch.snapshotId))');
+    expect(source).toContain('disabled={!caseState.current || importing || snapshotReading}');
+    expect(source).toContain('disabled={snapshotReading}');
+    expect(source).toContain('{#if openId && !snapshotReading}');
+    expect(source).toContain('{#if !snapshotReading}<span class="review">');
+    expect(source).toContain('<Modal title="Snapshot details"');
+    expect(source).toContain('<SnapshotDetails');
+    expect(source).toContain('snapshotOpen = null;');
   });
 });
 
@@ -279,5 +357,42 @@ describe('where a graph-only type is read', () => {
     // a person, an account, a claim have no tool of their own to be reopened in
     expect(source).toContain('uiState.openBoardEntity');
     expect(source).toContain('openId = id;');
+  });
+});
+
+describe('handing the question to the drawing', () => {
+  it('sends the question, never the rows it matched', () => {
+    // ids would be capped, would bloat the URL and would go stale on the next save;
+    // a filter is something the case can be asked again, and both surfaces resolve it
+    // through one predicate — so what the drawing holds is what the table counted
+    expect(source).toContain('uiState.drawInGraph = {');
+    expect(source).toContain('terms: toGraphQuery(filter, { types: wantedTypes })');
+    expect(source).toContain("uiState.tool = 'graph';");
+    expect(source).not.toContain('keep:');
+  });
+
+  it('offers it only where there is an answer to draw, and says which', () => {
+    expect(source).toContain('Draw these {matchCount}');
+    expect(source).toContain('label: said,');
+    expect(source).toContain('const drawTitle = $derived(');
+  });
+});
+
+describe('a row reaches the drawing', () => {
+  it('offers the graph from the row itself, not only from Details', () => {
+    // a list is good at narrowing and says nothing about how things join up, so the
+    // question a row most often raises is the one only the drawing answers
+    expect(source).toContain('uiState.openGraphEntity = entity.id;');
+    expect(source).toContain('aria-label="Show {entity.label} in the graph"');
+  });
+
+  it('keeps that click off the row it sits on', () => {
+    expect(source).toMatch(/e\.stopPropagation\(\);\s*uiState\.openGraphEntity/);
+  });
+
+  it('stays quiet until the row is under the pointer, like the review clicks', () => {
+    // eight hundred rows must not read as eight hundred buttons
+    expect(source).toMatch(/\.table td\.go \.act \{[^}]*opacity: 0;/);
+    expect(source).toContain('tr:hover td.go .act,');
   });
 });

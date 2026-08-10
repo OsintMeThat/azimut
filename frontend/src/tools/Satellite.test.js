@@ -111,7 +111,14 @@ describe('Satellite saved work', () => {
     // offline, every batch comes back with the same backlog — looping on that
     // would hammer Nominatim forever
     expect(source).toContain('const stalled = batch.remaining >= remaining');
-    expect(source).toContain('if (stalled) break;');
+    expect(source).toContain('if (stalled || throttled) break;');
+  });
+
+  it('stops and says so when OpenStreetMap is rate-limiting the address', () => {
+    // a 429 is not a lookup failure: running the pass again is exactly the
+    // wrong advice, so the pass ends and the toast says to wait
+    expect(source).toContain('throttled = Boolean(batch.throttled)');
+    expect(source).toContain('OpenStreetMap is rate-limiting this address');
   });
 
   it('does not let a Locate pass continue in another case', () => {
@@ -349,5 +356,24 @@ describe('sun and moon mode', () => {
     expect(source).toContain('if (!sunMode) toggleSunMode()');
     // no computed value travels: the map asks for its own
     expect(source).not.toContain('handed.sun');
+  });
+});
+
+describe('accepting a proposed point from the Saved panel', () => {
+  // import enrichment still proposes places from a file's GPS, and the panel
+  // reading them is where they are settled
+  it('sends the same PATCH the sidebar does, so one click means one thing', () => {
+    expect(source).toContain("status: 'confirmed',");
+    expect(source).toContain('onaccept={acceptSaved}');
+  });
+
+  it('re-reads the case, or the row would keep claiming it is proposed', () => {
+    const fn = source.slice(source.indexOf('async function acceptSaved'));
+    expect(fn.slice(0, fn.indexOf('\n  }'))).toContain('await reloadCase()');
+  });
+
+  it('offers it in the search modal too, which lists the same index', () => {
+    const modal = source.slice(source.indexOf('<SavedSearch'));
+    expect(modal.slice(0, modal.indexOf('/>'))).toContain('onaccept={acceptSaved}');
   });
 });

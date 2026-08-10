@@ -29,6 +29,7 @@
   import UpdateModal from './components/UpdateModal.svelte';
   import WorkspaceStopped from './components/WorkspaceStopped.svelte';
   import { readStatus, stoppedBecause } from './lib/workspace.js';
+  import { analysisSearch, leaveAnalysisView } from './lib/analysisSearch.svelte.js';
 
   // The rail holds the pipeline workspaces (docs/UI.md §3); tools are tabs
   // inside them. Two workspaces sit in the topbar rather than the rail: the
@@ -36,6 +37,7 @@
   // plumbing and not part of the working flow at all.
   const TOOLS = [
     { id: 'board', label: TOOL_LABELS.board, load: () => import('./tools/Board.svelte') },
+    { id: 'graph', label: TOOL_LABELS.graph, load: () => import('./tools/Graph.svelte') },
     { id: 'media', label: TOOL_LABELS.media, load: () => import('./tools/MediaLibrary.svelte') },
     { id: 'files', label: TOOL_LABELS.files, load: () => import('./tools/Files.svelte') },
     { id: 'reverse', label: TOOL_LABELS.reverse, load: () => import('./tools/ReverseSearch.svelte') },
@@ -62,6 +64,16 @@
   if (fromHash) uiState.tool = fromHash;
   $effect(() => {
     history.replaceState(null, '', `#${uiState.tool}`);
+  });
+
+  // A frozen reading belongs to the surface that captured it. Carrying a Graph
+  // snapshot into Board made the capture look like an incomplete second case and
+  // could leave a hidden Details id waiting for the next live read. Changing tools
+  // is therefore leaving the snapshot; live recipes still share their question.
+  $effect(() => {
+    const view = analysisSearch.activeView;
+    if (view?.mode !== 'snapshot' || uiState.tool === view.surface) return;
+    leaveAnalysisView(caseState.current?.id, { clear: true });
   });
 
   // Workspace navigation: clicking a workspace returns to its last-used tab.

@@ -16,23 +16,38 @@
    * One view, a table. Two views of the same rows only asked which one was the real
    * one. The graph is what comes next, and that is a different question, not a
    * different rendering of this list.
-   */
+  */
+  import { untrack } from 'svelte';
   import { api } from '../lib/api.js';
+  import {
+    analysisSearch,
+    openAnalysisCase,
+    setAnalysisFilter,
+  } from '../lib/analysisSearch.svelte.js';
   import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
-  import { buildCatalogQuery } from '../lib/catalog.js';
+  import { buildCatalogQuery, fetchAttrFacets } from '../lib/catalog.js';
   import { createPagedList } from '../lib/pagedList.svelte.js';
-  import { matchesEntity } from '../lib/entitySearch.js';
+  import { entitySearchMatches, matchesEntity } from '../lib/entitySearch.js';
   import { entityIcon } from '../lib/entityIcon.js';
+  import { fileUrl } from '../lib/fileUrl.js';
   import { folderOf } from '../lib/folderTree.js';
   import { deletedToast } from '../lib/trash.js';
   import {
+    chipsOf,
+    clearAxis,
+    emptyFilter,
+    isFiltering,
+    normalizeFilter,
+    orderFor,
+    toGraphQuery,
+    toQuery,
+  } from '../lib/entityFilter.js';
+  import {
     creatableTypes,
-    entityFamilies,
     entityFamily,
     entityFields,
     entityHint,
     entityIdentityLabel,
-    entityIdentityPlaceholder,
     entityLabel,
     entityTypes,
     familyReads,
@@ -41,41 +56,95 @@
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
-  import SearchInput from '../components/SearchInput.svelte';
-  import AttrFields from '../components/AttrFields.svelte';
+  import AnalysisViews from '../components/AnalysisViews.svelte';
+  import FilterBar from '../components/FilterBar.svelte';
+  import EntityCreate from '../components/EntityCreate.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
+  import SnapshotDetails from '../components/SnapshotDetails.svelte';
 
   const PAGE = 100;
+  /**
+   * How large a case may be before a field menu asks for a type first.
+   *
+   * The field facets are read by scanning the stored attributes of everything the
+   * narrowing covers, which is what lets the menu reach `kind` — a field the importer
+   * writes and the vocabulary declares nowhere. Over a whole case that scan is worth
+   * paying once, behind the click that opens the menu, and not worth paying at all on
+   * a case where the menu it builds would be unreadable anyway.
+   */
+  const FACET_SCAN_MAX = 5000;
 
   loadEntityTypes();
 
-  let family = $state(''); // '' = every family
-  let type = $state(''); // '' = every type in the chosen family
-  let status = $state(''); // '' = stated and suggested alike
-  let query = $state('');
+  /**
+   * The question being asked of the case, as one value (`lib/entityFilter.js`).
+   *
+   * It used to be six variables behind six selects, four of which appeared and
+   * disappeared as the others were set — so a term that was live looked exactly like
+   * one that was not, and the most useful filter in the app was invisible until you
+   * happened to narrow by type first. One object, one chip per term, one bar that
+   * never changes shape.
+   */
+  let filter = $state(emptyFilter());
+  let facets = $state([]); // the fields these types hold, and their values
+  /** Whether the field menu has anything to offer, or why it has not: nothing is
+   *  scanned for a menu nobody has opened. */
+  let facetState = $state('unasked'); // 'unasked' | 'loading' | 'ready' | 'narrow-first'
   let sortKey = $state(''); // '' = the catalog's own stable order
   let sortDesc = $state(false);
-  let summary = $state(null); // { total, by_type, by_status }
+  let summary = $state(null); // { total, by_type, by_status, by_folder, by_source, unlinked }
   let openId = $state(null); // the row whose Details are open
+  let snapshotOpen = $state(null); // a captured row, read without touching the live case
   let draft = $state(null); // the entity being created, or null
-  let saving = $state(false);
   let busyId = $state(null); // the row whose review action is in flight
   let discarding = $state(false); // Details closing with unsaved fields on screen
   let dirty = $state(false); // Details has edits the panel's Save has not taken
 
-  const families = $derived(entityFamilies());
-  /** The type menu follows the family filter: picking "actor" leaves two types to
+  /** The families the case actually holds, read off the summary: a filter offering a
+   *  family nothing is filed under is offering an empty answer. */
+  const families = $derived(
+    [
+      ...new Set(
+        Object.keys(summary?.by_type ?? {})
+          .map((type) => entityFamily(type))
+          .filter(Boolean)
+      ),
+    ].sort()
+  );
+  /** The type menu follows the family chips: picking "actor" leaves two types to
    *  choose between rather than seventeen. */
-  const typesInFamily = $derived(
-    entityTypes().filter((entry) => !family || entry.family === family)
+  const typeOptions = $derived(
+    entityTypes().filter(
+      (entry) => !filter.families.length || filter.families.includes(entry.family)
+    )
   );
 
-  /** What the request asks for. One type when one is picked, the family's whole set
-   *  when only a family is, nothing at all when neither — the family layer is server
-   *  vocabulary, so it resolves to types here rather than needing a route of its own. */
+  /** What the request asks for: the types picked, or every type of the families
+   *  picked, or nothing at all — the family layer is server vocabulary, so it
+   *  resolves to types here rather than needing a route of its own. */
   const wantedTypes = $derived(
-    type ? [type] : family ? typesInFamily.map((entry) => entry.type) : []
+    filter.types.length
+      ? filter.types
+      : filter.families.length
+        ? typeOptions.map((entry) => entry.type)
+        : []
   );
+
+  /** The one type on screen, or '' for a mixed list. What decides the declared
+   *  columns and what the first one is called: a column of addresses headed "Name" is
+   *  the lie this vocabulary went to the trouble of avoiding, and a mixed list has no
+   *  such reading to give. */
+  const onlyType = $derived(filter.types.length === 1 ? filter.types[0] : '');
+
+  /** A type left outside the families now chosen would filter to nothing, so it goes
+   *  with them — the same rule the family select used to apply on its way out. */
+  $effect(() => {
+    if (!filter.families.length || !filter.types.length) return;
+    const inside = filter.types.filter((type) =>
+      typeOptions.some((entry) => entry.type === type)
+    );
+    if (inside.length !== filter.types.length) filter = { ...filter, types: inside };
+  });
 
   const pl = createPagedList({
     fetchPage: ({ query: q, cursor }) =>
@@ -83,9 +152,9 @@
         buildCatalogQuery(caseState.current.id, {
           cursor,
           limit: PAGE,
-          types: wantedTypes,
-          status: status || undefined,
-          query: q || undefined,
+          ...toQuery({ ...filter, q }, { types: wantedTypes }),
+          order,
+          view: analysisSearch.snapshotId || undefined,
         })
       ),
   });
@@ -95,7 +164,7 @@
   // the size that needs it: past one page, the rows are the server's answer and
   // filtering them here would search the page rather than the case.
   $effect(() => {
-    pl.setQuery(query);
+    pl.setQuery(filter.q);
   });
 
   // A small case never reaches the server for a keystroke, so the term is applied
@@ -103,34 +172,52 @@
   // Same predicate either way (`lib/entitySearch.js`), or the box would answer one
   // way under a hundred rows and another way over.
   const matching = $derived(
-    pl.serverMode || !query.trim()
+    pl.serverMode || !filter.q.trim()
       ? pl.items
-      : pl.items.filter((e) => matchesEntity(e, query))
+      : pl.items.filter((e) => matchesEntity(e, filter.q))
   );
-  const filtering = $derived(Boolean(family || type || status || query.trim()));
-  // What the loaded rows are a part of. Under a filter that is the filtered count
-  // the page itself reports, never the case-wide summary: "40 of 5000" while
-  // showing places is a denominator from a different question.
-  const total = $derived(filtering ? pl.total : summary?.total ?? pl.total);
+  const filtering = $derived(isFiltering(filter));
+  const snapshotReading = $derived(Boolean(analysisSearch.snapshotId));
+  /** How many the question matches, across the case. The page's own count, except on
+   *  a small case searching in memory — there the server was never told the term, so
+   *  its count would answer a wider question than the one on screen. */
+  const matchCount = $derived(
+    pl.serverMode || !filter.q.trim() ? pl.total : matching.length
+  );
+  /** What the answer is a part of. The **whole case**, always: a proportion is the
+   *  information a count carries, and a denominator that shrinks with the numerator
+   *  carries none. */
+  const caseTotal = $derived(summary?.total ?? pl.total);
 
   /** The columns a table shows beyond the ones every entity has. Only when a single
    *  type is picked: a mixed list has no shared attributes, and a column that is
    *  blank for four rows out of five is noise. Read-only here — editing cells and
    *  CSV are the Case Sheet's, not this list's. */
-  const columns = $derived(type ? entityFields(type) : []);
+  const columns = $derived(onlyType ? entityFields(onlyType) : []);
 
   /** What the first column is called. Once a single type is picked it holds that
    *  type's own identity — an IP address, a handle — and the create form already
    *  says so; "Name" over a column of addresses is the same lie this vocabulary
    *  went to the trouble of avoiding. Mixed rows have no such reading. */
-  const identityColumn = $derived(type ? entityIdentityLabel(type) : 'Name');
+  const identityColumn = $derived(onlyType ? entityIdentityLabel(onlyType) : 'Name');
 
-  /** Sorted over what is loaded, which is what the row count beside "Show more"
-   *  says. The catalog's own order is a stable cursor order rather than an
-   *  alphabet, so sorting server-side would mean paging by a second key; over one
-   *  bounded page there is nothing to gain from it. */
+  /**
+   * Which ordering the store is being asked for, or '' when the sort is this page's
+   * own (`lib/entityFilter.js`).
+   *
+   * Two of the headings name a column the case can be ordered by, and clicking one
+   * asks the **case** for its newest or its alphabet rather than sorting the hundred
+   * rows that happen to be loaded. The other headings have no such column, so they
+   * keep the client sort and say so. One gesture either way: which of the two it is
+   * is a property of the column, not a second control the analyst has to find.
+   */
+  const order = $derived(orderFor(sortKey, sortDesc));
+
+  /** Sorted here only when the store did not sort it. What the note beside "Show
+   *  more" is about: an alphabet over the first hundred of eight hundred rows looks
+   *  exactly like an alphabet over the case. */
   const rows = $derived.by(() => {
-    if (!sortKey) return matching;
+    if (!sortKey || order) return matching;
     const direction = sortDesc ? -1 : 1;
     return [...matching].sort((a, b) => {
       const left = sortValue(a, sortKey);
@@ -178,6 +265,12 @@
     if (loadedFor !== id) {
       loadedFor = id;
       pl.clear();
+      // The question travels with the case, not with the tab: reopening Azimut on a
+      // case lands on what was being asked of it.
+      openAnalysisCase(id);
+      filter = normalizeFilter(analysisSearch.filter);
+      fieldsWanted = false;
+      facetState = 'unasked';
     }
     void pl.reload();
     api
@@ -188,17 +281,107 @@
       .catch(() => {});
   });
 
+  // Graph edits the same Search+ value while this mounted tool is hidden. Mirror
+  // that value back into the local bindable object without waiting for a case reload.
+  $effect(() => {
+    const id = caseState.current?.id;
+    const shared = JSON.stringify(analysisSearch.filter);
+    if (
+      !id || analysisSearch.caseId !== id ||
+      shared === untrack(() => JSON.stringify(filter))
+    ) return;
+    untrack(() => (filter = normalizeFilter(analysisSearch.filter)));
+  });
+
   // A filter is a different request, so the baseline is re-established rather than
   // filtered out of what is already loaded — page two of "every type" is not page
   // two of "places".
-  // Seeded with the filters' own initial value, so opening the board is one request
+  // Seeded with the filter's own initial value, so opening the board is one request
   // rather than this effect and the case effect above both asking for page one.
-  let lastFilter = '||';
+  let lastAsked = null;
   $effect(() => {
-    const key = `${family}|${type}|${status}`;
-    if (key === lastFilter) return;
-    lastFilter = key;
-    if (caseState.current?.id) void pl.reload();
+    const asked = JSON.stringify([
+      toQuery(filter, { types: wantedTypes }), order, analysisSearch.snapshotId,
+    ]);
+    if (asked === lastAsked) {
+      setAnalysisFilter(caseState.current?.id, filter);
+      return;
+    }
+    const first = lastAsked === null;
+    lastAsked = asked;
+    setAnalysisFilter(caseState.current?.id, filter);
+    // The text term is the paged list's own, debounced there; asking again here would
+    // be a second request per keystroke.
+    if (!first && caseState.current?.id) void pl.reload();
+  });
+
+  /**
+   * The fields on offer follow the types being listed, in one bounded read.
+   *
+   * **Read on demand**, which is the change that stopped the field filter being
+   * invisible: the scan costs the stored attributes of everything the narrowing
+   * covers, so it used to be gated behind picking a type first — and an analyst who
+   * had not picked one never learnt the filter existed. Now the gate is the click
+   * that opens the menu, which is the explicit act the cost was always worth paying
+   * behind, and only a case too large for the menu to be readable still asks for a
+   * type first.
+   *
+   * A field that survives a narrowing keeps its value, since changing the type filter
+   * must not silently drop the term beside it; one that does not is cleared and said,
+   * because a question about a field nothing on screen carries has no answer.
+   */
+  let fieldsWanted = $state(false);
+  let facetsFor = null;
+  $effect(() => {
+    const id = caseState.current?.id;
+    caseState.rev; // a save can add the first entity carrying a field
+    const key = `${id ?? ''}|${wantedTypes.join(',')}|${caseState.rev}`;
+    if (!id) {
+      facets = [];
+      facetsFor = null;
+      facetState = 'unasked';
+      return;
+    }
+    if (!wantedTypes.length && (summary?.total ?? 0) > FACET_SCAN_MAX) {
+      facets = [];
+      facetsFor = null;
+      facetState = 'narrow-first';
+      return;
+    }
+    if (!wantedTypes.length && !fieldsWanted) {
+      facets = [];
+      facetsFor = null;
+      facetState = 'unasked';
+      return;
+    }
+    if (facetsFor === key) return;
+    facetsFor = key;
+    facetState = 'loading';
+    fetchAttrFacets(id, wantedTypes)
+      .then((rows) => {
+        if (caseState.current?.id !== id) return;
+        facets = rows;
+        facetState = 'ready';
+        if (filter.attrKey && !rows.some((row) => row.key === filter.attrKey && row.values.length)) {
+          const dropped = filter.attrKey;
+          filter = clearAxis(filter, 'field');
+          toast(`Nothing on screen carries ${dropped}, so that term went`, 'warn');
+        }
+      })
+      .catch(() => {
+        facets = [];
+        facetState = 'ready';
+      });
+  });
+
+  // A value that is no longer among the field's own is not a term the table can
+  // answer, and left on screen it would read as a filter that stopped working.
+  $effect(() => {
+    if (!filter.attrValue) return;
+    const held = facets.find((row) => row.key === filter.attrKey)?.values ?? [];
+    if (held.length && !held.some((row) => row.value === filter.attrValue)) {
+      filter = { ...filter, attrValue: '' };
+    }
   });
 
   // A column that is no longer on screen cannot go on ordering the table.
@@ -207,70 +390,27 @@
     if (sortKey && !keys.includes(sortKey)) sortKey = '';
   });
 
-  function setFamily(value) {
-    family = value;
-    // a type from the family being left would filter to nothing
-    if (type && !entityTypes().some((e) => e.type === type && (!value || e.family === value))) {
-      type = '';
-    }
-  }
-
   /** Start from what the analyst is already looking at: the chosen type, or the
-   *  first type of the chosen family. Opening on "Person" while the family filter
+   *  first type of the chosen family. Opening on "Person" while the family chip
    *  says Identifier is the menu ignoring the question just asked. */
   function startCreate() {
-    const inFamily = creatableTypes().filter((entry) => !family || entry.family === family);
+    if (snapshotReading) return;
+    const wanted = creatableTypes().filter(
+      (entry) => !filter.families.length || filter.families.includes(entry.family)
+    );
     draft = {
-      type: type || inFamily[0]?.type || creatableTypes()[0]?.type || '',
+      type: onlyType || wanted[0]?.type || creatableTypes()[0]?.type || '',
       label: '',
       notes: '',
       attrs: {},
     };
   }
 
-  /**
-   * An entity of the same type already carrying this exact value.
-   *
-   * Only a warning, and only where it means something: in the `identifier` family
-   * the value *is* the identity, so two `email` rows holding one address are two
-   * records of one thing (ONTOLOGY §2). It does not block — merging is not shipped,
-   * and refusing the second entry would leave nowhere to put it — it offers the
-   * existing row instead, which is what the analyst almost always wanted.
-   */
-  let twin = $state(null);
-  $effect(() => {
-    const label = draft?.label.trim();
-    const kind = draft?.type;
-    const caseId = caseState.current?.id;
-    if (!label || !caseId || entityFamily(kind) !== 'identifier') {
-      twin = null;
-      return;
-    }
-    // debounced like every other search here: an address is typed one character at
-    // a time and none of the first fifteen is a question worth asking
-    let live = true;
-    const timer = setTimeout(() => {
-      api
-        .get(buildCatalogQuery(caseId, { types: [kind], query: label, limit: 20 }))
-        .then((page) => {
-          if (!live) return;
-          const wanted = label.toLowerCase();
-          twin = (page.items ?? []).find((e) => (e.label ?? '').toLowerCase() === wanted) ?? null;
-        })
-        .catch(() => {
-          if (live) twin = null;
-        });
-    }, 250);
-    return () => {
-      live = false;
-      clearTimeout(timer);
-    };
-  });
-
   /** Accept a machine's proposal. The far end of its suggested relations comes with
    *  it, which is the invariant the API keeps: an edge is confirmed together with
    *  the entity it hangs off, or neither is. */
   async function confirmEntity(entity) {
+    if (snapshotReading) return;
     if (busyId) return;
     busyId = entity.id;
     try {
@@ -290,6 +430,7 @@
    *  same Undo as every other one — dismissing a machine's reading is not a reason
    *  to make it unrecoverable. */
   async function dismissEntity(entity) {
+    if (snapshotReading) return;
     if (busyId) return;
     busyId = entity.id;
     const caseId = caseState.current.id;
@@ -301,36 +442,6 @@
       toast(e.message, 'danger');
     } finally {
       busyId = null;
-    }
-  }
-
-  const draftIdentityLabel = $derived(entityIdentityLabel(draft?.type));
-  const draftIdentityPlaceholder = $derived(entityIdentityPlaceholder(draft?.type));
-
-  /** Create it, then open it. A claim exists in order to be pointed at things, so
-   *  landing on its own Details with the relation picker is the next gesture, not a
-   *  detour. */
-  async function create() {
-    if (!draft || saving) return;
-    const label = draft.label.trim();
-    if (!draft.type || !label) return;
-    saving = true;
-    try {
-      const entity = await api.post(`/api/cases/${caseState.current.id}/entities`, {
-        type: draft.type,
-        label,
-        attrs: {
-          ...draft.attrs,
-          ...(draft.notes.trim() ? { notes: draft.notes.trim() } : {}),
-        },
-      });
-      draft = null;
-      await reloadCase();
-      openId = entity.id;
-    } catch (e) {
-      toast(e.message, 'danger');
-    } finally {
-      saving = false;
     }
   }
 
@@ -348,6 +459,7 @@
 
   async function importFiles(fileList) {
     const files = [...(fileList ?? [])];
+    if (snapshotReading) return;
     if (!files.length || !caseState.current || importing) return;
     const caseId = caseState.current.id;
     importing = true;
@@ -396,9 +508,125 @@
     const id = uiState.openBoardEntity;
     if (!id) return;
     uiState.openBoardEntity = null;
-    openId = id;
+    if (snapshotReading) {
+      snapshotOpen = analysisSearch.activeView?.spec?.snapshot?.entities?.find(
+        (entity) => entity.id === id
+      ) ?? null;
+    } else {
+      openId = id;
+    }
   });
 
+  /** The slug with a capital, not a second vocabulary: the families are code, and
+   *  inventing readings for them here is how two lists start. */
+  const familyTitle = (family) => family.charAt(0).toUpperCase() + family.slice(1);
+
+  /** The question as one sentence, which is what the graph writes over the drawing
+   *  so nobody has to remember what they asked two tabs ago. */
+  const said = $derived(
+    [
+      filter.q.trim() ? `“${filter.q.trim()}”` : '',
+      ...chipsOf(filter, { type: entityLabel, family: familyTitle }).map((chip) => chip.text),
+    ]
+      .filter(Boolean)
+      .join(' · ')
+  );
+  const drawTitle = $derived(`Draw this question in the graph: ${said}`);
+
+  /**
+   * Hand the question to the graph.
+   *
+   * The **filter** goes over, never the ids it matched. A list of ids would be capped,
+   * would bloat the URL, and would go stale the moment anything was saved; the filter
+   * is a question the case can be asked again, and both surfaces resolve it through
+   * one predicate — so what the drawing holds is what the table counted.
+   */
+  function drawAnswer() {
+    uiState.drawInGraph = {
+      terms: toGraphQuery(filter, { types: wantedTypes }),
+      label: said,
+      filter: normalizeFilter(filter),
+    };
+    uiState.tool = 'graph';
+  }
+
+  /** The portable recipe. Snapshot rows are resolved server-side from the same
+   *  question, so a case larger than the page is never silently cut to what loaded. */
+  function captureAnalysisView() {
+    return {
+      version: 1,
+      query: {
+        filter: normalizeFilter(filter),
+        terms: toGraphQuery(filter, { types: wantedTypes }),
+        label: said,
+      },
+      board: { order, sortKey, sortDesc },
+      timeline: { from: null, to: null, field: null },
+    };
+  }
+
+  async function openAnalysisView(view) {
+    openId = null;
+    snapshotOpen = null;
+    filter = normalizeFilter(view.spec?.query?.filter);
+    const board = view.spec?.board ?? {};
+    sortKey = typeof board.sortKey === 'string' ? board.sortKey : '';
+    sortDesc = board.sortDesc === true;
+    if (view.surface === 'graph') uiState.tool = 'graph';
+  }
+
+  let appliedViewId = null;
+  $effect(() => {
+    const view = analysisSearch.activeView;
+    if (!view) {
+      appliedViewId = null;
+      return;
+    }
+    if (view.surface !== 'board' || view.id === appliedViewId) return;
+    appliedViewId = view.id;
+    untrack(() => void openAnalysisView(view));
+  });
+
+  let observedLiveView = null;
+  let observedLiveState = '';
+  $effect(() => {
+    const view = analysisSearch.activeView;
+    if (!view || view.mode !== 'live' || view.surface !== 'board') {
+      observedLiveView = null;
+      observedLiveState = '';
+      return;
+    }
+    const savedFilter = normalizeFilter(view.spec?.query?.filter);
+    const savedBoard = view.spec?.board ?? {};
+    const current = JSON.stringify({
+      filter: normalizeFilter(filter),
+      sortKey,
+      sortDesc,
+    });
+    const saved = JSON.stringify({
+      filter: savedFilter,
+      sortKey: typeof savedBoard.sortKey === 'string' ? savedBoard.sortKey : '',
+      sortDesc: savedBoard.sortDesc === true,
+    });
+    if (observedLiveView !== view.id) {
+      observedLiveView = view.id;
+      observedLiveState = current;
+    } else if (current !== observedLiveState) {
+      observedLiveState = current;
+      analysisSearch.changeVersion += 1;
+    }
+    analysisSearch.modified = current !== saved;
+  });
+
+  function leaveAnalysisReading() {
+    appliedViewId = null;
+    openId = null;
+    snapshotOpen = null;
+    filter = normalizeFilter(analysisSearch.filter);
+  }
+
+  const matchReasons = (entity) =>
+    entity.matches?.length ? entity.matches : entitySearchMatches(entity, filter.q);
   const folderName = (entity) => folderOf(entity) || '';
   const created = (entity) => (entity.provenance?.at ?? '').slice(0, 10);
   const isSuggested = (entity) => entity.provenance?.status === 'suggested';
@@ -417,10 +645,16 @@
     <h2>Board</h2>
     <span class="sub">Everything this case holds</span>
     <div class="spacer"></div>
+    <AnalysisViews
+      surface="board"
+      capture={captureAnalysisView}
+      onopen={openAnalysisView}
+      onleave={leaveAnalysisReading}
+    />
     <button
       class="btn"
       title="Take a file into the case: a document, a scan, a plan, an image"
-      disabled={!caseState.current || importing}
+      disabled={!caseState.current || importing || snapshotReading}
       onclick={() => fileInput?.click()}
     >
       <Icon name="upload" size={14} /> {importing ? 'Adding…' : 'Add file'}
@@ -435,60 +669,48 @@
         e.currentTarget.value = '';
       }}
     />
-    <button class="btn btn-primary" onclick={startCreate} disabled={!caseState.current}>
+    <button class="btn btn-primary" onclick={startCreate} disabled={!caseState.current || snapshotReading}>
       <Icon name="plus" size={14} /> New entity
     </button>
   </div>
 
-  <div class="toolbar">
-    <SearchInput
-      bind:value={query}
-      placeholder="Search the case…"
-      count={filtering ? `${rows.length} shown` : null}
-      width="200px"
-    />
+  <!-- The question, as a bar that never changes shape: a search, one menu, and a chip
+       per term. Every menu behind it is built from what the case holds and counted,
+       so a term says how much of an answer it is before it is chosen. -->
+  <FilterBar
+    bind:filter
+    {summary}
+    {facets}
+    {facetState}
+    {families}
+    caseFolders={caseState.current?.folders ?? []}
+    types={typeOptions}
+    familyName={familyTitle}
+    typeName={entityLabel}
+    familyHint={familyReads}
+    typeHint={entityHint}
+    onfields={() => (fieldsWanted = true)}
+    disabled={snapshotReading}
+  />
 
-    <select
-      class="select filter"
-      value={family}
-      onchange={(e) => setFamily(e.currentTarget.value)}
-      title={familyReads(family) || 'Filter by family'}
-    >
-      <option value="">Every family</option>
-      {#each families as name (name)}
-        <!-- the slug with a capital, not a second vocabulary: the families are
-             code, and inventing readings for them here is how two lists start.
-             Each option carries its own clause: a reading only visible once the
-             family is chosen explains it to whoever already knew. -->
-        <option value={name} title={familyReads(name)}>
-          {name.charAt(0).toUpperCase() + name.slice(1)}
-        </option>
-      {/each}
-    </select>
-
-    <select
-      class="select filter"
-      bind:value={type}
-      title={entityHint(type) || 'Filter by type'}
-    >
-      <option value="">Every type</option>
-      {#each typesInFamily as entry (entry.type)}
-        <option value={entry.type}>
-          {entry.label}{summary?.by_type?.[entry.type] ? ` (${summary.by_type[entry.type]})` : ''}
-        </option>
-      {/each}
-    </select>
-
-    <!-- The two words the rest of the app already uses for these statuses: a row is
-         suggested until someone confirms it, and the Confirm button is what moves it.
-         Inventing a third pair of words here would make the same click read two ways. -->
-    <select class="select filter" title="Show what a tool proposed, or what was confirmed"
-      bind:value={status}>
-      <option value="">Confirmed and suggested</option>
-      <option value="confirmed">Confirmed</option>
-      <option value="suggested">Suggested</option>
-    </select>
-  </div>
+  <!-- The answer, and what it is an answer out of. The denominator is the whole case
+       even under a filter: a proportion is the information a count carries. -->
+  <p class="answer">
+    {#if !caseState.current}
+      &nbsp;
+    {:else if filtering}
+      <strong>{matchCount}</strong> of {caseTotal}
+      <!-- The table is good at narrowing and says nothing about how things join up;
+           the drawing is the opposite. This is the one gesture between them, and it
+           hands over the **question** rather than the rows it matched — so it works at
+           any size, and the drawing stays live as the case changes under it. -->
+      <button class="as-link" onclick={drawAnswer} title={drawTitle}>
+        Draw these {matchCount}
+      </button>
+    {:else}
+      {caseTotal} in this case
+    {/if}
+  </p>
 
   <!-- Dropping a file onto the list files it, the way the Media Library takes one.
        `dragleave` is guarded on the container itself: the event fires for every
@@ -498,7 +720,7 @@
     class="body"
     role="presentation"
     ondragover={(e) => {
-      if (!caseState.current) return;
+      if (!caseState.current || snapshotReading) return;
       e.preventDefault();
       dragOver = true;
     }}
@@ -543,6 +765,10 @@
                 </button>
               </th>
             {/each}
+            <!-- The action column has nothing to head and nothing to sort by: the
+                 button under it says what it does, and a heading over an icon would
+                 be a second name for one act. -->
+            <th class="go"></th>
           </tr>
         </thead>
         <tbody>
@@ -554,20 +780,41 @@
               class:suggested={isSuggested(entity)}
               class:busy={busyId === entity.id}
               tabindex="0"
-              onclick={() => (openId = entity.id)}
+              onclick={() => {
+                if (snapshotReading) snapshotOpen = entity;
+                else openId = entity.id;
+              }}
               onkeydown={(e) => {
                 // only the row's own key press: Enter on the confirm button inside
                 // it is that button's, and would otherwise open Details as well
                 if (e.target !== e.currentTarget) return;
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  openId = entity.id;
+                  if (snapshotReading) snapshotOpen = entity;
+                  else openId = entity.id;
                 }
               }}
             >
               <td>
-                <Icon name={entityIcon(entity)} size={12} />
+                {#if entity.thumb}
+                  <img
+                    class="entity-thumb"
+                    src={entity.thumb.startsWith('data:')
+                      ? entity.thumb
+                      : fileUrl(caseState.current.id, entity.thumb)}
+                    alt=""
+                    loading="lazy"
+                  />
+                {:else}
+                  <Icon name={entityIcon(entity)} size={12} />
+                {/if}
                 <span class="name">{entity.label}</span>
+                {#if filter.q.trim() && matchReasons(entity)[0]}
+                  {@const match = matchReasons(entity)[0]}
+                  <span class="match-reason" title={match.value}>
+                    {match.label}: {match.value}
+                  </span>
+                {/if}
                 {#if isSuggested(entity)}
                   <span class="tag" title="a tool proposed this, and nobody has confirmed it">
                     suggested
@@ -575,7 +822,7 @@
                   <!-- Settled where it is read. Filtering to the proposals and then
                        having to open each one to accept it made the filter a list
                        nobody could act on. -->
-                  <span class="review">
+                  {#if !snapshotReading}<span class="review">
                     <button
                       class="btn btn-ghost btn-sm act ok"
                       title="Confirm this item"
@@ -592,13 +839,33 @@
                     >
                       <Icon name="x" size={12} />
                     </button>
-                  </span>
+                  </span>{/if}
                 {/if}
               </td>
               <td title={entityHint(entity.type)}>{entityLabel(entity.type)}</td>
               <td class="dim">{folderName(entity)}</td>
               <td class="dim mono">{created(entity)}</td>
               {#each columns as column (column.key)}<td class="dim">{cell(entity, column)}</td>{/each}
+              <!-- The row's one way out of the table. A list is good at narrowing and
+                   says nothing about how things join up, so the question a row most
+                   often raises is the one only the drawing answers. Quiet until the
+                   row is under the pointer, like the review clicks beside it. -->
+              <td class="go">
+                {#if !snapshotReading}
+                <button
+                  class="btn btn-ghost btn-sm act"
+                  aria-label="Show {entity.label} in the graph"
+                  title="Show it in the graph, with what it is connected to"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    uiState.openGraphEntity = entity.id;
+                    uiState.tool = 'graph';
+                  }}
+                >
+                  <Icon name="graph" size={13} />
+                </button>
+                {/if}
+              </td>
             </tr>
           {/each}
         </tbody>
@@ -607,11 +874,15 @@
 
     {#if pl.hasMore}
       <div class="more">
-        <!-- The sort runs over what is loaded, so it says so while there is more:
-             an alphabet over the first hundred of eight hundred rows looks exactly
-             like an alphabet over the case. -->
+        <!-- A sort the store could not answer runs over what is loaded, so it says
+             so while there is more: an alphabet over the first hundred of eight
+             hundred rows looks exactly like an alphabet over the case. The two
+             headings the case can order by say nothing, because there is nothing to
+             warn about. -->
         <span class="dim">
-          Showing {rows.length} of {total}{sortKey ? ', sorted over the rows loaded' : ''}
+          Showing {rows.length} of {matchCount}{sortKey && !order
+            ? ', sorted over the rows loaded'
+            : ''}
         </span>
         <button class="btn btn-ghost btn-sm" onclick={() => pl.loadMore()} disabled={pl.loading}>
           {pl.loading ? 'Loading…' : 'Show more'}
@@ -622,68 +893,25 @@
 </div>
 
 {#if draft}
-  <Modal title="New entity" onclose={() => (draft = null)} width="560px">
-    <label class="modal-label" for="board-type">Type</label>
-    <!-- the menu says what each type is for: `claim` and `capture` are terse words
-         nobody can look up, and choosing the wrong one is a filing mistake -->
-    <select id="board-type" class="select" bind:value={draft.type} title={entityHint(draft.type)}>
-      {#each creatableTypes() as entry (entry.type)}
-        <option value={entry.type}>{entry.label}</option>
-      {/each}
-    </select>
-    {#if entityHint(draft.type)}
-      <p class="field-help">{entityHint(draft.type)}</p>
-    {/if}
-
-    <section class="create-card">
-      <label class="modal-label" for="board-label">{draftIdentityLabel}</label>
-      <input
-        id="board-label"
-        class="input"
-        placeholder={draftIdentityPlaceholder}
-        bind:value={draft.label}
-        onkeydown={(e) => e.key === 'Enter' && create()}
-      />
-
-      {#if twin}
-        <p class="twin">
-          This case already holds
-          <button
-            class="twin-open"
-            onclick={() => { const id = twin.id; draft = null; openId = id; }}
-          >{twin.label}</button>. On an identifier the value is the identity, so
-          this would be a second record of one thing.
-        </p>
-      {/if}
-
-      <!-- whatever else this type declares, generated from the registry -->
-      <AttrFields type={draft.type} bind:values={draft.attrs} />
-
-      <label class="modal-label" for="board-notes">Notes</label>
-      <textarea
-        id="board-notes"
-        class="textarea"
-        rows="3"
-        placeholder="Add context or observations"
-        bind:value={draft.notes}
-      ></textarea>
-    </section>
-
-    <div class="modal-row">
-      <div style="flex:1"></div>
-      <button class="btn" onclick={() => (draft = null)}>Cancel</button>
-      <button
-        class="btn btn-primary"
-        onclick={create}
-        disabled={saving || !draft.type || !draft.label.trim()}
-      >
-        {saving ? 'Creating…' : 'Create'}
-      </button>
-    </div>
-  </Modal>
+  <!-- The one create dialog, shared with the graph: a `claim` is filed with the same
+       words and the same duplicate warning wherever the analyst is standing. -->
+  <EntityCreate
+    startType={draft.type}
+    ontwin={(entity) => {
+      draft = null;
+      openId = entity.id;
+    }}
+    oncreated={(entity) => {
+      draft = null;
+      // Create it, then open it: a claim exists in order to be pointed at things, so
+      // landing on its own Details with the relation picker is the next gesture.
+      openId = entity.id;
+    }}
+    onclose={() => (draft = null)}
+  />
 {/if}
 
-{#if openId}
+{#if openId && !snapshotReading}
   <!-- Escape and the backdrop both close a modal, and the panel's fields wait for
        Save: closing over unsaved edits threw them away without a word. The ask is
        only raised when there is something to lose. -->
@@ -695,6 +923,16 @@
       bind:dirty
       onclose={() => (openId = null)}
       ondeleted={() => (openId = null)}
+    />
+  </Modal>
+{/if}
+
+{#if snapshotOpen && snapshotReading}
+  <Modal title="Snapshot details" onclose={() => (snapshotOpen = null)} width="640px">
+    <SnapshotDetails
+      entity={snapshotOpen}
+      entities={analysisSearch.activeView?.spec?.snapshot?.entities ?? []}
+      links={analysisSearch.activeView?.spec?.snapshot?.links ?? []}
     />
   </Modal>
 {/if}
@@ -714,37 +952,27 @@
   .spacer {
     flex: 1;
   }
-  .field-help {
-    margin: 5px 0 0;
+  .answer {
+    margin: 0;
+    padding: 8px 16px 2px;
     color: var(--text-3);
     font-size: var(--fs-xs);
   }
-  .create-card {
-    margin-top: 14px;
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--r);
-    background: var(--bg-2);
+  .answer strong {
+    color: var(--text-1);
+    font-weight: 600;
   }
-  .create-card .modal-label:first-child {
-    margin-top: 0;
+  .answer .as-link {
+    margin-left: 8px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
   }
-  .create-card .textarea {
-    width: 100%;
-    resize: vertical;
-  }
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    padding: 9px 16px;
-    border-bottom: 1px solid var(--border);
-  }
-  .filter {
-    width: auto;
-    padding: 4px 8px;
-    font-size: var(--fs-xs);
+  .answer .as-link:hover {
+    text-decoration: underline;
   }
   /* The one scrolling region. `.tool` is a full-height flex column, so the body
      needs min-height:0 or the table pushes the column taller than the viewport and
@@ -860,30 +1088,57 @@
   .act {
     padding-inline: 5px;
   }
+  /* The row's way into the drawing: right-aligned, and quiet until the row is under
+     the pointer or focused — the same restraint as the review clicks, so a table of
+     eight hundred rows is not eight hundred buttons. */
+  .table .go {
+    width: 1%;
+    padding-right: 0;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .table td.go .act {
+    opacity: 0;
+    color: var(--text-3);
+  }
+  tr:hover td.go .act,
+  tr:focus-within td.go .act,
+  tr:focus-visible td.go .act {
+    opacity: 1;
+  }
+  .table td.go .act:hover {
+    color: var(--accent);
+  }
   .act.ok:hover {
     color: var(--ok, #46a758);
   }
   .act.no:hover {
     color: var(--danger);
   }
-  .twin {
-    margin: 8px 0 0;
-    color: var(--warn);
-    font-size: var(--fs-xs);
-    line-height: 1.5;
-  }
-  .twin-open {
-    padding: 0;
-    border: 0;
-    background: none;
-    color: inherit;
-    font: inherit;
-    text-decoration: underline;
-    cursor: pointer;
-  }
   .name {
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .match-reason {
+    display: block;
+    max-width: 290px;
+    margin: 2px 0 0 18px;
+    overflow: hidden;
+    color: var(--accent);
+    font-size: var(--fs-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .entity-thumb {
+    width: 26px;
+    height: 26px;
+    display: inline-block;
+    margin-right: 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    object-fit: cover;
+    vertical-align: middle;
+    background: var(--bg-2);
   }
   .dim {
     color: var(--text-3);

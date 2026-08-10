@@ -24,6 +24,9 @@ vi.mock('../lib/relations.svelte.js', () => ({
   relationGroup: (type) => GROUPS[type] ?? '',
   relationHint: () => '',
   relationOptions: () => [],
+  // Only the tie verb declares one, which is the whole point of the field belonging
+  // to the verb: every other row renders without it.
+  relationQualifier: (type) => (type === 'associated-with' ? 'How they are tied' : ''),
   relationReading: (type) => VERBS[type] ?? type,
   relationVerb: (type) => VERBS[type] ?? type,
 }));
@@ -130,5 +133,30 @@ describe('a pointer is not shown as a finding', () => {
     expect(root.querySelector('.more').textContent.trim()).toBe('+ 1 more');
     // the cap counts rows, not sections: two rows survive it and one of them heads
     expect(reading(root)).toEqual(['North quay', 'Mentions', 'The sawmill']);
+  });
+});
+
+describe('what kind of tie, where the verb cannot say it', () => {
+  it('draws the field on the verb that declares one, and on no other row', () => {
+    // Declared by the verb, never by the edge: a note every relation could hold
+    // would leave nothing saying what a relation *is*.
+    const root = open([row('l1', 'associated-with', 'Second'), row('l2', 'owns', 'A lorry')]);
+    const fields = [...root.querySelectorAll('.nature')];
+    expect(fields).toHaveLength(1);
+    expect(fields[0].placeholder).toBe('How they are tied');
+  });
+
+  it('shows the word already stated rather than an empty box', () => {
+    const stated = row('l1', 'associated-with', 'Second');
+    stated.link.nature = 'sister';
+    const root = open([stated]);
+    expect(root.querySelector('.nature').value).toBe('sister');
+    expect(root.querySelector('.nature').classList.contains('set')).toBe(true);
+  });
+
+  it('offers nothing to qualify on a proposal, which is reviewed before it is read', () => {
+    const proposed = row('l1', 'associated-with', 'Second');
+    proposed.link.provenance = { status: 'suggested' };
+    expect(open([proposed]).querySelector('.nature')).toBeNull();
   });
 });

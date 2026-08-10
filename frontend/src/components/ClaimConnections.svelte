@@ -14,10 +14,21 @@
     onchanged = null,
   } = $props();
 
+  /**
+   * What a statement is made of, in the order it is built: what it is about, where
+   * it puts it, what it rests on, and what stands against it.
+   *
+   * `contradicts` comes last because it is the only one that reaches another
+   * statement rather than the case, and the only one whose rows read the same in
+   * both directions: two claims that cannot both hold say so whichever end the
+   * analyst filed it from, so this group deliberately does not sort by `direction`
+   * the way an ordinary relation list does.
+   */
   const GROUPS = [
     { type: 'about', label: 'Subjects', add: 'Add subject' },
     { type: 'at', label: 'Location', add: 'Add location' },
     { type: 'cites', label: 'Sources', add: 'Add source' },
+    { type: 'contradicts', label: 'Contradictions', add: 'Add contradiction' },
   ];
 
   let adding = $state(null);

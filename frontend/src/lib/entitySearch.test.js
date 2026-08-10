@@ -28,7 +28,7 @@ vi.mock('./entityTypes.svelte.js', () => ({
   entityFields: (type) => FIELDS[type] ?? [],
 }));
 
-const { entitySearchText, matchesEntity } = await import('./entitySearch.js');
+const { entitySearchMatches, entitySearchText, matchesEntity } = await import('./entitySearch.js');
 
 describe('entity search', () => {
   it('matches the label, the type, the folder and the notes', () => {
@@ -53,6 +53,23 @@ describe('entity search', () => {
     expect(matchesEntity(truck, 'kamaz')).toBe(true);
     expect(matchesEntity(claim, 'north jetty')).toBe(true);
     expect(matchesEntity(mark, 'web.archive.org')).toBe(true);
+    expect(entitySearchMatches(truck, 'AB-123')).toEqual([
+      { field: 'plate', label: 'Plate', value: 'AB-123-CD' },
+    ]);
+  });
+
+  it('lets separate words be satisfied by separate fields', () => {
+    const truck = {
+      label: 'Convoy lead',
+      type: 'vehicle',
+      attrs: { plate: 'AB-123-CD', make: 'Kamaz' },
+    };
+
+    expect(matchesEntity(truck, 'convoy AB-123')).toBe(true);
+    expect(entitySearchMatches(truck, 'convoy AB-123')).toEqual([
+      { field: 'label', label: 'Name', value: 'Convoy lead' },
+      { field: 'plate', label: 'Plate', value: 'AB-123-CD' },
+    ]);
   });
 
   it('leaves numbers, shapes and stored grades out, exactly as the index does', () => {

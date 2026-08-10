@@ -14,6 +14,7 @@
     post: 'M20 4 9 15m11-11-6.5 17-2.7-7.5L3 10.5 20 4Z',
     // ui
     plus: 'M12 5v14m-7-7h14',
+    minus: 'M5 12h14',
     folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z',
     folderOpen: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1M3 7v11a2 2 0 0 0 2 2h13a2 2 0 0 0 2-1.5l1.6-6A1.5 1.5 0 0 0 20.1 10H6.4a2 2 0 0 0-1.9 1.4L3 16',
     folderMinus: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm6 6h6',
@@ -33,6 +34,14 @@
     check: 'm4.5 12.5 5 5 10-11',
     note: 'M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm8 0v6h6M9 13h6m-6 4h4',
     pin: 'M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11Zm0-8.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z',
+    // A pushpin, and deliberately not the marker above it: `pin` means a point on
+    // the ground, so it would read as "this is a place" on a graph where place is
+    // a family. This one means "somebody put this here and it stays".
+    //
+    // One closed outline plus the needle, and no separate bar across the cap: drawn
+    // at 15 pixels, a bar meeting the two body verticals at the same point fills in
+    // under its own round joins and the top reads as a blob.
+    pushpin: 'M8.4 4h7.2v4.8l3.2 4.3H5.2l3.2-4.3V4ZM12 13.1V20',
     crosshair: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0-1v4m0 12v4M2 12h4m12 0h4',
     user: 'M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm-8 17c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5',
     layers: 'm12 3 9 5-9 5-9-5 9-5Zm-9 9.5 9 5 9-5M3 17l9 5 9-5',
@@ -58,6 +67,9 @@
     car: 'M5 17h14M4 17v-4.5l2-5A1.5 1.5 0 0 1 7.4 6h9.2a1.5 1.5 0 0 1 1.4 1.5l2 5V17M4 12.5h16M7.5 17v2M16.5 17v2M8 14.5h.01M16 14.5h.01',
     ship: 'M3 17.5c1.8 0 1.8 2 3.5 2s1.7-2 3.5-2 1.8 2 3.5 2 1.7-2 3.5-2 1.8 2 3.5 2M4.5 15l1.5-5h12l1.5 5M12 10V5M9 5h6',
     plane: 'M12 3a1.6 1.6 0 0 1 1.5 1.7V9l7 4v2l-7-2v4l2.5 2v1.5L12 19.5 8 20.5V19l2.5-2v-4l-7 2v-2l7-4V4.7A1.6 1.6 0 0 1 12 3Z',
+    // a model rather than an object: three cards of the same shape, because what an
+    // equipment type means is "there are several of these"
+    stack: 'M8 4h9a1 1 0 0 1 1 1v9M6 7h9a1 1 0 0 1 1 1v9M4 10h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z',
     // a statement, not a page: the quotation marks say "somebody is asserting this"
     quote: 'M9 5.5C6 7 4.5 9.5 4.5 12.5V18h6v-6h-3c0-2 .8-3.6 2.4-4.6L9 5.5Zm10 0c-3 1.5-4.5 4-4.5 7V18h6v-6h-3c0-2 .8-3.6 2.4-4.6L19 5.5Z',
     // the identifiers, told apart: a globe for a domain said nothing about the

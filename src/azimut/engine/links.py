@@ -59,6 +59,19 @@ TOMBSTONE_TYPES = (DERIVED_FROM,)
 #: ``attrs`` key holding the tombstones. Additive — schema stays 0.
 LOST = "lost_sources"
 
+#: The producing tools whose output was **made here** — composed out of material the
+#: case already holds, rather than collected. Matched against a media item's recorded
+#: ``source.type``, which the browse index carries as a column.
+#:
+#: Here rather than in either of the two modules that read it, because both would
+#: otherwise keep their own copy and one of them would be wrong: the graph marks these
+#: nodes and the Media Library hides these rows, and the two have to mean the same set
+#: or the picture and the list disagree about what the case collected. An upload, a
+#: download and a satellite capture are original material brought in, and are
+#: deliberately not here. A future tool that composes case material joins by stamping
+#: its own name and being added to this line.
+MADE_HERE: tuple[str, ...] = ("inspect",)
+
 #: Exact artifact contract. These are not ordinary relations: producing tools
 #: record them, and the pair decides delete behaviour. A file path resolving to an
 #: entity outside this matrix is a producer bug, not a reason to widen the graph.
@@ -87,15 +100,23 @@ DEPICTS = "depicts"
 OWNS = "owns"
 PART_OF = "part-of"
 MEMBER_OF = "member-of"
+ASSOCIATED_WITH = "associated-with"
 POSTED = "posted"
 APPEARS_IN = "appears-in"
 SITED_AT = "sited-at"
 IN_NETWORK = "in-network"
+INSTANCE_OF = "instance-of"
 MENTIONS = "mentions"
 ABOUT = "about"
 AT = "at"
 CITES = "cites"
+CONTRADICTS = "contradicts"
 
+#: What a statement is built out of: its subjects, its place, its evidence. The
+#: verbs a source folds across (``engine/graph._fold``) and the ones the Claim
+#: editor owns. ``contradicts`` is deliberately **not** here: it joins two
+#: statements to each other rather than a statement to what it rests on, so a
+#: fold that walked it would collapse an argument into a citation.
 CLAIM_CONNECTION_TYPES = (ABOUT, AT, CITES)
 
 #: How sure the analyst is that an edge holds, as one closed ordinal (ONTOLOGY §3).
@@ -156,6 +177,14 @@ class RelationType:
     the others". A verb that merely points — a document naming a place it was not
     made from — reads as a finding when it sits in the same list as one, so the
     heading is what keeps a pointer from being mistaken for a statement.
+
+    ``qualifier`` is how a free note on the edge is *labelled*, and empty means this
+    verb takes none — the same shape as ``ratable``, and the same guard. It exists
+    for `associated-with`, where the tie is real and its nature is a word only the
+    analyst has: sister, employer, business partner. **It belongs to the verb, never
+    to the edge.** A note every edge could carry would leave nothing saying what an
+    edge *is*, and the vocabulary would drain into free text within a case or two;
+    giving one to another verb later is a word here rather than a decision to retake.
     """
 
     type: str
@@ -167,6 +196,7 @@ class RelationType:
     group: str = ""
     action: str = "relation"
     ratable: bool = True
+    qualifier: str = ""
     manual: bool = True
     from_only: frozenset[str] = frozenset()
     to_only: frozenset[str] = frozenset()
@@ -206,13 +236,19 @@ RELATION_TYPES: tuple[RelationType, ...] = (
         from_only=frozenset({"media"}),
         from_media_kinds=frozenset({"image", "video", "audio"}),
     ),
+    # A `proof` is here beside the material it composes, and it is the one
+    # `document` the verb reaches. A proof is a rendered image: what it shows is a
+    # property of its pixels, exactly as it is for a frame or a crop. It is also
+    # where a geolocation is *concluded* — the composer's coordinate field is the
+    # analyst's own answer, and without this verb that answer could name no point.
+    # A note or a post gets `mentions` instead: they are read, not looked at.
     RelationType(
         DEPICTS, "shows",
         inverse_label="is shown in",
         hint="the place is visible in the image or video",
-        from_families=frozenset({entities.COLLECTED}),
+        from_families=frozenset({entities.COLLECTED, entities.DOCUMENT}),
         to_families=frozenset({entities.PLACE}),
-        from_only=frozenset({"media", "capture"}),
+        from_only=frozenset({"media", "capture", "proof"}),
         from_media_kinds=frozenset({"image", "video"}),
     ),
     RelationType(
@@ -240,6 +276,32 @@ RELATION_TYPES: tuple[RelationType, ...] = (
         to_families=frozenset({entities.ACTOR}),
         to_only=frozenset({"organization"}),
     ),
+    # The tie between two actors that is neither containment, membership nor
+    # ownership — and until this existed the vocabulary had **no** person-to-person
+    # verb at all: `owns` refuses a person as its object, `member-of` and `part-of`
+    # both end at an organization. Stating that two people are connected, which is
+    # the first thing a case does, cost a whole Claim node.
+    #
+    # `ACTOR → ACTOR` and no wider. Opened to identifiers and assets it becomes the
+    # verb that swallows the rest of the vocabulary, and a registry where one entry
+    # answers everything is a registry that says nothing.
+    #
+    # **What kind of tie is the qualifier**, free text, because it is the one field a
+    # closed list cannot hold: maintaining a taxonomy of human relationships is a
+    # project of its own, and the first case needing "former sister-in-law" breaks
+    # it. What the verb asserts is that the tie exists; how sure the analyst is rides
+    # on the ordinal like any other relation.
+    #
+    # Symmetric, so the two readings are one word. `relationOptions` drops the
+    # duplicate rather than offering the same sentence twice.
+    RelationType(
+        ASSOCIATED_WITH, "is associated with",
+        inverse_label="is associated with",
+        hint="a tie that exists, where what kind it is rides on the edge",
+        from_families=frozenset({entities.ACTOR}),
+        to_families=frozenset({entities.ACTOR}),
+        qualifier="How they are tied",
+    ),
     RelationType(
         POSTED, "posted",
         inverse_label="was posted by",
@@ -265,6 +327,21 @@ RELATION_TYPES: tuple[RelationType, ...] = (
         from_families=frozenset({entities.ASSET}),
         to_families=frozenset({entities.PLACE}),
         from_only=frozenset({"structure"}),
+    ),
+    # The only verb the `class` family takes from below. It runs object → model,
+    # because a named tank is one of a model and never the other way round, and it is
+    # ratable: "this is probably a T-72B3" is a reading of the footage, not a fact
+    # the analyst either has or does not.
+    #
+    # An `equipment-type` deliberately takes no `appears-in`. A model cannot be
+    # visible — only one of its members can — and offering the verb would give the
+    # case two ways to say "this was in the video", one of which carries no number.
+    RelationType(
+        INSTANCE_OF, "is a",
+        inverse_label="is the model of",
+        hint="this particular object is one of that model",
+        from_families=frozenset({entities.ASSET}),
+        to_families=frozenset({entities.CLASS}),
     ),
     RelationType(
         IN_NETWORK, "is in network",
@@ -304,8 +381,11 @@ RELATION_TYPES: tuple[RelationType, ...] = (
         inverse_label="has claim",
         hint="what the statement concerns",
         from_families=frozenset({entities.CLAIM}),
+        # `class` is here because a counted statement has nowhere else to point: "two
+        # of these were destroyed" is about the model, not about two objects nobody
+        # can name.
         to_families=frozenset({
-            entities.ACTOR, entities.ASSET, entities.IDENTIFIER,
+            entities.ACTOR, entities.ASSET, entities.CLASS, entities.IDENTIFIER,
             entities.PLACE, entities.COLLECTED,
         }),
         action="claim",
@@ -327,6 +407,33 @@ RELATION_TYPES: tuple[RelationType, ...] = (
         from_families=frozenset({entities.CLAIM}),
         to_families=frozenset({entities.DOCUMENT, entities.COLLECTED}),
         to_only=frozenset({"bookmark", "note", "proof", "media", "capture"}),
+        action="claim",
+        ratable=False,
+    ),
+    # What stands against a statement, which the drawing has always said it reads
+    # (``engine/graph``'s four questions) and the vocabulary could not say. A
+    # `refuted` confidence records that a statement is dead; it names nothing that
+    # killed it, so the case kept the verdict and lost the argument.
+    #
+    # Statement to statement, both ends, because eliminating a candidate is the
+    # other half of a geolocation: twelve are checked and eleven are ruled out, and
+    # each of those eleven has its own reasoning and its own sources. Pointed at a
+    # subject instead it would say "this vehicle is contradicted", which is not a
+    # thing anyone can assess.
+    #
+    # **No cycle check, unlike `part-of` and `in-network`.** Two statements
+    # contradicting each other is not a loop to refuse, it is the ordinary shape of
+    # an open question, and it reads the same in both directions.
+    #
+    # Not ratable, like the three connectors above: how strongly each side is held
+    # is already on each Claim, and a third grade on the edge between them would be
+    # the mixture ONTOLOGY §3 keeps three assessments apart to prevent.
+    RelationType(
+        CONTRADICTS, "contradicts",
+        inverse_label="is contradicted by",
+        hint="the two statements cannot both hold",
+        from_families=frozenset({entities.CLAIM}),
+        to_families=frozenset({entities.CLAIM}),
         action="claim",
         ratable=False,
     ),
@@ -387,7 +494,14 @@ def set_relation_type(case: CaseRepository, link_id: str, type_: str) -> dict[st
     )
     if twin:
         raise CaseError("those two already hold that relation")
-    return case.update_link(link_id, {"type": type_})
+    # A qualifier belongs to the verb (``RelationType.qualifier``), so correcting the
+    # reading to one that takes none takes it with it. Left behind it would be data
+    # no surface can show and no analyst can clear — the edge would go on privately
+    # holding "sister" while stating that one unit is part of another.
+    patch: dict[str, Any] = {"type": type_}
+    if not spec.qualifier and link.get("nature"):
+        patch["nature"] = None
+    return case.update_link(link_id, patch)
 
 
 def confirm_relation(case: CaseRepository, link_id: str) -> dict[str, Any]:
@@ -440,6 +554,38 @@ def set_confidence(case: CaseRepository, link_id: str, value: int | None) -> dic
     if link["provenance"]["status"] == "suggested":
         raise CaseError("confirm this relation before rating it")
     return case.update_link(link_id, {"confidence": value})
+
+
+#: Longest a qualifier may be. Short on purpose: "sister", "employer", "former
+#: business partner" are what this field is for, and a box that accepts a paragraph
+#: becomes the note on the edge that the qualifier belongs to a verb to avoid.
+#: Reasoning that runs to sentences is a Claim, which has a field for it.
+MAX_QUALIFIER = 120
+
+
+def set_qualifier(case: CaseRepository, link_id: str, value: str | None) -> dict[str, Any]:
+    """Say what kind of tie one edge states, or clear it.
+
+    Only a verb that declares a ``qualifier`` may carry one, exactly as only a
+    ``ratable`` verb may carry an ordinal — and refusing it here is what keeps the
+    column from becoming a note any edge can hold. An empty string and ``None`` both
+    clear it: unstated is a state, and an analyst who typed a word by mistake must
+    not be trapped with it.
+    """
+    link = case.get_link(link_id)
+    if link is None:
+        raise CaseError(f"link '{link_id}' not found")
+    spec = relation_type(str(link["type"]))
+    if spec is None or not spec.qualifier:
+        raise CaseError(f"'{link['type']}' carries no qualifier")
+    if value is None:
+        return case.update_link(link_id, {"nature": None})
+    if not isinstance(value, str):
+        raise CaseError("a qualifier must be text")
+    text = value.strip()
+    if len(text) > MAX_QUALIFIER:
+        raise CaseError(f"a qualifier is at most {MAX_QUALIFIER} characters")
+    return case.update_link(link_id, {"nature": text or None})
 
 
 def remove_relation(case: CaseRepository, link_id: str) -> None:
@@ -498,7 +644,7 @@ def _check_endpoints(
     _check_media_kind(target, spec.to_media_kinds, spec.type, "object")
 
 
-def _media_kind(entity: dict[str, Any]) -> str | None:
+def media_kind(entity: dict[str, Any]) -> str | None:
     if entity.get("type") != "media":
         return None
     attrs = entity.get("attrs") or {}
@@ -518,7 +664,7 @@ def _check_media_kind(
 ) -> None:
     if not allowed or entity.get("type") != "media":
         return
-    kind = _media_kind(entity)
+    kind = media_kind(entity)
     if kind not in allowed:
         expected = ", ".join(sorted(allowed))
         raise CaseError(f"the {end} of '{verb}' must be {expected} media")

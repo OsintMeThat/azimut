@@ -122,6 +122,57 @@ describe('Media Library positions', () => {
   });
 });
 
+describe('Media Library — what the case collected', () => {
+  it('is a switch beside the chips, not another chip', () => {
+    // The chips are single-select and each says "show me only X". This is the
+    // other axis — get X out of my way — the way the position filter already is.
+    expect(source).toContain('function toggleCollectedOnly()');
+    expect(source).toContain('aria-pressed={!collectedOnly}');
+  });
+
+  it('opens on what the case collected, working files held back', () => {
+    expect(source).toContain('let collectedOnly = $state(true)');
+  });
+
+  it('filters server-side, so the counts and the paging cannot disagree with it', () => {
+    expect(source).toContain('collectedOnly,');
+    // ...and through the same shared predicate client-side
+    expect(source).toContain('isMadeHere');
+  });
+
+  it('refetches on every toggle, since the loaded page is already the subset', () => {
+    // The other filters only narrow what was loaded; this one is on at load, so
+    // turning it off has to go and get the working files.
+    expect(source).toContain(
+      'function toggleCollectedOnly() {\n    collectedOnly = !collectedOnly;'
+    );
+    expect(source).toContain('if (caseState.current) pl.reload();');
+  });
+
+  it('says how many it is holding back rather than hiding them quietly', () => {
+    expect(source).toContain('pl.facets?.made_here_count ?? items.filter(isMadeHere).length');
+    expect(source).toContain('`Show ${madeHereCount} working file${madeHereCount > 1 ? \'s\' : \'\'}`');
+    expect(source).toContain(": 'Hide working files'");
+  });
+
+  it('does not appear in a case that made nothing', () => {
+    expect(source).toContain('{#if madeHereCount || !collectedOnly}');
+  });
+
+  it('tells a case of nothing but working files that it holds some', () => {
+    // Without this the default hides every file the case has and the grid says
+    // "No media yet", which is false.
+    expect(source).toContain(
+      '{#if !items.length && !jobs.length && !browseFiltersActive && madeHereCount}'
+    );
+    expect(source).toContain('<h3>Nothing collected yet</h3>');
+  });
+
+  it('counts as a browse filter only once the working files are showing', () => {
+    expect(source).toContain('|| gpsOnly || !collectedOnly');
+  });
+});
+
 describe('Media Library names', () => {
   it('shows the canonical stem once and keeps the extension out of the title', () => {
     expect(source).toContain('<span class="list-name">{item.title ?? item.filename}</span>');
@@ -172,9 +223,11 @@ describe('Media Library search empty state', () => {
   it('keeps the search bar available when a search has no matches', () => {
     expect(source).toContain('const browseFiltersActive = $derived(');
     expect(source).toContain('query.length > 0 || catFilter !== null || folderFilter !== null');
-    expect(source).toContain('const showBrowseBar = $derived(items.length > 0 || browseFiltersActive)');
+    expect(source).toContain(
+      'const showBrowseBar = $derived(items.length > 0 || browseFiltersActive || madeHereCount > 0)'
+    );
     expect(source).toContain('{#if showBrowseBar}');
-    expect(source).toContain('{#if !items.length && !jobs.length && !browseFiltersActive}');
+    expect(source).toContain('{:else if !items.length && !jobs.length && !browseFiltersActive}');
   });
 
   it('describes media fields without mentioning notes', () => {
@@ -257,7 +310,7 @@ describe('Media Library browse controls', () => {
 
   it('offers a right-side reset button for all browse filters', () => {
     expect(source).toContain('function resetFilters()');
-    expect(source).toContain("query = '';\n    catFilter = null;\n    folderFilter = null;\n    gpsOnly = false;\n    sort = 'name';\n    sortDirection = 'asc';");
+    expect(source).toContain("query = '';\n    catFilter = null;\n    folderFilter = null;\n    gpsOnly = false;\n    collectedOnly = true;\n    sort = 'name';\n    sortDirection = 'asc';");
     expect(source).toContain('class="btn btn-ghost btn-sm reset-filters"');
     expect(source).toContain('Reset filters');
     expect(source).toContain('<Icon name="reset" size={13} /> Reset filters');

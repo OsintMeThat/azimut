@@ -6,17 +6,22 @@ The note bodies and their PDF export live next door in `api/notes.py`.
 from __future__ import annotations
 
 import sqlite3
+from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, StrictInt
 
 from .. import config, workspace
+from ..engine import artifacts as artifact_engine
+from ..engine import analysis_views as analysis_view_engine
 from ..engine import bundles as bundle_engine
 from ..engine import doctor as doctor_engine
 from ..engine import entities as entity_engine
+from ..engine import entity_images as entity_image_engine
+from ..engine import graph as graph_engine
 from ..engine import links as link_engine
 from ..engine import media as media_engine
 from ..engine import reveal as reveal_engine
@@ -24,6 +29,7 @@ from ..engine import satellite as satellite_engine
 from ..engine import trash as trash_engine
 from ..repository import EntityStatus
 from ..workspace import Case, CaseError
+from .limits import MAX_IMAGE_BYTES
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
 
@@ -177,6 +183,10 @@ class EntityDeleteIn(BaseModel):
     ids: list[str] = Field(min_length=1, max_length=200)
 
 
+class EntityImagesIn(BaseModel):
+    media_ids: list[str] = Field(min_length=1, max_length=100)
+
+
 class LinkIn(BaseModel):
     # `from`/`to` are the link's own field names, but `from` is a Python keyword;
     # the request spells them out rather than aliasing around it.
@@ -196,6 +206,11 @@ class LinkPatch(BaseModel):
     #: turn a nonsense body into the "possible" level without anyone noticing, and
     #: `2.5` into `2`.
     confidence: StrictInt | None = None
+    #: What kind of tie the edge states, in the analyst's own words, or `null` to
+    #: clear it. Read through `model_fields_set` like the rating above, for the same
+    #: reason: `null` unsays it, omitting the key leaves it alone. Only a verb
+    #: declaring a `qualifier` accepts one (`engine/links.set_qualifier`).
+    nature: str | None = None
 
 
 class FolderIn(BaseModel):
@@ -222,6 +237,28 @@ class MediaPath(BaseModel):
     one. Where it may point is `Case.resolve_inside`'s answer, not this model's."""
 
     path: str = Field(min_length=1, max_length=300)
+
+
+class GraphPin(BaseModel):
+    """One node and where it was dropped, in the graph's own canvas units.
+
+    Bounded because a coordinate arrives from a pointer and nothing downstream
+    clamps it: the layout would happily place a node at 1e300 and the view would
+    then scale the whole case down to a dot trying to frame it.
+    """
+
+    id: str = Field(min_length=1, max_length=64)
+    x: float = Field(ge=-1_000_000, le=1_000_000)
+    y: float = Field(ge=-1_000_000, le=1_000_000)
+
+
+class GraphPins(BaseModel):
+    #: Which reading was being arranged. An arrangement belongs to one, because a
+    #: lens draws its own nodes and clusters them its own way.
+    lens: str = Field(min_length=1, max_length=40)
+    #: One drag, or the batch a debounce collected. Capped at the view's own node
+    #: ceiling: nothing can be arranged that was never drawn.
+    pins: list[GraphPin] = Field(min_length=1, max_length=graph_engine.MAX_OPENING)
 
 
 class DoctorRepair(BaseModel):
@@ -355,11 +392,46 @@ def relation_types() -> list[dict[str, Any]]:
             # A mention is a pointer, not a claim to grade. The surface omits the
             # control instead of offering one the model would refuse.
             "ratable": entry.ratable,
+            # How a free note on this edge is labelled, empty when the verb takes
+            # none — the same shape as `ratable`, and read the same way: a surface
+            # draws the field because the verb declares it, never because an edge
+            # happens to carry one.
+            "qualifier": entry.qualifier,
             "from_media_kinds": sorted(entry.from_media_kinds),
             "to_media_kinds": sorted(entry.to_media_kinds),
         }
         for entry in link_engine.RELATION_TYPES
     ]
+
+
+@router.get("/graph-lenses")
+def graph_lenses() -> dict[str, Any]:
+    """The readings the graph offers, and the orderings it ranks by.
+
+    A lens is a set of verbs *and* a set of node roles, and both live in the
+    registries, so each one is resolved from them rather than listed again here — a
+    verb or a type added there joins its lens with no edit. ``orders`` is the same
+    contract as the radius rungs: served, so the picker and the validator cannot drift.
+
+    ``hides`` is the types the reading leaves out of the drawing. Served because the
+    surface has to be able to say so *before* asking: a legend row that switches
+    nothing and a "bring this in" that the reading will refuse are both controls that
+    can only appear to be broken.
+
+    Declared above ``/{case_id}`` so the literal path wins.
+    """
+    return {
+        "lenses": [
+            {"id": entry.id, "label": entry.label, "hint": entry.hint,
+             "types": list(entry.types), "hides": list(entry.hides)}
+            for entry in graph_engine.lenses()
+        ],
+        "orders": [
+            {"value": value, "label": label, "hint": hint}
+            for value, label, hint in graph_engine.ORDERS
+        ],
+        "max_hops": graph_engine.MAX_HOPS,
+    }
 
 
 @router.get("/confidence-levels")
@@ -402,14 +474,12 @@ def entity_types() -> list[dict[str, Any]]:
             "family_reads": entity_engine.FAMILY_READS.get(entry.family, ""),
             "icon": entry.icon,
             "manual": entry.manual,
+            "image_gallery": entry.image_gallery,
             # ``entity.label`` is the primary value, but "Name" is not an honest
             # reading for an IP address, a phone number or a claim. The generated
             # form names that field from the type instead of duplicating it in attrs.
             "identity_label": entry.identity_label,
             "identity_placeholder": entry.identity_placeholder,
-            # heads the field block where they read as one subject; empty means the
-            # fields stand on their own labels
-            "group": entry.group,
             "attrs": [
                 {
                     "key": attr.key,
@@ -417,11 +487,19 @@ def entity_types() -> list[dict[str, Any]]:
                     "hint": attr.hint,
                     "kind": attr.kind,
                     "editable": attr.editable,
+                    # Heads this field and the ones after it that share it; empty
+                    # means the field stands on its own label. On the field rather
+                    # than on the type because a Claim says what it states and why
+                    # it is believed, which is two subjects and not one.
+                    "group": attr.group,
                     # Served so the form refuses exactly what the API refuses; a
                     # rung list is the shortcut UI, the bounds are the contract.
                     "rungs": [{"label": name, "value": v} for name, v in attr.rungs],
                     "minimum": attr.minimum,
                     "maximum": attr.maximum,
+                    # A count steps by one. Served so the spinner and the validator
+                    # cannot disagree about what a valid quantity is.
+                    "whole": attr.whole,
                     # The whole of a closed field, in scale order. A source's
                     # reliability rides here rather than on a route of its own: it
                     # belongs to the entity, so it travels with the entity registry.
@@ -603,6 +681,15 @@ def download_bundle(case_id: str, job_id: str) -> FileResponse:
     )
 
 
+def _explain_catalog_matches(page: dict[str, Any], query: str | None) -> dict[str, Any]:
+    if not query:
+        return page
+    for entity in page.get("items", []):
+        if matches := entity_engine.search_matches(entity, query):
+            entity["matches"] = matches
+    return page
+
+
 @router.get("/{case_id}/catalog/entities")
 def catalog_entities(
     case_id: str,
@@ -614,35 +701,318 @@ def catalog_entities(
     folder: str | None = None,
     unfiled: bool = False,
     recursive: bool = False,
+    attr: str | None = None,
+    value: str | None = None,
+    linked: str | None = None,
+    unlinked: bool = False,
+    since: str | None = None,
+    until: str | None = None,
+    by: str | None = None,
+    order: str = "",
+    view: str | None = None,
 ) -> dict[str, Any]:
     """A bounded page of the entity catalog (Step 5, "Bounded loading").
 
-    Stable cursor order, server-side filters (a comma-separated ``type`` set,
-    ``status``, a label substring ``q``, and folder — ``unfiled=true`` or an
-    ``folder`` path, optionally including descendants) and a ``next_cursor``
-    that is null on the last page. ``limit`` is clamped so no request can ask
-    for the whole graph at once.
+    Stable cursor order, server-side filters and a ``next_cursor`` that is null on the
+    last page. ``limit`` is clamped so no request can ask for the whole graph at once.
+
+    The filters: a comma-separated ``type`` set, ``status``, a label substring ``q``,
+    folder (``unfiled=true`` or a ``folder`` path, optionally including descendants),
+    one stored field holding one value (``attr`` with ``value``), having a neighbour of
+    a type (``linked``) or none at all (``unlinked``), and how the row got here —
+    ``since``/``until`` over the date it was filed, and a comma-separated ``by`` set of
+    whatever filed it. Together they are what make the page an answer rather than a
+    shorter list: *media, kind video, linked to a place* is "which videos have
+    coordinates", and ``total`` is how many.
+
+    ``order`` sorts the whole filtered set rather than the page — ``created`` and
+    ``label``, each with a ``-`` prefix for the other direction. Empty is the insertion
+    order that has always been the default.
+
+    ``attr`` without ``value`` is not a term — it is the analyst having chosen which
+    field they are about to ask about, and answering it as "holds nothing" would empty
+    the table between two clicks of one act.
     """
     case = get_case(case_id)
     limit = max(1, min(limit, 500))
+    if view:
+        saved = case.get_analysis_view(view)
+        if saved is None:
+            raise HTTPException(status_code=404, detail=f"analysis view '{view}' not found")
+        if saved["mode"] == "snapshot":
+            try:
+                return _explain_catalog_matches(
+                    analysis_view_engine.snapshot_page(
+                        saved, limit=limit, cursor=cursor, order=order
+                    ),
+                    q,
+                )
+            except CaseError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
     types = [t.strip() for t in type.split(",") if t.strip()] if type else None
+    filed_by = [name.strip() for name in by.split(",") if name.strip()] if by else None
     valid_status = (
         cast(EntityStatus, status) if status in ("confirmed", "suggested") else None
     )
     try:
-        return case.page_entities(
+        page = case.page_entities(
             limit=limit, cursor=cursor, types=types, status=valid_status,
             query=q, folder=folder, unfiled=unfiled, recursive=recursive,
+            attr=attr, attr_value=value, linked=linked, unlinked=unlinked,
+            since=since, until=until, filed_by=filed_by, order=order,
         )
+        thumbs = case.entity_image_thumbs([entity["id"] for entity in page["items"]])
+        for entity in page["items"]:
+            if thumb := thumbs.get(entity["id"]):
+                entity["thumb"] = thumb
+        return _explain_catalog_matches(page, q)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/{case_id}/catalog/summary")
 def catalog_summary(case_id: str) -> dict[str, Any]:
-    """Total plus per-type and per-status counts, so the catalog can show badges
-    without loading the graph."""
+    """Counts per type, status, folder and filer, plus how many the case connects to
+    nothing, so the catalog shows badges and populates its filter menus without
+    loading the graph."""
     return get_case(case_id).catalog_summary()
+
+
+@router.get("/{case_id}/catalog/attributes")
+def catalog_attributes(case_id: str, type: str | None = None) -> dict[str, Any]:
+    """Which stored fields these entities hold, and which values, as a menu.
+
+    What lets a field be filtered on without a query language: the field select and
+    the value select are both populated from the case, so every term of a search is
+    chosen rather than typed (SPEC anti-goals). It reaches fields the vocabulary does
+    not declare, which is the point — `kind` is written by the importer, so a
+    registry-driven menu would never have offered the one field an analyst most wants.
+
+    Narrowed by the same comma-separated ``type`` set as the page it filters: the
+    fields a media holds are not the fields a claim holds, and one menu of both is a
+    menu of neither.
+    """
+    types = [t.strip() for t in type.split(",") if t.strip()] if type else None
+    return {"attrs": get_case(case_id).attr_facets(types=types)}
+
+
+def _ids(value: str | None) -> list[str] | None:
+    """One of the graph's comma-separated id lists, or nothing at all.
+
+    ``None`` rather than an empty list when nothing was sent, because the engine
+    tells "no list" from "an empty one" and answers the first by not asking.
+    """
+    if not value:
+        return None
+    named = [entity_id.strip() for entity_id in value.split(",") if entity_id.strip()]
+    return named or None
+
+
+@router.get("/{case_id}/graph")
+def graph_view(
+    case_id: str,
+    lens: str = "all",
+    limit: int | None = None,
+    order: str = "degree",
+    type: str | None = None,
+    status: str | None = None,
+    q: str | None = None,
+    folder: str | None = None,
+    unfiled: bool = False,
+    recursive: bool = False,
+    attr: str | None = None,
+    value: str | None = None,
+    linked: str | None = None,
+    unlinked: bool = False,
+    since: str | None = None,
+    until: str | None = None,
+    by: str | None = None,
+    keep: str | None = None,
+    expand: str | None = None,
+    omit: str | None = None,
+    view: str | None = None,
+) -> dict[str, Any]:
+    """The whole case as one bounded graph — the view the graph opens on.
+
+    A case is a subject before it is a set of statements, so this is the entry
+    point and expansion is the drill-down, not the other way round. ``order``
+    decides which nodes a case too large to draw keeps: the hubs, or the latest
+    work. **The catalog's whole filter vocabulary narrows it** — down to the stored
+    field, the one-hop test and the date it was filed — so the board and the graph
+    cannot disagree about what "confirmed people in this folder, added this week"
+    means, and a question asked in the table can be handed to the drawing as itself
+    rather than as a list of ids that goes stale on the next save.
+
+    Three comma-separated lists then edit that set, and the drawing is whatever they
+    say it is. ``keep`` draws these nodes and nothing around them; ``expand`` draws
+    these and one hop, which is what lets the analyst follow a thread without losing
+    the case they were reading it in; ``omit`` leaves these out, whichever of the
+    three put them there. Ids the case does not hold are skipped rather than refused —
+    a drawing races a delete made in another tab.
+    """
+    case = get_case(case_id)
+    if view:
+        saved = case.get_analysis_view(view)
+        if saved is None:
+            raise HTTPException(status_code=404, detail=f"analysis view '{view}' not found")
+        if saved["mode"] == "snapshot":
+            try:
+                return graph_engine.snapshot_view(
+                    saved["spec"]["snapshot"], lens_id=lens, query=q
+                )
+            except CaseError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+    types = [t.strip() for t in type.split(",") if t.strip()] if type else None
+    filed_by = [name.strip() for name in by.split(",") if name.strip()] if by else None
+    try:
+        payload = graph_engine.view(
+            case, lens_id=lens, limit=limit, types=types, status=status,
+            query=q, folder=folder, unfiled=unfiled, recursive=recursive, order=order,
+            attr=attr, attr_value=value, linked=linked, unlinked=unlinked,
+            since=since, until=until, filed_by=filed_by,
+            keep=_ids(keep), expand=_ids(expand), omit=_ids(omit),
+        )
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _adopt_spec_previews(case, payload)
+    return payload
+
+
+@router.get("/{case_id}/graph/neighborhood")
+def graph_neighborhood(
+    case_id: str,
+    root: str,
+    lens: str = "all",
+    hops: int = 1,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """One node and what surrounds it, for a question that does have a root.
+
+    Every node carries its degree in this lens, so the analyst sees what a further
+    expansion costs before paying it, and ``truncated`` says when the node budget
+    ended the walk rather than the graph doing so.
+    """
+    case = get_case(case_id)
+    try:
+        payload = graph_engine.neighborhood(
+            case, root, lens_id=lens, hops=hops, limit=limit
+        )
+    except CaseError as exc:
+        detail = str(exc)
+        status_code = 404 if "not found" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    _adopt_spec_previews(case, payload)
+    return payload
+
+
+@router.get("/{case_id}/graph/paths")
+def graph_paths(
+    case_id: str,
+    from_id: str = Query(alias="from"),
+    to_id: str = Query(alias="to"),
+    lens: str = "all",
+    hops: int = graph_engine.MAX_PATH_HOPS,
+) -> dict[str, Any]:
+    """Every shortest route between two entities, or the fact that there is none.
+
+    A read, and the one question the graph existed without: the case answers "what
+    touches this" a hop at a time, where an investigation asks "how does this reach
+    that". ``found: false`` is an answer rather than an error — learning that two
+    entities are *not* connected within the budget is a finding about the case.
+
+    ``from`` and ``to`` are query names rather than argument names because ``from``
+    is a Python keyword, and the URL is the vocabulary the client reads.
+    """
+    case = get_case(case_id)
+    try:
+        return graph_engine.paths(case, from_id, to_id, lens_id=lens, max_hops=hops)
+    except CaseError as exc:
+        detail = str(exc)
+        status_code = 404 if "not found" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+
+def _lens_id(lens: str) -> str:
+    """The lens an arrangement belongs to, refused if the registry does not know it.
+
+    Checked at the edge like every other lens: an unrecognised one would file pins
+    under a reading nothing can ever draw, where they would sit in the case forever
+    with no surface able to show or clear them.
+    """
+    try:
+        return graph_engine.lens(lens).id
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/{case_id}/graph/pins")
+def pin_graph_nodes(case_id: str, body: GraphPins) -> dict[str, Any]:
+    """Record where nodes were dragged to, so the arrangement survives a reload.
+
+    Filed against the lens they were arranged in: a lens draws its own nodes and
+    clusters them its own way, so one shared arrangement would anchor every reading
+    into the shape of whichever one it was built in.
+
+    The whole batch in one transaction: a drag that moved several nodes is one
+    act, and half of it landing would leave an arrangement nobody chose. Writing a
+    pin asserts nothing about the case — it is where a hand put a dot — which is
+    why it never touches the entity or its provenance.
+    """
+    case = get_case(case_id)
+    lens = _lens_id(body.lens)
+    case.pin_entities(lens, {pin.id: (pin.x, pin.y) for pin in body.pins})
+    return {"lens": lens, "pinned": len(case.graph_pins(lens))}
+
+
+@router.delete("/{case_id}/graph/pins/{entity_id}")
+def unpin_graph_node(case_id: str, entity_id: str, lens: str = "all") -> dict[str, Any]:
+    """Hand one node back to the computed layout, in this lens."""
+    case = get_case(case_id)
+    reading = _lens_id(lens)
+    case.unpin_entities(reading, [entity_id])
+    return {"lens": reading, "pinned": len(case.graph_pins(reading))}
+
+
+@router.delete("/{case_id}/graph/pins")
+def unpin_graph(case_id: str, lens: str = "all") -> dict[str, Any]:
+    """Drop this lens's arrangement: the reading goes back to the placement it
+    computes, and the other readings keep theirs.
+
+    The way out of an arrangement that stopped helping. It is offered because the
+    pins are saved as they are made — an autosave with no way back is a trap.
+    """
+    case = get_case(case_id)
+    reading = _lens_id(lens)
+    case.clear_graph_pins(reading)
+    return {"lens": reading, "pinned": 0}
+
+
+def _adopt_spec_previews(case: Case, payload: dict[str, Any]) -> None:
+    """Give a node the preview its own spec file has been keeping to itself.
+
+    A proof records its thumbnail in ``proofs/.meta/<name>.json``, and the graph
+    answers from the database alone — that boundary is what keeps a graph read one
+    query instead of a walk of the case, so it is not the place to open files. This
+    copies the path across, **once per proof, ever**: the first view that draws one
+    reads its spec, records it on the entity, and every later view finds it on the row
+    like any other preview. A proof saved from now on carries it from the start.
+    """
+    for node in payload.get("nodes", []):
+        if node.get("thumb") or node.get("type") != "proof":
+            continue
+        entity = case.get_entity(node["id"])
+        thumb = artifact_engine.spec_thumb(case, entity) if entity else None
+        if not thumb:
+            continue
+        node["thumb"] = thumb
+        try:
+            case.update_entity(node["id"], {"attrs": {"thumb": thumb}})
+        except (CaseError, sqlite3.Error):
+            # The copy is an optimisation, not the answer: a background import or
+            # a mass delete holding the write lock past `busy_timeout` must not
+            # turn a read of the graph into an error. The node already carries
+            # what it needs, and the next draw tries the copy again.
+            pass
 
 
 @router.get("/{case_id}/entities/lookup")
@@ -655,6 +1025,35 @@ def lookup_entity(case_id: str, attr: str, value: str) -> dict[str, Any]:
     """
     entity = get_case(case_id).find_entity(attr=attr, value=value)
     return {"entity": entity}
+
+
+@router.get("/{case_id}/entities/twin")
+def entity_twin(
+    case_id: str, type: str, label: str, ignore: str = ""
+) -> dict[str, Any]:
+    """The entity already holding this identifier's value, or null.
+
+    Only the ``identifier`` family answers anything: there the value *is* the
+    identity, so two records of it are two records of one thing (ONTOLOGY §2).
+    Everywhere else two entities may share a label and the question is meaningless.
+
+    **It warns, it never refuses.** Merging is not shipped (`same-as`, SPEC §10), and
+    a create that failed would leave the analyst holding a value with nowhere to put
+    it — so this reports and the surface offers the row it found. ``ignore`` is the
+    entity being renamed, which is not its own twin.
+
+    The comparison lives in ``engine/entities.identity_key`` and is served rather
+    than reimplemented: the create form used to lowercase the raw label in the
+    browser, which let `@handle` and `handle` sit side by side as two accounts.
+    """
+    key = entity_engine.identity_key(type, label)
+    if not key:
+        return {"entity": None}
+    case = get_case(case_id)
+    for entity_id, existing in case.labels_of_type(type):
+        if entity_id != ignore and entity_engine.identity_key(type, existing) == key:
+            return {"entity": case.get_entity(entity_id)}
+    return {"entity": None}
 
 
 @router.post("/{case_id}/entities")
@@ -726,17 +1125,21 @@ def create_link(case_id: str, body: LinkIn) -> dict[str, Any]:
 
 @router.patch("/{case_id}/links/{link_id}")
 def update_link(case_id: str, link_id: str, body: LinkPatch) -> dict[str, Any]:
-    """Confirm a suggestion, correct which relation an edge states, or rate it.
+    """Confirm a suggestion, correct which relation an edge states, rate it, or say
+    what kind of tie it is.
 
     Restating the type goes through the vocabulary, so a 400 means the ontology
     has no such reading for those two entities; a missing link is a 404.
 
     Rating runs last on purpose: confirming a suggestion and rating it can arrive in
     one request, and a rating is refused on an unreviewed edge — so the confirm has
-    to have landed before the rating is judged.
+    to have landed before the rating is judged. The qualifier runs last for the
+    mirror reason: a reword that drops it must not be undone by a value sent against
+    the verb the edge no longer states.
     """
     rating = "confidence" in body.model_fields_set
-    if body.status is None and body.type is None and not rating:
+    qualifying = "nature" in body.model_fields_set
+    if body.status is None and body.type is None and not rating and not qualifying:
         raise HTTPException(status_code=400, detail="nothing to update")
     case = get_case(case_id)
     try:
@@ -751,6 +1154,8 @@ def update_link(case_id: str, link_id: str, body: LinkPatch) -> dict[str, Any]:
             link = case.update_link(link_id, {"status": body.status})
         if rating:
             link = link_engine.set_confidence(case, link_id, body.confidence)
+        if qualifying:
+            link = link_engine.set_qualifier(case, link_id, body.nature)
         return link
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -798,6 +1203,81 @@ def entity_chain(case_id: str, entity_id: str) -> dict[str, Any]:
     if chain is None:
         raise HTTPException(status_code=404, detail=f"entity '{entity_id}' not found")
     return chain
+
+
+def _entity_image_error(exc: CaseError) -> HTTPException:
+    status = 404 if "not found" in str(exc) else 400
+    return HTTPException(status_code=status, detail=str(exc))
+
+
+@router.get("/{case_id}/entities/{entity_id}/images")
+def entity_images(case_id: str, entity_id: str) -> dict[str, Any]:
+    """Presentation photos attached to one hand-made entity."""
+    try:
+        images = entity_image_engine.list_images(get_case(case_id), entity_id)
+    except CaseError as exc:
+        raise _entity_image_error(exc) from exc
+    return {"images": images}
+
+
+@router.post("/{case_id}/entities/{entity_id}/images")
+def attach_entity_images(
+    case_id: str, entity_id: str, body: EntityImagesIn
+) -> dict[str, Any]:
+    """Attach existing case images without creating semantic graph links."""
+    try:
+        return entity_image_engine.attach(get_case(case_id), entity_id, body.media_ids)
+    except CaseError as exc:
+        raise _entity_image_error(exc) from exc
+
+
+@router.post("/{case_id}/entities/{entity_id}/images/upload")
+async def upload_entity_image(
+    case_id: str,
+    entity_id: str,
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    """Store one private presentation photo outside the Media Library.
+
+    Bounded at the edge like the two other surfaces that swallow an image, and
+    against the same limit: a portrait is a portrait wherever it came from. The
+    pixel clamp further in answers a decompression bomb, not a file that is simply
+    enormous, and refusing early is what keeps a mistaken drag from filling the
+    disk with a temporary nobody asked for.
+    """
+    raw = await file.read(MAX_IMAGE_BYTES + 1)
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"photo must be under {MAX_IMAGE_BYTES // 1024 // 1024} MB",
+        )
+    try:
+        return entity_image_engine.import_photo(
+            get_case(case_id), entity_id, BytesIO(raw), file.filename
+        )
+    except CaseError as exc:
+        raise _entity_image_error(exc) from exc
+
+
+@router.put("/{case_id}/entities/{entity_id}/images/{image_id}/primary")
+def set_primary_entity_image(
+    case_id: str, entity_id: str, image_id: str
+) -> dict[str, Any]:
+    try:
+        images = entity_image_engine.set_primary(get_case(case_id), entity_id, image_id)
+    except CaseError as exc:
+        raise _entity_image_error(exc) from exc
+    return {"images": images}
+
+
+@router.delete("/{case_id}/entities/{entity_id}/images/{image_id}")
+def detach_entity_image(case_id: str, entity_id: str, image_id: str) -> dict[str, Any]:
+    """Detach a Media reference or delete a private presentation photo."""
+    try:
+        images = entity_image_engine.detach(get_case(case_id), entity_id, image_id)
+    except CaseError as exc:
+        raise _entity_image_error(exc) from exc
+    return {"images": images}
 
 
 @router.get("/{case_id}/entities/{entity_id}/placement")

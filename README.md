@@ -15,7 +15,10 @@ to fix a point on the map.*
 
 | Tool | What it does |
 |------|--------------|
+| **Board** | The whole case as one sortable table: typed identity fields per entity, one filter bar whose values are all taken from the case, and shared Details. |
+| **Graph** | The same case drawn. Lenses pick what a reading is about, nodes cluster, edges carry their verb, and a click opens what a node connects to without losing the picture you were reading. |
 | **Media** | Import local files or download by URL (X, Telegram, TikTok, YouTube, Instagram and more via yt-dlp, with a gallery-dl fallback for image-only posts). Public media is fetched cookie-less; a login-walled post prompts once for a browser session or an exported `cookies.txt`. Each item gets a clean local file, metadata and a SHA-256. Multi-photo posts open a picker. |
+| **Files** | Every saved artifact in one Finder-style view of your folders, not just media: select several, drag them into a folder, search across the lot. |
 | **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services. Nothing uploads on its own. |
 | **Inspect** | A scratch workspace over any photo or video: frame adjustments, editable crop, sharpest-frame capture, hand-made collage with per-piece warp/scale/rotate, auto-stitch to solve a panorama's layout, and ELA hints. Nothing enters the case until you save. |
 | **Satellite** | Coordinates or a place name become an imagery crop, with select-area capture, map rotation, measurement tools, reference overlays and editable AOI grids for area review. Esri/OSM by default, plus Sentinel-2 with a date calendar and a cloud-ceiling slider; add a Mapbox or Google key for more basemaps. |

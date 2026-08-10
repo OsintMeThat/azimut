@@ -5,11 +5,23 @@ import { MIN_W, MAX_W } from './sidebar.js';
 // The prefs tests below exercise import-time module state, so the transport is
 // stubbed and the module re-imported fresh per test. The static import above
 // still works: these tests never call the API.
-vi.mock('./api.js', () => ({ api: { get: vi.fn(), post: vi.fn(), del: vi.fn() } }));
+vi.mock('./api.js', () => ({
+  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
+}));
 
 async function freshState() {
   vi.resetModules();
   return import('./state.svelte.js');
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
 }
 
 describe('closeCase', () => {
@@ -184,5 +196,70 @@ describe('templates store', () => {
     await deleteTemplate('post', 'b');
     expect(api.del).toHaveBeenCalledWith('/api/templates/post/b');
     expect(templatesState.post).toEqual([]);
+  });
+});
+
+describe('case request ownership', () => {
+  let api;
+  let state;
+
+  beforeEach(async () => {
+    state = await freshState();
+    ({ api } = await import('./api.js'));
+    api.get.mockReset();
+    state.caseState.current = null;
+    state.caseState.loading = false;
+    state.caseState.rev = 0;
+  });
+
+  it('keeps the latest case when an older open finishes last', async () => {
+    const first = deferred();
+    const second = deferred();
+    api.get.mockImplementation((path) =>
+      path.endsWith('/case-a') ? first.promise : second.promise
+    );
+
+    const openingA = state.openCase('case-a');
+    const openingB = state.openCase('case-b');
+    second.resolve({ id: 'case-b', name: 'Case B' });
+    await openingB;
+    first.resolve({ id: 'case-a', name: 'Case A' });
+    await openingA;
+
+    expect(state.caseState.current).toEqual({ id: 'case-b', name: 'Case B' });
+    expect(state.caseState.loading).toBe(false);
+  });
+
+  it('does not let a late refresh reopen the case it started in', async () => {
+    const refresh = deferred();
+    api.get.mockReturnValue(refresh.promise);
+    state.caseState.current = { id: 'case-a', name: 'Case A' };
+
+    const reloading = state.reloadCase();
+    state.caseState.current = { id: 'case-b', name: 'Case B' };
+    refresh.resolve({ id: 'case-a', name: 'Case A refreshed' });
+    await reloading;
+
+    expect(state.caseState.current).toEqual({ id: 'case-b', name: 'Case B' });
+    expect(state.caseState.rev).toBe(0);
+  });
+
+  it('keeps the latest refresh when two writes finish out of order', async () => {
+    const first = deferred();
+    const second = deferred();
+    api.get
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    state.caseState.current = { id: 'case-a', name: 'Before' };
+
+    const older = state.reloadCase();
+    const newer = state.reloadCase();
+    second.resolve({ id: 'case-a', name: 'Newest' });
+    await newer;
+    first.resolve({ id: 'case-a', name: 'Older' });
+    await older;
+
+    expect(state.caseState.current).toEqual({ id: 'case-a', name: 'Newest' });
+    expect(state.caseState.rev).toBe(1);
   });
 });

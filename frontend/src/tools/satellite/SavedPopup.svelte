@@ -9,6 +9,7 @@
    * the ground rather than of your clicks.
    */
   import Icon from '../../components/Icon.svelte';
+  import { fileUrl } from '../../lib/fileUrl.js';
   import RelationList from '../../components/RelationList.svelte';
   import { api } from '../../lib/api.js';
   import { toast } from '../../lib/state.svelte.js';
@@ -149,7 +150,7 @@
           onclick={() => onopen(row)}
         >
           {#if row.thumbnail && caseId}
-            <img src={`/files/${caseId}/${row.thumbnail}`} alt="" loading="lazy" decoding="async" />
+            <img src={fileUrl(caseId, row.thumbnail)} alt="" loading="lazy" decoding="async" />
           {:else}
             <Icon name={GLYPH[row.kind] ?? 'pin'} size={20} />
           {/if}
@@ -257,7 +258,7 @@
               <a
                 class="link"
                 class:off={fullscreen}
-                href={fullscreen ? undefined : `/files/${caseId}/${row.path}`}
+                href={fullscreen ? undefined : fileUrl(caseId, row.path)}
                 target="_blank"
                 rel="noreferrer"
                 aria-disabled={fullscreen}

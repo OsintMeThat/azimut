@@ -52,7 +52,7 @@ def test_claim_confidence_is_a_closed_entity_field(client):
     rows = {row["type"]: row for row in client.get("/api/cases/entity-types").json()}
     fields = {field["key"]: field for field in rows["claim"]["attrs"]}
 
-    assert set(fields) == {"confidence", "method", "verbatim"}
+    assert set(fields) == {"count", "condition", "confidence", "method", "verbatim"}
     assert fields["confidence"]["kind"] == "choice"
     assert [option["value"] for option in fields["confidence"]["options"]] == [
         "certain", "probable", "possible", "refuted",
@@ -107,7 +107,7 @@ def test_one_claim_confidence_applies_to_all_its_connectors(client):
 
 
 def test_no_claim_connector_can_be_rated(client):
-    """All three, and clearing is refused as flatly as setting.
+    """All four, and clearing is refused as flatly as setting.
 
     This is what lets the Claim editor render a connector as a name and a Remove and
     nothing else: there is no route that puts a rating on one, so there is no legacy
@@ -115,6 +115,7 @@ def test_no_claim_connector_can_be_rated(client):
     """
     cid = _case(client, "Connector confidence")
     claim = _entity(client, cid, "claim", "A statement")
+    rival = _entity(client, cid, "claim", "The other reading")
     vessel = _entity(client, cid, "vessel", "Cargo vessel")
     place = _entity(client, cid, "place", "Candidate", {"lat": 1.0, "lon": 2.0})
     bookmark = _entity(client, cid, "bookmark", "Port notice")
@@ -122,6 +123,9 @@ def test_no_claim_connector_can_be_rated(client):
         _link(client, cid, claim["id"], vessel["id"], "about"),
         _link(client, cid, claim["id"], place["id"], "at"),
         _link(client, cid, claim["id"], bookmark["id"], "cites"),
+        # How strongly each side is held is already on each Claim; a grade on the
+        # edge between two of them would be the mixture the three homes prevent.
+        _link(client, cid, claim["id"], rival["id"], "contradicts"),
     ]
 
     for connector in connectors:
