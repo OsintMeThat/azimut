@@ -256,8 +256,8 @@ answers it against the case.
 
 Three rules hold it together:
 
-- **It warns, it never refuses.** Merging is not shipped (§4, `same-as`), so a create
-  that failed would leave the analyst holding a value with nowhere to put it. Both the
+- **It warns, it never refuses.** The case has no merge action, so a create that
+  failed would leave the analyst holding a value with nowhere to put it. Both the
   create dialog and Details name the row already holding it and offer to open it.
 - **It catches the same value typed twice, not every spelling that resolves to the
   same thing.** `+33612345678` is not compared against `0612345678` and
@@ -339,9 +339,23 @@ edge could carry neither.
 Two things this deliberately does not do. It does not date the observation — no verb
 carries a date (§3), and a Claim gains its point or interval in time with Temporal
 Claims (SPEC §6, v4). And **counting Claims counts observations, not objects**: two
-videos of the same destroyed tank are two statements. Deduplicating them is the open
-`same-as` question (§4), and until it is answered a total says *observations* in those
-words rather than implying a fleet.
+videos of the same destroyed tank are two statements. Azimut does not merge
+observations across entities, so a total says *observations* in those words rather
+than implying a fleet.
+
+**Where the number is read** is the entity's own Details, which adds up the statements
+already listed under Claims, and the Board's *Total the statements*, which groups a
+whole narrowing by `about` subject (`engine/tally.py`, one implementation for both, or
+the case would hold two totals for one question). Three rules fall
+straight out of the model above and are what keep the sum honest: a `refuted`
+statement is counted apart and never inside a total, since a candidate eliminated is
+the opposite of one observed; an absent `count` stays *seen, not counted* rather than
+becoming one; and **nothing is totalled across subjects**, because a number that sits
+on the node and not on `about` may belong to two of them and adding it would spend the
+one statement twice. Grouping *above* the subject is what the vocabulary cannot do
+yet: no verb says one `equipment-type` is a variant of another, so three T-72 variants
+stay three rows. Whether that verb is worth minting is a question this reading exists
+to answer rather than to presume.
 
 ### How precise a place is ✅
 
@@ -475,14 +489,13 @@ a narrowing can only remove a type, never smuggle one in from elsewhere.
 | `same-image-as` | image media → image media | a machine perceptual-hash match | ✅ |
 | `about` | claim → actor/asset/equipment-type/identifier/place/media/capture | what the statement concerns | ✅ |
 | `at` | claim → place | where the statement puts its subject | ✅ |
-| `cites` | claim → bookmark/note/proof/media/capture | what the statement rests on | ✅ |
+| `cites` | claim → bookmark/note/proof/media/capture/claim | what the statement rests on | ✅ |
 | `contradicts` | claim → claim | the two statements cannot both hold | ✅ |
 | `mentions` | note/post/proof/bookmark → any other declared entity | the document refers to the entity | ✅ |
-| `same-as` | entity → entity | two records, one real thing (merge) | ⬜ |
 
 Every manual connector is validated by the API and offered only by its own picker.
-`same-image-as` is machine-only. `part-of`, `in-network` and the derivation chain
-refuse cycles. Self-links are refused for every type.
+`same-image-as` is machine-only. `part-of`, `in-network`, `cites` and the derivation
+chain refuse cycles. Self-links are refused for every type.
 
 Every label completes the sentence *"<from> … <to>"*, which fixes the direction:
 `appears-in` runs subject → file, because a person appears in a video. `owns` may
@@ -549,6 +562,23 @@ A `claim` is a statement node. It points `about` at subjects, `at` at places and
 `verbatim`; its three connectors carry none of those values. This keeps one statement
 at one confidence even when it has several subjects, places or sources.
 
+**`cites` also reaches another claim ✅**, because an intermediate conclusion is what
+the next one is built out of: *the vehicle is a T-72B3* carries *the column is the 4th
+brigade*, and stated against the video instead, the case records two findings resting
+on one file and loses that refuting the first takes the second with it. It is `cites`
+rather than a verb of its own — the question is the same one, what does this rest on,
+and `inverse_label` already read *supports claim*. Three rules keep it from meaning
+more than it says:
+
+- **It refuses cycles**, unlike `contradicts`. *A because B, B because A* is circular
+  reasoning, where two statements standing against each other is an open question.
+- **A cited claim is never counted as a source.** The independence number answers
+  *three citations, how many sources*, and reasoning built on reasoning has found
+  nothing new (`graph._counted`).
+- **Nothing propagates.** A `probable` statement may carry a `certain` one: the verb
+  makes the path visible, and how strongly each end is held stays the analyst's, which
+  is the rule the three assessments already follow.
+
 | Claim `attrs.confidence` | Reads as |
 |---|---|
 | `certain` | established and corroborated |
@@ -590,7 +620,15 @@ grade.
 Ordinary semantic relations may carry the nullable `links.confidence` ordinal: `3`
 certain, `2` probable, `1` possible, `-1` ruled out, absent for not assessed. It
 saves turning a tentative ownership into a whole Claim node. A tool's suggestion is
-confirmed before it can be rated.
+confirmed before it can be rated, and it is rated from either surface that draws it:
+the Details row and the graph's own edge panel.
+
+**Ruled out is the one level the graph draws.** It is a verdict rather than a nuance,
+and a candidate eliminated is kept on purpose — so drawn like any other stated
+relation, eleven checked and rejected read as eleven live hypotheses. It takes a
+stroke of its own (`lib/graph.EDGE_KINDS`), and the other three deliberately do not:
+four more patterns would put what kind of edge it is and how sure of it on one
+channel, which is the mixture three separate assessments exist to prevent.
 
 **Three assessments, never combined**: Claim confidence, an ordinary relation's
 ordinal, and a source's A–E reliability (§2). Chain edges, mentions, Claim connectors
@@ -684,8 +722,7 @@ It answers with resolved type lists, so a client never has to know what a family
 - An older out-of-matrix connector stays visible and removable, but cannot be
   created or reworded. Compatibility does not silently widen the current vocabulary.
 - `same-image-as` is registered but **machine-only**: it is a claim about perceptual
-  hashes, and narrower than `same-as` — two files showing the same pixels, never one
-  merged graph identity.
+  hashes — two files showing the same pixels, never one shared graph identity.
 - Where they appear: the Details panel, the map popup and the case board. One
   component renders all three (`RelationList.svelte`), one collects a new one
   (`RelationPicker.svelte`).
@@ -931,11 +968,11 @@ How it is wired (`engine/links.py`):
   or a provider, which provenance already carries, with nothing in the case to
   point at.
 
-## 4. Provenance, assessment, identity
+## 4. Provenance and assessment
 
 - **Provenance** (on every entity and link): `by` (tool id: `media-library`,
-  `satellite`, `proof-composer`, `post-composer`, `inspect`, or `user`), `at`
-  (UTC), `status` and optional source URL. It borrows the entity/activity/agent
+  `satellite`, `proof-composer`, `post-composer`, `inspect`, `paste`, `ingest`,
+  or `user`), `at` (UTC), `status` and optional source URL. It borrows the entity/activity/agent
   shape of W3C PROV without implementing the full standard.
 - **Review status** is `confirmed` (analyst-made or analyst-accepted) vs
   `suggested` (a tool proposed it, awaiting a click). It is not confidence. Import
@@ -957,10 +994,6 @@ How it is wired (`engine/links.py`):
 - **Assessment has three separate homes.** Claim confidence is a string attribute
   on the Claim; an ordinary semantic relation may carry the nullable integer
   ordinal; source reliability is an A–E attribute on the source. None are combined.
-- **`same-as` / merge** (⬜ open, SPEC §10): when two entities are one real thing,
-  link `same-as` rather than destructively merging; a resolver treats a `same-as`
-  cluster as one node in views and unions its attributes and links. Collapse rules
-  must be defined before an orchestrator creates duplicate accounts.
 
 ## 5. Design rules
 

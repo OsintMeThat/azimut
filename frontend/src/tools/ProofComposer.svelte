@@ -1005,19 +1005,26 @@
     !!el && (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable);
 
   /**
-   * One place decides what Ctrl+V means: an image in the system clipboard is
-   * what the analyst just copied, so it wins; otherwise the copied annotation is
-   * pasted, which is what this shortcut did before images could be pasted.
+   * One place decides what Ctrl+V means, and the rule is which copy came last.
+   *
+   * Two clipboards answer one chord: the system's, which may hold a screenshot from
+   * an hour ago, and this composer's, which holds the annotation just copied. Only
+   * one of them is visible to this page, so freshness cannot be compared directly —
+   * what can be is whether the analyst left. A copy made here without leaving the
+   * window is necessarily the more recent of the two, so it wins; going somewhere
+   * else and coming back is the only way an outside copy could have happened, and
+   * that hands the chord back to the system clipboard. Without this, Ctrl+C on a
+   * rectangle followed by Ctrl+V pasted whatever image was in the clipboard.
    */
   function onPaste(e) {
     if (uiState.tool !== 'proof' || isTextTarget(e.target)) return;
     const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith('image/'));
-    if (item) {
-      e.preventDefault();
-      addPastedImage(item.getAsFile());
-    } else if (clipboard) {
+    if (clipboard && (shapeCopyFresh || !item)) {
       e.preventDefault();
       pasteShape();
+    } else if (item) {
+      e.preventDefault();
+      addPastedImage(item.getAsFile());
     }
   }
 
@@ -2012,12 +2019,25 @@
 
   // ---- clipboard (copy / paste / duplicate of a single element) ---------------
   let clipboard = null; // detached deep copy of a shape spec (no id)
+  /** Whether that copy is the last one the analyst made without leaving the window.
+   *  What lets Ctrl+V tell a shape just copied here from an older screenshot sitting
+   *  in the system clipboard (see `onPaste`). */
+  let shapeCopyFresh = false;
 
   function copyShape(id = selectedId) {
     const s = proof.shapes.find((x) => x.id === id);
     if (!s) return;
     clipboard = copyShapeSpec(s);
+    shapeCopyFresh = true;
   }
+
+  // The composer only ever hears about its own copies, so losing focus is the one
+  // signal that the system clipboard may have moved on since.
+  $effect(() => {
+    const release = () => (shapeCopyFresh = false);
+    window.addEventListener('blur', release);
+    return () => window.removeEventListener('blur', release);
+  });
 
   // Paste the clipboard as a fresh element, nudged down-right so it doesn't hide
   // the original. Points-based kinds shift every vertex.

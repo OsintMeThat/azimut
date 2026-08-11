@@ -191,6 +191,20 @@ uv run --no-sync python -m build --no-isolation
 uv run --no-sync pyinstaller packaging/azimut.spec
 ```
 
+### Versions
+
+The app version lives in `src/azimut/__init__.py` alone; `pyproject.toml` reads
+it back, and the release tag must match it.
+
+The capture extension keeps **its own** version: the app release that last
+changed a shipped file, so it lags whenever the extension is left alone.
+Settings reads "bundled newer than installed" as "go reinstall the unpacked
+folder", which is worth saying once and never for a zip that hasn't moved.
+`tests/test_updates.py` digests what `extension.zip` carries and fails either
+way — a change without a bump, or a bump without a change. When you do change
+the extension, set `extension/manifest.json` to the current app version and
+record the digest the failing test prints.
+
 ### Dependencies
 
 `pyproject.toml` declares **ranges** (the contract for `pip install azimut`

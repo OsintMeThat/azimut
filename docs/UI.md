@@ -43,6 +43,31 @@ Rules:
 - Artifact actions can open a tool, locate a place or add an item to a proof.
 - Settings is app plumbing: behind the topbar gear, not on the rail.
 
+## Pasting into a case
+
+`Ctrl+V` files what the clipboard holds. It covers the two things that have no
+file to drop: a screenshot taken with the system tool, and an address copied out
+of a browser. An image wins over a link when the clipboard carries both, and the
+page it was copied from prefills the image's source.
+
+A dialog always opens first, with only the fields that surface asks for.
+
+| Surface | An image | A link |
+|---|---|---|
+| **Media** | Title, source URL | refused: a link here is a download |
+| **Files** | Title, folder, source URL | Title, folder, notes |
+| **Graph** | Title, source URL, drawn at the viewport centre | Title, notes, drawn there too |
+| **Board** | Title, source URL, opened | Title, notes, opened |
+
+A refusal is a screen, not a toast: it says what this surface takes and where the
+thing does go. Text is refused everywhere. So is an image over 25 MB, naming the
+limit. A paste into a field is left alone, and a frozen snapshot refuses to be
+written into.
+
+A pasted image is recorded as a paste rather than an upload, so a screenshot with
+no stated source never reads like a file chosen off a disk. The Media grid counts
+both under **Imports**. Pasting the same crop twice is one file.
+
 ## Board
 
 The case as one table: a row per entity, whatever type it is. It is what makes the
@@ -99,6 +124,19 @@ row's Details.
   next save, where a question is something the case can be asked again — and both
   surfaces resolve it through one predicate, so what the drawing holds is what the
   table counted.
+- **Rows · Totals** is a view switch, the one Files and the Media Library already use,
+  sitting at the right of the count line. *Totals* renders the same question as a total
+  instead of a list: one row per subject the statements point at, summed over `count`
+  and split by condition, ranked. The chips do not move. It is **there from the first
+  day and dimmed until it can draw a real line** — never hidden, since a control you
+  can see and cannot use teaches something. A line is real when a statement carries a
+  **number** and points at **something**: *seen, not counted* is an answer rather than
+  a row, and a statement about nothing has no subject to sit under, so a total offered
+  over either opens on an empty answer that reads as a finding. An empty table and a
+  frozen snapshot dim it too. What **one** subject comes to is read where that subject is,
+  in its own Details; this reads several at once. **Nothing is totalled across
+  subjects**, because a statement may point at two and one number could not say which
+  it meant.
 - **The question is remembered per case**, in the browser rather than in the case: it
   is how somebody was looking at their material this afternoon, not something a bundle
   should carry to another machine.
@@ -483,7 +521,14 @@ single root to expand from. Expansion is the drill-down.
   the only case worded is a lens that does not draw that verb.
 - **An edge is a thing to read and to rule on.** Clicking one names it, says which way
   it goes, who filed it, and offers *Confirm* on a proposal or *Remove* on any of
-  them. On a worked case the finding is more often on the edge than on either node.
+  them. On a worked case the finding is more often on the edge than on either node —
+  so how sure of it, and what kind of tie it is, are set here too rather than a panel
+  away in Details. Each control appears because the **registry** declares it, not
+  because the edge holds a value: a ratable verb gets the rating, a verb that takes a
+  qualifier gets the word. A proposal gets neither, since reviewing a machine's claim
+  and grading it are two gestures and the API refuses the second first. Nothing may be
+  written to a line that stands for several, which is why a folded edge offers only its
+  sources back.
 - **Folder** draws one of the analyst's own buckets instead of the whole case, read the
   way the Board reads it. It sits in the toolbar rather than behind a menu because it is
   the closest thing the case has to *what I am working on*. The Board's other two
@@ -494,14 +539,29 @@ single root to expand from. Expansion is the drill-down.
   families; the two that stay inside one are reached by leaving one family on.
 - **Every edge says which way it goes and in what words.** The vocabulary is directed,
   so each edge carries a head, and the verb is written along the edges of whatever is
-  under the eye. Four strokes — lineage, stated relation, mention, proposal — and the
-  legend names the ones on screen, since an unexplained dash pattern is decoration.
+  under the eye. Seven strokes — lineage, stated relation, ruled out, contradiction,
+  mention, folded sources, proposal — and the legend names the ones on screen, since an
+  unexplained dash pattern is decoration.
+- **One rating is on the line, and only one.** A relation checked and eliminated is
+  drawn apart: "it is not this bridge" is half the work of a geolocation, and eleven
+  candidates ruled out drawn like live statements make a picture of the case count
+  eleven open hypotheses. The other three levels get no stroke — a verdict is not a
+  nuance, *probable* against *possible* is read one edge at a time in the panel, and
+  four more patterns would put *what kind of edge is this* and *how sure of it* on one
+  channel. Nothing is hidden either: the elimination is the finding, so it stays drawn.
 - **Nodes declutter by zoom.** Wide, they are dots; the few busiest keep their name,
   because what sits at the centre of the case is the question. Close enough for one
-  to fit, each becomes a **mini card**: family stripe, the preview the case already
-  holds (or the entity's glyph), title, type and degree. The card is held at a fixed
-  size on screen, which is what lets it fit — in canvas units it would cover its
-  neighbours at every zoom.
+  to fit, each becomes a **mini card**: family stripe, then a picture column as tall
+  as the card holding the preview the case already holds (or the entity's glyph,
+  centred in that same column), then title, type and degree. A preview fills the
+  column from the middle of the thumbnail rather than being fitted inside it, since
+  a wide capture fitted into a small box read as a hole in the card; the whole
+  thumbnail is in the tooltip.
+- **The card is sized off the screen, not the canvas** — in canvas units it would
+  cover its neighbours at every zoom. It still grows with the zoom, by the square
+  root of it and up to 1.7×: pinned to one exact size, zooming in bought distance
+  between the cards and nothing inside them. The gaps widen faster than the card
+  does, so cards that had room keep it.
 - **A node says when the case made it.** A frame, an adjustment, a collage: filed as
   ordinary media and drawn with the same glyph as a photograph somebody handed over.
   The card names the act instead of the kind — *Frame*, *Collage* — and the panel adds
@@ -710,6 +770,22 @@ has no verb menu or rating. A Claim has its own **About**, **At** and **Cites**
 editor; its confidence is edited with the Claim fields, and those three connectors
 carry no rating of their own.
 
+**Sources and Supports are two headings, Contradictions is one.** A statement may cite
+another statement, and resting on is not symmetric — so *Sources* lists what this one
+rests on and takes the **Add source**, while *Supports* lists the statements resting on
+this one and takes nothing: that reasoning is written where it is being made. *Supports*
+appears only once it holds something. A contradiction keeps one heading whichever end
+filed it, since it reads the same from both.
+
+**The Claims group adds up before it lists.** An entity several statements are *about*
+shows what they come to — `5 destroyed · 1 damaged` — above the statements themselves,
+with the same three rules the Board's total obeys: a ruled-out statement is counted
+apart and never inside the sum, an absent count reads as *without a number*, and the
+confidence spread is stated rather than folded in. Read over the whole case, since it
+is a fact about the row rather than about anyone's filter. A place reached by `at` or a
+source reached by `cites` is listed without being counted: neither says how many of
+anything.
+
 **A Claim's fields are headed twice**: what it states — how many, in what condition —
 then the reasoning behind it. One heading over all five would file a count as
 reasoning. The count steps by one and starts at one; leaving it empty says *seen, not
@@ -851,7 +927,9 @@ A proof is composed of panels: case images, each carrying its source. Two things
 in the composer are not panels.
 
 **Overlays.** Ctrl+V, a drop on the canvas, or `+ Add overlay` put an image
-straight into the proof. It lands in the `Overlays` section of the side column,
+straight into the proof. Ctrl+V answers to two clipboards, and the rule is which
+copy came last: an annotation copied here wins, until leaving the window and
+coming back hands the chord back to the system clipboard. It lands in the `Overlays` section of the side column,
 sits above the panels and the legend, and is moved,
 resized from its corners and framed like anything else on the canvas — you can
 annotate it too. It claims no source: no media is filed, no entity, no
@@ -903,6 +981,11 @@ instrument style of QGIS, Google Earth Pro, Resolve and Lightroom.
   `.dark-surface`. New chrome must use tokens; hardcoded light colours are limited
   to text on dark image scrims.
 - **Shape**: radii 3/4/6px, flat panels with 1px borders, rectangular badges.
+- **Update dot**: `.update-dot` on a `.dotted` host says "something here is to
+  install or update", and nothing else. It repeats down one path — the topbar
+  gear, the Settings tab holding it, then the button that acts on it — so
+  following it always ends somewhere it can be cleared. No counts, no other
+  colours.
 - **Motion**: none. Color-only transitions ≤0.15s; no entrance animations,
   no hover lifts. Transient functional feedback (locate-flash) is the one
   exception.

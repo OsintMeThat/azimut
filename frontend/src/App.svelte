@@ -6,9 +6,12 @@
     reloadCase,
     toast,
     updateState,
-    checkForUpdateOnStart,
+    updatesState,
+    prefs,
+    checkForUpdatesOnStart,
     toggleTheme,
   } from './lib/state.svelte.js';
+  import { updateBadges } from './lib/staleness.js';
   import { startEvents, onEvent } from './lib/events.js';
   import {
     CASE_WORKSPACE,
@@ -52,6 +55,10 @@
     ...TOOLS,
     { id: 'settings', label: TOOL_LABELS.settings, load: () => import('./tools/Settings.svelte') },
   ];
+  // Settings is the only place anything can be updated from, and it sits out of
+  // the working flow — so a dot on its icon is how the app mentions it at all.
+  let badges = $derived(updateBadges(updatesState, prefs.updateDismissedVersion));
+
   const loader = createToolLoader(Object.fromEntries(ALL_TOOLS.map((tool) => [tool.id, tool.load])));
   let toolComponents = $state.raw({});
   let toolErrors = $state.raw({});
@@ -142,12 +149,13 @@
   loadEntityTypes();
 
   // Load the case list and reopen the last-used case (survives reloads), then
-  // — once preferences have landed — see whether a newer release is out and
-  // pop a notice. The check reads prefs.updateCheckOnStart, so it must follow
-  // initSession, which loads them.
+  // — once preferences have landed — see what is behind: the app, the
+  // downloaders, the capture extension. The check reads prefs.updateCheckOnStart
+  // and the bundled extension version, so it must follow initSession, which
+  // loads them.
   initSession()
     .catch(() => {})
-    .finally(() => checkForUpdateOnStart());
+    .finally(() => checkForUpdatesOnStart());
 
   // Live nudges from our own backend (SSE, same-origin — still local-first):
   // the capture extension files screenshots while this tab just sits here, and
@@ -187,12 +195,15 @@
     </div>
     <div class="spacer"></div>
     <button
-      class="btn btn-ghost btn-sm"
+      class="btn btn-ghost btn-sm dotted"
       class:topbar-active={uiState.tool === 'settings'}
-      title="Settings"
+      title={badges.any ? 'Settings · something to install or update' : 'Settings'}
       onclick={() => (uiState.tool = 'settings')}
     >
       <Icon name="settings" size={16} />
+      {#if badges.any}
+        <span class="update-dot" aria-label="something to install or update"></span>
+      {/if}
     </button>
     <button
       class="btn btn-ghost btn-sm"

@@ -388,11 +388,23 @@ describe('Proof Composer pasted images', () => {
   it('lets one paste handler decide between an image and a copied annotation', () => {
     expect(source).toContain('onpaste={onPaste}');
     expect(source).toContain("i.type.startsWith('image/')");
-    expect(source).toContain('} else if (clipboard) {');
     // the old Ctrl+V keydown branch would have swallowed the paste event
     expect(source).not.toContain("k === 'v' && clipboard");
     // and a paste into the title or a caption stays text
     expect(source).toContain('isTextTarget(e.target)');
+  });
+
+  it('decides that chord on which copy came last', () => {
+    // Ctrl+C on a rectangle then Ctrl+V pasted whatever screenshot the system
+    // clipboard was holding, because the system one was read first.
+    expect(source).toContain('if (clipboard && (shapeCopyFresh || !item))');
+    expect(source).toContain('shapeCopyFresh = true;');
+  });
+
+  it('hands the chord back to the system clipboard once the analyst leaves', () => {
+    // going somewhere else is the only way an outside copy could have happened
+    expect(source).toContain("window.addEventListener('blur', release)");
+    expect(source).toContain('const release = () => (shapeCopyFresh = false)');
   });
 
   it('offers the file picker and the drop as well as Ctrl+V', () => {

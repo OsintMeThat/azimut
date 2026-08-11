@@ -420,6 +420,27 @@ a:hover {
   color: var(--danger);
 }
 
+/* "Something here can be updated", from the Settings icon down to the button
+   that does it. One dot, one meaning, wherever it lands. The host carries
+   .dotted to anchor it.
+
+   It hangs off the top-right corner rather than sitting inside: on a primary
+   button the inside is amber on amber, and on any button with a label the dot
+   lands on the words. */
+.dotted {
+  position: relative;
+}
+.update-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
+}
+
 /* Empty states — every tool has one, they must feel designed. */
 .empty {
   display: flex;

@@ -638,10 +638,19 @@ describe('a path is walked, not remembered', () => {
 describe('a node close up', () => {
   it('draws as a card past the zoom that has room for one', () => {
     // A card in canvas units would overlap its neighbours at every zoom, since the
-    // placement spaces nodes 130 apart; held at a fixed size on screen it fits.
+    // placement spaces nodes 130 apart; sized off the screen it fits.
     expect(source).toContain('const asCards = scale >= CARD_SCALE');
-    expect(source).toContain('card.scale({ x: 1 / scale, y: 1 / scale })');
+    expect(source).toContain('card.scale({ x: unit, y: unit })');
     expect(source).toContain('circle.visible(drawn && !carded)');
+  });
+
+  it('measures the card and everything hung off it with the same unit', () => {
+    // The rim an arrow stops at, the ring, the pin and the switch all sit on the
+    // card's edge. Measured any other way they drift off it as the card grows.
+    expect(source).toContain('const unit = cardFactor(scale)');
+    expect(source).toContain('const rim = { x: (CARD.w / 2) * unit, y: (CARD.h / 2) * unit }');
+    expect(source).toContain('Math.hypot(CARD.w / 2, CARD.h / 2) * unit');
+    expect(source).toContain('const margin = CARD.w * 2 * cardFactor(scale)');
   });
 
   it('shows the preview the case already holds, never the file itself', () => {
@@ -650,6 +659,17 @@ describe('a node close up', () => {
     expect(source).toContain('fileUrl(cid, thumb)');
     expect(source).toContain('previews.set(url, image)');
     expect(source).toContain("previews.set(url, 'failed')");
+  });
+
+  it('fills the picture column instead of letterboxing a thumbnail into it', () => {
+    // A wide capture fitted inside a square left a strip floating in a hole, which
+    // read as a broken card. The column is filled from the middle of the picture,
+    // over a ground that holds the shape while it loads or if it never does.
+    expect(source).toContain(
+      'art.crop(cropToFill(image.naturalWidth, image.naturalHeight, CARD.art / CARD.h))',
+    );
+    expect(source).toContain("name: 'ground'");
+    expect(source).toContain("card.findOne('.ground')?.fill(colours.surface)");
   });
 
   it('falls back to the entity glyph from the one icon set', () => {
@@ -1364,6 +1384,57 @@ describe('an edge is a thing to read and to rule on', () => {
   it('lights an edge under the pointer the way a node lights', () => {
     expect(source).toContain('const picked = link.id === chosenLink || link.id === hoveredLink');
   });
+
+  it('judges the edge where it is read, instead of a panel away', () => {
+    // Reading a line here and grading it used to mean leaving the drawing for the
+    // node's Details and finding the row again among its grouped connections. On a
+    // worked case the finding is more often on the edge than on either node.
+    expect(source).toContain('async function rateEdge(linkId, raw)');
+    expect(source).toContain('confidence: raw === \'\' ? null : Number(raw)');
+    expect(source).toContain('onchange={(event) => rateEdge(chosenEdge.id, event.currentTarget.value)}');
+  });
+
+  it('offers the two controls because the registry declares them, not because the edge holds one', () => {
+    // A qualifier belongs to the verb and a rating to a ratable one, so a derivation
+    // and a mention offer neither — the same rule Details follows, and what keeps a
+    // free note off the rest of the vocabulary.
+    expect(source).toContain('{@const qualifier = relationQualifier(chosenEdge.type)}');
+    expect(source).toContain(
+      '{@const gradable = isRatable(chosenEdge.type) && confidenceLevels().length}',
+    );
+  });
+
+  it('reads the levels from the registry and offers clearing as the absence of one', () => {
+    // One list, so the picker cannot offer a value the API would refuse; and "not
+    // assessed" is a state to return to rather than a fifth level.
+    expect(source).toContain('{#each confidenceLevels() as level (level.value)}');
+    expect(source).toContain('<option value="">Not assessed</option>');
+  });
+
+  it('never grades a proposal, which the API refuses before it is reviewed', () => {
+    // Reviewing a machine's claim and grading it are two gestures: the confirm has to
+    // land first, so the control is not there to be pressed.
+    expect(source).toContain(
+      "{#if !snapshotReading && chosenEdge.provenance?.status !== 'suggested'}",
+    );
+  });
+
+  it('lets the line carrying a qualifier be the line that changes it', () => {
+    // The drawing already wrote *is associated with (sister)* and could not correct
+    // it: readable in the picture, editable only outside it.
+    expect(source).toContain('if (link.nature) return `${verb} (${link.nature})`');
+    expect(source).toContain('async function qualifyEdge(link, raw)');
+    expect(source).toContain('{ nature: value || null }');
+    // On change, and not on a value the edge already holds: `change` fires on blur, so
+    // clicking through the panel would otherwise re-read the case for nothing.
+    expect(source).toContain("if (!cid || value === (link.nature ?? '')) return");
+  });
+
+  it('re-reads the case after a judgement, because the rating can change the stroke', () => {
+    expect(source).toMatch(
+      /confidence: raw === ''[\s\S]{0,200}loadedFor = null;\s*await load\(\);/,
+    );
+  });
 });
 
 describe('two entities can be connected from the graph', () => {
@@ -1635,12 +1706,21 @@ describe('the wrapper is an edge, and the count is what it says', () => {
     expect(source).toMatch(/function unfold\(link\)[\s\S]{0,600}holdOn\(back\)/);
   });
 
-  it('does not offer to confirm or remove an edge that is not a row', () => {
+  it('does not offer to confirm, remove or judge an edge that is not a row', () => {
     // Nothing may be written to a folded edge: the case has no such link, so the
-    // controls would 404 on an act the panel had just offered.
-    expect(source).toMatch(
-      /\{#if chosenEdge\.folded\}[\s\S]{0,2000}?\{:else\}[\s\S]{0,1600}?dropLink\(chosenEdge\.id\)/,
-    );
+    // controls would 404 on an act the panel had just offered. A rating and a
+    // qualifier are writes like the other two, so they sit on the same side of the
+    // branch — sliced rather than length-matched, since the row's half keeps growing.
+    const start = source.indexOf('{#if chosenEdge.folded}');
+    const split = source.indexOf('{#if chosenEdge.merged}', start);
+    const end = source.indexOf('<ul class="neighbours">', split);
+    expect(start).toBeGreaterThan(-1);
+    expect(split).toBeGreaterThan(start);
+    expect(source.slice(start, split)).not.toMatch(/dropLink|ruleOn|rateEdge|qualifyEdge/);
+    const row = source.slice(split, end);
+    expect(row).toContain('dropLink(chosenEdge.id)');
+    expect(row).toContain('rateEdge(chosenEdge.id');
+    expect(row).toContain('qualifyEdge(chosenEdge,');
   });
 
   it('says where a folded type lives when it cannot be handed back', () => {
@@ -1944,5 +2024,32 @@ describe('what a control says it does', () => {
 
     expect(new Set(hiding).size).toBe(1);
     expect(hiding.length).toBeGreaterThan(1);
+  });
+});
+
+describe('Ctrl+V on the drawing', () => {
+  it('draws a pasted screenshot or link where the eye already is', () => {
+    expect(source).toContain("import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js'");
+    expect(source).toContain("import PasteDialog from '../components/PasteDialog.svelte'");
+    expect(source).toContain("resolvePaste('graph', payload)");
+    // a paste has no pointer position the way a drop does, so the viewport centre
+    // is the honest spot
+    expect(source).toContain('toCanvas({ x: width / 2, y: height / 2 })');
+  });
+
+  it('files it through the same arrival a created node uses', () => {
+    // drewIn pins, reads once and offers Undo — a second path would be a second
+    // set of rules about what happens after something is filed
+    expect(source).toContain('drewIn(result.entity, at, cid)');
+    expect(source).toContain('drewIn(entity, at, cid)');
+  });
+
+  it('only answers while it is the tool on screen', () => {
+    expect(source).toMatch(/uiState\.tool !== 'graph'\) return;\s*return listenForPaste/);
+  });
+
+  it('refuses to write into a frozen reading, and says why', () => {
+    expect(source).toContain("say('This snapshot is read-only. Leave it to paste.')");
+    expect(source).toContain('{#if pasted && !snapshotReading}');
   });
 });

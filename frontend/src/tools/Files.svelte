@@ -12,10 +12,11 @@
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import { buildTree, subtreeCount, folderOf, flattenPaths, isInFolderSubtree } from '../lib/folderTree.js';
-  import { assignFolderBatch } from '../lib/filing.js';
+  import { assignFolder, assignFolderBatch } from '../lib/filing.js';
   import { createNote } from '../lib/notes.js';
   import { openNotebook } from '../lib/navigate.js';
   import { createBookmark } from '../lib/bookmarks.js';
+  import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
   import { marqueeRect, marqueeHits, toggleSelection } from '../lib/gridSelect.js';
   import { buildCatalogQuery, fetchAllEntities } from '../lib/catalog.js';
   import { matchesEntity } from '../lib/entitySearch.js';
@@ -36,6 +37,7 @@
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
   import FolderSelect from '../components/FolderSelect.svelte';
+  import PasteDialog from '../components/PasteDialog.svelte';
 
   const TYPE_ICON = {
     media: 'image', capture: 'satellite', note: 'note', proof: 'proof',
@@ -693,6 +695,70 @@
     }
   }
 
+  // ── paste ────────────────────────────────────────────────────────────────────
+  /**
+   * Ctrl+V files what the clipboard holds into the folder being looked at.
+   *
+   * The only surface here that had no way to take a file at all: its drag and drop
+   * moves items between folders, so an image had to go through the Media grid and
+   * be filed afterwards. A pasted screenshot and a pasted link now land already
+   * filed, which is what this desktop is for.
+   */
+  let pasted = $state(null);
+  let pasteBusy = $state(false);
+  $effect(() => {
+    if (uiState.tool !== 'files') return;
+    return listenForPaste((payload) => {
+      pasted ??= resolvePaste('files', payload, { folder: showUnfiled ? '' : cwd });
+    });
+  });
+
+  /** Show the folder the paste landed in, so it is never filed out of sight. */
+  function revealFiled(folder) {
+    if (folder) openFolder(folder);
+    else openUnfiled();
+  }
+
+  async function confirmPaste(resolved) {
+    if (pasteBusy || !caseState.current) return;
+    pasteBusy = true;
+    const { kind, values, payload } = resolved;
+    try {
+      const caseId = caseState.current.id;
+      if (kind === 'image') {
+        const result = await pasteImage(caseId, {
+          file: payload.file,
+          title: values.title,
+          sourceUrl: values.source,
+        });
+        // A duplicate is left where it already sits: the case keeps the copy it has,
+        // and refiling it under the folder of this paste would move an item the
+        // analyst filed on purpose the first time.
+        if (!result.duplicate && values.folder) {
+          await assignFolder(caseId, result.entity, values.folder);
+        }
+        pasted = null;
+        await reloadCase();
+        if (result.duplicate) {
+          toast('Already in the case (same SHA-256)', 'warn');
+        } else {
+          toast('Image filed', 'ok', 1600);
+          revealFiled(values.folder);
+        }
+      } else {
+        await createBookmark(caseId, { ...values, url: payload.url });
+        pasted = null;
+        await reloadCase();
+        toast('Bookmark saved', 'ok', 1600);
+        revealFiled(values.folder);
+      }
+    } catch (e) {
+      toast(e.message, 'danger');
+    } finally {
+      pasteBusy = false;
+    }
+  }
+
   // ── tree rail ────────────────────────────────────────────────────────────────
   let expanded = $state({});
   const isExpanded = (p) => expanded[p] === true;
@@ -1347,6 +1413,17 @@
       </button>
     </div>
   </Modal>
+{/if}
+
+<!-- Ctrl+V: a screenshot or a link, filed into the folder being looked at -->
+{#if pasted}
+  <PasteDialog
+    resolved={pasted}
+    folders={allFolders}
+    busy={pasteBusy}
+    onconfirm={confirmPaste}
+    onclose={() => (pasted = null)}
+  />
 {/if}
 
 <!-- details editor: the shared body, same as the sidebar and Media modal -->

@@ -579,6 +579,28 @@ def test_a_source_still_drawn_as_a_node_is_counted_too(client):
     assert body["single_account"] == 0
 
 
+def test_resting_on_another_statement_is_not_resting_on_a_source(client):
+    """A cited statement is reasoning, not material, so it never lifts the number.
+
+    The independence count answers "three citations, how many sources" — a statement
+    built on another statement has found nothing new, and counting it would say the
+    opposite of what the graph is drawing.
+    """
+    cid = _case(client, "grounded on reasoning")
+    model = _entity(client, cid, "claim", "The vehicle is a T-72B3")
+    unit = _entity(client, cid, "claim", "The column is the 4th brigade")
+    video = _entity(client, cid, "media", "Column", {"path": "media/column.mp4"})
+    _link(client, cid, model, video, "cites")
+    _link(client, cid, unit, model, "cites")
+
+    body = _graph(client, cid)
+    # The one that reached material rests on it; the one that reached a statement
+    # rests on nothing of its own, which is the honest reading.
+    assert _node(body, model)["rests"] == {"sources": 1, "accounts": 0, "one": False}
+    assert "rests" not in _node(body, unit)
+    assert body["single_account"] == 0
+
+
 def test_a_statement_with_nothing_to_rest_on_says_nothing(client):
     cid = _case(client, "no sources")
     claim = _entity(client, cid, "claim", "Unsupported")

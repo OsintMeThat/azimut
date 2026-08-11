@@ -10,6 +10,7 @@ import { formatCoords as renderCoords } from './coords.js';
 import { loadWidth, saveWidth, clampWidth } from './sidebar.js';
 import { loadTheme, saveTheme, applyTheme } from './theme.js';
 import { shouldShowUpdate } from './appUpdate.js';
+import { extensionVersion } from './extBridge.js';
 import { loadRelationTypes } from './relations.svelte.js';
 
 /**
@@ -37,6 +38,21 @@ export const updateState = $state({
   latest: '', // the newer release tag, e.g. "v0.2.0"
   url: '', // where to download it
   notes: '', // the release body, Markdown
+});
+
+/**
+ * What the startup checks found behind, feeding the dots on the Settings icon,
+ * on its tabs and on the buttons that do something about it (lib/staleness.js).
+ *
+ * Filled once, on load — nothing here polls. Settings writes back to it when a
+ * manual check or an update changes the answer, so clearing a badge doesn't
+ * wait for a reload.
+ */
+export const updatesState = $state({
+  app: null, // the /api/settings/update?check=true payload, or null
+  scrapers: null, // checked downloader entries, or null while never checked
+  extensionInstalled: null, // version stamped on <html> by the installed extension
+  extensionBundled: '', // version this build ships (GET /api/settings)
 });
 
 /** Render a lat/lon the way the user asked for it. The tools' one entry point. */
@@ -73,28 +89,37 @@ export function applyPrefs(s) {
   if (s.update_check_on_start !== undefined) prefs.updateCheckOnStart = s.update_check_on_start;
   if (s.update_dismissed_version !== undefined)
     prefs.updateDismissedVersion = s.update_dismissed_version;
+  if (s.extension_version !== undefined) updatesState.extensionBundled = s.extension_version;
 }
 
 /**
- * On page load, ask GitHub whether a newer release is out and pop a notice if
- * so. The one network call Azimut makes on mount — gated on the user's
- * `updateCheckOnStart` preference (Settings turns it off), so with it disabled
- * opening the app still phones nowhere. Never throws: a failed or muted check
- * simply leaves the pop-up closed.
+ * On page load, work out what is behind: a newer Azimut release, a newer
+ * downloader, a newer capture extension. Runs once — nothing here polls, and
+ * nothing re-checks when Settings opens.
+ *
+ * The extension half is a local comparison (the installed one stamps its
+ * version on <html> at document_start), so it happens either way. The two
+ * network calls are gated together on `updateCheckOnStart`: with it off,
+ * opening the app still phones nowhere. Never throws — offline is the normal
+ * case here, and a check that fails just leaves the badge unlit.
  */
-export async function checkForUpdateOnStart() {
+export async function checkForUpdatesOnStart() {
+  updatesState.extensionInstalled = extensionVersion();
   if (!prefs.updateCheckOnStart) return;
-  try {
-    const check = await api.get('/api/settings/update?check=true');
-    if (shouldShowUpdate(check, prefs.updateDismissedVersion)) {
-      updateState.latest = check.latest;
-      updateState.url = check.url;
-      updateState.notes = check.notes ?? '';
+  const [app, scrapers] = await Promise.allSettled([
+    api.get('/api/settings/update?check=true'),
+    api.get('/api/settings/scrapers?check=true'),
+  ]);
+  if (app.status === 'fulfilled') {
+    updatesState.app = app.value;
+    if (shouldShowUpdate(app.value, prefs.updateDismissedVersion)) {
+      updateState.latest = app.value.latest;
+      updateState.url = app.value.url;
+      updateState.notes = app.value.notes ?? '';
       updateState.show = true;
     }
-  } catch {
-    /* offline, rate-limited, whatever — the pop-up is a courtesy, not a gate */
   }
+  if (scrapers.status === 'fulfilled') updatesState.scrapers = scrapers.value.scrapers ?? [];
 }
 
 /** Close the update pop-up. `mute` remembers the tag so it won't show again. */

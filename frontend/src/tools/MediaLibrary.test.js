@@ -410,3 +410,30 @@ describe('a file the library cannot display', () => {
     expect(source).toContain('title="Open file"');
   });
 });
+
+describe('Ctrl+V on the grid', () => {
+  it('files a screenshot that exists nowhere but the clipboard', () => {
+    // dropping already covers a file; this covers what has no file to drop
+    expect(source).toContain("import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js'");
+    expect(source).toContain("import PasteDialog from '../components/PasteDialog.svelte'");
+    expect(source).toContain("resolvePaste('media', payload)");
+  });
+
+  it('only answers while it is the tool on screen', () => {
+    // every visited tool stays mounted behind the visible one (App.svelte), so an
+    // ungated listener would have four surfaces answering one Ctrl+V
+    expect(source).toMatch(/uiState\.tool !== 'media'\) return;\s*return listenForPaste/);
+  });
+
+  it('leaves a paste it is already asking about alone', () => {
+    expect(source).toContain('pasted ??= resolvePaste');
+  });
+
+  it('rings the new card so the paste is never filed out of sight', () => {
+    expect(source).toContain('uiState.focusMedia = result.item.path');
+  });
+
+  it('says a duplicate is one already, and files nothing twice', () => {
+    expect(source).toContain("toast('Already in the case (same SHA-256)', 'warn')");
+  });
+});

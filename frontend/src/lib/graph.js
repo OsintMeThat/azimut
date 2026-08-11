@@ -708,8 +708,12 @@ export function ringsAround(links, start, hops = 1) {
   return reached;
 }
 
+/** The one rating drawn on the line (``engine/links.REFUTED``). See `refuted` below
+ *  for why it is the only one of the four. */
+const RULED_OUT = -1;
+
 /**
- * The four ways an edge is drawn, and what each one means.
+ * The ways an edge is drawn, and what each one means.
  *
  * One table, read by both the stroke and the legend, because an unexplained dash
  * pattern is decoration: the analyst has no way to learn that fine dots mean a
@@ -720,6 +724,20 @@ export function ringsAround(links, start, hops = 1) {
 export const EDGE_KINDS = [
   { kind: 'lineage', label: 'produced from', dash: [], width: 1.7 },
   { kind: 'stated', label: 'stated relation', dash: [8, 5], width: 1.3 },
+  // A relation the analyst checked and eliminated, kept in the case on purpose
+  // (`engine/links.REFUTED`): "it is not this bridge" is half the work of a
+  // geolocation, and the eleven candidates ruled out are the record of it. Drawn
+  // apart because a verdict is not a nuance — *probable* against *possible* is read
+  // one edge at a time in the panel, where a dead statement has to be legible without
+  // reading anything, or a picture of the case counts eleven live hypotheses.
+  //
+  // **The other three levels deliberately get no stroke.** Four more patterns would
+  // put two different questions on one channel — what kind of edge this is, and how
+  // sure of it — and the eye cannot hold seven dashes apart anyway. Short dashes at a
+  // stated relation's weight rather than a thinner line: a hairline reads as *faint*,
+  // which is what a tentative edge would be, and this one is not tentative. It is
+  // settled, and settled the other way.
+  { kind: 'refuted', label: 'ruled out', dash: [2, 3], width: 1.6 },
   // Drawn apart from every other thing an analyst states, because it is the only
   // verb saying two rows of the case cannot both stand: a reader scanning a
   // statement cluster has to see the argument without reading the labels. Dash-dot
@@ -739,7 +757,7 @@ export const EDGE_KINDS = [
 
 const EDGE_BY_KIND = new Map(EDGE_KINDS.map((entry) => [entry.kind, entry]));
 
-/** Which of the six an edge is. A proposal is drawn as one whatever its verb, and a
+/** Which of them an edge is. A proposal is drawn as one whatever its verb, and a
  *  fold as one whatever it folded — the two are the same rule, applied to the two
  *  things an edge can be besides its verb. */
 export function edgeKind(link, chainTypes = []) {
@@ -748,6 +766,11 @@ export function edgeKind(link, chainTypes = []) {
   if (chainTypes.includes(link.type)) return 'lineage';
   if (link.type === 'contradicts') return 'contradiction';
   if (link.type === 'mentions') return 'mention';
+  // Read here rather than above, and it costs nothing to place it last: the API
+  // refuses a rating on a derivation, on a mention and on a claim connector, so an
+  // ordinary stated relation is the only thing that can carry one. There is no other
+  // kind for the verdict to outrank.
+  if (link.confidence === RULED_OUT) return 'refuted';
   return 'stated';
 }
 
@@ -848,14 +871,38 @@ export function edgeMidpoint(points, lift = 0) {
  *
  * In **screen** pixels, not canvas units, which is what makes the card viable at
  * all: drawn in canvas units a 158-wide card would overlap its neighbours at every
- * zoom, since the placement only spaces nodes 130 apart. Held at a fixed size on
- * screen, the gap between two nodes grows with the zoom while the card does not,
- * so past `CARD_SCALE` the cards have room and below it they would not.
+ * zoom, since the placement only spaces nodes 130 apart. Sized off the screen, the
+ * gap between two nodes grows with the zoom faster than the card does, so past
+ * `CARD_SCALE` the cards have room and below it they would not.
+ *
+ * `art` is the picture column: full height, flush against the stripe, so a thumbnail
+ * has a side of the card rather than a stamp in a corner of it. `glyph` is what a
+ * node with no picture draws in that column instead, centred, at the size it has
+ * always been — the cards that were already right are left alone.
  */
-export const CARD = { w: 176, h: 50, art: 34, pad: 8, stripe: 4 };
+export const CARD = { w: 176, h: 50, art: 50, glyph: 34, pad: 8, stripe: 4 };
 
 /** The zoom past which a node is worth drawing as a card rather than as a dot. */
 export const CARD_SCALE = 1.15;
+
+/** How much bigger than its base size a card is ever drawn. */
+export const CARD_GROWTH = 1.7;
+
+/**
+ * What one of the card's own units is worth in canvas units, at a given zoom.
+ *
+ * A card pinned to an exact screen size stops answering the zoom: past `CARD_SCALE`
+ * the case keeps spreading out while the card stays the same stamp, so zooming in
+ * buys distance and nothing else — and the thumbnail inside it can never become
+ * readable. It grows by the square root of the zoom instead. Across the card range
+ * the gaps widen 2.8× and the card 1.7×, so the drawing keeps getting easier to read
+ * without the cards ever closing back in on each other.
+ */
+export function cardFactor(scale) {
+  const zoom = Math.max(Number(scale) || 0, 0.01);
+  const grown = Math.min(Math.max(Math.sqrt(zoom / CARD_SCALE), 1), CARD_GROWTH);
+  return grown / zoom;
+}
 
 /**
  * How far the rim of a card sits from its centre, along one direction.
@@ -874,18 +921,28 @@ export function boxRadius(halfWidth, halfHeight, dx, dy) {
 }
 
 /**
- * Fit a picture inside the card's art box without distorting it.
+ * The part of a picture that fills the card's art column, without distorting it.
  *
- * A thumbnail is whatever shape its source was — a screenshot is wide, a phone
- * photo is tall — and stretching both into a square makes a row of cards look
- * wrong in a way that is hard to name and easy to see.
+ * A thumbnail is whatever shape its source was — a screenshot is wide, a phone photo
+ * is tall — and stretching either into the column would make a row of cards look
+ * wrong in a way that is hard to name and easy to see. Fitting it *inside* instead
+ * left a wide capture as a thin strip floating in a hole, which read as a broken
+ * card rather than as a picture. So the middle of the thumbnail fills the column and
+ * the edges are cropped: the card says which media this is, and the tooltip is where
+ * the whole of it is looked at.
+ *
+ * `aspect` is the column's own width over its height, in source pixels.
  */
-export function fitInside(naturalWidth, naturalHeight, box) {
+export function cropToFill(naturalWidth, naturalHeight, aspect = 1) {
   const width = Math.max(Number(naturalWidth) || 0, 1);
   const height = Math.max(Number(naturalHeight) || 0, 1);
-  const scale = Math.min(box / width, box / height);
-  const drawn = { w: width * scale, h: height * scale };
-  return { ...drawn, dx: (box - drawn.w) / 2, dy: (box - drawn.h) / 2 };
+  const shape = Math.max(Number(aspect) || 0, 0.01);
+  const wider = width / height > shape;
+  const kept = {
+    width: wider ? height * shape : width,
+    height: wider ? height : width / shape,
+  };
+  return { ...kept, x: (width - kept.width) / 2, y: (height - kept.height) / 2 };
 }
 
 /**
@@ -903,7 +960,8 @@ export function fitInside(naturalWidth, naturalHeight, box) {
 export function nodeAt(placed, byId, point, { carded = false, scale = 1 } = {}) {
   let best = null;
   let closest = Infinity;
-  const half = { x: CARD.w / 2 / scale, y: CARD.h / 2 / scale };
+  const unit = cardFactor(scale);
+  const half = { x: (CARD.w / 2) * unit, y: (CARD.h / 2) * unit };
   for (const seat of placed) {
     const dx = point.x - seat.x;
     const dy = point.y - seat.y;

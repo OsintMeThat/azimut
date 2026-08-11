@@ -26,6 +26,7 @@ from ..engine import links as link_engine
 from ..engine import media as media_engine
 from ..engine import reveal as reveal_engine
 from ..engine import satellite as satellite_engine
+from ..engine import tally as tally_engine
 from ..engine import trash as trash_engine
 from ..repository import EntityStatus
 from ..workspace import Case, CaseError
@@ -796,6 +797,44 @@ def catalog_attributes(case_id: str, type: str | None = None) -> dict[str, Any]:
     return {"attrs": get_case(case_id).attr_facets(types=types)}
 
 
+@router.get("/{case_id}/catalog/tally")
+def catalog_tally(
+    case_id: str,
+    type: str | None = None,
+    status: str | None = None,
+    q: str | None = None,
+    folder: str | None = None,
+    unfiled: bool = False,
+    recursive: bool = False,
+    attr: str | None = None,
+    value: str | None = None,
+    linked: str | None = None,
+    unlinked: bool = False,
+    since: str | None = None,
+    until: str | None = None,
+    by: str | None = None,
+) -> dict[str, Any]:
+    """What the statements in this narrowing add up to, per subject.
+
+    The same terms as the catalog page it sits beside, spelled the same way, because
+    it is the same question: the table lists the statements, this one adds them up
+    (``engine/tally.py``). Every rule about what may enter a sum is there — a ruled-out
+    statement never does, an absent count is not one, and nothing is totalled across
+    subjects.
+    """
+    types = [t.strip() for t in type.split(",") if t.strip()] if type else None
+    filed_by = [name.strip() for name in by.split(",") if name.strip()] if by else None
+    try:
+        return tally_engine.tally(
+            get_case(case_id), types=types, status=status, query=q,
+            folder=folder, unfiled=unfiled, recursive=recursive,
+            attr=attr, attr_value=value, linked=linked, unlinked=unlinked,
+            since=since, until=until, filed_by=filed_by,
+        )
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _ids(value: str | None) -> list[str] | None:
     """One of the graph's comma-separated id lists, or nothing at all.
 
@@ -1292,6 +1331,23 @@ def entity_placement(case_id: str, entity_id: str) -> dict[str, Any]:
     if placement is None:
         raise HTTPException(status_code=404, detail=f"entity '{entity_id}' not found")
     return placement
+
+
+@router.get("/{case_id}/entities/{entity_id}/tally")
+def entity_tally(case_id: str, entity_id: str) -> dict[str, Any]:
+    """What the statements about this entity come to, or 404 when nothing states one.
+
+    Its own route for the same reason placement is: the panel already lists the claims
+    pointing here, and adding them up walks their attributes, which the chain read has
+    no reason to carry on every Details open.
+
+    Over the whole case, never a filter: the panel is not narrowed, so a total obeying
+    a narrowing set on another screen would be a different number under one wording.
+    """
+    row = tally_engine.for_subject(get_case(case_id), entity_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="no statement is about this entity")
+    return row
 
 
 @router.get("/{case_id}/entities/{entity_id}/derivation")

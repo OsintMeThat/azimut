@@ -8,6 +8,7 @@
   import { caseState, uiState, ensureCase, reloadCase, toast } from '../lib/state.svelte.js';
   import {
     hasMediaForFilters,
+    isBroughtIn,
     isGenericImage,
     isMadeHere,
     isSatelliteMedia,
@@ -16,10 +17,12 @@
     visibleMedia,
     SORTS,
   } from '../lib/mediaFilter.js';
+  import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
   import { gotoPoint } from '../lib/navigate.js';
   import { revealMediaFolder } from '../lib/reveal.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import Icon from '../components/Icon.svelte';
+  import PasteDialog from '../components/PasteDialog.svelte';
   import SearchInput from '../components/SearchInput.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
@@ -84,7 +87,7 @@
     { key: 'video', label: 'Videos', icon: 'video', match: (i) => i.kind === 'video' },
     { key: 'collage', label: 'Collages', icon: 'layers', match: (i) => i.source?.op === 'collage' },
     { key: 'satellite', label: 'Satellite', icon: 'satellite', match: isSatelliteMedia },
-    { key: 'upload', label: 'Imports', icon: 'upload', match: (i) => i.source?.type === 'upload' },
+    { key: 'upload', label: 'Imports', icon: 'upload', match: isBroughtIn },
     { key: 'download', label: 'Downloads', icon: 'download', match: (i) => i.source?.type === 'download' },
     { key: 'other', label: 'Other files', icon: 'file', match: (i) => i.kind !== 'image' && i.kind !== 'video' },
   ];
@@ -643,6 +646,46 @@
     e.preventDefault();
     dragOver = false;
     importFiles(e.dataTransfer.files);
+  }
+
+  // ── paste ────────────────────────────────────────────────────────────────
+  // A screenshot taken with the system tool is only in the clipboard: there is no
+  // file to drop, so without this it has to be saved to disk first. A link is
+  // refused here and says so — this grid takes files, and a URL is the download
+  // field's business.
+  let pasted = $state(null);
+  let pasteBusy = $state(false);
+  $effect(() => {
+    if (uiState.tool !== 'media') return;
+    return listenForPaste((payload) => {
+      pasted ??= resolvePaste('media', payload);
+    });
+  });
+
+  async function confirmPaste(resolved) {
+    if (pasteBusy) return;
+    pasteBusy = true;
+    try {
+      const c = await ensureCase();
+      const result = await pasteImage(c.id, {
+        file: resolved.payload.file,
+        title: resolved.values.title,
+        sourceUrl: resolved.values.source,
+      });
+      pasted = null;
+      await Promise.all([refresh(), reloadCase()]);
+      // The same bytes twice is not an error and not a second item: the case keeps
+      // the one it has, and saying so is what stops the analyst pasting again.
+      if (result.duplicate) toast('Already in the case (same SHA-256)', 'warn');
+      else {
+        toast('Image added to the case', 'ok');
+        uiState.focusMedia = result.item.path;
+      }
+    } catch (e) {
+      toast(`Could not add the image: ${e.message}`, 'danger');
+    } finally {
+      pasteBusy = false;
+    }
   }
 
   // Open the shared details editor (same body as the case sidebar) for this
@@ -1365,6 +1408,16 @@
     busy={deleteBusy}
     onconfirm={confirmDelete}
     oncancel={() => (deleteTarget = null)}
+  />
+{/if}
+
+<!-- Ctrl+V: the screenshot that only exists in the clipboard -->
+{#if pasted}
+  <PasteDialog
+    resolved={pasted}
+    busy={pasteBusy}
+    onconfirm={confirmPaste}
+    onclose={() => (pasted = null)}
   />
 {/if}
 

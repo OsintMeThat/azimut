@@ -7,11 +7,15 @@ shouldn't be reached."""
 
 from __future__ import annotations
 
+import hashlib
+import json
+from pathlib import PurePosixPath
+
 import httpx
 import pytest
 
 from azimut import __version__
-from azimut.api.ingest import bundled_extension_version
+from azimut.api.ingest import _extension_dir, bundled_extension_version, shipped_extension_files
 from azimut.engine import updates
 
 
@@ -131,12 +135,91 @@ def test_update_endpoint_with_check_queries_github(client, monkeypatch):
 
 # -- bundled extension version --------------------------------------------
 
+# The extension carries the Azimut version whose release last changed it, not
+# the current one. Settings turns "bundled > installed" into "replace the
+# unpacked folder and reload", so bumping this in lock-step with __version__
+# would send every user through a reinstall for a byte-identical zip.
+#
+# The pair below is the contract, and it moves in one direction only: when a
+# shipped file really changes, set the manifest to the current __version__ and
+# record the new digest here (the failing test prints it).
+EXTENSION_VERSION = "0.2.5"
+EXTENSION_PAYLOAD = "f8141fe57fed06b98f373446d8fc19e932a988d1cc27fdcc7d632ae1b65bb198"
 
-def test_bundled_extension_version_matches_manifest():
-    # The repo checkout's extension/manifest.json is the source of truth here.
-    assert bundled_extension_version() == __version__
+# Text is digested by its line content: a Windows checkout can carry CRLF, and
+# the gate has to reach the same verdict on the three CI platforms.
+_TEXT_SUFFIXES = {".js", ".json", ".css", ".html", ".md", ".txt"}
+
+
+def _extension_payload_digest() -> str:
+    """Digest everything ``extension.zip`` ships, minus the manifest's own
+    ``version``.
+
+    Leaving the version out is what makes the gate cut both ways: with it in,
+    any bump would change the digest and a gratuitous one would look exactly
+    like a real change."""
+    src = _extension_dir()
+    assert src is not None, "no extension bundled with this checkout"
+    digest = hashlib.sha256()
+    for name, path in shipped_extension_files(src):
+        if name == "manifest.json":
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            manifest.pop("version", None)
+            data = json.dumps(manifest, sort_keys=True).encode("utf-8")
+        else:
+            data = path.read_bytes()
+            if PurePosixPath(name).suffix in _TEXT_SUFFIXES:
+                data = data.replace(b"\r\n", b"\n")
+        digest.update(f"{name}\0".encode() + data + b"\0")
+    return digest.hexdigest()
+
+
+def test_the_shipped_listing_reads_the_same_on_every_platform():
+    """The digest above folds the names in order, so the order is part of the gate.
+
+    Sorting `Path` objects would not do: comparing them is case-insensitive on
+    Windows and case-sensitive everywhere else, which puts `README.md` first on
+    Linux and mid-list on Windows — three CI platforms disagreeing about one
+    unchanged extension. Sorted by the posix name instead, which is the same
+    string on all three.
+    """
+    src = _extension_dir()
+    assert src is not None
+    names = [name for name, _ in shipped_extension_files(src)]
+    assert names == sorted(names)
+    assert all("\\" not in name for name in names)
+
+
+def test_the_extension_version_moves_only_when_the_extension_does():
+    """Both halves of the drift, in one gate.
+
+    A shipped file changed without a version bump: the installed extension and
+    the bundled one report the same version while differing, so Settings stays
+    quiet and the user keeps running a stale bridge. A version bump with no
+    change: everyone is told to reinstall the zip they already have, and a nag
+    that cries wolf is a nag nobody reads."""
+    digest = _extension_payload_digest()
+    version = bundled_extension_version()
+
+    assert digest == EXTENSION_PAYLOAD, (
+        f"the shipped extension changed. Set extension/manifest.json to the current "
+        f'__version__ ({__version__}) and record EXTENSION_VERSION = "{__version__}", '
+        f'EXTENSION_PAYLOAD = "{digest}" here.'
+    )
+    assert version == EXTENSION_VERSION, (
+        f"the extension is unchanged but its version moved to {version}. Put "
+        f"extension/manifest.json back to {EXTENSION_VERSION} — a bump users can't "
+        f"see is a reinstall prompt they don't need."
+    )
+
+
+def test_the_bundled_extension_is_never_ahead_of_the_app():
+    """It is stamped with the Azimut version that shipped it, so it can lag by
+    several releases but never lead — a version no release ever carried would
+    make the Settings comparison meaningless."""
+    assert not updates.is_newer(EXTENSION_VERSION, __version__)
 
 
 def test_settings_reports_extension_version(client):
     body = client.get("/api/settings").json()
-    assert body["extension_version"] == __version__
+    assert body["extension_version"] == EXTENSION_VERSION

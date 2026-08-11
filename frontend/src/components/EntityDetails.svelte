@@ -26,6 +26,7 @@
     loadEntityTypes,
   } from '../lib/entityTypes.svelte.js';
   import { entityIcon } from '../lib/entityIcon.js';
+  import { confidenceLine, countLines, noteLines } from '../lib/tally.js';
   import {
     loadRelationTypes,
     relatableTypes,
@@ -336,6 +337,49 @@
       .get(`/api/cases/${cid}/entities/${id}/placement`)
       .then((p) => { if (mySeq === placeSeq) placement = p; })
       .catch(() => { if (mySeq === placeSeq) placement = null; });
+  });
+
+  /**
+   * What the statements about this entity come to (`engine/tally.py`).
+   *
+   * The panel already lists the claims pointing here; it never added them up, so
+   * *how many of these were destroyed* was a question the analyst answered by reading
+   * four rows and doing the arithmetic. Read on the same terms as the placement
+   * beside it — its own request, only once the Case tab is on screen, and re-read
+   * after a save, since editing a statement changes what the case says.
+   *
+   * Over the whole case rather than any filter: this is a fact about the row, and a
+   * number that quietly obeyed a narrowing set on another screen would be a different
+   * number under the same words. 404 means nothing states anything about it, which is
+   * an ordinary answer here rather than an error.
+   */
+  let stated = $state(null);
+  let statedSeq = 0;
+
+  $effect(() => {
+    const id = currentId;
+    const cid = caseState.current?.id;
+    const wanted = tab === 'case' || unifiedDetails;
+    caseState.rev;
+    const mySeq = ++statedSeq;
+    if (!id || !cid || !wanted) {
+      stated = null;
+      return;
+    }
+    api
+      .get(`/api/cases/${cid}/entities/${id}/tally`)
+      .then((row) => { if (mySeq === statedSeq) stated = row; })
+      .catch(() => { if (mySeq === statedSeq) stated = null; });
+  });
+
+  /** The condition and confidence words, from the served registry rather than a list
+   *  kept here, exactly as the Board's own tally reads them. */
+  const claimReads = $derived.by(() => {
+    const reads = {};
+    for (const field of entityFields('claim')) {
+      for (const option of field.options ?? []) reads[option.value] = option.label;
+    }
+    return (value) => reads[value] ?? value;
   });
 
   /** One point, written the way every other coordinate row in this panel writes one. */
@@ -890,6 +934,30 @@
             {:else if claimRelations.length}
               <div class="connection-group">
                 <div class="connection-head"><h4>Claims</h4></div>
+                <!-- What those statements come to, above the statements themselves.
+                     The rows were always here; adding them up by reading four of them
+                     was the arithmetic this line does. Only where a statement is
+                     *about* this entity: a place reached by `at` and a source reached
+                     by `cites` are listed below without being counted, because
+                     neither says how many of anything. -->
+                {#if stated?.statements || stated?.refuted}
+                  {@const lines = countLines(stated, claimReads)}
+                  {@const notes = noteLines(stated)}
+                  {@const sure = confidenceLine(stated, claimReads)}
+                  <div class="stated">
+                    {#if lines.length}
+                      <p class="stated-sum">
+                        {#each lines as line (line.value)}<span>{line.text}</span>{/each}
+                      </p>
+                    {/if}
+                    <p class="stated-notes">
+                      {stated.statements}
+                      {stated.statements === 1 ? 'statement' : 'statements'}
+                      {#if sure}<span>· {sure}</span>{/if}
+                      {#each notes as note (note)}<span>· {note}</span>{/each}
+                    </p>
+                  </div>
+                {/if}
                 <ClaimReferences
                   relations={claimRelations}
                   onwalk={(target) => walkTo(target.id)}
@@ -1313,6 +1381,29 @@
   }
   .connection-head .on {
     color: var(--accent);
+  }
+  /* The sum sits above the statements it is made of: the figure reads first because
+     it is the answer, and what it left out sits directly under it rather than in a
+     tooltip — a total that hides its uncounted and ruled-out statements is right and
+     misleading at once. */
+  .stated {
+    margin: 2px 0 8px;
+  }
+  .stated-sum {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    margin: 0;
+    color: var(--text-1);
+    font-variant-numeric: tabular-nums;
+  }
+  .stated-notes {
+    margin: 2px 0 0;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .stated-notes span {
+    margin-left: 4px;
   }
   /* One row per point: the coordinate reads first because it is what the row is
      for, the attribution second, the map action last — the same order the relation

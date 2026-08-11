@@ -35,7 +35,8 @@ jobs:
           echo "tag=$tag  __version__=$ver"
           [ "$tag" = "$ver" ] || { echo "::error::tag v$tag != __version__ $ver — bump src/azimut/__init__.py"; exit 1; }
       # The version-parity gate the release workflow used to skip: pyproject's
-      # single-sourced version and the extension manifest must line up.
+      # version stays single-sourced, and the capture extension's own version
+      # moves when the extension does and only then.
       - name: Release gate + version parity
         run: uv run --no-sync pytest tests/test_release_gate.py tests/test_updates.py -q
 

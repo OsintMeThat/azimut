@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   hasMediaForFilters,
   isGenericImage,
+  isBroughtIn,
   isMadeHere,
   isSatelliteMedia,
   mediaDisplayKind,
@@ -248,5 +249,27 @@ describe('what the case made, apart from what it collected', () => {
     ).toEqual(['handed-over.jpg', 'map.png']);
     expect(visibleMedia([frame, upload, capture], { collectedOnly: false }).length).toBe(3);
     expect(visibleMedia([frame, upload], { collectedOnly: true, query: 'frame' })).toEqual([]);
+  });
+});
+
+describe('what the analyst brought in by hand', () => {
+  const dropped = item({ filename: 'dropped.png', source: { type: 'upload' } });
+  const pastedIn = item({ filename: 'Front gate.png', source: { type: 'clipboard' } });
+  const downloaded = item({ filename: 'clip.mp4', source: { type: 'download' } });
+
+  it('counts a paste and a drop as one facet', () => {
+    // Both were put there by the analyst, which is what the Imports filter asks.
+    // They stay two source types because only one of them can say where it came from.
+    expect(isBroughtIn(dropped)).toBe(true);
+    expect(isBroughtIn(pastedIn)).toBe(true);
+    expect(isBroughtIn(downloaded)).toBe(false);
+    expect(isBroughtIn(item({ source: { type: 'satellite' } }))).toBe(false);
+    expect(isBroughtIn(null)).toBe(false);
+  });
+
+  it('still reads a paste as collected rather than made here', () => {
+    // Azimut did not compose those pixels out of case material; a system screenshot
+    // tool did, outside the case.
+    expect(isMadeHere(pastedIn)).toBe(false);
   });
 });

@@ -864,6 +864,78 @@ def test_a_statement_can_be_told_what_stands_against_it(client):
     assert post(first["id"], first["id"]).status_code == 400
 
 
+def test_a_statement_may_rest_on_another_statement(client):
+    """`cites` reaches a claim, so an intermediate conclusion can carry the next one.
+
+    Without it a case could say what stands *against* a statement and never what holds
+    it up: refuting "the vehicle is a T-72B3" left "the column is the 4th brigade"
+    standing, with nothing in the graph naming what it had lost.
+    """
+    cid = _new_case(client, "Grounded reasoning")
+    case = Case.open(cid)
+    model = case.add_entity("claim", "The vehicle is a T-72B3", {}, by="user")
+    unit = case.add_entity("claim", "The column is the 4th brigade", {}, by="user")
+    video = case.add_entity("media", "Column", {"path": "media/column.mp4"}, by="user")
+
+    def post(from_id, to_id, type_="cites"):
+        return client.post(
+            f"/api/cases/{cid}/links",
+            json={"from_id": from_id, "to_id": to_id, "type": type_},
+        )
+
+    grounded = post(unit["id"], model["id"])
+    assert grounded.status_code == 200, grounded.text
+    assert grounded.json()["provenance"]["status"] == "confirmed"
+    # The material end is untouched by the widening.
+    assert post(model["id"], video["id"]).status_code == 200
+    # Only a statement may rest on something, and only a statement may be rested on
+    # among the types this verb reaches.
+    assert post(video["id"], model["id"]).status_code == 400
+
+
+def test_reasoning_may_not_close_on_itself(client):
+    """A because B, B because A is circular reasoning, not a shape a case may hold.
+
+    Unlike `contradicts`, where two statements standing against each other is an open
+    question and both directions are kept.
+    """
+    cid = _new_case(client, "Circular reasoning")
+    case = Case.open(cid)
+    first = case.add_entity("claim", "First", {}, by="user")
+    second = case.add_entity("claim", "Second", {}, by="user")
+    third = case.add_entity("claim", "Third", {}, by="user")
+
+    def cite(from_id, to_id):
+        return client.post(
+            f"/api/cases/{cid}/links",
+            json={"from_id": from_id, "to_id": to_id, "type": "cites"},
+        )
+
+    assert cite(first["id"], second["id"]).status_code == 200
+    assert cite(second["id"], first["id"]).status_code == 400
+    assert cite(first["id"], first["id"]).status_code == 400
+    # And around a longer way, which is the same fallacy with a step in it.
+    assert cite(second["id"], third["id"]).status_code == 200
+    assert cite(third["id"], first["id"]).status_code == 400
+
+
+def test_citing_material_still_costs_no_walk_worth_refusing(client):
+    """Only a claim may cite, so the walk stops on the first bookmark it meets."""
+    cid = _new_case(client, "Material citations")
+    case = Case.open(cid)
+    claim = case.add_entity("claim", "A statement", {}, by="user")
+    page = case.add_entity("bookmark", "A page", {"url": "https://example.org"}, by="user")
+
+    assert client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": claim["id"], "to_id": page["id"], "type": "cites"},
+    ).status_code == 200
+    assert client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": page["id"], "to_id": claim["id"], "type": "cites"},
+    ).status_code == 400
+
+
 def test_a_contradiction_is_not_what_a_statement_rests_on(client):
     """It is a claim-action verb and deliberately not a claim *connector*.
 

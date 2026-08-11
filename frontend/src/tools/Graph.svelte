@@ -83,8 +83,13 @@
   } from '../lib/entityTypes.svelte.js';
   import {
     CHAIN_TYPES,
+    confidenceHint,
+    confidenceLabel,
+    confidenceLevels,
+    isRatable,
     loadRelationTypes,
     relationOptions,
+    relationQualifier,
     relationReading,
     relationVerb,
   } from '../lib/relations.svelte.js';
@@ -97,6 +102,8 @@
     arrange,
     arrangementDiff,
     boxRadius,
+    cardFactor,
+    cropToFill,
     drawingSnapshot,
     drawableLinks,
     edgeKind,
@@ -104,7 +111,6 @@
     edgePoints,
     edgeStyle,
     fit,
-    fitInside,
     foldAway,
     foldableCount,
     nodeAt,
@@ -115,12 +121,15 @@
     shortLabel,
   } from '../lib/graph.js';
   import { createHistory } from '../lib/history.js';
+  import { createBookmark } from '../lib/bookmarks.js';
+  import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
   import Icon, { paths } from '../components/Icon.svelte';
   import AnalysisViews from '../components/AnalysisViews.svelte';
   import FilterBar from '../components/FilterBar.svelte';
   import Modal from '../components/Modal.svelte';
   import EntityCreate from '../components/EntityCreate.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
+  import PasteDialog from '../components/PasteDialog.svelte';
   import SnapshotDetails from '../components/SnapshotDetails.svelte';
 
   loadEntityTypes();
@@ -1808,6 +1817,58 @@
     }
   }
 
+  // ── paste ────────────────────────────────────────────────────────────────────
+  /**
+   * Ctrl+V draws what the clipboard holds, in the middle of what is being looked at.
+   *
+   * The drawing is where a case is thought about, so a screenshot or a link arriving
+   * mid-thought should land here rather than send the analyst to another tab and
+   * back. The centre of the viewport is the honest spot: a paste has no pointer
+   * position the way a drop does.
+   */
+  let pasted = $state(null);
+  let pasteBusy = $state(false);
+  $effect(() => {
+    if (uiState.tool !== 'graph') return;
+    return listenForPaste((payload) => {
+      if (snapshotReading) {
+        say('This snapshot is read-only. Leave it to paste.');
+        return;
+      }
+      pasted ??= resolvePaste('graph', payload);
+    });
+  });
+
+  async function confirmPaste(resolved) {
+    const cid = caseState.current?.id;
+    if (pasteBusy || !cid) return;
+    pasteBusy = true;
+    const { kind, values, payload } = resolved;
+    const at = width && height ? toCanvas({ x: width / 2, y: height / 2 }) : null;
+    try {
+      if (kind === 'image') {
+        const result = await pasteImage(cid, {
+          file: payload.file,
+          title: values.title,
+          sourceUrl: values.source,
+        });
+        pasted = null;
+        // The same bytes twice is not an error and not a second node: the case keeps
+        // the one it has, and saying so is what stops the analyst pasting again.
+        if (result.duplicate) say('Already in the case (same SHA-256)');
+        drewIn(result.entity, at, cid);
+      } else {
+        const entity = await createBookmark(cid, { ...values, url: payload.url });
+        pasted = null;
+        drewIn(entity, at, cid);
+      }
+    } catch (err) {
+      say(err.message);
+    } finally {
+      pasteBusy = false;
+    }
+  }
+
   /**
    * Undo a removal, because a node named again outranks the edit that took it out.
    *
@@ -3244,6 +3305,66 @@
   }
 
   /**
+   * How sure of this edge, said where the edge is read.
+   *
+   * The assessment lived one panel away: reading a line here and grading it meant
+   * leaving the drawing for the node's Details and finding the row again among the
+   * grouped connections. On a worked case the finding is more often on the edge than
+   * on either node it joins, so the judgement belongs on the same click as the reading.
+   *
+   * `''` is *not assessed*, and it sends `null` rather than being left out: absence is
+   * a state to be able to return to, so a level picked by mistake is not a hole. The
+   * control is not offered on a proposal at all — reviewing a machine's claim and
+   * grading it are two gestures, and the API refuses the second before the first.
+   *
+   * The whole view is re-read afterwards, like every other write here, because the
+   * rating can change the stroke: a relation ruled out is drawn apart.
+   */
+  async function rateEdge(linkId, raw) {
+    if (snapshotReading) return;
+    const cid = caseState.current?.id;
+    if (!cid) return;
+    say('');
+    try {
+      await api.patch(`/api/cases/${cid}/links/${linkId}`, {
+        confidence: raw === '' ? null : Number(raw),
+      });
+      if (caseState.current?.id !== cid) return;
+      loadedFor = null;
+      await load();
+    } catch (err) {
+      say(err.message || 'That edge could not be rated.');
+    }
+  }
+
+  /**
+   * Say what kind of tie this edge states, or clear it.
+   *
+   * The drawing already writes it on the line — *is associated with (sister)* — and
+   * could not change it, which is the odd half of the seam this closes: the word was
+   * readable in the picture and editable only outside it.
+   *
+   * On `change` rather than on every keystroke, so "sister" is one request rather than
+   * six. A value equal to what the edge already holds files nothing: `change` fires on
+   * blur, and a click through the panel would otherwise re-read the case for nothing.
+   */
+  async function qualifyEdge(link, raw) {
+    if (snapshotReading) return;
+    const cid = caseState.current?.id;
+    const value = raw.trim();
+    if (!cid || value === (link.nature ?? '')) return;
+    say('');
+    try {
+      await api.patch(`/api/cases/${cid}/links/${link.id}`, { nature: value || null });
+      if (caseState.current?.id !== cid) return;
+      loadedFor = null;
+      await load();
+    } catch (err) {
+      say(err.message || 'That edge could not be qualified.');
+    }
+  }
+
+  /**
    * How a collapsed edge reads: how many sources it stands for, and how many accounts
    * published them.
    *
@@ -3344,8 +3465,8 @@
    * mean five shapes and one image request per node for cards nobody looked at.
    */
   function buildCard(data) {
-    const left = CARD.stripe + CARD.pad;
-    const textLeft = left + CARD.art + CARD.pad;
+    const art = CARD.stripe;
+    const textLeft = art + CARD.art + CARD.pad;
     const textWidth = CARD.w - textLeft - CARD.pad;
     const card = new Konva.Group();
     card.add(
@@ -3370,28 +3491,54 @@
       }),
     );
     if (showPreviews && data.thumb) {
+      // A ground under the picture and a rule down its right side. A thumbnail is
+      // whatever colours its source was, and dropped straight onto the card it read
+      // as a scrap lying on top of one; given a seat and an edge it reads as a side
+      // of the card. The ground also holds the column while the picture loads, or
+      // for good if it never does.
+      card.add(
+        new Konva.Rect({
+          name: 'ground',
+          x: art,
+          width: CARD.art,
+          height: CARD.h,
+          // Rounded on the left only, and tighter than the card's own corner, which
+          // keeps the column inside the curve it sits in.
+          cornerRadius: [4, 0, 0, 4],
+          listening: false,
+        }),
+      );
       card.add(
         new Konva.Image({
           name: 'art',
-          x: left,
-          y: CARD.pad,
+          x: art,
           width: CARD.art,
-          height: CARD.art,
-          cornerRadius: 3,
+          height: CARD.h,
+          cornerRadius: [4, 0, 0, 4],
+          listening: false,
+        }),
+      );
+      card.add(
+        new Konva.Rect({
+          name: 'rule',
+          x: art + CARD.art,
+          width: 1,
+          height: CARD.h,
           listening: false,
         }),
       );
       showPreview(card, data.thumb);
     } else {
       // No picture to show: the entity's own glyph, from the one icon set, so a
-      // card without a preview still says what kind of thing it is.
-      const glyph = CARD.art / 24;
+      // card without a preview still says what kind of thing it is. Centred in the
+      // column the picture would have filled, which is where it already sat.
+      const glyph = CARD.glyph / 24;
       card.add(
         new Konva.Path({
           name: 'glyph',
           data: paths[entityIcon(data)] ?? paths.alert,
-          x: left,
-          y: CARD.pad,
+          x: art + (CARD.art - CARD.glyph) / 2,
+          y: (CARD.h - CARD.glyph) / 2,
           scaleX: glyph,
           scaleY: glyph,
           strokeWidth: 1.8 / glyph,
@@ -3463,12 +3610,8 @@
     const draw = (image) => {
       const art = card.findOne('.art');
       if (!art || !image?.naturalWidth) return;
-      const box = fitInside(image.naturalWidth, image.naturalHeight, CARD.art);
       art.image(image);
-      art.width(box.w);
-      art.height(box.h);
-      art.x(CARD.stripe + CARD.pad + box.dx);
-      art.y(CARD.pad + box.dy);
+      art.crop(cropToFill(image.naturalWidth, image.naturalHeight, CARD.art / CARD.h));
       stage?.batchDraw();
     };
     const held = previews.get(url);
@@ -3550,7 +3693,11 @@
     const lit = hovered ?? selected;
     const near = narrowing;
     const asCards = scale >= CARD_SCALE;
-    const rim = { x: CARD.w / 2 / scale, y: CARD.h / 2 / scale };
+    // What one of the card's units is worth out here. Everything hung off a card —
+    // its rim, the ring around it, the pin, the switch — is measured with it, so the
+    // card and its furniture grow as one shape.
+    const unit = cardFactor(scale);
+    const rim = { x: (CARD.w / 2) * unit, y: (CARD.h / 2) * unit };
     const seen = onScreen(scale);
     // Built once per redraw rather than asked per node: a few hundred nodes each
     // scanning these lists would be the one quadratic thing in the loop.
@@ -3700,12 +3847,12 @@
       label.y(circle.y() + circle.radius() + 5 / scale);
 
       if (carded || entry.card) {
-        styleCard(entry, data, { scale, carded, isSelected, isNear, matched, drawn });
+        styleCard(entry, data, { scale, unit, carded, isSelected, isNear, matched, drawn });
       }
       styleGlyph(entry, data, { scale, carded, isNear, drawn });
-      stylePill(entry, data, { scale, carded, isNear, drawn });
-      styleMark(entry, { scale, carded, marked: drawn && isNear && marked.has(id) });
-      styleHeld(entry, { scale, carded, inHand: drawn && isNear && inHand.has(id) });
+      stylePill(entry, data, { scale, unit, carded, isNear, drawn });
+      styleMark(entry, { scale, unit, carded, marked: drawn && isNear && marked.has(id) });
+      styleHeld(entry, { scale, unit, carded, inHand: drawn && isNear && inHand.has(id) });
       // While a relation is being drawn, what it cannot land on steps back. The
       // vocabulary decides that, so an illegal pair is never drawn and then refused.
       if (drawing) {
@@ -3762,7 +3909,7 @@
     const top = -group.y() / scale;
     // Two cards of slack, so a normal drag reveals cards that already exist rather
     // than the dots underneath them: the scene is only redressed when the drag ends.
-    const margin = (CARD.w * 2) / scale;
+    const margin = CARD.w * 2 * cardFactor(scale);
     const right = left + width / scale;
     const bottom = top + height / scale;
     return (shape) => {
@@ -3822,7 +3969,7 @@
    * whether it is selected and whether it is a proposal. A ring around it is the one
    * free place left to say "this one moves with the others".
    */
-  function styleHeld(entry, { scale, carded, inHand }) {
+  function styleHeld(entry, { scale, unit, carded, inHand }) {
     if (!inHand && !entry.ring) return;
     if (!entry.ring) {
       entry.ring = new Konva.Circle({
@@ -3839,7 +3986,7 @@
     // Clear of a card too, which is wider than it is tall: the ring has to sit
     // outside whichever shape the node is currently drawn as.
     const around = carded
-      ? Math.hypot(CARD.w / 2, CARD.h / 2) / scale + 4 / scale
+      ? Math.hypot(CARD.w / 2, CARD.h / 2) * unit + 4 / scale
       : entry.circle.radius() + 6 / scale;
     ring.radius(around);
     ring.stroke(colours.accent);
@@ -3849,8 +3996,12 @@
     ring.opacity(0.8);
   }
 
-  /** One card, sized in screen pixels and centred on the node it stands for. */
-  function styleCard(entry, data, { scale, carded, isSelected, isNear, matched, drawn = true }) {
+  /** One card, sized off the screen and centred on the node it stands for. */
+  function styleCard(
+    entry,
+    data,
+    { scale, unit, carded, isSelected, isNear, matched, drawn = true },
+  ) {
     if (!carded || !drawn) {
       entry.card?.visible(false);
       return;
@@ -3859,9 +4010,10 @@
     const card = entry.card;
     card.visible(true);
     card.opacity(isNear ? 1 : 0.16);
-    // Held at a fixed size on screen, which is the whole reason a card can exist
-    // here: the gap between two nodes grows with the zoom while the card does not.
-    card.scale({ x: 1 / scale, y: 1 / scale });
+    // Sized off the screen rather than off the canvas, which is the whole reason a
+    // card can exist here: the gap between two nodes grows with the zoom faster than
+    // the card does, so the cards never close back in on each other (`cardFactor`).
+    card.scale({ x: unit, y: unit });
     card.position({ x: entry.circle.x(), y: entry.circle.y() });
     // A card carries the search the same way a dot does, or a name typed at a zoom
     // close enough to read the cards would light nothing at all.
@@ -3874,6 +4026,8 @@
     bg.dash(data.status === 'suggested' ? [3, 3] : []);
     card.findOne('.stripe').fill(familyColour(data.family));
     card.findOne('.glyph')?.stroke(familyColour(data.family));
+    card.findOne('.ground')?.fill(colours.surface);
+    card.findOne('.rule')?.fill(lit ? colours.accent : colours.border);
     card.findOne('.title').fill(lit ? colours.accent : colours.strong);
     card.findOne('.meta').fill(colours.label);
   }
@@ -3891,7 +4045,7 @@
    * something. A pill on every dot would be a few hundred numbers competing with the
    * shape of the case, which is the one thing this tool exists to show.
    */
-  function stylePill(entry, data, { scale, carded, isNear, drawn }) {
+  function stylePill(entry, data, { scale, unit, carded, isNear, drawn }) {
     const on = switchFor?.id === data.id ? switchFor : null;
     const holding = collapsed.includes(data.id);
     const act = holding ? 'unfold' : on?.act;
@@ -3940,11 +4094,13 @@
     // Held at a fixed size on screen like every other annotation, and hung off the
     // node's top right — clear of the label, which sits under it.
     pill.scale({ x: 1 / scale, y: 1 / scale });
-    const reach = carded ? { x: CARD.w / 2, y: CARD.h / 2 } : { x: 0, y: 0 };
+    const reach = carded
+      ? { x: (CARD.w / 2) * unit, y: (CARD.h / 2) * unit }
+      : { x: 0, y: 0 };
     const radius = carded ? 0 : entry.circle.radius() * 0.7;
     pill.position({
-      x: entry.circle.x() + radius + reach.x / scale - (carded ? width / scale : 0),
-      y: entry.circle.y() - radius - reach.y / scale - height / scale,
+      x: entry.circle.x() + radius + reach.x - (carded ? width / scale : 0),
+      y: entry.circle.y() - radius - reach.y - height / scale,
     });
   }
 
@@ -3956,7 +4112,7 @@
    * is the entity vocabulary's own pin glyph, held at a fixed size on screen like
    * every other annotation here, and built on the first node that needs one.
    */
-  function styleMark(entry, { scale, carded, marked }) {
+  function styleMark(entry, { scale, unit, carded, marked }) {
     if (!marked && !entry.mark) return;
     if (!entry.mark) {
       entry.mark = new Konva.Path({
@@ -3980,7 +4136,7 @@
     mark.stroke(colours.accent);
     const circle = entry.circle;
     const half = carded
-      ? { x: CARD.w / 2 / scale, y: CARD.h / 2 / scale }
+      ? { x: (CARD.w / 2) * unit, y: (CARD.h / 2) * unit }
       : { x: circle.radius(), y: circle.radius() };
     mark.position({
       x: circle.x() + half.x - (carded ? size * 1.1 : size * 0.35),
@@ -5341,6 +5497,50 @@
           {#if chosenEdge.provenance?.by}
             <p class="meta">Filed by {chosenEdge.provenance.by}</p>
           {/if}
+          <!-- How sure of this, and what kind of tie it is: the two values an edge
+               carries besides its verb, offered where the edge is read rather than a
+               panel away. Each is drawn because the **registry** declares it — a
+               ratable verb, a verb that takes a qualifier — never because this edge
+               happens to hold a value. Same rule as Details, and it is what keeps a
+               free note off the rest of the vocabulary. -->
+          {#if !snapshotReading && chosenEdge.provenance?.status !== 'suggested'}
+            {@const rating = chosenEdge.confidence ?? null}
+            {@const qualifier = relationQualifier(chosenEdge.type)}
+            {@const gradable = isRatable(chosenEdge.type) && confidenceLevels().length}
+            {#if gradable || qualifier}
+              <div class="says">
+                {#if gradable}
+                  <select
+                    class="select pick rate"
+                    class:set={rating !== null}
+                    class:out={rating === -1}
+                    value={rating ?? ''}
+                    title={rating === null
+                      ? 'How sure of this'
+                      : confidenceHint(rating) || confidenceLabel(rating)}
+                    onchange={(event) => rateEdge(chosenEdge.id, event.currentTarget.value)}
+                  >
+                    <!-- clearing, not a fifth level: this is the absence of a rating -->
+                    <option value="">Not assessed</option>
+                    {#each confidenceLevels() as level (level.value)}
+                      <option value={level.value}>{level.label}</option>
+                    {/each}
+                  </select>
+                {/if}
+                {#if qualifier}
+                  <input
+                    class="input pick nature"
+                    class:set={Boolean(chosenEdge.nature)}
+                    value={chosenEdge.nature ?? ''}
+                    placeholder={qualifier}
+                    title={qualifier}
+                    maxlength="120"
+                    onchange={(event) => qualifyEdge(chosenEdge, event.currentTarget.value)}
+                  />
+                {/if}
+              </div>
+            {/if}
+          {/if}
           {#if !snapshotReading}<div class="actions">
             {#if chosenEdge.provenance?.status === 'suggested'}
               <button class="btn btn-ghost" onclick={() => ruleOn(chosenEdge.id, 'confirmed')}>
@@ -5544,6 +5744,16 @@
       drewIn(entity, at, caseId);
     }}
     onclose={() => (creating = null)}
+  />
+{/if}
+
+<!-- Ctrl+V: a screenshot or a link, drawn where the eye already is -->
+{#if pasted && !snapshotReading}
+  <PasteDialog
+    resolved={pasted}
+    busy={pasteBusy}
+    onconfirm={confirmPaste}
+    onclose={() => (pasted = null)}
   />
 {/if}
 
@@ -6088,6 +6298,40 @@
     margin-left: 6px;
     font-style: normal;
     color: var(--warn);
+  }
+  /* The two judgements an edge carries, on their own line above the acts: they are
+     what the analyst *says* about the edge, where the buttons below are what happens
+     to it. Wrapping, because a 264px panel does not hold a rating and a word side by
+     side in every language. */
+  .says {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .rate {
+    color: var(--text-3);
+  }
+  .rate.set {
+    color: var(--text-1);
+  }
+  /* Ruled out is the one rating the drawing marks, so the control marks it too: the
+     line and the panel have to agree about which statements are dead. */
+  .rate.out {
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+    background-color: color-mix(in srgb, var(--danger) 12%, transparent);
+  }
+  /* Sized to a word, because a word is what it holds: wide enough for "business
+     partner", narrow enough that nobody mistakes it for a notes box. */
+  .nature {
+    width: 11ch;
+    min-width: 0;
+    color: var(--text-3);
+  }
+  .nature.set {
+    color: var(--text-1);
   }
   /* Wrapping, because the row grew a fourth act and a fixed-width panel then squeezed
      the last one until *Collapse (35)* read as *Collapse*. A button clipped to its

@@ -5,9 +5,12 @@ import {
   drawingSnapshot,
   nodeAt,
   CARD_SCALE,
+  CARD_GROWTH,
   EDGE_KINDS,
   arrange,
   boxRadius,
+  cardFactor,
+  cropToFill,
   arrangeClusters,
   arrangeHops,
   arrangeRings,
@@ -21,7 +24,6 @@ import {
   extent,
   familyRank,
   fit,
-  fitInside,
   nodeRadius,
   parallelBends,
   positionsById,
@@ -617,6 +619,38 @@ describe('edges', () => {
     ).toBe('proposed');
   });
 
+  it('draws a ruled-out relation apart from one nobody has assessed', () => {
+    // Eliminating a candidate is a finding the case keeps, not a deletion: twelve are
+    // checked and eleven ruled out. Drawn like any other stated relation, those eleven
+    // read as live hypotheses to anyone glancing at the picture.
+    const out = edgeStyle({ type: 'owns', confidence: -1 }, chain);
+    const stated = edgeStyle({ type: 'owns' }, chain);
+    expect(out.kind).toBe('refuted');
+    expect(out.dash).not.toEqual(stated.dash);
+    expect(out.label).toBe('ruled out');
+  });
+
+  it('gives a stroke to the verdict and not to the other three levels', () => {
+    // A verdict is not a nuance. *Probable* against *possible* is read one edge at a
+    // time in the panel; four more dash patterns would put "what kind of edge is this"
+    // and "how sure of it" on one channel, which is the mixture the three assessments
+    // are kept apart to prevent (ONTOLOGY §3).
+    for (const level of [3, 2, 1, null]) {
+      expect(edgeKind({ type: 'owns', confidence: level }, chain)).toBe('stated');
+    }
+  });
+
+  it('lets every other reading of an edge outrank the verdict', () => {
+    // A rating only ever reaches an ordinary stated relation — the API refuses one on
+    // a derivation, a mention and a claim connector — so nothing here is a contest.
+    // What is: an unreviewed edge is unreviewed first, and a fold is not a row at all.
+    expect(
+      edgeKind({ type: 'owns', confidence: -1, provenance: { status: 'suggested' } }, chain),
+    ).toBe('proposed');
+    expect(edgeKind({ type: 'cites', confidence: -1, folded: {} }, chain)).toBe('folded');
+    expect(edgeKind({ type: 'derived-from', confidence: -1 }, chain)).toBe('lineage');
+  });
+
   it('gives the legend and the stroke one table to read, so a dash is explained', () => {
     // An unexplained dash pattern is decoration: nothing tells the analyst that
     // fine dots mean a mention.
@@ -719,19 +753,60 @@ describe('the card a node becomes close up', () => {
     expect(boxRadius(80, 25, 1, 1)).toBeCloseTo(25 * Math.SQRT2, 6);
   });
 
-  it('fits a picture inside the art box without stretching it', () => {
-    const wide = fitInside(640, 360, 34);
-    expect(Math.max(wide.w, wide.h)).toBeCloseTo(34, 6);
-    expect(wide.w / wide.h).toBeCloseTo(640 / 360, 6);
-    expect(wide.dy).toBeGreaterThan(0); // letterboxed, not distorted
-    expect(wide.dx).toBeCloseTo(0, 6);
-    const square = fitInside(100, 100, 34);
-    expect(square.dx).toBeCloseTo(0, 6);
-    expect(square.dy).toBeCloseTo(0, 6);
+  it('fills the art column from the middle of the picture', () => {
+    // A wide capture keeps its full height and gives up the sides; a tall photo
+    // keeps its full width. Either way the column is filled and nothing is stretched.
+    const wide = cropToFill(640, 360, 1);
+    expect(wide.height).toBeCloseTo(360, 6);
+    expect(wide.width).toBeCloseTo(360, 6);
+    expect(wide.x).toBeCloseTo(140, 6);
+    expect(wide.y).toBeCloseTo(0, 6);
+    const tall = cropToFill(360, 640, 1);
+    expect(tall.width).toBeCloseTo(360, 6);
+    expect(tall.y).toBeCloseTo(140, 6);
+    const square = cropToFill(100, 100, 1);
+    expect(square).toMatchObject({ x: 0, y: 0, width: 100, height: 100 });
+  });
+
+  it('crops to the column it is given rather than to a square', () => {
+    const half = cropToFill(400, 400, 2);
+    expect(half.width / half.height).toBeCloseTo(2, 6);
+    expect(half.width).toBeCloseTo(400, 6);
+    expect(half.y).toBeCloseTo(100, 6);
   });
 
   it('survives a picture whose size never arrived', () => {
-    expect(Number.isFinite(fitInside(undefined, 0, 34).w)).toBe(true);
+    const crop = cropToFill(undefined, 0, 1);
+    expect(Number.isFinite(crop.width)).toBe(true);
+    expect(crop.width).toBeGreaterThan(0);
+  });
+
+  it('grows with the zoom, but slower than the case spreads out', () => {
+    // The point of the growth: zooming in has to make the card bigger on screen, or
+    // close up the drawing is a handful of stamps floating between long arrows.
+    const onScreen = (zoom) => cardFactor(zoom) * zoom;
+    expect(onScreen(CARD_SCALE)).toBeCloseTo(1, 6);
+    expect(onScreen(2)).toBeGreaterThan(onScreen(CARD_SCALE));
+    expect(onScreen(3.2)).toBeGreaterThan(onScreen(2));
+    expect(onScreen(3.2)).toBeLessThanOrEqual(CARD_GROWTH);
+    // And the reason it can grow at all: between two zooms the gap between nodes
+    // widens faster than the card does, so cards that had room keep it.
+    const spread = 3.2 / CARD_SCALE;
+    expect(onScreen(3.2) / onScreen(CARD_SCALE)).toBeLessThan(spread);
+  });
+
+  it('never shrinks a card below its own size, or on a zoom that never arrived', () => {
+    expect(cardFactor(0.4) * 0.4).toBeCloseTo(1, 6);
+    expect(Number.isFinite(cardFactor(undefined))).toBe(true);
+    expect(Number.isFinite(cardFactor(0))).toBe(true);
+  });
+
+  it('gives the picture a column as tall as the card', () => {
+    // The crop assumes the column is the card's own height; the glyph sits inside
+    // that same column, which is what keeps every title on a row aligned.
+    expect(CARD.art).toBe(CARD.h);
+    expect(CARD.glyph).toBeLessThan(CARD.art);
+    expect(CARD.stripe + CARD.art + CARD.pad).toBeLessThan(CARD.w / 2);
   });
 });
 
@@ -792,6 +867,16 @@ describe('what a pointer is over', () => {
     // A point 60 units out is well past any circle and well inside a card.
     expect(nodeAt(placed, byId, { x: 60, y: 0 })).toBe(null);
     expect(nodeAt(placed, byId, { x: 60, y: 0 }, { carded: true })).toBe('a');
+  });
+
+  it('follows the card as it grows with the zoom', () => {
+    // The box tested here is the box on screen. A card drawn 1.7× its base size has
+    // to be clickable across all of it, or the drawing stops answering its own edges.
+    const far = { x: (CARD.w / 2) * cardFactor(3.2) - 1, y: 0 };
+    expect(nodeAt(placed, byId, far, { carded: true, scale: 3.2 })).toBe('a');
+    expect(nodeAt(placed, byId, { x: far.x + 3, y: 0 }, { carded: true, scale: 3.2 })).toBe(
+      null,
+    );
   });
 });
 

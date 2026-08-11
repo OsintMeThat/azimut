@@ -80,7 +80,7 @@ describe('bounded loading', () => {
   });
 
   it('offers Show more with an honest total', () => {
-    expect(source).toContain('{#if pl.hasMore}');
+    expect(source).toContain('pl.hasMore');
     expect(source).toContain('pl.loadMore()');
     expect(source).toContain('Showing {rows.length} of {matchCount}');
   });
@@ -394,5 +394,95 @@ describe('a row reaches the drawing', () => {
     // eight hundred rows must not read as eight hundred buttons
     expect(source).toMatch(/\.table td\.go \.act \{[^}]*opacity: 0;/);
     expect(source).toContain('tr:hover td.go .act,');
+  });
+});
+
+describe('adding the statements up', () => {
+  it('renders the same question, through the switch the other lists already use', () => {
+    // the chips stay where they are and the sentence is unchanged; what moves is how
+    // the answer is drawn
+    expect(source).toContain("import ViewSwitch from '../components/ViewSwitch.svelte'");
+    expect(source).toContain("{ id: 'rows', label: 'Rows', icon: 'note'");
+    expect(source).toContain("id: 'totals',");
+    expect(source).toContain("onpick={(id) => (totalling = id === 'totals')}");
+    expect(source).toContain('buildTallyQuery(caseState.current.id, toQuery(filter, { types: wantedTypes }))');
+  });
+
+  it('offers Totals from the first day, dimmed until it can draw a real line', () => {
+    // a control you can see and cannot use teaches something; one that is not there
+    // teaches nothing — the rule the filter menu already follows
+    expect(source).toContain('disabled: nothingToDraw || empty || snapshotReading,');
+    expect(source).toContain("'No statement counts anything about a subject yet'");
+    expect(source).toContain("'Nothing in the table to add up'");
+  });
+
+  it('calls a line real only when a statement counts something about a subject', () => {
+    // either half alone opens the total on nothing: "seen, not counted" is an answer
+    // rather than a row, and a statement about nothing has no subject to sit under
+    expect(source).toContain('const countable = $derived(summary?.countable ?? 0);');
+    expect(source).toContain('const nothingToDraw = countable === 0;');
+    expect(source).toContain('const empty = !rows.length;');
+    // priced off the summary every filter term is priced from, so it costs no request
+    expect(source).not.toContain('summary?.by_type?.claim');
+  });
+
+  it('re-reads after a write, since a relation is what changes a total', () => {
+    // stating one while the total is on screen used to need the page reloaded before
+    // it appeared; the row list and the panel's own total both read this already
+    expect(source).toMatch(/caseState\.rev;\s*const url = buildTallyQuery/);
+  });
+
+  it('asks only while it is on screen, and not once per keystroke', () => {
+    // a sum has no in-memory half to fall back on the way the row list does, so the
+    // whole question is debounced rather than the text term alone
+    expect(source).toContain('if (!totalling || snapshotReading || !caseState.current?.id) return;');
+    expect(source).toContain('const TALLY_DELAY = 250;');
+    expect(source).toMatch(/setTimeout\(\(\) => \{\s*tallying = true;/);
+    expect(source).toContain('clearTimeout(timer);');
+  });
+
+  it('steps back to the list inside a frozen snapshot', () => {
+    // a snapshot is a copy of rows rather than a question the case can still be asked
+    expect(source).toContain('if (snapshotReading && totalling) totalling = false;');
+    expect(source).toContain('A frozen snapshot holds rows rather than a question to add up');
+  });
+
+  it('never prints a sum without what was left out of it', () => {
+    expect(source).toContain('countLines(row, claimReads)');
+    expect(source).toContain('noteLines(row)');
+    expect(source).toContain('readingNotes(tally)');
+  });
+
+  it('takes its words from the served registry, not from a list kept here', () => {
+    expect(source).toContain("for (const field of entityFields('claim'))");
+    expect(source).not.toContain("'destroyed'");
+  });
+
+  it('offers no Show more under a bounded total', () => {
+    expect(source).toContain('{#if pl.hasMore && !totalling}');
+  });
+
+  it('opens the subject a row stands for', () => {
+    expect(source).toContain('onclick={() => (openId = row.id)}');
+  });
+});
+
+describe('Ctrl+V on the table', () => {
+  it('files what the clipboard holds and opens the row it made', () => {
+    expect(source).toContain("import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js'");
+    expect(source).toContain("import PasteDialog from '../components/PasteDialog.svelte'");
+    expect(source).toContain("resolvePaste('board', payload)");
+    // opened, not just filed: the next gesture is relating it to what prompted it
+    expect(source).toContain('openId = result.entity.id;');
+    expect(source).toContain('openId = entity.id;');
+  });
+
+  it('only answers while it is the tool on screen', () => {
+    expect(source).toMatch(/uiState\.tool !== 'board'\) return;\s*return listenForPaste/);
+  });
+
+  it('refuses to write into a frozen reading, and says why', () => {
+    expect(source).toContain("toast('This snapshot is read-only. Leave it to paste.', 'warn')");
+    expect(source).toContain('{#if pasted && !snapshotReading}');
   });
 });

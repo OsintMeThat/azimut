@@ -364,6 +364,23 @@ def _attr_match(key: str, value: str) -> tuple[str, list[Any]]:
     return f"({joined})", patterns
 
 
+def _holds_number(key: str) -> str:
+    """One ``attrs`` field holding a *number*, as this SQLite can ask it.
+
+    Not ``_attr_match``, which compares against a chosen value: here nothing is being
+    matched, the question is whether a number was written at all. It is what tells a
+    statement that counts something from one that says *seen, not counted*, and both
+    spellings have to answer it the same way (module docstring).
+    """
+    if not _ATTR_KEY.match(key):
+        raise CaseError(f"'{key}' is not a field name")
+    if _has_json1():
+        return f"json_type(attrs_json, '$.\"{key}\"') IN ('integer', 'real')"
+    # `json.dumps` writes `{"count": 2}`. GLOB rather than LIKE because a digit has to
+    # be part of the pattern: `LIKE '%"count": %'` also matches a null and a string.
+    return f"attrs_json GLOB '*\"{key}\": [0-9]*'"
+
+
 def _facet_value(value: Any) -> str | None:
     """One stored value as a menu can offer it, or None when it cannot.
 
@@ -881,7 +898,10 @@ _MEDIA_CATEGORY_SQL = {
     "video": "kind = 'video'",
     "collage": "source_op = 'collage'",
     "satellite": _SATELLITE_SQL,
-    "upload": "source_type = 'upload'",
+    # A paste and a drop are one facet: both are material the analyst brought in
+    # by hand, which is the question this filter asks. They stay two source types
+    # because only one of them can state where it came from.
+    "upload": "source_type IN ('upload', 'clipboard')",
     "download": "source_type = 'download'",
     "other": "kind NOT IN ('image', 'video')",
 }
@@ -1937,6 +1957,24 @@ class SqliteCase:
                     ") GROUP BY far_type"
                 )
             }
+            # How many statements would actually produce a row if the case were added
+            # up: one carrying a number, about something. Here for the same reason
+            # `unlinked` is — it prices a control before it is pressed, and the two
+            # halves are what make the row real. A statement with no number says
+            # *seen, not counted* and one about nothing has no subject to sit under,
+            # so neither draws a line, and a total offered over them opens on an empty
+            # answer that reads as a finding about the case.
+            countable = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM entities e"
+                    " WHERE e.type = 'claim'"
+                    f" AND {_holds_number('count')}"
+                    " AND EXISTS ("
+                    "  SELECT 1 FROM links l WHERE l.from_id = e.id AND l.type = ?"
+                    " )",
+                    (link_engine.ABOUT,),
+                ).fetchone()[0]
+            )
         return {
             "total": total,
             "by_type": by_type,
@@ -1945,6 +1983,7 @@ class SqliteCase:
             "by_source": by_source,
             "linked_to": linked_to,
             "unlinked": unlinked,
+            "countable": countable,
         }
 
     def attr_facets(

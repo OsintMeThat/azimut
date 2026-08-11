@@ -147,3 +147,41 @@ describe('Files delete shortcut', () => {
     expect(source).toContain('target.isContentEditable');
   });
 });
+
+describe('Ctrl+V on the desktop', () => {
+  it('gives Files the only way it has ever had to take a file', () => {
+    // its drag and drop moves items between folders, so an image had to go through
+    // the Media grid and be filed afterwards
+    expect(source).toContain("import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js'");
+    expect(source).toContain("import PasteDialog from '../components/PasteDialog.svelte'");
+    expect(source).toContain("resolvePaste('files', payload,");
+  });
+
+  it('only answers while it is the tool on screen', () => {
+    expect(source).toMatch(/uiState\.tool !== 'files'\) return;\s*return listenForPaste/);
+  });
+
+  it('opens on the folder being looked at, like the New bookmark button does', () => {
+    expect(source).toContain("{ folder: showUnfiled ? '' : cwd }");
+  });
+
+  it('files the image where the dialog said, and takes a link as a bookmark', () => {
+    expect(source).toContain('await assignFolder(caseId, result.entity, values.folder)');
+    expect(source).toContain('await createBookmark(caseId, { ...values, url: payload.url })');
+  });
+
+  it('shows the folder it landed in, so nothing is filed out of sight', () => {
+    expect(source).toContain('function revealFiled(folder)');
+    expect(source).toContain('if (folder) openFolder(folder);');
+    expect(source).toContain('else openUnfiled();');
+  });
+
+  it('leaves a duplicate where it already sits', () => {
+    // refiling it under this paste's folder would move an item filed on purpose
+    expect(source).toContain('if (!result.duplicate && values.folder)');
+  });
+
+  it('offers the folder picker the same tree every other dialog here gets', () => {
+    expect(source).toMatch(/<PasteDialog[^>]*folders=\{allFolders\}/s);
+  });
+});

@@ -486,10 +486,16 @@ endpoints:
   14), so an ordered page walks an index instead of sorting the filtered set in a
   temp B-tree; `tests/test_repository.py` reads the query plan and holds it there.
 - `GET /api/cases/{id}/catalog/summary` returns `{total, by_type, by_status,
-  by_folder, by_source, linked_to, unlinked}` without shipping the graph. `linked_to`
-  counts entities that **have a neighbour** of each type, which is not how many of
-  that type the case holds: it is what the filter menu has to price itself with, and
-  the other number looks like an answer without being one.
+  by_folder, by_source, linked_to, unlinked, countable}` without shipping the graph.
+  `linked_to` counts entities that **have a neighbour** of each type, which is not how
+  many of that type the case holds: it is what the filter menu has to price itself
+  with, and the other number looks like an answer without being one. `countable` is how
+  many statements would draw a line if the case were added up — carrying a number,
+  about something — which is what dims the Board's **Totals** view before it can answer.
+- `GET /api/cases/{id}/catalog/tally` adds those statements up per subject over the
+  same narrowing terms as the catalog page, bounded at 2 000 statements and reporting
+  the cut. `GET /entities/{id}/tally` is the same arithmetic for one subject, which is
+  what the Details panel reads.
 - `GET /api/cases/{id}/entities/{id}/chain` (neighbour derivation),
   `GET /entities/lookup` (one entity by attribute), and
   `GET /entities/{id}/derivation` (transitive `derived-from` closure) are the

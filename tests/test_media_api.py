@@ -1746,3 +1746,126 @@ def test_enrich_counts_the_jobs_the_queue_took(client):
         "queued": 1
     }
     workqueue.wait_until_idle()
+
+
+# ── clipboard paste ──────────────────────────────────────────────────────────
+# A screenshot taken with the system tool exists only in the clipboard, so there
+# is no file to drop and no name or origin to read off one. That is the whole
+# reason this route is not `upload`: the title and the source are stated in the
+# dialog or not at all, and the provenance must not claim a file was chosen.
+
+
+def _paste(client, cid, data=None, name="image.png", **fields):
+    return client.post(
+        f"/api/cases/{cid}/media/paste",
+        files={"file": (name, io.BytesIO(_png_bytes() if data is None else data), "image/png")},
+        data=fields,
+    )
+
+
+def test_paste_files_the_image_under_its_typed_title_and_source(client):
+    cid = client.post("/api/cases", json={"name": "Paste"}).json()["id"]
+
+    body = _paste(
+        client, cid, title="Front gate", source_url="https://example.com/page"
+    ).json()
+
+    assert body["duplicate"] is False
+    item = body["item"]
+    # the title names the file, because "image.png" is what every clipboard calls it
+    assert item["filename"] == "Front gate.png"
+    assert item["title"] == "Front gate"
+    assert item["kind"] == "image"
+    # recorded as a paste, never as an upload: a screenshot with no stated source
+    # must not read like a file somebody picked off a disk
+    assert item["source"]["type"] == "clipboard"
+    assert item["source"]["url"] == "https://example.com/page"
+    assert item["source"]["original_name"] == "image.png"
+
+    entity = graph_read.entities(cid)[0]
+    assert entity["type"] == "media"
+    assert entity["label"] == "Front gate"
+    assert entity["provenance"]["by"] == "paste"
+    assert entity["attrs"]["source_url"] == "https://example.com/page"
+    assert client.get(f"/files/{cid}/{item['path']}").status_code == 200
+
+
+def test_paste_without_a_title_is_stamped_rather_than_called_image(client):
+    cid = client.post("/api/cases", json={"name": "Unnamed paste"}).json()["id"]
+
+    item = _paste(client, cid).json()["item"]
+
+    assert item["filename"].startswith("paste-")
+    assert item["filename"].endswith(".png")
+    # nothing was stated, so nothing is claimed
+    assert "url" not in item["source"]
+
+
+def test_pasting_the_same_crop_twice_is_one_file(client):
+    """Deduped like any import: the bytes are the identity, whatever gesture
+    brought them in, and a second Ctrl+V is usually a doubt about the first."""
+    cid = client.post("/api/cases", json={"name": "Twice"}).json()["id"]
+    pixels = _png_bytes(color=(3, 9, 27))
+
+    first = _paste(client, cid, pixels, title="Gate").json()
+    again = _paste(client, cid, pixels, title="Gate again").json()
+
+    assert first["duplicate"] is False and again["duplicate"] is True
+    assert len(client.get(f"/api/cases/{cid}/media").json()) == 1
+
+
+def test_a_paste_and_a_drop_count_as_one_facet(client):
+    """Both are material the analyst brought in by hand, which is what the
+    Imports filter asks. They stay two source types because only one of them can
+    say where it came from."""
+    cid = client.post("/api/cases", json={"name": "Facet"}).json()["id"]
+    _upload(client, cid, "dropped.png", _png_bytes(color=(1, 2, 3)))
+    _paste(client, cid, _png_bytes(color=(4, 5, 6)), title="Pasted")
+
+    facets = client.get(f"/api/cases/{cid}/media/page").json()["facets"]
+    assert facets["category_counts"]["upload"] == 2
+
+    filtered = client.get(
+        f"/api/cases/{cid}/media/page", params={"category": "upload"}
+    ).json()
+    assert len(filtered["items"]) == 2
+
+
+def test_paste_refuses_anything_that_is_not_a_readable_image(client):
+    """The clipboard is not a file picker: a case takes a pasted screenshot, not
+    an arbitrary payload."""
+    cid = client.post("/api/cases", json={"name": "Not an image"}).json()["id"]
+
+    refused = _paste(client, cid, b"this is not a png", name="clip.txt")
+
+    assert refused.status_code == 422
+    assert "readable image" in refused.json()["detail"]
+    assert client.get(f"/api/cases/{cid}/media").json() == []
+
+
+def test_paste_refuses_a_source_that_is_not_an_http_url(client):
+    """The source is provenance. A `javascript:` or `data:` string is not one,
+    and it would be read back as a link in the details panel."""
+    cid = client.post("/api/cases", json={"name": "Bad source"}).json()["id"]
+
+    refused = _paste(client, cid, title="Gate", source_url="javascript:alert(1)")
+
+    assert refused.status_code == 422
+    assert "http(s)" in refused.json()["detail"]
+    assert client.get(f"/api/cases/{cid}/media").json() == []
+
+
+def test_paste_is_bounded_at_the_edge_like_every_other_swallowed_image(client, monkeypatch):
+    """Refusing early is what keeps a mistaken Ctrl+V from writing an enormous
+    temporary nobody asked for."""
+    from azimut.api import media as media_api
+    from azimut.workspace import Case
+
+    monkeypatch.setattr(media_api, "MAX_IMAGE_BYTES", 100)
+    cid = client.post("/api/cases", json={"name": "Bounded paste"}).json()["id"]
+
+    refused = _paste(client, cid, title="Huge")
+
+    assert refused.status_code == 413
+    assert "under" in refused.json()["detail"]
+    assert list(Case.open(cid).media_dir.glob("*.png")) == []

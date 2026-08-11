@@ -1,3 +1,9 @@
+/**
+ * @vitest-environment happy-dom
+ *
+ * The startup check reads the extension's marker off <html>, so this file needs
+ * a document like extBridge's own tests do.
+ */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { caseState, uiState, closeCase, setSidebarWidth } from './state.svelte.js';
 import { MIN_W, MAX_W } from './sidebar.js';
@@ -131,27 +137,58 @@ describe('applyPrefs', () => {
 });
 
 describe('startup update check', () => {
-  it('checks by default and stays silent when the Settings switch is off', async () => {
+  it('checks the app and the downloaders by default, and neither when the Settings switch is off', async () => {
     const { api } = await import('./api.js');
     api.get.mockReset().mockResolvedValue({
-      current: 'v0.1.0', latest: null, update_available: false,
+      current: 'v0.1.0', latest: null, update_available: false, scrapers: [],
     });
-    const { applyPrefs, checkForUpdateOnStart } = await freshState();
+    const { applyPrefs, checkForUpdatesOnStart } = await freshState();
 
-    await checkForUpdateOnStart();
+    await checkForUpdatesOnStart();
     expect(api.get).toHaveBeenCalledWith('/api/settings/update?check=true');
+    expect(api.get).toHaveBeenCalledWith('/api/settings/scrapers?check=true');
 
     api.get.mockClear();
     applyPrefs({ update_check_on_start: false });
-    await checkForUpdateOnStart();
+    await checkForUpdatesOnStart();
     expect(api.get).not.toHaveBeenCalled();
+  });
+
+  it('records what the downloaders check found', async () => {
+    const { api } = await import('./api.js');
+    const entries = [{ dist: 'yt-dlp', version: '2026.1.1', latest: '2026.7.1', outdated: true }];
+    api.get.mockReset().mockImplementation((path) =>
+      path.startsWith('/api/settings/scrapers')
+        ? Promise.resolve({ scrapers: entries })
+        : Promise.resolve({ update_available: false }),
+    );
+    const { checkForUpdatesOnStart, updatesState } = await freshState();
+
+    await checkForUpdatesOnStart();
+    expect(updatesState.scrapers).toEqual(entries);
+  });
+
+  it('compares the installed extension without asking the network', async () => {
+    const { api } = await import('./api.js');
+    api.get.mockReset().mockRejectedValue(new Error('must not be called'));
+    document.documentElement.dataset.azimutCaptureExtension = '0.2.1';
+    const { applyPrefs, checkForUpdatesOnStart, updatesState } = await freshState();
+    applyPrefs({ update_check_on_start: false, extension_version: '0.2.5' });
+
+    await checkForUpdatesOnStart();
+    expect(api.get).not.toHaveBeenCalled();
+    expect(updatesState.extensionInstalled).toBe('0.2.1');
+    expect(updatesState.extensionBundled).toBe('0.2.5');
+    delete document.documentElement.dataset.azimutCaptureExtension;
   });
 
   it('does not surface an offline failure', async () => {
     const { api } = await import('./api.js');
     api.get.mockReset().mockRejectedValue(new Error('offline'));
-    const { checkForUpdateOnStart } = await freshState();
-    await expect(checkForUpdateOnStart()).resolves.toBeUndefined();
+    const { checkForUpdatesOnStart, updatesState } = await freshState();
+    await expect(checkForUpdatesOnStart()).resolves.toBeUndefined();
+    expect(updatesState.app).toBeNull();
+    expect(updatesState.scrapers).toBeNull();
   });
 });
 

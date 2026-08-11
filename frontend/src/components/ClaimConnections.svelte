@@ -16,18 +16,26 @@
 
   /**
    * What a statement is made of, in the order it is built: what it is about, where
-   * it puts it, what it rests on, and what stands against it.
+   * it puts it, what it rests on, what rests on it, and what stands against it.
    *
-   * `contradicts` comes last because it is the only one that reaches another
-   * statement rather than the case, and the only one whose rows read the same in
-   * both directions: two claims that cannot both hold say so whichever end the
-   * analyst filed it from, so this group deliberately does not sort by `direction`
-   * the way an ordinary relation list does.
+   * **`cites` is read by direction, and `contradicts` is not.** A citation is not
+   * symmetric — this statement resting on that one is a different fact from that one
+   * resting on this — so the two readings are two groups, and only the outgoing one
+   * takes a source: what rests on this statement is stated from *there*, where the
+   * reasoning is being written. Two claims that cannot both hold say so whichever end
+   * they were filed from, which is why that group deliberately ignores `direction`
+   * the way an ordinary relation list does not.
    */
   const GROUPS = [
     { type: 'about', label: 'Subjects', add: 'Add subject' },
     { type: 'at', label: 'Location', add: 'Add location' },
-    { type: 'cites', label: 'Sources', add: 'Add source' },
+    { type: 'cites', way: 'out', label: 'Sources', add: 'Add source' },
+    {
+      type: 'cites',
+      way: 'in',
+      label: 'Supports',
+      hint: 'statements that rest on this one',
+    },
     { type: 'contradicts', label: 'Contradictions', add: 'Add contradiction' },
   ];
 
@@ -35,7 +43,12 @@
   let busy = $state(false);
   let busyId = $state(null);
 
-  const rows = (type) => relations.filter((row) => row.link.type === type);
+  /** A group's rows. `way` narrows to one reading; without it both are listed, which
+   *  is what a symmetric verb wants. */
+  const rows = (group) =>
+    relations.filter(
+      (row) => row.link.type === group.type && (!group.way || row.direction === group.way)
+    );
 
   async function add(choice) {
     if (busy) return;
@@ -67,16 +80,21 @@
 </script>
 
 <div class="claim-connections">
-  {#each GROUPS as group (group.type)}
-    {@const items = rows(group.type)}
+  {#each GROUPS as group (`${group.type}:${group.way ?? 'both'}`)}
+    {@const items = rows(group)}
+    <!-- A reading nobody can add to is worth a heading only once it holds something:
+         an empty "Supports" on every statement would be a permanent blank. -->
+    {#if group.add || items.length}
     <section class="claim-group">
       <div class="claim-head">
-        <h4>{group.label}</h4>
+        <h4 title={group.hint ?? ''}>{group.label}</h4>
+        {#if group.add}
         <button
           class="btn btn-ghost btn-sm add"
           class:on={adding === group.type}
           onclick={() => (adding = adding === group.type ? null : group.type)}
         >{group.add}</button>
+        {/if}
       </div>
       {#if items.length}
         <div class="claim-items">
@@ -96,7 +114,7 @@
           {/each}
         </div>
       {/if}
-      {#if adding === group.type}
+      {#if group.add && adding === group.type}
         <RelationPicker
           subjectType="claim"
           subject={claim}
@@ -110,6 +128,7 @@
         />
       {/if}
     </section>
+    {/if}
   {/each}
 </div>
 

@@ -25,7 +25,14 @@
     setAnalysisFilter,
   } from '../lib/analysisSearch.svelte.js';
   import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
-  import { buildCatalogQuery, fetchAttrFacets } from '../lib/catalog.js';
+  import { buildCatalogQuery, buildTallyQuery, fetchAttrFacets } from '../lib/catalog.js';
+  import {
+    confidenceLine,
+    countLines,
+    isEmpty as nothingTotalled,
+    noteLines,
+    readingNotes,
+  } from '../lib/tally.js';
   import { createPagedList } from '../lib/pagedList.svelte.js';
   import { entitySearchMatches, matchesEntity } from '../lib/entitySearch.js';
   import { entityIcon } from '../lib/entityIcon.js';
@@ -53,6 +60,8 @@
     familyReads,
     loadEntityTypes,
   } from '../lib/entityTypes.svelte.js';
+  import { createBookmark } from '../lib/bookmarks.js';
+  import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
@@ -60,7 +69,9 @@
   import FilterBar from '../components/FilterBar.svelte';
   import EntityCreate from '../components/EntityCreate.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
+  import PasteDialog from '../components/PasteDialog.svelte';
   import SnapshotDetails from '../components/SnapshotDetails.svelte';
+  import ViewSwitch from '../components/ViewSwitch.svelte';
 
   const PAGE = 100;
   /**
@@ -188,6 +199,122 @@
    *  information a count carries, and a denominator that shrinks with the numerator
    *  carries none. */
   const caseTotal = $derived(summary?.total ?? pl.total);
+
+  /**
+   * The same question, added up instead of listed.
+   *
+   * Not a second view of these rows — the one thing this tool refuses (see the top of
+   * this file) — but the one answer the rows cannot give. A case that follows a
+   * conflict writes *two of these destroyed here* twenty times over, and twenty rows
+   * later what the analyst wants is the total, which a table gives only by being added
+   * up by hand.
+   *
+   * So it is a **gesture on the question**, exactly like "Draw these": the chips stay
+   * where they are, the sentence is unchanged, and what moves is what is done with the
+   * answer. Every rule about what may enter a sum is the server's
+   * (`engine/tally.py`), and every word about what was left out of one is
+   * `lib/tally.js` — a total printed bare is true and misleading in the same breath.
+   */
+  let totalling = $state(false);
+  let tally = $state(null);
+  let tallying = $state(false);
+
+  /**
+   * The two renderings, as the switch offers them.
+   *
+   * **Totals is offered from the first day and dimmed until it can draw a real line**,
+   * rather than appearing the day a case gains one — the rule the filter menu already
+   * follows: a control you can see and cannot use teaches something, one that is not
+   * there teaches nothing.
+   *
+   * What makes a line real is both halves at once: a statement carrying a **number**,
+   * and pointing at **something** (`summary.countable`). Either alone opens the total
+   * on nothing — *seen, not counted* is an answer rather than a row, and a statement
+   * about nothing has no subject to sit under — and a reading that opens on an empty
+   * answer reads as a finding about the case instead of as a control that was not
+   * ready. Priced by the same summary every filter term is priced from, so it costs no
+   * request of its own.
+   *
+   * The state currently on is never dimmed (`ViewSwitch` enforces it too), or the
+   * screen would show itself as unavailable while being what is on screen.
+   */
+  const countable = $derived(summary?.countable ?? 0);
+  const viewOptions = $derived.by(() => {
+    const nothingToDraw = countable === 0;
+    const empty = !rows.length;
+    return [
+      { id: 'rows', label: 'Rows', icon: 'note', hint: 'One row per thing the case holds' },
+      {
+        id: 'totals',
+        label: 'Totals',
+        icon: 'hash',
+        disabled: nothingToDraw || empty || snapshotReading,
+        hint: snapshotReading
+          ? 'A frozen snapshot holds rows rather than a question to add up'
+          : nothingToDraw
+            ? 'No statement counts anything about a subject yet'
+            : empty
+              ? 'Nothing in the table to add up'
+              : 'What the statements about these come to, per subject',
+      },
+    ];
+  });
+
+  /**
+   * Read on the same terms as the page, and only while it is on screen: a total
+   * nobody is looking at is a request nobody is waiting for.
+   *
+   * Debounced on **every** term rather than on the text one alone. The search box is
+   * the only term that changes per keystroke, but a sum has no in-memory half to fall
+   * back on the way the row list does — the arithmetic is the server's at any case
+   * size — so one delay for the whole question is one rule instead of a term-by-term
+   * bookkeeping, and a quarter second after a chip click is not felt.
+   */
+  const TALLY_DELAY = 250; // the paged list's own, for the same box
+  $effect(() => {
+    if (!totalling || snapshotReading || !caseState.current?.id) return;
+    // A statement stated, counted or related changes what the case comes to, and the
+    // total is the one reading where that is the whole point. Read like the row list
+    // beside it and like the panel's own total, or a relation added while this is on
+    // screen would need the page reloaded to appear in it.
+    caseState.rev;
+    const url = buildTallyQuery(caseState.current.id, toQuery(filter, { types: wantedTypes }));
+    let current = true;
+    const timer = setTimeout(() => {
+      tallying = true;
+      api
+        .get(url)
+        .then((body) => {
+          if (current) tally = body;
+        })
+        .catch(() => {
+          if (current) tally = null;
+        })
+        .finally(() => {
+          if (current) tallying = false;
+        });
+    }, TALLY_DELAY);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  });
+
+  /** A snapshot is a frozen copy of rows rather than a question the case can still be
+   *  asked, so the addition has nothing to run over and steps back to the list. */
+  $effect(() => {
+    if (snapshotReading && totalling) totalling = false;
+  });
+
+  /** The condition and confidence words, from the served registry rather than spelled
+   *  again here: a level added there reads correctly in the tally with no edit. */
+  const claimReads = $derived.by(() => {
+    const reads = {};
+    for (const field of entityFields('claim')) {
+      for (const option of field.options ?? []) reads[option.value] = option.label;
+    }
+    return (value) => reads[value] ?? value;
+  });
 
   /** The columns a table shows beyond the ones every entity has. Only when a single
    *  type is picked: a mixed list has no shared attributes, and a column that is
@@ -497,6 +624,58 @@
     }
   }
 
+  // ── paste ────────────────────────────────────────────────────────────────────
+  /**
+   * Ctrl+V files what the clipboard holds and opens the row it made.
+   *
+   * The table is where the case is read as a list, and a screenshot or a link
+   * arriving while reading it has somewhere to be: filed, then open, so the next
+   * gesture is relating it to whatever prompted the paste.
+   */
+  let pasted = $state(null);
+  let pasteBusy = $state(false);
+  $effect(() => {
+    if (uiState.tool !== 'board') return;
+    return listenForPaste((payload) => {
+      if (snapshotReading) {
+        toast('This snapshot is read-only. Leave it to paste.', 'warn');
+        return;
+      }
+      pasted ??= resolvePaste('board', payload);
+    });
+  });
+
+  async function confirmPaste(resolved) {
+    const caseId = caseState.current?.id;
+    if (pasteBusy || !caseId) return;
+    pasteBusy = true;
+    const { kind, values, payload } = resolved;
+    try {
+      if (kind === 'image') {
+        const result = await pasteImage(caseId, {
+          file: payload.file,
+          title: values.title,
+          sourceUrl: values.source,
+        });
+        pasted = null;
+        await reloadCase();
+        // The same bytes twice is not an error and not a second row: the case keeps
+        // the one it has, and saying so is what stops the analyst pasting again.
+        if (result.duplicate) toast('Already in the case (same SHA-256)', 'warn');
+        openId = result.entity.id;
+      } else {
+        const entity = await createBookmark(caseId, { ...values, url: payload.url });
+        pasted = null;
+        await reloadCase();
+        openId = entity.id;
+      }
+    } catch (e) {
+      toast(e.message, 'danger');
+    } finally {
+      pasteBusy = false;
+    }
+  }
+
   function closeDetails() {
     if (dirty) discarding = true;
     else openId = null;
@@ -696,6 +875,7 @@
   <!-- The answer, and what it is an answer out of. The denominator is the whole case
        even under a filter: a proportion is the information a count carries. -->
   <p class="answer">
+    <span class="said">
     {#if !caseState.current}
       &nbsp;
     {:else if filtering}
@@ -710,6 +890,15 @@
     {:else}
       {caseTotal} in this case
     {/if}
+    </span>
+    <!-- How this screen renders the answer, in the control Files and the Media Library
+         already use for the same job. What a single subject comes to is read where
+         that subject is, in its own Details; this one reads several at once, ranked. -->
+    <ViewSwitch
+      options={viewOptions}
+      value={totalling ? 'totals' : 'rows'}
+      onpick={(id) => (totalling = id === 'totals')}
+    />
   </p>
 
   <!-- Dropping a file onto the list files it, the way the Media Library takes one.
@@ -743,6 +932,68 @@
     {/if}
     {#if !caseState.current}
       <p class="empty">Open a case to see what it holds.</p>
+    {:else if totalling}
+      <!-- The addition. One row per subject the statements point at, and every number
+           beside what it left out: a sum that hid its uncounted and its ruled-out
+           statements would be arithmetically right and read as more than it is. -->
+      {#if nothingTotalled(tally)}
+        {#if !tallying}
+          <p class="empty">No statement in this narrowing.</p>
+        {/if}
+      {:else}
+        {#each readingNotes(tally) as note (note)}
+          <p class="reading-note">{note}</p>
+        {/each}
+        <table class="table tally">
+          <thead>
+            <tr>
+              <th>Subject</th>
+              <th title="added over the statements that carried a number">
+                What the statements come to
+              </th>
+              <th title="how many statements point at this subject">Statements</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each tally.rows as row (row.id)}
+              {@const lines = countLines(row, claimReads)}
+              {@const notes = noteLines(row)}
+              {@const sure = confidenceLine(row, claimReads)}
+              <tr
+                tabindex="0"
+                onclick={() => (openId = row.id)}
+                onkeydown={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openId = row.id;
+                  }
+                }}
+              >
+                <td>
+                  <Icon name={entityIcon(row)} size={12} />
+                  <span class="name">{row.label}</span>
+                  <span class="dim">{entityLabel(row.type)}</span>
+                </td>
+                <td>
+                  {#if lines.length}
+                    {#each lines as line (line.value)}
+                      <span class="sum">{line.text}</span>
+                    {/each}
+                  {:else}
+                    <span class="dim">—</span>
+                  {/if}
+                </td>
+                <td class="dim">
+                  {row.statements}
+                  {#each notes as note (note)}<span class="note">{note}</span>{/each}
+                  {#if sure}<span class="sure">{sure}</span>{/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
     {:else if !rows.length && !pl.loading}
       <p class="empty">{filtering ? 'Nothing matches.' : 'Nothing filed in this case yet.'}</p>
     {:else}
@@ -872,7 +1123,9 @@
       </table>
     {/if}
 
-    {#if pl.hasMore}
+    <!-- Paging belongs to the list. The addition is bounded server-side and says so on
+         its own line, so a "Show more" under it would offer to lengthen a total. -->
+    {#if pl.hasMore && !totalling}
       <div class="more">
         <!-- A sort the store could not answer runs over what is loaded, so it says
              so while there is more: an alphabet over the first hundred of eight
@@ -908,6 +1161,16 @@
       openId = entity.id;
     }}
     onclose={() => (draft = null)}
+  />
+{/if}
+
+<!-- Ctrl+V: a screenshot or a link, filed and opened -->
+{#if pasted && !snapshotReading}
+  <PasteDialog
+    resolved={pasted}
+    busy={pasteBusy}
+    onconfirm={confirmPaste}
+    onclose={() => (pasted = null)}
   />
 {/if}
 
@@ -952,11 +1215,21 @@
   .spacer {
     flex: 1;
   }
+  /* The count reads first because it is the answer; the control that decides how that
+     answer is drawn sits at the other end, directly above what it governs. */
   .answer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin: 0;
     padding: 8px 16px 2px;
     color: var(--text-3);
     font-size: var(--fs-xs);
+  }
+  /* The whole sentence is one flex item, or the gap would fall between "23" and
+     "of 1204" as well as around the control. */
+  .answer .said {
+    margin-right: auto;
   }
   .answer strong {
     color: var(--text-1);
@@ -1162,5 +1435,32 @@
     align-items: center;
     gap: 8px;
     padding-top: 10px;
+  }
+  /* The addition. A sum reads as one figure per condition rather than as a sentence,
+     and everything it left out sits under the count it was left out of. */
+  .reading-note {
+    margin: 0 0 8px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .tally .sum {
+    display: block;
+    font-variant-numeric: tabular-nums;
+  }
+  .tally .note,
+  .tally .sure {
+    display: block;
+    margin-top: 2px;
+    font-size: var(--fs-xs);
+  }
+  .tally .note {
+    color: var(--text-3);
+  }
+  .tally .sure {
+    color: var(--text-3);
+    font-style: italic;
+  }
+  .tally td .dim {
+    margin-left: 6px;
   }
 </style>

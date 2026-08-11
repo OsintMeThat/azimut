@@ -405,8 +405,15 @@ RELATION_TYPES: tuple[RelationType, ...] = (
         inverse_label="supports claim",
         hint="the evidence the statement relies on",
         from_families=frozenset({entities.CLAIM}),
-        to_families=frozenset({entities.DOCUMENT, entities.COLLECTED}),
-        to_only=frozenset({"bookmark", "note", "proof", "media", "capture"}),
+        # A statement rests on material, and it may rest on **another statement**: an
+        # intermediate conclusion is what the next one is built out of. Without it a
+        # case could say what stands *against* a statement (`contradicts`) and never
+        # what holds it up, so refuting the first left the second standing with nothing
+        # naming the loss. It is `cites` rather than a verb of its own because the
+        # question is the same one — what does this rest on — and the inverse reading
+        # was already written for it.
+        to_families=frozenset({entities.DOCUMENT, entities.COLLECTED, entities.CLAIM}),
+        to_only=frozenset({"bookmark", "note", "proof", "media", "capture", "claim"}),
         action="claim",
         ratable=False,
     ),
@@ -673,12 +680,18 @@ def _check_media_kind(
 def _check_relation_cycle(
     case: CaseRepository, type_: str, from_id: str, to_id: str
 ) -> None:
-    """Keep structural containment directed and acyclic.
+    """Keep the verbs that **stack** from closing on themselves.
 
-    Ownership and membership can contain real cross-holdings, so only the two
-    relations whose meaning is strict containment are checked.
+    Ownership and membership can contain real cross-holdings, so only the relations
+    whose meaning stacks are checked: strict containment, and a statement resting on
+    another. *A because B, B because A* is circular reasoning rather than a shape a
+    case may hold — where two statements contradicting each other is an open question
+    and is deliberately left unchecked (`contradicts`).
+
+    Walking `cites` costs nothing on the material end: only a claim may cite, so a
+    bookmark or a media has no outgoing edge of this type and the walk stops on it.
     """
-    if type_ not in (PART_OF, IN_NETWORK):
+    if type_ not in (PART_OF, IN_NETWORK, CITES):
         return
     frontier = [to_id]
     seen: set[str] = set()

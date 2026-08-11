@@ -315,6 +315,36 @@ describe('where the chain puts this entity', () => {
   });
 });
 
+describe('what the statements about this entity come to', () => {
+  it('adds up the rows the panel was already listing', () => {
+    // the claims pointing here were always on screen; answering "how many of these
+    // were destroyed" meant reading four rows and doing the arithmetic
+    expect(source).toContain('/tally`)');
+    expect(source).toContain('if (mySeq === statedSeq) stated = row;');
+    expect(source).toContain('{#if stated?.statements || stated?.refuted}');
+  });
+
+  it('reads it on the same terms as the placement beside it', () => {
+    // its own request, only once the Case tab is on screen, re-read after a save
+    expect(source).toMatch(/const mySeq = \+\+statedSeq;/);
+    expect(source).toContain('caseState.rev;');
+  });
+
+  it('never prints the sum without what it left out', () => {
+    expect(source).toContain('countLines(stated, claimReads)');
+    expect(source).toContain('noteLines(stated)');
+    expect(source).toContain('confidenceLine(stated, claimReads)');
+  });
+
+  it('takes its words from the served registry, not a list kept here', () => {
+    expect(source).toContain("for (const field of entityFields('claim'))");
+  });
+
+  it('sits above the statements rather than replacing them', () => {
+    expect(source).toMatch(/<\/div>\s*{\/if}\s*<ClaimReferences/);
+  });
+});
+
 describe('a file the app has no viewer for', () => {
   it('offers its folder instead of a download', () => {
     // the browser's answer is a copy in Downloads, worked on outside the case

@@ -62,7 +62,7 @@ const settings = {
   ingest_token: '',
   version: '0.2.7',
   workspace_root: '/tmp/azimut-browser-fixture',
-  extension_version: '0.2.7',
+  extension_version: '0.2.5', // tracks the extension, so it lags the app version
   update_check_on_start: false,
   update_dismissed_version: '',
   usage: {},
@@ -584,6 +584,7 @@ export async function installAppFixture(page, options = {}) {
     ])
   );
   const uploads = [];
+  const pastes = [];
   const revealed = [];
 
   await page.addInitScript((caseId) => {
@@ -1118,6 +1119,17 @@ export async function installAppFixture(page, options = {}) {
         options.placements?.[placementMatch[1]] ?? { points: [], truncated: false }
       );
     }
+    // What the statements about one entity come to. Details asks for it whenever the
+    // Case tab is on screen, so every spec that opens a panel reaches it. 404 is the
+    // ordinary answer — nothing states anything about this row — and `tallies` is how
+    // a spec gives one a total.
+    const tallyMatch = caseId && path.match(
+      new RegExp(`^/api/cases/${caseId}/entities/(.+)/tally$`)
+    );
+    if (tallyMatch) {
+      const row = options.tallies?.[tallyMatch[1]];
+      return row ? json(route, row) : route.fulfill({ status: 404, body: '{}' });
+    }
     const chainMatch = caseId && path.match(new RegExp(`^/api/cases/${caseId}/entities/(.+)/chain$`));
     if (chainMatch) {
       const chain = fixtureChains[chainMatch[1]];
@@ -1160,6 +1172,26 @@ export async function installAppFixture(page, options = {}) {
     if (caseId && path === `/api/cases/${caseId}/media/reveal` && request.method() === 'POST') {
       revealed.push(request.postDataJSON()?.path ?? '');
       return json(route, { path: '/workspace/cases/browser-test/azimut/media' });
+    }
+    if (caseId && path === `/api/cases/${caseId}/media/paste` && request.method() === 'POST') {
+      // The clipboard route answers the shape `upload` does, plus whatever the paste
+      // dialog stated: the title that names the file and the origin it typed.
+      const body = request.postData() ?? '';
+      const field = (name) => body.match(new RegExp(`name="${name}"\\r?\\n\\r?\\n([^\\r]*)`))?.[1] ?? '';
+      pastes.push({ title: field('title'), source_url: field('source_url'), length: body.length });
+      const result = options.pasteResult ?? {
+        duplicate: false,
+        entity: {
+          id: 'media-pasted',
+          type: 'media',
+          label: field('title') || 'paste-20260811-120000',
+          attrs: { path: 'media/pasted.png', kind: 'image', sha256: 'def' },
+          provenance: { by: 'paste', at: '2026-08-11T12:00:00Z', status: 'confirmed' },
+        },
+        item: { path: 'media/pasted.png', kind: 'image' },
+      };
+      if (!result.duplicate && result.entity) fixtureCatalog.push(result.entity);
+      return json(route, result);
     }
     if (caseId && path === `/api/cases/${caseId}/media/upload` && request.method() === 'POST') {
       // What the importer answers: the entity it filed, with the kind it read off
@@ -1268,6 +1300,7 @@ export async function installAppFixture(page, options = {}) {
     graphPinWrites,
     analysisWrites,
     uploads,
+    pastes,
     revealed,
     trashWrites,
     bundleCalls,

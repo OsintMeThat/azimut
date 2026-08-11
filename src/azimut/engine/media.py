@@ -308,6 +308,38 @@ def import_stream(case: Case, filename: str, stream: BinaryIO) -> dict[str, Any]
     return _register(case, dest, {"type": "upload", "original_name": filename})
 
 
+def import_paste(
+    case: Case,
+    filename: str,
+    stream: BinaryIO,
+    *,
+    source_url: str = "",
+    title: str = "",
+) -> dict[str, Any]:
+    """File an image the analyst pasted out of the clipboard.
+
+    Its own entry rather than ``import_stream``'s: a paste has no file behind it to
+    be named after, and no origin the bytes can be read for. So the name comes from
+    the title typed in the dialog (a stamped one when nothing was typed — every
+    clipboard image is called ``image.png``), and the origin is whatever address was
+    typed beside it, which is the only chance to state one.
+
+    Recorded as ``clipboard`` and never as an upload: a screenshot with no stated
+    source must not read like a file somebody chose off a disk. Deduped like any
+    upload, so pasting the same crop twice is one file.
+    """
+    media_dir = case.subdir("media")
+    suffix = Path(safe_filename(filename)).suffix or ".png"
+    stamped = f"paste-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+    dest = unique_path(media_dir, layout.visible_filename(title.strip() or stamped, suffix))
+    with dest.open("wb") as out:
+        shutil.copyfileobj(stream, out)
+    source: dict[str, Any] = {"type": "clipboard", "original_name": filename}
+    if source_url:
+        source["url"] = source_url
+    return _register(case, dest, source, by="paste")
+
+
 def register_existing(case: Case, rel_path: str, *, by: str = "case-doctor") -> dict[str, Any]:
     """Adopt a file that was placed directly in this case's media directory.
 

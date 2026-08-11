@@ -173,18 +173,16 @@ async function pasteScreenshot(page, { via = 'paste' } = {}) {
         new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true })
       );
     } else {
-      window.dispatchEvent(
-        new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true })
-      );
+      // Forced onto the event rather than passed to the constructor: Firefox ignores
+      // `clipboardData` in the init dict, since only the browser is meant to fill it.
+      const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: transfer, configurable: true });
+      window.dispatchEvent(event);
     }
   }, via);
 }
 
-test('pastes a screenshot into the proof without filing it as a panel', async ({ page, browserName }) => {
-  // Firefox drops the clipboardData of a synthetic ClipboardEvent, so only the
-  // real shortcut can drive it there. The drop test below covers the same insert
-  // path on both engines.
-  test.skip(browserName === 'firefox', 'synthetic paste carries no clipboardData in Firefox');
+test('pastes a screenshot into the proof without filing it as a panel', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await openProofWithPanel(page);
 
@@ -259,5 +257,81 @@ test('a pasted image hosts its own annotations and leaves with them', async ({ p
   await page.locator('.paste-row').getByTitle('Remove overlay').click();
   await expect(page.locator('.paste-row')).toHaveCount(0);
   await expect(page.locator('.shape-row')).toHaveCount(0);
+  fixture.expectNoUnexpectedRequests();
+});
+
+/** Draw one box on the panel, which leaves it selected. */
+async function drawBox(page) {
+  const canvas = page.locator('.konva canvas').first();
+  const box = await canvas.boundingBox();
+  const x = box.x + box.width / 2 - 40;
+  const y = box.y + box.height / 2 - 25;
+  await page.getByTitle('Box (r)').click();
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 90, y + 65, { steps: 6 });
+  await page.mouse.up();
+}
+
+/** A paste event, optionally carrying an image the way the system clipboard would. */
+async function sendPaste(page, { image = null } = {}) {
+  await page.evaluate((b64) => {
+    const data = new DataTransfer();
+    if (b64) {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      data.items.add(new File([bytes], 'image.png', { type: 'image/png' }));
+    }
+    // forced onto the event rather than passed to the constructor, which Firefox
+    // ignores; no engine lets a script fill the real clipboard unprompted
+    const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: data, configurable: true });
+    window.dispatchEvent(event);
+  }, image);
+}
+
+const CLIPBOARD_PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
+
+test('Ctrl+C then Ctrl+V duplicates the selected annotation', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await openProofWithPanel(page);
+  await drawBox(page);
+  await expect(page.locator('.shape-row')).toHaveCount(1);
+
+  await page.keyboard.press('Control+c');
+  await sendPaste(page);
+
+  await expect(page.locator('.shape-row')).toHaveCount(2);
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('a copied shape outranks a screenshot the clipboard was already holding', async ({ page }) => {
+  // The two clipboards answer one chord, and the analyst copied the shape last.
+  // Reading the system one first pasted an hour-old screenshot over their rectangle.
+  const fixture = await installAppFixture(page);
+  await openProofWithPanel(page);
+  await drawBox(page);
+
+  await page.keyboard.press('Control+c');
+  await sendPaste(page, { image: CLIPBOARD_PNG });
+
+  await expect(page.locator('.shape-row')).toHaveCount(2);
+  await expect(page.locator('.paste-row')).toHaveCount(0);
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('leaving the window hands Ctrl+V back to the system clipboard', async ({ page }) => {
+  // Going somewhere else is the only way an outside copy could have happened, so it
+  // is what makes the shape copy the older of the two.
+  const fixture = await installAppFixture(page);
+  await openProofWithPanel(page);
+  await drawBox(page);
+  await page.keyboard.press('Control+c');
+
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await sendPaste(page, { image: CLIPBOARD_PNG });
+
+  await expect(page.locator('.paste-row')).toHaveCount(1);
+  await expect(page.locator('.shape-row')).toHaveCount(1); // the shape was not duplicated
   fixture.expectNoUnexpectedRequests();
 });

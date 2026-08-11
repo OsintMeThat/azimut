@@ -161,16 +161,20 @@ proof for publication.
 | ✅ **One question, two surfaces** | One filter bar of nine axes, every value chosen from the case and priced by what it would answer with; *Draw these N* hands the Board's question to the graph; a saved view names a live recipe or freezes a read-only snapshot. |
 | ✅ **How sure, how reliable** | A Claim carries statement confidence, a ratable ordinary relation may carry its own ordinal, and a source carries Admiralty reliability. The assessments are never combined. |
 | ✅ **What stands against a statement** | A Claim names the Claim it cannot both hold with, ungraded and readable either way, and the drawing gives that line its own stroke. |
+| ✅ **What holds a statement up** | A Claim cites the Claim it is built on, so refuting an intermediate conclusion shows what it takes with it. Circular grounding is refused, and reasoning is never counted as a source. |
 | ✅ **Two people are tied** | Actors are stated as associated where containment, membership and ownership all miss, and that verb alone carries the analyst's word for the tie. |
 | ✅ **The value the case already holds** | An identifier typed a second way names the row already carrying it, compared by the registry rather than by the screen asking. It warns and never refuses. |
 | ✅ **What state a thing is in** | Every asset states its last known condition off one scale, from intact to destroyed. |
 | ✅ **Counting a model** | A model is an entity of its own, an object states which one it is, and a statement counts how many were seen and in what state. |
+| ✅ **What the statements come to** | An entity's Details adds up the statements about it, and a Rows/Totals switch turns the Board's whole narrowing into a total per subject. A statement ruled out never enters a sum, an absent count is not one, and nothing is totalled across subjects. |
 | ✅ **How precise a place is** | A saved point states its uncertainty radius, its traced footprint, the source's own wording and how it was found; the map draws the spread instead of a pin. |
 | ✅ **Visible file names** | Shows each file-backed artifact under its filename stem and moves the file when that name changes. |
 | ✅ **Case doctor** | Checks a case without changing it, then offers explicit repairs for a missing database, missing media and files dropped into `media/`. |
 | ✅ **Workspace folder** | Settings adopts a folder as it is, or copies and SHA-256-verifies every file before switching an external pointer and keeping the old copy. A missing configured folder stops startup. |
 | ✅ **One Azimut per workspace** | An OS-held lock the kernel drops on exit, with a heartbeat so a folder shared between machines can tell a live holder from a crashed one. The second instance opens to a screen naming the first, and can overrule it. |
 | ✅ **Adopt a case folder** | A folder made in the workspace from the file manager becomes a case on one click, where it is, without reading or moving what it holds. One holding a case that lost its manifest is recovered instead, then handed to the Doctor. |
+| ✅ **What needs updating** | One check on load dots the Settings icon, the tab and the button that acts on it when Azimut or a downloader is behind, or the capture extension is behind or missing. The extension carries the release that last changed it, so a version it didn't earn never asks for a reinstall. |
+| ✅ **Paste into a case** | Ctrl+V files the screenshot or the link the clipboard holds from the Media grid, Files, the graph or the table, asking for a name, a folder and the origin an image has none of. A surface that will not take what was pasted says so and says where it does go. |
 
 
 ---
@@ -288,7 +292,8 @@ spec alone:
 Toward v5: real-world measurement from a resected photo or a solved camera track
 and its GCP camera pose; a gaussian-splat round trip for a solved camera track;
 satellite-pass search from public TLEs; 3D satellite capture; Google
-Photorealistic 3D Tiles on the user's own key.
+Photorealistic 3D Tiles on the user's own key; non-destructive identity resolution
+for duplicate entities returned by orchestrated searches.
 
 ## 7. Loose ideas
 
@@ -348,9 +353,11 @@ stops making sense.
   Accepted risks recorded here: cleartext keys over
   localhost, the hash-verified scraper updater, and tile/media URL fetches (SSRF
   only matters if the localhost assumption breaks). The startup update check is
-  the one on-mount network call: opt-out and read-only against GitHub's releases
-  feed, notes rendered through the Notebook's DOMPurify-sanitized Markdown
-  renderer rather than as raw HTML. Remote images embedded in a
+  the one on-mount network call: opt-out, and read-only against GitHub's
+  releases feed plus PyPI's JSON for the two downloaders, both governed by the
+  same switch. Release notes are rendered through the Notebook's
+  DOMPurify-sanitized Markdown renderer rather than as raw HTML. The capture
+  extension is compared locally, so it is answered with the switch off. Remote images embedded in a
   Notebook note contact their host whenever the preview opens; Notebook warns
   about that behavior and local Case media avoids it. Notebook diagrams are the
   one markup DOMPurify does not clear: Mermaid draws its SVG into the preview
@@ -369,9 +376,6 @@ stops making sense.
 
 ## 10. Open questions
 
-- Define `same-as` merge semantics before a resolver ships. The attribute vocabulary
-  and assessment model are settled (ONTOLOGY §2, §3); merge waits on what actually
-  creates duplicates, the v5 Search Orchestrator.
 - Source reliability sits on the `bookmark` or the `account` cited. Reopen it the day
   a source is neither: a paper document, a testimony.
 - Déjà Vu community index: needs infrastructure and moderation; out of scope
