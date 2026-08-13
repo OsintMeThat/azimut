@@ -39,8 +39,8 @@ jobs:
             os: macos-latest
             python: "3.12"
             tests: all
-          # Four fresh Windows processes retain the complete suite while making
-          # progress visible and keeping the slowest shard near ten minutes.
+          # Five fresh Windows processes retain the complete suite while making
+          # progress visible and keeping every shard well below the timeout.
           - name: Backend (windows-latest, py3.12, A-F)
             os: windows-latest
             python: "3.12"
@@ -49,10 +49,14 @@ jobs:
             os: windows-latest
             python: "3.12"
             tests: tests/test_[g-l]*.py
-          - name: Backend (windows-latest, py3.12, M-R)
+          - name: Backend (windows-latest, py3.12, M-O)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_[m-r]*.py
+            tests: tests/test_[m-o]*.py
+          - name: Backend (windows-latest, py3.12, P-R)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_[p-r]*.py
           - name: Backend (windows-latest, py3.12, S-Z)
             os: windows-latest
             python: "3.12"
