@@ -1422,8 +1422,7 @@
         // grid: corner-drag only changes the panel's scale — the grid decides
         // where it sits, so the row re-flows around the new size
         group.on('transformend', () => {
-          const next = (group.scaleX() * panel.natural[1]) / PANEL_H;
-          panel.scale = Math.round(Math.min(SCALE_MAX, Math.max(SCALE_MIN, next)) * 100) / 100;
+          panel.scale = scaleFromNode(group.scaleX(), panel.natural[1]);
           dirty = true;
           requestAnimationFrame(fit);
         });
@@ -1656,7 +1655,7 @@
       if (!boundPanel) return newBox;
       const impliedScale =
         (newBox.width / stage.scaleX()) * (boundPanel.natural[1] / (boundPanel.natural[0] * PANEL_H));
-      return impliedScale < SCALE_MIN || impliedScale > SCALE_MAX ? oldBox : newBox;
+      return impliedScale < PANEL_SCALE_MIN || impliedScale > PANEL_SCALE_MAX ? oldBox : newBox;
     });
     transformer.keepRatio(!!sigNode || !!pasteNode);
     transformer.nodes(
@@ -2849,8 +2848,8 @@
           bind:selectedId
           {activeColor}
           caseId={caseState.current?.id}
-          scaleMin={SCALE_MIN}
-          scaleMax={SCALE_MAX}
+          scaleMin={PANEL_SCALE_MIN}
+          scaleMax={PANEL_SCALE_MAX}
           scaleStep={SCALE_STEP}
           frameWidthMax={FRAME_WIDTH_MAX}
           frameColor={FRAME_COLOR}
