@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend (${{ matrix.os }}, py${{ matrix.python }})
+    name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -30,13 +30,38 @@ jobs:
         # Windows exe was a guess; this is what makes "works everywhere" checkable.
         # Filesystem behaviour is where they actually differ — engine/scrapers.py
         # swaps directories, and Windows won't delete an open file.
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ["3.12"]
         include:
-          - os: ubuntu-latest
+          - name: Backend (ubuntu-latest, py3.12)
+            os: ubuntu-latest
+            python: "3.12"
+            tests: all
+          - name: Backend (macos-latest, py3.12)
+            os: macos-latest
+            python: "3.12"
+            tests: all
+          # One long Windows process can stall in TestClient startup after
+          # hundreds of tests. Three fresh processes retain the complete suite
+          # while making both progress and the offending file visible.
+          - name: Backend (windows-latest, py3.12, A-F)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_[a-f]*.py
+          - name: Backend (windows-latest, py3.12, G-R)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_[g-r]*.py
+          - name: Backend (windows-latest, py3.12, S-Z)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_[s-z]*.py
+          - name: Backend (ubuntu-latest, py3.11)
+            os: ubuntu-latest
             python: "3.11"  # the floor in requires-python
-          - os: ubuntu-latest
+            tests: all
+          - name: Backend (ubuntu-latest, py3.13)
+            os: ubuntu-latest
             python: "3.13"  # the ceiling we've tested against
+            tests: all
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -50,20 +75,19 @@ jobs:
       - run: uv lock --check
       - run: uv sync --frozen --extra dev
       - name: Run backend suite
-        if: runner.os != 'Windows'
+        if: matrix.tests == 'all'
         run: uv run pytest -q --durations=20 --durations-min=1
-      # Windows is the slowest box. Naming every test keeps a genuine stall
-      # diagnosable instead of leaving one silent pytest process for hours.
-      - name: Run backend suite with per-test progress
-        if: runner.os == 'Windows'
-        run: uv run pytest -vv --durations=20 --durations-min=1
+      - name: Run Windows shard with per-test progress
+        if: matrix.tests != 'all'
+        shell: bash
+        run: uv run pytest -vv ${{ matrix.tests }} --durations=20 --durations-min=1
 
   lint:
     name: Lint & type-check (backend)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # One box, not the OS/version matrix: ruff and mypy read the same source
-    # everywhere, so five runs would just be five identical verdicts. Python
+    # everywhere, so matrix runs would just be identical verdicts. Python
     # 3.12 on purpose — mypy parses numpy's 2.x stubs, which use 3.12 syntax a
     # 3.11 target chokes on. The 3.11 floor stays covered by the pytest matrix.
     steps:
