@@ -60,7 +60,7 @@ const settings = {
   eco_max_zooms: {},
   provider_status: {},
   ingest_token: '',
-  version: '0.2.7',
+  version: '0.2.8',
   workspace_root: '/tmp/azimut-browser-fixture',
   extension_version: '0.2.5', // tracks the extension, so it lags the app version
   update_check_on_start: false,
