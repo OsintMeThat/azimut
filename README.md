@@ -1,17 +1,54 @@
-# Azimut
+<p align="center">
+  <picture>
+    <source
+      media="(prefers-color-scheme: dark)"
+      srcset="https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/lockup-dark.svg"
+    >
+    <img
+      src="https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/lockup-light.svg"
+      alt="Azimut"
+      height="52"
+    >
+  </picture>
+</p>
 
-Azimut is a local OSINT workspace for reviewing media, building geolocation
-proofs and keeping case notes together.
+<p align="center"><b>The OSINT workspace that runs on your machine.</b></p>
 
-It is built for open-source investigators, journalists and researchers. Each
-case is a plain folder that can be reopened, archived or shared.
+<p align="center">
+  <a href="https://pypi.org/project/azimut/"><img alt="PyPI" src="https://img.shields.io/pypi/v/azimut?color=e8a33d"></a>
+  <a href="https://pypi.org/project/azimut/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/azimut"></a>
+  <a href="https://github.com/OsintMeThat/azimut/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/OsintMeThat/azimut/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/OsintMeThat/azimut/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0-4c6ef5"></a>
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-6b7280">
+</p>
+
+![One case in Azimut, from the clip that arrives to the proof, the analysis surfaces and the published report](https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.gif)
+
+## Install & run
+
+```bash
+pipx install azimut   # isolated app install; plain `pip install azimut` also works
+azimut                # starts on http://127.0.0.1:8477 and opens a browser tab
+```
+
+No Python? Every release attaches a self-contained binary for Windows, macOS
+(Apple Silicon) and Linux on the
+[Releases page](https://github.com/OsintMeThat/azimut/releases) — download, run,
+and it opens in your browser.
+
+Your cases and settings live under `~/Azimut`, outside the app: upgrading or
+removing Azimut leaves them alone. [Install in detail](#install-in-detail) covers
+the binaries' first-run warnings, building from source and the development loop.
+
+## What Azimut is
+
+A local OSINT workspace for reviewing media, building geolocation proofs and
+keeping case notes together. It is built for open-source investigators,
+journalists and researchers. Each case is a plain folder that can be reopened,
+archived or shared.
 
 *The name is the French word for azimuth, the compass bearing you sight along
 to fix a point on the map.*
-
-## v0.2.8: Entities, graph and timeline
-
-![Azimut workflows from source review to proof and report](https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.gif)
 
 | Tool | What it does |
 |------|--------------|
@@ -35,21 +72,9 @@ extension, and cross-platform binaries with a bundled ffmpeg.
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
 
-Inside a case, Azimut owns only the `azimut/` directory. `README.txt` explains
-the boundary; anything else at the case root is yours and travels with the case
-bundle.
+## New in v0.2.8
 
-The workspace root stays equally readable: permanent case folders sit directly
-under `~/Azimut`. Azimut keeps scratch sessions, bundles, settings, runtime
-tools and tile caches under the hidden `~/Azimut/.azimut/` directory. Settings →
-Storage moves the workspace anywhere you like, including an external drive, or
-adopts one you moved yourself. The old copy is kept until you delete it.
-
-The Case Doctor checks case integrity, including the derived Timeline index. It
-only changes a case after you choose a repair, and states what a database rebuild
-cannot recover before it starts.
-
-New in v0.2.8:
+Entities, graph and timeline:
 
 - Read the whole case as a table, with one filter bar whose values and counts all
   come from the case, and file a person, an account or a statement by hand.
@@ -69,19 +94,30 @@ New in v0.2.8:
 - Existing cases upgrade to SQLite schema 17 when they open, and bundles exported
   by v0.2.7 still import.
 
-## Install & run
+## Cases on disk
 
-```bash
-pipx install azimut   # isolated app install; plain `pip install azimut` also works
-azimut                # starts on http://127.0.0.1:8477 and opens a browser tab
-```
+Inside a case, Azimut owns only the `azimut/` directory. `README.txt` explains
+the boundary; anything else at the case root is yours and travels with the case
+bundle.
+
+The workspace root stays equally readable: permanent case folders sit directly
+under `~/Azimut`. Azimut keeps scratch sessions, bundles, settings, runtime
+tools and tile caches under the hidden `~/Azimut/.azimut/` directory. Settings →
+Storage moves the workspace anywhere you like, including an external drive, or
+adopts one you moved yourself. The old copy is kept until you delete it.
+
+The Case Doctor checks case integrity, including the derived Timeline index. It
+only changes a case after you choose a repair, and states what a database rebuild
+cannot recover before it starts.
+
+## Install in detail
+
+Azimut runs in a normal browser tab (Firefox/Chrome); there is no separate
+window. Closing the terminal it prints its URL into stops the app.
 
 Update with `pipx upgrade azimut`, remove with `pipx uninstall azimut`. Your
 cases and settings live under `~/Azimut`; upgrades and uninstalling the app do
 not remove them. Delete `~/Azimut` manually if you also want to remove the data.
-
-Azimut runs in a normal browser tab (Firefox/Chrome); there is no separate
-window. Closing the terminal it prints its URL into stops the app.
 
 ### Ready-to-run binary (no Python)
 
@@ -117,7 +153,7 @@ put ffmpeg on your `PATH` for those features. Everything else works without it.
 The bundled ffmpeg is redistributed under its own license; see
 [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html).
 
-From source:
+### From source
 
 Requires Python 3.11+ and Node.js 20+ for the frontend build.
 

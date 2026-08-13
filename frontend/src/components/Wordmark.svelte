@@ -7,7 +7,10 @@
      Cap height 100, stroke 15, butt caps and mitre joins. The A's apex is cut
      flat: a mitred point there goes thin and sharp next to the squared-off M,
      U and T. Letter positions carry pair kerning, not uniform spacing — evenly
-     spaced, the T's centred stem leaves a hole and it reads "AZIMU T". -->
+     spaced, the T's centred stem leaves a hole and it reads "AZIMU T".
+     The same seven paths sit in docs/media/lockup-*.svg for the README, where
+     there is no CSS to read the ink from; brandAssets.test.js holds them
+     together. -->
 <svg {height} viewBox="-7.5 -7.5 503.3 115" aria-label="Azimut">
   <g
     fill="none"
