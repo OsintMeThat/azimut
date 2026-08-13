@@ -13,7 +13,7 @@ import pytest
 import fullcase
 from legacy_case import rewind_case, unwrap_case, write_legacy_json_case
 
-from azimut import config, layout, workspace
+from azimut import caselayout, config, layout, workspace
 from azimut.sqlite_backend import SQLITE_SCHEMA
 from azimut.engine import trash as trash_engine
 from azimut.workspace import Case, CaseError, ensure_dir
@@ -323,13 +323,18 @@ def test_released_schema_three_is_stamped_only_once(tmp_workspace, monkeypatch):
 )
 def test_folder_normalizer_resumes_after_each_stage(tmp_workspace, monkeypatch, stage):
     case, expected = _case_at_folder_checkpoint(workspace.STORAGE_SCHEMA)
-    real_stage = getattr(workspace, stage)
+    # The stages live in `caselayout`; `workspace` calls one of them directly
+    # (`_wrap_case_folder`, before the manifest can even be read), so the patch
+    # goes on every module that looks the name up.
+    homes = [m for m in (caselayout, workspace) if hasattr(m, stage)]
+    real_stage = getattr(caselayout, stage)
 
     def stop_after_stage(current):
         real_stage(current)
         raise RuntimeError(f"stop after {stage}")
 
-    monkeypatch.setattr(workspace, stage, stop_after_stage)
+    for home in homes:
+        monkeypatch.setattr(home, stage, stop_after_stage)
     with pytest.raises(RuntimeError, match="stop after"):
         Case.open(case.id)
 
@@ -342,7 +347,8 @@ def test_folder_normalizer_resumes_after_each_stage(tmp_workspace, monkeypatch, 
         workspace.STORAGE_SCHEMA
     )
 
-    monkeypatch.setattr(workspace, stage, real_stage)
+    for home in homes:
+        monkeypatch.setattr(home, stage, real_stage)
     opened = Case.open(case.id)
 
     assert opened.read()["azimut"]["schema"] == workspace.CASE_SCHEMA

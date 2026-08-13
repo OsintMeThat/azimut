@@ -43,6 +43,16 @@
     filterProofPanelItems, hasProofCanvasContent, proofExportOptions, panelPreview,
   } from '../lib/composer.js';
   import {
+    movedBy,
+    nextPanelRow,
+    notesAfterRemoval,
+    nudgeShape,
+    PANEL_SCALE_MAX,
+    PANEL_SCALE_MIN,
+    scaleFromNode,
+    viewCentrePoint,
+  } from '../lib/proofEdits.js';
+  import {
     assetName, base64Of, PASTE_TYPES, MAX_PASTES, MAX_PASTE_BYTES,
   } from '../lib/pasteAsset.js';
   import {
@@ -51,8 +61,6 @@
   import { createHistory } from '../lib/history.js';
   import { pollWhile } from '../lib/poll.js';
 
-  const SCALE_MIN = 0.25;
-  const SCALE_MAX = 2.5;
   const SCALE_STEP = 0.05;
 
   const DRAW_TOOLS = [
@@ -821,11 +829,9 @@
 
   // Move a panel up/down a row; going past the last row starts a fresh row.
   function movePanelRow(index, delta) {
-    const panel = proof.panels[index];
-    const maxRow = Math.max(...proof.panels.map((p) => p.row ?? 0));
-    const next = (panel.row ?? 0) + delta;
-    if (next < 0 || next > maxRow + 1) return;
-    panel.row = next;
+    const next = nextPanelRow(proof.panels, index, delta);
+    if (next === null) return;
+    proof.panels[index].row = next;
     normalizeRows();
     selectedId = null;
     dirty = true;
@@ -840,7 +846,7 @@
   function scalePanel(index, delta) {
     const p = proof.panels[index];
     const cur = p.scale ?? 1;
-    const next = clampPanelScale(cur, delta, SCALE_MIN, SCALE_MAX);
+    const next = clampPanelScale(cur, delta, PANEL_SCALE_MIN, PANEL_SCALE_MAX);
     if (next === cur) return;
     if (proof.layout === 'free') materializeFreePositions(); // others must not reflow
     p.scale = next;
@@ -878,9 +884,7 @@
   function commitPanelNode(panel, node, { resized = false } = {}) {
     materializeFreePositions();
     if (resized) {
-      // transformer scales the group; group scale = (PANEL_H·scale)/naturalH
-      const next = (node.scaleX() * panel.natural[1]) / PANEL_H;
-      panel.scale = Math.round(Math.min(SCALE_MAX, Math.max(SCALE_MIN, next)) * 100) / 100;
+      panel.scale = scaleFromNode(node.scaleX(), panel.natural[1]);
     }
     panel.x = node.x();
     panel.y = node.y();
@@ -899,10 +903,9 @@
   // Free mode: array order is the z-order, front→back (Z1 = foreground), so
   // "bring forward" swaps toward index 0 and "send backward" toward the end.
   function movePanelZ(index, delta) {
-    const target = index + delta;
-    if (target < 0 || target >= proof.panels.length) return;
-    const [panel] = proof.panels.splice(index, 1);
-    proof.panels.splice(target, 0, panel);
+    const next = movedBy(proof.panels, index, delta);
+    if (!next) return;
+    proof.panels = next;
     dirty = true;
   }
 
@@ -949,10 +952,10 @@
   /** Doc-space centre of what the analyst is looking at. */
   function viewCentre() {
     if (!stage || !containerEl) return { x: 0, y: 0 };
-    return {
-      x: (containerEl.clientWidth / 2 - stage.x()) / stage.scaleX(),
-      y: (containerEl.clientHeight / 2 - stage.y()) / stage.scaleY(),
-    };
+    return viewCentrePoint(
+      { width: containerEl.clientWidth, height: containerEl.clientHeight },
+      { x: stage.x(), y: stage.y(), scaleX: stage.scaleX(), scaleY: stage.scaleY() },
+    );
   }
 
   async function addPastedImage(file) {
@@ -1419,8 +1422,7 @@
         // grid: corner-drag only changes the panel's scale — the grid decides
         // where it sits, so the row re-flows around the new size
         group.on('transformend', () => {
-          const next = (group.scaleX() * panel.natural[1]) / PANEL_H;
-          panel.scale = Math.round(Math.min(SCALE_MAX, Math.max(SCALE_MIN, next)) * 100) / 100;
+          panel.scale = scaleFromNode(group.scaleX(), panel.natural[1]);
           dirty = true;
           requestAnimationFrame(fit);
         });
@@ -1653,7 +1655,7 @@
       if (!boundPanel) return newBox;
       const impliedScale =
         (newBox.width / stage.scaleX()) * (boundPanel.natural[1] / (boundPanel.natural[0] * PANEL_H));
-      return impliedScale < SCALE_MIN || impliedScale > SCALE_MAX ? oldBox : newBox;
+      return impliedScale < PANEL_SCALE_MIN || impliedScale > PANEL_SCALE_MAX ? oldBox : newBox;
     });
     transformer.keepRatio(!!sigNode || !!pasteNode);
     transformer.nodes(
@@ -2063,10 +2065,7 @@
   function deleteShape(id) {
     const gone = proof.shapes.find((s) => s.id === id);
     proof.shapes = proof.shapes.filter((s) => s.id !== id);
-    // drop the legend note if this was the last element of its color
-    if (gone && !proof.shapes.some((s) => s.color === gone.color)) {
-      delete proof.notes[gone.color];
-    }
+    proof.notes = notesAfterRemoval(proof.notes, proof.shapes, gone);
     if (selectedId === id) selectedId = null;
     dirty = true;
   }
@@ -2127,12 +2126,7 @@
   function nudgeSelected(dx, dy) {
     const s = selectedShape;
     if (!s) return;
-    if (Array.isArray(s.points)) {
-      s.points = s.points.map((v, i) => v + (i % 2 === 0 ? dx : dy));
-    } else {
-      s.x = (s.x ?? 0) + dx;
-      s.y = (s.y ?? 0) + dy;
-    }
+    Object.assign(s, nudgeShape(s, dx, dy));
     dirty = true;
   }
 
@@ -2854,8 +2848,8 @@
           bind:selectedId
           {activeColor}
           caseId={caseState.current?.id}
-          scaleMin={SCALE_MIN}
-          scaleMax={SCALE_MAX}
+          scaleMin={PANEL_SCALE_MIN}
+          scaleMax={PANEL_SCALE_MAX}
           scaleStep={SCALE_STEP}
           frameWidthMax={FRAME_WIDTH_MAX}
           frameColor={FRAME_COLOR}

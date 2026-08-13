@@ -6,6 +6,9 @@ const cluster = readFileSync(
   new URL('./satellite/MapToolCluster.svelte', import.meta.url),
   'utf8'
 );
+// The sky overlay's geometry moved to `lib/skyOverlay.js`, where it is exercised
+// against real numbers (`skyOverlay.test.js`); the tool hands it to Leaflet.
+const sky = readFileSync(new URL('../lib/skyOverlay.js', import.meta.url), 'utf8');
 
 describe('Satellite saved work', () => {
   it('opens the case on one compact index, not on every capture row', () => {
@@ -285,20 +288,23 @@ describe('sun and moon mode', () => {
   });
 
   it('draws only the arc the body sweeps while it is up', () => {
-    expect(source).toContain('function upRuns(altitudes)');
-    expect(source).toContain('if (altitude >= 0)');
+    expect(sky).toContain('export function upRuns(altitudes)');
+    expect(sky).toContain('if (altitude >= 0)');
+    expect(source).toContain('for (const run of upRuns(body.altitude))');
     expect(source).toContain('measure.destination(origin, azimuth, reach * scale)');
   });
 
   it('ticks the arc hourly, longer every three hours', () => {
-    expect(source).toContain('if (minute % 60 || body.altitude[i] < 0) return');
-    expect(source).toContain('const long = minute % 180 === 0');
+    expect(sky).toContain('if (minute % 60 || altitudes[i] < 0) return');
+    expect(sky).toContain('long: minute % 180 === 0');
+    expect(source).toContain('hourTicks(curve.minutes, body.altitude)');
   });
 
   it('rides the body along its own ray, as close to the anchor as it is high', () => {
     // the anchor stands for the zenith and the arc for the horizon, the same
     // radial convention as the compass rosette
-    expect(source).toContain('at(body.azimuth[sunIndex], (90 - altitude) / 90)');
+    expect(sky).toContain('return (90 - altitude) / 90;');
+    expect(source).toContain('at(body.azimuth[sunIndex], markScale(altitude))');
     expect(source).toContain('function bodyIcon(kind, colour, illuminated, waxing)');
   });
 
@@ -308,27 +314,29 @@ describe('sun and moon mode', () => {
   });
 
   it('draws the moon mark at its phase, worked out of the lit fraction', () => {
-    expect(source).toContain('Math.acos(Math.min(1, Math.max(-1, 2 * illuminated - 1)))');
-    expect(source).toContain('litPath(r, illuminated, phaseAngle)');
+    expect(sky).toContain('Math.acos(clamped) * 180) / Math.PI');
+    expect(sky).toContain('litPath(r, illuminated, phaseAngleOf(illuminated))');
     // a plan view has no vertical, so the bright-limb angle is not used here
-    expect(source).toContain('glyphRotation(waxing)');
-    expect(source).not.toContain('glyphRotation(waxing, ');
+    expect(sky).toContain('glyphRotation(waxing)');
+    expect(sky).not.toContain('glyphRotation(waxing, ');
   });
 
   it('names the altitude on the mark and on the ray', () => {
-    expect(source).toContain('alt ${Math.round(altitude)}°');
+    expect(sky).toContain('alt ${Math.round(altitude)}°');
+    expect(source).toContain('bodyReading(');
     expect(source).toContain("bindTooltip(body.key === 'moon'");
   });
 
   it('keeps a body below the horizon on the map, dashed', () => {
     expect(source).toContain('const altitude = body.altitude[sunIndex]');
-    expect(source).toContain('const below = altitude < 0');
+    expect(sky).toContain('return altitude < 0;');
+    expect(source).toContain('const below = isBelow(altitude)');
     expect(source).toContain("dashArray: below ? '6 6' : null");
   });
 
   it('scrubs the hour without asking the backend again', () => {
     // the whole day arrived in one response, so the slider reads an array
-    expect(source).toContain('function nearestSample(clock, wanted)');
+    expect(sky).toContain('export function nearestSample(clock, wanted)');
     expect(source).toContain('onindex={(value) => (sunIndex = value)}');
     expect(source).toMatch(/if \(sunDay\) params\.set\('date', sunDay\)/);
   });

@@ -160,8 +160,9 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | Tool | What it does |
 |------|--------------|
 | **Case Sheet** | Adds editable free columns and CSV/GeoJSON round trips to the shipped Board. Imported loose rows stay outside the graph until promoted. |
-| **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
+| **Saved view management** | Renames and sorts Board, Graph and Timeline views, with their surface and last modification clearly shown. |
+| **Analysis view export** | Copies or exports the visible Graph or Timeline as a PNG with its lens, question, time window, clock and legend. |
 
 Toward v2: split Satellite.svelte into `lib/` modules, before the map engine
 changes under it.
@@ -172,6 +173,7 @@ changes under it.
 |------|--------------|
 | **Map engine (MapLibre)** | Replaces Leaflet with MapLibre GL at 2D parity: same providers, same captures, and the capture tests still verify the pixels. Ships before the 3D map, which builds on it. |
 | **3D map** | Pitch, public DEM terrain and extruded OSM buildings on the MapLibre map. An oblique capture records its pitch beside the bearing, so the view can be reproduced. |
+| **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. Follows the map engine, which redraws what a capture is made of. |
 | **Footprint tracing** | Draws a place's uncertainty as the shape it really is, for a quay, a treeline or an L-shaped block the circle describes badly. The field, its validation and its drawing already ship; only the gesture is missing, and it follows the map engine rather than being written twice. |
 | **Satellite Compare** | Same coords across providers (Esri / Sentinel-2 date slider / Bing / keyed), synced pan/zoom. Copernicus easy link. |
@@ -273,6 +275,7 @@ stops making sense.
 - **Count a statement's independence by origin, not by wrapper:** three collages made from one video are three sources today, and are arguably one. The graph already answers this for a place; changing it for a statement changes a published number.
 - **Free-form montage editor:** consider only if it stays distinct from Geo Proof and Inspect collage.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
+- **Guided companion:** a mark the analyst clicks for a legend of the open tool, covering what it is for and the controls whose icon does not say it. Clicking an entry points at the real button.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
 
 ## 8. Explicit non-goals

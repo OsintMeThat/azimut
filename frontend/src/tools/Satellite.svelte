@@ -13,7 +13,16 @@
   } from '../lib/state.svelte.js';
   import { mapLinks } from '../lib/maplinks.js';
   import * as measure from '../lib/measure.js';
-  import { litPath, glyphRotation } from '../lib/moonphase.js';
+  import { markerGeometry, markerSvg } from '../lib/mapMarkers.js';
+  import {
+    bodyReading,
+    bodySvg,
+    hourTicks,
+    isBelow,
+    markScale,
+    nearestSample,
+    upRuns,
+  } from '../lib/skyOverlay.js';
   import * as gridSearch from '../lib/gridSearch.js';
   import { dragBearing, pivotPanOffset } from '../lib/satRotate.js';
   import { clampSize, scaledCapture } from '../lib/captureSize.js';
@@ -1442,73 +1451,20 @@
       });
   });
 
-  // Match a wall clock against the day's own labels rather than dividing minutes
-  // by 60, which is wrong by an hour on the days daylight saving moves.
-  function nearestSample(clock, wanted) {
-    const target = Number(wanted.slice(0, 2)) * 60 + Number(wanted.slice(3, 5));
-    let best = 0;
-    let closest = Infinity;
-    clock.forEach((stamp, i) => {
-      const minutes = Number(stamp.slice(0, 2)) * 60 + Number(stamp.slice(3, 5));
-      const gap = Math.abs(minutes - target);
-      if (gap < closest) {
-        closest = gap;
-        best = i;
-      }
-    });
-    return best;
-  }
-
   function themeColour(name, fallback) {
     const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     return value || fallback;
   }
 
-  // Runs of consecutive samples with the body above the horizon: the arc it
-  // actually sweeps in the sky. Drawing the whole 24 hours would close the circle
-  // through the bearings it holds while it is down, which says nothing.
-  function upRuns(altitudes) {
-    const runs = [];
-    let run = null;
-    altitudes.forEach((altitude, i) => {
-      if (altitude >= 0) {
-        run = run ?? [];
-        run.push(i);
-      } else if (run) {
-        runs.push(run);
-        run = null;
-      }
-    });
-    if (run) runs.push(run);
-    return runs.filter((r) => r.length > 1);
-  }
-
   // The body itself, as a mark on its own ray: it rides between the anchor, which
   // stands for the zenith, and the arc, which stands for the horizon, so how far
-  // up it is reads as how close to you it is. The same radial convention as the
-  // compass rosette in Coords & Sky.
+  // up it is reads as how close to you it is. The geometry and the glyph are in
+  // `lib/skyOverlay.js`; this only hands them to Leaflet.
   function bodyIcon(kind, colour, illuminated, waxing) {
     const size = 20;
-    const r = size / 2 - 2;
-    let inner = `<circle r="${r}" fill="${colour}" />`;
-    if (kind === 'moon') {
-      // Phase angle back out of the lit fraction: k = (1 + cos i) / 2 by
-      // definition, so nothing extra has to be fetched to draw it.
-      const phaseAngle = (Math.acos(Math.min(1, Math.max(-1, 2 * illuminated - 1))) * 180) / Math.PI;
-      // The bright-limb angle belongs to a view of the sky and says nothing in a
-      // plan view, so the map uses the table convention: lit side right when waxing.
-      inner =
-        `<circle r="${r}" fill="${colour}" opacity="0.25" />` +
-        `<g transform="rotate(${glyphRotation(waxing)})">` +
-        `<path d="${litPath(r, illuminated, phaseAngle)}" fill="${colour}" /></g>`;
-    }
     return L.divIcon({
       className: 'sky-body', // replaces Leaflet's boxed default
-      html:
-        `<svg width="${size}" height="${size}" viewBox="${-size / 2} ${-size / 2} ${size} ${size}">` +
-        `<circle r="${r + 1.5}" fill="rgba(0,0,0,0.45)" />${inner}` +
-        `<circle r="${r}" fill="none" stroke="#fff" stroke-opacity="0.85" stroke-width="1.5" />` +
-        `</svg>`,
+      html: bodySvg(kind, colour, illuminated, waxing, size),
       iconSize: [size, size],
       iconAnchor: [size / 2, size / 2],
     });
@@ -1556,9 +1512,7 @@
           { color: body.colour, weight: 2.5, opacity: 0.9 }
         ).addTo(sunLayer);
       }
-      curve.minutes.forEach((minute, i) => {
-        if (minute % 60 || body.altitude[i] < 0) return;
-        const long = minute % 180 === 0; // longer every three hours
+      for (const { index: i, long } of hourTicks(curve.minutes, body.altitude)) {
         L.polyline([at(body.azimuth[i], 0.94), at(body.azimuth[i], long ? 1.1 : 1.03)], {
           color: body.colour,
           weight: 2.5,
@@ -1566,10 +1520,12 @@
         })
           .bindTooltip(`${body.label} ${curve.clock[i]} · az ${Math.round(body.azimuth[i])}°`)
           .addTo(sunLayer);
-      });
+      }
       const altitude = body.altitude[sunIndex];
-      const below = altitude < 0;
-      const reading = `${body.label} ${curve.clock[sunIndex]} · az ${Math.round(body.azimuth[sunIndex])}° · alt ${Math.round(altitude)}°`;
+      const below = isBelow(altitude);
+      const reading = bodyReading(
+        body.label, curve.clock[sunIndex], body.azimuth[sunIndex], altitude
+      );
       L.polyline([[origin.lat, origin.lon], at(body.azimuth[sunIndex])], {
         color: body.colour,
         weight: 3.5,
@@ -1581,7 +1537,7 @@
       // Nothing rides the ray while the body is under the horizon: the dashed
       // ray already says where it is, and a mark on it would claim it is visible.
       if (!below) {
-        L.marker(at(body.azimuth[sunIndex], (90 - altitude) / 90), {
+        L.marker(at(body.azimuth[sunIndex], markScale(altitude)), {
           icon: bodyIcon(
             body.key,
             body.colour,
@@ -1705,33 +1661,12 @@
   let selRect = $state(null); // live marquee { x0, y0, x1, y1 } in map-container px
 
   function markerIcon(style) {
-    if (style === 'pin') {
-      return L.divIcon({
-        className: 'sat-marker',
-        iconSize: [30, 42],
-        iconAnchor: [15, 42], // tip points at the location
-        html: `<svg width="30" height="42" viewBox="0 0 30 42">
-          <path d="M15 41 C15 41 27 24 27 14 A12 12 0 1 0 3 14 C3 24 15 41 15 41 Z"
-            fill="#e5484d" stroke="#3c0c0e" stroke-width="1.5"/>
-          <circle cx="15" cy="14" r="4.5" fill="#fff" stroke="#3c0c0e" stroke-width="1"/>
-        </svg>`,
-      });
-    }
+    const { size, anchor } = markerGeometry(style);
     return L.divIcon({
       className: 'sat-marker',
-      iconSize: [46, 46],
-      iconAnchor: [23, 23],
-      html: `<svg width="46" height="46" viewBox="0 0 46 46">
-        <g stroke="#000" stroke-width="4" opacity="0.55">
-          <line x1="1" y1="23" x2="16" y2="23"/><line x1="30" y1="23" x2="45" y2="23"/>
-          <line x1="23" y1="1" x2="23" y2="16"/><line x1="23" y1="30" x2="23" y2="45"/>
-        </g>
-        <g stroke="#fff" stroke-width="2">
-          <line x1="1" y1="23" x2="16" y2="23"/><line x1="30" y1="23" x2="45" y2="23"/>
-          <line x1="23" y1="1" x2="23" y2="16"/><line x1="23" y1="30" x2="23" y2="45"/>
-          <circle cx="23" cy="23" r="2.5" fill="none"/>
-        </g>
-      </svg>`,
+      iconSize: size,
+      iconAnchor: anchor,
+      html: markerSvg(style),
     });
   }
 

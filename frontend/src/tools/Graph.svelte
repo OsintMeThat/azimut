@@ -50,6 +50,14 @@
    */
   import Konva from 'konva';
   import { fileUrl } from '../lib/fileUrl.js';
+  import { mergedArrangement, validPins } from '../lib/graphArrangement.js';
+  import {
+    clampZoom,
+    toCanvasPoint,
+    visibleRect,
+    within,
+    zoomAround,
+  } from '../lib/graphViewport.js';
   import { tick, untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import {
@@ -157,8 +165,6 @@
 
   /** Below this scale a label is noise, so only the node in hand keeps one. */
   const LABEL_SCALE = 0.62;
-  const ZOOM_MIN = 0.12;
-  const ZOOM_MAX = 3.2;
   /** Pointer travel that turns a click into a pan, so a hand tremor still selects. */
   const DRAG_SLOP = 4;
   /** How long a drag waits before it is filed, so a flurry of them is one request. */
@@ -2051,14 +2057,7 @@
   function replaceViewArrangement(wanted, owner = arrangementOwner) {
     pins.clear();
     settled.clear();
-    for (const spot of wanted ?? []) {
-      if (
-        typeof spot?.id !== 'string' ||
-        !Number.isFinite(spot.x) ||
-        !Number.isFinite(spot.y)
-      ) continue;
-      pins.set(spot.id, { x: spot.x, y: spot.y });
-    }
+    for (const [id, spot] of validPins(wanted)) pins.set(id, spot);
     arrangementOwner = owner;
     pinnedIds = [...pins.keys()];
     pinCount = pinnedIds.length;
@@ -2079,17 +2078,12 @@
   /** Where every pin in the active arrangement stands. A named view retains local
    *  off-screen pins; the case-wide undo remains limited to nodes currently drawn. */
   function arrangementNow() {
-    const at = new Map();
-    if (!ownsViewArrangement()) {
-      for (const node of payload?.nodes ?? []) {
-        if (node.pin) at.set(node.id, { x: node.pin[0], y: node.pin[1] });
-      }
-    }
-    for (const [id, spot] of pins) at.set(id, { x: spot.x, y: spot.y });
-    const held = new Set(pinnedIds);
-    return [...at.entries()]
-      .filter(([id]) => held.has(id))
-      .map(([id, spot]) => ({ id, x: spot.x, y: spot.y }));
+    return mergedArrangement({
+      nodes: payload?.nodes ?? [],
+      pins,
+      held: pinnedIds,
+      fromView: ownsViewArrangement(),
+    });
   }
 
   function snapshotNow() {
@@ -3933,18 +3927,11 @@
    * requests for cards nobody can see.
    */
   function onScreen(scale) {
-    const left = -group.x() / scale;
-    const top = -group.y() / scale;
     // Two cards of slack, so a normal drag reveals cards that already exist rather
     // than the dots underneath them: the scene is only redressed when the drag ends.
     const margin = CARD.w * 2 * cardFactor(scale);
-    const right = left + width / scale;
-    const bottom = top + height / scale;
-    return (shape) => {
-      const x = shape.x();
-      const y = shape.y();
-      return x > left - margin && x < right + margin && y > top - margin && y < bottom + margin;
-    };
+    const rect = visibleRect({ x: group.x(), y: group.y(), scale }, width, height, margin);
+    return (shape) => within(rect, shape.x(), shape.y());
   }
 
   /**
@@ -4244,22 +4231,23 @@
    *  The same inverse `zoomBy` already takes to keep the pointer over the same spot
    *  while zooming, said once so a dropped file and a new entity land where the
    *  gesture aimed. */
+  /** Where the camera stands, as `lib/graphViewport.js` states it. */
+  function camera() {
+    return { x: group.x(), y: group.y(), scale: group.scaleX() || 1 };
+  }
+
   function toCanvas(point) {
     if (!group) return { x: point.x, y: point.y };
-    const scale = group.scaleX() || 1;
-    return { x: (point.x - group.x()) / scale, y: (point.y - group.y()) / scale };
+    return toCanvasPoint(point, camera());
   }
 
   function zoomBy(factor, anchor) {
     if (!group || !stage) return;
-    const old = group.scaleX();
-    const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, old * factor));
-    if (next === old) return;
-    const point = anchor ?? { x: width / 2, y: height / 2 };
-    const local = { x: (point.x - group.x()) / old, y: (point.y - group.y()) / old };
-    group.scale({ x: next, y: next });
-    group.position({ x: point.x - local.x * next, y: point.y - local.y * next });
-    zoom = next;
+    const moved = zoomAround(factor, anchor ?? { x: width / 2, y: height / 2 }, camera());
+    if (!moved) return; // already at the bound; nothing to redraw
+    group.scale({ x: moved.scale, y: moved.scale });
+    group.position({ x: moved.x, y: moved.y });
+    zoom = moved.scale;
     cameraRevision += 1;
     restyle();
   }
@@ -4611,7 +4599,7 @@
       rereads += 1;
       await tick();
       if (saved.camera && group) {
-        const scale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Number(saved.camera.zoom) || 1));
+        const scale = clampZoom(Number(saved.camera.zoom) || 1);
         group.position({ x: Number(saved.camera.x) || 0, y: Number(saved.camera.y) || 0 });
         group.scale({ x: scale, y: scale });
         zoom = scale;

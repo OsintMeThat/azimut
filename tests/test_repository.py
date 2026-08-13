@@ -322,9 +322,9 @@ def test_the_store_that_ships_can_read_inside_a_stored_field():
     belt and braces, and it matches at any depth where this is top-level exact — so if
     this ever fails on a platform, that difference is what ships there.
     """
-    from azimut import sqlite_backend
+    from azimut.store import filters
 
-    assert sqlite_backend._has_json1() is True
+    assert filters._has_json1() is True
 
 
 def test_page_entities_filters_on_one_stored_field(repo):
@@ -450,9 +450,9 @@ def test_a_value_a_menu_cannot_show_is_not_offered(repo):
 def test_the_field_filter_answers_the_same_without_json1(repo, monkeypatch):
     """The fallback is what a binary whose SQLite lacks JSON1 would run, so it is
     exercised on every platform rather than only where it might one day be needed."""
-    from azimut import sqlite_backend
+    from azimut.store import filters
 
-    monkeypatch.setattr(sqlite_backend, "_has_json1", lambda: False)
+    monkeypatch.setattr(filters, "_has_json1", lambda: False)
     video = repo.add_entity("media", "clip", {"kind": "video"}, by="user")
     repo.add_entity("media", "still", {"kind": "image"}, by="user")
     hundred = repo.add_entity("place", "block", {"radius_m": 100}, by="user")
@@ -623,7 +623,7 @@ def test_links_among_holds_an_edge_whose_ends_bind_in_two_statements(repo):
     unconnected dots, and each one went on reporting the lost edges as connections
     still to open under a control that could never bring one in.
     """
-    from azimut.sqlite_backend import _ID_CHUNK
+    from azimut.store.sql import _ID_CHUNK
 
     hub = repo.add_entity("person", "hub", by="user")["id"]
     # One chunk over the boundary, so the star's arms are bound in three statements
@@ -676,7 +676,7 @@ def test_the_closed_set_costs_one_statement_whatever_the_drawing_holds(repo):
     top of that would have moved the freeze from the canvas to the database, which is
     why this lands with the limit and not after it.
     """
-    from azimut.sqlite_backend import _ID_CHUNK
+    from azimut.store.sql import _ID_CHUNK
 
     hub = repo.add_entity("person", "hub", by="user")["id"]
     spokes = [
@@ -699,7 +699,7 @@ def test_the_closed_set_costs_one_statement_whatever_the_drawing_holds(repo):
 
 def test_one_hop_costs_one_statement_too(repo):
     """The open set could always be chunked, and is asked through the same table."""
-    from azimut.sqlite_backend import _ID_CHUNK
+    from azimut.store.sql import _ID_CHUNK
 
     hub = repo.add_entity("person", "hub", by="user")["id"]
     spokes = [
@@ -719,7 +719,7 @@ def test_one_hop_costs_one_statement_too(repo):
 def test_the_scope_table_does_not_survive_the_read_that_filled_it(repo):
     """A temp table left standing would answer the next question with the last one's
     ids. It belongs to the connection, and each read opens its own."""
-    from azimut.sqlite_backend import _SCOPE
+    from azimut.store.sql import _SCOPE
 
     hub = repo.add_entity("person", "hub", by="user")["id"]
     other = repo.add_entity("person", "other", by="user")["id"]
@@ -746,7 +746,7 @@ def test_every_case_wide_ordering_is_served_by_an_index(repo):
     a temp B-tree for every page. This holds the plan to the index, in both
     directions and with a cursor in hand, which is the shape a second page runs.
     """
-    from azimut.sqlite_backend import _PAGE_ORDERS
+    from azimut.store.cursors import _PAGE_ORDERS
 
     repo.add_entity("person", "Ada", by="user")
     plans: dict[str, list[str]] = {}

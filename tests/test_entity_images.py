@@ -248,10 +248,10 @@ def test_a_photo_past_the_limit_is_refused_before_anything_is_written(
     before anything looked at its size.
     """
     from azimut import layout
-    from azimut.api import cases
+    from azimut.api.cases import entity_images
     from azimut.workspace import Case
 
-    monkeypatch.setattr(cases, "MAX_IMAGE_BYTES", 100)
+    monkeypatch.setattr(entity_images, "MAX_IMAGE_BYTES", 100)
     case_id = _case(client, "Bounded photos")
     subject = _entity(client, case_id, "person", "Unknown subject")
 

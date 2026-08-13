@@ -170,7 +170,11 @@ def test_storage_and_jobs_add_no_new_runtime_dependency():
     # sqlite3/threading/subprocess are stdlib; Pillow (declared) does the imaging.
     assert "pillow" in declared
     src = Path(__file__).resolve().parent.parent / "src" / "azimut"
-    text = (src / "sqlite_backend.py").read_text() + (src / "engine" / "thumbnails.py").read_text()
+    # The store is a package plus its entry module, so the scan follows it rather
+    # than stopping at the file the class happens to live in.
+    files = [src / "sqlite_backend.py", src / "engine" / "thumbnails.py"]
+    files += sorted((src / "store").glob("*.py"))
+    text = "".join(path.read_text() for path in files)
     assert "import sqlite3" in (src / "sqlite_backend.py").read_text()
     for banned in ("import numpy", "import pandas", "import redis", "import celery"):
         assert banned not in text  # no heavyweight queue/DB dependency slipped in
@@ -260,6 +264,9 @@ def test_current_settings_docs_name_the_current_sections():
         root / "frontend" / "src" / "components" / "WorkspaceFolder.svelte",
         root / "frontend" / "src" / "tools" / "Settings.svelte",
     ]
+    # Settings is a tab host now, so the copy this reads lives in the tabs. Scan
+    # the directory rather than the host, or a stale label walks back in unseen.
+    current += sorted((root / "frontend" / "src" / "tools" / "settings").glob("*.svelte"))
     text = "\n".join(path.read_text(encoding="utf-8") for path in current)
     for stale in ("Settings → Preferences", "About tab", "Preferences tab"):
         assert stale not in text

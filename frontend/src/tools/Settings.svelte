@@ -7,20 +7,9 @@
     templatesState, loadTemplates, saveTemplate, deleteTemplate,
   } from '../lib/state.svelte.js';
   import { templateFromProof, textSignatureStyle } from '../lib/composer.js';
-  import { POST_TARGETS, templateFromPost } from '../lib/post.js';
+  import { templateFromPost } from '../lib/post.js';
   import { formatCoords, parseHomeView } from '../lib/coords.js';
-  import { formatDistance, formatArea } from '../lib/measure.js';
-  import {
-    monthCount,
-    tilesOfFree,
-    freeTierShare,
-    usageBlocked,
-    providerStatus,
-    USAGE_LINKS,
-    BLOCK_SHARE,
-    ECO_MAX_ZOOM,
-    FREE_TIER,
-  } from '../lib/usage.js';
+  import { USAGE_LINKS, ECO_MAX_ZOOM } from '../lib/usage.js';
   import { probeKey, googleMapsLoadedKey } from '../lib/gmaps.js';
   import { extensionVersion } from '../lib/extBridge.js';
   import { CASE_FOLDER_LABEL, saveDestination } from '../lib/exportDest.js';
@@ -29,7 +18,13 @@
   import ProofTemplateEditor from '../components/ProofTemplateEditor.svelte';
   import PostTemplateEditor from '../components/PostTemplateEditor.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
-  import WorkspaceFolder from '../components/WorkspaceFolder.svelte';
+  import ExtensionTab from './settings/ExtensionTab.svelte';
+  import GeneralTab from './settings/GeneralTab.svelte';
+  import ImageryTab from './settings/ImageryTab.svelte';
+  import PublishingTab from './settings/PublishingTab.svelte';
+  import StorageTab from './settings/StorageTab.svelte';
+  import SystemTab from './settings/SystemTab.svelte';
+  import TemplatesTab from './settings/TemplatesTab.svelte';
 
   // Keep workflow choices above app maintenance in the settings rail.
   const TABS = [
@@ -135,21 +130,7 @@
   /** Build the per-provider shape used by key and preference state. */
   const perProvider = (value) => Object.fromEntries(KEYED.map((k) => [k.id, value(k)]));
 
-  const COORD_CHOICES = [
-    { id: 'dd', label: 'Decimal' },
-    { id: 'dms', label: 'DMS' },
-    { id: 'mgrs', label: 'MGRS' },
-  ];
-  const UNIT_CHOICES = [
-    { id: 'metric', label: 'Metric' },
-    { id: 'imperial', label: 'Imperial' },
-  ];
-
   let keys = $state(perProvider(() => ''));
-  let shown = $state(perProvider(() => false));
-  // Start cards closed so setup details appear only for the selected provider.
-  let open = $state(perProvider(() => false));
-  let termsOpen = $state(false);
   let usage = $state({});
   let month = $state('');
   let testing = $state(perProvider(() => false));
@@ -267,8 +248,6 @@
     }
   }
 
-  // Downloaders can be refreshed from PyPI between Azimut releases.
-  const SCRAPER_LABELS = { 'yt-dlp': 'yt-dlp', 'gallery-dl': 'gallery-dl' };
   let scrapers = $state([]);
   let checking = $state(false);
   let updating = $state({}); // { [dist]: true } while its request is in flight
@@ -693,818 +672,116 @@
       {/each}
     </nav>
 
-    <div class="pane">
+    <div class="pane settings-pane">
       {#if tab === 'general'}
-        <section class="group">
-          <h3>Coordinates</h3>
-          <div class="row">
-            <div class="row-label">
-              <span>Format</span>
-              <span class="row-hint">How every tool prints a latitude/longitude.</span>
-            </div>
-            <div class="seg" role="group" aria-label="Coordinate format">
-              {#each COORD_CHOICES as c (c.id)}
-                <button
-                  class="seg-btn"
-                  class:on={prefs.coordFormat === c.id}
-                  onclick={() => savePrefs({ coord_format: c.id })}
-                >{c.label}</button>
-              {/each}
-            </div>
-          </div>
-          <p class="sample mono">{coordSample}</p>
-          <p class="note">
-            Changes display only; case data stays in decimal degrees.
-          </p>
-        </section>
-
-        <section class="group">
-          <h3>Measurements</h3>
-          <div class="row">
-            <div class="row-label">
-              <span>Units</span>
-              <span class="row-hint">The Satellite ruler, area and readouts.</span>
-            </div>
-            <div class="seg" role="group" aria-label="Units">
-              {#each UNIT_CHOICES as c (c.id)}
-                <button
-                  class="seg-btn"
-                  class:on={prefs.units === c.id}
-                  onclick={() => savePrefs({ units: c.id })}
-                >{c.label}</button>
-              {/each}
-            </div>
-          </div>
-          <p class="sample mono">
-            {formatDistance(1234, prefs.units)} · {formatArea(52000, prefs.units)}
-          </p>
-        </section>
-
-        <section class="group">
-          <h3>Satellite home view</h3>
-          <p class="intro">
-            Default opening position for Satellite; case navigation still takes priority.
-          </p>
-          <div class="grid-3">
-            <label class="field">
-              <span>Latitude</span>
-              <input class="input mono" bind:value={home.lat} onchange={saveHome} inputmode="decimal" spellcheck="false" />
-            </label>
-            <label class="field">
-              <span>Longitude</span>
-              <input class="input mono" bind:value={home.lon} onchange={saveHome} inputmode="decimal" spellcheck="false" />
-            </label>
-            <label class="field">
-              <span>Zoom</span>
-              <input class="input mono" bind:value={home.zoom} onchange={saveHome} type="number" min="1" max="21" />
-            </label>
-          </div>
-        </section>
-
-        <section class="group">
-          <h3>Proofs</h3>
-          <p class="intro">
-            Saving a proof turns the coordinates it carries into a place on the map, and
-            says the proof shows it.
-          </p>
-          <div class="row">
-            <div class="row-label">
-              <span>Save the point without asking</span>
-              <span class="row-hint">
-                Off, the composer asks each time. A point already saved is never asked about.
-              </span>
-            </div>
-            <input
-              type="checkbox"
-              bind:checked={proofPlaceAuto}
-              onchange={() => savePrefs({ proof_place_auto: proofPlaceAuto })}
-              aria-label="Save a proof's point without asking"
-            />
-          </div>
-        </section>
+        <GeneralTab
+          {prefs}
+          {home}
+          {coordSample}
+          {savePrefs}
+          {saveHome}
+          bind:proofPlaceAuto
+        />
       {/if}
 
       {#if tab === 'publishing'}
-        <section class="group">
-          <h3>Geo Report</h3>
-          <div class="row">
-            <div class="row-label">
-              <span>Default mention</span>
-              <span class="row-hint">Pre-filled on a new draft. Leave empty for none.</span>
-            </div>
-            <input
-              class="input mention"
-              bind:value={mention}
-              onchange={() => savePrefs({ post_mention: mention })}
-              placeholder="@GeoConfirmed"
-              spellcheck="false"
-            />
-          </div>
-          <div class="row">
-            <div class="row-label">
-              <span>Preferred platform</span>
-              <span class="row-hint">Used for new Geo Report drafts.</span>
-            </div>
-            <div class="seg" role="group" aria-label="Preferred platform">
-              {#each Object.values(POST_TARGETS) as option (option.id)}
-                <button
-                  class="seg-btn"
-                  class:on={postTarget === option.id}
-                  onclick={() => {
-                    postTarget = option.id;
-                    savePrefs({ post_target: option.id });
-                  }}
-                >{option.label}</button>
-              {/each}
-            </div>
-          </div>
-        </section>
-
-        <section class="group">
-          <h3>Signature</h3>
-          <div class="row">
-            <div class="row-label">
-              <span>Your account handle</span>
-              <span class="row-hint">Shown on proofs that enable “Add account handle”.</span>
-            </div>
-            <input
-              class="input mention"
-              bind:value={signatureHandle}
-              onchange={() => savePrefs({ signature_handle: signatureHandle })}
-              placeholder="@my_handle"
-              maxlength="64"
-              spellcheck="false"
-            />
-          </div>
-          <div class="row">
-            <div class="row-label">
-              <span>Your logo</span>
-              <span class="row-hint">
-                Transparent PNG, up to 2 MB, used only on signed proofs.
-              </span>
-            </div>
-            <div class="sig-side">
-              {#if signature}
-                <img class="sig-preview" src={`/api/settings/signature.png?v=${sigBust}`} alt="Your signature" />
-              {/if}
-              <div class="sig-buttons">
-                <button class="btn btn-sm" onclick={() => sigInput?.click()}>
-                  {signature ? 'Replace…' : 'Choose PNG…'}
-                </button>
-                {#if signature}
-                  <button class="btn btn-danger btn-sm" onclick={removeSignature}>Remove</button>
-                {/if}
-              </div>
-            </div>
-            <input
-              bind:this={sigInput}
-              class="sig-file"
-              type="file"
-              accept="image/png"
-              onchange={uploadSignature}
-            />
-          </div>
-        </section>
+        <PublishingTab
+          {signature}
+          {sigBust}
+          {savePrefs}
+          {removeSignature}
+          {uploadSignature}
+          bind:mention
+          bind:postTarget
+          bind:signatureHandle
+          bind:sigInput
+        />
       {/if}
 
       {#if tab === 'imagery'}
-        <section class="group">
-          <h3>Providers</h3>
-          <p class="intro">
-            Add provider keys to unlock more Satellite basemaps; usage appears on each card.
-          </p>
-
-          <div class="cards">
-            {#each KEYED as k (k.id)}
-              {@const count = monthCount(usage, k.id, month)}
-              {@const share = freeTierShare(count, k.id, tiers)}
-              {@const st = providerStatus({
-                key: keys[k.id],
-                enabled: enabled[k.id],
-                status: testResult[k.id],
-                count,
-                meter: k.id,
-                overrides,
-                tiers,
-              })}
-              <div class="card" class:open={open[k.id]}>
-                <div class="card-head">
-                  <button
-                    class="card-toggle"
-                    onclick={() => (open[k.id] = !open[k.id])}
-                    aria-expanded={open[k.id]}
-                  >
-                    <Icon name={open[k.id] ? 'chevronDown' : 'chevronRight'} size={13} />
-                    <span class="card-name">{k.label}</span>
-                    <span class="card-gives">{k.gives}</span>
-                  </button>
-                  <span
-                    class="chip {st.tone}"
-                    title={st.tone === 'bad' ? testResult[k.id]?.detail : undefined}
-                  >{st.label}</span>
-                  {#if keys[k.id]}
-                    <input
-                      class="card-enable"
-                      type="checkbox"
-                      bind:checked={enabled[k.id]}
-                      onchange={saveProviderPrefs}
-                      title="Show or hide this basemap in the Satellite tab"
-                      aria-label="Show {k.label} in the Satellite tab"
-                    />
-                  {/if}
-                </div>
-
-                <!-- one line either way: what it would cost, or what it has cost -->
-                {#if keys[k.id] || count}
-                  <div class="card-meter">
-                    <div class="meter-track" aria-hidden="true">
-                      <div
-                        class="meter-fill"
-                        class:hot={share >= BLOCK_SHARE}
-                        style="width:{Math.min(share * 100, 100)}%"
-                      ></div>
-                    </div>
-                    <span class="mono meter-read">{tilesOfFree(count, k.id, tiers)}</span>
-                  </div>
-                {:else if !open[k.id]}
-                  <!-- open, the body's overage already leads with the cost -->
-                  <p class="card-cost">{k.cost}</p>
-                {/if}
-
-                {#if open[k.id]}
-                  <div class="card-body">
-                    {#if k.warning}
-                      <p class="key-warning"><Icon name="alert" size={12} /> {k.warning}</p>
-                    {/if}
-                    {#if k.steps}
-                      <ol class="key-steps">
-                        {#each k.steps as step (step)}
-                          <li>{step}</li>
-                        {/each}
-                      </ol>
-                    {/if}
-
-                    <label class="key-label" for="key-{k.id}">
-                      {k.field}
-                      <a href={k.help} target="_blank" rel="noreferrer" title="How to get one">
-                        how to get one <Icon name="external" size={11} />
-                      </a>
-                    </label>
-                    <div class="key-line">
-                      <input
-                        id="key-{k.id}"
-                        class="input"
-                        type={shown[k.id] ? 'text' : 'password'}
-                        placeholder={k.placeholder}
-                        bind:value={keys[k.id]}
-                        onchange={() => saveKey(k.id)}
-                        autocomplete="off"
-                        spellcheck="false"
-                      />
-                      <button
-                        class="btn btn-ghost btn-sm"
-                        onclick={() => (shown[k.id] = !shown[k.id])}
-                        title={shown[k.id] ? 'Hide key' : 'Show key'}
-                        aria-label={shown[k.id] ? 'Hide key' : 'Show key'}
-                      >
-                        <Icon name={shown[k.id] ? 'eyeOff' : 'eye'} size={14} />
-                      </button>
-                      <button
-                        class="btn btn-sm"
-                        onclick={() => testKey(k.id)}
-                        disabled={testing[k.id] || !keys[k.id].trim()}
-                        title="Exercise this key against the real service"
-                      >
-                        {testing[k.id] ? 'Testing…' : 'Test'}
-                      </button>
-                    </div>
-                    {#if testResult[k.id] && !testResult[k.id].ok}
-                      <p class="verdict bad">
-                        <Icon name="alert" size={12} />
-                        {testResult[k.id].detail}
-                      </p>
-                    {/if}
-
-                    <p class="overage">{k.cost}. {k.overage}</p>
-
-                    {#if keys[k.id] || count}
-                      {#if usageBlocked(count, k.id, overrides, tiers)}
-                        <p class="blocked">
-                          <Icon name="alert" size={12} />
-                          Paused at {Math.round(BLOCK_SHARE * 100)}% of the free tier. The map and
-                          captures fall back to free imagery until next month, or:
-                        </p>
-                      {/if}
-                      {#if share >= BLOCK_SHARE || overrides[k.id]}
-                        <label
-                          class="toggle override"
-                          title="Serve past the pause (extra tiles are billed)"
-                        >
-                          <input
-                            type="checkbox"
-                            bind:checked={overrides[k.id]}
-                            onchange={saveProviderPrefs}
-                          />
-                          keep serving past {Math.round(BLOCK_SHARE * 100)}% (billed)
-                        </label>
-                      {/if}
-
-                      <div class="card-controls">
-                        <label
-                          class="ctrl"
-                          title={k.tierNote ??
-                            "This account's monthly free allowance. Check the provider dashboard"}
-                        >
-                          <span>Free allowance</span>
-                          <input
-                            class="input num mono"
-                            type="number"
-                            min="1"
-                            step="1000"
-                            placeholder={String(FREE_TIER[k.id] ?? '')}
-                            bind:value={tierEdits[k.id]}
-                            onchange={saveFreeTier}
-                          />
-                          <span class="ctrl-note">
-                            {tierEdits[k.id].trim() === ''
-                              ? 'blank = the documented default'
-                              : `default is ${(FREE_TIER[k.id] ?? 0).toLocaleString('en-US')}`}
-                          </span>
-                        </label>
-
-                        {#if k.browserTest}
-                          <p class="ctrl-note">
-                            Eco mode is unavailable because reopening this widget starts another billed map load.
-                          </p>
-                        {:else}
-                          <label
-                            class="ctrl"
-                            title="Blank uses global; 0 disables eco mode"
-                          >
-                            <span>Eco below z ≤</span>
-                            <input
-                              class="input num mono"
-                              type="number"
-                              min="0"
-                              max="21"
-                              placeholder={k.id === 'sentinelhub' ? '11' : String(ecoMaxZoom)}
-                              bind:value={ecoZooms[k.id]}
-                              onchange={saveEcoZoom}
-                              disabled={!eco}
-                              aria-label="Eco threshold for {k.label}"
-                            />
-                            <span class="ctrl-note">
-                              {k.id === 'sentinelhub'
-                                ? 'blank = 11 (it caps at z14)'
-                                : 'blank = the global threshold'}
-                            </span>
-                          </label>
-                        {/if}
-                      </div>
-
-                      <a class="card-link" href={k.usage} target="_blank" rel="noreferrer">
-                        {k.label} usage & limits <Icon name="external" size={11} />
-                      </a>
-                    {/if}
-                  </div>
-                {/if}
-              </div>
-            {/each}
-          </div>
-
-          <div class="cards-foot">
-            <span class="row-hint">Counters for {month}. Stored locally.</span>
-            <button class="btn btn-ghost btn-sm" onclick={() => load()} title="Refresh counters">
-              <Icon name="reset" size={13} /> Refresh
-            </button>
-          </div>
-        </section>
-
-        <section class="group">
-          <h3>Eco mode</h3>
-          <label
-            class="toggle eco"
-            title="Zoomed out this far, billed basemaps swap to free imagery"
-          >
-            <input type="checkbox" bind:checked={eco} onchange={saveEcoZoom} />
-            Use free imagery when zoomed out, up to z ≤
-            <input
-              class="input num mono"
-              type="number"
-              min="1"
-              max="21"
-              bind:value={ecoMaxZoom}
-              onchange={saveEcoZoom}
-              disabled={!eco}
-              aria-label="Eco mode zoom threshold"
-            />
-          </label>
-          <p class="note">
-            Applies while zoomed out; provider cards can override it.
-          </p>
-        </section>
-
-        <section class="group">
-          <div class="card">
-            <div class="card-head">
-              <button
-                class="card-toggle"
-                onclick={() => (termsOpen = !termsOpen)}
-                aria-expanded={termsOpen}
-              >
-                <Icon name={termsOpen ? 'chevronDown' : 'chevronRight'} size={13} />
-                <span class="card-name">Provider terms</span>
-                <span class="card-gives">Applied automatically</span>
-              </button>
-            </div>
-            {#if termsOpen}
-              <ul class="rules">
-                <li>Google tiles are not cached; captures are screenshots with attribution.</li>
-                <li>Mapbox attribution remains attached to captures.</li>
-                <li>Provider keys stay outside cases and exports.</li>
-              </ul>
-            {/if}
-          </div>
-        </section>
+        <ImageryTab
+          {KEYED}
+          {keys}
+          {usage}
+          {month}
+          {tiers}
+          {tierEdits}
+          {enabled}
+          {overrides}
+          {testResult}
+          {testing}
+          {ecoZooms}
+          {load}
+          {saveKey}
+          {testKey}
+          {saveProviderPrefs}
+          {saveEcoZoom}
+          {saveFreeTier}
+          bind:eco
+          bind:ecoMaxZoom
+        />
       {/if}
 
       {#if tab === 'extension'}
-        <section class="group">
-          <h3>Capture extension</h3>
-          <p class="note">
-            Captures supported map sites and powers the Google basemap Capture button.
-          </p>
-          <div class="row">
-            <div class="row-label">
-              <span>Status in this browser</span>
-              <span class="row-hint">
-                {#if extDetected}
-                  detected · <span class="mono">v{extDetected}</span>
-                  {#if extOutdated}
-                    · update bundled (<span class="mono">v{about.extension_version}</span>)
-                  {/if}
-                {:else}
-                  not detected. After installing, reload this tab
-                {/if}
-              </span>
-            </div>
-            <a class="btn btn-sm btn-primary dotted" href="/api/ingest/extension.zip" download>
-              <Icon name="download" size={13} />
-              {extOutdated ? 'Download update (.zip)' : 'Download extension (.zip)'}
-              {#if badges.extension}
-                <span
-                  class="update-dot"
-                  aria-label={extOutdated ? 'an update is waiting' : 'not installed yet'}
-                ></span>
-              {/if}
-            </a>
-          </div>
-          {#if extOutdated}
-            <p class="note warn">
-              Bundled v{about.extension_version} is newer than installed v{extDetected}; replace
-              the unpacked folder and reload the extension.
-            </p>
-          {/if}
-          <p class="note">
-            Unzip it, load it as an unpacked extension, then reload this tab.
-          </p>
-        </section>
-
-        <section class="group">
-          <h3>Pairing</h3>
-          <p class="note">
-            Paste this token into the extension options; rotating it unpairs existing extensions.
-          </p>
-          <div class="row">
-            <div class="row-label">
-              <span>Pairing token</span>
-              <span class="row-hint mono">{tokenShown ? ingestToken : '•'.repeat(24)}</span>
-            </div>
-            <div class="scraper-actions">
-              <button class="btn btn-sm" onclick={async () => { await ensureToken(); tokenShown = !tokenShown; }}>
-                {tokenShown ? 'Hide' : 'Show'}
-              </button>
-              <button class="btn btn-sm btn-primary" onclick={copyToken}>
-                <Icon name="copy" size={13} /> Copy
-              </button>
-              <button class="btn btn-sm" onclick={rotateToken}>Rotate</button>
-            </div>
-          </div>
-          <p class="note">
-            The extension can file one user-requested map capture through this local app.
-          </p>
-        </section>
+        <ExtensionTab
+          {about}
+          {badges}
+          {extDetected}
+          {extOutdated}
+          {ingestToken}
+          {copyToken}
+          {ensureToken}
+          {rotateToken}
+          bind:tokenShown
+        />
       {/if}
 
       {#if tab === 'storage'}
-        <WorkspaceFolder onchange={(status) => (about.workspace_root = status.root)} />
-
-        <section class="group">
-          <h3>Export folders</h3>
-          <p class="note">Choose a folder for each export type.</p>
-          {#each EXPORT_KINDS as kind (kind.id)}
-            <div class="row">
-              <div class="row-label">
-                <span>{kind.label}</span>
-                <span class="row-hint mono export-path" title={exportDirs[kind.id] || CASE_FOLDER_LABEL}>
-                  {exportDirs[kind.id] || CASE_FOLDER_LABEL}
-                </span>
-              </div>
-              <div class="scraper-actions">
-                <button class="btn btn-sm" onclick={() => (exportPickerKind = kind.id)}>Change…</button>
-                <button
-                  class="btn btn-ghost btn-sm"
-                  onclick={() => resetExportDestination(kind.id)}
-                  disabled={!exportDirs[kind.id]}
-                >Reset</button>
-              </div>
-            </div>
-          {/each}
-        </section>
-
-        <section class="group">
-          <h3>Settings backup</h3>
-          <p class="note">
-            Carries settings, keys, templates and your signature; export folders and
-            download logins stay here, so keep this backup private.
-          </p>
-          <div class="links">
-            <a class="btn btn-sm" href="/api/settings/export" download>
-              <Icon name="save" size={13} /> Export backup
-            </a>
-            <button class="btn btn-sm" onclick={() => settingsFile?.click()}>
-              <Icon name="file" size={13} /> Import backup
-            </button>
-            <input
-              type="file"
-              accept="application/json,.json"
-              bind:this={settingsFile}
-              onchange={importSettings}
-              hidden
-            />
-          </div>
-        </section>
+        <StorageTab
+          {about}
+          {exportDirs}
+          {EXPORT_KINDS}
+          {importSettings}
+          {resetExportDestination}
+          bind:exportPickerKind
+          bind:settingsFile
+        />
       {/if}
 
       {#if tab === 'system'}
-        <section class="group">
-          <h3>Azimut</h3>
-          <dl class="facts">
-            <dt>Version</dt>
-            <dd class="mono">{about.version || '—'}</dd>
-            <dt>ffmpeg</dt>
-            <dd class="mono" title={ffmpeg.path || ''}>
-              {#if ffmpeg.available}
-                {ffmpeg.version || 'installed'}
-                <span class="sub">· {ffmpeg.source === 'bundled' ? 'bundled' : 'system PATH'}</span>
-              {:else}
-                not found <span class="sub">· install ffmpeg on your PATH</span>
-              {/if}
-            </dd>
-            <dt>License</dt>
-            <dd>AGPL-3.0-only</dd>
-          </dl>
-          <p class="note">
-            Case data stays in the workspace; network access is limited to requested features
-            and the automatic GitHub update check.
-          </p>
-          <div class="links">
-            <a class="btn btn-sm" href={REPO_URL} target="_blank" rel="noreferrer">
-              <Icon name="link" size={13} /> Source & issues <Icon name="external" size={11} />
-            </a>
-            <a class="btn btn-sm" href={SITE_URL} target="_blank" rel="noreferrer">
-              <Icon name="globe" size={13} /> osintmethat.com <Icon name="external" size={11} />
-            </a>
-          </div>
-        </section>
-
-        <section class="group">
-          <h3>Updates</h3>
-          <div class="row">
-            <div class="row-label">
-              <span>Check for a newer release</span>
-              <span class="row-hint">
-                {#if appUpdate?.update_available}
-                  <span class="mono">{appUpdate.latest}</span> is out. You have
-                  <span class="mono">{about.version}</span>
-                {:else if appUpdate && !appUpdate.error}
-                  you're on the latest (<span class="mono">{about.version}</span>)
-                {:else}
-                  {updateOnStart
-                    ? 'checks GitHub on startup and when requested'
-                    : 'checks GitHub when requested'}
-                {/if}
-              </span>
-            </div>
-            {#if appUpdate?.update_available}
-              <a class="btn btn-sm btn-primary dotted" href={appUpdate.url} target="_blank" rel="noreferrer">
-                <Icon name="download" size={13} /> Get {appUpdate.latest} <Icon name="external" size={11} />
-                {#if badges.app}
-                  <span class="update-dot" aria-label="an update is waiting"></span>
-                {/if}
-              </a>
-            {:else}
-              <button class="btn btn-sm" onclick={checkAppUpdate} disabled={checkingApp}>
-                {checkingApp ? 'Checking…' : 'Check for updates'}
-              </button>
-            {/if}
-          </div>
-          <div class="row">
-            <div class="row-label">
-              <span>Tell me on startup</span>
-              <span class="row-hint">
-                Asks GitHub and PyPI once when the app opens, and marks what is behind.
-              </span>
-            </div>
-            <input
-              type="checkbox"
-              bind:checked={updateOnStart}
-              onchange={() => savePrefs({ update_check_on_start: updateOnStart })}
-              aria-label="Check for updates on startup"
-            />
-          </div>
-          <p class="note">
-            Update with <span class="mono">pipx upgrade azimut</span>; standalone users replace
-            the downloaded binary.
-          </p>
-        </section>
-
-        <section class="group">
-          <h3>Report an issue</h3>
-          <p class="note">
-            Opens a new issue on the public GitHub tracker; anyone can read it.
-          </p>
-          <div class="report-kind">
-            <label>
-              <input
-                type="radio"
-                value="bug"
-                bind:group={reportKind}
-                onchange={loadReport}
-              /> Something is broken
-            </label>
-            <label>
-              <input
-                type="radio"
-                value="idea"
-                bind:group={reportKind}
-                onchange={loadReport}
-              /> Something is missing
-            </label>
-          </div>
-          <textarea
-            class="report-summary"
-            rows="3"
-            maxlength="2000"
-            placeholder={reportKind === 'bug'
-              ? 'What you did, what you expected, what you got'
-              : 'What you would like Azimut to do'}
-            bind:value={reportSummary}
-            oninput={refreshReport}
-          ></textarea>
-          {#if report}
-            <details class="report-preview">
-              <summary>What gets sent</summary>
-              <pre class="mono">{report.report}</pre>
-            </details>
-          {/if}
-          <div class="links">
-            <a
-              class="btn btn-sm btn-primary"
-              href={report?.url || `${REPO_URL}/issues/new`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <Icon name="link" size={13} /> Open a GitHub issue <Icon name="external" size={11} />
-            </a>
-            <button class="btn btn-sm" onclick={copyReport} disabled={!report}>
-              <Icon name="copy" size={13} /> Copy report
-            </button>
-          </div>
-          <p class="note">
-            Your text, the version, the OS and the last warnings of this run, with your
-            paths, account name, case names and any keys removed. Nothing leaves the app
-            until you open the issue.
-          </p>
-        </section>
-
-        <section class="group">
-          <h3>Downloaders</h3>
-          <p class="note">
-            Update these tools if a media link stops resolving.
-          </p>
-          {#each scrapers as s (s.dist)}
-            <div class="row">
-              <div class="row-label">
-                <span>{SCRAPER_LABELS[s.dist] ?? s.dist}</span>
-                <span class="row-hint">
-                  <span class="mono">{s.version || 'not installed'}</span>
-                  {#if s.source === 'runtime'}
-                    · updated in place{#if s.bundled_version}, shipped with {s.bundled_version}{/if}
-                  {:else}
-                    · as shipped
-                  {/if}
-                  {#if s.restart_required}
-                    · <span class="stale">restart to apply</span>
-                  {:else if s.outdated}
-                    · <span class="stale">{s.latest} available</span>
-                  {:else if s.latest}
-                    · up to date
-                  {/if}
-                </span>
-              </div>
-              <div class="scraper-actions">
-                {#if s.source === 'runtime'}
-                  <button class="btn btn-sm" onclick={() => resetScraper(s.dist)}>Revert</button>
-                {/if}
-                <button
-                  class="btn btn-sm dotted"
-                  class:btn-primary={s.outdated}
-                  disabled={updating[s.dist]}
-                  onclick={() => updateScraper(s.dist)}
-                >
-                  {updating[s.dist] ? 'Updating…' : 'Update'}
-                  {#if s.outdated && !updating[s.dist]}
-                    <span class="update-dot" aria-label="an update is waiting"></span>
-                  {/if}
-                </button>
-              </div>
-            </div>
-          {/each}
-          <div class="links">
-            <button class="btn btn-sm" disabled={checking} onclick={checkScrapers}>
-              <Icon name="download" size={13} />
-              {checking ? 'Checking…' : 'Check for updates'}
-            </button>
-          </div>
-          <p class="note">
-            Updates are hash-verified from PyPI when requested; Revert restores the bundled version.
-          </p>
-        </section>
+        <SystemTab
+          {about}
+          {ffmpeg}
+          {badges}
+          {appUpdate}
+          {checkingApp}
+          {checkAppUpdate}
+          {scrapers}
+          {checking}
+          {checkScrapers}
+          {updating}
+          {updateScraper}
+          {resetScraper}
+          {savePrefs}
+          {report}
+          {loadReport}
+          {refreshReport}
+          {copyReport}
+          {REPO_URL}
+          {SITE_URL}
+          bind:updateOnStart
+          bind:reportKind
+          bind:reportSummary
+        />
       {/if}
 
       {#if tab === 'templates'}
-        <section class="group">
-          <h3>Geo Proof templates</h3>
-          <p class="note">
-            Reusable proof styles shared across cases.
-          </p>
-          <div class="tpl-list">
-            {#each templatesState.proof as t (t.id)}
-              <div class="tpl-row">
-                <span class="tpl-name">{t.name}</span>
-                <div class="tpl-actions">
-                  <button class="btn btn-sm" onclick={() => editTemplate('proof', t)}>
-                    <Icon name="edit" size={13} /> Edit
-                  </button>
-                  <button class="btn btn-sm" title="Delete"
-                    onclick={() => (deleteTpl = { kind: 'proof', id: t.id, name: t.name })}>
-                    <Icon name="trash" size={13} />
-                  </button>
-                </div>
-              </div>
-            {/each}
-            {#if !templatesState.proof.length}
-              <p class="empty">No proof templates yet.</p>
-            {/if}
-          </div>
-          <button class="btn btn-sm" onclick={() => newTemplate('proof')}>
-            <Icon name="plus" size={13} /> New proof template
-          </button>
-        </section>
-
-        <section class="group">
-          <h3>Geo Report templates</h3>
-          <p class="note">
-            Reusable thread structures for new Geo Reports.
-          </p>
-          <div class="tpl-list">
-            {#each templatesState.post as t (t.id)}
-              <div class="tpl-row">
-                <span class="tpl-name">{t.name}</span>
-                <div class="tpl-actions">
-                  <button class="btn btn-sm" onclick={() => editTemplate('post', t)}>
-                    <Icon name="edit" size={13} /> Edit
-                  </button>
-                  <button class="btn btn-sm" title="Delete"
-                    onclick={() => (deleteTpl = { kind: 'post', id: t.id, name: t.name })}>
-                    <Icon name="trash" size={13} />
-                  </button>
-                </div>
-              </div>
-            {/each}
-            {#if !templatesState.post.length}
-              <p class="empty">No post templates yet.</p>
-            {/if}
-          </div>
-          <button class="btn btn-sm" onclick={() => newTemplate('post')}>
-            <Icon name="plus" size={13} /> New post template
-          </button>
-        </section>
+        <TemplatesTab {newTemplate} {editTemplate} bind:deleteTpl />
       {/if}
     </div>
   </div>
 </div>
+
 
 {#if exportPickerKind}
   <ExportFolderPicker
@@ -1555,25 +832,25 @@
   />
 {/if}
 
+
 <style>
   .tool {
     height: 100%;
     display: flex;
     flex-direction: column;
   }
+
   .tool-header {
     display: flex;
     align-items: baseline;
     gap: 12px;
     padding: 14px 18px 10px;
   }
+
   .tool-header h2 {
     font-size: var(--fs-lg);
   }
-  .sub {
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-  }
+
 
   /* Settings use a section rail and one scrolling pane. */
   .split {
@@ -1581,6 +858,7 @@
     display: flex;
     min-height: 0;
   }
+
   .rail {
     width: 168px;
     flex-shrink: 0;
@@ -1590,6 +868,7 @@
     padding: 4px 8px 8px 12px;
     border-right: 1px solid var(--border);
   }
+
   .rail-tab {
     display: flex;
     align-items: center;
@@ -1605,22 +884,18 @@
     cursor: pointer;
     transition: background 0.12s var(--ease), color 0.12s var(--ease);
   }
-  /* A rail tab is a full-width row, not a control with a corner, so its dot
-     sits at the end of the line instead of hanging off it. */
-  .rail-tab .update-dot {
-    top: 50%;
-    right: 9px;
-    transform: translateY(-50%);
-  }
+
   .rail-tab:hover {
     background: var(--bg-2);
     color: var(--text-1);
   }
+
   .rail-tab.active {
     background: var(--accent-soft);
     color: var(--accent);
     font-weight: 600;
   }
+
   .rail-tab.rail-break {
     margin-top: 8px;
     padding-top: 10px;
@@ -1629,541 +904,16 @@
     border-top-right-radius: 0;
   }
 
+
   .pane {
     flex: 1;
     overflow-y: auto;
     padding: 6px 18px 32px;
     max-width: 640px;
   }
-  .group {
-    padding: 14px 0 18px;
-    border-bottom: 1px solid var(--border);
-  }
-  .group:last-child {
-    border-bottom: 0;
-  }
-  h3 {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font-size: var(--fs-xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-3);
-    margin-bottom: 12px;
-  }
 
-  .row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 18px;
-    margin-bottom: 8px;
-  }
-  .row-label {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    font-size: var(--fs-sm);
-    color: var(--text-1);
-  }
-  .row-hint {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    line-height: 1.4;
-  }
-  .export-path {
-    display: block;
-    max-width: min(380px, 48vw);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  /* Recipe for a provider whose "key" is a configuration you build yourself */
-  .key-steps {
-    margin: 4px 0 8px;
-    padding-left: 18px;
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    line-height: 1.5;
-  }
-  .key-steps li {
-    margin: 1px 0;
-  }
-  .key-warning {
-    display: flex;
-    align-items: baseline;
-    gap: 5px;
-    margin: 4px 0 8px;
-    color: var(--warn, #d8a03d);
-    font-size: var(--fs-xs);
-    line-height: 1.45;
-  }
-  .scraper-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  /* the one state worth pulling the eye: this downloader will fail on real links */
-  .stale {
-    color: var(--warn, var(--text-1));
-    font-weight: 500;
-  }
-  .sig-side {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .sig-preview {
-    /* Checkerboard preview for transparent logos. */
-    max-width: 88px;
-    max-height: 44px;
-    padding: 4px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    background-color: var(--bg-2);
-    background-image:
-      linear-gradient(45deg, var(--bg-3) 25%, transparent 25% 75%, var(--bg-3) 75%),
-      linear-gradient(45deg, var(--bg-3) 25%, transparent 25% 75%, var(--bg-3) 75%);
-    background-size: 10px 10px;
-    background-position: 0 0, 5px 5px;
-  }
-  .sig-buttons {
-    display: flex;
-    gap: 6px;
-  }
-  .sig-file {
-    display: none;
-  }
-
-  /* One-row segmented control. */
-  .seg {
-    display: flex;
-    flex-shrink: 0;
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    overflow: hidden;
-  }
-  .seg-btn {
-    padding: 5px 12px;
-    border: 0;
-    border-left: 1px solid var(--border);
-    background: var(--bg-2);
-    color: var(--text-2);
-    font: inherit;
-    font-size: var(--fs-xs);
-    cursor: pointer;
-    transition: background 0.12s var(--ease), color 0.12s var(--ease);
-  }
-  .seg-btn:first-child {
-    border-left: 0;
-  }
-  .seg-btn:hover {
-    background: var(--bg-3);
-    color: var(--text-1);
-  }
-  .seg-btn.on {
-    background: var(--accent);
-    color: var(--accent-text);
-    font-weight: 600;
-  }
-
-  .sample {
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-    padding: 6px 9px;
-    border-radius: var(--r-sm);
-    background: var(--bg-2);
-    border: 1px solid var(--border);
-    display: inline-block;
-    margin-top: 4px;
-  }
-  .note {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    line-height: 1.5;
-    margin-top: 8px;
-  }
-  .note.warn {
-    color: var(--warn, #d8a03d);
-  }
-  /* same voice as .note, but leading a group instead of trailing one */
-  .intro {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    line-height: 1.5;
-    margin: 0 0 14px;
-  }
-
-  .grid-3 {
-    display: grid;
-    grid-template-columns: 1fr 1fr 90px;
-    gap: 10px;
-  }
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: var(--fs-xs);
-    color: var(--text-2);
-    font-weight: 600;
-  }
-  .mention {
-    width: 200px;
-    flex-shrink: 0;
-  }
-
-  .facts {
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 6px 18px;
-    margin: 0;
-    font-size: var(--fs-sm);
-  }
-  .facts dt {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    align-self: center;
-  }
-  .facts dd {
-    margin: 0;
-    color: var(--text-1);
-    overflow-wrap: anywhere;
-  }
   /* The path can be long, so the button sits after it and never squeezes it. */
-  .workspace-fact {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  .links {
-    display: flex;
-    gap: 8px;
-    margin-top: 14px;
-    flex-wrap: wrap;
-  }
 
-  /* Report an issue: kind, the user's words, then the report itself folded away. */
-  .report-kind {
-    display: flex;
-    gap: 16px;
-    margin: 10px 0 8px;
-    font-size: var(--fs-xs);
-    color: var(--text-2);
-  }
-  .report-kind label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .report-summary {
-    width: 100%;
-    resize: vertical;
-    font: inherit;
-    font-size: var(--fs-sm);
-  }
-  .report-preview {
-    margin-top: 10px;
-    font-size: var(--fs-xs);
-  }
-  .report-preview summary {
-    color: var(--text-3);
-    cursor: pointer;
-  }
-  .report-preview pre {
-    margin: 8px 0 0;
-    padding: 8px 10px;
-    max-height: 240px;
-    overflow: auto;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    background: var(--bg-2);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    color: var(--text-2);
-  }
-  .links .btn {
-    gap: 6px;
-    text-decoration: none;
-  }
-
-  /* Provider cards show a summary until opened for setup. */
-  .cards {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .card {
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    padding: 8px 10px;
-    background: var(--bg-2);
-    transition: border-color 0.12s var(--ease);
-  }
-  .card.open {
-    border-color: var(--text-3);
-    background: none;
-  }
-  .card-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .card-toggle {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--text-3);
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .card-name {
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    color: var(--text-1);
-    flex-shrink: 0;
-  }
-  .card-gives {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .card-enable {
-    accent-color: var(--accent);
-    margin: 0;
-    flex-shrink: 0;
-    cursor: pointer;
-  }
-  /* One-word verdict; the tooltip carries the detail. */
-  .chip {
-    flex-shrink: 0;
-    padding: 1px 7px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    white-space: nowrap;
-  }
-  .chip.ok {
-    color: var(--ok);
-    border-color: color-mix(in srgb, var(--ok) 40%, transparent);
-  }
-  .chip.bad {
-    color: var(--danger);
-    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
-  }
-  .chip.warn {
-    color: var(--warn, #d8a03d);
-    border-color: color-mix(in srgb, var(--warn, #d8a03d) 40%, transparent);
-  }
-  .card-meter {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    margin: 7px 0 1px;
-  }
-  .card-meter .meter-track {
-    flex: 1;
-  }
-  .meter-read,
-  .card-cost {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    white-space: nowrap;
-  }
-  .card-cost {
-    margin: 5px 0 1px 21px; /* aligned under the name, past the chevron */
-  }
-  .card-body {
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border);
-  }
-  .card-controls {
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-    margin-top: 9px;
-  }
-  .ctrl {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-  /* Align provider control fields in one column. */
-  .ctrl > span:first-child {
-    min-width: 104px;
-    color: var(--text-2);
-  }
-  .ctrl-note {
-    opacity: 0.8;
-  }
-  .card-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    margin-top: 10px;
-    color: var(--accent);
-    font-size: var(--fs-xs);
-  }
-  .cards-foot {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-top: 12px;
-  }
-  .key-label {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    font-size: var(--fs-xs);
-    color: var(--text-2);
-    font-weight: 600;
-    margin-bottom: 5px;
-  }
-  .key-label a {
-    color: var(--accent);
-    font-weight: 400;
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-  }
-  .key-line {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-  }
-  .key-line .input {
-    flex: 1;
-    font-family: var(--font-mono);
-  }
-  .verdict {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin-top: 5px;
-    font-size: var(--fs-xs);
-    line-height: 1.4;
-  }
-  .verdict.bad {
-    color: var(--danger);
-  }
-  .meter-track {
-    height: 5px;
-    border-radius: var(--r-sm);
-    background: var(--bg-2);
-    border: 1px solid var(--border);
-    overflow: hidden;
-  }
-  .meter-fill {
-    height: 100%;
-    background: var(--accent);
-    border-radius: inherit;
-    transition: width 0.3s var(--ease);
-  }
-  .meter-fill.hot {
-    background: var(--danger);
-  }
-  .overage {
-    margin-top: 9px;
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    line-height: 1.45;
-  }
-  .toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--fs-xs);
-    color: var(--text-2);
-    cursor: pointer;
-    user-select: none;
-  }
-  .toggle input {
-    accent-color: var(--accent);
-    margin: 0;
-  }
-  .toggle.override {
-    margin-top: 6px;
-    color: var(--danger);
-  }
-  .toggle.eco {
-    display: flex;
-    margin: 2px 0;
-  }
-  /* every small numeric box in this tab: eco thresholds, free allowances */
-  .num {
-    width: 92px;
-    padding: 2px 6px;
-    flex-shrink: 0;
-  }
-  .blocked {
-    margin-top: 6px;
-    color: var(--danger);
-    font-size: var(--fs-xs);
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    line-height: 1.4;
-  }
-  .rules {
-    margin: 12px 0 2px;
-    padding-left: 18px;
-    color: var(--text-2);
-    font-size: var(--fs-xs);
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    line-height: 1.45;
-  }
-
-  /* --- templates tab ------------------------------------------------------ */
-  .tpl-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-bottom: 12px;
-  }
-  .tpl-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 7px 10px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    background: var(--bg-2);
-  }
-  .tpl-name {
-    font-size: var(--fs-sm);
-    color: var(--text-1);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .tpl-actions {
-    display: flex;
-    gap: 6px;
-    flex-shrink: 0;
-  }
-  .empty {
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-    font-style: italic;
-  }
 
   .tpl-modal-overlay {
     position: fixed;
@@ -2175,6 +925,7 @@
     justify-content: center;
     padding: 24px;
   }
+
   .tpl-modal {
     width: min(920px, 100%);
     max-height: 88vh;
@@ -2185,6 +936,7 @@
     border-radius: var(--r-lg, 12px);
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
   }
+
   .tpl-modal-head {
     display: flex;
     align-items: center;
@@ -2192,6 +944,7 @@
     padding: 12px 14px;
     border-bottom: 1px solid var(--border);
   }
+
   .tpl-title {
     flex: 1;
     background: var(--bg-2);
@@ -2202,10 +955,12 @@
     font: inherit;
     font-weight: 600;
   }
+
   .tpl-modal-body {
     padding: 16px;
     overflow-y: auto;
   }
+
   .tpl-modal-foot {
     display: flex;
     justify-content: flex-end;
