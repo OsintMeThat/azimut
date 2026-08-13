@@ -9,7 +9,7 @@ case is a plain folder that can be reopened, archived or shared.
 *The name is the French word for azimuth, the compass bearing you sight along
 to fix a point on the map.*
 
-## v0.2.7: Movable workspaces and finished exports
+## v0.2.8: Entities, graph and timeline
 
 ![Azimut workflows from source review to proof and report](https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.gif)
 
@@ -17,6 +17,7 @@ to fix a point on the map.*
 |------|--------------|
 | **Board** | The whole case as one sortable table: typed identity fields per entity, one filter bar whose values are all taken from the case, and shared Details. |
 | **Graph** | The same case drawn. Lenses pick what a reading is about, nodes cluster, edges carry their verb, and a click opens what a node connects to without losing the picture you were reading. |
+| **Timeline** | The same case on a time axis. Dated statements and media stack in coloured tracks, the ruler reads in any zone or at a saved place, date quality is drawn instead of flattened, and the window can be handed to Board, Graph or the map. |
 | **Media** | Import local files or download by URL (X, Telegram, TikTok, YouTube, Instagram and more via yt-dlp, with a gallery-dl fallback for image-only posts). Public media is fetched cookie-less; a login-walled post prompts once for a browser session or an exported `cookies.txt`. Each item gets a clean local file, metadata and a SHA-256. Multi-photo posts open a picker. |
 | **Files** | Every saved artifact in one Finder-style view of your folders, not just media: select several, drag them into a folder, search across the lot. |
 | **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services. Nothing uploads on its own. |
@@ -48,23 +49,25 @@ The Case Doctor checks case integrity, including the derived Timeline index. It
 only changes a case after you choose a repair, and states what a database rebuild
 cannot recover before it starts.
 
-New in v0.2.7:
+New in v0.2.8:
 
-- Keep analyst-owned files beside Azimut's managed `azimut/` directory in every
-  case. Existing cases and older bundles migrate automatically.
-- Move or adopt the complete workspace from Settings, including on an external
-  drive. Each copied file is SHA-256-verified before the pointer switches, and a
-  missing drive stops startup instead of creating an empty workspace.
-- Diagnose damaged cases without writing to them, then choose each Case Doctor
-  repair explicitly.
-- Calculate local sun and moon conditions offline and review their daily paths
-  on the map.
-- Export selected notes as server-rendered PDFs with local images, diagrams and
-  bundled fonts for scripts used around the world.
-- Choose separate export folders for note PDFs, media copies and proof PNGs;
-  external exports reserve a new name atomically instead of overwriting.
-- Save video frames under timecode-first names and preserve a Geo Report before
-  handing a different proof to the composer.
+- Read the whole case as a table, with one filter bar whose values and counts all
+  come from the case, and file a person, an account or a statement by hand.
+- Draw the same question in the Graph: lenses, clustered nodes, verbs on the
+  edges, sources folded onto the edge they stand for, and an undo for the drawing
+  that never writes to the case.
+- Put dated statements and media on a Timeline, in coloured tracks, on any zone's
+  clock, with daylight under the ruler at a saved place.
+- Create and edit dates on the axis itself, and measure two entries without
+  pretending a coarse date is an exact one.
+- Hand one period from Timeline to Board, Graph and a session-only map layer.
+  Fact time never mixes with the date something was filed.
+- Keep statement confidence and source reliability apart, with support and
+  contradiction stated as their own links.
+- Date a statement through a guided editor for a year, a day, a bounded range or
+  a zoned time range, with the raw syntax still accepted.
+- Existing cases upgrade to SQLite schema 17 when they open, and bundles exported
+  by v0.2.7 still import.
 
 ## Install & run
 
@@ -235,7 +238,7 @@ wheel + Windows/Linux/macOS binaries, attaches them to a GitHub release, and
 publishes to PyPI. **Don't publish by hand.**
 
 ```bash
-git tag v0.2.7 && git push origin v0.2.7
+git tag v0.2.8 && git push origin v0.2.8
 ```
 
 One-time setup: register the repo as a
