@@ -3,6 +3,7 @@
 import io
 import json
 import sqlite3
+from contextlib import closing
 
 from azimut import layout
 from azimut.engine import workqueue
@@ -45,11 +46,12 @@ def test_stale_timeline_index_is_diagnosed_then_explicitly_rebuilt(client):
         },
     ).json()
     case = Case.open(case_id)
-    with sqlite3.connect(case.db_path) as conn:
+    with closing(sqlite3.connect(case.db_path)) as conn:
         conn.execute(
             "UPDATE temporal_items SET earliest = ? WHERE owner_id = ?",
             ("2026-08-11T10:32:14.5Z", claim["id"]),
         )
+        conn.commit()
 
     report = client.get(f"/api/cases/{case_id}/doctor").json()
 
@@ -61,7 +63,7 @@ def test_stale_timeline_index_is_diagnosed_then_explicitly_rebuilt(client):
             "tone": "primary",
         }
     ]
-    with sqlite3.connect(case.db_path) as conn:
+    with closing(sqlite3.connect(case.db_path)) as conn:
         assert conn.execute(
             "SELECT earliest FROM temporal_items WHERE owner_id = ?", (claim["id"],)
         ).fetchone()[0] == "2026-08-11T10:32:14.5Z"
@@ -73,7 +75,7 @@ def test_stale_timeline_index_is_diagnosed_then_explicitly_rebuilt(client):
 
     assert repaired["repair"]["status"] == "rebuilt"
     assert repaired["report"]["status"] == "healthy"
-    with sqlite3.connect(case.db_path) as conn:
+    with closing(sqlite3.connect(case.db_path)) as conn:
         assert conn.execute(
             "SELECT earliest FROM temporal_items WHERE owner_id = ?", (claim["id"],)
         ).fetchone()[0] == "2026-08-11T10:32:14.500000Z"
