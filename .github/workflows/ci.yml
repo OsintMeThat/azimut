@@ -38,7 +38,7 @@ jobs:
             python: "3.13"  # the ceiling we've tested against
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
           prune-cache: true
@@ -59,7 +59,7 @@ jobs:
     # 3.11 target chokes on. The 3.11 floor stays covered by the pytest matrix.
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
           prune-cache: true
@@ -79,7 +79,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - run: uv sync --upgrade --extra dev
       - run: uv run pytest -q --durations=20 --durations-min=1
 

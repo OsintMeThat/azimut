@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           python-version: "3.12"
       # Install the app (editable) + dev tools, like the CI backend job, so the
@@ -48,7 +48,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24.19.0"
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           python-version: "3.12"
       - name: Build frontend into the package
@@ -107,7 +107,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24.19.0"
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           python-version: "3.12"
       - name: Build frontend into the package
