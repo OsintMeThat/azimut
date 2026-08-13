@@ -2,6 +2,7 @@
 
 import pytest
 
+from azimut.api import satellite
 from azimut.engine import geo
 
 # The suite's autouse fixture replaces geo.reverse_geocode with an offline stub,
@@ -356,7 +357,7 @@ def test_daylight_validates_at_the_edge(client, params):
     assert client.get("/api/geo/daylight", params=params).status_code == 422
 
 
-def test_daylight_does_not_touch_the_network(client, monkeypatch):
+def test_daylight_does_not_touch_the_network(monkeypatch):
     import socket
 
     def explode(*args, **kwargs):
@@ -364,13 +365,12 @@ def test_daylight_does_not_touch_the_network(client, monkeypatch):
 
     monkeypatch.setattr(socket, "socket", explode)
     monkeypatch.setattr(socket, "create_connection", explode)
-    body = client.get(
-        "/api/geo/daylight",
-        params={
-            "lat": 48.8584, "lon": 2.2945,
-            "from": "2026-07-30T00:00:00Z", "to": "2026-07-31T00:00:00Z",
-        },
-    ).json()
+    body = satellite.daylight_for_window(
+        lat=48.8584,
+        lon=2.2945,
+        start="2026-07-30T00:00:00Z",
+        end="2026-07-31T00:00:00Z",
+    )
     assert len(body["day"]) == 1
 
 
