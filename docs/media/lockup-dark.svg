@@ -1,0 +1,28 @@
+<!-- The README lockup for dark backgrounds: the mark, then AZIMUT drawn at the
+     same cap height. Same two flanks as frontend/src/components/Logo.svelte and
+     the same seven letter paths as Wordmark.svelte, with the theme's own inks
+     inlined because a file GitHub and PyPI fetch on their own has no CSS.
+     frontend/src/components/brandAssets.test.js holds all of them together. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 606 115" width="606" height="115" role="img" aria-label="Azimut">
+  <title>Azimut</title>
+  <g transform="translate(-26.6 2.5) scale(4.5833)">
+    <path fill="#e3e3e3" d="M12 1.8 5.8 21.4 12 16.4Z" />
+    <path fill="#e8a33d" d="M12 1.8 18.2 21.4 12 16.4Z" />
+  </g>
+  <g
+    transform="translate(109.3 7.5)"
+    fill="none"
+    stroke="#e3e3e3"
+    stroke-width="15"
+    stroke-linecap="butt"
+    stroke-linejoin="miter"
+  >
+    <path d="M0 100 25 0h13.3l25 100" />
+    <path d="M13 69h37.3" />
+    <path transform="translate(96.3 0)" d="M0 7.5h58L0 92.5h58" />
+    <path transform="translate(193.3 0)" d="M0 0v100" />
+    <path transform="translate(232.3 0)" d="M0 100V0l38 58 38-58v100" />
+    <path transform="translate(347.3 0)" d="M0 0v69a31 31 0 0 0 62 0V0" />
+    <path transform="translate(430.3 0)" d="M0 7.5h58M29 7.5V100" />
+  </g>
+</svg>
