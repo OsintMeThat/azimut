@@ -4,10 +4,18 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
   # Weekly, so the "latest deps" tripwire below reports upstream breakage even
   # in quiet weeks — bit rot doesn't wait for us to push.
   schedule:
     - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend:
@@ -29,17 +37,18 @@ jobs:
           - os: ubuntu-latest
             python: "3.13"  # the ceiling we've tested against
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
         with:
           enable-cache: true
+          prune-cache: true
           python-version: ${{ matrix.python }}
       # --frozen installs uv.lock exactly and never re-resolves, so a green run
       # means "these versions work", not "whatever PyPI served this morning".
       # --check fails if uv.lock drifted from pyproject.toml (forgot `uv lock`).
       - run: uv lock --check
       - run: uv sync --frozen --extra dev
-      - run: uv run pytest -q
+      - run: uv run pytest -q --durations=20 --durations-min=1
 
   lint:
     name: Lint & type-check (backend)
@@ -49,10 +58,11 @@ jobs:
     # 3.12 on purpose — mypy parses numpy's 2.x stubs, which use 3.12 syntax a
     # 3.11 target chokes on. The 3.11 floor stays covered by the pytest matrix.
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
         with:
           enable-cache: true
+          prune-cache: true
           python-version: "3.12"
       - run: uv sync --frozen --extra dev
       - run: uv run ruff check src tests
@@ -65,12 +75,13 @@ jobs:
     # to the newest versions our ranges allow, so an upstream release that breaks
     # us surfaces here — on a scheduled run we triage — instead of in a user's
     # `pip install azimut`. Advisory: a red run never blocks a merge.
+    if: github.event_name == 'schedule'
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
       - run: uv sync --upgrade --extra dev
-      - run: uv run pytest -q
+      - run: uv run pytest -q --durations=20 --durations-min=1
 
   frontend:
     name: Frontend tests + build
@@ -79,10 +90,10 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24.19.0"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
@@ -97,10 +108,10 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24.19.0"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
