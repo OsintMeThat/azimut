@@ -16,6 +16,7 @@ newer SQLite than the code does is a false alarm waiting to fire on one OS.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 #: Objects created after schema 7, dropped newest first. A migration that adds a
@@ -67,7 +68,7 @@ def rewind(db: Path | str, version: int) -> None:
     """Put `case.db` back at `version`, shape included, ready to be migrated up."""
     if version not in (7, 8):
         raise ValueError(f"no rewind to schema {version}")
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.executescript(_LINKS_V7 if version == 7 else _LINKS_V8)
         for statement in _AFTER_7:
             conn.execute(statement)

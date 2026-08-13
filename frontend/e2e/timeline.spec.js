@@ -451,14 +451,19 @@ test('creates and resizes an hourly period on a day view', async ({ page }) => {
   await setWindow(page, '2026-06-23T00:00', '2026-06-24T00:00');
 
   const canvas = page.locator('.track-canvas').first();
+  await expect(canvas).toHaveClass(/createable/);
+  await canvas.evaluate((element) => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
   const box = await canvas.boundingBox();
   const y = box.y + box.height - 8;
-  await page.mouse.move(box.x + box.width * .4, y);
+  await canvas.hover({ position: { x: box.width * .4, y: box.height - 8 } });
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * .5, y, { steps: 5 });
   await page.mouse.up();
 
   const dialog = page.getByRole('dialog', { name: 'Add assessment' });
+  await expect(dialog).toBeVisible();
   await expect(dialog.getByLabel('Date format')).toHaveValue('time-range');
   await expect(dialog.getByLabel('Start time')).toHaveValue(/2026-06-23T\d{2}:\d{2}(?::\d{2})?/);
   await expect(dialog.getByLabel('End time')).toHaveValue(/2026-06-23T\d{2}:\d{2}(?::\d{2})?/);

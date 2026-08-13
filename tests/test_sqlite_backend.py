@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from contextlib import closing
 
 import pytest
 from bigcase import build_big_case
@@ -75,7 +76,7 @@ def test_open_missing_db_raises(tmp_path):
 def test_open_refuses_newer_schema(tmp_path):
     db = tmp_path / "case.db"
     SqliteCase.create(db, name="From the future")
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'", ("99",))
     with pytest.raises(CaseError, match="newer Azimut"):
         SqliteCase.open(db)
@@ -153,7 +154,7 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
     galleries in 12, saved analysis views in 13, and the indexes the catalog
     orders the whole case by in 14. A second open applies nothing."""
     db = tmp_path / "case.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.executescript(_SCHEMA_V1)
 
     # runs 1 -> 2 -> ... -> the current schema in place. The media directory is
@@ -167,7 +168,7 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
     # 2 -> 3: the durable jobs table exists and works.
     store.enqueue_job("thumbnail", key="media/x.jpg")
     assert store.count_jobs() == {"queued": 1}
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'"
         ).fetchone()[0] == str(SQLITE_SCHEMA)
@@ -230,7 +231,7 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
         }
 
     SqliteCase.open(db, media_dir=tmp_path / "media")  # idempotent — applies nothing
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         for version in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13):
             assert conn.execute(
                 "SELECT COUNT(*) FROM schema_migrations WHERE version = ?", (version,)
@@ -286,7 +287,7 @@ def test_the_confidence_migration_runs_on_a_case_with_no_links_at_all(tmp_path):
     reopened = SqliteCase.open(db, media_dir=tmp_path / "media")
 
     assert reopened.list_links() == []
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute(
             "SELECT value FROM meta WHERE key = 'schema_version'"
         ).fetchone()[0] == str(SQLITE_SCHEMA)
@@ -331,7 +332,7 @@ def test_schema_9_rebuilds_the_index_for_rows_written_before_it(tmp_path):
     db = tmp_path / "case.db"
     store = SqliteCase.create(db, name="Old rows")
     truck = store.add_entity("vehicle", "Truck 12", {"plate": "AB-123-CD"}, by="user")
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         # exactly what schema 8 stored: label, type, folder, notes
         conn.execute("UPDATE entities SET search_text = 'truck 12\nvehicle'")
         conn.commit()
@@ -394,7 +395,7 @@ def test_open_backfills_the_position_flag_from_already_indexed_items(tmp_path):
     """4 -> 5 reads the sidecar JSON already in the row, so a case enriched before
     the column existed gains its GPS filter on open — no file scan, no re-enrich."""
     db = tmp_path / "case.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.executescript(_SCHEMA_V4_MEDIA)
 
     store = SqliteCase.open(db)
@@ -413,7 +414,7 @@ def test_open_without_a_media_dir_defers_the_backfill(tmp_path):
     moves.
     """
     db = tmp_path / "case.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.executescript(_SCHEMA_V1)  # predates the index, so it needs the backfill
     media_dir = tmp_path / "elsewhere"
     (media_dir / layout.META_DIR).mkdir(parents=True)
@@ -425,7 +426,7 @@ def test_open_without_a_media_dir_defers_the_backfill(tmp_path):
     )
 
     SqliteCase.open(db)
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute("SELECT value FROM meta WHERE key='media_index_ready'").fetchone() is None
 
     store = SqliteCase.open(db, media_dir=media_dir)

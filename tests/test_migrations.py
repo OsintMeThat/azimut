@@ -7,6 +7,7 @@ migrations to prove the runners, and pin the "same schema doesn't rewrite" and
 import json
 import shutil
 import sqlite3
+from contextlib import closing
 
 import pytest
 import fullcase
@@ -627,7 +628,7 @@ def test_a_whole_case_from_the_last_release_opens_on_the_current_schema(client):
 
     reopened = Case.open(full.case_id)
 
-    with sqlite3.connect(reopened.db_path) as conn:
+    with closing(sqlite3.connect(reopened.db_path)) as conn, conn:
         assert conn.execute(
             "SELECT value FROM meta WHERE key = 'schema_version'"
         ).fetchone()[0] == str(SQLITE_SCHEMA)
@@ -688,7 +689,7 @@ def test_schema_16_keeps_existing_views_and_accepts_timeline_readings(tmp_worksp
         "created_at": "2026-08-12T10:00:00Z",
         "updated_at": "2026-08-12T10:00:00Z",
     })
-    with sqlite3.connect(case.db_path) as conn:
+    with closing(sqlite3.connect(case.db_path)) as conn, conn:
         conn.execute("ALTER TABLE analysis_views RENAME TO analysis_views_current")
         conn.execute(
             "CREATE TABLE analysis_views ("
@@ -747,7 +748,7 @@ def test_schema_16_copies_views_by_column_name_whatever_their_order(tmp_workspac
         "updated_at": "2026-08-10T21:02:45Z",
     })
     assert saved["snapshot_count"] == 3
-    with sqlite3.connect(case.db_path) as conn:
+    with closing(sqlite3.connect(case.db_path)) as conn, conn:
         # the pre-16 shape, with the count appended after the timestamps
         conn.execute("ALTER TABLE analysis_views RENAME TO analysis_views_current")
         conn.execute(
@@ -784,7 +785,7 @@ def test_schema_17_rewrites_temporal_bounds_to_fixed_width(tmp_workspace):
         {"when": "2026-08-11T10:32:14.5Z"},
         by="user",
     )
-    with sqlite3.connect(case.db_path) as conn:
+    with closing(sqlite3.connect(case.db_path)) as conn, conn:
         conn.execute(
             "UPDATE temporal_items SET earliest = ?, latest = ? WHERE owner_id = ?",
             (

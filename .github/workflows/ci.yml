@@ -21,7 +21,7 @@ jobs:
   backend:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -39,17 +39,20 @@ jobs:
             os: macos-latest
             python: "3.12"
             tests: all
-          # One long Windows process can stall in TestClient startup after
-          # hundreds of tests. Three fresh processes retain the complete suite
-          # while making both progress and the offending file visible.
+          # Four fresh Windows processes retain the complete suite while making
+          # progress visible and keeping the slowest shard near ten minutes.
           - name: Backend (windows-latest, py3.12, A-F)
             os: windows-latest
             python: "3.12"
             tests: tests/test_[a-f]*.py
-          - name: Backend (windows-latest, py3.12, G-R)
+          - name: Backend (windows-latest, py3.12, G-L)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_[g-r]*.py
+            tests: tests/test_[g-l]*.py
+          - name: Backend (windows-latest, py3.12, M-R)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_[m-r]*.py
           - name: Backend (windows-latest, py3.12, S-Z)
             os: windows-latest
             python: "3.12"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 
 import pytest
 from fastapi import HTTPException
@@ -396,7 +397,7 @@ def test_schema_15_backfills_existing_claims_and_media(tmp_path):
         },
         entity_id=media["id"],
     )
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("DROP TABLE temporal_items")
         conn.execute("UPDATE meta SET value = '14' WHERE key = 'schema_version'")
         conn.execute("DELETE FROM schema_migrations WHERE version >= 15")
