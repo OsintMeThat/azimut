@@ -37,8 +37,15 @@ def offline_reverse_geocode(monkeypatch):
     care about the located path stub ``geo.reverse_geocode`` themselves; every
     other one gets the offline verdict (``failed``), which is what the app is
     designed to survive.
+
+    Nominatim's one-per-second floor is neutralized with it: it is a politeness
+    rule about a network nobody here reaches, and paying it would make the suite
+    wait seconds per lookup. The tests that check the floor itself restore the
+    real pacer.
     """
     monkeypatch.setattr(geo, "reverse_geocode", lambda lat, lon, timeout=8, language=None: None)
+    monkeypatch.setattr(geo, "_pace", lambda: None)
+    geo._reset_pace()
 
 
 def _let_the_worker_finish() -> None:

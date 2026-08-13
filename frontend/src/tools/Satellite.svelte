@@ -1,8 +1,12 @@
 <script>
   import { onMount, tick } from 'svelte';
+  import { fileUrl } from '../lib/fileUrl.js';
   import L from 'leaflet';
   import 'leaflet/dist/leaflet.css';
   import { api } from '../lib/api.js';
+  import { setAnalysisPeriod } from '../lib/analysisSearch.svelte.js';
+  import { temporalMapQuery } from '../lib/temporalMap.js';
+  import { windowWords } from '../lib/timeline.js';
   import { filterSaved, isMode, pendingLocate } from '../lib/geoTree.js';
   import {
     caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords, prefsReady,
@@ -69,6 +73,7 @@
   import SavedTree from './satellite/SavedTree.svelte';
   import SavedSearch from './satellite/SavedSearch.svelte';
   import SavedOverlay from './satellite/SavedOverlay.svelte';
+  import TemporalMapOverlay from './satellite/TemporalMapOverlay.svelte';
 
   let mapEl;
   let toolEl; // Browser fullscreen target.
@@ -97,6 +102,10 @@
   let savedQuery = $state('');
   let savedSearchOpen = $state(false);
   let savedOverlay = $state(false); // map layer: off by default, session only
+  let temporalMap = $state(null); // Timeline handoff, session-only
+  let temporalMapLoading = $state(false);
+  let temporalMapError = $state('');
+  let temporalMapSeq = 0;
   // Persist geography or My-work folder grouping across reloads.
   const GROUP_KEY = 'azimut:satelliteSavedGroup';
   let savedGroup = $state(loadSavedGroup());
@@ -1209,6 +1218,10 @@
       locateStopped = true;
       locateGeneration += 1;
       locating = null;
+      temporalMapSeq += 1;
+      temporalMap = null;
+      temporalMapLoading = false;
+      temporalMapError = '';
     }
     if (!id) {
       return;
@@ -1276,6 +1289,88 @@
       setBearing(Number.isFinite(target.bearing) ? target.bearing : 0);
     }
   });
+
+  $effect(() => {
+    const handed = uiState.mapTimelineRange;
+    const caseId = caseState.current?.id;
+    if (!mapReady || !handed || !caseId) return;
+    uiState.mapTimelineRange = null;
+    const run = ++temporalMapSeq;
+    temporalMap = {
+      from: handed.from,
+      to: handed.to,
+      items: [],
+      matched: 0,
+      mapped: 0,
+      marks: 0,
+      truncated: false,
+    };
+    temporalMapLoading = true;
+    temporalMapError = '';
+    // The case's own saved pins go off, rather than being assumed off. They are the
+    // whole index and take no notice of the window, so left on they answer a period
+    // with every place the case has ever held — the layer then reads as showing
+    // everything. The pin button is right there for anyone who wants that comparison.
+    savedOverlay = false;
+    api.get(temporalMapQuery(caseId, handed.from, handed.to, handed.categories ?? []))
+      .then((result) => {
+        if (run !== temporalMapSeq || caseState.current?.id !== caseId) return;
+        temporalMap = { ...temporalMap, ...result, from: handed.from, to: handed.to };
+        // Framed on what the window holds, and on nothing else. Fitting the case's own
+        // pins as well was a way to see none of them: a window with nothing placed in
+        // it pulled the view out to whatever continents the case has saved work on,
+        // which reads as the layer showing everything rather than showing nothing.
+        // With nothing to frame, the map stays where the analyst left it.
+        const points = result.items.flatMap((item) =>
+          item.place_entities.map((place) => [place.lat, place.lon])
+        );
+        if (!points.length) return;
+        tick().then(() => {
+          if (run !== temporalMapSeq || !map) return;
+          map.fitBounds(L.latLngBounds(points), { padding: [54, 54], maxZoom: 14 });
+        });
+      })
+      .catch((error) => {
+        if (run === temporalMapSeq) {
+          temporalMapError = error.message || 'The Timeline layer could not be loaded.';
+        }
+      })
+      .finally(() => {
+        if (run === temporalMapSeq) temporalMapLoading = false;
+      });
+  });
+
+  function openTemporalTimeline(item = null) {
+    if (!temporalMap) return;
+    uiState.timelineRange = {
+      from: temporalMap.from,
+      to: temporalMap.to,
+      itemId: item?.id ?? null,
+    };
+    uiState.tool = 'timeline';
+  }
+
+  function openTemporalCatalog(tool) {
+    if (!temporalMap || !caseState.current?.id) return;
+    setAnalysisPeriod(caseState.current.id, {
+      from: temporalMap.from,
+      to: temporalMap.to,
+      categories: ['statement'],
+    });
+    if (tool === 'graph') {
+      uiState.drawInGraph = {
+        label: `Fact time · ${windowWords(temporalMap.from, temporalMap.to, 'UTC')}`,
+      };
+    }
+    uiState.tool = tool;
+  }
+
+  function closeTemporalMap() {
+    temporalMapSeq += 1;
+    temporalMap = null;
+    temporalMapLoading = false;
+    temporalMapError = '';
+  }
 
   // --- sun and moon mode ---
   //
@@ -2672,6 +2767,29 @@
     else openNotes(row);
   }
 
+  /** Accept a point a tool proposed, from the panel the analyst is reading it in.
+   *
+   *  The same PATCH the sidebar sends, so the far end of the point's suggested
+   *  relations is accepted with it — the API keeps that invariant, and a point
+   *  confirmed here while the edge tying it to its capture stayed proposed would
+   *  be the two surfaces disagreeing about one click. */
+  let acceptingId = $state(null);
+  async function acceptSaved(row) {
+    if (acceptingId) return;
+    acceptingId = row.id;
+    try {
+      await api.patch(`/api/cases/${caseState.current.id}/entities/${row.id}`, {
+        status: 'confirmed',
+      });
+      await reloadCase(); // re-reads the saved index and the case sidebar
+      toast('Point accepted', 'ok', 1600);
+    } catch (e) {
+      toast(`Could not accept this point: ${e.message}`, 'danger');
+    } finally {
+      acceptingId = null;
+    }
+  }
+
   // --- details modal (title + notes) ---
   let notesItem = $state(null);
   let notesText = $state('');
@@ -2863,6 +2981,7 @@
     locating = { done: 0, total };
     let located = 0;
     let failed = 0;
+    let throttled = false;
     try {
       let remaining = total;
       while (remaining > 0 && !locateStopped && generation === locateGeneration) {
@@ -2872,22 +2991,26 @@
         if (generation !== locateGeneration) return;
         located += batch.located;
         failed += batch.failed;
-        // A batch that resolved nothing means the network is down, not that the
-        // next one will do better: stop instead of hammering Nominatim forever.
+        throttled = Boolean(batch.throttled);
+        // A batch that resolved nothing means the network is down, or that
+        // Nominatim put us in its penalty box — not that the next one will do
+        // better: stop instead of hammering it forever.
         const stalled = batch.remaining >= remaining;
         remaining = batch.remaining;
         locating = { done: total - remaining, total };
-        if (stalled) break;
+        if (stalled || throttled) break;
       }
       if (generation !== locateGeneration) return;
       const rows = await api.get(`/api/cases/${id}/satellite/index`);
       if (generation !== locateGeneration) return;
       saved = rows;
       toast(
-        failed
-          ? `Located ${located} of ${total}. ${failed} lookup(s) failed; run Locate again to retry`
-          : `Located ${located} of ${total}`,
-        failed ? 'warn' : 'ok'
+        throttled
+          ? `Located ${located} of ${total}. OpenStreetMap is rate-limiting this address; wait a minute and run Locate again`
+          : failed
+            ? `Located ${located} of ${total}. ${failed} lookup(s) failed; run Locate again to retry`
+            : `Located ${located} of ${total}`,
+        failed || throttled ? 'warn' : 'ok'
       );
     } catch (e) {
       if (generation === locateGeneration) {
@@ -3042,6 +3165,38 @@
           onshowproofs={() => (savedKind = 'proofs')}
           onrefresh={reloadCase}
         />
+      {/if}
+
+      {#if temporalMap}
+        <TemporalMapOverlay
+          map={mapReady ? map : null}
+          items={temporalMap.items}
+          caseId={caseState.current?.id}
+          onopen={openTemporalTimeline}
+        />
+        <div class="temporal-layer-card" aria-label="Timeline map layer">
+          <div>
+            <strong>Timeline</strong>
+            <span>{windowWords(temporalMap.from, temporalMap.to, 'UTC')}</span>
+          </div>
+          {#if temporalMapLoading}
+            <p>Loading placed statements…</p>
+          {:else if temporalMapError}
+            <p class="error">{temporalMapError}</p>
+          {:else if !temporalMap.matched}
+            <p>Nothing is dated in this window.</p>
+          {:else if !temporalMap.mapped}
+            <p>None of the {temporalMap.matched} dated here carries a place.</p>
+          {:else}
+            <p>{temporalMap.mapped} placed of {temporalMap.matched} dated{temporalMap.truncated ? ', partial' : ''}</p>
+          {/if}
+          <nav aria-label="Open Timeline range">
+            <button onclick={() => openTemporalTimeline()}>Timeline</button>
+            <button onclick={() => openTemporalCatalog('board')}>Board</button>
+            <button onclick={() => openTemporalCatalog('graph')}>Graph</button>
+            <button class="quiet" onclick={closeTemporalMap}>Close</button>
+          </nav>
+        </div>
       {/if}
 
       <!-- top-left control cluster: fullscreen, OSM labels overlay, measure tools -->
@@ -3491,6 +3646,7 @@
             onedit={editSaved}
             ondelete={(row) => (deleteTarget = row)}
             onproof={sendToComposer}
+            onaccept={acceptSaved}
             onbrowse={() => (savedSearchOpen = true)}
             onlocate={runLocate}
             oncancelLocate={() => (locateStopped = true)}
@@ -3562,7 +3718,7 @@
         <a
           class="link-out"
           class:disabled={fullscreen}
-          href={fullscreen ? undefined : `/files/${caseState.current?.id}/${notesItem.path}`}
+          href={fullscreen ? undefined : fileUrl(caseState.current?.id, notesItem.path)}
           target="_blank"
           rel="noreferrer"
           aria-disabled={fullscreen}
@@ -3605,6 +3761,7 @@
     onedit={editSaved}
     ondelete={(row) => (deleteTarget = row)}
     onproof={sendToComposer}
+    onaccept={acceptSaved}
   />
 {/if}
 
@@ -3729,6 +3886,7 @@
         caseId={caseState.current.id}
         relations={placeModal.relations}
         subjectType="place"
+        actionFilter="relation"
         onwalk={(entity) => { placeModal = null; openEntity(entity); }}
         onchanged={async () => {
           await loadPlaceRelations(placeModal?.id);
@@ -3812,7 +3970,7 @@
             <button class="ref-pick" onclick={() => addRef(m)} title={m.title ?? m.filename}>
               <div class="ref-thumb">
                 {#if m.thumbnail}
-                  <img src={`/files/${caseState.current.id}/${m.thumbnail}`} alt={m.filename} loading="lazy" />
+                  <img src={fileUrl(caseState.current.id, m.thumbnail)} alt={m.filename} loading="lazy" />
                 {:else}
                   <Icon name={m.kind === 'video' ? 'video' : 'image'} size={26} />
                 {/if}
@@ -3858,6 +4016,44 @@
     inset: 0;
     background: var(--bg-2);
   }
+  .temporal-layer-card {
+    position: absolute;
+    z-index: 720;
+    top: 12px;
+    right: 12px;
+    width: min(330px, calc(100% - 90px));
+    padding: 10px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--bg-1) 94%, transparent);
+    box-shadow: var(--shadow-2);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+  .temporal-layer-card > div {
+    display: flex;
+    gap: 7px;
+    min-width: 0;
+  }
+  .temporal-layer-card strong { color: var(--text-1); }
+  .temporal-layer-card span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .temporal-layer-card p { margin: 6px 0 8px; color: var(--text-3); }
+  .temporal-layer-card .error { color: var(--danger); }
+  .temporal-layer-card nav { display: flex; gap: 9px; }
+  .temporal-layer-card button {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+  }
+  .temporal-layer-card button:hover { text-decoration: underline; }
+  .temporal-layer-card .quiet { margin-left: auto; color: var(--text-3); }
   /* Mid screen-grab: a widget capture crops the map element's *rectangle*, so
      everything we paint over the map (HUD, control clusters, capture bar,
      reference windows, the frame outline itself) would land in the capture.

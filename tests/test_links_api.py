@@ -10,9 +10,10 @@ import base64
 import io
 
 from PIL import Image
+import pytest
 
 from azimut.engine import links as link_engine
-from azimut.workspace import Case
+from azimut.workspace import Case, CaseError
 
 import graph_read
 
@@ -228,6 +229,64 @@ def test_upload_and_download_emit_no_links(client):
     cid = _new_case(client, "No links")
     _upload(client, cid, "a.png")
     assert _links(client, cid) == []
+
+
+def test_lineage_rejects_sources_outside_the_artifact_matrix(client):
+    cid = _new_case(client, "Lineage matrix")
+    case = Case.open(cid)
+    media = case.add_entity("media", "Image", {"path": "media/image.png"}, by="user")
+    proof = case.add_entity("proof", "Proof", {"spec": "proofs/.meta/proof.json"}, by="user")
+    case.add_entity(
+        "proof", "Other proof", {"spec": "proofs/.meta/other.json"}, by="user"
+    )
+    post = case.add_entity("post", "Post", {"draft": ".drafts/post.json"}, by="user")
+    session = case.add_entity(
+        "inspect-session", "Session", {"spec": ".inspect/session.json"}, by="user"
+    )
+
+    link_engine.sync(
+        case, proof["id"], link_engine.DERIVED_FROM, ["media/image.png"], by="proof-composer"
+    )
+    with pytest.raises(CaseError, match="proof cannot be derived-from a proof"):
+        link_engine.sync(
+            case,
+            proof["id"],
+            link_engine.DERIVED_FROM,
+            ["proofs/.meta/other.json"],
+            by="proof-composer",
+        )
+    with pytest.raises(CaseError, match="inspect-session cannot be depends-on a proof"):
+        link_engine.sync(
+            case,
+            session["id"],
+            link_engine.DEPENDS_ON,
+            ["proofs/.meta/proof.json"],
+            by="inspect",
+        )
+    with pytest.raises(CaseError, match="post cannot be derived-from a inspect-session"):
+        link_engine.sync(
+            case,
+            post["id"],
+            link_engine.DERIVED_FROM,
+            [".inspect/session.json"],
+            by="post-composer",
+        )
+    assert {link["to"] for link in case.links_of(proof["id"])} == {media["id"]}
+
+
+def test_lineage_cannot_create_a_cycle(client):
+    cid = _new_case(client, "Lineage cycle")
+    case = Case.open(cid)
+    first = case.add_entity("media", "First", {"path": "media/first.png"}, by="user")
+    second = case.add_entity("media", "Second", {"path": "media/second.png"}, by="user")
+
+    link_engine.link_all(
+        case, first["id"], link_engine.DERIVED_FROM, ["media/second.png"], by="inspect"
+    )
+    with pytest.raises(CaseError, match="cannot create a cycle"):
+        link_engine.link_all(
+            case, second["id"], link_engine.DERIVED_FROM, ["media/first.png"], by="inspect"
+        )
 
 
 def test_a_source_deleted_before_the_save_leaves_a_tombstone(client):
@@ -638,12 +697,19 @@ def test_derivation_endpoint_returns_the_closure_and_404s(client):
 def test_relation_vocabulary_says_how_each_type_reads_and_who_may_state_it(client):
     entries = {row["type"]: row for row in client.get("/api/cases/relation-types").json()}
 
-    assert entries["located-at"]["label"] == "was shot at"
-    assert entries["located-at"]["from_types"] == ["capture", "media"]
+    assert entries["located-at"]["label"] == "was recorded at"
+    assert entries["located-at"]["inverse_label"] == "was recorded here"
+    assert entries["located-at"]["from_types"] == ["media"]
     assert entries["located-at"]["to_types"] == ["place"]
+    assert entries["located-at"]["from_media_kinds"] == ["audio", "image", "video"]
     assert entries["located-at"]["manual"] is True
+    assert entries["in-network"]["from_types"] == ["ip", "network"]
+    assert entries["in-network"]["to_types"] == ["network"]
+    assert entries["mentions"]["action"] == "mention"
+    assert {entries[type_]["action"] for type_ in ("about", "at", "cites")} == {"claim"}
     # enrichment's own claim: named so the UI can say it, never offered by hand
     assert entries["same-image-as"]["manual"] is False
+    assert entries["same-image-as"]["from_media_kinds"] == ["image"]
 
 
 def test_the_analyst_can_state_a_relation_and_it_lands_confirmed(client):
@@ -688,7 +754,7 @@ def test_a_stated_relation_is_refused_when_the_ontology_has_no_reading(client):
 
     # a derivation records what a save did; it is never asserted after the fact
     assert post(media["id"], place["id"], "derived-from").status_code == 400
-    # the wrong way round: a place is not shot at a photo
+    # the wrong way round: a place is not recorded at a photo
     assert post(place["id"], media["id"], "located-at").status_code == 400
     # a perceptual-hash match is enrichment's claim, not a person's
     assert post(media["id"], other["id"], "same-image-as").status_code == 400
@@ -699,6 +765,204 @@ def test_a_stated_relation_is_refused_when_the_ontology_has_no_reading(client):
     assert post(media["id"], "e_ghost", "located-at").status_code == 400
 
     assert case.links_of(media["id"]) == []
+
+
+def test_media_relations_respect_the_file_kind(client):
+    cid = _new_case(client, "Media kinds")
+    case = Case.open(cid)
+    image = case.add_entity("media", "Still", {"path": "media/still.jpg"}, by="user")
+    audio = case.add_entity("media", "Call", {"path": "media/call.wav"}, by="user")
+    document = case.add_entity("media", "Report", {"path": "media/report.pdf"}, by="user")
+    capture = case.add_entity("capture", "Map", {"path": "captures/map.png"}, by="user")
+    person = case.add_entity("person", "Witness", {}, by="user")
+    place = case.add_entity("place", "Station", {"lat": 1.0, "lon": 2.0}, by="user")
+
+    def post(from_id, to_id, type_):
+        return client.post(
+            f"/api/cases/{cid}/links",
+            json={"from_id": from_id, "to_id": to_id, "type": type_},
+        )
+
+    assert post(image["id"], place["id"], "located-at").status_code == 200
+    assert post(audio["id"], place["id"], "located-at").status_code == 200
+    assert post(document["id"], place["id"], "located-at").status_code == 400
+    assert post(capture["id"], place["id"], "located-at").status_code == 400
+    assert post(image["id"], place["id"], "depicts").status_code == 200
+    assert post(audio["id"], place["id"], "depicts").status_code == 400
+    assert post(person["id"], image["id"], "appears-in").status_code == 200
+    assert post(person["id"], audio["id"], "appears-in").status_code == 400
+
+
+def test_networks_link_ips_and_parent_networks_without_cycles(client):
+    cid = _new_case(client, "Networks")
+    case = Case.open(cid)
+    ip = case.add_entity("ip", "203.0.113.42", {}, by="user")
+    subnet = case.add_entity("network", "203.0.113.0/24", {}, by="user")
+    parent = case.add_entity("network", "203.0.112.0/23", {}, by="user")
+
+    assert client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": ip["id"], "to_id": subnet["id"], "type": "in-network"},
+    ).status_code == 200
+    assert client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": subnet["id"], "to_id": parent["id"], "type": "in-network"},
+    ).status_code == 200
+    assert client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": parent["id"], "to_id": subnet["id"], "type": "in-network"},
+    ).status_code == 400
+
+
+def test_organization_containment_cannot_create_a_cycle(client):
+    cid = _new_case(client, "Organization cycle")
+    case = Case.open(cid)
+    unit = case.add_entity("organization", "Unit", {}, by="user")
+    command = case.add_entity("organization", "Command", {}, by="user")
+
+    assert client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": unit["id"], "to_id": command["id"], "type": "part-of"},
+    ).status_code == 200
+    assert client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": command["id"], "to_id": unit["id"], "type": "part-of"},
+    ).status_code == 400
+
+
+def test_a_statement_can_be_told_what_stands_against_it(client):
+    """`contradicts` runs claim → claim, both ways, and joins nothing else.
+
+    A `refuted` confidence records that a statement is dead and names nothing that
+    killed it. Ruling out eleven candidates is half of a geolocation, and each of the
+    eleven has its own reasoning — so what stands against a statement is another
+    statement, never a grade and never a subject.
+    """
+    cid = _new_case(client, "Contradiction")
+    case = Case.open(cid)
+    first = case.add_entity("claim", "The bridge at Kerch", {}, by="user")
+    second = case.add_entity("claim", "A different bridge", {}, by="user")
+    person = case.add_entity("person", "Witness", {}, by="user")
+
+    def post(from_id, to_id, type_="contradicts"):
+        return client.post(
+            f"/api/cases/{cid}/links",
+            json={"from_id": from_id, "to_id": to_id, "type": type_},
+        )
+
+    stated = post(first["id"], second["id"])
+    assert stated.status_code == 200, stated.text
+    assert stated.json()["provenance"]["status"] == "confirmed"
+
+    # Two statements contradicting each other is what an open question looks like,
+    # not a loop to refuse — unlike `part-of`, which is containment.
+    assert post(second["id"], first["id"]).status_code == 200
+
+    # "This vehicle is contradicted" is not something anyone can assess.
+    assert post(first["id"], person["id"]).status_code == 400
+    assert post(person["id"], first["id"]).status_code == 400
+    assert post(first["id"], first["id"]).status_code == 400
+
+
+def test_a_statement_may_rest_on_another_statement(client):
+    """`cites` reaches a claim, so an intermediate conclusion can carry the next one.
+
+    Without it a case could say what stands *against* a statement and never what holds
+    it up: refuting "the vehicle is a T-72B3" left "the column is the 4th brigade"
+    standing, with nothing in the graph naming what it had lost.
+    """
+    cid = _new_case(client, "Grounded reasoning")
+    case = Case.open(cid)
+    model = case.add_entity("claim", "The vehicle is a T-72B3", {}, by="user")
+    unit = case.add_entity("claim", "The column is the 4th brigade", {}, by="user")
+    video = case.add_entity("media", "Column", {"path": "media/column.mp4"}, by="user")
+
+    def post(from_id, to_id, type_="cites"):
+        return client.post(
+            f"/api/cases/{cid}/links",
+            json={"from_id": from_id, "to_id": to_id, "type": type_},
+        )
+
+    grounded = post(unit["id"], model["id"])
+    assert grounded.status_code == 200, grounded.text
+    assert grounded.json()["provenance"]["status"] == "confirmed"
+    # The material end is untouched by the widening.
+    assert post(model["id"], video["id"]).status_code == 200
+    # Only a statement may rest on something, and only a statement may be rested on
+    # among the types this verb reaches.
+    assert post(video["id"], model["id"]).status_code == 400
+
+
+def test_reasoning_may_not_close_on_itself(client):
+    """A because B, B because A is circular reasoning, not a shape a case may hold.
+
+    Unlike `contradicts`, where two statements standing against each other is an open
+    question and both directions are kept.
+    """
+    cid = _new_case(client, "Circular reasoning")
+    case = Case.open(cid)
+    first = case.add_entity("claim", "First", {}, by="user")
+    second = case.add_entity("claim", "Second", {}, by="user")
+    third = case.add_entity("claim", "Third", {}, by="user")
+
+    def cite(from_id, to_id):
+        return client.post(
+            f"/api/cases/{cid}/links",
+            json={"from_id": from_id, "to_id": to_id, "type": "cites"},
+        )
+
+    assert cite(first["id"], second["id"]).status_code == 200
+    assert cite(second["id"], first["id"]).status_code == 400
+    assert cite(first["id"], first["id"]).status_code == 400
+    # And around a longer way, which is the same fallacy with a step in it.
+    assert cite(second["id"], third["id"]).status_code == 200
+    assert cite(third["id"], first["id"]).status_code == 400
+
+
+def test_citing_material_still_costs_no_walk_worth_refusing(client):
+    """Only a claim may cite, so the walk stops on the first bookmark it meets."""
+    cid = _new_case(client, "Material citations")
+    case = Case.open(cid)
+    claim = case.add_entity("claim", "A statement", {}, by="user")
+    page = case.add_entity("bookmark", "A page", {"url": "https://example.org"}, by="user")
+
+    assert client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": claim["id"], "to_id": page["id"], "type": "cites"},
+    ).status_code == 200
+    assert client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": page["id"], "to_id": claim["id"], "type": "cites"},
+    ).status_code == 400
+
+
+def test_a_contradiction_is_not_what_a_statement_rests_on(client):
+    """It is a claim-action verb and deliberately not a claim *connector*.
+
+    The connectors say what a statement is built out of, and a source fold walks
+    them (`engine/graph._fold`). Walked across this one, an argument between two
+    statements would collapse into a citation.
+    """
+    assert link_engine.CONTRADICTS not in link_engine.CLAIM_CONNECTION_TYPES
+    spec = link_engine.relation_type(link_engine.CONTRADICTS)
+    assert spec is not None
+    assert spec.action == "claim" and spec.manual and not spec.ratable
+    assert spec.from_types == spec.to_types == frozenset({"claim"})
+
+
+def test_an_older_out_of_matrix_connection_is_removable_but_not_rewordable(client):
+    cid = _new_case(client, "Older connection")
+    case = Case.open(cid)
+    person = case.add_entity("person", "Member", {}, by="user")
+    organization = case.add_entity("organization", "Group", {}, by="user")
+    legacy = case.add_link(person["id"], organization["id"], "part-of", by="user")
+
+    refused = client.patch(
+        f"/api/cases/{cid}/links/{legacy['id']}", json={"type": "member-of"}
+    )
+    assert refused.status_code == 400
+    assert client.delete(f"/api/cases/{cid}/links/{legacy['id']}").status_code == 200
+    assert case.links_of(person["id"]) == []
 
 
 def test_a_relation_can_be_restated_corrected_and_taken_back(client):
@@ -760,7 +1024,7 @@ def test_restating_a_relation_is_refused_outside_the_vocabulary(client):
 def test_confirming_a_relation_confirms_the_point_it_proposes(client):
     """The two halves of an enrichment suggestion are one claim, so the Suggestions
     list and the relation rows never disagree about the same click: accepting "this
-    file was shot at this point" accepts the point too."""
+    file was recorded at this point" accepts the point too."""
     cid = _new_case(client, "Symmetric confirm")
     case = Case.open(cid)
     media = case.add_entity("media", "Photo", {"path": "media/photo.jpg"}, by="user")
@@ -863,3 +1127,92 @@ def test_confirming_an_entity_stops_at_one_hop(client):
     assert case.get_entity(place["id"])["provenance"]["status"] == "confirmed"
     assert case.get_link(far["id"])["provenance"]["status"] == "suggested"
     assert case.get_entity(other["id"])["provenance"]["status"] == "suggested"
+
+
+def test_two_actors_can_be_tied_without_owning_or_containing_each_other(client):
+    """The verb the vocabulary had no way to say.
+
+    `owns` refuses a person as its object, `member-of` and `part-of` both end at an
+    organization — so until this existed, stating that two people are connected, the
+    first thing a case does, cost a whole Claim node.
+    """
+    cid = _new_case(client, "Association")
+    case = Case.open(cid)
+    one = case.add_entity("person", "First", {}, by="user")
+    two = case.add_entity("person", "Second", {}, by="user")
+    unit = case.add_entity("organization", "A unit", {}, by="user")
+    car = case.add_entity("vehicle", "A lorry", {}, by="user")
+
+    def post(from_id, to_id):
+        return client.post(
+            f"/api/cases/{cid}/links",
+            json={"from_id": from_id, "to_id": to_id, "type": "associated-with"},
+        )
+
+    assert post(one["id"], two["id"]).status_code == 200
+    assert post(one["id"], unit["id"]).status_code == 200
+    assert post(unit["id"], one["id"]).status_code == 200
+    # Opened past the actors it becomes the verb that swallows the vocabulary.
+    assert post(one["id"], car["id"]).status_code == 400
+    assert post(one["id"], one["id"]).status_code == 400
+
+
+def test_what_kind_of_tie_belongs_to_the_verb_and_not_to_the_edge(client):
+    """A note every edge could hold would leave nothing saying what an edge *is*.
+
+    So the qualifier is declared by the relation type, exactly as a rating is
+    declared by `ratable`, and the API refuses one anywhere else.
+    """
+    cid = _new_case(client, "Qualified tie")
+    case = Case.open(cid)
+    one = case.add_entity("person", "First", {}, by="user")
+    two = case.add_entity("person", "Second", {}, by="user")
+    unit = case.add_entity("organization", "A unit", {}, by="user")
+
+    tie = client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": one["id"], "to_id": two["id"], "type": "associated-with"},
+    ).json()
+    member = client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": one["id"], "to_id": unit["id"], "type": "member-of"},
+    ).json()
+
+    def qualify(link_id, value):
+        return client.patch(f"/api/cases/{cid}/links/{link_id}", json={"nature": value})
+
+    said = qualify(tie["id"], "  sister  ")
+    assert said.status_code == 200
+    assert said.json()["nature"] == "sister"
+    # unstated is a state to be able to return to, both ways of saying it
+    assert qualify(tie["id"], None).json().get("nature") is None
+    assert qualify(tie["id"], "employer").json()["nature"] == "employer"
+    assert qualify(tie["id"], "   ").json().get("nature") is None
+    # a word, not a notes box
+    assert qualify(tie["id"], "x" * 200).status_code == 400
+    # and no other verb accepts one
+    assert qualify(member["id"], "sister").status_code == 400
+    assert "nature" not in Case.open(cid).get_link(member["id"])
+
+
+def test_rewording_a_tie_into_another_verb_takes_its_qualifier_with_it(client):
+    """Left behind it would be data no surface can show and nobody can clear: the
+    edge would privately hold "sister" while stating that one unit is part of
+    another."""
+    cid = _new_case(client, "Reworded tie")
+    case = Case.open(cid)
+    person = case.add_entity("person", "First", {}, by="user")
+    unit = case.add_entity("organization", "A unit", {}, by="user")
+
+    tie = client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": person["id"], "to_id": unit["id"], "type": "associated-with"},
+    ).json()
+    client.patch(f"/api/cases/{cid}/links/{tie['id']}", json={"nature": "employer"})
+
+    reworded = client.patch(
+        f"/api/cases/{cid}/links/{tie['id']}", json={"type": "member-of"}
+    )
+    assert reworded.status_code == 200
+    assert "nature" not in reworded.json()
+    assert "nature" not in Case.open(cid).get_link(tie["id"])

@@ -1,7 +1,7 @@
 """REST API for post drafts: save, list, load, delete.
 
 A draft is the re-editable state of the Post Composer (thread of tweets built
-from a geolocation). Drafts live in ``<case>/exports/`` as JSON and are indexed
+from a geolocation). Drafts live in ``<case>/.drafts/`` as JSON and are indexed
 as ``post`` entities so they show up in the case sidebar (spec §4 — the case is
 the product). Azimut never posts on your behalf; a draft is prepared here and the
 human publishes it (spec §6 non-goals).

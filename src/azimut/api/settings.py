@@ -96,6 +96,8 @@ class PrefsIn(BaseModel):
     coord_format: str | None = None  # one of config.COORD_FORMATS
     units: str | None = None  # one of config.UNIT_SYSTEMS
     home_view: HomeView | None = None  # where the Satellite tab opens
+    # whether saving a proof files its point as a place, or asks first
+    proof_place_auto: bool | None = None
     post_mention: str | None = None  # handle a new post draft is addressed to
     post_target: str | None = None  # social composer a new post draft starts with
     signature_handle: str | None = None  # account handle stamped on opted-in proofs
@@ -122,6 +124,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "coord_format": settings.get("coord_format", "dd"),
         "units": settings.get("units", "metric"),
         "home_view": settings.get("home_view", DEFAULT_HOME_VIEW),
+        "proof_place_auto": bool(settings.get("proof_place_auto", True)),
         "post_mention": settings.get("post_mention", DEFAULT_POST_MENTION),
         "post_target": settings.get("post_target", DEFAULT_POST_TARGET),
         "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
@@ -247,6 +250,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["units"] = body.units
     if body.home_view is not None:
         settings["home_view"] = body.home_view.model_dump()
+    if body.proof_place_auto is not None:
+        settings["proof_place_auto"] = bool(body.proof_place_auto)
     if body.post_mention is not None:
         settings["post_mention"] = body.post_mention.strip()[:64]
     if body.post_target is not None:
@@ -560,6 +565,7 @@ class ImportedSettings(BaseModel):
     home_view: ImportedHomeView = Field(
         default_factory=lambda: ImportedHomeView.model_validate(DEFAULT_HOME_VIEW)
     )
+    proof_place_auto: bool = True
     post_mention: str = Field(default=DEFAULT_POST_MENTION, max_length=64)
     post_target: Literal["x", "bluesky", "mastodon"] = DEFAULT_POST_TARGET
     signature_handle: str = Field(default=DEFAULT_SIGNATURE_HANDLE, max_length=64)

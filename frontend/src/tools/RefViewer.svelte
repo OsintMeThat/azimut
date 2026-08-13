@@ -5,6 +5,7 @@
   // lib/refViewers.js; this file is the pointer/DOM glue. Session-only: nothing
   // here is captured or saved.
   import Icon from '../components/Icon.svelte';
+  import { fileUrl } from '../lib/fileUrl.js';
   import {
     clamp,
     clampWindow,
@@ -178,10 +179,10 @@
       {#if caseId}
         {#if isVideo}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <video src={`/files/${caseId}/${viewer.path}`} controls preload="metadata"></video>
+          <video src={fileUrl(caseId, viewer.path)} controls preload="metadata"></video>
         {:else}
           <img
-            src={`/files/${caseId}/${viewer.path}`}
+            src={fileUrl(caseId, viewer.path)}
             alt={viewer.title}
             draggable="false"
             style:transform={`translate(${viewer.ox}px, ${viewer.oy}px) scale(${viewer.scale})`}

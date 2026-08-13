@@ -15,7 +15,10 @@ to fix a point on the map.*
 
 | Tool | What it does |
 |------|--------------|
+| **Board** | The whole case as one sortable table: typed identity fields per entity, one filter bar whose values are all taken from the case, and shared Details. |
+| **Graph** | The same case drawn. Lenses pick what a reading is about, nodes cluster, edges carry their verb, and a click opens what a node connects to without losing the picture you were reading. |
 | **Media** | Import local files or download by URL (X, Telegram, TikTok, YouTube, Instagram and more via yt-dlp, with a gallery-dl fallback for image-only posts). Public media is fetched cookie-less; a login-walled post prompts once for a browser session or an exported `cookies.txt`. Each item gets a clean local file, metadata and a SHA-256. Multi-photo posts open a picker. |
+| **Files** | Every saved artifact in one Finder-style view of your folders, not just media: select several, drag them into a folder, search across the lot. |
 | **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services. Nothing uploads on its own. |
 | **Inspect** | A scratch workspace over any photo or video: frame adjustments, editable crop, sharpest-frame capture, hand-made collage with per-piece warp/scale/rotate, auto-stitch to solve a panorama's layout, and ELA hints. Nothing enters the case until you save. |
 | **Satellite** | Coordinates or a place name become an imagery crop, with select-area capture, map rotation, measurement tools, reference overlays and editable AOI grids for area review. Esri/OSM by default, plus Sentinel-2 with a date calendar and a cloud-ceiling slider; add a Mapbox or Google key for more basemaps. |
@@ -41,9 +44,9 @@ tools and tile caches under the hidden `~/Azimut/.azimut/` directory. Settings â
 Storage moves the workspace anywhere you like, including an external drive, or
 adopts one you moved yourself. The old copy is kept until you delete it.
 
-The Case Doctor checks that a case's database and media records still match its
-files. It only changes a case after you choose a repair, and states what a
-database rebuild cannot recover before it starts.
+The Case Doctor checks case integrity, including the derived Timeline index. It
+only changes a case after you choose a repair, and states what a database rebuild
+cannot recover before it starts.
 
 New in v0.2.7:
 
@@ -187,6 +190,20 @@ uv sync --frozen --no-dev --group release --no-build-isolation --no-editable
 uv run --no-sync python -m build --no-isolation
 uv run --no-sync pyinstaller packaging/azimut.spec
 ```
+
+### Versions
+
+The app version lives in `src/azimut/__init__.py` alone; `pyproject.toml` reads
+it back, and the release tag must match it.
+
+The capture extension keeps **its own** version: the app release that last
+changed a shipped file, so it lags whenever the extension is left alone.
+Settings reads "bundled newer than installed" as "go reinstall the unpacked
+folder", which is worth saying once and never for a zip that hasn't moved.
+`tests/test_updates.py` digests what `extension.zip` carries and fails either
+way â€” a change without a bump, or a bump without a change. When you do change
+the extension, set `extension/manifest.json` to the current app version and
+record the digest the failing test prints.
 
 ### Dependencies
 

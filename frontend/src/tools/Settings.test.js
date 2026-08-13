@@ -81,6 +81,13 @@ describe('Settings sections', () => {
     expect(source).toContain("const aliases = { preferences: 'general', about: 'system' }");
   });
 
+  it('offers the proof point as save-or-ask, never as a status', () => {
+    expect(source).toContain('proof_place_auto: proofPlaceAuto');
+    expect(source).toContain('proofPlaceAuto = s.proof_place_auto ?? true');
+    expect(source).toContain('Save the point without asking');
+    expect(source).toContain('Off, the composer asks each time.');
+  });
+
   it('manages all three export folders from Storage', () => {
     expect(source).toContain("{ id: 'notes', label: 'Note PDFs' }");
     expect(source).toContain("{ id: 'media', label: 'Media copies' }");

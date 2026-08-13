@@ -25,6 +25,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from .. import config
 from ..engine import artifacts as artifact_engine
 from ..engine import exportdir
 from ..engine import links as link_engine
@@ -36,6 +37,7 @@ from ..workspace import Case, CaseError, ensure_dir
 from .cases import delete_by_path, get_case
 from .drafts import list_drafts
 from .naming import read_created_at, slugify
+from .satellite import locate_on_save
 from .. import layout
 
 router = APIRouter(prefix="/api", tags=["proofs"])
@@ -57,6 +59,13 @@ class AssetIn(BaseModel):
 
     name: str = Field(min_length=1, max_length=40)
     data: str  # base64 body
+
+
+class ProofPlaceIn(BaseModel):
+    """The point the composer asked about, answered yes."""
+
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
 
 
 class ProofIn(BaseModel):
@@ -355,6 +364,12 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
             # a spec-only proof exported later gains its PNG here — without the
             # path the sidebar preview and delete_by_path can't see the file
             attrs["path"] = png_rel
+        # The thumbnail travels on the entity as well as in the spec, so a surface
+        # drawing a proof beside other entities — the graph draws a few hundred at
+        # once — reads it off the row it already has instead of opening one JSON
+        # file per proof.
+        if thumb_rel and existing["attrs"].get("thumb") != thumb_rel:
+            attrs["thumb"] = thumb_rel
         if attrs:
             patch["attrs"] = attrs
         case.update_entity(existing["id"], patch)
@@ -363,7 +378,11 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
         entity_id = case.add_entity(
             "proof",
             name,
-            attrs={"spec": rel, **({"path": png_rel} if png_rel else {})},
+            attrs={
+                "spec": rel,
+                **({"path": png_rel} if png_rel else {}),
+                **({"thumb": thumb_rel} if thumb_rel else {}),
+            },
             by="proof-composer",
         )["id"]
     if old_rel:
@@ -380,13 +399,112 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
         by="proof-composer",
     )
 
+    place, released = _place_for(case, entity_id, spec)
     return {
         "name": name,
         "title": name,
         "png": png_rel,
         "thumb": thumb_rel,
         "spec_path": rel,
+        "place": place,
+        # points this save moved off that nothing holds any more; the composer asks
+        "orphans": [{"id": e["id"], "label": e["label"]} for e in released],
     }
+
+
+def _place_for(
+    case: Case, proof_id: str, spec: dict[str, Any]
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """File the point this proof carries, or hand the composer the question.
+
+    A proof is where a geolocation is concluded, so its point is what becomes a
+    node — once, here, rather than on every capture taken while looking for it.
+    ``proof_place_auto`` decides which of the two happens; neither is a
+    suggestion, because both spell out the analyst's own answer.
+
+    Every path restates what the proof says (``satellite.restate_proof_point``),
+    which is what makes a *re*-save mean something: corrected coordinates move the
+    edges instead of adding a second set, and a POV answer changed on the way back
+    through changes the verb. The first half of the answer is the question to ask,
+    ``None`` when there is none — **a point the case already holds is neither
+    filed twice nor asked about**, so a proof re-saved untouched stays silent while
+    still restating what it says. The second half is the points it let go of.
+    """
+    point = satellite_engine.own_point(spec)
+    pov = bool(spec.get("pov"))
+    if point is None:
+        # the coordinate field was cleared: the proof withdraws the point it stated
+        return None, satellite_engine.restate_proof_point(case, proof_id, None, pov=pov)
+    standing = satellite_engine.place_at(case, point["lat"], point["lon"], keyed_only=False)
+    if standing is not None:
+        # nothing to file, so nothing to ask — but the proof still says it is there
+        return None, satellite_engine.restate_proof_point(
+            case, proof_id, standing["id"], pov=pov
+        )
+    if not config.load_settings().get("proof_place_auto", True):
+        # the point moved somewhere the case cannot hold yet: the old claim is
+        # withdrawn either way, and the new one waits on the analyst's yes
+        released = satellite_engine.restate_proof_point(case, proof_id, None, pov=pov)
+        return {
+            "filed": False,
+            "lat": point["lat"],
+            "lon": point["lon"],
+            # so the question can say what the point will mean
+            "pov": pov,
+        }, released
+    place, released = file_proof_place(case, proof_id, point["lat"], point["lon"], pov=pov)
+    return {"filed": True, "id": place["id"], "label": place["label"]}, released
+
+
+def file_proof_place(
+    case: Case, proof_id: str, lat: float, lon: float, *, pov: bool = False
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Write the place, then resolve its country, as every other place save does.
+
+    Shared by the automatic path above and the composer's own answer to the
+    question, so both leave exactly the same trace.
+    """
+    place, released = satellite_engine.place_for_proof(case, proof_id, lat, lon, pov=pov)
+    locate_on_save(case, place["id"], lat, lon)
+    return place, released
+
+
+@router.post("/cases/{case_id}/proofs/{name}/place")
+def save_proof_place(case_id: str, name: str, body: ProofPlaceIn) -> dict[str, Any]:
+    """File the point of a proof the composer just asked the analyst about.
+
+    The other half of ``proof_place_auto`` being off: the save reported a point
+    with nowhere to live, the composer asked, and this is the yes. It re-checks
+    that nothing stands there, so two open tabs answering the same question file
+    one place rather than two.
+    """
+    case = get_case(case_id)
+    proof = case.find_entity(attr="spec", value=layout.proof_spec_rel(slugify(name, "proof")))
+    if proof is None:
+        raise HTTPException(status_code=404, detail="no such proof")
+    # POV is read off the spec on disk rather than taken from the body: it is a
+    # property of the proof that was just saved, not of the answer to the question.
+    pov = bool(_read_spec(case, proof).get("pov"))
+    existing = satellite_engine.place_at(case, body.lat, body.lon, keyed_only=False)
+    if existing is not None:
+        # somebody filed that point between the question and the yes: the proof
+        # joins the place standing there rather than minting a second one
+        satellite_engine.restate_proof_point(case, proof["id"], existing["id"], pov=pov)
+        return existing
+    place, _released = file_proof_place(case, proof["id"], body.lat, body.lon, pov=pov)
+    return place
+
+
+def _read_spec(case: Case, proof: dict[str, Any]) -> dict[str, Any]:
+    """The saved spec of a proof, or an empty one if it cannot be read."""
+    rel = (proof.get("attrs") or {}).get("spec")
+    if not isinstance(rel, str) or not rel:
+        return {}
+    try:
+        loaded = json.loads(case.resolve_inside(rel).read_text(encoding="utf-8"))
+    except (OSError, ValueError, CaseError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
 
 
 @router.delete("/cases/{case_id}/proofs/{name}")

@@ -29,6 +29,7 @@
     onedit,
     ondelete,
     onproof,
+    onaccept = null,
   } = $props();
 
   // A case can hold thousands of saved items; a modal that renders all of them
@@ -80,6 +81,7 @@
       {onedit}
       {ondelete}
       {onproof}
+      {onaccept}
     />
   {/snippet}
 

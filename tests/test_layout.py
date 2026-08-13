@@ -87,6 +87,8 @@ def _tool_relative(slug: int, media: int) -> dict[str, int]:
         "sidecar": len(layout.sidecar_rel(f"media/{longest_media}")),
         "download scratch": len("media/.dl/") + layout.DOWNLOAD_ID_LENGTH + 1 + media,
         "thumbnail": len("media/.thumbs/") + THUMB_NAME,
+        "entity photo": len(layout.entity_image_rel("i_0123456789")),
+        "entity photo thumbnail": len(layout.entity_image_thumb_rel("i_0123456789")),
         "note": len(layout.note_rel(longest_folder, longest_name)),
         "proof asset": len(layout.proof_assets_rel(longest_name)) + 1 + ASSET_NAME,
         "proof spec": len(layout.proof_spec_rel(longest_name)),
@@ -182,6 +184,8 @@ def test_layout_answers_are_all_under_the_root(tmp_path: Path) -> None:
     answers = [
         layout.manifest(root),
         layout.database(root),
+        layout.entity_images(root),
+        layout.entity_image_thumbs(root),
         layout.notes_file(root),
         layout.media(root),
         layout.notes(root),

@@ -1,11 +1,15 @@
-"""REST API for the Media Library: upload, URL download (async job), list, delete,
-and copying one file back out to a folder of the analyst's own."""
+"""REST API for the Media Library: upload, clipboard paste, URL download (async
+job), list, delete, and copying one file back out to a folder of the analyst's own."""
 
 from __future__ import annotations
 
+import io
+import warnings
 from typing import Any
+from urllib.parse import urlsplit
 
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Form, HTTPException, UploadFile
+from PIL import Image
 from pydantic import BaseModel, Field, HttpUrl
 
 from .. import config, jobs
@@ -16,6 +20,7 @@ from ..engine import reveal as reveal_engine
 from ..engine import thumbnails as thumbnail_engine
 from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
+from .limits import MAX_IMAGE_BYTES
 
 router = APIRouter(prefix="/api", tags=["media"])
 
@@ -110,6 +115,7 @@ def page_media(
     category: str | None = None,
     folder: str | None = None,
     gps: bool = False,
+    collected_only: bool = False,
     sort: str = "newest",
     direction: str | None = None,
     limit: int = 200,
@@ -120,6 +126,9 @@ def page_media(
     ``next_cursor``, so the client filters in memory with no further calls; a
     large case pages via ``cursor`` and searches server-side via ``q``.
     ``gps=true`` keeps only the files whose metadata states a position.
+    ``collected_only=true`` drops what the case made out of its own material — an
+    extracted frame, a collage — and scopes the counts with it; the number it hides
+    comes back as ``facets.made_here_count``.
     ``facets`` counts the whole filtered set so category/folder/GPS controls stay
     accurate. The unbounded ``GET .../media`` stays for consumers that need the
     full index (pickers, satellite crops, derivation)."""
@@ -132,6 +141,7 @@ def page_media(
         category=category,
         folder=folder,
         gps=gps,
+        collected_only=collected_only,
         sort=sort,
         direction=direction,
         limit=limit,
@@ -241,6 +251,59 @@ async def upload(case_id: str, file: UploadFile) -> dict[str, Any]:
     case = get_case(case_id)
     result = media_engine.import_stream(case, file.filename or "file", file.file)
     return result
+
+
+@router.post("/cases/{case_id}/media/paste")
+async def paste(
+    case_id: str,
+    file: UploadFile,
+    title: str = Form(default="", max_length=200),
+    source_url: str = Form(default="", max_length=4000),
+) -> dict[str, Any]:
+    """File an image pasted out of the clipboard (lib/clipboardPaste.js).
+
+    Separate from ``upload`` because the provenance differs and provenance is the
+    point: a dropped file states its own name and came off a disk, while a pasted
+    screenshot has neither, so the dialog behind this route is where a title and an
+    origin get stated at all. Both are optional — an unnamed paste is stamped, and a
+    crop of the analyst's own screen honestly has no source.
+
+    Bounded at the edge like every other surface that swallows an image, and against
+    the same limit. The pixel clamp answers a decompression bomb; refusing early is
+    what keeps a mistaken Ctrl+V from writing an enormous temporary nobody asked for.
+    Images only: the clipboard is not a file picker, and a case takes a pasted
+    screenshot, not an arbitrary payload.
+    """
+    raw = await file.read(MAX_IMAGE_BYTES + 1)
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"pasted image must be under {MAX_IMAGE_BYTES // 1024 // 1024} MB",
+        )
+    try:
+        # Kept explicit even when a test runner or embedding process installs its
+        # own warning policy after Azimut starts.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            Image.open(io.BytesIO(raw)).verify()
+    except (Image.DecompressionBombWarning, Image.DecompressionBombError) as exc:
+        raise HTTPException(status_code=413, detail="image exceeds the 100 MP limit") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"not a readable image: {exc}") from exc
+
+    source_url = source_url.strip()
+    if source_url:
+        split = urlsplit(source_url)
+        if split.scheme not in ("http", "https") or not split.hostname:
+            raise HTTPException(status_code=422, detail="the source must be an http(s) URL")
+
+    return media_engine.import_paste(
+        get_case(case_id),
+        file.filename or "pasted-image.png",
+        io.BytesIO(raw),
+        source_url=source_url,
+        title=title,
+    )
 
 
 @router.post("/cases/{case_id}/media/download")

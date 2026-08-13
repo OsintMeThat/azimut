@@ -9,14 +9,17 @@
    * lib/filing.js); the selection math is pure and unit-tested (lib/gridSelect.js).
    */
   import { api } from '../lib/api.js';
+  import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import { buildTree, subtreeCount, folderOf, flattenPaths, isInFolderSubtree } from '../lib/folderTree.js';
-  import { assignFolderBatch } from '../lib/filing.js';
+  import { assignFolder, assignFolderBatch } from '../lib/filing.js';
   import { createNote } from '../lib/notes.js';
   import { openNotebook } from '../lib/navigate.js';
   import { createBookmark } from '../lib/bookmarks.js';
+  import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
   import { marqueeRect, marqueeHits, toggleSelection } from '../lib/gridSelect.js';
   import { buildCatalogQuery, fetchAllEntities } from '../lib/catalog.js';
+  import { matchesEntity } from '../lib/entitySearch.js';
   import { sortFileEntities } from '../lib/fileSort.js';
   import {
     deletedToast,
@@ -34,6 +37,7 @@
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
   import FolderSelect from '../components/FolderSelect.svelte';
+  import PasteDialog from '../components/PasteDialog.svelte';
 
   const TYPE_ICON = {
     media: 'image', capture: 'satellite', note: 'note', proof: 'proof',
@@ -151,15 +155,10 @@
   const total = $derived(
     searching && pl.serverMode ? pl.total : (summary?.total ?? confirmed.length)
   );
-  function matches(e) {
-    const q = query.trim().toLowerCase();
-    return (
-      (e.label ?? '').toLowerCase().includes(q) ||
-      e.type.toLowerCase().includes(q) ||
-      (folderOf(e) ?? '').toLowerCase().includes(q) ||
-      (e.attrs?.notes ?? '').toLowerCase().includes(q)
-    );
-  }
+  // The server's own index, restated once in `lib/entitySearch.js` rather than
+  // spelled out per tool: a bookmark's archived copy is a declared field, so it is
+  // searchable here exactly as it is past one page.
+  const matches = (e) => matchesEntity(e, query);
 
   // Sort the current view. The list headers use the same state as the grid
   // selector, so changing view does not silently change the order.
@@ -696,6 +695,70 @@
     }
   }
 
+  // ── paste ────────────────────────────────────────────────────────────────────
+  /**
+   * Ctrl+V files what the clipboard holds into the folder being looked at.
+   *
+   * The only surface here that had no way to take a file at all: its drag and drop
+   * moves items between folders, so an image had to go through the Media grid and
+   * be filed afterwards. A pasted screenshot and a pasted link now land already
+   * filed, which is what this desktop is for.
+   */
+  let pasted = $state(null);
+  let pasteBusy = $state(false);
+  $effect(() => {
+    if (uiState.tool !== 'files') return;
+    return listenForPaste((payload) => {
+      pasted ??= resolvePaste('files', payload, { folder: showUnfiled ? '' : cwd });
+    });
+  });
+
+  /** Show the folder the paste landed in, so it is never filed out of sight. */
+  function revealFiled(folder) {
+    if (folder) openFolder(folder);
+    else openUnfiled();
+  }
+
+  async function confirmPaste(resolved) {
+    if (pasteBusy || !caseState.current) return;
+    pasteBusy = true;
+    const { kind, values, payload } = resolved;
+    try {
+      const caseId = caseState.current.id;
+      if (kind === 'image') {
+        const result = await pasteImage(caseId, {
+          file: payload.file,
+          title: values.title,
+          sourceUrl: values.source,
+        });
+        // A duplicate is left where it already sits: the case keeps the copy it has,
+        // and refiling it under the folder of this paste would move an item the
+        // analyst filed on purpose the first time.
+        if (!result.duplicate && values.folder) {
+          await assignFolder(caseId, result.entity, values.folder);
+        }
+        pasted = null;
+        await reloadCase();
+        if (result.duplicate) {
+          toast('Already in the case (same SHA-256)', 'warn');
+        } else {
+          toast('Image filed', 'ok', 1600);
+          revealFiled(values.folder);
+        }
+      } else {
+        await createBookmark(caseId, { ...values, url: payload.url });
+        pasted = null;
+        await reloadCase();
+        toast('Bookmark saved', 'ok', 1600);
+        revealFiled(values.folder);
+      }
+    } catch (e) {
+      toast(e.message, 'danger');
+    } finally {
+      pasteBusy = false;
+    }
+  }
+
   // ── tree rail ────────────────────────────────────────────────────────────────
   let expanded = $state({});
   const isExpanded = (p) => expanded[p] === true;
@@ -705,6 +768,15 @@
 
   // ── details ────────────────────────────────────────────────────────────────
   let infoEntityId = $state(null);
+  // The panel's fields wait for Save while its connections file themselves, so
+  // Escape and the backdrop ask before throwing an edit away.
+  let infoDirty = $state(false);
+  let infoDiscarding = $state(false);
+
+  function closeInfo() {
+    if (infoDirty) infoDiscarding = true;
+    else infoEntityId = null;
+  }
 
   // View mode: small/large icon grids, plus a details list with columns.
   let view = $state('small');
@@ -1048,7 +1120,7 @@
               >
                 <span class="lcol-name">
                   {#if tileThumb(e)}
-                    <img class="lrow-thumb" src={`/files/${caseState.current.id}/${tileThumb(e)}`} alt="" loading="lazy" />
+                    <img class="lrow-thumb" src={fileUrl(caseState.current.id, tileThumb(e))} alt="" loading="lazy" />
                   {:else}
                     <Icon name={tileIcon(e)} size={15} />
                   {/if}
@@ -1138,7 +1210,7 @@
             >
               <div class="thumb">
                 {#if tileThumb(e)}
-                  <img src={`/files/${caseState.current.id}/${tileThumb(e)}`} alt={e.label} loading="lazy" />
+                  <img src={fileUrl(caseState.current.id, tileThumb(e))} alt={e.label} loading="lazy" />
                 {:else}
                   <Icon name={tileIcon(e)} size={dense ? 24 : 34} />
                 {/if}
@@ -1343,15 +1415,38 @@
   </Modal>
 {/if}
 
+<!-- Ctrl+V: a screenshot or a link, filed into the folder being looked at -->
+{#if pasted}
+  <PasteDialog
+    resolved={pasted}
+    folders={allFolders}
+    busy={pasteBusy}
+    onconfirm={confirmPaste}
+    onclose={() => (pasted = null)}
+  />
+{/if}
+
 <!-- details editor: the shared body, same as the sidebar and Media modal -->
 {#if infoEntityId}
-  <Modal title="Details" onclose={() => (infoEntityId = null)} width="520px">
+  <Modal title="Details" onclose={closeInfo} width="520px">
     <EntityDetails
       entityId={infoEntityId}
+      bind:dirty={infoDirty}
       onclose={() => (infoEntityId = null)}
       ondeleted={() => (infoEntityId = null)}
     />
   </Modal>
+{/if}
+
+{#if infoDiscarding}
+  <ConfirmDialog
+    title="Discard changes?"
+    message="This item has edits that Save has not taken."
+    confirmLabel="Discard"
+    icon="alert"
+    onconfirm={() => { infoDiscarding = false; infoDirty = false; infoEntityId = null; }}
+    oncancel={() => (infoDiscarding = false)}
+  />
 {/if}
 
 <style>

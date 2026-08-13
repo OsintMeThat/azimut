@@ -47,6 +47,22 @@ class FullCase:
     note: str = ""  # its case-relative path
     place_id: str = ""
     grid: str = ""
+    person_id: str = ""
+    org_id: str = ""
+    entity_photo_id: str = ""
+    entity_photo: str = ""
+    entity_photo_thumb: str = ""
+    account_id: str = ""
+    network_id: str = ""
+    vessel_id: str = ""
+    structure_id: str = ""
+    model_id: str = ""
+    bookmark_id: str = ""
+    claim_id: str = ""
+    counted_id: str = ""  # the statement that counts a model rather than objects
+    pinned_id: str = ""  # a node placed by hand on the graph canvas
+    analysis_view_id: str = ""  # a named Board reading stored with the case
+    timeline_view_id: str = ""  # a named Timeline reading stored with the case
     entity_types: set[str] = field(default_factory=set)
 
 
@@ -130,6 +146,73 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     )
     assert related.status_code == 200, related.text
 
+    # -- the hand-made vocabulary: one entity per family, and the verbs ------
+    # These own nothing on disk, so they are here for the registry and bundle
+    # gates rather than for the file ones: a type that reaches the graph without
+    # deciding what it owns fails `test_every_type_in_a_full_case_declares...`.
+    def entity(type_: str, label: str, attrs: dict | None = None) -> str:
+        res = client.post(
+            f"/api/cases/{case_id}/entities",
+            json={"type": type_, "label": label, "attrs": attrs or {}},
+        )
+        assert res.status_code == 200, res.text
+        return res.json()["id"]
+
+    full.person_id = entity("person", "A. Nadeau")
+    full.org_id = entity("organization", "Northwind Shipping")
+    full.account_id = entity("account", "@harbourwatch", {})
+    full.network_id = entity("network", "203.0.113.0/24", {"asn": "AS64496"})
+    full.vessel_id = entity(
+        "vessel", "MV Aurora", {"imo": "9074729", "condition": "intact"}
+    )
+    full.structure_id = entity(
+        "structure", "Quay 4 warehouse", {"kind": "warehouse", "condition": "damaged"}
+    )
+    # A model rather than an object, and the one member of the `class` family: the
+    # bundle has to carry it, and the vessel above has to be able to say it is one.
+    full.model_id = entity(
+        "equipment-type", "Handysize bulker",
+        {"category": "cargo vessel", "aliases": "handy bulker"},
+    )
+
+    gallery = client.post(
+        f"/api/cases/{case_id}/entities/{full.person_id}/images",
+        json={"media_ids": [photo_entity["id"]]},
+    )
+    assert gallery.status_code == 200, gallery.text
+    assert gallery.json()["images"][0]["primary"] is True
+
+    direct_photo = client.post(
+        f"/api/cases/{case_id}/entities/{full.org_id}/images/upload",
+        files={
+            "file": (
+                "organization-logo.png",
+                io.BytesIO(_png(color=(70, 90, 120))),
+                "image/png",
+            )
+        },
+    )
+    assert direct_photo.status_code == 200, direct_photo.text
+    direct_item = direct_photo.json()["images"][0]
+    full.entity_photo_id = direct_item["id"]
+    full.entity_photo = direct_item["path"]
+    full.entity_photo_thumb = direct_item["thumbnail"]
+
+    for from_id, to_id, verb in (
+        (full.person_id, full.account_id, "owns"),
+        (full.person_id, full.network_id, "owns"),
+        (full.org_id, full.vessel_id, "owns"),
+        (full.account_id, photo_entity["id"], "posted"),
+        (full.vessel_id, photo_entity["id"], "appears-in"),
+        (full.vessel_id, full.model_id, "instance-of"),
+        (full.structure_id, full.place_id, "sited-at"),
+    ):
+        stated = client.post(
+            f"/api/cases/{case_id}/links",
+            json={"from_id": from_id, "to_id": to_id, "type": verb},
+        )
+        assert stated.status_code == 200, f"{verb}: {stated.text}"
+
     # -- proof: one panel from the case, one pasted image ---------------------
     pasted = _png(size=(40, 30), color=(220, 220, 40))
     asset_name = f"{hashlib.sha256(pasted).hexdigest()[:16]}.png"
@@ -173,6 +256,58 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     full.note = note.json()["attrs"]["path"]
     client.put(f"/api/cases/{case_id}/notes", json={"text": "# Full case\n\nRunning notes.\n"})
 
+    # -- a claim, with its three dedicated connectors --------------------------
+    # The reified statement carries one confidence for the whole assertion. Its
+    # connectors only identify the subject, place and supporting material.
+    # The source it rests on, graded on the axis that is never multiplied into the
+    # edge's own rating: the bundle has to carry both and keep them apart.
+    full.bookmark_id = entity(
+        "bookmark",
+        "Harbour watch thread",
+        {
+            "url": "https://example.test/thread/48",
+            "fetched_at": "2026-08-01T09:12:00+00:00",
+            "archive_url": "https://web.archive.test/web/2026/https://example.test/thread/48",
+            "reliability": "B",
+        },
+    )
+
+    full.claim_id = entity(
+        "claim",
+        "Where was the photo taken?",
+        {
+            "when": "2026-08-01T09:12:00Z",
+            "time_role": "observed",
+            "method": "spans counted against Esri imagery",
+            "confidence": "probable",
+        },
+    )
+    for to_id, verb in (
+        (photo_entity["id"], "about"),
+        (full.place_id, "at"),
+        (full.note_id, "cites"),
+        (full.bookmark_id, "cites"),
+    ):
+        stated = client.post(
+            f"/api/cases/{case_id}/links",
+            json={"from_id": full.claim_id, "to_id": to_id, "type": verb},
+        )
+        assert stated.status_code == 200, f"{verb}: {stated.text}"
+
+    # The counted statement: how many of one model, in what state. One kind of thing
+    # per claim, so the number on the node is never ambiguous about what it counts.
+    full.counted_id = entity(
+        "claim",
+        "Two Handysize bulkers berthed at Quay 4",
+        {"count": 2, "condition": "intact", "confidence": "possible"},
+    )
+    for to_id, verb in ((full.model_id, "about"), (full.place_id, "at")):
+        stated = client.post(
+            f"/api/cases/{case_id}/links",
+            json={"from_id": full.counted_id, "to_id": to_id, "type": verb},
+        )
+        assert stated.status_code == 200, f"{verb}: {stated.text}"
+
     grid = client.put(
         f"/api/cases/{case_id}/search-grids/north-sweep",
         json={
@@ -191,6 +326,59 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     )
     assert grid.status_code == 200, grid.text
     full.grid = f".search/{grid.json()['name']}.json"
+
+    # -- the graph as the analyst arranged it ---------------------------------
+    # Not an artifact and not an assertion: where a node was dragged to, in one
+    # reading. Planted here so the trash and bundle gates cover it — a pin has to
+    # travel with the case and die with the entity it places.
+    full.pinned_id = full.person_id
+    pinned = client.put(
+        f"/api/cases/{case_id}/graph/pins",
+        json={"lens": "all", "pins": [{"id": full.person_id, "x": -220.5, "y": 118.25}]},
+    )
+    assert pinned.status_code == 200, pinned.text
+
+    saved_view = client.post(
+        f"/api/cases/{case_id}/analysis-views",
+        json={
+            "name": "People in review",
+            "mode": "live",
+            "surface": "board",
+            "spec": {
+                "query": {
+                    "filter": {"families": ["actor"], "status": "suggested"},
+                    "terms": {"type": "person,organization", "status": "suggested"},
+                },
+                "board": {"order": "-created", "sortKey": "created", "sortDesc": True},
+            },
+        },
+    )
+    assert saved_view.status_code == 200, saved_view.text
+    full.analysis_view_id = saved_view.json()["id"]
+
+    timeline_view = client.post(
+        f"/api/cases/{case_id}/analysis-views",
+        json={
+            "name": "Chronology in review",
+            "mode": "live",
+            "surface": "timeline",
+            "spec": {
+                "timeline": {
+                    "from": "2026-08-01",
+                    "to": "2026-08-02",
+                    "tracks": [
+                        {
+                            "id": "events",
+                            "label": "Events",
+                            "categories": ["statement"],
+                        }
+                    ],
+                }
+            },
+        },
+    )
+    assert timeline_view.status_code == 200, timeline_view.text
+    full.timeline_view_id = timeline_view.json()["id"]
 
     # Enrichment and thumbnails were queued along the way; let them land, or the
     # caller's first delete races a background write into the same case.

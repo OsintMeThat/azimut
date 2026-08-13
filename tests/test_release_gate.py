@@ -223,7 +223,7 @@ def test_release_tooling_is_bounded_and_built_from_the_lock():
     assert "uv pip install . pyinstaller" not in workflow
     assert "python -m build --no-isolation" in workflow
     assert "--group release" in workflow
-    assert workflow.count('node-version: "20.20.2"') == 2
+    assert workflow.count('node-version: "24.19.0"') == 2
     assert "--no-build-isolation" in workflow
     assert "--no-editable" in workflow
     assert "uv run python" not in workflow
@@ -241,8 +241,8 @@ def test_release_tooling_is_bounded_and_built_from_the_lock():
     assert "pytest tests/test_release_gate.py tests/test_updates.py" in workflow
     assert "\n  dist:\n" in workflow and "needs: guard" in workflow
     release_job = workflow.split("  release:\n", maxsplit=1)[1]
-    assert release_job.index("actions/checkout@v4") < release_job.index(
-        "softprops/action-gh-release@v2"
+    assert release_job.index("actions/checkout@v7") < release_job.index(
+        "softprops/action-gh-release@v3"
     )
     assert (root / "docs" / "RELEASE_NOTES.md").is_file()
 

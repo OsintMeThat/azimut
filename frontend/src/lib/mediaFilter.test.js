@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   hasMediaForFilters,
   isGenericImage,
+  isBroughtIn,
+  isMadeHere,
   isSatelliteMedia,
   mediaDisplayKind,
   matchesQuery,
@@ -218,5 +220,56 @@ describe('visibleMedia — position filter', () => {
     ]);
     expect(visibleMedia([located, bare], { gpsOnly: false }).length).toBe(2);
     expect(visibleMedia([located, bare], { gpsOnly: true, query: 'plain' })).toEqual([]);
+  });
+});
+
+describe('what the case made, apart from what it collected', () => {
+  const frame = item({ filename: 'frame.png', source: { type: 'inspect', op: 'frame' } });
+  const collage = item({ filename: 'collage.png', source: { type: 'inspect', op: 'collage' } });
+  const upload = item({ filename: 'handed-over.jpg', source: { type: 'upload' } });
+  const capture = item({ filename: 'map.png', source: { type: 'satellite' } });
+
+  it('counts only the tools that compose case material', () => {
+    expect(isMadeHere(frame)).toBe(true);
+    expect(isMadeHere(collage)).toBe(true);
+    // Original imagery brought into the case, not made out of what it holds.
+    expect(isMadeHere(capture)).toBe(false);
+    expect(isMadeHere(upload)).toBe(false);
+    expect(isMadeHere(item())).toBe(false);
+    expect(isMadeHere(null)).toBe(false);
+  });
+
+  it('takes them out of the grid on request, and composes with the other filters', () => {
+    // The in-memory pass a case small enough for one page takes; a large case is
+    // filtered in SQL, and both read the same set.
+    expect(
+      visibleMedia([frame, upload, capture], { collectedOnly: true, sort: 'name' }).map(
+        (i) => i.filename
+      )
+    ).toEqual(['handed-over.jpg', 'map.png']);
+    expect(visibleMedia([frame, upload, capture], { collectedOnly: false }).length).toBe(3);
+    expect(visibleMedia([frame, upload], { collectedOnly: true, query: 'frame' })).toEqual([]);
+  });
+});
+
+describe('what the analyst brought in by hand', () => {
+  const dropped = item({ filename: 'dropped.png', source: { type: 'upload' } });
+  const pastedIn = item({ filename: 'Front gate.png', source: { type: 'clipboard' } });
+  const downloaded = item({ filename: 'clip.mp4', source: { type: 'download' } });
+
+  it('counts a paste and a drop as one facet', () => {
+    // Both were put there by the analyst, which is what the Imports filter asks.
+    // They stay two source types because only one of them can say where it came from.
+    expect(isBroughtIn(dropped)).toBe(true);
+    expect(isBroughtIn(pastedIn)).toBe(true);
+    expect(isBroughtIn(downloaded)).toBe(false);
+    expect(isBroughtIn(item({ source: { type: 'satellite' } }))).toBe(false);
+    expect(isBroughtIn(null)).toBe(false);
+  });
+
+  it('still reads a paste as collected rather than made here', () => {
+    // Azimut did not compose those pixels out of case material; a system screenshot
+    // tool did, outside the case.
+    expect(isMadeHere(pastedIn)).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 <script>
   import Icon from '../../components/Icon.svelte';
+  import { fileUrl } from '../../lib/fileUrl.js';
   import Modal from '../../components/Modal.svelte';
   import FolderBrowser from '../../components/FolderBrowser.svelte';
   import PanelCategories from './PanelCategories.svelte';
@@ -112,7 +113,7 @@
             >
               <span class="pick-image">
                 {#if item.thumb}
-                  <img src={`/files/${caseId}/${item.thumb}`} alt="" loading="lazy" decoding="async" />
+                  <img src={fileUrl(caseId, item.thumb)} alt="" loading="lazy" decoding="async" />
                 {:else}
                   <!-- no cached thumbnail yet: a placeholder, never the
                        full-size original in a 150px cell -->

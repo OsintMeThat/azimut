@@ -6,11 +6,15 @@
     reloadCase,
     toast,
     updateState,
-    checkForUpdateOnStart,
+    updatesState,
+    prefs,
+    checkForUpdatesOnStart,
     toggleTheme,
   } from './lib/state.svelte.js';
+  import { updateBadges } from './lib/staleness.js';
   import { startEvents, onEvent } from './lib/events.js';
   import {
+    CASE_WORKSPACE,
     WORKSPACES,
     TOOL_LABELS,
     sidebarOpenForWorkspace,
@@ -18,6 +22,7 @@
     toolFromHash,
   } from './lib/workspaces.js';
   import { createToolLoader } from './lib/toolLoader.js';
+  import { loadEntityTypes } from './lib/entityTypes.svelte.js';
   import Icon from './components/Icon.svelte';
   import Logo from './components/Logo.svelte';
   import Wordmark from './components/Wordmark.svelte';
@@ -27,11 +32,16 @@
   import UpdateModal from './components/UpdateModal.svelte';
   import WorkspaceStopped from './components/WorkspaceStopped.svelte';
   import { readStatus, stoppedBecause } from './lib/workspace.js';
+  import { analysisSearch, leaveAnalysisView } from './lib/analysisSearch.svelte.js';
 
-  // The rail holds workspaces (docs/UI.md §3); tools are tabs inside them.
-  // Settings lives behind the topbar gear instead — app plumbing, not part
-  // of the working flow.
+  // The rail holds the pipeline workspaces (docs/UI.md §3); tools are tabs
+  // inside them. Two workspaces sit in the topbar rather than the rail: the
+  // case, which is what the stages file into, and Settings, which is app
+  // plumbing and not part of the working flow at all.
   const TOOLS = [
+    { id: 'board', label: TOOL_LABELS.board, load: () => import('./tools/Board.svelte') },
+    { id: 'graph', label: TOOL_LABELS.graph, load: () => import('./tools/Graph.svelte') },
+    { id: 'timeline', label: TOOL_LABELS.timeline, load: () => import('./tools/Timeline.svelte') },
     { id: 'media', label: TOOL_LABELS.media, load: () => import('./tools/MediaLibrary.svelte') },
     { id: 'files', label: TOOL_LABELS.files, load: () => import('./tools/Files.svelte') },
     { id: 'reverse', label: TOOL_LABELS.reverse, load: () => import('./tools/ReverseSearch.svelte') },
@@ -46,6 +56,10 @@
     ...TOOLS,
     { id: 'settings', label: TOOL_LABELS.settings, load: () => import('./tools/Settings.svelte') },
   ];
+  // Settings is the only place anything can be updated from, and it sits out of
+  // the working flow — so a dot on its icon is how the app mentions it at all.
+  let badges = $derived(updateBadges(updatesState, prefs.updateDismissedVersion));
+
   const loader = createToolLoader(Object.fromEntries(ALL_TOOLS.map((tool) => [tool.id, tool.load])));
   let toolComponents = $state.raw({});
   let toolErrors = $state.raw({});
@@ -58,6 +72,17 @@
   if (fromHash) uiState.tool = fromHash;
   $effect(() => {
     history.replaceState(null, '', `#${uiState.tool}`);
+  });
+
+  // A frozen reading belongs to the surface that captured it. Carrying a Graph
+  // snapshot into Board made the capture look like an incomplete second case and
+  // could leave a hidden Details id waiting for the next live read. Changing tools
+  // is therefore leaving the snapshot; live recipes still share their question.
+  $effect(() => {
+    for (const view of [analysisSearch.catalog.activeView, analysisSearch.timeline.activeView]) {
+      if (view?.mode !== 'snapshot' || uiState.tool === view.surface) continue;
+      leaveAnalysisView(caseState.current?.id, view.surface, { clear: true });
+    }
   });
 
   // Workspace navigation: clicking a workspace returns to its last-used tab.
@@ -119,13 +144,20 @@
     })
     .catch(() => {});
 
+  // The entity vocabulary: types, families, icons and the fields a form is built
+  // from. It is code rather than case data, so it is fetched once here and shared —
+  // and asking at startup is what keeps a row from painting under a fallback icon
+  // before the first surface that needs the registry happens to ask for it.
+  loadEntityTypes();
+
   // Load the case list and reopen the last-used case (survives reloads), then
-  // — once preferences have landed — see whether a newer release is out and
-  // pop a notice. The check reads prefs.updateCheckOnStart, so it must follow
-  // initSession, which loads them.
+  // — once preferences have landed — see what is behind: the app, the
+  // downloaders, the capture extension. The check reads prefs.updateCheckOnStart
+  // and the bundled extension version, so it must follow initSession, which
+  // loads them.
   initSession()
     .catch(() => {})
-    .finally(() => checkForUpdateOnStart());
+    .finally(() => checkForUpdatesOnStart());
 
   // Live nudges from our own backend (SSE, same-origin — still local-first):
   // the capture extension files screenshots while this tab just sits here, and
@@ -151,15 +183,29 @@
       <Logo size={27} />
       <span class="brand-name"><Wordmark height={13} /></span>
     </div>
-    <CaseSwitcher />
+    <div class="case-group">
+      <CaseSwitcher />
+      <button
+        class="btn btn-ghost case-btn"
+        class:topbar-active={activeWs?.id === CASE_WORKSPACE.id}
+        title="Open the case board"
+        onclick={() => openWorkspace(CASE_WORKSPACE)}
+      >
+        <Icon name={CASE_WORKSPACE.icon} size={16} />
+        <span>{TOOL_LABELS.board}</span>
+      </button>
+    </div>
     <div class="spacer"></div>
     <button
-      class="btn btn-ghost btn-sm"
-      class:gear-active={uiState.tool === 'settings'}
-      title="Settings"
+      class="btn btn-ghost btn-sm dotted"
+      class:topbar-active={uiState.tool === 'settings'}
+      title={badges.any ? 'Settings · something to install or update' : 'Settings'}
       onclick={() => (uiState.tool = 'settings')}
     >
       <Icon name="settings" size={16} />
+      {#if badges.any}
+        <span class="update-dot" aria-label="something to install or update"></span>
+      {/if}
     </button>
     <button
       class="btn btn-ghost btn-sm"
@@ -277,7 +323,31 @@
   .spacer {
     flex: 1;
   }
-  .gear-active {
+  /* the switcher and the board button are one control — which case, then open
+     it. Both carry the same weight, and the hairline is what says they belong
+     together: their own padding leaves too much air for proximity alone to. */
+  .case-group {
+    display: flex;
+    align-items: center;
+  }
+  .case-btn {
+    position: relative;
+    margin-left: 13px;
+    gap: 8px;
+    padding: 6px 12px;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+  }
+  .case-btn::before {
+    content: '';
+    position: absolute;
+    left: -7px;
+    top: 5px;
+    bottom: 5px;
+    width: 1px;
+    background: var(--border);
+  }
+  .topbar-active {
     color: var(--text-1);
     background: var(--bg-2);
   }

@@ -4,15 +4,24 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
   # Weekly, so the "latest deps" tripwire below reports upstream breakage even
   # in quiet weeks — bit rot doesn't wait for us to push.
   schedule:
     - cron: "0 6 * * 1"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
-    name: Backend (${{ matrix.os }}, py${{ matrix.python }})
+    name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -21,38 +30,75 @@ jobs:
         # Windows exe was a guess; this is what makes "works everywhere" checkable.
         # Filesystem behaviour is where they actually differ — engine/scrapers.py
         # swaps directories, and Windows won't delete an open file.
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ["3.12"]
         include:
-          - os: ubuntu-latest
+          - name: Backend (ubuntu-latest, py3.12)
+            os: ubuntu-latest
+            python: "3.12"
+            tests: all
+          - name: Backend (macos-latest, py3.12)
+            os: macos-latest
+            python: "3.12"
+            tests: all
+          # Four fresh Windows processes retain the complete suite while making
+          # progress visible and keeping the slowest shard near ten minutes.
+          - name: Backend (windows-latest, py3.12, A-F)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_[a-f]*.py
+          - name: Backend (windows-latest, py3.12, G-L)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_[g-l]*.py
+          - name: Backend (windows-latest, py3.12, M-R)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_[m-r]*.py
+          - name: Backend (windows-latest, py3.12, S-Z)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_[s-z]*.py
+          - name: Backend (ubuntu-latest, py3.11)
+            os: ubuntu-latest
             python: "3.11"  # the floor in requires-python
-          - os: ubuntu-latest
+            tests: all
+          - name: Backend (ubuntu-latest, py3.13)
+            os: ubuntu-latest
             python: "3.13"  # the ceiling we've tested against
+            tests: all
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
+          prune-cache: true
           python-version: ${{ matrix.python }}
       # --frozen installs uv.lock exactly and never re-resolves, so a green run
       # means "these versions work", not "whatever PyPI served this morning".
       # --check fails if uv.lock drifted from pyproject.toml (forgot `uv lock`).
       - run: uv lock --check
       - run: uv sync --frozen --extra dev
-      - run: uv run pytest -q
+      - name: Run backend suite
+        if: matrix.tests == 'all'
+        run: uv run pytest -q --durations=20 --durations-min=1
+      - name: Run Windows shard with per-test progress
+        if: matrix.tests != 'all'
+        shell: bash
+        run: uv run pytest -vv ${{ matrix.tests }} --durations=20 --durations-min=1
 
   lint:
     name: Lint & type-check (backend)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # One box, not the OS/version matrix: ruff and mypy read the same source
-    # everywhere, so five runs would just be five identical verdicts. Python
+    # everywhere, so matrix runs would just be identical verdicts. Python
     # 3.12 on purpose — mypy parses numpy's 2.x stubs, which use 3.12 syntax a
     # 3.11 target chokes on. The 3.11 floor stays covered by the pytest matrix.
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
+          prune-cache: true
           python-version: "3.12"
       - run: uv sync --frozen --extra dev
       - run: uv run ruff check src tests
@@ -61,28 +107,31 @@ jobs:
   backend-floating:
     name: Backend tests (latest deps)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     # The lock is the safety net; this is the tripwire. It re-resolves everything
     # to the newest versions our ranges allow, so an upstream release that breaks
     # us surfaces here — on a scheduled run we triage — instead of in a user's
     # `pip install azimut`. Advisory: a red run never blocks a merge.
+    if: github.event_name == 'schedule'
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - run: uv sync --upgrade --extra dev
-      - run: uv run pytest -q
+      - run: uv run pytest -q --durations=20 --durations-min=1
 
   frontend:
     name: Frontend tests + build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24.19.0"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
@@ -93,14 +142,15 @@ jobs:
   browser:
     name: Browser canvas interactions
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24.19.0"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci

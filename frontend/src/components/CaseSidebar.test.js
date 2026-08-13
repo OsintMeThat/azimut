@@ -197,6 +197,12 @@ describe('entity row', () => {
     expect(row).toContain('title="Confirm"');
     expect(row).toContain('title="Dismiss"');
   });
+
+  it('uses the primary photo and keeps the type icon as the fallback', () => {
+    expect(row).toContain('{#if entity.thumb}');
+    expect(row).toContain('src={fileUrl(caseId, entity.thumb)}');
+    expect(row).toContain('<Icon name={entityIcon(entity)} size={14} />');
+  });
 });
 
 describe('details drawer', () => {
@@ -208,9 +214,17 @@ describe('details drawer', () => {
   });
 
   it('closes on Escape, on the back arrow and on delete', () => {
-    expect(drawer).toContain("onkeydown={(e) => e.key === 'Escape' && onclose()}");
+    expect(drawer).toContain("onkeydown={(e) => e.key === 'Escape' && requestClose()}");
     expect(drawer).toContain('title="Back to the case"');
     expect(shell).toContain('<DetailsDrawer entity={infoEntity} onclose={closeInfo} ondeleted={closeInfo} />');
+  });
+
+  it('asks before a close would throw away an unsaved field', () => {
+    // the panel's fields wait for Save while its connections file themselves, so
+    // Escape and the back arrow used to drop a half-typed value without a word
+    expect(drawer).toContain('bind:dirty');
+    expect(drawer).toContain('if (dirty) discarding = true;');
+    expect(drawer).toContain('title="Discard changes?"');
   });
 
   it('hands focus back to the row it was opened from', () => {

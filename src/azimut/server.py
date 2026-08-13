@@ -232,12 +232,13 @@ def create_app() -> FastAPI:
     )
 
     from .api import (
-        cases, drafts, events, files, folders, ingest, inspect, media, notes, proofs,
-        satellite, settings, templates,
+        analysis_views, cases, drafts, events, files, folders, ingest, inspect, media,
+        notes, proofs, satellite, settings, templates,
     )
 
     app.include_router(cases.router)
     app.include_router(cases.workspace_router)
+    app.include_router(analysis_views.router)
     app.include_router(notes.router)
     app.include_router(media.router)
     app.include_router(inspect.router)

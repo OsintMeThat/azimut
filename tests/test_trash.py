@@ -63,7 +63,35 @@ def test_undo_brings_back_the_entity_its_id_and_its_file(client):
     # and it is browsable again — the media index row came back with it
     listed = client.get(f"/api/cases/{full.case_id}/media").json()
     assert any(item["path"] == full.photo for item in listed)
+    gallery = client.get(
+        f"/api/cases/{full.case_id}/entities/{full.person_id}/images"
+    ).json()["images"]
+    assert [(image["media_id"], image["primary"]) for image in gallery] == [
+        (photo["id"], True)
+    ]
     assert trash_of(client, full.case_id)["groups"] == []
+
+
+def test_undo_restores_private_entity_photos(client):
+    full = fullcase.build_full_case(client)
+    case = Case.open(full.case_id)
+
+    group = client.delete(
+        f"/api/cases/{full.case_id}/entities/{full.org_id}"
+    ).json()["trash"]
+    assert not case.resolve_inside(full.entity_photo).exists()
+    assert not case.resolve_inside(full.entity_photo_thumb).exists()
+
+    restored = client.post(f"/api/cases/{full.case_id}/trash/{group}/restore")
+    assert restored.status_code == 200, restored.text
+    gallery = client.get(
+        f"/api/cases/{full.case_id}/entities/{full.org_id}/images"
+    ).json()["images"]
+    assert [(image["id"], image["direct"], image["primary"]) for image in gallery] == [
+        (full.entity_photo_id, True, True)
+    ]
+    assert case.resolve_inside(full.entity_photo).is_file()
+    assert case.resolve_inside(full.entity_photo_thumb).is_file()
 
 
 def test_a_cascade_comes_back_as_one_piece(client):
@@ -116,6 +144,26 @@ def test_a_relation_survives_the_round_trip(client):
     chain = client.get(f"/api/cases/{full.case_id}/entities/{photo['id']}/chain").json()
     stated = [r for r in chain["relations"] if r["link"]["type"] == "located-at"]
     assert [r["entity"]["id"] for r in stated] == [full.place_id]
+
+
+def test_a_restored_node_comes_back_placed_by_the_layout(client):
+    """Where a node sat on the canvas does not survive its own deletion, and that is
+    the deliberate half of the bargain: the pin cascades with the entity so a
+    reissued id can never inherit a spot chosen for something else. The entity, its
+    files and its links all come back — the graph simply places it again."""
+    full = fullcase.build_full_case(client)
+    case = Case.open(full.case_id)
+    assert case.graph_pins("all") == {full.pinned_id: (-220.5, 118.25)}
+
+    group = client.delete(
+        f"/api/cases/{full.case_id}/entities/{full.pinned_id}"
+    ).json()["trash"]
+    assert case.graph_pins("all") == {}
+
+    client.post(f"/api/cases/{full.case_id}/trash/{group}/restore")
+
+    assert case.get_entity(full.pinned_id) is not None
+    assert case.graph_pins("all") == {}
 
 
 def test_a_proof_takes_its_pasted_images_into_the_trash_and_back(client):

@@ -60,6 +60,10 @@ META_DIR = ".meta"
 #: The case database. Hidden because it is the one file whose loss costs
 #: everything, and the one someone deletes to reclaim space.
 DATA_DIR = ".data"
+#: Presentation photos imported directly into an entity. They are deliberately
+#: outside ``media/``: adding a portrait or logo must not create evidence in the
+#: Media Library. The database records their paths and the entity owns them.
+ENTITY_IMAGES_DIR = "entity-images"
 
 #: Content directories, in birth order. The trash is deliberately not one of
 #: them — see `TRASH_DIR`.
@@ -293,6 +297,24 @@ def data_dir(root: Path) -> Path:
 def database(root: Path) -> Path:
     """The case database: entities, links, folders, jobs and the trash journal."""
     return data_dir(root) / "case.db"
+
+
+def entity_images(root: Path) -> Path:
+    """Private presentation photos imported directly into entity details."""
+    return data_dir(root) / ENTITY_IMAGES_DIR
+
+
+def entity_image_thumbs(root: Path) -> Path:
+    """Bounded previews for direct entity photos."""
+    return entity_images(root) / ".thumbs"
+
+
+def entity_image_rel(image_id: str) -> str:
+    return f"{DATA_DIR}/{ENTITY_IMAGES_DIR}/{image_id}.jpg"
+
+
+def entity_image_thumb_rel(image_id: str) -> str:
+    return f"{DATA_DIR}/{ENTITY_IMAGES_DIR}/.thumbs/{image_id}.jpg"
 
 
 def notes_file(root: Path) -> Path:

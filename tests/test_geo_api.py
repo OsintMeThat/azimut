@@ -2,6 +2,7 @@
 
 import pytest
 
+from azimut.api import satellite
 from azimut.engine import geo
 
 # The suite's autouse fixture replaces geo.reverse_geocode with an offline stub,
@@ -297,6 +298,80 @@ def test_sky_refuses_a_zone_it_cannot_load(client, zone):
 )
 def test_sky_validates_at_the_edge(client, params):
     assert client.get("/api/geo/sky", params=params).status_code == 422
+
+
+# -- /api/geo/daylight ----------------------------------------------------------
+#
+# The geometry is covered in tests/test_sky.py. What matters here is the contract the
+# Timeline reads: the point's own civil zone beside the spans, UTC instants whatever
+# clock the axis is labelled with, and a window too wide answered as cut rather than
+# paid for.
+
+
+def test_daylight_carries_the_spans_and_the_point_s_own_zone(client):
+    response = client.get(
+        "/api/geo/daylight",
+        params={
+            "lat": 50.45, "lon": 30.52,
+            "from": "2026-06-20T00:00:00Z", "to": "2026-06-22T00:00:00Z",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["zone"]["name"] == "Europe/Kyiv"
+    assert body["zone"]["abbreviation"] == "EEST"
+    assert body["zone"]["offset_minutes"] == 180
+    assert body["truncated"] is False
+    assert len(body["day"]) == 2
+    for span in body["day"]:
+        assert span["from"].endswith("Z") and span["to"].endswith("Z")
+    # dusk is not a line, so the two runs are both given and civil encloses the day
+    assert body["civil"][0]["from"] < body["day"][0]["from"]
+
+
+def test_daylight_says_a_window_was_too_wide_rather_than_paying_for_it(client):
+    body = client.get(
+        "/api/geo/daylight",
+        params={
+            "lat": 50.45, "lon": 30.52,
+            "from": "2026-01-01T00:00:00Z", "to": "2027-01-01T00:00:00Z",
+        },
+    ).json()
+    assert body["truncated"] is True
+    assert body["day"] == [] and body["civil"] == []
+    # the zone still answers: it is what the axis is labelled with, and it costs
+    # nothing to work out
+    assert body["zone"]["name"] == "Europe/Kyiv"
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"lat": 91, "lon": 0, "from": "2026-06-20T00:00:00Z", "to": "2026-06-21T00:00:00Z"},
+        {"lat": 0, "lon": 0, "from": "yesterday", "to": "2026-06-21T00:00:00Z"},
+        {"lat": 0, "lon": 0, "from": "2026-06-21T00:00:00Z", "to": "2026-06-20T00:00:00Z"},
+        {"lat": 0, "lon": 0, "from": "2026-06-21T00:00:00Z"},
+    ],
+)
+def test_daylight_validates_at_the_edge(client, params):
+    assert client.get("/api/geo/daylight", params=params).status_code == 422
+
+
+def test_daylight_does_not_touch_the_network(monkeypatch):
+    import socket
+
+    def explode(*args, **kwargs):
+        raise AssertionError("daylight must be computed offline")
+
+    monkeypatch.setattr(socket, "socket", explode)
+    monkeypatch.setattr(socket, "create_connection", explode)
+    body = satellite.daylight_for_window(
+        lat=48.8584,
+        lon=2.2945,
+        start="2026-07-30T00:00:00Z",
+        end="2026-07-31T00:00:00Z",
+    )
+    assert len(body["day"]) == 1
 
 
 def test_sky_never_touches_the_network(client, monkeypatch):

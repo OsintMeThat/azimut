@@ -339,6 +339,139 @@ def test_media_page_does_not_scan_sidecars_for_each_request(client, monkeypatch)
     assert page["total"] == 1
 
 
+# -- what the case collected, apart from what it made ------------------------
+#
+# A geolocation case ends up with far more extracted frames than collected files,
+# and the chips cannot answer "what did we actually collect": they are
+# single-select and each says "show me only X". This is the other axis, so it is a
+# switch, and it scopes the counts as well as the page — a chooser still
+# advertising rows the switch is hiding is a chooser that lies.
+
+
+def _made_here(client, cid, source_path, *, name=None):
+    """One derivative through the real Inspect route.
+
+    The source colours matter: brightening a near-black pixel rounds back to
+    itself, the bytes match, and dedupe hands back the *upload* — which is correct
+    behaviour and a fixture that would test nothing.
+    """
+    res = client.post(
+        f"/api/cases/{cid}/inspect/save-frames",
+        json={
+            "items": [
+                {
+                    "path": source_path,
+                    "ops": [{"op": "brightness", "params": {"amount": 1.4}}],
+                    **({"label": name} if name else {}),
+                }
+            ]
+        },
+    )
+    assert res.status_code == 200, res.text
+    saved = res.json()["saved"][0]
+    assert saved["duplicate"] is False, "fixture produced bytes the case already held"
+    return saved["item"]
+
+
+def test_media_page_can_leave_out_what_the_case_made(client):
+    cid = client.post("/api/cases", json={"name": "Collected"}).json()["id"]
+    original = _upload(client, cid, "orig.png", _png_bytes()).json()["item"]
+    made = _made_here(client, cid, original["path"])
+
+    everything = client.get(f"/api/cases/{cid}/media/page").json()
+    assert {item["path"] for item in everything["items"]} == {original["path"], made["path"]}
+    # The number is reported whether the switch is on or off: off, it is what
+    # turning it on would hide.
+    assert everything["facets"]["made_here_count"] == 1
+
+    collected = client.get(
+        f"/api/cases/{cid}/media/page", params={"collected_only": "true"}
+    ).json()
+    assert [item["path"] for item in collected["items"]] == [original["path"]]
+    assert collected["total"] == 1
+    assert collected["facets"]["made_here_count"] == 1
+
+
+def test_leaving_them_out_scopes_the_counts_too(client):
+    """Otherwise the Collages chip offers thirty rows and clicking it shows none."""
+    cid = client.post("/api/cases", json={"name": "Scoped counts"}).json()["id"]
+    original = _upload(client, cid, "orig.png", _png_bytes()).json()["item"]
+    _made_here(client, cid, original["path"])
+
+    page = client.get(f"/api/cases/{cid}/media/page", params={"collected_only": "true"}).json()
+    assert page["facets"]["category_counts"]["image"] == 1
+    assert page["facets"]["category_counts"]["upload"] == 1
+    assert page["facets"]["kind_counts"]["image"] == 1
+
+
+def test_leaving_them_out_does_not_touch_collected_material(client):
+    """A satellite capture is original imagery brought into the case, not something
+    composed out of what the case already holds. Same for a download and an import."""
+    from azimut.engine import media as media_engine
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Untouched"}).json()["id"]
+    upload = _upload(client, cid, "orig.png", _png_bytes()).json()["item"]
+    capture = media_engine.import_image(
+        Case.open(cid),
+        Image.new("RGB", (32, 24)),
+        "map.png",
+        {"type": "satellite"},
+        entity_type="capture",
+        dedupe=False,
+    )["item"]
+
+    page = client.get(f"/api/cases/{cid}/media/page", params={"collected_only": "true"}).json()
+    assert {item["path"] for item in page["items"]} == {upload["path"], capture["path"]}
+    assert page["facets"]["made_here_count"] == 0
+
+
+def test_the_switch_reads_how_a_file_entered_not_everything_true_about_it(client):
+    """Dedupe hands back the entity that is already there, and its row with it. Bytes
+    that arrived as an upload stay on the collected side even once Inspect produces
+    the same picture, because that is how they entered the case."""
+    cid = client.post("/api/cases", json={"name": "Entered by"}).json()["id"]
+    original = _upload(client, cid, "orig.png", _png_bytes()).json()["item"]
+    made = _made_here(client, cid, original["path"])
+    same_bytes = client.get(f"/files/{cid}/{made['path']}").content
+
+    again = _upload(client, cid, "handed-over.png", same_bytes).json()
+    assert again["duplicate"] is True
+
+    page = client.get(f"/api/cases/{cid}/media/page", params={"collected_only": "true"}).json()
+    # Still one made-here row, not two, and the import did not resurrect it.
+    assert [item["path"] for item in page["items"]] == [original["path"]]
+    assert page["facets"]["made_here_count"] == 1
+
+
+def test_leaving_them_out_pages_and_counts_together(client):
+    """The page and the total come from the same SQL, so a client-side filter would
+    have produced a right-looking first page and a wrong count under it."""
+    cid = client.post("/api/cases", json={"name": "Paged"}).json()["id"]
+    originals = [
+        _upload(client, cid, f"orig{i}.png", _png_bytes(color=(40 + i * 40, 20, 20))).json()["item"]
+        for i in range(3)
+    ]
+    for original in originals:
+        _made_here(client, cid, original["path"])
+
+    first = client.get(
+        f"/api/cases/{cid}/media/page", params={"collected_only": "true", "limit": 2}
+    ).json()
+    assert first["total"] == 3
+    assert len(first["items"]) == 2
+    assert first["next_cursor"] == "2"
+
+    rest = client.get(
+        f"/api/cases/{cid}/media/page",
+        params={"collected_only": "true", "limit": 2, "cursor": first["next_cursor"]},
+    ).json()
+    assert len(rest["items"]) == 1
+    assert rest["next_cursor"] is None
+    seen = {item["path"] for item in first["items"] + rest["items"]}
+    assert seen == {item["path"] for item in originals}
+
+
 def test_media_metadata_returns_only_requested_paths(client):
     cid = client.post("/api/cases", json={"name": "Metadata"}).json()["id"]
     first = _upload(client, cid, "first.png", _png_bytes(color=(10, 0, 0))).json()["item"]
@@ -1613,3 +1746,126 @@ def test_enrich_counts_the_jobs_the_queue_took(client):
         "queued": 1
     }
     workqueue.wait_until_idle()
+
+
+# ── clipboard paste ──────────────────────────────────────────────────────────
+# A screenshot taken with the system tool exists only in the clipboard, so there
+# is no file to drop and no name or origin to read off one. That is the whole
+# reason this route is not `upload`: the title and the source are stated in the
+# dialog or not at all, and the provenance must not claim a file was chosen.
+
+
+def _paste(client, cid, data=None, name="image.png", **fields):
+    return client.post(
+        f"/api/cases/{cid}/media/paste",
+        files={"file": (name, io.BytesIO(_png_bytes() if data is None else data), "image/png")},
+        data=fields,
+    )
+
+
+def test_paste_files_the_image_under_its_typed_title_and_source(client):
+    cid = client.post("/api/cases", json={"name": "Paste"}).json()["id"]
+
+    body = _paste(
+        client, cid, title="Front gate", source_url="https://example.com/page"
+    ).json()
+
+    assert body["duplicate"] is False
+    item = body["item"]
+    # the title names the file, because "image.png" is what every clipboard calls it
+    assert item["filename"] == "Front gate.png"
+    assert item["title"] == "Front gate"
+    assert item["kind"] == "image"
+    # recorded as a paste, never as an upload: a screenshot with no stated source
+    # must not read like a file somebody picked off a disk
+    assert item["source"]["type"] == "clipboard"
+    assert item["source"]["url"] == "https://example.com/page"
+    assert item["source"]["original_name"] == "image.png"
+
+    entity = graph_read.entities(cid)[0]
+    assert entity["type"] == "media"
+    assert entity["label"] == "Front gate"
+    assert entity["provenance"]["by"] == "paste"
+    assert entity["attrs"]["source_url"] == "https://example.com/page"
+    assert client.get(f"/files/{cid}/{item['path']}").status_code == 200
+
+
+def test_paste_without_a_title_is_stamped_rather_than_called_image(client):
+    cid = client.post("/api/cases", json={"name": "Unnamed paste"}).json()["id"]
+
+    item = _paste(client, cid).json()["item"]
+
+    assert item["filename"].startswith("paste-")
+    assert item["filename"].endswith(".png")
+    # nothing was stated, so nothing is claimed
+    assert "url" not in item["source"]
+
+
+def test_pasting_the_same_crop_twice_is_one_file(client):
+    """Deduped like any import: the bytes are the identity, whatever gesture
+    brought them in, and a second Ctrl+V is usually a doubt about the first."""
+    cid = client.post("/api/cases", json={"name": "Twice"}).json()["id"]
+    pixels = _png_bytes(color=(3, 9, 27))
+
+    first = _paste(client, cid, pixels, title="Gate").json()
+    again = _paste(client, cid, pixels, title="Gate again").json()
+
+    assert first["duplicate"] is False and again["duplicate"] is True
+    assert len(client.get(f"/api/cases/{cid}/media").json()) == 1
+
+
+def test_a_paste_and_a_drop_count_as_one_facet(client):
+    """Both are material the analyst brought in by hand, which is what the
+    Imports filter asks. They stay two source types because only one of them can
+    say where it came from."""
+    cid = client.post("/api/cases", json={"name": "Facet"}).json()["id"]
+    _upload(client, cid, "dropped.png", _png_bytes(color=(1, 2, 3)))
+    _paste(client, cid, _png_bytes(color=(4, 5, 6)), title="Pasted")
+
+    facets = client.get(f"/api/cases/{cid}/media/page").json()["facets"]
+    assert facets["category_counts"]["upload"] == 2
+
+    filtered = client.get(
+        f"/api/cases/{cid}/media/page", params={"category": "upload"}
+    ).json()
+    assert len(filtered["items"]) == 2
+
+
+def test_paste_refuses_anything_that_is_not_a_readable_image(client):
+    """The clipboard is not a file picker: a case takes a pasted screenshot, not
+    an arbitrary payload."""
+    cid = client.post("/api/cases", json={"name": "Not an image"}).json()["id"]
+
+    refused = _paste(client, cid, b"this is not a png", name="clip.txt")
+
+    assert refused.status_code == 422
+    assert "readable image" in refused.json()["detail"]
+    assert client.get(f"/api/cases/{cid}/media").json() == []
+
+
+def test_paste_refuses_a_source_that_is_not_an_http_url(client):
+    """The source is provenance. A `javascript:` or `data:` string is not one,
+    and it would be read back as a link in the details panel."""
+    cid = client.post("/api/cases", json={"name": "Bad source"}).json()["id"]
+
+    refused = _paste(client, cid, title="Gate", source_url="javascript:alert(1)")
+
+    assert refused.status_code == 422
+    assert "http(s)" in refused.json()["detail"]
+    assert client.get(f"/api/cases/{cid}/media").json() == []
+
+
+def test_paste_is_bounded_at_the_edge_like_every_other_swallowed_image(client, monkeypatch):
+    """Refusing early is what keeps a mistaken Ctrl+V from writing an enormous
+    temporary nobody asked for."""
+    from azimut.api import media as media_api
+    from azimut.workspace import Case
+
+    monkeypatch.setattr(media_api, "MAX_IMAGE_BYTES", 100)
+    cid = client.post("/api/cases", json={"name": "Bounded paste"}).json()["id"]
+
+    refused = _paste(client, cid, title="Huge")
+
+    assert refused.status_code == 413
+    assert "under" in refused.json()["detail"]
+    assert list(Case.open(cid).media_dir.glob("*.png")) == []

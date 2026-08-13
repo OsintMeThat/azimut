@@ -43,3 +43,11 @@ describe('createBookmark', () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 });
+
+describe('what createBookmark hands back', () => {
+  it('returns the entity, so the drawing can place it and the table open it', async () => {
+    api.post.mockResolvedValueOnce({ id: 'ent-7', type: 'bookmark', label: 'Leak site' });
+    const entity = await createBookmark('case-1', { title: 'Leak site', url: 'https://x.example' });
+    expect(entity).toMatchObject({ id: 'ent-7' });
+  });
+});

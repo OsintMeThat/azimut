@@ -1,7 +1,8 @@
 <script>
   import { onMount } from 'svelte';
   import { api } from '../lib/api.js';
-  import { toast, prefs, applyPrefs, uiState } from '../lib/state.svelte.js';
+  import { toast, prefs, applyPrefs, uiState, updatesState } from '../lib/state.svelte.js';
+  import { updateBadges, carryLatest } from '../lib/staleness.js';
   import {
     templatesState, loadTemplates, saveTemplate, deleteTemplate,
   } from '../lib/state.svelte.js';
@@ -21,7 +22,7 @@
     FREE_TIER,
   } from '../lib/usage.js';
   import { probeKey, googleMapsLoadedKey } from '../lib/gmaps.js';
-  import { extensionVersion, extensionOutdated } from '../lib/extBridge.js';
+  import { extensionVersion } from '../lib/extBridge.js';
   import { CASE_FOLDER_LABEL, saveDestination } from '../lib/exportDest.js';
   import Icon from '../components/Icon.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
@@ -176,8 +177,10 @@
   // Read once per mount because an extension installed mid-session needs a reload.
   const extDetected = extensionVersion();
 
-  // Flag when the bundled extension is newer than the browser's loaded copy.
-  let extOutdated = $derived(extensionOutdated(extDetected, about.extension_version));
+  // Every dot in this tool comes from the same place as the one on the Settings
+  // icon, so a tab can never disagree with the rail that led the user to it.
+  let badges = $derived(updateBadges(updatesState, prefs.updateDismissedVersion));
+  let extOutdated = $derived(badges.extensionOutdated);
 
   async function copyToken() {
     try {
@@ -208,6 +211,8 @@
   let mention = $state('');
   let postTarget = $state('x');
   let updateOnStart = $state(true); // pop a notice on load when a release is out
+  // whether saving a proof files its point as a place, or asks first
+  let proofPlaceAuto = $state(true);
   // The app-wide logo lives beside settings.json and reaches cases only in proof PNGs.
   // `sigBust` refreshes the preview after replacement.
   let signature = $state(false);
@@ -270,10 +275,17 @@
 
   async function loadScrapers(check = false) {
     const path = check ? '/api/settings/scrapers?check=true' : '/api/settings/scrapers';
-    scrapers = (await api.get(path)).scrapers;
+    const fresh = (await api.get(path)).scrapers;
+    // A local read knows the installed version and nothing about PyPI, so it
+    // would blank the verdict the startup check found. Carry `latest` across
+    // and judge it again, and updating one downloader stops clearing the other
+    // one's badge.
+    scrapers = check ? fresh : carryLatest(fresh, updatesState.scrapers);
+    updatesState.scrapers = scrapers;
   }
 
-  // Scraper checks run only when requested and never on Settings mount.
+  // Scraper checks run only when requested and never on Settings mount: the
+  // startup check already asked, and its answer is in the store.
   async function checkScrapers() {
     if (checking) return;
     checking = true;
@@ -290,17 +302,20 @@
     }
   }
 
-  // Manual app update check. The separate startup check remains enabled by default.
-  let appUpdate = $state(null); // { current, latest, update_available, url, error }
+  // The startup check's answer, until the user asks for a fresher one. Both land
+  // in the same place so the row and the dot beside it can't tell different
+  // stories — { current, latest, update_available, url, error } or null.
+  let appUpdate = $derived(updatesState.app);
   let checkingApp = $state(false);
 
   async function checkAppUpdate() {
     if (checkingApp) return;
     checkingApp = true;
     try {
-      appUpdate = await api.get('/api/settings/update?check=true');
-      if (appUpdate.error) toast(`Could not reach GitHub: ${appUpdate.error}`, 'danger');
-      else if (!appUpdate.update_available) toast('Azimut is up to date', 'ok');
+      const fresh = await api.get('/api/settings/update?check=true');
+      updatesState.app = fresh;
+      if (fresh.error) toast(`Could not reach GitHub: ${fresh.error}`, 'danger');
+      else if (!fresh.update_available) toast('Azimut is up to date', 'ok');
     } catch (e) {
       toast(`Could not check for updates: ${e.message}`, 'danger');
     } finally {
@@ -408,6 +423,7 @@
     mention = s.post_mention ?? '';
     postTarget = s.post_target ?? 'x';
     updateOnStart = s.update_check_on_start ?? true;
+    proofPlaceAuto = s.proof_place_auto ?? true;
     applyPrefs(s); // the rest of the app reads these live
     await loadScrapers().catch(() => {}); // local disk read; never blocks Settings
     // shells out to `ffmpeg -version`; non-blocking, System only reads it
@@ -662,7 +678,7 @@
     <nav class="rail" aria-label="Settings sections">
       {#each TABS as t (t.id)}
         <button
-          class="rail-tab"
+          class="rail-tab dotted"
           class:active={tab === t.id}
           class:rail-break={t.id === 'storage'}
           onclick={() => (tab = t.id)}
@@ -670,6 +686,9 @@
         >
           <Icon name={t.icon} size={15} />
           {t.label}
+          {#if badges.tabs[t.id]}
+            <span class="update-dot" aria-label="something to install or update"></span>
+          {/if}
         </button>
       {/each}
     </nav>
@@ -739,6 +758,28 @@
               <span>Zoom</span>
               <input class="input mono" bind:value={home.zoom} onchange={saveHome} type="number" min="1" max="21" />
             </label>
+          </div>
+        </section>
+
+        <section class="group">
+          <h3>Proofs</h3>
+          <p class="intro">
+            Saving a proof turns the coordinates it carries into a place on the map, and
+            says the proof shows it.
+          </p>
+          <div class="row">
+            <div class="row-label">
+              <span>Save the point without asking</span>
+              <span class="row-hint">
+                Off, the composer asks each time. A point already saved is never asked about.
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              bind:checked={proofPlaceAuto}
+              onchange={() => savePrefs({ proof_place_auto: proofPlaceAuto })}
+              aria-label="Save a proof's point without asking"
+            />
           </div>
         </section>
       {/if}
@@ -1107,9 +1148,15 @@
                 {/if}
               </span>
             </div>
-            <a class="btn btn-sm btn-primary" href="/api/ingest/extension.zip" download>
+            <a class="btn btn-sm btn-primary dotted" href="/api/ingest/extension.zip" download>
               <Icon name="download" size={13} />
               {extOutdated ? 'Download update (.zip)' : 'Download extension (.zip)'}
+              {#if badges.extension}
+                <span
+                  class="update-dot"
+                  aria-label={extOutdated ? 'an update is waiting' : 'not installed yet'}
+                ></span>
+              {/if}
             </a>
           </div>
           {#if extOutdated}
@@ -1250,8 +1297,11 @@
               </span>
             </div>
             {#if appUpdate?.update_available}
-              <a class="btn btn-sm btn-primary" href={appUpdate.url} target="_blank" rel="noreferrer">
+              <a class="btn btn-sm btn-primary dotted" href={appUpdate.url} target="_blank" rel="noreferrer">
                 <Icon name="download" size={13} /> Get {appUpdate.latest} <Icon name="external" size={11} />
+                {#if badges.app}
+                  <span class="update-dot" aria-label="an update is waiting"></span>
+                {/if}
               </a>
             {:else}
               <button class="btn btn-sm" onclick={checkAppUpdate} disabled={checkingApp}>
@@ -1263,7 +1313,7 @@
             <div class="row-label">
               <span>Tell me on startup</span>
               <span class="row-hint">
-                Checks GitHub when the app opens and reports available releases.
+                Asks GitHub and PyPI once when the app opens, and marks what is behind.
               </span>
             </div>
             <input
@@ -1368,12 +1418,15 @@
                   <button class="btn btn-sm" onclick={() => resetScraper(s.dist)}>Revert</button>
                 {/if}
                 <button
-                  class="btn btn-sm"
+                  class="btn btn-sm dotted"
                   class:btn-primary={s.outdated}
                   disabled={updating[s.dist]}
                   onclick={() => updateScraper(s.dist)}
                 >
                   {updating[s.dist] ? 'Updating…' : 'Update'}
+                  {#if s.outdated && !updating[s.dist]}
+                    <span class="update-dot" aria-label="an update is waiting"></span>
+                  {/if}
                 </button>
               </div>
             </div>
@@ -1551,6 +1604,13 @@
     text-align: left;
     cursor: pointer;
     transition: background 0.12s var(--ease), color 0.12s var(--ease);
+  }
+  /* A rail tab is a full-width row, not a control with a corner, so its dot
+     sits at the end of the line instead of hanging off it. */
+  .rail-tab .update-dot {
+    top: 50%;
+    right: 9px;
+    transform: translateY(-50%);
   }
   .rail-tab:hover {
     background: var(--bg-2);

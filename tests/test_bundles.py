@@ -12,9 +12,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
 from azimut import config, layout
-from azimut.engine import bundles, workqueue
+from azimut.engine import bundles, entity_images, media as media_engine, workqueue
 from azimut.workspace import Case
 
 
@@ -231,6 +232,112 @@ def test_export_import_round_trip_keeps_confirmed_relations(bundle_case):
 
     assert imported.get_link(relation["id"]) == relation
     assert imported.get_link(relation["id"])["provenance"]["status"] == "confirmed"
+
+
+def test_export_import_round_trip_keeps_and_rebuilds_temporal_rows(bundle_case):
+    subject = bundle_case.add_entity("person", "Witness", by="user")
+    saved = bundle_case.save_temporal_claim(
+        entity_id=None,
+        label="The witness arrived",
+        attrs={"when": "2026-08-11T10:32:14Z", "time_role": "occurred"},
+        connectors={"about": [subject["id"]], "at": [], "cites": []},
+        by="user",
+    )
+
+    exported = bundles.export_case(bundle_case)
+    destination = Case.create(bundles.imported_name("Source case"))
+    imported = Case.open(bundles.import_into(destination, exported)["case_id"])
+
+    before = imported.timeline_page(categories=["statement"])
+    assert before["items"][0]["owner_id"] == saved["entity"]["id"]
+    assert imported.rebuild_temporal_projection() >= 1
+    assert imported.timeline_page(categories=["statement"]) == before
+
+
+def test_export_import_round_trip_keeps_the_graph_as_it_was_arranged(bundle_case):
+    """A bundle is how a case reaches another machine, and an arrangement somebody
+    built by hand is work. Losing it on the way would make the graph redraw itself
+    from scratch on the far side, which is the one thing pinning exists to stop."""
+    node = bundle_case.add_entity("person", "Dragged", by="user")
+    bundle_case.pin_entities("all", {node["id"]: (-412.5, 987.25)})
+
+    exported = bundles.export_case(bundle_case)
+    destination = Case.create(bundles.imported_name("Source case"))
+    imported = Case.open(bundles.import_into(destination, exported)["case_id"])
+
+    assert imported.graph_pins("all") == {node["id"]: (-412.5, 987.25)}
+
+
+def test_export_import_round_trip_keeps_saved_analysis_views(bundle_case):
+    """Named readings are case state, so the raw database bundle carries them."""
+    live = bundle_case.save_analysis_view({
+        "id": "v_bundle",
+        "name": "Source accounts",
+        "mode": "live",
+        "surface": "graph",
+        "spec": {"version": 1, "query": {"terms": {"type": "account"}}},
+        "created_at": "2026-08-10T10:00:00Z",
+        "updated_at": "2026-08-10T10:00:00Z",
+    })
+    snapshot = bundle_case.save_analysis_view({
+        "id": "v_timeline_bundle",
+        "name": "Frozen chronology",
+        "mode": "snapshot",
+        "surface": "timeline",
+        "spec": {
+            "version": 1,
+            "timeline": {"tracks": [{"id": "events", "categories": ["statement"]}]},
+            "snapshot": {
+                "captured_at": "2026-08-12T10:00:00Z",
+                "entities": [],
+                "links": [],
+                "timeline_items": [],
+                "timeline_tracks": {"events": []},
+            },
+        },
+        "created_at": "2026-08-12T10:00:00Z",
+        "updated_at": "2026-08-12T10:00:00Z",
+    })
+
+    exported = bundles.export_case(bundle_case)
+    destination = Case.create(bundles.imported_name("Source case"))
+    imported = Case.open(bundles.import_into(destination, exported)["case_id"])
+
+    assert imported.get_analysis_view(live["id"]) == live
+    assert imported.get_analysis_view(snapshot["id"]) == snapshot
+
+
+def test_export_import_round_trip_keeps_entity_photo_galleries(bundle_case):
+    subject = bundle_case.add_entity("person", "Unknown subject", by="user")
+    organization = bundle_case.add_entity(
+        "organization", "Unknown organization", by="user"
+    )
+    uploaded = media_engine.import_stream(
+        bundle_case, "portrait.png", BytesIO(b"not a rendered test image")
+    )
+    media_id = uploaded["entity"]["id"]
+    bundle_case.add_entity_images(subject["id"], [media_id])
+    pixels = BytesIO()
+    Image.new("RGB", (80, 60), (30, 60, 90)).save(pixels, "PNG")
+    pixels.seek(0)
+    direct = entity_images.import_photo(
+        bundle_case, organization["id"], pixels, "logo.png"
+    )["images"][0]
+
+    exported = bundles.export_case(bundle_case)
+    destination = Case.create(bundles.imported_name("Source case"))
+    imported = Case.open(bundles.import_into(destination, exported)["case_id"])
+
+    gallery = imported.entity_images(subject["id"])
+    assert [(image["media_id"], image["primary"]) for image in gallery] == [
+        (media_id, True)
+    ]
+    private_gallery = imported.entity_images(organization["id"])
+    assert [(image["id"], image["direct"], image["primary"]) for image in private_gallery] == [
+        (direct["id"], True, True)
+    ]
+    assert imported.resolve_inside(private_gallery[0]["path"]).is_file()
+    assert imported.resolve_inside(private_gallery[0]["thumbnail"]).is_file()
 
 
 def test_export_import_round_trip_keeps_the_analysts_free_zone(bundle_case):

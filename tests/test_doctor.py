@@ -2,10 +2,14 @@
 
 import io
 import json
+import sqlite3
+from contextlib import closing
 
 from azimut import layout
 from azimut.engine import workqueue
 from azimut.workspace import Case
+
+from fullcase import _png
 
 
 def _new_case(client, name="Doctor case"):
@@ -29,6 +33,52 @@ def test_healthy_case_has_no_doctor_findings(client):
     assert report["status"] == "healthy"
     assert report["issues"] == []
     assert report["summary"] == {"errors": 0, "warnings": 0, "info": 0}
+
+
+def test_stale_timeline_index_is_diagnosed_then_explicitly_rebuilt(client):
+    case_id = _new_case(client, "Stale Timeline")
+    claim = client.post(
+        f"/api/cases/{case_id}/entities",
+        json={
+            "type": "claim",
+            "label": "The vessel arrived",
+            "attrs": {"when": "2026-08-11T10:32:14.5Z", "time_role": "observed"},
+        },
+    ).json()
+    case = Case.open(case_id)
+    with closing(sqlite3.connect(case.db_path)) as conn:
+        conn.execute(
+            "UPDATE temporal_items SET earliest = ? WHERE owner_id = ?",
+            ("2026-08-11T10:32:14.5Z", claim["id"]),
+        )
+        conn.commit()
+
+    report = client.get(f"/api/cases/{case_id}/doctor").json()
+
+    issue = next(item for item in report["issues"] if item["kind"] == "temporal-index-stale")
+    assert issue["actions"] == [
+        {
+            "id": "rebuild-timeline",
+            "label": "Rebuild Timeline index",
+            "tone": "primary",
+        }
+    ]
+    with closing(sqlite3.connect(case.db_path)) as conn:
+        assert conn.execute(
+            "SELECT earliest FROM temporal_items WHERE owner_id = ?", (claim["id"],)
+        ).fetchone()[0] == "2026-08-11T10:32:14.5Z"
+
+    repaired = client.post(
+        f"/api/cases/{case_id}/doctor/repair",
+        json={"action": "rebuild-timeline"},
+    ).json()
+
+    assert repaired["repair"]["status"] == "rebuilt"
+    assert repaired["report"]["status"] == "healthy"
+    with closing(sqlite3.connect(case.db_path)) as conn:
+        assert conn.execute(
+            "SELECT earliest FROM temporal_items WHERE owner_id = ?", (claim["id"],)
+        ).fetchone()[0] == "2026-08-11T10:32:14.500000Z"
 
 
 def test_deleted_database_can_be_rebuilt_from_file_backed_artifacts(client):
@@ -159,6 +209,9 @@ def test_doctor_refuses_repairs_that_the_current_damage_does_not_offer(client):
         f"/api/cases/{case_id}/doctor/repair", json={"action": "rebuild"}
     ).status_code == 409
     assert client.post(
+        f"/api/cases/{case_id}/doctor/repair", json={"action": "rebuild-timeline"}
+    ).status_code == 409
+    assert client.post(
         f"/api/cases/{case_id}/doctor/repair",
         json={"action": "import", "path": "notes.md"},
     ).status_code == 409
@@ -195,3 +248,71 @@ def test_scratch_case_uses_the_same_doctor_and_rebuild(client):
     ).json()
     assert repaired["report"]["status"] == "healthy"
     assert repaired["report"]["scratch"] is True
+
+
+def test_the_rebuild_states_every_loss_and_leaves_no_photo_behind(client):
+    """A rebuild reads files, so anything that lived only in `case.db` is gone.
+
+    The dialog has to say so before the analyst chooses it, and the private photos
+    have to go with the rows that owned them: kept, they would be files nothing
+    displays, nothing deletes and every later bundle still carries.
+    """
+    case_id = _new_case(client, "Photo loss")
+    subject = client.post(
+        f"/api/cases/{case_id}/entities",
+        json={"type": "person", "label": "Unknown subject"},
+    ).json()
+    added = client.post(
+        f"/api/cases/{case_id}/entities/{subject['id']}/images/upload",
+        files={"file": ("portrait.png", io.BytesIO(_png()), "image/png")},
+    )
+    assert added.status_code == 200, added.text
+    case = Case.open(case_id)
+    photo = case.resolve_inside(added.json()["images"][0]["path"])
+    assert photo.is_file()
+    case.db_path.unlink()
+
+    issue = client.get(f"/api/cases/{case_id}/doctor").json()["issues"][0]
+    assert issue["losses"] == [
+        "Relations between entities",
+        "Catalog filing folders",
+        "Provenance that was not stored in a sidecar",
+        "Entity photo galleries, and the photos added from the computer",
+        "Saved analysis views",
+        "The graph arrangement, per lens",
+    ]
+    assert photo.is_file()  # naming the loss changed nothing
+
+    client.post(f"/api/cases/{case_id}/doctor/repair", json={"action": "rebuild"})
+
+    assert not photo.exists()
+    assert not layout.entity_images(case.path).exists()
+    assert client.get(f"/api/cases/{case_id}/doctor").json()["status"] == "healthy"
+
+
+def test_a_rebuilt_case_is_shaped_like_a_new_one(client):
+    """The birth-state gate, from the other direction: after a rebuild the tool root
+    holds nothing a fresh case would not, so no orphan survives the repair."""
+    case_id = _new_case(client, "Shape after repair")
+    subject = client.post(
+        f"/api/cases/{case_id}/entities",
+        json={"type": "organization", "label": "Northwind"},
+    ).json()
+    client.post(
+        f"/api/cases/{case_id}/entities/{subject['id']}/images/upload",
+        files={"file": ("logo.png", io.BytesIO(_png()), "image/png")},
+    )
+    case = Case.open(case_id)
+    case.db_path.unlink()
+    client.post(f"/api/cases/{case_id}/doctor/repair", json={"action": "rebuild"})
+
+    born = Case.open(client.post("/api/cases", json={"name": "Newborn"}).json()["id"])
+
+    def tree(root):
+        return sorted(
+            path.relative_to(root).as_posix()
+            for path in root.rglob("*")
+            if path.name != "case.db"
+        )
+
+    assert tree(Case.open(case_id).tool_root) == tree(born.tool_root)

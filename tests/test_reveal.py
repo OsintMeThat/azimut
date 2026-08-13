@@ -248,3 +248,32 @@ def test_a_refusal_reaches_the_ui_as_a_reason(client, monkeypatch):
 
     assert res.status_code == 409
     assert "xdg-open" in res.json()["detail"]
+
+
+def test_media_route_shows_the_folder_a_file_sits_in(client, shown):
+    """A PDF or a spreadsheet has no viewer here, so the folder is the answer.
+
+    What opens is the folder, never the file: revealing is "where is this", and
+    launching whatever program claims a `.docx` is a different, riskier thing.
+    """
+    cid = client.post("/api/cases", json={"name": "Reveal media"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/media/upload",
+        files={"file": ("site plan.pdf", b"%PDF-1.4 fixture", "application/pdf")},
+    )
+
+    res = client.post(f"/api/cases/{cid}/media/reveal", json={"path": "media/site plan.pdf"})
+
+    assert res.status_code == 200
+    assert shown[0].name == "media"
+    assert shown[0].resolve().is_relative_to((config.cases_dir() / cid).resolve())
+    assert res.json()["path"].endswith("media")
+
+
+def test_media_route_refuses_a_path_that_leaves_the_case(client, shown):
+    cid = client.post("/api/cases", json={"name": "Reveal escape"}).json()["id"]
+
+    for attempt in ("../../etc", "/etc", "media/../../..", "media/nothing.pdf"):
+        res = client.post(f"/api/cases/{cid}/media/reveal", json={"path": attempt})
+        assert res.status_code in (400, 404), attempt
+    assert not shown

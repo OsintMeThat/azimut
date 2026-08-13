@@ -405,7 +405,7 @@ describe('postReportMarkdown', () => {
     expect(report).toContain('## Assessment\n\nMatch against reference imagery.');
     expect(report).not.toContain('## Prepared thread');
     expect(report).toContain('[[entity:e_proof|Rooftop proof]]');
-    expect(report).toContain('[[media:e_proof|Rooftop proof]]{width=70% align=center}');
+    expect(report).toContain('[[media:e_proof|Rooftop proof]]{width=100% align=center}');
     expect(report).toContain('[[entity:e_frame|Frame]]');
     expect(report).toContain('[[media:e_frame|Frame]]{width=100% align=center}');
     expect(report).not.toContain('- proofs/match.png');

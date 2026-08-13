@@ -3,12 +3,65 @@
 from __future__ import annotations
 
 import re
+import threading
+import time
 from typing import Any
 
 import httpx
 
 from . import coords
 from .tiles import USER_AGENT
+
+# -- Nominatim's pace ----------------------------------------------------------
+
+#: Nominatim asks for at most one request a second, and the penalty for going
+#: faster is a 429 on the whole address for a while. The floor therefore belongs
+#: **here**, in front of every request, rather than in whichever caller happens
+#: to loop: a country backfill paces itself between items, and then
+#: `locate_point` makes a second lookup for the English region name that no
+#: caller can see, and the two together were the real pace. One home for the
+#: rule, and no caller can break it.
+NOMINATIM_INTERVAL = 1.1
+#: How long a 429 is remembered, so a surface can say why nothing resolved
+#: instead of reporting a lookup failure the analyst cannot act on.
+THROTTLE_COOLDOWN = 60.0
+
+_pace_lock = threading.Lock()
+_last_request = 0.0
+_throttled_until = 0.0
+
+
+def _pace() -> None:
+    """Hold the caller until the interval since the last Nominatim request has
+    passed. Serialized, so two threads cannot both decide it is their turn."""
+    global _last_request
+    with _pace_lock:
+        wait = NOMINATIM_INTERVAL - (time.monotonic() - _last_request)
+        if wait > 0:
+            time.sleep(wait)
+        _last_request = time.monotonic()
+
+
+def _note_throttling(response: Any) -> None:
+    """Remember a 429. Reads the status defensively: the only thing this needs
+    from the response is a number, and a caller's stub may not carry one."""
+    global _throttled_until
+    if getattr(response, "status_code", None) == 429:
+        _throttled_until = time.monotonic() + THROTTLE_COOLDOWN
+
+
+def throttled() -> bool:
+    """Whether Nominatim answered 429 recently. A pass that resolved nothing
+    reads very differently depending on this, so a surface reports it."""
+    return time.monotonic() < _throttled_until
+
+
+def _reset_pace() -> None:
+    """Test seam: forget the last request and any throttling."""
+    global _last_request, _throttled_until
+    _last_request = 0.0
+    _throttled_until = 0.0
+
 
 # -- parsing -------------------------------------------------------------------
 
@@ -282,12 +335,14 @@ def geocode(query: str) -> dict[str, Any] | None:
     and the analyst can tell they landed where they meant to.
     """
     try:
+        _pace()
         response = httpx.get(
             "https://nominatim.openstreetmap.org/search",
             params={"q": query, "format": "jsonv2", "limit": 1, "accept-language": "en"},
             headers={"User-Agent": USER_AGENT},
             timeout=8,
         )
+        _note_throttling(response)
         response.raise_for_status()
         results = response.json()
         if not results:
@@ -320,12 +375,14 @@ def reverse_geocode(
     if language:
         params["accept-language"] = language
     try:
+        _pace()
         response = httpx.get(
             "https://nominatim.openstreetmap.org/reverse",
             params=params,
             headers={"User-Agent": USER_AGENT},
             timeout=timeout,
         )
+        _note_throttling(response)
         response.raise_for_status()
         data = response.json()
         return {

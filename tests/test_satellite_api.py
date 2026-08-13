@@ -70,12 +70,10 @@ def _places(client, cid):
     return _of_type(client, cid, "place")
 
 
-def test_capture_creates_capture_entity_not_place(client, monkeypatch):
+def test_capture_creates_its_own_entity(client, monkeypatch):
     monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
     cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
     cap = _capture(client, cid, 48.8584, 2.2945)
-    # a capture is an image entity, not a navigable place
-    assert _places(client, cid) == []
     caps = _captures(client, cid)
     assert len(caps) == 1
     # the entity is tied to this exact capture by path, titled with its coords
@@ -993,7 +991,7 @@ def test_a_save_succeeds_when_the_lookup_fails(client, monkeypatch):
     # …and a later Locate pass resolves what the failure left behind
     monkeypatch.setattr(geo, "reverse_geocode", _UKRAINE)
     assert client.post(f"/api/cases/{cid}/satellite/locate").json() == {
-        "located": 2, "failed": 0, "remaining": 0,
+        "located": 2, "failed": 0, "remaining": 0, "throttled": False,
     }
     assert {r["geo"]["country"] for r in _index(client, cid)} == {"Ukraine"}
 
@@ -1032,40 +1030,47 @@ def _places_at(client, cid, count):
 
 
 def test_locate_works_through_the_backlog_and_reports_what_is_left(client, monkeypatch):
-    monkeypatch.setattr(satellite_api, "NOMINATIM_INTERVAL", 0)
     cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
     _places_at(client, cid, 5)  # all saved offline → all failed
 
     monkeypatch.setattr(geo, "reverse_geocode", _UKRAINE)
     first = client.post(f"/api/cases/{cid}/satellite/locate", params={"limit": 2}).json()
-    assert first == {"located": 2, "failed": 0, "remaining": 3}
+    assert first == {"located": 2, "failed": 0, "remaining": 3, "throttled": False}
 
     second = client.post(f"/api/cases/{cid}/satellite/locate", params={"limit": 25}).json()
-    assert second == {"located": 3, "failed": 0, "remaining": 0}
+    assert second == {"located": 3, "failed": 0, "remaining": 0, "throttled": False}
     # settled items are never looked up again — re-running is a no-op
     assert client.post(f"/api/cases/{cid}/satellite/locate").json() == {
-        "located": 0, "failed": 0, "remaining": 0,
+        "located": 0, "failed": 0, "remaining": 0, "throttled": False,
     }
 
 
 def test_locate_leaves_a_failure_for_the_next_pass(client, monkeypatch):
-    monkeypatch.setattr(satellite_api, "NOMINATIM_INTERVAL", 0)
     cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
     _places_at(client, cid, 2)
 
     assert client.post(f"/api/cases/{cid}/satellite/locate").json() == {
-        "located": 0, "failed": 2, "remaining": 2,
+        "located": 0, "failed": 2, "remaining": 2, "throttled": False,
     }
 
 
+def test_locate_reports_that_nominatim_is_throttling(client, monkeypatch):
+    """A 429 is not an ordinary lookup failure: the analyst has to be told to
+    wait rather than to run the pass again, so the verdict travels."""
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    _places_at(client, cid, 1)
+
+    monkeypatch.setattr(geo, "throttled", lambda: True)
+    assert client.post(f"/api/cases/{cid}/satellite/locate").json()["throttled"] is True
+
+
 def test_locate_settles_open_sea_without_retrying_it(client, monkeypatch):
-    monkeypatch.setattr(satellite_api, "NOMINATIM_INTERVAL", 0)
     cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
     client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 0.0, "lon": -30.0})
 
     monkeypatch.setattr(geo, "reverse_geocode", _address({}))
     assert client.post(f"/api/cases/{cid}/satellite/locate").json() == {
-        "located": 1, "failed": 0, "remaining": 0,
+        "located": 1, "failed": 0, "remaining": 0, "throttled": False,
     }
     assert _index(client, cid)[0]["geo"] == {"state": "nocountry"}
     assert _index(client, cid)[0]["continent"] is None

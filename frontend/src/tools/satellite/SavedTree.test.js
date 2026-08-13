@@ -270,3 +270,36 @@ describe('SavedTree folder view', () => {
     expect(source).not.toContain('assignFolder');
   });
 });
+
+describe('accepting a proposed point', () => {
+  const proposed = [
+    {
+      id: 'p9',
+      kind: 'place',
+      title: 'roof match',
+      lat: 48.8584,
+      lon: 2.2945,
+      status: 'suggested',
+      geo: { state: 'ok', country: 'France', country_code: 'fr' },
+      continent: 'Europe',
+      fetched_at: '2026-07-20T09:12:04Z',
+    },
+  ];
+
+  it('offers it on the row, where the map that decides is already open', () => {
+    const body = at({ rows: proposed, query: 'roof', onaccept: noop });
+    expect(body).toContain('Accept this point');
+    expect(body).toContain('suggested');
+  });
+
+  it('stays off a point nobody proposed', () => {
+    const settled = [{ ...proposed[0], status: 'confirmed' }];
+    expect(at({ rows: settled, query: 'roof', onaccept: noop })).not.toContain(
+      'Accept this point'
+    );
+  });
+
+  it('stays off where a surface cannot reload after the change', () => {
+    expect(at({ rows: proposed, query: 'roof' })).not.toContain('Accept this point');
+  });
+});

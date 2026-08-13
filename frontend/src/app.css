@@ -47,6 +47,25 @@
   --sky-sun: #bd8721;
   --sky-moon: #4a93cc;
 
+  /* Case-graph families (ONTOLOGY §2). Eight hues that have to separate from each
+     other *and* stay quiet: the graph's meaning rides on the stroke, so colour
+     only says which family a node belongs to. Not --accent, which stays reserved
+     for selection so a selected node reads as selected whatever its family, and
+     not the annotation palette, which is sized for contrast over imagery. */
+  --graph-actor: #7aa2d6;
+  --graph-asset: #6fb3a8;
+  --graph-class: #bfa14e;
+  --graph-identifier: #a892cc;
+  --graph-collected: #c98f6b;
+  --graph-document: #8f9aa8;
+  --graph-place: #7fb069;
+  --graph-claim: #cf8ba0;
+
+  /* Timeline categories. Status and selection still use their own tokens. */
+  --timeline-statement: #50bda8;
+  --timeline-media: #7896f0;
+  --timeline-activity: #a487d1;
+
   /* -- typography --------------------------------------------- */
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
@@ -111,6 +130,20 @@
   --sky-sun: #cc9526;
   --sky-moon: #3f97d2;
 
+  /* graph families, darkened for a white canvas rather than flipped */
+  --graph-actor: #3f6ea8;
+  --graph-asset: #2f7f72;
+  --graph-class: #85661a;
+  --graph-identifier: #6f57a0;
+  --graph-collected: #a35f34;
+  --graph-document: #5b6674;
+  --graph-place: #4a7f36;
+  --graph-claim: #a35470;
+
+  --timeline-statement: #1f7669;
+  --timeline-media: #4264b5;
+  --timeline-activity: #76539d;
+
   --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.12);
   --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.16);
 
@@ -146,6 +179,9 @@
   --danger-soft: rgba(217, 112, 112, 0.12);
   --info: #6f9fd8;
   --info-soft: rgba(111, 159, 216, 0.12);
+  --timeline-statement: #50bda8;
+  --timeline-media: #7896f0;
+  --timeline-activity: #a487d1;
   --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.4);
   --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.5);
 }
@@ -394,6 +430,27 @@ a:hover {
 .badge.danger {
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+/* "Something here can be updated", from the Settings icon down to the button
+   that does it. One dot, one meaning, wherever it lands. The host carries
+   .dotted to anchor it.
+
+   It hangs off the top-right corner rather than sitting inside: on a primary
+   button the inside is amber on amber, and on any button with a label the dot
+   lands on the words. */
+.dotted {
+  position: relative;
+}
+.update-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
 }
 
 /* Empty states — every tool has one, they must feel designed. */

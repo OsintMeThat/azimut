@@ -148,6 +148,139 @@ def test_filed_notes_are_markdown_files(client):
     assert client.get(f"/api/cases/{cid}/notes/{note['id']}").json()["text"] == "Updated"
 
 
+def test_a_report_note_records_the_case_files_it_was_written_from(client):
+    """A note composed out of case files is an artifact made from them, and says so.
+
+    Without this the report note was the one filed artifact with no chain: its images
+    pointed at a proof and its media that nothing in the graph knew it depended on, so
+    Details showed "nothing filed against this" on a page full of evidence.
+    """
+    cid = client.post("/api/cases", json={"name": "Report chain"}).json()["id"]
+    case = Case.open(cid)
+    proof = case.add_entity("proof", "Convoy", {"path": "proofs/convoy.png"}, by="proof-composer")
+    photo = case.add_entity("media", "clip.jpg", {"path": "media/clip.jpg"}, by="user")
+
+    note = client.post(
+        f"/api/cases/{cid}/notes",
+        json={
+            "title": "Convoy report",
+            "content": "![](proofs/convoy.png)",
+            "sources": ["proofs/convoy.png", "media/clip.jpg"],
+        },
+    ).json()
+
+    chain = client.get(f"/api/cases/{cid}/entities/{note['id']}/chain").json()
+    assert {row["entity"]["id"] for row in chain["sources"]} == {proof["id"], photo["id"]}
+    assert {row["type"] for row in chain["sources"]} == {"derived-from"}
+    # and the other way round: the proof knows the report leans on it
+    proof_chain = client.get(f"/api/cases/{cid}/entities/{proof['id']}/chain").json()
+    assert [row["entity"]["id"] for row in proof_chain["dependents"]] == [note["id"]]
+
+
+def test_a_note_typed_by_hand_files_no_chain_at_all(client):
+    """Most notes are written, not composed. Sending no sources must leave the note
+    exactly as it has always been, with no edge invented for it."""
+    cid = client.post("/api/cases", json={"name": "Plain note"}).json()["id"]
+
+    note = client.post(f"/api/cases/{cid}/notes", json={"title": "Lead"}).json()
+
+    chain = client.get(f"/api/cases/{cid}/entities/{note['id']}/chain").json()
+    assert chain["sources"] == [] and chain["lost"] == []
+
+
+def test_a_report_source_that_is_already_gone_is_kept_as_a_tombstone(client):
+    """A proof deleted while the composer was open cannot be linked, but the fact that
+    the report was written from it is not dropped in silence."""
+    cid = client.post("/api/cases", json={"name": "Vanished source"}).json()["id"]
+
+    note = client.post(
+        f"/api/cases/{cid}/notes",
+        json={"title": "Report", "sources": ["proofs/gone.png"]},
+    ).json()
+
+    chain = client.get(f"/api/cases/{cid}/entities/{note['id']}/chain").json()
+    assert chain["sources"] == []
+    assert [lost["path"] for lost in chain["lost"]] == ["proofs/gone.png"]
+
+
+def _sources_of(client, cid, note_id):
+    chain = client.get(f"/api/cases/{cid}/entities/{note_id}/chain").json()
+    return {row["entity"]["id"] for row in chain["sources"]}
+
+
+def test_a_note_restates_its_chain_from_its_own_body_on_every_save(client):
+    """The Notebook inserts case media at any time, so birth is not when a note's
+    chain is settled.
+
+    An image added afterwards was a dependency nothing in the graph knew about —
+    deleting it left the note showing a hole — and one taken out of the text left a
+    scar the note had stopped earning.
+    """
+    cid = client.post("/api/cases", json={"name": "Note body chain"}).json()["id"]
+    case = Case.open(cid)
+    proof = case.add_entity("proof", "Convoy", {"path": "proofs/convoy.png"}, by="proof-composer")
+    photo = case.add_entity("media", "clip.jpg", {"path": "media/clip.jpg"}, by="user")
+    note = client.post(f"/api/cases/{cid}/notes", json={"title": "Lead"}).json()
+    assert _sources_of(client, cid, note["id"]) == set()
+
+    client.put(
+        f"/api/cases/{cid}/notes/{note['id']}",
+        json={"text": f"# Lead\n\n[[media:{proof['id']}|Convoy]]\n[[media:{photo['id']}|clip]]"},
+    )
+    assert _sources_of(client, cid, note["id"]) == {proof["id"], photo["id"]}
+
+    # the photo is taken back out: the edge goes with it
+    client.put(
+        f"/api/cases/{cid}/notes/{note['id']}",
+        json={"text": f"# Lead\n\n[[media:{proof['id']}|Convoy]]"},
+    )
+    assert _sources_of(client, cid, note["id"]) == {proof["id"]}
+
+
+def test_saving_a_report_keeps_the_draft_it_was_composed_in(client):
+    """The body names the files it shows; it cannot name the draft. So a body-driven
+    restatement reconciles only what the text speaks for, or the first edit to a
+    report would quietly drop the post it came out of."""
+    cid = client.post("/api/cases", json={"name": "Report draft"}).json()["id"]
+    case = Case.open(cid)
+    post = case.add_entity("post", "Thread", {"draft": ".drafts/thread.json"}, by="post-composer")
+    proof = case.add_entity("proof", "Convoy", {"path": "proofs/convoy.png"}, by="proof-composer")
+    note = client.post(
+        f"/api/cases/{cid}/notes",
+        json={"title": "Report", "sources": [".drafts/thread.json", "proofs/convoy.png"]},
+    ).json()
+    assert _sources_of(client, cid, note["id"]) == {post["id"], proof["id"]}
+
+    client.put(
+        f"/api/cases/{cid}/notes/{note['id']}",
+        json={"text": f"# Report\n\n[[media:{proof['id']}|Convoy]]"},
+    )
+
+    assert _sources_of(client, cid, note["id"]) == {post["id"], proof["id"]}
+
+
+def test_a_note_body_naming_something_unjoinable_still_saves(client):
+    """A body is prose. A token pointing at a place, at a missing id or at the note
+    itself is skipped, never a 400 that loses the analyst's writing."""
+    cid = client.post("/api/cases", json={"name": "Odd tokens"}).json()["id"]
+    case = Case.open(cid)
+    place = case.add_entity("place", "Quay", {"lat": 1.0, "lon": 2.0}, by="user")
+    note = client.post(f"/api/cases/{cid}/notes", json={"title": "Lead"}).json()
+
+    saved = client.put(
+        f"/api/cases/{cid}/notes/{note['id']}",
+        json={
+            "text": (
+                f"[[media:{place['id']}|Quay]] [[media:e_missing|Gone]] "
+                f"[[media:{note['id']}|Itself]] [[entity:{place['id']}|Quay]]"
+            )
+        },
+    )
+
+    assert saved.status_code == 200
+    assert _sources_of(client, cid, note["id"]) == set()
+
+
 def test_deleting_filed_note_removes_markdown_file(client):
 
     cid = client.post("/api/cases", json={"name": "Notebook delete"}).json()["id"]
@@ -273,6 +406,225 @@ def test_catalog_searches_notes_and_descendant_folders(client):
     ).json()
     assert page["total"] == 1
     assert [entity["label"] for entity in page["items"]] == ["frame"]
+
+
+def test_catalog_answers_which_videos_have_coordinates(client):
+    """The sentence the Board can now ask, term by term, each chosen from the case:
+    *media, kind video, linked to a place.* The count is the answer and the page is
+    which ones — and neither was expressible anywhere in the app before."""
+    cid = client.post("/api/cases", json={"name": "Sentence"}).json()["id"]
+
+    def entity(type_, label, attrs=None):
+        return client.post(
+            f"/api/cases/{cid}/entities",
+            json={"type": type_, "label": label, "attrs": attrs or {}},
+        ).json()["id"]
+
+    placed = entity("media", "clip.mp4", {"kind": "video"})
+    entity("media", "orphan.mp4", {"kind": "video"})
+    entity("media", "still.jpg", {"kind": "image"})
+    quay = entity("place", "48.0, 2.0", {"lat": 48.0, "lon": 2.0})
+    client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": placed, "to_id": quay, "type": "located-at"},
+    )
+
+    page = client.get(
+        f"/api/cases/{cid}/catalog/entities",
+        params={"type": "media", "attr": "kind", "value": "video", "linked": "place"},
+    ).json()
+    assert page["total"] == 1
+    assert [row["id"] for row in page["items"]] == [placed]
+
+
+def test_the_field_and_value_menus_are_populated_from_the_case(client):
+    """No query language: every term of a search is chosen from what the case holds.
+    Including `kind`, which the vocabulary declares nowhere."""
+    cid = client.post("/api/cases", json={"name": "Menus"}).json()["id"]
+    for label, kind in (("a.mp4", "video"), ("b.mp4", "video"), ("c.jpg", "image")):
+        client.post(
+            f"/api/cases/{cid}/entities",
+            json={"type": "media", "label": label, "attrs": {"kind": kind}},
+        )
+
+    body = client.get(
+        f"/api/cases/{cid}/catalog/attributes", params={"type": "media"}
+    ).json()
+    kinds = next(row for row in body["attrs"] if row["key"] == "kind")
+    assert kinds["entities"] == 3
+    assert kinds["values"] == [
+        {"value": "video", "count": 2},
+        {"value": "image", "count": 1},
+    ]
+
+
+def test_catalog_lists_what_the_case_connects_to_nothing(client):
+    """The case's unexploited material, and the one question the catalog could not
+    ask: the graph counts these, but counting is not reaching them."""
+    cid = client.post("/api/cases", json={"name": "Loose"}).json()["id"]
+
+    def entity(type_, label, attrs=None):
+        return client.post(
+            f"/api/cases/{cid}/entities",
+            json={"type": type_, "label": label, "attrs": attrs or {}},
+        ).json()["id"]
+
+    joined = entity("media", "clip.mp4", {"kind": "video"})
+    quay = entity("place", "48.0, 2.0", {"lat": 48.0, "lon": 2.0})
+    alone = entity("media", "orphan.mp4", {"kind": "video"})
+    linked = client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": joined, "to_id": quay, "type": "located-at"},
+    )
+    assert linked.status_code == 200
+
+    page = client.get(
+        f"/api/cases/{cid}/catalog/entities", params={"unlinked": "true"}
+    ).json()
+    assert page["total"] == 1
+    assert [row["id"] for row in page["items"]] == [alone]
+    # and the summary states the same number, so the menu can price the term before
+    # it is chosen rather than landing the analyst on an empty table
+    assert client.get(f"/api/cases/{cid}/catalog/summary").json()["unlinked"] == 1
+
+
+def test_the_summary_prices_linked_to_by_what_it_would_answer_with(client):
+    """Four media pointing at one place is **four** under "linked to a place" and one
+    under "type: place". The filter asks the first, so the menu has to price the
+    first — a count answering the neighbouring question looks like an answer and is
+    not one, which is exactly how a menu stops being trusted."""
+    cid = client.post("/api/cases", json={"name": "Counts"}).json()["id"]
+
+    def entity(type_, label, attrs=None):
+        return client.post(
+            f"/api/cases/{cid}/entities",
+            json={"type": type_, "label": label, "attrs": attrs or {}},
+        ).json()["id"]
+
+    quay = entity("place", "48.0, 2.0", {"lat": 48.0, "lon": 2.0})
+    for i in range(4):
+        clip = entity("media", f"clip{i}.mp4", {"kind": "video"})
+        client.post(
+            f"/api/cases/{cid}/links",
+            json={"from_id": clip, "to_id": quay, "type": "located-at"},
+        )
+
+    summary = client.get(f"/api/cases/{cid}/catalog/summary").json()
+    assert summary["by_type"]["place"] == 1  # the case holds one place
+    assert summary["linked_to"]["place"] == 4  # four things touch it
+    assert summary["linked_to"]["media"] == 1  # and it touches four, which is one row
+
+    # and the filter itself answers with exactly what the menu promised
+    page = client.get(
+        f"/api/cases/{cid}/catalog/entities", params={"linked": "place"}
+    ).json()
+    assert page["total"] == 4
+
+
+def test_a_pair_joined_twice_counts_once_in_the_menu(client):
+    """A media joined to one place by two verbs is one row that is linked to a place,
+    not two — or the menu promises more than the table can hand back."""
+    cid = client.post("/api/cases", json={"name": "Twice"}).json()["id"]
+    clip = client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "media", "label": "clip.mp4", "attrs": {"kind": "video"}},
+    ).json()["id"]
+    quay = client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "place", "label": "48.0, 2.0", "attrs": {"lat": 48.0, "lon": 2.0}},
+    ).json()["id"]
+    for verb in ("located-at", "depicts"):
+        client.post(
+            f"/api/cases/{cid}/links", json={"from_id": clip, "to_id": quay, "type": verb}
+        )
+
+    summary = client.get(f"/api/cases/{cid}/catalog/summary").json()
+    assert summary["linked_to"]["place"] == 1
+    assert (
+        client.get(f"/api/cases/{cid}/catalog/entities", params={"linked": "place"}).json()[
+            "total"
+        ]
+        == 1
+    )
+
+
+def test_catalog_narrows_on_when_a_row_was_filed(client, monkeypatch):
+    """*What came in this week* is a question about the case, and `prov_at` already
+    holds the answer. A bare date reaches the whole of that day at both ends."""
+    cid = client.post("/api/cases", json={"name": "Dates"}).json()["id"]
+    for label, at in (
+        ("old", "2026-07-01T09:00:00Z"),
+        ("edge", "2026-08-10T23:59:59Z"),
+        ("new", "2026-08-11T08:00:00Z"),
+    ):
+        monkeypatch.setattr("azimut.sqlite_backend._now", lambda at=at: at)
+        client.post(f"/api/cases/{cid}/entities", json={"type": "person", "label": label})
+
+    page = client.get(
+        f"/api/cases/{cid}/catalog/entities",
+        params={"since": "2026-08-01", "until": "2026-08-10"},
+    ).json()
+    # the row filed a second before midnight is inside the day it was filed on
+    assert [row["label"] for row in page["items"]] == ["edge"]
+    assert page["total"] == 1
+
+
+def test_catalog_tells_what_a_tool_proposed_from_what_was_entered_by_hand(client):
+    """`provenance.by` is the difference between the case's own work and a machine's,
+    and the menu is populated from the case like every other term."""
+    cid = client.post("/api/cases", json={"name": "Filers"}).json()["id"]
+    client.post(f"/api/cases/{cid}/entities", json={"type": "person", "label": "typed"})
+    client.post(f"/api/cases/{cid}/entities", json={"type": "place", "label": "48.0, 2.0"})
+
+    summary = client.get(f"/api/cases/{cid}/catalog/summary").json()
+    assert summary["by_source"] == {"user": 2}
+
+    page = client.get(
+        f"/api/cases/{cid}/catalog/entities", params={"by": "user"}
+    ).json()
+    assert page["total"] == 2
+    assert client.get(
+        f"/api/cases/{cid}/catalog/entities", params={"by": "satellite"}
+    ).json()["total"] == 0
+
+
+def test_catalog_sorts_the_case_rather_than_the_page(client, monkeypatch):
+    """The difference an ordering makes: *the newest in this case* is not *the newest
+    of the rows one page happened to load*, which is all a client-side sort can say."""
+    cid = client.post("/api/cases", json={"name": "Order"}).json()["id"]
+    for label, at in (
+        ("first", "2026-07-01T09:00:00Z"),
+        ("second", "2026-07-02T09:00:00Z"),
+        ("third", "2026-07-03T09:00:00Z"),
+    ):
+        monkeypatch.setattr("azimut.sqlite_backend._now", lambda at=at: at)
+        client.post(f"/api/cases/{cid}/entities", json={"type": "person", "label": label})
+
+    page = client.get(
+        f"/api/cases/{cid}/catalog/entities", params={"order": "-created", "limit": 2}
+    ).json()
+    assert [row["label"] for row in page["items"]] == ["third", "second"]
+    rest = client.get(
+        f"/api/cases/{cid}/catalog/entities",
+        params={"order": "-created", "limit": 2, "cursor": page["next_cursor"]},
+    ).json()
+    assert [row["label"] for row in rest["items"]] == ["first"]
+    assert rest["next_cursor"] is None
+
+
+def test_catalog_refuses_an_ordering_it_does_not_have(client):
+    cid = client.post("/api/cases", json={"name": "BadOrder"}).json()["id"]
+    res = client.get(f"/api/cases/{cid}/catalog/entities", params={"order": "size"})
+    assert res.status_code == 400
+
+
+def test_a_field_name_the_store_cannot_ask_for_is_refused(client):
+    cid = client.post("/api/cases", json={"name": "BadField"}).json()["id"]
+    res = client.get(
+        f"/api/cases/{cid}/catalog/entities",
+        params={"attr": 'kind"] or 1=1 --', "value": "video"},
+    )
+    assert res.status_code == 400
 
 
 def test_catalog_rejects_a_bad_cursor(client):

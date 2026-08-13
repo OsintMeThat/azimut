@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   MAX_SLUG, NAME_PREFIX, slugify, uniqueName, nextName, isDefaultName,
-  savedEntities, savedSlugs, savedTitles, savedTitle,
+  savedEntities, savedSlugs, savedTitles, savedTitle, specAttr, specPath,
 } from './naming.js';
 
 describe('slugify — mirrors the backend api/naming.slugify', () => {
@@ -78,6 +78,25 @@ describe('saved-item case queries', () => {
     { label: 'A place', attrs: { spec: 'places/x.json' } }, // filed, but not one of ours
     { label: 'No spec' },
   ];
+
+  it('builds the spec path a filed entity actually carries', () => {
+    // The tools look an item up by this exact string to tell whether it is still
+    // filed, so it has to name the hidden folders the case really uses — a stale
+    // `inspect/` matched nothing and warned "deleted" on every save.
+    expect(specPath('session', 'angle')).toBe('.inspect/angle.json');
+    expect(specPath('proof', 'rooftop')).toBe('proofs/.meta/rooftop.json');
+    expect(specPath('draft', 'thread')).toBe('.drafts/thread.json');
+    // and the same string the filed entities carry, so a lookup by it hits
+    for (const [kind, slug] of [['session', 'angle'], ['proof', 'rooftop'], ['draft', 'thread']]) {
+      expect(entities.some((e) => e.attrs?.[specAttr(kind)] === specPath(kind, slug))).toBe(true);
+    }
+  });
+
+  it('names the attribute each kind stores its spec under', () => {
+    expect(specAttr('session')).toBe('spec');
+    expect(specAttr('proof')).toBe('spec');
+    expect(specAttr('draft')).toBe('draft'); // posts are the odd one out
+  });
 
   it('picks only the entities of the asked-for kind', () => {
     expect(savedEntities(entities, 'proof').map((e) => e.label)).toEqual(['Rooftop', 'Bridge']);

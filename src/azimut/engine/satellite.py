@@ -18,11 +18,12 @@ to).
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
 from ..repository import EntityStatus
-from ..workspace import Case
+from ..workspace import Case, CaseError
 from . import continents
 from . import coords as coords_engine
 from . import countries
@@ -87,6 +88,276 @@ def save_place(
     attrs.update(extra_attrs or {})
     label = (title or "").strip() or coords_label(lat, lon)
     return case.add_entity("place", label, attrs=attrs, by=by, status=status)
+
+
+#: Which attribute holds the rounded point two places are considered one at.
+#: Five decimals is about a metre. The name is import enrichment's, which wrote
+#: the key first, and it is **shared rather than copied**: a photo's EXIF point
+#: and a capture framed on the same spot have to land on one node, or the case
+#: grows two places nobody asked it to tell apart.
+COORD_KEY = "enrich_coord_key"
+
+
+def coord_key(lat: float, lon: float) -> str:
+    """The dedup key for a point, rounded to roughly one metre."""
+    return f"{float(lat):.5f},{float(lon):.5f}"
+
+
+def place_at(
+    case: Case, lat: float, lon: float, *, keyed_only: bool = True
+) -> dict[str, Any] | None:
+    """The place already standing at this point, or None.
+
+    ``keyed_only`` is the difference between a machine's reading and the
+    analyst's own gesture, and it decides whether a place they pinned by hand can
+    be reused.
+
+    **Enrichment keeps it on** (the default). A camera's EXIF proposing a point
+    must not attach itself to a pin somebody placed deliberately: those two may
+    be the same spot or may not, and deciding is a judgement the Suggestions
+    panel exists to let them make.
+
+    **A capture turns it off.** The analyst framed that view themselves, so the
+    pin already at that point is not somebody else's claim to be weighed — it is
+    the same act, made twice. Reusing it is what keeps one point from drawing as
+    two pins a metre apart.
+    """
+    key = coord_key(lat, lon)
+    found = case.find_entity(attr=COORD_KEY, value=key)
+    if found is not None or keyed_only:
+        return found
+    for place in _page_all(case, ["place"]):
+        attrs = place.get("attrs") or {}
+        if attrs.get("lat") is None or attrs.get("lon") is None:
+            continue
+        try:
+            if coord_key(attrs["lat"], attrs["lon"]) == key:
+                return place
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def place_for_proof(
+    case: Case,
+    proof_id: str,
+    lat: float,
+    lon: float,
+    *,
+    pov: bool = False,
+    by: str = "proof-composer",
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """File a proof's point as a ``place``, and join what the proof establishes.
+
+    **A geolocation is concluded in the composer, not while framing the map.** The
+    coordinates a proof carries are the analyst's answer — what they typed, or the
+    point their panels gave it and they left standing — where a capture is one of
+    the dozen views taken while looking. So the point becomes a node here, once,
+    at the moment somebody commits to it, rather than on every crop.
+
+    Filed ``confirmed``: whether it was typed or accepted from the panels, the
+    proof is the analyst's own act, and a review step over one's own answer is a
+    step over nothing.
+
+    **The proof itself always ``depicts``.** It was composed, never recorded
+    anywhere, so ``located-at`` is not a reading it can take — which is what the
+    registry says too. ``pov`` decides the verb for the *material*, and only there.
+
+    The caller decides *whether* to ask (``config.proof_place_auto``); this only
+    files. Callers check :func:`place_at` first, so a point already in the case is
+    never duplicated and never asked about.
+
+    Answers with the place and whatever the proof let go of to conclude on it
+    (:func:`restate_proof_point`).
+    """
+    place = save_place(
+        case, float(lat), float(lon), by=by,
+        extra_attrs={COORD_KEY: coord_key(float(lat), float(lon))},
+    )
+    return place, restate_proof_point(case, proof_id, place["id"], pov=pov, by=by)
+
+
+#: The two verbs a proof's point is stated with. `depicts` for the composition and
+#: for anything it shows; `located-at` for material POV says was recorded there.
+PLACE_VERBS = (links.DEPICTS, links.LOCATED_AT)
+
+
+def restate_proof_point(
+    case: Case,
+    proof_id: str,
+    place_id: str | None,
+    *,
+    pov: bool = False,
+    by: str = "proof-composer",
+) -> list[dict[str, Any]]:
+    """Make the graph say what this proof says now, and stop saying what it said.
+
+    **A proof states one point, and a save is the restatement of it** — the same
+    rule its panels already follow (``links.sync``, ONTOLOGY §3). Re-opening a
+    proof and correcting the coordinates is the analyst withdrawing an answer, so
+    the old edges go rather than piling up beside the new ones; toggling POV is
+    them saying the point means something else, so the verb on the material
+    changes. Without this a corrected proof read as two geolocations, and a POV
+    answer could only ever be given once.
+
+    ``place_id`` is the point the proof concludes on now, or ``None`` when it
+    concludes on none — a coordinate field cleared withdraws the claim rather than
+    freezing the last one.
+
+    **Only what the composer itself wrote is reconciled** (``by``). An edge the
+    analyst stated by hand in Details, or one import enrichment proposed from a
+    photo's EXIF, is a separate claim about the same file: saving a proof must not
+    silently drop it.
+
+    Answers with the places this proof let go of that nothing else holds — the
+    caller asks about deleting them (``api/proofs``), since a point nobody points
+    at is the analyst's own leftover to keep or drop, not ours to sweep.
+    """
+    material = [
+        entity
+        for entity in (links.derivation_subgraph(case, proof_id) or {}).get("entities", [])
+        if entity["id"] != proof_id
+    ]
+    released: list[dict[str, Any]] = []
+    for old_id in _stated_places(case, proof_id, by=by):
+        if old_id == place_id:
+            continue
+        _withdraw_point(case, proof_id, old_id, material, by=by)
+        old = case.get_entity(old_id)
+        if old is not None and not case.links_of(old_id):
+            released.append(old)
+    if place_id is not None:
+        _state_point(case, proof_id, place_id, material, pov=pov, by=by)
+    return released
+
+
+def _stated_places(case: Case, proof_id: str, *, by: str) -> list[str]:
+    """The points this proof currently concludes on, read off its own edges.
+
+    The proof is the only reliable record of where a save put its material: the
+    edges it wrote on a video carry no proof id, so what a re-save has to undo is
+    read from the composition that wrote them.
+    """
+    seen: list[str] = []
+    for link in case.links_of(proof_id):
+        if link["from"] != proof_id or link["type"] not in PLACE_VERBS:
+            continue
+        if (link.get("provenance") or {}).get("by") != by:
+            continue
+        target = case.get_entity(link["to"])
+        if target is not None and target["type"] == "place" and link["to"] not in seen:
+            seen.append(link["to"])
+    return seen
+
+
+def _other_proof_states(case: Case, place_id: str, proof_id: str, *, by: str) -> bool:
+    """True if another proof still concludes on this point.
+
+    Two proofs built from one video can land on the same roof, and the edges they
+    wrote on that video are indistinguishable. So a save withdraws its own point
+    only while it is the last one claiming it: dropping the material's edge here
+    would undo a conclusion this proof never made.
+    """
+    for link in case.links_of(place_id):
+        if link["to"] != place_id or link["type"] not in PLACE_VERBS or link["from"] == proof_id:
+            continue
+        if (link.get("provenance") or {}).get("by") != by:
+            continue
+        source = case.get_entity(link["from"])
+        if source is not None and source["type"] == "proof":
+            return True
+    return False
+
+
+def _drop_stated(case: Case, entity_id: str, place_id: str, verbs: tuple[str, ...], by: str) -> None:
+    """Remove this entity's own statements about a point, and nothing else's."""
+    for link in case.links_of(entity_id):
+        if link["from"] != entity_id or link["to"] != place_id or link["type"] not in verbs:
+            continue
+        if (link.get("provenance") or {}).get("by") == by:
+            case.remove_link(link["id"])
+
+
+def _withdraw_point(
+    case: Case, proof_id: str, place_id: str, material: list[dict[str, Any]], *, by: str
+) -> None:
+    """Take back a point this proof no longer concludes on, material included."""
+    shared = _other_proof_states(case, place_id, proof_id, by=by)
+    _drop_stated(case, proof_id, place_id, PLACE_VERBS, by)
+    if shared:
+        return
+    for entity in material:
+        _drop_stated(case, entity["id"], place_id, PLACE_VERBS, by)
+
+
+def _state_point(
+    case: Case,
+    proof_id: str,
+    place_id: str,
+    material: list[dict[str, Any]],
+    *,
+    pov: bool,
+    by: str,
+) -> None:
+    """Join the proof and the material it was composed from to the same point.
+
+    **The proof itself always ``depicts``.** It was composed, never recorded
+    anywhere, so ``located-at`` is not a reading it can take — which is what the
+    registry says too. ``pov`` decides the verb for the *material*, and only there.
+
+    A proof stating a point is the analyst's answer about **the footage**, not
+    about the composition: the whole reason the proof exists is to say where that
+    video was. So the files behind it carry the edge too — the frame, the collage,
+    the video two hops up, the capture — read off the derivation closure rather
+    than the panels alone, since a frame stands between a proof and the clip it
+    came from.
+
+    **``pov`` picks the verb, because the composition cannot.** Recorded-at and
+    shows are independent claims: a rooftop shot was recorded somewhere it never
+    shows, and a skyline is shown from kilometres away. Neither entails the other,
+    and a match between a frame and an imagery says only that they meet — not
+    whether the analyst located the camera or what it was pointed at. So the
+    composer asks once, and the answer travels in the spec:
+
+    - ``pov`` — the point is where the camera stood → ``located-at`` on the media
+      (an image, a video or a recording of the moment);
+    - otherwise — the point is what the frame shows → ``depicts``.
+
+    **A capture is never ``located-at``.** Orbital imagery was not recorded on the
+    ground, so it shows the place whichever answer the analyst gave.
+
+    Filed ``confirmed``, because composing is the assertion: putting a frame beside
+    a capture and writing the coordinates *is* the geolocation, and there is no
+    second opinion to collect from the person who just made it. A review everybody
+    clicks through is what makes ``suggested`` stop meaning anything where it is
+    real, on a camera's EXIF or a hash match (ONTOLOGY §4). Being wrong costs one
+    removal: a relation drops alone, cascading nothing and leaving no tombstone.
+
+    Only what the verb accepts. A PDF in the chain is skipped rather than refused,
+    and so is an audio file unless the point is where it was recorded.
+
+    **The verb is restated, not only added.** Answering POV differently on a
+    re-save is the analyst correcting what the point means, so the reading it
+    replaces goes: a video stops showing the place and is recorded there instead,
+    and an audio file drops the edge ``shows`` would refuse. A point another proof
+    still concludes on is left alone (:func:`_other_proof_states`) — the answer
+    being restated is this proof's, and it does not speak for that one.
+    """
+    verb = links.LOCATED_AT if pov else links.DEPICTS
+    kinds = ("image", "video", "audio") if pov else ("image", "video")
+    shared = _other_proof_states(case, place_id, proof_id, by=by)
+    case.add_link(proof_id, place_id, links.DEPICTS, by=by, unique=True)
+    for entity in material:
+        wanted: str | None = None
+        if entity["type"] == "capture":
+            wanted = links.DEPICTS
+        elif entity["type"] == "media" and links.media_kind(entity) in kinds:
+            wanted = verb
+        if not shared:
+            stale = tuple(v for v in PLACE_VERBS if v != wanted)
+            _drop_stated(case, entity["id"], place_id, stale, by)
+        if wanted is not None:
+            case.add_link(entity["id"], place_id, wanted, by=by, unique=True)
 
 
 def is_capture(item: dict[str, Any]) -> bool:
@@ -225,6 +496,12 @@ def _saved_row(
         "fetched_at": _saved_when(entity, capture),
         "imagery_date": source.get("imagery_date"),
         "notes": source.get("notes") or attrs.get("notes") or "",
+        # How tightly the point is pinned (ONTOLOGY §2). Carried in the index
+        # because the map overlay draws it: an approximate place is a circle or a
+        # polygon rather than a pin, and a pin on a guess is the lie this fixes.
+        # Absent stays absent — a point with no radius draws exactly as before.
+        "radius_m": attrs.get("radius_m"),
+        "footprint": attrs.get("footprint"),
         # how many proofs were built on this point. `All` draws every point
         # once, so a worked row is marked rather than doubled by a proof
         # marker landing on the capture it composes.
@@ -253,7 +530,13 @@ def saved_index(case: Case) -> list[dict[str, Any]]:
     # two grouped queries for the whole case rather than one per row: this list
     # is read on case open and must not walk the graph row by row
     worked = case.count_dependents(link_type=links.DERIVED_FROM, from_type="proof")
-    related = case.count_incident_links(exclude_types=list(links.CHAIN_TYPES))
+    related = case.count_incident_links(
+        exclude_types=[
+            *links.CHAIN_TYPES,
+            links.MENTIONS,
+            *links.CLAIM_CONNECTION_TYPES,
+        ]
+    )
     rows = []
     for entity in saved_entities(case):
         is_image = entity["type"] == "capture"
@@ -449,6 +732,158 @@ def proof_index(
         rows.extend(_proof_row(proof, entity, point) for point in points)
     rows.sort(key=lambda r: r["fetched_at"], reverse=True)
     return rows
+
+
+# -- placement: where the chain puts an entity (ONTOLOGY §3) ----------------------
+#
+# The chain is read backwards as geography: a proof with no point of its own stands
+# at the point of every capture it composes. `proof_index` does that one hop back
+# for the map. This walks the same edges in both directions and further, because
+# the artifact holding the point is rarely the one being read: a video reaches its
+# capture through a proof that composed a frame of it, three hops away through a
+# shared descendant. That V is what the geolocation gesture actually looks like —
+# putting a frame beside a satellite view *is* the assertion they are one place.
+
+#: How far a placement walk travels over chain edges. A note sits three hops above a
+#: capture (note → post → proof → capture) and a video three below one
+#: (video ← frame ← proof → capture), so four covers every shape `CHAIN_ENDPOINTS`
+#: declares with one hop to spare.
+PLACEMENT_DEPTH = 4
+#: Entities one walk may read, whatever the depth would allow. A video cut into forty
+#: frames across ten proofs must not turn opening a panel into a graph scan.
+PLACEMENT_NODES = 200
+#: Points one entity reports. Fifteen distinct placements is a case already
+#: contradicting itself; past that the panel is a wall rather than a reading.
+PLACEMENT_LIMIT = 15
+
+
+def _point(lat: Any, lon: Any) -> dict[str, float] | None:
+    if lat is None or lon is None:
+        return None
+    try:
+        return {"lat": float(lat), "lon": float(lon)}
+    except (TypeError, ValueError):
+        return None
+
+
+def _entity_point(case: Case, entity: dict[str, Any]) -> dict[str, float] | None:
+    """The point this entity carries itself, or None if it carries none.
+
+    Two types hold one inside a chain. A ``capture`` records the marker it was taken
+    at. A ``proof`` states its own through the composer, and ``own_point`` is what
+    decides which: what the analyst typed wins over what the panels froze. Reusing it
+    here is what keeps a video from reporting a capture's raw point while the proof
+    beside it shows the corrected one.
+    """
+    attrs = entity.get("attrs") or {}
+    if entity.get("type") == "capture":
+        return _point(attrs.get("lat"), attrs.get("lon"))
+    if entity.get("type") != "proof":
+        return None
+    spec_rel = attrs.get("spec")
+    if not isinstance(spec_rel, str) or not spec_rel:
+        return None
+    try:
+        spec = json.loads(case.resolve_inside(spec_rel).read_text(encoding="utf-8"))
+    except (OSError, ValueError, CaseError):
+        return None  # a spec deleted or half-written places nothing
+    return own_point(spec) if isinstance(spec, dict) else None
+
+
+def _filed_at(entity: dict[str, Any]) -> str:
+    return str((entity.get("provenance") or {}).get("at") or "")
+
+
+def placements(
+    case: Case, entity_id: str, *, limit: int | None = None
+) -> dict[str, Any] | None:
+    """Where the derivation chain puts one entity, nearest placement first.
+
+    Breadth-first over ``derived-from``/``depends-on`` in both directions, so the
+    artifact that placed this one is found however far round the V it sits. Each
+    point comes back with the entity it was read off — the *via* the panel names —
+    and the entity's own point comes back with none, because nothing placed it.
+
+    **An artifact that carries a point is where the walk stops.** ``proof_index``
+    already settles this for the map — a proof that states where it is says it once,
+    rather than also drawing at the panels it overrode — and a panel that listed both
+    would contradict the map about the same proof. Stopping there is also what keeps
+    a video to its own argument: the capture behind its proof is reached, the second
+    proof that happens to reuse that capture is not.
+
+    Points are deduplicated on the exact pair, never on a rounded one: two captures
+    of the same roof are metres apart, and merging them would assert they are one
+    place, which is the analyst's call and not a rounding. The nearest hop wins a
+    repeated point, and the most recently filed artifact wins inside one hop.
+
+    A ``capture`` reports nothing at all. Its point is its own, written at the save
+    and already read under Info, so listing it here would show one datum twice in one
+    panel for the single type that never derived it.
+
+    Returns ``None`` when the entity is gone.
+    """
+    root = case.get_entity(entity_id)
+    if root is None:
+        return None
+    if root.get("type") == "capture":
+        return {"points": [], "truncated": False}
+
+    cap = PLACEMENT_LIMIT if limit is None else limit
+    found: dict[tuple[float, float], dict[str, Any]] = {}
+    seen: set[str] = {entity_id}
+    frontier = [root]
+    reads = 1
+    truncated = False
+    for depth in range(PLACEMENT_DEPTH + 1):
+        if not frontier:
+            break
+        # newest first inside one hop: when two artifacts state the same point, the
+        # freshest reading is the one worth attributing it to
+        frontier.sort(key=_filed_at, reverse=True)
+        neighbours: list[str] = []
+        for node in frontier:
+            point = _entity_point(case, node)
+            if point is not None:
+                key = (point["lat"], point["lon"])
+                if key in found:  # a nearer artifact already stands here
+                    continue
+                if len(found) >= cap:
+                    truncated = True
+                else:
+                    found[key] = {
+                        "lat": point["lat"],
+                        "lon": point["lon"],
+                        "depth": depth,
+                        "via": None
+                        if node["id"] == entity_id
+                        else {
+                            "id": node["id"],
+                            "type": node.get("type"),
+                            "label": node.get("label"),
+                        },
+                    }
+                continue  # this artifact is the placement; what it was made from is not
+            if depth == PLACEMENT_DEPTH:
+                continue
+            for link in case.links_of(node["id"]):
+                if link["type"] not in links.CHAIN_TYPES:
+                    continue
+                other = link["to"] if link["from"] == node["id"] else link["from"]
+                if other in seen:
+                    continue
+                seen.add(other)
+                neighbours.append(other)
+        nxt: list[dict[str, Any]] = []
+        for other_id in neighbours:
+            if reads >= PLACEMENT_NODES:
+                truncated = True  # the walk stopped short, so the list may be partial
+                break
+            neighbour = case.get_entity(other_id)
+            reads += 1
+            if neighbour is not None:
+                nxt.append(neighbour)
+        frontier = nxt
+    return {"points": list(found.values()), "truncated": truncated}
 
 
 def is_unlocated(entity: dict[str, Any]) -> bool:

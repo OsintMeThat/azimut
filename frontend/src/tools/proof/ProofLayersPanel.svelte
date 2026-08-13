@@ -1,5 +1,6 @@
 <script>
   import Icon from '../../components/Icon.svelte';
+  import { fileUrl } from '../../lib/fileUrl.js';
 
   let {
     proof,
@@ -108,7 +109,7 @@
         title="Select this panel on the canvas"
         onclick={() => (selectedPanelId = selectedPanelId === panel.id ? null : panel.id)}
       >
-        <img src={`/files/${caseId}/${panel.src}`} alt="" />
+        <img src={fileUrl(caseId, panel.src)} alt="" />
         {#if proof.layout === 'free'}
           <span class="row-badge" title="Z1 is the foreground">Z{index + 1}</span>
         {:else}

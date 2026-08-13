@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from contextlib import closing
 
 import pytest
 from bigcase import build_big_case
+import schema_rewind
 from legacy_case import legacy_manifest_path, read_legacy_manifest, write_legacy_json_case
 
 from azimut import layout
-from azimut.sqlite_backend import SqliteCase, convert_json_to_sqlite
+from azimut.sqlite_backend import SQLITE_SCHEMA, SqliteCase, convert_json_to_sqlite
 from azimut.workspace import CaseError
 
 
@@ -74,7 +76,7 @@ def test_open_missing_db_raises(tmp_path):
 def test_open_refuses_newer_schema(tmp_path):
     db = tmp_path / "case.db"
     SqliteCase.create(db, name="From the future")
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'", ("99",))
     with pytest.raises(CaseError, match="newer Azimut"):
         SqliteCase.open(db)
@@ -145,14 +147,17 @@ INSERT INTO entities(id, type, label, attrs_json, prov_by, prov_at)
 def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
     """A schema-1 case.db is upgraded on open through the whole chain: the folder
     column is added and backfilled (1->2), the jobs table is created (2->3),
-    search/media browse indexes arrive in schema 4, the position flag in 5 and
-    the trash journal in 6 and its recovery state in 7. A second open applies
-    nothing."""
+    search/media browse indexes arrive in schema 4, the position flag in 5, the
+    trash journal in 6, its recovery state in 7, link confidence in 8, the
+    search-index rebuild in 9, the graph's hand-placed nodes, one arrangement
+    per lens, in 10, what kind of tie an edge states in 11, entity photo
+    galleries in 12, saved analysis views in 13, and the indexes the catalog
+    orders the whole case by in 14. A second open applies nothing."""
     db = tmp_path / "case.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.executescript(_SCHEMA_V1)
 
-    # runs 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 in place. The media directory is
+    # runs 1 -> 2 -> ... -> the current schema in place. The media directory is
     # passed because the backend never guesses the case layout; it is empty
     # here, so the schema-4 backfill marks itself done with no rows.
     store = SqliteCase.open(db, media_dir=tmp_path / "media")
@@ -163,12 +168,14 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
     # 2 -> 3: the durable jobs table exists and works.
     store.enqueue_job("thumbnail", key="media/x.jpg")
     assert store.count_jobs() == {"queued": 1}
-    with sqlite3.connect(db) as conn:
-        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "7"
+    with closing(sqlite3.connect(db)) as conn, conn:
+        assert conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone()[0] == str(SQLITE_SCHEMA)
         applied = {
             r[0] for r in conn.execute("SELECT version FROM schema_migrations").fetchall()
         }
-        assert {2, 3, 4, 5, 6, 7} <= applied
+        assert set(range(2, SQLITE_SCHEMA + 1)) <= applied
         columns = {
             row[1] for row in conn.execute("PRAGMA table_info(entities)").fetchall()
         }
@@ -183,13 +190,160 @@ def test_open_upgrades_a_v1_db_through_every_migration(tmp_path):
             row[1] for row in conn.execute("PRAGMA table_info(trash)").fetchall()
         }
         assert "state" in trash_columns
+        # 7 -> 8: an edge can carry how sure the analyst is.
+        link_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(links)").fetchall()
+        }
+        assert "confidence" in link_columns
+        # 10 -> 11: an edge can say what kind of tie it states. Nothing to backfill —
+        # every edge filed before this is unqualified, which is what a null says.
+        assert "nature" in link_columns
+        assert not conn.execute("SELECT 1 FROM links WHERE nature IS NOT NULL").fetchall()
+        # 9 -> 10: the graph can remember where a node was dragged to, per lens, and
+        # a case that never could reads as one nobody has arranged.
+        assert store.graph_pins("all") == {}
+        pin_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(graph_pins)").fetchall()
+        }
+        assert "lens" in pin_columns
+        # 11 -> 12: galleries hold private photos or existing Media references.
+        image_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(entity_images)").fetchall()
+        }
+        assert image_columns == {
+            "entity_id",
+            "image_id",
+            "media_id",
+            "path",
+            "thumbnail",
+            "title",
+            "position",
+            "is_primary",
+        }
+        # 12 -> 13: named Board/Graph readings are case-owned rows. The count lets
+        # their bounded menu avoid parsing snapshot JSON.
+        view_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(analysis_views)").fetchall()
+        }
+        assert view_columns == {
+            "id", "name", "mode", "surface", "spec_json", "snapshot_count",
+            "created_at", "updated_at",
+        }
 
     SqliteCase.open(db, media_dir=tmp_path / "media")  # idempotent — applies nothing
-    with sqlite3.connect(db) as conn:
-        for version in (2, 3, 4, 5, 6, 7):
+    with closing(sqlite3.connect(db)) as conn, conn:
+        for version in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13):
             assert conn.execute(
                 "SELECT COUNT(*) FROM schema_migrations WHERE version = ?", (version,)
             ).fetchone()[0] == 1
+
+
+def _rewind_to_schema_7(db):
+    schema_rewind.rewind(db, 7)
+
+
+def test_a_real_schema_7_case_keeps_every_link_through_the_confidence_migration(tmp_path):
+    """The upgrade people will actually run when they download the next release: a
+    case built by the shipped code, migrated in place. Every edge survives with its
+    id, type and provenance, and none of them acquires a rating — an existing link
+    reads as *not assessed*, which is the truth about it.
+
+    Written as a real case rather than a hand-authored schema-7 dump so it exercises
+    the same `ALTER TABLE` the shipped binary will run, whatever the platform: the
+    step is one SQL statement in one transaction, with no file moved or replaced, so
+    it carries none of the Windows rename-not-delete hazards a file swap would.
+    """
+    db = tmp_path / "case.db"
+    store = SqliteCase.create(db, name="Before the upgrade")
+    a = store.add_entity("media", "clip.mp4", by="user")["id"]
+    b = store.add_entity("place", "the quay", by="user")["id"]
+    edge = store.add_link(a, b, "located-at", by="user")
+    suggested = store.add_link(a, b, "depicts", by="enrich", status="suggested")
+    _rewind_to_schema_7(db)
+
+    reopened = SqliteCase.open(db, media_dir=tmp_path / "media")
+
+    links = {link["id"]: link for link in reopened.list_links()}
+    assert set(links) == {edge["id"], suggested["id"]}
+    assert links[edge["id"]]["type"] == "located-at"
+    assert links[edge["id"]]["provenance"]["status"] == "confirmed"
+    # the enrichment suggestion is still awaiting review: the two axes are separate
+    assert links[suggested["id"]]["provenance"]["status"] == "suggested"
+    assert links[suggested["id"]]["provenance"]["by"] == "enrich"
+    # absent, not null: no reader has to tell unevaluated from rated-as-nothing
+    for link in links.values():
+        assert "confidence" not in link
+
+
+def test_the_confidence_migration_runs_on_a_case_with_no_links_at_all(tmp_path):
+    """The other real shape: most cases hold entities and no relations yet. `ALTER
+    TABLE` on an empty table is still a schema change, and the version has to move
+    or every later open would retry it."""
+    db = tmp_path / "case.db"
+    store = SqliteCase.create(db, name="No relations")
+    store.add_entity("media", "lonely.jpg", by="user")
+    _rewind_to_schema_7(db)
+
+    reopened = SqliteCase.open(db, media_dir=tmp_path / "media")
+
+    assert reopened.list_links() == []
+    with closing(sqlite3.connect(db)) as conn, conn:
+        assert conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()[0] == str(SQLITE_SCHEMA)
+
+
+def _rewind_to_schema_8(db):
+    schema_rewind.rewind(db, 8)
+
+
+def test_a_case_search_reaches_the_fields_the_vocabulary_declares(tmp_path):
+    """A vehicle is looked for by its plate and a claim by the words it quotes.
+
+    Both were unfindable while the index stopped at the label, the type, the folder
+    and the notes — the declared fields, the ones the registry went to the trouble
+    of naming, were exactly what search could not see.
+    """
+    db = tmp_path / "case.db"
+    store = SqliteCase.create(db, name="Declared fields")
+    truck = store.add_entity(
+        "vehicle", "Truck 12", {"plate": "AB-123-CD", "make": "Kamaz"}, by="user"
+    )
+    claim = store.add_entity(
+        "claim", "Filmed at the quay", {"verbatim": "on the north jetty"}, by="user"
+    )
+    place = store.add_entity("place", "Quay 4", {"radius_m": 500}, by="user")
+
+    assert [e["id"] for e in store.page_entities(query="AB-123")["items"]] == [truck["id"]]
+    assert [e["id"] for e in store.page_entities(query="kamaz")["items"]] == [truck["id"]]
+    assert [e["id"] for e in store.page_entities(query="north jetty")["items"]] == [claim["id"]]
+    # a stored number is not text to match on: "500" against every radius in the
+    # case would bury the rows that actually say 500
+    assert store.page_entities(query="500")["items"] == []
+    assert [e["id"] for e in store.page_entities(query="quay 4")["items"]] == [place["id"]]
+
+
+def test_schema_9_rebuilds_the_index_for_rows_written_before_it(tmp_path):
+    """The index is a stored column, so widening it only reaches later writes.
+
+    Without the rebuild a case filed last week would go on answering searches from
+    its label alone, which is indistinguishable from the bug being unfixed.
+    """
+    db = tmp_path / "case.db"
+    store = SqliteCase.create(db, name="Old rows")
+    truck = store.add_entity("vehicle", "Truck 12", {"plate": "AB-123-CD"}, by="user")
+    with closing(sqlite3.connect(db)) as conn, conn:
+        # exactly what schema 8 stored: label, type, folder, notes
+        conn.execute("UPDATE entities SET search_text = 'truck 12\nvehicle'")
+        conn.commit()
+    assert SqliteCase.open(db, media_dir=tmp_path / "media").page_entities(
+        query="AB-123"
+    )["items"] == []
+
+    _rewind_to_schema_8(db)
+    reopened = SqliteCase.open(db, media_dir=tmp_path / "media")
+
+    assert [e["id"] for e in reopened.page_entities(query="AB-123")["items"]] == [truck["id"]]
 
 
 # A schema-4 media index: the browse table as it shipped, before the position
@@ -241,7 +395,7 @@ def test_open_backfills_the_position_flag_from_already_indexed_items(tmp_path):
     """4 -> 5 reads the sidecar JSON already in the row, so a case enriched before
     the column existed gains its GPS filter on open — no file scan, no re-enrich."""
     db = tmp_path / "case.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.executescript(_SCHEMA_V4_MEDIA)
 
     store = SqliteCase.open(db)
@@ -260,7 +414,7 @@ def test_open_without_a_media_dir_defers_the_backfill(tmp_path):
     moves.
     """
     db = tmp_path / "case.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.executescript(_SCHEMA_V1)  # predates the index, so it needs the backfill
     media_dir = tmp_path / "elsewhere"
     (media_dir / layout.META_DIR).mkdir(parents=True)
@@ -272,7 +426,7 @@ def test_open_without_a_media_dir_defers_the_backfill(tmp_path):
     )
 
     SqliteCase.open(db)
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute("SELECT value FROM meta WHERE key='media_index_ready'").fetchone() is None
 
     store = SqliteCase.open(db, media_dir=media_dir)
@@ -406,6 +560,43 @@ def test_pagination_keys_on_rowid_so_a_deletion_does_not_skip(tmp_path):
     assert [e["id"] for e in page2["items"]] == ids[2:]  # nothing skipped
 
 
+def test_an_ordered_page_keys_on_its_sort_and_never_ties_itself_into_a_loop(tmp_path):
+    """A sort has to page on its own key *and* the rowid. Every one of these four
+    entities was filed in the same second — which is what a bulk import looks like —
+    so a cursor holding the date alone would hand back the same page forever."""
+    store = SqliteCase.create(tmp_path / "case.db", name="Ordered")
+    ids = [store.add_entity("person", f"P{i}", by="user")["id"] for i in range(4)]
+
+    seen: list[str] = []
+    cursor = None
+    while True:
+        page = store.page_entities(limit=2, cursor=cursor, order="-created")
+        seen.extend(entity["id"] for entity in page["items"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+    assert seen == list(reversed(ids))  # every row once, newest first
+
+
+def test_an_ordered_cursor_survives_a_key_holding_its_own_separator(tmp_path):
+    """The cursor is spelled `<rowid>:<key>`, and a label may hold a colon. The rowid
+    cannot, so the key takes the whole of the rest and a name round-trips unharmed."""
+    store = SqliteCase.create(tmp_path / "case.db", name="Colons")
+    for label in ("aa: one", "bb: two", "cc: three"):
+        store.add_entity("person", label, by="user")
+
+    first = store.page_entities(limit=2, order="label")
+    assert [entity["label"] for entity in first["items"]] == ["aa: one", "bb: two"]
+    rest = store.page_entities(limit=2, cursor=first["next_cursor"], order="label")
+    assert [entity["label"] for entity in rest["items"]] == ["cc: three"]
+
+
+def test_an_ordering_the_store_does_not_have_is_refused(tmp_path):
+    store = SqliteCase.create(tmp_path / "case.db", name="BadOrder")
+    with pytest.raises(CaseError):
+        store.page_entities(order="size")
+
+
 # -- converter -------------------------------------------------------------
 
 
@@ -527,3 +718,45 @@ def test_a_media_row_carries_the_entity_it_belongs_to(tmp_workspace):
     assert by_path["media/loose.jpg"]["entity_id"] is None
     assert case.media_items_by_paths(["media/photo.jpg"])[0]["entity_id"] == photo["id"]
     assert case.page_media_items()["items"][0]["entity_id"] in (photo["id"], None)
+
+
+def test_the_index_says_how_each_file_came_into_the_case(tmp_workspace):
+    """Read off the two indexed columns, keyed by entity, because the surfaces that
+    draw one hold ids. A row recording no route is left out rather than mapped to an
+    empty one: a caller has to be able to tell "came in by no stated route" from "the
+    index has never seen this entity"."""
+    from azimut.workspace import Case
+
+    case = Case.create("Origins")
+    frame = case.add_entity("media", "Frame", attrs={"path": "media/frame.png"}, by="inspect")
+    photo = case.add_entity("media", "Photo", attrs={"path": "media/photo.jpg"}, by="test")
+    mystery = case.add_entity("media", "Mystery", attrs={"path": "media/x.jpg"}, by="test")
+    case.upsert_media_item(
+        {
+            "path": "media/frame.png",
+            "filename": "frame.png",
+            "kind": "image",
+            "source": {"type": "inspect", "op": "frame", "from": "media/clip.mp4"},
+        },
+        entity_id=frame["id"],
+    )
+    case.upsert_media_item(
+        {
+            "path": "media/photo.jpg",
+            "filename": "photo.jpg",
+            "kind": "image",
+            "source": {"type": "upload"},
+        },
+        entity_id=photo["id"],
+    )
+    case.upsert_media_item(
+        {"path": "media/x.jpg", "filename": "x.jpg", "kind": "image"},
+        entity_id=mystery["id"],
+    )
+
+    found = case.media_origins([frame["id"], photo["id"], mystery["id"], "e_nope"])
+    assert found[frame["id"]] == {"type": "inspect", "op": "frame"}
+    # An upload has a route and no act: nothing composed it, so there is no `op`.
+    assert found[photo["id"]] == {"type": "upload"}
+    assert mystery["id"] not in found and "e_nope" not in found
+    assert case.media_origins([]) == {}

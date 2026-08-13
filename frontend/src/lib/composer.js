@@ -837,6 +837,11 @@ export function toSpec(proof) {
     templateId: typeof proof.templateId === 'string' ? proof.templateId : null,
     coords: autoCoords(proof.panels), // auto geo (first geo panel), for reference
     coordsText: proof.coordsText?.trim() ? proof.coordsText.trim() : null, // null → auto
+    // Whether the point is where the camera stood rather than what it filmed.
+    // The proof cannot deduce it — a rooftop shot is recorded somewhere it never
+    // shows — so the analyst says, and the place filed on save takes the verb
+    // from it (engine/satellite.place_for_proof).
+    pov: proof.pov === true,
     source: proof.source?.trim() ? proof.source.trim() : null, // null → auto (link only)
     captionSize: proof.captionSize ?? CAPTION_SIZE,
     legendSize: proof.legendSize ?? LEGEND_SIZE,

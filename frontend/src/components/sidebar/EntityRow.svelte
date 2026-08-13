@@ -2,6 +2,7 @@
   // One entity row. The folder tree and the result list render the same row, so
   // it is a component rather than a snippet owned by either of them.
   import { ENTITY_TOOL, gotoCapture } from '../../lib/navigate.js';
+  import { fileUrl } from '../../lib/fileUrl.js';
   import { folderOf } from '../../lib/folderTree.js';
   import { entityIcon } from '../../lib/entityIcon.js';
   import Icon from '../Icon.svelte';
@@ -46,7 +47,11 @@
   onkeydown={(ev) => ev.key === 'Enter' && onactivate(entity, ev)}
 >
   {#if !suggested}<Icon name="grip" size={13} />{/if}
-  <Icon name={entityIcon(entity)} size={14} />
+  {#if entity.thumb}
+    <img class="entity-thumb" src={fileUrl(caseId, entity.thumb)} alt="" loading="lazy" />
+  {:else}
+    <Icon name={entityIcon(entity)} size={14} />
+  {/if}
   <div class="e-body">
     <span class="e-label">{entity.label}</span>
     <span class="e-meta">{meta ?? entity.type}</span>
@@ -73,7 +78,7 @@
       <a
         class="btn btn-ghost btn-sm act"
         title="Open in new tab"
-        href={`/files/${caseId}/${entity.attrs.path}`}
+        href={fileUrl(caseId, entity.attrs.path)}
         target="_blank"
         rel="noreferrer"
         onclick={(ev) => ev.stopPropagation()}
@@ -121,6 +126,15 @@
     margin-bottom: 4px;
   }
   .e-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .entity-thumb {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    object-fit: cover;
+    background: var(--bg-2);
+  }
   .e-label {
     font-size: var(--fs-sm);
     color: var(--text-1);

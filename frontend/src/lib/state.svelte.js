@@ -10,6 +10,7 @@ import { formatCoords as renderCoords } from './coords.js';
 import { loadWidth, saveWidth, clampWidth } from './sidebar.js';
 import { loadTheme, saveTheme, applyTheme } from './theme.js';
 import { shouldShowUpdate } from './appUpdate.js';
+import { extensionVersion } from './extBridge.js';
 import { loadRelationTypes } from './relations.svelte.js';
 
 /**
@@ -37,6 +38,21 @@ export const updateState = $state({
   latest: '', // the newer release tag, e.g. "v0.2.0"
   url: '', // where to download it
   notes: '', // the release body, Markdown
+});
+
+/**
+ * What the startup checks found behind, feeding the dots on the Settings icon,
+ * on its tabs and on the buttons that do something about it (lib/staleness.js).
+ *
+ * Filled once, on load — nothing here polls. Settings writes back to it when a
+ * manual check or an update changes the answer, so clearing a badge doesn't
+ * wait for a reload.
+ */
+export const updatesState = $state({
+  app: null, // the /api/settings/update?check=true payload, or null
+  scrapers: null, // checked downloader entries, or null while never checked
+  extensionInstalled: null, // version stamped on <html> by the installed extension
+  extensionBundled: '', // version this build ships (GET /api/settings)
 });
 
 /** Render a lat/lon the way the user asked for it. The tools' one entry point. */
@@ -73,28 +89,37 @@ export function applyPrefs(s) {
   if (s.update_check_on_start !== undefined) prefs.updateCheckOnStart = s.update_check_on_start;
   if (s.update_dismissed_version !== undefined)
     prefs.updateDismissedVersion = s.update_dismissed_version;
+  if (s.extension_version !== undefined) updatesState.extensionBundled = s.extension_version;
 }
 
 /**
- * On page load, ask GitHub whether a newer release is out and pop a notice if
- * so. The one network call Azimut makes on mount — gated on the user's
- * `updateCheckOnStart` preference (Settings turns it off), so with it disabled
- * opening the app still phones nowhere. Never throws: a failed or muted check
- * simply leaves the pop-up closed.
+ * On page load, work out what is behind: a newer Azimut release, a newer
+ * downloader, a newer capture extension. Runs once — nothing here polls, and
+ * nothing re-checks when Settings opens.
+ *
+ * The extension half is a local comparison (the installed one stamps its
+ * version on <html> at document_start), so it happens either way. The two
+ * network calls are gated together on `updateCheckOnStart`: with it off,
+ * opening the app still phones nowhere. Never throws — offline is the normal
+ * case here, and a check that fails just leaves the badge unlit.
  */
-export async function checkForUpdateOnStart() {
+export async function checkForUpdatesOnStart() {
+  updatesState.extensionInstalled = extensionVersion();
   if (!prefs.updateCheckOnStart) return;
-  try {
-    const check = await api.get('/api/settings/update?check=true');
-    if (shouldShowUpdate(check, prefs.updateDismissedVersion)) {
-      updateState.latest = check.latest;
-      updateState.url = check.url;
-      updateState.notes = check.notes ?? '';
+  const [app, scrapers] = await Promise.allSettled([
+    api.get('/api/settings/update?check=true'),
+    api.get('/api/settings/scrapers?check=true'),
+  ]);
+  if (app.status === 'fulfilled') {
+    updatesState.app = app.value;
+    if (shouldShowUpdate(app.value, prefs.updateDismissedVersion)) {
+      updateState.latest = app.value.latest;
+      updateState.url = app.value.url;
+      updateState.notes = app.value.notes ?? '';
       updateState.show = true;
     }
-  } catch {
-    /* offline, rate-limited, whatever — the pop-up is a courtesy, not a gate */
   }
+  if (scrapers.status === 'fulfilled') updatesState.scrapers = scrapers.value.scrapers ?? [];
 }
 
 /** Close the update pop-up. `mute` remembers the tag so it won't show again. */
@@ -164,6 +189,31 @@ export const uiState = $state({
   inspectPath: null, // media path to open in the Inspect tool
   focusMedia: null, // media path to highlight & scroll to in the Media Library
   openInspect: null, // inspect-session name to reopen in the Inspect tool
+  // Entity id the Board should open Details on. The graph-only types — a person,
+  // an account, a claim — have no tool of their own to be reopened in, so the
+  // board is where following a relation to one of them lands.
+  openBoardEntity: null,
+  /**
+   * A question worked out in the Board, handed to the graph to be drawn.
+   *
+   * `{ terms, label }` — the catalog filter as request parameters, and the sentence
+   * it reads as. The **filter** travels rather than the ids it matched, which is what
+   * makes this work at any size: the graph asks the case the same question the table
+   * asked, so nothing is capped, no URL carries five hundred ids, and the drawing
+   * stays live as the case changes under it. Both surfaces resolve it through one
+   * predicate, so they cannot disagree about what it means.
+   */
+  drawInGraph: null,
+  /** One entity the graph should draw and select, wherever it came from. The mirror
+   *  of `openBoardEntity`: a node has to be reachable from the row as much as a row
+   *  from the node. */
+  openGraphEntity: null,
+  /** Entity/item handed to Timeline from Details. Timeline consumes and clears it. */
+  timelineFocus: null, // { entityId, entityLabel, itemId }
+  /** A fact-time range handed back to Timeline. Consumed once, never persisted. */
+  timelineRange: null, // { from, to }
+  /** A fact-time range handed to the Satellite map as a temporary event layer. */
+  mapTimelineRange: null, // { from, to }
   gotoCoords: null, // { lat, lon } to fly to in the Satellite tool
   // A point, a date and a time handed over by Coords & Sky: the Satellite tab
   // opens its Sun & moon mode there. Session-only, and never part of a capture
@@ -255,19 +305,54 @@ function rememberCase(id) {
   }
 }
 
+let openingCase = 0;
+const caseChangeGuards = new Set();
+
+/** Finish case-owned work before another case becomes current. A guard returning
+ *  false keeps the current case open, so a failed save cannot be mistaken for a
+ *  successful switch. */
+export function registerCaseChangeGuard(guard) {
+  caseChangeGuards.add(guard);
+  return () => caseChangeGuards.delete(guard);
+}
+
+async function prepareCaseChange(fromId, toId) {
+  for (const guard of [...caseChangeGuards]) {
+    if ((await guard({ fromId, toId })) === false) return false;
+  }
+  return true;
+}
+
 export async function openCase(id) {
+  const run = ++openingCase;
   caseState.loading = true;
   try {
+    const currentId = caseState.current?.id ?? null;
+    if (
+      currentId && currentId !== id &&
+      !(await prepareCaseChange(currentId, id))
+    ) return;
+    if (run !== openingCase) return;
     // reference viewers point at the previous case's media — drop them
     if (caseState.current?.id !== id) {
       uiState.refViewers = [];
       uiState.openNotebook = null;
       uiState.focusCapture = null;
+      uiState.drawInGraph = null;
+      uiState.openBoardEntity = null;
+      uiState.openGraphEntity = null;
+      uiState.timelineFocus = null;
+      uiState.timelineRange = null;
+      uiState.mapTimelineRange = null;
     }
-    caseState.current = await api.get(`/api/cases/${id}`);
+    const opened = await api.get(`/api/cases/${id}`);
+    // Case reads can finish out of order. Only the latest choice may become current,
+    // or a slow first click can put its case back after a faster second one opened.
+    if (run !== openingCase) return;
+    caseState.current = opened;
     rememberCase(id);
   } finally {
-    caseState.loading = false;
+    if (run === openingCase) caseState.loading = false;
   }
 }
 
@@ -300,11 +385,23 @@ export async function initSession() {
   }
 }
 
+let reloadingCase = 0;
+
 export async function reloadCase() {
-  if (caseState.current) {
-    caseState.current = await api.get(`/api/cases/${caseState.current.id}`);
-    caseState.rev++;
-  }
+  const id = caseState.current?.id;
+  if (!id) return;
+  const selection = openingCase;
+  const run = ++reloadingCase;
+  const reloaded = await api.get(`/api/cases/${id}`);
+  // A write may finish while another case is being opened. Its refresh belongs to
+  // the case it started in and must never put that case back under the analyst.
+  if (
+    run !== reloadingCase ||
+    selection !== openingCase ||
+    caseState.current?.id !== id
+  ) return;
+  caseState.current = reloaded;
+  caseState.rev++;
 }
 
 export async function createCase(name) {
@@ -352,6 +449,8 @@ export async function promoteCase(name) {
  * next, since the consuming effects only check that *some* case is open.
  */
 export function closeCase() {
+  // Invalidate an open or refresh still in flight before dropping the current case.
+  openingCase++;
   caseState.current = null;
   rememberCase(null);
   uiState.composeQueue = [];
@@ -361,6 +460,12 @@ export function closeCase() {
   uiState.inspectPath = null;
   uiState.focusMedia = null;
   uiState.openInspect = null;
+  uiState.drawInGraph = null;
+  uiState.openBoardEntity = null;
+  uiState.openGraphEntity = null;
+  uiState.timelineFocus = null;
+  uiState.timelineRange = null;
+  uiState.mapTimelineRange = null;
   uiState.gotoCoords = null;
   uiState.skyAt = null;
   uiState.refViewers = [];

@@ -159,12 +159,39 @@
     rebuild(rows, precision);
   });
 
+  /**
+   * How tightly a mark is pinned, as a shape under its pin (ONTOLOGY §2).
+   *
+   * A pin dropped on a guess is the lie this fixes: "somewhere on the north quay"
+   * draws as the circle it is. A footprint wins over a radius when both are set,
+   * because a traced shape says more than the circle around it.
+   *
+   * A mark with neither returns nothing and draws exactly as it always has —
+   * absence is a state, never something to flag.
+   */
+  function shapesFor(mark) {
+    const row = mark.items.find((r) => r.footprint || r.radius_m > 0);
+    if (!row) return [];
+    const style = {
+      color: '#f5a623',
+      weight: 1.5,
+      opacity: 0.9,
+      fillColor: '#f5a623',
+      fillOpacity: 0.12,
+      // never steals the click from the pin it sits under
+      interactive: false,
+    };
+    return row.footprint
+      ? [L.geoJSON(row.footprint, { style: () => style })]
+      : [L.circle([mark.lat, mark.lon], { ...style, radius: row.radius_m })];
+  }
+
   function rebuild(rows, precision) {
     const marks = groupSavedMarkers(rows, precision);
     const next = new Map();
     group?.remove();
     group = L.layerGroup(
-      marks.map((mark) => {
+      marks.flatMap((mark) => {
         const marker = L.marker([mark.lat, mark.lon], {
           icon: icon(mark),
           title: mark.items.length > 1 ? `${mark.items.length} saved here` : mark.items[0].title,
@@ -185,7 +212,8 @@
           maxWidth: 330,
           autoPanPadding: [24, 24],
         });
-        return marker;
+        // the shape first, so the pin stays on top of its own uncertainty
+        return [...shapesFor(mark), marker];
       })
     ).addTo(map);
     elements = next;

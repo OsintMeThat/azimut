@@ -7,16 +7,16 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # create the GitHub release + upload assets
-  id-token: write   # PyPI Trusted Publishing (OIDC) — no token secret needed
+  contents: read
 
 jobs:
   guard:
     name: Version + release gate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           python-version: "3.12"
       # Install the app (editable) + dev tools, like the CI backend job, so the
@@ -35,7 +35,8 @@ jobs:
           echo "tag=$tag  __version__=$ver"
           [ "$tag" = "$ver" ] || { echo "::error::tag v$tag != __version__ $ver — bump src/azimut/__init__.py"; exit 1; }
       # The version-parity gate the release workflow used to skip: pyproject's
-      # single-sourced version and the extension manifest must line up.
+      # version stays single-sourced, and the capture extension's own version
+      # moves when the extension does and only then.
       - name: Release gate + version parity
         run: uv run --no-sync pytest tests/test_release_gate.py tests/test_updates.py -q
 
@@ -43,12 +44,13 @@ jobs:
     name: Build wheel + sdist
     needs: guard
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20.20.2"
-      - uses: astral-sh/setup-uv@v5
+          node-version: "24.19.0"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           python-version: "3.12"
       - name: Build frontend into the package
@@ -77,15 +79,17 @@ jobs:
           assert not missing, f"wheel is missing PDF font assets: {missing}"
           print(f"{whl}: {len(static)} static files and PDF font assets bundled")
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/*
+          if-no-files-found: error
 
   binaries:
     name: Binary (${{ matrix.os }})
     needs: guard
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -102,11 +106,11 @@ jobs:
           # macos-latest is Apple Silicon. Intel remains a documented Python
           # package install rather than a standalone release asset.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20.20.2"
-      - uses: astral-sh/setup-uv@v5
+          node-version: "24.19.0"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           python-version: "3.12"
       - name: Build frontend into the package
@@ -141,19 +145,44 @@ jobs:
           else
             mv dist-bin/azimut "dist-bin/${{ matrix.asset }}"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset }}
           path: dist-bin/${{ matrix.asset }}
+          if-no-files-found: error
+
+  artifacts:
+    name: Assemble release artifacts
+    needs: [dist, binaries]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # This also exercises the upload/download pair on manual branch runs,
+      # before a tag can reach GitHub Releases or PyPI.
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+      - name: Verify the complete release set
+        shell: bash
+        run: |
+          test "$(find artifacts/dist -maxdepth 1 -type f -name '*.whl' | wc -l)" -eq 1
+          test "$(find artifacts/dist -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 1
+          test -s artifacts/azimut-linux-x86_64/azimut-linux-x86_64
+          test -s artifacts/azimut-windows-x86_64.exe/azimut-windows-x86_64.exe
+          test -s artifacts/azimut-macos-arm64/azimut-macos-arm64
 
   release:
     name: GitHub release + PyPI publish
-    needs: [dist, binaries]
+    needs: artifacts
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write   # create the GitHub release + upload assets
+      id-token: write   # PyPI Trusted Publishing (OIDC) — no token secret needed
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Gather release assets (binaries + wheel/sdist)
@@ -162,7 +191,7 @@ jobs:
           find artifacts -type f -exec cp {} upload/ \;
           ls -l upload
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: upload/*
           body_path: docs/RELEASE_NOTES.md

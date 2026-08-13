@@ -1,6 +1,6 @@
 # Azimut product overview
 
-Status: **spec v0.3** (2026-07-18). Read in order: Done → Roadmap → Loose ideas.
+Status: **spec v0.3** (2026-08-03). Read in order: Done → Roadmap → Loose ideas.
 Implementation detail belongs in code and tests; see
 [IMAGERY_PROVIDERS.md](IMAGERY_PROVIDERS.md), [UI.md](UI.md),
 [ONTOLOGY.md](ONTOLOGY.md) and
@@ -73,15 +73,31 @@ App-wide settings, scratch cases, caches and runtime tools also stay under
 The entity/link schema has existed since v1. Full vocabulary lives in
 [ONTOLOGY.md](ONTOLOGY.md).
 
-- **Entity types** (extensible): person, organization, alias/username, account,
-  email, phone, domain, ip, vehicle, place, event, media, proof.
-- **Links**: typed directed edges (owns, appears-in, located-at, same-as, posted,
-  mentions, …) plus free-typed labels.
-- **Provenance on everything**: which tool/action, source, when, confidence
-  (`confirmed` by analyst vs `suggested` by a tool).
+- **Entity types** (extensible) sit in one of eight **families**. Relations start
+  from families and narrow endpoints where a verb is type-specific:
 
-Tools suggest entities and links; analyst confirmation adds them to the graph.
-Relations, graph, map and timeline views are planned for v4.
+  | Family | Types |
+  |---|---|
+  | actor | person, organization |
+  | asset | vehicle, vessel, aircraft, structure |
+  | class | equipment-type |
+  | identifier | account, email, phone, domain, ip, network |
+  | collected | media, capture |
+  | document | proof, post, note, inspect-session, bookmark |
+  | place | place |
+  | claim | claim |
+
+- **Links**: typed directed edges (owns, part-of, member-of, associated-with, posted,
+  appears-in, sited-at, instance-of, in-network, located-at, depicts, same-image-as,
+  about, at, cites, contradicts, …) plus free-typed labels.
+- **Provenance on everything**: which tool/action, source, when and review status
+  (`confirmed` by analyst vs `suggested` by a tool).
+- **Assessment stays separate**: a Claim carries its confidence; a ratable ordinary
+  relation may carry its own ordinal; a source carries Admiralty reliability A–E.
+
+Tools suggest entities and links; the analyst reviews them. Relations, Mentions,
+Claims, lineage, the Board, the graph and configurable saved Timeline readings are
+shipped.
 
 ---
 
@@ -94,52 +110,41 @@ proof for publication.
 
 | Tool | What it does |
 |------|--------------|
-| ✅ **Media Library** | Imports or downloads case media with metadata, SHA-256, notes, provenance and multi-attachment selection. |
-| ✅ **Inspect** | Reviews images and video, including saved orientation (±90°/±180°), frame selection, adjustments, crops, collages, auto-stitch, ELA hints and sessions. |
-| ✅ **Satellite** | Saves places and attributed map captures with provider, date, rotation, measure and reference tools. |
-| ✅ **Saved work navigation** | Groups a case's places, captures and filed screenshots by continent/country/region (labelled in English and the local language) or by My-work folder, searchable in either spelling with previews and shown on the map at its default zoom when none was saved. |
-| ✅ **Geo Proof** | Composes templated grid or free-layout panels with annotations, coloured frames and pasted overlays that stay out of the case, and exports a PNG with an editable spec. |
+| ✅ **Media Library & Inspect** | Imports or downloads case media with metadata, provenance and hashes, then reviews images and video through saved editing sessions. |
+| ✅ **Satellite** | Saves places and attributed map captures from free or optional keyed imagery, including dated Sentinel-2 passes and usage controls. |
+| ✅ **Geo Proof** | Composes annotated panels, files their coordinates as places and exports an editable PNG proof. |
 | ✅ **Geo Report** | Prepares sourced proof threads and saved drafts without posting automatically. |
-| ✅ **Case sidebar** | Searches and filters the case, manages notes, suggestions, folders, multi-row filing, a details drawer and synchronized artifact deletion. |
-| ✅ **Imagery providers** | Supports Esri, OSM, OpenTopoMap, Sentinel-2 and optional Mapbox/Google with usage controls. |
-| ✅ **Sentinel-2 cloud ceiling** | Renders cloudy passes by default and lets a slider set the ceiling, which the tiles, the calendar and "most recent" all follow. |
-| ✅ **Capture extension** | Files user-initiated map screenshots with URL metadata, attribution and provenance; also saves a map's point as a place, or any page as a bookmark. |
-| ✅ **Distribution** | Bundles the browser UI, launcher, cross-platform binaries, ffmpeg, locked builds and server hardening. |
+| ✅ **Case navigation** | Searches, groups and files case work through the sidebar, Saved views, folders, notes and synchronized deletion. |
+| ✅ **Capture extension** | Files user-requested screenshots with their source details, saves map points and bookmarks pages. |
+| ✅ **Distribution** | Ships the browser UI, hardened local launcher, locked cross-platform builds, ffmpeg and browser interaction tests. |
 
 ### v2 GEOINT suite (shipped as GitHub `v0.2.0+`)
 
 | Tool | What it does |
 |------|--------------|
-| ✅ **Coords & Sky** | Converts common coordinate formats, copies results, opens map or geocoding links, and borrows a point already saved in the case instead of retyping it. |
-| ✅ **Sun, moon and local time** | Rise, set, azimuth, altitude, twilights, moon phase and bright-limb angle for a point and date, each instant in civil local time and UTC, with a day chart and a compass rosette. Polar day, polar night and a date without a moonrise are states. |
-| ✅ **Sun & moon on the map** | A map mode: one date's path from an anchored point, as the arc each body sweeps while up, hour ticks, and the bearing at a draggable hour. |
-| ✅ **Reverse Search** | Prepares image or video frames for keyless reverse-image services without uploading automatically. |
-| ✅ **Grid Search** | Saves editable AOI grids with keyboard review states and place promotion. |
-| ✅ **Templates** | Stores reusable proof styles and post-thread structures at workspace level. |
-| ✅ **Geo Report outputs** | Targets X, Bluesky or Mastodon and saves structured Markdown notes with evidence links. |
-| ✅ **Case Notebook** | Edits tabbed Markdown notes with local media, entity links and broken-reference markers. |
-| ✅ **Notebook diagrams** | Draws ```mermaid fences in the preview and the PDF, loading the library only when a note holds one. |
-| ✅ **Notes to PDF** | Exports the open note or a ticked selection as one server-rendered file per note, with stable homonym names, bounded diagrams and bundled faces for living scripts including CJK. |
-| ✅ **Export destinations** | Remembers separate app-wide folders for note PDFs, media copies and proof PNGs, defaults to the case's `exports/` and atomically avoids overwrites elsewhere. |
-| ✅ **Canvas tests** | Exercises Leaflet and Konva interactions in Chromium and Firefox. |
-| ✅ **Storage platform** | Uses per-case SQLite, bounded catalog queries and a durable one-worker job queue. |
-| ✅ **Case bundle** | Exports and imports the whole case folder, including the analyst's free zone, with integrity checks and optional whole-bundle password protection. |
-| ✅ **Trash** | Holds deleted artifacts for restore or explicit permanent deletion. |
-| ✅ **Gated downloads** | Fetches login-walled media by borrowing a browser session or cookies.txt, cookie-less by default and prompted only on a wall. |
-| ✅ **Find at scale** | Bounded, paged loading with a shared search box and sort across the Media Library and Files, plus case-name search in the switcher. |
-| ✅ **Searchable pickers** | Pickers in Inspect, Reverse Search, Geo Proof and the Notebook notes menu search past six entries and browse case folders behind the "…". |
-| ✅ **Report an issue** | System writes a bug or a request into a pre-filled GitHub issue, with version, OS and the run's last warnings, home path and account name scrubbed. |
-| ✅ **Settings backup** | Carries portable settings, keys, presets and the signature while leaving machine paths and download sessions behind. |
-| ✅ **Open the folder** | A case's folder, or the whole workspace, opened in the system file manager. |
-| ✅ **Proofs on the map** | A fourth position of the Saved switch places each proof by its own coordinates, then by the captures it composes; `All` marks a worked capture with a dot rather than doubling it. |
-| ✅ **Import enrichment** | Reads image EXIF/dHash and video container/stream metadata locally in the background; parsed GPS produces linked Suggestions and all fields appear in Details. |
-| ✅ **GPS in Media** | A GPS filter and a per-row pin in the Media list send a stated position to the map, images and videos alike. |
-| ✅ **Relation vocabulary** | One registry for the non-chain edges, stated or settled from Details and from a point's card on the map. |
-| ✅ **Visible file names** | Shows each file-backed artifact under its filename stem and moves the file when that name changes. |
-| ✅ **Case doctor** | Checks a case without changing it, then offers explicit repairs for a missing database, missing media and files dropped into `media/`. |
-| ✅ **Workspace folder** | Settings adopts a folder as it is, or copies and SHA-256-verifies every file before switching an external pointer and keeping the old copy. A missing configured folder stops startup. |
-| ✅ **One Azimut per workspace** | An OS-held lock the kernel drops on exit, with a heartbeat so a folder shared between machines can tell a live holder from a crashed one. The second instance opens to a screen naming the first, and can overrule it. |
-| ✅ **Adopt a case folder** | A folder made in the workspace from the file manager becomes a case on one click, where it is, without reading or moving what it holds. One holding a case that lost its manifest is recovered instead, then handed to the Doctor. |
+| ✅ **Coordinates & sky** | Converts coordinates and reads sun, moon, twilight and local time for a saved point on charts or the map. |
+| ✅ **Research helpers** | Prepares media for keyless reverse search and saves keyboard-reviewed AOI grids. |
+| ✅ **Reports & templates** | Stores reusable proof and post structures, then prepares sourced Markdown for X, Bluesky or Mastodon. |
+| ✅ **Case Notebook** | Edits linked Markdown notes with local media, Mermaid diagrams, PDF output and remembered export folders. |
+| ✅ **Media at scale** | Handles login-gated downloads, bounded search, searchable pickers, local metadata enrichment and GPS handoff to the map. |
+| ✅ **Storage & recovery** | Uses per-case SQLite and durable jobs, with whole-case bundles, Trash and portable settings backups. |
+| ✅ **Case utilities** | Opens case folders, reports scrubbed diagnostics, keeps filenames in sync and offers explicit Doctor repairs. |
+| ✅ **Evidence on the map** | Places proofs and derived media through their evidence chain, with stated point uncertainty and traced footprints. |
+| ✅ **Ontology connections** | Keeps Relations, Mentions, Claim connectors and artifact lineage separate under one validated verb registry. |
+| ✅ **Board & entities** | Provides the sortable Case Board, shared Details, typed creation and primary entity photos. |
+| ✅ **Case graph** | Draws registry-backed lenses with clustered nodes, readable edges, previews and an explicit view budget. |
+| ✅ **Working the graph** | Expands, folds, hides, searches and pins nodes per lens, with undo and no case mutation. |
+| ✅ **Graph evidence** | Folds sources onto their edges and exposes derivation, support, source and account counts. |
+| ✅ **Shared analysis views** | Shares one filter and saved-view family between Board and Graph while Timeline keeps readings built for tracks. |
+| ✅ **Claim assessment** | Keeps statement confidence, relation confidence and source reliability separate, with explicit support and contradiction links. |
+| ✅ **Structured findings** | Records associations, duplicate identifiers, asset condition, equipment models and statement totals without inventing missing values. |
+| ✅ **Temporal Claims** | Dates a Claim with guided point, timestamp or interval input and files its subjects, places and evidence atomically. |
+| ✅ **Case Timeline** | Aligns dated statements and media on a windowed UTC axis with uncertainty, density, direct edits and Undated work. |
+| ✅ **Timeline readings** | Builds coloured tracks from presets or Search+, then saves a changing Live view or a fixed Snapshot. |
+| ✅ **Timeline clocks & comparison** | Reads the axis in UTC or a chosen civil zone, adds daylight context and compares exact or uncertain entries. |
+| ✅ **Shared fact time** | Passes one fact-time window between Timeline, Board, Graph and a session-only Map layer without mixing in filing dates. |
+| ✅ **Workspace portability** | Moves or adopts a workspace safely, recovers hand-added cases and prevents two live instances from sharing it silently. |
+| ✅ **Updates & paste** | Reports available app, downloader and extension updates, then files supported clipboard content from the main case surfaces. |
 
 
 ---
@@ -154,8 +159,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 
 | Tool | What it does |
 |------|--------------|
-| **Case Board / Relations** | Browses, creates and merges entities; graph view over the schema filled since v1, on the shipped relation vocabulary. |
-| **Case Sheet** | The same case as a table: a row is an entity, columns are its attributes plus free ones the analyst adds, sorted, filtered and edited in place. Imports a CSV as loose rows that stay out of the graph until promoted, and exports back to CSV or GeoJSON. |
+| **Case Sheet** | Adds editable free columns and CSV/GeoJSON round trips to the shipped Board. Imported loose rows stay outside the graph until promoted. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
 
@@ -169,10 +173,13 @@ changes under it.
 | **Map engine (MapLibre)** | Replaces Leaflet with MapLibre GL at 2D parity: same providers, same captures, and the capture tests still verify the pixels. Ships before the 3D map, which builds on it. |
 | **3D map** | Pitch, public DEM terrain and extruded OSM buildings on the MapLibre map. An oblique capture records its pitch beside the bearing, so the view can be reproduced. |
 | **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. Follows the map engine, which redraws what a capture is made of. |
+| **Footprint tracing** | Draws a place's uncertainty as the shape it really is, for a quay, a treeline or an L-shaped block the circle describes badly. The field, its validation and its drawing already ship; only the gesture is missing, and it follows the map engine rather than being written twice. |
 | **Satellite Compare** | Same coords across providers (Esri / Sentinel-2 date slider / Bing / keyed), synced pan/zoom. Copernicus easy link. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
 | **Metadata follow-up** | Explains which common image/video fields were stripped and proposes events from capture times. |
 | **Edit Provenance** | Reads a rendered video's own edit history: which source clips it was cut from, in what order, and the GPS, dates and cameras those clips still carry. |
+| **Sky sessions** | Saves a sun or moon lookup as a case artifact: the point, the date and the time, never the numbers they produce. It reopens where it was left, a proof can show its reading, and a statement can cite it. |
+| **Grid sessions in the graph** | Brings the saved AOI grids into the case as entities, adopting the specs already on disk. Grid Search is the last saved tool state living outside the graph, so today nothing can say "this sweep is how I found it". |
 | **Sky Clock** | Marks a shadow, the sun or the moon in an image or a video frame, with the horizon and north giving the angles, then renders the year as a day × hour heatmap of the slots that fit. A visible moon also carries phase and bright-limb angle, which usually cuts a year down to a few instants. |
 | **Case KMZ** | One self-contained file per case: a pin per place, carrying the notes and proof images it is linked to, opened in Google Earth. Frozen rather than live, because only the web Earth remains and it follows no network link. |
 | **Imagery Wayback** | Esri World Imagery archive as a date slider: one view across every published release, key-less. |
@@ -213,12 +220,10 @@ supplies, since a ridge ends the day well before the flat horizon does.
 | **Skyline Matching** | Traces a horizon in a photo and compares it against the DEM profile seen from candidate points, in the same azimuth and elevation frame Camera Resection and Sky Clock already use. Terrain-occluded sun times then split candidates a matching horizon leaves tied. |
 | **Map Board (MyMaps-style)** | Editable case map: custom pins + notes/links, shapes, layers; import/export KML/KMZ/GeoJSON; pins bind to `place`. |
 | **Evidence Locker** | Track SHA-256, timestamps, source and notes; archive with Wayback; export `evidence.jsonl` under a hash-chained manifest, so any later edit to an exported file is detectable. |
-| **Timeline Builder** | Timestamped events from mixed sources aligned on timeline + map. |
 | **Report Builder** | Assemble proofs/maps/timeline/entities/notes into PDF or one self-contained HTML file with its media embedded, readable offline. |
 | **Case Sync (Git)** | Push a case to a private or public Git remote, pull it back, and diff two revisions, so two analysts can work the same case. |
 
-Toward v4: dependency-aware delete (partly done);
-archive-on-download and a Wayback CDX snapshot timeline with diff; web-page save
+Toward v4: archive-on-download and a Wayback CDX snapshot timeline with diff; web-page save
 extension; provenance stamp on exports (short hash, optionally visible) that
 re-identifies a shared PNG in its case;
 Sentinel-2 change detection with an NDVI difference over a date range; source
@@ -256,7 +261,8 @@ spec alone:
 Toward v5: real-world measurement from a resected photo or a solved camera track
 and its GCP camera pose; a gaussian-splat round trip for a solved camera track;
 satellite-pass search from public TLEs; 3D satellite capture; Google
-Photorealistic 3D Tiles on the user's own key.
+Photorealistic 3D Tiles on the user's own key; non-destructive identity resolution
+for duplicate entities returned by orchestrated searches.
 
 ## 7. Loose ideas
 
@@ -264,8 +270,10 @@ No version yet. Promote an idea when its workflow is clear; delete it when it
 stops making sense.
 
 - **Media in the analyst's half:** a button that looks for media beside `azimut/` and offers to bring them into the case, rather than waiting for them to be moved into `media/` by hand.
+- **Count a statement's independence by origin, not by wrapper:** three collages made from one video are three sources today, and are arguably one. The graph already answers this for a place; changing it for a statement changes a published number.
 - **Free-form montage editor:** consider only if it stays distinct from Geo Proof and Inspect collage.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
+- **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
 
 ## 8. Explicit non-goals
 
@@ -315,9 +323,11 @@ stops making sense.
   Accepted risks recorded here: cleartext keys over
   localhost, the hash-verified scraper updater, and tile/media URL fetches (SSRF
   only matters if the localhost assumption breaks). The startup update check is
-  the one on-mount network call: opt-out and read-only against GitHub's releases
-  feed, notes rendered through the Notebook's DOMPurify-sanitized Markdown
-  renderer rather than as raw HTML. Remote images embedded in a
+  the one on-mount network call: opt-out, and read-only against GitHub's
+  releases feed plus PyPI's JSON for the two downloaders, both governed by the
+  same switch. Release notes are rendered through the Notebook's
+  DOMPurify-sanitized Markdown renderer rather than as raw HTML. The capture
+  extension is compared locally, so it is answered with the switch off. Remote images embedded in a
   Notebook note contact their host whenever the preview opens; Notebook warns
   about that behavior and local Case media avoids it. Notebook diagrams are the
   one markup DOMPurify does not clear: Mermaid draws its SVG into the preview
@@ -336,8 +346,8 @@ stops making sense.
 
 ## 10. Open questions
 
-- Define entity attribute vocabularies, `same-as` merge semantics and confidence
-  levels before Relations ships.
+- Source reliability sits on the `bookmark` or the `account` cited. Reopen it the day
+  a source is neither: a paper document, a testimony.
 - Déjà Vu community index: needs infrastructure and moderation; out of scope
   until v5.
 - Name/handle availability: GitHub org/repo `azimut`, x.com handle, domain.

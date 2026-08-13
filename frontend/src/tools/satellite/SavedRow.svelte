@@ -8,6 +8,7 @@
    * a long list scans as titles and coordinates rather than as rows of buttons.
    */
   import Icon from '../../components/Icon.svelte';
+  import { fileUrl } from '../../lib/fileUrl.js';
 
   let {
     row,
@@ -24,6 +25,9 @@
     onedit,
     ondelete,
     onproof,
+    // Absent where a surface has no way to reload after the change; the accept
+    // action then stays off the row rather than being offered and doing nothing.
+    onaccept = null,
     onhover = () => {},
   } = $props();
 
@@ -45,6 +49,7 @@
       .join(' · ')
   );
   const blocked = $derived(fullscreen ? 'Exit fullscreen first. This leaves the map' : null);
+  const proposed = $derived(row.status === 'suggested');
 </script>
 
 <div
@@ -73,7 +78,7 @@
   >
     <span class="thumb">
       {#if row.thumbnail && caseId}
-        <img src={`/files/${caseId}/${row.thumbnail}`} alt="" loading="lazy" decoding="async" />
+        <img src={fileUrl(caseId, row.thumbnail)} alt="" loading="lazy" decoding="async" />
       {:else}
         <Icon name={GLYPH[row.kind] ?? 'pin'} size={dense ? 16 : 14} />
       {/if}
@@ -89,9 +94,10 @@
              say so rather than printing 0°, 0° -->
         {#if flyable}<span class="mono">{coords(row)}</span>{:else}<span>No coordinates</span>{/if}
         {#if meta}<span class="bits">{meta}</span>{/if}
-        <!-- a point enrichment proposed from a file's metadata, not analyst work -->
-        {#if row.status === 'suggested'}
-          <span class="proposed" title="Proposed from a file's own metadata">suggested</span>
+        <!-- a point a tool proposed: a file's own metadata, or a capture filed
+             while the analyst was not accepting them on the spot -->
+        {#if proposed}
+          <span class="proposed" title="Proposed by a tool, waiting for you">suggested</span>
         {/if}
       </span>
       {#if row.notes}<span class="note">{row.notes}</span>{/if}
@@ -99,6 +105,15 @@
   </button>
 
   <div class="actions">
+    <!-- Accepting is offered where the point is read, not only in the sidebar:
+         the analyst is looking at the map that decides whether the point is
+         right, and sending them to another panel to say so is the trip this
+         saves. -->
+    {#if proposed && onaccept}
+      <button class="act accept" title="Accept this point" onclick={() => onaccept(row)}>
+        <Icon name="check" size={13} />
+      </button>
+    {/if}
     {#if isProof}
       <!-- a proof is edited and deleted in the composer that owns it; here it
            is a point on the map, and the one thing to do with it is open it -->
@@ -310,6 +325,9 @@
   }
   .act.danger:hover {
     color: var(--danger);
+  }
+  .act.accept {
+    color: var(--accent);
   }
   .act.disabled,
   .act:disabled {

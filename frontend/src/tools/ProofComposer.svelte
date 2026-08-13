@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { fileUrl } from '../lib/fileUrl.js';
   import Konva from 'konva';
   import { api } from '../lib/api.js';
   import { lookupEntity, fetchAllEntities } from '../lib/catalog.js';
@@ -44,7 +45,9 @@
   import {
     assetName, base64Of, PASTE_TYPES, MAX_PASTES, MAX_PASTE_BYTES,
   } from '../lib/pasteAsset.js';
-  import { nextName, savedSlugs, savedTitles, savedTitle, slugify } from '../lib/naming.js';
+  import {
+    nextName, savedSlugs, savedTitles, savedTitle, slugify, specAttr, specPath,
+  } from '../lib/naming.js';
   import { createHistory } from '../lib/history.js';
   import { pollWhile } from '../lib/poll.js';
 
@@ -69,6 +72,7 @@
     title: '', panels: [], pastes: [], shapes: [], notes: {}, legendOrder: [],
     templateId: null, // selected saved house style; its values remain copied below
     coordsText: '', source: '', // '' → auto-derived from panels; non-empty → manual override
+    pov: false, // the point is where the camera stood, not what it filmed
     captionSize: CAPTION_SIZE, legendSize: LEGEND_SIZE, footerSize: FOOTER_SIZE, footer: '',
     footerEnabled: true, // false → no footer line at all
     footerColor: null, // null → auto from the background
@@ -110,7 +114,7 @@
     const name = savedName;
     if (!id || !name) return;
     let live = true;
-    lookupEntity(id, 'spec', `proofs/.meta/${name}.json`).then((bound) => {
+    lookupEntity(id, specAttr('proof'), specPath('proof', name)).then((bound) => {
       if (live && !bound && savedName === name) {
         savedName = null;
         dirty = true;
@@ -248,6 +252,7 @@
     if (pathDraft) finishPath(false);
     proof.title = spec.title ?? freshTitle();
     proof.coordsText = spec.coordsText ?? '';
+    proof.pov = spec.pov === true;
     proof.source = spec.source ?? '';
     proof.captionSize = style.captionSize;
     proof.legendSize = style.legendSize;
@@ -276,7 +281,7 @@
     proof.shapes = spec.shapes ?? [];
     // a panel image missing from the cache (shouldn't happen) reloads async
     for (const p of proof.panels.filter((x) => !x.img)) {
-      loadImage(`/files/${caseState.current?.id}/${p.src}`)
+      loadImage(fileUrl(caseState.current?.id, p.src))
         .then((img) => {
           imgCache.set(p.src, img);
           p.img = img;
@@ -751,7 +756,7 @@
   async function addPanel(item) {
     try {
       proofStarted = true;
-      const img = await loadImage(`/files/${caseState.current.id}/${item.src}`);
+      const img = await loadImage(fileUrl(caseState.current.id, item.src));
       imgCache.set(item.src, img);
       // A template can stack the first pair. Later panels keep joining the
       // current bottom row, preserving the composer's existing workflow.
@@ -1000,19 +1005,26 @@
     !!el && (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable);
 
   /**
-   * One place decides what Ctrl+V means: an image in the system clipboard is
-   * what the analyst just copied, so it wins; otherwise the copied annotation is
-   * pasted, which is what this shortcut did before images could be pasted.
+   * One place decides what Ctrl+V means, and the rule is which copy came last.
+   *
+   * Two clipboards answer one chord: the system's, which may hold a screenshot from
+   * an hour ago, and this composer's, which holds the annotation just copied. Only
+   * one of them is visible to this page, so freshness cannot be compared directly —
+   * what can be is whether the analyst left. A copy made here without leaving the
+   * window is necessarily the more recent of the two, so it wins; going somewhere
+   * else and coming back is the only way an outside copy could have happened, and
+   * that hands the chord back to the system clipboard. Without this, Ctrl+C on a
+   * rectangle followed by Ctrl+V pasted whatever image was in the clipboard.
    */
   function onPaste(e) {
     if (uiState.tool !== 'proof' || isTextTarget(e.target)) return;
     const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith('image/'));
-    if (item) {
-      e.preventDefault();
-      addPastedImage(item.getAsFile());
-    } else if (clipboard) {
+    if (clipboard && (shapeCopyFresh || !item)) {
       e.preventDefault();
       pasteShape();
+    } else if (item) {
+      e.preventDefault();
+      addPastedImage(item.getAsFile());
     }
   }
 
@@ -2007,12 +2019,25 @@
 
   // ---- clipboard (copy / paste / duplicate of a single element) ---------------
   let clipboard = null; // detached deep copy of a shape spec (no id)
+  /** Whether that copy is the last one the analyst made without leaving the window.
+   *  What lets Ctrl+V tell a shape just copied here from an older screenshot sitting
+   *  in the system clipboard (see `onPaste`). */
+  let shapeCopyFresh = false;
 
   function copyShape(id = selectedId) {
     const s = proof.shapes.find((x) => x.id === id);
     if (!s) return;
     clipboard = copyShapeSpec(s);
+    shapeCopyFresh = true;
   }
+
+  // The composer only ever hears about its own copies, so losing focus is the one
+  // signal that the system clipboard may have moved on since.
+  $effect(() => {
+    const release = () => (shapeCopyFresh = false);
+    window.addEventListener('blur', release);
+    return () => window.removeEventListener('blur', release);
+  });
 
   // Paste the clipboard as a fresh element, nudged down-right so it doesn't hide
   // the original. Points-based kinds shift every vertex.
@@ -2311,6 +2336,58 @@
   const freshTitle = () => nextName('proof', savedProofTitles());
 
   let overwritePrompt = $state(null); // { slug, andPost } when a save hits a named proof
+  // { name, lat, lon } — the point a save carried, where the setting says to ask
+  // first. Only ever set for a point the case does not already hold.
+  let placeOffer = $state(null);
+  let placeSaving = $state(false);
+  // [{ id, label }] — points this save moved the proof off that nothing else in
+  // the case holds. Asked about after the question above, never beside it.
+  let orphanOffer = $state(null);
+  let orphanDeleting = $state(false);
+
+  /** Say yes to the point: it is filed exactly as the automatic path files it. */
+  async function acceptPlaceOffer() {
+    if (!placeOffer || placeSaving) return;
+    placeSaving = true;
+    const offer = placeOffer;
+    try {
+      const place = await api.post(
+        `/api/cases/${caseState.current.id}/proofs/${encodeURIComponent(offer.name)}/place`,
+        { lat: offer.lat, lon: offer.lon }
+      );
+      placeOffer = null;
+      await reloadCase();
+      toast(`Saved the point as a place: ${place.label}`, 'ok', 2600);
+    } catch (e) {
+      toast(`Could not save the point: ${e.message}`, 'danger', 6000);
+    } finally {
+      placeSaving = false;
+    }
+  }
+
+  /** Say yes to dropping the point the proof moved off. Deleted like any entity,
+   *  so it lands in the trash and comes back from there. */
+  async function deleteOrphanPlaces() {
+    if (!orphanOffer || orphanDeleting) return;
+    orphanDeleting = true;
+    const going = orphanOffer;
+    try {
+      for (const place of going) {
+        await api.del(`/api/cases/${caseState.current.id}/entities/${place.id}`);
+      }
+      orphanOffer = null;
+      await reloadCase();
+      toast(
+        going.length === 1 ? `Deleted the old place: ${going[0].label}` : `Deleted ${going.length} old places`,
+        'ok',
+        2600
+      );
+    } catch (e) {
+      toast(`Could not delete the old place: ${e.message}`, 'danger', 6000);
+    } finally {
+      orphanDeleting = false;
+    }
+  }
 
   async function save({ andPost = false } = {}) {
     if (!proof.panels.length || saving) return;
@@ -2353,6 +2430,14 @@
       dirty = false;
       await reloadCase();
       toast(`Proof saved: ${result.png}`, 'ok');
+      // The point this proof carries. Filed already, or a question — the server
+      // answers with nothing at all when the case already holds that point, so
+      // re-saving never asks twice.
+      if (result.place?.filed) toast(`Saved the point as a place: ${result.place.label}`, 'ok', 2600);
+      else if (result.place) placeOffer = { name: result.name, ...result.place };
+      // Corrected coordinates take the old point back. The place stays on the map
+      // until the analyst says otherwise, so it is a question, not a cleanup.
+      orphanOffer = result.orphans?.length ? result.orphans : null;
       if (andPost) {
         uiState.postProof = {
           title: result.title,
@@ -2450,6 +2535,7 @@
     savedName = entry.name;
     proof.title = spec.title;
     proof.coordsText = spec.coordsText ?? '';
+    proof.pov = spec.pov === true;
     proof.source = spec.source ?? '';
     proof.captionSize = style.captionSize;
     proof.legendSize = style.legendSize;
@@ -2469,7 +2555,7 @@
     color = proof.palette[0];
     for (const p of spec.panels) {
       try {
-        const img = await loadImage(`/files/${caseState.current.id}/${p.src}`);
+        const img = await loadImage(fileUrl(caseState.current.id, p.src));
         imgCache.set(p.src, img);
         proof.panels.push({ ...p, id: p.id ?? newId('p'), row: p.row ?? 0, img });
       } catch {
@@ -2481,7 +2567,7 @@
     for (const p of spec.pastes ?? []) {
       try {
         const img = await loadImage(
-          `/files/${caseState.current.id}/proofs/${entry.name}.assets/${p.asset}`
+          fileUrl(caseState.current.id, `proofs/${entry.name}.assets/${p.asset}`)
         );
         pasteAssets.set(p.asset, { img, data: null, pending: false });
         proof.pastes.push({ ...p, id: p.id ?? newId('x'), img });
@@ -2723,6 +2809,17 @@
             value={displayedCoords}
             oninput={(e) => { proof.coordsText = e.target.value; dirty = true; }}
           />
+          <!-- What the point means. Nothing in the composition can answer it: a
+               rooftop shot is recorded somewhere it never shows, and a distant
+               skyline is shown from kilometres away. -->
+          <label class="meta-check" title="The point is where the camera stood, not what it filmed">
+            <input
+              type="checkbox"
+              checked={proof.pov}
+              onchange={(e) => { proof.pov = e.currentTarget.checked; dirty = true; }}
+            />
+            <span>POV</span>
+          </label>
         </div>
         <div class="meta-field">
           <div class="meta-head">
@@ -3013,6 +3110,41 @@
   />
 {/if}
 
+<!-- The point this proof concludes on, offered once. The map is where it will be
+     read, so the question names the coordinates rather than the file. -->
+{#if placeOffer}
+  <ConfirmDialog
+    title="Save this point as a place?"
+    message={`${formatCoords({ lat: placeOffer.lat, lon: placeOffer.lon }, prefs.coordFormat)} is not saved in this case yet.`}
+    detail={placeOffer.pov
+      ? 'It joins the map, and the footage this proof composes will say it was recorded there.'
+      : 'It joins the map, and this proof and the files it composes will say they show it.'}
+    confirmLabel="Save the point"
+    tone="default"
+    icon="pin"
+    busy={placeSaving}
+    onconfirm={acceptPlaceOffer}
+    oncancel={() => (placeOffer = null)}
+  />
+<!-- The point the proof moved off, once the question above is answered: one save
+     can raise both, and two dialogs at once is a save nobody can read. -->
+{:else if orphanOffer}
+  <ConfirmDialog
+    title={orphanOffer.length === 1 ? 'Delete the old place?' : 'Delete the old places?'}
+    message={orphanOffer.length === 1
+      ? `This proof no longer points at “${orphanOffer[0].label}”.`
+      : `This proof no longer points at ${orphanOffer.length} saved places.`}
+    detail="Nothing else in the case points there."
+    restorable={RESTORABLE}
+    confirmLabel="Delete"
+    tone="default"
+    icon="trash"
+    busy={orphanDeleting}
+    onconfirm={deleteOrphanPlaces}
+    oncancel={() => (orphanOffer = null)}
+  />
+{/if}
+
 {#if deleteEntry}
   <ConfirmDialog
     title="Delete this proof?"
@@ -3069,7 +3201,7 @@
             {#each visiblePanelItems as item (item.src)}
               <button class="pick card" onclick={() => addPanelFromPicker(item)}>
                 {#if item.thumb}
-                  <img src={`/files/${caseState.current.id}/${item.thumb}`} alt="" loading="lazy" decoding="async" />
+                  <img src={fileUrl(caseState.current.id, item.thumb)} alt="" loading="lazy" decoding="async" />
                 {:else if item.thumbPending}
                   <span class="pick-placeholder"><Icon name="clock" size={20} /></span>
                 {:else}
@@ -3133,7 +3265,7 @@
                   {#if entry.thumb || entry.png}
                     <!-- the thumbnail of the export, or the export itself when
                          it could not be rendered; decoded off the main thread -->
-                    <img src={`/files/${caseState.current.id}/${entry.thumb ?? entry.png}`} alt="" loading="lazy" decoding="async" />
+                    <img src={fileUrl(caseState.current.id, entry.thumb ?? entry.png)} alt="" loading="lazy" decoding="async" />
                   {/if}
                   <div class="open-meta">
                     <span class="open-title">{entry.title}</span>
@@ -3264,6 +3396,16 @@
     border-radius: var(--r-sm);
   }
   .meta-reset:hover { color: var(--text-1); background: var(--bg-2); }
+  .meta-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 5px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    cursor: pointer;
+  }
+  .meta-check:hover { color: var(--text-1); }
   .tpl-settings-link {
     margin-left: auto;
     display: inline-flex;

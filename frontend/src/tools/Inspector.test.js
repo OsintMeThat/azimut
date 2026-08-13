@@ -36,6 +36,14 @@ describe('Inspect sessions', () => {
     expect(source).toContain("const signature = () => JSON.stringify([sessionName.trim(), sessionSpec()]);");
   });
 
+  it('checks the current hidden spec path before claiming a saved session was deleted', () => {
+    // Sessions moved from `inspect/` to `.inspect/` when the case folder hid its
+    // machinery. The old literal matched no entity, so every save dropped the
+    // binding and warned the session had been deleted. Ask the helper instead.
+    expect(source).toContain("lookupEntity(id, specAttr('session'), specPath('session', sessionName))");
+    expect(source).not.toContain('`inspect/${sessionName}.json`');
+  });
+
   it('asks before an unbound workspace takes a name another session holds', () => {
     expect(source).toContain('if (!openedSession && takenSlugs().has(slug))');
     expect(source).toContain('title="Overwrite this session?"');

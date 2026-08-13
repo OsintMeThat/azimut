@@ -25,7 +25,7 @@ from azimut.workspace import Case, _slugify
 # entity/link types stay valid" rule the ontology promises.
 _SEMANTIC_TYPES = (
     "person", "organization", "account", "email", "phone", "domain", "place",
-    "event", "vehicle", "alias",
+    "ip", "vehicle", "vessel", "aircraft", "structure",
 )
 _UNKNOWN_TYPES = ("spacecraft", "widget", "signal")
 _LINK_TYPES = ("appears-in", "located-at", "owns", "mentions", "posted", "same-as")
@@ -200,7 +200,7 @@ def build_big_case(
         folder = pick_folder()
         if folder:
             attrs["folder"] = folder
-        if etype in ("place", "event") and rng.random() < 0.5:
+        if etype == "place" and rng.random() < 0.5:
             attrs["lat"] = round(rng.uniform(-60, 60), 6)
             attrs["lon"] = round(rng.uniform(-180, 180), 6)
         add({"id": eid, "type": etype, "label": f"{etype.title()} {i}", "attrs": attrs})
@@ -228,7 +228,7 @@ def build_big_case(
         if kind == "proof":
             attrs = {"spec": f"proofs/proof_{i:06d}.json"}
         elif kind == "post":
-            attrs = {"draft": f"exports/draft_{i:06d}.json"}
+            attrs = {"draft": f".drafts/draft_{i:06d}.json"}
         else:
             attrs = {"spec": f"inspect/session_{i:06d}.json"}
         folder = pick_folder()

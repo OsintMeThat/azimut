@@ -1,3 +1,9 @@
+/**
+ * @vitest-environment happy-dom
+ *
+ * The startup check reads the extension's marker off <html>, so this file needs
+ * a document like extBridge's own tests do.
+ */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { caseState, uiState, closeCase, setSidebarWidth } from './state.svelte.js';
 import { MIN_W, MAX_W } from './sidebar.js';
@@ -5,11 +11,23 @@ import { MIN_W, MAX_W } from './sidebar.js';
 // The prefs tests below exercise import-time module state, so the transport is
 // stubbed and the module re-imported fresh per test. The static import above
 // still works: these tests never call the API.
-vi.mock('./api.js', () => ({ api: { get: vi.fn(), post: vi.fn(), del: vi.fn() } }));
+vi.mock('./api.js', () => ({
+  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
+}));
 
 async function freshState() {
   vi.resetModules();
   return import('./state.svelte.js');
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
 }
 
 describe('closeCase', () => {
@@ -22,6 +40,12 @@ describe('closeCase', () => {
     uiState.inspectPath = 'media/a.jpg';
     uiState.focusMedia = 'media/a.jpg';
     uiState.openInspect = 'session-a';
+    uiState.drawInGraph = { label: 'A question' };
+    uiState.openBoardEntity = 'entity-a';
+    uiState.openGraphEntity = 'entity-a';
+    uiState.timelineFocus = { itemId: 'event-a' };
+    uiState.timelineRange = { from: '2026-01-01', to: '2026-02-01' };
+    uiState.mapTimelineRange = { from: '2026-01-01', to: '2026-02-01' };
     uiState.gotoCoords = { lat: 1, lon: 2 };
   });
 
@@ -39,6 +63,12 @@ describe('closeCase', () => {
     expect(uiState.inspectPath).toBeNull();
     expect(uiState.focusMedia).toBeNull();
     expect(uiState.openInspect).toBeNull();
+    expect(uiState.drawInGraph).toBeNull();
+    expect(uiState.openBoardEntity).toBeNull();
+    expect(uiState.openGraphEntity).toBeNull();
+    expect(uiState.timelineFocus).toBeNull();
+    expect(uiState.timelineRange).toBeNull();
+    expect(uiState.mapTimelineRange).toBeNull();
     expect(uiState.gotoCoords).toBeNull();
   });
 });
@@ -119,27 +149,58 @@ describe('applyPrefs', () => {
 });
 
 describe('startup update check', () => {
-  it('checks by default and stays silent when the Settings switch is off', async () => {
+  it('checks the app and the downloaders by default, and neither when the Settings switch is off', async () => {
     const { api } = await import('./api.js');
     api.get.mockReset().mockResolvedValue({
-      current: 'v0.1.0', latest: null, update_available: false,
+      current: 'v0.1.0', latest: null, update_available: false, scrapers: [],
     });
-    const { applyPrefs, checkForUpdateOnStart } = await freshState();
+    const { applyPrefs, checkForUpdatesOnStart } = await freshState();
 
-    await checkForUpdateOnStart();
+    await checkForUpdatesOnStart();
     expect(api.get).toHaveBeenCalledWith('/api/settings/update?check=true');
+    expect(api.get).toHaveBeenCalledWith('/api/settings/scrapers?check=true');
 
     api.get.mockClear();
     applyPrefs({ update_check_on_start: false });
-    await checkForUpdateOnStart();
+    await checkForUpdatesOnStart();
     expect(api.get).not.toHaveBeenCalled();
+  });
+
+  it('records what the downloaders check found', async () => {
+    const { api } = await import('./api.js');
+    const entries = [{ dist: 'yt-dlp', version: '2026.1.1', latest: '2026.7.1', outdated: true }];
+    api.get.mockReset().mockImplementation((path) =>
+      path.startsWith('/api/settings/scrapers')
+        ? Promise.resolve({ scrapers: entries })
+        : Promise.resolve({ update_available: false }),
+    );
+    const { checkForUpdatesOnStart, updatesState } = await freshState();
+
+    await checkForUpdatesOnStart();
+    expect(updatesState.scrapers).toEqual(entries);
+  });
+
+  it('compares the installed extension without asking the network', async () => {
+    const { api } = await import('./api.js');
+    api.get.mockReset().mockRejectedValue(new Error('must not be called'));
+    document.documentElement.dataset.azimutCaptureExtension = '0.2.1';
+    const { applyPrefs, checkForUpdatesOnStart, updatesState } = await freshState();
+    applyPrefs({ update_check_on_start: false, extension_version: '0.2.5' });
+
+    await checkForUpdatesOnStart();
+    expect(api.get).not.toHaveBeenCalled();
+    expect(updatesState.extensionInstalled).toBe('0.2.1');
+    expect(updatesState.extensionBundled).toBe('0.2.5');
+    delete document.documentElement.dataset.azimutCaptureExtension;
   });
 
   it('does not surface an offline failure', async () => {
     const { api } = await import('./api.js');
     api.get.mockReset().mockRejectedValue(new Error('offline'));
-    const { checkForUpdateOnStart } = await freshState();
-    await expect(checkForUpdateOnStart()).resolves.toBeUndefined();
+    const { checkForUpdatesOnStart, updatesState } = await freshState();
+    await expect(checkForUpdatesOnStart()).resolves.toBeUndefined();
+    expect(updatesState.app).toBeNull();
+    expect(updatesState.scrapers).toBeNull();
   });
 });
 
@@ -184,5 +245,84 @@ describe('templates store', () => {
     await deleteTemplate('post', 'b');
     expect(api.del).toHaveBeenCalledWith('/api/templates/post/b');
     expect(templatesState.post).toEqual([]);
+  });
+});
+
+describe('case request ownership', () => {
+  let api;
+  let state;
+
+  beforeEach(async () => {
+    state = await freshState();
+    ({ api } = await import('./api.js'));
+    api.get.mockReset();
+    state.caseState.current = null;
+    state.caseState.loading = false;
+    state.caseState.rev = 0;
+  });
+
+  it('keeps the latest case when an older open finishes last', async () => {
+    const first = deferred();
+    const second = deferred();
+    api.get.mockImplementation((path) =>
+      path.endsWith('/case-a') ? first.promise : second.promise
+    );
+
+    const openingA = state.openCase('case-a');
+    const openingB = state.openCase('case-b');
+    second.resolve({ id: 'case-b', name: 'Case B' });
+    await openingB;
+    first.resolve({ id: 'case-a', name: 'Case A' });
+    await openingA;
+
+    expect(state.caseState.current).toEqual({ id: 'case-b', name: 'Case B' });
+    expect(state.caseState.loading).toBe(false);
+  });
+
+  it('waits for case-owned work and cancels the switch when it cannot be saved', async () => {
+    const guard = vi.fn().mockResolvedValue(false);
+    const unregister = state.registerCaseChangeGuard(guard);
+    state.caseState.current = { id: 'case-a', name: 'Case A' };
+
+    await state.openCase('case-b');
+
+    expect(guard).toHaveBeenCalledWith({ fromId: 'case-a', toId: 'case-b' });
+    expect(api.get).not.toHaveBeenCalled();
+    expect(state.caseState.current.id).toBe('case-a');
+    expect(state.caseState.loading).toBe(false);
+    unregister();
+  });
+
+  it('does not let a late refresh reopen the case it started in', async () => {
+    const refresh = deferred();
+    api.get.mockReturnValue(refresh.promise);
+    state.caseState.current = { id: 'case-a', name: 'Case A' };
+
+    const reloading = state.reloadCase();
+    state.caseState.current = { id: 'case-b', name: 'Case B' };
+    refresh.resolve({ id: 'case-a', name: 'Case A refreshed' });
+    await reloading;
+
+    expect(state.caseState.current).toEqual({ id: 'case-b', name: 'Case B' });
+    expect(state.caseState.rev).toBe(0);
+  });
+
+  it('keeps the latest refresh when two writes finish out of order', async () => {
+    const first = deferred();
+    const second = deferred();
+    api.get
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    state.caseState.current = { id: 'case-a', name: 'Before' };
+
+    const older = state.reloadCase();
+    const newer = state.reloadCase();
+    second.resolve({ id: 'case-a', name: 'Newest' });
+    await newer;
+    first.resolve({ id: 'case-a', name: 'Older' });
+    await older;
+
+    expect(state.caseState.current).toEqual({ id: 'case-a', name: 'Newest' });
+    expect(state.caseState.rev).toBe(1);
   });
 });

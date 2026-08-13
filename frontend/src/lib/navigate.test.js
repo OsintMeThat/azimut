@@ -1,11 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { uiState } from './state.svelte.js';
-import { gotoCapture, gotoPoint, openEntity } from './navigate.js';
+
+const post = vi.fn().mockResolvedValue({ path: '/cases/c1/azimut/media' });
+vi.mock('./api.js', () => ({ api: { post: (...a) => post(...a), get: vi.fn() } }));
+
+const { caseState, uiState } = await import('./state.svelte.js');
+const { gotoCapture, gotoPoint, openEntity, opensInFileManager } = await import('./navigate.js');
 
 beforeEach(() => {
   uiState.tool = 'media';
   uiState.gotoCoords = null;
   uiState.focusCapture = null;
+  uiState.openBoardEntity = null;
+  post.mockClear();
+  caseState.current = { id: 'c1', name: 'Case', entities: [], links: [], folders: [] };
   vi.stubGlobal('window', { open: vi.fn() });
 });
 
@@ -50,6 +57,24 @@ describe('openEntity', () => {
   });
 });
 
+describe('a type with no tool of its own', () => {
+  it('opens on the board, which is where the graph types are read', () => {
+    // before this the call fell through doing nothing: a relation row on the map
+    // said "Open …" and swallowed the click
+    openEntity({ id: 'e-person', type: 'person', label: 'A. Analyst', attrs: {} });
+
+    expect(uiState.tool).toBe('board');
+    expect(uiState.openBoardEntity).toBe('e-person');
+  });
+
+  it('leaves the workspace alone for a row it cannot identify', () => {
+    openEntity({ type: 'person', attrs: {} });
+
+    expect(uiState.tool).toBe('media');
+    expect(uiState.openBoardEntity).toBeNull();
+  });
+});
+
 describe('gotoCapture', () => {
   it('leaves the zoom to the map when the capture records none', () => {
     gotoCapture({ type: 'capture', attrs: { lat: 48.8584, lon: 2.2945, zoom: null } });
@@ -72,5 +97,34 @@ describe('gotoPoint', () => {
     uiState.gotoCoords = null;
     gotoPoint(Number('north'), 2.2945);
     expect(uiState.gotoCoords).toBeNull();
+  });
+});
+
+describe('a file the app cannot display', () => {
+  const plan = { id: 'm1', type: 'media', attrs: { path: 'media/site plan.pdf', kind: 'file' } };
+
+  it('is handed back to the desktop, in the folder it lives in', () => {
+    openEntity(plan);
+
+    expect(post).toHaveBeenCalledWith('/api/cases/c1/media/reveal', {
+      path: 'media/site plan.pdf',
+    });
+    // and the workspace does not move: nothing here could show it anyway
+    expect(uiState.tool).toBe('media');
+    expect(uiState.focusMedia).not.toBe('media/site plan.pdf');
+  });
+
+  it('leaves the images, video and audio the app does display alone', () => {
+    openEntity({ id: 'm2', type: 'media', attrs: { path: 'media/quay.jpg', kind: 'image' } });
+
+    expect(post).not.toHaveBeenCalled();
+    expect(uiState.focusMedia).toBe('media/quay.jpg');
+  });
+
+  it('says which entities need the file manager', () => {
+    expect(opensInFileManager(plan)).toBe(true);
+    expect(opensInFileManager({ type: 'media', attrs: { path: 'a.mp4' } })).toBe(false);
+    expect(opensInFileManager({ type: 'capture', attrs: { path: 'media/crop.png' } })).toBe(false);
+    expect(opensInFileManager(null)).toBe(false);
   });
 });

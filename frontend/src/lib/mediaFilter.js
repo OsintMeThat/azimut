@@ -36,6 +36,33 @@ export function isGenericImage(item) {
   return item?.kind === 'image' && !isSatelliteMedia(item);
 }
 
+/** How material the analyst brought in by hand arrives: dropped or picked off a
+ *  disk, or pasted out of the clipboard. Two source types and one facet — the
+ *  filter asks who brought the file in, not which gesture did it. Mirrors
+ *  `_MEDIA_CATEGORY_SQL['upload']`, which the server answers the same question with. */
+const BROUGHT_IN = new Set(['upload', 'clipboard']);
+
+/** Whether the analyst put this file into the case themselves. */
+export function isBroughtIn(item) {
+  return BROUGHT_IN.has(item?.source?.type);
+}
+
+/** The tools that make a file out of material the case already holds. Mirrors
+ *  `links.MADE_HERE`; the server filters on the same set, and this is the
+ *  in-memory pass a case small enough for one page takes instead. */
+const MADE_HERE = new Set(['inspect']);
+
+/** Whether the case made this file rather than collected it: an extracted frame,
+ *  an adjustment, a collage.
+ *
+ *  Reads **how the file entered the case**, not everything true about it. Bytes
+ *  imported first and later found identical to a frame keep `upload`, because that
+ *  is how they arrived — which is the same reason the graph reads the origin off
+ *  the index rather than off the derivation links, where both are true at once. */
+export function isMadeHere(item) {
+  return MADE_HERE.has(item?.source?.type);
+}
+
 /** User-facing kind label for the Media Library card. */
 export function mediaDisplayKind(item) {
   return isSatelliteMedia(item) ? 'satellite' : item?.kind;
@@ -64,6 +91,7 @@ export function visibleMedia(
     catMatch = null,
     folderFilter = null,
     gpsOnly = false,
+    collectedOnly = false,
     query = '',
     sort = 'newest',
     direction,
@@ -76,6 +104,7 @@ export function visibleMedia(
         (!catMatch || catMatch(i)) &&
         (!folderFilter || i.folder === folderFilter) &&
         (!gpsOnly || hasPosition(i)) &&
+        (!collectedOnly || !isMadeHere(i)) &&
         matchesQuery(i, query)
     ),
     sort,

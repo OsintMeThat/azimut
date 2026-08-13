@@ -9,6 +9,8 @@ open; see tests/test_migrations.py).
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import pytest
 
 from azimut.workspace import Case, CaseError
@@ -306,6 +308,164 @@ def test_catalog_summary_counts_by_folder(repo):
     assert repo.catalog_summary()["by_folder"] == {"X": 2}
 
 
+# -- filtering on a field, and on having a neighbour ---------------------------
+#
+# Until these, a case could show every video and every place and never the set that
+# is both: `kind=video` was not expressible anywhere in the app.
+
+
+def test_the_store_that_ships_can_read_inside_a_stored_field():
+    """The exact path is the one that ships, proved per platform rather than assumed.
+
+    The extension set is per-binary (docs/STORAGE_AND_PERFORMANCE.md), so this runs in
+    CI on Windows, macOS, Linux and the 3.11 floor. The `LIKE` fallback beside it is
+    belt and braces, and it matches at any depth where this is top-level exact — so if
+    this ever fails on a platform, that difference is what ships there.
+    """
+    from azimut import sqlite_backend
+
+    assert sqlite_backend._has_json1() is True
+
+
+def test_page_entities_filters_on_one_stored_field(repo):
+    video = repo.add_entity("media", "clip", {"kind": "video"}, by="user")
+    repo.add_entity("media", "still", {"kind": "image"}, by="user")
+
+    page = repo.page_entities(limit=50, attr="kind", attr_value="video")
+    assert [e["id"] for e in page["items"]] == [video["id"]]
+    assert page["total"] == 1
+
+
+def test_a_field_filter_reaches_what_the_vocabulary_does_not_declare(repo):
+    """`kind` is written by the importer and declared nowhere, and it is the field an
+    analyst most wants to filter on. A registry-driven menu would never offer it."""
+    from azimut.engine import entities as entity_engine
+
+    assert entity_engine.entity_type("media").attrs == ()
+    repo.add_entity("media", "clip", {"kind": "video"}, by="user")
+
+    assert repo.page_entities(attr="kind", attr_value="video")["total"] == 1
+
+
+def test_a_number_in_a_field_is_matched_as_the_menu_spells_it(repo):
+    """The value select offers text, so both sides of the control have to agree on the
+    spelling. `100` also matching `1000` is the classic form of getting this wrong."""
+    hundred = repo.add_entity("place", "block", {"radius_m": 100}, by="user")
+    repo.add_entity("place", "town", {"radius_m": 1000}, by="user")
+
+    page = repo.page_entities(attr="radius_m", attr_value="100")
+    assert [e["id"] for e in page["items"]] == [hundred["id"]]
+
+
+def test_a_field_name_the_store_cannot_ask_for_is_refused(repo):
+    """The key reaches SQL inside a JSON path, which the database parses rather than
+    binds, so the character set is closed instead of escaped."""
+    with pytest.raises(CaseError):
+        repo.page_entities(attr='kind"] or 1=1 --', attr_value="video")
+
+
+def test_choosing_a_field_without_a_value_is_not_a_term(repo):
+    """Half of one act: the field is picked, the value select has just been populated.
+    Read as a term, the table would empty itself between two clicks."""
+    repo.add_entity("media", "clip", {"kind": "video"}, by="user")
+
+    assert repo.page_entities(attr="kind")["total"] == 1
+
+
+def test_page_entities_filters_on_having_a_neighbour(repo):
+    """*Which videos have coordinates* is this test and the field filter together, and
+    the count is the answer: the page is which ones."""
+    placed = repo.add_entity("media", "clip", {"kind": "video"}, by="user")
+    loose = repo.add_entity("media", "orphan", {"kind": "video"}, by="user")
+    place = repo.add_entity("place", "quay", {"lat": 1.0, "lon": 2.0}, by="user")
+    repo.add_link(placed["id"], place["id"], "located-at", by="user")
+
+    page = repo.page_entities(types=["media"], attr="kind", attr_value="video", linked="place")
+    assert [e["id"] for e in page["items"]] == [placed["id"]]
+    assert page["total"] == 1
+    assert loose["id"] not in {e["id"] for e in page["items"]}
+
+
+def test_having_a_neighbour_reads_the_pair_not_the_direction(repo):
+    """"Linked to a place" is a question about the pair. Which end states the verb is a
+    property of the vocabulary, and the analyst is not asking about the vocabulary."""
+    place = repo.add_entity("place", "quay", {"lat": 1.0, "lon": 2.0}, by="user")
+    media = repo.add_entity("media", "clip", {"path": "media/clip.mp4"}, by="user")
+    repo.add_link(media["id"], place["id"], "located-at", by="user")
+
+    assert repo.page_entities(types=["place"], linked="media")["total"] == 1
+    assert repo.page_entities(types=["media"], linked="place")["total"] == 1
+
+
+def test_attr_facets_offer_the_fields_and_values_the_case_holds(repo):
+    repo.add_entity("media", "a", {"kind": "video", "path": "media/a.mp4"}, by="user")
+    repo.add_entity("media", "b", {"kind": "video", "path": "media/b.mp4"}, by="user")
+    repo.add_entity("media", "c", {"kind": "image", "path": "media/c.jpg"}, by="user")
+    repo.add_entity("person", "d", {"nationality": "FR"}, by="user")
+
+    facets = {row["key"]: row for row in repo.attr_facets(types=["media"])}
+    assert "nationality" not in facets  # narrowed to the type the menu is filtering
+    assert facets["kind"]["entities"] == 3
+    # Commonest value first, so the menu opens on the answer rather than on the
+    # alphabet.
+    assert facets["kind"]["values"] == [
+        {"value": "video", "count": 2},
+        {"value": "image", "count": 1},
+    ]
+
+
+def test_a_field_with_too_many_values_is_not_offered_as_a_menu(repo):
+    """A select over five thousand file paths is not a way to choose, and offering it
+    would be the typed query this app refuses. It says it was cut."""
+    for n in range(6):
+        repo.add_entity("media", f"m{n}", {"path": f"media/{n}.mp4"}, by="user")
+
+    facets = {row["key"]: row for row in repo.attr_facets(types=["media"], limit=3)}
+    assert facets["path"]["truncated"] is True
+    assert facets["path"]["values"] == []
+    assert facets["path"]["entities"] == 6
+
+
+def test_a_value_a_menu_cannot_show_is_not_offered(repo):
+    """A footprint is a shape and a quoted paragraph is a stored value; neither is a
+    choice. A boolean is left out because the two sides of the control would not agree
+    on how to spell it."""
+    ring = [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0]]
+    repo.add_entity(
+        "place", "shape",
+        {
+            "footprint": {"type": "Polygon", "coordinates": [ring]},
+            "verbatim": "x" * 500,
+            "flagged": True,
+            "radius_m": 25,
+        },
+        by="user",
+    )
+
+    facets = {row["key"]: row for row in repo.attr_facets()}
+    assert set(facets) == {"radius_m"}
+    assert facets["radius_m"]["values"] == [{"value": "25", "count": 1}]
+
+
+def test_the_field_filter_answers_the_same_without_json1(repo, monkeypatch):
+    """The fallback is what a binary whose SQLite lacks JSON1 would run, so it is
+    exercised on every platform rather than only where it might one day be needed."""
+    from azimut import sqlite_backend
+
+    monkeypatch.setattr(sqlite_backend, "_has_json1", lambda: False)
+    video = repo.add_entity("media", "clip", {"kind": "video"}, by="user")
+    repo.add_entity("media", "still", {"kind": "image"}, by="user")
+    hundred = repo.add_entity("place", "block", {"radius_m": 100}, by="user")
+    repo.add_entity("place", "town", {"radius_m": 1000}, by="user")
+
+    assert [e["id"] for e in repo.page_entities(attr="kind", attr_value="video")["items"]] == [
+        video["id"]
+    ]
+    assert [
+        e["id"] for e in repo.page_entities(attr="radius_m", attr_value="100")["items"]
+    ] == [hundred["id"]]
+
+
 def test_snapshot_carries_manifest_and_graph(repo):
     repo.add_entity("person", "Ada", by="user")
     snap = repo.snapshot()
@@ -451,3 +611,182 @@ def test_count_incident_links_groups_relations_in_either_direction(repo):
 
     # excluding nothing counts every edge, chain included
     assert repo.count_incident_links(exclude_types=[])[proof["id"]] == 1
+
+
+def test_links_among_holds_an_edge_whose_ends_bind_in_two_statements(repo):
+    """The closed set must not thin out as the set it closes over grows.
+
+    An id set larger than one SQL statement can bind cannot go into an ``IN (…)``,
+    and an edge with **both** ends in the set has ends that can fall in two different
+    chunks of it. Asked chunk by chunk, no chunk held such an edge and neither did the
+    answer: a drawn view past the chunk size lost most of its edges, its nodes drew as
+    unconnected dots, and each one went on reporting the lost edges as connections
+    still to open under a control that could never bring one in.
+    """
+    from azimut.sqlite_backend import _ID_CHUNK
+
+    hub = repo.add_entity("person", "hub", by="user")["id"]
+    # One chunk over the boundary, so the star's arms are bound in three statements
+    # while the hub is bound in one.
+    spokes = [
+        repo.add_entity("person", f"spoke {i:04d}", by="user")["id"]
+        for i in range(_ID_CHUNK * 2 + 1)
+    ]
+    for spoke in spokes:
+        repo.add_link(hub, spoke, "owns", by="user")
+
+    among = repo.links_among([hub, *spokes])
+
+    assert len(among) == len(spokes)
+    # Recorded order survives being read in several statements: parallel edges are
+    # bowed to their own side of the line in payload order, so a set of edges that
+    # came back shuffled would redraw the picture differently on every read.
+    assert among == repo.links_among([hub, *spokes])
+    assert [link["id"] for link in among] == [
+        link["id"] for link in repo.list_links() if link["from"] == hub
+    ]
+    # Still closed: an id nobody passed in cannot arrive at the far end of an edge.
+    assert repo.links_among([hub, *spokes[:3]]) == among[:3]
+
+
+@contextmanager
+def _statements(case):
+    """Every SQL statement one case runs, in order. What proves a read is bounded."""
+    seen: list[str] = []
+    plain = case._sqlite._connect
+
+    @contextmanager
+    def traced():
+        with plain() as conn:
+            conn.set_trace_callback(seen.append)
+            yield conn
+
+    case._sqlite._connect = traced
+    try:
+        yield seen
+    finally:
+        del case._sqlite._connect
+
+
+def test_the_closed_set_costs_one_statement_whatever_the_drawing_holds(repo):
+    """The cost the node ceiling was hiding rather than removing.
+
+    Closing over an id set by asking every **pair** of chunks is the square of the
+    set: nine statements at 650 nodes, four hundred at 5 000. Lifting the ceiling on
+    top of that would have moved the freeze from the canvas to the database, which is
+    why this lands with the limit and not after it.
+    """
+    from azimut.sqlite_backend import _ID_CHUNK
+
+    hub = repo.add_entity("person", "hub", by="user")["id"]
+    spokes = [
+        repo.add_entity("person", f"spoke {i:04d}", by="user")["id"]
+        for i in range(_ID_CHUNK * 3)
+    ]
+    for spoke in spokes:
+        repo.add_link(hub, spoke, "owns", by="user")
+
+    with _statements(repo) as ran:
+        among = repo.links_among([hub, *spokes])
+
+    assert len(among) == len(spokes)
+    # Four chunks would have been sixteen statements. The scope table is filled with
+    # one `executemany`, and the question itself is asked once.
+    reads = [sql for sql in ran if sql.lstrip().upper().startswith("SELECT")]
+    assert len(reads) == 1
+    assert "JOIN scope" in reads[0]
+
+
+def test_one_hop_costs_one_statement_too(repo):
+    """The open set could always be chunked, and is asked through the same table."""
+    from azimut.sqlite_backend import _ID_CHUNK
+
+    hub = repo.add_entity("person", "hub", by="user")["id"]
+    spokes = [
+        repo.add_entity("person", f"spoke {i:04d}", by="user")["id"]
+        for i in range(_ID_CHUNK * 2)
+    ]
+    for spoke in spokes:
+        repo.add_link(hub, spoke, "owns", by="user")
+
+    with _statements(repo) as ran:
+        touching = repo.links_touching(spokes)
+
+    assert len(touching) == len(spokes)
+    assert len([sql for sql in ran if sql.lstrip().upper().startswith("SELECT")]) == 1
+
+
+def test_the_scope_table_does_not_survive_the_read_that_filled_it(repo):
+    """A temp table left standing would answer the next question with the last one's
+    ids. It belongs to the connection, and each read opens its own."""
+    from azimut.sqlite_backend import _SCOPE
+
+    hub = repo.add_entity("person", "hub", by="user")["id"]
+    other = repo.add_entity("person", "other", by="user")["id"]
+    repo.add_link(hub, other, "owns", by="user")
+    assert len(repo.links_among([hub, other])) == 1
+
+    with repo._sqlite._connect() as conn:
+        left = conn.execute(
+            "SELECT name FROM temp.sqlite_master WHERE name = ?", (_SCOPE,)
+        ).fetchall()
+    assert left == []
+
+    # And two reads in a row see their own set, not the one before it.
+    assert repo.links_among([hub]) == []
+    assert len(repo.links_among([hub, other])) == 1
+
+
+def test_every_case_wide_ordering_is_served_by_an_index(repo):
+    """The catalog orders the *whole case* by identity and by when a row was filed,
+    so those two pages have to cost what a page costs and not what the case costs.
+
+    Without an index behind the ordering the keyset cursor bounds what comes back
+    and not what it takes to find it: SQLite reads the filtered set and sorts it in
+    a temp B-tree for every page. This holds the plan to the index, in both
+    directions and with a cursor in hand, which is the shape a second page runs.
+    """
+    from azimut.sqlite_backend import _PAGE_ORDERS
+
+    repo.add_entity("person", "Ada", by="user")
+    plans: dict[str, list[str]] = {}
+    with repo._sqlite._connect() as conn:
+        for order, (expression, _key, descending) in _PAGE_ORDERS.items():
+            way = "<" if descending else ">"
+            direction = "DESC" if descending else "ASC"
+            sql = (
+                "SELECT rowid AS _rowid, * FROM entities"
+                f" WHERE ({expression} {way} ? OR ({expression} = ? AND rowid {way} ?))"
+                f" ORDER BY {expression} {direction}, rowid {direction} LIMIT ?"
+            )
+            plans[order] = [
+                row[-1] for row in conn.execute(
+                    "EXPLAIN QUERY PLAN " + sql, ("a", "a", 1, 101)
+                )
+            ]
+
+    assert set(plans) == set(_PAGE_ORDERS)
+    for order, plan in plans.items():
+        detail = " | ".join(plan)
+        assert "TEMP B-TREE" not in detail.upper(), f"{order} sorts in memory: {detail}"
+        assert "USING INDEX" in detail.upper(), f"{order} has no index to walk: {detail}"
+
+
+def test_an_ordered_page_reads_the_case_in_order_and_pages_without_repeating(repo):
+    """The ordering covers the whole case rather than the page, and the cursor keys
+    on the sort plus the row's own seat, so the second page starts where the first
+    stopped even when two rows share a label."""
+    for label in ("delta", "Alpha", "charlie", "Alpha", "bravo"):
+        repo.add_entity("person", label, by="user")
+
+    first = repo.page_entities(limit=2, order="label")
+    second = repo.page_entities(limit=2, cursor=first["next_cursor"], order="label")
+    third = repo.page_entities(limit=2, cursor=second["next_cursor"], order="label")
+
+    seen = [e["label"] for e in (*first["items"], *second["items"], *third["items"])]
+    assert seen == ["Alpha", "Alpha", "bravo", "charlie", "delta"]
+    assert first["total"] == 5
+    assert third["next_cursor"] is None
+    assert [e["label"] for e in repo.page_entities(order="-label")["items"]] == [
+        "delta", "charlie", "bravo", "Alpha", "Alpha",
+    ]

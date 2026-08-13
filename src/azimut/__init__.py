@@ -4,11 +4,15 @@ import warnings
 
 from PIL import Image as _Image
 
-# The single source of truth for the app version. pyproject.toml reads it back
-# through hatchling's dynamic version (``[tool.hatch.version]``) and the
-# extension manifest is kept in lock-step by a test, so a release is bumped in
-# exactly one place. Getting this wrong nags every user with a false update
-# (the binary's self-check compares this against the latest GitHub tag).
+# The single source of truth for the app version: pyproject.toml reads it back
+# through hatchling's dynamic version (``[tool.hatch.version]``), so a release
+# is bumped in exactly one place. Getting this wrong nags every user with a
+# false update (the binary's self-check compares this against the latest GitHub
+# tag).
+#
+# The capture extension is versioned separately, on purpose — it carries the
+# release that last changed it (tests/test_updates.py). Don't move the two
+# together.
 __version__ = "0.2.7"
 
 # Cap the pixels Pillow will decode from a file, process-wide. A tiny,

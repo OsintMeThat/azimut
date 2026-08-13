@@ -588,6 +588,59 @@ def day_events(
     return {"sun": sun, "twilight": twilight, "moon": moon}
 
 
+def daylight_spans(
+    lat: float,
+    lon: float,
+    start: datetime,
+    end: datetime,
+    threshold: float = SUN_HORIZON_DEG,
+    step_minutes: int = 1,
+) -> list[dict[str, datetime]]:
+    """The stretches of a window during which the sun stands above ``threshold``.
+
+    ``day_events`` above answers *when did the sun rise on this date*, which is an
+    almanac's question and is paired around one culmination. This answers a different
+    one: *over these days, when was it light* — a run of spans clipped to the window,
+    for a chronology that needs to place a timestamp against the daylight at the spot
+    it claims.
+
+    A span open at either edge is clipped to the window rather than reaching outside
+    it, and a window with no crossing at all is one span or none: polar day and polar
+    night are answers here too, and the caller cannot tell them apart from a missing
+    computation unless the whole window comes back covered or empty.
+    """
+    if end <= start:
+        return []
+    jd = _grid(start, end, max(1, step_minutes) * 60)
+    altitude = _positions(lat, lon, jd)["sun_altitude"]
+
+    def offset(point: float) -> float:
+        return float(_positions(lat, lon, np.array([point]))["sun_altitude"][0] - threshold)
+
+    rising, falling = _crossings(
+        jd, altitude - threshold, lambda low, high: _secant(offset, low, high)
+    )
+    first = _julian_day([start])[0]
+    last = _julian_day([end])[0]
+    edges = sorted(
+        [(point, True) for point in rising] + [(point, False) for point in falling]
+    )
+    spans: list[dict[str, datetime]] = []
+    # Where the window opens decides whether the first edge closes a span or opens
+    # one: a window starting at noon is inside daylight before anything crosses.
+    open_at: float | None = first if bool(altitude[0] > threshold) else None
+    for point, is_rise in edges:
+        if is_rise:
+            if open_at is None:
+                open_at = point
+        elif open_at is not None:
+            spans.append({"from": _to_datetime(open_at), "to": _to_datetime(point)})
+            open_at = None
+    if open_at is not None:
+        spans.append({"from": _to_datetime(open_at), "to": _to_datetime(last)})
+    return spans
+
+
 def day_curve(
     lat: float, lon: float, start: datetime, end: datetime, step_minutes: int = 10
 ) -> dict[str, Any]:

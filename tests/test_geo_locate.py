@@ -2,6 +2,8 @@
 (offline tables) and ``geo.locate_point`` (Nominatim behind a stub, never the
 network)."""
 
+import httpx
+
 from azimut.engine import continents, countries, geo
 
 
@@ -231,3 +233,107 @@ def test_locate_point_never_raises(monkeypatch):
 
     monkeypatch.setattr(geo, "reverse_geocode", boom)
     assert geo.locate_point(48.8, 2.3) == {"state": "failed"}
+
+
+# -- Nominatim's pace ---------------------------------------------------------
+# The usage policy is one request a second, and the penalty for exceeding it is a
+# 429 on the whole address. These hold the floor in front of *every* request
+# rather than in whichever caller loops: `locate_point` makes a second lookup for
+# the English region that no caller can see, and the two together were the pace
+# that got a 103-place backfill throttled.
+
+
+#: The real reverse geocoder, captured at import: conftest's autouse fixture
+#: replaces it with an offline stub before every test, and these are the tests
+#: that need the request path itself.
+_REAL_REVERSE = geo.reverse_geocode
+_REAL_PACE = geo._pace
+
+
+def _recording_httpx(monkeypatch, status=200, payload=None):
+    """Stub httpx.get, recording the delay each call was made to wait."""
+    waited: list[float] = []
+
+    class Response:
+        status_code = status
+
+        def raise_for_status(self):
+            if status >= 400:
+                raise httpx.HTTPStatusError("boom", request=None, response=None)
+
+        @staticmethod
+        def json():
+            return payload if payload is not None else {"address": {}}
+
+    monkeypatch.setattr(geo.httpx, "get", lambda *a, **k: Response())
+    monkeypatch.setattr(geo.time, "sleep", waited.append)
+    monkeypatch.setattr(geo, "reverse_geocode", _REAL_REVERSE)
+    monkeypatch.setattr(geo, "_pace", _REAL_PACE)
+    geo._reset_pace()
+    return waited
+
+
+def test_two_lookups_in_a_row_wait_for_the_interval(monkeypatch):
+    waited = _recording_httpx(monkeypatch)
+
+    geo.reverse_geocode(48.8, 2.3)
+    geo.reverse_geocode(48.9, 2.4)
+
+    assert len(waited) == 1  # the first call has nothing to wait for
+    assert 0 < waited[0] <= geo.NOMINATIM_INTERVAL
+
+
+def test_the_pace_is_held_per_request_not_per_caller(monkeypatch):
+    # the floor is in front of the request, so it holds however many callers,
+    # loops or hidden second lookups there are
+    _recording_httpx(monkeypatch)
+    slept: list[float] = []
+    monkeypatch.setattr(geo.time, "sleep", slept.append)
+
+    for _ in range(4):
+        _REAL_PACE()
+
+    assert len(slept) == 3
+    assert all(0 < delay <= geo.NOMINATIM_INTERVAL for delay in slept)
+
+
+def test_the_english_region_lookup_is_paced_too(monkeypatch):
+    # the bug this covers: `locate_point` made two requests back to back, so a
+    # caller pacing itself between items still ran at twice the allowed rate
+    waited = _recording_httpx(
+        monkeypatch,
+        payload={"address": {"country_code": "ve", "country": "Venezuela",
+                             "state": "Distrito Capital"}},
+    )
+
+    geo.locate_point(10.4449, -66.9072)
+
+    assert len(waited) == 1
+    assert waited[0] > 0
+
+
+def test_the_forward_geocoder_shares_the_same_pace(monkeypatch):
+    waited = _recording_httpx(monkeypatch, payload=[{"lat": "1", "lon": "2"}])
+
+    geo.geocode("Caracas")
+    geo.geocode("Maracaibo")
+
+    assert len(waited) == 1
+
+
+def test_a_429_is_remembered_as_throttling(monkeypatch):
+    _recording_httpx(monkeypatch, status=429)
+    assert geo.throttled() is False
+
+    assert geo.locate_point(10.4449, -66.9072) == {"state": "failed"}
+
+    # a batch that resolved nothing because the address is in the penalty box is
+    # not the same event as a batch of genuine lookup failures
+    assert geo.throttled() is True
+
+
+def test_an_ordinary_failure_is_not_throttling(monkeypatch):
+    _recording_httpx(monkeypatch, status=500)
+
+    assert geo.locate_point(10.4449, -66.9072) == {"state": "failed"}
+    assert geo.throttled() is False

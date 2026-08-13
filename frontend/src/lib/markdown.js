@@ -1,6 +1,8 @@
 import DOMPurify from 'dompurify';
 import { marked, Renderer } from 'marked';
 
+import { fileRelPath, fileUrl } from './fileUrl.js';
+
 const ENTITY_REF = /\[\[entity:([A-Za-z0-9_-]+)\|([^\]]+)\]\]/g;
 const MEDIA_REF = /\[\[media:([A-Za-z0-9_-]+)\|([^\]]+)\]\](?:\{([^}\n]+)\})?/g;
 const IMAGE_ATTRS = /!\[([^\]]*)\]\((\S+?)(?:\s+["']([^"']*)["'])?\)\s*\{([^}\n]+)\}/g;
@@ -76,11 +78,6 @@ function broken(kind, label) {
   return `<span class="broken-ref" title="Deleted from this case">${kind}: ${label}</span>`;
 }
 
-function localMediaPath(href, caseId) {
-  const prefix = `/files/${caseId}/`;
-  return caseId && href.startsWith(prefix) ? href.slice(prefix.length) : null;
-}
-
 function imageOptions(href) {
   const url = new URL(href, 'https://notebook.invalid');
   const attributes = url.searchParams.get(ATTR_PARAM) ?? '';
@@ -131,7 +128,7 @@ function renderer({ entities, caseId }) {
     if (mediaMatch) {
       const entity = byId.get(mediaMatch[1]);
       if (!entity?.attrs?.path) return broken('Media unavailable', body);
-      const url = `/files/${caseId}/${entity.attrs.path}`;
+      const url = fileUrl(caseId, entity.attrs.path);
       return entity.attrs.kind === 'video'
         ? `<video controls src="${url}">${body}</video>`
         : `<img src="${url}" alt="${entity.label}">`;
@@ -142,13 +139,16 @@ function renderer({ entities, caseId }) {
 
   value.image = (token) => {
     const options = imageOptions(token.href);
-    const path = localMediaPath(options.href, caseId);
+    const path = fileRelPath(options.href, caseId);
     if (path && !mediaByPath.has(path)) return broken('Media unavailable', token.text);
+    // Rebuilt rather than reused, so a case file whose name needs encoding
+    // resolves even in notes written before it was encoded.
+    if (path) options.href = fileUrl(caseId, path);
     const mediaUrl = new URL(options.href, 'https://notebook.invalid');
     if (mediaUrl.protocol === 'azimut:' && mediaUrl.hostname === 'media') {
       const entity = byId.get(mediaUrl.pathname.slice(1));
       if (!entity?.attrs?.path) return broken('Media unavailable', token.text);
-      const url = `/files/${caseId}/${entity.attrs.path}`;
+      const url = fileUrl(caseId, entity.attrs.path);
       const markup = imageMarkup({ href: url, alt: entity.label, title: token.title, ...options });
       return entity.attrs.kind === 'video'
         ? `<video controls src="${url}" class="${markup.className}"${markup.attrs}>${token.text}</video>`

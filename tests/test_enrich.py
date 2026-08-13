@@ -347,8 +347,15 @@ def test_a_rescaled_copy_is_suggested_as_the_same_image(tmp_workspace, monkeypat
     a = case.find_entity(attr="path", value=first)
     b = case.find_entity(attr="path", value=second)
     matches = [ln for ln in case.links_of(b["id"]) if ln["type"] == enrich.SAME_IMAGE_AS]
-    assert [ln["to"] for ln in matches] == [a["id"]]
+    assert len(matches) == 1
+    assert {matches[0]["from"], matches[0]["to"]} == {a["id"], b["id"]}
     assert matches[0]["provenance"]["status"] == "suggested"
+
+    # A later pass starting from the other endpoint resolves to the same canonical
+    # orientation, so a symmetric match can never be stored twice in reverse.
+    digest = next(item["dhash"] for item in case.list_media_items() if item["path"] == first)
+    enrich._suggest_same_image(case, a["id"], first, digest)
+    assert len([ln for ln in case.links_of(a["id"]) if ln["type"] == enrich.SAME_IMAGE_AS]) == 1
 
 
 def test_unrelated_pictures_are_not_linked(tmp_workspace, monkeypatch, tmp_path):

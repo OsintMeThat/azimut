@@ -9,6 +9,7 @@
   // image via a same-origin canvas — nothing leaves the machine until an
   // engine tab is opened by the analyst.
   import { api } from '../lib/api.js';
+  import { fileUrl } from '../lib/fileUrl.js';
   import { matchesTerms } from '../lib/folderBrowse.js';
   import { caseState, uiState, toast } from '../lib/state.svelte.js';
   import { UPLOAD_PAGES } from '../lib/reverseSearch.js';
@@ -67,7 +68,7 @@
   );
   const resetAdjust = () => (adjust = { ...NEUTRAL });
 
-  const srcOf = (item) => `/files/${caseState.current.id}/${item.path}`;
+  const srcOf = (item) => fileUrl(caseState.current.id, item.path);
   const nameOf = (item) => (item.label || item.path).replace(/^media\//, '');
   const frameLabel = $derived(selected?.kind === 'video' ? 'frame' : 'image');
 
@@ -399,7 +400,7 @@
               <button class="picker-open" onclick={() => pickMedia(item)} title={item.path}>
                 <div class="picker-thumb">
                   {#if item.thumbnail}
-                    <img src={`/files/${caseState.current.id}/${item.thumbnail}`} alt="" loading="lazy" />
+                    <img src={fileUrl(caseState.current.id, item.thumbnail)} alt="" loading="lazy" />
                   {:else}
                     <Icon name={item.kind === 'video' ? 'video' : 'image'} size={22} />
                   {/if}

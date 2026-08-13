@@ -344,6 +344,13 @@ def ingest_bookmark(
     Nothing is fetched: we store the URL the user is already on, its title and
     the source site — a pointer, not a copy. An empty ``case_id`` opens a fresh
     scratch session, the same as a screenshot ingest.
+
+    ``fetched_at`` is stamped here, as it is on a capture, and by the server rather
+    than from the request: the extension is standing on the page at this instant, so
+    the moment is known rather than typed, and a browser clock is not a source. A
+    bookmark added by hand in the app carries none — nothing was fetched — and that
+    absence is never flagged. It is what an archived copy is later dated against
+    (ONTOLOGY §2).
     """
     split = urlsplit(url)
     if split.scheme not in ("http", "https") or not split.hostname:
@@ -354,7 +361,12 @@ def ingest_bookmark(
     entity = case.add_entity(
         "bookmark",
         label,
-        {"url": url, "site": split.hostname, "folder": ""},
+        {
+            "url": url,
+            "site": split.hostname,
+            "folder": "",
+            "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        },
         by="ingest",
     )
     events.publish(
@@ -385,11 +397,42 @@ def _extension_dir() -> Path | None:
     return None
 
 
+def shipped_extension_files(src: Path) -> list[tuple[str, Path]]:
+    """Every file ``extension.zip`` carries, as ``(posix relative name, path)``
+    sorted by name. Paths are posix so the listing is identical on the three
+    release platforms.
+
+    The version gate in ``tests/test_updates.py`` digests exactly this list, so
+    "what the manifest version claims" and "what the user downloads" cannot
+    drift: a change to a shipped file fails the gate until the version moves.
+
+    Ordered by that posix name rather than by ``Path``, which is the whole point:
+    comparing paths is case-insensitive on Windows and case-sensitive everywhere
+    else, so ``README.md`` sorts first on Linux and mid-list on Windows. The gate
+    digests names in order, so sorting by the object would hand the three release
+    platforms three verdicts about one unchanged extension.
+    """
+    shipped: list[tuple[str, Path]] = []
+    for path in src.rglob("*"):
+        rel = path.relative_to(src)
+        if not path.is_file() or path.name in _ZIP_EXCLUDE_FILES:
+            continue
+        if any(part in _ZIP_EXCLUDE_DIRS or part.endswith(".test.js") for part in rel.parts):
+            continue
+        shipped.append((rel.as_posix(), path))
+    return sorted(shipped, key=lambda entry: entry[0])
+
+
 def bundled_extension_version() -> str | None:
     """The ``version`` of the extension this Azimut build ships. Settings
     compares it to the version stamped by the *installed* extension
     (lib/extBridge.js) so it can flag "an update is bundled — re-download and
-    reload". None if no extension is bundled (unusual builds)."""
+    reload". None if no extension is bundled (unusual builds).
+
+    This tracks the extension, not the app: it is the Azimut version whose
+    release last changed a shipped file, so it stays put across releases that
+    leave the extension alone. Bumping it in lock-step with ``__version__``
+    would tell every user to reinstall an identical zip."""
     src = _extension_dir()
     if src is None:
         return None
@@ -414,13 +457,8 @@ def extension_zip() -> Response:
         raise HTTPException(status_code=404, detail="extension not bundled with this build")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path in sorted(src.rglob("*")):
-            rel = path.relative_to(src)
-            if not path.is_file() or path.name in _ZIP_EXCLUDE_FILES:
-                continue
-            if any(part in _ZIP_EXCLUDE_DIRS or part.endswith(".test.js") for part in rel.parts):
-                continue
-            zf.write(path, str(rel))
+        for name, path in shipped_extension_files(src):
+            zf.write(path, name)
     return Response(
         content=buf.getvalue(),
         media_type="application/zip",

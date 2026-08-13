@@ -82,8 +82,10 @@ describe('Proof Composer naming', () => {
   });
 
   it('checks the current hidden spec path before claiming a saved proof was deleted', () => {
-    expect(source).toContain("lookupEntity(id, 'spec', `proofs/.meta/${name}.json`)");
-    expect(source).not.toContain("lookupEntity(id, 'spec', `proofs/${name}.json`)");
+    // Via the shared helper, never a literal: the path moved once already, and a
+    // stale one matches nothing, so every save warns the proof was deleted.
+    expect(source).toContain("lookupEntity(id, specAttr('proof'), specPath('proof', name))");
+    expect(source).not.toContain('`proofs/${name}.json`');
   });
 });
 
@@ -339,7 +341,7 @@ describe('Proof Composer saved-proof list', () => {
     // backfills it, and one that could not be rendered never gets one
     const row = source.slice(source.indexOf('<div class="open-list">'), source.indexOf('open-del'));
     expect(row).toContain('{#if entry.thumb || entry.png}');
-    expect(row).toContain('${entry.thumb ?? entry.png}');
+    expect(row).toContain('fileUrl(caseState.current.id, entry.thumb ?? entry.png)');
   });
 });
 
@@ -386,11 +388,23 @@ describe('Proof Composer pasted images', () => {
   it('lets one paste handler decide between an image and a copied annotation', () => {
     expect(source).toContain('onpaste={onPaste}');
     expect(source).toContain("i.type.startsWith('image/')");
-    expect(source).toContain('} else if (clipboard) {');
     // the old Ctrl+V keydown branch would have swallowed the paste event
     expect(source).not.toContain("k === 'v' && clipboard");
     // and a paste into the title or a caption stays text
     expect(source).toContain('isTextTarget(e.target)');
+  });
+
+  it('decides that chord on which copy came last', () => {
+    // Ctrl+C on a rectangle then Ctrl+V pasted whatever screenshot the system
+    // clipboard was holding, because the system one was read first.
+    expect(source).toContain('if (clipboard && (shapeCopyFresh || !item))');
+    expect(source).toContain('shapeCopyFresh = true;');
+  });
+
+  it('hands the chord back to the system clipboard once the analyst leaves', () => {
+    // going somewhere else is the only way an outside copy could have happened
+    expect(source).toContain("window.addEventListener('blur', release)");
+    expect(source).toContain('const release = () => (shapeCopyFresh = false)');
   });
 
   it('offers the file picker and the drop as well as Ctrl+V', () => {
@@ -468,5 +482,56 @@ describe('Proof Composer frames', () => {
     const fn = source.slice(source.indexOf('function frameNode('), source.indexOf('// ---- rebuild canvas'));
     expect(fn).toContain('x: w / 2, y: w / 2');
     expect(fn).toContain('natural[0] - w');
+  });
+});
+
+describe('POV', () => {
+  it('asks what the point means, since the composition cannot say', () => {
+    // recorded-at and shows are independent: a rooftop shot is recorded
+    // somewhere it never shows
+    expect(source).toContain('pov: false');
+    expect(source).toContain('proof.pov = spec.pov === true');
+    expect(source).toContain('The point is where the camera stood, not what it filmed');
+    expect(source).toContain('<span>POV</span>');
+  });
+});
+
+describe("the point a proof concludes on", () => {
+  it('files it silently, or asks — never both, and never for a point already saved', () => {
+    // the server answers with nothing when the case holds that point already
+    expect(source).toContain('if (result.place?.filed)');
+    expect(source).toContain('else if (result.place) placeOffer =');
+  });
+
+  it('asks with the coordinates, since the map is where the point will be read', () => {
+    expect(source).toContain('Save this point as a place?');
+    expect(source).toContain('is not saved in this case yet.');
+    expect(source).toContain('this proof and the files it composes will say they show it');
+    expect(source).toContain('was recorded there');
+  });
+
+  it('answers through the proof, so the edge is filed with the point', () => {
+    expect(source).toContain('/proofs/${encodeURIComponent(offer.name)}/place');
+    expect(source).toContain('await reloadCase()');
+  });
+
+  it('asks before dropping the point a correction moved it off', () => {
+    // the place stays on the map until the analyst says otherwise: a save
+    // withdraws the claim, it does not clean up after them
+    expect(source).toContain('orphanOffer = result.orphans?.length ? result.orphans : null');
+    expect(source).toContain('Delete the old place?');
+    expect(source).toContain('This proof no longer points at');
+    expect(source).toContain('Nothing else in the case points there.');
+  });
+
+  it('queues that question behind the other one, since a save can raise both', () => {
+    const dialogs = source.slice(source.indexOf('{#if placeOffer}'));
+    expect(dialogs.indexOf('{:else if orphanOffer}')).toBeGreaterThan(-1);
+    expect(dialogs.indexOf('{:else if orphanOffer}')).toBeLessThan(dialogs.indexOf('{#if deleteEntry}'));
+  });
+
+  it('drops it through the entity route, so it lands in the trash like any delete', () => {
+    expect(source).toContain('await api.del(`/api/cases/${caseState.current.id}/entities/${place.id}`)');
+    expect(source).toContain('restorable={RESTORABLE}');
   });
 });
