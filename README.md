@@ -19,7 +19,7 @@
   <a href="https://pypi.org/project/azimut/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/azimut"></a>
   <a href="https://github.com/OsintMeThat/azimut/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/OsintMeThat/azimut/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/OsintMeThat/azimut/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0-4c6ef5"></a>
-  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-6b7280">
+  <a href="https://github.com/OsintMeThat/azimut/releases/latest"><img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-6b7280"></a>
 </p>
 
 ![One case in Azimut, from the clip that arrives to the proof, the analysis surfaces and the published report](https://raw.githubusercontent.com/OsintMeThat/azimut/main/docs/media/demo.gif)
