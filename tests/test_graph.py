@@ -31,6 +31,7 @@ from PIL import Image
 from azimut.engine import entities as entity_engine
 from azimut.engine import graph as graph_engine
 from azimut.engine import links as link_engine
+from azimut.engine import workqueue
 from azimut.workspace import Case
 
 
@@ -1064,6 +1065,10 @@ def _adjusted(client, cid, path, amount=1.4, label=None):
         },
     )
     assert res.status_code == 200, res.text
+    # Saving queues enrichment, and the graph assertions below read the mirror
+    # suggestion that job may create. Do not race the background worker on a fast
+    # or heavily loaded runner.
+    assert workqueue.wait_until_idle(timeout=10)
     return res.json()["saved"][0]
 
 
