@@ -13,7 +13,7 @@ from PIL import Image as _Image
 # The capture extension is versioned separately, on purpose — it carries the
 # release that last changed it (tests/test_updates.py). Don't move the two
 # together.
-__version__ = "0.2.7"
+__version__ = "0.2.8"
 
 # Cap the pixels Pillow will decode from a file, process-wide. A tiny,
 # highly-compressed image can otherwise expand to gigabytes in memory and take
