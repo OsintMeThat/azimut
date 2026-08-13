@@ -1226,6 +1226,10 @@ async function dragNode(page, from, dx, dy) {
   await page.mouse.move(from.x + dx / 2, from.y + dy / 2, { steps: 5 });
   await page.mouse.move(from.x + dx, from.y + dy, { steps: 5 });
   await page.mouse.up();
+  // Graph keeps its drag guard through the release click, then clears it on the
+  // next frame. A second gesture cannot happen before that frame in real use, so
+  // do not let a fast headless runner manufacture that impossible overlap.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
 }
 
 /** Leave and come back, so a node already under a still pointer names itself. */
