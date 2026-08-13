@@ -242,7 +242,7 @@ once.
 **The declared `text`, `longtext` and `url` fields are what a case search matches
 on**, beside the label, the type, the folder and the notes — a vehicle is looked for
 by its plate. Numbers, shapes and stored grades stay out of the index. One predicate
-serves both sides: `sqlite_backend._entity_search_text` for the server,
+serves both sides: `store/rows.py::_entity_search_text` for the server,
 `lib/entitySearch.js` for the lists that filter a small case in memory.
 
 ### When the case already holds the value ✅

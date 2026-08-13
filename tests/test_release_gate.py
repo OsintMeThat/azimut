@@ -170,7 +170,11 @@ def test_storage_and_jobs_add_no_new_runtime_dependency():
     # sqlite3/threading/subprocess are stdlib; Pillow (declared) does the imaging.
     assert "pillow" in declared
     src = Path(__file__).resolve().parent.parent / "src" / "azimut"
-    text = (src / "sqlite_backend.py").read_text() + (src / "engine" / "thumbnails.py").read_text()
+    # The store is a package plus its entry module, so the scan follows it rather
+    # than stopping at the file the class happens to live in.
+    files = [src / "sqlite_backend.py", src / "engine" / "thumbnails.py"]
+    files += sorted((src / "store").glob("*.py"))
+    text = "".join(path.read_text() for path in files)
     assert "import sqlite3" in (src / "sqlite_backend.py").read_text()
     for banned in ("import numpy", "import pandas", "import redis", "import celery"):
         assert banned not in text  # no heavyweight queue/DB dependency slipped in

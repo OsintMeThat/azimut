@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('./Graph.svelte', import.meta.url), 'utf8');
 const layout = readFileSync(new URL('../lib/graph.js', import.meta.url), 'utf8');
+const viewport = readFileSync(new URL('../lib/graphViewport.js', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../app.css', import.meta.url), 'utf8');
 
 describe('the graph answers what the table cannot', () => {
@@ -170,9 +171,13 @@ describe('the interaction', () => {
   });
 
   it('clamps the zoom so a case cannot be lost off-screen', () => {
-    expect(source).toContain('ZOOM_MIN');
-    expect(source).toContain('ZOOM_MAX');
-    expect(source).toContain('Math.min(ZOOM_MAX, Math.max(ZOOM_MIN');
+    // The bound and the anchored zoom live in `lib/graphViewport.js`, which is
+    // where they are exercised (`graphViewport.test.js`); the tool only calls them.
+    expect(viewport).toContain('export const ZOOM_MIN');
+    expect(viewport).toContain('export const ZOOM_MAX');
+    expect(viewport).toContain('Math.min(ZOOM_MAX, Math.max(ZOOM_MIN');
+    expect(source).toContain("from '../lib/graphViewport.js'");
+    expect(source).toContain('zoomAround(factor,');
   });
 
   it('gives the whole screen to the drawing, toolbar included', () => {

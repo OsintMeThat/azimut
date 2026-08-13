@@ -246,8 +246,18 @@ uses to read and mutate a case's graph, catalog and jobs. Nothing outside the
 implementation reaches into a raw `case.json` shape. `workspace.Case` is the
 filesystem shell (manifest, notes, media, lifecycle, path resolution) and
 delegates every graph, catalog and job method to a `SqliteCase`
-(`sqlite_backend.py`) over `case.db`. `engine/links.py` and `api/cases.py` read
-through `get_entity` / `links_of` / `snapshot`, never the file.
+(`sqlite_backend.py`) over `case.db`. That delegation is `casestore.CaseStore`,
+mixed into `Case`: every method there forwards and does nothing else, so what
+stays on `Case` is the half that also has a folder to keep in step. `engine/links.py`
+and the `api/cases/` routers read through `get_entity` / `links_of` / `snapshot`,
+never the file.
+
+`sqlite_backend.py` owns the schema, the connection and `SqliteCase`. What that
+class is built out of lives in `store/`, one module per concern: statement shaping
+(`sql`), the predicates a case is narrowed by (`filters`), keyset cursors
+(`cursors`), the denormalised columns a record is indexed on (`rows`), the derived
+temporal projection (`temporal`) and the versioned schema upgrades (`migrations`).
+The case-folder reshaping pass is `caselayout.py`, beside `workspace.py`.
 
 `snapshot()` returns the whole graph for delete planning, export, migration checks
 and test assertions.

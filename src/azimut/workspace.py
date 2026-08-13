@@ -24,6 +24,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from . import config, layout
+from .caselayout import (
+    _follow_hidden_dirs,
+    _normalize_case_layout,
+    _prune_empty_note_dirs,
+    _wrap_case_folder,
+    ensure_dir,
+    write_readme,
+)
+from .casestore import CaseStore
 from .layout import MAX_CASE_SLUG
 from .repository import EntityStatus
 
@@ -123,75 +132,6 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:10]}"
 
 
-def ensure_dir(path: Path) -> Path:
-    """``path.mkdir(parents=True, exist_ok=True)``, tolerant of a transient
-    ``PermissionError`` Windows can raise when several threads race to create
-    the very same directory for the first time (e.g. several concurrent
-    downloads all hitting a case's not-yet-created ``media/.dl`` or
-    ``media/.thumbs`` at once): CreateDirectory there occasionally answers
-    "access is denied" instead of "already exists" mid-race, which
-    ``exist_ok=True`` alone does not catch. Retried briefly — the directory
-    reliably exists by the next attempt, whoever won the race.
-    """
-    for attempt in range(20):
-        try:
-            path.mkdir(parents=True, exist_ok=True)
-            _hide_dotted_chain(path)
-            return path
-        except PermissionError:
-            if path.is_dir():
-                return path
-            if attempt == 19:
-                raise
-            time.sleep(0.01)
-    return path  # pragma: no cover - loop always returns or raises above
-
-
-def _hide_dotted_chain(path: Path) -> None:
-    """Hide *path* on Windows, and the dot-directories `parents=True` just made.
-
-    `media/.meta/<proof>.assets` creates `.meta` on the way to a leaf that is
-    not itself dotted, so hiding the leaf alone would leave the directory that
-    matters visible. The walk stops at the first ancestor without a leading dot,
-    which is always the visible half of the case (`media/`, `proofs/`, the tool
-    root), so it never climbs out of the workspace.
-    """
-    current = path
-    while True:
-        config.hide_if_dotted(current)
-        parent = current.parent
-        if parent == current or not parent.name.startswith("."):
-            return
-        current = parent
-
-
-def _follow_hidden_dirs(root: Path) -> None:
-    """Put the hidden attribute back on a case's internal directories.
-
-    `.azimut` gets this at every startup (`config.ensure_workspace`); a case only
-    got it the day it was born, so any copy of a workspace — a move onto another
-    drive, a folder carried between machines, a backup unpacked — showed the
-    analyst directories the layout means to keep out of sight.
-
-    Costs nothing off Windows, where `hide_if_dotted` is what returns early: one
-    guard in one place beats a second copy of the platform test here.
-    """
-    for directory in layout.hidden_dirs(root):
-        config.hide_if_dotted(directory)
-
-
-def write_readme(root: Path) -> None:
-    """Leave the note that says which half of the case folder is whose.
-
-    Only when there is none. The file sits in the analyst's half, so once it is
-    there it is theirs: an edited or deleted README is a choice, not damage, and
-    rewriting it on every open would undo it.
-    """
-    readme = layout.readme(root)
-    if not readme.exists():
-        readme.write_text(layout.README_TEXT, encoding="utf-8")
-
-
 def _replace_with_retry(src: Path, dst: Path) -> None:
     """``src.replace(dst)`` with a brief retry for a transient Windows
     ``PermissionError``. The case lock already keeps our own threads off the
@@ -231,7 +171,7 @@ def _parse_cursor(cursor: str | None) -> int:
         raise CaseError(f"invalid cursor '{cursor}'") from None
 
 
-class Case:
+class Case(CaseStore):
     """Handle over one case directory.
 
     The filesystem shell (manifest, notes, media, lifecycle, path resolution)
@@ -239,6 +179,11 @@ class Case:
     `CaseRepository` contract, delegated to a `SqliteCase` over `case.db`. A
     legacy json case (schema ≤ `JSON_SCHEMA`) is converted to sqlite on open
     (`migrate`), so every live handle is sqlite-backed.
+
+    That delegation is `CaseStore` (`casestore.py`), inherited rather than written
+    out here: it is a seam, not behaviour, and the methods that only forward were
+    burying the ones that also have a folder to keep in step. What stays below is
+    the half that has both.
     """
 
     def __init__(self, path: Path):
@@ -268,6 +213,12 @@ class Case:
         if self._sqlite_cache is _UNSET:
             self._sqlite_cache = self._resolve_sqlite()
         return self._sqlite_cache
+
+    def _forget_store(self) -> None:
+        """Drop the cached backend handle so the next graph access re-resolves it
+        from the manifest. Called after the database moves on disk or the manifest
+        changes storage format."""
+        self._sqlite_cache = _UNSET
 
     def _resolve_sqlite(self) -> "SqliteCase | None":
         from .sqlite_backend import SqliteCase
@@ -484,7 +435,7 @@ class Case:
                 "updated_at": data.get("updated_at") or _now(),
             }
         )
-        self._sqlite_cache = _UNSET  # re-resolve against the new manifest
+        self._forget_store()  # re-resolve against the new manifest
 
     def _backup(self, tag: str) -> None:
         """Copy case.json aside once, under a ``tag``. Never overwrites an
@@ -720,298 +671,6 @@ class Case:
         """
         return {**self.read(), "folders": self._graph().list_folders()}
 
-    def list_entities(self) -> list[dict[str, Any]]:
-        return self._graph().list_entities()
-
-    def page_entities(
-        self,
-        *,
-        limit: int = 100,
-        cursor: str | None = None,
-        types: list[str] | None = None,
-        status: EntityStatus | None = None,
-        query: str | None = None,
-        folder: str | None = None,
-        unfiled: bool = False,
-        recursive: bool = False,
-        attr: str | None = None,
-        attr_value: str | None = None,
-        linked: str | None = None,
-        unlinked: bool = False,
-        since: str | None = None,
-        until: str | None = None,
-        filed_by: list[str] | None = None,
-        temporal_since: str | None = None,
-        temporal_until: str | None = None,
-        temporal_categories: list[str] | None = None,
-        order: str = "",
-    ) -> dict[str, Any]:
-        """A bounded, filtered page of the catalog (Step 5), paged with an indexed
-        keyset over the ordering asked for."""
-        return self._graph().page_entities(
-            limit=limit,
-            cursor=cursor,
-            types=types,
-            status=status,
-            query=query,
-            folder=folder,
-            unfiled=unfiled,
-            recursive=recursive,
-            attr=attr,
-            attr_value=attr_value,
-            linked=linked,
-            unlinked=unlinked,
-            since=since,
-            until=until,
-            filed_by=filed_by,
-            temporal_since=temporal_since,
-            temporal_until=temporal_until,
-            temporal_categories=temporal_categories,
-            order=order,
-        )
-
-    def catalog_summary(self) -> dict[str, Any]:
-        """Total plus per-type, per-status, per-folder and per-filer counts."""
-        return self._graph().catalog_summary()
-
-    def attr_facets(
-        self, *, types: list[str] | None = None, limit: int = 50
-    ) -> list[dict[str, Any]]:
-        """Which stored fields these entities hold, and which values, as a menu."""
-        return self._graph().attr_facets(types=types, limit=limit)
-
-    def list_links(self) -> list[dict[str, Any]]:
-        return self._graph().list_links()
-
-    def entity_images(self, entity_id: str) -> list[dict[str, Any]]:
-        return self._graph().entity_images(entity_id)
-
-    def entity_image_thumbs(self, entity_ids: list[str]) -> dict[str, str]:
-        return self._graph().entity_image_thumbs(entity_ids)
-
-    def entity_images_touching(self, entity_ids: list[str]) -> list[dict[str, Any]]:
-        return self._graph().entity_images_touching(entity_ids)
-
-    def add_entity_images(self, entity_id: str, media_ids: list[str]) -> int:
-        return self._graph().add_entity_images(entity_id, media_ids)
-
-    def add_entity_image_file(
-        self,
-        entity_id: str,
-        image_id: str,
-        path: str,
-        thumbnail: str,
-        title: str,
-    ) -> None:
-        self._graph().add_entity_image_file(
-            entity_id, image_id, path, thumbnail, title
-        )
-
-    def set_primary_entity_image(self, entity_id: str, image_id: str) -> None:
-        self._graph().set_primary_entity_image(entity_id, image_id)
-
-    def remove_entity_image(self, entity_id: str, image_id: str) -> dict[str, Any]:
-        return self._graph().remove_entity_image(entity_id, image_id)
-
-    def reinsert_entity_images(self, rows: list[dict[str, Any]]) -> dict[str, int]:
-        return self._graph().reinsert_entity_images(rows)
-
-    def upsert_media_item(self, item: dict[str, Any], *, entity_id: str | None = None) -> None:
-        self._graph().upsert_media_item(item, entity_id=entity_id)
-
-    def remove_media_item(self, path: str) -> None:
-        self._graph().remove_media_item(path)
-
-    def timeline_page(
-        self,
-        *,
-        since: str | None = None,
-        until: str | None = None,
-        categories: list[str] | None = None,
-        entity_id: str | None = None,
-        include_undated: bool = True,
-        limit: int = 100,
-        cursor: str | None = None,
-        bucket: str | None = None,
-        track: dict[str, Any] | None = None,
-        spread: bool = False,
-    ) -> dict[str, Any]:
-        return self._graph().timeline_page(
-            since=since,
-            until=until,
-            categories=categories,
-            entity_id=entity_id,
-            include_undated=include_undated,
-            limit=limit,
-            cursor=cursor,
-            bucket=bucket,
-            track=track,
-            spread=spread,
-        )
-
-    def rebuild_temporal_projection(self) -> int:
-        return self._graph().rebuild_temporal_projection()
-
-    def temporal_projection_status(self) -> dict[str, int | bool]:
-        return self._graph().temporal_projection_status()
-
-    def list_media_items(self) -> list[dict[str, Any]]:
-        return self._graph().list_media_items()
-
-    def media_items_by_paths(self, paths: list[str]) -> list[dict[str, Any]]:
-        return self._graph().media_items_by_paths(paths)
-
-    def media_thumbs(self, entity_ids: list[str]) -> dict[str, str]:
-        return self._graph().media_thumbs(entity_ids)
-
-    def media_kinds(self, entity_ids: list[str]) -> dict[str, str]:
-        return self._graph().media_kinds(entity_ids)
-
-    def media_origins(self, entity_ids: list[str]) -> dict[str, dict[str, str]]:
-        return self._graph().media_origins(entity_ids)
-
-    def page_media_items(
-        self,
-        *,
-        q: str | None = None,
-        kind: str | None = None,
-        category: str | None = None,
-        folder: str | None = None,
-        gps: bool = False,
-        collected_only: bool = False,
-        sort: str = "newest",
-        direction: str | None = None,
-        limit: int = 200,
-        offset: int = 0,
-    ) -> dict[str, Any]:
-        return self._graph().page_media_items(
-            q=q,
-            kind=kind,
-            category=category,
-            folder=folder,
-            gps=gps,
-            collected_only=collected_only,
-            sort=sort,
-            direction=direction,
-            limit=limit,
-            offset=offset,
-        )
-
-    def get_link(self, link_id: str) -> dict[str, Any] | None:
-        return self._graph().get_link(link_id)
-
-    def links_of(self, entity_id: str) -> list[dict[str, Any]]:
-        return self._graph().links_of(entity_id)
-
-    def count_dependents(self, *, link_type: str, from_type: str) -> dict[str, int]:
-        return self._graph().count_dependents(link_type=link_type, from_type=from_type)
-
-    def count_incident_links(self, *, exclude_types: list[str]) -> dict[str, int]:
-        return self._graph().count_incident_links(exclude_types=exclude_types)
-
-    def rank_entities(
-        self,
-        *,
-        limit: int = 200,
-        types: list[str] | None = None,
-        exclude_types: list[str] | None = None,
-        status: EntityStatus | None = None,
-        query: str | None = None,
-        folder: str | None = None,
-        unfiled: bool = False,
-        recursive: bool = False,
-        attr: str | None = None,
-        attr_value: str | None = None,
-        linked: str | None = None,
-        unlinked_only: bool = False,
-        since: str | None = None,
-        until: str | None = None,
-        filed_by: list[str] | None = None,
-        temporal_since: str | None = None,
-        temporal_until: str | None = None,
-        temporal_categories: list[str] | None = None,
-        link_types: list[str] | None = None,
-        order: str = "degree",
-    ) -> dict[str, Any]:
-        return self._graph().rank_entities(
-            limit=limit, types=types, exclude_types=exclude_types, status=status,
-            query=query, folder=folder, unfiled=unfiled, recursive=recursive,
-            attr=attr, attr_value=attr_value, linked=linked, unlinked_only=unlinked_only,
-            since=since, until=until, filed_by=filed_by,
-            temporal_since=temporal_since, temporal_until=temporal_until,
-            temporal_categories=temporal_categories,
-            link_types=link_types, order=order,
-        )
-
-    def entities_by_ids(self, ids: list[str]) -> list[dict[str, Any]]:
-        return self._graph().entities_by_ids(ids)
-
-    def labels_of_type(self, type_: str) -> list[tuple[str, str]]:
-        return self._graph().labels_of_type(type_)
-
-    def links_among(
-        self, ids: list[str], *, types: list[str] | None = None
-    ) -> list[dict[str, Any]]:
-        return self._graph().links_among(ids, types=types)
-
-    def links_touching(
-        self,
-        ids: list[str],
-        *,
-        types: list[str] | None = None,
-        exclude_types: list[str] | None = None,
-        end_types: list[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        return self._graph().links_touching(
-            ids, types=types, exclude_types=exclude_types, end_types=end_types
-        )
-
-    def degrees_of(
-        self,
-        ids: list[str],
-        *,
-        types: list[str] | None = None,
-        exclude_types: list[str] | None = None,
-    ) -> dict[str, int]:
-        return self._graph().degrees_of(ids, types=types, exclude_types=exclude_types)
-
-
-    def graph_pins(self, lens: str) -> dict[str, tuple[float, float]]:
-        return self._graph().graph_pins(lens)
-
-    def pin_entities(self, lens: str, pins: dict[str, tuple[float, float]]) -> int:
-        return self._graph().pin_entities(lens, pins)
-
-    def unpin_entities(self, lens: str, ids: list[str]) -> int:
-        return self._graph().unpin_entities(lens, ids)
-
-    def clear_graph_pins(self, lens: str) -> int:
-        return self._graph().clear_graph_pins(lens)
-
-    def list_analysis_views(self) -> list[dict[str, Any]]:
-        return self._graph().list_analysis_views()
-
-    def get_analysis_view(self, view_id: str) -> dict[str, Any] | None:
-        return self._graph().get_analysis_view(view_id)
-
-    def save_analysis_view(self, view: dict[str, Any]) -> dict[str, Any]:
-        return self._graph().save_analysis_view(view)
-
-    def remove_analysis_view(self, view_id: str) -> dict[str, Any] | None:
-        return self._graph().remove_analysis_view(view_id)
-
-    def reinsert_analysis_views(self, views: list[dict[str, Any]]) -> int:
-        return self._graph().reinsert_analysis_views(views)
-
-    def get_entity(self, entity_id: str) -> dict[str, Any] | None:
-        return self._graph().get_entity(entity_id)
-
-    def note_ids_by_titles(self, titles: set[str]) -> dict[str, list[str]]:
-        return self._graph().note_ids_by_titles(titles)
-
-    def entity_count(self) -> int:
-        """Entity total for the case switcher — one indexed count."""
-        return self._graph().count_entities()
 
     # -- notes -------------------------------------------------------------
 
@@ -1212,24 +871,6 @@ class Case:
             self._follow_named_artifact_rename(entity_id, patch)
             return self._graph().update_entity(entity_id, patch)
 
-    def save_temporal_claim(
-        self,
-        *,
-        entity_id: str | None,
-        label: str,
-        attrs: dict[str, Any],
-        connectors: dict[str, list[str]] | None,
-        by: str,
-        status: EntityStatus = "confirmed",
-    ) -> dict[str, Any]:
-        return self._graph().save_temporal_claim(
-            entity_id=entity_id,
-            label=label,
-            attrs=attrs,
-            connectors=connectors,
-            by=by,
-            status=status,
-        )
 
     def _follow_named_artifact_rename(self, entity_id: str, patch: dict[str, Any]) -> None:
         """Keep named tool files aligned with a label edited from Details.
@@ -1365,50 +1006,6 @@ class Case:
         patch.setdefault("attrs", {})["path"] = target
         patch["label"] = canonical
 
-    def remove_entity(self, entity_id: str) -> None:
-        self._graph().remove_entity(entity_id)
-
-    def find_entity(self, *, attr: str, value: Any) -> dict[str, Any] | None:
-        return self._graph().find_entity(attr=attr, value=value)
-
-    def add_link(
-        self,
-        from_id: str,
-        to_id: str,
-        type_: str,
-        *,
-        by: str,
-        status: EntityStatus = "confirmed",
-        unique: bool = False,
-    ) -> dict[str, Any]:
-        """Add a typed edge. ``unique`` returns the existing identical edge
-        instead of stacking a duplicate — what a producer wants when its output
-        can dedupe onto an entity that is already in the case."""
-        return self._graph().add_link(from_id, to_id, type_, by=by, status=status, unique=unique)
-
-    def sync_links(
-        self,
-        from_id: str,
-        type_: str,
-        to_ids: list[str],
-        *,
-        by: str,
-        status: EntityStatus = "confirmed",
-    ) -> list[dict[str, Any]]:
-        """Make ``from_id``'s outgoing links of ``type_`` exactly ``to_ids``.
-
-        Re-saving an artifact restates its sources rather than piling onto them:
-        edges that are still true are left untouched (same id, same timestamp),
-        edges that are no longer true are dropped, new ones are appended. Unknown
-        targets and a self-reference are ignored.
-        """
-        return self._graph().sync_links(from_id, type_, to_ids, by=by, status=status)
-
-    def update_link(self, link_id: str, patch: dict[str, Any]) -> dict[str, Any]:
-        return self._graph().update_link(link_id, patch)
-
-    def remove_link(self, link_id: str) -> None:
-        self._graph().remove_link(link_id)
 
     # -- folders (nested organisational buckets for entities) ----------------
     #
@@ -1432,75 +1029,7 @@ class Case:
             raise CaseError(f"a folder path is at most {layout.MAX_FOLDER_PATH} characters")
         return path
 
-    def list_folders(self) -> list[str]:
-        return self._graph().list_folders()
 
-    def add_folder(self, name: str) -> list[str]:
-        return self._graph().add_folder(name)
-
-    def remove_folder(self, name: str) -> list[str]:
-        return self._graph().remove_folder(name)
-
-    # -- trash journal (engine/trash.py owns the files) ----------------------
-
-    def add_trash_group(
-        self,
-        group_id: str,
-        *,
-        label: str,
-        type_: str,
-        item_count: int,
-        size_bytes: int,
-        payload: dict[str, Any],
-        state: str = "ready",
-    ) -> dict[str, Any]:
-        return self._graph().add_trash_group(
-            group_id,
-            label=label,
-            type_=type_,
-            item_count=item_count,
-            size_bytes=size_bytes,
-            payload=payload,
-            state=state,
-        )
-
-    def update_trash_group(
-        self,
-        group_id: str,
-        *,
-        state: str | None = None,
-        size_bytes: int | None = None,
-        payload: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        return self._graph().update_trash_group(
-            group_id,
-            state=state,
-            size_bytes=size_bytes,
-            payload=payload,
-        )
-
-    def list_trash(self) -> list[dict[str, Any]]:
-        return self._graph().list_trash()
-
-    def get_trash_group(self, group_id: str) -> dict[str, Any] | None:
-        return self._graph().get_trash_group(group_id)
-
-    def list_incomplete_trash(self) -> list[dict[str, Any]]:
-        return self._graph().list_incomplete_trash()
-
-    def remove_trash_group(self, group_id: str) -> None:
-        self._graph().remove_trash_group(group_id)
-
-    def clear_trash(self) -> list[str]:
-        return self._graph().clear_trash()
-
-    def trash_summary(self) -> dict[str, int]:
-        return self._graph().trash_summary()
-
-    def reinsert(
-        self, entities: list[dict[str, Any]], links: list[dict[str, Any]]
-    ) -> dict[str, int]:
-        return self._graph().reinsert(entities, links)
 
     @property
     def trash_dir(self) -> Path:
@@ -1509,49 +1038,6 @@ class Case:
         into it."""
         return layout.trash(self.path)
 
-    # -- durable jobs (thumbnail and background-job model) -------------------
-
-    def enqueue_job(
-        self,
-        kind: str,
-        *,
-        key: str | None = None,
-        payload: dict[str, Any] | None = None,
-        max_attempts: int = 3,
-    ) -> dict[str, Any]:
-        return self._graph().enqueue_job(kind, key=key, payload=payload, max_attempts=max_attempts)
-
-    def claim_job(self, *, kinds: list[str] | None = None) -> dict[str, Any] | None:
-        return self._graph().claim_job(kinds=kinds)
-
-    def complete_job(self, job_id: str) -> None:
-        self._graph().complete_job(job_id)
-
-    def fail_job(self, job_id: str, error: str) -> dict[str, Any]:
-        return self._graph().fail_job(job_id, error)
-
-    def cancel_job(self, job_id: str) -> None:
-        self._graph().cancel_job(job_id)
-
-    def get_job(self, job_id: str) -> dict[str, Any] | None:
-        return self._graph().get_job(job_id)
-
-    def list_jobs(
-        self, *, kind: str | None = None, state: str | None = None
-    ) -> list[dict[str, Any]]:
-        return self._graph().list_jobs(kind=kind, state=state)
-
-    def count_jobs(self, *, kind: str | None = None) -> dict[str, int]:
-        return self._graph().count_jobs(kind=kind)
-
-    def recover_jobs(self) -> int:
-        return self._graph().recover_jobs()
-
-    def prune_jobs(self, *, kind: str | None = None) -> int:
-        return self._graph().prune_jobs(kind=kind)
-
-    def replace_path_references(self, old: str, new: str) -> None:
-        self._graph().replace_path_references(old, new)
 
     # -- helpers -------------------------------------------------------------
 
@@ -1698,285 +1184,6 @@ def restore_manifest(name: str) -> "Case":
     write_readme(path)
     return case
 
-
-def _wrap_case_folder(case: "Case") -> None:
-    """Move the tool's files into `azimut/`.
-
-    What this buys is in `layout.py`: the case root becomes the analyst's, and a
-    folder they create there can no longer collide with one of ours.
-
-    Nothing inside is rewritten. Paths are stored relative to the tool root
-    (`media/x.png`), so they go on meaning the same thing one level down — the
-    database, the sidecars and any bundle are untouched.
-
-    **Only the tool's own entries move** (`layout.UNWRAPPED_ENTRIES`). Nothing
-    stopped an analyst from keeping their own folder beside a case before this,
-    and carrying it into `azimut/` would contradict the very boundary being
-    drawn. Anything unrecognised stays at the case root, which is where it now
-    belongs anyway.
-
-    **The manifest moves last.** While it is still at the case root the move is
-    unfinished, and that is exactly what `layout.needs_wrapper` reads, so a
-    power cut mid-move is resumed rather than half-applied. Runs before anything
-    reads the manifest, which is why it is keyed on the filesystem rather than
-    on a schema number nobody could load yet.
-    """
-    root = case.path
-    if not layout.needs_wrapper(root):
-        return
-    tool = layout.tool_root(root)
-    tool.mkdir(exist_ok=True)
-    ours = [root / name for name in layout.UNWRAPPED_ENTRIES]
-    ours += sorted(root.glob(layout.UNWRAPPED_BACKUP_GLOB))
-    for entry in dict.fromkeys(ours):
-        destination = tool / entry.name
-        if not entry.exists() or destination.exists():
-            continue  # absent, or already carried over by an interrupted run
-        shutil.move(str(entry), str(destination))
-    shutil.move(str(layout.unwrapped_manifest(root)), str(layout.manifest(root)))
-    case._sqlite_cache = _UNSET  # the database is at a new path now
-
-
-def _flatten_trash(case: "Case") -> None:
-    """Make trash groups stop mirroring the case tree.
-
-    A group used to hold ``media/clip.mp4`` under its own directory, stacking
-    two case trees and making the trash the longest path Azimut could write —
-    on its own enough to pass Windows' 260-character limit. The journal already
-    knows where each file came from, so the files move to numbered slots and the
-    payload gains the ``slots`` list that pairs with ``files``.
-
-    Idempotent: a file already in its slot is left alone, so an interrupted run
-    resumes.
-    """
-    from .engine.trash import slots_for
-
-    groups = [g["id"] for g in case.list_trash()]
-    groups += [g["id"] for g in case.list_incomplete_trash()]
-    for group_id in dict.fromkeys(groups):
-        group = case.get_trash_group(group_id)
-        if group is None:
-            continue
-        payload = dict(group.get("payload") or {})
-        files = [str(rel) for rel in (payload.get("files") or [])]
-        slots = slots_for(files)
-        root = case.trash_dir / group_id
-        for rel, slot in zip(files, slots):
-            source = root / rel
-            destination = root / slot
-            if source.exists() and not destination.exists():
-                shutil.move(str(source), str(destination))
-        _drop_empty_dirs(root)
-        payload["slots"] = slots
-        case.update_trash_group(group_id, payload=payload)
-
-
-def _drop_empty_dirs(root: Path) -> None:
-    """Remove the directories a mirrored group left behind, deepest first."""
-    if not root.is_dir():
-        return
-    for path in sorted(root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-        if path.is_dir() and not any(path.iterdir()):
-            path.rmdir()
-
-
-def _prune_empty_note_dirs(root: Path, directory: Path) -> None:
-    """Drop the folder directories a moved note left empty, up to `notes/`.
-
-    A mirrored tree that keeps every directory a note ever passed through stops
-    being a mirror. Stops at `notes/` itself, which is born with the case.
-
-    Both paths are resolved before they are compared. Callers hand in the note
-    directory as the case knows it and the note's own parent as
-    `resolve_inside` returned it, which are the same directory in two spellings
-    the moment a symlink sits anywhere above the workspace: macOS reaches every
-    temporary directory through `/var` → `/private/var`, and a workspace under a
-    synced or linked folder does the same on any platform. Comparing the two
-    spellings makes the containment check say "outside", and the loop that
-    should prune then does nothing at all.
-    """
-    root = root.resolve()
-    directory = directory.resolve()
-    while directory != root and directory.is_relative_to(root):
-        try:
-            if any(directory.iterdir()):
-                return
-            directory.rmdir()
-        except OSError:
-            return
-        directory = directory.parent
-
-
-def _move_into(source: Path, destination: Path) -> None:
-    """Carry one entry over, skipping what an interrupted run already moved."""
-    if not source.exists() or destination.exists():
-        return
-    ensure_dir(destination.parent)
-    shutil.move(str(source), str(destination))
-
-
-def _hide_the_machinery(case: "Case") -> None:
-    """Move what only Azimut can read out of the way.
-
-    The rule is in `layout.py`: visible means openable in another program.
-    Applied here it moves the database into `.data/`, the media sidecars into
-    `media/.meta/`, the proof specs and their pasted assets into
-    `proofs/.meta/`, and renames `inspect/` and `search/` to dot-directories.
-
-    `exports/` is the one that changes meaning rather than place. It held post
-    drafts — its name was wrong — so the drafts become `.drafts/` and a fresh,
-    empty `exports/` is left behind for what the word actually promises.
-
-    This is the first folder step that rewrites *stored* paths: a proof's
-    ``spec``, a session's ``spec`` and a post's ``draft`` all name a directory
-    that just moved.
-    """
-    root = case.path
-    tool = layout.tool_root(root)
-
-    # The database first, and with no connection open: on Windows an open file
-    # cannot be moved. Nothing holds one here — every backend connection is
-    # scoped to its own `with` — but the cached handle is dropped anyway so the
-    # next access re-resolves against the new path.
-    _move_into(tool / layout.PRE_HIDDEN_DB, layout.database(root))
-    case._sqlite_cache = _UNSET
-
-    # Sidecars: `media/clip.mp4.azimut.json` -> `media/.meta/clip.mp4.json`.
-    media_dir = layout.media(root)
-    if media_dir.is_dir():
-        suffix = layout.PRE_HIDDEN_SIDECAR_SUFFIX
-        for sidecar in sorted(media_dir.glob(f"*{suffix}")):
-            name = sidecar.name[: -len(suffix)]
-            _move_into(sidecar, case.resolve_inside(layout.sidecar_rel(name)))
-
-    # Proof specs and pasted assets join them; the rendered PNG stays visible.
-    proofs_dir = layout.subdir(root, "proofs")
-    if proofs_dir.is_dir():
-        for spec in sorted(proofs_dir.glob("*.json")):
-            _move_into(spec, case.resolve_inside(layout.proof_spec_rel(spec.stem)))
-        for assets in sorted(proofs_dir.glob("*.assets")):
-            _move_into(assets, case.resolve_inside(layout.proof_assets_rel(assets.stem)))
-
-    # The sidecars just moved, and the one-time browse-index backfill may have
-    # already run against their old location. Forget it, so the reopen below
-    # rebuilds the index from where they are now.
-    store = case._sqlite
-    if store is not None:
-        store.forget_media_index()
-        case._sqlite_cache = _UNSET
-
-    for old, new in layout.PRE_HIDDEN_DIRS.items():
-        _move_into(tool / old, tool / new)
-    for directory in layout.content_dirs(root):
-        ensure_dir(directory)
-
-    _rewrite_moved_paths(case)
-
-
-#: entity type -> (attribute holding a case-relative path, old prefix, rebuild).
-_MOVED_ATTRS: dict[str, tuple[str, str, Callable[[str], str]]] = {
-    "proof": ("spec", "proofs/", layout.proof_spec_rel),
-    "inspect-session": ("spec", "inspect/", layout.session_rel),
-    "post": ("draft", "exports/", layout.draft_rel),
-}
-
-
-def _rewrite_moved_paths(case: "Case") -> None:
-    """Point the graph at the directories the migration just renamed.
-
-    Only entities still naming the old location are touched, so a re-run after
-    an interruption rewrites nothing twice.
-    """
-    for entity in case.list_entities():
-        rule = _MOVED_ATTRS.get(str(entity.get("type") or ""))
-        if rule is None:
-            continue
-        attribute, prefix, rebuild = rule
-        current = (entity.get("attrs") or {}).get(attribute)
-        if not isinstance(current, str) or not current.startswith(prefix):
-            continue
-        stem = Path(current).stem
-        case.update_entity(entity["id"], {"attrs": {attribute: rebuild(stem)}})
-
-
-def _name_notes_after_their_titles(case: "Case") -> None:
-    """Make notes stop being named after their entity id.
-
-    `notes/e_03aeb50d41.md` was visible and illegible — in the way without being
-    readable. Every other document already follows "the name is the filename";
-    notes were the only holdout, and only because they are generic entities with
-    their path hardcoded rather than a tool of their own.
-
-    Titles are not unique, so a collision inside one folder takes a numbered
-    suffix, exactly as a new note would.
-
-    An empty patch is the whole migration: `update_entity` already moves a note
-    whose title or folder no longer matches its filename. Once moved, the
-    current path is reserved for that note, so a resumed pass leaves the path
-    and any collision suffix unchanged.
-    """
-    for entity in case.list_entities():
-        if entity.get("type") == "note":
-            case.update_entity(entity["id"], {})
-
-
-def _leave_a_readme(case: "Case") -> None:
-    """Teach a case that predates the free zone which half is whose.
-
-    The wrapper gave the analyst the case root three schemas ago; nothing on
-    disk told them. This is the step that does, and it is the only migration
-    here that writes into their half of the folder rather than ours.
-    """
-    write_readme(case.path)
-
-
-def _align_visible_names(case: "Case") -> None:
-    """Make every analyst-visible filename stem the name Azimut displays.
-
-    Uploads belong to the analyst, so their existing filename wins. Downloads,
-    captures and derived media belong to an Azimut save gate, so their stored
-    title wins and machine timestamps/remote ids remain provenance. Named
-    documents run through their existing rename hooks, which also repairs a
-    Details edit that changed only the graph label.
-    """
-    from .engine import media as media_engine
-
-    media_engine.recover_media_rename(case)
-    for item in list(case.list_media_items()):
-        path = str(item.get("path") or "")
-        if not path:
-            continue
-        source: dict[str, Any] = item["source"] if isinstance(item.get("source"), dict) else {}
-        entity = case.find_entity(attr="path", value=path)
-        if source.get("type") == "upload":
-            desired = Path(path).stem
-        else:
-            desired = str(item.get("title") or (entity or {}).get("label") or Path(path).stem)
-        # `Case.migrate` already owns the case lock. An older case cannot have
-        # live work in this process; waiting here would deadlock a test that
-        # deliberately rewinds a just-created case while its worker is draining.
-        media_engine.rename_media(case, path, desired, settle_worker=False)
-
-    for entity in list(case.list_entities()):
-        if entity.get("type") in {"note", "proof", "inspect-session", "post"}:
-            case.update_entity(entity["id"], {"label": entity.get("label") or ""})
-
-
-def _normalize_case_layout(case: "Case") -> None:
-    """Bring every unreleased folder checkpoint to the final layout.
-
-    Schemas 4 through 7 were useful while building the layout, but no released
-    Azimut wrote them. One normalizer accepts schema 3 and those development
-    states, applies every operation in dependency order, then the runner stamps
-    the current schema once. Each operation is idempotent, so an interrupted
-    pass restarts here without guessing which line completed.
-    """
-    _wrap_case_folder(case)
-    _flatten_trash(case)
-    _hide_the_machinery(case)
-    _name_notes_after_their_titles(case)
-    _leave_a_readme(case)
-    _align_visible_names(case)
 
 
 def open_workspace() -> None:
