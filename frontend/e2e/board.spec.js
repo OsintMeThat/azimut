@@ -420,12 +420,12 @@ test('sorts on a heading, and reverses on a second click', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Name' }).click();
 
-  expect(await names()).toEqual(['checkpoint north', 'harbour watch thread suggested', 'roadside photo']);
+  await expect.poll(names).toEqual(['checkpoint north', 'harbour watch thread suggested', 'roadside photo']);
   await expect(page.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'ascending');
 
   await page.getByRole('button', { name: 'Name' }).click();
 
-  expect(await names()).toEqual(['roadside photo', 'harbour watch thread suggested', 'checkpoint north']);
+  await expect.poll(names).toEqual(['roadside photo', 'harbour watch thread suggested', 'checkpoint north']);
   await expect(page.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'descending');
 });
 

@@ -1790,6 +1790,7 @@ test('a gathered handful is taken out in one act, not one node per read', async 
   await page.keyboard.down('Control');
   await page.mouse.click(first.x, first.y);
   await page.keyboard.up('Control');
+  await expect(page.getByRole('button', { name: /1 held/ })).toBeVisible();
 
   await pick(page, 'Section chief');
   const second = await middle(page);

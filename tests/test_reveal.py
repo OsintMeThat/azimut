@@ -266,7 +266,7 @@ def test_media_route_shows_the_folder_a_file_sits_in(client, shown):
 
     assert res.status_code == 200
     assert shown[0].name == "media"
-    assert shown[0].is_relative_to(config.cases_dir() / cid)
+    assert shown[0].resolve().is_relative_to((config.cases_dir() / cid).resolve())
     assert res.json()["path"].endswith("media")
 
 

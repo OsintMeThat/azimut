@@ -21,6 +21,7 @@ jobs:
   backend:
     name: Backend (${{ matrix.os }}, py${{ matrix.python }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -48,11 +49,19 @@ jobs:
       # --check fails if uv.lock drifted from pyproject.toml (forgot `uv lock`).
       - run: uv lock --check
       - run: uv sync --frozen --extra dev
-      - run: uv run pytest -q --durations=20 --durations-min=1
+      - name: Run backend suite
+        if: runner.os != 'Windows'
+        run: uv run pytest -q --durations=20 --durations-min=1
+      # Windows is the slowest box. Naming every test keeps a genuine stall
+      # diagnosable instead of leaving one silent pytest process for hours.
+      - name: Run backend suite with per-test progress
+        if: runner.os == 'Windows'
+        run: uv run pytest -vv --durations=20 --durations-min=1
 
   lint:
     name: Lint & type-check (backend)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # One box, not the OS/version matrix: ruff and mypy read the same source
     # everywhere, so five runs would just be five identical verdicts. Python
     # 3.12 on purpose — mypy parses numpy's 2.x stubs, which use 3.12 syntax a
@@ -71,6 +80,7 @@ jobs:
   backend-floating:
     name: Backend tests (latest deps)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     # The lock is the safety net; this is the tripwire. It re-resolves everything
     # to the newest versions our ranges allow, so an upstream release that breaks
     # us surfaces here — on a scheduled run we triage — instead of in a user's
@@ -86,6 +96,7 @@ jobs:
   frontend:
     name: Frontend tests + build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
@@ -104,6 +115,7 @@ jobs:
   browser:
     name: Browser canvas interactions
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
