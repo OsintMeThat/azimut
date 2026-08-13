@@ -145,6 +145,7 @@ proof for publication.
 | ✅ **Shared fact time** | Passes one fact-time window between Timeline, Board, Graph and a session-only Map layer without mixing in filing dates. |
 | ✅ **Workspace portability** | Moves or adopts a workspace safely, recovers hand-added cases and prevents two live instances from sharing it silently. |
 | ✅ **Updates & paste** | Reports available app, downloader and extension updates, then files supported clipboard content from the main case surfaces. |
+| ✅ **Saved view management** | Renames a live or frozen reading in its row and orders each family's list by name, edit or surface, with the surface and last write on show. |
 
 
 ---
@@ -161,7 +162,6 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 |------|--------------|
 | **Case Sheet** | Adds editable free columns and CSV/GeoJSON round trips to the shipped Board. Imported loose rows stay outside the graph until promoted. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
-| **Saved view management** | Renames and sorts Board, Graph and Timeline views, with their surface and last modification clearly shown. |
 | **Analysis view export** | Copies or exports the visible Graph or Timeline as a PNG with its lens, question, time window, clock and legend. |
 
 Toward v2: split Satellite.svelte into `lib/` modules, before the map engine

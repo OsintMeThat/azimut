@@ -151,6 +151,12 @@ row's Details.
   case when opened. Every
   later filter, sort, fold, hiding, expansion, camera move and graph drag autosaves;
   the badge says **saving…**, **saved** or **save failed**.
+- **The menu is where a list of readings is kept in order.** Every row states its mode,
+  its surface where the family holds two, and when it was last written — a distance up
+  to a week, then the date, with the exact UTC minute in the tooltip. Past one saved
+  view, **Sort** offers recently updated, name or surface, remembered per family in the
+  browser. **Rename** edits the name in the row itself and is the one edit a snapshot
+  accepts, since a label is not evidence.
 - **A snapshot freezes a reading, not a second case.** It keeps up to 2,000 captured
   entities, their fields and provenance, the relations among them and bounded photo
   previews. Its Search+ controls and every case write are disabled, and its own
@@ -905,8 +911,8 @@ autosaves its window, display timezone, display mode, categories, ordered tracks
 their colours, folds, hidden and pinned entries, grouping and entity scope. A Snapshot
 stores up to 5,000 matching
 temporal rows with their exact track assignments and opens read-only. It does not query
-the current case when reopened. Timeline views can be duplicated, deleted through
-Trash, restored and carried in a complete case bundle.
+the current case when reopened. Timeline views can be renamed, duplicated, deleted
+through Trash, restored and carried in a complete case bundle.
 
 A track that includes Statements can create Claims; Media-only and Case activity
 tracks cannot. Clicking empty space creates a point; dragging creates a bounded range.

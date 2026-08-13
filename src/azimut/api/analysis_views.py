@@ -34,6 +34,10 @@ class AnalysisViewDuplicateIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
 
 
+class AnalysisViewRenameIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
 def _unique(case, name: str, surface: str, *, ignore: str | None = None) -> None:
     """A name is claimed inside its own family, not across the app: the Timeline's
     views and the catalog's are separate lists, and refusing a name the user cannot
@@ -124,6 +128,31 @@ def duplicate_analysis_view(
         created_at=now,
         snapshot_copy=True,
     )
+
+
+@router.patch("/{view_id}")
+def rename_analysis_view(
+    case_id: str, view_id: str, body: AnalysisViewRenameIn
+) -> dict[str, Any]:
+    """Rename one reading, whatever it holds.
+
+    A snapshot refuses `PUT` because its capture is evidence, but its label is not:
+    renaming is the one edit both modes accept, and it leaves the spec untouched. The
+    answer is the menu row rather than the whole view, so relabelling a large capture
+    does not ship it back.
+    """
+    case = get_case(case_id)
+    current = case.get_analysis_view(view_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail=f"analysis view '{view_id}' not found")
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="an analysis view needs a name")
+    _unique(case, name, current["surface"], ignore=view_id)
+    renamed = case.rename_analysis_view(view_id, name, _now())
+    if renamed is None:  # pragma: no cover - the read above is the invariant
+        raise HTTPException(status_code=404, detail=f"analysis view '{view_id}' not found")
+    return view_engine.summary(renamed)
 
 
 @router.put("/{view_id}")

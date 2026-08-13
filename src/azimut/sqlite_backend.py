@@ -938,6 +938,30 @@ class SqliteCase:
             raise CaseError(f"analysis view '{view['id']}' was not saved")
         return saved
 
+    def rename_analysis_view(
+        self, view_id: str, name: str, updated_at: str
+    ) -> dict[str, Any] | None:
+        """Give one saved reading another name, leaving the reading itself alone.
+
+        The spec column is never touched here, so a snapshot keeps the exact bytes it
+        captured: a label is not evidence, and rewriting thousands of frozen rows to
+        change one is both slow and a chance to lose them.
+        """
+
+        def op(conn: sqlite3.Connection) -> bool:
+            cursor = conn.execute(
+                "UPDATE analysis_views SET name = ?, updated_at = ? WHERE id = ?",
+                (name, updated_at, view_id),
+            )
+            renamed = cursor.rowcount > 0
+            if renamed:
+                self._touch(conn)
+            return renamed
+
+        if not self._write(op):
+            return None
+        return self.get_analysis_view(view_id)
+
     def remove_analysis_view(self, view_id: str) -> dict[str, Any] | None:
         """Remove one view and return the recipe Trash needs to restore it."""
         existing = self.get_analysis_view(view_id)

@@ -310,6 +310,11 @@ class CaseStore:
     def save_analysis_view(self, view: dict[str, Any]) -> dict[str, Any]:
         return self._graph().save_analysis_view(view)
 
+    def rename_analysis_view(
+        self, view_id: str, name: str, updated_at: str
+    ) -> dict[str, Any] | None:
+        return self._graph().rename_analysis_view(view_id, name, updated_at)
+
     def remove_analysis_view(self, view_id: str) -> dict[str, Any] | None:
         return self._graph().remove_analysis_view(view_id)
 

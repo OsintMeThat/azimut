@@ -315,6 +315,12 @@ class CaseRepository(Protocol):
     def save_analysis_view(self, view: dict[str, Any]) -> dict[str, Any]:
         ...
 
+    def rename_analysis_view(
+        self, view_id: str, name: str, updated_at: str
+    ) -> dict[str, Any] | None:
+        """Relabel one reading without rewriting the recipe or capture it holds."""
+        ...
+
     def remove_analysis_view(self, view_id: str) -> dict[str, Any] | None:
         ...
 
