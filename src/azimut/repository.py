@@ -66,6 +66,9 @@ class CaseRepository(Protocol):
         since: str | None = None,
         until: str | None = None,
         filed_by: list[str] | None = None,
+        temporal_since: str | None = None,
+        temporal_until: str | None = None,
+        temporal_categories: list[str] | None = None,
         order: str = "",
     ) -> dict[str, Any]:
         """A bounded, filtered slice of the catalog (Step 5, "Bounded loading").
@@ -182,6 +185,9 @@ class CaseRepository(Protocol):
         since: str | None = None,
         until: str | None = None,
         filed_by: list[str] | None = None,
+        temporal_since: str | None = None,
+        temporal_until: str | None = None,
+        temporal_categories: list[str] | None = None,
         link_types: list[str] | None = None,
         order: str = "degree",
     ) -> dict[str, Any]:
@@ -437,6 +443,35 @@ class CaseRepository(Protocol):
         """
         ...
 
+    def timeline_page(
+        self,
+        *,
+        since: str | None = None,
+        until: str | None = None,
+        categories: list[str] | None = None,
+        entity_id: str | None = None,
+        include_undated: bool = True,
+        limit: int = 100,
+        cursor: str | None = None,
+        bucket: str | None = None,
+        track: dict[str, Any] | None = None,
+        spread: bool = False,
+    ) -> dict[str, Any]:
+        """One bounded temporal page plus optional density buckets.
+
+        ``spread`` samples the page across the whole window instead of taking its
+        front, for a reader that draws the page on an axis.
+        """
+        ...
+
+    def rebuild_temporal_projection(self) -> int:
+        """Recreate the derived temporal index from graph and media authorities."""
+        ...
+
+    def temporal_projection_status(self) -> dict[str, int | bool]:
+        """Compare the derived temporal index with its graph and media authorities."""
+        ...
+
     # -- entity mutations --------------------------------------------------
 
     def add_entity(
@@ -452,6 +487,19 @@ class CaseRepository(Protocol):
         ...
 
     def update_entity(self, entity_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        ...
+
+    def save_temporal_claim(
+        self,
+        *,
+        entity_id: str | None,
+        label: str,
+        attrs: dict[str, Any],
+        connectors: dict[str, list[str]] | None,
+        by: str,
+        status: EntityStatus = "confirmed",
+    ) -> dict[str, Any]:
+        """Create or replace a Claim and selected connectors atomically."""
         ...
 
     def remove_entity(self, entity_id: str) -> None:

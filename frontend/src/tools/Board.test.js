@@ -110,9 +110,10 @@ describe('bounded loading', () => {
 
   it('re-establishes the baseline when the question changes', () => {
     // page two of "every type" is not page two of "places", and the request itself is
-    // the key: a term that changes nothing about what is asked reloads nothing
+    // the key: a term that changes nothing about what is asked reloads nothing. The
+    // fact-time window is part of the question, so moving it reloads too.
     expect(source).toMatch(
-      /const asked = JSON\.stringify\(\[\s*toQuery\(filter, \{ types: wantedTypes \}\), order, analysisSearch\.snapshotId,\s*\]\)/
+      /const asked = JSON\.stringify\(\[\s*toQuery\(filter, \{ types: wantedTypes \}\),\s*analysisPeriodQuery\(analysisSearch\.period\),\s*order,\s*catalogViews\.snapshotId,\s*\]\)/
     );
     expect(source).toContain('void pl.reload()');
   });
@@ -165,9 +166,13 @@ describe('the question is one value, and one bar that never changes shape', () =
     expect(source).toContain('if (!wantedTypes.length && !fieldsWanted) {');
   });
 
-  it('asks for a type first only on a case too large for the menu to be read', () => {
-    expect(source).toContain('const FACET_SCAN_MAX = 5000');
-    expect(source).toContain("facetState = 'narrow-first'");
+  it('offers the field menu at any case size', () => {
+    // it used to go dark past five thousand entities, which is exactly the case where
+    // a field is the only practical way to narrow. The scan is linear and small; the
+    // bound that keeps the menu readable is the server's own one on values.
+    expect(source).not.toMatch(/FACET_SCAN_MAX/);
+    expect(source).not.toMatch(/narrow-first/);
+    expect(source).not.toMatch(/summary\?\.total \?\? 0\) >/);
   });
 
   it('drops a term the narrowing has left with nothing to answer, and says so', () => {
@@ -316,7 +321,7 @@ describe('creating one', () => {
 
 describe('a frozen analysis snapshot', () => {
   it('keeps its question and captured rows read-only while retaining details', () => {
-    expect(source).toContain('const snapshotReading = $derived(Boolean(analysisSearch.snapshotId))');
+    expect(source).toContain('const snapshotReading = $derived(Boolean(catalogViews.snapshotId))');
     expect(source).toContain('disabled={!caseState.current || importing || snapshotReading}');
     expect(source).toContain('disabled={snapshotReading}');
     expect(source).toContain('{#if openId && !snapshotReading}');
@@ -405,7 +410,11 @@ describe('adding the statements up', () => {
     expect(source).toContain("{ id: 'rows', label: 'Rows', icon: 'note'");
     expect(source).toContain("id: 'totals',");
     expect(source).toContain("onpick={(id) => (totalling = id === 'totals')}");
-    expect(source).toContain('buildTallyQuery(caseState.current.id, toQuery(filter, { types: wantedTypes }))');
+    // The totals answer the question on screen, period included: a sum over a wider
+    // window than the table is showing would be a different question.
+    expect(source).toMatch(
+      /buildTallyQuery\(caseState\.current\.id, \{\s*\.\.\.toQuery\(filter, \{ types: wantedTypes \}\),\s*\.\.\.analysisPeriodQuery\(analysisSearch\.period\),\s*\}\)/
+    );
   });
 
   it('offers Totals from the first day, dimmed until it can draw a real line', () => {

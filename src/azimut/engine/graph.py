@@ -308,6 +308,9 @@ def view(
     since: str | None = None,
     until: str | None = None,
     filed_by: list[str] | None = None,
+    temporal_since: str | None = None,
+    temporal_until: str | None = None,
+    temporal_categories: list[str] | None = None,
     order: str = "degree",
     keep: list[str] | None = None,
     expand: list[str] | None = None,
@@ -367,6 +370,8 @@ def view(
         query=query, folder=folder, unfiled=unfiled, recursive=recursive,
         attr=attr, attr_value=attr_value, linked=linked, unlinked_only=unlinked,
         since=since, until=until, filed_by=filed_by,
+        temporal_since=temporal_since, temporal_until=temporal_until,
+        temporal_categories=temporal_categories,
         link_types=verbs, order=order,
     )
     nodes = ranked["entities"]

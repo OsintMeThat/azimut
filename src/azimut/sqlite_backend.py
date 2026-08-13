@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -28,6 +29,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, TypeVar
 from .engine import entities as entity_engine
 from .engine import links as link_engine
 from .engine import mapsites
+from .engine import timeline as timeline_engine
 from . import layout
 from .repository import EntityStatus
 from .workspace import Case, CaseError, _new_id, _now, _parse_cursor, _replace_with_retry
@@ -78,7 +80,12 @@ if TYPE_CHECKING:
 # or Graph reading. A snapshot keeps its captured entities and links inside the
 # recipe; a live view keeps only the question and presentation state. Its denormalised
 # count lets a bounded menu say how large a capture is without parsing its JSON.
-SQLITE_SCHEMA = 14
+# Schema 14 indexes catalog ordering. Schema 15 adds the rebuildable temporal
+# projection used by Time and Timeline; Claims and media sidecars remain authoritative.
+# Schema 16 lets the existing Analysis View store own Timeline recipes and snapshots.
+# Schema 17 rebuilds the derived temporal projection with fixed-width UTC bounds, so
+# SQLite text ordering remains chronological at sub-second precision.
+SQLITE_SCHEMA = 17
 
 _SCHEMA = """
 CREATE TABLE meta (
@@ -186,7 +193,7 @@ CREATE TABLE analysis_views (
     id         TEXT PRIMARY KEY,
     name       TEXT NOT NULL,
     mode       TEXT NOT NULL CHECK (mode IN ('live', 'snapshot')),
-    surface    TEXT NOT NULL CHECK (surface IN ('board', 'graph')),
+    surface    TEXT NOT NULL CHECK (surface IN ('board', 'graph', 'timeline')),
     spec_json  TEXT NOT NULL,
     snapshot_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -208,6 +215,28 @@ CREATE TABLE media_items (
     source_op    TEXT,
     imagery_mode TEXT,
     has_gps      INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE temporal_items (
+    id          TEXT PRIMARY KEY,
+    owner_id    TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    authority   TEXT NOT NULL CHECK (authority IN ('entity', 'media')),
+    category    TEXT NOT NULL CHECK (
+        category IN ('statement', 'media', 'case_activity')
+    ),
+    kind        TEXT NOT NULL,
+    raw         TEXT,
+    earliest    TEXT,
+    latest      TEXT,
+    precision   TEXT,
+    shape       TEXT,
+    time_role   TEXT,
+    uncertain   INTEGER NOT NULL DEFAULT 0 CHECK (uncertain IN (0, 1)),
+    approximate INTEGER NOT NULL DEFAULT 0 CHECK (approximate IN (0, 1)),
+    zone        TEXT,
+    sortable    INTEGER NOT NULL DEFAULT 0 CHECK (sortable IN (0, 1)),
+    status      TEXT,
+    confidence  TEXT,
+    parse_error TEXT
 );
 CREATE INDEX idx_entities_type   ON entities(type);
 CREATE INDEX idx_entities_status ON entities(prov_status);
@@ -231,6 +260,9 @@ CREATE INDEX idx_media_added    ON media_items(added_at);
 CREATE INDEX idx_media_source   ON media_items(source_type);
 CREATE INDEX idx_media_gps      ON media_items(has_gps);
 CREATE INDEX idx_trash_deleted  ON trash(deleted_at);
+CREATE INDEX idx_temporal_window ON temporal_items(category, earliest, latest);
+CREATE INDEX idx_temporal_owner  ON temporal_items(owner_id, category);
+CREATE INDEX idx_temporal_kind   ON temporal_items(kind);
 """
 
 # Job lifecycle (doc "Job states"): a fresh job is `queued`; the worker claims it
@@ -489,6 +521,9 @@ def _entity_filters(
     since: str | None = None,
     until: str | None = None,
     filed_by: list[str] | None = None,
+    temporal_since: str | None = None,
+    temporal_until: str | None = None,
+    temporal_categories: list[str] | None = None,
     alias: str = "entities",
 ) -> tuple[str, list[Any]]:
     """The shared ``WHERE`` over entities: type set, review status, folder, search.
@@ -560,6 +595,29 @@ def _entity_filters(
     if filed_by:
         where.append(f"prov_by IN ({_marks(filed_by)})")
         params.extend(filed_by)
+    if temporal_since is not None or temporal_until is not None:
+        if temporal_since is None or temporal_until is None:
+            raise CaseError("a temporal filter needs both boundaries")
+        categories = list(dict.fromkeys(
+            temporal_categories or list(timeline_engine.DEFAULT_CATEGORIES)
+        ))
+        invalid = sorted(set(categories) - set(timeline_engine.ALL_CATEGORIES))
+        if invalid:
+            raise CaseError(f"unknown timeline category '{invalid[0]}'")
+        if not categories:
+            raise CaseError("a temporal filter needs a category")
+        where.append(
+            "EXISTS (SELECT 1 FROM temporal_items temporal_match"
+            " WHERE temporal_match.earliest IS NOT NULL"
+            " AND temporal_match.latest > ? AND temporal_match.earliest < ?"
+            f" AND temporal_match.category IN ({_marks(categories)})"
+            f" AND (temporal_match.owner_id = {alias}.id OR EXISTS ("
+            "SELECT 1 FROM links temporal_scope"
+            " WHERE temporal_scope.from_id = temporal_match.owner_id"
+            f" AND temporal_scope.to_id = {alias}.id"
+            " AND temporal_scope.type IN ('about', 'at', 'cites'))))"
+        )
+        params.extend((temporal_since, temporal_until, *categories))
     return ((" WHERE " + " AND ".join(where)) if where else "", params)
 
 
@@ -640,6 +698,192 @@ def _replace_exact(value: Any, old: str, new: str) -> Any:
     if isinstance(value, dict):
         return {key: _replace_exact(item, old, new) for key, item in value.items()}
     return value
+
+
+_TEMPORAL_COLUMNS = (
+    "id", "owner_id", "authority", "category", "kind", "raw", "earliest",
+    "latest", "precision", "shape", "time_role", "uncertain", "approximate",
+    "zone", "sortable", "status", "confidence", "parse_error",
+)
+
+
+def _write_temporal_rows(
+    conn: sqlite3.Connection,
+    owner_id: str,
+    authority: str,
+    rows: list[timeline_engine.ProjectionRow],
+) -> None:
+    """Replace one authority's derived rows for one owner."""
+    conn.execute(
+        "DELETE FROM temporal_items WHERE owner_id = ? AND authority = ?",
+        (owner_id, authority),
+    )
+    placeholders = ", ".join("?" for _ in _TEMPORAL_COLUMNS)
+    for row in rows:
+        record = row.record()
+        conn.execute(
+            f"INSERT INTO temporal_items({', '.join(_TEMPORAL_COLUMNS)})"
+            f" VALUES({placeholders})",
+            tuple(record[column] for column in _TEMPORAL_COLUMNS),
+        )
+
+
+def _entity_for_projection(row: sqlite3.Row) -> dict[str, Any]:
+    entity: dict[str, Any] = {
+        "id": row["id"],
+        "type": row["type"],
+        "label": row["label"],
+        "attrs": json.loads(row["attrs_json"]),
+        "provenance": {
+            "by": row["prov_by"],
+            "at": row["prov_at"],
+            "status": row["prov_status"],
+        },
+    }
+    if row["prov_source"] is not None:
+        entity["provenance"]["source"] = row["prov_source"]
+    return entity
+
+
+def _sync_entity_temporal(conn: sqlite3.Connection, entity: dict[str, Any]) -> None:
+    _write_temporal_rows(
+        conn,
+        str(entity["id"]),
+        "entity",
+        timeline_engine.project_entity(entity),
+    )
+
+
+def _sync_media_temporal(
+    conn: sqlite3.Connection, item: dict[str, Any], entity_id: str | None
+) -> None:
+    if not entity_id:
+        return
+    # The media browse contract historically permits a row whose optional
+    # entity id no longer resolves (imports repair that association later).
+    # Temporal rows do carry a foreign key, so only project an owner that exists.
+    if conn.execute("SELECT 1 FROM entities WHERE id = ?", (entity_id,)).fetchone() is None:
+        return
+    _write_temporal_rows(
+        conn,
+        entity_id,
+        "media",
+        timeline_engine.project_media(item, entity_id),
+    )
+
+
+def _rebuild_temporal_projection_conn(conn: sqlite3.Connection) -> int:
+    """Rebuild the projection in the caller's transaction, returning its size."""
+    conn.execute("DELETE FROM temporal_items")
+    for row in conn.execute("SELECT * FROM entities ORDER BY rowid").fetchall():
+        _sync_entity_temporal(conn, _entity_for_projection(row))
+    for row in conn.execute(
+        "SELECT item_json, entity_id FROM media_items"
+        " WHERE entity_id IS NOT NULL ORDER BY rowid"
+    ).fetchall():
+        _sync_media_temporal(conn, json.loads(row["item_json"]), row["entity_id"])
+    return int(conn.execute("SELECT COUNT(*) FROM temporal_items").fetchone()[0])
+
+
+def _temporal_projection_status_conn(conn: sqlite3.Connection) -> dict[str, int | bool]:
+    """Compare the derived index with graph and media authorities without writing."""
+    expected: dict[str, tuple[Any, ...]] = {}
+
+    def remember(rows: list[timeline_engine.ProjectionRow]) -> None:
+        for row in rows:
+            record = row.record()
+            expected[row.id] = tuple(
+                int(record[column])
+                if column in {"uncertain", "approximate", "sortable"}
+                else record[column]
+                for column in _TEMPORAL_COLUMNS
+            )
+
+    entity_rows = conn.execute("SELECT * FROM entities ORDER BY rowid").fetchall()
+    entity_ids = {str(row["id"]) for row in entity_rows}
+    for row in entity_rows:
+        remember(timeline_engine.project_entity(_entity_for_projection(row)))
+    for row in conn.execute(
+        "SELECT item_json, entity_id FROM media_items"
+        " WHERE entity_id IS NOT NULL ORDER BY rowid"
+    ).fetchall():
+        entity_id = str(row["entity_id"])
+        if entity_id in entity_ids:
+            remember(timeline_engine.project_media(json.loads(row["item_json"]), entity_id))
+
+    actual = {
+        str(row["id"]): tuple(row[column] for column in _TEMPORAL_COLUMNS)
+        for row in conn.execute(
+            f"SELECT {', '.join(_TEMPORAL_COLUMNS)} FROM temporal_items"
+        ).fetchall()
+    }
+    missing = expected.keys() - actual.keys()
+    extra = actual.keys() - expected.keys()
+    changed = {
+        item_id for item_id in expected.keys() & actual.keys()
+        if expected[item_id] != actual[item_id]
+    }
+    return {
+        "consistent": not (missing or extra or changed),
+        "expected": len(expected),
+        "actual": len(actual),
+        "missing": len(missing),
+        "extra": len(extra),
+        "changed": len(changed),
+    }
+
+
+def _timeline_cursor(group: int, stamp: str, item_id: str) -> str:
+    body = json.dumps([group, stamp, item_id], separators=(",", ":")).encode()
+    return urlsafe_b64encode(body).decode().rstrip("=")
+
+
+def _timeline_phase_cursor(stride: int, phase: int) -> str:
+    body = json.dumps(["phase", stride, phase], separators=(",", ":")).encode()
+    return urlsafe_b64encode(body).decode().rstrip("=")
+
+
+def _decode_cursor(cursor: str) -> Any:
+    padded = cursor + "=" * (-len(cursor) % 4)
+    return json.loads(urlsafe_b64decode(padded.encode()).decode())
+
+
+def _parse_timeline_cursor(cursor: str | None) -> tuple[int, str, str] | None:
+    if cursor is None:
+        return None
+    try:
+        value = _decode_cursor(cursor)
+        if (
+            not isinstance(value, list)
+            or len(value) != 3
+            or value[0] not in (0, 1)
+            or not isinstance(value[1], str)
+            or not isinstance(value[2], str)
+        ):
+            raise ValueError
+        return int(value[0]), value[1], value[2]
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        raise CaseError(f"invalid timeline cursor '{cursor}'") from None
+
+
+def _parse_timeline_phase(cursor: str | None) -> tuple[int, int] | None:
+    """Where a spread read resumes: which of ``stride`` interleaved slices is next."""
+    if cursor is None:
+        return None
+    try:
+        value = _decode_cursor(cursor)
+        if (
+            not isinstance(value, list)
+            or len(value) != 3
+            or value[0] != "phase"
+            or any(not isinstance(part, int) or isinstance(part, bool) for part in value[1:])
+            or not 1 <= value[1] <= 100_000
+            or not 0 <= value[2] < value[1]
+        ):
+            raise ValueError
+        return int(value[1]), int(value[2])
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        raise CaseError(f"invalid timeline cursor '{cursor}'") from None
 
 
 def _migrate_1_to_2(conn: sqlite3.Connection) -> None:
@@ -859,6 +1103,65 @@ def _migrate_13_to_14(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX idx_entities_filed ON entities(prov_at)")
 
 
+def _migrate_14_to_15(conn: sqlite3.Connection) -> None:
+    """Add and backfill the rebuildable Time and Timeline search projection."""
+    conn.execute(
+        "CREATE TABLE temporal_items ("
+        " id TEXT PRIMARY KEY,"
+        " owner_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,"
+        " authority TEXT NOT NULL CHECK (authority IN ('entity', 'media')),"
+        " category TEXT NOT NULL CHECK ("
+        "category IN ('statement', 'media', 'case_activity')"
+        "),"
+        " kind TEXT NOT NULL, raw TEXT, earliest TEXT, latest TEXT, precision TEXT,"
+        " shape TEXT, time_role TEXT,"
+        " uncertain INTEGER NOT NULL DEFAULT 0 CHECK (uncertain IN (0, 1)),"
+        " approximate INTEGER NOT NULL DEFAULT 0 CHECK (approximate IN (0, 1)),"
+        " zone TEXT, sortable INTEGER NOT NULL DEFAULT 0 CHECK (sortable IN (0, 1)),"
+        " status TEXT, confidence TEXT, parse_error TEXT"
+        ")"
+    )
+    conn.execute(
+        "CREATE INDEX idx_temporal_window"
+        " ON temporal_items(category, earliest, latest)"
+    )
+    conn.execute(
+        "CREATE INDEX idx_temporal_owner ON temporal_items(owner_id, category)"
+    )
+    conn.execute("CREATE INDEX idx_temporal_kind ON temporal_items(kind)")
+    _rebuild_temporal_projection_conn(conn)
+
+
+def _migrate_15_to_16(conn: sqlite3.Connection) -> None:
+    """Extend the case-owned Analysis View contract to Timeline readings."""
+    conn.execute("ALTER TABLE analysis_views RENAME TO analysis_views_legacy")
+    conn.execute(
+        "CREATE TABLE analysis_views ("
+        " id TEXT PRIMARY KEY, name TEXT NOT NULL,"
+        " mode TEXT NOT NULL CHECK (mode IN ('live', 'snapshot')),"
+        " surface TEXT NOT NULL CHECK (surface IN ('board', 'graph', 'timeline')),"
+        " spec_json TEXT NOT NULL, snapshot_count INTEGER NOT NULL DEFAULT 0,"
+        " created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    # Named, not `SELECT *`: the legacy table's columns are in whatever order its own
+    # history left them, and a positional copy would silently rotate the last three.
+    conn.execute(
+        "INSERT INTO analysis_views"
+        " (id, name, mode, surface, spec_json, snapshot_count, created_at, updated_at)"
+        " SELECT id, name, mode, surface, spec_json, snapshot_count, created_at,"
+        " updated_at FROM analysis_views_legacy"
+    )
+    conn.execute("DROP TABLE analysis_views_legacy")
+    conn.execute(
+        "CREATE INDEX idx_analysis_views_updated ON analysis_views(updated_at DESC)"
+    )
+
+
+def _migrate_16_to_17(conn: sqlite3.Connection) -> None:
+    """Rewrite temporal bounds to their fixed-width sortable representation."""
+    _rebuild_temporal_projection_conn(conn)
+
+
 # from_version -> function(conn) applying the in-place upgrade to from_version + 1.
 # The whole chain runs inside one immediate transaction in `SqliteCase._upgrade`,
 # which stamps each new schema_version and records each migration as it goes; a
@@ -878,6 +1181,9 @@ _SQLITE_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     11: _migrate_11_to_12,
     12: _migrate_12_to_13,
     13: _migrate_13_to_14,
+    14: _migrate_14_to_15,
+    15: _migrate_15_to_16,
+    16: _migrate_16_to_17,
 }
 
 _MEDIA_CATEGORIES = (
@@ -1399,6 +1705,9 @@ class SqliteCase:
         since: str | None = None,
         until: str | None = None,
         filed_by: list[str] | None = None,
+        temporal_since: str | None = None,
+        temporal_until: str | None = None,
+        temporal_categories: list[str] | None = None,
         link_types: list[str] | None = None,
         order: str = "degree",
     ) -> dict[str, Any]:
@@ -1434,6 +1743,8 @@ class SqliteCase:
             folder=folder, unfiled=unfiled, recursive=recursive,
             attr=attr, attr_value=attr_value, linked=linked, unlinked=unlinked_only,
             since=since, until=until, filed_by=filed_by,
+            temporal_since=temporal_since, temporal_until=temporal_until,
+            temporal_categories=temporal_categories,
             # This statement names the entity table `e`, and the shared predicate has
             # one term that correlates to the outer row rather than reading a column.
             alias="e",
@@ -1600,7 +1911,10 @@ class SqliteCase:
     def save_analysis_view(self, view: dict[str, Any]) -> dict[str, Any]:
         """Insert or replace one validated recipe as a single transaction."""
         spec = json.dumps(view["spec"], ensure_ascii=False, separators=(",", ":"))
-        snapshot_count = len(view["spec"].get("snapshot", {}).get("entities", []))
+        snapshot = view["spec"].get("snapshot", {})
+        snapshot_count = len(
+            snapshot.get("timeline_items", snapshot.get("entities", []))
+        )
 
         def op(conn: sqlite3.Connection) -> None:
             conn.execute(
@@ -1815,6 +2129,9 @@ class SqliteCase:
         since: str | None = None,
         until: str | None = None,
         filed_by: list[str] | None = None,
+        temporal_since: str | None = None,
+        temporal_until: str | None = None,
+        temporal_categories: list[str] | None = None,
         order: str = "",
     ) -> dict[str, Any]:
         """A bounded, cursor-paginated slice of entities, in insertion order or sorted.
@@ -1847,6 +2164,8 @@ class SqliteCase:
             folder=folder, unfiled=unfiled, recursive=recursive,
             attr=attr, attr_value=attr_value, linked=linked, unlinked=unlinked,
             since=since, until=until, filed_by=filed_by,
+            temporal_since=temporal_since, temporal_until=temporal_until,
+            temporal_categories=temporal_categories,
         )
         clause, params = filter_clause, list(filter_params)
         sort_key = ""
@@ -2009,6 +2328,15 @@ class SqliteCase:
         Scanned in Python like ``find_entity``, deliberately: it is a bounded read
         behind an explicit act, and a JSON1 grouping would put the one thing this
         module refuses to depend on in the middle of a menu.
+
+        **What it costs, so no caller gates on case size again.** The scan is linear
+        in the rows the narrowing covers and small per row: measured at 6 ms for 1 000
+        entities, 0.3 s for 50 000 and 0.7 s for 100 000, with a distinct ``path`` and
+        ``sha256`` each — the shape that overflows ``limit`` and so pays the most.
+        The Board and the graph used to darken the field menu past five thousand,
+        which cost the cases that most need a field to narrow with the one filter that
+        scales for them. The bound that keeps a menu readable is the one on values,
+        above.
         """
         wanted = list(dict.fromkeys(types or []))
         counts: dict[str, int] = {}
@@ -2410,6 +2738,16 @@ class SqliteCase:
             " has_gps = excluded.has_gps",
             (values[0], entity_id, *values[1:]),
         )
+        indexed = conn.execute(
+            "SELECT item_json, entity_id FROM media_items WHERE path = ?",
+            (values[0],),
+        ).fetchone()
+        assert indexed is not None
+        _sync_media_temporal(
+            conn,
+            json.loads(indexed["item_json"]),
+            indexed["entity_id"],
+        )
 
     def upsert_media_item(
         self, item: dict[str, Any], *, entity_id: str | None = None
@@ -2421,7 +2759,16 @@ class SqliteCase:
 
     def remove_media_item(self, path: str) -> None:
         def op(conn: sqlite3.Connection) -> None:
+            row = conn.execute(
+                "SELECT entity_id FROM media_items WHERE path = ?", (path,)
+            ).fetchone()
             conn.execute("DELETE FROM media_items WHERE path = ?", (path,))
+            if row is not None and row["entity_id"]:
+                conn.execute(
+                    "DELETE FROM temporal_items"
+                    " WHERE owner_id = ? AND authority = 'media'",
+                    (row["entity_id"],),
+                )
 
         self._write(op)
 
@@ -2684,6 +3031,373 @@ class SqliteCase:
             },
         }
 
+    # -- temporal projection ---------------------------------------------
+
+    @staticmethod
+    def _timeline_scope(
+        *, categories: list[str], entity_id: str | None,
+        track: dict[str, Any] | None = None,
+    ) -> tuple[list[str], list[Any]]:
+        invalid = sorted(set(categories) - set(timeline_engine.ALL_CATEGORIES))
+        if invalid:
+            raise CaseError(f"unknown timeline category '{invalid[0]}'")
+        if not categories:
+            raise CaseError("at least one timeline category is required")
+        placeholders = ", ".join("?" for _ in categories)
+        where = [f"t.category IN ({placeholders})"]
+        params: list[Any] = list(categories)
+        if entity_id:
+            where.append(
+                "(t.owner_id = ? OR EXISTS ("
+                "SELECT 1 FROM links temporal_link"
+                " WHERE temporal_link.from_id = t.owner_id"
+                " AND temporal_link.to_id = ?"
+                " AND temporal_link.type IN ('about', 'at', 'cites')))"
+            )
+            params.extend((entity_id, entity_id))
+        query: dict[str, Any] = track if isinstance(track, dict) else {}
+        roles = [
+            value for value in query.get("roles", [])
+            if value in {"occurred", "observed", "valid", "unset"}
+        ] if isinstance(query.get("roles"), list) else []
+        if roles:
+            role_values = [value for value in roles if value != "unset"]
+            role_parts = []
+            if role_values:
+                role_parts.append(f"t.time_role IN ({_marks(role_values)})")
+                params.extend(role_values)
+            if "unset" in roles:
+                role_parts.append("t.time_role IS NULL")
+            where.append("(" + " OR ".join(role_parts) + ")")
+
+        raw_terms: dict[Any, Any] = (
+            query["terms"] if isinstance(query.get("terms"), dict) else {}
+        )
+        terms = {str(key): value for key, value in raw_terms.items()}
+        has_terms = any(value not in (None, "", [], False) for value in terms.values())
+        relation_value = query.get("relation")
+        relation = relation_value if isinstance(relation_value, str) else None
+        relation_key = relation or "any"
+        if has_terms:
+            def term(key: str) -> str:
+                return str(terms.get(key) or "")[:1000]
+
+            types = [part for part in term("type").split(",") if part][:100]
+            filed_by = [part for part in term("by").split(",") if part][:100]
+            entity_clause, entity_params = _entity_filters(
+                types=types or None,
+                status=(
+                    term("status")
+                    if term("status") in {"confirmed", "suggested"}
+                    else None
+                ),
+                query=term("q") or None,
+                folder=term("folder") or None,
+                unfiled=term("unfiled").lower() == "true",
+                recursive=term("recursive").lower() == "true",
+                attr=term("attr") or None,
+                attr_value=term("value") or None,
+                linked=term("linked") or None,
+                unlinked=term("unlinked").lower() == "true",
+                since=term("since") or None,
+                until=term("until") or None,
+                filed_by=filed_by or None,
+                alias="scope_entity",
+            )
+            match = entity_clause.removeprefix(" WHERE ") or "1"
+            relation_types = {
+                "about": ("about",),
+                "place": ("at",),
+                "source": ("cites",),
+                "owner": (),
+                "any": ("about", "at", "cites"),
+            }.get(relation_key, ("about", "at", "cites"))
+            reaches = ["scope_entity.id = t.owner_id"] if relation_key in {"any", "owner"} else []
+            if relation_types:
+                reaches.append(
+                    "EXISTS (SELECT 1 FROM links track_link"
+                    " WHERE track_link.from_id = t.owner_id"
+                    " AND track_link.to_id = scope_entity.id"
+                    f" AND track_link.type IN ({_marks(list(relation_types))}))"
+                )
+                entity_params.extend(relation_types)
+            where.append(
+                "EXISTS (SELECT 1 FROM entities scope_entity WHERE "
+                f"({match}) AND ({' OR '.join(reaches)}))"
+            )
+            params.extend(entity_params)
+        elif relation in {"about", "place", "source"}:
+            connector = {"about": "about", "place": "at", "source": "cites"}[relation]
+            where.append(
+                "EXISTS (SELECT 1 FROM links track_link"
+                " WHERE track_link.from_id = t.owner_id AND track_link.type = ?)"
+            )
+            params.append(connector)
+        hidden_raw: list[Any] = (
+            query["hidden"] if isinstance(query.get("hidden"), list) else []
+        )
+        hidden = [str(value) for value in hidden_raw[:500] if value]
+        if hidden:
+            where.append(f"t.id NOT IN ({_marks(hidden)})")
+            params.extend(hidden)
+        return where, params
+
+    @staticmethod
+    def _timeline_item(
+        row: sqlite3.Row, connectors: dict[str, dict[str, list[dict[str, str]]]]
+    ) -> dict[str, Any]:
+        joined = connectors.get(row["owner_id"], {})
+        return {
+            "id": row["id"],
+            "owner_id": row["owner_id"],
+            "authority": row["authority"],
+            "category": row["category"],
+            "kind": row["kind"],
+            "label": row["label"],
+            "raw": row["raw"],
+            "earliest": row["earliest"],
+            "latest": row["latest"],
+            "precision": row["precision"],
+            "shape": row["shape"],
+            "time_role": row["time_role"],
+            "uncertain": bool(row["uncertain"]),
+            "approximate": bool(row["approximate"]),
+            "zone": row["zone"],
+            "sortable": bool(row["sortable"]),
+            "status": row["status"],
+            "confidence": row["confidence"],
+            "parse_error": row["parse_error"],
+            "owner_type": row["owner_type"],
+            "subjects": [entry["id"] for entry in joined.get("about", [])],
+            "places": [entry["id"] for entry in joined.get("at", [])],
+            "sources": [entry["id"] for entry in joined.get("cites", [])],
+            "subject_entities": joined.get("about", []),
+            "place_entities": joined.get("at", []),
+            "source_entities": joined.get("cites", []),
+        }
+
+    def timeline_page(
+        self,
+        *,
+        since: str | None = None,
+        until: str | None = None,
+        categories: list[str] | None = None,
+        entity_id: str | None = None,
+        include_undated: bool = True,
+        limit: int = 100,
+        cursor: str | None = None,
+        bucket: str | None = None,
+        track: dict[str, Any] | None = None,
+        spread: bool = False,
+    ) -> dict[str, Any]:
+        """Return one indexed, homogeneous page for Time or Timeline.
+
+        ``since`` is inclusive and ``until`` exclusive. Rows intersect the
+        window. A local timestamp has no UTC bounds and travels as ``unplaced``
+        until its timezone is known; ``undated`` is reserved for an absent value.
+
+        A page is the front of the window unless ``spread`` asks otherwise, and
+        the front of a lopsided case is one corner of it: 200 rows off 273 media
+        that pile into January leave February onward empty, which reads as
+        missing data rather than as an unread page. A spread read cuts the same
+        ordering into ``stride`` interleaved slices and serves one per page, so
+        the first page samples the whole window at the density the overview
+        draws, and the rest fill it in without a repeat or a gap.
+        """
+        if not 1 <= limit <= 200:
+            raise CaseError("a timeline page holds between 1 and 200 items")
+        selected = list(dict.fromkeys(categories or timeline_engine.DEFAULT_CATEGORIES))
+        base_where, base_params = self._timeline_scope(
+            categories=selected, entity_id=entity_id, track=track
+        )
+        dated = ["t.earliest IS NOT NULL"]
+        dated_params: list[Any] = []
+        if since:
+            dated.append("t.latest > ?")
+            dated_params.append(since)
+        if until:
+            dated.append("t.earliest < ?")
+            dated_params.append(until)
+        time_scope = "(" + " AND ".join(dated) + ")"
+        if include_undated:
+            time_scope = f"({time_scope} OR t.earliest IS NULL)"
+        where = [*base_where, time_scope]
+        params = [*base_params, *dated_params]
+
+        parsed_cursor = None if spread else _parse_timeline_cursor(cursor)
+        phase_cursor = _parse_timeline_phase(cursor) if spread else None
+        group_sql = "CASE WHEN t.earliest IS NULL THEN 1 ELSE 0 END"
+        stamp_sql = "COALESCE(t.earliest, '')"
+        if parsed_cursor is not None:
+            group, stamp, item_id = parsed_cursor
+            where.append(
+                f"({group_sql} > ? OR ({group_sql} = ? AND "
+                f"({stamp_sql} > ? OR ({stamp_sql} = ? AND t.id > ?))))"
+            )
+            params.extend((group, group, stamp, stamp, item_id))
+
+        clause = " WHERE " + " AND ".join(where)
+        total_clause = " WHERE " + " AND ".join([*base_where, time_scope])
+        total_params = [*base_params, *dated_params]
+        with self._connect() as conn:
+            extent_row = conn.execute(
+                "SELECT MIN(t.earliest) AS first, MAX(t.latest) AS last"
+                " FROM temporal_items t WHERE "
+                + " AND ".join([*base_where, "t.earliest IS NOT NULL"]),
+                base_params,
+            ).fetchone()
+            total = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM temporal_items t{total_clause}",
+                    total_params,
+                ).fetchone()[0]
+            )
+            undated = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM temporal_items t WHERE "
+                    + " AND ".join([*base_where, "t.raw IS NULL"]),
+                    base_params,
+                ).fetchone()[0]
+            )
+            unplaced = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM temporal_items t WHERE "
+                    + " AND ".join(
+                        [*base_where, "t.raw IS NOT NULL", "t.earliest IS NULL"]
+                    ),
+                    base_params,
+                ).fetchone()[0]
+            )
+            # `stride` slices of the same ordering, one per page. A slice holds
+            # ceil((total - phase) / stride) rows, which never exceeds the limit the
+            # stride was derived from, so a spread page needs no overflow row to know
+            # it is full — the phase says whether another slice is owed.
+            stride, phase = phase_cursor or (
+                max(1, -(-total // limit)) if spread else 1, 0
+            )
+            if stride > 1:
+                rows = conn.execute(
+                    "WITH ranked AS (SELECT t.id AS ranked_id,"
+                    f" ROW_NUMBER() OVER (ORDER BY {group_sql}, {stamp_sql}, t.id) - 1 AS rn"
+                    f" FROM temporal_items t{clause})"
+                    " SELECT t.*, e.label, e.type AS owner_type FROM ranked"
+                    " JOIN temporal_items t ON t.id = ranked.ranked_id"
+                    " JOIN entities e ON e.id = t.owner_id"
+                    " WHERE ranked.rn % ? = ? ORDER BY ranked.rn LIMIT ?",
+                    (*params, stride, phase, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT t.*, e.label, e.type AS owner_type FROM temporal_items t"
+                    " JOIN entities e ON e.id = t.owner_id"
+                    f"{clause} ORDER BY {group_sql}, {stamp_sql}, t.id LIMIT ?",
+                    (*params, limit + 1),
+                ).fetchall()
+
+            page_rows = rows[:limit]
+            owner_ids = list(dict.fromkeys(str(row["owner_id"]) for row in page_rows))
+            connectors: dict[str, dict[str, list[dict[str, str]]]] = {}
+            if owner_ids:
+                placeholders = ", ".join("?" for _ in owner_ids)
+                for link in conn.execute(
+                    "SELECT temporal_link.from_id, temporal_link.to_id,"
+                    " temporal_link.type, target.label, target.type AS entity_type"
+                    " FROM links temporal_link JOIN entities target"
+                    " ON target.id = temporal_link.to_id"
+                    f" WHERE temporal_link.from_id IN ({placeholders})"
+                    " AND temporal_link.type IN ('about', 'at', 'cites')"
+                    " ORDER BY temporal_link.rowid",
+                    owner_ids,
+                ).fetchall():
+                    by_type = connectors.setdefault(link["from_id"], {})
+                    by_type.setdefault(link["type"], []).append({
+                        "id": link["to_id"],
+                        "label": link["label"],
+                        "type": link["entity_type"],
+                    })
+
+            buckets: list[dict[str, Any]] = []
+            buckets_truncated = False
+            if bucket is not None:
+                # `hour` cuts on the "T" boundary of the stored instant, which is what
+                # lets a window zoomed onto a single day still read as a histogram
+                # rather than as one column.
+                widths = {"year": 4, "month": 7, "day": 10, "hour": 13}
+                if bucket not in widths:
+                    raise CaseError("a timeline bucket must be year, month, day or hour")
+                bucket_where = [*base_where, *dated]
+                bucket_params = [*base_params, *dated_params]
+                # A bucket also reports where its own entries actually sit. The period
+                # it names is the coarse thing — six August rows all falling in the
+                # first week are not "August" — and the overview draws each bar across
+                # that inner span, so the bars and the visible-range brush answer the
+                # same question on the same instants.
+                bucket_rows = conn.execute(
+                    "SELECT substr(t.earliest, 1, ?) AS start, t.category,"
+                    " COUNT(*) AS count, MIN(t.earliest) AS first, MAX(t.latest) AS last"
+                    " FROM temporal_items t WHERE "
+                    + " AND ".join(bucket_where)
+                    + " GROUP BY start, t.category ORDER BY start, t.category LIMIT 3001",
+                    (widths[bucket], *bucket_params),
+                ).fetchall()
+                grouped: dict[str, dict[str, Any]] = {}
+                for row in bucket_rows:
+                    start = str(row["start"])
+                    if start not in grouped and len(grouped) >= 1000:
+                        buckets_truncated = True
+                        break
+                    target = grouped.setdefault(
+                        start,
+                        {"start": start, "count": 0, "categories": {}, "first": None, "last": None},
+                    )
+                    count = int(row["count"])
+                    target["count"] += count
+                    target["categories"][str(row["category"])] = count
+                    first = row["first"]
+                    last = row["last"]
+                    if first is not None and (target["first"] is None or first < target["first"]):
+                        target["first"] = first
+                    # An open-ended row has no `latest`; the bar then reaches as far as
+                    # what it is known to start at, never further.
+                    reach = last if last is not None else first
+                    if reach is not None and (target["last"] is None or reach > target["last"]):
+                        target["last"] = reach
+                buckets = list(grouped.values())
+
+        next_cursor = None
+        if spread:
+            if phase + 1 < stride:
+                next_cursor = _timeline_phase_cursor(stride, phase + 1)
+        elif len(rows) > limit and page_rows:
+            last = page_rows[-1]
+            next_cursor = _timeline_cursor(
+                1 if last["earliest"] is None else 0,
+                str(last["earliest"] or ""),
+                str(last["id"]),
+            )
+        return {
+            "items": [self._timeline_item(row, connectors) for row in page_rows],
+            "next_cursor": next_cursor,
+            "total": total,
+            "undated": undated,
+            "unplaced": unplaced,
+            "buckets": buckets,
+            "buckets_truncated": buckets_truncated,
+            "extent": {
+                "from": extent_row["first"] if extent_row is not None else None,
+                "to": extent_row["last"] if extent_row is not None else None,
+            },
+        }
+
+    def rebuild_temporal_projection(self) -> int:
+        """Explicitly recreate every derived temporal row in one transaction."""
+        return self._write(_rebuild_temporal_projection_conn)
+
+    def temporal_projection_status(self) -> dict[str, int | bool]:
+        """Report whether every derived temporal row still matches its authority."""
+        with self._connect() as conn:
+            return _temporal_projection_status_conn(conn)
+
     def count_entities(self) -> int:
         """Entity total via one indexed count — the case switcher's per-case
         badge without materialising the graph."""
@@ -2739,6 +3453,7 @@ class SqliteCase:
                     source or None,
                 ),
             )
+            _sync_entity_temporal(conn, entity)
             self._touch(conn)
             return entity
 
@@ -2772,8 +3487,138 @@ class SqliteCase:
                     entity_id,
                 ),
             )
+            _sync_entity_temporal(conn, entity)
             self._touch(conn)
             return entity
+
+        return self._write(op)
+
+    def save_temporal_claim(
+        self,
+        *,
+        entity_id: str | None,
+        label: str,
+        attrs: dict[str, Any],
+        connectors: dict[str, list[str]] | None,
+        by: str,
+        status: EntityStatus = "confirmed",
+    ) -> dict[str, Any]:
+        """Create or replace a Claim and selected connectors atomically."""
+        if connectors is not None:
+            invalid = set(connectors) - set(link_engine.CLAIM_CONNECTION_TYPES)
+            if invalid:
+                raise CaseError(f"unknown Claim connector '{sorted(invalid)[0]}'")
+
+        def op(conn: sqlite3.Connection) -> dict[str, Any]:
+            claim_id = entity_id or _new_id("e")
+            now = _now()
+            existing = conn.execute(
+                "SELECT * FROM entities WHERE id = ?", (claim_id,)
+            ).fetchone()
+            if entity_id is not None:
+                if existing is None:
+                    raise CaseError(f"entity '{claim_id}' not found")
+                if existing["type"] != "claim":
+                    raise CaseError(f"entity '{claim_id}' is not a Claim")
+                conn.execute(
+                    "UPDATE entities SET label = ?, attrs_json = ?, folder = ?,"
+                    " search_text = ?, prov_status = ? WHERE id = ?",
+                    (
+                        label,
+                        json.dumps(attrs, ensure_ascii=False),
+                        _folder_of(attrs),
+                        _entity_search_text("claim", label, attrs),
+                        status,
+                        claim_id,
+                    ),
+                )
+                provenance = {
+                    "by": existing["prov_by"],
+                    "at": existing["prov_at"],
+                    "status": status,
+                }
+                if existing["prov_source"] is not None:
+                    provenance["source"] = existing["prov_source"]
+            else:
+                conn.execute(
+                    "INSERT INTO entities"
+                    "(id, type, label, attrs_json, folder, search_text,"
+                    " prov_by, prov_at, prov_status, prov_source)"
+                    " VALUES(?, 'claim', ?, ?, ?, ?, ?, ?, ?, NULL)",
+                    (
+                        claim_id,
+                        label,
+                        json.dumps(attrs, ensure_ascii=False),
+                        _folder_of(attrs),
+                        _entity_search_text("claim", label, attrs),
+                        by,
+                        now,
+                        status,
+                    ),
+                )
+                provenance = {"by": by, "at": now, "status": status}
+
+            if connectors is not None:
+                for type_, raw_targets in connectors.items():
+                    targets = [
+                        target
+                        for target in dict.fromkeys(raw_targets)
+                        if target != claim_id
+                    ]
+                    present: set[str] = set()
+                    if targets:
+                        placeholders = ", ".join("?" for _ in targets)
+                        present = {
+                            row["id"]
+                            for row in conn.execute(
+                                f"SELECT id FROM entities WHERE id IN ({placeholders})",
+                                targets,
+                            )
+                        }
+                    missing = [target for target in targets if target not in present]
+                    if missing:
+                        raise CaseError(f"entity '{missing[0]}' not found")
+                    existing_links = {
+                        row["to_id"]: row
+                        for row in conn.execute(
+                            "SELECT * FROM links WHERE from_id = ? AND type = ?",
+                            (claim_id, type_),
+                        ).fetchall()
+                    }
+                    wanted = set(targets)
+                    stale = [
+                        (row["id"],)
+                        for target, row in existing_links.items()
+                        if target not in wanted
+                    ]
+                    if stale:
+                        conn.executemany("DELETE FROM links WHERE id = ?", stale)
+                    for target in targets:
+                        if target in existing_links:
+                            continue
+                        conn.execute(
+                            "INSERT INTO links"
+                            "(id, from_id, to_id, type, prov_by, prov_at,"
+                            " prov_status, prov_source)"
+                            " VALUES(?, ?, ?, ?, ?, ?, ?, NULL)",
+                            (_new_id("l"), claim_id, target, type_, by, _now(), status),
+                        )
+
+            entity = {
+                "id": claim_id,
+                "type": "claim",
+                "label": label,
+                "attrs": attrs,
+                "provenance": provenance,
+            }
+            _sync_entity_temporal(conn, entity)
+            self._touch(conn)
+            links = conn.execute(
+                "SELECT * FROM links WHERE from_id = ?"
+                " AND type IN ('about', 'at', 'cites') ORDER BY rowid",
+                (claim_id,),
+            ).fetchall()
+            return {"entity": entity, "links": [self._link(row) for row in links]}
 
         return self._write(op)
 
@@ -3180,6 +4025,7 @@ class SqliteCase:
                         prov.get("source"),
                     ),
                 )
+                _sync_entity_temporal(conn, entity)
             present = {
                 r["id"]
                 for r in conn.execute("SELECT id FROM entities")
@@ -3538,6 +4384,7 @@ def _import_graph(conn: sqlite3.Connection, data: dict[str, Any], report: Migrat
                 prov.get("source"),
             ),
         )
+        _sync_entity_temporal(conn, entity)
         entity_ids.add(entity["id"])
     for link in data.get("links", []):
         if link["from"] not in entity_ids or link["to"] not in entity_ids:

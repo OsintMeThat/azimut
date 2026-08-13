@@ -21,6 +21,7 @@ from pathlib import Path
 #: Objects created after schema 7, dropped newest first. A migration that adds a
 #: table or an index adds its line here in the same change.
 _AFTER_7 = (
+    "DROP TABLE IF EXISTS temporal_items",
     "DROP INDEX IF EXISTS idx_entities_filed",
     "DROP INDEX IF EXISTS idx_entities_label",
     "DROP TABLE IF EXISTS analysis_views",

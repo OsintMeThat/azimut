@@ -24,8 +24,8 @@ describe('a bar that never changes shape', () => {
     // teaches nothing, which is how the field filter stayed invisible
     expect(markup).toContain('disabled={state.off}');
     expect(markup).toContain('title={state.off ? `${axis.hint} — ${state.note}` : axis.hint}');
-    expect(source).toContain("return { off: true, note: 'pick a type first' }");
     expect(source).toContain("{ off: true, note: 'no stored fields here' }");
+    expect(source).toContain("{ off: true, note: 'nothing is linked yet' }");
   });
 
   it('says what every term does, in the menu and on hover', () => {
@@ -42,6 +42,9 @@ describe('a bar that never changes shape', () => {
     expect(source).toContain("if (facetState === 'unasked') return { off: false, note: '' }");
     expect(source).toContain("if (facetState === 'loading') return { off: false, note: 'reading…' }");
     expect(markup).toContain('Reading what the case stores…');
+    // and it opens whatever the case holds: no size ever turns the row off
+    expect(source).not.toMatch(/narrow-first/);
+    expect(markup).not.toMatch(/Pick a type first/);
   });
 
   it('offers a way out of every term, and out of all of them at once', () => {

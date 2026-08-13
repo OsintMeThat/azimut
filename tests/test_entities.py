@@ -104,15 +104,15 @@ def test_a_field_that_opens_a_subject_says_what_heads_it(client):
     fields, so they head nothing — and the panel renders them bare.
 
     The heading is on the field rather than on the type because one type can hold two
-    subjects: a Claim says *what* it states and *why* that is believed, and running
-    all five under one word would file a count as reasoning."""
+    subjects: a Claim says *what* it states, *when* it applies and *why* that is
+    believed, and running them all under one word would file a count as reasoning."""
     rows = {row["type"]: row for row in client.get("/api/cases/entity-types").json()}
 
     heads = {attr["key"]: attr["group"] for attr in rows["place"]["attrs"]}
     assert heads == {"radius_m": "How precise", "footprint": "", "verbatim": "", "method": ""}
     assert {attr["group"] for attr in rows["vessel"]["attrs"]} == {""}
     assert [attr["group"] for attr in rows["claim"]["attrs"]] == [
-        "What it states", "", "Reasoning", "", "",
+        "What it states", "", "When", "", "Reasoning", "", "",
     ]
 
 
@@ -417,6 +417,79 @@ def test_a_count_says_it_steps_by_one(client):
     assert count["whole"] is True
     assert count["minimum"] == 1
     assert radius["whole"] is False  # a metre is not the smallest honest step
+
+
+def test_a_claim_declares_when_its_statement_applies(client):
+    rows = {row["type"]: row for row in client.get("/api/cases/entity-types").json()}
+    fields = {field["key"]: field for field in rows["claim"]["attrs"]}
+
+    assert fields["when"]["kind"] == "temporal"
+    assert fields["when"]["group"] == "When"
+    assert fields["time_role"]["kind"] == "choice"
+    assert [option["value"] for option in fields["time_role"]["options"]] == [
+        "occurred", "observed", "valid",
+    ]
+
+
+def test_a_claim_keeps_only_supported_temporal_values(client):
+    cid = _new_case(client, "Temporal statement")
+
+    created = client.post(
+        f"/api/cases/{cid}/entities",
+        json={
+            "type": "claim",
+            "label": "The address appeared in the access log",
+            "attrs": {
+                "when": "2026-08-11T18:40:00+02:00",
+                "time_role": "observed",
+            },
+        },
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["attrs"]["when"] == "2026-08-11T18:40:00+02:00"
+
+    interval = client.patch(
+        f"/api/cases/{cid}/entities/{created.json()['id']}",
+        json={"attrs": {"when": "2026-08~/2026-10?", "time_role": "valid"}},
+    )
+    bad_date = client.patch(
+        f"/api/cases/{cid}/entities/{created.json()['id']}",
+        json={"attrs": {"when": "2026-02-29"}},
+    )
+    bad_role = client.patch(
+        f"/api/cases/{cid}/entities/{created.json()['id']}",
+        json={"attrs": {"time_role": "published"}},
+    )
+
+    assert interval.status_code == 200, interval.text
+    assert interval.json()["attrs"]["when"] == "2026-08~/2026-10?"
+    assert bad_date.status_code == 400
+    assert bad_role.status_code == 400
+
+
+def test_a_claim_may_keep_a_local_time_or_no_time_at_all(client):
+    cid = _new_case(client, "Local time statement")
+
+    local = client.post(
+        f"/api/cases/{cid}/entities",
+        json={
+            "type": "claim",
+            "label": "The camera clock showed this time",
+            "attrs": {"when": "2026-08-11T18:40:00"},
+        },
+    )
+    undated = client.post(
+        f"/api/cases/{cid}/entities",
+        json={"type": "claim", "label": "The date is not known", "attrs": {}},
+    )
+    cleared = client.patch(
+        f"/api/cases/{cid}/entities/{local.json()['id']}",
+        json={"attrs": {"when": None}},
+    )
+
+    assert local.status_code == 200, local.text
+    assert undated.status_code == 200, undated.text
+    assert cleared.status_code == 200, cleared.text
 
 
 # -- the class family ----------------------------------------------------------

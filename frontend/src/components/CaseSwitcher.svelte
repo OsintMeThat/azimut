@@ -717,7 +717,7 @@
         <span><Icon name="check" size={18} /></span>
         <div>
           <strong>No problems found</strong>
-          <p>The database and media records match the case files.</p>
+          <p>The case files and derived indexes match the database.</p>
         </div>
       </div>
     {:else if doctorReport}

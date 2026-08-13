@@ -105,6 +105,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..workspace import CaseError
+from .temporal import TemporalError, parse_temporal
 
 #: The families, in the order a menu should show them.
 ACTOR = "actor"
@@ -149,13 +150,15 @@ FAMILY_READS: dict[str, str] = {
 #: What an `attrs` field is edited as, and what the validator checks. Presentation
 #: only in the sense that everything is stored as written; a kind is added here when
 #: a type needs it, never in advance — an editor nothing uses is a screen nobody can
-#: reach. `date` arrives with the claim node's EDTF.
+#: reach. `temporal` holds the Claim profile parsed by ``engine.temporal``.
 #:
 #: `longtext` holds the same value as `text` and is checked by the same rule; what it
 #: says is that the field expects sentences. A quoted source and the reasoning behind
 #: a claim run to paragraphs, and a one-line box that scrolls sideways at eighty
 #: characters is a field nobody fills — the reason those two exist at all.
-ATTR_KINDS: tuple[str, ...] = ("text", "longtext", "number", "url", "geojson", "choice")
+ATTR_KINDS: tuple[str, ...] = (
+    "text", "longtext", "number", "url", "geojson", "choice", "temporal",
+)
 
 #: Longest a declared text field may be. Generous: `verbatim` quotes a source and
 #: `method` explains a match, and truncating either would defeat the point of
@@ -235,6 +238,15 @@ CLAIM_CONFIDENCE: tuple[tuple[str, str], ...] = (
     ("refuted", "Ruled out"),
 )
 
+#: Which question a Claim's date answers. Kept separate from confidence and source
+#: reliability: the same instant can be when a fact happened, when somebody saw it,
+#: or when a state held, and treating those as one event would move evidence in time.
+CLAIM_TIME_ROLES: tuple[tuple[str, str], ...] = (
+    ("occurred", "Occurred"),
+    ("observed", "Observed"),
+    ("valid", "Valid during"),
+)
+
 
 @dataclass(frozen=True)
 class Attr:
@@ -254,12 +266,12 @@ class Attr:
     are, and it is what makes the field closed: anything else is refused.
 
     ``group`` heads this field and the ones after it that share it, which is what
-    lets one type hold two subjects: a Claim says *what* it states and *why* it is
-    believed, and running five fields under one heading would file a count as
-    reasoning. Empty means the field stands on its own label. Fields sharing a
-    heading are declared next to each other, since the heading is emitted where the
-    group changes rather than by regrouping the list — a form whose fields reordered
-    themselves would not be the registry's order any more.
+    lets one type hold several subjects: a Claim says *what* it states, *when* it
+    applies and *why* it is believed. Running every field under one heading would
+    file a count as reasoning. Empty means the field stands on its own label. Fields
+    sharing a heading are declared next to each other, since the heading is emitted
+    where the group changes rather than by regrouping the list — a form whose fields
+    reordered themselves would not be the registry's order any more.
     """
 
     key: str
@@ -294,7 +306,7 @@ class EntityType:
     case is about it, and a default would answer that question by omission.
 
     Headings belong to the fields (``Attr.group``), not here: a place's four fields
-    do all answer one question, but a Claim's five answer two.
+    do all answer one question, but a Claim's fields answer three.
     """
 
     type: str
@@ -579,10 +591,6 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
     # `about` at its subject, `at` at places and `cites` at its sources; confidence
     # belongs to this node, not to any one connector (`engine/links.py`).
     #
-    # `edtf` is deliberately absent: the date field arrives with its parser, and a
-    # box that stores `2024-03~` without deriving bounds from it would be a field
-    # that looks like it works.
-    #
     # `count` and `condition` are what let a statement be counted: "two of these,
     # destroyed". They sit on the node and not on `about`, because a Claim may point
     # at several subjects and one number on the node could not say which it meant —
@@ -605,6 +613,16 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
                 "condition", "Condition",
                 hint="the state at the moment this statement describes",
                 kind="choice", options=ASSET_CONDITIONS,
+            ),
+            Attr(
+                "when", "When", kind="temporal",
+                hint="when this statement applies",
+                group="When",
+            ),
+            Attr(
+                "time_role", "Time role", kind="choice",
+                hint="what this value means for the statement",
+                options=CLAIM_TIME_ROLES,
             ),
             Attr(
                 "confidence", "Confidence",
@@ -909,6 +927,13 @@ def _check_choice(attr: Attr, value: Any) -> None:
         raise CaseError(f"'{attr.key}' must be one of {allowed}, or nothing")
 
 
+def _check_temporal(attr: Attr, value: Any) -> None:
+    try:
+        parse_temporal(value)
+    except TemporalError as exc:
+        raise CaseError(f"'{attr.key}' {exc}") from exc
+
+
 _CHECKS: dict[str, Callable[[Attr, Any], None]] = {
     "text": _check_text,
     "longtext": _check_text,
@@ -916,4 +941,5 @@ _CHECKS: dict[str, Callable[[Attr, Any], None]] = {
     "url": _check_url,
     "geojson": _check_geojson,
     "choice": _check_choice,
+    "temporal": _check_temporal,
 }

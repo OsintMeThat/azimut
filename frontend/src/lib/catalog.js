@@ -35,6 +35,9 @@ function narrowing(
     since,
     until,
     by,
+    temporalFrom,
+    temporalTo,
+    temporalCategories,
   } = {},
   params = new URLSearchParams()
 ) {
@@ -53,6 +56,13 @@ function narrowing(
   if (since) params.set('since', since);
   if (until) params.set('until', until);
   if (by && by.length) params.set('by', by.join(','));
+  if (temporalFrom && temporalTo) {
+    params.set('temporal_from', temporalFrom);
+    params.set('temporal_to', temporalTo);
+    if (temporalCategories?.length) {
+      params.set('temporal_category', temporalCategories.join(','));
+    }
+  }
   return params;
 }
 

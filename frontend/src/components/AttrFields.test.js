@@ -15,6 +15,9 @@ describe('generated fields', () => {
   it('reads each field with the editor its kind asks for', () => {
     expect(source).toContain("{:else if field.kind === 'number'}");
     expect(source).toContain("{:else if field.kind === 'choice'}");
+    expect(source).toContain("{:else if field.kind === 'temporal'}");
+    expect(source).toContain("import TemporalInput from './TemporalInput.svelte'");
+    expect(source).toContain('<TemporalInput');
     expect(source).toContain("{:else if field.kind === 'geojson'}");
     expect(source).not.toContain("field.kind === 'flag'");
     expect(source).toContain("type={field.kind === 'url' ? 'url' : 'text'}");
@@ -23,6 +26,11 @@ describe('generated fields', () => {
   it('carries the registry bounds onto the input, so the form refuses what the API does', () => {
     expect(source).toContain('min={field.minimum ?? undefined}');
     expect(source).toContain('max={field.maximum ?? undefined}');
+  });
+
+  it('can leave fields to a dedicated Details tab without changing the registry', () => {
+    expect(source).toContain('exclude = []');
+    expect(source).toContain('if (exclude.includes(field.key)) return false;');
   });
 });
 

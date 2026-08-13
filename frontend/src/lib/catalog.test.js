@@ -61,6 +61,17 @@ describe('buildCatalogQuery', () => {
     ).toBe('/api/cases/c1/catalog/entities?since=2026-08-03&until=2026-08-10&by=user%2Csatellite');
   });
 
+  it('keeps fact time separate from filing time', () => {
+    expect(buildCatalogQuery('c1', {
+      temporalFrom: '2026-08-01T00:00:00Z',
+      temporalTo: '2026-09-01T00:00:00Z',
+      temporalCategories: ['statement', 'media'],
+    })).toBe(
+      '/api/cases/c1/catalog/entities?temporal_from=2026-08-01T00%3A00%3A00Z'
+      + '&temporal_to=2026-09-01T00%3A00%3A00Z&temporal_category=statement%2Cmedia'
+    );
+  });
+
   it('orders the whole filtered set, and says nothing when it does not', () => {
     expect(buildCatalogQuery('c1', { order: '-created' })).toBe(
       '/api/cases/c1/catalog/entities?order=-created'

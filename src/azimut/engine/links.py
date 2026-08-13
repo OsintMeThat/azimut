@@ -471,6 +471,32 @@ def add_relation(
     return case.add_link(from_id, to_id, type_, by=by, unique=True)
 
 
+def check_relation_target(
+    case: CaseRepository,
+    source: dict[str, Any],
+    to_id: str,
+    type_: str,
+) -> None:
+    """Validate one prospective relation without writing it.
+
+    Atomic Claim creation needs to validate its connectors before the new Claim
+    exists in storage. Existing Claims also receive the normal cycle check.
+    """
+    spec = _statable(type_)
+    target = _entity(case, to_id)
+    source_id = str(source.get("id") or "")
+    if source_id and source_id == to_id:
+        raise CaseError("an entity cannot relate to itself")
+    if source.get("type") not in spec.from_types:
+        raise CaseError(f"a {source.get('type')} cannot be the subject of '{spec.type}'")
+    if target["type"] not in spec.to_types:
+        raise CaseError(f"a {target['type']} cannot be the object of '{spec.type}'")
+    _check_media_kind(source, spec.from_media_kinds, spec.type, "subject")
+    _check_media_kind(target, spec.to_media_kinds, spec.type, "object")
+    if source_id and case.get_entity(source_id) is not None:
+        _check_relation_cycle(case, spec.type, source_id, to_id)
+
+
 def set_relation_type(case: CaseRepository, link_id: str, type_: str) -> dict[str, Any]:
     """Correct which relation an existing edge states.
 

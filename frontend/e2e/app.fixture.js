@@ -509,6 +509,82 @@ function json(route, body, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
+function fixtureIso(milliseconds) {
+  return new Date(milliseconds).toISOString().replace('.000Z', 'Z');
+}
+
+function fixtureTemporalToken(raw) {
+  const clean = raw.replace(/[~?%]$/, '');
+  const timestamp = clean.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(Z|[+-]\d{2}:\d{2})?$/);
+  if (timestamp) {
+    if (!timestamp[1]) {
+      return {
+        earliest: null, latest: null,
+        precision: clean.includes('.') ? 'subsecond' : 'second',
+        zone: 'local', sortable: false, timestamp: true,
+      };
+    }
+    const earliest = Date.parse(clean);
+    if (!Number.isFinite(earliest)) return null;
+    return {
+      earliest: fixtureIso(earliest),
+      latest: fixtureIso(earliest + (clean.includes('.') ? 1 : 1000)),
+      precision: clean.includes('.') ? 'subsecond' : 'second',
+      zone: timestamp[1] === 'Z' ? 'utc' : 'offset',
+      sortable: true,
+      timestamp: true,
+    };
+  }
+
+  const match = clean.match(/^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = match[2] ? Number(match[2]) : 1;
+  const day = match[3] ? Number(match[3]) : 1;
+  const earliest = Date.UTC(year, month - 1, day);
+  const latest = match[3]
+    ? Date.UTC(year, month - 1, day + 1)
+    : match[2] ? Date.UTC(year, month, 1) : Date.UTC(year + 1, 0, 1);
+  return {
+    earliest: fixtureIso(earliest),
+    latest: fixtureIso(latest),
+    precision: match[3] ? 'day' : match[2] ? 'month' : 'year',
+    zone: 'date-only',
+    sortable: true,
+    timestamp: false,
+  };
+}
+
+function fixtureTemporalReading(raw) {
+  if (!raw) {
+    return {
+      earliest: null, latest: null, precision: null, shape: null,
+      zone: null, sortable: false, uncertain: false, approximate: false,
+    };
+  }
+  const parts = raw.split('/');
+  const start = fixtureTemporalToken(parts[0]);
+  const end = parts[1] ? fixtureTemporalToken(parts[1]) : null;
+  if (!start || (parts[1] && !end)) {
+    return {
+      earliest: null, latest: null, precision: null,
+      shape: parts[1] ? 'interval' : 'instant', zone: null, sortable: false,
+      uncertain: raw.includes('?') || raw.includes('%'),
+      approximate: raw.includes('~') || raw.includes('%'),
+    };
+  }
+  return {
+    earliest: start.earliest,
+    latest: end ? (end.timestamp ? end.earliest : end.latest) : start.latest,
+    precision: end && end.precision !== start.precision ? 'mixed' : start.precision,
+    shape: end ? 'interval' : 'instant',
+    zone: end && end.zone !== start.zone ? 'mixed' : start.zone,
+    sortable: start.sortable && (!end || end.sortable),
+    uncertain: raw.includes('?') || raw.includes('%'),
+    approximate: raw.includes('~') || raw.includes('%'),
+  };
+}
+
 /**
  * Run the real Svelte, Konva and Leaflet code while replacing only Azimut's
  * local API and files with deterministic fixtures. Any unexpected request is
@@ -552,6 +628,8 @@ export async function installAppFixture(page, options = {}) {
     spec: structuredClone(view.spec ?? {}),
   }));
   const analysisWrites = [];
+  const timelineRows = (options.timelineItems ?? []).map((item) => structuredClone(item));
+  const timelineWrites = [];
   const bundlePreview = options.bundlePreview;
   const bundleJob = options.bundleJob ?? { state: 'ready' };
   // Relations, keyed by entity id: what the bounded chain endpoint answers for
@@ -586,6 +664,122 @@ export async function installAppFixture(page, options = {}) {
   const uploads = [];
   const pastes = [];
   const revealed = [];
+
+  const timelineEntity = (id) => fixtureCatalog.find((entity) => entity.id === id)
+    ?? fixtureChains[id]?.entity
+    ?? null;
+  const timelineReferences = (item, ids, held) => {
+    if (Array.isArray(held)) return held.map((entry) => ({ ...entry }));
+    return (ids ?? []).map(timelineEntity).filter(Boolean).map((entry) => ({
+      id: entry.id, label: entry.label, type: entry.type,
+    }));
+  };
+  const enrichedTimelineItem = (item) => ({
+    ...structuredClone(item),
+    owner_type: item.owner_type ?? timelineEntity(item.owner_id)?.type ?? '',
+    subject_entities: timelineReferences(item, item.subjects, item.subject_entities),
+    place_entities: timelineReferences(item, item.places, item.place_entities),
+    source_entities: timelineReferences(item, item.sources, item.source_entities),
+  });
+  /** Where a statement's places sit, read from the place entities themselves. The
+   *  projection carries names, and only the map route resolves them to coordinates —
+   *  a place the case has not located therefore drops out here, as it does server
+   *  side. */
+  const positionedPlaces = (item) => (item.places ?? []).map((placeId) => {
+    const place = timelineEntity(placeId);
+    const lat = Number(place?.attrs?.lat);
+    const lon = Number(place?.attrs?.lon);
+    if (!place || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return {
+      id: place.id,
+      label: place.label,
+      lat,
+      lon,
+      radius_m: place.attrs.radius_m ?? null,
+      footprint: place.attrs.footprint ?? null,
+    };
+  }).filter(Boolean);
+  /** What a mark carries about the row's own entity, so the card can hand it back to
+   *  the tool that owns it and show a photograph rather than a line of text. */
+  const mapOwner = (item) => {
+    const entity = timelineEntity(item.owner_id);
+    return {
+      id: item.owner_id,
+      type: entity?.type ?? item.owner_type ?? '',
+      label: entity?.label ?? item.label ?? '',
+      attrs: entity?.attrs ?? {},
+      thumb: entity?.thumb ?? entity?.attrs?.thumb ?? null,
+    };
+  };
+  const timelineMatchesTrack = (item, track = {}) => {
+    if ((track.hidden ?? []).includes(item.id)) return false;
+    const roles = Array.isArray(track.roles) ? track.roles : [];
+    if (roles.length && !roles.includes(item.time_role ?? 'unset')) return false;
+    const terms = track.terms && typeof track.terms === 'object' ? track.terms : {};
+    const relation = track.relation ?? 'any';
+    const related = {
+      owner: [timelineEntity(item.owner_id)].filter(Boolean),
+      about: timelineReferences(item, item.subjects, item.subject_entities),
+      place: timelineReferences(item, item.places, item.place_entities),
+      source: timelineReferences(item, item.sources, item.source_entities),
+    };
+    const candidates = relation === 'any'
+      ? [...related.owner, ...related.about, ...related.place, ...related.source]
+      : related[relation] ?? [];
+    const hasTerms = Object.values(terms).some((value) => value !== '' && value !== null && value !== false);
+    if (!hasTerms) return !['about', 'place', 'source'].includes(relation) || candidates.length > 0;
+    const types = String(terms.type ?? '').split(',').filter(Boolean);
+    const words = String(terms.q ?? '').toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    return candidates.some((entity) => {
+      const text = [entity.label, entity.type, ...Object.values(entity.attrs ?? {})]
+        .filter(Boolean).join('\n').toLocaleLowerCase();
+      return (!types.length || types.includes(entity.type))
+        && (!terms.status || entity.provenance?.status === terms.status)
+        && (!words.length || words.every((word) => text.includes(word)));
+    });
+  };
+  const scopedTimelineRows = ({ categories = [], entity = '', track = {}, from = '', to = '', includeUndated = true }) =>
+    timelineRows.map(enrichedTimelineItem).filter((item) =>
+      (!categories.length || categories.includes(item.category))
+      && (!entity || item.owner_id === entity || (item.subjects ?? []).includes(entity)
+        || (item.places ?? []).includes(entity) || (item.sources ?? []).includes(entity))
+      && timelineMatchesTrack(item, track)
+      && (item.earliest
+        ? (!from || item.latest > (from.includes('T') ? from : `${from}T00:00:00Z`))
+          && (!to || item.earliest < (to.includes('T') ? to : `${to}T23:59:59Z`))
+        : includeUndated)
+    );
+  const analysisSnapshotCount = (spec) => spec?.snapshot?.timeline_items?.length
+    ?? spec?.snapshot?.entities?.length
+    ?? 0;
+  const captureTimelineSnapshot = (spec) => {
+    const timeline = spec?.timeline ?? {};
+    const visible = new Set(timeline.visible_categories ?? ['statement', 'media']);
+    const captured = new Map();
+    const timelineTracks = {};
+    for (const track of timeline.tracks ?? []) {
+      const categories = (track.categories ?? []).filter((category) => visible.has(category));
+      const rows = categories.length ? scopedTimelineRows({
+        categories,
+        entity: timeline.entity?.id ?? '',
+        track: { ...(track.query ?? {}), hidden: track.hidden ?? [] },
+        from: timeline.from ?? '',
+        to: timeline.to ?? '',
+      }) : [];
+      timelineTracks[track.id] = rows.map((item) => item.id);
+      for (const item of rows) captured.set(item.id, item);
+    }
+    return {
+      ...structuredClone(spec),
+      snapshot: {
+        captured_at: '2026-08-12T12:00:00Z',
+        entities: [],
+        links: [],
+        timeline_items: [...captured.values()],
+        timeline_tracks: timelineTracks,
+      },
+    };
+  };
 
   await page.addInitScript((caseId) => {
     localStorage.setItem('azimut:lastCase', caseId);
@@ -691,21 +885,25 @@ export async function installAppFixture(page, options = {}) {
         return json(route, {
           views: analysisViews.map(({ spec, ...view }) => ({
             ...view,
-            snapshot_count: spec?.snapshot?.entities?.length ?? 0,
+            snapshot_count: analysisSnapshotCount(spec),
           })),
         });
       }
       if (request.method() === 'POST') {
         const body = request.postDataJSON();
+        const spec = body.mode === 'snapshot' && body.surface === 'timeline'
+          ? captureTimelineSnapshot(body.spec)
+          : structuredClone(body.spec ?? {});
         const saved = {
           id: `v_browser_${analysisViews.length + 1}`,
           ...body,
+          spec,
           created_at: '2026-08-10T10:00:00Z',
           updated_at: '2026-08-10T10:00:00Z',
-          snapshot_count: body.spec?.snapshot?.entities?.length ?? 0,
+          snapshot_count: analysisSnapshotCount(spec),
         };
         analysisViews.push(saved);
-        analysisWrites.push({ method: 'POST', body });
+        analysisWrites.push({ method: 'POST', caseId, body });
         return json(route, saved);
       }
     }
@@ -745,7 +943,7 @@ export async function installAppFixture(page, options = {}) {
           id,
           updated_at: '2026-08-10T11:00:00Z',
         };
-        analysisWrites.push({ method: 'PUT', id, body });
+        analysisWrites.push({ method: 'PUT', caseId, id, body });
         return json(route, analysisViews[index]);
       }
       if (request.method() === 'DELETE') {
@@ -832,6 +1030,115 @@ export async function installAppFixture(page, options = {}) {
 
     if (caseId && path === `/api/cases/${caseId}/graph/paths`) {
       return json(route, graphPaths(url, options.graph, caseLinks));
+    }
+
+    const timelineClaimMatch = caseId && path.match(
+      new RegExp(`^/api/cases/${caseId}/timeline/claims(?:/([^/]+))?$`)
+    );
+    if (timelineClaimMatch && request.method() !== 'GET') {
+      const body = request.postDataJSON();
+      const ownerId = timelineClaimMatch[1] ?? `claim-browser-${timelineRows.length + 1}`;
+      timelineWrites.push({ method: request.method(), ownerId, body });
+      const index = timelineRows.findIndex((item) => item.owner_id === ownerId);
+      const raw = body.when ?? (index >= 0 ? timelineRows[index].raw : null);
+      const reading = fixtureTemporalReading(raw);
+      const temporal = {
+        id: `temporal:claim:${ownerId}`,
+        owner_id: ownerId,
+        category: 'statement',
+        kind: 'claim',
+        label: body.statement ?? (index >= 0 ? timelineRows[index].label : 'Assessment'),
+        raw,
+        ...reading,
+        time_role: body.time_role ?? null,
+        status: 'confirmed',
+        confidence: body.confidence ?? null,
+        parse_error: null,
+        subjects: body.about ?? [],
+        places: body.at ?? [],
+        sources: body.cites ?? [],
+      };
+      if (index >= 0) timelineRows[index] = temporal;
+      else timelineRows.push(temporal);
+      return json(route, {
+        entity: { id: ownerId, type: 'claim', label: temporal.label, attrs: body, provenance: { by: 'user', at: '2026-08-12T10:00:00Z', status: 'confirmed' } },
+        links: [],
+        temporal,
+      });
+    }
+    if (caseId && path === `/api/cases/${caseId}/timeline/map`) {
+      const from = url.searchParams.get('from');
+      const to = url.searchParams.get('to');
+      // Everything dated in the window that the case has put somewhere, in whichever
+      // categories the caller asked for — `at` is a Claim's connector, and a layer
+      // reading it alone answered a window of located photographs with nothing.
+      // `matched` counts the window; `mapped` counts the ones a marker can be put on,
+      // so the card can say how much it is not showing.
+      const wanted = url.searchParams.getAll('category').flatMap((value) => value.split(','));
+      const matched = scopedTimelineRows({
+        categories: wanted.filter(Boolean).length ? wanted.filter(Boolean) : ['statement', 'media'],
+        from, to, includeUndated: false,
+      });
+      const mapped = matched
+        .map((item) => ({
+          ...item,
+          place_entities: positionedPlaces(item),
+          owner: mapOwner(item),
+        }))
+        .filter((item) => item.place_entities.length);
+      return json(route, {
+        items: mapped,
+        matched: matched.length,
+        mapped: mapped.length,
+        marks: mapped.reduce((count, item) => count + item.place_entities.length, 0),
+        truncated: false,
+        window: { from, to },
+      });
+    }
+
+    if (caseId && path === `/api/cases/${caseId}/timeline`) {
+      const wanted = url.searchParams.getAll('category');
+      const entity = url.searchParams.get('entity');
+      let track = {};
+      try {
+        track = JSON.parse(url.searchParams.get('track') ?? '{}');
+      } catch {
+        return json(route, { detail: 'Invalid timeline track' }, 400);
+      }
+      const base = scopedTimelineRows({ categories: wanted, entity, track });
+      const datedBase = base.filter((item) => item.earliest);
+      const from = url.searchParams.get('from');
+      const to = url.searchParams.get('to');
+      const includeUndated = url.searchParams.get('include_undated') !== 'false';
+      const visible = scopedTimelineRows({
+        categories: wanted, entity, track, from, to, includeUndated,
+      });
+      const bucket = url.searchParams.get('bucket');
+      const width = { year: 4, month: 7, day: 10 }[bucket] ?? 0;
+      const bucketCounts = new Map();
+      if (width) for (const item of datedBase) {
+        const key = item.earliest.slice(0, width);
+        const held = bucketCounts.get(key) ?? { count: 0, categories: {} };
+        held.count += 1;
+        held.categories[item.category] = (held.categories[item.category] ?? 0) + 1;
+        bucketCounts.set(key, held);
+      }
+      return json(route, {
+        items: visible,
+        next_cursor: null,
+        total: visible.length,
+        undated: base.filter((item) => !item.earliest && !item.raw).length,
+        unplaced: base.filter((item) => !item.earliest && item.raw).length,
+        buckets: [...bucketCounts]
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([start, held]) => ({ start, count: held.count, categories: held.categories })),
+        buckets_truncated: false,
+        extent: {
+          from: datedBase.map((item) => item.earliest).sort()[0] ?? null,
+          to: datedBase.map((item) => item.latest).sort().at(-1) ?? null,
+        },
+        window: { from, to },
+      });
     }
 
     if (caseId && path === `/api/cases/${caseId}/satellite/index`) {
@@ -945,6 +1252,21 @@ export async function installAppFixture(page, options = {}) {
             (link.from === id && typeOf.get(link.to) === wantedType) ||
             (link.to === id && typeOf.get(link.from) === wantedType)
         );
+      // A fact-time window reaches an entity through its own dates and through the
+      // statements that name it, which is the join the server makes: a person is in
+      // June because something said about them happened in June.
+      const temporalFrom = url.searchParams.get('temporal_from') ?? '';
+      const temporalTo = url.searchParams.get('temporal_to') ?? '';
+      const inPeriod = temporalFrom && temporalTo
+        ? new Set(scopedTimelineRows({
+            categories: (url.searchParams.get('temporal_category') ?? '').split(',').filter(Boolean),
+            from: temporalFrom,
+            to: temporalTo,
+            includeUndated: false,
+          }).flatMap((item) => [
+            item.owner_id, ...item.subjects ?? [], ...item.places ?? [], ...item.sources ?? [],
+          ]))
+        : null;
       const matching = held.filter(
         (entity) =>
           (!wanted.length || wanted.includes(entity.type)) &&
@@ -952,7 +1274,8 @@ export async function installAppFixture(page, options = {}) {
           (!term || [entity.label, entity.type, ...Object.values(entity.attrs ?? {})]
             .some((heldValue) => String(heldValue ?? '').toLowerCase().includes(term))) &&
           (!field || !value || String(entity.attrs?.[field] ?? '') === value) &&
-          (!linked || reaches(entity.id, linked))
+          (!linked || reaches(entity.id, linked)) &&
+          (!inPeriod || inPeriod.has(entity.id))
       );
       const order = url.searchParams.get('order') ?? '';
       const descending = order.startsWith('-');
@@ -1120,7 +1443,7 @@ export async function installAppFixture(page, options = {}) {
       );
     }
     // What the statements about one entity come to. Details asks for it whenever the
-    // Case tab is on screen, so every spec that opens a panel reaches it. 404 is the
+    // Connections tab is on screen, so every spec that opens a panel reaches it. 404 is the
     // ordinary answer — nothing states anything about this row — and `tallies` is how
     // a spec gives one a total.
     const tallyMatch = caseId && path.match(
@@ -1299,6 +1622,7 @@ export async function installAppFixture(page, options = {}) {
     graphQueries,
     graphPinWrites,
     analysisWrites,
+    timelineWrites,
     uploads,
     pastes,
     revealed,

@@ -12,8 +12,9 @@
    * nothing is flagged for being absent.
    */
   import { entityFields, withHeadings } from '../lib/entityTypes.svelte.js';
+  import TemporalInput from './TemporalInput.svelte';
 
-  let { type, values = $bindable({}) } = $props();
+  let { type, values = $bindable({}), exclude = [] } = $props();
 
   const fields = $derived(entityFields(type));
 
@@ -25,6 +26,7 @@
    * lands — carrying the summary and the Clear that drops it.
    */
   const shown = $derived(withHeadings(fields.filter((field) => {
+    if (exclude.includes(field.key)) return false;
     if (field.editable === false) return values?.[field.key] != null && values[field.key] !== '';
     return field.kind !== 'geojson' || values?.[field.key];
   })));
@@ -117,6 +119,14 @@
               </option>
             {/each}
           </select>
+        {:else if field.kind === 'temporal'}
+          <div class="temporal-field">
+            <TemporalInput
+              id={`attr-${field.key}`}
+              value={values?.[field.key] ?? ''}
+              onchange={(value) => set(field.key, value)}
+            />
+          </div>
         {:else if field.kind === 'longtext'}
           <!-- A quoted source and the reasoning behind a claim run to paragraphs.
                Held in a one-line box they scroll sideways past eighty characters,
@@ -186,6 +196,9 @@
   /* A long field takes the whole row: two paragraph boxes side by side in a 180px
      column would be narrower than the one-line input they replace. */
   .attr:has(.textarea) {
+    grid-column: 1 / -1;
+  }
+  .attr:has(.temporal-field) {
     grid-column: 1 / -1;
   }
   .textarea {

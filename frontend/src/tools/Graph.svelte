@@ -54,9 +54,18 @@
   import { api } from '../lib/api.js';
   import {
     analysisSearch,
+    catalogViews,
     openAnalysisCase,
     setAnalysisFilter,
+    setAnalysisPeriod,
   } from '../lib/analysisSearch.svelte.js';
+  import {
+    analysisPeriodQuery,
+    analysisPeriodSpec,
+    emptyAnalysisPeriod,
+    hasAnalysisPeriod,
+    normalizeAnalysisPeriod,
+  } from '../lib/analysisPeriod.js';
   import { buildCatalogQuery, fetchAttrFacets } from '../lib/catalog.js';
   import {
     chipsOf,
@@ -122,9 +131,11 @@
   } from '../lib/graph.js';
   import { createHistory } from '../lib/history.js';
   import { createBookmark } from '../lib/bookmarks.js';
+  import { windowWords } from '../lib/timeline.js';
   import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
   import Icon, { paths } from '../components/Icon.svelte';
   import AnalysisViews from '../components/AnalysisViews.svelte';
+  import AnalysisPeriodBar from '../components/AnalysisPeriodBar.svelte';
   import FilterBar from '../components/FilterBar.svelte';
   import Modal from '../components/Modal.svelte';
   import EntityCreate from '../components/EntityCreate.svelte';
@@ -152,7 +163,6 @@
   const DRAG_SLOP = 4;
   /** How long a drag waits before it is filed, so a flurry of them is one request. */
   const SAVE_AFTER = 400;
-  const FACET_SCAN_MAX = 5000;
   /** How far one arrow key moves a node, in canvas units. The keyboard path to the
    *  same act: a canvas cannot otherwise be arranged without a mouse. */
   const NUDGE = 12;
@@ -320,11 +330,24 @@
   const searchTerms = $derived(
     toGraphQuery(searchFilter, { types: searchWantedTypes })
   );
+  const activePeriod = $derived(hasAnalysisPeriod(analysisSearch.period));
+  const temporalTerms = $derived.by(() => {
+    const period = analysisPeriodQuery(analysisSearch.period);
+    if (!period.temporalFrom) return {};
+    return {
+      temporal_from: period.temporalFrom,
+      temporal_to: period.temporalTo,
+      temporal_category: period.temporalCategories.join(','),
+    };
+  });
   const searchSaid = $derived(
     [
       searchFilter.q.trim() ? `“${searchFilter.q.trim()}”` : '',
       ...chipsOf(searchFilter, { type: entityLabel, family: familyTitle })
         .map((chip) => chip.text),
+      activePeriod ? `Fact time · ${windowWords(
+        analysisSearch.period.from, analysisSearch.period.to, 'UTC'
+      )}` : '',
     ].filter(Boolean).join(' · ')
   );
   let loading = $state(false);
@@ -468,6 +491,11 @@
   let width = $state(0);
   let height = $state(0);
 
+  /** The whole tool, which is what full screen takes over: a canvas alone would
+   *  leave the toolbar behind, and the toolbar is how the drawing is steered. */
+  let toolElement = $state(null);
+  let fullscreen = $state(false);
+
   /**
    * Where nodes have been dragged to, and why this map is deliberately not `$state`.
    *
@@ -539,8 +567,8 @@
   const mode = $derived(root ? 'hops' : 'rings');
   const ownsViewArrangement = () => Boolean(
     arrangementOwner &&
-    analysisSearch.activeView?.surface === 'graph' &&
-    analysisSearch.activeView?.id === arrangementOwner
+    catalogViews.activeView?.surface === 'graph' &&
+    catalogViews.activeView?.id === arrangementOwner
   );
   const placed = $derived.by(() => {
     void arrangementRevision;
@@ -558,7 +586,7 @@
   const chosen = $derived(selected ? (byId.get(selected) ?? null) : null);
   const edgeById = $derived(new Map(edges.map((link) => [link.id, link])));
   const chosenEdge = $derived(chosenLink ? (edgeById.get(chosenLink) ?? null) : null);
-  const snapshotReading = $derived(Boolean(analysisSearch.snapshotId || payload?.snapshot));
+  const snapshotReading = $derived(Boolean(catalogViews.snapshotId || payload?.snapshot));
 
   /**
    * The readings a landed connection offers, under the registry's own headings.
@@ -1469,8 +1497,13 @@
     // for it (`lib/entityFilter.js`). Applied as **terms** rather than as the ids it
     // matched: the drawing then answers the same question the table did, at any size,
     // and goes on answering it as the case changes underneath.
-    const params = { lens, order, ...searchTerms };
-    if (analysisSearch.snapshotId) params.view = analysisSearch.snapshotId;
+    const params = {
+      lens,
+      order,
+      ...searchTerms,
+      ...(catalogViews.snapshotId ? {} : temporalTerms),
+    };
+    if (catalogViews.snapshotId) params.view = catalogViews.snapshotId;
     // The types the switched-on families resolve to, as the catalog's own
     // comma-separated list. Empty when every family is on, which is no narrowing.
     // Intersected with a handed-over type set rather than replacing it: both are
@@ -1519,7 +1552,7 @@
       cid, lens, order, root ?? '', hops, pickFolder, hiddenFamilies.join(','),
       // A question the Board handed over is the question: arriving with one, and
       // letting it go, both refit the view rather than growing what was on screen.
-      JSON.stringify(searchTerms), analysisSearch.snapshotId ?? '',
+      JSON.stringify(searchTerms), JSON.stringify(temporalTerms), catalogViews.snapshotId ?? '',
     ].join('|');
     try {
       const [path, params] = request();
@@ -2570,7 +2603,8 @@
       pickFolder,
       hiddenFamilies.join(','),
       JSON.stringify(searchTerms),
-      analysisSearch.snapshotId ?? '',
+      JSON.stringify(temporalTerms),
+      catalogViews.snapshotId ?? '',
       // An undo that only puts an arrangement back changes nothing else the reading
       // is keyed on, and the picture has to move all the same.
       String(rereads),
@@ -2627,12 +2661,6 @@
       facets = [];
       facetsFor = null;
       facetState = 'unasked';
-      return;
-    }
-    if (!searchWantedTypes.length && (summary?.total ?? 0) > FACET_SCAN_MAX) {
-      facets = [];
-      facetsFor = null;
-      facetState = 'narrow-first';
       return;
     }
     if (!searchWantedTypes.length && !fieldsWanted) {
@@ -4330,6 +4358,27 @@
     restyle();
   }
 
+  /** Native full screen, so the drawing gets the browser chrome's rows too. The
+   *  canvas is measured with `bind:clientWidth`, so the stage follows on its own.
+   *  Esc leaves it without asking us, which is why the flag is read back from the
+   *  document rather than toggled here. */
+  async function toggleFullscreen() {
+    if (!toolElement || typeof document === 'undefined') return;
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await toolElement.requestFullscreen();
+    } catch {
+      toast('Full screen is not available', 'danger');
+    }
+  }
+
+  $effect(() => {
+    if (typeof document === 'undefined') return;
+    const changed = () => (fullscreen = document.fullscreenElement === toolElement);
+    document.addEventListener('fullscreenchange', changed);
+    return () => document.removeEventListener('fullscreenchange', changed);
+  });
+
   /** Which way one arrow key moves a node. */
   const ARROWS = {
     ArrowLeft: [-1, 0],
@@ -4488,6 +4537,28 @@
 
   /** A saved graph is a question plus presentation state. Its arrangement belongs
    * to the view, so reopening it restores the reading without rewriting case pins. */
+  function openPeriodInTimeline() {
+    uiState.timelineRange = {
+      from: analysisSearch.period.from,
+      to: analysisSearch.period.to,
+    };
+    uiState.tool = 'timeline';
+  }
+
+  function openPeriodOnMap() {
+    uiState.mapTimelineRange = {
+      from: analysisSearch.period.from,
+      to: analysisSearch.period.to,
+      categories: analysisSearch.period.categories ?? [],
+    };
+    uiState.tool = 'satellite';
+  }
+
+  function clearPeriod() {
+    fromBoard = null;
+    setAnalysisPeriod(caseState.current?.id, emptyAnalysisPeriod());
+  }
+
   function captureAnalysisView(mode) {
     const graph = JSON.parse(snapshotNow());
     graph.camera = group
@@ -4501,7 +4572,7 @@
         label: searchSaid,
       },
       graph,
-      timeline: { from: null, to: null, field: null },
+      timeline: analysisPeriodSpec(analysisSearch.period),
       ...(mode === 'snapshot' ? { capture_ids: nodes.map((node) => node.id) } : {}),
     };
   }
@@ -4514,7 +4585,7 @@
     // Finish a case-wide drag before replacing the drawing-side map with the view's
     // own arrangement. The two stores never borrow coordinates from each other.
     await flushPins();
-    if (analysisSearch.activeView?.id !== view.id) {
+    if (catalogViews.activeView?.id !== view.id) {
       restoring = false;
       return;
     }
@@ -4553,7 +4624,8 @@
   }
 
   async function openAnalysisView(view) {
-    if (view.surface === 'board') {
+    if (view.surface !== 'graph') {
+      // The only other surface in this family is the Board: same question, rows.
       uiState.tool = 'board';
       return;
     }
@@ -4574,7 +4646,7 @@
 
   // A view can be opened from the other surface while this component is hidden.
   $effect(() => {
-    const view = analysisSearch.activeView;
+    const view = catalogViews.activeView;
     if (!view || view.surface !== 'graph') {
       appliedViewId = null;
       if (arrangementOwner) {
@@ -4592,7 +4664,7 @@
   let observedLiveView = null;
   let observedLiveState = '';
   $effect(() => {
-    const view = analysisSearch.activeView;
+    const view = catalogViews.activeView;
     void arrangementRevision;
     void arrangementSaveRevision;
     void cameraRevision;
@@ -4605,10 +4677,12 @@
     if (restoring) return;
     const current = {
       filter: normalizeFilter(searchFilter),
+      period: normalizeAnalysisPeriod(analysisSearch.period),
       graph: captureAnalysisView('live').graph,
     };
     const saved = {
       filter: normalizeFilter(view.spec?.query?.filter),
+      period: normalizeAnalysisPeriod(view.spec?.timeline),
       graph: view.spec?.graph ?? {},
     };
     const currentState = JSON.stringify(current);
@@ -4617,9 +4691,9 @@
       observedLiveState = currentState;
     } else if (currentState !== observedLiveState) {
       observedLiveState = currentState;
-      analysisSearch.changeVersion += 1;
+      catalogViews.changeVersion += 1;
     }
-    analysisSearch.modified = currentState !== JSON.stringify(saved);
+    catalogViews.modified = currentState !== JSON.stringify(saved);
   });
 
   $effect(() => () => {
@@ -4641,7 +4715,7 @@
   onpointercancel={onPointerUp}
 />
 
-<div class="graph-tool">
+<div class="graph-tool" bind:this={toolElement}>
   <div class="toolbar">
     {#if root}
       <button class="btn btn-ghost btn-sm" onclick={wholeCase}>
@@ -4964,6 +5038,18 @@
         <Icon name="reset" size={14} />
       </button>
     </span>
+
+    <!-- Last in the row, and always there: a big case is read by giving it the whole
+         screen, and a control that moves as chips appear is a control you hunt for. -->
+    <button
+      class="btn btn-ghost btn-sm placed"
+      aria-pressed={fullscreen}
+      onclick={toggleFullscreen}
+      title={fullscreen ? 'Back to the window (Esc)' : 'Draw the case on the whole screen'}
+    >
+      <Icon name={fullscreen ? 'minimize' : 'maximize'} size={14} stroke={1.7} />
+      {fullscreen ? 'Exit full screen' : 'Full screen'}
+    </button>
   </div>
 
   {#if !root}
@@ -4981,6 +5067,14 @@
       disabled={snapshotReading}
       onfields={() => (fieldsWanted = true)}
     />
+    {#if activePeriod}
+      <AnalysisPeriodBar
+        period={analysisSearch.period}
+        ontimeline={openPeriodInTimeline}
+        onmap={openPeriodOnMap}
+        onclear={clearPeriod}
+      />
+    {/if}
   {/if}
 
   {#if fromBoard}
@@ -5269,7 +5363,7 @@
           {#if snapshotReading}
             <button
               class="btn btn-ghost"
-              onclick={() => (snapshotOpen = analysisSearch.activeView?.spec?.snapshot?.entities
+              onclick={() => (snapshotOpen = catalogViews.activeView?.spec?.snapshot?.entities
                 ?.find((entity) => entity.id === chosen.id) ?? null)}
             >Captured details</button>
           {:else}
@@ -5777,8 +5871,8 @@
   <Modal title="Snapshot details" onclose={() => (snapshotOpen = null)} width="640px">
     <SnapshotDetails
       entity={snapshotOpen}
-      entities={analysisSearch.activeView?.spec?.snapshot?.entities ?? []}
-      links={analysisSearch.activeView?.spec?.snapshot?.links ?? []}
+      entities={catalogViews.activeView?.spec?.snapshot?.entities ?? []}
+      links={catalogViews.activeView?.spec?.snapshot?.links ?? []}
     />
   </Modal>
 {/if}
@@ -5789,6 +5883,14 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
+  }
+  /* The fullscreen backdrop is black by default, and the toolbar draws no background
+     of its own, so the page's is stated here. */
+  .graph-tool:fullscreen {
+    width: 100vw;
+    height: 100vh;
+    background: var(--bg-0);
+    color: var(--text-1);
   }
   .toolbar {
     display: flex;

@@ -61,6 +61,11 @@
   --graph-place: #7fb069;
   --graph-claim: #cf8ba0;
 
+  /* Timeline categories. Status and selection still use their own tokens. */
+  --timeline-statement: #50bda8;
+  --timeline-media: #7896f0;
+  --timeline-activity: #a487d1;
+
   /* -- typography --------------------------------------------- */
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
@@ -135,6 +140,10 @@
   --graph-place: #4a7f36;
   --graph-claim: #a35470;
 
+  --timeline-statement: #1f7669;
+  --timeline-media: #4264b5;
+  --timeline-activity: #76539d;
+
   --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.12);
   --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.16);
 
@@ -170,6 +179,9 @@
   --danger-soft: rgba(217, 112, 112, 0.12);
   --info: #6f9fd8;
   --info-soft: rgba(111, 159, 216, 0.12);
+  --timeline-statement: #50bda8;
+  --timeline-media: #7896f0;
+  --timeline-activity: #a487d1;
   --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.4);
   --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.5);
 }

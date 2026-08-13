@@ -42,7 +42,7 @@
     /** The fields the narrowed types hold, as `/catalog/attributes` answers. */
     facets = [],
     /** Whether those facets are for the whole case or still being fetched. */
-    facetState = 'ready', // 'ready' | 'loading' | 'narrow-first'
+    facetState = 'ready', // 'ready' | 'loading' | 'unasked'
     /** Types the case actually holds, in menu order: `[{ type, label, family }]`. */
     types = [],
     families = [],
@@ -150,10 +150,9 @@
    *  in the menu rather than by leaving the row out. */
   function axisState(axis) {
     if (axis === 'field') {
-      // Only a case too large for the menu to be readable asks for a type first.
-      // Everything else opens: the fields are read on this click, which is the whole
-      // point of the change — gated behind a type, `kind` was invisible.
-      if (facetState === 'narrow-first') return { off: true, note: 'pick a type first' };
+      // Always openable, whatever the case holds: the fields are read on this click,
+      // which is the whole point — gated behind a type, `kind` was invisible, and
+      // gated behind a size the large cases lost the one filter that scales.
       if (facetState === 'loading') return { off: false, note: 'reading…' };
       if (facetState === 'unasked') return { off: false, note: '' };
       return fields.length
@@ -485,8 +484,6 @@
            know what to click" comes from. -->
       {#if facetState === 'loading'}
         <p class="note">Reading what the case stores…</p>
-      {:else if facetState === 'narrow-first'}
-        <p class="note">Too much to scan. Pick a type first, then come back.</p>
       {:else if !fields.length}
         <p class="note">Nothing here stores a field a menu can offer.</p>
       {:else}

@@ -44,9 +44,9 @@ tools and tile caches under the hidden `~/Azimut/.azimut/` directory. Settings â
 Storage moves the workspace anywhere you like, including an external drive, or
 adopts one you moved yourself. The old copy is kept until you delete it.
 
-The Case Doctor checks that a case's database and media records still match its
-files. It only changes a case after you choose a repair, and states what a
-database rebuild cannot recover before it starts.
+The Case Doctor checks case integrity, including the derived Timeline index. It
+only changes a case after you choose a repair, and states what a database rebuild
+cannot recover before it starts.
 
 New in v0.2.7:
 

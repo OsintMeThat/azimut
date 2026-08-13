@@ -438,6 +438,64 @@ def test_local_noon_is_midday_on_the_clock():
     assert moment == datetime(2026, 1, 15, 11, 0, tzinfo=UTC)
 
 
+# -- daylight over a window ----------------------------------------------------
+#
+# A different question from the almanac above: not *when did the sun rise on this
+# date* but *over these days, when was it light*. Held to the same standard — the
+# altitude at each returned edge is the horizon — plus the two things a run of spans
+# can get wrong that a single day cannot: the clipping at each end of the window, and
+# a window with no crossing in it at all.
+
+
+def test_daylight_spans_one_per_day_and_each_edge_is_the_horizon():
+    start = datetime(2026, 6, 20, tzinfo=UTC)
+    spans = sky.daylight_spans(*PARIS, start, start + timedelta(days=3))
+    assert len(spans) == 3
+    for span in spans:
+        assert span["from"] < span["to"]
+        for edge in (span["from"], span["to"]):
+            assert _altitude(*PARIS, edge) == pytest.approx(sky.SUN_HORIZON_DEG, abs=0.01)
+    # midsummer in Paris: a good sixteen hours of it
+    assert 15.5 < (spans[0]["to"] - spans[0]["from"]).total_seconds() / 3600 < 16.5
+
+
+def test_daylight_clips_to_the_window_instead_of_reaching_outside_it():
+    """A window opening at noon is already inside daylight, and a chronology drawing
+    the ribbon must not be handed a sunrise that happened before the axis starts."""
+    noon = datetime(2026, 6, 20, 12, tzinfo=UTC)
+    spans = sky.daylight_spans(*PARIS, noon, noon + timedelta(hours=4))
+    assert len(spans) == 1
+    assert spans[0]["from"] == noon
+    assert spans[0]["to"] == noon + timedelta(hours=4)
+
+
+def test_polar_day_is_one_span_and_polar_night_is_none():
+    """The two answers a caller cannot tell from a failed computation unless the
+    window comes back either wholly covered or wholly empty."""
+    midsummer = datetime(2026, 6, 20, tzinfo=UTC)
+    covered = sky.daylight_spans(*TROMSO, midsummer, midsummer + timedelta(days=3))
+    assert covered == [{"from": midsummer, "to": midsummer + timedelta(days=3)}]
+
+    midwinter = datetime(2026, 12, 20, tzinfo=UTC)
+    assert sky.daylight_spans(*TROMSO, midwinter, midwinter + timedelta(days=3)) == []
+
+
+def test_civil_twilight_encloses_the_daylight_it_surrounds():
+    start = datetime(2026, 6, 20, tzinfo=UTC)
+    day = sky.daylight_spans(*PARIS, start, start + timedelta(days=1))[0]
+    civil = sky.daylight_spans(
+        *PARIS, start, start + timedelta(days=1), sky.TWILIGHTS["civil"]
+    )[0]
+    assert civil["from"] < day["from"]
+    assert civil["to"] > day["to"]
+
+
+def test_a_window_that_ends_before_it_starts_has_no_spans():
+    start = datetime(2026, 6, 20, tzinfo=UTC)
+    assert sky.daylight_spans(*PARIS, start, start) == []
+    assert sky.daylight_spans(*PARIS, start, start - timedelta(days=1)) == []
+
+
 # -- nothing reaches the network -----------------------------------------------
 
 

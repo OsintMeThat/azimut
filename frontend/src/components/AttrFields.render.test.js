@@ -40,13 +40,20 @@ const RELIABILITY = {
   ],
 };
 
-// Two subjects on one type, the shape a Claim has: what it states, then why that is
-// believed. A single heading over all four would file a count as reasoning.
+// Three subjects on one type: what a Claim states, when it applies, then why it is
+// believed. A single heading over every field would file a count as reasoning.
 const COUNTED = [
   { key: 'count', label: 'How many', kind: 'number', group: 'What it states',
     rungs: [], minimum: 1, whole: true },
   { key: 'condition', label: 'Condition', kind: 'choice', rungs: [],
     options: [{ value: 'destroyed', label: 'Destroyed' }] },
+  { key: 'when', label: 'When', kind: 'temporal', group: 'When', rungs: [] },
+  { key: 'time_role', label: 'Time role', kind: 'choice', rungs: [],
+    options: [
+      { value: 'occurred', label: 'Occurred' },
+      { value: 'observed', label: 'Observed' },
+      { value: 'valid', label: 'Valid during' },
+    ] },
   { key: 'confidence', label: 'Confidence', kind: 'choice', group: 'Reasoning',
     rungs: [], options: [{ value: 'probable', label: 'Probable' }] },
   { key: 'method', label: 'How this was worked out', kind: 'longtext', rungs: [] },
@@ -305,14 +312,12 @@ describe('a type with nothing to show', () => {
   });
 });
 
-describe('one type, two subjects', () => {
+describe('one type, three subjects', () => {
   const headings = (root) =>
     [...root.querySelectorAll('.attrs-h')].map((node) => node.textContent);
 
   it('opens a heading where the registry changes group, and only there', () => {
-    // four fields, two headings: a count is not reasoning, and a heading per field
-    // would be a form of labels rather than a form of blocks
-    expect(headings(open({}, 'claim'))).toEqual(['What it states', 'Reasoning']);
+    expect(headings(open({}, 'claim'))).toEqual(['What it states', 'When', 'Reasoning']);
   });
 
   it('leaves the fields in the order the vocabulary declares them', () => {
@@ -320,7 +325,8 @@ describe('one type, two subjects', () => {
     const order = [...root.querySelectorAll('.attr-k')].map((node) => node.textContent);
 
     expect(order).toEqual([
-      'How many', 'Condition', 'Confidence', 'How this was worked out',
+      'How many', 'Condition', 'When', 'Time role', 'Confidence',
+      'How this was worked out',
     ]);
   });
 
@@ -334,5 +340,80 @@ describe('one type, two subjects', () => {
 
     expect(field(root, 'count').getAttribute('step')).toBe('1');
     expect(field(root, 'count').getAttribute('min')).toBe('1');
+  });
+});
+
+describe('a temporal Claim field', () => {
+  const choose = (root, label, value) => {
+    const select = root.querySelector(`select[aria-label="${label}"]`);
+    select.value = value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+  };
+
+  it('starts with a date picker and exposes every guided format', () => {
+    const root = open({}, 'claim');
+    const when = field(root, 'when');
+    const format = root.querySelector('select[aria-label="Date format"]');
+
+    expect(when.type).toBe('date');
+    expect(format.value).toBe('date');
+    expect([...format.options].map((option) => option.textContent)).toEqual([
+      'Date', 'Date and time', 'Date range', 'Time range', 'Advanced syntax',
+    ]);
+  });
+
+  it('builds an approximate month without making the analyst type its syntax', () => {
+    const root = open({}, 'claim');
+
+    choose(root, 'Date precision', 'month');
+    type(field(root, 'when'), '2026-08');
+    choose(root, 'Date certainty', '~');
+    choose(root, 'Date format', 'advanced');
+
+    expect(field(root, 'when').value).toBe('2026-08~');
+  });
+
+  it('adds seconds and UTC to a guided date and time', () => {
+    const root = open({}, 'claim');
+
+    choose(root, 'Date format', 'timestamp');
+    type(field(root, 'when'), '2026-08-11T18:40');
+    choose(root, 'Timezone', 'utc');
+    choose(root, 'Date format', 'advanced');
+
+    expect(field(root, 'when').value).toBe('2026-08-11T18:40:00Z');
+  });
+
+  it('opens the complete syntax reference beside the advanced field', () => {
+    const root = open({}, 'claim');
+
+    choose(root, 'Date format', 'advanced');
+
+    const guide = root.querySelector('[aria-label="Supported date syntax"]');
+    expect(guide).not.toBeNull();
+    expect(field(root, 'when').getAttribute('aria-describedby')).toBe(guide.id);
+    expect(guide.textContent).toContain("Dates use Azimut's EDTF profile");
+    expect(guide.textContent).toContain('Local time');
+    expect(guide.textContent).toContain('2026-08-11T18:40:00+02:00');
+    expect(guide.textContent).toContain('2026-08~/2026-10?');
+    expect(guide.textContent).toContain('Approximate and uncertain');
+    expect(guide.textContent).toContain('Open ranges');
+    expect(guide.querySelectorAll('[role="row"]')).toHaveLength(10);
+  });
+
+  it('keeps the syntax table out of the guided modes', () => {
+    const root = open({}, 'claim');
+
+    expect(root.textContent).not.toContain('Supported date syntax');
+    expect(root.querySelector('[aria-label="Supported date syntax"]')).toBeNull();
+  });
+
+  it('offers exactly the three meanings served by the registry', () => {
+    const options = [...field(open({}, 'claim'), 'time_role').options];
+
+    expect(options.map((option) => option.value)).toEqual([
+      '', 'occurred', 'observed', 'valid',
+    ]);
   });
 });

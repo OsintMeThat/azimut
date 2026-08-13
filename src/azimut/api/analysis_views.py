@@ -1,4 +1,4 @@
-"""Named, case-owned Board and Graph readings."""
+"""Named, case-owned Board, Graph and Timeline readings."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def _now() -> str:
 class AnalysisViewIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     mode: Literal["live", "snapshot"] = "live"
-    surface: Literal["board", "graph"] = "board"
+    surface: Literal["board", "graph", "timeline"] = "board"
     spec: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -34,10 +34,16 @@ class AnalysisViewDuplicateIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
 
 
-def _unique(case, name: str, *, ignore: str | None = None) -> None:
+def _unique(case, name: str, surface: str, *, ignore: str | None = None) -> None:
+    """A name is claimed inside its own family, not across the app: the Timeline's
+    views and the catalog's are separate lists, and refusing a name the user cannot
+    see anywhere is worse than allowing the repeat."""
     wanted = name.strip().casefold()
+    wanted_family = view_engine.family(surface)
     if any(
-        view["id"] != ignore and str(view["name"]).strip().casefold() == wanted
+        view["id"] != ignore
+        and view_engine.family(view.get("surface")) == wanted_family
+        and str(view["name"]).strip().casefold() == wanted
         for view in case.list_analysis_views()
     ):
         raise HTTPException(status_code=409, detail=f"an analysis view named '{name}' already exists")
@@ -52,7 +58,7 @@ def _save(
     snapshot_copy: bool = False,
 ) -> dict[str, Any]:
     name = body.name.strip()
-    _unique(case, name, ignore=view_id)
+    _unique(case, name, body.surface, ignore=view_id)
     try:
         spec = view_engine.prepare(
             case,

@@ -2,6 +2,7 @@
 
 import io
 import json
+import sqlite3
 
 from azimut import layout
 from azimut.engine import workqueue
@@ -31,6 +32,51 @@ def test_healthy_case_has_no_doctor_findings(client):
     assert report["status"] == "healthy"
     assert report["issues"] == []
     assert report["summary"] == {"errors": 0, "warnings": 0, "info": 0}
+
+
+def test_stale_timeline_index_is_diagnosed_then_explicitly_rebuilt(client):
+    case_id = _new_case(client, "Stale Timeline")
+    claim = client.post(
+        f"/api/cases/{case_id}/entities",
+        json={
+            "type": "claim",
+            "label": "The vessel arrived",
+            "attrs": {"when": "2026-08-11T10:32:14.5Z", "time_role": "observed"},
+        },
+    ).json()
+    case = Case.open(case_id)
+    with sqlite3.connect(case.db_path) as conn:
+        conn.execute(
+            "UPDATE temporal_items SET earliest = ? WHERE owner_id = ?",
+            ("2026-08-11T10:32:14.5Z", claim["id"]),
+        )
+
+    report = client.get(f"/api/cases/{case_id}/doctor").json()
+
+    issue = next(item for item in report["issues"] if item["kind"] == "temporal-index-stale")
+    assert issue["actions"] == [
+        {
+            "id": "rebuild-timeline",
+            "label": "Rebuild Timeline index",
+            "tone": "primary",
+        }
+    ]
+    with sqlite3.connect(case.db_path) as conn:
+        assert conn.execute(
+            "SELECT earliest FROM temporal_items WHERE owner_id = ?", (claim["id"],)
+        ).fetchone()[0] == "2026-08-11T10:32:14.5Z"
+
+    repaired = client.post(
+        f"/api/cases/{case_id}/doctor/repair",
+        json={"action": "rebuild-timeline"},
+    ).json()
+
+    assert repaired["repair"]["status"] == "rebuilt"
+    assert repaired["report"]["status"] == "healthy"
+    with sqlite3.connect(case.db_path) as conn:
+        assert conn.execute(
+            "SELECT earliest FROM temporal_items WHERE owner_id = ?", (claim["id"],)
+        ).fetchone()[0] == "2026-08-11T10:32:14.500000Z"
 
 
 def test_deleted_database_can_be_rebuilt_from_file_backed_artifacts(client):
@@ -159,6 +205,9 @@ def test_doctor_refuses_repairs_that_the_current_damage_does_not_offer(client):
 
     assert client.post(
         f"/api/cases/{case_id}/doctor/repair", json={"action": "rebuild"}
+    ).status_code == 409
+    assert client.post(
+        f"/api/cases/{case_id}/doctor/repair", json={"action": "rebuild-timeline"}
     ).status_code == 409
     assert client.post(
         f"/api/cases/{case_id}/doctor/repair",

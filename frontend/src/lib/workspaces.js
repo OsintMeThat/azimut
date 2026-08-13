@@ -17,7 +17,7 @@ export const CASE_WORKSPACE = {
   id: 'case',
   label: 'Case',
   icon: 'graph',
-  tools: ['board', 'graph'],
+  tools: ['board', 'graph', 'timeline'],
 };
 
 /** The rail, in investigation order. */
@@ -34,6 +34,7 @@ export const ALL_WORKSPACES = [CASE_WORKSPACE, ...WORKSPACES];
 export const TOOL_LABELS = {
   board: 'Board',
   graph: 'Graph',
+  timeline: 'Timeline',
   media: 'Media',
   files: 'Files',
   reverse: 'Reverse Search',

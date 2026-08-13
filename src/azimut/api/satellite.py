@@ -614,6 +614,79 @@ def sky_for_point(
     }
 
 
+#: How wide a window the daylight ribbon answers for.
+#:
+#: Both a cost bound and a legibility one, and they land in the same place. The search
+#: is linear in the window and this route walks it twice, once per threshold: measured
+#: at 65 ms for a week and 170 ms for a month, per run. And a ribbon drawn over more
+#: than a month is stripes a few pixels wide, which is moiré rather than a reading —
+#: while the axis it sits under is panned, so the request repeats. Past this the answer
+#: is empty and says it was cut, the way every other bounded read here does.
+MAX_DAYLIGHT_DAYS = 31
+
+
+def _instant(value: str, field: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"{field} must be an ISO 8601 instant"
+        ) from exc
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+@router.get("/geo/daylight")
+def daylight_for_window(
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+    start: str = Query(alias="from"),
+    end: str = Query(alias="to"),
+) -> dict[str, Any]:
+    """When it was light at a point, over a window, plus that point's civil zone.
+
+    Pure computation like ``/geo/sky``: nothing here reaches the network, and the
+    zone comes from the bundled boundaries (``engine.localtime``) rather than from a
+    lookup service.
+
+    Two runs of spans, because dusk is not a line: ``day`` is the sun above the
+    horizon and ``civil`` is it above −6°, so a caller can draw the hour in between
+    as what it is. Instants are UTC — the axis they land on is UTC underneath
+    whatever clock it is labelled with.
+    """
+    first = _instant(start, "from")
+    last = _instant(end, "to")
+    if last <= first:
+        raise HTTPException(status_code=422, detail="to must come after from")
+    zone_name = localtime.zone_for(lat, lon)
+    stamped = localtime.both(first, zone_name) or {}
+    zone = {
+        "name": zone_name,
+        "abbreviation": stamped.get("abbreviation"),
+        "offset": stamped.get("offset"),
+        "offset_minutes": stamped.get("offset_minutes"),
+    }
+    if (last - first).total_seconds() > MAX_DAYLIGHT_DAYS * 86_400:
+        return {"lat": lat, "lon": lon, "zone": zone, "day": [], "civil": [], "truncated": True}
+
+    def spans(threshold: float) -> list[dict[str, str]]:
+        return [
+            {
+                "from": span["from"].isoformat().replace("+00:00", "Z"),
+                "to": span["to"].isoformat().replace("+00:00", "Z"),
+            }
+            for span in sky.daylight_spans(lat, lon, first, last, threshold)
+        ]
+
+    return {
+        "lat": lat,
+        "lon": lon,
+        "zone": zone,
+        "day": spans(sky.SUN_HORIZON_DEG),
+        "civil": spans(sky.TWILIGHTS["civil"]),
+        "truncated": False,
+    }
+
+
 @router.post("/cases/{case_id}/satellite/capture")
 def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
     case = get_case(case_id)

@@ -12,7 +12,7 @@ file-backed visible name with its filename stem in one idempotent migration.
 Schemas 4–8 were unreleased development checkpoints and normalize through the
 same jump. The entity/link shape is unchanged since v1. Breaking changes require
 a manifest schema bump and migration. The internal SQLite schema is at version
-14: 8 adds `links.confidence`, 9 rebuilds the entity search index so a case
+17: 8 adds `links.confidence`, 9 rebuilds the entity search index so a case
 search reaches the declared fields (§2) rather than stopping at the label and the
 notes, 11 adds `links.nature` — what kind of tie an edge states, in the analyst's
 own words, and only where the verb declares a qualifier (§3) — and 10 adds
@@ -33,16 +33,22 @@ and never enters the Media Library. A Media reference does not state
 `appears-in`, and detaching it does not delete the media. The first attachment
 becomes primary, and the next is promoted when the primary disappears. Trash
 and bundles carry both forms.
-Schema 13 adds `analysis_views`. These are named readings of the graph, not entities
-or findings: a live row stores a Board or Graph recipe, while a snapshot copies the
+Schema 13 adds `analysis_views`. These are named readings of the case, not entities
+or findings. A live row stores a Board or Graph recipe, while a snapshot copies the
 captured entities, provenance, closed relations and bounded preview thumbnails. They
 stay tied to their case, travel only with its complete bundle and never create graph
 edges. Live graph pins and camera are presentation owned by that view, separate from
-the case-wide arrangement. Their denormalised snapshot count lets the Views menu avoid parsing or
-transferring a capture merely to say how many entities it holds.
+the case-wide arrangement. Their denormalised snapshot count lets the Views menu avoid
+parsing or transferring a capture merely to say how many entities it holds.
 Schema 14 indexes `label` (under `NOCASE`) and `prov_at`, the two columns the
 catalog orders the whole case by. Nothing about the vocabulary changes: it is the
 index the ordering was already asking for.
+Schema 15 adds the rebuildable temporal projection. Claims and media metadata remain
+authoritative. Schema 16 lets Analysis Views own Timeline recipes and immutable
+temporal snapshots. Schema 17 rebuilds temporal bounds at fixed microsecond width so
+SQLite text ordering stays chronological. A Timeline view stores presentation and
+track queries, never copies temporal rows into the graph and never creates a temporal
+relation.
 
 Legend: ✅ implemented in code · ⬜ proposed.
 
@@ -184,7 +190,7 @@ answer by omission (`tests/test_entities.py`).
 | `domain` | identifier | subject | ✅ | analyst | hostname in the label; `registrar?` | no |
 | `ip` | identifier | subject | ✅ | analyst | address in the label; legacy read-only `network?`; `asn?`, `provider?` | no |
 | `network` | identifier | subject | ✅ | analyst | network/CIDR in the label; `asn?`, `provider?`, `country?` | no |
-| `claim` | claim | subject | ✅ | analyst | `count`, `condition`, `confidence`, `method`, `verbatim` | no |
+| `claim` | claim | subject | ✅ | analyst | `count`, `condition`, `when`, `time_role`, `confidence`, `method`, `verbatim` | no |
 
 Every row is created by something: the tool-born ones by the save that produces them,
 the analyst's own from the board's **New entity**, which builds its form out of the
@@ -221,16 +227,17 @@ never *everything this type holds*** — that is what keeps validation additive,
 no key a tool already writes is judged by it.
 
 A declared field says how it is edited: `text`, `longtext`, `number`, `url`,
-`choice`, `geojson`. `longtext` stores and validates exactly what `text` does; it
-says the field expects sentences, so it gets a box that grows. A `number` may declare
-its bounds, its shortcut rungs, and whether it is `whole` — a count steps by one,
-where a radius in metres does not.
+`choice`, `geojson`, `temporal`. `longtext` stores and validates exactly what `text`
+does; it says the field expects sentences, so it gets a box that grows. A `number`
+may declare its bounds, its shortcut rungs, and whether it is `whole` — a count steps
+by one, where a radius in metres does not.
 
 A field may also declare the `group` that **heads it and the fields after it**, which
-is what lets one type hold two subjects: a Claim says what it states and then why
-that is believed, where a place's four fields all answer how tightly the point is
-pinned. The heading is emitted where the group changes, so the form keeps the
-registry's order rather than regrouping itself, and a heading may be opened once.
+is what lets one type hold several subjects: a Claim says what it states, when it
+applies and why that is believed, where a place's four fields all answer how tightly
+the point is pinned. The heading is emitted where the group changes, so the form
+keeps the registry's order rather than regrouping itself, and a heading may be opened
+once.
 
 **The declared `text`, `longtext` and `url` fields are what a case search matches
 on**, beside the label, the type, the folder and the notes — a vehicle is looked for
@@ -313,12 +320,13 @@ complete (SPEC §2), and statistics whose labels live elsewhere do not travel. A
 catalogue can later seed the field by autocompletion, copying the term into the case
 on use, which changes nothing here.
 
-**The Claim carries the number.** `count` (whole, at least 1) and `condition` join
-`confidence`, `method` and `verbatim` on the node — never on `about`, because a Claim
-may point at several subjects and one number on the node could not say which it
-meant. So **one statement counts one kind of thing**, and a second kind is a second
-Claim with its own confidence. That is the call §3 already makes for competing
-candidates, and it is what keeps every value on the node assessable as one.
+**The Claim carries the number and time.** `count` (whole, at least 1), `condition`,
+`when` and `time_role` join `confidence`, `method` and `verbatim` on the node. They
+never sit on `about`, because a Claim may point at several subjects and one number on
+the node could not say which it meant. So **one statement counts one kind of thing**,
+and a second kind is a second Claim with its own confidence. That is the call §3
+already makes for competing candidates, and it is what keeps every value on the node
+assessable as one.
 
 Absent `count` means *seen, not counted*, which is a different and honest answer from
 one — the same reasoning that makes zero an invalid radius below.
@@ -326,7 +334,8 @@ one — the same reasoning that makes zero an invalid radius below.
 The shape of a filed observation, then:
 
 ```
-claim(count: 2, condition: destroyed, confidence: probable)
+claim(count: 2, condition: destroyed, when: 2026-08~, time_role: observed,
+      confidence: probable)
    ├── about ──▶ equipment-type "T-72B3"
    ├── at    ──▶ place "Crossroads"
    └── cites ──▶ media (the video)
@@ -336,9 +345,21 @@ claim(count: 2, condition: destroyed, confidence: probable)
 whole design: the two-hop path carries how many and in what state, where a direct
 edge could carry neither.
 
-Two things this deliberately does not do. It does not date the observation — no verb
-carries a date (§3), and a Claim gains its point or interval in time with Temporal
-Claims (SPEC §6, v4). And **counting Claims counts observations, not objects**: two
+No verb carries that date (§3): the temporal value belongs to the statement. The
+parser accepts reduced Gregorian dates, date intervals, final `~`, `?` and `%`
+qualifiers, and ISO timestamps with seconds. A timestamp without a timezone is kept
+as unplaced rather than undated, but is not globally sortable. Two zoned timestamps
+may form an exact interval. Local-time intervals, mixed date/time intervals, open
+intervals and the rest of EDTF Level 2 remain outside the announced profile.
+
+Time reads a derived SQLite projection, never a second authority. Claim `when` and
+`time_role` remain on the Claim; capture/publication/imagery dates remain in the media
+sidecar; filing and collection dates remain provenance. The projection labels them
+`statement`, `media` or `case_activity`, and can be deleted and rebuilt from those
+records. A manually assessed media time is therefore a sourced Claim about the media,
+not a rewrite of `taken_at`.
+
+**Counting Claims counts observations, not objects**: two
 videos of the same destroyed tank are two statements. Azimut does not merge
 observations across entities, so a total says *observations* in those words rather
 than implying a fleet.
@@ -392,10 +413,10 @@ the radius. Why the ladder is not derived from Plus Code lengths is in
 `entities.PRECISION_RUNGS`. Nothing here is required and **absence is never flagged**:
 a place with no radius draws as a pin, with no badge asking for one.
 
-The four fields are edited in Details → **Case**, under the heading the registry
+The four fields are edited in Details → **Info**, under the heading the registry
 gives them (`group` on the field that opens the block, `"How precise"` here), and committed
-by the panel's Save. They sit under Case rather than Info because Info reports what
-the file or the save says about itself, where precision is the analyst's judgement.
+by the panel's Save. Info holds the entity's editable profile; Connections is reserved
+for graph edges and lineage, and Time for dated statements and intrinsic dates.
 
 The saved index (`GET /cases/{id}/satellite/index`) carries `radius_m` and
 `footprint` so the map overlay draws them without fetching each place: a footprint
@@ -542,7 +563,8 @@ statement.
 
 **No verb carries a date.** `sited-at` is a permanent site, not a visit. A person's
 whereabouts at a time, or a unit reassigned between corps, is a statement with a
-reason and sources, so it belongs on a claim node rather than an edge.
+reason and sources, so its `when` and `time_role` belong on a claim node rather than
+an edge.
 
 **`mentions` is a pointer, not a derivation.** A document *refers to* something,
 where `derived-from` says the file was built from it; both may sit on the same pair,
@@ -558,9 +580,10 @@ only reworded inside its action, and a mention carries no rating (`ratable: fals
 ### The claim, and how sure it is ✅
 
 A `claim` is a statement node. It points `about` at subjects, `at` at places and
-`cites` at evidence. The Claim holds `count`, `condition`, `confidence`, `method` and
-`verbatim`; its three connectors carry none of those values. This keeps one statement
-at one confidence even when it has several subjects, places or sources.
+`cites` at evidence. The Claim holds `count`, `condition`, `when`, `time_role`,
+`confidence`, `method` and `verbatim`; its three connectors carry none of those
+values. This keeps one statement at one confidence even when it has several subjects,
+places or sources.
 
 **`cites` also reaches another claim ✅**, because an intermediate conclusion is what
 the next one is built out of: *the vehicle is a T-72B3* carries *the column is the 4th

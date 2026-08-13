@@ -1,15 +1,18 @@
 <script>
-  /** Named, case-owned Search+ and graph readings. */
+  /** Named, case-owned readings. Board and Graph share a family of views; the
+   *  Timeline has its own — see `lib/analysisSearch.svelte.js`. */
   import { api } from '../lib/api.js';
   import {
     activateAnalysisView,
     adoptSavedAnalysisView,
-    analysisSearch,
     leaveAnalysisView,
+    viewFamily,
+    viewSlot,
   } from '../lib/analysisSearch.svelte.js';
   import { copyName } from '../lib/analysisViews.js';
+  import { closeOnOutsidePointer } from '../lib/dismiss.js';
   import { restoreGroup } from '../lib/trash.js';
-  import { caseState, toast } from '../lib/state.svelte.js';
+  import { caseState, registerCaseChangeGuard, toast } from '../lib/state.svelte.js';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
 
@@ -20,8 +23,19 @@
     onleave = () => {},
   } = $props();
 
-  let views = $state([]);
+  /**
+   * The views this surface can open, and the slot it reads.
+   *
+   * Board and Graph draw one question, so they share both. The Timeline asks about
+   * time and shares with neither: a list mixing the two offered readings that the
+   * surface underneath could not draw.
+   */
+  const family = $derived(viewFamily(surface));
+  const slot = $derived(viewSlot(surface));
+  let stored = $state([]);
+  const views = $derived(stored.filter((view) => viewFamily(view.surface) === family));
   let menu = $state(false);
+  let anchor = $state(null);
   let saving = $state(false);
   let name = $state('');
   let mode = $state('live');
@@ -31,11 +45,16 @@
   let autoTimer = 0;
   let activeSave = null;
   const AUTO_SAVE_AFTER = 650;
+  const snapshotNote = $derived(
+    surface === 'timeline'
+      ? 'Freezes up to 5,000 timeline entries.'
+      : 'Freezes up to 2,000 entities and their relations.'
+  );
 
   const activeStatus = $derived.by(() => {
-    if (analysisSearch.activeView?.mode !== 'live') return 'snapshot';
-    if (analysisSearch.saveState === 'error') return 'live · save failed';
-    if (analysisSearch.modified || analysisSearch.saveState === 'saving') {
+    if (slot.activeView?.mode !== 'live') return 'snapshot';
+    if (slot.saveState === 'error') return 'live · save failed';
+    if (slot.modified || slot.saveState === 'saving') {
       return 'live · saving…';
     }
     return 'live · saved';
@@ -45,14 +64,14 @@
     const caseId = caseState.current?.id;
     const run = ++readRun;
     if (!caseId) {
-      views = [];
+      stored = [];
       return;
     }
     try {
       const body = await api.get(`/api/cases/${caseId}/analysis-views`);
-      if (run === readRun && caseState.current?.id === caseId) views = body.views ?? [];
+      if (run === readRun && caseState.current?.id === caseId) stored = body.views ?? [];
     } catch {
-      if (run === readRun) views = [];
+      if (run === readRun) stored = [];
     }
   }
 
@@ -66,7 +85,7 @@
   });
 
   function updateSummary(view) {
-    views = views.map((row) => row.id === view.id
+    stored = stored.map((row) => row.id === view.id
       ? {
           ...row,
           name: view.name,
@@ -82,15 +101,15 @@
   async function persistActive() {
     while (activeSave) await activeSave;
     const caseId = caseState.current?.id;
-    const current = analysisSearch.activeView;
+    const current = slot.activeView;
     if (
       !caseId || !current || current.mode !== 'live' || current.surface !== surface ||
-      !analysisSearch.modified
+      !slot.modified
     ) return true;
 
     const viewId = current.id;
-    const version = analysisSearch.changeVersion;
-    analysisSearch.saveState = 'saving';
+    const version = slot.changeVersion;
+    slot.saveState = 'saving';
     const request = (async () => {
       try {
         const spec = await capture('live');
@@ -102,16 +121,16 @@
         });
         if (!adoptSavedAnalysisView(caseId, view)) return true;
         updateSummary(view);
-        if (analysisSearch.changeVersion === version) {
-          analysisSearch.modified = false;
-          analysisSearch.saveState = 'saved';
+        if (slot.changeVersion === version) {
+          slot.modified = false;
+          slot.saveState = 'saved';
         }
         return true;
       } catch (error) {
         if (
           caseState.current?.id === caseId &&
-          analysisSearch.activeView?.id === viewId
-        ) analysisSearch.saveState = 'error';
+          slot.activeView?.id === viewId
+        ) slot.saveState = 'error';
         toast(error.message || 'The live view could not be saved.', 'danger');
         return false;
       }
@@ -126,20 +145,20 @@
 
   $effect(() => {
     const caseId = caseState.current?.id;
-    const current = analysisSearch.activeView;
+    const current = slot.activeView;
     // Read every edit revision even while `modified` was already true, so typing,
     // repeated drags and consecutive folds restart one quiet-period timer.
-    void analysisSearch.changeVersion;
+    void slot.changeVersion;
     clearTimeout(autoTimer);
     autoTimer = 0;
     if (!caseId || !current || current.mode !== 'live' || current.surface !== surface) return;
-    if (!analysisSearch.modified) {
-      if (!activeSave && analysisSearch.saveState !== 'saved') {
-        analysisSearch.saveState = 'saved';
+    if (!slot.modified) {
+      if (!activeSave && slot.saveState !== 'saved') {
+        slot.saveState = 'saved';
       }
       return;
     }
-    analysisSearch.saveState = 'saving';
+    slot.saveState = 'saving';
     autoTimer = setTimeout(() => {
       autoTimer = 0;
       void persistActive();
@@ -150,16 +169,24 @@
     };
   });
 
+  // A case switch is allowed only after this surface has filed its last live edit.
+  // `openCase` runs the guard while the old case is still current, so the request
+  // can never be sent to the case being opened.
+  $effect(() => registerCaseChangeGuard(() => persistActive()));
+
   // A fast tool switch must not strand the last edit inside the debounce window.
   $effect(() => () => {
     clearTimeout(autoTimer);
     autoTimer = 0;
     if (
-      analysisSearch.activeView?.mode === 'live' &&
-      analysisSearch.activeView?.surface === surface &&
-      analysisSearch.modified
+      slot.activeView?.mode === 'live' &&
+      slot.activeView?.surface === surface &&
+      slot.modified
     ) void persistActive();
   });
+
+  // A menu is dismissed by pressing somewhere else, like every other popover here.
+  $effect(() => menu ? closeOnOutsidePointer(anchor, () => (menu = false)) : undefined);
 
   async function open(viewId) {
     const caseId = caseState.current?.id;
@@ -220,8 +247,8 @@
     if (!caseId) return;
     try {
       const result = await api.del(`/api/cases/${caseId}/analysis-views/${view.id}`);
-      if (analysisSearch.activeView?.id === view.id) {
-        leaveAnalysisView(caseId);
+      if (slot.activeView?.id === view.id) {
+        leaveAnalysisView(caseId, surface);
         await onleave();
       }
       await read();
@@ -245,18 +272,18 @@
   async function leave() {
     const caseId = caseState.current?.id;
     if (!(await persistActive())) return;
-    leaveAnalysisView(caseId, { clear: true });
+    leaveAnalysisView(caseId, surface, { clear: true });
     await onleave();
   }
 </script>
 
 <div class="views">
-  {#if analysisSearch.activeView}
-    <span class="active" title={analysisSearch.activeView.mode === 'snapshot'
-      ? `Captured ${analysisSearch.activeView.spec?.snapshot?.captured_at ?? ''}`
+  {#if slot.activeView}
+    <span class="active" title={slot.activeView.mode === 'snapshot'
+      ? `Captured ${slot.activeView.spec?.snapshot?.captured_at ?? ''}`
       : 'Recomputed from the current case'}>
-      <Icon name={analysisSearch.activeView.mode === 'snapshot' ? 'clock' : 'layers'} size={12} />
-      {analysisSearch.activeView.name}
+      <Icon name={slot.activeView.mode === 'snapshot' ? 'clock' : 'layers'} size={12} />
+      {slot.activeView.name}
       <em aria-live="polite">{activeStatus}</em>
       <button aria-label="Leave saved view" title="Leave this view" onclick={leave}>
         <Icon name="x" size={10} />
@@ -264,7 +291,7 @@
     </span>
   {/if}
 
-  <div class="anchor">
+  <div class="anchor" bind:this={anchor}>
     <button
       class="btn btn-sm"
       aria-expanded={menu}
@@ -278,8 +305,8 @@
         <div class="menu-actions">
           <button
             class="btn btn-sm btn-primary"
-            disabled={analysisSearch.activeView?.mode === 'snapshot'}
-            title={analysisSearch.activeView?.mode === 'snapshot'
+            disabled={slot.activeView?.mode === 'snapshot'}
+            title={slot.activeView?.mode === 'snapshot'
               ? 'Duplicate the snapshot to keep another copy.'
               : 'Save the current question as a named view.'}
             onclick={() => ((saving = true), (menu = false))}
@@ -293,7 +320,10 @@
               <li>
                 <button class="open" disabled={busy} onclick={() => open(view.id)}>
                   <strong>{view.name}</strong>
-                  <span>{view.mode === 'snapshot' ? `${view.snapshot_count} captured` : 'live'} · {view.surface}</span>
+                  <span>
+                    {view.mode === 'snapshot' ? `${view.snapshot_count} captured` : 'live'}
+                    {#if family === 'catalog'}· {view.surface}{/if}
+                  </span>
                 </button>
                 <button title="Duplicate view" aria-label="Duplicate {view.name}" onclick={() => duplicate(view.id)}>
                   <Icon name="copy" size={12} />
@@ -305,7 +335,9 @@
             {/each}
           </ul>
         {:else}
-          <p class="empty">No saved views yet.</p>
+          <p class="empty">
+            {family === 'timeline' ? 'No saved timeline views yet.' : 'No saved board or graph views yet.'}
+          </p>
         {/if}
       </div>
     {/if}
@@ -325,7 +357,7 @@
       </label>
       <label class="choice">
         <input type="radio" bind:group={mode} value="snapshot" />
-        <span><strong>Snapshot</strong><small>Freezes up to 2,000 entities and their relations.</small></span>
+        <span><strong>Snapshot</strong><small>{snapshotNote}</small></span>
       </label>
       <div class="save-actions">
         <button class="btn" onclick={() => (saving = false)}>Cancel</button>
@@ -354,7 +386,9 @@
     background: var(--bg-1); box-shadow: var(--shadow-2);
   }
   .menu-actions { display: flex; gap: 6px; padding-bottom: 7px; border-bottom: 1px solid var(--border); }
-  ul { max-height: 310px; margin-top: 6px; overflow: auto; }
+  /* The list's own reset: without it the browser's 40px marker gutter left an empty
+     column down the left of every row. */
+  ul { max-height: 310px; margin: 6px 0 0; padding: 0; list-style: none; overflow: auto; }
   li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 2px; }
   li:hover { background: var(--bg-2); }
   li > button:not(.open) { display: flex; padding: 7px 5px; color: var(--text-3); }

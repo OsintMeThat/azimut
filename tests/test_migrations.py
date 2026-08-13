@@ -675,3 +675,129 @@ def test_a_case_from_the_last_release_keeps_its_photos_and_readings_on_disk(clie
 
     assert reopened.entity_images(full.org_id) == []
     assert photo.is_file()
+
+
+def test_schema_16_keeps_existing_views_and_accepts_timeline_readings(tmp_workspace):
+    case = Case.create("Timeline view migration")
+    existing = case.save_analysis_view({
+        "id": "v_existing",
+        "name": "Existing graph reading",
+        "mode": "live",
+        "surface": "graph",
+        "spec": {"version": 1, "query": {"terms": {}}},
+        "created_at": "2026-08-12T10:00:00Z",
+        "updated_at": "2026-08-12T10:00:00Z",
+    })
+    with sqlite3.connect(case.db_path) as conn:
+        conn.execute("ALTER TABLE analysis_views RENAME TO analysis_views_current")
+        conn.execute(
+            "CREATE TABLE analysis_views ("
+            "id TEXT PRIMARY KEY, name TEXT NOT NULL,"
+            "mode TEXT NOT NULL CHECK (mode IN ('live', 'snapshot')),"
+            "surface TEXT NOT NULL CHECK (surface IN ('board', 'graph')),"
+            "spec_json TEXT NOT NULL, snapshot_count INTEGER NOT NULL DEFAULT 0,"
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        conn.execute("INSERT INTO analysis_views SELECT * FROM analysis_views_current")
+        conn.execute("DROP TABLE analysis_views_current")
+        conn.execute("CREATE INDEX idx_analysis_views_updated ON analysis_views(updated_at DESC)")
+        conn.execute("UPDATE meta SET value = '15' WHERE key = 'schema_version'")
+        conn.execute("DELETE FROM schema_migrations WHERE version >= 16")
+
+    reopened = Case.open(case.id)
+    assert reopened.get_analysis_view(existing["id"]) == existing
+    timeline = reopened.save_analysis_view({
+        "id": "v_timeline",
+        "name": "Timeline reading",
+        "mode": "live",
+        "surface": "timeline",
+        "spec": {"version": 1, "timeline": {"tracks": []}},
+        "created_at": "2026-08-12T11:00:00Z",
+        "updated_at": "2026-08-12T11:00:00Z",
+    })
+    assert timeline["surface"] == "timeline"
+
+
+def test_schema_16_copies_views_by_column_name_whatever_their_order(tmp_workspace):
+    """The legacy table's columns sit in whatever order its own history left them.
+
+    A case that gained `snapshot_count` by an `ALTER TABLE` carries it last, so the
+    positional copy the migration used to do rotated three values on every existing
+    row: the count came out holding a timestamp, and the view could no longer be read.
+    """
+    case = Case.create("View column order")
+    saved = case.save_analysis_view({
+        "id": "v_snap",
+        "name": "Frozen graph reading",
+        "mode": "snapshot",
+        "surface": "graph",
+        "spec": {
+            "version": 1,
+            "query": {"terms": {}},
+            "snapshot": {
+                "captured_at": "2026-08-10T21:02:40Z",
+                "entities": [
+                    {"id": f"e{index}", "type": "person", "label": f"Person {index}"}
+                    for index in range(3)
+                ],
+                "links": [],
+            },
+        },
+        "created_at": "2026-08-10T21:02:40Z",
+        "updated_at": "2026-08-10T21:02:45Z",
+    })
+    assert saved["snapshot_count"] == 3
+    with sqlite3.connect(case.db_path) as conn:
+        # the pre-16 shape, with the count appended after the timestamps
+        conn.execute("ALTER TABLE analysis_views RENAME TO analysis_views_current")
+        conn.execute(
+            "CREATE TABLE analysis_views ("
+            "id TEXT PRIMARY KEY, name TEXT NOT NULL,"
+            "mode TEXT NOT NULL CHECK (mode IN ('live', 'snapshot')),"
+            "surface TEXT NOT NULL CHECK (surface IN ('board', 'graph')),"
+            "spec_json TEXT NOT NULL,"
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL,"
+            "snapshot_count INTEGER NOT NULL DEFAULT 0)"
+        )
+        conn.execute(
+            "INSERT INTO analysis_views"
+            " (id, name, mode, surface, spec_json, created_at, updated_at, snapshot_count)"
+            " SELECT id, name, mode, surface, spec_json, created_at, updated_at,"
+            " snapshot_count FROM analysis_views_current"
+        )
+        conn.execute("DROP TABLE analysis_views_current")
+        conn.execute("CREATE INDEX idx_analysis_views_updated ON analysis_views(updated_at DESC)")
+        conn.execute("UPDATE meta SET value = '15' WHERE key = 'schema_version'")
+        conn.execute("DELETE FROM schema_migrations WHERE version >= 16")
+
+    reopened = Case.open(case.id)
+
+    assert reopened.get_analysis_view("v_snap") == saved
+    assert [view["snapshot_count"] for view in reopened.list_analysis_views()] == [3]
+
+
+def test_schema_17_rewrites_temporal_bounds_to_fixed_width(tmp_workspace):
+    case = Case.create("Variable temporal bounds")
+    claim = case.add_entity(
+        "claim",
+        "Subsecond observation",
+        {"when": "2026-08-11T10:32:14.5Z"},
+        by="user",
+    )
+    with sqlite3.connect(case.db_path) as conn:
+        conn.execute(
+            "UPDATE temporal_items SET earliest = ?, latest = ? WHERE owner_id = ?",
+            (
+                "2026-08-11T10:32:14.5Z",
+                "2026-08-11T10:32:14.6Z",
+                claim["id"],
+            ),
+        )
+        conn.execute("UPDATE meta SET value = '16' WHERE key = 'schema_version'")
+        conn.execute("DELETE FROM schema_migrations WHERE version >= 17")
+
+    reopened = Case.open(case.id)
+
+    item = reopened.timeline_page(categories=["statement"])["items"][0]
+    assert item["earliest"] == "2026-08-11T10:32:14.500000Z"
+    assert item["latest"] == "2026-08-11T10:32:14.600000Z"

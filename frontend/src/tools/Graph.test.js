@@ -175,6 +175,20 @@ describe('the interaction', () => {
     expect(source).toContain('Math.min(ZOOM_MAX, Math.max(ZOOM_MIN');
   });
 
+  it('gives the whole screen to the drawing, toolbar included', () => {
+    // The tool element, not the canvas: full screen without the toolbar is a picture
+    // that can no longer be steered. The canvas is measured with `bind:clientWidth`,
+    // so the stage follows the new size on its own.
+    expect(source).toContain('<div class="graph-tool" bind:this={toolElement}>');
+    expect(source).toContain('await toolElement.requestFullscreen()');
+    expect(source).toContain('await document.exitFullscreen()');
+    expect(source).toContain("fullscreen ? 'Exit full screen' : 'Full screen'");
+    // Esc leaves it without telling us, so the flag is read back off the document.
+    expect(source).toContain('fullscreen = document.fullscreenElement === toolElement');
+    expect(source).toContain(".addEventListener('fullscreenchange', changed)");
+    expect(source).toContain('.graph-tool:fullscreen');
+  });
+
   it('reaches the same actions from the keyboard as from the canvas', () => {
     expect(source).toContain('onkeydown={onKey}');
     expect(source).toContain("event.key === 'Escape'");
@@ -1244,7 +1258,7 @@ describe('the drawing is a set you own', () => {
     // folder, a family or a question handed over by the Board is a new one — and the
     // key that decides that carries none of the three lists.
     expect(source).toMatch(/cid,[\s\S]{0,260}?String\(rev\),\s*lens,\s*order,\s*root \?\? '',\s*hops/);
-    expect(source).toContain('JSON.stringify(searchTerms), analysisSearch.snapshotId');
+    expect(source).toContain('JSON.stringify(searchTerms), JSON.stringify(temporalTerms), catalogViews.snapshotId');
     expect(source).toMatch(/kept\.join\(','\),\s*expanded\.join\(','\),\s*omitted\.join\(','\),/);
   });
 
@@ -1846,7 +1860,9 @@ describe('what is drawn is chosen by role, then by family', () => {
   });
 
   it('uses Search+ for the same typed, review, folder and field question as the Board', () => {
-    expect(source).toContain('const params = { lens, order, ...searchTerms };');
+    expect(source).toMatch(
+      /const params = \{\s*lens,\s*order,\s*\.\.\.searchTerms,\s*\.\.\.\(catalogViews\.snapshotId \? \{\} : temporalTerms\),\s*\};/
+    );
     expect(source).toContain('bind:filter={searchFilter}');
     expect(source).toContain('if (pickFolder && !params.folder) params.folder = pickFolder;');
   });
@@ -1855,8 +1871,11 @@ describe('what is drawn is chosen by role, then by family', () => {
 describe('a question handed over by the Board', () => {
   it('is applied as the terms it was asked in, so any size of answer survives', () => {
     // a list of ids would be capped and would go stale; a question is something the
-    // case can be asked again, and this one is spelled for this route already
-    expect(source).toContain('const params = { lens, order, ...searchTerms };');
+    // case can be asked again, and this one is spelled for this route already. The
+    // fact-time window rides with it, except on a snapshot, which already answered.
+    expect(source).toMatch(
+      /const params = \{\s*lens,\s*order,\s*\.\.\.searchTerms,\s*\.\.\.\(catalogViews\.snapshotId \? \{\} : temporalTerms\),\s*\};/
+    );
   });
 
   it('is announced over the drawing, with one press back to the case', () => {
@@ -1965,13 +1984,13 @@ describe('a named live graph', () => {
   it('tracks repeated drawing and camera edits for debounced autosave', () => {
     expect(source).toContain('let arrangementSaveRevision = $state(0)');
     expect(source).toContain('void arrangementSaveRevision');
-    expect(source).toContain('analysisSearch.changeVersion += 1');
+    expect(source).toContain('catalogViews.changeVersion += 1');
   });
 });
 
 describe('a frozen analysis snapshot', () => {
   it('stays on its captured surface and opens retained details without writing', () => {
-    expect(source).toContain('const snapshotReading = $derived(Boolean(analysisSearch.snapshotId || payload?.snapshot))');
+    expect(source).toContain('const snapshotReading = $derived(Boolean(catalogViews.snapshotId || payload?.snapshot))');
     expect(source).toContain('const canArrange = $derived(!root && !snapshotReading)');
     expect(source).toContain('disabled={snapshotReading}');
     expect(source).toContain('if (snapshotReading) return;');

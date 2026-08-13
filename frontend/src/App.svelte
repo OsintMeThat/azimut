@@ -41,6 +41,7 @@
   const TOOLS = [
     { id: 'board', label: TOOL_LABELS.board, load: () => import('./tools/Board.svelte') },
     { id: 'graph', label: TOOL_LABELS.graph, load: () => import('./tools/Graph.svelte') },
+    { id: 'timeline', label: TOOL_LABELS.timeline, load: () => import('./tools/Timeline.svelte') },
     { id: 'media', label: TOOL_LABELS.media, load: () => import('./tools/MediaLibrary.svelte') },
     { id: 'files', label: TOOL_LABELS.files, load: () => import('./tools/Files.svelte') },
     { id: 'reverse', label: TOOL_LABELS.reverse, load: () => import('./tools/ReverseSearch.svelte') },
@@ -78,9 +79,10 @@
   // could leave a hidden Details id waiting for the next live read. Changing tools
   // is therefore leaving the snapshot; live recipes still share their question.
   $effect(() => {
-    const view = analysisSearch.activeView;
-    if (view?.mode !== 'snapshot' || uiState.tool === view.surface) return;
-    leaveAnalysisView(caseState.current?.id, { clear: true });
+    for (const view of [analysisSearch.catalog.activeView, analysisSearch.timeline.activeView]) {
+      if (view?.mode !== 'snapshot' || uiState.tool === view.surface) continue;
+      leaveAnalysisView(caseState.current?.id, view.surface, { clear: true });
+    }
   });
 
   // Workspace navigation: clicking a workspace returns to its last-used tab.

@@ -79,6 +79,9 @@ def tally(
     since: str | None = None,
     until: str | None = None,
     filed_by: list[str] | None = None,
+    temporal_since: str | None = None,
+    temporal_until: str | None = None,
+    temporal_categories: list[str] | None = None,
     limit: int = MAX_STATEMENTS,
 ) -> dict[str, Any]:
     """The statements in this narrowing, grouped by subject and added up.
@@ -102,6 +105,8 @@ def tally(
         folder=folder, unfiled=unfiled, recursive=recursive,
         attr=attr, attr_value=attr_value, linked=linked, unlinked=unlinked,
         since=since, until=until, filed_by=filed_by,
+        temporal_since=temporal_since, temporal_until=temporal_until,
+        temporal_categories=temporal_categories,
     )
     claims: list[dict[str, Any]] = page["items"]
     matched = int(page["total"])

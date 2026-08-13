@@ -62,6 +62,7 @@ class FullCase:
     counted_id: str = ""  # the statement that counts a model rather than objects
     pinned_id: str = ""  # a node placed by hand on the graph canvas
     analysis_view_id: str = ""  # a named Board reading stored with the case
+    timeline_view_id: str = ""  # a named Timeline reading stored with the case
     entity_types: set[str] = field(default_factory=set)
 
 
@@ -274,7 +275,12 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     full.claim_id = entity(
         "claim",
         "Where was the photo taken?",
-        {"method": "spans counted against Esri imagery", "confidence": "probable"},
+        {
+            "when": "2026-08-01T09:12:00Z",
+            "time_role": "observed",
+            "method": "spans counted against Esri imagery",
+            "confidence": "probable",
+        },
     )
     for to_id, verb in (
         (photo_entity["id"], "about"),
@@ -349,6 +355,30 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     )
     assert saved_view.status_code == 200, saved_view.text
     full.analysis_view_id = saved_view.json()["id"]
+
+    timeline_view = client.post(
+        f"/api/cases/{case_id}/analysis-views",
+        json={
+            "name": "Chronology in review",
+            "mode": "live",
+            "surface": "timeline",
+            "spec": {
+                "timeline": {
+                    "from": "2026-08-01",
+                    "to": "2026-08-02",
+                    "tracks": [
+                        {
+                            "id": "events",
+                            "label": "Events",
+                            "categories": ["statement"],
+                        }
+                    ],
+                }
+            },
+        },
+    )
+    assert timeline_view.status_code == 200, timeline_view.text
+    full.timeline_view_id = timeline_view.json()["id"]
 
     # Enrichment and thumbnails were queued along the way; let them land, or the
     # caller's first delete races a background write into the same case.

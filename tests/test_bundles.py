@@ -234,6 +234,26 @@ def test_export_import_round_trip_keeps_confirmed_relations(bundle_case):
     assert imported.get_link(relation["id"])["provenance"]["status"] == "confirmed"
 
 
+def test_export_import_round_trip_keeps_and_rebuilds_temporal_rows(bundle_case):
+    subject = bundle_case.add_entity("person", "Witness", by="user")
+    saved = bundle_case.save_temporal_claim(
+        entity_id=None,
+        label="The witness arrived",
+        attrs={"when": "2026-08-11T10:32:14Z", "time_role": "occurred"},
+        connectors={"about": [subject["id"]], "at": [], "cites": []},
+        by="user",
+    )
+
+    exported = bundles.export_case(bundle_case)
+    destination = Case.create(bundles.imported_name("Source case"))
+    imported = Case.open(bundles.import_into(destination, exported)["case_id"])
+
+    before = imported.timeline_page(categories=["statement"])
+    assert before["items"][0]["owner_id"] == saved["entity"]["id"]
+    assert imported.rebuild_temporal_projection() >= 1
+    assert imported.timeline_page(categories=["statement"]) == before
+
+
 def test_export_import_round_trip_keeps_the_graph_as_it_was_arranged(bundle_case):
     """A bundle is how a case reaches another machine, and an arrangement somebody
     built by hand is work. Losing it on the way would make the graph redraw itself
@@ -250,7 +270,7 @@ def test_export_import_round_trip_keeps_the_graph_as_it_was_arranged(bundle_case
 
 def test_export_import_round_trip_keeps_saved_analysis_views(bundle_case):
     """Named readings are case state, so the raw database bundle carries them."""
-    saved = bundle_case.save_analysis_view({
+    live = bundle_case.save_analysis_view({
         "id": "v_bundle",
         "name": "Source accounts",
         "mode": "live",
@@ -259,12 +279,32 @@ def test_export_import_round_trip_keeps_saved_analysis_views(bundle_case):
         "created_at": "2026-08-10T10:00:00Z",
         "updated_at": "2026-08-10T10:00:00Z",
     })
+    snapshot = bundle_case.save_analysis_view({
+        "id": "v_timeline_bundle",
+        "name": "Frozen chronology",
+        "mode": "snapshot",
+        "surface": "timeline",
+        "spec": {
+            "version": 1,
+            "timeline": {"tracks": [{"id": "events", "categories": ["statement"]}]},
+            "snapshot": {
+                "captured_at": "2026-08-12T10:00:00Z",
+                "entities": [],
+                "links": [],
+                "timeline_items": [],
+                "timeline_tracks": {"events": []},
+            },
+        },
+        "created_at": "2026-08-12T10:00:00Z",
+        "updated_at": "2026-08-12T10:00:00Z",
+    })
 
     exported = bundles.export_case(bundle_case)
     destination = Case.create(bundles.imported_name("Source case"))
     imported = Case.open(bundles.import_into(destination, exported)["case_id"])
 
-    assert imported.get_analysis_view(saved["id"]) == saved
+    assert imported.get_analysis_view(live["id"]) == live
+    assert imported.get_analysis_view(snapshot["id"]) == snapshot
 
 
 def test_export_import_round_trip_keeps_entity_photo_galleries(bundle_case):

@@ -8,6 +8,8 @@ describe('saved analysis views', () => {
     expect(source).toContain('value="live"');
     expect(source).toContain('Recomputes the question from the current case.');
     expect(source).toContain('value="snapshot"');
+    expect(source).toContain("surface === 'timeline'");
+    expect(source).toContain('Freezes up to 5,000 timeline entries.');
     expect(source).toContain('Freezes up to 2,000 entities and their relations.');
   });
 
@@ -21,7 +23,7 @@ describe('saved analysis views', () => {
   });
 
   it('autosaves a live recipe and exposes the current save state', () => {
-    expect(source).toContain("analysisSearch.activeView.mode === 'snapshot'");
+    expect(source).toContain("slot.activeView.mode === 'snapshot'");
     expect(source).toContain("return 'live · saving…'");
     expect(source).toContain("return 'live · saved'");
     expect(source).toContain('aria-live="polite"');
@@ -33,17 +35,37 @@ describe('saved analysis views', () => {
 
   it('does not replay an autosave response over a newer edit', () => {
     expect(source).toContain('adoptSavedAnalysisView(caseId, view)');
-    expect(source).toContain('analysisSearch.changeVersion === version');
+    expect(source).toContain('slot.changeVersion === version');
     expect(source).not.toContain('await onopen(view);\n      await read();\n      toast(`Updated');
   });
 
+  it('flushes the active live view before a case switch', () => {
+    expect(source).toContain('registerCaseChangeGuard(() => persistActive())');
+    expect(source).toContain("current.surface !== surface");
+  });
+
+  it('offers only the readings this surface can draw, and says so when there are none', () => {
+    expect(source).toContain('const family = $derived(viewFamily(surface))');
+    expect(source).toContain('const slot = $derived(viewSlot(surface))');
+    expect(source).toContain("stored.filter((view) => viewFamily(view.surface) === family)");
+    expect(source).toContain('No saved timeline views yet.');
+    expect(source).toContain('No saved board or graph views yet.');
+    // the surface is worth naming only where the family holds two of them
+    expect(source).toContain("{#if family === 'catalog'}· {view.surface}{/if}");
+  });
+
+  it('closes the menu on a press outside it, and resets the list gutter', () => {
+    expect(source).toContain('closeOnOutsidePointer(anchor, () => (menu = false))');
+    expect(source).toContain('list-style: none');
+  });
+
   it('cancels a pending save when the recipe is changed back', () => {
-    expect(source).toContain("if (!analysisSearch.modified) {");
-    expect(source).toContain("analysisSearch.saveState = 'saved'");
+    expect(source).toContain("if (!slot.modified) {");
+    expect(source).toContain("slot.saveState = 'saved'");
   });
 
   it('keeps a snapshot immutable instead of recapturing it under the same name', () => {
-    expect(source).toContain("disabled={analysisSearch.activeView?.mode === 'snapshot'}");
+    expect(source).toContain("disabled={slot.activeView?.mode === 'snapshot'}");
     expect(source).toContain('Duplicate the snapshot to keep another copy.');
   });
 });

@@ -230,7 +230,7 @@ test('shows an entity’s typed fields directly in Details', async ({ page }) =>
   await expect(dialog.getByLabel('ASN')).toHaveValue('AS64496');
   await expect(dialog.getByLabel('Provider')).toHaveValue('Example Transit');
   await expect(dialog.getByLabel('Notes')).toHaveValue('Observed in the access log');
-  await expect(dialog.getByRole('tab')).toHaveCount(0);
+  await expect(dialog.getByRole('tab')).toHaveText(['Info', 'Connections', 'Time']);
 });
 
 test('uses a relation instead of new free text for an IP network', async ({ page }) => {
@@ -287,8 +287,7 @@ test('opens a row in the same Details panel every other surface uses', async ({ 
 
   await expect(page.getByRole('heading', { name: 'Details' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'https://example.test/t' })).toBeVisible();
-  // the source's own grade is edited here, under Case, from the served scale
-  await page.getByRole('tab', { name: 'Case' }).click();
+  // the source's own grade is profile information, served by the entity registry
   await expect(page.getByLabel('Source reliability')).toHaveValue('B');
 });
 
@@ -314,6 +313,7 @@ test('keeps Add relation and Add mention as separate gestures', async ({ page })
 
   await entityCell(page, 'Witness A').click();
   const dialog = page.getByRole('dialog');
+  await dialog.getByRole('tab', { name: 'Connections' }).click();
   await expect(dialog.getByRole('button', { name: 'Add relation' })).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Add mention' })).toBeVisible();
 
@@ -362,6 +362,7 @@ test('offers IP addresses and networks through Add relation', async ({ page }) =
 
   await entityCell(page, '203.0.113.42').click();
   const dialog = page.getByRole('dialog');
+  await dialog.getByRole('tab', { name: 'Connections' }).click();
   const add = dialog.getByRole('button', { name: 'Add relation' });
   await expect(add).toHaveAttribute('title', /Network/);
   await add.click();
@@ -395,8 +396,10 @@ test('keeps both readings when relation endpoints share a type', async ({ page }
   });
 
   await entityCell(page, '203.0.112.0/23').click();
-  const composer = page.getByRole('dialog').locator('.picker.composer');
-  await page.getByRole('dialog').getByRole('button', { name: 'Add relation' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('tab', { name: 'Connections' }).click();
+  const composer = dialog.locator('.picker.composer');
+  await dialog.getByRole('button', { name: 'Add relation' }).click();
   await composer.getByRole('button', { name: /203\.0\.113\.0\/24/ }).click();
   const reading = composer.locator('.verb-select');
   await expect(reading.locator('option')).toHaveText(['is in network', 'contains']);

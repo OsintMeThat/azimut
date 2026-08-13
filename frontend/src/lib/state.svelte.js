@@ -208,6 +208,12 @@ export const uiState = $state({
    *  of `openBoardEntity`: a node has to be reachable from the row as much as a row
    *  from the node. */
   openGraphEntity: null,
+  /** Entity/item handed to Timeline from Details. Timeline consumes and clears it. */
+  timelineFocus: null, // { entityId, entityLabel, itemId }
+  /** A fact-time range handed back to Timeline. Consumed once, never persisted. */
+  timelineRange: null, // { from, to }
+  /** A fact-time range handed to the Satellite map as a temporary event layer. */
+  mapTimelineRange: null, // { from, to }
   gotoCoords: null, // { lat, lon } to fly to in the Satellite tool
   // A point, a date and a time handed over by Coords & Sky: the Satellite tab
   // opens its Sun & moon mode there. Session-only, and never part of a capture
@@ -300,16 +306,44 @@ function rememberCase(id) {
 }
 
 let openingCase = 0;
+const caseChangeGuards = new Set();
+
+/** Finish case-owned work before another case becomes current. A guard returning
+ *  false keeps the current case open, so a failed save cannot be mistaken for a
+ *  successful switch. */
+export function registerCaseChangeGuard(guard) {
+  caseChangeGuards.add(guard);
+  return () => caseChangeGuards.delete(guard);
+}
+
+async function prepareCaseChange(fromId, toId) {
+  for (const guard of [...caseChangeGuards]) {
+    if ((await guard({ fromId, toId })) === false) return false;
+  }
+  return true;
+}
 
 export async function openCase(id) {
   const run = ++openingCase;
   caseState.loading = true;
   try {
+    const currentId = caseState.current?.id ?? null;
+    if (
+      currentId && currentId !== id &&
+      !(await prepareCaseChange(currentId, id))
+    ) return;
+    if (run !== openingCase) return;
     // reference viewers point at the previous case's media — drop them
     if (caseState.current?.id !== id) {
       uiState.refViewers = [];
       uiState.openNotebook = null;
       uiState.focusCapture = null;
+      uiState.drawInGraph = null;
+      uiState.openBoardEntity = null;
+      uiState.openGraphEntity = null;
+      uiState.timelineFocus = null;
+      uiState.timelineRange = null;
+      uiState.mapTimelineRange = null;
     }
     const opened = await api.get(`/api/cases/${id}`);
     // Case reads can finish out of order. Only the latest choice may become current,
@@ -426,6 +460,12 @@ export function closeCase() {
   uiState.inspectPath = null;
   uiState.focusMedia = null;
   uiState.openInspect = null;
+  uiState.drawInGraph = null;
+  uiState.openBoardEntity = null;
+  uiState.openGraphEntity = null;
+  uiState.timelineFocus = null;
+  uiState.timelineRange = null;
+  uiState.mapTimelineRange = null;
   uiState.gotoCoords = null;
   uiState.skyAt = null;
   uiState.refViewers = [];

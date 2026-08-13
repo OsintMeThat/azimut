@@ -105,17 +105,20 @@ describe('the entity vocabulary', () => {
   });
 
   it('opens a heading where the registry changes group, and nowhere else', () => {
-    // one type can hold two subjects — a Claim says what it states and why that is
-    // believed — so the heading rides on the field that opens the block, and the
-    // fields after it continue under whatever is open
+    // one type can hold several subjects, so the heading rides on the field that
+    // opens the block and the fields after it continue under whatever is open
     const marked = mod.withHeadings([
       { key: 'count', group: 'What it states' },
       { key: 'condition' },
+      { key: 'when', group: 'When' },
+      { key: 'time_role' },
       { key: 'confidence', group: 'Reasoning' },
       { key: 'method' },
     ]);
 
-    expect(marked.map((f) => f.heads)).toEqual(['What it states', '', 'Reasoning', '']);
+    expect(marked.map((f) => f.heads)).toEqual([
+      'What it states', '', 'When', '', 'Reasoning', '',
+    ]);
   });
 
   it('heads nothing for a type whose fields stand on their own labels', () => {

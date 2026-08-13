@@ -21,9 +21,18 @@
   import { api } from '../lib/api.js';
   import {
     analysisSearch,
+    catalogViews,
     openAnalysisCase,
     setAnalysisFilter,
+    setAnalysisPeriod,
   } from '../lib/analysisSearch.svelte.js';
+  import {
+    analysisPeriodQuery,
+    analysisPeriodSpec,
+    emptyAnalysisPeriod,
+    hasAnalysisPeriod,
+    normalizeAnalysisPeriod,
+  } from '../lib/analysisPeriod.js';
   import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import { buildCatalogQuery, buildTallyQuery, fetchAttrFacets } from '../lib/catalog.js';
   import {
@@ -61,11 +70,13 @@
     loadEntityTypes,
   } from '../lib/entityTypes.svelte.js';
   import { createBookmark } from '../lib/bookmarks.js';
+  import { windowWords } from '../lib/timeline.js';
   import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import AnalysisViews from '../components/AnalysisViews.svelte';
+  import AnalysisPeriodBar from '../components/AnalysisPeriodBar.svelte';
   import FilterBar from '../components/FilterBar.svelte';
   import EntityCreate from '../components/EntityCreate.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
@@ -74,16 +85,6 @@
   import ViewSwitch from '../components/ViewSwitch.svelte';
 
   const PAGE = 100;
-  /**
-   * How large a case may be before a field menu asks for a type first.
-   *
-   * The field facets are read by scanning the stored attributes of everything the
-   * narrowing covers, which is what lets the menu reach `kind` — a field the importer
-   * writes and the vocabulary declares nowhere. Over a whole case that scan is worth
-   * paying once, behind the click that opens the menu, and not worth paying at all on
-   * a case where the menu it builds would be unreadable anyway.
-   */
-  const FACET_SCAN_MAX = 5000;
 
   loadEntityTypes();
 
@@ -100,7 +101,7 @@
   let facets = $state([]); // the fields these types hold, and their values
   /** Whether the field menu has anything to offer, or why it has not: nothing is
    *  scanned for a menu nobody has opened. */
-  let facetState = $state('unasked'); // 'unasked' | 'loading' | 'ready' | 'narrow-first'
+  let facetState = $state('unasked'); // 'unasked' | 'loading' | 'ready'
   let sortKey = $state(''); // '' = the catalog's own stable order
   let sortDesc = $state(false);
   let summary = $state(null); // { total, by_type, by_status, by_folder, by_source, unlinked }
@@ -146,6 +147,7 @@
    *  the lie this vocabulary went to the trouble of avoiding, and a mixed list has no
    *  such reading to give. */
   const onlyType = $derived(filter.types.length === 1 ? filter.types[0] : '');
+  const activePeriod = $derived(hasAnalysisPeriod(analysisSearch.period));
 
   /** A type left outside the families now chosen would filter to nothing, so it goes
    *  with them — the same rule the family select used to apply on its way out. */
@@ -164,8 +166,9 @@
           cursor,
           limit: PAGE,
           ...toQuery({ ...filter, q }, { types: wantedTypes }),
+          ...(catalogViews.snapshotId ? {} : analysisPeriodQuery(analysisSearch.period)),
           order,
-          view: analysisSearch.snapshotId || undefined,
+          view: catalogViews.snapshotId || undefined,
         })
       ),
   });
@@ -187,8 +190,8 @@
       ? pl.items
       : pl.items.filter((e) => matchesEntity(e, filter.q))
   );
-  const filtering = $derived(isFiltering(filter));
-  const snapshotReading = $derived(Boolean(analysisSearch.snapshotId));
+  const filtering = $derived(isFiltering(filter) || activePeriod);
+  const snapshotReading = $derived(Boolean(catalogViews.snapshotId));
   /** How many the question matches, across the case. The page's own count, except on
    *  a small case searching in memory — there the server was never told the term, so
    *  its count would answer a wider question than the one on screen. */
@@ -278,7 +281,10 @@
     // beside it and like the panel's own total, or a relation added while this is on
     // screen would need the page reloaded to appear in it.
     caseState.rev;
-    const url = buildTallyQuery(caseState.current.id, toQuery(filter, { types: wantedTypes }));
+    const url = buildTallyQuery(caseState.current.id, {
+      ...toQuery(filter, { types: wantedTypes }),
+      ...analysisPeriodQuery(analysisSearch.period),
+    });
     let current = true;
     const timer = setTimeout(() => {
       tallying = true;
@@ -428,7 +434,10 @@
   let lastAsked = null;
   $effect(() => {
     const asked = JSON.stringify([
-      toQuery(filter, { types: wantedTypes }), order, analysisSearch.snapshotId,
+      toQuery(filter, { types: wantedTypes }),
+      analysisPeriodQuery(analysisSearch.period),
+      order,
+      catalogViews.snapshotId,
     ]);
     if (asked === lastAsked) {
       setAnalysisFilter(caseState.current?.id, filter);
@@ -450,8 +459,15 @@
    * covers, so it used to be gated behind picking a type first — and an analyst who
    * had not picked one never learnt the filter existed. Now the gate is the click
    * that opens the menu, which is the explicit act the cost was always worth paying
-   * behind, and only a case too large for the menu to be readable still asks for a
-   * type first.
+   * behind.
+   *
+   * **The size of the case decides nothing.** It used to: past five thousand entities
+   * the menu went dark and asked for a type first, which is exactly backwards — a case
+   * that large is the one where a field is the only practical way to narrow. The scan
+   * is linear and small (measured: 50 000 entities in 0.3 s, 100 000 in 0.7 s), and
+   * what keeps the menu readable is the server's own bound on **values** — a field
+   * holding more of them than the limit comes back with none and says it was cut. That
+   * was always the right bound; the entity count never was.
    *
    * A field that survives a narrowing keeps its value, since changing the type filter
    * must not silently drop the term beside it; one that does not is cleared and said,
@@ -467,12 +483,6 @@
       facets = [];
       facetsFor = null;
       facetState = 'unasked';
-      return;
-    }
-    if (!wantedTypes.length && (summary?.total ?? 0) > FACET_SCAN_MAX) {
-      facets = [];
-      facetsFor = null;
-      facetState = 'narrow-first';
       return;
     }
     if (!wantedTypes.length && !fieldsWanted) {
@@ -688,7 +698,7 @@
     if (!id) return;
     uiState.openBoardEntity = null;
     if (snapshotReading) {
-      snapshotOpen = analysisSearch.activeView?.spec?.snapshot?.entities?.find(
+      snapshotOpen = catalogViews.activeView?.spec?.snapshot?.entities?.find(
         (entity) => entity.id === id
       ) ?? null;
     } else {
@@ -706,6 +716,9 @@
     [
       filter.q.trim() ? `“${filter.q.trim()}”` : '',
       ...chipsOf(filter, { type: entityLabel, family: familyTitle }).map((chip) => chip.text),
+      activePeriod ? `Fact time · ${windowWords(
+        analysisSearch.period.from, analysisSearch.period.to, 'UTC'
+      )}` : '',
     ]
       .filter(Boolean)
       .join(' · ')
@@ -729,6 +742,27 @@
     uiState.tool = 'graph';
   }
 
+  function openPeriodInTimeline() {
+    uiState.timelineRange = {
+      from: analysisSearch.period.from,
+      to: analysisSearch.period.to,
+    };
+    uiState.tool = 'timeline';
+  }
+
+  function openPeriodOnMap() {
+    uiState.mapTimelineRange = {
+      from: analysisSearch.period.from,
+      to: analysisSearch.period.to,
+      categories: analysisSearch.period.categories ?? [],
+    };
+    uiState.tool = 'satellite';
+  }
+
+  function clearPeriod() {
+    setAnalysisPeriod(caseState.current?.id, emptyAnalysisPeriod());
+  }
+
   /** The portable recipe. Snapshot rows are resolved server-side from the same
    *  question, so a case larger than the page is never silently cut to what loaded. */
   function captureAnalysisView() {
@@ -740,7 +774,7 @@
         label: said,
       },
       board: { order, sortKey, sortDesc },
-      timeline: { from: null, to: null, field: null },
+      timeline: analysisPeriodSpec(analysisSearch.period),
     };
   }
 
@@ -751,12 +785,14 @@
     const board = view.spec?.board ?? {};
     sortKey = typeof board.sortKey === 'string' ? board.sortKey : '';
     sortDesc = board.sortDesc === true;
+    // Board and Graph read one saved question, so a Graph view opened here is a
+    // request for the other drawing of it. The Timeline keeps its own views.
     if (view.surface === 'graph') uiState.tool = 'graph';
   }
 
   let appliedViewId = null;
   $effect(() => {
-    const view = analysisSearch.activeView;
+    const view = catalogViews.activeView;
     if (!view) {
       appliedViewId = null;
       return;
@@ -769,7 +805,7 @@
   let observedLiveView = null;
   let observedLiveState = '';
   $effect(() => {
-    const view = analysisSearch.activeView;
+    const view = catalogViews.activeView;
     if (!view || view.mode !== 'live' || view.surface !== 'board') {
       observedLiveView = null;
       observedLiveState = '';
@@ -779,11 +815,13 @@
     const savedBoard = view.spec?.board ?? {};
     const current = JSON.stringify({
       filter: normalizeFilter(filter),
+      period: normalizeAnalysisPeriod(analysisSearch.period),
       sortKey,
       sortDesc,
     });
     const saved = JSON.stringify({
       filter: savedFilter,
+      period: normalizeAnalysisPeriod(view.spec?.timeline),
       sortKey: typeof savedBoard.sortKey === 'string' ? savedBoard.sortKey : '',
       sortDesc: savedBoard.sortDesc === true,
     });
@@ -792,9 +830,9 @@
       observedLiveState = current;
     } else if (current !== observedLiveState) {
       observedLiveState = current;
-      analysisSearch.changeVersion += 1;
+      catalogViews.changeVersion += 1;
     }
-    analysisSearch.modified = current !== saved;
+    catalogViews.modified = current !== saved;
   });
 
   function leaveAnalysisReading() {
@@ -871,6 +909,15 @@
     onfields={() => (fieldsWanted = true)}
     disabled={snapshotReading}
   />
+
+  {#if activePeriod}
+    <AnalysisPeriodBar
+      period={analysisSearch.period}
+      ontimeline={openPeriodInTimeline}
+      onmap={openPeriodOnMap}
+      onclear={clearPeriod}
+    />
+  {/if}
 
   <!-- The answer, and what it is an answer out of. The denominator is the whole case
        even under a filter: a proportion is the information a count carries. -->
@@ -1194,8 +1241,8 @@
   <Modal title="Snapshot details" onclose={() => (snapshotOpen = null)} width="640px">
     <SnapshotDetails
       entity={snapshotOpen}
-      entities={analysisSearch.activeView?.spec?.snapshot?.entities ?? []}
-      links={analysisSearch.activeView?.spec?.snapshot?.links ?? []}
+      entities={catalogViews.activeView?.spec?.snapshot?.entities ?? []}
+      links={catalogViews.activeView?.spec?.snapshot?.links ?? []}
     />
   </Modal>
 {/if}

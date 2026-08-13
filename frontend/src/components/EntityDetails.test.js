@@ -157,29 +157,29 @@ describe('metadata arriving after the panel opened', () => {
   });
 });
 
-describe('the two tabs', () => {
-  it('cuts on the model seam: what the item says in Info, what the analyst states in Case', () => {
+describe('the three tabs', () => {
+  it('gives every entity the same Info, Connections and Time sections', () => {
     expect(source).toContain("let tab = $state('info')");
     expect(source).toContain('aria-selected={tab === \'info\'}');
     expect(source).toContain(">Info<");
-    expect(source).toContain(">Case<");
+    expect(source).toContain(">Connections<");
+    expect(source).toContain(">Time<");
   });
 
-  it('shows hand-made entity fields directly instead of hiding them behind Case', () => {
-    expect(source).toContain('isManualEntityType(entity.type)');
-    expect(source).toContain('{#if !unifiedDetails}');
-    expect(source).toContain("{#if tab === 'info' || unifiedDetails}");
-    expect(source).toContain('{#if unifiedDetails && declaredFields.length}');
-    expect(source).toContain("{#if tab === 'case' || unifiedDetails}");
+  it('does not collapse hand-made entities into a different one-scroll layout', () => {
+    expect(source).not.toContain('unifiedDetails');
+    expect(source).not.toContain('isManualEntityType');
+    expect(source).toContain("{#if tab === 'info'}");
+    expect(source).toContain("{#if tab === 'connections'}");
+    expect(source).toContain("{#if tab === 'time'}");
   });
 
-  it('keeps the preview and the title above both, and the actions below', () => {
+  it('files preview and identity under Info, with shared actions below every tab', () => {
     const tabs = source.indexOf('<div class="ed-tabs"');
-    expect(source.indexOf('class="info-preview"')).toBeLessThan(tabs);
-    expect(source.indexOf('id="ed-title"')).toBeLessThan(tabs);
-    // Save commits fields from both tabs, so its bar cannot be inside either
+    expect(source.indexOf('class="info-preview"')).toBeGreaterThan(tabs);
+    expect(source.indexOf('id="ed-title"')).toBeGreaterThan(tabs);
     expect(source.indexOf('class="details-actions"')).toBeGreaterThan(
-      source.indexOf("{#if tab === 'case' || unifiedDetails}")
+      source.indexOf("{#if tab === 'time'}")
     );
   });
 
@@ -189,19 +189,18 @@ describe('the two tabs', () => {
     expect(source).toContain('for="ed-title">{identityLabel}</label>');
   });
 
-  it('files the declared fields, the derivation chain and the relations under Case', () => {
-    const caseTab = source.indexOf("{#if tab === 'case' || unifiedDetails}");
-    // precision is the analyst's judgement, not something the file reports, so it
-    // belongs beside the relations rather than among the read-only rows
-    expect(source.indexOf('<AttrFields', caseTab)).toBeGreaterThan(caseTab);
-    expect(source.indexOf('<details class="lineage-card">')).toBeGreaterThan(caseTab);
-    expect(source.indexOf('<RelationList')).toBeGreaterThan(caseTab);
+  it('keeps profile fields in Info and graph structure in Connections', () => {
+    const infoTab = source.indexOf("{#if tab === 'info'}");
+    const connectionsTab = source.indexOf("{#if tab === 'connections'}");
+    expect(source.indexOf('<AttrFields', infoTab)).toBeLessThan(connectionsTab);
+    expect(source.indexOf('<details class="lineage-card">')).toBeGreaterThan(connectionsTab);
+    expect(source.indexOf('<RelationList')).toBeGreaterThan(connectionsTab);
   });
 
   it('keeps connections light and lineage collapsed', () => {
     expect(source).toContain('<div class="case-layout">');
-    expect(source).toContain('<section class="case-card profile-card">');
     expect(source).toContain('<section class="connections">');
+    expect(source).not.toContain('profile-card');
     expect(source).not.toContain('connections-card');
     expect(source).not.toContain('layout="cards"');
     expect(source).not.toContain('class="chain-h"');
@@ -217,8 +216,8 @@ describe('the two tabs', () => {
   });
 
   it('files the metadata, the notes and the folder under Info', () => {
-    const infoTab = source.indexOf("{#if tab === 'info' || unifiedDetails}");
-    const caseTab = source.indexOf("{#if tab === 'case' || unifiedDetails}");
+    const infoTab = source.indexOf("{#if tab === 'info'}");
+    const connectionsTab = source.indexOf("{#if tab === 'connections'}");
     for (const marker of [
       '<div class="info-rows">',
       '<summary>EXIF metadata',
@@ -227,8 +226,14 @@ describe('the two tabs', () => {
     ]) {
       const at = source.indexOf(marker);
       expect(at, marker).toBeGreaterThan(infoTab);
-      expect(at, marker).toBeLessThan(caseTab);
+      expect(at, marker).toBeLessThan(connectionsTab);
     }
+  });
+
+  it('mounts the entity-scoped temporal read only while Time is open', () => {
+    const timeTab = source.indexOf("{#if tab === 'time'}");
+    expect(source.indexOf('<EntityTime', timeTab)).toBeGreaterThan(timeTab);
+    expect(source).toContain('caseId={caseState.current.id}');
   });
 
   it('opens a freshly walked entity on Info rather than wherever the last one sat', () => {
@@ -239,8 +244,12 @@ describe('the two tabs', () => {
 describe('the declared fields', () => {
   it('are generated from the registry, not written per type here', () => {
     expect(source).toContain("import AttrFields from './AttrFields.svelte'");
-    expect(source).toContain('<AttrFields type={entity.type} bind:values={infoAttrs} />');
-    expect(source).toContain('{#if unifiedDetails && declaredFields.length}');
+    expect(source).toContain('<AttrFields');
+    expect(source).toContain('type={entity.type}');
+    expect(source).toContain('bind:values={infoAttrs}');
+    expect(source).toContain("exclude={entity.type === 'claim'");
+    expect(source).toContain("['when', 'time_role', 'confidence', 'method', 'verbatim']");
+    expect(source).toContain('{#if declaredFields.length}');
   });
 
   it('are seeded from the entity and committed beside the notes, merged not replaced', () => {
@@ -254,8 +263,9 @@ describe('the declared fields', () => {
     expect(source).toContain('seededFields === 0 && fields.length > 0 && !dirtyNow');
   });
 
-  it('count as something filed, so Case never says the entity is empty while showing them', () => {
-    expect(source).toContain('!hasRelations && !declaredFields.length && !lineageCount');
+  it('do not affect the Connections empty state because they live in Info', () => {
+    expect(source).toContain('!hasRelations && !lineageCount && !placedPoints.length');
+    expect(source).not.toContain('!declaredFields.length && !lineageCount');
   });
 });
 
@@ -283,10 +293,10 @@ describe('a bookmark, which is what a claim rests on', () => {
 });
 
 describe('where the chain puts this entity', () => {
-  it('reads it from its own route, once the Case tab is on screen', () => {
+  it('reads it from its own route, once Connections is on screen', () => {
     // the walk reaches further than the chain's one hop, and the panel opens on
     // Info — a click through a list of rows must not pay for it
-    expect(source).toContain("const wanted = tab === 'case' || unifiedDetails;");
+    expect(source).toContain("const wanted = tab === 'connections';");
     expect(source).toContain('/placement`)');
     expect(source).toContain('if (mySeq === placeSeq) placement = p;');
   });
@@ -325,7 +335,7 @@ describe('what the statements about this entity come to', () => {
   });
 
   it('reads it on the same terms as the placement beside it', () => {
-    // its own request, only once the Case tab is on screen, re-read after a save
+    // its own request, only once Connections is on screen, re-read after a save
     expect(source).toMatch(/const mySeq = \+\+statedSeq;/);
     expect(source).toContain('caseState.rev;');
   });
@@ -355,5 +365,14 @@ describe('a file the app has no viewer for', () => {
 
   it('drops the tool button for it, since no tool reopens a document', () => {
     expect(source).toContain('{#if (ENTITY_TOOL[entity.type] && !inFileManager)');
+  });
+});
+
+describe('Claim details tabs', () => {
+  it('keeps assessment fields in Time instead of duplicating them in Info', () => {
+    expect(source).toContain(
+      "exclude={entity.type === 'claim' ? ['when', 'time_role', 'confidence', 'method', 'verbatim'] : []}"
+    );
+    expect(source).toContain('<EntityTime');
   });
 });

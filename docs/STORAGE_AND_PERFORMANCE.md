@@ -171,7 +171,8 @@ not orphan it. Diagnosis is read-only and reports:
 
 - a missing or unreadable `case.db`;
 - media and capture entities whose file no longer exists;
-- visible files placed directly in `media/` without a graph entity.
+- visible files placed directly in `media/` without a graph entity;
+- a temporal projection that no longer matches Claims or media metadata.
 
 Repairs are separate API actions. A deleted database is rebuilt in a temporary
 SQLite file from media sidecars, note files and proof specs, then renamed into
@@ -180,8 +181,8 @@ database-only provenance cannot be recovered and the dialog says so first.
 Missing media can be removed through the normal Trash path or rebound to an
 unregistered file already inside `media/`. An unknown file goes through the
 normal media registration pipeline, gaining a hash, sidecar, index row and
-provenance. None of these actions runs at startup, on case open or during a
-diagnostic request.
+provenance. A stale temporal projection can be rebuilt from its authorities.
+None of these actions runs at startup, on case open or during a diagnostic request.
 
 ## Ownership rules
 
@@ -256,13 +257,16 @@ review.
 
 ## Database shape
 
-`case.db` is at SQLite schema 14: schema 8 adds nullable `links.confidence`,
+`case.db` is at SQLite schema 17: schema 8 adds nullable `links.confidence`,
 schema 9 rebuilds every row's `search_text`, schema 10 stores graph pins per lens,
 schema 11 adds `links.nature`, schema 12 adds entity photo galleries, schema 13
 adds saved analysis views with their bounded-list count, and schema 14 indexes the
-two columns the catalog orders the whole case by. The schema counter is
-independent of the JSON `CASE_SCHEMA`: the manifest's `azimut.storage` field
-selects the backend, and each format counts its own shape upgrades.
+two columns the catalog orders the whole case by. Schema 15 adds the rebuildable
+temporal projection, schema 16 extends saved analysis views to Timeline recipes
+and snapshots, and schema 17 rewrites temporal bounds to fixed microsecond width.
+The schema counter is independent of the JSON `CASE_SCHEMA`: the
+manifest's `azimut.storage` field selects the backend, and each format counts its own
+shape upgrades.
 
 The case manifest is at `CASE_SCHEMA` 9. Schema 3 is the last released folder
 shape before the `azimut/` boundary; schemas 4–8 were development checkpoints
@@ -309,12 +313,15 @@ use `.data/rename.json`, so a restart can finish references after the bytes move
   reference owns no duplicate bytes; its original media record remains the owner.
 
 `analysis_views`
-: Case-owned live recipes and immutable Board or Graph snapshots. List reads carry
+: Case-owned live recipes and immutable Board, Graph or Timeline snapshots. List reads carry
   metadata and `snapshot_count`, never the snapshot payload. A live recipe stores
   Search+ and presentation state, including view-local graph pins and camera, and
-  autosaves after edits. A snapshot stores copied entities, provenance, closed
-  relations and embedded bounded preview thumbnails, without consulting current
-  graph rows or files when read.
+  autosaves after edits. Timeline recipes store their ordered track queries, folds,
+  grouping, visible categories, hidden and pinned entries, entity scope and UTC
+  window. An entity snapshot stores copied entities, provenance, closed relations and
+  embedded bounded preview thumbnails. A Timeline snapshot stores the matching
+  temporal rows and exact track assignments. Neither consults current graph rows or
+  files when read.
 
 `folders`
 : Normalized `/`-separated logical paths for the analyst's organisation. Not
@@ -344,6 +351,37 @@ use `.data/rename.json`, so a restart can finish references after the bytes move
   through `GET /api/cases/{id}/media/item`. The original files and sidecars remain
   the file-level records.
 
+`temporal_items`
+: Rebuildable, homogeneous rows for dated Claims, intrinsic media dates and case
+  activity. Each row keeps the raw value beside normalized half-open bounds,
+  precision, timezone and uncertainty flags. Claims in `entities.attrs`, indexed
+  media sidecars and entity provenance remain authoritative. Deleting this table's
+  contents and running `rebuild_temporal_projection()` recreates the same rows.
+  Window/category/owner indexes let Time and Timeline page without scanning entity
+  JSON or opening sidecars. Each page also returns the complete dated extent for the
+  selected categories and entity scope, independent of the visible window, so the UI
+  can reset and position its density overview without loading every row. Density
+  buckets are cut by year, month, day or hour, and include their per-category counts
+  plus the span of their own entries, so the minimap can stack its columns and open a
+  clicked one onto what it holds without another query. A track query applies the shared Search+ entity predicate through the
+  temporal owner, subject, place or evidence connector, plus time-role and view-local
+  hiding. Its counts distinguish an absent date (`undated`) from a raw local or invalid
+  value that cannot be positioned yet (`unplaced`). A caller drawing the page on an axis
+  asks for a spread read (`spread=true`): the same ordering is cut into `stride =
+  ceil(total / limit)` interleaved slices, one per page, so the first page samples the
+  whole window at the density the overview draws instead of stopping wherever the front
+  of the window runs out of room, and later pages fill the sample in without a repeat
+  or a gap. Chronological cursors and phase cursors are not interchangeable.
+
+  The same table answers the fact-time window Board, Graph and their saved views
+  filter by. It is one `EXISTS` over the window index beside the catalog's other
+  terms, reaching a row either as the owner of a temporal entry or through an
+  `about`/`at`/`cites` edge from one, so the period narrows the page, the totals and
+  a capture through the same predicate rather than through three readings of it. The
+  boundaries are read once, at the edge, and a reduced date names its whole civil
+  period on the upper end — a saved `2024-03` is the whole of March wherever it is
+  asked from.
+
 ### Indexes and migrations
 
 Indexes cover entity type/status/folder, link source/target/type and media browse
@@ -357,14 +395,21 @@ the media browse index (3→4), the `has_gps` flag (4→5), the trash journal
 (5→6), interrupted-operation recovery state (6→7), relation confidence (7→8),
 search-text rebuilding (8→9), graph pins (9→10), relation qualifiers (10→11),
 entity galleries (11→12), saved analysis views with their denormalised snapshot
-count (12→13) and the catalog's ordering indexes (13→14). The 4→5 backfill
-reads the sidecar JSON already held in each index row, so a case enriched before
-the column existed gains its position filter on open with no file scan.
+count (12→13), the catalog's ordering indexes (13→14), and the temporal projection
+with a full authority backfill (14→15). Schema 16 rebuilds the analysis-view table
+with Timeline as an accepted surface while preserving every existing view. Schema 17
+rebuilds the temporal projection so whole seconds and sub-second values share one
+sortable width. The 4→5 backfill reads the sidecar JSON
+already held in each index row, so a case enriched before the column existed gains
+its position filter on open with no file scan.
 
 The schema-4 media backfill scans sidecars once on first open. Its completion
 marker and index rows commit together, so an interrupted backfill retries safely.
 Normal media creation, edits, thumbnail changes and deletion keep the index in
-sync.
+sync. The same writes refresh the media-owned temporal rows. Entity create, update,
+delete and Trash restore refresh or cascade the entity-owned rows. Bundle databases
+carry the projection, while an explicit rebuild after import remains safe and
+idempotent.
 
 ## Trash and artifact ownership
 
@@ -382,7 +427,7 @@ Windows file lock leaves a retryable group instead of orphaned bytes.
 
 Saved analysis views are case state too. Deleting one writes its full recipe or
 capture to Trash, and restore reinserts the same id. Snapshots are bounded to 2,000
-entities, 10,000 closed relations and an 8 MiB JSON spec. Embedded previews are
+entities, 10,000 closed relations or 5,000 temporal rows, and an 8 MiB JSON spec. Embedded previews are
 thumbnail copies, at most 512 KiB each and 4 MiB total; they are visual context, not
 original evidence and not a cryptographic attestation. There is no standalone view
 file. Case bundles carry the `analysis_views` rows with the rest of `case.db`, so

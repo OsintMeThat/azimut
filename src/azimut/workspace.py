@@ -741,6 +741,9 @@ class Case:
         since: str | None = None,
         until: str | None = None,
         filed_by: list[str] | None = None,
+        temporal_since: str | None = None,
+        temporal_until: str | None = None,
+        temporal_categories: list[str] | None = None,
         order: str = "",
     ) -> dict[str, Any]:
         """A bounded, filtered page of the catalog (Step 5), paged with an indexed
@@ -761,6 +764,9 @@ class Case:
             since=since,
             until=until,
             filed_by=filed_by,
+            temporal_since=temporal_since,
+            temporal_until=temporal_until,
+            temporal_categories=temporal_categories,
             order=order,
         )
 
@@ -815,6 +821,39 @@ class Case:
 
     def remove_media_item(self, path: str) -> None:
         self._graph().remove_media_item(path)
+
+    def timeline_page(
+        self,
+        *,
+        since: str | None = None,
+        until: str | None = None,
+        categories: list[str] | None = None,
+        entity_id: str | None = None,
+        include_undated: bool = True,
+        limit: int = 100,
+        cursor: str | None = None,
+        bucket: str | None = None,
+        track: dict[str, Any] | None = None,
+        spread: bool = False,
+    ) -> dict[str, Any]:
+        return self._graph().timeline_page(
+            since=since,
+            until=until,
+            categories=categories,
+            entity_id=entity_id,
+            include_undated=include_undated,
+            limit=limit,
+            cursor=cursor,
+            bucket=bucket,
+            track=track,
+            spread=spread,
+        )
+
+    def rebuild_temporal_projection(self) -> int:
+        return self._graph().rebuild_temporal_projection()
+
+    def temporal_projection_status(self) -> dict[str, int | bool]:
+        return self._graph().temporal_projection_status()
 
     def list_media_items(self) -> list[dict[str, Any]]:
         return self._graph().list_media_items()
@@ -888,6 +927,9 @@ class Case:
         since: str | None = None,
         until: str | None = None,
         filed_by: list[str] | None = None,
+        temporal_since: str | None = None,
+        temporal_until: str | None = None,
+        temporal_categories: list[str] | None = None,
         link_types: list[str] | None = None,
         order: str = "degree",
     ) -> dict[str, Any]:
@@ -896,6 +938,8 @@ class Case:
             query=query, folder=folder, unfiled=unfiled, recursive=recursive,
             attr=attr, attr_value=attr_value, linked=linked, unlinked_only=unlinked_only,
             since=since, until=until, filed_by=filed_by,
+            temporal_since=temporal_since, temporal_until=temporal_until,
+            temporal_categories=temporal_categories,
             link_types=link_types, order=order,
         )
 
@@ -1167,6 +1211,25 @@ class Case:
             self._follow_note_rename(entity_id, patch)
             self._follow_named_artifact_rename(entity_id, patch)
             return self._graph().update_entity(entity_id, patch)
+
+    def save_temporal_claim(
+        self,
+        *,
+        entity_id: str | None,
+        label: str,
+        attrs: dict[str, Any],
+        connectors: dict[str, list[str]] | None,
+        by: str,
+        status: EntityStatus = "confirmed",
+    ) -> dict[str, Any]:
+        return self._graph().save_temporal_claim(
+            entity_id=entity_id,
+            label=label,
+            attrs=attrs,
+            connectors=connectors,
+            by=by,
+            status=status,
+        )
 
     def _follow_named_artifact_rename(self, entity_id: str, patch: dict[str, Any]) -> None:
         """Keep named tool files aligned with a label edited from Details.

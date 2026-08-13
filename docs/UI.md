@@ -19,7 +19,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 
 | Workspace | Tools today | Future tools land here |
 |---|---|---|
-| **Case** (topbar) | Board, Graph | Sheet; v4: Timeline; v5: Orchestrator |
+| **Case** (topbar) | Board, Graph, Timeline | Sheet; v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect (Selection / Frame / Collage / Analyze) | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
 | **Map** | Satellite, Coords & Sky | **one map, many modes**: Compare, Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
@@ -29,7 +29,8 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 not a stage: it is what every stage files into. It hangs off the case switcher in
 the topbar instead, so the header answers *which case* and the rail answers *what
 am I doing*. It stays a workspace in every other respect — tabs, `#case` deep
-links, its own remembered sidebar — which is where Sheet and Timeline will land.
+links, and its own remembered sidebar. Timeline lives here because it is another
+reading of the case, not a collection or examination stage.
 That sidebar stays closed by default, because the board already lists the same case
 and two lists side by side only ask which one is real.
 
@@ -112,10 +113,12 @@ row's Details.
   holds. A field with no value picked yet asks nothing, and a field the case holds too
   many distinct values for is not offered — a menu of five thousand paths is not a way
   to choose.
-- **The field menu is read on the click that opens it.** Gated behind picking a type
-  first, `kind` — the field the importer writes, the vocabulary declares nowhere, and
-  an analyst most wants — was a filter nobody could find. Only a case too large for the
-  menu to be readable still asks for a type first, and says so.
+- **The field menu is read on the click that opens it**, at any case size. Gated
+  behind picking a type first, `kind` — the field the importer writes, the vocabulary
+  declares nowhere, and an analyst most wants — was a filter nobody could find; gated
+  behind a size, the large cases lost the one filter that scales for them. The scan is
+  linear and small (50 000 entities in 0.3 s, 100 000 in 0.7 s), and what keeps the
+  menu readable is the bound on **values** above, never the number of rows.
 - **The count is the answer, against the whole case**: *23 of 1 204*. The denominator
   never shrinks with the numerator, because a proportion is the information a count
   carries.
@@ -140,8 +143,12 @@ row's Details.
 - **The question is remembered per case**, in the browser rather than in the case: it
   is how somebody was looking at their material this afternoon, not something a bundle
   should carry to another machine.
-- **Views** name case-owned analyses. A live view saves the Search+ question and the
-  surface presentation, then recomputes against the current case when opened. Every
+- **Views** name case-owned analyses, in two families. Board and Graph ask one question
+  of the catalog and share both their question and their list of views; the Timeline
+  reads time and shares with neither, so each menu offers only the readings the surface
+  under it can draw, and a name is claimed inside its own family. A live view saves the
+  Search+ question and the surface presentation, then recomputes against the current
+  case when opened. Every
   later filter, sort, fold, hiding, expansion, camera move and graph drag autosaves;
   the badge says **saving…**, **saved** or **save failed**.
 - **A snapshot freezes a reading, not a second case.** It keeps up to 2,000 captured
@@ -606,6 +613,9 @@ single root to expand from. Expansion is the drill-down.
   keyboard, and the level is on screen. Colour says only which family a node belongs
   to; the meaning of an edge is on its stroke, so the picture survives being printed.
   Selection keeps the amber.
+- **Full screen** gives the drawing every row the browser chrome was holding, which is
+  what a case of a few hundred nodes is read at. The toolbar comes with it, so the
+  picture can still be steered, and Esc gives the window back. As in the Timeline.
 
 ## Case sidebar
 
@@ -641,12 +651,12 @@ remembered per workspace for the current session. Reloading restores the default
   restore, permanent-delete and empty actions as the sidebar. Delete sends the
   current selection through the standard confirmation.
 - **Details** — a drawer over the sidebar, closed with the back arrow or Escape, so
-  selecting a row never pushes the case out of view. An analyst-entered entity opens
-  as one compact form: typed identity, declared fields, notes, folder, connections.
-  File and tool entities keep two tabs — **Info** is what the file or save reports
-  about itself, **Case** is what the analyst states about it. Case uses a responsive
-  field grid, one light connection list, and a collapsed **Made from & used by**
-  block. A field declared as holding sentences is a box that grows, not a line. A
+  selecting a row never pushes the case out of view. Every entity uses the same three
+  tabs. **Info** holds identity, declared profile fields, file metadata, notes and
+  folder. **Connections** holds placement, relations, mentions, Claims and the
+  collapsed **Made from & used by** block. **Time** holds dated statements, intrinsic
+  media dates and a collapsed Case activity section. A field declared as holding
+  sentences is a box that grows, not a line. A
   suggested entity says so at the top and carries the click that confirms it.
   People, organizations, assets and equipment types add a photo gallery above the
   form. It accepts several images from the computer or the Media Library, keeps the
@@ -706,7 +716,8 @@ reads **Rename to use** and does nothing until it is renamed.
 damage is listed one item at a time with only the repairs that apply. Database
 rebuild states what cannot be recovered before the button. Removing a missing
 media record takes a second click, while relinking only accepts an unregistered
-file already placed in that case's `media/` folder.
+file already placed in that case's `media/` folder. A stale Timeline index can be
+rebuilt from Claims and media metadata.
 
 ## Workspace folder
 
@@ -786,12 +797,183 @@ is a fact about the row rather than about anyone's filter. A place reached by `a
 source reached by `cites` is listed without being counted: neither says how many of
 anything.
 
-**A Claim's fields are headed twice**: what it states — how many, in what condition —
-then the reasoning behind it. One heading over all five would file a count as
-reasoning. The count steps by one and starts at one; leaving it empty says *seen, not
-counted*, which is not the same answer as one. An asset carries its own **Condition**
-off the same scale, where it reads as the last known state rather than as one
-observation.
+**A Claim's fields use three sections**: statement, time and reasoning. The Time
+section uses a guided editor for a year, month, day, date and time, bounded date
+range or zoned time range. Precision, certainty and timezone are chosen separately, so the analyst does
+not need to remember suffixes or timestamp punctuation. **Advanced** preserves and
+accepts the announced raw syntax. It opens a complete reference beside the field:
+patterns and examples for reduced dates, local/UTC/offset timestamps, subseconds,
+date and time ranges and uncertainty markers, followed by the unsupported forms. Its role
+says whether the fact occurred, was observed or was valid then. The count steps by
+one and starts at one; leaving it empty says *seen, not counted*, which is not the
+same answer as one. An asset carries its own **Condition** off the same scale, where
+it reads as the last known state rather than as one observation.
+
+The Time tab and Timeline use one backend contract:
+window intersection, category and entity filters, opaque pagination, optional
+year/month/day density buckets, a complete extent, and separate Undated and unplaced
+counts. Unplaced means a value exists but cannot sit on the UTC axis yet.
+Creating or editing a Temporal Claim writes its fields and selected
+`about`/`at`/`cites` connector sets in one transaction. Deletion uses the normal
+recoverable Trash workflow.
+
+## Timeline
+
+Timeline is the third Case tab. Its main axis is horizontal and stores its window in
+UTC. One searchable picker decides what the labels read: UTC, this computer's zone, any
+zone in the world, or local time at a place the case has saved. A zone is named rather
+than offered as an offset, so a stated hour survives the two days a year the offset
+moves, and each row shows the offset in force **at the window** rather than today's.
+The list is the platform's own copy of the IANA database, so it matches the renames
+either way: typing `kyiv` finds a list that says `Europe/Kiev`, and `kolkata` finds
+`Asia/Calcutta`.
+Above a day the ticks step by that zone's calendar, so a day tick is its own midnight;
+below it they keep exact spacing, so an hour a zone skips reads 01:00 then 03:00.
+A saved place is the one reading that also draws **daylight** under the ruler, because a
+band of day and night needs coordinates and a zone name carries none: night is the
+strip, civil twilight and day are laid over it, and instants stay UTC underneath
+whatever clock labels them. It is read from `/api/geo/daylight`, which is pure local computation and
+answers a window wider than a month as cut rather than drawing stripes a few pixels
+wide.
+Category tracks stack vertically. An instant is a point and an explicit interval is a bar.
+A reduced date stays a point, with a thin bounded line showing the whole year, month
+or day its precision covers. Approximate dates use a dashed edge and uncertain dates
+use a pattern. Suggested status uses a corner mark; refuted confidence strikes the
+label. The legend separates date quality from assessment confidence because the two
+are independent.
+
+The toolbar states the window in words, on the axis's own clock, between two step
+arrows: pressing it opens the exact boundaries, the spans `Hour` to `Year`, and `All`
+for the complete filtered extent. A span is asked for by name rather than reached by
+repeated zoom steps, and the reading is what stays out because a window is checked far
+more often than it is typed. Dragging the ruler pans directly. The wheel zooms around
+the pointer; Shift-wheel and a horizontal trackpad gesture pan. Arrow keys, Page Up/Down, `+`, `-` and Home provide
+the same navigation without a pointer. Full screen keeps the whole workspace available
+for dense cases.
+Only the visible window is read, 200 items at a time. A separate density request keeps
+the full chronology visible underneath without loading every event. The minimap is a
+histogram: one column per bin, as wide as the bin, stacked by category, with exact
+counts on hover. Bins are cut as fine as they can be drawn — by the hour on a case
+spanning a day, by the day on one spanning months — because a case cut by the period it
+happens to span drew one mark for a scraped batch of two hundred in a week and the same
+mark for a single entry that could be anywhere in a month. Column heights go by the
+square root of the share, so that batch does not flatten everything beside it.
+
+The visible window is a movable, resizable brush, and what it leaves out is dimmed.
+Bars, date scale and brush are placed on one mapping from instant to position, which is
+the only way the three can agree: what the brush covers is what the axis is showing.
+Under it, one slot per calendar period, named in the middle of its own — a period is
+named under its own column rather than at the instant it opens, and only as many names
+as fit are printed. The columns answer the pointer and the space around them drags the
+brush, so a bar under the brush is still clickable; clicking one opens the axis onto
+what that bin holds. `Case activity` is off by default. `Undated`
+contains missing dates; a separate `Not on UTC axis` list keeps local timestamps and
+invalid legacy values visible without inventing a timezone. The date a fact entered
+Azimut never masquerades as the date of the fact.
+
+Overview stays above Plot or List, so expanding a dense track never pushes the global
+navigator below the chronology. Events are packed against their rendered labels.
+Overflow becomes a `+N` control that expands the track in place; **Collapse** in that
+track's left label restores the bounded view and its `+N`. Plot and List are
+two readings of the same loaded page.
+
+The Timeline opens with **Events** and **Media** tracks. **Track** adds editable
+presets for Events, Person, Place, Media, Sources and Case activity, using labels from
+the entity registry. **Custom** opens the shared Search+ builder, then states whether
+that question matches the entry itself, its subject, place, evidence, or any of those
+connections. Category and time-role filters remain separate from that question.
+
+Each track shows its name over two lines before the ellipsis, and hovering it names the
+categories and the Search+ question the lane was filled from. A track can be given a
+**colour**: left on **Auto** its entries keep the category colours the legend explains,
+and a chosen colour wins for that track alone. Each track has one reorder grip and a
+fold control. Dragging the grip changes its
+position; `Alt` with an arrow key provides the same action. The track menu can rename,
+duplicate or delete it. Selecting an entry exposes **Pin in track** and **Hide from
+track** in the inspector. Pinning keeps an entry out of density overflow, while hiding
+affects only that track and leaves **Show hidden** beside its name. Both are acts on a
+lane, so neither is offered for an entry with no place on the axis: `Undated` and
+`Not on UTC axis` list what the loaded page holds whatever the tracks hide, because an
+entry is in them for what it is rather than for where it is drawn. Grouping by subject,
+type, place, evidence or time role creates temporary subtracks. The same temporal row
+may appear in several tracks or groups without becoming a second Claim.
+
+**Views** uses the same case-owned contract as Board and Graph, on its own list: a
+Timeline reading is tracks, a window and a clock, none of which a Board can draw. A Live
+Timeline view
+autosaves its window, display timezone, display mode, categories, ordered tracks with
+their colours, folds, hidden and pinned entries, grouping and entity scope. A Snapshot
+stores up to 5,000 matching
+temporal rows with their exact track assignments and opens read-only. It does not query
+the current case when reopened. Timeline views can be duplicated, deleted through
+Trash, restored and carried in a complete case bundle.
+
+A track that includes Statements can create Claims; Media-only and Case activity
+tracks cannot. Clicking empty space creates a point; dragging creates a bounded range.
+At day scale and below these are zoned timestamps and time ranges, so hours can be
+created, moved and resized directly. Date-only Claims support the same confirmed move,
+and intervals expose both resize edges. Every direct write shows the old and new
+values before saving.
+
+Selecting an entry opens a fixed-width inspector without changing the axis geometry.
+It shows the readable and raw date, precision, timezone, authority, role, status,
+confidence, reasoning and named subjects, places and evidence. Statements can be
+edited there. **Right-clicking an entry** — on the axis, in the list or in either
+holding queue — names the same four acts where the pointer is: pin, hide, Details and
+Edit assessment. It changes no selection, so a pair being measured survives it, and the
+two lane acts follow the inspector's rule of appearing only for an entry that has a
+lane. A media date offers **Add correction**, prefilled from the intrinsic
+date; saving creates a sourced Claim about the media and does not rewrite its sidecar.
+The Details view keeps Claim time fields in **Time**, not **Info**. `Open in Timeline`
+applies a visible entity chip that can be cleared in one click.
+
+**Ctrl-click a second entry** and the inspector measures between the two. Two exact
+timestamps give one figure; anything coarser gives the range the bounds allow, with the
+difference as written underneath it — a stated day is a window a day wide, so two dated
+statements are a range apart and not a number. Windows that intersect report their
+overlap and refuse to order the pair. A period says how long it runs, a point says only
+how coarsely it is dated, and the two are never printed as the same thing. Ctrl-clicking
+the held entry again lets it go; selecting another entry outright drops the pair.
+
+A Claim owns one `when` value, which may be a point or interval. Its Time tab says
+**Set statement date** when that value is absent instead of presenting the Claim as
+an existing undated assessment. A second temporal reading is a separate Claim about
+the same subject, with its own confidence and evidence; Claims do not point `about`
+other Claims.
+
+### One period, four surfaces
+
+**Open in** ends the track row, not the boundaries menu: a window is set rarely and
+asked of the other surfaces often, so the three targets stay one click away while the
+header keeps the window alone in its middle column. Board and Graph receive it
+as a **fact-time** filter and say so in a bar above the answer, with the way back to
+Timeline and Map and a Clear. That filter is the question, so it narrows the page, the
+totals and a saved view alike, and it never touches `since`/`until`, which ask when a
+row was *filed*. A row is in the window when a temporal entry it owns is, or when a
+statement `about`, `at` or `cites` it is — a person belongs to June because something
+said about them happened in June.
+
+The Map layer is session-only and named as such. It draws whatever the window holds
+that the case has put on the ground, grouped per place, and says how much of the window
+could be placed at all. Placed means every relation that puts something somewhere —
+a statement `at` a place, a photograph `located-at` one, an image `depicts`ing one, a
+structure `sited-at` one — not `at` alone, which is a Claim's connector and left a case
+full of located photographs answering with an empty map. It reads the categories the
+Timeline was reading. It draws the window and nothing else: the case's saved pins are
+its whole index and answer no period, so they are switched off on the way in and stay
+on their own control, and the view is framed on the window's marks alone. A window
+holding nothing placed says so in words rather than pulling the map out over unrelated
+ground.
+
+The marks are the saved layer's own pins in a second tint, because they are the same
+gesture on the same map. A mark's card leads with what each row is — a photograph shows
+itself — and offers both ways on: the entry on the axis it came from, and the thing
+itself in the tool that owns it, with a file the browser can show also opening in its
+own tab. The card's own buttons hand the period to Board or Graph, or close the layer.
+
+Sent back, the window and the chosen entry both land: when the reading is already the
+one being handed over, the entry is taken from what is on screen rather than waiting
+for a reload that will never come.
 
 ## Sources
 

@@ -40,6 +40,12 @@ describe('closeCase', () => {
     uiState.inspectPath = 'media/a.jpg';
     uiState.focusMedia = 'media/a.jpg';
     uiState.openInspect = 'session-a';
+    uiState.drawInGraph = { label: 'A question' };
+    uiState.openBoardEntity = 'entity-a';
+    uiState.openGraphEntity = 'entity-a';
+    uiState.timelineFocus = { itemId: 'event-a' };
+    uiState.timelineRange = { from: '2026-01-01', to: '2026-02-01' };
+    uiState.mapTimelineRange = { from: '2026-01-01', to: '2026-02-01' };
     uiState.gotoCoords = { lat: 1, lon: 2 };
   });
 
@@ -57,6 +63,12 @@ describe('closeCase', () => {
     expect(uiState.inspectPath).toBeNull();
     expect(uiState.focusMedia).toBeNull();
     expect(uiState.openInspect).toBeNull();
+    expect(uiState.drawInGraph).toBeNull();
+    expect(uiState.openBoardEntity).toBeNull();
+    expect(uiState.openGraphEntity).toBeNull();
+    expect(uiState.timelineFocus).toBeNull();
+    expect(uiState.timelineRange).toBeNull();
+    expect(uiState.mapTimelineRange).toBeNull();
     expect(uiState.gotoCoords).toBeNull();
   });
 });
@@ -265,6 +277,20 @@ describe('case request ownership', () => {
 
     expect(state.caseState.current).toEqual({ id: 'case-b', name: 'Case B' });
     expect(state.caseState.loading).toBe(false);
+  });
+
+  it('waits for case-owned work and cancels the switch when it cannot be saved', async () => {
+    const guard = vi.fn().mockResolvedValue(false);
+    const unregister = state.registerCaseChangeGuard(guard);
+    state.caseState.current = { id: 'case-a', name: 'Case A' };
+
+    await state.openCase('case-b');
+
+    expect(guard).toHaveBeenCalledWith({ fromId: 'case-a', toId: 'case-b' });
+    expect(api.get).not.toHaveBeenCalled();
+    expect(state.caseState.current.id).toBe('case-a');
+    expect(state.caseState.loading).toBe(false);
+    unregister();
   });
 
   it('does not let a late refresh reopen the case it started in', async () => {

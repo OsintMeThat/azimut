@@ -18,6 +18,7 @@ DATABASE_MISSING = "database-missing"
 DATABASE_UNREADABLE = "database-unreadable"
 MEDIA_MISSING = "media-missing"
 MEDIA_UNKNOWN = "media-unknown"
+TEMPORAL_INDEX_STALE = "temporal-index-stale"
 
 
 def _media_files(case: Case) -> Iterator[Path]:
@@ -86,6 +87,7 @@ def scan(case: Case) -> dict[str, Any]:
 
     try:
         entities = list(_media_entities(case))
+        temporal_status = case.temporal_projection_status()
     except (CaseError, OSError, sqlite3.Error) as exc:
         return _report(case, manifest, [_database_issue(unreadable=str(exc))])
 
@@ -101,6 +103,25 @@ def scan(case: Case) -> dict[str, Any]:
     ]
 
     issues: list[dict[str, Any]] = []
+    if not temporal_status["consistent"]:
+        issues.append(
+            {
+                "id": TEMPORAL_INDEX_STALE,
+                "kind": TEMPORAL_INDEX_STALE,
+                "severity": "warning",
+                "title": "Timeline index is out of date",
+                "detail": "The index does not match the case's Claims and media metadata.",
+                "expected": temporal_status["expected"],
+                "actual": temporal_status["actual"],
+                "actions": [
+                    {
+                        "id": "rebuild-timeline",
+                        "label": "Rebuild Timeline index",
+                        "tone": "primary",
+                    }
+                ],
+            }
+        )
     for entity in entities:
         rel_path = str((entity.get("attrs") or {}).get("path") or "")
         if rel_path and not case.resolve_inside(rel_path).is_file():
@@ -297,3 +318,9 @@ def require_unknown_media(case: Case, rel_path: str) -> Path:
     if case.find_entity(attr="path", value=rel_path) is not None:
         raise CaseError(f"media '{rel_path}' is already registered")
     return path
+
+
+def require_stale_temporal_projection(case: Case) -> None:
+    """Refuse a Timeline repair unless the read-only check currently offers it."""
+    if case.temporal_projection_status()["consistent"]:
+        raise CaseError("the Timeline index is already current")

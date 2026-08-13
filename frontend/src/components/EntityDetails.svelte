@@ -22,7 +22,6 @@
     entityIdentityPlaceholder,
     entityLabel,
     hasImageGallery,
-    isManualEntityType,
     loadEntityTypes,
   } from '../lib/entityTypes.svelte.js';
   import { entityIcon } from '../lib/entityIcon.js';
@@ -52,6 +51,7 @@
   import RelationList from './RelationList.svelte';
   import RelationPicker from './RelationPicker.svelte';
   import EntityImages from './EntityImages.svelte';
+  import EntityTime from './EntityTime.svelte';
 
   let {
     entityId,
@@ -160,10 +160,8 @@
     dirtyNow = dirty;
   });
 
-  // Two tabs, cut where the model cuts: what the file or the save says about
-  // itself, against what the analyst states — precision, the chain, relations, and
-  // later confidence. Piling all of it into one scroll is what made this panel
-  // long, and four editable fields dropped among read-only rows read as a bug.
+  // Every entity uses the same three readings. Keeping profile fields out of
+  // Connections also means Time can be opened without walking past unrelated rows.
   let tab = $state('info');
   $effect(() => {
     currentId; // a different entity opens on its own terms
@@ -306,7 +304,6 @@
     (chain?.relations ?? []).filter((row) => relationAction(row.link.type) === 'claim')
   );
   const hasRelations = $derived(Boolean(chain?.relations?.length));
-  const unifiedDetails = $derived(Boolean(entity && isManualEntityType(entity.type)));
   const lineageCount = $derived(
     (chain?.sources?.length ?? 0) +
       (chain?.lost?.length ?? 0) +
@@ -317,7 +314,7 @@
   );
 
   // Where the chain puts this entity (ONTOLOGY §3). Its own request, and only once
-  // the Case tab is on screen: the walk reaches further than the chain's one hop,
+  // the Connections tab is on screen: the walk reaches further than the chain's one hop,
   // and the panel opens on Info, so clicking through a list of rows never pays for it.
   let placement = $state(null); // { points, truncated }
   let placeSeq = 0;
@@ -326,7 +323,7 @@
   $effect(() => {
     const id = currentId;
     const cid = caseState.current?.id;
-    const wanted = tab === 'case' || unifiedDetails;
+    const wanted = tab === 'connections';
     caseState.rev; // a save can add or drop a panel, and with it a point
     const mySeq = ++placeSeq;
     if (!id || !cid || !wanted) {
@@ -345,7 +342,7 @@
    * The panel already lists the claims pointing here; it never added them up, so
    * *how many of these were destroyed* was a question the analyst answered by reading
    * four rows and doing the arithmetic. Read on the same terms as the placement
-   * beside it — its own request, only once the Case tab is on screen, and re-read
+   * beside it — its own request, only once Connections is on screen, and re-read
    * after a save, since editing a statement changes what the case says.
    *
    * Over the whole case rather than any filter: this is a fact about the row, and a
@@ -359,7 +356,7 @@
   $effect(() => {
     const id = currentId;
     const cid = caseState.current?.id;
-    const wanted = tab === 'case' || unifiedDetails;
+    const wanted = tab === 'connections';
     caseState.rev;
     const mySeq = ++statedSeq;
     if (!id || !cid || !wanted) {
@@ -592,6 +589,25 @@
       <div class="info-loading">Loading…</div>
     {/if}
 
+    <div class="ed-tabs" role="tablist" aria-label="Details sections">
+      <button
+        class="ed-tab" class:on={tab === 'info'} role="tab" aria-selected={tab === 'info'}
+        title="Identity, profile and file metadata"
+        onclick={() => (tab = 'info')}
+      >Info</button>
+      <button
+        class="ed-tab" class:on={tab === 'connections'} role="tab" aria-selected={tab === 'connections'}
+        title="Relations, statements and lineage"
+        onclick={() => (tab = 'connections')}
+      >Connections</button>
+      <button
+        class="ed-tab" class:on={tab === 'time'} role="tab" aria-selected={tab === 'time'}
+        title="Dates and time assessments"
+        onclick={() => (tab = 'time')}
+      >Time</button>
+    </div>
+
+    {#if tab === 'info'}
     {#if infoData?.kind === 'image' && infoData.thumbnail}
       <div class="info-preview">
         <img src={fileUrl(caseState.current.id, infoData.path)} alt={entity.label} />
@@ -646,30 +662,6 @@
       </p>
     {/if}
 
-    {#if unifiedDetails && declaredFields.length}
-      <AttrFields type={entity.type} bind:values={infoAttrs} />
-    {/if}
-
-    <!-- Two tabs on the model's own seam: what the item says about itself, against
-         what the analyst states about it. The preview and the title stay above both,
-         because you want the picture in front of you while stating a relation. -->
-    {#if !unifiedDetails}
-    <div class="ed-tabs" role="tablist">
-      <button
-        class="ed-tab" class:on={tab === 'info'} role="tab" aria-selected={tab === 'info'}
-        title="what the file or the save reports about itself"
-        onclick={() => (tab = 'info')}
-      >Info</button>
-      <button
-        class="ed-tab" class:on={tab === 'case'} role="tab" aria-selected={tab === 'case'}
-        title="what you are stating about it"
-        onclick={() => (tab = 'case')}
-      >Case</button>
-    </div>
-    {/if}
-
-    {#if tab === 'info' || unifiedDetails}
-    {#if !unifiedDetails}
     <div class="info-rows">
       <div class="info-row"><span class="info-k">Type</span><span>{entity.type}</span></div>
       {#if entity.provenance?.by}
@@ -747,6 +739,13 @@
         <div class="info-row"><span class="info-k">Coords</span><span class="mono">{entity.attrs.coords}</span></div>
       {/if}
     </div>
+
+    {#if declaredFields.length}
+      <AttrFields
+        type={entity.type}
+        bind:values={infoAttrs}
+        exclude={entity.type === 'claim' ? ['when', 'time_role', 'confidence', 'method', 'verbatim'] : []}
+      />
     {/if}
 
     {#if infoData?.kind === 'image' && (infoData.taken_at || infoData.gps || Object.keys(infoData.exif ?? {}).length)}
@@ -790,21 +789,8 @@
     <FolderSelect bind:value={infoFolder} folders={allFolders} emptyLabel="None" />
     {/if}
 
-    {#if tab === 'case' || unifiedDetails}
+    {#if tab === 'connections'}
       <div class="case-layout">
-        {#if declaredFields.length && !unifiedDetails}
-          <section class="case-card profile-card">
-            <div class="card-head">
-              <span class="card-icon"><Icon name={entityIcon(entity)} size={14} /></span>
-              <div>
-                <h3>Profile</h3>
-                <p>{entity.type}</p>
-              </div>
-            </div>
-            <AttrFields type={entity.type} bind:values={infoAttrs} />
-          </section>
-        {/if}
-
         {#if canRelate || canMention || hasRelations || lineageCount || placedPoints.length}
           <section class="connections">
             <div class="card-head connections-head"><h3>Connections</h3></div>
@@ -1021,13 +1007,17 @@
           </section>
         {/if}
 
-        {#if !canRelate && !canMention && !hasRelations && !declaredFields.length && !lineageCount}
+        {#if !canRelate && !canMention && !hasRelations && !lineageCount && !placedPoints.length}
           <div class="case-card empty-card">
             <Icon name="link" size={16} />
-            <p>No profile details or connections yet.</p>
+            <p>No connections yet.</p>
           </div>
         {/if}
       </div>
+    {/if}
+
+    {#if tab === 'time'}
+      <EntityTime caseId={caseState.current.id} {entity} {onclose} />
     {/if}
 
     <div class="details-actions">
@@ -1051,7 +1041,7 @@
           <Icon name="external" size={13} /> Open link
         </a>
       {/if}
-      <!-- The archived copy is typed in the Case tab, so it needs somewhere to be
+      <!-- The archived copy is typed in Connections, so it needs somewhere to be
            read: a field only ever written is a field nobody trusts. -->
       {#if entity.type === 'bookmark' && entity.attrs?.archive_url}
         <a class="btn btn-ghost btn-sm" href={entity.attrs.archive_url} target="_blank" rel="noreferrer">
@@ -1337,7 +1327,6 @@
     color: var(--text-2);
   }
   .card-head h3,
-  .card-head p,
   .lineage-group h4,
   .empty-card p {
     margin: 0;
@@ -1346,13 +1335,6 @@
     color: var(--text-1);
     font-size: var(--fs-sm);
     font-weight: 600;
-  }
-  .card-head p {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-  }
-  .profile-card :global(.attrs) {
-    margin-top: 4px;
   }
   .connections {
     min-width: 0;

@@ -91,11 +91,12 @@ export function entityFields(type) {
 /**
  * Mark the field that opens each heading, over the fields actually being rendered.
  *
- * The registry heads a *field*, not a type, because one type can hold two subjects:
- * a Claim says what it states and why that is believed, where a place's four fields
- * all answer how tightly the point is pinned. A heading is emitted where the group
- * changes, so the registry's order is left exactly as it is — a form that regrouped
- * its own fields would stop being the order the vocabulary declares.
+ * The registry heads a *field*, not a type, because one type can hold several
+ * subjects: a Claim says what it states, when it applies and why it is believed,
+ * where a place's four fields all answer how tightly the point is pinned. A heading
+ * is emitted where the group changes, so the registry's order is left exactly as it
+ * is — a form that regrouped its own fields would stop being the order the vocabulary
+ * declares.
  *
  * Takes the shown fields rather than the type, because a field can be hidden — an
  * untraced footprint, an empty legacy value — and a heading resolved before that

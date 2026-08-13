@@ -46,7 +46,14 @@ def test_live_view_crud_and_bounded_list(client):
     view = created.json()
     assert view["mode"] == "live"
     assert view["snapshot_count"] == 0
-    assert view["spec"]["timeline"] == {"from": None, "to": None, "field": None}
+    # A Board or Graph view saves the period it was read through, and which temporal
+    # categories that period is asked of. Unset means the two the case states itself.
+    assert view["spec"]["timeline"] == {
+        "from": None,
+        "to": None,
+        "field": None,
+        "categories": ["statement", "media"],
+    }
 
     listing = client.get(f"/api/cases/{case_id}/analysis-views").json()["views"]
     assert listing == [{key: value for key, value in view.items() if key != "spec"}]
@@ -217,3 +224,324 @@ def test_deleted_view_goes_to_trash_and_restores(client):
     assert client.get(
         f"/api/cases/{case_id}/analysis-views/{view['id']}"
     ).status_code == 200
+
+
+def test_a_board_snapshot_freezes_the_period_it_was_read_through(client):
+    """A Board view saved with a fact-time period captures what that period holds.
+
+    The window is written as a reduced date, which is where a capture and the live
+    question can disagree: `2024-03` is the whole of March on the axis, and a snapshot
+    that stopped at its first instant would freeze an emptier case than the one the
+    analyst was looking at.
+    """
+    case_id = _case(client, "Board period")
+    person = _entity(client, case_id, "person", "Witness")
+    march = client.post(
+        f"/api/cases/{case_id}/timeline/claims",
+        json={
+            "statement": "Witness reached the gate",
+            "when": "2024-03-05T10:00:00Z",
+            "about": [person["id"]],
+        },
+    ).json()
+    april = client.post(
+        f"/api/cases/{case_id}/timeline/claims",
+        json={"statement": "Later event", "when": "2024-04-05T10:00:00Z"},
+    ).json()
+
+    body = {
+        "name": "March",
+        "mode": "snapshot",
+        "surface": "board",
+        "spec": {
+            "query": {"filter": {}, "terms": {}, "label": ""},
+            "board": {"order": "label"},
+            "timeline": {
+                "from": "2024-03",
+                "to": "2024-03",
+                "field": "fact-time",
+                "categories": ["statement"],
+            },
+        },
+    }
+    created = client.post(f"/api/cases/{case_id}/analysis-views", json=body)
+    assert created.status_code == 200, created.text
+    view = created.json()
+    assert view["spec"]["timeline"]["from"] == "2024-03"
+
+    frozen = client.get(
+        f"/api/cases/{case_id}/catalog/entities", params={"view": view["id"]}
+    )
+    assert frozen.status_code == 200, frozen.text
+    frozen_ids = {entity["id"] for entity in frozen.json()["items"]}
+    assert frozen_ids == {march["entity"]["id"], person["id"]}
+    assert april["entity"]["id"] not in frozen_ids
+
+    # And it froze what the live question over the same period answers, rather than
+    # its own reading of the boundaries.
+    live = client.get(
+        f"/api/cases/{case_id}/catalog/entities",
+        params={
+            "temporal_from": "2024-03",
+            "temporal_to": "2024-03",
+            "temporal_category": "statement",
+        },
+    )
+    assert live.status_code == 200, live.text
+    assert {entity["id"] for entity in live.json()["items"]} == frozen_ids
+
+
+def test_a_saved_period_that_is_not_a_date_is_refused(client):
+    case_id = _case(client, "Bad period")
+    body = {
+        "name": "Nonsense",
+        "mode": "snapshot",
+        "surface": "board",
+        "spec": {
+            "query": {"filter": {}, "terms": {}, "label": ""},
+            "timeline": {"from": "last tuesday", "to": "2024-03", "categories": ["statement"]},
+        },
+    }
+    refused = client.post(f"/api/cases/{case_id}/analysis-views", json=body)
+    assert refused.status_code == 400, refused.text
+
+
+def test_timeline_snapshot_freezes_rows_and_track_assignments(client):
+    """A snapshot captures the window it was read through, track by track.
+
+    The window is in the past so the run date cannot change the answer: the case
+    activity of a case filed today falls outside it, which is exactly why the second
+    track comes back empty.
+    """
+    case_id = _case(client, "Timeline snapshot")
+    person = _entity(client, case_id, "person", "Witness")
+    saved_claim = client.post(
+        f"/api/cases/{case_id}/timeline/claims",
+        json={
+            "statement": "Witness reached the gate",
+            "when": "2024-03-05T10:00:00Z",
+            "about": [person["id"]],
+        },
+    )
+    assert saved_claim.status_code == 200, saved_claim.text
+    temporal_id = saved_claim.json()["temporal"]["id"]
+    body = {
+        "name": "Frozen chronology",
+        "mode": "snapshot",
+        "surface": "timeline",
+        "spec": {
+            "query": {"filter": {}, "terms": {}, "label": ""},
+            "timeline": {
+                "from": "2024-03-05T00:00:00Z",
+                "to": "2024-03-06T00:00:00Z",
+                "timezone": "Europe/Paris",
+                "zone_choice": "machine",
+                "group_by": "subject",
+                "visible_categories": ["statement"],
+                "tracks": [
+                    {
+                        "id": "people",
+                        "label": "People",
+                        "categories": ["statement"],
+                        "query": {
+                            "filter": {"types": ["person"]},
+                            "terms": {"type": "person"},
+                            "relation": "about",
+                        },
+                        "collapsed": False,
+                        "hidden": [],
+                        "pinned": [temporal_id],
+                    },
+                    {
+                        "id": "activity",
+                        "label": "Case activity",
+                        "categories": ["case_activity"],
+                    },
+                ],
+            },
+        },
+    }
+    response = client.post(f"/api/cases/{case_id}/analysis-views", json=body)
+    assert response.status_code == 200, response.text
+    view = response.json()
+    assert view["snapshot_count"] == 1
+    assert view["spec"]["timeline"]["timezone"] == "Europe/Paris"
+    assert view["spec"]["timeline"]["zone_choice"] == "machine"
+    assert view["spec"]["snapshot"]["timeline_tracks"] == {
+        "people": [temporal_id],
+        "activity": [],
+    }
+    frozen = view["spec"]["snapshot"]["timeline_items"][0]
+    assert frozen["label"] == "Witness reached the gate"
+    assert frozen["subject_entities"][0]["label"] == "Witness"
+
+    claim_id = saved_claim.json()["entity"]["id"]
+    assert client.delete(f"/api/cases/{case_id}/entities/{claim_id}").status_code == 200
+    reopened = client.get(
+        f"/api/cases/{case_id}/analysis-views/{view['id']}"
+    ).json()
+    assert reopened["spec"]["snapshot"]["timeline_items"][0] == frozen
+
+    duplicate = client.post(
+        f"/api/cases/{case_id}/analysis-views/{view['id']}/duplicate",
+        json={"name": "Frozen chronology copy"},
+    )
+    assert duplicate.status_code == 200, duplicate.text
+    assert duplicate.json()["spec"]["snapshot"] == view["spec"]["snapshot"]
+
+
+def test_a_track_captures_the_case_activity_it_asks_for(client):
+    """Tracks own category selection: there is no second global switch above them.
+
+    A lane declaring `case_activity` therefore freezes the filing dates, while a lane
+    declaring `statement` beside it freezes only the Claim.
+    """
+    case_id = _case(client, "Activity track")
+    person = _entity(client, case_id, "person", "Witness")
+    claim = client.post(
+        f"/api/cases/{case_id}/timeline/claims",
+        json={
+            "statement": "Witness reached the gate",
+            "when": "2024-03-05T10:00:00Z",
+            "about": [person["id"]],
+        },
+    )
+    assert claim.status_code == 200, claim.text
+
+    created = client.post(
+        f"/api/cases/{case_id}/analysis-views",
+        json={
+            "name": "Everything",
+            "mode": "snapshot",
+            "surface": "timeline",
+            "spec": {
+                "timeline": {
+                    "tracks": [
+                        {"id": "events", "label": "Events", "categories": ["statement"]},
+                        {
+                            "id": "activity",
+                            "label": "Case activity",
+                            "categories": ["case_activity"],
+                        },
+                    ],
+                },
+            },
+        },
+    )
+    assert created.status_code == 200, created.text
+    snapshot = created.json()["spec"]["snapshot"]
+
+    assert snapshot["timeline_tracks"] == {
+        "events": [claim.json()["temporal"]["id"]],
+        "activity": [f"temporal:activity:{person['id']}:filed"],
+    }
+    assert created.json()["snapshot_count"] == 2
+
+
+def test_empty_timeline_snapshot_duplicates_without_changing_its_tracks(client):
+    case_id = _case(client, "Empty Timeline snapshot")
+    created = client.post(
+        f"/api/cases/{case_id}/analysis-views",
+        json={
+            "name": "Empty chronology",
+            "mode": "snapshot",
+            "surface": "timeline",
+            "spec": {
+                "timeline": {
+                    "tracks": [{
+                        "id": "events",
+                        "label": "Events",
+                        "categories": ["statement"],
+                    }],
+                },
+            },
+        },
+    )
+    assert created.status_code == 200, created.text
+    view = created.json()
+    assert view["spec"]["snapshot"]["timeline_tracks"] == {"events": []}
+
+    duplicate = client.post(
+        f"/api/cases/{case_id}/analysis-views/{view['id']}/duplicate",
+        json={"name": "Empty chronology copy"},
+    )
+    assert duplicate.status_code == 200, duplicate.text
+    assert duplicate.json()["spec"]["snapshot"] == view["spec"]["snapshot"]
+
+
+def test_a_name_is_claimed_inside_its_own_family(client):
+    """Board and Graph share one list of views; the Timeline has its own.
+
+    Refusing a name because it is taken on a list the analyst cannot see from here is
+    worse than allowing the repeat, so the check is scoped to the family.
+    """
+    case_id = _case(client, "Two families")
+    board = client.post(f"/api/cases/{case_id}/analysis-views", json=_body("Week one"))
+    assert board.status_code == 200, board.text
+
+    graph = client.post(
+        f"/api/cases/{case_id}/analysis-views", json=_body("week ONE", surface="graph")
+    )
+    assert graph.status_code == 409
+
+    timeline = client.post(
+        f"/api/cases/{case_id}/analysis-views",
+        json={
+            "name": "Week one",
+            "mode": "live",
+            "surface": "timeline",
+            "spec": {"timeline": {"tracks": []}},
+        },
+    )
+    assert timeline.status_code == 200, timeline.text
+    assert timeline.json()["surface"] == "timeline"
+
+    names = {
+        (view["surface"], view["name"])
+        for view in client.get(f"/api/cases/{case_id}/analysis-views").json()["views"]
+    }
+    assert names == {("board", "Week one"), ("timeline", "Week one")}
+
+
+def test_a_timeline_view_keeps_the_clock_and_the_colours_it_was_read_with(client):
+    case_id = _case(client, "Zone and colour")
+    body = {
+        "name": "Tokyo reading",
+        "mode": "live",
+        "surface": "timeline",
+        "spec": {
+            "timeline": {
+                "timezone": "Asia/Tokyo",
+                "zone_choice": "zone:Asia/Tokyo",
+                "tracks": [
+                    {
+                        "id": "vessels",
+                        "label": "Vessels",
+                        "categories": ["statement"],
+                        "color": "blue",
+                    },
+                    {
+                        "id": "media",
+                        "label": "Media",
+                        "categories": ["media"],
+                        "color": "chartreuse",
+                    },
+                ],
+            },
+        },
+    }
+    created = client.post(f"/api/cases/{case_id}/analysis-views", json=body)
+    assert created.status_code == 200, created.text
+    timeline = created.json()["spec"]["timeline"]
+
+    # a zone named outright travels: the view was read on it and must reopen on it
+    assert timeline["zone_choice"] == "zone:Asia/Tokyo"
+    assert [track["color"] for track in timeline["tracks"]] == ["blue", ""]
+
+    for refused in ("zone:../../etc/passwd", "zone:", "somewhere else"):
+        body["spec"]["timeline"]["zone_choice"] = refused
+        answer = client.put(
+            f"/api/cases/{case_id}/analysis-views/{created.json()['id']}", json=body
+        )
+        assert answer.status_code == 200, answer.text
+        assert answer.json()["spec"]["timeline"]["zone_choice"] == "utc"

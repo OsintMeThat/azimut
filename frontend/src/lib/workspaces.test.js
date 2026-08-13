@@ -10,13 +10,13 @@ import {
 } from './workspaces.js';
 
 const ALL_TOOLS = [
-  'board', 'media', 'files', 'reverse', 'inspect', 'satellite', 'coordinates', 'proof', 'post',
+  'board', 'graph', 'timeline', 'media', 'files', 'reverse', 'inspect', 'satellite', 'coordinates', 'proof', 'post', 'notebook',
   'settings',
 ];
 
 describe('workspaceOf', () => {
   it('maps every tool to exactly one workspace', () => {
-    for (const tool of ['board', 'media', 'files', 'reverse', 'inspect', 'satellite', 'coordinates', 'proof', 'post']) {
+    for (const tool of ['board', 'graph', 'timeline', 'media', 'files', 'reverse', 'inspect', 'satellite', 'coordinates', 'proof', 'post', 'notebook']) {
       const owners = ALL_WORKSPACES.filter((w) => w.tools.includes(tool));
       expect(owners).toHaveLength(1);
       expect(workspaceOf(tool)).toBe(owners[0]);
@@ -27,6 +27,7 @@ describe('workspaceOf', () => {
     expect(WORKSPACES.map((w) => w.id)).not.toContain('case');
     expect(WORKSPACES[0].id).toBe('collect');
     expect(workspaceOf('board')).toBe(CASE_WORKSPACE);
+    expect(workspaceOf('timeline')).toBe(CASE_WORKSPACE);
   });
 
   it('resolves the case workspace even though the rail never lists it', () => {
@@ -61,6 +62,7 @@ describe('product-facing labels', () => {
     expect(WORKSPACES.find((w) => w.id === 'collect').label).toBe('Sources');
     expect(TOOL_LABELS.proof).toBe('Geo Proof');
     expect(TOOL_LABELS.post).toBe('Geo Report');
+    expect(TOOL_LABELS.timeline).toBe('Timeline');
   });
 });
 
@@ -91,6 +93,7 @@ describe('toolFromHash', () => {
     expect(toolFromHash('#compose', ALL_TOOLS)).toBe('proof');
     // off the rail, still a workspace: #case has to keep resolving
     expect(toolFromHash('#case', ALL_TOOLS)).toBe('board');
+    expect(toolFromHash('#case/timeline', ALL_TOOLS)).toBe('timeline');
   });
 
   it('accepts workspace/tab form', () => {
