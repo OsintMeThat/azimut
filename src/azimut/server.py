@@ -35,27 +35,54 @@ SERVE_PORT: int | None = None
 LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
 
-class NotesPdfBodyLimit:
-    """Bound the one JSON route that can carry binary images before parsing."""
+class BulkBodyLimit:
+    """Bound the JSON routes that carry a payload the browser assembled, before parsing.
+
+    Two of them: a note's PDF export posts its Mermaid diagrams and a sheet posts a
+    whole table. Each is bounded by its own route's number, so the limit stays beside
+    the code that knows what it is for.
+    """
+
+    #: `(method, tail, module, attribute)`, where the tail is the path segments after
+    #: `/api/cases/{case_id}/` and `*` stands for one segment of any value.
+    ROUTES: tuple[tuple[str, tuple[str, ...], str, str], ...] = (
+        ("POST", ("notes", "pdf"), "notes", "MAX_PDF_BODY_BYTES"),
+        ("POST", ("sheets", "import"), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("PUT", ("sheets", "*"), "sheets", "MAX_SHEET_BODY_BYTES"),
+    )
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
     @staticmethod
-    def _matches(scope: Scope) -> bool:
-        parts = str(scope.get("path", "")).split("/")
-        return scope.get("method") == "POST" and len(parts) == 6 and (
-            parts[1], parts[2], parts[4], parts[5]
-        ) == ("api", "cases", "notes", "pdf")
+    def _matches(tail: tuple[str, ...], route: tuple[str, ...]) -> bool:
+        return len(tail) == len(route) and all(
+            want in ("*", have) for want, have in zip(route, tail)
+        )
+
+    @classmethod
+    def _limit(cls, scope: Scope) -> int | None:
+        method = str(scope.get("method", ""))
+        parts = str(scope.get("path", "")).strip("/").split("/")
+        if len(parts) < 4 or parts[0] != "api" or parts[1] != "cases":
+            return None
+        tail = tuple(parts[3:])
+        for want_method, route, module_name, attribute in cls.ROUTES:
+            if method != want_method or not cls._matches(tail, route):
+                continue
+            # Imported lazily so each route owns its limit and a test can lower it
+            # without rebuilding the application.
+            from importlib import import_module
+
+            module = import_module(f".api.{module_name}", package=__package__)
+            return int(getattr(module, attribute))
+        return None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not self._matches(scope):
+        limit = self._limit(scope) if scope["type"] == "http" else None
+        if limit is None:
             await self.app(scope, receive, send)
             return
-
-        # Import lazily so the route owns the limit and tests can lower it
-        # without rebuilding the application.
-        from .api import notes
 
         headers = dict(scope.get("headers", []))
         raw_length = headers.get(b"content-length", b"")
@@ -63,7 +90,7 @@ class NotesPdfBodyLimit:
             content_length = int(raw_length) if raw_length else None
         except ValueError:
             content_length = None
-        if content_length is not None and content_length > notes.MAX_PDF_BODY_BYTES:
+        if content_length is not None and content_length > limit:
             await JSONResponse(
                 {"detail": "request body too large"}, status_code=413
             )(scope, receive, send)
@@ -75,7 +102,7 @@ class NotesPdfBodyLimit:
             if message["type"] != "http.request":
                 break
             chunk = message.get("body", b"")
-            if len(body) + len(chunk) > notes.MAX_PDF_BODY_BYTES:
+            if len(body) + len(chunk) > limit:
                 await JSONResponse(
                     {"detail": "request body too large"}, status_code=413
                 )(scope, receive, send)
@@ -233,13 +260,14 @@ def create_app() -> FastAPI:
 
     from .api import (
         analysis_views, cases, drafts, events, files, folders, ingest, inspect, media,
-        notes, proofs, satellite, settings, templates,
+        notes, proofs, satellite, settings, sheets, templates,
     )
 
     app.include_router(cases.router)
     app.include_router(cases.workspace_router)
     app.include_router(analysis_views.router)
     app.include_router(notes.router)
+    app.include_router(sheets.router)
     app.include_router(media.router)
     app.include_router(inspect.router)
     app.include_router(satellite.router)
@@ -256,8 +284,8 @@ def create_app() -> FastAPI:
     # Inside the local guard: a request that isn't allowed to reach the app at
     # all should not learn whether the workspace is there.
     install_availability_guard(app)
-    # Bound diagram-carrying JSON before FastAPI/Pydantic materialises it.
-    app.add_middleware(NotesPdfBodyLimit)
+    # Bound picture-carrying JSON before FastAPI/Pydantic materialises it.
+    app.add_middleware(BulkBodyLimit)
     # last, so it wraps everything: refuse non-loopback Host / cross-origin web
     install_local_guard(app)
 

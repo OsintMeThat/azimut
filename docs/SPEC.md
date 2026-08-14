@@ -51,6 +51,7 @@ azimut/        # everything Azimut owns; the rest of the folder is yours
   case.json    # small manifest: name, dates, storage format + schema
   notes.md     # free-form case notes (markdown)
   notes/       # note bodies, named after their title, filed as in the notebook
+  sheets/      # case sheets as plain CSV; .meta/ holds the grid's own state
   media/       # source + captured + extracted media; .meta/ holds the sidecars
   proofs/      # exported PNGs; .meta/ holds the specs and pasted images
   exports/     # notes exported to PDF, and yours to fill
@@ -146,6 +147,7 @@ proof for publication.
 | ✅ **Workspace portability** | Moves or adopts a workspace safely, recovers hand-added cases and prevents two live instances from sharing it silently. |
 | ✅ **Updates & paste** | Reports available app, downloader and extension updates, then files supported clipboard content from the main case surfaces. |
 | ✅ **Saved view management** | Renames a live or frozen reading in its row and orders each family's list by name, edit or surface, with the surface and last write on show. |
+| ✅ **Case Sheet** | Opens and builds case CSVs in a plain grid: keyed rows, own columns, drag to reorder, one column kept in view, sort, filters including empty and excluded, row colour, clipboard both ways, bulk fill, patch undo, a row read down a panel, live links, and cells that point at case entities. A save is refused rather than overwriting a file changed on disk. |
 
 
 ---
@@ -160,7 +162,6 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 
 | Tool | What it does |
 |------|--------------|
-| **Case Sheet** | Adds editable free columns and CSV/GeoJSON round trips to the shipped Board. Imported loose rows stay outside the graph until promoted. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
 | **Analysis view export** | Copies or exports the visible Graph or Timeline as a PNG with its lens, question, time window, clock and legend. |
 
@@ -283,8 +284,6 @@ stops making sense.
 - No cloud, accounts, hosted service, or telemetry.
 - No automated geolocation verdict; Azimut files facts for the analyst.
 - No rebuilding specialized OSINT services; Azimut orchestrates them.
-- No spreadsheet engine. The Case Sheet is a view of the graph, not a workbook:
-  no formulas, no cell types, no second copy of the case.
 - No block-evasion scraping. User session cookies are in scope; third-party
   downloader proxies are not because they re-encode media and expose targets.
 - No auto-posting by default. An optional, opt-in X/Twitter API key (Settings,
@@ -320,7 +319,9 @@ stops making sense.
 - **Security posture** (single-user localhost): `127.0.0.1` bind + Host/Origin
   guard (DNS rebinding), 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
   names for images pasted into a proof (no client-chosen path), token-gated
-  ingest island for the extension. The workspace pointer is the one file written
+  ingest island for the extension. A case id and an artifact name each address
+  one directory entry, checked against POSIX *and* Windows path rules so the
+  separator only one of them honours cannot walk out of the workspace. The workspace pointer is the one file written
   outside the workspace, 0600 and holding a path; deleting the copy a move set
   aside acts on this process's own memory, never on a path from the request.
   Accepted risks recorded here: cleartext keys over

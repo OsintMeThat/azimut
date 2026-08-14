@@ -19,7 +19,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 
 | Workspace | Tools today | Future tools land here |
 |---|---|---|
-| **Case** (topbar) | Board, Graph, Timeline | Sheet; v5: Orchestrator |
+| **Case** (topbar) | Board, Graph, Timeline, Sheet | v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect (Selection / Frame / Collage / Analyze) | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
 | **Map** | Satellite, Coords & Sky | **one map, many modes**: Compare, Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
@@ -177,8 +177,9 @@ row's Details.
   gesture either way: which of the two it is belongs to the column, not to a second
   control the analyst has to find.
 - **Columns** are the four every entity has — identity, type, folder, created — plus
-  the chosen type's declared fields once a single type is picked. Read-only: editing
-  cells and CSV belong to the Case Sheet. A primary entity photo replaces the type
+  the chosen type's declared fields once a single type is picked. Read-only: a value is
+  edited in that row's Details, and the Case Sheet works on the case's CSV files rather
+  than on these rows. A primary entity photo replaces the type
   icon in the identity column; without one, the icon remains.
 - **A row is a control**: focusable, opened with Enter, and the review clicks inside
   it never open it.
@@ -1133,6 +1134,100 @@ overlay never resizes the export.
 **Frames.** Any panel or overlay takes a coloured border, its own colour and
 thickness, drawn inset so the layout does not shift. A frame is decoration: it
 stays out of the legend, which is still built from annotation colours alone.
+
+## Sheet
+
+A table the analyst works in, which **is** a CSV in the case folder. Three uses no
+other tool covers: a comparison grid, candidates down and criteria across; a worklist
+carrying its own state and a count; and the half-facts that are too soft to be
+entities and too valuable to lose. The graph says what the case believes, a sheet
+says what it is checking.
+
+- **The file is the artifact.** `sheets/<name>.csv`, readable in any spreadsheet. A
+  finding is a column of it — a status, a verdict, the reason — so handing the file
+  to someone else hands them the work. Presentation lives in a sidecar
+  (`sheets/.meta/<name>.json`): widths, hidden columns, the sort, row colours, which
+  column stays in view and which entity a cell points at. Losing the sidecar costs
+  colours, never a finding.
+- **Two writers on one file, and the grid does not win.** Because the CSV is the
+  artifact, it may be open in a spreadsheet at the same time. A read hands out a
+  stamp of the file and every save presents it back; a save that would write over
+  work the grid never saw is refused, and a banner offers the two ways out — reload
+  the file, or overwrite what is there. Nothing else is written until that is
+  answered.
+- **Persistence is the file plus its sidecar, and nothing else.** No named views, no
+  exported plate: a sheet *is* its own saved reading, and a second frozen copy of its
+  state would be a duplicate that drifts. Another reading of the same rows is another
+  sheet. Undo follows the same logic — a typed cell records the cells that changed,
+  not a copy of the table, so a long afternoon on a long sheet stays undoable.
+- **Rows are keyed by an `id` column, in the file.** Nothing hangs on a row's
+  position, because a file sorted in someone else's spreadsheet would move every
+  colour and link one row down. An import that already carries an `id` keeps it
+  rather than being given a second one; a file edited outside and stripped of it is
+  re-keyed in the grid, said so in one line, and written back only on the next save.
+- **The browser neither reads nor writes CSV.** One parser and one writer, both in
+  `engine/sheets.py`, so an imported file and a saved grid cannot disagree. Import
+  posts the text of a file dropped on the grid, picked from a dialog or pasted into
+  one, and the delimiter is guessed — a semicolon export is a table, not an error.
+- **A clipboard block is not a file, so it is read here.** It is TSV, and a paste is a
+  patch into a selection whose geometry only the browser knows. `Ctrl+V` lands a block
+  from the cursor: rows grow to fit it, columns never do — a block wider than the
+  sheet is clipped and says by how much, because a heading nobody chose is worse than
+  a cell lost — and the key column is never written. A wall of links with no tabs is
+  read as an inbox instead: one row per link. `Ctrl+C` copies the selected rectangle
+  back out, quoted so a spreadsheet reads it whole.
+- **Editing is a grid's.** Click selects, shift-click extends a rectangle, typing
+  starts an edit on that character, Enter and Tab commit and move, Escape cancels,
+  arrows walk the cursor in the order the screen shows. `Ctrl+F` reaches the search,
+  `Ctrl+Enter` adds a row, `Ctrl+D` copies the top of the selection down, Delete
+  empties it. Deep undo, and the sheet autosaves.
+- **Many rows at once.** Shift-click in the gutter ticks a range in the order the grid
+  draws; a box in the header ticks everything shown, and only what is shown. Ticked
+  rows are painted, deleted, or given one answer in one column together — the worklist
+  gesture: forty rows checked in a pass, then all forty marked.
+- **Columns are the analyst's.** Drag a heading to move it, which moves it **in the
+  file** where a collaborator will see it. One column can be kept beside the key while
+  the table scrolls sideways. A URL in a cell is a link, shown as its host: a hundred
+  and twenty characters of query string in a row thirty pixels tall says nothing.
+- **A row can be read down instead of across.** Fourteen columns do not read by
+  scrolling sideways, so a panel shows one row field by field, every box editable, its
+  links live, and how much of it is filled. It walks the rows on screen, not the file's
+  own order.
+- **Everything that opens over the grid closes on Escape or a click beside it** —
+  the column menu, the columns list, the sheet list, the fill bar, the row panel.
+- **Sort is three states on one control**: up, down, off. A blank cell sinks to the
+  bottom whichever way the arrow points, because blank is "no answer yet" and it must
+  not bury the rows that have one.
+- **The question is a search, a chip per clause and a count** — *23 of 1 204*, the
+  denominator being the whole sheet. A column is asked three things, and they and
+  together: which values, whether it is empty or filled, and a word it must not hold.
+  The last two are what a list of values cannot do — `To be found`, `-`, `?` and an
+  empty cell all mean the same thing to the person filtering. A column with too many
+  distinct values offers no value menu and says so; the other two still work.
+- **A cell can point at an entity.** The `@` on the cell opens the picker, which leads
+  with what the case holds — a count per type — because the analyst usually does not
+  know the label: the cell says `3rd Bde` and the case holds `3rd Separate Brigade`. A
+  bare search bar only works when the answer is already known. Narrowing by type is one
+  click and says how big each answer is first; the arrows and Enter pick without the
+  mouse. The list is **paged, not capped**: it says how many of the matching set are on
+  screen and loads the rest on a press, and the ordering — name or newest, either way —
+  is applied to the whole matching set on the server, because sorting the forty rows
+  already loaded answers a different question. The link is recorded beside the table and
+  the cell takes the entity's name when it was empty, so the CSV still says in words
+  what the graph says in an edge. Each of those becomes a `mentions` edge on save, and
+  clicking the mark opens that entity's Details.
+- Rows are ticked in the gutter, painted from the annotation palette, and deleted
+  together. Amber is not in that palette: it means selection, so a tick marks the
+  gutter rather than washing the row and hiding the colour just painted on it.
+- **The grid draws its own scrollbars**, one per axis, in a strip beside the table
+  rather than over it. The app's chrome is thin everywhere, which is right for a
+  panel hinting there is more below and wrong here, where the bar is how a wide
+  table is crossed; and on Linux the native ones are overlays that fade out. Drag
+  the thumb, or click the track to jump a panel. The tick column, the row's key and
+  the column kept in view stay put while the table scrolls sideways.
+- Only the rows on screen are in the DOM, so a sheet of twenty thousand scrolls. Row
+  height is fixed: a cell holding sentences shows one line and opens into a box that
+  grows.
 
 ## Notebook
 

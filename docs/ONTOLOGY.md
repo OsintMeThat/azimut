@@ -124,7 +124,7 @@ to one clause — no full stop, no em-dash, under a hundred characters.
 | `class` | a model the case counts with, never one particular object | `equipment-type` |
 | `identifier` | a handle on a system | `account`, `email`, `phone`, `domain`, `ip`, `network` |
 | `collected` | bytes gathered into the case rather than written, so one may depict a place | `media`, `capture` |
-| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `inspect-session`, `bookmark` |
+| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `bookmark` |
 | `place` | a point, never a thing | `place` |
 | `claim` | a statement about the graph, carrying its own reasoning | `claim` |
 
@@ -153,7 +153,7 @@ picture of the case is about it. The line that matters is between the first two 
 |---|---|---|---|
 | `subject` | the case is about it | `person`, `organization`, `vehicle`, `vessel`, `aircraft`, `structure`, `equipment-type`, `account`, `email`, `phone`, `domain`, `ip`, `network`, `media`, `place`, `claim` | a node |
 | `attestation` | a wrapper around something the case already holds | `bookmark`, `proof`, `capture` | folded into the edge that carries its provenance, drawn or not (below) |
-| `annex` | consulted rather than seen, hanging off one node | `note`, `inspect-session` | out of the case readings, drawn by **My work** |
+| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session` | out of the case readings, drawn by **My work** |
 | `deliverable` | what the case produced | `post` | out of the case readings, drawn by **My work** |
 
 A bookmark stays drawn because it is not a leaf: *this account posted it, this
@@ -176,6 +176,7 @@ answer by omission (`tests/test_entities.py`).
 | `post` | document | deliverable | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | document | annex | ✅ | inspect | `spec` (json) | yes |
 | `note` | document | annex | ✅ | notebook | `path`, `folder?` | yes (Markdown) |
+| `sheet` | document | annex | ✅ | sheet | `path` (csv) | yes (CSV + sidecar) |
 | `bookmark` | document | attestation | ✅ | capture extension | `url`, `fetched_at?`, `archive_url?`, `reliability?` | no (a URL) |
 | `person` | actor | subject | ✅ | analyst | `aliases`, `role`, `nationality` | no |
 | `organization` | actor | subject | ✅ | analyst | `echelon`, `country` | no |
@@ -512,7 +513,7 @@ a narrowing can only remove a type, never smuggle one in from elsewhere.
 | `at` | claim → place | where the statement puts its subject | ✅ |
 | `cites` | claim → bookmark/note/proof/media/capture/claim | what the statement rests on | ✅ |
 | `contradicts` | claim → claim | the two statements cannot both hold | ✅ |
-| `mentions` | note/post/proof/bookmark → any other declared entity | the document refers to the entity | ✅ |
+| `mentions` | note/post/proof/bookmark/sheet → any other declared entity | the document refers to the entity | ✅ |
 
 Every manual connector is validated by the API and offered only by its own picker.
 `same-image-as` is machine-only. `part-of`, `in-network`, `cites` and the derivation
@@ -569,7 +570,10 @@ an edge.
 **`mentions` is a pointer, not a derivation.** A document *refers to* something,
 where `derived-from` says the file was built from it; both may sit on the same pair,
 and deleting the target drops the mention with no tombstone. The author is a note,
-post, proof or bookmark; the target is any other declared entity, a Claim included.
+post, proof, bookmark or sheet; the target is any other declared entity, a Claim
+included. A sheet states its mentions from the cells the analyst pointed at an
+entity, restated on every save, so a row naming a subject is visible from that
+subject's side too.
 
 It is the one verb served as its own **action** (`RelationType.action`, `"mention"`)
 under its own heading (`RelationType.group`). A pointer must not borrow the weight of

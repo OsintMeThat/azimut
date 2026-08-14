@@ -168,7 +168,7 @@ def test_a_reading_of_the_case_leaves_out_what_the_analyst_wrote():
     are derived from the relation registry: a type added there lands in the right
     readings with no edit here."""
     filing = entity_engine.types_with_role(entity_engine.ANNEX, entity_engine.DELIVERABLE)
-    assert filing == {"note", "inspect-session", "post"}
+    assert filing == {"note", "sheet", "inspect-session", "post"}
 
     for lens_id in ("all", "subjects", "ground", "claims"):
         assert set(graph_engine.lens(lens_id).hides) == filing, lens_id

@@ -90,6 +90,8 @@ def _tool_relative(slug: int, media: int) -> dict[str, int]:
         "entity photo": len(layout.entity_image_rel("i_0123456789")),
         "entity photo thumbnail": len(layout.entity_image_thumb_rel("i_0123456789")),
         "note": len(layout.note_rel(longest_folder, longest_name)),
+        "sheet table": len(layout.sheet_rel(longest_name)),
+        "sheet sidecar": len(layout.sheet_meta_rel(longest_name)),
         "proof asset": len(layout.proof_assets_rel(longest_name)) + 1 + ASSET_NAME,
         "proof spec": len(layout.proof_spec_rel(longest_name)),
         "proof export": len(layout.proof_export_rel(longest_name)),
@@ -196,7 +198,7 @@ def test_layout_answers_are_all_under_the_root(tmp_path: Path) -> None:
         assert answer.is_relative_to(root)
 
 
-def test_content_dirs_covers_every_subdir_and_the_meta_pair(tmp_path: Path) -> None:
+def test_content_dirs_covers_every_subdir_and_its_meta(tmp_path: Path) -> None:
     root = tmp_path / "a-case"
     born = layout.content_dirs(root)
     assert [d.name for d in born[: len(CASE_SUBDIRS)]] == list(CASE_SUBDIRS)
@@ -204,6 +206,7 @@ def test_content_dirs_covers_every_subdir_and_the_meta_pair(tmp_path: Path) -> N
     assert set(born[len(CASE_SUBDIRS) :]) == {
         layout.media(root) / layout.META_DIR,
         layout.subdir(root, "proofs") / layout.META_DIR,
+        layout.subdir(root, "sheets") / layout.META_DIR,
     }
     assert layout.trash(root).name not in CASE_SUBDIRS
 

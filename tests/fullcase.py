@@ -19,6 +19,7 @@ import base64
 import hashlib
 import io
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from PIL import Image
 from azimut import layout
@@ -45,6 +46,9 @@ class FullCase:
     draft: str = ""
     note_id: str = ""
     note: str = ""  # its case-relative path
+    sheet_id: str = ""
+    sheet: str = ""  # the CSV, which is the sheet
+    sheet_meta: str = ""  # the sidecar beside it
     place_id: str = ""
     grid: str = ""
     person_id: str = ""
@@ -255,6 +259,22 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     full.note_id = note.json()["id"]
     full.note = note.json()["attrs"]["path"]
     client.put(f"/api/cases/{case_id}/notes", json={"text": "# Full case\n\nRunning notes.\n"})
+
+    # -- a sheet: a CSV in the case, and the sidecar that paints it ------------
+    sheet = client.post(f"/api/cases/{case_id}/sheets", json={"title": "Candidates"})
+    assert sheet.status_code == 200, sheet.text
+    full.sheet_id = sheet.json()["id"]
+    full.sheet = sheet.json()["attrs"]["path"]
+    full.sheet_meta = layout.sheet_meta_rel(Path(full.sheet).stem)
+    saved_sheet = client.put(
+        f"/api/cases/{case_id}/sheets/{full.sheet_id}",
+        json={
+            "columns": ["id", "Subject", "Status"],
+            "rows": [["r1", "Quai sud", "ruled out"]],
+            "meta": {"colours": {"r1": "grey"}, "widths": {"Subject": 220}},
+        },
+    )
+    assert saved_sheet.status_code == 200, saved_sheet.text
 
     # -- a claim, with its three dedicated connectors --------------------------
     # The reified statement carries one confidence for the whole assertion. Its
