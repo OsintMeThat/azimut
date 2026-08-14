@@ -58,6 +58,23 @@ def _pan(angles, width=520, height=420, focal=520.0, seed=5) -> list[Image.Image
     return out
 
 
+def _overlaid(images, box=(18, 18, 138, 88), seed=41) -> list[Image.Image]:
+    """The same textured patch burnt into every image at the same pixel.
+
+    Stands in for what a video actually carries: a platform logo, a channel bug, a
+    timestamp. Textured rather than flat, because a flat patch has no keypoints and
+    would prove nothing.
+    """
+    x0, y0, x1, y1 = box
+    logo = _scene(x1 - x0, y1 - y0, seed=seed, blobs=90)
+    out = []
+    for img in images:
+        copy = img.copy()
+        copy.paste(logo, (x0, y0))
+        out.append(copy)
+    return out
+
+
 def _widths(quads):
     return [max(p[0] for p in q) - min(p[0] for p in q) for q in quads]
 
@@ -239,6 +256,102 @@ def test_rotation_layout_raises_when_nothing_overlaps():
 def test_rotation_layout_rejects_an_unknown_warp():
     with pytest.raises(ValueError, match="unknown panorama warp"):
         stitch.solve_rotation_layout(_pan([0, 20]), width=800, height=600, warp="planar")
+
+
+# --- fixed overlays --------------------------------------------------------
+
+
+def _points(*groups):
+    """Keypoint arrays from ``(x, y)`` lists, as the solvers hand them over."""
+    import numpy as np
+
+    return [np.asarray(g, dtype=np.float32) for g in groups]
+
+
+def test_static_points_flags_what_sits_in_the_same_place():
+    pinned = [(10.0, 10.0), (12.0, 40.0), (60.0, 15.0)]
+    moving = [[(100.0 + 30 * i, 20.0 * k) for k in range(12)] for i in range(4)]
+    points = _points(*[pinned + m for m in moving])
+
+    static = stitch._static_points(points, [(400, 300)] * 4)
+
+    assert [sorted(s) for s in static] == [[0, 1, 2]] * 4
+
+
+def test_static_points_says_nothing_from_a_single_peer():
+    """Two frames of a still camera and two frames sharing a logo are the same
+    picture — and there the identity the overlay pushes for is the right answer."""
+    points = _points([(10.0, 10.0), (12.0, 40.0)], [(10.0, 10.0), (12.0, 40.0)])
+
+    assert stitch._static_points(points, [(400, 300)] * 2) == [set(), set()]
+
+
+def test_static_points_leaves_a_scene_that_simply_does_not_move():
+    """Everything pinned means the camera is what stands still. Strip that and the
+    solver has nothing left to match with, so the piece keeps all of it."""
+    shared = [(10.0 * i, 20.0 + i) for i in range(30)]
+    points = _points(shared, shared, shared)
+
+    assert stitch._static_points(points, [(400, 300)] * 3) == [set()] * 3
+
+
+def test_static_points_only_compares_pieces_of_the_same_geometry():
+    """Same pixel on a different canvas is not the same place, so no overlay claim."""
+    shared = [(10.0, 10.0), (12.0, 40.0), (60.0, 15.0)]
+    noise = [[(100.0 + 30 * i, 20.0 * k) for k in range(12)] for i in range(3)]
+    points = _points(*[shared + n for n in noise])
+
+    static = stitch._static_points(points, [(400, 300), (400, 300), (640, 480)])
+
+    assert static == [set(), set(), set()]
+
+
+def test_solve_layout_refuses_a_stitch_only_the_overlay_supports():
+    """The regression this rejection exists for, and the reason it is worth having.
+
+    Three unrelated scenes wearing the same logo: the overlay matches itself
+    perfectly, so unfiltered it clears every guard here and glues the three into
+    one confident panorama — geometry invented out of nothing, which is exactly
+    what an analyst must never be handed.
+    """
+    pieces = _overlaid([_scene(width=500, height=500, seed=s) for s in (1, 2, 3)])
+
+    with pytest.raises(RuntimeError, match="no overlap"):
+        stitch.solve_layout(pieces, width=900, height=900)
+
+
+def test_rotation_layout_refuses_a_stitch_only_the_overlay_supports():
+    pieces = _overlaid([_scene(width=500, height=500, seed=s) for s in (4, 5, 6)])
+
+    with pytest.raises(RuntimeError, match="no overlap"):
+        stitch.solve_rotation_layout(pieces, width=900, height=900)
+
+
+def test_solve_layout_still_stitches_pieces_that_wear_a_logo():
+    """The other half of the bargain: dropping those keypoints must not cost the
+    real overlap. Same known offset as the plain planar test, logo and all."""
+    scene = _scene()
+    pieces = _overlaid([scene.crop((x, 0, x + 500, 500)) for x in (0, 130, 260, 390)])
+
+    solved = stitch.solve_layout(pieces, width=1600, height=800)
+
+    assert solved["dropped"] == []
+    width_a = solved["quads"][0][1][0] - solved["quads"][0][0][0]
+    xs = [_centroid(solved["quads"][i])[0] for i in range(4)]
+    for a, b in zip(xs, xs[1:]):
+        assert (b - a) / width_a == pytest.approx(130 / 500, abs=0.06)
+
+
+def test_rotation_layout_still_stitches_pieces_that_wear_a_logo():
+    views = _overlaid(_pan([-30, -15, 0, 15, 30]))
+
+    solved = stitch.solve_rotation_layout(views, width=1600, height=800)
+
+    assert solved["dropped"] == []
+    xs = [_centroid(solved["quads"][i])[0] for i in range(5)]
+    assert xs == sorted(xs)
+    widths = _widths(solved["quads"].values())
+    assert max(widths) / min(widths) == pytest.approx(1.0, abs=0.1)
 
 
 # --- the remap op ----------------------------------------------------------

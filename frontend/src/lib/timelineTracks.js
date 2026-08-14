@@ -66,8 +66,11 @@ export function normalizeTimelineTracks(value) {
   const tracks = raw.length ? raw.map(timelineTrack) : defaultTimelineTracks();
   const seen = new Set();
   return tracks.map((track, index) => {
+    // The suffix counts up. A fixed one is loop-invariant, so a saved view whose
+    // ids already hold the deduped spelling (['t-3', 't', 't']) spun here
+    // forever and froze the tab.
     let id = track.id;
-    while (seen.has(id)) id = `${track.id}-${index + 1}`;
+    for (let n = index + 1; seen.has(id); n += 1) id = `${track.id}-${n}`;
     seen.add(id);
     return { ...track, id };
   });

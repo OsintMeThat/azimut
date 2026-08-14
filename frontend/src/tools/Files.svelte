@@ -270,6 +270,15 @@
       ? visibleEntities
       : (searching ? completeFolderEntities.filter(matches) : completeFolderEntities)
   );
+  // Every row a selection can name. List view renders the whole open folder, so
+  // resolving selected ids against the first catalog page alone dropped every
+  // row past 200: a delete silently spared them, and a move reported a count it
+  // had not moved.
+  const selectable = $derived(
+    completeFolderEntities === null
+      ? confirmed
+      : [...new Map([...confirmed, ...completeFolderEntities].map((e) => [e.id, e])).values()]
+  );
   const curFolders = $derived(searching ? [] : sortFolders(current.children));
   const curEntities = $derived(sortEntities(completeVisibleEntities));
   const entityOrder = $derived(curEntities.map((e) => e.id));
@@ -419,7 +428,7 @@
     draggingIds = [];
     dropTarget = null;
     if (!ids.length) return;
-    const ents = confirmed.filter((e) => ids.includes(e.id));
+    const ents = selectable.filter((e) => ids.includes(e.id));
     // no-op when dropped on the folder they already sit in
     if (ents.every((e) => (folderOf(e) ?? '') === folder)) return;
     try {
@@ -537,7 +546,7 @@
   }
 
   async function askDeleteEntities(ids) {
-    const ents = confirmed.filter((e) => ids.includes(e.id));
+    const ents = selectable.filter((e) => ids.includes(e.id));
     if (!ents.length) return;
     const multi = ents.length > 1;
     // The authoritative plan is the backend's; a single delete previews its

@@ -535,3 +535,24 @@ describe("the point a proof concludes on", () => {
     expect(source).toContain('restorable={RESTORABLE}');
   });
 });
+
+describe('Proof Composer — one document at a time', () => {
+  const composer = readFileSync(new URL('./ProofComposer.svelte', import.meta.url), 'utf8');
+
+  it('stops an earlier open from streaming panels into the proof that replaced it', () => {
+    // The open list stays up while a proof loads, so clicking a second entry is
+    // one gesture away. Without a guard, A's panels kept arriving into the
+    // document now bound to B's name, and Save wrote the hybrid over B.
+    expect(composer).toContain('let openRun = 0;');
+    expect(composer).toContain('const run = ++openRun;');
+    expect(composer.match(/if \(run !== openRun\) return;/g)?.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('cancels a pending history capture before an undo restores the document', () => {
+    // The clear has to come before the histBusy guard, or a timer armed in the
+    // 350 ms before the undo survives it and pushes the pre-undo state back.
+    expect(composer).toMatch(
+      /const json = docSnapshot\(\);[\s\S]*?clearTimeout\(histTimer\);\s*\n\s*if \(histBusy\) return;/
+    );
+  });
+});

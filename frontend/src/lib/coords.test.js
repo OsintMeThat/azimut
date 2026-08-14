@@ -7,6 +7,7 @@ import {
   latBand,
   parseHomeView,
   utmZone,
+  wrapLon,
 } from './coords.js';
 
 describe('formatDD', () => {
@@ -173,5 +174,37 @@ describe('parseHomeView', () => {
     });
     expect(parseHomeView({ lat: '-', lon: '2.2945', zoom: 16 })).toBeNull();
     expect(parseHomeView({ lat: 'north', lon: '2.2945', zoom: 16 })).toBeNull();
+  });
+});
+
+describe('utmZone', () => {
+  it('stops at zone 60, which is where the grid ends', () => {
+    // Zone 60 ends *at* 180°, so the division that assumes an open interval
+    // answered 61 on the antimeridian — a zone no projection has.
+    expect(utmZone(0, 180)).toBe(60);
+    expect(utmZone(0, 179.999)).toBe(60);
+    expect(utmZone(0, -180)).toBe(1);
+    expect(utmZone(0, 0)).toBe(31);
+  });
+});
+
+describe('wrapLon', () => {
+  it('folds a longitude Leaflet kept counting past the date line', () => {
+    // Panning west across the antimeridian leaves the map centre at 187°, which
+    // every API bound refuses — Capture answered 422 and the tool went dead.
+    expect(wrapLon(187)).toBeCloseTo(-173, 10);
+    expect(wrapLon(-187)).toBeCloseTo(173, 10);
+    expect(wrapLon(540)).toBeCloseTo(180, 10);
+  });
+
+  it('leaves an ordinary longitude exactly as it is', () => {
+    expect(wrapLon(2.2945)).toBe(2.2945);
+    expect(wrapLon(-180)).toBe(-180);
+    expect(wrapLon(180)).toBe(180);
+    expect(wrapLon(0)).toBe(0);
+  });
+
+  it('passes a non-number through rather than inventing a meridian', () => {
+    expect(Number.isNaN(wrapLon('north'))).toBe(true);
   });
 });

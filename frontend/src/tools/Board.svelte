@@ -782,12 +782,15 @@
     openId = null;
     snapshotOpen = null;
     filter = normalizeFilter(view.spec?.query?.filter);
+    // Board and Graph read one saved question, and each surface restores only the
+    // presentation it saved. A Graph view opened here brings its question to the rows
+    // and leaves the analyst in the tool they are working in; its lens, folds and
+    // arrangement wait for the Graph, which restores them off the same active view.
+    // The table's own sort is left alone, because such a view never stated one.
+    if (view.surface !== 'board') return;
     const board = view.spec?.board ?? {};
     sortKey = typeof board.sortKey === 'string' ? board.sortKey : '';
     sortDesc = board.sortDesc === true;
-    // Board and Graph read one saved question, so a Graph view opened here is a
-    // request for the other drawing of it. The Timeline keeps its own views.
-    if (view.surface === 'graph') uiState.tool = 'graph';
   }
 
   let appliedViewId = null;
@@ -1262,6 +1265,11 @@
   .spacer {
     flex: 1;
   }
+  /* One height across the header. Views comes from a shared component and is `btn-sm`,
+     the tool's own two are not, and three buttons of two heights read as a mistake.
+     Stated from the same tokens a plain `.btn` is built from — its text plus its
+     padding and rule — rather than as a number that would drift from them. */
+  .tool-header :global(.btn) { min-height: calc(var(--fs-sm) * 1.5 + 12px); }
   /* The count reads first because it is the answer; the control that decides how that
      answer is drawn sits at the other end, directly above what it governs. */
   .answer {

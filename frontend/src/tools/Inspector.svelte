@@ -102,6 +102,9 @@
 
   // the live session (reset on source / case change)
   const _firstCollage = makeCollage('Collage 1');
+  // Bumped every time the session is cleared, so work started against the old
+  // one can tell it is stale (`resetSession`, `capture`).
+  let sessionRun = 0;
   const session = $state({
     source: null,
     videoAdjust: {},
@@ -199,7 +202,8 @@
     }
     // Frame tab: Enter applies the crop (→ committed preview), Esc leaves editing.
     if (activeTab === 'frame' && cropEditing) {
-      if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); commitCrop(); }
+      if (e.key === 'Enter') { e.preventDefault(); commitCrop(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancelCrop(); }
       return;
     }
     // Selection tab: ←/→ step one frame (Shift = 1s), ,/. mpv-style aliases
@@ -237,6 +241,7 @@
   // applied (Enter / Apply), a committed *preview* showing the cropped result.
   // Re-opening crop (button or double-click) goes back to editing the original.
   let cropEditing = $state(false);
+  let cropBefore = null; // the crop editing opened on — what Escape puts back
   let frameOrientationBusy = $state(false);
 
   const videoFilters = $derived(filters.filter((f) => VIDEO_ADJUST_IDS.includes(f.id)));
@@ -539,6 +544,10 @@
   }
 
   function resetSession() {
+    // Everything still in flight against the session being cleared belongs to a
+    // document that no longer exists. `session` is one object mutated in place,
+    // so a pending render has no way to notice on its own (see `capture`).
+    sessionRun += 1;
     for (const fr of session.frames) if (fr.url?.startsWith('blob:')) URL.revokeObjectURL(fr.url);
     session.source = null;
     session.videoAdjust = {};
@@ -569,6 +578,7 @@
     rotating = false;
     frameAspect = null;
     cropEditing = false;
+    cropBefore = null;
     anchorCollageHistory();
   }
 
@@ -676,11 +686,20 @@
 
   // -- frame capture (Selection) -------------------------------------------
   async function capture(time) {
+    // The render and the measurement below are two round trips, and a slow video
+    // leaves room to discard the session or pick another source in between. The
+    // frame that lands is evidence, so a stale one must be dropped rather than
+    // pushed into whatever document is open by then.
+    const run = sessionRun;
     try {
       const sourceOps = rotationOps(videoRotation);
       const url = await renderUrl(session.source.path, time, sourceOps);
       const frame = makeFrame(session.source.path, time, url);
       const dim = await imageSize(url);
+      if (run !== sessionRun) {
+        if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+        return;
+      }
       frame.sourceOps = sourceOps;
       frame.w = dim.w;
       frame.h = dim.h;
@@ -690,7 +709,7 @@
       session.activeFrameId = frame.id;
       toast('Frame added to tray. Not saved yet', 'ok');
     } catch (e) {
-      toast(e.message, 'danger');
+      if (run === sessionRun) toast(e.message, 'danger');
     }
   }
 
@@ -819,12 +838,14 @@
     frameRotMatrix = IDENTITY;
     frameAspect = null;
     cropEditing = false;
+    cropBefore = null;
     shared.cropMode = false;
   });
 
   // Enter crop editing (original + box); arm a fresh draw if there's no box yet.
   function beginCrop() {
     if (!activeFrame) return;
+    cropBefore = activeFrame.crop ? { ...activeFrame.crop } : null;
     cropEditing = true;
     if (!activeFrame.crop) shared.cropMode = true;
   }
@@ -832,6 +853,16 @@
   function commitCrop() {
     cropEditing = false;
     shared.cropMode = false;
+    cropBefore = null;
+  }
+  // Escape leaves crop editing the way it found it: the box drawn since
+  // `beginCrop` is dropped rather than applied. Escape committing was the one
+  // key in the tool that made a change the analyst was backing out of.
+  function cancelCrop() {
+    if (activeFrame) activeFrame.crop = cropBefore;
+    cropEditing = false;
+    shared.cropMode = false;
+    cropBefore = null;
   }
 
   // Wheel zooms toward the pointer (never below the fitted size); at 1× the pan

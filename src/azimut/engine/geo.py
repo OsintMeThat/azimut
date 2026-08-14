@@ -241,6 +241,13 @@ def parse_geohash(text: str) -> tuple[float, float] | None:
     code = text.strip().lower()
     if not code or len(code) < 4:  # too short to be an unambiguous paste
         return None
+    if code.isdigit():
+        # Base32 holds the ten digits, so "2023" decodes as happily as "u09tvw0f"
+        # does — and a bare number pasted into a coordinate field is a year, an
+        # altitude or a case number, never a place. A real geohash carries at
+        # least one letter, so requiring one costs nothing and stops the parser
+        # from inventing a location out of a caption.
+        return None
     lat_lo, lat_hi = -90.0, 90.0
     lon_lo, lon_hi = -180.0, 180.0
     even = True

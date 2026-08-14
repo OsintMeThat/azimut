@@ -365,6 +365,27 @@ describe('where a graph-only type is read', () => {
   });
 });
 
+describe('opening a saved view of the other surface', () => {
+  it('brings its question to the rows without moving the analyst', () => {
+    // The two surfaces share one question and restore only what each of them saved:
+    // a Graph view's lens and arrangement wait for the Graph rather than dragging the
+    // analyst there. Handing the question over is a separate, explicit act.
+    const body = source.slice(
+      source.indexOf('async function openAnalysisView'),
+      source.indexOf('let appliedViewId'),
+    );
+    expect(body).toContain("if (view.surface !== 'board') return;");
+    // No tool switch here. "Draw these N" stays: that handoff is asked for.
+    expect(body).not.toContain('uiState.tool');
+  });
+
+  it('leaves the table sorted as it is when the view states no sort', () => {
+    expect(source).toMatch(
+      /if \(view\.surface !== 'board'\) return;\s*const board = view\.spec\?\.board \?\? \{\};/
+    );
+  });
+});
+
 describe('handing the question to the drawing', () => {
   it('sends the question, never the rows it matched', () => {
     // ids would be capped, would bloat the URL and would go stale on the next save;

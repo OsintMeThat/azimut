@@ -84,18 +84,26 @@ def _render(media_path: Path, out_path: Path, kind: str) -> bool:
     if kind == "video":
         if not ffmpeg_engine.ffmpeg_available():
             return False
-        subprocess.run(
-            [
-                ffmpeg_engine.ffmpeg_exe(), "-y", "-loglevel", "error",
-                "-ss", "1", "-i", str(media_path),
-                "-frames:v", "1", "-vf", f"scale={THUMB_MAX}:-2",
-                str(out_path),
-            ],
-            check=True,
-            timeout=30,
-            capture_output=True,
-        )
-        return out_path.exists()
+        # One second in, because the first frame of a clip is often black or a
+        # fade-in. A video shorter than that has no such frame, and seeking past
+        # the end yields no output at all — so the seek is a preference, not a
+        # requirement, and the second pass takes whatever the clip opens with
+        # rather than letting a two-second capture retry until it is given up on.
+        for seek in ("1", "0"):
+            subprocess.run(
+                [
+                    ffmpeg_engine.ffmpeg_exe(), "-y", "-loglevel", "error",
+                    "-ss", seek, "-i", str(media_path),
+                    "-frames:v", "1", "-vf", f"scale={THUMB_MAX}:-2",
+                    str(out_path),
+                ],
+                check=True,
+                timeout=30,
+                capture_output=True,
+            )
+            if out_path.exists():
+                return True
+        return False
     return False
 
 

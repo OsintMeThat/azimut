@@ -94,3 +94,16 @@ describe('Post naming', () => {
     expect(source).toContain("!isDefaultName(item.title, 'proof')");
   });
 });
+
+describe('Post Composer — coordinates that no longer parse', () => {
+  const composer = readFileSync(new URL('./PostComposer.svelte', import.meta.url), 'utf8');
+
+  it('stops publishing the old point when a re-parse fails', () => {
+    // The facts card, the tweet text, the copy buttons and the saved report all
+    // read `geo`. Leaving the previous one in place kept every one of them
+    // stating a location the input no longer showed.
+    expect(composer).toMatch(
+      /\} catch \{[\s\S]*?geo = null;\s*\n\s*regenerate\(\);\s*\n\s*toast\('Could not parse coordinates'/
+    );
+  });
+});

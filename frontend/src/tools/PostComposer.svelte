@@ -249,6 +249,11 @@
       regenerate();
       lookupPlace();
     } catch {
+      // The old point does not survive text that no longer resolves to it.
+      // Leaving it in place kept the facts card, the tweet, the copy buttons and
+      // the saved report publishing a location the input no longer shows.
+      geo = null;
+      regenerate();
       toast('Could not parse coordinates', 'danger');
     }
   }

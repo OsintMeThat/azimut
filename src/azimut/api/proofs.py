@@ -306,13 +306,22 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
 
     # Decoded up front: a bad batch must be refused before anything is written.
     incoming = _decode_assets(body.assets)
+    # The export too, and for a stronger reason — the rename below deletes the
+    # old PNG and moves the assets folder, so a payload refused after that point
+    # would leave the proof under its old name with both of them gone.
+    png_bytes: bytes | None = None
+    if body.png_base64:
+        try:
+            png_bytes = base64.b64decode(body.png_base64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="invalid PNG payload") from exc
 
     # The export moves with the spec, so a rename saved without fresh pixels
     # keeps the PNG the proof already had rather than dropping it.
     if old_rel and old:
         old_png = case.resolve_inside(layout.proof_export_rel(old))
         if old_png.exists():
-            if body.png_base64:
+            if png_bytes is not None:
                 old_png.unlink()
             else:
                 old_png.replace(case.resolve_inside(layout.proof_export_rel(name)))
@@ -324,11 +333,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
 
     # the export lands first: its thumbnail is recorded in the spec written below
     png_rel = thumb_rel = None
-    if body.png_base64:
-        try:
-            png_bytes = base64.b64decode(body.png_base64, validate=True)
-        except (binascii.Error, ValueError) as exc:
-            raise HTTPException(status_code=422, detail="invalid PNG payload") from exc
+    if png_bytes is not None:
         case.resolve_inside(layout.proof_export_rel(name)).write_bytes(png_bytes)
         png_rel = layout.proof_export_rel(name)
         thumb_rel = _proof_thumb(case, name, png_bytes)
@@ -510,7 +515,8 @@ def _read_spec(case: Case, proof: dict[str, Any]) -> dict[str, Any]:
 @router.delete("/cases/{case_id}/proofs/{name}")
 def delete_proof(case_id: str, name: str) -> dict[str, Any]:
     case = get_case(case_id)
-    rel = layout.proof_spec_rel(name)
+    # Named the way the save named it — see `api/satellite.delete_search_grid`.
+    rel = layout.proof_spec_rel(slugify(name, "proof"))
     try:
         case.resolve_inside(rel)
     except CaseError as exc:

@@ -1133,10 +1133,15 @@ def save_search_grid(case_id: str, name: str, body: GridSaveIn) -> dict[str, Any
 
 @router.delete("/cases/{case_id}/search-grids/{name}")
 def delete_search_grid(case_id: str, name: str) -> dict[str, Any]:
-    """Discard one saved grid."""
+    """Discard one saved grid.
+
+    The name goes through `slugify` exactly as the save did: the delete has to
+    address the file the save wrote, and a raw name is one `\\` away from
+    addressing a different one on Windows.
+    """
     case = get_case(case_id)
     try:
-        spec_path = case.resolve_inside(layout.grid_rel(name))
+        spec_path = case.resolve_inside(layout.grid_rel(slugify(name, "grid")))
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     existed = spec_path.exists()

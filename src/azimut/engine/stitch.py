@@ -26,13 +26,19 @@ that a curved warp is not a quad: the piece's pixels are remapped (a ``remap`` o
 baked into its recipe, so the full-res export re-derives it) and the piece is
 placed as an upright rectangle. It stays draggable — it is no longer corner-warpable.
 
+Both models share one pre-filter (:func:`_static_points`): keypoints that sit at
+the same pixel of most pieces are dropped before any matching. Video frames come
+with burnt-in furniture — a platform logo, a channel bug — and those points agree
+with each other far too well to be argued with once they reach the matcher.
+
 The heavy lifting is OpenCV's; the fitting math is pure so it stays testable and
 honest about coordinates.
 """
 
 from __future__ import annotations
 
-from collections import deque
+import math
+from collections import defaultdict, deque
 from typing import Any
 
 from PIL import Image
@@ -69,6 +75,25 @@ _MATCH_CONF = 0.3  # per-descriptor, OpenCV's default for its panorama pipeline
 # wildly bigger than it started has a broken camera behind it, not a wide angle.
 _MAX_WARP_AREA = 25.0
 
+# Frames pulled from one video carry the same burnt-in furniture — a platform logo,
+# a channel bug, a timestamp — at the same pixel of every frame. Those keypoints
+# match each other perfectly at zero displacement, and being both numerous and
+# mutually consistent they out-vote the scene: RANSAC settles on the identity
+# homography and the pieces stack instead of stitching. So find them and never hand
+# them to the matcher. Position is the whole test — an overlay is defined by *where*
+# it sits, not by what it looks like, and keypoints are sparse enough (~2000 over a
+# 1000px work image) that a chance co-location surviving across most of the set is
+# vanishingly unlikely.
+_STATIC_PX = 2.0  # work pixels: an overlay does not move, only the detector jitters
+_STATIC_SHARE = 0.6  # of the other same-sized pieces must show the point too
+# Two pieces of a still camera look exactly like two pieces sharing an overlay, and
+# there the identity *is* the answer — so never conclude anything from one peer.
+_STATIC_MIN_PEERS = 2
+# Past this share the *scene* is what stands still (a fixed camera, a slow pan), not
+# an overlay on it. Dropping those points would leave nothing to stitch with, so the
+# piece keeps all of them and the solver is no worse off than before.
+_STATIC_MAX_SHARE = 0.5
+
 # Gain read-back probe level: mid-grey, so a gain up to ~2.5 stays representable
 # in uint8 while quantisation keeps the recovered scalar within ~1%.
 _PROBE = 100
@@ -103,22 +128,91 @@ def _detector(cv2) -> tuple[Any, int]:
     return cv2.ORB_create(nfeatures=2000), cv2.NORM_HAMMING
 
 
+def _work_scale(size: tuple[int, int]) -> float:
+    """The factor that takes an image down to ``WORK_DIM`` (1.0 if already smaller)."""
+    return min(1.0, WORK_DIM / max(size))
+
+
+def _work_size(size: tuple[int, int]) -> tuple[int, int]:
+    """``size`` after :func:`_work_scale` — the pixel grid features are found on."""
+    scale = _work_scale(size)
+    return max(1, round(size[0] * scale)), max(1, round(size[1] * scale))
+
+
 def _features(cv2, det, img: Image.Image):
     """Keypoints (in full-res coordinates) + descriptors, or ``(None, None)``."""
     import numpy as np
 
     gray = img.convert("L")
-    scale = 1.0
-    if max(gray.size) > WORK_DIM:
-        scale = WORK_DIM / max(gray.size)
-        gray = gray.resize(
-            (max(1, round(gray.width * scale)), max(1, round(gray.height * scale))),
-            Image.Resampling.BILINEAR,
-        )
+    scale = _work_scale(gray.size)
+    if scale < 1.0:
+        gray = gray.resize(_work_size(gray.size), Image.Resampling.BILINEAR)
     kp, desc = det.detectAndCompute(np.asarray(gray), None)
     if desc is None or len(kp) < 4:
         return None, None
     return np.asarray([k.pt for k in kp], dtype=np.float32) / scale, desc
+
+
+def _static_points(points: list[Any], sizes: list[tuple[int, int]]) -> list[set[int]]:
+    """Per image, the indices of the keypoints that sit still across the set.
+
+    ``points`` are keypoints in *work* pixels (so the tolerance means the same thing
+    whatever the source resolution) and ``sizes`` the work sizes they were found on.
+    Only pieces of identical size are compared: an overlay lands on the same pixel
+    of every frame of one video, and that claim is meaningless across geometries.
+
+    A keypoint is called static when enough of its peers hold one within
+    :data:`_STATIC_PX` of the same spot. The two guards above — a floor on peers, a
+    ceiling on the share — draw the line between "something is pinned over the
+    scene" and "the scene itself is not moving", which the evidence inside a single
+    piece cannot tell apart.
+    """
+    out: list[set[int]] = [set() for _ in points]
+    groups: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for i, (pts, size) in enumerate(zip(points, sizes)):
+        if pts is not None and len(pts):
+            groups[size].append(i)
+
+    for members in groups.values():
+        if len(members) <= _STATIC_MIN_PEERS:
+            continue
+        # Bucket every keypoint into a _STATIC_PX-wide cell, so a point's possible
+        # neighbours are the nine cells around its own — no all-pairs scan.
+        cells: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+        for i in members:
+            for k, (x, y) in enumerate(points[i]):
+                cells[(int(x // _STATIC_PX), int(y // _STATIC_PX))].append((i, k))
+
+        needed = max(_STATIC_MIN_PEERS, math.ceil(_STATIC_SHARE * (len(members) - 1)))
+        for i in members:
+            flagged: set[int] = set()
+            for k, (x, y) in enumerate(points[i]):
+                cx, cy = int(x // _STATIC_PX), int(y // _STATIC_PX)
+                peers: set[int] = set()
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        for j, m in cells.get((cx + dx, cy + dy), ()):
+                            if j == i or j in peers:
+                                continue
+                            px, py = points[j][m]
+                            if (px - x) ** 2 + (py - y) ** 2 <= _STATIC_PX**2:
+                                peers.add(j)
+                if len(peers) >= needed:
+                    flagged.add(k)
+            if len(flagged) <= _STATIC_MAX_SHARE * len(points[i]):
+                out[i] = flagged
+    return out
+
+
+def _drop_points(feat, drop: set[int]):
+    """``feat`` minus the given keypoints, or ``(None, None)`` if too few remain."""
+    pts, desc = feat
+    if pts is None or not drop:
+        return feat
+    keep = [k for k in range(len(pts)) if k not in drop]
+    if len(keep) < 4:
+        return None, None
+    return pts[keep], desc[keep]
 
 
 def _pair_homography(cv2, matcher, feat_a, feat_b) -> tuple[Any, int]:
@@ -224,8 +318,6 @@ def quad_ok(quad: Quad) -> bool:
     the quad inside out. Such a piece is worse than useless on the canvas, so it
     is dropped rather than rendered.
     """
-    import math
-
     if any(not math.isfinite(v) for pt in quad for v in pt):
         return False
     # Convexity: every consecutive cross product must share a sign. A fold or a
@@ -280,6 +372,14 @@ def solve_layout(images: list[Image.Image], *, width: int, height: int) -> dict[
     matcher = cv2.BFMatcher(norm)
 
     feats = [_features(cv2, det, img) for img in images]
+    statics = _static_points(
+        [
+            None if pts is None else pts * _work_scale(img.size)
+            for (pts, _), img in zip(feats, images)
+        ],
+        [_work_size(img.size) for img in images],
+    )
+    feats = [_drop_points(f, s) for f, s in zip(feats, statics)]
 
     edges: dict[tuple[int, int], Any] = {}
     weights: dict[tuple[int, int], int] = {}
@@ -348,8 +448,32 @@ def _work_array(img: Image.Image):
 
 
 def _detail_features(cv2, arrays: list[Any]) -> list[Any]:
+    """Features for the rotation model, minus whatever is pinned over the scene.
+
+    Same rejection as the planar solver, applied one step earlier: this pipeline
+    matches inside OpenCV, so the overlay's keypoints have to be gone from the
+    feature objects before the matcher ever sees them.
+    """
+    import numpy as np
+
     det, _ = _detector(cv2)
-    return [cv2.detail.computeImageFeatures2(det, arr) for arr in arrays]
+    feats = [cv2.detail.computeImageFeatures2(det, arr) for arr in arrays]
+
+    points = [
+        np.asarray([k.pt for k in ft.keypoints], dtype=np.float32) if len(ft.keypoints) else None
+        for ft in feats
+    ]
+    sizes = [(arr.shape[1], arr.shape[0]) for arr in arrays]
+    for ft, drop in zip(feats, _static_points(points, sizes)):
+        if not drop:
+            continue
+        keep = [k for k in range(len(ft.keypoints)) if k not in drop]
+        if len(keep) < 4:
+            continue
+        descriptors = ft.descriptors.get()
+        ft.keypoints = tuple(ft.keypoints[k] for k in keep)
+        ft.descriptors = cv2.UMat(descriptors[keep])
+    return feats
 
 
 def _match_component(cv2, feats: list[Any]) -> tuple[list[Any], list[int]]:

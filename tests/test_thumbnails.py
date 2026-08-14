@@ -208,3 +208,56 @@ def test_worker_wakes_and_drains_in_the_background(tmp_workspace, monkeypatch):
     refreshed = media_engine.read_item(c, item["path"])
     assert refreshed["thumbnail"] and c.resolve_inside(refreshed["thumbnail"]).exists()
     assert workqueue.wait_until_idle()
+
+
+# -- videos shorter than the seek -----------------------------------------
+
+
+def test_a_video_shorter_than_the_seek_still_gets_a_thumbnail(case, monkeypatch, tmp_path):
+    """`-ss 1` skips a fade-in, but a clip under a second has no frame there and
+    ffmpeg writes nothing at all. That is not a broken file, so the render falls
+    back to the opening frame instead of burning the job's retries."""
+    from azimut.engine import ffmpeg as ffmpeg_engine
+
+    seeks: list[str] = []
+
+    def fake_run(argv, **kwargs):
+        seek = argv[argv.index("-ss") + 1]
+        seeks.append(seek)
+        if seek != "0":
+            return None  # ffmpeg seeks past the end and produces no file
+        Image.new("RGB", (32, 24), (5, 5, 5)).save(argv[-1], "JPEG")
+        return None
+
+    monkeypatch.setattr(ffmpeg_engine, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(ffmpeg_engine, "ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(thumbnails.subprocess, "run", fake_run)
+
+    source = tmp_path / "blink.mp4"
+    source.write_bytes(b"short clip")
+    out = tmp_path / "thumb.jpg"
+
+    assert thumbnails._render(source, out, "video") is True
+    assert out.exists()
+    assert seeks == ["1", "0"], "the opening frame was never tried"
+
+
+def test_a_normal_video_is_read_one_second_in(case, monkeypatch, tmp_path):
+    """The fallback must not cost a second ffmpeg run on every ordinary clip."""
+    from azimut.engine import ffmpeg as ffmpeg_engine
+
+    seeks: list[str] = []
+
+    def fake_run(argv, **kwargs):
+        seeks.append(argv[argv.index("-ss") + 1])
+        Image.new("RGB", (32, 24), (5, 5, 5)).save(argv[-1], "JPEG")
+        return None
+
+    monkeypatch.setattr(ffmpeg_engine, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(ffmpeg_engine, "ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(thumbnails.subprocess, "run", fake_run)
+
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"a longer clip")
+    assert thumbnails._render(source, tmp_path / "thumb.jpg", "video") is True
+    assert seeks == ["1"]

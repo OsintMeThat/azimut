@@ -244,8 +244,11 @@
 
   $effect(() => {
     const json = docSnapshot(); // reads every document field → tracked
-    if (histBusy) return;
+    // Cleared before the guard, not after it: an undo sets `histBusy` and then
+    // returns here, so a timer armed in the 350 ms before it would survive and
+    // push the pre-undo document back onto the stack.
     clearTimeout(histTimer);
+    if (histBusy) return;
     histTimer = setTimeout(() => {
       history.push(json);
       syncHist();
@@ -2518,8 +2521,16 @@
     }
   }
 
+  // Bumped by every open, so panels still streaming in for a proof the analyst
+  // has moved on from stop writing into the document that replaced it. The open
+  // list stays up while a proof loads, so clicking a second one is one gesture
+  // away — and the merged result overwrote the second proof on Save.
+  let openRun = 0;
+
   async function openProof(entry) {
+    const run = ++openRun;
     const spec = await api.get(`/api/cases/${caseState.current.id}/proofs/${entry.name}`);
+    if (run !== openRun) return;
     const style = normalizeProofStyle(spec);
     resetDoc();
     proofStarted = true;
@@ -2550,9 +2561,11 @@
     for (const p of spec.panels) {
       try {
         const img = await loadImage(fileUrl(caseState.current.id, p.src));
+        if (run !== openRun) return;
         imgCache.set(p.src, img);
         proof.panels.push({ ...p, id: p.id ?? newId('p'), row: p.row ?? 0, img });
       } catch {
+        if (run !== openRun) return;
         toast(`Missing panel image: ${p.src}`, 'warn');
       }
     }
@@ -2563,9 +2576,11 @@
         const img = await loadImage(
           fileUrl(caseState.current.id, `proofs/${entry.name}.assets/${p.asset}`)
         );
+        if (run !== openRun) return;
         pasteAssets.set(p.asset, { img, data: null, pending: false });
         proof.pastes.push({ ...p, id: p.id ?? newId('x'), img });
       } catch {
+        if (run !== openRun) return;
         toast('An overlay of this proof is missing', 'warn');
       }
     }

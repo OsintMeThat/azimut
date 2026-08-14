@@ -74,7 +74,10 @@ def utm_zone(lat: float, lon: float) -> int:
         if lon < 33:
             return 35
         return 37
-    return int((lon + 180) // 6) + 1
+    # Zone 60 ends *at* 180°, so the open interval the division assumes closes
+    # there: without the clamp the antimeridian answers 61, a zone that does not
+    # exist and that `to_utm` would project against.
+    return min(60, int((lon + 180) // 6) + 1)
 
 
 def lat_band(lat: float) -> str | None:

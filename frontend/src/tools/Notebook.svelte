@@ -72,6 +72,7 @@
   let saved = $state(true);
   let editVersion = 0;
   let saveTimer;
+  let pendingSave = null; // the debounced write, callable before its timer fires
 
   // The whole entity set — notes to list, references and media to insert, and the
   // targets `[[mentions]]` resolve to — read off the bounded catalog rather than
@@ -289,6 +290,7 @@
   function cancelPendingSave() {
     clearTimeout(saveTimer);
     saveTimer = undefined;
+    pendingSave = null; // deliberately dropped: the note is being deleted or reset
     editVersion += 1;
   }
 
@@ -344,7 +346,24 @@
     const targetKey = key;
     const contents = text;
     const version = ++editVersion;
-    saveTimer = setTimeout(() => save(target, targetKey, contents, version), 700);
+    // Kept beside the timer so the edit can be written *now* by anything that
+    // has to get it onto disk before it acts (see runExport). The arguments are
+    // the ones captured here, not the live fields: by the time this is flushed
+    // the analyst may be on another note.
+    pendingSave = () => save(target, targetKey, contents, version);
+    saveTimer = setTimeout(() => {
+      pendingSave = null;
+      save(target, targetKey, contents, version);
+    }, 700);
+  }
+
+  /** Write a debounced edit immediately, if one is still waiting. */
+  async function flushPendingSave() {
+    const write = pendingSave;
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+    pendingSave = null;
+    if (write) await write();
   }
 
   async function save(target, targetKey, contents, version) {
@@ -400,13 +419,18 @@
    *
    * The backend renders from what is on disk, so a pending edit is flushed
    * first — otherwise the analyst exports the note as it was 700 ms ago.
+   *
+   * The debounced save is flushed, never merely cancelled: the timer may hold
+   * the only copy of an edit made in *another* tab, since switching tabs resets
+   * `saved` without touching it. Dropping it lost that edit while the header
+   * still read "Saved".
    */
   async function runExport(noteIds) {
     if (!caseState.current || exportBusy) return;
     const caseId = caseState.current.id;
     exportBusy = true;
     try {
-      clearTimeout(saveTimer);
+      await flushPendingSave();
       if (!saved) await save(endpoint, key, text, editVersion);
       const result = await exportNotes(caseId, noteIds);
       exportOpen = false;

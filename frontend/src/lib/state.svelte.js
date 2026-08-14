@@ -333,18 +333,9 @@ export async function openCase(id) {
       !(await prepareCaseChange(currentId, id))
     ) return;
     if (run !== openingCase) return;
-    // reference viewers point at the previous case's media — drop them
-    if (caseState.current?.id !== id) {
-      uiState.refViewers = [];
-      uiState.openNotebook = null;
-      uiState.focusCapture = null;
-      uiState.drawInGraph = null;
-      uiState.openBoardEntity = null;
-      uiState.openGraphEntity = null;
-      uiState.timelineFocus = null;
-      uiState.timelineRange = null;
-      uiState.mapTimelineRange = null;
-    }
+    // Everything queued names something in the case being left behind —
+    // reference viewers point at its media, `openProof` at one of its files.
+    if (caseState.current?.id !== id) clearCaseHandoffs();
     const opened = await api.get(`/api/cases/${id}`);
     // Case reads can finish out of order. Only the latest choice may become current,
     // or a slow first click can put its case back after a faster second one opened.
@@ -443,22 +434,27 @@ export async function promoteCase(name) {
 }
 
 /**
- * Close the open case (dropping back to one-shot mode). Also clears every
- * cross-tool handoff — otherwise a queued handoff meant for the closed case
- * (e.g. "open this proof") could get consumed against whatever case comes
- * next, since the consuming effects only check that *some* case is open.
+ * Drop every queued cross-tool handoff.
+ *
+ * A handoff names something in the case that queued it — a proof, a draft, a
+ * media path, a point on the map — and the effects that consume one only check
+ * that *some* case is open. So anything still queued when the open case changes
+ * would be spent against the case that replaced it.
+ *
+ * One list, called from both `closeCase` and `openCase`. Written out twice they
+ * drifted, and switching between two cases went on carrying `openProof`,
+ * `openDraft`, `openInspect`, `composeQueue`, `inspectPath`, `focusMedia`,
+ * `postProof`, `gotoCoords` and `skyAt` across the boundary.
  */
-export function closeCase() {
-  // Invalidate an open or refresh still in flight before dropping the current case.
-  openingCase++;
-  caseState.current = null;
-  rememberCase(null);
+function clearCaseHandoffs() {
   uiState.composeQueue = [];
   uiState.postProof = null;
   uiState.openProof = null;
   uiState.openDraft = null;
+  uiState.openNotebook = null;
   uiState.inspectPath = null;
   uiState.focusMedia = null;
+  uiState.focusCapture = null;
   uiState.openInspect = null;
   uiState.drawInGraph = null;
   uiState.openBoardEntity = null;
@@ -469,6 +465,18 @@ export function closeCase() {
   uiState.gotoCoords = null;
   uiState.skyAt = null;
   uiState.refViewers = [];
+}
+
+/**
+ * Close the open case (dropping back to one-shot mode). Also clears every
+ * cross-tool handoff — see `clearCaseHandoffs`.
+ */
+export function closeCase() {
+  // Invalidate an open or refresh still in flight before dropping the current case.
+  openingCase++;
+  caseState.current = null;
+  rememberCase(null);
+  clearCaseHandoffs();
 }
 
 /**

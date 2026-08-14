@@ -607,16 +607,27 @@ class SqliteCase:
     # -- reads -------------------------------------------------------------
 
     def snapshot(self) -> dict[str, Any]:
+        # One read transaction, not four bare SELECTs: the connection runs in
+        # autocommit, so without it a write landing between the entities read and
+        # the links read would produce a snapshot whose edges point at nodes it
+        # does not carry. A bundle export runs on the worker thread while the
+        # analyst keeps editing, which is exactly that window.
         with self._connect() as conn:
-            meta = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM meta")}
-            entities = [
-                self._entity(r) for r in conn.execute("SELECT * FROM entities ORDER BY rowid")
-            ]
-            links = [self._link(r) for r in conn.execute("SELECT * FROM links ORDER BY rowid")]
-            folders = [
-                r["path"]
-                for r in conn.execute("SELECT path FROM folders ORDER BY path COLLATE NOCASE")
-            ]
+            conn.execute("BEGIN")
+            try:
+                meta = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM meta")}
+                entities = [
+                    self._entity(r) for r in conn.execute("SELECT * FROM entities ORDER BY rowid")
+                ]
+                links = [self._link(r) for r in conn.execute("SELECT * FROM links ORDER BY rowid")]
+                folders = [
+                    r["path"]
+                    for r in conn.execute("SELECT path FROM folders ORDER BY path COLLATE NOCASE")
+                ]
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
         schema = int(meta.get("schema_version", SQLITE_SCHEMA))
         return {
             "azimut": {"schema": schema, "storage": "sqlite"},
@@ -3060,8 +3071,8 @@ class SqliteCase:
                 conn.execute(
                     "INSERT OR REPLACE INTO links"
                     "(id, from_id, to_id, type, prov_by, prov_at, prov_status,"
-                    " prov_source, confidence)"
-                    " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " prov_source, confidence, nature)"
+                    " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         link["id"], link["from"], link["to"], link["type"],
                         prov.get("by", "user"), prov.get("at", _now()),
@@ -3069,6 +3080,9 @@ class SqliteCase:
                         # restoring an eliminated candidate must bring back the
                         # elimination: "I ruled these eleven out" is the finding
                         link.get("confidence"),
+                        # and the qualifier with it: "brother of" is the analyst's
+                        # own reading of the tie, not a decoration on the verb
+                        link.get("nature"),
                     ),
                 )
                 kept += 1

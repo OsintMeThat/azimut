@@ -1,8 +1,29 @@
 /** Thin fetch wrapper for the local Azimut API. */
 
+/**
+ * Read a FastAPI error body into one line.
+ *
+ * A refused request answers with a string; a body the schema rejected answers
+ * with the validator's list of objects, and handing that straight to `Error`
+ * stringified every validation failure in the app as "[object Object]".
+ */
+function detailLine(detail) {
+  if (typeof detail === 'string') return detail;
+  if (!Array.isArray(detail)) return '';
+  return detail
+    .map((item) => {
+      if (typeof item === 'string') return item;
+      const field = Array.isArray(item?.loc) ? item.loc.filter((p) => p !== 'body').join('.') : '';
+      const message = item?.msg ?? '';
+      return field && message ? `${field}: ${message}` : message || field;
+    })
+    .filter(Boolean)
+    .join('; ');
+}
+
 class ApiError extends Error {
   constructor(status, detail) {
-    super(detail || `HTTP ${status}`);
+    super(detailLine(detail) || `HTTP ${status}`);
     this.status = status;
   }
 }

@@ -604,9 +604,14 @@ SETTINGS_MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {}
 
 def _settings_schema(data: dict[str, Any]) -> int:
     """The schema a loaded settings.json declares. Files predating the tag are
-    the first schema."""
+    the first schema.
+
+    A number below the first schema is treated as the first: no migration was
+    ever written for it, and answering with it would send the runner looking for
+    one that cannot exist.
+    """
     value = data.get("schema")
-    return value if isinstance(value, int) else 1
+    return max(1, value) if isinstance(value, int) else 1
 
 
 def migrate_settings(data: dict[str, Any]) -> dict[str, Any]:
@@ -617,6 +622,11 @@ def migrate_settings(data: dict[str, Any]) -> dict[str, Any]:
     Pure: it never writes. ensure_workspace() persists the result once at start.
     """
     version = _settings_schema(data)
+    if data.get("schema") != version:
+        # The file declared a number no schema was ever written for, or none at
+        # all. Restating it as the one the file is actually being read as keeps
+        # the next save from handing the same puzzle back.
+        data = {**data, "schema": version}
     for step in range(version, SETTINGS_SCHEMA):
         data = SETTINGS_MIGRATIONS[step](data)
         data["schema"] = step + 1
@@ -629,6 +639,13 @@ def load_settings() -> dict[str, Any]:
     try:
         data = json.loads(settings_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        return copy.deepcopy(DEFAULT_SETTINGS)
+    # Valid JSON that is not an object is as unusable as a truncated file, and
+    # it arrives by the same accident. Falling back to defaults is the whole
+    # point of the guard above; a file shaped `null` or `[]` must not be the one
+    # corruption that takes every settings read — and `ensure_workspace` with
+    # it — down at startup.
+    if not isinstance(data, dict):
         return copy.deepcopy(DEFAULT_SETTINGS)
     merged = copy.deepcopy(DEFAULT_SETTINGS)
     merged.update(migrate_settings(data))

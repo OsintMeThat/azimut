@@ -418,8 +418,11 @@
         path ? { path } : {}
       );
       if (path) {
+        // Keyed by case *and* path, the way `markBrokenThumb` recorded it —
+        // deleting the bare path never matched, so a regenerated thumbnail kept
+        // showing the broken placeholder until the case was switched.
         const next = new Set(brokenThumbs);
-        next.delete(path);
+        next.delete(`${id}/${path}`);
         brokenThumbs = next;
       }
       await refresh();

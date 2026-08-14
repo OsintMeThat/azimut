@@ -128,13 +128,16 @@ def _run_loop() -> None:
             if not _pending:
                 _worker_running = False
                 return
-            case_id, case = next(iter(_pending.items()))
+            # Claimed before the drain, not after it. `wake` is a no-op while the
+            # case is already pending, so a job enqueued *during* the drain — past
+            # the point this pass read the queue — would have its mark removed by
+            # a pop on the way out and never be drained at all.
+            case_id = next(iter(_pending))
+            case = _pending.pop(case_id)
         try:
             drain(case)
         except Exception:  # a worker must never die on one case's failure
             pass
-        with _worker_lock:
-            _pending.pop(case_id, None)
 
 
 def wake(case: "CaseType") -> None:

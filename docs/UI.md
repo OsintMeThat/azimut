@@ -151,6 +151,10 @@ row's Details.
   case when opened. Every
   later filter, sort, fold, hiding, expansion, camera move and graph drag autosaves;
   the badge says **saving…**, **saved** or **save failed**.
+- **Each surface restores only what it saved.** Opening a Graph view from the Board puts
+  its question on the rows and leaves the analyst where they are; the lens, the folds and
+  the arrangement wait for the Graph, which restores them off the same active view. The
+  row names the surface, so a reading made elsewhere is recognised before it is opened.
 - **The menu is where a list of readings is kept in order.** Every row states its mode,
   its surface where the family holds two, and when it was last written — a distance up
   to a week, then the date, with the exact UTC minute in the tooltip. Past one saved

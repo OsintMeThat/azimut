@@ -385,3 +385,21 @@ describe('accepting a proposed point from the Saved panel', () => {
     expect(modal.slice(0, modal.indexOf('/>'))).toContain('onaccept={acceptSaved}');
   });
 });
+
+describe('Satellite — lifecycle and the date line', () => {
+  it('registers a teardown Svelte will actually call', () => {
+    // Svelte only honours a cleanup returned from a *synchronous* onMount, and
+    // the setup awaits the providers and the saved home view.
+    expect(source).toContain('onMount(() => {');
+    expect(source).not.toContain('onMount(async () => {');
+    expect(source).toContain('async function build()');
+    expect(source).toContain('teardown?.();');
+  });
+
+  it('folds the map centre back inside the bounds every route enforces', () => {
+    // Leaflet keeps counting past ±180 across the antimeridian; the capture
+    // route bounds lon to ±180, so an unwrapped centre answered 422.
+    expect(source).toContain("import { wrapLon } from '../lib/coords.js';");
+    expect(source).toContain('center = { lat: c.lat, lon: wrapLon(c.lng), zoom: map.getZoom() };');
+  });
+});

@@ -11,6 +11,7 @@
   import {
     caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords, prefsReady,
   } from '../lib/state.svelte.js';
+  import { wrapLon } from '../lib/coords.js';
   import { mapLinks } from '../lib/maplinks.js';
   import * as measure from '../lib/measure.js';
   import { markerGeometry, markerSvg } from '../lib/mapMarkers.js';
@@ -429,7 +430,25 @@
     uiState.refViewers = uiState.refViewers.filter((v) => v.id !== id);
   }
 
-  onMount(async () => {
+  // Svelte only honours a cleanup returned from a *synchronous* onMount, and the
+  // setup below has to await the providers and the saved home view. So onMount
+  // stays synchronous and hands back a teardown that runs whatever the async
+  // build registered. Tools are never unmounted today, which is exactly why an
+  // async onMount would have gone on quietly returning a promise nobody calls.
+  onMount(() => {
+    let teardown = null;
+    let gone = false;
+    build().then((cleanup) => {
+      if (gone) cleanup?.();
+      else teardown = cleanup;
+    });
+    return () => {
+      gone = true;
+      teardown?.();
+    };
+  });
+
+  async function build() {
     refreshUsage(); // prefs drive the eco/soft-block fallbacks from the start
     providers = await api.get('/api/satellite/providers');
     await prefsReady; // the home view has to land before the map is built
@@ -460,7 +479,10 @@
     }).addTo(map);
     map.on('moveend zoomend', () => {
       const c = map.getCenter();
-      center = { lat: c.lat, lon: c.lng, zoom: map.getZoom() };
+      // Leaflet keeps counting past ±180° when the analyst pans across the date
+      // line, and every coordinate the app sends is bounded to it — an unwrapped
+      // centre made Capture answer 422 and blocked work over the Pacific.
+      center = { lat: c.lat, lon: wrapLon(c.lng), zoom: map.getZoom() };
     });
     map.on('rotate', () => {
       bearing = Math.round(map.getBearing());
@@ -492,7 +514,7 @@
       offActivated();
       map.remove();
     };
-  });
+  }
 
   function onKeydown(e) {
     if (uiState.tool !== 'satellite') return;

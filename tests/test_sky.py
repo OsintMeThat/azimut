@@ -60,6 +60,30 @@ def test_moon_matches_meeus_example_47a():
     assert abs(distance[0] - 368409.7) < 400
 
 
+def test_moon_longitude_tracks_the_full_series_across_decades():
+    """Example 47.a is one instant, and this series has 0.02 deg of its own
+    error — so a wrong perturbation term can sit *closer* to the truth there by
+    luck. These four epochs are picked where the terms do not cancel, and the
+    references are ELP-2000/82 (Meeus table 47.A, leading terms) rather than the
+    truncation under test.
+
+    The one that made this necessary: the 0.053 inequality is `sin(2D + M')`,
+    the Moon's mean anomaly. Spelled with the Sun's it costs up to 0.1 deg of
+    moon direction, which lands squarely in what a shadow reading is judged on.
+    """
+    references = {
+        2459983.2200: 160.026647,
+        2460579.2900: 105.295233,
+        2462218.3900: 87.547067,
+        2463410.5300: 325.029664,
+    }
+    for julian_day, expected in references.items():
+        t = np.array([(julian_day - 2451545.0) / 36525.0])
+        lon, _lat, _distance = sky._moon_ecliptic(t)
+        error = abs((lon[0] - expected + 180) % 360 - 180)
+        assert error < 0.07, f"JD {julian_day}: {error:.4f} deg off"
+
+
 def test_obliquity_is_current_at_j2000():
     """23.4392911° mean at J2000, shifted by the nutation term in obliquity."""
     obliquity = sky._obliquity(np.array([0.0]), np.array([125.04]))

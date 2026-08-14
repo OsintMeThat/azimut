@@ -437,3 +437,12 @@ describe('Ctrl+V on the grid', () => {
     expect(source).toContain("toast('Already in the case (same SHA-256)', 'warn')");
   });
 });
+
+describe('Media Library — broken thumbnails', () => {
+  it('clears the broken flag under the key it was recorded with', () => {
+    // Recorded as `${caseId}/${path}`, so deleting the bare path never matched
+    // and a regenerated thumbnail kept showing the placeholder.
+    expect(source).toContain('next.delete(`${id}/${path}`);');
+    expect(source).not.toContain('next.delete(path);');
+  });
+});
