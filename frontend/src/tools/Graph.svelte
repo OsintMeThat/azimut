@@ -141,8 +141,11 @@
   import { createBookmark } from '../lib/bookmarks.js';
   import { windowWords } from '../lib/timeline.js';
   import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
+  import { graphPlate } from '../lib/graphPlate.js';
+  import { plateFilename } from '../lib/plate.js';
   import Icon, { paths } from '../components/Icon.svelte';
   import AnalysisViews from '../components/AnalysisViews.svelte';
+  import PlateExport from '../components/PlateExport.svelte';
   import AnalysisPeriodBar from '../components/AnalysisPeriodBar.svelte';
   import FilterBar from '../components/FilterBar.svelte';
   import Modal from '../components/Modal.svelte';
@@ -862,6 +865,7 @@
   });
 
   const lensHint = $derived(lenses.find((entry) => entry.id === lens)?.hint ?? '');
+  const lensLabel = $derived(lenses.find((entry) => entry.id === lens)?.label ?? lens);
 
   /**
    * Finding a node by name. On a case drawn at a few hundred nodes, hunting one by
@@ -4565,6 +4569,57 @@
     };
   }
 
+  /**
+   * The drawing as a page, for the export dialog.
+   *
+   * Handed the scene the canvas is built from and nothing else: the same placement, the
+   * same bends, the same legend the panel shows. Serialising is `lib/graphPlate.js`, so
+   * a plate cannot say something about the drawing that the drawing does not.
+   */
+  function capturePlate() {
+    if (!placed.length) return null;
+    const view = catalogViews.activeView?.name ?? '';
+    const at = new Date().toISOString();
+    // Two ways the drawing is narrower than the case, and both have to be said. A fold
+    // tidies, a focus cuts; the plate resizes to what is left either way, so neither is
+    // visible on the page unless it is written there.
+    const outsideFocus = hiding
+      ? placed.reduce((count, node) => count + (hiding.has(node.id) ? 0 : 1), 0)
+      : 0;
+    const page = graphPlate({
+      meta: {
+        caseName: caseState.current?.name ?? '',
+        surface: 'Graph',
+        view,
+        title: `Graph · ${lensLabel}`,
+        lens: lensLabel,
+        // The question says the window itself — `searchSaid` ends on the fact-time
+        // chip — so the plate does not print it a second time under it.
+        question: searchSaid,
+        aside: [
+          foldedCount ? `${foldedCount} node${foldedCount === 1 ? '' : 's'} folded away` : '',
+          outsideFocus
+            ? `${outsideFocus} node${outsideFocus === 1 ? '' : 's'} outside the focus`
+            : '',
+        ].filter(Boolean).join(' · '),
+        at,
+      },
+      families: legend.filter((entry) => entry.on && entry.count),
+      strokes,
+      placed,
+      edges,
+      bends,
+      byId,
+      hidden: hiding,
+      chainTypes: CHAIN_TYPES,
+      verbOf: (link) => relationVerb(link.type),
+    });
+    return {
+      ...page,
+      filename: plateFilename({ surface: 'graph', view, lens: lensLabel, at }),
+    };
+  }
+
   let appliedViewId = null;
 
   async function applyGraphView(view) {
@@ -4612,11 +4667,11 @@
   }
 
   async function openAnalysisView(view) {
-    if (view.surface !== 'graph') {
-      // The only other surface in this family is the Board: same question, rows.
-      uiState.tool = 'board';
-      return;
-    }
+    // The only other surface in this family is the Board. Its rows are the same
+    // question, and that question reaches the drawing through the shared Search+ on
+    // its own — so there is nothing to restore here, and no reason to take the analyst
+    // out of the tool they are in. The Board applies its sort from the same view.
+    if (view.surface !== 'graph') return;
     await applyGraphView(view);
   }
 
@@ -4813,6 +4868,8 @@
       onopen={openAnalysisView}
       onleave={leaveAnalysisReading}
     />
+
+    <PlateExport surface="graph" plate={capturePlate} disabled={!caseState.current} />
 
     <span class="spacer"></span>
 

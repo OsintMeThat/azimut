@@ -155,6 +155,18 @@ row's Details.
   its question on the rows and leaves the analyst where they are; the lens, the folds and
   the arrangement wait for the Graph, which restores them off the same active view. The
   row names the surface, so a reading made elsewhere is recognised before it is opened.
+- **Export writes the reading out as a plate**, from Graph and from Timeline alike.
+  A plate is a page rather than a screenshot: a header naming the case, the view, the
+  lens, the question, the window and the clock, the drawing itself, and a legend for
+  its hues and strokes. **SVG** is the default — the drawing is rebuilt as vectors from
+  the same geometry the screen uses, so it zooms without softening and its text stays
+  text — with **PNG** for an image and **Copy image** for the clipboard, which takes no
+  SVG. The image states the scale it will really have, since a wide reading rasterises
+  under twice the page. The page is always drawn on the daylight palette whatever the app
+  is set to, and a Timeline plate is laid out at its own width rather than the browser's,
+  so two analysts export the same file. The header states what the drawing holds and what
+  it leaves out: how many nodes and links are on it, entries with no date, nodes a fold or
+  a focus is holding back, verbs dropped where the drawing is too dense to carry them.
 - **The menu is where a list of readings is kept in order.** Every row states its mode,
   its surface where the family holds two, and when it was last written — a distance up
   to a week, then the date, with the exact UTC minute in the tooltip. Past one saved
@@ -751,8 +763,8 @@ process, warned once and never presented as the ordinary way out.
 
 ## Export folders and backup
 
-Settings → Storage remembers one destination each for note PDFs, media copies
-and proof PNGs. **Change…** opens the shared folder browser, which lists folders
+Settings → Storage remembers one destination each for note PDFs, media copies,
+proof PNGs and analysis plates. **Change…** opens the shared folder browser, which lists folders
 only and can create one; the case's `exports/` stays the default. Media Details,
 saved proofs and Notebook use those same destinations. Files already outside a
 case are never overwritten, and concurrent exports reserve distinct numbered

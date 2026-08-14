@@ -1,6 +1,6 @@
 /**
- * Export destinations: where the notes PDFs, the media copies and the proof
- * PNGs land, and the folder browser that lets the analyst say so.
+ * Export destinations: where the notes PDFs, the media copies, the proof PNGs and
+ * the analysis plates land, and the folder browser that lets the analyst say so.
  *
  * The destination is remembered per kind, app-wide, in settings — a case folder
  * is not the right home for it, since the whole point is that the analyst files
@@ -14,7 +14,7 @@
 import { api } from './api.js';
 
 /** The exports that remember a folder. Mirrors `KINDS` in engine/exportdir.py. */
-export const KINDS = ['notes', 'media', 'proofs'];
+export const KINDS = ['notes', 'media', 'proofs', 'views'];
 
 /** What to call the default in the UI, once per kind so the wording can't drift. */
 export const CASE_FOLDER_LABEL = "the case's exports folder";

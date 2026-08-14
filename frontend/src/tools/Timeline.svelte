@@ -63,7 +63,10 @@
     trackPresets,
     trackTint,
   } from '../lib/timelineTracks.js';
+  import { plateFilename } from '../lib/plate.js';
+  import { PLATE_PLOT, timelinePlate } from '../lib/timelinePlate.js';
   import AnalysisViews from '../components/AnalysisViews.svelte';
+  import PlateExport from '../components/PlateExport.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
   import Icon from '../components/Icon.svelte';
@@ -203,8 +206,16 @@
   });
   const unplaced = $derived(pageItems.filter((item) => !item.earliest && item.raw));
   const undated = $derived(pageItems.filter((item) => !item.earliest && !item.raw));
-  const tracks = $derived(
-    groupedTimelineTracks(trackSpecs, baseTrackItems, groupBy, entityLabel).map((track) => {
+  /**
+   * The tracks as they are drawn, laid out against a given axis width.
+   *
+   * The width is a parameter rather than the measured one, because `layoutTimelineItems`
+   * packs lanes by the room a label takes in pixels: it is the width that decides which
+   * entries collide, how many lanes a track needs and what ends up in a `+n`. The screen
+   * asks at the width it measured, the export at the plate's own.
+   */
+  function buildTracks(axisWidth) {
+    return groupedTimelineTracks(trackSpecs, baseTrackItems, groupBy, entityLabel).map((track) => {
       const baseId = track.parentId ?? track.id;
       const expanded = Boolean(expandedTracks[baseId]);
       return {
@@ -212,12 +223,13 @@
         expanded,
         total: groupBy === 'none' ? (trackPages[baseId]?.total ?? track.items.length) : track.items.length,
         layout: layoutTimelineItems(
-          track.items.filter((item) => item.earliest), from, to, plotWidth,
+          track.items.filter((item) => item.earliest), from, to, axisWidth,
           expanded ? PAGE : 6
         ),
       };
-    })
-  );
+    });
+  }
+  const tracks = $derived(buildTracks(plotWidth));
   const density = $derived(layoutDensityBuckets(overview, extent));
   const overviewUnit = $derived(
     { 13: 'Hour', 10: 'Day', 7: 'Month' }[overview[0]?.start?.length] ?? 'Year'
@@ -538,6 +550,48 @@
         tracks: trackSpecs,
         entity: entityFilter,
       },
+    };
+  }
+
+  /**
+   * The axis as a page, for the export dialog.
+   *
+   * The window, the tracks and the clock are the ones on screen — the plate reads what the
+   * analyst is on, never a second answer about it. The *geometry* is the plate's own: the
+   * ruler and the lanes are laid out at `PLATE_PLOT`, because both are packed in pixels
+   * and reusing the browser's width would make the page depend on the size of the window
+   * it was exported from.
+   */
+  function capturePlate() {
+    if (!axisWindow) return null;
+    const view = timelineViews.activeView?.name ?? '';
+    const at = new Date().toISOString();
+    const page = timelinePlate({
+      meta: {
+        caseName: caseState.current?.name ?? '',
+        surface: 'Timeline',
+        view,
+        title: 'Timeline',
+        question: entityFilter ? `Scoped to ${entityFilter.label}` : '',
+        window: windowWords(from, to, zone),
+        clock: zoneWord,
+        // What the axis cannot hold is stated rather than left out silently.
+        aside: undatedTotal
+          ? `${undatedTotal} undated entr${undatedTotal === 1 ? 'y' : 'ies'} are not on this axis`
+          : '',
+        at,
+      },
+      tracks: buildTracks(PLATE_PLOT),
+      ticks: axisTicks(from, to, PLATE_PLOT, zone),
+      minorTicks: axisMinorTicks(from, to, PLATE_PLOT, zone),
+      bands: axisBands(from, to, PLATE_PLOT, zone),
+      nowLeft,
+      scaleWord: axisScale(from, to, PLATE_PLOT),
+      clock: zoneWord,
+    });
+    return {
+      ...page,
+      filename: plateFilename({ surface: 'timeline', view, lens: windowWords(from, to, 'UTC'), at }),
     };
   }
 
@@ -1354,6 +1408,7 @@
         onopen={openAnalysisView}
         onleave={leaveAnalysisReading}
       />
+      <PlateExport surface="timeline" plate={capturePlate} disabled={!caseState.current} />
       <button class="btn btn-ghost fullscreen-btn" aria-pressed={fullscreen} onclick={toggleFullscreen}>{fullscreen ? 'Exit full screen' : 'Full screen'}</button>
       <button class="btn btn-primary add-event" disabled={snapshotReading} onclick={() => openEditor()}><Icon name="plus" size={13} />Add assessment</button>
     </div>
@@ -2041,7 +2096,12 @@
   .range-handoffs button:disabled { opacity: .4; cursor: default; }
   .range-spans button:hover { border-color: var(--border-strong); color: var(--text-1); }
   .range-spans button:disabled { opacity: .4; cursor: default; }
-  .head-actions { justify-self: end; display: flex; gap: 5px; }
+  .head-actions { justify-self: end; display: flex; align-items: center; gap: 5px; }
+  /* One height across the row. Views and Export come from shared components and are
+     `btn-sm`, the tool's own two are not, and four buttons of two heights read as a
+     mistake. Stated from the same tokens a plain `.btn` is built from — its text plus
+     its padding and rule — rather than as a number that would drift from them. */
+  .head-actions :global(.btn) { min-height: calc(var(--fs-sm) * 1.5 + 12px); }
   .add-event { justify-self: end; }
   .timeline-tool:fullscreen { width: 100vw; height: 100vh; }
   .filter-row { min-height: 42px; display: flex; align-items: center; gap: 8px; padding: 0 24px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent); }

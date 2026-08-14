@@ -38,15 +38,16 @@ LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 class BulkBodyLimit:
     """Bound the JSON routes that carry a payload the browser assembled, before parsing.
 
-    Two of them: a note's PDF export posts its Mermaid diagrams and a sheet posts a
-    whole table. Each is bounded by its own route's number, so the limit stays beside
-    the code that knows what it is for.
+    Three of them: a note's PDF export posts its Mermaid diagrams, an analysis plate
+    posts the page itself, and a sheet posts a whole table. Each is bounded by its own
+    route's number, so the limit stays beside the code that knows what it is for.
     """
 
     #: `(method, tail, module, attribute)`, where the tail is the path segments after
     #: `/api/cases/{case_id}/` and `*` stands for one segment of any value.
     ROUTES: tuple[tuple[str, tuple[str, ...], str, str], ...] = (
         ("POST", ("notes", "pdf"), "notes", "MAX_PDF_BODY_BYTES"),
+        ("POST", ("plates",), "plates", "MAX_PLATE_BODY_BYTES"),
         ("POST", ("sheets", "import"), "sheets", "MAX_SHEET_BODY_BYTES"),
         ("PUT", ("sheets", "*"), "sheets", "MAX_SHEET_BODY_BYTES"),
     )
@@ -260,13 +261,14 @@ def create_app() -> FastAPI:
 
     from .api import (
         analysis_views, cases, drafts, events, files, folders, ingest, inspect, media,
-        notes, proofs, satellite, settings, sheets, templates,
+        notes, plates, proofs, satellite, settings, sheets, templates,
     )
 
     app.include_router(cases.router)
     app.include_router(cases.workspace_router)
     app.include_router(analysis_views.router)
     app.include_router(notes.router)
+    app.include_router(plates.router)
     app.include_router(sheets.router)
     app.include_router(media.router)
     app.include_router(inspect.router)

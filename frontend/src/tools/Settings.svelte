@@ -206,13 +206,14 @@
   // back. A file written before those sections existed is a bare settings blob,
   // so it gets wrapped into the current shape.
   let settingsFile = $state(null);
-  let exportDirs = $state({ notes: '', media: '', proofs: '' });
+  let exportDirs = $state({ notes: '', media: '', proofs: '', views: '' });
   let exportPickerKind = $state(null);
 
   const EXPORT_KINDS = [
     { id: 'notes', label: 'Note PDFs' },
     { id: 'media', label: 'Media copies' },
     { id: 'proofs', label: 'Proof PNGs' },
+    { id: 'views', label: 'Analysis plates' },
   ];
 
   async function resetExportDestination(kind) {

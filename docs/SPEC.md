@@ -54,7 +54,7 @@ azimut/        # everything Azimut owns; the rest of the folder is yours
   sheets/      # case sheets as plain CSV; .meta/ holds the grid's own state
   media/       # source + captured + extracted media; .meta/ holds the sidecars
   proofs/      # exported PNGs; .meta/ holds the specs and pasted images
-  exports/     # notes exported to PDF, and yours to fill
+  exports/     # notes as PDF, analysis plates, and yours to fill
   .data/       # case.db: authoritative SQLite graph
   .drafts/     # post drafts
   .inspect/    # saved Inspect session specs
@@ -147,6 +147,7 @@ proof for publication.
 | ✅ **Workspace portability** | Moves or adopts a workspace safely, recovers hand-added cases and prevents two live instances from sharing it silently. |
 | ✅ **Updates & paste** | Reports available app, downloader and extension updates, then files supported clipboard content from the main case surfaces. |
 | ✅ **Saved view management** | Renames a live or frozen reading in its row and orders each family's list by name, edit or surface, with the surface and last write on show. |
+| ✅ **Analysis view export** | Writes the Graph or the Timeline out as a vector plate carrying its lens, question, window, clock and legend, or copies it as an image. |
 | ✅ **Case Sheet** | Opens and builds case CSVs in a plain grid: keyed rows, own columns, drag to reorder, one column kept in view, sort, filters including empty and excluded, row colour, clipboard both ways, bulk fill, patch undo, a row read down a panel, live links, and cells that point at case entities. A save is refused rather than overwriting a file changed on disk. |
 
 
@@ -163,7 +164,6 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | Tool | What it does |
 |------|--------------|
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
-| **Analysis view export** | Copies or exports the visible Graph or Timeline as a PNG with its lens, question, time window, clock and legend. |
 
 Toward v2: split Satellite.svelte into `lib/` modules, before the map engine
 changes under it.
@@ -336,11 +336,13 @@ stops making sense.
   about that behavior and local Case media avoids it. Notebook diagrams are the
   one markup DOMPurify does not clear: Mermaid draws its SVG into the preview
   after sanitizing, under its own `strict` level, which escapes labels and drops
-  click handlers. The PDF export is the one place a picture drawn in the browser
-  is posted back: the request, each diagram and their decoded total are bounded
-  before rendering, and every diagram is read as an image,
-  and the note's own text is re-read from disk rather than trusted from the
-  request. Case imports extract only unique, non-symlink members declared
+  click handlers. Two routes take a picture drawn in the browser back: the note
+  PDF export, whose request, diagrams and decoded total are bounded before
+  rendering, every diagram read as an image and the note's own text re-read from
+  disk rather than trusted from the request; and the analysis plate, bounded the
+  same way and inspected before it is written, since a plate lands where documents
+  are opened — it must start as an SVG and carry no script, event handler,
+  embedded document or reference leaving the file. Case imports extract only unique, non-symlink members declared
   by the manifest and matching its SHA-256. Password-protected bundles seal the
   complete ZIP with chunked AES-256-GCM and a scrypt-derived key; filenames stay
   encrypted and the password is never persisted in a job. Import temporarily
