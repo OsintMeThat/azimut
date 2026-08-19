@@ -2168,10 +2168,12 @@ def test_a_session_given_once_is_not_asked_for_again(client, monkeypatch):
     assert answer["needs_auth"] is True and answer["refused"] is True
     assert len(tried) == 2, "cookie-less first, then once with the stored session"
 
-    # And a caller that named its own session is answered on its own attempt alone.
+    # And a caller that named its own session is answered on its own attempt alone. A
+    # cookie file rather than a browser, because a Chromium pick is answered by the
+    # Windows guard before anything is tried and the assertion would be about that.
     tried.clear()
     assert media_engine.fetch_url(
-        case, "https://x.com/u/status/3", cookies={"browser": "brave"}
+        case, "https://x.com/u/status/3", cookies={"file": "cookies.txt"}
     )["refused"] is True
     assert len(tried) == 1
 
