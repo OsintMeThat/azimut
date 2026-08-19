@@ -20,8 +20,10 @@
   import ProofCanvas from './proof/ProofCanvas.svelte';
   import ProofLayersPanel from './proof/ProofLayersPanel.svelte';
   import NewProofDialog from './proof/NewProofDialog.svelte';
+  import ImportProofDialog from './proof/ImportProofDialog.svelte';
   import PanelCategories from './proof/PanelCategories.svelte';
   import { bindPanelPointerLifecycle, createCanvasRenderGate } from './proof/canvasLifecycle.js';
+  import { closeStrandedGesture } from '../lib/konvaGesture.js';
   import {
     ANNO_COLORS, PAD, GAP, ROW_GAP, PANEL_H, TWEET_GUIDES,
     CAPTION_SIZE, LEGEND_SIZE, FOOTER_SIZE,
@@ -174,6 +176,11 @@
   let picker = $state(false);
   let pickerItems = $state([]);
   let newProofOpen = $state(false);
+  // Importing a published proof is a third way into the same tool, beside
+  // composing one and opening a saved one. It writes a proof like any other, so
+  // the only thing this screen owns is the door — and that door is in the New
+  // proof dialog rather than the toolbar, which has no room left for a button.
+  let importOpen = $state(false);
   let newProofTemplateId = $state('');
   let newProofPanelPaths = $state([]);
   let newProofQuery = $state('');
@@ -382,9 +389,22 @@
     stage.on('dblclick dbltap', () => { if (pathDraft) finishPath(true); });
 
     // The release can happen outside the canvas. Capture it at window level so
-    // a deferred rebuild is never left waiting after an interrupted drag.
-    const beginPointer = () => canvasRenderGate?.beginPointer();
-    const settlePointer = () => canvasRenderGate?.endPointer();
+    // a deferred rebuild is never left waiting after an interrupted drag, and
+    // so a gesture the browser stopped reporting is ended rather than left
+    // running against the pointer.
+    const closeStranded = () => {
+      if (stage) closeStrandedGesture({ transformer, stage, isDragging: () => Konva.isDragging() });
+    };
+    const beginPointer = () => {
+      closeStranded(); // a new press proves the last gesture is over, however it ended
+      canvasRenderGate?.beginPointer();
+    };
+    const settlePointer = () => {
+      canvasRenderGate?.endPointer();
+      // A frame later, so a gesture that ended normally has already closed
+      // itself and only a stranded one is left to end.
+      requestAnimationFrame(closeStranded);
+    };
     // Capture before Konva dispatches the event: selected annotations stop
     // bubbling at their node, so a Stage listener alone cannot see every press.
     containerEl.addEventListener('pointerdown', beginPointer, true);
@@ -3059,7 +3079,19 @@
     caseId={caseState.current?.id}
     togglePanel={toggleNewProofPanel}
     requestCreation={requestNewProofCreation}
+    startImport={() => { newProofOpen = false; importOpen = true; }}
     close={() => (newProofOpen = false)}
+  />
+{/if}
+
+{#if importOpen && caseState.current}
+  <ImportProofDialog
+    caseId={caseState.current.id}
+    onclose={() => (importOpen = false)}
+    oncreated={async (created) => {
+      await reloadCase();
+      openProof({ name: created.proof.name });
+    }}
   />
 {/if}
 

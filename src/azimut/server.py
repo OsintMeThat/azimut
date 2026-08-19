@@ -261,7 +261,7 @@ def create_app() -> FastAPI:
 
     from .api import (
         analysis_views, cases, drafts, events, files, folders, ingest, inspect, media,
-        notes, plates, proofs, satellite, settings, sheets, templates,
+        notes, plates, proofimports, proofs, satellite, settings, sheets, templates,
     )
 
     app.include_router(cases.router)
@@ -274,6 +274,7 @@ def create_app() -> FastAPI:
     app.include_router(inspect.router)
     app.include_router(satellite.router)
     app.include_router(proofs.router)
+    app.include_router(proofimports.router)
     app.include_router(drafts.router)
     app.include_router(files.router)
     app.include_router(folders.router)

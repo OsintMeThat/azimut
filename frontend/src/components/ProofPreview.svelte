@@ -19,6 +19,7 @@
     normalizeProofStyle, textColors, attributionLine, loadImage,
     BG, CAPTION_SIZE, FOOTER_SIZE, SIG_SCALE, SIG_TEXT_SIZE,
   } from '../lib/composer.js';
+  import { closeStrandedGesture } from '../lib/konvaGesture.js';
   import { prefs } from '../lib/state.svelte.js';
 
   let { style = $bindable(), logoMissing = $bindable(false) } = $props();
@@ -217,6 +218,22 @@
       cw = host.clientWidth || cw;
       ro.observe(host);
     }
+    // A release the page never sees leaves Konva resizing the signature under a
+    // bare pointer, and the size it settles on never reaches the template. Each
+    // render builds a new transformer, so the live one is read at close time
+    // rather than held. A frame's delay lets a healthy gesture close itself.
+    const closeStranded = () => {
+      if (!stage) return;
+      closeStrandedGesture({
+        transformer: layer.findOne('Transformer'),
+        stage,
+        isDragging: () => Konva.isDragging(),
+      });
+    };
+    const settlePointer = () => requestAnimationFrame(closeStranded);
+    window.addEventListener('pointerup', settlePointer, true);
+    window.addEventListener('pointercancel', settlePointer, true);
+    window.addEventListener('blur', settlePointer);
     // load the real signature once; a missing file flips logoMissing for the editor
     loadImage('/api/settings/signature.png')
       .then((img) => { sigImg = img; logoMissing = false; render(); })
@@ -224,7 +241,11 @@
     render();
     return () => {
       ro.disconnect();
+      window.removeEventListener('pointerup', settlePointer, true);
+      window.removeEventListener('pointercancel', settlePointer, true);
+      window.removeEventListener('blur', settlePointer);
       stage?.destroy();
+      stage = null;
     };
   });
 

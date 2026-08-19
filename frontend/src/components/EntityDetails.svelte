@@ -12,7 +12,7 @@
    */
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
-  import { caseState, reloadCase, toast, uiState } from '../lib/state.svelte.js';
+  import { caseState, fmtCoords, reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import { buildTree, flattenPaths, folderOf } from '../lib/folderTree.js';
   import { assignFolder as fileEntity } from '../lib/filing.js';
   import {
@@ -41,7 +41,8 @@
     ENTITY_TOOL,
   } from '../lib/navigate.js';
   import { pollWhile } from '../lib/poll.js';
-  import { deletedToast, RESTORABLE } from '../lib/trash.js';
+  import { canStateSource, sourceProblem } from '../lib/statedSource.js';
+  import { deletedToast, FILE_BACKED, RESTORABLE } from '../lib/trash.js';
   import Icon from './Icon.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import FolderSelect from './FolderSelect.svelte';
@@ -102,8 +103,6 @@
 
   const allFolders = $derived(flattenPaths(buildTree(caseState.current?.folders ?? [], [])));
 
-  // Entity types backed by a file on disk — deleting them drops the file.
-  const FILE_BACKED = new Set(['media', 'capture', 'proof', 'post', 'inspect-session', 'note']);
   // Every type gets the title/notes editor — a list of which ones did was a list
   // that drifted: none of the hand-made types were on it, so a claim created on the
   // board opened with a title nobody could correct. A capture and a media commit
@@ -116,6 +115,9 @@
   let infoTitle = $state('');
   let infoNotes = $state('');
   let infoFolder = $state('');
+  // Only ever shown for a file the analyst brought in: an origin the bytes cannot
+  // state, and that the import may have gone past without anyone typing.
+  let infoSource = $state('');
   let infoSaving = $state(false);
   let seededId = null; // the id whose fields are currently loaded
   let seededFields = 0; // declared fields the registry knew when they were loaded
@@ -135,6 +137,7 @@
       title: infoTitle,
       notes: infoNotes,
       folder: infoFolder,
+      source: infoSource,
       attrs: { ...infoAttrs },
     };
   }
@@ -144,6 +147,7 @@
     if (infoTitle !== baseline.title) return true;
     if (infoNotes !== baseline.notes) return true;
     if (infoFolder !== baseline.folder) return true;
+    if (infoSource !== baseline.source) return true;
     const keys = new Set([...Object.keys(baseline.attrs), ...Object.keys(infoAttrs)]);
     for (const key of keys) {
       if ((baseline.attrs[key] ?? null) !== (infoAttrs[key] ?? null)) return true;
@@ -179,6 +183,11 @@
   // so the one action that helps is the folder it sits in.
   const inFileManager = $derived(opensInFileManager(entity));
 
+  // A file the analyst brought in gets a Source field; one a tool fetched or made
+  // shows the origin it recorded, as a fact, in the rows above.
+  const sourceEditable = $derived(entity?.type === 'media' && canStateSource(infoData));
+  const sourceIssue = $derived(sourceEditable ? sourceProblem(infoSource) : '');
+
   $effect(() => {
     const e = entity;
     caseState.rev; // re-resolve preview/metadata after a reload…
@@ -203,6 +212,7 @@
         infoTitle = e.label ?? '';
         infoNotes = e.attrs?.notes ?? '';
         infoFolder = folderOf(e) ?? '';
+        infoSource = '';
         infoData = null;
       }
       infoAttrs = Object.fromEntries(fields.map((f) => [f.key, e.attrs?.[f.key] ?? null]));
@@ -240,6 +250,7 @@
       if (infoData && seedFields) {
         infoTitle = infoData.title ?? e.label ?? '';
         infoNotes = infoData.notes ?? infoNotes;
+        infoSource = canStateSource(infoData) ? (infoData.source?.url ?? '') : '';
         // the sidecar is what the fields now hold, so it is what they are compared
         // against — otherwise the panel would open already reading as edited
         snapshot();
@@ -293,6 +304,19 @@
   const identityLabel = $derived(entity ? entityIdentityLabel(entity.type) : 'Title');
   const identityPlaceholder = $derived(
     entity ? entityIdentityPlaceholder(entity.type) : 'What to call it'
+  );
+
+  /**
+   * The point this entity sits on, for the types that carry one.
+   *
+   * Read off `lat`/`lon` rather than off the `coords` string the map save wrote:
+   * that string only exists when a tool minted it, so a place promoted from a
+   * sheet column held its point and showed nothing. Reading the pair also renders
+   * it in the format the analyst chose, where the stored string is frozen decimal
+   * degrees. The string is still the fallback, for a record that has one and no pair.
+   */
+  const coordText = $derived(
+    fmtCoords(entity?.attrs?.lat, entity?.attrs?.lon) || entity?.attrs?.coords || ''
   );
   const ordinaryRelations = $derived(
     (chain?.relations ?? []).filter((row) => relationAction(row.link.type) === 'relation')
@@ -381,7 +405,7 @@
 
   /** One point, written the way every other coordinate row in this panel writes one. */
   function pointText(point) {
-    return `${Number(point.lat).toFixed(6)}, ${Number(point.lon).toFixed(6)}`;
+    return fmtCoords(point.lat, point.lon);
   }
 
   $effect(() => {
@@ -498,6 +522,9 @@
       } else if (entity.type === 'media') {
         await api.patch(`/api/cases/${cid}/media`, {
           path: entity.attrs.path, title: infoTitle.trim(), notes: infoNotes,
+          // Sent only where it can be stated, so a Save on a download or a
+          // derivative never asks the route to touch what a tool recorded.
+          ...(sourceEditable ? { source_url: infoSource.trim() } : {}),
         });
       } else {
         await api.patch(`/api/cases/${cid}/entities/${entity.id}`, {
@@ -577,9 +604,10 @@
     return bytes + ' B';
   }
 
-  function formatCoords(gps) {
-    if (gps?.lat == null || gps?.lon == null) return '';
-    return `${Number(gps.lat).toFixed(6)}, ${Number(gps.lon).toFixed(6)}`;
+  /** The pair EXIF or a video probe carried, read on the same terms as every other
+   *  coordinate in this panel. */
+  function gpsText(gps) {
+    return fmtCoords(gps?.lat, gps?.lon);
   }
 </script>
 
@@ -651,7 +679,7 @@
       id="ed-title"
       class="input"
       bind:value={infoTitle}
-      placeholder={entity.attrs?.coords ?? identityPlaceholder}
+      placeholder={coordText || identityPlaceholder}
     />
 
     {#if twin}
@@ -688,7 +716,9 @@
         {#if infoData.source?.duration}
           <div class="info-row"><span class="info-k">Duration</span><span>{infoData.source.duration}s</span></div>
         {/if}
-        {#if infoData.source?.webpage_url ?? infoData.source?.url}
+        <!-- What a tool fetched, read as a fact. A file whose origin is the
+             analyst's to state carries it as a field below instead. -->
+        {#if !sourceEditable && (infoData.source?.webpage_url ?? infoData.source?.url)}
           <div class="info-row">
             <span class="info-k">Source</span>
             <a class="mono src" href={infoData.source.webpage_url ?? infoData.source.url} target="_blank" rel="noreferrer">
@@ -735,8 +765,8 @@
           </div>
         {/if}
       {/if}
-      {#if entity.attrs?.coords}
-        <div class="info-row"><span class="info-k">Coords</span><span class="mono">{entity.attrs.coords}</span></div>
+      {#if coordText}
+        <div class="info-row"><span class="info-k">Coords</span><span class="mono">{coordText}</span></div>
       {/if}
     </div>
 
@@ -756,7 +786,7 @@
             <div class="info-row"><span class="info-k">Captured</span><span class="mono">{infoData.taken_at}</span></div>
           {/if}
           {#if infoData.gps}
-            <div class="info-row"><span class="info-k">GPS</span><span class="mono">{formatCoords(infoData.gps)}</span></div>
+            <div class="info-row"><span class="info-k">GPS</span><span class="mono">{gpsText(infoData.gps)}</span></div>
           {/if}
           {#each Object.entries(infoData.exif ?? {}) as [key, value] (key)}
             <div class="info-row"><span class="info-k">{key}</span><span class="exif-value">{value}</span></div>
@@ -773,13 +803,24 @@
             <div class="info-row"><span class="info-k">Captured</span><span class="mono">{infoData.taken_at}</span></div>
           {/if}
           {#if infoData.gps}
-            <div class="info-row"><span class="info-k">GPS</span><span class="mono">{formatCoords(infoData.gps)}</span></div>
+            <div class="info-row"><span class="info-k">GPS</span><span class="mono">{gpsText(infoData.gps)}</span></div>
           {/if}
           {#each Object.entries(infoData.video_metadata) as [key, value] (key)}
             <div class="info-row"><span class="info-k">{key}</span><span class="exif-value">{value}</span></div>
           {/each}
         </div>
       </details>
+    {/if}
+
+    {#if sourceEditable}
+      <label class="modal-label" for="ed-source">Source URL</label>
+      <input
+        id="ed-source"
+        class="input"
+        placeholder="https://…"
+        bind:value={infoSource}
+      />
+      <p class="field-help">Where you got this file. Recorded as stated, not as fetched.</p>
     {/if}
 
     <label class="modal-label" for="ed-notes">Notes</label>
@@ -1083,7 +1124,12 @@
         <Icon name="trash" size={13} /> Delete
       </button>
       <div style="flex:1"></div>
-      <button class="btn btn-primary btn-sm" onclick={saveInfo} disabled={infoSaving}>
+      {#if sourceIssue}<span class="save-problem">{sourceIssue}</span>{/if}
+      <button
+        class="btn btn-primary btn-sm"
+        onclick={saveInfo}
+        disabled={infoSaving || Boolean(sourceIssue)}
+      >
         {infoSaving ? 'Saving…' : 'Save'}
       </button>
     </div>
@@ -1130,6 +1176,16 @@
     color: var(--warn);
     font-size: var(--fs-xs);
     line-height: 1.5;
+  }
+  .field-help {
+    margin: 5px 0 0;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .save-problem {
+    align-self: center;
+    color: var(--warn);
+    font-size: var(--fs-xs);
   }
   .twin-open {
     padding: 0;
