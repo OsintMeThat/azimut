@@ -18,6 +18,7 @@ writes, folders, the trash journal, the durable job queue.
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any
 
 from .repository import EntityStatus
@@ -330,6 +331,11 @@ class CaseStore:
     def entity_count(self) -> int:
         """Entity total for the case switcher — one indexed count."""
         return self._graph().count_entities()
+
+    def batch(self) -> AbstractContextManager[None]:
+        """One transaction for every store write made inside it. See
+        `sqlite_backend.SqliteCase.batch` for what it costs and when not to."""
+        return self._graph().batch()
 
     def save_temporal_claim(
         self,

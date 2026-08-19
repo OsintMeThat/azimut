@@ -43,6 +43,11 @@ class EntityPatch(BaseModel):
 class EntityDeleteIn(BaseModel):
     ids: list[str] = Field(min_length=1, max_length=200)
 
+class EntityIdsIn(BaseModel):
+    #: A sheet may point at one entity per cell, so the bound is the sidecar's, not a
+    #: selection's.
+    ids: list[str] = Field(min_length=1, max_length=2000)
+
 @router.get("/{case_id}/entities/lookup")
 def lookup_entity(case_id: str, attr: str, value: str) -> dict[str, Any]:
     """One entity by an ``attrs`` value (``path``, ``spec``, ``draft``), or null.
@@ -203,3 +208,16 @@ def remove_entities(case_id: str, body: EntityDeleteIn) -> dict[str, Any]:
         return delete_entities_deep(case, body.ids)
     except CaseError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+@router.post("/{case_id}/entities/missing")
+def missing_entities(case_id: str, body: EntityIdsIn) -> dict[str, list[str]]:
+    """Which of these ids the case no longer holds.
+
+    A sidecar keeps ids and only ids — a sheet cell's link, the files a row carries —
+    so a delete on another screen leaves a tool holding pointers at nothing. This is
+    how it finds out in one bounded lookup: there is no route that reads one entity,
+    and asking per id would be a request per cell.
+    """
+    case = get_case(case_id)
+    held = {str(entity["id"]) for entity in case.entities_by_ids(body.ids)}
+    return {"missing": [row for row in dict.fromkeys(body.ids) if row not in held]}

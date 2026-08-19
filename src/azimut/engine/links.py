@@ -452,6 +452,36 @@ def relation_type(type_: str) -> RelationType | None:
     return next((entry for entry in RELATION_TYPES if entry.type == type_), None)
 
 
+def pair_verbs(
+    from_type: str, to_type: str, *, action: str = ""
+) -> tuple[RelationType, ...]:
+    """Every verb the vocabulary allows from one type to another, in menu order.
+
+    The **type-only** half of `_check_endpoints`, asked before either entity exists.
+    That is what planning a batch of edges needs: a plan that had to create the nodes
+    first to learn the pair is illegal would have written half of them to find out.
+    `place_verb` is the one-column case of the same question, kept apart because it
+    ranks its answers rather than listing them.
+
+    Media kinds are deliberately **not** decided here. `located-at` takes image, video
+    and audio media and not a PDF, and a type alone does not say which of those a row
+    holds. So a verb offered here can still be refused for one row, and the caller that
+    writes a batch validates every resolved pair before it writes any of them.
+
+    Only what an analyst may state: `same-image-as` is enrichment's own claim, and the
+    derivation chain is recorded by the save that produced it rather than asserted after
+    the fact — which is why it is absent from the registry entirely.
+    """
+    return tuple(
+        spec
+        for spec in RELATION_TYPES
+        if spec.manual
+        and (not action or spec.action == action)
+        and from_type in spec.from_types
+        and to_type in spec.to_types
+    )
+
+
 def add_relation(
     case: CaseRepository, from_id: str, to_id: str, type_: str, *, by: str
 ) -> dict[str, Any]:

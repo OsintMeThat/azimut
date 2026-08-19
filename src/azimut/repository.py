@@ -17,6 +17,7 @@ browsing; it is not a second copy of the media bytes.
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from typing import Any, Literal, Protocol, runtime_checkable
 
 #: Confidence on an entity or link: an analyst's `confirmed` vs a tool's
@@ -476,6 +477,17 @@ class CaseRepository(Protocol):
 
     def temporal_projection_status(self) -> dict[str, int | bool]:
         """Compare the derived temporal index with its graph and media authorities."""
+        ...
+
+    # -- writing several things as one -------------------------------------
+
+    def batch(self) -> AbstractContextManager[None]:
+        """One transaction for every write made inside, or none of them.
+
+        For the caller that has a whole plan to write and no half of it worth
+        keeping — a sheet promotion's entities and the links between them. Short and
+        without I/O: it holds the store's write lock while it is open.
+        """
         ...
 
     # -- entity mutations --------------------------------------------------

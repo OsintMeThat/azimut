@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -331,6 +332,12 @@ class SqliteCase:
 
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
+        # The connection a `batch()` is holding open, per thread. Thread-local rather
+        # than a plain attribute because one `SqliteCase` is shared by the request
+        # threads and the job worker, and a sqlite3 connection belongs to the thread
+        # that made it: an attribute would hand one thread's open transaction to
+        # another and raise from somewhere unrelated.
+        self._local = threading.local()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -519,18 +526,42 @@ class SqliteCase:
         # and there is no cross-thread connection to mismanage. Autocommit
         # (isolation_level=None) leaves transaction control explicit — reads run
         # bare, writes wrap in BEGIN IMMEDIATE..COMMIT via `_write`.
-        conn = sqlite3.connect(self.db_path, isolation_level=None)
+        #
+        # Inside a `batch()`, that connection is lent instead. Reads have to join it
+        # or they would be looking at the file as it was before the batch started:
+        # SQLite shows uncommitted rows to the connection that wrote them and to no
+        # other, so a planner that adds an entity and then reads it back would find
+        # nothing. Never closed here — the batch owns its lifetime.
+        ambient = getattr(self._local, "conn", None)
+        if ambient is not None:
+            yield ambient
+            return
+        conn = self._open()
         try:
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute("PRAGMA busy_timeout = 5000")
-            conn.execute("PRAGMA synchronous = FULL")
             yield conn
         finally:
             conn.close()
 
+    def _open(self) -> sqlite3.Connection:
+        """One configured connection. Here rather than inline because `batch()` opens
+        its own and the two must agree on every pragma."""
+        conn = sqlite3.connect(self.db_path, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA synchronous = FULL")
+        return conn
+
     def _write(self, op: Callable[[sqlite3.Connection], T]) -> T:
-        """Run `op` inside one immediate transaction, rolling back on error."""
+        """Run `op` inside one immediate transaction, rolling back on error.
+
+        Inside a `batch()` there is already a transaction open and it belongs to the
+        batch, so the operation joins it and neither commits nor rolls back: one
+        `COMMIT` for the whole lot is the point of the thing.
+        """
+        ambient = getattr(self._local, "conn", None)
+        if ambient is not None:
+            return op(ambient)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
@@ -540,6 +571,44 @@ class SqliteCase:
             except BaseException:
                 conn.execute("ROLLBACK")
                 raise
+
+    @contextmanager
+    def batch(self) -> Iterator[None]:
+        """One transaction for every store call made inside, on this thread.
+
+        What "all or nothing" costs. A promotion that writes thirty-four entities and
+        thirty-four links makes sixty-nine short transactions on its own, and a failure
+        at the fortieth leaves the first thirty-nine standing — a case half-way through
+        an operation nobody can see the shape of. Wrapped in a batch, the same calls
+        share one `BEGIN IMMEDIATE`: the last one commits them all, and any exception
+        leaves the case exactly as it was.
+
+        **Keep a batch short and keep I/O out of it.** It holds SQLite's write lock for
+        its whole duration, so every other writer — the job worker included — waits on
+        it and then fails on `busy_timeout`. That is precisely why the road that
+        downloads files is atomic per row instead: a batch around a hundred network
+        fetches would lock the case for minutes.
+
+        Not nestable, deliberately. An inner batch would either commit early, breaking
+        the outer promise, or silently do nothing, breaking its own; refusing says which
+        caller is wrong while there is still a stack trace to say it in.
+        """
+        if getattr(self._local, "conn", None) is not None:
+            raise CaseError("a batch is already open on this thread")
+        conn = self._open()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            self._local.conn = conn
+            try:
+                yield
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+            finally:
+                self._local.conn = None
+        finally:
+            conn.close()
 
     @staticmethod
     def _touch(conn: sqlite3.Connection) -> None:

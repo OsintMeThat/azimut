@@ -103,3 +103,58 @@ test('chooses a real export folder and uses it from Media Library', async ({ pag
   await expect(page.getByText('panel.svg copied to Field reports')).toBeVisible();
   fixture.expectNoUnexpectedRequests();
 });
+
+// The template preview hangs its commits off transformend, the same way the
+// composer does, so a release the page never sees left the signature resizing
+// under a bare pointer and never wrote the size back into the template.
+test('a signature resize whose release the window never sees still lands, and stops there', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await page.goto('/#settings');
+  const rail = page.getByRole('navigation', { name: 'Settings sections' });
+  await rail.getByRole('button', { name: 'Templates' }).click();
+  await page.getByRole('button', { name: 'New proof template' }).click();
+
+  await page.getByLabel('Stamp the logo').check();
+  const size = page.getByRole('slider', { name: 'Size' });
+  const before = await size.inputValue();
+  const canvas = page.locator('.preview-frame canvas').first();
+  await expect(canvas).toBeVisible();
+
+  // Select the logo, then take its frame's corner. Both live on the canvas,
+  // where there is no DOM handle to aim at; ask the stage where it put them.
+  const preview = () => page.evaluate(() => {
+    const stage = window.Konva.stages[window.Konva.stages.length - 1];
+    const k = stage.scaleX();
+    const tr = stage.find('Transformer')[0];
+    const logo = stage.find((n) => n.draggable())[0];
+    const r = logo.getClientRect({ relativeTo: stage });
+    return {
+      logo: { x: (r.x + r.width / 2) * k, y: (r.y + r.height / 2) * k },
+      anchor: tr ? { x: tr.x() + tr.width(), y: tr.y() + tr.height() } : null,
+    };
+  });
+
+  const box = await canvas.boundingBox();
+  const { logo } = await preview();
+  await page.mouse.click(box.x + logo.x, box.y + logo.y);
+  const { anchor } = await preview();
+  expect(anchor).not.toBeNull();
+
+  const ax = box.x + anchor.x;
+  const ay = box.y + anchor.y;
+  await page.mouse.move(ax, ay);
+  await page.mouse.down();
+  await page.mouse.move(ax + 14, ay + 9, { steps: 6 });
+  await page.evaluate(() => window.dispatchEvent(new Event('blur'))); // the release that never arrives
+
+  await expect(size).not.toHaveValue(before);
+  const committed = await size.inputValue();
+
+  // The pointer wanders on with no button held. Nothing may follow it.
+  await page.mouse.move(ax + 120, ay + 90, { steps: 10 });
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 100)));
+  await expect(size).toHaveValue(committed);
+
+  await page.mouse.up();
+  fixture.expectNoUnexpectedRequests();
+});

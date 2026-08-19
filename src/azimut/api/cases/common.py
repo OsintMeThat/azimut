@@ -18,6 +18,7 @@ from fastapi import HTTPException
 
 from ...engine import entities as entity_engine
 from ...engine import links as link_engine
+from ...engine import sheets as sheet_engine
 from ...engine import timeline as timeline_engine
 from ...engine import trash as trash_engine
 from ...engine.temporal import TemporalError, window_bound
@@ -88,6 +89,18 @@ def delete_entities_deep(case: Case, entity_ids: list[str]) -> dict[str, Any]:
         except Exception:
             trash_engine.rollback(case, group["id"])
             raise
+
+        # A sheet points at the case through ids in a sidecar rather than through edges,
+        # so nothing above reaches them: a cell would stay marked as linked to a row the
+        # case no longer holds, and the next save would write the dead id back. Cleared
+        # here, which is the one door every delete comes through.
+        #
+        # **After the commit, and outside the rollback.** A sidecar is a file and the
+        # rollback restores the graph and the trash, so clearing them inside it meant a
+        # refused delete gave the entities back with the sheets' links, vocabularies and
+        # attached pieces already gone for good. Past the commit there is nothing left to
+        # roll back, which is what makes this the safe side of the line.
+        sheet_engine.forget_entities(case, set(going_by_id))
 
         return {
             "status": "deleted",

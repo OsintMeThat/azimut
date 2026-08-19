@@ -175,7 +175,7 @@ async function openTimeline(page, options = {}) {
 test('draws a clear chronology with density, uncertainty and an inspector', async ({ page }, testInfo) => {
   const fixture = await openTimeline(page);
 
-  await expect(page.locator('.tabstrip').getByRole('button')).toHaveText(['Board', 'Graph', 'Timeline']);
+  await expect(page.locator('.tabstrip').getByRole('button')).toHaveText(['Board', 'Graph', 'Timeline', 'Sheet']);
   await expect(page.locator('.track-label strong')).toHaveText(['Events', 'Media']);
   await expect(page.getByRole('button', { name: /Witness arrived/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Vehicle remained/ }).locator('..')).toHaveClass(/period.*approximate.*uncertain/);

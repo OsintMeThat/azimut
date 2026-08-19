@@ -20,9 +20,11 @@
   import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
   import { gotoPoint } from '../lib/navigate.js';
   import { revealMediaFolder } from '../lib/reveal.js';
+  import { thisBrowser } from '../lib/thisBrowser.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import Icon from '../components/Icon.svelte';
   import PasteDialog from '../components/PasteDialog.svelte';
+  import SourceDialog from '../components/SourceDialog.svelte';
   import SearchInput from '../components/SearchInput.svelte';
   import Modal from '../components/Modal.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
@@ -64,6 +66,8 @@
   // cookie affordance, shown only when a download hits a login wall:
   // {url, index, title, platform, guidance, browser, busy}
   let authPrompt = $state(null);
+  // Telegram's public page omits the file URL for videos it marks as too big.
+  let telegramPrompt = $state(null); // {url}
 
   // browsers yt-dlp can read a session from; the Chromium subset can't be read
   // on Windows (locked/app-bound store) so we steer those to the file fallback
@@ -127,10 +131,13 @@
   );
 
   // --- free-text search + sort ---
+  // Newest first, which is what the library is opened for: the files that just came in are
+  // the ones being worked on, and A–Z put them wherever their filename happened to fall.
+  // The same order the server already answers with by default (`GET .../media/page`).
   let query = $state('');
-  let sort = $state('name');
-  let sortDirection = $state('asc');
-  let headerSort = $state(null);
+  let sort = $state('newest');
+  let sortDirection = $state('desc');
+  let headerSort = $state('added');
   const LIST_SORTS = [
     { id: 'name', label: 'Name' },
     { id: 'type', label: 'Type' },
@@ -142,7 +149,7 @@
     query.length > 0 || catFilter !== null || folderFilter !== null || gpsOnly || !collectedOnly
   );
   const filtersActive = $derived(
-    browseFiltersActive || sort !== 'name' || sortDirection !== 'asc'
+    browseFiltersActive || sort !== 'newest' || sortDirection !== 'desc'
   );
   // Also shown for a case whose files are all working ones: the grid is empty
   // because the switch is on, and the switch is in this bar.
@@ -255,9 +262,9 @@
     folderFilter = null;
     gpsOnly = false;
     collectedOnly = true;
-    sort = 'name';
-    sortDirection = 'asc';
-    headerSort = null;
+    sort = 'newest';
+    sortDirection = 'desc';
+    headerSort = 'added';
     reloadIfServerBacked();
   }
 
@@ -465,25 +472,76 @@
     }
   }
 
-  async function importFiles(fileList) {
+  // ── import ───────────────────────────────────────────────────────────────
+  // A downloaded file that reaches the case as an import carries no address of
+  // its own: the analyst fetched it elsewhere, and only they know where from. So
+  // the batch is asked once, on the way in, and the answer sticks for the session
+  // — one thread's worth of files rarely arrives in a single drop.
+  let pendingImport = $state(null); // {files: File[]} waiting on the dialog
+  let importBusy = $state(false);
+  let statingSource = $state(null); // {paths} — a landed batch, stated afterwards
+  let statingBusy = $state(false);
+  let lastSource = $state(''); // prefills whichever dialog opens next
+
+  function importFiles(fileList) {
     const files = [...fileList];
-    if (!files.length) return;
-    const c = await ensureCase();
-    let added = 0;
-    let dups = 0;
-    for (const file of files) {
-      const form = new FormData();
-      form.append('file', file);
-      try {
-        const res = await api.post(`/api/cases/${c.id}/media/upload`, form);
-        res.duplicate ? dups++ : added++;
-      } catch (e) {
-        toast(`${file.name}: ${e.message}`, 'danger');
+    if (files.length) pendingImport = { files };
+  }
+
+  async function runImport(files, sourceUrl) {
+    if (importBusy) return;
+    importBusy = true;
+    try {
+      const c = await ensureCase();
+      let dups = 0;
+      const landed = [];
+      for (const file of files) {
+        const form = new FormData();
+        form.append('file', file);
+        if (sourceUrl) form.append('source_url', sourceUrl);
+        try {
+          const res = await api.post(`/api/cases/${c.id}/media/upload`, form);
+          if (res.duplicate) dups++;
+          else if (res.item?.path) landed.push(res.item.path);
+        } catch (e) {
+          toast(`${file.name}: ${e.message}`, 'danger');
+        }
       }
+      lastSource = sourceUrl;
+      pendingImport = null;
+      await Promise.all([refresh(), reloadCase()]);
+      if (landed.length) {
+        const count = `${landed.length} file${landed.length > 1 ? 's' : ''}`;
+        // Nothing stated: the offer to say it sits on the batch that just landed,
+        // rather than one panel per file, later, once it has been forgotten.
+        const offer = sourceUrl
+          ? null
+          : { label: 'Set source', onClick: () => (statingSource = { paths: landed }) };
+        toast(`${count} added to the case`, 'ok', offer ? 6000 : 3800, offer);
+      }
+      if (dups) toast(`${dups} duplicate${dups > 1 ? 's' : ''} skipped (same SHA-256)`, 'warn');
+    } finally {
+      importBusy = false;
     }
-    await Promise.all([refresh(), reloadCase()]);
-    if (added) toast(`${added} file${added > 1 ? 's' : ''} added to the case`, 'ok');
-    if (dups) toast(`${dups} duplicate${dups > 1 ? 's' : ''} skipped (same SHA-256)`, 'warn');
+  }
+
+  /** State one origin for a batch already in the case. */
+  async function saveStatedSource(sourceUrl) {
+    if (statingBusy || !statingSource) return;
+    statingBusy = true;
+    try {
+      const cid = caseState.current.id;
+      for (const path of statingSource.paths)
+        await api.patch(`/api/cases/${cid}/media`, { path, source_url: sourceUrl });
+      lastSource = sourceUrl;
+      statingSource = null;
+      await Promise.all([refresh(), reloadCase()]);
+      toast('Source saved', 'ok');
+    } catch (e) {
+      toast(`Could not save the source: ${e.message}`, 'danger');
+    } finally {
+      statingBusy = false;
+    }
   }
 
   async function download() {
@@ -565,7 +623,9 @@
         return;
       }
       jobs = jobs.filter((j) => j.id !== jobId);
-      if (status.status === 'done' && status.result?.needs_auth) {
+      if (status.status === 'done' && status.result?.telegram_only) {
+        telegramPrompt = { url: job.url };
+      } else if (status.status === 'done' && status.result?.needs_auth) {
         // login wall — offer a cookie source and retry, nothing downloaded yet
         authPrompt = {
           url: job.url,
@@ -573,7 +633,7 @@
           title: job.title ?? null,
           platform: status.result.platform ?? '',
           guidance: status.result.guidance ?? '',
-          browser: 'firefox',
+          browser: thisBrowser(),
           busy: false,
         };
       } else if (status.status === 'done' && status.result?.multi) {
@@ -1131,7 +1191,9 @@
               <span class="meta">
                 {fmtSize(item.size)} ·
                 <span class="mono" title={item.sha256}>{item.sha256.slice(0, 8)}</span>
-                {#if item.source?.type === 'download'}
+                <!-- Any file that has an origin says so, fetched or stated: what the
+                     row is for is getting back to where the thing came from. -->
+                {#if item.source?.webpage_url ?? item.source?.url}
                   · <a href={item.source.webpage_url ?? item.source.url} target="_blank" rel="noreferrer">source</a>
                 {/if}
               </span>
@@ -1247,6 +1309,25 @@
         <Icon name="download" size={14} />
         Download {picker.items.filter((i) => i.selected).length} selected
       </button>
+    </div>
+  </Modal>
+{/if}
+
+{#if telegramPrompt}
+  <Modal title="This video needs Telegram" onclose={() => (telegramPrompt = null)} width="440px">
+    <p class="telegram-hint">Save it in Telegram, then import the file here.</p>
+    <div class="modal-actions">
+      <div style="flex:1"></div>
+      <button class="btn" onclick={() => (telegramPrompt = null)}>Close</button>
+      <a
+        class="btn btn-primary"
+        href={telegramPrompt.url}
+        target="_blank"
+        rel="noreferrer"
+        onclick={() => (telegramPrompt = null)}
+      >
+        <Icon name="external" size={14} /> Open in Telegram
+      </a>
     </div>
   </Modal>
 {/if}
@@ -1421,6 +1502,29 @@
     busy={pasteBusy}
     onconfirm={confirmPaste}
     onclose={() => (pasted = null)}
+  />
+{/if}
+
+<!-- Where a dropped batch came from: asked once on the way in, and again on the
+     batch that landed without an answer. -->
+{#if pendingImport}
+  <SourceDialog
+    count={pendingImport.files.length}
+    value={lastSource}
+    busy={importBusy}
+    onconfirm={(source) => runImport(pendingImport.files, source)}
+    onclose={() => (pendingImport = null)}
+  />
+{/if}
+
+{#if statingSource}
+  <SourceDialog
+    mode="state"
+    count={statingSource.paths.length}
+    value={lastSource}
+    busy={statingBusy}
+    onconfirm={saveStatedSource}
+    onclose={() => (statingSource = null)}
   />
 {/if}
 
@@ -1904,7 +2008,8 @@
   }
 
   /* cookie affordance */
-  .auth-hint {
+  .auth-hint,
+  .telegram-hint {
     font-size: var(--fs-sm);
     color: var(--text-2);
     margin: 0 0 14px;

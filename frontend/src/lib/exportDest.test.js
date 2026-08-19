@@ -29,6 +29,7 @@ describe('export destinations', () => {
       media: '',
       proofs: '',
       views: '',
+      sheets: '',
     });
     expect(api.get).toHaveBeenCalledWith('/api/settings');
   });
@@ -41,6 +42,7 @@ describe('export destinations', () => {
       media: '/evidence',
       proofs: '',
       views: '',
+      sheets: '',
     });
     expect(api.put).toHaveBeenCalledWith('/api/settings/prefs', {
       export_dirs: { media: '/evidence' },

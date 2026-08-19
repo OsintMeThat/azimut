@@ -25,8 +25,15 @@ def _evict_finished() -> None:
         del _jobs[jid]
 
 
-def start(kind: str, work: Callable[[Callable[[dict[str, Any]], None]], Any]) -> str:
-    """Run `work(set_progress)` in a thread; returns the job id."""
+def start(kind: str, work: Callable[..., Any], *, stoppable: bool = False) -> str:
+    """Run `work(set_progress)` in a thread; returns the job id.
+
+    ``stoppable`` calls it as ``work(set_progress, stopping)`` instead, where
+    ``stopping()`` answers whether somebody has pressed cancel. A job that takes
+    it is promising to check between units of work and to leave the unit it was
+    part-way through unwritten — which is the only kind of cancellation this
+    registry can offer, since a thread cannot be interrupted from outside.
+    """
     job_id = uuid.uuid4().hex[:12]
     with _lock:
         _evict_finished()
@@ -37,9 +44,12 @@ def start(kind: str, work: Callable[[Callable[[dict[str, Any]], None]], Any]) ->
             if job_id in _jobs:
                 _jobs[job_id]["progress"] = progress
 
+    def stopping() -> bool:
+        return cancelled(job_id)
+
     def runner() -> None:
         try:
-            result = work(set_progress)
+            result = work(set_progress, stopping) if stoppable else work(set_progress)
             with _lock:
                 _jobs[job_id].update(status="done", result=result)
         except Exception as exc:  # surfaced to the UI, not swallowed
@@ -48,6 +58,25 @@ def start(kind: str, work: Callable[[Callable[[dict[str, Any]], None]], Any]) ->
 
     threading.Thread(target=runner, daemon=True).start()
     return job_id
+
+
+def cancel(job_id: str) -> bool:
+    """Ask a running job to stop at its next safe point. Answers whether it heard.
+
+    A flag, never a kill: the work decides where stopping is safe, and for the one
+    job that takes it that is between two rows.
+    """
+    with _lock:
+        job = _jobs.get(job_id)
+        if not job or job["status"] != "running":
+            return False
+        job["cancelled"] = True
+        return True
+
+
+def cancelled(job_id: str) -> bool:
+    with _lock:
+        return bool((_jobs.get(job_id) or {}).get("cancelled"))
 
 
 def get(job_id: str) -> dict[str, Any] | None:

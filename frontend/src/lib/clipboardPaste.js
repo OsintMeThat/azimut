@@ -13,9 +13,9 @@
  * four tools, because scattered copy becomes four vocabularies inside a week.
  */
 import { api } from './api.js';
+import { isSourceUrl, sourceProblem } from './statedSource.js';
 
 const IMAGE_TYPE = /^image\//i;
-const HTTP_URL = /^https?:\/\/\S+$/i;
 
 /** The API's own cap on a swallowed image (api/limits.py), said here so the
  *  refusal names the limit instead of waiting for a 413. */
@@ -31,7 +31,7 @@ export const MAX_PASTE_IMAGE_BYTES = 25 * 1024 * 1024;
 export function sourceFromHtml(html) {
   const match = /<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(html ?? '');
   const url = (match?.[1] ?? match?.[2] ?? '').trim();
-  return HTTP_URL.test(url) ? url : '';
+  return isSourceUrl(url) ? url : '';
 }
 
 function imageFrom(clipboardData) {
@@ -58,9 +58,9 @@ export function readPaste(clipboardData) {
   const file = imageFrom(clipboardData);
   if (file) {
     const fromMarkup = sourceFromHtml(clipboardData.getData?.('text/html') ?? '');
-    return { kind: 'image', file, sourceUrl: fromMarkup || (HTTP_URL.test(text) ? text : '') };
+    return { kind: 'image', file, sourceUrl: fromMarkup || (isSourceUrl(text) ? text : '') };
   }
-  if (HTTP_URL.test(text)) return { kind: 'url', url: text };
+  if (isSourceUrl(text)) return { kind: 'url', url: text };
   if (text) return { kind: 'text', text };
   return null;
 }
@@ -147,9 +147,7 @@ export function resolvePaste(tool, payload, { folder = '' } = {}) {
 export function pasteProblem(resolved) {
   const values = resolved?.values ?? {};
   if (resolved?.kind === 'url' && !(values.title ?? '').trim()) return 'A bookmark needs a title.';
-  const source = (values.source ?? '').trim();
-  if (source && !HTTP_URL.test(source)) return 'The source must be an http(s) address.';
-  return '';
+  return sourceProblem(values.source);
 }
 
 /**

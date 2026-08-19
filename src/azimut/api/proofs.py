@@ -489,7 +489,7 @@ def save_proof_place(case_id: str, name: str, body: ProofPlaceIn) -> dict[str, A
         raise HTTPException(status_code=404, detail="no such proof")
     # POV is read off the spec on disk rather than taken from the body: it is a
     # property of the proof that was just saved, not of the answer to the question.
-    pov = bool(_read_spec(case, proof).get("pov"))
+    pov = bool(read_spec(case, proof).get("pov"))
     existing = satellite_engine.place_at(case, body.lat, body.lon, keyed_only=False)
     if existing is not None:
         # somebody filed that point between the question and the yes: the proof
@@ -500,7 +500,7 @@ def save_proof_place(case_id: str, name: str, body: ProofPlaceIn) -> dict[str, A
     return place
 
 
-def _read_spec(case: Case, proof: dict[str, Any]) -> dict[str, Any]:
+def read_spec(case: Case, proof: dict[str, Any]) -> dict[str, Any]:
     """The saved spec of a proof, or an empty one if it cannot be read."""
     rel = (proof.get("attrs") or {}).get("spec")
     if not isinstance(rel, str) or not rel:

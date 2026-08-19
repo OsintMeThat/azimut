@@ -266,15 +266,48 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     full.sheet_id = sheet.json()["id"]
     full.sheet = sheet.json()["attrs"]["path"]
     full.sheet_meta = layout.sheet_meta_rel(Path(full.sheet).stem)
+    # The sidecar carries what the app knows about a column as well as how it looks — a
+    # role, its vocabulary, a line of instruction, and which column the progress is read
+    # off — so the bundle gates see all of it and not only the colours.
     saved_sheet = client.put(
         f"/api/cases/{case_id}/sheets/{full.sheet_id}",
         json={
-            "columns": ["id", "Subject", "Status"],
-            "rows": [["r1", "Quai sud", "ruled out"]],
-            "meta": {"colours": {"r1": "grey"}, "widths": {"Subject": 220}},
+            "columns": [
+                "id", "Subject", "Status", "Coordinates", "Added", "On map",
+                "Links with others", "start synchro",
+            ],
+            "rows": [
+                ["r1", "Quai sud", "ruled out", "48.85660, 2.35220", "", "", "", "-00:01:50"],
+                ["r2", "Pont nord", "to do", "", "", "", "Quai sud", "00:04:04"],
+            ],
+            "meta": {
+                "colours": {"r1": "grey"},
+                "widths": {"Subject": 220},
+                "frozen": "Subject",
+                "roles": {
+                    "Status": {"kind": "state", "values": ["to do", "done", "ruled out"]},
+                    "Coordinates": {"kind": "latlon"},
+                    "Added": {"kind": "stamped"},
+                    "On map": {"kind": "computed", "of": "has_point"},
+                    "Links with others": {"kind": "row", "of": "Subject", "multi": ", "},
+                    "start synchro": {"kind": "offset", "anchor": "IGLA launch"},
+                },
+                "notes": {"Status": "where this candidate got to"},
+                "progress": "Coordinates",
+                # The three tables the bridge to the case writes, each a different grain:
+                # a named moment several videos are lined up on, a case file a row carries,
+                # and what a column's words mean in the graph.
+                "anchors": {"IGLA launch": {"at": "2026-01-03T01:57:00Z"}},
+                "attachments": {"r1": [photo_entity["id"]]},
+                "values": {"Subject": {"Quai sud": full.structure_id}},
+                "description": "What is left to geolocate.",
+            },
         },
     )
     assert saved_sheet.status_code == 200, saved_sheet.text
+    assert saved_sheet.json()["rows"][0][4], "a stamped column is dated by the save"
+    assert saved_sheet.json()["meta"]["anchors"]["IGLA launch"]["at"]
+    assert saved_sheet.json()["meta"]["attachments"] == {"r1": [photo_entity["id"]]}
 
     # -- a claim, with its three dedicated connectors --------------------------
     # The reified statement carries one confidence for the whole assertion. Its

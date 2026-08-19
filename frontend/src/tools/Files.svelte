@@ -23,12 +23,13 @@
   import { sortFileEntities } from '../lib/fileSort.js';
   import {
     deletedToast,
+    deleteEntities,
     emptyTrash,
+    entityDeletePrompt,
     formatSize,
     purgeGroup,
     readTrash,
     restoreGroup,
-    RESTORABLE,
   } from '../lib/trash.js';
   import { createPagedList } from '../lib/pagedList.svelte.js';
   import Icon from '../components/Icon.svelte';
@@ -44,8 +45,6 @@
     post: 'post', place: 'pin', 'inspect-session': 'inspect', bookmark: 'link',
   };
   const VIDEO_EXTS = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v']);
-  // Entity types backed by a file on disk — deleting them drops the file too.
-  const FILE_BACKED = new Set(['media', 'capture', 'proof', 'post', 'inspect-session', 'note']);
 
   // ── case data ──────────────────────────────────────────────────────────────
   // Bounded loading: a first page (200) off the catalog, not the whole graph on
@@ -548,37 +547,13 @@
   async function askDeleteEntities(ids) {
     const ents = selectable.filter((e) => ids.includes(e.id));
     if (!ents.length) return;
-    const multi = ents.length > 1;
-    // The authoritative plan is the backend's; a single delete previews its
-    // dependents endpoint rather than mirroring the whole graph client-side.
-    let consequences = null;
-    if (!multi) {
-      try {
-        consequences = await api.get(
-          `/api/cases/${caseState.current.id}/entities/${ents[0].id}/dependents`
-        );
-      } catch {
-        /* no preview — the delete still enforces the plan server-side */
-      }
-    }
+    // The dialog and the route are the trash's, shared with every other surface
+    // that deletes several things at once, so one gesture keeps one wording.
     confirmState = {
-      title: multi ? `Delete ${ents.length} items?` : 'Delete everywhere?',
-      message: multi
-        ? `${ents.length} items will be removed from the case and their tools.`
-        : `“${ents[0].label}” will be removed from the case and its tool.`,
-      detail: ents.some((e) => FILE_BACKED.has(e.type))
-        ? `Moves ${multi ? 'the items and their files' : 'the item and its files'} to the case trash.`
-        : `Moves ${multi ? 'the items' : 'the item'} to the case trash.`,
-      consequences,
-      restorable: RESTORABLE,
-      confirmLabel: multi ? 'Delete all' : 'Delete everywhere',
-      tone: 'default',
-      icon: 'trash',
+      ...(await entityDeletePrompt(caseState.current.id, ents)),
       action: async () => {
         const caseId = caseState.current.id;
-        const result = multi
-          ? await api.post(`/api/cases/${caseId}/entities/delete`, { ids: ents.map((e) => e.id) })
-          : await api.del(`/api/cases/${caseId}/entities/${ents[0].id}`);
+        const result = await deleteEntities(caseId, ents.map((e) => e.id));
         await reloadCase();
         selected = [];
         deletedToast(caseId, result, ents[0].label);

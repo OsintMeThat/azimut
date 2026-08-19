@@ -72,6 +72,9 @@ _DMS = (
     r"(?P<deg>\d{1,3})\s*[°d]\s*(?:(?P<min>\d{1,2}(?:\.\d+)?)\s*[’'m]\s*)?"
     r"(?:(?P<sec>\d{1,2}(?:\.\d+)?)\s*[”\"s]\s*)?(?P<hemi>[NSEW])"
 )
+#: Open Location Code's alphabet, read by the plus-code parser, the encoder and
+#: the text scanner's pattern.
+_OLC_ALPHABET = "23456789CFGHJMPQRVWX"
 # UTM: "31U 448251 5411932" (zone, band, easting, northing; spacing loose).
 _UTM = (
     r"(?P<zone>\d{1,2})\s*(?P<band>[C-HJ-NP-X])\s+"
@@ -156,6 +159,103 @@ def parse_plus_code(text: str) -> tuple[float, float] | None:
         res /= 20
     res *= 20  # the last pair's cell size
     return lat - 90 + res / 2, lon - 180 + res / 2
+
+
+# -- scanning free text ----------------------------------------------------------
+#
+# `parse_coords` answers "is this string a coordinate", which is the right
+# question for a field somebody pasted into. Reading a post asks a different one:
+# "does this prose state a position anywhere". So the scan finds *candidates* by
+# shape and hands each one to the parser above — the formats live in one place,
+# and nothing is accepted here that could not be typed into the field.
+#
+# Two of the parsed formats are deliberately not scanned for. A geohash is bare
+# lowercase letters and digits, so half the words in a sentence are one; a UTM
+# reference is three numbers in a row, which prose produces by accident. Both
+# still paste into a field, where the analyst meant them.
+
+#: How many distinct positions one scan reports. A post states one, occasionally
+#: a handful; past this the text is a list and the analyst is better served by
+#: reading it than by a wall of chips.
+MAX_SCANNED_COORDS = 8
+
+#: Decimal degrees written out. The decimal point is required: without it every
+#: "2, 3" in a sentence is a coordinate, and no geolocation is stated to the
+#: nearest degree anyway.
+_SCAN_DEC = r"[-+]?\d{1,3}\.\d+"
+_SCAN_DEC_PAIR = re.compile(rf"({_SCAN_DEC})\s*(?:,|;|\s)\s*({_SCAN_DEC})")
+_SCAN_DMS = re.compile(_DMS, re.IGNORECASE)
+_SCAN_PLUS = re.compile(rf"\b[{_OLC_ALPHABET}]{{8}}\+[{_OLC_ALPHABET}]{{2}}\b")
+_SCAN_MGRS = re.compile(r"\b\d{1,2}\s?[C-HJ-NP-X]\s?[A-Z]{2}\s?\d{2,10}(?:\s\d{1,5})?\b")
+#: Positions carried by a map link rather than written out. One pattern per
+#: convention, each anchored on what makes it unambiguous.
+_SCAN_URL = (
+    re.compile(rf"@({_SCAN_DEC}),({_SCAN_DEC})"),  # Google Maps
+    re.compile(rf"!3d({_SCAN_DEC})!4d({_SCAN_DEC})"),  # a Google place pin
+    re.compile(rf"[?&#](?:q|ll|sll|center|cp)=({_SCAN_DEC})[,~]({_SCAN_DEC})", re.IGNORECASE),
+    re.compile(rf"#map=\d+/({_SCAN_DEC})/({_SCAN_DEC})"),  # OpenStreetMap
+    re.compile(rf"mlat=({_SCAN_DEC})&mlon=({_SCAN_DEC})"),  # an OSM marker
+)
+
+
+def _in_range(lat: float, lon: float) -> bool:
+    return -90 <= lat <= 90 and -180 <= lon <= 180
+
+
+def scan_coords(text: str) -> list[dict[str, Any]]:
+    """Every position a free text states, in the order it states them.
+
+    Each answer carries the substring it was read from, so a surface can show
+    the analyst *what* it found rather than asking them to trust a number that
+    appeared in a field. Duplicates collapse at about a metre: a post that
+    writes its point twice, once in prose and once inside a map link, is
+    offering one position.
+    """
+    found: list[tuple[int, dict[str, Any]]] = []
+
+    def add(at: int, lat: float, lon: float, raw: str, form: str) -> None:
+        if _in_range(lat, lon):
+            found.append((at, {"lat": lat, "lon": lon, "text": raw.strip(), "format": form}))
+
+    for match in _SCAN_DEC_PAIR.finditer(text):
+        add(match.start(), float(match.group(1)), float(match.group(2)), match.group(0), "decimal")
+
+    # A DMS position is two halves written side by side, so the pair is what is
+    # read — one lone "48°51'N" states a parallel, not a point.
+    dms = list(_SCAN_DMS.finditer(text))
+    for first, second in zip(dms, dms[1:]):
+        raw = text[first.start() : second.end()]
+        parsed = parse_coords(raw)
+        if parsed:
+            add(first.start(), parsed[0], parsed[1], raw, "dms")
+
+    for pattern, form in ((_SCAN_PLUS, "plus-code"), (_SCAN_MGRS, "mgrs")):
+        for match in pattern.finditer(text):
+            parsed = parse_coords(match.group(0))
+            if parsed:
+                add(match.start(), parsed[0], parsed[1], match.group(0), form)
+
+    for pattern in _SCAN_URL:
+        for match in pattern.finditer(text):
+            add(
+                match.start(),
+                float(match.group(1)),
+                float(match.group(2)),
+                match.group(0),
+                "map-link",
+            )
+
+    seen: set[tuple[float, float]] = set()
+    answer: list[dict[str, Any]] = []
+    for _, candidate in sorted(found, key=lambda item: item[0]):
+        key = (round(candidate["lat"], 5), round(candidate["lon"], 5))
+        if key in seen:
+            continue
+        seen.add(key)
+        answer.append(candidate)
+        if len(answer) == MAX_SCANNED_COORDS:
+            break
+    return answer
 
 
 # -- formatting ------------------------------------------------------------------
@@ -274,8 +374,8 @@ def parse_geohash(text: str) -> tuple[float, float] | None:
 
 # -- Open Location Code (plus codes) ----------------------------------------------
 # Standard encoding, full 10-character code + '+'. Public-domain algorithm.
-
-_OLC_ALPHABET = "23456789CFGHJMPQRVWX"
+# The alphabet sits up with the other parsing constants: both halves of the
+# format read it, and the text scanner builds its pattern from it at import.
 
 
 def plus_code(lat: float, lon: float) -> str:

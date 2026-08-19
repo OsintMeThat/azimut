@@ -129,6 +129,17 @@ export function creatableTypes() {
   return registry.types.filter((entry) => entry.manual);
 }
 
+/** Every type a sheet row may be promoted into, in menu order.
+ *
+ *  Not the same list as `creatableTypes`, and reading one for the other is what put a
+ *  `claim` in the promote dialog and left `place` out of it: a place is born from the
+ *  map so it is never *created* by hand, but a column of coordinates is the other
+ *  honest way to have one. The registry answers both questions rather than the browser
+ *  guessing from `manual`. */
+export function promotableTypes() {
+  return registry.types.filter((entry) => entry.promotable);
+}
+
 /** Whether this type is entered as a graph record rather than born from a tool. */
 export function isManualEntityType(type) {
   return Boolean(entryFor(type)?.manual);

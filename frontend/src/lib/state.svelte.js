@@ -214,6 +214,15 @@ export const uiState = $state({
   timelineRange: null, // { from, to }
   /** A fact-time range handed to the Satellite map as a temporary event layer. */
   mapTimelineRange: null, // { from, to }
+  /**
+   * A sheet's column of coordinates, handed to the map as a temporary layer.
+   *
+   * The **points travel**, not a query — which is the opposite of `drawInGraph` and for
+   * a reason: a sheet's coordinates are text in a file, not entities the case can be
+   * asked about, so there is no question the map could re-ask. Session-only, consumed
+   * and cleared by Satellite, and never part of a capture or a proof.
+   */
+  mapSheetPoints: null, // { points: [{ lat, lon, label, decimals }], sheet, column }
   gotoCoords: null, // { lat, lon } to fly to in the Satellite tool
   // A point, a date and a time handed over by Coords & Sky: the Satellite tab
   // opens its Sun & moon mode there. Session-only, and never part of a capture

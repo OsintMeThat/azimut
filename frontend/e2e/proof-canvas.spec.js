@@ -335,3 +335,50 @@ test('leaving the window hands Ctrl+V back to the system clipboard', async ({ pa
   await expect(page.locator('.shape-row')).toHaveCount(1); // the shape was not duplicated
   fixture.expectNoUnexpectedRequests();
 });
+
+// Konva ends a corner-resize on a window mouseup and on nothing else. A release
+// the page never sees — the button let go outside the window, the tab alt-tabbed
+// away mid-drag — used to leave the resize running: the panel kept growing under
+// a pointer with no button held, and the scale never reached the document, so the
+// drawn panel, its selection frame and the sidebar percentage all disagreed.
+test('a resize whose release the window never sees still lands, and stops there', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await openProofWithPanel(page);
+
+  await page.locator('.panel-thumb').click();
+  await expect(page.locator('.panel-row')).toHaveClass(/selected/);
+  await expect(page.locator('.scale-val')).toHaveText('100%');
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+
+  // The selection frame is drawn on the canvas, so its corner has no DOM handle
+  // to click; ask the stage where it put it.
+  const anchor = await page.evaluate(() => {
+    const tr = window.Konva.stages[0].find('Transformer')[0];
+    return { x: tr.x() + tr.width(), y: tr.y() + tr.height() };
+  });
+  const canvas = await page.locator('.konva canvas').first().boundingBox();
+  const ax = canvas.x + anchor.x;
+  const ay = canvas.y + anchor.y;
+
+  await page.mouse.move(ax, ay);
+  await page.mouse.down();
+  await page.mouse.move(ax + 60, ay + 40, { steps: 8 });
+  await page.evaluate(() => window.dispatchEvent(new Event('blur'))); // the release that never arrives
+
+  await expect(page.locator('.scale-val')).not.toHaveText('100%');
+  const committed = await page.locator('.scale-val').innerText();
+
+  // The pointer wanders on with no button held. Nothing may follow it.
+  await page.mouse.move(ax + 240, ay + 170, { steps: 10 });
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 100)));
+  await expect(page.locator('.scale-val')).toHaveText(committed);
+
+  await page.mouse.up();
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
+  await expect.poll(() => fixture.proofSaves.length).toBe(1);
+  const saved = fixture.proofSaves[0].spec.panels[0];
+  expect(`${Math.round(saved.scale * 100)}%`).toBe(committed);
+  fixture.expectNoUnexpectedRequests();
+});

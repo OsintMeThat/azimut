@@ -35,7 +35,7 @@ from .. import config, layout
 #: The exports that remember a destination of their own. Notes, proofs and analysis
 #: plates are documents the analyst files somewhere; media is the original coming
 #: back out.
-KINDS = ("notes", "media", "proofs", "views")
+KINDS = ("notes", "media", "proofs", "views", "sheets")
 
 #: The case subdir an export falls back to when its kind has no folder saved.
 CASE_EXPORTS = "exports"

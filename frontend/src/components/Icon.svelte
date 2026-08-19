@@ -45,6 +45,10 @@
     crosshair: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0-1v4m0 12v4M2 12h4m12 0h4',
     user: 'M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm-8 17c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5',
     layers: 'm12 3 9 5-9 5-9-5 9-5Zm-9 9.5 9 5 9-5M3 17l9 5 9-5',
+    // A funnel: what a filter is drawn as everywhere, and deliberately not a
+    // magnifier — that one already means the search over the rows, and two
+    // magnifiers on one screen doing two different things is a third thing to learn.
+    filter: 'M4 5h16l-6.2 7.4V20l-3.6-2.2v-5.4L4 5Z',
     grid: 'M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z',
     // A table: the frame, its header row, one column divider. Distinct from `grid`
     // above, which is four equal cells and means an AOI sweep.

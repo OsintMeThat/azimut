@@ -735,3 +735,15 @@ a:hover {
   font-size: var(--fs-sm);
   font-style: italic;
 }
+
+/* Row and value marks, from the annotation palette. Global because three components
+   paint with them — the grid's rows and chips, the cell editor's offers, the column
+   panel's vocabulary — and a scoped copy per component is three lists that drift. The
+   amber accent is not in here: it means selection, and a row painted with it would read
+   as a selected row. */
+.c-red { --mark: var(--anno-1); --row-tint: rgba(255, 82, 82, 0.1); }
+.c-orange { --mark: var(--anno-6); --row-tint: rgba(255, 158, 64, 0.1); }
+.c-yellow { --mark: var(--anno-3); --row-tint: rgba(255, 215, 64, 0.1); }
+.c-green { --mark: var(--anno-4); --row-tint: rgba(105, 240, 174, 0.1); }
+.c-blue { --mark: var(--anno-2); --row-tint: rgba(64, 196, 255, 0.1); }
+.c-grey { --mark: var(--text-3); --row-tint: rgba(160, 160, 160, 0.08); }

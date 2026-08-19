@@ -214,6 +214,7 @@
     { id: 'media', label: 'Media copies' },
     { id: 'proofs', label: 'Proof PNGs' },
     { id: 'views', label: 'Analysis plates' },
+    { id: 'sheets', label: 'Sheet CSVs' },
   ];
 
   async function resetExportDestination(kind) {

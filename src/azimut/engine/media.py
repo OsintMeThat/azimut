@@ -39,6 +39,19 @@ MAX_PICKER_ITEMS = 20
 _CHROMIUM_BROWSERS = {"chrome", "chromium", "edge", "brave", "vivaldi", "opera", "whale"}
 
 # Best-effort phrases that identify an authentication failure.
+#
+# Some of these are what a site says about content it will not *show* rather than about
+# a session it will not accept, and X is the reason: a tweet a guest cannot read comes
+# back as "Unavailable", word for word what a deleted one gives. Read as a plain failure,
+# that made a login wall unrecoverable — no `needs_auth`, so no prompt, so no cookie
+# source was ever stored and every retry went out cookie-less too.
+#
+# So it is read as a wall, and **the cost of being wrong is a retry that carries the
+# session**: `fetch_url` answers a wall by trying once more with whatever the settings
+# hold, without asking, so a post that is merely deleted sends the analyst's cookies to a
+# host that did not need them. Accepted deliberately — a hundred-row press cannot stop on
+# a question, and the first attempt is always cookie-less — and recorded in SPEC's
+# security posture rather than left to be discovered here.
 _AUTH_FAILURE_PHRASES = (
     "log in",
     "login",
@@ -57,7 +70,22 @@ _AUTH_FAILURE_PHRASES = (
     "forbidden",
     "nsfw",
     "account",
+    # What a site says about content a guest cannot see, which is the same sentence it
+    # says about content that is gone. Deliberately *not* yt-dlp's "no video could be
+    # found in this tweet": that is also what a perfectly public photo-only post gets, and
+    # it is the ordinary road to the image extractor rather than a refusal.
+    "unavailable",
+    "not available",
 )
+
+
+class UnknownLink(RuntimeError):
+    """Neither downloader knows this address.
+
+    Its own type because it is the one failure a session can never fix, and the phrases
+    that identify a wall are loose enough to catch it by accident — which turned "this is
+    not a link Azimut can read" into "sign in to read it".
+    """
 
 
 def _looks_like_auth_failure(message: str) -> bool:
@@ -66,9 +94,19 @@ def _looks_like_auth_failure(message: str) -> bool:
 
 
 def _is_gallery_auth_error(exc: BaseException) -> bool:
-    """gallery-dl raises typed ``AuthenticationError`` / ``AuthorizationError``
-    from ``gallery_dl.exception`` when a link needs a login."""
-    return type(exc).__name__ in {"AuthenticationError", "AuthorizationError"}
+    """Whether gallery-dl stopped on something a session would get past.
+
+    Typed first: it raises ``AuthenticationError`` / ``AuthorizationError`` from
+    ``gallery_dl.exception`` when a link plainly needs a login. Then by message,
+    because the common case is not typed at all — X aborts with a bare
+    ``AbortExtraction('Unavailable')`` for a tweet the guest session cannot read,
+    and reading that as a plain failure is what kept the cookie prompt from ever
+    appearing for the site it is most needed on.
+    """
+    return type(exc).__name__ in {
+        "AuthenticationError",
+        "AuthorizationError",
+    } or _looks_like_auth_failure(str(exc))
 
 
 def _resolve_cookie_file(file: str) -> Path:
@@ -202,6 +240,14 @@ def _write_sidecar(media_path: Path, data: dict[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
+# The files whose origin only the analyst can state: brought in off a disk, out of
+# the clipboard, or placed in the case folder and adopted. Everything else was
+# fetched or made by a tool, and what that tool recorded about where the bytes came
+# from is not something a later edit gets to write over — a case that cannot tell a
+# fetched address from a stated one is holding neither.
+STATED_SOURCE_TYPES = frozenset({"upload", "clipboard", "manual"})
+
+
 def _source_paths(source: dict[str, Any]) -> list[str]:
     """The case files a derivative was produced from, as its producer recorded them.
 
@@ -213,6 +259,43 @@ def _source_paths(source: dict[str, Any]) -> list[str]:
     paths = [source["from"]] if source.get("from") else []
     paths += [p for p in source.get("sources") or [] if p]
     return paths
+
+
+def stage_descriptor(staged_path: Path, source: dict[str, Any]) -> dict[str, Any]:
+    """What a held file is, without filing it.
+
+    A download that is going to be reviewed before it lands answers with this
+    instead of an entity: the same facts a sidecar would carry, read off the
+    bytes that are already on disk, so a preview can say whether the case
+    already holds them without the case holding them yet.
+    """
+    return {
+        "filename": staged_path.name,
+        "title": staged_path.stem,
+        "kind": media_kind(staged_path.name),
+        "sha256": sha256_file(staged_path),
+        "size": staged_path.stat().st_size,
+        "source": source,
+    }
+
+
+def _deliver(
+    case: Case,
+    media_path: Path,
+    source: dict[str, Any],
+    *,
+    by: str = "import",
+    stage: Path | None = None,
+) -> dict[str, Any]:
+    """File a freshly downloaded file, or hold it where the caller asked.
+
+    Every download path ends here. ``stage`` is what the proof importer passes:
+    the bytes stay outside the library until the analyst approves what they are
+    about to create, and a cancelled import leaves nothing behind.
+    """
+    if stage is None:
+        return _register(case, media_path, source, by=by)
+    return {"multi": False, "staged": stage_descriptor(media_path, source)}
 
 
 def _register(
@@ -299,13 +382,25 @@ def _register(
     return {"duplicate": False, "entity": entity, "item": indexed}
 
 
-def import_stream(case: Case, filename: str, stream: BinaryIO) -> dict[str, Any]:
-    """Import an uploaded file into the case."""
+def import_stream(
+    case: Case, filename: str, stream: BinaryIO, *, source_url: str = ""
+) -> dict[str, Any]:
+    """Import an uploaded file into the case.
+
+    ``source_url`` is where the analyst says the file came from: a file downloaded
+    by hand and then imported has an origin the bytes cannot state, and only the
+    person who fetched it knows it. Stated, never observed — the type stays
+    ``upload``, so a reader can always tell this URL from the one a download
+    really pulled from.
+    """
     media_dir = case.subdir("media")
     dest = unique_path(media_dir, safe_filename(filename))
     with dest.open("wb") as out:
         shutil.copyfileobj(stream, out)
-    return _register(case, dest, {"type": "upload", "original_name": filename})
+    source: dict[str, Any] = {"type": "upload", "original_name": filename}
+    if source_url:
+        source["url"] = source_url
+    return _register(case, dest, source)
 
 
 def import_paste(
@@ -501,6 +596,16 @@ def import_produced_file(
     return _register(case, dest, source, by=by)
 
 
+def _entry_kind(entry: dict[str, Any] | None) -> str:
+    """What an extracted entry would land as, read off its extension.
+
+    Before the download rather than after: a caller that has nowhere to put a video
+    should hear so while there is still another extractor to try.
+    """
+    ext = (entry or {}).get("ext")
+    return media_kind(f"file.{ext}") if ext else "video"
+
+
 def _picker_items(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     items = []
     for i, entry in enumerate(entries, start=1):
@@ -526,6 +631,7 @@ def _register_downloaded_item(
     *,
     title: str | None,
     source_extra: dict[str, Any],
+    stage: Path | None = None,
 ) -> dict[str, Any]:
     """Shared tail for the non-yt-dlp download paths (gallery-dl, the Telegram
     photo scraper): write ``content`` into the case's media dir, register it,
@@ -544,13 +650,13 @@ def _register_downloaded_item(
         )
         tmp_path = tmp_dir / fname
         tmp_path.write_bytes(content)
-        dest = unique_path(media_dir, fname)
+        dest = unique_path(stage or media_dir, fname)
         shutil.move(str(tmp_path), str(dest))
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
     source = {"type": "download", "url": post_url, "webpage_url": post_url, **source_extra}
-    result = _register(case, dest, source)
+    result = _deliver(case, dest, source, stage=stage)
     result["multi"] = False
     return result
 
@@ -577,7 +683,13 @@ def _gallery_dl_item(file_url: str, kwdict: dict[str, Any]) -> dict[str, Any]:
 
 
 def _register_gallery_dl_item(
-    case: Case, extractor, post_url: str, item: dict[str, Any], *, title: str | None = None
+    case: Case,
+    extractor,
+    post_url: str,
+    item: dict[str, Any],
+    *,
+    title: str | None = None,
+    stage: Path | None = None,
 ) -> dict[str, Any]:
     resp = extractor.request(item["url"])
     fname = f"{item['filename']}.{item['extension']}" if item["extension"] else item["filename"]
@@ -587,6 +699,7 @@ def _register_gallery_dl_item(
         fname,
         resp.content,
         title=title,
+        stage=stage,
         source_extra={
             "downloader": "gallery-dl",
             "title": item["title"],
@@ -605,6 +718,7 @@ def _download_via_gallery_dl(
     index: int | None = None,
     title: str | None = None,
     cookies: dict[str, Any] | None = None,
+    stage: Path | None = None,
 ) -> dict[str, Any]:
     """Fallback for links yt-dlp can't extract at all.
 
@@ -618,7 +732,7 @@ def _download_via_gallery_dl(
     _apply_gallery_cookies(cookies)
     extractor = gdl_extractor.find(url)
     if extractor is None:
-        raise RuntimeError(f"no extractor (yt-dlp or gallery-dl) recognizes this link: {url}")
+        raise UnknownLink(f"no extractor (yt-dlp or gallery-dl) recognizes this link: {url}")
 
     items = [_gallery_dl_item(msg[1], msg[2]) for msg in extractor if msg[0] == 3]  # Message.Url
     if not items:
@@ -634,24 +748,25 @@ def _download_via_gallery_dl(
         }
 
     picked = items[(index or 1) - 1]
-    return _register_gallery_dl_item(case, extractor, url, picked, title=title)
+    return _register_gallery_dl_item(case, extractor, url, picked, title=title, stage=stage)
 
 
 _TELEGRAM_POST_RE = re.compile(r"^https?://(www\.)?(t|telegram)\.me/[^/]+/\d+")
 
 
-def _telegram_extra_photos(url: str) -> list[dict[str, Any]]:
+def _telegram_embed_media(url: str) -> tuple[list[dict[str, Any]], bool]:
     """yt-dlp's Telegram extractor only regex-matches ``<video>`` players in
     the public embed page — it has no notion of photos at all, so a mixed
     video+photo album silently loses its photos (verified against a real
     post: 2 videos + 2 photos in the HTML, yt-dlp reports only the 2 videos).
     gallery-dl has no Telegram extractor either. Scrape the same embed page
-    ourselves for photo attachments to fill that gap. Best-effort: any
-    failure (markup change, non-Telegram URL, network hiccup) yields ``[]``
-    rather than breaking the main download flow.
+    ourselves for photo attachments to fill that gap and notice the explicit
+    ``Media is too big`` wall. Best-effort: any failure (markup change,
+    non-Telegram URL, network hiccup) yields no media and no wall rather than
+    breaking the main download flow.
     """
     if not _TELEGRAM_POST_RE.match(url):
-        return []
+        return [], False
     import requests
 
     try:
@@ -660,16 +775,28 @@ def _telegram_extra_photos(url: str) -> list[dict[str, Any]]:
         resp.raise_for_status()
         html = resp.text
     except Exception:
-        return []
+        return [], False
 
     urls = re.findall(
         r"tgme_widget_message_photo_wrap[^\"]*\"[^>]*background-image:url\('([^']+)'\)", html
     )
-    return [{"url": u} for u in dict.fromkeys(urls)]  # de-dup, keep order
+    too_large = bool(
+        re.search(
+            r'message_media_not_supported_label"[^>]*>\s*Media is too big\s*<',
+            html,
+            re.IGNORECASE,
+        )
+    )
+    return [{"url": u} for u in dict.fromkeys(urls)], too_large  # de-dup, keep order
 
 
 def _register_telegram_photo(
-    case: Case, post_url: str, photo: dict[str, Any], *, title: str | None = None
+    case: Case,
+    post_url: str,
+    photo: dict[str, Any],
+    *,
+    title: str | None = None,
+    stage: Path | None = None,
 ) -> dict[str, Any]:
     import requests
 
@@ -684,12 +811,40 @@ def _register_telegram_photo(
         f"{uuid.uuid4().hex[:10]}{ext}",
         resp.content,
         title=title,
+        stage=stage,
         source_extra={
             "downloader": "telegram-scrape",
             "title": photo.get("title") or "Telegram photo",
             "extractor": "telegram-scrape",
         },
     )
+
+
+def fetch_url(case: Case, url: str, **asked: Any) -> dict[str, Any]:
+    """Download, and use the session the settings hold if a wall comes back.
+
+    The app's rule is that nothing reaches the network unless the analyst's action needs
+    it, and reading a browser's cookie store is reading their credentials for every site —
+    so it is asked for, once, and it is stored (`download_cookies`). What was missing was
+    the other half: **an answer given once should not be asked for again.** Every road went
+    out cookie-less, hit the wall, and put the question back on screen, which for a hundred
+    rows of a binder is a hundred questions with the same answer.
+
+    So: cookie-less first, still, because public media must never touch the session. Then,
+    on a wall and only on a wall, once, with whatever the settings hold. A caller that
+    already passed a session, or a workspace with none configured, is answered unchanged —
+    the prompt is what stores one, and it still appears when there is nothing to use.
+
+    The retry is what makes a loose wall phrase cost more than a question: a dead link that
+    only says "Unavailable" gets the session too. See `_AUTH_FAILURE_PHRASES`.
+    """
+    answer = download_url(case, url, **asked)
+    if not answer.get("needs_auth") or asked.get("cookies") is not None:
+        return answer
+    session = cookies_from_preference(config.load_settings().get("download_cookies"))
+    if session is None:
+        return answer
+    return download_url(case, url, **{**asked, "cookies": session})
 
 
 def _fallback_or_needs_auth(
@@ -700,6 +855,7 @@ def _fallback_or_needs_auth(
     title: str | None,
     cookies: dict[str, Any] | None,
     yt_auth: bool,
+    stage: Path | None = None,
 ) -> dict[str, Any]:
     """yt-dlp found nothing — try gallery-dl, but turn a login wall into a
     ``needs_auth`` signal instead of an error, so the UI can offer cookies.
@@ -709,10 +865,22 @@ def _fallback_or_needs_auth(
     as the underlying error rather than an endless re-prompt.
     """
     try:
-        return _download_via_gallery_dl(case, url, index=index, title=title, cookies=cookies)
+        return _download_via_gallery_dl(
+            case, url, index=index, title=title, cookies=cookies, stage=stage
+        )
+    except UnknownLink:
+        # Not knowing the address is not a refusal — but yt-dlp having *seen* a wall is,
+        # and gallery-dl simply not being the tool for that site does not undo it.
+        if cookies is None and yt_auth:
+            return {"needs_auth": True, "platform": sys.platform}
+        raise
     except Exception as exc:
         if cookies is None and (yt_auth or _is_gallery_auth_error(exc)):
             return {"needs_auth": True, "platform": sys.platform}
+        if cookies is not None and (yt_auth or _is_gallery_auth_error(exc)):
+            # Tried with a session and still refused. Said as such rather than as the
+            # platform's own wording, which is a tombstone the analyst cannot act on.
+            return {"needs_auth": True, "platform": sys.platform, "refused": True}
         raise
 
 
@@ -724,11 +892,13 @@ def download_url(
     index: int | None = None,
     title: str | None = None,
     cookies: dict[str, Any] | None = None,
+    stage: Path | None = None,
+    wants: str = "",
 ) -> dict[str, Any]:
     """Resolve and download a URL via yt-dlp. Blocking — run in a worker.
 
     One extraction total (plus, for Telegram links, one lightweight extra
-    fetch — see ``_telegram_extra_photos``). Without ``index``, a post with
+    fetch — see ``_telegram_embed_media``). Without ``index``, a post with
     several attachments (a tweet with several photos, a mixed Telegram
     album, …) is *not* downloaded — ``{"multi": True, "items": [...]}`` is
     returned instead so the caller can show a picker and call back with the
@@ -737,6 +907,20 @@ def download_url(
 
     Falls back to gallery-dl (see ``_download_via_gallery_dl``) for links
     yt-dlp can't extract at all — most commonly image-only posts.
+
+    ``stage`` diverts the result: the file lands in that directory and comes back
+    as ``{"staged": {...}}`` rather than as a media entity, so a caller that
+    reviews before filing (the proof importer) holds the bytes without the case
+    holding them. Everything before the last step is identical.
+
+    ``wants="image"`` says the caller has somewhere for a picture and nowhere for
+    a video — a proof's panel is the only such slot. yt-dlp reads posts for their
+    *video*, so a post publishing a picture beside a quoted clip hands back the
+    clip and the picture stays invisible: the image extractor is the one that can
+    reach it, and today it is only tried when yt-dlp found nothing at all. With
+    ``wants`` set, a pick of the wrong kind counts as nothing found. Any other
+    value only records what the caller was after; the fallback is gallery-dl, and
+    gallery-dl fetches images.
 
     ``cookies`` is a login session for gated media (``{"browser": name}`` or
     ``{"file": path}``); ``None`` (the default) downloads cookie-less, so public
@@ -757,7 +941,10 @@ def download_url(
     tmp_dir = media_dir / ".dl" / uuid.uuid4().hex[: layout.DOWNLOAD_ID_LENGTH]
     ensure_dir(tmp_dir)
 
-    extra_photos = _telegram_extra_photos(url)  # [] — and free — for non-Telegram links
+    # Both values come from the same embed fetch. A large Telegram video has no
+    # URL in that page, only an instruction to open the app; keep that distinct
+    # from an extractor failure so the UI can give the useful next step.
+    extra_photos, telegram_too_large = _telegram_embed_media(url)
 
     ydl_opts = {
         "outtmpl": str(tmp_dir / "%(title).120B [%(id)s].%(ext)s"),
@@ -790,7 +977,7 @@ def download_url(
         yt_auth = False
         try:
             info = ydl.extract_info(url, download=False)
-            entries = [e for e in (info.get("entries") or []) if e]
+            entries = [e for e in ((info or {}).get("entries") or []) if e]
         except yt_dlp.utils.DownloadError as exc:
             yt_auth = _looks_like_auth_failure(str(exc))
             info = None
@@ -800,7 +987,8 @@ def download_url(
             if info is None and not entries:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
                 return _fallback_or_needs_auth(
-                    case, url, index=index, title=title, cookies=cookies, yt_auth=yt_auth
+                    case, url, index=index, title=title, cookies=cookies, yt_auth=yt_auth,
+                    stage=stage,
                 )
             target_info = entries[0] if entries else info
         else:
@@ -809,8 +997,11 @@ def download_url(
 
             if total == 0:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
+                if telegram_too_large:
+                    return {"telegram_only": True}
                 return _fallback_or_needs_auth(
-                    case, url, index=index, title=title, cookies=cookies, yt_auth=yt_auth
+                    case, url, index=index, title=title, cookies=cookies, yt_auth=yt_auth,
+                    stage=stage,
                 )
 
             if index is None and 1 < total <= MAX_PICKER_ITEMS:
@@ -846,9 +1037,19 @@ def download_url(
                 # not a yt-dlp entry — one of the extra Telegram photos
                 shutil.rmtree(tmp_dir, ignore_errors=True)
                 photo = extra_photos[pick - yt_count - 1]
-                return _register_telegram_photo(case, url, photo, title=title)
+                return _register_telegram_photo(case, url, photo, title=title, stage=stage)
 
             target_info = entries[pick - 1] if entries else info
+
+        # A slot that holds a picture is not served by the video this post quotes.
+        # Handing it back would fill the panel with fifty seconds of footage and say
+        # so only at the preview, two screens later.
+        if wants == "image" and _entry_kind(target_info) != "image":
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            return _fallback_or_needs_auth(
+                case, url, index=index, title=title, cookies=cookies, yt_auth=yt_auth,
+                stage=stage,
+            )
 
         # download from the info we already extracted — no second extraction
         info = ydl.process_ie_result(target_info, download=True)
@@ -872,7 +1073,7 @@ def download_url(
         if display_title
         else original
     )
-    dest = unique_path(media_dir, filename)
+    dest = unique_path(stage or media_dir, filename)
     shutil.move(str(downloaded), str(dest))
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -888,7 +1089,7 @@ def download_url(
         "extractor": info.get("extractor"),
         "duration": info.get("duration"),
     }
-    result = _register(case, dest, source)
+    result = _deliver(case, dest, source, stage=stage)
     result["multi"] = False
     return result
 
@@ -1135,6 +1336,11 @@ def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, 
     same filing may already be writing the file's own facts to the same sidecar.
     Unguarded, whichever finished second dropped the other's fields — and the one
     users noticed was the name they had just typed.
+
+    ``source_url`` states where a collected file came from, and is refused on a
+    download: that URL is what the app actually fetched, and letting a later edit
+    write over it would leave the case unable to say which of the two it is
+    holding. An empty value drops the claim.
     """
     if "title" in patch:
         renamed = rename_media(case, rel_path, patch["title"])
@@ -1159,6 +1365,18 @@ def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, 
                 else:
                     data[key] = str(val)
 
+        if "source_url" in patch:
+            source = data.get("source")
+            if not isinstance(source, dict):
+                source = {}
+            if source.get("type") not in STATED_SOURCE_TYPES:
+                raise CaseError("only a file brought in by hand can be given a source")
+            stated = str(patch["source_url"] or "")
+            source = {key: value for key, value in source.items() if key != "url"}
+            if stated:
+                source["url"] = stated
+            data["source"] = source
+
         _write_sidecar(media_path, data)
 
         # mirror onto the media entity (label mirrors the title; folder/notes attrs)
@@ -1170,6 +1388,10 @@ def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, 
                 attrs["folder"] = patch["folder"] or ""
             if "notes" in patch:
                 attrs["notes"] = patch["notes"] or ""
+            if "source_url" in patch:
+                # The attribute, never `provenance.source`: provenance records the act
+                # that filed the file, and that act was an import with nothing stated.
+                attrs["source_url"] = patch["source_url"] or ""
             if attrs:
                 entity_patch["attrs"] = attrs
             if entity_patch:
