@@ -76,6 +76,12 @@ presents it as this logical shape:
   SQLite browse index mirrors searchable fields, plus whether that position
   exists. Entities retain only what the graph needs for identity, links and
   deduplication.
+- A media's origin is `source.url`, mirrored onto `attrs.source_url`, and
+  `source.type` says how it was come by: a `download` fetched that address, while
+  an `upload`, a `clipboard` paste or an adopted `manual` file carries what the
+  analyst stated for it. Only those three can be given or corrected one; what a
+  tool recorded is never written over, since a case that cannot tell a fetched
+  address from a stated one is holding neither.
 
 ## 2. Entity
 
@@ -581,6 +587,70 @@ a finding, so the split is the registry's and every surface obeys it: **Add rela
 never turns into **mentions**, **Add mention** has its own target search, an edge is
 only reworded inside its action, and a mention carries no rating (`ratable: false`).
 
+### Promotion, which is how a sheet reaches all of this ✅
+
+A sheet says what is being **checked**; the graph says what the case **believes**.
+Promotion is the one road between them and it runs one way: nothing reads the graph
+back into a cell. **One declaration, one press** (`engine/sheetpass.py`): a binder's line
+holds several of these at once, and only the first is one row per thing
+(`engine/sheetpromote.py`, `engine/sheetclaims.py`).
+
+| Mode | What it makes | Why it is its own answer |
+|---|---|---|
+| a **row** | one entity of the chosen type | the ordinary case |
+| a **group of rows** | one entity, one place per point | a cross-border event is two lines, one point per country; row by row that is two events |
+| a **column's words** | one entity per distinct **word** | four hundred rows hold forty pieces of equipment, and a cell may hold three |
+| a column of **addresses** | a `bookmark` per URL | a cell holds an address, so it becomes the thing that claims to be one |
+| a column of **row names** | `part-of` / `member-of` edges | an order of battle held as text, with a validation that has already decayed |
+| a column of **times** | a `claim` per row | the binder holds a *reasoning about* a time across three columns, not a time |
+
+**And the edges between the columns**, which is what no single-column road could draw: for
+each pair the analyst joined, the vocabulary is asked what it allows between their two
+types (`pair_verbs`), only the pairs with an answer are offered, and the verb is re-checked
+against the registry before anything is written. They enter `confirmed` — the analyst chose
+the reading and pressed the button — and carry the pass's one confidence where the edge is
+`ratable`. An edge is drawn only where **both** ends resolved: a row whose unit is ambiguous
+keeps its entities and loses its edges, with the reason.
+
+Six rules hold across the modes, and they are the reason it is safe to press twice.
+
+**Nothing that owns a file is born from a cell.** A `media`, a `capture`, a `proof`, a
+`post`, an `inspect-session` hold bytes; a cell holds an address. They exist only where the
+app itself fetched the file — the proof import's road (`engine/proofimport.py`), and the
+build a geolocation index presses (`engine/sheetproofs.py`), which is that same road driven
+a row at a time. The rule is not about where the request came from but about who fetched
+the bytes: the build downloads them, so it may state `derived-from`, and the pass never
+touches the network, so it may not.
+
+**A name is not an identity.** Two people share a name, so a label the case already
+holds is *offered* and never merged into on its own. The exception is the
+`identifier` family, where the value **is** the identity (§2).
+
+**The sidecar remembers what came from here.** A promoted cell points at the entity it
+made (`links`), a promoted word points at what it means (`values`), so the second
+press updates instead of minting a twin. What the cell **said** at that moment is kept
+too (`promoted`), which is what lets a row say it has moved on since — a link alone
+cannot, being the same link after the label is rewritten.
+
+**Only the columns asked for travel.** The label, the mapped fields, the point. A
+promotion that swept every column into the graph would put a worklist's private notes
+into the case's own record of a subject.
+
+**A point is a second entity unless the row *is* a place.** Writing a latitude onto a
+structure would put a field on it that nothing in the app declares, shows or edits, so
+the coordinates become a `place` joined by whichever verb the vocabulary allows
+(`sited-at` for a structure), and a type it allows none for is refused at the door.
+
+**An inferred time is a Claim, never a cell.** Ten videos carrying an offset against
+one **sync point** get an absolute time the moment that point is dated — `probable`,
+with the reasoning naming it. Writing that timestamp into a `when` cell would present a
+deduction as an observation. An estimated hour is likewise recorded one rung below an
+established one, because the binder kept two columns for exactly that difference.
+
+**Deleting a sheet keeps what it established.** Its `mentions` edges go with it and
+the entities stay: throwing the worklist away is throwing the worklist away, not the
+subjects it settled.
+
 ### The claim, and how sure it is ✅
 
 A `claim` is a statement node. It points `about` at subjects, `at` at places and
@@ -806,6 +876,18 @@ the moment somebody commits to it. That moment is the proof.
 
 `proof_place_auto` (Settings → General → Proofs, on by default) decides whether
 the save files it or the composer asks first. Both write the same thing.
+
+**An imported proof is filed by the same rules** (`engine/proofimport.py`). A
+post that publishes a geolocation is a proof and its material written in prose,
+so the import files the footage the post points at as `media`, each picture it
+published as a `media` that proof composes, and writes their spec through the
+composer's own save route — one panel per published picture, since a post
+publishing a set published one geolocation. Nothing about the vocabulary changes: the proof
+`depicts`, the footage takes the verb POV picks, and the point deduplicates on
+`COORD_KEY` like any other. The footage reaches the point because the picture
+records `derived-from` it — the derivation closure is what the placement reads,
+so a source that is merely named in the text and never downloaded is a proof with
+no material rather than an edge stated about a file the case does not hold.
 
 ### Lenses ✅
 

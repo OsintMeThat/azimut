@@ -45,6 +45,13 @@ dependencies = [
     # correctly in one document (see docs, and the shaping note below).
     "fpdf2>=2.8,<3",
     "markdown-it-py>=4.0,<5",
+    # Reading a multi-tab workbook into one sheet per tab (engine/sheetxlsx.py). The
+    # binders this tool replaces arrive as .xlsx with five or six tabs, and asking the
+    # analyst to export each one to CSV by hand is asking them not to bother. Pure
+    # Python with its one pure-Python dependency (et-xmlfile), so the three binaries
+    # get the same reader and no build step. Reading only: the case's own table is a
+    # CSV, and writing xlsx would be a second artifact format to keep honest.
+    "openpyxl>=3.1,<4",
     # Text shaping, and not optional: without it Arabic comes out unjoined and
     # Burmese mis-stacked — text that looks like text and is wrong, which is
     # worse than text that is missing. fpdf2 uses it when it is importable,

@@ -44,22 +44,39 @@ class BulkBodyLimit:
     """
 
     #: `(method, tail, module, attribute)`, where the tail is the path segments after
-    #: `/api/cases/{case_id}/` and `*` stands for one segment of any value.
+    #: `/api/cases/{case_id}/`. `*` stands for one segment of any value and a trailing
+    #: `...` for any number of further segments — which is what every road out of a
+    #: sheet's promotion needs, since each of them posts the whole table and each has a
+    #: `/preview` beside it. Spelling those out one by one is how `promote/preview` went
+    #: unbounded while `promote` was bounded, and then how `move/undo`, `proofs`, `parse`
+    #: and `meta` went the same way. Which is why the gate is a test rather than this
+    #: list: `test_sheets.py` enumerates the routers and fails on a body that can carry a
+    #: table and answers no limit.
+    ANY = "..."
     ROUTES: tuple[tuple[str, tuple[str, ...], str, str], ...] = (
         ("POST", ("notes", "pdf"), "notes", "MAX_PDF_BODY_BYTES"),
         ("POST", ("plates",), "plates", "MAX_PLATE_BODY_BYTES"),
+        ("POST", ("sheets",), "sheets", "MAX_SHEET_BODY_BYTES"),
         ("POST", ("sheets", "import"), "sheets", "MAX_SHEET_BODY_BYTES"),
-        ("PUT", ("sheets", "*"), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "parse"), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "*", "promote", ANY), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "*", "move", ANY), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "*", "proofs", ANY), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "*", "points"), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "*", "csv"), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("PUT", ("sheets", "*", ANY), "sheets", "MAX_SHEET_BODY_BYTES"),
     )
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    @staticmethod
-    def _matches(tail: tuple[str, ...], route: tuple[str, ...]) -> bool:
-        return len(tail) == len(route) and all(
-            want in ("*", have) for want, have in zip(route, tail)
-        )
+    @classmethod
+    def _matches(cls, tail: tuple[str, ...], route: tuple[str, ...]) -> bool:
+        open_ended = route[-1:] == (cls.ANY,)
+        wanted = route[:-1] if open_ended else route
+        if len(tail) < len(wanted) or (not open_ended and len(tail) != len(wanted)):
+            return False
+        return all(want in ("*", have) for want, have in zip(wanted, tail))
 
     @classmethod
     def _limit(cls, scope: Scope) -> int | None:
@@ -261,8 +278,10 @@ def create_app() -> FastAPI:
 
     from .api import (
         analysis_views, cases, drafts, events, files, folders, ingest, inspect, media,
-        notes, plates, proofimports, proofs, satellite, settings, sheets, templates,
+        notes, plates, proofimports, proofs, satellite, settings, sheetproofs, sheets,
+        templates,
     )
+    from .engine import sheets as sheet_engine
 
     app.include_router(cases.router)
     app.include_router(cases.workspace_router)
@@ -270,6 +289,8 @@ def create_app() -> FastAPI:
     app.include_router(notes.router)
     app.include_router(plates.router)
     app.include_router(sheets.router)
+    # The one sheet road that fetches bytes, so its own module and its own job.
+    app.include_router(sheetproofs.router)
     app.include_router(media.router)
     app.include_router(inspect.router)
     app.include_router(satellite.router)
@@ -282,6 +303,15 @@ def create_app() -> FastAPI:
     app.include_router(ingest.router)
     app.include_router(events.router)
     app.include_router(templates.router)
+    # A sheet's CSV that the filesystem would not take. Handled once for the app rather
+    # than at each of the ten routes that write one: the failure is the same wherever it
+    # happens — a spreadsheet holding the file open on Windows, a read-only folder — and
+    # its answer does not depend on which route hit it. A route added later cannot forget
+    # this, which a per-route `except` could.
+    @app.exception_handler(sheet_engine.SheetUnwritable)
+    async def _sheet_unwritable(_: Request, exc: sheet_engine.SheetUnwritable) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
     # extension-origin CORS, /api/ingest/* only (see ingest.install_cors)
     ingest.install_cors(app)
     # Inside the local guard: a request that isn't allowed to reach the app at

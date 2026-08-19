@@ -1,0 +1,7 @@
+id,Title,Country,Coordinates,Source
+r1,South quay,Atlantis,"48.85660, 2.35220",https://example.test/a
+r2,North bridge,Atlantis,To be found,https://example.test/b
+r3,East station,Borduria,"48.85, 2.35",https://example.test/c
+r4,West depot,Borduria,,https://example.test/d
+r5,Old mill,Atlantis,"48°51'24\"N 2°21'08\"E",
+r6,River lock,Atlantis,-,https://example.test/f
