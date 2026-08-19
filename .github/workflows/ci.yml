@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend (${{ matrix.os }}, py${{ matrix.python }})
+    name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -30,19 +30,54 @@ jobs:
         # Windows exe was a guess; this is what makes "works everywhere" checkable.
         # Filesystem behaviour is where they actually differ — engine/scrapers.py
         # swaps directories, and Windows won't delete an open file.
+        #
+        # `tests` is what each box runs. Everywhere but Windows that is the whole
+        # suite in one job, because -n auto finishes it in about three minutes.
+        # Windows pays roughly eight times as much per test — every one of these
+        # builds a case, and a case is a database, folders and files — so it stays
+        # split, and the three ranges are cut on measured cost rather than on the
+        # alphabet: the five old shards ran 11%, 19%, 11%, 21% and 38% of the work,
+        # which is one job holding everything up while four idle.
         include:
-          - os: ubuntu-latest
+          - name: Backend (ubuntu-latest, py3.12)
+            os: ubuntu-latest
             python: "3.12"
-          - os: macos-latest
+            tests: tests
+          - name: Backend (macos-latest, py3.12)
+            os: macos-latest
             python: "3.12"
-          - os: windows-latest
+            tests: tests
+          - name: Backend (windows-latest, py3.12, A-L)
+            os: windows-latest
             python: "3.12"
-          - os: ubuntu-latest
+            tests: tests/test_[a-l]*.py
+          - name: Backend (windows-latest, py3.12, M-R)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_[m-r]*.py
+          - name: Backend (windows-latest, py3.12, S-Z)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_[s-z]*.py
+          - name: Backend (ubuntu-latest, py3.11)
+            os: ubuntu-latest
             python: "3.11"  # the floor in requires-python
-          - os: ubuntu-latest
+            tests: tests
+          - name: Backend (ubuntu-latest, py3.13)
+            os: ubuntu-latest
             python: "3.13"  # the ceiling we've tested against
+            tests: tests
     steps:
       - uses: actions/checkout@v7
+      # Defender reads every file as it is written, and this suite writes a whole
+      # case per test. Excluding the three directories the run works in is the
+      # difference between a Windows job that fits the timeout and one that does
+      # not. Best-effort: a runner that refuses the call is slow, not broken.
+      - name: Keep Defender out of the directories the suite writes
+        if: runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: Add-MpPreference -ExclusionPath $env:RUNNER_TEMP, $env:TEMP, $env:GITHUB_WORKSPACE
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
@@ -53,14 +88,13 @@ jobs:
       # --check fails if uv.lock drifted from pyproject.toml (forgot `uv lock`).
       - run: uv lock --check
       - run: uv sync --frozen --extra dev
-      # -n auto spreads the suite over the runner's cores, which is what replaced
-      # the five alphabetical Windows shards: they existed to keep one serial
-      # Windows run under the timeout, and splitting by first letter balanced
-      # nothing — the shard holding test_sheets.py did most of the work while the
-      # others idled. Every test builds its case under `tmp_path` (see
-      # tests/conftest.py), so there is nothing for two workers to collide over.
+      # -n auto spreads the work over the runner's cores. Every test builds its
+      # case under `tmp_path` (see tests/conftest.py) and nothing is scoped wider
+      # than a test, so there is nothing for two workers to collide over. bash on
+      # every OS so the Windows ranges glob the same way they do here.
       - name: Run backend suite
-        run: uv run pytest -q -n auto --durations=20 --durations-min=1
+        shell: bash
+        run: uv run pytest -q -n auto ${{ matrix.tests }} --durations=20 --durations-min=1
 
   lint:
     name: Lint & type-check (backend)
