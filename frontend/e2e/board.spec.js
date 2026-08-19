@@ -84,12 +84,18 @@ async function ask(page, question) {
     .click();
 }
 
-/** The identity cell, excluding the action cell whose accessible name repeats it. */
+/**
+ * The identity cell, which is the one that opens Details.
+ *
+ * Not simply the first cell: the tick box sits in front of it and swallows the click
+ * that lands on it, which is the whole point of a selection column. Excluding the
+ * action cell too, whose accessible name repeats the entity's.
+ */
 function entityCell(page, name) {
   return page
     .locator('tbody tr')
     .filter({ has: page.locator('.name', { hasText: name }) })
-    .locator('td')
+    .locator('td:not(.pick)')
     .first();
 }
 
@@ -415,8 +421,9 @@ test('keeps both readings when relation endpoints share a type', async ({ page }
 
 test('sorts on a heading, and reverses on a second click', async ({ page }) => {
   await openBoard(page);
+  // The cell after the tick box, rather than the first one, which the tick box is.
   const names = async () =>
-    (await page.locator('tbody tr td:first-child').allInnerTexts()).map((t) => t.trim());
+    (await page.locator('tbody tr td.pick + td').allInnerTexts()).map((t) => t.trim());
 
   await page.getByRole('button', { name: 'Name' }).click();
 
@@ -442,7 +449,7 @@ test('sorts by type too, so a mixed case can be read a family at a time', async 
 
   await page.getByRole('button', { name: 'Type' }).click();
 
-  expect(await page.locator('tbody tr td:nth-child(2)').allInnerTexts()).toEqual([
+  expect(await page.locator('tbody tr td.pick + td + td').allInnerTexts()).toEqual([
     'Bookmark', 'Media', 'Place',
   ]);
 });
@@ -659,7 +666,7 @@ test('draws a document as a document, never as a photograph', async ({ page }) =
   await openBoard(page, { catalog: [catalog[0], plan] });
   await expect(page.locator('tbody tr')).toHaveCount(2);
 
-  const icons = await page.locator('tbody tr td:first-child svg path').evaluateAll((nodes) =>
+  const icons = await page.locator('tbody tr td.pick + td svg path').evaluateAll((nodes) =>
     nodes.map((node) => node.getAttribute('d'))
   );
 
