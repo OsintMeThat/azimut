@@ -548,7 +548,14 @@ class SqliteCase:
         conn = sqlite3.connect(self.db_path, isolation_level=None)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 5000")
+        # Long enough for a queue, not long enough to hide a deadlock: every write goes
+        # through BEGIN IMMEDIATE, so no waiter is queued behind a lock it holds itself,
+        # and what it waits on is the fsync `synchronous = FULL` charges per commit.
+        # Five seconds held on Linux and ran out on Windows. Eight concurrent downloads
+        # open eighty of these between them, ten per filed item; the whole lot costs two
+        # seconds of lock on Linux and enough more on Windows that one of the eight gave
+        # up on a queue that was still moving.
+        conn.execute("PRAGMA busy_timeout = 30000")
         conn.execute("PRAGMA synchronous = FULL")
         return conn
 
