@@ -189,8 +189,8 @@
         {#if loading}
           Looking.
         {:else if query.trim() || type}
-          Nothing in this case matches. {total} {total === 1 ? 'entity' : 'entities'} filed
-          in all — clear the box to see them.
+          Nothing in this case matches. {total} {total === 1 ? 'entity' : 'entities'} filed in
+          all; clear the box to see them.
         {:else}
           This case holds no entities yet.
         {/if}
@@ -218,7 +218,7 @@
   .picker { display: flex; flex-direction: column; min-height: 0; }
   .types { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
   .chip {
-    display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px;
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px;
     border: 1px solid var(--border); border-radius: var(--r-sm);
     background: var(--bg-2); color: var(--text-2); font-size: var(--fs-xs);
   }

@@ -148,6 +148,68 @@ describe('pasting into a table', () => {
     expect(next.rows[0]).toEqual(['A', 'r1', 'C']);
   });
 
+  it('lands on the rows that are on screen, not on the ones under them in the file', () => {
+    // Three rows of a filtered sheet were copied off the screen; they have to come back
+    // to the screen. Writing rows 1..3 of the file would fill rows nobody can see.
+    const filtered = {
+      columns: ['id', 'Subject', 'Status'],
+      rows: [
+        ['r1', 'Quai sud', 'ruled out'],
+        ['r2', 'hidden', ''],
+        ['r3', 'Pont nord', ''],
+        ['r4', 'hidden', ''],
+      ],
+    };
+    const { table: next } = pasteBlock(filtered, [['A'], ['B']], { row: 0, column: 1 }, {
+      rows: [0, 2],
+      columns: [0, 1, 2],
+    });
+    expect(next.rows.map((row) => row[1])).toEqual(['A', 'hidden', 'B', 'hidden']);
+  });
+
+  it('walks the columns in the order they are drawn', () => {
+    const { table: next } = pasteBlock(table(), [['A', 'B']], { row: 0, column: 2 }, {
+      rows: [0, 1],
+      columns: [0, 2, 1],
+    });
+    expect(next.rows[0]).toEqual(['r1', 'B', 'A']);
+  });
+
+  it('counts a column that is not drawn as one the block did not fit in', () => {
+    const { table: next, clipped } = pasteBlock(table(), [['A', 'B']], { row: 0, column: 1 }, {
+      rows: [0, 1],
+      columns: [0, 1],
+    });
+    expect(clipped).toBe(1);
+    expect(next.rows[0]).toEqual(['r1', 'A', 'ruled out']);
+  });
+
+  it('grows past the last row on screen rather than past the last row of the file', () => {
+    const filtered = {
+      columns: ['id', 'Subject', 'Status'],
+      rows: [
+        ['r1', 'Quai sud', ''],
+        ['r2', 'hidden', ''],
+      ],
+    };
+    const { table: next, added } = pasteBlock(filtered, [['A'], ['B']], { row: 0, column: 1 }, {
+      rows: [0],
+      columns: [0, 1, 2],
+    });
+    expect(added).toBe(1);
+    expect(next.rows.map((row) => row[1])).toEqual(['A', 'hidden', 'B']);
+  });
+
+  it('falls back to the file\'s order for a cell the view does not hold', () => {
+    // The pinned row is drawn above the list, so it is in no view; a paste on it still
+    // has to land on it.
+    const { table: next } = pasteBlock(table(), [['A']], { row: 1, column: 1 }, {
+      rows: [0],
+      columns: [0, 1, 2],
+    });
+    expect(next.rows[1][1]).toBe('A');
+  });
+
   it('bounds how far one paste may grow the sheet', () => {
     expect(MAX_PASTE_ROWS).toBe(20_000);
     const huge = Array.from({ length: MAX_PASTE_ROWS + 10 }, (_, index) => [`v${index}`]);

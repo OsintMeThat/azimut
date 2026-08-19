@@ -83,6 +83,7 @@
   import SavedTree from './satellite/SavedTree.svelte';
   import SavedSearch from './satellite/SavedSearch.svelte';
   import SavedOverlay from './satellite/SavedOverlay.svelte';
+  import SheetPointsOverlay from './satellite/SheetPointsOverlay.svelte';
   import TemporalMapOverlay from './satellite/TemporalMapOverlay.svelte';
 
   let mapEl;
@@ -116,6 +117,9 @@
   let temporalMapLoading = $state(false);
   let temporalMapError = $state('');
   let temporalMapSeq = 0;
+  /** A sheet's coordinate column, handed over as points. Session-only, like the layer
+   *  above it, and never part of a capture or a proof. */
+  let sheetPoints = $state(null); // { points, sheet, column }
   // Persist geography or My-work folder grouping across reloads.
   const GROUP_KEY = 'azimut:satelliteSavedGroup';
   let savedGroup = $state(loadSavedGroup());
@@ -1253,6 +1257,8 @@
       temporalMap = null;
       temporalMapLoading = false;
       temporalMapError = '';
+      // The points came out of another case's sheet, so they go with it.
+      sheetPoints = null;
     }
     if (!id) {
       return;
@@ -1319,6 +1325,25 @@
       map.setView([target.lat, target.lon], zoom);
       setBearing(Number.isFinite(target.bearing) ? target.bearing : 0);
     }
+  });
+
+  /**
+   * A sheet's column of coordinates, taken as it was handed over.
+   *
+   * No request, unlike the layer below: a sheet's coordinates are text in a CSV, not
+   * entities the case can be asked about, so there is nothing to re-ask and the points
+   * themselves travel. Framed on what arrived, because a layer that lands off screen
+   * reads as a layer that did not land.
+   */
+  $effect(() => {
+    const handed = uiState.mapSheetPoints;
+    if (!mapReady || !handed?.points?.length) return;
+    uiState.mapSheetPoints = null;
+    sheetPoints = handed;
+    const bounds = L.latLngBounds(handed.points.map((point) => [point.lat, point.lon]));
+    tick().then(() => {
+      if (map && bounds.isValid()) map.fitBounds(bounds, { padding: [48, 48], maxZoom: 17 });
+    });
   });
 
   $effect(() => {
@@ -3124,6 +3149,22 @@
         />
       {/if}
 
+      {#if sheetPoints}
+        <SheetPointsOverlay map={mapReady ? map : null} points={sheetPoints.points} />
+        <!-- Both temporary layers can be on at once, so this one sits under the other
+             rather than on top of it. -->
+        <div class="temporal-layer-card" class:stacked={temporalMap} aria-label="Sheet map layer">
+          <div>
+            <strong>Sheet</strong>
+            <span>{sheetPoints.sheet} · {sheetPoints.column}</span>
+          </div>
+          <p>{sheetPoints.points.length} point{sheetPoints.points.length === 1 ? '' : 's'} read from the column</p>
+          <nav aria-label="Close the sheet layer">
+            <button class="quiet" onclick={() => (sheetPoints = null)}>Close</button>
+          </nav>
+        </div>
+      {/if}
+
       {#if temporalMap}
         <TemporalMapOverlay
           map={mapReady ? map : null}
@@ -3973,6 +4014,7 @@
     inset: 0;
     background: var(--bg-2);
   }
+  .temporal-layer-card.stacked { top: 150px; }
   .temporal-layer-card {
     position: absolute;
     z-index: 720;

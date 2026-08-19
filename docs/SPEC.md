@@ -127,12 +127,12 @@ proof for publication.
 | ✅ **Research helpers** | Prepares media for keyless reverse search and saves keyboard-reviewed AOI grids. |
 | ✅ **Reports & templates** | Stores reusable proof and post structures, then prepares sourced Markdown for X, Bluesky or Mastodon. |
 | ✅ **Case Notebook** | Edits linked Markdown notes with local media, Mermaid diagrams, PDF output and remembered export folders. |
-| ✅ **Media at scale** | Handles login-gated downloads, bounded search, searchable pickers, local metadata enrichment and GPS handoff to the map. |
+| ✅ **Media at scale** | Handles login-gated downloads from a gate read in the site's own words, reusing a session named once and keeping the first attempt cookie-less, with bounded search, searchable pickers, local metadata enrichment and GPS handoff to the map. |
 | ✅ **Storage & recovery** | Uses per-case SQLite and durable jobs, with whole-case bundles, Trash and portable settings backups. |
 | ✅ **Case utilities** | Opens case folders, reports scrubbed diagnostics, keeps filenames in sync and offers explicit Doctor repairs. |
 | ✅ **Evidence on the map** | Places proofs and derived media through their evidence chain, with stated point uncertainty and traced footprints. |
 | ✅ **Ontology connections** | Keeps Relations, Mentions, Claim connectors and artifact lineage separate under one validated verb registry. |
-| ✅ **Board & entities** | Provides the sortable Case Board, shared Details, typed creation and primary entity photos. |
+| ✅ **Board & entities** | Provides the sortable Case Board, shared Details, typed creation, primary entity photos and a ticked selection deleted as one recoverable act. |
 | ✅ **Case graph** | Draws registry-backed lenses with clustered nodes, readable edges, previews and an explicit view budget. |
 | ✅ **Working the graph** | Expands, folds, hides, searches and pins nodes per lens, with undo and no case mutation. |
 | ✅ **Graph evidence** | Folds sources onto their edges and exposes derivation, support, source and account counts. |
@@ -148,7 +148,16 @@ proof for publication.
 | ✅ **Updates & paste** | Reports available app, downloader and extension updates, then files supported clipboard content from the main case surfaces. |
 | ✅ **Saved view management** | Renames a live or frozen reading in its row and orders each family's list by name, edit or surface, with the surface and last write on show. |
 | ✅ **Analysis view export** | Writes the Graph or the Timeline out as a vector plate carrying its lens, question, window, clock and legend, or copies it as an image. |
-| ✅ **Case Sheet** | Opens and builds case CSVs in a plain grid: keyed rows, own columns, drag to reorder, one column kept in view, sort, filters including empty and excluded, row colour, clipboard both ways, bulk fill, patch undo, a row read down a panel, live links, and cells that point at case entities. A save is refused rather than overwriting a file changed on disk. |
+| ✅ **Case Sheet** | Opens and builds case CSVs in a plain grid, with keyed rows, two sort keys, filters, row colour, a pinned reference row, clipboard both ways, bulk fill, undo, a row read down a panel, and cells that point at case entities. |
+| ✅ **Working a sheet** | Sorts, filters, inserts, duplicates, renames, merges, pins, hides and deletes from the heading's own menu, and rewrites an imported column through six passes that say first how many cells they would touch. |
+| ✅ **Two writers on one file** | Notices a CSV changed on disk when the window comes back, reads it as a diff, and confirms the reload or the overwrite rather than choosing for the analyst. |
+| ✅ **Columns that know what they hold** | Types a column in the sidecar as a state, a list, a yes/no, a number, a point, a date or a picture, and lets the sort, the filters, the vocabulary, the map, the Timeline, the progress and the link check read it. |
+| ✅ **A family of sheets** | Files a workbook one sheet per tab, forks a sheet with its rows or with only its columns, and moves ticked rows to another sheet under a column mapping, with the whole move undone from its toast. |
+| ✅ **A sheet into the case, both ways** | Promotes a declared sheet into entities, places, bookmarks, vocabularies, row edges and dated Claims in one transaction, read as a plan first, and builds a worklist back out of what the case holds. |
+| ✅ **A geolocation index into proofs** | Builds one proof per row out of two columns of addresses and a column of coordinates, as a stoppable job that is atomic per row and safe to press twice. |
+| ✅ **Imported proofs** | Turns a published post into a composed proof: every picture a panel, its text read for a position, the footage it points at fetched, and nothing filed before the preview is approved. |
+| ✅ **Where an imported file came from** | States one origin for a whole import, offers it to a batch that landed without one, and corrects any file later from Details without writing over what a download recorded. |
+| ✅ **A reading handed over** | Writes the rows on screen out as a CSV into the folder this case files sheets in, or copies them as a Markdown table carrying the case, the sheet, the filter, the sort, the count and the hour. |
 
 
 ---
@@ -160,10 +169,6 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 [UI.md](UI.md)). Releases ship as GitHub `v0.x` tags.
 
 ### v2: still to finish (next `v0.2.x`)
-
-| Tool | What it does |
-|------|--------------|
-| **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
 
 Toward v2: split Satellite.svelte into `lib/` modules, before the map engine
 changes under it.
@@ -193,6 +198,8 @@ changes under it.
 | **Ground Imagery** | Ground-level photos: Panoramax/Mapillary/KartaView key-less first; Street View easy link, optional keyed in-app view. |
 | **Panorama** | Stitch a video window / frame set. Auto-stitch already in Inspect; still to do: sample a video window directly, seam blending. |
 | **Proof annotation** | Grow the Geo Proof toolbox: shape fill + dashed strokes, numbered markers, a redaction/blur box; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
+| **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
+| **Help and tips** | A mark the analyst clicks for the open tool's own guide: what it is for, the controls whose icon does not say it, and its shortcuts. Clicking an entry points at the real button. One panel, one entry per tool. |
 
 Edit Provenance rests on three facts about Adobe renders, kept here so the tool
 can be rebuilt from the spec alone:
@@ -276,7 +283,6 @@ stops making sense.
 - **Count a statement's independence by origin, not by wrapper:** three collages made from one video are three sources today, and are arguably one. The graph already answers this for a place; changing it for a statement changes a published number.
 - **Free-form montage editor:** consider only if it stays distinct from Geo Proof and Inspect collage.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
-- **Guided companion:** a mark the analyst clicks for a legend of the open tool, covering what it is for and the controls whose icon does not say it. Clicking an entry points at the real button.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
 
 ## 8. Explicit non-goals
@@ -325,8 +331,16 @@ stops making sense.
   outside the workspace, 0600 and holding a path; deleting the copy a move set
   aside acts on this process's own memory, never on a path from the request.
   Accepted risks recorded here: cleartext keys over
-  localhost, the hash-verified scraper updater, and tile/media URL fetches (SSRF
-  only matters if the localhost assumption breaks). The startup update check is
+  localhost, the hash-verified scraper updater, tile/media URL fetches (SSRF
+  only matters if the localhost assumption breaks), and a download that fails
+  saying only that the content is unavailable being retried with the stored
+  browser session, so a merely deleted post gets the analyst's cookies — kept
+  because a hundred-row press cannot stop on a question and the first attempt is
+  always cookie-less. A sheet's link check refuses a literal loopback, private or
+  link-local address on the first hop and on every redirect; a hostname that
+  resolves to one is not looked up to find out, and what such a hop could learn is
+  "this port answered" and never a body. An imported workbook is bounded on its
+  compressed bytes and on the size its own directory declares once unzipped. The startup update check is
   the one on-mount network call: opt-out, and read-only against GitHub's
   releases feed plus PyPI's JSON for the two downloaders, both governed by the
   same switch. Release notes are rendered through the Notebook's

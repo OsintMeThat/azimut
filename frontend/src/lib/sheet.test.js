@@ -1,47 +1,73 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_COLUMNS,
+  MAX_ROWS,
+  tooBigBy,
   DEFAULT_WIDTH,
   GUTTER_WIDTH,
   ID_COLUMN,
   addColumn,
   addRow,
   applyEdits,
+  clearFilters,
   columnValues,
   compareCells,
   dropChip,
+  duplicateColumn,
+  duplicateRows,
   emptyMeta,
+  explodeRow,
   fillEdits,
   filterChips,
+  filterSummary,
   freeColumnName,
+  highlightParts,
+  insertColumn,
+  insertRow,
   isFilterActive,
   keyIndex,
   keysBetween,
   linkAt,
+  linkedEntityIds,
   linkLabel,
-  matchesRow,
+  answersTerms,
+  searchTerms,
+  mergeRows,
   moveColumn,
+  nextSecondSort,
   nextSort,
+  onlyFilterValue,
+  readFilters,
   removeColumn,
   removeRows,
   renameColumn,
+  renameFilterColumn,
+  rowHeight,
   rowKey,
   scrollFromThumb,
   scrollThumb,
-  setCell,
+  serializeFilters,
   setCells,
   setColour,
+  setFilterContains,
+  setFilterRange,
   setFilterWithout,
   setFrozen,
+  setLegend,
   setLink,
+  setPinned,
+  setTall,
   setWidth,
   shownKeys,
   stickyOffsets,
+  suggestMapping,
   toggleFilterFill,
   toggleFilterValue,
   toggleHidden,
   urlsIn,
   visibleColumns,
   visibleRows,
+  withoutEntities,
 } from './sheet.js';
 
 const table = () => ({
@@ -115,12 +141,12 @@ describe('ordering', () => {
 
 describe('the question asked of a sheet', () => {
   it('needs every term to appear somewhere in the row', () => {
-    expect(matchesRow(['r1', 'Quai sud', 'ruled out'], 'quai out')).toBe(true);
-    expect(matchesRow(['r1', 'Quai sud', 'ruled out'], 'quai nord')).toBe(false);
+    expect(answersTerms(['r1', 'Quai sud', 'ruled out'], searchTerms('quai out'))).toBe(true);
+    expect(answersTerms(['r1', 'Quai sud', 'ruled out'], searchTerms('quai nord'))).toBe(false);
   });
 
   it('matches everything when nothing is typed', () => {
-    expect(matchesRow(['r1', 'x'], '  ')).toBe(true);
+    expect(answersTerms(['r1', 'x'], searchTerms('  '))).toBe(true);
   });
 
   it('narrows to the chosen values of a column', () => {
@@ -143,24 +169,35 @@ describe('the question asked of a sheet', () => {
       { columns: ['id', 'Status'], rows: [['r1', 'a'], ['r2', 'b'], ['r3', 'a']] },
       'Status',
     );
-    expect(counted).toEqual([
-      { value: 'a', count: 2 },
-      { value: 'b', count: 1 },
+    expect(counted.values).toEqual([
+      { value: 'a', rows: 2 },
+      { value: 'b', rows: 1 },
     ]);
+    expect(counted.total).toBe(2);
+    expect(counted.capped).toBe(false);
   });
 
-  it('offers no values for a column that holds too many', () => {
+  it('pages a column holding more values than a menu lists, rather than refusing it', () => {
     const rows = Array.from({ length: 60 }, (_, index) => [`r${index}`, `value ${index}`]);
-    expect(columnValues({ columns: ['id', 'Free'], rows }, 'Free')).toBeNull();
+    const counted = columnValues({ columns: ['id', 'Free'], rows }, 'Free', null, { limit: 40 });
+    expect(counted.values).toHaveLength(40);
+    expect(counted.total).toBe(60);
+    expect(counted.capped).toBe(true);
+  });
+
+  it('narrows the values against the whole column, not against the page', () => {
+    const rows = Array.from({ length: 60 }, (_, index) => [`r${index}`, `value ${index}`]);
+    const counted = columnValues({ columns: ['id', 'Free'], rows }, 'Free', null, {
+      term: 'value 5',
+      limit: 40,
+    });
+    // `value 5` and `value 50`..`value 59`: found past the fortieth entry of the list.
+    expect(counted.matching).toBe(11);
+    expect(counted.capped).toBe(false);
   });
 });
 
 describe('edits', () => {
-  it('never mutate the table they were handed', () => {
-    const before = table();
-    setCell(before, 0, 1, 'changed');
-    expect(before.rows[0][1]).toBe('Quai sud');
-  });
 
   it('append a row already carrying a key', () => {
     const next = addRow(table());
@@ -262,6 +299,19 @@ describe('asking a column something other than a value', () => {
     ]);
   });
 
+  it('keeps the rows holding a term, which is all a column of prose can offer', () => {
+    // The other half of `without`. Past the bound there is no list of values to tick,
+    // so a column of notes could be ruled out by a word and never kept by one.
+    const filters = setFilterContains({}, 'Note', 'found');
+    expect(visibleRows(worklist(), { filters })).toEqual([1]);
+  });
+
+  it('reads the two halves of that question together', () => {
+    let filters = setFilterContains({}, 'Note', 'o');
+    filters = setFilterWithout(filters, 'Note', 'AI');
+    expect(visibleRows(worklist(), { filters })).toEqual([0, 1, 2]);
+  });
+
   it('ands the clauses of one column together', () => {
     let filters = toggleFilterFill({}, 'Note', 'filled');
     filters = setFilterWithout(filters, 'Note', 'idea');
@@ -299,6 +349,238 @@ describe('asking a column something other than a value', () => {
   it('names the blank value in a chip rather than showing nothing', () => {
     const chips = filterChips(toggleFilterValue({}, 'Note', ''));
     expect(chips[0].label).toBe('(blank)');
+  });
+
+  it('takes back a term the same way a chip does', () => {
+    const filters = setFilterContains({}, 'Note', 'found');
+    const [chip] = filterChips(filters);
+    expect(chip.label).toBe('with found');
+    expect(dropChip(filters, chip)).toEqual({});
+  });
+
+  it('asking for one value drops what else was asked of that column', () => {
+    // What a cell offers: the answer under the pointer is the whole question, so a
+    // second value ticked in the menu is not carried along with it.
+    let filters = toggleFilterValue({}, 'Note', 'no idea');
+    filters = setFilterWithout(filters, 'Note', 'AI');
+    filters = toggleFilterFill(filters, 'Coordinates', 'blank');
+
+    const only = onlyFilterValue(filters, 'Note', 'to be found');
+    expect(filterSummary(only.Note)).toBe('to be found');
+    // And it leaves the other columns exactly as they were.
+    expect(filterSummary(only.Coordinates)).toBe('empty');
+  });
+
+  it('says what is asked of a column in one line, for the panel to state', () => {
+    let filters = toggleFilterValue({}, 'Note', 'no idea');
+    filters = setFilterContains(filters, 'Note', 'ide');
+    expect(filterSummary(filters.Note)).toBe('no idea · with ide');
+    expect(filterSummary(undefined)).toBe('');
+  });
+
+  it('finds a value inside a cell that holds several of them', () => {
+    // Comparing the whole cell found neither answer, so clicking a chip in the grid
+    // narrowed a list column to nothing at all.
+    const table = {
+      columns: ['id', 'Equipments'],
+      rows: [['r1', 'Buk-M2E, ZU23-2'], ['r2', 'S-125'], ['r3', '']],
+    };
+    const roles = { Equipments: { kind: 'choice', multi: ', ' } };
+    const filters = toggleFilterValue({}, 'Equipments', 'ZU23-2');
+    expect(visibleRows(table, { filters, roles })).toEqual([0]);
+    expect(
+      visibleRows(table, { filters: toggleFilterValue({}, 'Equipments', 'S-125'), roles }),
+    ).toEqual([1]);
+    // And an empty cell still answers the blank entry the menu offers.
+    expect(visibleRows(table, { filters: toggleFilterValue({}, 'Equipments', ''), roles })).toEqual([
+      2,
+    ]);
+  });
+
+  it('asks a column for the cells its own type cannot read', () => {
+    const table = {
+      columns: ['id', 'Count'],
+      rows: [['r1', '3'], ['r2', 'about 12'], ['r3', '']],
+    };
+    const roles = { Count: { kind: 'number' } };
+    const filters = toggleFilterFill({}, 'Count', 'unreadable');
+    expect(visibleRows(table, { filters, roles })).toEqual([1]);
+    expect(filterChips(filters)[0].label).toBe('to check');
+  });
+
+  it('counts a list column value by value rather than cell by cell', () => {
+    const table = {
+      columns: ['id', 'Equipments'],
+      rows: [['r1', 'Buk-M2E, S-125'], ['r2', 'S-125']],
+    };
+    expect(columnValues(table, 'Equipments', { kind: 'choice', multi: ', ' }).values)
+      .toEqual([
+        { value: 'S-125', rows: 2 },
+        { value: 'Buk-M2E', rows: 1 },
+      ]);
+  });
+});
+
+describe('asking a column for a range', () => {
+  const distances = () => ({
+    columns: ['id', 'Distance'],
+    rows: [['r1', '2'], ['r2', '12'], ['r3', 'about 5'], ['r4', '']],
+  });
+
+  it('keeps the rows between the two bounds and drops what it cannot read', () => {
+    const filters = setFilterRange({}, 'Distance', { from: '1', to: '10' });
+    expect(visibleRows(distances(), { filters, roles: { Distance: { kind: 'number' } } }))
+      .toEqual([0]);
+  });
+
+  it('takes either bound on its own', () => {
+    const roles = { Distance: { kind: 'number' } };
+    expect(visibleRows(distances(), { filters: setFilterRange({}, 'Distance', { from: '3' }), roles }))
+      .toEqual([1]);
+    expect(visibleRows(distances(), { filters: setFilterRange({}, 'Distance', { to: '3' }), roles }))
+      .toEqual([0]);
+  });
+
+  it('reads a date column as moments rather than as words', () => {
+    const table = {
+      columns: ['id', 'When'],
+      rows: [['r1', '03/01/2026'], ['r2', '28/02/2026'], ['r3', 'unknown']],
+    };
+    const filters = setFilterRange({}, 'When', { from: '2026-02-01' });
+    expect(visibleRows(table, { filters, roles: { When: { kind: 'when' } } })).toEqual([1]);
+  });
+
+  it('says each bound as its own chip, and each one is removable alone', () => {
+    const filters = setFilterRange({}, 'Distance', { from: '1', to: '10' });
+    const chips = filterChips(filters);
+    expect(chips.map((chip) => chip.label)).toEqual(['from 1', 'to 10']);
+    expect(isFilterActive(dropChip(filters, chips[0]).Distance)).toBe(true);
+    expect(dropChip(dropChip(filters, chips[0]), chips[1]).Distance).toBeUndefined();
+  });
+});
+
+describe('marking what the search found', () => {
+  it('cuts a cell into the parts a term matched and the parts it did not', () => {
+    expect(highlightParts('Quai sud, Kherson', 'kherson')).toEqual([
+      { text: 'Quai sud, ', hit: false },
+      { text: 'Kherson', hit: true },
+    ]);
+  });
+
+  it('marks two overlapping terms once rather than twice', () => {
+    expect(highlightParts('Kherson', 'kher kherson')).toEqual([{ text: 'Kherson', hit: true }]);
+  });
+
+  it('leaves the cell whole when nothing is being searched for', () => {
+    expect(highlightParts('Quai sud', '  ')).toEqual([{ text: 'Quai sud', hit: false }]);
+  });
+});
+
+describe('growing a table where the work is', () => {
+  it('inserts a column at an index rather than at the end', () => {
+    const next = insertColumn(table(), 2, 'Verdict');
+    expect(next.columns).toEqual(['id', 'Subject', 'Verdict', 'Status', 'Score']);
+    expect(next.rows[0]).toEqual(['r1', 'Quai sud', '', 'ruled out', '10']);
+  });
+
+  it('names an inserted column around one already taken', () => {
+    expect(insertColumn(table(), 1, 'Status').columns[1]).toBe('Status 2');
+  });
+
+  it('copies a column beside itself with its cells and its lens', () => {
+    const meta = { ...emptyMeta(), widths: { Status: 220 }, roles: { Status: { kind: 'state' } },
+      notes: { Status: 'where it got to' }, links: { r1: { Status: 'e_7' } } };
+    const copied = duplicateColumn(table(), meta, 2);
+    expect(copied.table.columns).toEqual(['id', 'Subject', 'Status', 'Status copy', 'Score']);
+    expect(copied.table.rows[0][3]).toBe('ruled out');
+    expect(copied.meta.widths['Status copy']).toBe(220);
+    expect(copied.meta.roles['Status copy']).toEqual({ kind: 'state' });
+    expect(copied.meta.notes['Status copy']).toBe('where it got to');
+    // The link stays on the cell the case answered about, and is not claimed by a copy.
+    expect(copied.meta.links.r1['Status copy']).toBeUndefined();
+  });
+
+  it('inserts a blank row at an index, keyed', () => {
+    const next = insertRow(table(), 1);
+    expect(next.rows).toHaveLength(4);
+    expect(next.rows[1][0]).toMatch(/^r[0-9a-f]{10}$/);
+    expect(next.rows[1][1]).toBe('');
+    expect(next.rows[2][1]).toBe('Pont nord');
+  });
+
+  it('duplicates rows under themselves, each with a key of its own', () => {
+    const { table: next, keys } = duplicateRows(table(), [0, 2]);
+    expect(next.rows.map((row) => row[1])).toEqual([
+      'Quai sud', 'Quai sud', 'Pont nord', 'Gare est', 'Gare est',
+    ]);
+    expect(keys).toHaveLength(2);
+    expect(new Set(next.rows.map((row) => row[0])).size).toBe(5);
+  });
+});
+
+describe('sorting a column that knows what it holds', () => {
+  // The most visible thing a role buys, and the reason the roles reach `visibleRows`.
+  const dated = () => ({
+    columns: ['id', 'Date'],
+    rows: [
+      ['r1', '01/02/2026'],
+      ['r2', '31/01/2026'],
+      ['r3', 'AFTER'],
+      ['r4', ''],
+    ],
+  });
+
+  it('reads a European date as a date instead of as text', () => {
+    const asText = visibleRows(dated(), { sort: { column: 'Date', desc: false } });
+    expect(asText.slice(0, 2)).toEqual([0, 1]); // 01/02 before 31/01: wrong, and expected
+
+    const byRole = visibleRows(dated(), {
+      sort: { column: 'Date', desc: false },
+      roles: { Date: { kind: 'when', dayFirst: true } },
+    });
+    expect(byRole.slice(0, 2)).toEqual([1, 0]); // 31 January before 1 February
+  });
+
+  it('keeps the blank at the bottom whichever way the arrow points', () => {
+    const roles = { Date: { kind: 'when', dayFirst: true } };
+    for (const desc of [false, true]) {
+      const shown = visibleRows(dated(), { sort: { column: 'Date', desc }, roles });
+      expect(shown.at(-1)).toBe(3);
+    }
+  });
+
+  it('puts a cell the role cannot read after the ones it can', () => {
+    const shown = visibleRows(dated(), {
+      sort: { column: 'Date', desc: false },
+      roles: { Date: { kind: 'when' } },
+    });
+    expect(shown).toEqual([1, 0, 2, 3]);
+  });
+
+  it('ranks a state column by its vocabulary, not its alphabet', () => {
+    const table = {
+      columns: ['id', 'Status'],
+      rows: [['r1', 'done'], ['r2', 'to do'], ['r3', 'in progress']],
+    };
+    const shown = visibleRows(table, {
+      sort: { column: 'Status', desc: false },
+      roles: { Status: { kind: 'state', values: ['to do', 'in progress', 'done'] } },
+    });
+    expect(shown.map((index) => table.rows[index][1])).toEqual(['to do', 'in progress', 'done']);
+  });
+
+  it('falls back to reading the words where the role says nothing', () => {
+    const table = { columns: ['id', 'Name'], rows: [['r1', 'AB-10'], ['r2', 'AB-2']] };
+    const shown = visibleRows(table, {
+      sort: { column: 'Name', desc: false },
+      roles: { Name: { kind: 'stamped' } },
+    });
+    expect(shown).toEqual([1, 0]);
+  });
+
+  it('sorts as before when no role is declared, so nothing regressed', () => {
+    const shown = visibleRows(table(), { sort: { column: 'Score', desc: false } });
+    expect(shown.map((index) => table().rows[index][3])).toEqual(['9', '10', '100']);
   });
 });
 
@@ -555,5 +837,314 @@ describe('the sidecar', () => {
     const hidden = toggleHidden(emptyMeta(), 'Score');
     expect(hidden.hidden).toEqual(['Score']);
     expect(toggleHidden(hidden, 'Score').hidden).toEqual([]);
+  });
+});
+
+// -- the question, written down -----------------------------------------------
+//
+// The sort and the hidden columns were always in the sidecar; the half that decides
+// which rows are on screen lived in the tab and died with it. The runtime holds the
+// chosen values as a Set and the file holds a list — JSON has no set — so these two
+// functions are the boundary and they have to agree.
+
+describe('the question a sheet was left on', () => {
+  it('writes the chosen values out as a list and reads them back as a set', () => {
+    const asked = toggleFilterValue({}, 'Status', 'to do');
+    const stored = serializeFilters(asked);
+    expect(Array.isArray(stored.Status.values)).toBe(true);
+    expect(stored.Status.values).toEqual(['to do']);
+
+    const back = readFilters(stored, ['id', 'Status']);
+    expect(back.Status.values).toBeInstanceOf(Set);
+    expect(isFilterActive(back.Status)).toBe(true);
+  });
+
+  it('does not write down a filter that asks nothing', () => {
+    const off = toggleFilterValue(toggleFilterValue({}, 'Status', 'to do'), 'Status', 'to do');
+    expect(serializeFilters(off)).toEqual({});
+  });
+
+  it('drops a stored filter whose column the file no longer has', () => {
+    const stored = serializeFilters(toggleFilterValue({}, 'Gone', 'anything'));
+    expect(readFilters(stored, ['id', 'Status'])).toEqual({});
+    // With no list of columns to check against, everything stored is taken.
+    expect(Object.keys(readFilters(stored))).toEqual(['Gone']);
+  });
+
+  it('moves what is asked of a column onto its new name, and drops it on a delete', () => {
+    // The rows on screen must not change because a heading was spelled again.
+    const asked = toggleFilterValue({}, 'Status', 'to do');
+    expect(Object.keys(renameFilterColumn(asked, 'Status', 'State'))).toEqual(['State']);
+    expect(renameFilterColumn(asked, 'Status', null)).toEqual({});
+    // A column nothing was asked of leaves the rest alone.
+    expect(renameFilterColumn(asked, 'Subject', 'Name')).toEqual(asked);
+  });
+
+  it('clears every column at once', () => {
+    expect(clearFilters()).toEqual({});
+  });
+});
+
+describe('a rename or a delete, and everything hanging off the column name', () => {
+  const table = {
+    columns: ['id', 'Subject', 'Status'],
+    rows: [['r1', 'Quai sud', 'done']],
+  };
+  const meta = {
+    ...emptyMeta(),
+    widths: { Status: 200 },
+    hidden: ['Status'],
+    roles: { Status: { kind: 'state' } },
+    notes: { Status: 'where this row got to' },
+    filters: { Status: { values: ['done'] } },
+    promoted: { r1: { Status: 'done' } },
+    links: { r1: { Status: 'e_7' } },
+    progress: 'Status',
+    frozen: 'Status',
+    sort: { column: 'Subject', desc: false, then: { column: 'Status', desc: true } },
+  };
+
+  it('takes all of it with the new name', () => {
+    const moved = renameColumn(table, meta, 2, 'State');
+    expect(moved.table.columns).toEqual(['id', 'Subject', 'State']);
+    expect(moved.meta.widths).toEqual({ State: 200 });
+    expect(moved.meta.hidden).toEqual(['State']);
+    expect(moved.meta.roles.State.kind).toBe('state');
+    expect(moved.meta.notes).toEqual({ State: 'where this row got to' });
+    expect(moved.meta.filters).toEqual({ State: { values: ['done'] } });
+    expect(moved.meta.promoted).toEqual({ r1: { State: 'done' } });
+    expect(moved.meta.links).toEqual({ r1: { State: 'e_7' } });
+    expect(moved.meta.progress).toBe('State');
+    expect(moved.meta.frozen).toBe('State');
+    expect(moved.meta.sort.then).toEqual({ column: 'State', desc: true });
+  });
+
+  it('takes all of it away with the column', () => {
+    const gone = removeColumn(table, meta, 2);
+    expect(gone.table.columns).toEqual(['id', 'Subject']);
+    expect(gone.meta.widths).toEqual({});
+    expect(gone.meta.hidden).toEqual([]);
+    expect(gone.meta.roles).toEqual({});
+    expect(gone.meta.notes).toEqual({});
+    expect(gone.meta.filters).toEqual({});
+    expect(gone.meta.promoted).toEqual({});
+    expect(gone.meta.links).toEqual({});
+    expect(gone.meta.progress).toBeNull();
+    expect(gone.meta.frozen).toBeNull();
+    // The first key survives; only the tiebreak it no longer has is dropped.
+    expect(gone.meta.sort).toEqual({ column: 'Subject', desc: false });
+  });
+
+  it('drops the sort itself when the column it sorted on goes', () => {
+    const sorted = { ...emptyMeta(), sort: { column: 'Status', desc: true } };
+    expect(removeColumn(table, sorted, 2).meta.sort).toBeNull();
+    expect(renameColumn(table, sorted, 2, 'State').meta.sort).toEqual({
+      column: 'State',
+      desc: true,
+    });
+  });
+});
+
+describe('a second key, for when the first one ties', () => {
+  it('cycles ascending, descending, off', () => {
+    const sort = { column: 'Status', desc: false };
+    const up = nextSecondSort(sort, 'Subject');
+    expect(up.then).toEqual({ column: 'Subject', desc: false });
+    const down = nextSecondSort(up, 'Subject');
+    expect(down.then).toEqual({ column: 'Subject', desc: true });
+    expect(nextSecondSort(down, 'Subject').then).toBeUndefined();
+  });
+
+  it('refuses to break a column ties with itself, which is a loop', () => {
+    const sort = { column: 'Status', desc: false, then: { column: 'Subject', desc: false } };
+    expect(nextSecondSort(sort, 'Status').then).toBeUndefined();
+  });
+
+  it('is nothing at all without a first key', () => {
+    expect(nextSecondSort(null, 'Subject')).toBeNull();
+  });
+
+  it('orders the rows by the second key inside the first', () => {
+    const table = {
+      columns: ['id', 'Status', 'Subject'],
+      rows: [
+        ['r1', 'done', 'Quai sud'],
+        ['r2', 'to do', 'Aval'],
+        ['r3', 'done', 'Amont'],
+        ['r4', 'to do', 'Zone 5'],
+      ],
+    };
+    const sort = { column: 'Status', desc: false, then: { column: 'Subject', desc: false } };
+    const seen = visibleRows(table, { sort }).map((index) => table.rows[index][0]);
+    expect(seen).toEqual(['r3', 'r1', 'r2', 'r4']);
+  });
+});
+
+describe('folding rows together and pulling one apart', () => {
+  const table = {
+    columns: ['id', 'Subject', 'Notes'],
+    rows: [
+      ['r1', 'Quai sud', ''],
+      ['r2', 'Quai sud, harbour side', 'seen on the 4th'],
+      ['r3', 'Pont nord', ''],
+    ],
+  };
+
+  it('keeps the fullest answer per column, and the first row own key', () => {
+    // The surviving row keeps its key, so its colour, its links and its promotion
+    // record survive with it.
+    const merged = mergeRows(table, [0, 1]);
+    expect(merged.folded).toBe(1);
+    expect(merged.key).toBe('r1');
+    expect(merged.table.rows).toEqual([
+      ['r1', 'Quai sud, harbour side', 'seen on the 4th'],
+      ['r3', 'Pont nord', ''],
+    ]);
+  });
+
+  it('does nothing to one row on its own', () => {
+    expect(mergeRows(table, [1]).table).toBe(table);
+    expect(mergeRows(table, []).folded).toBe(0);
+  });
+
+  it('turns one cell of values into a row each, the rest of the row copied down', () => {
+    const inbox = {
+      columns: ['id', 'Systems', 'Source'],
+      rows: [['r1', 'Buk-M2E, ZU23-2, S-300', 'https://a.org/1']],
+    };
+    const grown = explodeRow(inbox, 0, 1, ',');
+    expect(grown.keys).toHaveLength(2);
+    expect(grown.table.rows.map((row) => row[1])).toEqual(['Buk-M2E', 'ZU23-2', 'S-300']);
+    expect(grown.table.rows.every((row) => row[2] === 'https://a.org/1')).toBe(true);
+    // Every new row is its own row, so nothing hangs on somebody else's key.
+    expect(new Set(grown.table.rows.map((row) => row[0])).size).toBe(3);
+  });
+
+  it('leaves a cell holding one value alone, and never splits the handle', () => {
+    expect(explodeRow(table, 0, 1, ',').keys).toEqual([]);
+    expect(explodeRow(table, 0, 0, ',').table).toBe(table);
+  });
+});
+
+describe('what the grid remembers about how it is drawn', () => {
+  it('answers one of two row heights, because a note cannot live in one line', () => {
+    expect(rowHeight(emptyMeta())).toBe(30);
+    expect(rowHeight(setTall(emptyMeta(), true))).toBe(78);
+    expect(setTall(setTall(emptyMeta(), true), false).tall).toBe(false);
+  });
+
+  it('names a colour, and forgets it when the name is taken away', () => {
+    const named = setLegend(emptyMeta(), 'red', '  ruled out  ');
+    expect(named.legend).toEqual({ red: 'ruled out' });
+    expect(setLegend(named, 'red', '').legend).toEqual({});
+    // A colour the palette does not hold is not a colour this sheet paints with.
+    expect(setLegend(emptyMeta(), 'chartreuse', 'invented').legend).toEqual({});
+  });
+
+  it('keeps one row under the heading, and lets it go when it is pinned again', () => {
+    const pinned = setPinned(emptyMeta(), 'r1');
+    expect(pinned.pinned).toBe('r1');
+    expect(setPinned(pinned, 'r1').pinned).toBeNull();
+    expect(setPinned(pinned, 'r2').pinned).toBe('r2');
+  });
+});
+
+
+describe('the bounds the file actually has', () => {
+  const table = (rows, columns = 3) => ({
+    columns: Array.from({ length: columns }, (_, at) => `c${at}`),
+    rows: Array.from({ length: rows }, () => []),
+  });
+
+  it('lets an ordinary sheet grow', () => {
+    expect(tooBigBy(table(10), { rows: 400 })).toBeNull();
+    expect(tooBigBy(table(10), { columns: 6 })).toBeNull();
+  });
+
+  it('says how much room is left rather than only refusing', () => {
+    const said = tooBigBy(table(MAX_ROWS - 12), { rows: 400 });
+    expect(said).toContain('12');
+  });
+
+  it('refuses the column that would not fit', () => {
+    expect(tooBigBy(table(1, MAX_COLUMNS), { columns: 1 })).toContain(String(MAX_COLUMNS));
+    expect(tooBigBy(table(1, MAX_COLUMNS - 1), { columns: 1 })).toBeNull();
+  });
+
+  it('answers for a table that is already over, which is how a pass is checked', () => {
+    // `cleanTable` asks about the table a pass produced, not about a growth it planned.
+    expect(tooBigBy(table(1, MAX_COLUMNS + 2))).not.toBeNull();
+    expect(tooBigBy(table(MAX_ROWS + 1))).toContain('full');
+  });
+});
+
+describe('a sidecar and what the case still holds', () => {
+  const meta = {
+    ...emptyMeta(),
+    links: { r1: { Subject: 'e_gone', Note: 'e_kept' }, r2: { Subject: 'e_gone' } },
+    values: { Unit: { 'Buk-M2E': 'e_gone', 'ZU23-2': 'e_kept' } },
+    attachments: { r1: ['e_file', 'e_gone'] },
+    colours: { r1: 'grey' },
+  };
+
+  it('names every entity the sidecar points at, once each', () => {
+    expect(linkedEntityIds(meta).sort()).toEqual(['e_file', 'e_gone', 'e_kept']);
+    expect(linkedEntityIds(emptyMeta())).toEqual([]);
+  });
+
+  it('drops the pointers at what was deleted, in all three places', () => {
+    const next = withoutEntities(meta, new Set(['e_gone']));
+
+    expect(next.links).toEqual({ r1: { Note: 'e_kept' } });
+    expect(next.values).toEqual({ Unit: { 'ZU23-2': 'e_kept' } });
+    expect(next.attachments).toEqual({ r1: ['e_file'] });
+  });
+
+  it('leaves the reading built around them alone', () => {
+    // a colour is the analyst's, not a pointer at the case
+    expect(withoutEntities(meta, new Set(['e_gone'])).colours).toEqual({ r1: 'grey' });
+  });
+
+  it('hands back the same sidecar when nothing it points at has gone', () => {
+    expect(withoutEntities(meta, new Set(['e_elsewhere']))).toBe(meta);
+    expect(withoutEntities(meta, new Set())).toBe(meta);
+  });
+});
+
+describe('lining two sheets up before a row is moved', () => {
+  it('takes an identical name as the answer, and says nothing about it', () => {
+    expect(suggestMapping(['Subject', 'Status'], ['id', 'Subject', 'Status'])).toEqual([
+      { name: 'Subject', to: 'Subject', guessed: false },
+      { name: 'Status', to: 'Status', guessed: false },
+    ]);
+  });
+
+  it('proposes a name that differs only in how it is written, and calls it a guess', () => {
+    // Case, accents and the space against the underscore: the same column, twice.
+    expect(suggestMapping(['Local time', 'Vérifié'], ['id', 'local_time', 'verifie'])).toEqual([
+      { name: 'Local time', to: 'local_time', guessed: true },
+      { name: 'Vérifié', to: 'verifie', guessed: true },
+    ]);
+  });
+
+  it('leaves a column the other sheet has nothing for pointed at nothing', () => {
+    expect(suggestMapping(['Scratch'], ['id', 'Subject'])).toEqual([
+      { name: 'Scratch', to: '', guessed: false },
+    ]);
+  });
+
+  it('spends a target once, and the exact spelling has first claim on it', () => {
+    const pairs = suggestMapping(['adresse', 'Adresse'], ['id', 'Adresse']);
+
+    expect(pairs).toEqual([
+      { name: 'adresse', to: '', guessed: false },
+      { name: 'Adresse', to: 'Adresse', guessed: false },
+    ]);
+  });
+
+  it('leaves the key column out of it, on both sides', () => {
+    const pairs = suggestMapping(['id', 'Subject'], ['id', 'Subject']);
+
+    expect(pairs).toEqual([{ name: 'Subject', to: 'Subject', guessed: false }]);
   });
 });

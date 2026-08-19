@@ -105,40 +105,57 @@ export function linkRows(text) {
 /**
  * Paste *block* into *table* with its top-left cell at (row, column).
  *
- * Three rules, and each one is a decision:
+ * Four rules, and each one is a decision:
  *
+ * - **It lands where it looks like it lands.** `view` is the rows and the columns as
+ *   they are drawn, and the block walks that order rather than the file's: a sheet
+ *   that is filtered, sorted, or has had a column dragged elsewhere would otherwise
+ *   copy the three rows on screen and write them into three the analyst cannot see.
+ *   Without a view the file's own order is the order.
  * - **Rows grow.** A block longer than what is left below gets the rows it needs,
  *   each with its own key. That is the whole point of pasting a worklist in.
- * - **Columns do not.** A block wider than the table is clipped, and `clipped`
- *   says by how much. Inventing columns would change the file's schema from a
- *   keystroke, and a heading the analyst never chose is worse than a cell lost.
+ * - **Columns do not.** A block wider than what is drawn to the right is clipped, and
+ *   `clipped` says by how much. Inventing columns would change the file's schema from
+ *   a keystroke, and a heading the analyst never chose is worse than a cell lost.
  * - **The key column is never written.** It is the row's handle; a pasted value
  *   landing on it would move every colour and every link to another row.
  *
  * Returns the new table plus what happened, so the grid can say it out loud.
  */
-export function pasteBlock(table, block, at = { row: 0, column: 0 }) {
+export function pasteBlock(table, block, at = { row: 0, column: 0 }, view = null) {
   const columns = table?.columns ?? [];
   const key = keyIndex(columns);
-  const startRow = Math.max(0, at?.row ?? 0);
-  const startColumn = Math.max(0, at?.column ?? 0);
+  const everyRow = table.rows.map((_, index) => index);
+  const everyColumn = columns.map((_, index) => index);
+  const atRow = Math.max(0, at?.row ?? 0);
+  const atColumn = Math.max(0, at?.column ?? 0);
+  // A cell the view does not hold — the pinned row, drawn outside the list — is pasted
+  // on in the file's order, since there is no place for it in the drawn one.
+  let rowOrder = view?.rows?.length ? view.rows : everyRow;
+  let columnOrder = view?.columns?.length ? view.columns : everyColumn;
+  if (!rowOrder.includes(atRow)) rowOrder = everyRow;
+  if (!columnOrder.includes(atColumn)) columnOrder = everyColumn;
+  const startRow = Math.max(0, rowOrder.indexOf(atRow));
+  const startColumn = Math.max(0, columnOrder.indexOf(atColumn));
   const width = Math.max(0, ...(block ?? []).map((row) => row.length));
-  const clipped = Math.max(0, startColumn + width - columns.length);
+  const clipped = Math.max(0, startColumn + width - columnOrder.length);
   const wanted = startRow + (block?.length ?? 0);
-  const added = Math.min(Math.max(0, wanted - table.rows.length), MAX_PASTE_ROWS);
+  const added = Math.min(Math.max(0, wanted - rowOrder.length), MAX_PASTE_ROWS);
 
   const rows = table.rows.map((row) => [...row]);
+  const order = [...rowOrder];
   for (let index = 0; index < added; index += 1) {
+    order.push(rows.length);
     rows.push(columns.map((_, column) => (column === key ? newKey() : '')));
   }
 
   let written = 0;
   (block ?? []).forEach((cells, down) => {
-    const target = rows[startRow + down];
+    const target = rows[order[startRow + down]];
     if (!target) return;
     cells.forEach((value, across) => {
-      const column = startColumn + across;
-      if (column >= columns.length || column === key) return;
+      const column = columnOrder[startColumn + across];
+      if (column === undefined || column === key) return;
       target[column] = String(value ?? '');
       written += 1;
     });
