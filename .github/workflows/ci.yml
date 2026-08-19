@@ -38,8 +38,12 @@ jobs:
         # one box that runs the suite in pieces, and the pieces are cut on measured
         # cost rather than on the alphabet. Neither signal predicts Windows alone:
         # by CPU seconds the heaviest range finished first, by test count the
-        # lightest finished last, so the weight is both, and the six ranges each
-        # carry 14-18% of it against the 11/19/11/21/38 the old five ran.
+        # lightest finished last, so the weight is both.
+        #
+        # Then measured again, because the box itself is not a constant: the same
+        # range ran 11 minutes one hour and 24 the next, and `test_repository.py`
+        # alone is half of it. That range is split rather than trusted, since a
+        # slow hour on the 30-minute timeout is a red run for no reason.
         #
         # The ranges have to leave no gap: one stopping at test_sc* beside one
         # starting at test_se* runs everything except the test_sd* somebody adds
@@ -54,27 +58,31 @@ jobs:
             os: macos-latest
             python: "3.12"
             tests: tests
-          - name: Backend (windows-latest, py3.12, 1/6)
+          - name: Backend (windows-latest, py3.12, 1/7)
             os: windows-latest
             python: "3.12"
             tests: tests/test_[a-d]*.py tests/test_e[a-n]*.py
-          - name: Backend (windows-latest, py3.12, 2/6)
+          - name: Backend (windows-latest, py3.12, 2/7)
             os: windows-latest
             python: "3.12"
             tests: tests/test_e[o-z]*.py tests/test_[f-i]*.py
-          - name: Backend (windows-latest, py3.12, 3/6)
+          - name: Backend (windows-latest, py3.12, 3/7)
             os: windows-latest
             python: "3.12"
             tests: tests/test_[j-o]*.py tests/test_p[a-l]*.py
-          - name: Backend (windows-latest, py3.12, 4/6)
+          - name: Backend (windows-latest, py3.12, 4/7)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_p[m-z]*.py tests/test_[q-r]*.py tests/test_s[a-d]*.py
-          - name: Backend (windows-latest, py3.12, 5/6)
+            tests: tests/test_p[m-z]*.py
+          - name: Backend (windows-latest, py3.12, 5/7)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_[q-r]*.py tests/test_s[a-d]*.py
+          - name: Backend (windows-latest, py3.12, 6/7)
             os: windows-latest
             python: "3.12"
             tests: tests/test_s[e-h]*.py
-          - name: Backend (windows-latest, py3.12, 6/6)
+          - name: Backend (windows-latest, py3.12, 7/7)
             os: windows-latest
             python: "3.12"
             tests: tests/test_s[i-z]*.py tests/test_[t-z]*.py
