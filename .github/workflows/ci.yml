@@ -34,10 +34,17 @@ jobs:
         # `tests` is what each box runs. Everywhere but Windows that is the whole
         # suite in one job, because -n auto finishes it in about three minutes.
         # Windows pays roughly eight times as much per test — every one of these
-        # builds a case, and a case is a database, folders and files — so it stays
-        # split, and the three ranges are cut on measured cost rather than on the
-        # alphabet: the five old shards ran 11%, 19%, 11%, 21% and 38% of the work,
-        # which is one job holding everything up while four idle.
+        # builds a case, and a case is a database, folders and files — so it is the
+        # one box that runs the suite in pieces, and the pieces are cut on measured
+        # cost rather than on the alphabet. Neither signal predicts Windows alone:
+        # by CPU seconds the heaviest range finished first, by test count the
+        # lightest finished last, so the weight is both, and the six ranges each
+        # carry 14-18% of it against the 11/19/11/21/38 the old five ran.
+        #
+        # The ranges have to leave no gap: one stopping at test_sc* beside one
+        # starting at test_se* runs everything except the test_sd* somebody adds
+        # next year, and says nothing. `tests/test_ci_shards.py` reads them back
+        # out of this file and fails if they stop covering the directory.
         include:
           - name: Backend (ubuntu-latest, py3.12)
             os: ubuntu-latest
@@ -47,18 +54,30 @@ jobs:
             os: macos-latest
             python: "3.12"
             tests: tests
-          - name: Backend (windows-latest, py3.12, A-L)
+          - name: Backend (windows-latest, py3.12, 1/6)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_[a-l]*.py
-          - name: Backend (windows-latest, py3.12, M-R)
+            tests: tests/test_[a-d]*.py tests/test_e[a-n]*.py
+          - name: Backend (windows-latest, py3.12, 2/6)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_[m-r]*.py
-          - name: Backend (windows-latest, py3.12, S-Z)
+            tests: tests/test_e[o-z]*.py tests/test_[f-i]*.py
+          - name: Backend (windows-latest, py3.12, 3/6)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_[s-z]*.py
+            tests: tests/test_[j-o]*.py tests/test_p[a-l]*.py
+          - name: Backend (windows-latest, py3.12, 4/6)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_p[m-z]*.py tests/test_[q-r]*.py tests/test_s[a-d]*.py
+          - name: Backend (windows-latest, py3.12, 5/6)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_s[e-h]*.py
+          - name: Backend (windows-latest, py3.12, 6/6)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_s[i-z]*.py tests/test_[t-z]*.py
           - name: Backend (ubuntu-latest, py3.11)
             os: ubuntu-latest
             python: "3.11"  # the floor in requires-python
