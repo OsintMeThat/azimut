@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   backend:
-    name: ${{ matrix.name }}
+    name: Backend (${{ matrix.os }}, py${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -31,44 +31,16 @@ jobs:
         # Filesystem behaviour is where they actually differ — engine/scrapers.py
         # swaps directories, and Windows won't delete an open file.
         include:
-          - name: Backend (ubuntu-latest, py3.12)
-            os: ubuntu-latest
+          - os: ubuntu-latest
             python: "3.12"
-            tests: all
-          - name: Backend (macos-latest, py3.12)
-            os: macos-latest
+          - os: macos-latest
             python: "3.12"
-            tests: all
-          # Five fresh Windows processes retain the complete suite while making
-          # progress visible and keeping every shard well below the timeout.
-          - name: Backend (windows-latest, py3.12, A-F)
-            os: windows-latest
+          - os: windows-latest
             python: "3.12"
-            tests: tests/test_[a-f]*.py
-          - name: Backend (windows-latest, py3.12, G-L)
-            os: windows-latest
-            python: "3.12"
-            tests: tests/test_[g-l]*.py
-          - name: Backend (windows-latest, py3.12, M-O)
-            os: windows-latest
-            python: "3.12"
-            tests: tests/test_[m-o]*.py
-          - name: Backend (windows-latest, py3.12, P-R)
-            os: windows-latest
-            python: "3.12"
-            tests: tests/test_[p-r]*.py
-          - name: Backend (windows-latest, py3.12, S-Z)
-            os: windows-latest
-            python: "3.12"
-            tests: tests/test_[s-z]*.py
-          - name: Backend (ubuntu-latest, py3.11)
-            os: ubuntu-latest
+          - os: ubuntu-latest
             python: "3.11"  # the floor in requires-python
-            tests: all
-          - name: Backend (ubuntu-latest, py3.13)
-            os: ubuntu-latest
+          - os: ubuntu-latest
             python: "3.13"  # the ceiling we've tested against
-            tests: all
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -81,13 +53,14 @@ jobs:
       # --check fails if uv.lock drifted from pyproject.toml (forgot `uv lock`).
       - run: uv lock --check
       - run: uv sync --frozen --extra dev
+      # -n auto spreads the suite over the runner's cores, which is what replaced
+      # the five alphabetical Windows shards: they existed to keep one serial
+      # Windows run under the timeout, and splitting by first letter balanced
+      # nothing — the shard holding test_sheets.py did most of the work while the
+      # others idled. Every test builds its case under `tmp_path` (see
+      # tests/conftest.py), so there is nothing for two workers to collide over.
       - name: Run backend suite
-        if: matrix.tests == 'all'
-        run: uv run pytest -q --durations=20 --durations-min=1
-      - name: Run Windows shard with per-test progress
-        if: matrix.tests != 'all'
-        shell: bash
-        run: uv run pytest -vv ${{ matrix.tests }} --durations=20 --durations-min=1
+        run: uv run pytest -q -n auto --durations=20 --durations-min=1
 
   lint:
     name: Lint & type-check (backend)
@@ -122,7 +95,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - run: uv sync --upgrade --extra dev
-      - run: uv run pytest -q --durations=20 --durations-min=1
+      - run: uv run pytest -q -n auto --durations=20 --durations-min=1
 
   frontend:
     name: Frontend tests + build
@@ -144,9 +117,18 @@ jobs:
       - run: npm run build
 
   browser:
-    name: Browser canvas interactions
+    name: Browser canvas interactions (${{ matrix.browser }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # One job per browser rather than one job running both. The specs stay at a
+    # single Playwright worker on purpose — canvas startup times out when Leaflet
+    # and Konva compete for a runner's cores — so the only way to shorten this
+    # job is to stop making Firefox wait for Chromium. Each job also installs
+    # only the browser it runs.
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
     defaults:
       run:
         working-directory: frontend
@@ -158,5 +140,5 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      - run: npx playwright install --with-deps chromium firefox
-      - run: npm run test:e2e
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - run: npm run test:e2e -- --project=${{ matrix.browser }}

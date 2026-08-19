@@ -98,6 +98,13 @@ dev = [
     # Reads an exported note back, so the PDF tests assert what is on the page
     # rather than that bytes were written. Test-only: nothing ships it.
     "pypdf>=6,<7",
+    # Runs the suite across the machine's cores, which CI asks for with `-n auto`.
+    # The tests were already isolated from each other — every one builds its case
+    # under `tmp_path`, and nothing is scoped wider than a test — so the only
+    # thing serial execution bought was a quarter of an hour per CI run. Not in
+    # `addopts` on purpose: a local run stays serial, because parallel output
+    # interleaves and `-x` and pdb stop being useful the moment it does.
+    "pytest-xdist>=3.6,<4",
     # Static analysis, run in CI (see .github/workflows/ci.yml). ruff is 0.x and
     # ships rule changes between minors, so it's pinned to one minor; mypy to the
     # next major. Both bounds are raised deliberately, after the suite is green.
