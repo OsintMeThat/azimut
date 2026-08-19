@@ -9,9 +9,9 @@ import subprocess
 import threading
 
 import graph_read
-import time
 
 import pytest
+from jobwait import job_result
 from PIL import Image
 
 from azimut.engine import inspect as inspect_engine
@@ -1004,13 +1004,7 @@ def test_frame_capture_from_video(client, tmp_path):
     job_id = client.post(
         f"/api/cases/{cid}/inspect/suggest", json={"path": item["path"], "bins": 4}
     ).json()["job_id"]
-    for _ in range(100):
-        job = client.get(f"/api/jobs/{job_id}").json()
-        if job["status"] != "running":
-            break
-        time.sleep(0.1)
-    assert job["status"] == "done"
-    assert len(job["result"]["frames"]) >= 1
+    assert len(job_result(client, job_id)["frames"]) >= 1
 
 
 def test_saved_frame_filename_follows_the_typed_name(client):

@@ -13,9 +13,9 @@ attachments — because each of those is a different word beside a row.
 
 import json
 import random
-import time
 import zlib
 
+from jobwait import job_result
 from PIL import Image
 
 from test_sheet_bridge import (
@@ -81,17 +81,7 @@ def press(client, case_id, sheet, **asked):
         f"/api/cases/{case_id}/sheets/{sheet['id']}/proofs", json=build_body(sheet, **asked)
     )
     assert started.status_code == 200, started.text
-    return finish(client, started.json()["job_id"])
-
-
-def finish(client, job_id):
-    for _ in range(200):
-        job = client.get(f"/api/jobs/{job_id}").json()
-        if job["status"] != "running":
-            break
-        time.sleep(0.05)
-    assert job["status"] == "done", job
-    return job["result"]
+    return job_result(client, started.json()["job_id"])
 
 
 def actions(answer):
@@ -710,7 +700,7 @@ def test_a_cancelled_press_keeps_the_rows_it_finished_and_leaves_no_half_row(
     assert reached.wait(10)
     assert client.post(f"/api/jobs/{job_id}/cancel").json() == {"stopped": True}
     held.set()
-    result = finish(client, job_id)
+    result = job_result(client, job_id)
 
     assert result["stopped"] is True
     assert result["counts"] == {"built": 1, "restated": 0, "failed": 0}

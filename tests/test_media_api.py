@@ -9,6 +9,7 @@ import graph_read
 import pytest
 import time
 
+from jobwait import job_result, wait_for_job
 from PIL import Image
 
 from azimut.engine.media import safe_filename
@@ -1007,14 +1008,9 @@ def test_download_route_surfaces_multi_via_job(client, monkeypatch):
         f"/api/cases/{cid}/media/download", json={"url": "https://x.com/u/status/1"}
     ).json()["job_id"]
 
-    for _ in range(100):
-        job = client.get(f"/api/jobs/{job_id}").json()
-        if job["status"] != "running":
-            break
-        time.sleep(0.1)
-    assert job["status"] == "done"
-    assert job["result"]["multi"] is True
-    assert [i["title"] for i in job["result"]["items"]] == ["a", "b"]
+    result = job_result(client, job_id)
+    assert result["multi"] is True
+    assert [i["title"] for i in result["items"]] == ["a", "b"]
 
 
 def test_download_with_index_picks_entry_and_keeps_custom_title(client, monkeypatch):
@@ -1442,11 +1438,7 @@ def test_download_job_bad_url(client):
         json={"url": "https://localhost:1/nothing-here"},
     ).json()["job_id"]
 
-    for _ in range(100):
-        job = client.get(f"/api/jobs/{job_id}").json()
-        if job["status"] != "running":
-            break
-        time.sleep(0.1)
+    job = wait_for_job(client, job_id)
     assert job["status"] == "error"
     assert job["error"]
 
@@ -1677,12 +1669,7 @@ def test_download_use_cookies_threads_saved_preference(client, monkeypatch):
             f"/api/cases/{cid}/media/download",
             json={"url": "https://x.test/1", "use_cookies": use_cookies},
         ).json()["job_id"]
-        for _ in range(100):
-            job = client.get(f"/api/jobs/{job_id}").json()
-            if job["status"] != "running":
-                break
-            time.sleep(0.05)
-        assert job["status"] == "done"
+        job_result(client, job_id)
 
     assert seen == [None, {"browser": "firefox"}]
 

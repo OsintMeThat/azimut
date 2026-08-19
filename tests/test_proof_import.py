@@ -12,8 +12,8 @@ Three promises are what these tests hold to:
 """
 
 import io
-import time
 
+from jobwait import job_result
 from PIL import Image
 
 from azimut import layout
@@ -63,14 +63,6 @@ def attach(client, case_id, token, slot, content, filename, source_url=""):
     return response.json()
 
 
-def wait_for_job(client, job_id, tries=200):
-    for _ in range(tries):
-        job = client.get(f"/api/jobs/{job_id}").json()
-        if job["status"] != "running":
-            assert job["status"] == "done", job.get("error")
-            return job["result"]
-        time.sleep(0.05)
-    raise AssertionError("the job never finished")
 
 
 FORM = {
@@ -250,7 +242,7 @@ def test_the_fetch_holds_the_download_and_reads_the_post(client, monkeypatch):
         json={"url": "https://x.com/a/1", "slot": "panel"},
     )
     assert started.status_code == 200, started.text
-    result = wait_for_job(client, started.json()["job_id"])
+    result = job_result(client, started.json()["job_id"])
 
     assert result["staged"]["kind"] == "image"
     assert result["post"]["coords"][0]["lat"] == 10.393313
