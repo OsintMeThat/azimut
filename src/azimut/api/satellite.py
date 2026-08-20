@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from .. import config
 from ..engine import (
+    cities,
     geo,
     google_tiles,
     localtime,
@@ -479,6 +480,47 @@ def geocode(q: str) -> dict[str, Any]:
     if not result:
         raise HTTPException(status_code=404, detail="no match for that place name")
     return result
+
+
+@router.get("/geo/suggest")
+def suggest_offline(
+    q: str, limit: int = Query(default=8, ge=1, le=20)
+) -> dict[str, Any]:
+    """What the search bar can offer on a keystroke, without touching the network.
+
+    Two things: the coordinates the text parses to, if it parses, and cities from
+    the bundled gazetteer. The geocoder is deliberately not consulted here — see
+    `/geo/places`, which the UI only calls once typing stops.
+    """
+    query = q.strip()
+    parsed = geo.parse_coords(query) if query else None
+    found = cities.search(query, limit) if query else []
+    return {
+        "coords": {"lat": parsed[0], "lon": parsed[1]} if parsed else None,
+        "cities": found,
+        "attribution": cities.ATTRIBUTION if found else None,
+    }
+
+
+@router.get("/geo/places")
+def suggest_places(q: str, limit: int = Query(default=5, ge=1, le=10)) -> dict[str, Any]:
+    """Geocoder matches for a partial place name: the slow layer under `/geo/suggest`.
+
+    Never called on a keystroke. `busy` says the request was dropped rather than
+    queued, which is not the same as the geocoder having nothing.
+    """
+    query = q.strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="empty query")
+    found = geo.suggest(query, limit)
+    if found is None:
+        return {"places": [], "busy": True, "throttled": geo.throttled(), "attribution": None}
+    return {
+        "places": found,
+        "busy": False,
+        "throttled": False,
+        "attribution": "© OpenStreetMap contributors (Nominatim)" if found else None,
+    }
 
 
 @router.get("/geo/reverse")

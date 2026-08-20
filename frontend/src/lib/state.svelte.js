@@ -21,7 +21,7 @@ import { loadRelationTypes } from './relations.svelte.js';
 export const prefs = $state({
   coordFormat: 'dd', // 'dd' | 'dms' | 'mgrs'
   units: 'metric', // 'metric' | 'imperial'
-  homeView: { lat: 48.8584, lon: 2.2945, zoom: 16 }, // where Satellite opens
+  homeView: { lat: 43, lon: 25, zoom: 3 }, // where Satellite opens
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
   postTarget: 'x', // social composer a fresh post draft starts with
   signatureHandle: '', // account handle stamped onto proofs that opt into it

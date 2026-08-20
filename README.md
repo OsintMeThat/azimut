@@ -59,7 +59,7 @@ to fix a point on the map.*
 | **Files** | Every saved artifact in one Finder-style view of your folders, not just media: select several, drag them into a folder, search across the lot. |
 | **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services. Nothing uploads on its own. |
 | **Inspect** | A scratch workspace over any photo or video: frame adjustments, editable crop, sharpest-frame capture, hand-made collage with per-piece warp/scale/rotate, auto-stitch to solve a panorama's layout, and ELA hints. Nothing enters the case until you save. |
-| **Satellite** | Coordinates or a place name become an imagery crop, with select-area capture, map rotation, measurement tools, reference overlays and editable AOI grids for area review. Esri/OSM by default, plus Sentinel-2 with a date calendar and a cloud-ceiling slider; add a Mapbox or Google key for more basemaps. |
+| **Satellite** | Coordinates or a place name become an imagery crop. The search bar proposes matches as you type: saved work, coordinates and a bundled city list answer offline, and the geocoder fills in the rest once you pause. Select-area capture, map rotation, measurement tools, reference overlays and editable AOI grids for area review. Esri/OSM by default, plus Sentinel-2 with a date calendar and a cloud-ceiling slider; add a Mapbox or Google key for more basemaps. |
 | **Coords & Sky** | Convert common coordinate formats, copy the result, open map or geocoding links, and read the sun and moon at that point on a date: rise, set, azimuth, altitude, twilights, moon phase and bright-limb angle, in local time and UTC, computed offline. |
 | **Geo Proof** | Start a named proof from a reusable house style, select case panels with search, compose them in a grid or free layout, annotate with colored shapes/freehand/text, and export `proof.png` plus a re-editable spec. |
 | **Geo Report** | Turn a proof into a prepared thread for X, Bluesky, or Mastodon: coordinates, plus code, attribution, target-specific character counts, media, and a structured Markdown case note with linked evidence. |
@@ -262,6 +262,11 @@ Raising an upper bound is a deliberate act: bump it in `pyproject.toml`, run
 `uv lock`, and make sure the suite passes before it lands. The weekly
 "latest deps" CI job re-resolves past the lock, so upstream breakage shows up
 as a red run of ours rather than a broken install for someone else.
+
+The map's offline city list is data, not a dependency:
+`src/azimut/engine/data/cities.tsv.gz`, about 770 KiB, trimmed from GeoNames
+(CC BY 4.0) by `python scripts/build_cities.py`. Rebuild it when it goes stale;
+nothing else reads it.
 
 **yt-dlp and gallery-dl are deliberately unbounded**: they track sites that
 change, so pinning them just schedules a breakage. They can also be updated

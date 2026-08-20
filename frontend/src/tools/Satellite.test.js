@@ -403,3 +403,31 @@ describe('Satellite — lifecycle and the date line', () => {
     expect(source).toContain('center = { lat: c.lat, lon: wrapLon(c.lng), zoom: map.getZoom() };');
   });
 });
+
+describe('Satellite — the search bar', () => {
+  it('is the suggesting combobox, fed by the case and the map centre', () => {
+    expect(source).toContain("import PlaceSearch from './satellite/PlaceSearch.svelte';");
+    expect(source).toContain('<PlaceSearch');
+    expect(source).toContain('savedRows={saved}');
+    expect(source).toContain('centre={{ lat: center.lat, lon: center.lon }}');
+    expect(source).toContain('units={prefs.units}');
+    // the plain form it replaces is gone, not left beside it
+    expect(source).not.toContain('class="go-form"');
+  });
+
+  it('keeps the old Enter behaviour as the fallback', () => {
+    // Enter with nothing highlighted still parses or geocodes the raw text
+    expect(source).toContain('onsubmit={goTo}');
+    expect(source).toContain("await api.get(`/api/geo/geocode?q=");
+  });
+
+  it('opens a chosen saved item the way the panel does', () => {
+    // same view and bearing as the tree and the modal — one road to a saved place
+    expect(source).toContain('function goToSuggestion(item)');
+    expect(source).toContain('if (item.row) {\n      openSaved(item.row);');
+  });
+
+  it('flies to a proposed point at the zoom that suits what it is', () => {
+    expect(source).toContain('map.setView([item.lat, item.lon], item.zoom ?? Math.max(map.getZoom(), 13));');
+  });
+});

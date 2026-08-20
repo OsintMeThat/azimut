@@ -28,6 +28,7 @@
   import { dragBearing, pivotPanOffset } from '../lib/satRotate.js';
   import { clampSize, scaledCapture } from '../lib/captureSize.js';
   import { panelWidth } from '../lib/panelWidth.js';
+  import PlaceSearch from './satellite/PlaceSearch.svelte';
   import { assignFolder } from '../lib/filing.js';
   import { saveRelation } from '../lib/relations.svelte.js';
   import { openEntity } from '../lib/navigate.js';
@@ -1648,6 +1649,18 @@
     }
   }
 
+  /** Fly to a row the search bar proposed. A saved item is opened the way the
+   *  panel opens it — same view, same bearing — and anything else is a point
+   *  with a sensible zoom for what it is: a city, a street, a coordinate. */
+  function goToSuggestion(item) {
+    if (item.row) {
+      openSaved(item.row);
+      return;
+    }
+    if (!map || !Number.isFinite(item.lat) || !Number.isFinite(item.lon)) return;
+    map.setView([item.lat, item.lon], item.zoom ?? Math.max(map.getZoom(), 13));
+  }
+
   function setBearing(deg) {
     if (!map) return;
     map.setBearing(((deg % 360) + 360) % 360);
@@ -3101,23 +3114,15 @@
   <div class="tool-header">
     <h2>Satellite</h2>
     <div class="spacer"></div>
-    <form
-      class="go-form"
-      onsubmit={(e) => {
-        e.preventDefault();
-        goTo();
-      }}
-    >
-      <input
-        class="input"
-        placeholder={'50.4501, 30.5234  ·  48°51\'29"N 2°17\'40"E  ·  a place name'}
-        bind:value={coordsText}
-        title="Coordinates (decimal, DMS, MGRS, plus code) or a place name"
-      />
-      <button type="submit" class="btn" disabled={!coordsText.trim() || searching}>
-        <Icon name="search" size={15} /> {searching ? '…' : 'Go'}
-      </button>
-    </form>
+    <PlaceSearch
+      bind:value={coordsText}
+      savedRows={saved}
+      centre={{ lat: center.lat, lon: center.lon }}
+      units={prefs.units}
+      {searching}
+      onpick={goToSuggestion}
+      onsubmit={goTo}
+    />
   </div>
 
   <div class="body">
@@ -3988,11 +3993,6 @@
 <style>
   .spacer {
     flex: 1;
-  }
-  .go-form {
-    display: flex;
-    gap: 8px;
-    width: min(420px, 36vw);
   }
   .body {
     flex: 1;

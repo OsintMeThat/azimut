@@ -518,7 +518,7 @@
 
   // a live sample so the format choice is legible before it's applied elsewhere
   const coordSample = $derived(
-    formatCoords(Number(home.lat) || 48.8584, Number(home.lon) || 2.2945, prefs.coordFormat)
+    formatCoords(Number(home.lat) || 43, Number(home.lon) || 25, prefs.coordFormat)
   );
 
   onMount(() => {

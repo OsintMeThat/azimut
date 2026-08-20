@@ -1060,6 +1060,17 @@ remote ids in provenance instead of appending them to the visible name.
 
 ## Map
 
+The search bar in the header proposes matches as you type, in the order they can
+answer: the coordinates the text parses to, saved work in this case, cities from
+a gazetteer shipped with the app (GeoNames, credited under the list), and last
+the geocoder's streets and hamlets. The first three cost no network and appear on
+the keystroke; the geocoder is asked once typing stops, from three characters up,
+and a request it cannot pace is dropped rather than queued, so the list keeps
+what it had. Arrows walk the list, Enter takes the highlighted row, and Enter on
+nothing parses or geocodes the raw text the way the plain box always did. A city
+lands at zoom 12 and a street at 15; a saved item reopens at its own view and
+bearing. Picks are remembered locally and offered back when the bar is empty.
+
 Saved work — places, captures and screenshots filed by the extension — lives in
 one right-hand **Saved** panel, grouped by geography rather than by date. The
 tree's depth follows the case: one country opens straight on its regions, a

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+from collections import OrderedDict
 from typing import Any
 
 import httpx
@@ -30,6 +31,14 @@ _pace_lock = threading.Lock()
 _last_request = 0.0
 _throttled_until = 0.0
 
+#: Suggestions answered from memory, keyed by the trimmed lowercase query. A
+#: search bar walks the same prefixes over and over (backspace, retype, pick a
+#: different one), and every repeat we can answer here is a slot the geocoder
+#: keeps for a query it has never seen.
+SUGGEST_CACHE_SIZE = 96
+_suggest_cache: OrderedDict[str, tuple[dict[str, Any], ...]] = OrderedDict()
+_cache_lock = threading.Lock()
+
 
 def _pace() -> None:
     """Hold the caller until the interval since the last Nominatim request has
@@ -40,6 +49,27 @@ def _pace() -> None:
         if wait > 0:
             time.sleep(wait)
         _last_request = time.monotonic()
+
+
+def _try_pace() -> bool:
+    """Claim the next Nominatim slot, or give up at once.
+
+    The blocking `_pace` is right for work the analyst asked for and will wait
+    for. It is wrong for the search bar's suggestions: a suggestion that arrives
+    after the next keystroke is worse than no suggestion, and queueing them
+    behind a country backfill is how a typing analyst earns a 429 for everyone.
+    So this one never waits — it returns False and the caller says so.
+    """
+    global _last_request
+    if throttled() or not _pace_lock.acquire(blocking=False):
+        return False
+    try:
+        if time.monotonic() - _last_request < NOMINATIM_INTERVAL:
+            return False
+        _last_request = time.monotonic()
+        return True
+    finally:
+        _pace_lock.release()
 
 
 def _note_throttling(response: Any) -> None:
@@ -57,10 +87,12 @@ def throttled() -> bool:
 
 
 def _reset_pace() -> None:
-    """Test seam: forget the last request and any throttling."""
+    """Test seam: forget the last request, any throttling, and the suggestions."""
     global _last_request, _throttled_until
     _last_request = 0.0
     _throttled_until = 0.0
+    with _cache_lock:
+        _suggest_cache.clear()
 
 
 # -- parsing -------------------------------------------------------------------
@@ -463,6 +495,54 @@ def geocode(query: str) -> dict[str, Any] | None:
         }
     except Exception:
         return None
+
+
+def suggest(query: str, limit: int = 5) -> list[dict[str, Any]] | None:
+    """Several matches for a partial place name, for the search bar's slow layer.
+
+    What the bundled gazetteer cannot answer — streets, hamlets, anything under
+    15 000 people — lives here. Returns the matches, or **None** when the slot
+    was refused: an empty list means the geocoder answered and had nothing, and
+    the two read very differently to somebody watching a list not fill in.
+    """
+    key = " ".join(query.split()).casefold()
+    if not key:
+        return []
+    with _cache_lock:
+        cached = _suggest_cache.get(key)
+        if cached is not None:
+            _suggest_cache.move_to_end(key)
+            return [dict(place) for place in cached[:limit]]
+    if not _try_pace():
+        return None
+    try:
+        response = httpx.get(
+            "https://nominatim.openstreetmap.org/search",
+            # `limit` is capped by the route; the cache keeps whatever came back,
+            # so a widened limit on the next keystroke is not a second request.
+            params={"q": query, "format": "jsonv2", "limit": 10, "accept-language": "en"},
+            headers={"User-Agent": USER_AGENT},
+            timeout=8,
+        )
+        _note_throttling(response)
+        response.raise_for_status()
+        found = [
+            {
+                "lat": float(item["lat"]),
+                "lon": float(item["lon"]),
+                "display_name": item.get("display_name") or "",
+                "kind": item.get("type") or item.get("category") or "",
+            }
+            for item in response.json()
+            if item.get("lat") is not None and item.get("lon") is not None
+        ]
+    except Exception:
+        return None
+    with _cache_lock:
+        _suggest_cache[key] = tuple(found)
+        while len(_suggest_cache) > SUGGEST_CACHE_SIZE:
+            _suggest_cache.popitem(last=False)
+    return [dict(place) for place in found[:limit]]
 
 
 def reverse_geocode(

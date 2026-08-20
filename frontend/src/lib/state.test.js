@@ -127,7 +127,7 @@ describe('prefsReady — tools must not race the settings fetch', () => {
 
     await loadPrefs().catch(() => {});
     await expect(prefsReady).resolves.toBeUndefined(); // never hangs a tool
-    expect(prefs.homeView).toEqual({ lat: 48.8584, lon: 2.2945, zoom: 16 });
+    expect(prefs.homeView).toEqual({ lat: 43, lon: 25, zoom: 3 });
   });
 });
 

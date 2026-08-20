@@ -340,7 +340,10 @@ stops making sense.
   link-local address on the first hop and on every redirect; a hostname that
   resolves to one is not looked up to find out, and what such a hop could learn is
   "this port answered" and never a body. An imported workbook is bounded on its
-  compressed bytes and on the size its own directory declares once unzipped. The startup update check is
+  compressed bytes and on the size its own directory declares once unzipped. The map's search bar answers from
+  a bundled gazetteer and never reaches out on a keystroke; its geocoder layer
+  waits for a pause, and a request the one-per-second pace cannot take is dropped
+  rather than queued. The startup update check is
   the one on-mount network call: opt-out, and read-only against GitHub's
   releases feed plus PyPI's JSON for the two downloaders, both governed by the
   same switch. Release notes are rendered through the Notebook's

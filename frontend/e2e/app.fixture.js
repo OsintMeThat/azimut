@@ -73,6 +73,17 @@ const settings = {
   month: '2026-07',
 };
 
+// The offline gazetteer, cut down to what a spec needs: two cities that share a
+// prefix, so ranking is visible, and one street only the geocoder knows about.
+const GAZETTEER = [
+  { name: 'Kramatorsk', region: 'Donetsk', country: 'ua', country_name: 'Ukraine', lat: 48.7311, lon: 37.5678, population: 147145 },
+  { name: 'Kraków', region: 'Lesser Poland', country: 'pl', country_name: 'Poland', lat: 50.0614, lon: 19.9366, population: 755050 },
+];
+
+const GEOCODED = [
+  { lat: 48.8534, lon: 37.6067, display_name: 'Kramatorska Street, Sloviansk, Donetsk Oblast, Ukraine', kind: 'road' },
+];
+
 // A workspace that is present and nobody else's, so the app runs instead of
 // showing the stopped screen (GET /settings/workspace), and no folder in it is
 // waiting to become a case (GET /workspace/folders).
@@ -609,6 +620,9 @@ export async function installAppFixture(page, options = {}) {
     ...settings,
     export_dirs: { ...settings.export_dirs, ...(options.exportDirs ?? {}) },
   };
+  // What the search bar asked for, and in which layer: a spec has to be able to
+  // prove the geocoder was left alone while the analyst was still typing.
+  const geoQueries = { suggest: [], places: [] };
   const settingsWrites = [];
   const folderWrites = [];
   const exportWrites = [];
@@ -1700,6 +1714,35 @@ export async function installAppFixture(page, options = {}) {
       return json(route, { status: 'saved', ...sheetPayload(held) });
     }
 
+    // The search bar's two layers. The offline one answers coordinates and a
+    // handful of cities; the geocoder answers streets, and only ever late.
+    if (path === '/api/geo/suggest') {
+      const q = url.searchParams.get('q') ?? '';
+      geoQueries.suggest.push(q);
+      const decimal = /^\s*(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(q);
+      const cities = decimal
+        ? []
+        : GAZETTEER.filter((city) => city.name.toLowerCase().startsWith(q.trim().toLowerCase()));
+      return json(route, {
+        coords: decimal ? { lat: Number(decimal[1]), lon: Number(decimal[2]) } : null,
+        cities,
+        attribution: cities.length ? '© GeoNames (CC BY 4.0)' : null,
+      });
+    }
+    if (path === '/api/geo/places') {
+      const q = url.searchParams.get('q') ?? '';
+      geoQueries.places.push(q);
+      const places = GEOCODED.filter((place) =>
+        place.display_name.toLowerCase().includes(q.trim().toLowerCase())
+      );
+      return json(route, {
+        places,
+        busy: false,
+        throttled: false,
+        attribution: places.length ? '© OpenStreetMap contributors (Nominatim)' : null,
+      });
+    }
+
     unexpected.push(`${request.method()} ${path}`);
     return json(route, { detail: `Unhandled browser fixture request: ${path}` }, 404);
   });
@@ -1730,6 +1773,7 @@ export async function installAppFixture(page, options = {}) {
     sheetOnDisk: (id) => fixtureSheets.get(id),
     trashWrites,
     bundleCalls,
+    geoQueries,
     settingsWrites,
     folderWrites,
     exportWrites,

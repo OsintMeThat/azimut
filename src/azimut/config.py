@@ -98,7 +98,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "units": "metric",
     # Where the Satellite tab opens before anything points it somewhere else
     # (a case artifact, a "go to coords" handoff). {"lat", "lon", "zoom"}.
-    "home_view": {"lat": 48.8584, "lon": 2.2945, "zoom": 16},
+    "home_view": {"lat": 43.0, "lon": 25.0, "zoom": 3},
     # Saving a proof files the point it carries as a `place`, joined by `depicts`
     # (engine/satellite.place_for_proof). A geolocation is concluded in the
     # composer, not while framing the map, so the point becomes a node once —
