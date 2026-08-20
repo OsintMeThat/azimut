@@ -49,19 +49,27 @@ class FetchIn(BaseModel):
     slot: str = Field(default=import_engine.SLOT_PANEL)
     #: 1-based pick when the post carries several attachments, as in Media.
     index: int | None = None
-    #: Several picks, for the picture slot alone: a post publishing a geolocation as a set
-    #: publishes one proof, and the set becomes its panels. In the order they were ticked.
+    #: Several picks: a post publishing a geolocation as a set publishes one proof and the
+    #: set becomes its panels, and a post carrying two photos of the scene is two pieces
+    #: of material, not one. In the order they were ticked.
     indexes: list[int] = Field(default_factory=list, max_length=import_engine.MAX_PANELS)
     use_cookies: bool = False
 
 
 class FormIn(BaseModel):
     """What the analyst filled in. Coordinates and a source are required, and
-    the preview is where that is said rather than at the end of a save."""
+    the preview is where that is said rather than at the end of a save.
+
+    ``source_urls`` is a list because a thread states one point and hangs the photos and
+    the clips it rests on off several posts. Each address holds its own files, is
+    retried on its own and is dropped on its own.
+    """
 
     title: str = Field(default="", max_length=layout.MAX_SLUG)
     coords: str = Field(default="", max_length=200)
-    source_url: str = Field(default="", max_length=2000)
+    source_urls: list[str] = Field(
+        default_factory=list, max_length=import_engine.MAX_SOURCES
+    )
     note: str = Field(default="", max_length=500)
     pov: bool = False
 
@@ -117,8 +125,6 @@ def fetch(case_id: str, token: str, body: FetchIn) -> dict[str, str]:
     #: What to download, in order. `None` is "whatever the post holds", which is the
     #: answer before anybody has seen a picker.
     picks: list[int | None] = [n for n in body.indexes if n > 0] or [body.index]
-    if len(picks) > 1 and slot != import_engine.SLOT_PANEL:
-        raise HTTPException(status_code=422, detail="only the picture slot composes a set")
 
     def work(set_progress):
         def hook(d):
@@ -148,7 +154,9 @@ def fetch(case_id: str, token: str, body: FetchIn) -> dict[str, str]:
             if not staged:
                 return result  # a picker, a login wall, a Telegram-only post
             held.append(staged)
-        import_engine.fill_files(case, token, slot, held)
+        # Keyed by the address it came from: a second source address holds its own files
+        # beside the first one's, and retrying one that failed replaces only its own.
+        import_engine.fill_files(case, token, slot, held, for_url=url)
         answer: dict[str, Any] = {"slot": slot, "staged": held[0], "held": held}
         if slot == import_engine.SLOT_PANEL:
             post = import_engine.read_post(held[0].get("source") or {}, url)
@@ -192,14 +200,31 @@ async def attach(
     # every other image entering the app answers to.
     with path.open("wb") as out:
         shutil.copyfileobj(file.file, out)
-    if slot == import_engine.SLOT_PANEL and path.stat().st_size > MAX_IMAGE_BYTES:
-        path.unlink(missing_ok=True)
-        raise HTTPException(status_code=413, detail="that picture is too large")
+    if slot == import_engine.SLOT_PANEL:
+        # A proof is composed of pictures: the composer lays panels out on a canvas and
+        # a clip has nothing to lay out. Said at the door the file comes through rather
+        # than at the preview, which is two screens and one staged file later.
+        if media_engine.media_kind(name) != "image":
+            path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=422,
+                detail="a proof is composed of pictures, and this file is not one",
+            )
+        if path.stat().st_size > MAX_IMAGE_BYTES:
+            path.unlink(missing_ok=True)
+            raise HTTPException(status_code=413, detail="that picture is too large")
     source: dict[str, Any] = {"type": "manual", "original_name": file.filename or name}
     if stated:
         source["url"] = stated
     staged = media_engine.stage_descriptor(path, source)
-    import_engine.fill_slot(case, token, slot, staged)
+    # For the material, the stated origin is also the row this file answers for, so it
+    # replaces what that one address holds and leaves the other addresses alone.
+    # Attaching a picture still replaces the whole set: "here is my picture instead" is
+    # what that route means, and a set built from a post is not something it adds to.
+    import_engine.fill_files(
+        case, token, slot, [staged],
+        for_url=stated if slot == import_engine.SLOT_SOURCE else "",
+    )
     return {"slot": slot, "staged": staged}
 
 
@@ -240,10 +265,18 @@ def write_import(
 
     created: dict[str, Any] = {}
 
-    source_rel = None
-    source_path = import_engine.staged_path(case, token, import_engine.SLOT_SOURCE)
-    if source_path is not None:
-        held = import_engine.held_files(case, token, import_engine.SLOT_SOURCE)[0]
+    # Paired here for the same reason the pictures are: a file whose bytes have gone
+    # must not shift the rest onto their neighbours' provenance.
+    source_rels: list[dict[str, str]] = []
+    filed_sources: list[dict[str, Any]] = []
+    pairs = import_engine.staged_pairs(case, token, import_engine.SLOT_SOURCE)
+    by_name = {str(held.get("filename") or ""): path for path, held in pairs}
+    # Only what the form still states, and in its order — the same reading the preview
+    # ran on, so the commit files exactly what the analyst was shown.
+    for held in import_engine.stated_sources(
+        [held for _path, held in pairs], import_engine.read_source_urls(form)
+    ):
+        source_path = by_name[str(held.get("filename") or "")]
         filed = media_engine.import_produced_file(
             case,
             source_path,
@@ -251,8 +284,16 @@ def write_import(
             dict(held.get("source") or {}),
             by=by,
         )
-        source_rel = filed["entity"]["attrs"]["path"]
-        created["source"] = _summary(filed)
+        # The file and the address it came from: the composer reconciles its Source list
+        # against these, so a source taken off the proof takes its files with it.
+        source_rels.append(
+            {"path": filed["entity"]["attrs"]["path"], "url": str(held.get("for_url") or "")}
+        )
+        filed_sources.append(_summary(filed))
+    if filed_sources:
+        created["source"] = filed_sources[0]
+        if len(filed_sources) > 1:
+            created["sources"] = filed_sources
 
     # Path and manifest entry together: pairing them by position meant a file whose bytes
     # had gone — quarantined by an antivirus, swept by hand — filed every picture after it
@@ -277,13 +318,11 @@ def write_import(
     panels: list[tuple[str, tuple[int, int]]] = []
     filed_panels: list[dict[str, Any]] = []
     for at, (panel_path, held) in enumerate(held_panels):
-        # The picture states where it came from twice: the post in its provenance,
-        # and the footage as a derivation, which is what puts the source media in the
-        # proof's chain — and therefore what lets the point reach it (ONTOLOGY §3).
-        panel_source = {
-            **dict(held.get("source") or {}),
-            **({"from": source_rel} if source_rel else {}),
-        }
+        # The picture states where it came from once, in its provenance: the post that
+        # published it. What the geolocation *rests* on is the proof's own claim, filed
+        # from the spec below — a published picture is one file among the several the
+        # proof was read from, not the thing they all hang off.
+        panel_source = dict(held.get("source") or {})  # the post, and nothing else
         # Numbered from the second, so a single-picture import keeps the name it had.
         stem = name if at == 0 else f"{name} {at + 1}"
         filed = media_engine.import_produced_file(
@@ -299,7 +338,7 @@ def write_import(
     if len(filed_panels) > 1:
         created["panels"] = [_summary(one) for one in filed_panels]
 
-    spec = import_engine.build_spec(panels, form)
+    spec = import_engine.build_spec(panels, form, material=source_rels)
     saved = proofs.save_proof(
         case_id,
         proofs.ProofIn(title=form["title"], spec=spec, png_base64=export),
@@ -321,17 +360,11 @@ def write_import(
     }
 
     place = saved.get("place")
-    if isinstance(place, dict) and place.get("filed") is False and proof_entity is not None:
+    if isinstance(place, dict) and place.get("asking") and proof_entity is not None:
         # `proof_place_auto` is off, so the composer's own save would have asked.
         # The import already asked — that is what the preview was — so the answer
         # is filed here rather than handed back as a second question.
-        proofs.file_proof_place(
-            case,
-            proof_entity["id"],
-            float(place["lat"]),
-            float(place["lon"]),
-            pov=bool(spec.get("pov")),
-        )
+        proofs.file_proof_points(case, proof_entity)
     # Read off the edge rather than off the save's answer: the save reports
     # nothing when the point was already in the case, and "which place did this
     # land on" has to be answerable whether the import pinned it or reused it.

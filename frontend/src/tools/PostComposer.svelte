@@ -18,7 +18,7 @@
     applyPostTemplateStructure, newPostMediaTweet, proofSourceMediaPaths,
     normalizePostMediaPickerTarget, postMediaForType, renumberMediaTweetText, retargetMediaTweetText,
     normalizePostTarget, POST_TARGETS, postCharacterCount, postComposeUrl, postReportMarkdown,
-    postTarget, templateUsesPostField, togglePostMedia,
+    postTarget, templateUsesPostField, togglePostMedia, pointLines,
   } from '../lib/post.js';
   import { bidiSafe } from '../lib/bidi.js';
   import { matchesQuery } from '../lib/mediaFilter.js';
@@ -35,6 +35,9 @@
   let description = $state('');
   let mention = $state(prefs.postMention);
   let source = $state('');
+  /** The Source box grows with what it holds, up to four lines: a proof read from a
+   *  thread carries an address per post, and one row would hide all but the first. */
+  const sourceRows = $derived(Math.min(4, Math.max(1, source.split('\n').length)));
   let proofPng = $state(null);
   let proofVer = $state(0); // cache-buster: bumped whenever proofPng is (re)assigned
   let tweet1 = $state('');
@@ -238,7 +241,10 @@
   });
 
   async function resolveCoords() {
-    const value = coordsText.trim();
+    // The first line is the conclusion: it is what the place, the plus code, the
+    // DMS and the map links are an address for. The rest are points the picture
+    // also shows, carried into the tweet as written.
+    const value = pointLines(coordsText)[0]?.coords ?? '';
     if (!value) {
       geo = null;
       regenerate();
@@ -282,6 +288,7 @@
       description,
       lat: geo?.lat,
       lon: geo?.lon,
+      coordsText,
       mention,
       source,
     });
@@ -904,14 +911,16 @@
   }
 
   function reportContent(title = draftTitle(), evidence = {}) {
+    const points = pointLines(coordsText);
     const coordinates = geo
       ? `${geo.lat.toFixed(6)}, ${geo.lon.toFixed(6)}`
-      : coordsText.trim();
+      : points[0]?.coords ?? '';
     return postReportMarkdown({
       title,
       place,
       plusCode: geo?.plus_code,
       coordinates,
+      points,
       dms: geo?.dms,
       mapLinks: geo?.links,
       description,
@@ -1094,14 +1103,17 @@
           title={fieldDisabledByTemplate('coordinates') ? TEMPLATE_FIELD_HINT : undefined}
         >
           <label class="label" for="pc-coords">Coordinates</label>
-          <input
+          <!-- One point per line. A proof showing three impacts hands over three,
+               and the first one is what the facts below are an address for. -->
+          <textarea
             id="pc-coords"
-            class="input mono"
+            class="input mono coords-input"
+            rows={Math.min(4, Math.max(1, pointLines(coordsText).length))}
             placeholder="10.303315, -66.874095"
             bind:value={coordsText}
             onchange={resolveCoords}
             disabled={fieldDisabledByTemplate('coordinates')}
-          />
+          ></textarea>
           {#if geo}
             <div class="geo-facts card">
               <button class="fact mono" onclick={() => copy(`${geo.lat.toFixed(6)}, ${geo.lon.toFixed(6)}`)} title="Copy">
@@ -1162,14 +1174,17 @@
           title={fieldDisabledByTemplate('source') ? TEMPLATE_FIELD_HINT : undefined}
         >
           <label class="label" for="pc-source">Source</label>
-          <input
+          <!-- A box of several lines: a proof read from a thread rests on the post that
+               published it and the ones under it, and each address is a line. -->
+          <textarea
             id="pc-source"
-            class="input"
+            class="textarea post-source"
+            rows={sourceRows}
             placeholder="https://instagram.com/… (original post)"
             bind:value={source}
             onchange={regenerate}
             disabled={fieldDisabledByTemplate('source')}
-          />
+          ></textarea>
         </div>
 
         {#if caseState.current}
@@ -1646,6 +1661,11 @@
     line-height: 1.6;
     min-height: 0;
   }
+  /* One line reads as the box it used to be; several grow it, up to a point. */
+  .post-source {
+    min-height: 0;
+    line-height: 1.5;
+  }
   .media-tabs {
     display: flex;
     gap: 4px;
@@ -1756,6 +1776,8 @@
     cursor: not-allowed;
   }
   .field.template-disabled .input { pointer-events: none; }
+  /* Grows with the points it holds, up to four lines, then scrolls. */
+  .coords-input { resize: vertical; line-height: 1.5; }
   .field.template-disabled:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 3px;

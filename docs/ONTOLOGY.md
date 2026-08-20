@@ -756,18 +756,20 @@ subject removes it transitively.
 - It is also read backwards, as geography. The Saved panel counts the proofs
   hanging off each saved point through this edge, and a proof with no point of
   its own is placed at the point of every capture it composes, one hop back.
-  A proof does carry its own point first, though: `coordsText` (what the analyst
-  typed, in any supported format) then `coords` (what the panels gave it, frozen
-  at save). That is what keeps a proof on the map once its capture is deleted —
-  a tombstone records the path, the sha256 and the URL, never coordinates.
+  A proof does carry its own points first, though: `spec.points[]` (what the
+  analyst typed, in any supported format, one entry per point) then `coords`
+  (what the panels gave it, frozen at save). That is what keeps a proof on the
+  map once its capture is deleted — a tombstone records the path, the sha256 and
+  the URL, never coordinates.
 - **Placement reads the same edges further, and in both directions**
   (`satellite.placements`, `GET /entities/{id}/placement`): a video reaches its
   capture three hops away, through the proof that composed a frame of it. Only
   `capture` and `proof` carry a point, and **the artifact carrying one ends the
   walk**. Points deduplicate on the exact pair, never a rounded one, and the nearest
-  hop wins a repeat. Bounded at four hops, 200 entities read and 15 points reported,
-  each with the entity it was read off; a `capture` reports none, its point being its
-  own rather than one the chain placed it at.
+  hop wins a repeat. A proof reports every point it states, so the footage behind a
+  three-point proof answers for all three. Bounded at four hops, 200 entities read
+  and 15 points reported, each with the entity it was read off; a `capture` reports
+  none, its point being its own rather than one the chain placed it at.
 - `attrs.lost_sources[]` stores `{label, type, path, sha256, source_url, at}`.
   Tombstones are keyed by path and never stacked.
 - Every UI deletion uses the same dependency-aware service. The confirmation
@@ -826,10 +828,18 @@ It answers with resolved type lists, so a client never has to know what a family
 
 ### Where a geolocation becomes a point ✅
 
-Saving a proof files the point it carries as a `place` and states
-`proof --depicts--> place` (`satellite.place_for_proof`). The point is what the
-analyst typed into the composer, or what its panels froze and they left standing
-(`own_point`, §3 placement).
+Saving a proof files the points it carries as `place`s and states
+`proof --depicts--> place` for each (`satellite.place_for_proof`). They are what
+the analyst typed into the composer, or what its panels froze and they left
+standing (`spec_points`, §3 placement).
+
+**A proof states as many points as it argues.** Three impacts, a building, the
+camera that filmed it: each is a point somebody concluded on, and they are peers,
+in the order they were typed. **The first is the conclusion** — the map mark, the
+coordinate a post cites, the place a save files first — and nothing else takes
+that rank, POV included: a list that reordered itself would take a coordinate out
+of a tweet without saying so. A point may carry a name, which becomes the `place`'s
+label: "impact 2" reads better in the tree than `64.148100, -21.940100`.
 
 **A capture files nothing.** Ten are taken while hunting one roof and each frames
 a slightly different centre, so filing each would pin the search rather than the
@@ -850,9 +860,9 @@ the moment somebody commits to it. That moment is the proof.
 - **A save restates the point rather than adding one**
   (`satellite.restate_proof_point`), the rule the proof's panels already follow.
   Reopening a proof and correcting the coordinates is an answer withdrawn: the old
-  edges go, or the case reads as two geolocations. Toggling POV changes the verb
-  the last save wrote, and an emptied coordinate field withdraws the point
-  entirely. Only what the composer itself wrote is reconciled — an edge stated by
+  edges go, or the case reads as two geolocations. It reconciles the **whole list**
+  by difference, so a point taken off it rends its place exactly as an emptied
+  field once did, and POV moved to another line changes both verbs. Only what the composer itself wrote is reconciled — an edge stated by
   hand in Details, or proposed by import enrichment, is a separate claim about the
   same file — and a point another proof still concludes on keeps its material.
   A place the proof let go of that nothing else holds is **offered for deletion,
@@ -864,30 +874,65 @@ the moment somebody commits to it. That moment is the proof.
   their own act is the review everybody clicks through, which is what makes
   `suggested` stop meaning anything where it is real. Being wrong costs one
   removal, since a relation drops alone.
-- **`spec.pov` picks the verb for the material, because the composition cannot.**
+- **POV picks the verb for the material, because the composition cannot.**
   Recorded-at and shows are independent — a rooftop shot was recorded somewhere it
   never shows, a skyline is shown from kilometres away — and a match between a
   frame and an imagery says only that they meet, not whether the camera or its
-  subject was located. The composer asks once (**POV**), and the answer travels in
-  the spec: set, the media are `located-at` the point; unset, they `depicts` it. A
+  subject was located. So it rides on the **point**, not on the proof, and **at
+  most one point carries it**: a camera stood in one place, and two would have one
+  video recorded twice. Set, the media are `located-at` that point; unset, they
+  `depicts` it. A
   `capture` shows it either way, since orbital imagery was recorded nowhere on the
   ground, and so does the proof, which was composed. POV is also the only reading
   that reaches an audio file, which has a place it was made and nothing it shows.
 
+**A point another road filed for the proof is one of its points too.** A sheet
+row states a second position about a picture it already built, under its own
+provenance rather than by composing that picture twice (`sheetproofs._added_point`).
+The graph then holds a point the spec never learned, so everything that asks what
+a proof concludes on reads both (`satellite.proof_points`): the map draws it, and
+the composer **opens on it** instead of beside it. Saving is what makes the spec
+agree; until then, reopening never rewrites what the analyst typed.
+
 `proof_place_auto` (Settings → General → Proofs, on by default) decides whether
-the save files it or the composer asks first. Both write the same thing.
+the save files them or the composer asks first. Both write the same thing, and the
+question is plural when the list is.
+
+**Only the conclusion is looked up at save.** Geography is a paced Nominatim call
+(`engine/geo._pace`, 1.1 s apart under one lock), so resolving three points would
+hold the save for three seconds to answer what the Locate pass answers for free.
+The rest are born unlocated, exactly as an offline save already is.
+
+**A proof is derived from what it composes and from what it rests on.** Its panels are
+the pictures laid out on the canvas; its `material` is the footage behind them, brought
+into the case from an address the analyst stated in the composer's Source list. Both are
+restated on every save (`links.sync`), so an address taken off the list drops its edge
+the way a dropped panel does, and the point follows the derivation closure rather than a
+second rule — `restate_proof_point` already poses a proof's place on everything in its
+chain.
 
 **An imported proof is filed by the same rules** (`engine/proofimport.py`). A
 post that publishes a geolocation is a proof and its material written in prose,
-so the import files the footage the post points at as `media`, each picture it
+so the import files every file the post points at as `media`, each picture it
 published as a `media` that proof composes, and writes their spec through the
 composer's own save route — one panel per published picture, since a post
-publishing a set published one geolocation. Nothing about the vocabulary changes: the proof
-`depicts`, the footage takes the verb POV picks, and the point deduplicates on
-`COORD_KEY` like any other. The footage reaches the point because the picture
-records `derived-from` it — the derivation closure is what the placement reads,
-so a source that is merely named in the text and never downloaded is a proof with
-no material rather than an edge stated about a file the case does not hold.
+publishing a set published one geolocation. **Both halves are plural, and for
+opposite reasons**: a set of published pictures is one composition, while a thread
+states one point and hangs the photos and the clips it rests on off several posts.
+
+**The proof is the node they all hang off.** It composes the pictures and rests on the
+material, and both are its own `derived-from` edges — the same shape the composer writes
+by hand, and the reading somebody opening the graph is after, since the proof is the
+finding and a published picture is one file among the several it was read from. Hanging
+the material off the *picture* instead made a media node the centre of a geolocation and
+left the proof a leaf beside it. It also asked the import to say which photo of four a
+composite was laid out from, which is not something a post says.
+
+Nothing about the vocabulary changes: the proof `depicts`, the material takes the verb
+POV picks, and the point deduplicates on `COORD_KEY` like any other. The material reaches
+the point because the proof records `derived-from` it — the derivation closure is what the
+placement reads, so a source that is merely named in the text and never downloaded is a
+proof with no material rather than an edge stated about a file the case does not hold.
 
 ### Lenses ✅
 

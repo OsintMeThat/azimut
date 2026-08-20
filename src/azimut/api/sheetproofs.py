@@ -328,47 +328,84 @@ def _fetch(case: Case, token: str, slot: str, url: str) -> dict[str, Any]:
     stage = import_engine.staging_dir(case, token)
     ensure_dir(stage)
     wants = _SLOT_WANTS.get(slot, "")
-    result = media_engine.fetch_url(case, url, stage=stage, wants=wants)
+    try:
+        result = media_engine.fetch_url(case, url, stage=stage, wants=wants)
+    except media_engine.WrongKind as refusal:
+        # The post was read and holds nothing this slot has room for. One line, because a
+        # hundred rows cannot each raise a dialog and this one is actionable: the row goes
+        # to the pile to do by hand.
+        raise _RowFailed(str(refusal)) from refusal
     if result.get("multi"):
-        if slot == import_engine.SLOT_PANEL:
-            return _every_picture(case, token, url, result, stage=stage)
-        result = _pick(case, url, result, stage=stage, wants=wants)
+        return _every_file(case, token, slot, url, result, stage=stage)
     if result.get("needs_auth"):
         raise _RowFailed(_walled(result))
     staged = result.get("staged")
     if not staged:
         raise _RowFailed("nothing at that address could be downloaded")
-    import_engine.fill_slot(case, token, slot, staged)
+    # Keyed by its address, so a row listing three of them holds three sets rather than
+    # each one wiping the last.
+    import_engine.fill_files(case, token, slot, [staged], for_url=url)
     return staged
 
 
-def _every_picture(
+#: What a slot can use out of a post carrying several attachments. A panel is a picture
+#: by definition; material is whatever was recorded on the spot, which is why a still
+#: photographed there counts and a PDF hanging off the post does not.
+_SLOT_KINDS = {
+    import_engine.SLOT_PANEL: ("image",),
+    import_engine.SLOT_SOURCE: ("image", "video", "audio"),
+}
+
+#: What a row says the post was missing, in the words of what the slot is for.
+_SLOT_MISSING = {import_engine.SLOT_PANEL: "image", import_engine.SLOT_SOURCE: "media"}
+
+
+def _every_file(
     case: Case,
     token: str,
+    slot: str,
     url: str,
     offered: dict[str, Any],
     *,
     stage: Any,
 ) -> dict[str, Any]:
-    """Take the whole published set, in the order it was published.
+    """Take the whole set a post carries, in the order it published it.
 
     A post that publishes a geolocation as several pictures — the overhead, the ground
     shot, the match — published *one* proof, and keeping the first of three keeps a third
     of it. They become the panels of one composition, which is what a proof already is.
+    The material side answers the same way for the same reason: a post carrying two photos
+    of the scene and the clip under them is three things that were shot there, and a
+    hundred rows cannot each be asked which one counted.
 
-    Only pictures: a clip quoted beside them is the footage, not a panel, and it has its
-    own column.
+    A slot takes only what it can use — pictures for the panels, anything recorded for the
+    material — and a post holding none of it is a row to do by hand.
     """
-    pictures = [item for item in offered.get("items") or [] if item.get("kind") == "image"]
-    if not pictures:
+    kinds = _SLOT_KINDS.get(slot, ())
+    # Vouched for as the post's own, and of a kind this slot can use. A hundred rows
+    # cannot each be asked whether the clip a post quotes belongs to the geolocation,
+    # and taking it would file somebody else's video on this row's point.
+    wanted = [
+        item
+        for item in offered.get("items") or []
+        if item.get("kind") in kinds and item.get("own", True)
+    ]
+    if not wanted:
+        held_count = len(offered.get("items") or [])
+        # Named for what the slot was after rather than for the kind it prefers: the
+        # material takes a photograph as readily as a clip, so "no video" would be a
+        # refusal about the wrong thing.
         raise _RowFailed(
-            f"that post holds {len(offered.get('items') or [])} files and no image, "
+            f"that post holds {held_count} files and no {_SLOT_MISSING[slot]}, "
             "so pick one by hand"
         )
     held: list[dict[str, Any]] = []
-    for item in pictures[: import_engine.MAX_PANELS]:
+    cap = import_engine.SLOT_CAPS[slot]
+    for item in wanted[:cap]:
+        # Asked for by its own kind: `wants="image"` is what reaches the image extractor
+        # for a picture yt-dlp would answer with the clip quoted beside it.
         answer = media_engine.fetch_url(
-            case, url, index=int(item["index"]), stage=stage, wants="image"
+            case, url, index=int(item["index"]), stage=stage, wants=str(item.get("kind") or "")
         )
         if answer.get("needs_auth"):
             raise _RowFailed(_walled(answer))
@@ -377,41 +414,8 @@ def _every_picture(
             held.append(staged)
     if not held:
         raise _RowFailed("nothing could be downloaded from that address")
-    import_engine.fill_files(case, token, import_engine.SLOT_PANEL, held)
+    import_engine.fill_files(case, token, slot, held, for_url=url)
     return held[0]
-
-
-def _pick(
-    case: Case,
-    url: str,
-    offered: dict[str, Any],
-    *,
-    stage: Any,
-    wants: str,
-) -> dict[str, Any]:
-    """Choose among a post's attachments the way the slot would, and fetch that one.
-
-    The first of the wanted kind, because a post publishes what it is about before what it
-    adds to it.
-
-    The two slots differ on what to do when nothing matches, and they differ because their
-    contents do. A proof is **composed of pictures**, so a post carrying no picture holds
-    no proof, and guessing which frame of a video was the published one is not a call a
-    rule gets to make. The footage is only usually a video: a still photographed on the
-    spot is material too, so the source slot takes the first attachment rather than
-    refusing a row over a preference.
-    """
-    items = offered.get("items") or []
-    chosen = next((item for item in items if item.get("kind") == wants), None)
-    if chosen is None and wants != "image":
-        chosen = items[0] if items else None
-    if chosen is None:
-        raise _RowFailed(
-            f"that post holds {len(items)} files and no {wants}, so pick one by hand"
-        )
-    return media_engine.fetch_url(
-        case, url, index=int(chosen["index"]), stage=stage, wants=wants
-    )
 
 
 def _row_media(
@@ -428,26 +432,41 @@ def _row_media(
     takes, for the same reason.
     """
     point = decision["point"]
-    held = build_engine.held_media(case, decision["source_url"])
-    if held is None:
+    filed: list[dict[str, Any]] = []
+    wanted: list[str] = []
+    for url in decision["source_urls"]:
+        held = build_engine.held_media(case, url)
+        if held is None:
+            wanted.append(url)
+        else:
+            filed.append(held)
+    if wanted:
         token = import_engine.open_import(case)
         try:
-            staged = _fetch(case, token, import_engine.SLOT_SOURCE, decision["source_url"])
+            for url in wanted:
+                _fetch(case, token, import_engine.SLOT_SOURCE, url)
             if stopping():
                 raise _Stopped()
-            path = import_engine.staged_path(case, token, import_engine.SLOT_SOURCE)
-            if path is None:
+            pairs = import_engine.staged_pairs(case, token, import_engine.SLOT_SOURCE)
+            if not pairs:
                 raise _RowFailed("the download is no longer held")
-            filed = media_engine.import_produced_file(
-                case, path, str(staged["filename"]), dict(staged.get("source") or {}),
-                by=build_engine.BY,
-            )
-            held = filed["entity"]
+            for path, staged in pairs:
+                produced = media_engine.import_produced_file(
+                    case, path, str(staged["filename"]), dict(staged.get("source") or {}),
+                    by=build_engine.BY,
+                )
+                filed.append(produced["entity"])
         finally:
             import_engine.discard(case, token)
     place = _place_for(case, point["lat"], point["lon"])
-    _state(case, held["id"], place["id"], build_engine.proof_verb(pov))
-    return {"source": held, "place": place}
+    verb = build_engine.proof_verb(pov)
+    # Each file states the point for itself: they were all recorded there, and an edge
+    # standing on only the first would leave the rest off the map.
+    for one in filed:
+        _state(case, one["id"], place["id"], verb)
+    made: dict[str, Any] = {"source": filed[0], "place": place}
+    made.update({f"source {at + 2}": one for at, one in enumerate(filed[1:])})
+    return made
 
 
 def _row_proof(
@@ -472,7 +491,7 @@ def _row_proof(
         # cell: the import reads coordinates with its own parser, and handing it the two
         # numbers is what keeps the plan and the press about the same spot.
         "coords": f"{point['lat']}, {point['lon']}",
-        "source_url": decision["source_url"],
+        "source_urls": decision["source_urls"],
         "note": decision["note"],
         "pov": pov,
     }
@@ -481,7 +500,8 @@ def _row_proof(
 
     token = import_engine.open_import(case)
     try:
-        _fetch(case, token, import_engine.SLOT_SOURCE, decision["source_url"])
+        for url in decision["source_urls"]:
+            _fetch(case, token, import_engine.SLOT_SOURCE, url)
         _fetch(case, token, import_engine.SLOT_PANEL, decision["proof_url"])
         # The last moment this row is only bytes. Past it the media are filed and a cancel
         # can no longer mean "as if it never ran".
@@ -521,8 +541,9 @@ def _added_point(case: Case, decision: dict[str, Any], *, pov: bool) -> dict[str
     Which the vocabulary allows exactly here: a save reconciles only the edges the composer
     itself wrote (ONTOLOGY §"Where a geolocation becomes a point"), and an edge stated by
     another hand is a separate claim about the same file. Written under this road's own
-    provenance, it survives every later save and the composer's own field goes on stating
-    the one point it holds.
+    provenance, it survives every later save — and the composer **opens on it** rather
+    than beside it (``satellite.open_spec``), so the proof reads the same in the tool
+    that made it as it does on the map.
 
     `depicts` and never `located-at`, whatever POV says: a proof was composed and recorded
     nowhere. POV picks the verb for the material, and only there.
@@ -533,9 +554,13 @@ def _added_point(case: Case, decision: dict[str, Any], *, pov: bool) -> dict[str
     grid's log with its point resting on nothing. The next press would not take it again.
     """
     panel = build_engine.held_media(case, decision["proof_url"])
-    source = build_engine.held_media(case, decision["source_url"])
+    sources = [
+        one
+        for one in (build_engine.held_media(case, url) for url in decision["source_urls"])
+        if one is not None
+    ]
     proof = build_engine.built_proof(case, decision["proof_url"])
-    if proof is None and panel is None and source is None:
+    if proof is None and panel is None and not sources:
         raise _RowFailed("the row this one joins did not build")
     # Read before the place is filed, so a row with nothing to join leaves no bare pin
     # behind either.
@@ -543,7 +568,10 @@ def _added_point(case: Case, decision: dict[str, Any], *, pov: bool) -> dict[str
     place = _place_for(case, point["lat"], point["lon"])
     verb = build_engine.proof_verb(pov)
     made: dict[str, Any] = {"place": place}
-    for slot, held in (("panel", panel), ("source", source)):
+    named = [("panel", panel)] + [
+        (f"source {at + 2}" if at else "source", one) for at, one in enumerate(sources)
+    ]
+    for slot, held in named:
         if held is None:
             continue
         _state(case, held["id"], place["id"], verb)
@@ -574,8 +602,10 @@ def _restate_proof(
     spec = dict(proofs.read_spec(case, proof))
     if not spec:
         raise _RowFailed("that proof's composition could not be read")
-    spec["coordsText"] = form["coords"]
-    spec["pov"] = form["pov"]
+    # Through the engine rather than by hand: a proof composed with several points
+    # holds a list, and setting the old field beside it would be read as nothing
+    # said. A sheet row states one point, and this is how it says so.
+    satellite_engine.state_points(spec, [{"coords": form["coords"], "pov": form["pov"]}])
     if form["note"]:
         panels = [dict(panel) for panel in spec.get("panels") or []]
         if panels:
@@ -598,15 +628,17 @@ def _restate_proof(
     # so the place is read off its answer rather than filed a second time. `None` there
     # means the case already held that point, which is the quiet common case.
     lat, lon = decision["point"]["lat"], decision["point"]["lon"]
-    reported = saved.get("place")
-    if reported is None:
-        place = satellite_engine.place_at(case, lat, lon, keyed_only=False)
-    elif reported.get("filed"):
-        place = case.get_entity(str(reported["id"]))
-    else:
+    reported = saved.get("place") or {}
+    filed = reported.get("filed") or []
+    if filed:
+        place = case.get_entity(str(filed[0]["id"]))
+    elif reported.get("asking"):
         # `proof_place_auto` is off, so the composer's own save would have asked. The
         # analyst answered when they read the plan.
-        place, _released = proofs.file_proof_place(case, proof["id"], lat, lon, pov=pov)
+        filed = proofs.file_proof_points(case, proof)
+        place = case.get_entity(str(filed[0]["id"])) if filed else None
+    else:
+        place = satellite_engine.place_at(case, lat, lon, keyed_only=False)
     return {
         "proof": {"id": proof["id"], "label": str(saved["name"])},
         "place": place,

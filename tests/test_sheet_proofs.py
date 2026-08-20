@@ -307,11 +307,13 @@ def test_a_full_row_writes_the_whole_constellation(client, monkeypatch):
     assert [entity["label"] for entity in case_entities(case_id, "proof")] == ["Bridge strike"]
     assert len(case_entities(case_id, "media")) == 2
     assert len(case_entities(case_id, "place")) == 1
+    # The proof composes the picture and rests on the footage: both are its own edges,
+    # so the whole geolocation hangs off one node.
     assert edges(case_id) == [
         "media depicts place",
         "media depicts place",
-        "media derived-from media",
         "proof depicts place",
+        "proof derived-from media",
         "proof derived-from media",
     ]
     # And the row says what it made, which is what the grid logs beside it.
@@ -336,7 +338,7 @@ def test_a_full_row_writes_the_whole_constellation(client, monkeypatch):
     )
     assert spec["panels"][0]["caption"] == "south bank"
     assert spec["pov"] is False
-    assert spec["source"] == "https://ex.org/clip"
+    assert spec["sources"] == ["https://ex.org/clip"]
 
 
 def test_pov_moves_the_two_files_onto_the_ground_instead_of_showing_it(client, monkeypatch):
@@ -348,10 +350,10 @@ def test_pov_moves_the_two_files_onto_the_ground_instead_of_showing_it(client, m
 
     press(client, case_id, sheet, pov=True)
     assert edges(case_id) == [
-        "media derived-from media",
         "media located-at place",
         "media located-at place",
         "proof depicts place",
+        "proof derived-from media",
         "proof derived-from media",
     ]
 
@@ -507,6 +509,99 @@ def test_a_post_of_several_attachments_is_answered_by_what_the_slot_holds(
     assert {call["wants"] for call in picks} == {"image"}
 
 
+def test_a_source_cell_of_several_addresses_is_one_proof_resting_on_all_of_them(
+    client, monkeypatch
+):
+    """A geolocation states one point and rests on whatever was shot at it.
+
+    A thread hangs the photos and the clips off several posts, so the cell lists them —
+    there is no `+` in a spreadsheet, and a column that read only the first address filed
+    one file and left the rest of the case's own evidence outside it.
+
+    One proof, one point, and every file in its chain. The published picture stays one:
+    a row builds one proof, and a second picture would be a second.
+    """
+    import json
+
+    from azimut.api.cases import get_case
+
+    stub_downloads(monkeypatch)
+    case_id = make_case(client)
+    sheet = geoloc(
+        client,
+        case_id,
+        "Title,Source media,Geolocation proof,Coordinates,Status,Notes\n"
+        "Fuerte Tiuna,https://ex.org/photos https://ex.org/clip1 https://ex.org/clip2,"
+        "https://ex.org/pic,10.467771 -66.886490,,\n",
+    )
+
+    # The plan says what it is about to do, and it says it before a byte moves.
+    said = plan(client, case_id, sheet).json()
+    assert said["rows"][0]["action"] == "make"
+
+    result = press(client, case_id, sheet)
+    assert result["counts"] == {"built": 1, "restated": 0, "failed": 0}
+    media = case_entities(case_id, "media")
+    assert len(media) == 4  # three pieces of material and the picture composed of them
+
+    proof = case_entities(case_id, "proof")[0]
+    spec = json.loads(
+        get_case(case_id).resolve_inside(proof["attrs"]["spec"]).read_text(encoding="utf-8")
+    )
+    assert spec["sources"] == [
+        "https://ex.org/photos", "https://ex.org/clip1", "https://ex.org/clip2",
+    ]
+
+    links = case_links(case_id)
+    panel = next(one for one in media if one["attrs"].get("source_url") == "https://ex.org/pic")
+    material = {one["id"] for one in media} - {panel["id"]}
+    # The proof composes the picture and rests on the three files: one node the whole
+    # geolocation hangs off, rather than a media node the rest is strung from.
+    from_proof = {
+        link["to"] for link in links
+        if link["from"] == proof["id"] and link["type"] == "derived-from"
+    }
+    assert from_proof == material | {panel["id"]}
+    assert not [
+        link for link in links
+        if link["from"] == panel["id"] and link["type"] == "derived-from"
+    ]
+
+
+def test_a_post_that_quotes_another_gives_up_only_its_own(client, monkeypatch):
+    """The clip a post quotes belongs to the post it quotes.
+
+    yt-dlp's X extractor reads a tweet's media and the media of the tweet it quotes into
+    one list, and nothing in what comes back says which is which past the first. A press
+    that took both would file a stranger's video and, on a road that poses material on a
+    point, claim it was recorded there — a wrong statement where a missing one is merely
+    incomplete. A hundred rows cannot each be asked, so the rule takes what is vouched
+    for and leaves the rest to the two screens that have somebody in front of them.
+    """
+    calls = stub_downloads(
+        monkeypatch,
+        several={
+            "https://ex.org/quoting": [
+                {"index": 1, "kind": "video", "title": "the post's own clip", "own": True},
+                {"index": 2, "kind": "video", "title": "the quoted clip", "own": False},
+            ]
+        },
+    )
+    case_id = make_case(client)
+    sheet = geoloc(
+        client,
+        case_id,
+        "Title,Source media,Geolocation proof,Coordinates,Status,Notes\n"
+        "Quito,https://ex.org/quoting,,-0.22 -78.51,,\n",
+    )
+
+    result = press(client, case_id, sheet)
+    assert result["counts"] == {"built": 1, "restated": 0, "failed": 0}
+    assert len(case_entities(case_id, "media")) == 1
+    # Asked twice: once to see what the post holds, once for the one file it vouches for.
+    assert [call["index"] for call in calls] == [None, 1]
+
+
 def test_a_post_publishing_several_pictures_is_one_proof_of_several_panels(
     client, monkeypatch
 ):
@@ -557,7 +652,8 @@ def test_a_post_publishing_several_pictures_is_one_proof_of_several_panels(
     assert "path" not in attrs, "a set has no render, so it has no export to point at"
     assert attrs.get("thumb"), "and it borrows the first picture's, so it is not a blank node"
 
-    # The proof rests on all three, which is what makes the point reach them.
+    # The proof composes all three and rests on the footage: four edges of its own, and
+    # that closure is what makes the point reach every one of them.
     from test_sheet_bridge import case_links
 
     named = {entity["id"]: entity for entity in case.list_entities()}
@@ -565,7 +661,7 @@ def test_a_post_publishing_several_pictures_is_one_proof_of_several_panels(
         link for link in case_links(case_id)
         if link["type"] == "derived-from" and named[link["from"]]["type"] == "proof"
     ]
-    assert len(chain) == 3
+    assert len(chain) == 4
 
 
 def test_a_post_holding_nothing_of_the_kind_is_a_row_to_do_by_hand(client, monkeypatch):
@@ -596,10 +692,16 @@ def test_a_post_holding_nothing_of_the_kind_is_a_row_to_do_by_hand(client, monke
     assert not case_entities(case_id, "proof")
 
 
-def test_the_footage_slot_takes_a_still_rather_than_refusing_the_row(client, monkeypatch):
+def test_the_footage_slot_takes_the_stills_rather_than_refusing_the_row(client, monkeypatch):
     """The footage is only *usually* a video. A photograph taken on the spot is material
     too, so a preference is not a reason to lose the row — where a proof composed of no
-    picture really is nothing to compose."""
+    picture really is nothing to compose.
+
+    And a post carrying two of them carries two things that were shot there. The panel
+    road already answers a set by taking all of it, for the reason that keeping the first
+    of two keeps half; the material road has no reason to answer differently, and a
+    hundred rows cannot each be asked which photograph counted.
+    """
     calls = stub_downloads(
         monkeypatch,
         several={
@@ -619,8 +721,17 @@ def test_the_footage_slot_takes_a_still_rather_than_refusing_the_row(client, mon
 
     result = press(client, case_id, sheet)
     assert result["counts"] == {"built": 1, "restated": 0, "failed": 0}
-    assert len(case_entities(case_id, "media")) == 1
-    assert [call["index"] for call in calls] == [None, 1]
+    media = case_entities(case_id, "media")
+    assert len(media) == 2
+    assert [call["index"] for call in calls] == [None, 1, 2]
+    # Both of them state the point, or the second would be in the case and off the map.
+    place = case_entities(case_id, "place")[0]
+    posed = {
+        link["from"]
+        for link in case_links(case_id)
+        if link["to"] == place["id"] and link["type"] in ("located-at", "depicts")
+    }
+    assert {one["id"] for one in media} <= posed
 
 
 def test_a_second_press_refreshes_the_point_and_the_note_and_downloads_nothing(
@@ -810,9 +921,9 @@ def test_one_published_proof_seen_at_two_points_is_one_proof(client, monkeypatch
         "media depicts place",
         "media depicts place",
         "media depicts place",
-        "media derived-from media",
         "proof depicts place",
         "proof depicts place",
+        "proof derived-from media",
         "proof derived-from media",
     ]
     # And the second row's cell still points at the proof it is about, so the line reads as

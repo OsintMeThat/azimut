@@ -140,14 +140,11 @@ def place_at(
 
 def place_for_proof(
     case: Case,
-    proof_id: str,
-    lat: float,
-    lon: float,
+    point: dict[str, Any],
     *,
-    pov: bool = False,
     by: str = "proof-composer",
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """File a proof's point as a ``place``, and join what the proof establishes.
+) -> dict[str, Any]:
+    """File one point a proof states as a ``place``.
 
     **A geolocation is concluded in the composer, not while framing the map.** The
     coordinates a proof carries are the analyst's answer — what they typed, or the
@@ -155,26 +152,27 @@ def place_for_proof(
     the dozen views taken while looking. So the point becomes a node here, once,
     at the moment somebody commits to it, rather than on every crop.
 
+    **The label names the ground.** A place is the one entity whose identity is a
+    number, so it is normally called by its coordinates; a proof that says which
+    impact this is has already named it better than the numbers can, and the tree
+    reads "impact 2" instead of `64.148100, -21.940100`.
+
     Filed ``confirmed``: whether it was typed or accepted from the panels, the
     proof is the analyst's own act, and a review step over one's own answer is a
     step over nothing.
 
-    **The proof itself always ``depicts``.** It was composed, never recorded
-    anywhere, so ``located-at`` is not a reading it can take — which is what the
-    registry says too. ``pov`` decides the verb for the *material*, and only there.
-
-    The caller decides *whether* to ask (``config.proof_place_auto``); this only
-    files. Callers check :func:`place_at` first, so a point already in the case is
-    never duplicated and never asked about.
-
-    Answers with the place and whatever the proof let go of to conclude on it
-    (:func:`restate_proof_point`).
+    Files only. The caller decides *whether* to ask (``config.proof_place_auto``),
+    checks :func:`place_at` first so a point already in the case is never
+    duplicated, and states the whole list at once
+    (:func:`restate_proof_point`) — a point cannot be joined on its own without
+    withdrawing the others the same proof concludes on.
     """
-    place = save_place(
-        case, float(lat), float(lon), by=by,
-        extra_attrs={COORD_KEY: coord_key(float(lat), float(lon))},
+    lat, lon = float(point["lat"]), float(point["lon"])
+    label = str(point.get("label") or "").strip()
+    return save_place(
+        case, lat, lon, title=label or None, by=by,
+        extra_attrs={COORD_KEY: coord_key(lat, lon)},
     )
-    return place, restate_proof_point(case, proof_id, place["id"], pov=pov, by=by)
 
 
 #: The two verbs a proof's point is stated with. `depicts` for the composition and
@@ -185,24 +183,25 @@ PLACE_VERBS = (links.DEPICTS, links.LOCATED_AT)
 def restate_proof_point(
     case: Case,
     proof_id: str,
-    place_id: str | None,
+    stated: list[dict[str, Any]],
     *,
-    pov: bool = False,
     by: str = "proof-composer",
 ) -> list[dict[str, Any]]:
     """Make the graph say what this proof says now, and stop saying what it said.
 
-    **A proof states one point, and a save is the restatement of it** — the same
-    rule its panels already follow (``links.sync``, ONTOLOGY §3). Re-opening a
-    proof and correcting the coordinates is the analyst withdrawing an answer, so
-    the old edges go rather than piling up beside the new ones; toggling POV is
-    them saying the point means something else, so the verb on the material
-    changes. Without this a corrected proof read as two geolocations, and a POV
-    answer could only ever be given once.
+    **A save is the restatement of everything a proof states** — the same rule its
+    panels already follow (``links.sync``, ONTOLOGY §3). Re-opening a proof and
+    correcting the coordinates is the analyst withdrawing an answer, so the old
+    edges go rather than piling up beside the new ones; taking a point off the list
+    rends its place exactly as clearing the field once did; moving POV to another
+    line is them saying the two points mean something else, so the verbs on the
+    material follow. Without this a corrected proof read as two geolocations, and a
+    POV answer could only ever be given once.
 
-    ``place_id`` is the point the proof concludes on now, or ``None`` when it
-    concludes on none — a coordinate field cleared withdraws the claim rather than
-    freezing the last one.
+    ``stated`` is the whole list the proof concludes on now — ``{"id", "pov"}`` per
+    place, in the composer's own order — and an empty one withdraws everything.
+    **It has to be the whole list**: this reconciles by difference, so filing one
+    point on its own would take back every other point the same proof holds.
 
     **Only what the composer itself wrote is reconciled** (``by``). An edge the
     analyst stated by hand in Details, or one import enrichment proposed from a
@@ -218,15 +217,16 @@ def restate_proof_point(
         for entity in (links.derivation_subgraph(case, proof_id) or {}).get("entities", [])
         if entity["id"] != proof_id
     ]
+    wanted = {entry["id"]: bool(entry.get("pov")) for entry in stated}
     released: list[dict[str, Any]] = []
     for old_id in _stated_places(case, proof_id, by=by):
-        if old_id == place_id:
+        if old_id in wanted:
             continue
         _withdraw_point(case, proof_id, old_id, material, by=by)
         old = case.get_entity(old_id)
         if old is not None and not case.links_of(old_id):
             released.append(old)
-    if place_id is not None:
+    for place_id, pov in wanted.items():
         _state_point(case, proof_id, place_id, material, pov=pov, by=by)
     return released
 
@@ -317,7 +317,7 @@ def _state_point(
     shows, and a skyline is shown from kilometres away. Neither entails the other,
     and a match between a frame and an imagery says only that they meet — not
     whether the analyst located the camera or what it was pointed at. So the
-    composer asks once, and the answer travels in the spec:
+    answer is given per point, on the line it belongs to, and travels in the spec:
 
     - ``pov`` — the point is where the camera stood → ``located-at`` on the media
       (an image, a video or a recording of the moment);
@@ -559,28 +559,262 @@ def saved_index(case: Case) -> list[dict[str, Any]]:
     return rows
 
 
-def own_point(spec: dict[str, Any]) -> dict[str, float] | None:
-    """The point a proof states for itself, or None if it states none.
+#: How many points one proof may state. A composition arguing fifteen positions is
+#: a case rather than a proof, and the cap is what keeps a spec written by hand from
+#: filing a hundred places on one save. Same number as ``PLACEMENT_LIMIT``, for the
+#: same reason: past that a panel is a wall rather than a reading.
+MAX_PROOF_POINTS = 15
 
-    A proof is not only placed by what it composes. ``coordsText`` is what the
-    analyst typed into the composer's coordinate field, in whatever format they
-    use, and it wins: it is their own assertion, and it is the reason the field
-    exists. ``coords`` is what the panels gave the proof, frozen at save — which
-    is what keeps a proof on the map after the capture it was built from is
-    deleted, since outputs outlive their sources (ONTOLOGY §3).
+
+def _typed_point(text: Any) -> dict[str, Any] | None:
+    """One coordinate field read as a point, or None when it holds no point.
+
+    The text comes back with it. A proof reopened has to show the analyst what
+    they wrote, not a rendering of it: somebody who works in DMS typed DMS.
     """
-    text = str(spec.get("coordsText") or "").strip()
-    if text:
-        parsed = geo_engine.parse_coords(text)
-        if parsed:  # prose in the field is a caption, not a point
-            return {"lat": parsed[0], "lon": parsed[1]}
-    coords = spec.get("coords")
-    if isinstance(coords, dict) and coords.get("lat") is not None and coords.get("lon") is not None:
-        try:
-            return {"lat": float(coords["lat"]), "lon": float(coords["lon"])}
-        except (TypeError, ValueError):
-            return None
-    return None
+    trimmed = str(text or "").strip()
+    parsed = geo_engine.parse_coords(trimmed)
+    return {"lat": parsed[0], "lon": parsed[1], "coords": trimmed} if parsed else None
+
+
+def _stated_once(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    """The single point a spec written before the list states.
+
+    ``coordsText`` is what the analyst typed into the composer's coordinate field,
+    in whatever format they use, and it wins: it is their own assertion, and it is
+    the reason the field exists. ``coords`` is what the panels gave the proof,
+    frozen at save — which is what keeps a proof on the map after the capture it
+    was built from is deleted, since outputs outlive their sources (ONTOLOGY §3).
+
+    Still the live reading for a sheet row and an import, which each state one
+    point and have no reason to learn the list to say so.
+    """
+    point = _typed_point(spec.get("coordsText"))
+    if point is None:
+        coords = spec.get("coords")
+        frozen = _point((coords or {}).get("lat"), (coords or {}).get("lon")) \
+            if isinstance(coords, dict) else None
+        # nothing was typed, so the row carries no text: the composer shows the
+        # panels' own answer there and the reset arrow stays away, as it always has
+        point = {**frozen, "coords": ""} if frozen else None
+    if point is None:
+        return []
+    return [{**point, "label": "", "pov": bool(spec.get("pov"))}]
+
+
+def _mirror_broken(spec: dict[str, Any], entries: list[Any]) -> bool:
+    """True when the single-point field says something the list does not.
+
+    Only when the field is *there*: a spec holding a list and no ``coordsText`` was
+    written by something that states them all, and has nothing to disagree with.
+    """
+    if "coordsText" not in spec:
+        return False
+    first = entries[0] if entries and isinstance(entries[0], dict) else {}
+    return str(spec.get("coordsText") or "").strip() != str(first.get("coords") or "").strip()
+
+
+def spec_points(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every point a proof states, its conclusion first.
+
+    **A proof shows more than one place more often than it shows one** — three
+    impacts, a building and the camera that filmed it. Each is a point the analyst
+    concluded on, and they are peers: the list is what they typed, in the order
+    they typed it.
+
+    **The first one is the conclusion.** It places the proof on the map, a post
+    cites it, the export prints it — every surface that can carry only one answer
+    reads that one. Nothing else about a point takes that rank, POV included: an
+    analyst concluding on the camera moves it to the top themselves, and a list
+    that reordered itself would take a coordinate out of a tweet without saying so.
+
+    **``pov`` rides on the point, not on the proof**, because that is what it says:
+    the material was recorded *there*. At most one point carries it — a camera
+    stood in one place, and two would have one video recorded twice — so the first
+    to claim it keeps it whatever a hand-written spec asked for.
+
+    Text that reads as no point is skipped (prose in the field is a caption), and
+    two entries a metre apart are one place, so the second is dropped rather than
+    drawn as a second mark on the same roof.
+
+    A spec holding no list falls back to the single point it was written with
+    (:func:`_stated_once`), so nothing has to be migrated and nothing that states
+    one point has to learn the list.
+
+    **The mirror is also a check.** ``coordsText`` and the first entry are written
+    together and never drift (:func:`state_points`), so when they disagree the
+    field was set by something that does not know the list — an older build, a
+    route stating one point by hand — and what it says is the newer answer. The
+    list is dropped rather than quietly outvoting the coordinates somebody typed.
+    """
+    entries = spec.get("points")
+    points: list[dict[str, Any]] = []
+    if isinstance(entries, list) and not _mirror_broken(spec, entries):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            point = _typed_point(entry.get("coords"))
+            if point is None:
+                continue
+            points.append(
+                {
+                    **point,
+                    "label": str(entry.get("label") or "").strip(),
+                    "pov": bool(entry.get("pov")),
+                }
+            )
+    return _settled(points or _stated_once(spec))
+
+
+def _settled(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One entry per point, one POV at most, capped — whatever order they arrived in."""
+    kept: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    pov_taken = False
+    for point in points:
+        key = coord_key(point["lat"], point["lon"])
+        if key in seen:
+            continue
+        seen.add(key)
+        if point["pov"] and pov_taken:
+            point = {**point, "pov": False}
+        pov_taken = pov_taken or point["pov"]
+        kept.append(point)
+        if len(kept) == MAX_PROOF_POINTS:
+            break
+    return kept
+
+
+def _recorded_there(case: Case, place_id: str) -> bool:
+    """True when some material says it was recorded at this point — POV, read off
+    the graph rather than off a spec that never learned about the point."""
+    for link in case.links_of(place_id):
+        if link["to"] == place_id and link["type"] == links.LOCATED_AT:
+            source = case.get_entity(link["from"])
+            if source is not None and source["type"] == "media":
+                return True
+    return False
+
+
+def _adopted_points(
+    case: Case,
+    proof_id: str,
+    held: set[str],
+    incident: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Points filed for this proof by a road that never wrote its composition.
+
+    A sheet row does exactly that (``api/sheetproofs._added_point``): the binder's
+    cross-border shape is one picture and two lines, so the second line's point
+    joins the proof under the sheet's own provenance rather than composing the
+    picture twice. The graph then holds a point the spec never learned, and a
+    composer opening on one row while the map draws two is the proof saying two
+    different things.
+
+    ``held`` is what the spec already states, and skipping those early is what
+    keeps the common case cheap: every proof points at its own places, so without
+    it the index would read the POV of every point it already knows about.
+
+    A place named by its own coordinates is unnamed — that label is what a place
+    with nothing else to say gets — so it arrives as a point with no name.
+    """
+    found: list[dict[str, Any]] = []
+    for link in incident if incident is not None else case.links_of(proof_id):
+        if link["from"] != proof_id or link["type"] not in PLACE_VERBS:
+            continue
+        place = case.get_entity(link["to"])
+        if place is None or place.get("type") != "place":
+            continue
+        attrs = place.get("attrs") or {}
+        point = _point(attrs.get("lat"), attrs.get("lon"))
+        if point is None or coord_key(point["lat"], point["lon"]) in held:
+            continue
+        label = str(place.get("label") or "").strip()
+        if label == coords_label(point["lat"], point["lon"]):
+            label = ""
+        found.append({
+            **point,
+            "coords": coords_label(point["lat"], point["lon"], "dd"),
+            "label": label,
+            "pov": _recorded_there(case, place["id"]),
+        })
+    return found
+
+
+def proof_points(
+    case: Case,
+    proof_id: str,
+    stated: list[dict[str, Any]],
+    incident: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Every point a proof concludes on: what it states, then what was filed for it.
+
+    ``stated`` is :func:`spec_points` — the analyst's own list, and the authority
+    on order, so the conclusion stays the conclusion. What another road filed
+    follows, and only where the list does not already hold that point.
+
+    Every surface that asks what a proof concludes on reads this one: the map rows,
+    the composer opening the proof, the placement walk. Reading only the spec left
+    the composer showing one row for a proof the map drew twice.
+    """
+    held = {coord_key(one["lat"], one["lon"]) for one in stated}
+    return _settled([*stated, *_adopted_points(case, proof_id, held, incident)])
+
+
+def open_spec(case: Case, proof_id: str, spec: dict[str, Any]) -> dict[str, Any]:
+    """The spec a proof reopens on, holding every point it concludes on.
+
+    Untouched when the spec already states them all, which is every proof but the
+    one a sheet row filed a second point for — reopening must not rewrite what the
+    analyst wrote, down to the format they typed it in.
+
+    When there *is* more to show, the rows are materialised: a point with no text
+    is the panels answering for the proof, and that answer has to become the
+    conclusion in writing before another point can sit under it. Same rule as the
+    composer's own `+`.
+    """
+    stated = spec_points(spec)
+    merged = proof_points(case, proof_id, stated)
+    if len(merged) <= len(stated):
+        return spec
+    return state_points(spec, [
+        {**one, "coords": one["coords"] or coords_label(one["lat"], one["lon"], "dd")}
+        for one in merged
+    ])
+
+
+def state_points(spec: dict[str, Any], entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Write what a proof states into its spec: the list, and the mirror of it.
+
+    **One place writes a point, on both sides at once**, so a spec on disk never
+    carries the two saying different things. Setting ``coordsText`` alone on a proof
+    that holds a list leaves a contradiction behind, and while the read resolves it
+    the right way (:func:`spec_points`), a file nobody can read twice the same way
+    is not a file to write. Everything that states a point for a proof it did not
+    compose comes through here.
+
+    **The mirror is not a leftover.** A case bundle travels between installations
+    and the binaries are versioned, so a build older than the list has to find the
+    conclusion where it has always been rather than open a proof with no point.
+    It carries the first point, which is the one such a build could hold anyway.
+    """
+    points: list[dict[str, Any]] = []
+    for entry in entries:
+        coords = str(entry.get("coords") or "").strip()
+        if not coords:
+            continue
+        point: dict[str, Any] = {"coords": coords}
+        label = str(entry.get("label") or "").strip()
+        if label:
+            point["label"] = label
+        if entry.get("pov"):
+            point["pov"] = True
+        points.append(point)
+    spec["points"] = points
+    first = points[0] if points else {}
+    spec["coordsText"] = first.get("coords", "")
+    spec["pov"] = bool(first.get("pov"))
+    return spec
 
 
 def _source_points(
@@ -642,16 +876,65 @@ def _linked_posts(
     return linked
 
 
-def _geo_at(sources: list[dict[str, Any]], point: dict[str, float]) -> dict[str, Any]:
-    """The attrs of the source standing on this exact point, or nothing.
+def _at(lat: Any, lon: Any) -> tuple[float, float] | None:
+    """One point rounded to about a metre — the precision the map groups marks at."""
+    try:
+        return (round(float(lat), 5), round(float(lon), 5))
+    except (TypeError, ValueError):
+        return None
 
-    Five decimals is about a metre — the same precision the map groups marks at.
+
+def _located(attrs: dict[str, Any]) -> bool:
+    """True once this entity's geography came back with a country."""
+    geo = attrs.get("geo")
+    return isinstance(geo, dict) and geo.get("state") == "ok"
+
+
+def _place_geo(case: Case) -> dict[tuple[float, float], dict[str, Any]]:
+    """The geography of the case's places, by the point each one stands on.
+
+    A proof carries no geography of its own and no Locate pass ever gives it one
+    (``saved_entities`` is places and captures). But the point it states in the
+    composer is filed as a ``place``, whose country is resolved right there
+    (``api/proofs._state_points``) — so the answer is already in the case, one
+    node away, for exactly the proofs whose panels place nothing: a frame and a
+    photo carry no point, and their proof would otherwise file under Unlocated
+    while the place it just wrote knows the country.
+
+    Read once per index rather than once per row, since a case holds far fewer
+    places than the proofs index has rows.
+
+    A located place wins a point two of them share: a pin dropped before the
+    Locate pass ran and the place a proof filed on the same metre are one spot,
+    and only the one that knows its country answers anything.
     """
-    here = (round(point["lat"], 5), round(point["lon"], 5))
+    found: dict[tuple[float, float], dict[str, Any]] = {}
+    for place in _page_all(case, ["place"]):
+        attrs = place.get("attrs") or {}
+        key = _at(attrs.get("lat"), attrs.get("lon"))
+        if key is not None and not _located(found.get(key) or {}):
+            found[key] = attrs
+    return found
+
+
+def _geo_at(
+    sources: list[dict[str, Any]],
+    point: dict[str, float],
+    places: dict[tuple[float, float], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """The attrs of whatever stands on this exact point, or nothing.
+
+    A source the proof composes answers first — it is what the proof was built
+    from. Failing that, the place standing there does, which is how a proof made
+    of photos still files under its country.
+    """
+    here = _at(point["lat"], point["lon"])
+    if here is None:
+        return {}
     for source in sources:
-        if (round(float(source["lat"]), 5), round(float(source["lon"]), 5)) == here:
+        if _at(source["lat"], source["lon"]) == here:
             return dict(source["attrs"])
-    return {}
+    return dict((places or {}).get(here) or {})
 
 
 def _proof_row(
@@ -673,6 +956,10 @@ def _proof_row(
         # folder as well as by place
         "folder": (entity.get("attrs") or {}).get("folder") or "",
         "notes": "",
+        # what the analyst called this point, when they called it anything. It is
+        # what tells three rows of one proof apart: same title, same thumbnail,
+        # three places.
+        "label": (point or {}).get("label") or "",
         "lat": lat,
         "lon": lon,
         "geo": geo,
@@ -691,12 +978,14 @@ def proof_index(
     listing: list[dict[str, Any]],
     draft_listing: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Proofs as map rows, newest first — one row per distinct source point.
+    """Proofs as map rows, newest first — one row per distinct point.
 
-    ``listing`` is the proofs listing (title, export, thumbnail), which the
-    proofs API owns; everything geographic is read here so the Saved panel gets
-    the row shape it already knows. A proof whose panels are all unlocated still
-    comes back, without a point, and files under ``Unlocated`` in the tree.
+    ``listing`` is the proofs listing (title, export, thumbnail, the points its
+    spec states), which the proofs API owns; everything geographic is read here so
+    the Saved panel gets the row shape it already knows. A proof stating three
+    points is three rows: the map is about places, and a proof arguing three of
+    them draws three marks. A proof whose panels are all unlocated still comes
+    back, without a point, and files under ``Unlocated`` in the tree.
 
     Kept out of ``saved_index`` on purpose: that one is read on every case open,
     this one only when the Proofs position of the switch is first opened.
@@ -709,6 +998,7 @@ def proof_index(
     drafts = {
         layout.draft_rel(draft["name"]): draft for draft in (draft_listing or [])
     }
+    places = _place_geo(case)
     rows: list[dict[str, Any]] = []
     for proof in listing:
         entity = by_spec.get(proof.get("spec_path"))
@@ -718,13 +1008,17 @@ def proof_index(
         linked_posts = _linked_posts(entity["id"], incident, post_entities, drafts)
         proof = {**proof, "posts": len(linked_posts), "linked_posts": linked_posts}
         sources = _source_points(case, entity["id"], incident)
-        stated = proof.get("coords")
+        stated = proof_points(case, entity["id"], proof.get("points") or [], incident)
         if stated:
-            # the proof says where it is, so it says it once. Its geography is
-            # borrowed only from a source standing on that same point — a
-            # neighbouring capture's country would be a guess, and a wrong
-            # country files the proof under the wrong branch.
-            points: list[dict[str, Any] | None] = [{**stated, "attrs": _geo_at(sources, stated)}]
+            # the proof says where it is, so what it composes stops answering for
+            # it. Each point's geography is borrowed only from what stands on that
+            # same point: a source it composes, or the place the save filed there.
+            # A neighbouring capture's country would be a guess, and a place the
+            # analyst linked by hand from somewhere else is about somewhere else —
+            # a wrong country files the proof under the wrong branch.
+            points: list[dict[str, Any] | None] = [
+                {**point, "attrs": _geo_at(sources, point, places)} for point in stated
+            ]
         else:
             # a proof none of whose panels carry a point still lists, without
             # one: it files under Unlocated rather than leaving its own tool
@@ -766,28 +1060,32 @@ def _point(lat: Any, lon: Any) -> dict[str, float] | None:
         return None
 
 
-def _entity_point(case: Case, entity: dict[str, Any]) -> dict[str, float] | None:
-    """The point this entity carries itself, or None if it carries none.
+def _entity_points(case: Case, entity: dict[str, Any]) -> list[dict[str, Any]]:
+    """The points this entity carries itself, or nothing if it carries none.
 
-    Two types hold one inside a chain. A ``capture`` records the marker it was taken
-    at. A ``proof`` states its own through the composer, and ``own_point`` is what
-    decides which: what the analyst typed wins over what the panels froze. Reusing it
-    here is what keeps a video from reporting a capture's raw point while the proof
-    beside it shows the corrected one.
+    Two types hold them inside a chain. A ``capture`` records the one marker it was
+    taken at. A ``proof`` states its own through the composer, and ``spec_points``
+    is what decides which: what the analyst typed wins over what the panels froze,
+    and a proof arguing three impacts reports all three. Reading them here is what
+    keeps a video from reporting a capture's raw point while the proof beside it
+    shows the corrected one — and what makes the footage behind a three-point proof
+    answer for all three rather than for its conclusion alone.
     """
     attrs = entity.get("attrs") or {}
     if entity.get("type") == "capture":
-        return _point(attrs.get("lat"), attrs.get("lon"))
+        point = _point(attrs.get("lat"), attrs.get("lon"))
+        return [point] if point is not None else []
     if entity.get("type") != "proof":
-        return None
+        return []
     spec_rel = attrs.get("spec")
     if not isinstance(spec_rel, str) or not spec_rel:
-        return None
+        return []
     try:
         spec = json.loads(case.resolve_inside(spec_rel).read_text(encoding="utf-8"))
     except (OSError, ValueError, CaseError):
-        return None  # a spec deleted or half-written places nothing
-    return own_point(spec) if isinstance(spec, dict) else None
+        return []  # a spec deleted or half-written places nothing
+    stated = spec_points(spec) if isinstance(spec, dict) else []
+    return proof_points(case, entity["id"], stated)
 
 
 def _filed_at(entity: dict[str, Any]) -> str:
@@ -805,9 +1103,9 @@ def placements(
     and the entity's own point comes back with none, because nothing placed it.
 
     **An artifact that carries a point is where the walk stops.** ``proof_index``
-    already settles this for the map — a proof that states where it is says it once,
-    rather than also drawing at the panels it overrode — and a panel that listed both
-    would contradict the map about the same proof. Stopping there is also what keeps
+    already settles this for the map — a proof that states where it is answers with
+    its own points, rather than also drawing at the panels it overrode — and a panel
+    that listed both would contradict the map about the same proof. Stopping there is also what keeps
     a video to its own argument: the capture behind its proof is reached, the second
     proof that happens to reuse that capture is not.
 
@@ -842,14 +1140,15 @@ def placements(
         frontier.sort(key=_filed_at, reverse=True)
         neighbours: list[str] = []
         for node in frontier:
-            point = _entity_point(case, node)
-            if point is not None:
-                key = (point["lat"], point["lon"])
-                if key in found:  # a nearer artifact already stands here
-                    continue
-                if len(found) >= cap:
-                    truncated = True
-                else:
+            carried = _entity_points(case, node)
+            if carried:
+                for point in carried:
+                    key = (point["lat"], point["lon"])
+                    if key in found:  # a nearer artifact already stands here
+                        continue
+                    if len(found) >= cap:
+                        truncated = True
+                        break
                     found[key] = {
                         "lat": point["lat"],
                         "lon": point["lon"],

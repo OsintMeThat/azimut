@@ -310,3 +310,40 @@ def test_a_deleted_capture_leaves_the_proof_its_frozen_point(client, sat_tiles):
     proof_id = _id(cid, spec="proofs/.meta/Roofline.json")
     assert _points(client, cid, proof_id) == [(50.4501, 30.5234)]
     assert _points(client, cid, _id(cid, path=video)) == [(50.4501, 30.5234)]
+
+
+# ── a proof arguing several points places the footage at all of them ─────────
+
+
+def test_the_footage_behind_a_proof_reports_every_point_it_states(client):
+    """Three impacts is three placements, not the conclusion and a shrug.
+
+    The proof is what establishes each of them, so the video it was cut from
+    answers for all three — the same one-hop reading the map already does, once
+    per point.
+    """
+    cid = _new_case(client)
+    clip = _upload(client, cid, "clip.png")
+    frame = _frame_of(cid, clip)
+    _save_proof(client, cid, "Harbour strike", [frame], points=[
+        {"coords": "64.1466, -21.9426", "label": "impact 1"},
+        {"coords": "64.1481, -21.9401", "label": "impact 2"},
+        {"coords": "64.1502, -21.9350", "label": "caméra", "pov": True},
+    ])
+
+    assert sorted(_points(client, cid, _id(cid, path=clip))) == [
+        (64.1466, -21.9426), (64.1481, -21.9401), (64.1502, -21.935),
+    ]
+
+
+def test_a_proof_reports_its_own_points_and_nothing_it_overrode(client, sat_tiles):
+    """The walk stops where a point is carried, whatever the panels say."""
+    cid = _new_case(client)
+    cap = _sat(client, cid, 50.4501, 30.5234)
+    _save_proof(client, cid, "Corrected", [cap], points=[
+        {"coords": "64.1466, -21.9426"},
+        {"coords": "64.1481, -21.9401"},
+    ])
+
+    proof_id = _id(cid, spec="proofs/.meta/Corrected.json")
+    assert sorted(_points(client, cid, proof_id)) == [(64.1466, -21.9426), (64.1481, -21.9401)]

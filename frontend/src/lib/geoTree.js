@@ -55,6 +55,8 @@ function savedText(row) {
       : `${row.lat}, ${row.lon}\n${Number(row.lat).toFixed(4)}, ${Number(row.lon).toFixed(4)}`;
   return [
     row.title,
+    // what the analyst called this point, when a proof states several
+    row.label,
     row.notes,
     row.provider,
     row.site,

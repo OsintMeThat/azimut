@@ -37,28 +37,44 @@
    *  post publishing a set published one proof of several panels. */
   let panels = $state([]);
   const panel = $derived(panels[0] ?? null);
-  let sourceMedia = $state(null); // the staged footage
+  /** The staged material, each entry stamped with the address it was fetched for. A
+   *  thread states one point and hangs the photos and the clips it rests on off several
+   *  posts, so this is a list and every row of the form owns its share of it. */
+  let sourceFiles = $state([]);
   let post = $state(null); // what the platform said, and what its text states
 
   // `pov` decides the verb the footage takes: ticked, it was recorded at the
   // point; unticked, it shows it. The stronger of the two is a claim, so it is
   // never pre-made — a post that says "point of view" still needs the click.
-  let form = $state({ title: '', coords: '', source_url: '', note: '', pov: false });
+  let form = $state({ title: '', coords: '', source_urls: [''], note: '', pov: false });
   let coordsFrom = $state(''); // the substring a prefilled position was read from
   let report = $state(null); // the preview, once asked for
   /** Which of the two waits behind the Preview button is running: '' | 'source' |
    *  'checking'. They differ by two orders of magnitude, so one word for both is a
    *  progress bar that lies. */
   let phase = $state('');
-  /** The address the footage was fetched for, or '' before any attempt.
+  /** One http(s) address and nothing else, which is what the Source field holds.
    *
-   *  An address rather than a flag, because the question the preview asks is not "was
-   *  something tried" but "was *this* tried". As a flag, retyping the address that had
-   *  just been downloaded — or pressing the chip that already filled the field — threw
-   *  away a held video and made the next Preview fetch it all over again. */
-  let sourceFrom = $state('');
-  /** Whether what is held is what the field now says. */
-  const sourceHeld = $derived(sourceMedia && sourceFrom === form.source_url.trim());
+   *  Only decides whether to attempt the download: the reading that counts is the
+   *  server's, and the preview blocks on it. Two addresses pasted with a space
+   *  between them used to be posted to /fetch as one, refused there, and reported as
+   *  a source that "was not downloaded" — a proof filed with no material. */
+  const ONE_ADDRESS = /^https?:\/\/\S+$/i;
+
+  /** The addresses a download has been attempted for, held or failed.
+   *
+   *  Addresses rather than a flag, because the question is not "was something tried" but
+   *  "was *this* tried". As a flag, retyping the address that had just been downloaded —
+   *  or pressing the chip that already filled the box — threw away a held video and made
+   *  the next Preview fetch it all over again. */
+  let sourceTried = $state([]);
+
+  /** What one row of the form holds: its files, and whether it was ever asked for. */
+  function sourceState(url) {
+    const address = url.trim();
+    const files = address ? sourceFiles.filter((one) => one.for_url === address) : [];
+    return { address, files, tried: !!address && sourceTried.includes(address) };
+  }
 
   /** What the import is holding, in the order it is written: the picture the
    *  proof is composed of, then the footage it rests on. Both are on disk in the
@@ -71,7 +87,11 @@
         label: panels.length > 1 ? `Panel ${at + 1}` : 'Proof',
         staged,
       })),
-      { slot: 'source', label: 'Source media', staged: sourceMedia },
+      ...sourceFiles.map((staged, at) => ({
+        slot: 'source',
+        label: sourceFiles.length > 1 ? `Source ${at + 1}` : 'Source media',
+        staged,
+      })),
     ]
       .filter((entry) => entry.staged)
       .map((entry) => ({
@@ -125,18 +145,24 @@
     });
     const result = await runJob(job_id, slot);
     if (result.multi) {
-      // The published picture is usually the whole point of the post, so the pictures
-      // arrive ticked and unticking one is the exception. The footage slot starts empty:
-      // which clip is the source is not something a rule knows.
+      // What the slot can use arrives ticked, and unticking is the exception. The
+      // published picture is usually the whole point of the post; and an address typed
+      // into a source box was typed as material, so what hangs off it is material —
+      // a picture, a clip or a recording alike.
+      //
+      // `own` is the one thing that holds a file back from arriving ticked: the video
+      // extractor reads a post's media and the media of the post it quotes into one
+      // list, so past the first it cannot say whose a clip is. Everything is still
+      // listed — a quoted clip is sometimes exactly what is wanted — it is just not
+      // ticked by a rule. A picker that hides is a picker that lies.
       const items = result.items ?? [];
       picker = {
         slot,
         url,
         items,
-        picked:
-          slot === 'panel'
-            ? items.filter((item) => item.kind === 'image').map((item) => item.index)
-            : [],
+        picked: items
+          .filter((item) => usable(slot, item.kind) && item.own !== false)
+          .map((item) => item.index),
       };
       return null;
     }
@@ -167,8 +193,41 @@
    *  pick out of several attachments, or a retry behind a login. Each of those
    *  counts as the attempt the preview must not make a second time. */
   function applySource(result, url) {
-    sourceMedia = result.staged;
-    sourceFrom = url ?? form.source_url.trim();
+    const address = url.trim();
+    const landed = (result.held ?? (result.staged ? [result.staged] : []))
+      .map((staged) => ({ ...staged, for_url: address }));
+    // Stamped here rather than read back off the answer: what a slot holds is keyed by
+    // address on the server, and a hand-attached file has no metadata to read it from.
+    sourceFiles = [...sourceFiles.filter((one) => one.for_url !== address), ...landed];
+    if (!sourceTried.includes(address)) sourceTried = [...sourceTried, address];
+    report = null;
+  }
+
+  /** An address that answered with nothing. Tried is what the preview must not repeat. */
+  function sourceFailed(url) {
+    const address = url.trim();
+    sourceFiles = sourceFiles.filter((one) => one.for_url !== address);
+    if (!sourceTried.includes(address)) sourceTried = [...sourceTried, address];
+  }
+
+  function setSource(at, value) {
+    form.source_urls = form.source_urls.map((one, i) => (i === at ? value : one));
+    report = null;
+  }
+
+  /** A box of its own per address, rather than a space between two of them: each one is
+   *  fetched on its own, fails on its own and is attached by hand on its own, and one
+   *  field could never show four states at once. */
+  function addSource(url = '') {
+    if (url && form.source_urls.some((one) => one.trim() === url)) return;
+    const rows = form.source_urls.filter((one) => one.trim());
+    form.source_urls = [...rows, url];
+    report = null;
+  }
+
+  function dropSource(at) {
+    const rows = form.source_urls.filter((_, i) => i !== at);
+    form.source_urls = rows.length ? rows : [''];
     report = null;
   }
 
@@ -181,7 +240,12 @@
       form.coords = `${first.lat}, ${first.lon}`;
       coordsFrom = first.text;
     }
-    if (!form.source_url && post?.urls?.length) form.source_url = post.urls[0];
+    // The addresses the post's own text points at, all of them: a thread naming the
+    // photos and the clip names its material, and picking the first would be this
+    // dialog choosing for the analyst.
+    if (!form.source_urls.some((one) => one.trim())) {
+      form.source_urls = post?.urls?.length ? [...post.urls] : [''];
+    }
     if (!form.title) form.title = (post?.title || '').slice(0, 60).trim();
     stage = 'form';
   }
@@ -213,11 +277,12 @@
     }
   }
 
-  async function attachSourceFile(file) {
+  async function attachSourceFile(url, file) {
     if (!file || busy) return;
     busy = true;
     try {
-      applySource(await attach('source', file, form.source_url.trim()));  // by hand, for this address
+      // For this address and no other: what the other rows hold stays where it is.
+      applySource(await attach('source', file, url.trim()), url);
     } catch (e) {
       toast(e.message, 'danger');
     } finally {
@@ -231,15 +296,15 @@
    *  and the preview says the material is missing, which is the honest reading
    *  of a link that has been taken down.
    */
-  async function downloadSource() {
-    const url = form.source_url.trim();
-    if (!url) return;
+  async function downloadSource(url) {
+    const address = url.trim();
+    if (!address) return;
     try {
-      const result = await fetchInto('source', url);
-      if (result) applySource(result, url);
+      const result = await fetchInto('source', address);
+      if (result) applySource(result, address);
     } catch (e) {
-      toast(`The source could not be downloaded: ${e.message}`, 'warn', 6000);
-      sourceFrom = url; // it was tried and it did not answer, which is the point
+      toast(`${address} could not be downloaded: ${e.message}`, 'warn', 6000);
+      sourceFailed(address); // it was tried and it did not answer, which is the point
     }
   }
 
@@ -254,9 +319,21 @@
       // and a cookie store read before a single byte arrives — where the check itself is
       // a tenth of a second. Saying "Checking…" through the first was the app claiming to
       // be nearly done for minutes.
-      if (form.source_url.trim() !== sourceFrom) {
+      const pending = form.source_urls
+        .map((one) => one.trim())
+        .filter((one) => ONE_ADDRESS.test(one) && !sourceTried.includes(one));
+      if (pending.length) {
         phase = 'source';
-        await downloadSource();
+        for (const url of pending) await downloadSource(url);
+      }
+      // A fetch that answered with a picker or a login wall settled nothing: the question
+      // is on screen and the slot is about to change under it. Reading the case behind it
+      // reported on a state nobody had agreed to yet — a picker cancelled left a preview
+      // standing that said "ready", and Create filed a proof whose source had never been
+      // downloaded. No report is the honest answer to an unanswered question.
+      if (picker || authPrompt) {
+        report = null;
+        return;
       }
       phase = 'checking';
       report = await api.post(`/api/cases/${caseId}/proof-imports/${token}/preview`, { ...form });
@@ -308,19 +385,29 @@
     }
   }
 
+  //: What each slot has somewhere to put. A proof is composed of **pictures**: the
+  //: composer lays panels out on a canvas and a video has nothing to lay out, so a clip
+  //: ticked for the picture slot was a refusal waiting two screens away at the preview.
+  //: The material takes anything that was recorded — a still photographed on the spot is
+  //: material as much as the clip beside it.
+  const SLOT_KINDS = { panel: ['image'], source: ['image', 'video', 'audio'] };
+
+  function usable(slot, kind) {
+    return (SLOT_KINDS[slot] ?? []).includes(kind);
+  }
+
   /**
    * Take what was ticked, in the order it was ticked.
    *
-   * The picture slot composes a **set**: a post publishing a geolocation as three images
-   * published one proof, and keeping the first keeps a third of it. The footage slot is
-   * one file, so there ticking a second replaces the first.
+   * **Both slots compose a set.** A post publishing a geolocation as three images
+   * published one proof, and keeping the first keeps a third of it; a post carrying two
+   * photos of the scene and the clip under them holds three things that were shot there,
+   * and keeping one leaves the rest of the case's own evidence outside it.
    */
   function tick(index) {
+    const item = picker.items.find((one) => one.index === index);
+    if (!item || !usable(picker.slot, item.kind)) return;
     const held = picker.picked ?? [];
-    if (picker.slot !== 'panel') {
-      picker = { ...picker, picked: held[0] === index ? [] : [index] };
-      return;
-    }
     picker = {
       ...picker,
       picked: held.includes(index) ? held.filter((one) => one !== index) : [...held, index],
@@ -333,10 +420,7 @@
     picker = null;
     busy = true;
     try {
-      const result = await fetchInto(slot, url, {
-        index: picked[0],
-        indexes: slot === 'panel' ? picked : [],
-      });
+      const result = await fetchInto(slot, url, { index: picked[0], indexes: picked });
       if (result && slot === 'panel') applyPost(result);
       else if (result) applySource(result, url);
     } catch (e) {
@@ -491,42 +575,65 @@
           </div>
         {/if}
 
-        <label class="import-field">
+        <!-- One box per address, each with its own outcome underneath it. A proof read
+             from a thread rests on the post that published it, the photos beside it and
+             the clip under those, and every one of them is fetched on its own. -->
+        <div class="import-field">
           <span>Source <b aria-hidden="true">*</b></span>
-          <input
-            class="input"
-            bind:value={form.source_url}
-            oninput={onFormInput}
-            placeholder="https://…"
-          />
-        </label>
+          {#each form.source_urls as url, at (at)}
+            {@const state = sourceState(url)}
+            <div class="import-source-row">
+              <input
+                class="input"
+                value={url}
+                oninput={(e) => setSource(at, e.target.value)}
+                placeholder="https://…"
+              />
+              {#if form.source_urls.length > 1}
+                <button
+                  class="import-source-drop"
+                  title="Remove this source"
+                  onclick={() => dropSource(at)}
+                >
+                  <Icon name="x" size={13} />
+                </button>
+              {/if}
+            </div>
+            {#if state.files.length}
+              <div class="import-source-state">
+                <span class="badge ok">
+                  {state.files.length > 1
+                    ? `${state.files.length} files held`
+                    : `Held: ${state.files[0].filename}`}
+                </span>
+              </div>
+            {:else if state.tried}
+              <div class="import-source-state">
+                <span class="badge danger">Not downloaded</span>
+                <label class="btn btn-sm">
+                  Attach it
+                  <input
+                    type="file"
+                    hidden
+                    onchange={(e) => attachSourceFile(url, e.currentTarget.files?.[0])}
+                  />
+                </label>
+              </div>
+            {/if}
+          {/each}
+          <button class="btn btn-sm import-source-add" onclick={() => addSource()}>
+            <Icon name="plus" size={12} />
+            Add a source
+          </button>
+        </div>
 
         {#if post?.urls?.length}
           <div class="import-chips">
             {#each post.urls as url (url)}
-              <button
-                class="btn btn-sm"
-                onclick={() => { form.source_url = url; report = null; }}
-              >{url}</button>
+              <button class="btn btn-sm" onclick={() => addSource(url)}>{url}</button>
             {/each}
           </div>
         {/if}
-
-        <div class="import-source-state">
-          {#if sourceHeld}
-            <span class="badge ok">Source media held: {sourceMedia.filename}</span>
-          {:else if sourceFrom === form.source_url.trim() && sourceFrom}
-            <span class="badge danger">The source was not downloaded</span>
-            <label class="btn btn-sm">
-              Attach it
-              <input
-                type="file"
-                hidden
-                onchange={(e) => attachSourceFile(e.currentTarget.files?.[0])}
-              />
-            </label>
-          {/if}
-        </div>
 
         <label class="import-field">
           <span>Note</span>
@@ -599,9 +706,10 @@
   {/if}
 </Modal>
 
-<!-- Several attachments, nothing downloaded yet. One is picked, not many: the
-     picture a proof is composed of is a single image, and the extractor's own
-     poster frame is what makes that choice possible without fetching first. -->
+<!-- Several attachments, nothing downloaded yet. Both slots take the ones ticked: a
+     post publishing a geolocation as a set publishes one proof, and a post carrying two
+     photos of the scene holds two things that were shot there. The extractor's own
+     poster frame is what makes the choice possible without fetching first. -->
 {#if picker}
   <Modal
     title={picker.slot === 'source' ? 'Choose the footage' : 'Choose the picture'}
@@ -613,13 +721,21 @@
       {#if picker.slot === 'panel'}
         Ticked ones become the panels of one proof.
       {:else}
-        Pick one.
+        Ticked ones become the material it rests on.
+      {/if}
+      {#if picker.items.some((item) => item.own === false)}
+        The video extractor also reports what a post quotes, so only the first is ticked.
       {/if}
     </p>
     <ul class="import-picker">
       {#each picker.items as item (item.index)}
         <li>
           <button class="import-pick" class:picked={picker.picked?.includes(item.index)}
+                  class:unusable={!usable(picker.slot, item.kind)}
+                  disabled={!usable(picker.slot, item.kind)}
+                  title={usable(picker.slot, item.kind)
+                    ? undefined
+                    : 'A proof is composed of pictures'}
                   aria-pressed={picker.picked?.includes(item.index)}
                   onclick={() => tick(item.index)}>
             <span class="import-pick-thumb">
@@ -639,9 +755,13 @@
       <div class="spacer"></div>
       <button class="btn" onclick={() => (picker = null)}>Cancel</button>
       <button class="btn btn-primary" disabled={!picker.picked?.length} onclick={pick}>
-        {picker.slot === 'panel' && picker.picked?.length > 1
-          ? `Compose ${picker.picked.length} panels`
-          : 'Take it'}
+        {#if picker.picked?.length > 1}
+          {picker.slot === 'panel'
+            ? `Compose ${picker.picked.length} panels`
+            : `Take ${picker.picked.length} files`}
+        {:else}
+          Take it
+        {/if}
       </button>
     </div>
   </Modal>
@@ -751,6 +871,30 @@
     gap: 8px;
     min-height: 22px;
   }
+  .import-source-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .import-source-row .input { flex: 1; min-width: 0; }
+  .import-source-drop {
+    display: inline-flex;
+    color: var(--text-3);
+    padding: 3px;
+    border-radius: var(--r-sm);
+  }
+  .import-source-drop:hover { color: var(--danger); background: var(--bg-2); }
+  /* Discreet on purpose: one source is the ordinary case and the button must not read
+     as a step somebody skipped. */
+  .import-source-add {
+    align-self: flex-start;
+    gap: 5px;
+    color: var(--text-3);
+    background: none;
+    border: none;
+    padding: 2px 0;
+  }
+  .import-source-add:hover { color: var(--text-1); background: none; }
   .import-report {
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -843,10 +987,13 @@
     text-align: left;
     cursor: pointer;
   }
-  .import-pick:hover {
+  .import-pick:hover:not(:disabled) {
     background: var(--bg-3);
     border-color: var(--border-strong);
   }
+  /* Shown and refused rather than hidden: a picker that hides is a picker that lies,
+     and "this post also carries a clip" is worth knowing while choosing. */
+  .import-pick.unusable { opacity: 0.45; cursor: not-allowed; }
   .import-pick-thumb {
     display: flex;
     align-items: center;

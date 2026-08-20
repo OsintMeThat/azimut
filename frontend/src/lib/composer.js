@@ -184,9 +184,11 @@ export function legendLineHeight(legendSize = LEGEND_SIZE) {
   return Math.round(legendSize + 13);
 }
 
-/** Height of the footer band for a given footer font size. */
-export function footerBand(footerSize = FOOTER_SIZE) {
-  return Math.round(footerSize + 13);
+/** Height of the footer band for a given footer font size and line count.
+ *  One line is the attribution; the coordinates, when the proof prints them,
+ *  add their own above it. */
+export function footerBand(footerSize = FOOTER_SIZE, lines = 1) {
+  return Math.round(footerSize + 13) * Math.max(1, lines);
 }
 
 // Default band heights, derived from the size defaults so they can't drift out
@@ -475,22 +477,223 @@ export function autoSourceUrls(panels) {
   return [...set];
 }
 
-/** Auto source line: distinct panel source links joined, or '' when none. */
-export function autoSource(panels) {
-  return autoSourceUrls(panels).join('  ·  ');
+//: What joins several addresses into the block a post and a report read. A line each:
+//: they are addresses, and a reader scanning four of them down a column reads them where
+//: four strung along one line with a dot between is a wall to pick apart.
+export const SOURCE_SEPARATOR = '\n';
+
+//: One http(s) address and nothing else.
+const ADDRESS = /^https?:\/\/\S+$/i;
+
+/**
+ * The addresses a proof states for itself, as a list.
+ *
+ * An array is the shape a proof carries now. A string is what one saved before this
+ * carried, and it splits back into its parts only when every part is an address —
+ * the line the composer wrote itself. Anything else is one thing the analyst typed,
+ * and it stays one entry rather than being cut at its spaces.
+ */
+export function normalizeSources(value) {
+  let list;
+  if (Array.isArray(value)) {
+    list = value;
+  } else {
+    const text = String(value ?? '').trim();
+    const parts = text ? text.split(/\s*·\s*|\s+/) : [];
+    list = parts.every((part) => ADDRESS.test(part)) ? parts : [text];
+  }
+  return [...new Set(list.map((one) => String(one ?? '').trim()).filter(Boolean))];
 }
 
-/** Effective coordinates text for a proof/spec: manual override else auto. */
+/**
+ * The addresses a proof states, or `null` when it states none of its own.
+ *
+ * The distinction is the whole point: **an empty list is an answer**. A proof whose
+ * source boxes have all been emptied says it has no public source — the footage was
+ * handed over privately, and saying so is not the same as never having said anything.
+ * Falling back to the panels there put addresses back on a proof somebody had just
+ * taken them off, and carried them into the post behind their back.
+ *
+ * `null`/absent, or the empty string a proof saved before this carried, is "nothing
+ * stated" and the panels answer for it.
+ */
+export function statedSources(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') return value.trim() ? normalizeSources(value) : null;
+  return Array.isArray(value) ? normalizeSources(value) : null;
+}
+
+/**
+ * Case files a proof rests on, each with the address that brought it in.
+ *
+ * The address is what makes the list reconcilable: taking a source off the proof has to
+ * take what that source brought with it, and a bare path cannot say which row it came
+ * from. A proof saved before this carried bare paths, and they read as material nothing
+ * named — kept, since the list cannot disown what it cannot name.
+ */
+export function normalizeMaterial(value) {
+  const seen = new Set();
+  const held = [];
+  for (const one of Array.isArray(value) ? value : []) {
+    const path = String((typeof one === 'string' ? one : one?.path) ?? '').trim();
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    held.push({ path, url: String(one?.url ?? '').trim() });
+  }
+  return held;
+}
+
+/** The material still answered for by one of the addresses the proof states. */
+export function statedMaterial(material, sources) {
+  const stated = new Set(sources);
+  return normalizeMaterial(material).filter((one) => !one.url || stated.has(one.url));
+}
+
+/** Auto source line: distinct panel source links joined, or '' when none. */
+export function autoSource(panels) {
+  return autoSourceUrls(panels).join(SOURCE_SEPARATOR);
+}
+
+/** How many points one proof may state. Mirrors `satellite.MAX_PROOF_POINTS`:
+ *  past fifteen a proof is a case, and the panel is a wall rather than a reading. */
+export const MAX_POINTS = 15;
+
+/** True when the single-point field says something the list does not.
+ *
+ *  The two are written together and never drift (`statePoints`), so a disagreement
+ *  means the field was set by something that does not know the list — an older
+ *  build, a route stating one point. What it says is the newer answer.
+ *  Mirrors `engine/satellite._mirror_broken`. */
+function mirrorBroken(p, entries) {
+  if (!('coordsText' in (p ?? {}))) return false;
+  const first = entries[0] && typeof entries[0] === 'object' ? entries[0] : {};
+  return String(p.coordsText ?? '').trim() !== String(first.coords ?? '').trim();
+}
+
+/**
+ * The points a proof states, its conclusion first — `{coords, label, pov}` each,
+ * with `coords` still the text the analyst typed.
+ *
+ * A proof shows more than one place more often than it shows one: three impacts,
+ * a building, the camera that filmed it. The first is the conclusion — the map
+ * mark, the coordinate a post cites — and `pov` rides on the point that carries
+ * it, at most one, because a camera stood in one place.
+ *
+ * A spec written before the list reads as the one point it holds, so nothing
+ * migrates. Mirrors `engine/satellite.spec_points`, minus the parsing: the
+ * server reads the text, this side only carries it.
+ */
+export function specPoints(p) {
+  const entries = Array.isArray(p?.points) ? p.points : null;
+  const stated = entries && !mirrorBroken(p, entries)
+    ? entries
+        .filter((one) => one && typeof one === 'object')
+        .map((one) => ({
+          coords: String(one.coords ?? '').trim(),
+          label: String(one.label ?? '').trim(),
+          pov: one.pov === true,
+        }))
+        .filter((one) => one.coords)
+    : [];
+  const points = stated.length
+    ? stated
+    : (String(p?.coordsText ?? '').trim()
+        ? [{ coords: String(p.coordsText).trim(), label: '', pov: p?.pov === true }]
+        : []);
+  let taken = false;
+  return points.map((one) => {
+    const pov = one.pov && !taken;
+    taken = taken || pov;
+    return { ...one, pov };
+  });
+}
+
+/**
+ * Write what a proof states onto a spec: the list, and the mirror of it.
+ *
+ * The mirror is not a leftover. A case bundle travels between installations and
+ * the binaries are versioned, so a build older than the list has to find the
+ * conclusion where it has always been rather than open a proof with no point.
+ * Mirrors `engine/satellite.state_points`.
+ */
+export function statePoints(spec, points) {
+  const stated = (points ?? [])
+    .map((one) => ({
+      coords: String(one?.coords ?? '').trim(),
+      label: String(one?.label ?? '').trim(),
+      pov: one?.pov === true,
+    }))
+    .filter((one) => one.coords)
+    .map((one) => ({
+      coords: one.coords,
+      ...(one.label ? { label: one.label } : {}),
+      ...(one.pov ? { pov: true } : {}),
+    }));
+  spec.points = stated;
+  spec.coordsText = stated[0]?.coords ?? '';
+  spec.pov = stated[0]?.pov === true;
+  return spec;
+}
+
+/** Effective coordinates text for a proof/spec: what it concludes on, else auto. */
 export function proofCoordsText(p, format = 'dd') {
-  const manual = p.coordsText?.trim();
-  if (manual) return manual;
+  const stated = specPoints(p)[0]?.coords;
+  if (stated) return stated;
   return formatCoords(autoCoords(p.panels ?? []), format);
 }
 
-/** Effective source line for a proof/spec: manual override else auto. */
+/** Every point a proof states, ready to print: `{coords, label}` per line.
+ *  Falls back to the one the panels give it, which is what the field shows. */
+export function proofCoordsLines(p, format = 'dd') {
+  const stated = specPoints(p);
+  if (stated.length) return stated.map(({ coords, label }) => ({ coords, label }));
+  const auto = formatCoords(autoCoords(p.panels ?? []), format);
+  return auto ? [{ coords: auto, label: '' }] : [];
+}
+
+/** The coordinates as the plate prints them, one string per line.
+ *
+ *  Unnamed points share a line: three impacts nobody named are three numbers, and
+ *  giving each its own line grows the picture for nothing. A point the analyst
+ *  named earns its line, because the name is what they wanted read. */
+export function coordsPlateLines(lines) {
+  const bare = (lines ?? []).filter((one) => !one.label).map((one) => one.coords);
+  const named = (lines ?? [])
+    .filter((one) => one.label)
+    .map((one) => `${one.label} — ${one.coords}`);
+  return [...(bare.length ? [bare.join(' · ')] : []), ...named];
+}
+
+/** The coordinates as a post carries them: one per line, named when named.
+ *  A tweet has no height to save, so nothing is joined. */
+export function coordsPostLines(lines) {
+  return (lines ?? []).map((one) => (one.label ? `${one.label} — ${one.coords}` : one.coords));
+}
+
+/** Every line the plate's footer prints: the coordinates when asked, then the
+ *  credit line unless it was turned off. One source for the height and for the
+ *  drawing, so a proof that grew a line cannot be measured as if it had not.
+ *
+ *  Empty is a valid answer — a footer switched on with nothing to print takes no
+ *  band at all, rather than an empty strip under the panels. */
+export function footerLines(proof, format = 'dd') {
+  const printed = proof?.footerCoords === true
+    ? coordsPlateLines(proofCoordsLines(proof, format))
+    : [];
+  const credit = proof?.footerText === false
+    ? []
+    : [proof?.footer?.trim() || attributionLine(proof?.panels ?? [])];
+  return [...printed, ...credit];
+}
+
+/** Effective source line for a proof/spec: the stated addresses, else the traced ones.
+ *
+ *  Always one line, whatever the proof holds: a plate, a post and a report all read a
+ *  source as text. Only editing it is a list.
+ */
 export function proofSource(p) {
-  const manual = p.source?.trim();
-  if (manual) return manual;
+  const stated = statedSources(p.sources ?? p.source ?? null);
+  if (stated) return stated.join(SOURCE_SEPARATOR);
   return autoSource(p.panels ?? []);
 }
 
@@ -515,7 +718,7 @@ export function legendRowCount(count, columns) {
 export function docSize(panels, shapes, notes = {}, text = {}, legendOrder = [], layout = 'grid', space) {
   const {
     captionSize = CAPTION_SIZE, legendSize = LEGEND_SIZE, footerSize = FOOTER_SIZE,
-    footerEnabled = true,
+    footerEnabled = true, footerLines = 1,
   } = text;
   const { pad } = normSpace(space);
   const boxes = layoutPanels(panels, captionSize, layout, space);
@@ -529,7 +732,7 @@ export function docSize(panels, shapes, notes = {}, text = {}, legendOrder = [],
   const height =
     panelsBottom(panels, captionSize, layout, space) +
     (legend.length ? 10 + legendRows * legendLineHeight(legendSize) : 0) +
-    (footerEnabled ? footerBand(footerSize) : 0) + pad;
+    (footerEnabled && footerLines > 0 ? footerBand(footerSize, footerLines) : 0) + pad;
   return { width: contentW, height, legend, cols };
 }
 
@@ -836,13 +1039,36 @@ export function toSpec(proof) {
     // style values, so reopening it can restore the template picker.
     templateId: typeof proof.templateId === 'string' ? proof.templateId : null,
     coords: autoCoords(proof.panels), // auto geo (first geo panel), for reference
-    coordsText: proof.coordsText?.trim() ? proof.coordsText.trim() : null, // null → auto
-    // Whether the point is where the camera stood rather than what it filmed.
-    // The proof cannot deduce it — a rooftop shot is recorded somewhere it never
-    // shows — so the analyst says, and the place filed on save takes the verb
-    // from it (engine/satellite.place_for_proof).
-    pov: proof.pov === true,
-    source: proof.source?.trim() ? proof.source.trim() : null, // null → auto (link only)
+    // The points the proof concludes on, and the mirror of the first for a build
+    // that predates the list. Whether a point is where the camera stood rather
+    // than what it filmed rides on the point itself: the proof cannot deduce it —
+    // a rooftop shot is recorded somewhere it never shows — so the analyst says,
+    // per line, and the place filed on save takes its verb from that line
+    // (engine/satellite.restate_proof_point).
+    ...statePoints({}, proof.points),
+    // What the plate's footer prints. `footer` is the credit line itself;
+    // `footerText` is whether it prints at all, and `footerCoords` whether the
+    // proof's points print above it. Coordinates are off unless asked: they are
+    // the footer lines that change the picture's height.
+    footerCoords: proof.footerCoords === true,
+    footerText: proof.footerText !== false,
+    // The addresses the proof states, empty → traced from the panels instead. Named
+    // for the plural like the multi-parent key of a media's own origin (`sources`,
+    // beside `from`), because it draws the same distinction: one of them, or several.
+    // null → traced from the panels; a list, empty included, → what the analyst states.
+    sources: statedSources(proof.sources ?? proof.source ?? null),
+    // Case files the proof rests on without composing them: the clip a panel was cut
+    // from, the second angle nobody cropped. The save states `derived-from` over these
+    // as well as over the panels, which is what puts them in the chain and, through it,
+    // on the point (`api/proofs.save_proof`).
+    //
+    // Only what a stated address still answers for. A source taken off the proof takes
+    // its files out of the chain with it — otherwise removing a row left the line
+    // shorter and the graph exactly as it was, which is a proof saying two things.
+    material: statedMaterial(
+      proof.material,
+      statedSources(proof.sources ?? proof.source ?? null) ?? autoSourceUrls(proof.panels ?? []),
+    ),
     captionSize: proof.captionSize ?? CAPTION_SIZE,
     legendSize: proof.legendSize ?? LEGEND_SIZE,
     footerSize: proof.footerSize ?? FOOTER_SIZE,
@@ -911,6 +1137,8 @@ export function templateFromProof(proof) {
     footerSize: proof.footerSize ?? FOOTER_SIZE,
     footer: proof.footer ?? '',
     footerEnabled: proof.footerEnabled !== false,
+    footerText: proof.footerText !== false,
+    footerCoords: proof.footerCoords === true,
     footerColor: proof.footerColor ?? null,
     footerAlign: proof.footerAlign === 'right' ? 'right' : 'left',
     captionsEnabled: proof.captionsEnabled !== false,
@@ -949,6 +1177,11 @@ export function normalizeProofStyle(style = {}) {
     footerSize: boundedNumber(source.footerSize, FOOTER_SIZE, 8, 80),
     footer: typeof source.footer === 'string' ? source.footer.slice(0, 200) : '',
     footerEnabled: typeof source.footerEnabled === 'boolean' ? source.footerEnabled : true,
+    // A template saved before these existed says nothing about them, and a style
+    // that says nothing must not change what a proof does: the credit line goes on
+    // printing, the coordinates go on not printing.
+    footerText: typeof source.footerText === 'boolean' ? source.footerText : true,
+    footerCoords: source.footerCoords === true,
     footerColor: source.footerColor == null ? null : normalizedColor(source.footerColor, null),
     footerAlign: source.footerAlign === 'right' ? 'right' : 'left',
     captionsEnabled: typeof source.captionsEnabled === 'boolean' ? source.captionsEnabled : true,
@@ -977,6 +1210,10 @@ export function applyProofStyle(proof, style, available = {}) {
   if ('footerSize' in source) proof.footerSize = normalized.footerSize;
   if ('footer' in source) proof.footer = normalized.footer;
   if ('footerEnabled' in source) proof.footerEnabled = normalized.footerEnabled;
+  // Absent from an older template, so an old house style leaves both alone rather
+  // than quietly taking a proof's coordinates off its plate.
+  if ('footerText' in source) proof.footerText = normalized.footerText;
+  if ('footerCoords' in source) proof.footerCoords = normalized.footerCoords;
   if ('footerColor' in source) proof.footerColor = normalized.footerColor;
   if ('footerAlign' in source) proof.footerAlign = normalized.footerAlign;
   if ('captionsEnabled' in source) proof.captionsEnabled = normalized.captionsEnabled;

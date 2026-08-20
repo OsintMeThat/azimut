@@ -1098,15 +1098,18 @@ spelling. Proofs and posts keep the native name only.
 Saving a place or a capture resolves its country as part of the save, so the item
 appears already grouped. Offline it lands under Unlocated for a later Locate.
 
-Saving a proof turns the coordinates it carries into a place, which is where a
-geolocation stops being text in a spec and joins the map (ONTOLOGY §3). The
-composer's **POV** box beside the coordinates says what the point is: ticked, the
-footage was recorded there; left alone, the footage shows it. Nothing in a
-composition can answer that, which is why it is asked rather than guessed. A capture
-files nothing: ten are taken while hunting one roof, and the point is worth
-minting once, where somebody commits to it. Settings → General → Proofs saves it
-outright or has the composer ask; a point the case already holds is neither
-filed twice nor asked about.
+Saving a proof turns the coordinates it carries into places, which is where a
+geolocation stops being text in a spec and joins the map (ONTOLOGY §3). A proof
+stating three points draws three marks and files three rows under one title,
+told apart by the name each point was given. The marker beside a row says that
+point is where the camera stood, at most one per proof; the others are what the
+footage shows. Nothing in a composition can answer that, which is why it is asked
+rather than guessed. A capture files nothing: ten are taken while hunting one
+roof, and the point is worth minting once, where somebody commits to it.
+Settings → General → Proofs saves them outright or has the composer ask; a point
+the case already holds is neither filed twice nor asked about. Only the first
+point is looked up at save — the rest wait for Locate rather than holding the
+save for a lookup each.
 
 A row the enrichment proposed from a file's GPS carries a `suggested` chip and an
 **accept** action, on the row and in the search modal, so the point is settled
@@ -1181,9 +1184,102 @@ content hash, travels with a rename, and goes when the proof does. A proof needs
 a panel first, since the panels are what give the document its size — moving an
 overlay never resizes the export.
 
+**Coordinates and sources.** Both sit above the panels and both fill themselves in:
+the coordinates from the first panel that carries them, the sources from the address
+each panel's media traces back to.
+
+**Coordinates are a list too**, one row per point, with a `+` to add one. A proof
+often shows more than one place — three impacts, a building, the camera — and each
+row takes an optional name and the marker that says the camera stood there. **The
+first row is the proof's point**: the map mark, the coordinate a post cites, the
+one the export prints. An arrow moves a row up to make it the conclusion; the
+marker never reorders anything, or ticking it would take a coordinate out of a
+tweet without saying so. A single-point proof is the field it has always been.
+The exported picture prints them only when asked (Advanced → Show coordinates):
+unnamed points share one line, a named one takes its own, and the plate grows by
+what it prints. **Show text** switches the credit line off beside it, so a plate
+can carry its points and nothing else; with both off the band takes no height at
+all. A saved house style carries both, and one saved before they existed leaves a
+proof's own answer alone. Posting from the proof carries every point into the tweet, one
+per line, while the place, the plus code and the map links stay the conclusion's.
+
+**Source is a list**, one box per address, with a
+`+` to add one — a proof read from a thread rests on the post that published it, the
+photos beside it and the clip under those. Editing a traced box turns the whole list
+into the proof's own and the traced ones come along, so stating a fourth address never
+means retyping the three the panels already knew. The reset arrow hands the list back
+to the panels, and it is the only way back: **an emptied list is an answer**, not a
+blank to fill in. A proof whose boxes have all been cleared says it has no public
+source — the footage was handed over privately — and the `!` says so rather than the
+panels quietly putting their addresses back and carrying them into the post.
+
+**An address the case holds nothing from** shows a download arrow beside it. Pressing
+it brings the files in as ordinary media and records them as the proof's *material*:
+in its chain, and through the chain on its point, without ever becoming panels. An
+address holding several files asks which, ticked by default, since an address stated
+as material holds material. Only stated addresses offer it — one traced off a panel is
+already in the case by construction.
+
+Wherever a source is *read* rather than edited — the post it is handed to, the Markdown
+report — it is one address per line, and a report renders one link each.
+
 **Frames.** Any panel or overlay takes a coloured border, its own colour and
 thickness, drawn inset so the layout does not shift. A frame is decoration: it
 stays out of the legend, which is still built from annotation colours alone.
+
+**Drawing.** A tool in hand holds the canvas alone. Nothing already drawn answers
+the pointer, so a stroke started inside a box draws a new element instead of
+dragging the old one, and the colour and width you pick set the next element
+rather than repainting the last. The selection stays where it was and its handles
+come back with Select. A box or an ellipse also takes a fill, in its own colour at
+an opacity you choose. Shapes start hollow: a fill hides what is under it, so it
+is asked for rather than given. Fill and outline share one colour, since the
+legend reads colour as the feature. Every shape tool stays in hand, so three
+boxes is three drags. Text is the one that puts the pen down: the editor opens
+where the label was placed, because placing it and saying what it says are one
+act. A label holds more than one line — Shift+Enter opens the second, Enter ends
+the edit.
+
+**What a picked element offers.** A box, an ellipse or a freehand stroke resizes
+from any handle and rotates; a line, an arrow or a curve gets a handle per vertex
+instead, so any point can be re-placed. A stroke is the exception among the
+points-based kinds: it has too many samples to show, so it takes the frame and
+the handles rather than a canvas full of dots.
+
+**Symbols.** A grid of fixed marks — a pin, an impact, vehicles, a building, a
+drone, a camera, an antenna, a north arrow — stamped with one click. The tool
+stays in hand afterwards, since marking six vehicles is one act rather than six.
+A symbol takes the active colour like anything else drawn, so it joins the legend
+by colour and claims no vocabulary the legend cannot say. It resizes from its
+corners with the ratio locked: the box is square and there is one side to change,
+so a squashed symbol is not expressible. The pin hangs from its tip rather than
+its middle, which is what keeps it on its pixel while it is resized. The solid
+marks carry no outline and the width control stays away for them. Fill on a
+symbol is a disc behind the glyph rather than paint inside it — a thin stroke
+over aerial imagery needs something to sit on — and how opaque that disc goes
+stays your call, because it covers the picture.
+
+**Picking several.** Shift adds an element to the ones already picked, on the
+canvas and on the rows in the side column alike. A rectangle dragged over the
+page picks everything it touches, and in grid layout it can be dragged across a
+panel too, since the grid decides where a panel sits and the drag cannot be
+moving it. In free layout that same drag moves the panel, so the rectangle starts
+on the page around it. What a family answers to: colour, stroke width, fill,
+arrow keys, Delete, and a drag from any one of them, which carries the rest.
+Resizing, rotating and copying still want one element, and the handles say so —
+several picked at once show the border and no anchors.
+
+**The gestures.** Escape unwinds one level per press: the draft in hand first,
+then whatever is picked, and only with nothing left to drop does it put the pen
+down. Only the primary button draws. A release the canvas never sees still lands:
+letting go over the side column commits the stroke and applies the rectangle
+rather than leaving either one following a bare pointer. Space or the middle
+button pans, and so does a drag that starts where no tool has anything to draw
+on. A row picked in the side column takes the hand back to Select, since a row
+cannot mean "draw here" — which is also why the rows stop lighting up while a
+drawing tool is in hand: a pick nothing answers to is not shown as one. A dialog
+over the composer keeps the one-letter keys, so `r` never changes the tool
+underneath it.
 
 ### Import
 
@@ -1225,16 +1321,32 @@ the one that can reach it, and it used to be tried only when nothing at all was
 found — so the panel filled with fifty seconds of video and said so two screens
 later, at the preview. Now a result of the wrong kind counts as nothing found.
 
-Coordinates and a source are required. Pressing **Preview** downloads the footage
-the source points at — the left of the dialog then holds both files, the proof
-picture and the footage, with arrows to step between them and the video playable
-before anything is filed — and lists what the import would write: each entity marked
-new or reused, the edges between them, and whatever is worth saying first — a
-point already on the map, a picture the case already holds, this post imported
-before, or a file whose own metadata sits more than 150 m from the coordinates
-entered. A source that could not be downloaded is a warning, not a blockage: the
-proof is created without material and the address stays on it. **Create** appears
-only once the preview comes back clean, and editing a field withdraws it.
+Coordinates and a source are required, and **a source is one box per address**.
+A geolocation thread states its point in the post that published it and hangs the
+photos and the clips it rests on off the ones after it, so the addresses the post's
+text pointed at all arrive as boxes and **Add a source** opens another. Each box is
+fetched on its own, says underneath itself what it holds or that it was not
+downloaded, and offers **Attach it** for that one address. Two addresses typed into
+one box is refused: a box is the address its own file comes from, and nothing can be
+downloaded from a pair.
+
+Pressing **Preview** downloads what the boxes point at — the left of the dialog then
+holds every file, the proof picture and the material, with arrows to step between
+them and a video playable before anything is filed — and lists what the import would
+write: each entity marked new or reused, the edges between them, and whatever is
+worth saying first — a point already on the map, a picture the case already holds,
+this post imported before, or a file whose own metadata sits more than 150 m from the
+coordinates entered. A source that could not be downloaded is a warning, not a
+blockage: the proof is created without that file and the address stays on it. An
+address taken off the list leaves its download behind rather than filing it.
+**Create** appears only once the preview comes back clean, and editing a field
+withdraws it.
+
+**The proof is what everything hangs off.** It composes the pictures and rests on the
+material, and both are its own edges, so the graph draws one node for the geolocation
+rather than a media node with the rest strung from it. Which photo of four a composite
+was laid out from is not something a post says, and a guessed pairing would state one
+edge right and the rest wrong.
 
 **One picture exports itself; a set waits for the composer.** A published panel is
 already a rendered proof, so a single-picture import files it as `proofs/<name>.png`
@@ -1767,18 +1879,31 @@ says what it is checking.
     would do before one of them starts. Rows ruled out on their status are dropped by default
     and handed back with one click, because a filter nobody can see is the app deciding which
     lines of a binder count.
+  - **A source cell may list several addresses.** There is no `+` in a spreadsheet, so a
+    cell holding them separated by spaces is how a hundred rows say what the import dialog
+    says with boxes: one proof, one point, and every file it rests on. The published
+    picture stays one — a row builds one proof, and a second picture would be a second.
+    A row counts as already there only when every one of its addresses is already
+    downloaded, since half a row is a row to run.
   - **A post with several attachments is answered, not asked about.** That is the ordinary
-    shape here — a published geolocation is a picture and the post carries the footage
+    shape here — a published geolocation is a picture and the post carries the material
     beside it — so a picker would fire on nearly every row, and a hundred rows cannot each
-    raise one. The slot's own kind picks: the proof takes **every** picture, since a post
-    publishing a set published one proof of several panels, and the footage takes the clip.
+    raise one. Each slot takes **everything it can use and the extractor vouches for**:
+    the proof takes every picture, since a post publishing a set published one proof of
+    several panels, and the material takes every picture, clip and recording, since a post
+    carrying two photos of the scene carries two things that were shot there. Keeping the
+    first of them keeps half. What is *not* vouched for is left: the video extractor reads
+    a post's media and the media of the post it quotes into one list, and past the first it
+    cannot say whose a clip is. Taking it would file a stranger's video on this row's
+    point, which is a wrong statement where a missing one is only incomplete — and the two
+    screens with somebody in front of them list it instead.
     A row behind a login wall says the next move rather than the platform's own wording,
     which is a tombstone nobody can act on: no browser picked in Settings, one picked that
     is not signed in to that site, or Windows refusing to hand over a Chromium cookie store
     at all — three different instructions, not one sentence.
-    The two differ on what happens when nothing matches, because their contents do: a post
-    carrying no picture holds no proof and is a row to do by hand, while the footage takes
-    the first attachment, a still photographed on the spot being material too.
+    The two still differ on what happens when nothing matches, because their contents do:
+    a post carrying no picture holds no proof and is a row to do by hand, while the
+    material takes a still photographed on the spot as readily as a clip.
   - **A hundred rows a press**, against five hundred for the press above, and the door says
     how many are left over: a cap that only refuses reads as a breakdown where the same cap
     naming the remainder reads as the queue it is.

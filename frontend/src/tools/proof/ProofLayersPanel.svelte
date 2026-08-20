@@ -1,14 +1,23 @@
 <script>
   import Icon from '../../components/Icon.svelte';
+  import ProofGlyph from '../../components/ProofGlyph.svelte';
+  import { iconByName } from '../../lib/proofIcons.js';
   import { fileUrl } from '../../lib/fileUrl.js';
 
   let {
     proof,
     collapsed,
     gonePanels,
-    selectedPanelId = $bindable(),
-    selectedPasteId = $bindable(),
-    selectedId = $bindable(),
+    selectedPanelId,
+    selectedPasteId,
+    selectedIds,
+    // A drawing tool holds the handles back on the canvas, so the rows stop
+    // lighting up too: a pick shown in one column and absent from the other is
+    // a selection the analyst cannot act on.
+    selectionLive,
+    selectShape,
+    selectPanelRow,
+    selectPasteRow,
     activeColor,
     caseId,
     scaleMin,
@@ -36,6 +45,11 @@
     deleteShape,
     markDirty,
   } = $props();
+
+  // A row says which symbol it is, not merely that it is one: eleven rows all
+  // reading "Symbol" would be a list nobody can navigate.
+  const rowLabel = (shape) =>
+    (shape.kind === 'icon' ? iconByName(shape.name)?.label : null) ?? kindLabel[shape.kind];
 </script>
 
 <!-- Coloured border for a panel or a pasted image. Picking a colour adds one,
@@ -101,13 +115,13 @@
   {#each proof.panels as panel, index (panel.id)}
     <div
       class="panel-row card"
-      class:selected={selectedPanelId === panel.id}
+      class:selected={selectionLive && selectedPanelId === panel.id}
       class:gone={gonePanels.includes(panel)}
     >
       <button
         class="panel-thumb"
         title="Select this panel on the canvas"
-        onclick={() => (selectedPanelId = selectedPanelId === panel.id ? null : panel.id)}
+        onclick={() => selectPanelRow(panel.id)}
       >
         <img src={fileUrl(caseId, panel.src)} alt="" />
         {#if proof.layout === 'free'}
@@ -181,11 +195,11 @@
     <div class="none">Paste a screenshot with Ctrl+V. It stays in this proof only.</div>
   {/if}
   {#each proof.pastes as paste, index (paste.id)}
-    <div class="panel-row paste-row card" class:selected={selectedPasteId === paste.id}>
+    <div class="panel-row paste-row card" class:selected={selectionLive && selectedPasteId === paste.id}>
       <button
         class="panel-thumb"
         title="Select this overlay on the canvas"
-        onclick={() => (selectedPasteId = selectedPasteId === paste.id ? null : paste.id)}
+        onclick={() => selectPasteRow(paste.id)}
       >
         <img src={paste.img?.src} alt="" />
         <span class="row-badge" title="Z1 is the foreground">Z{index + 1}</span>
@@ -263,11 +277,11 @@
   {#each proof.shapes as shape, index (shape.id)}
     <div
       class="shape-row"
-      class:selected={selectedId === shape.id}
-      onclick={() => (selectedId = shape.id)}
+      class:selected={selectionLive && selectedIds.includes(shape.id)}
+      onclick={(event) => selectShape(shape.id, event.shiftKey)}
       role="button"
       tabindex="0"
-      onkeydown={(event) => event.key === 'Enter' && (selectedId = shape.id)}
+      onkeydown={(event) => event.key === 'Enter' && selectShape(shape.id, event.shiftKey)}
     >
       <div class="reorder">
         <button
@@ -284,7 +298,11 @@
         ><Icon name="chevronDown" size={11} /></button>
       </div>
       <span class="chip" style:background={shape.color}></span>
-      <Icon name={kindIcon[shape.kind]} size={13} />
+      {#if shape.kind === 'icon'}
+        <ProofGlyph name={shape.name} size={13} />
+      {:else}
+        <Icon name={kindIcon[shape.kind]} size={13} />
+      {/if}
       {#if shape.kind === 'text'}
         <input
           class="input comment-input"
@@ -326,7 +344,7 @@
           ><Icon name="x" size={11} /></button>
         {/if}
       {:else}
-        <span class="el-label">{kindLabel[shape.kind]} <span class="el-id">#{index + 1}</span></span>
+        <span class="el-label">{rowLabel(shape)} <span class="el-id">#{index + 1}</span></span>
       {/if}
       <button
         class="btn btn-ghost btn-sm"

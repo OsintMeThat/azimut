@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import mimetypes
 import re
 import shutil
@@ -16,6 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, BinaryIO
+from urllib.parse import urlsplit
 
 from PIL import Image
 
@@ -25,6 +27,8 @@ from . import enrich as enrich_engine
 from . import ffmpeg as ffmpeg_engine
 from . import links as link_engine
 from . import thumbnails as thumbnail_engine
+
+logger = logging.getLogger(__name__)
 
 # The thumbnail cache lives here; content-addressed generation, the durable job
 # model and cache budgeting are owned by `thumbnails.py`. Re-exported for the
@@ -77,6 +81,32 @@ _AUTH_FAILURE_PHRASES = (
     "unavailable",
     "not available",
 )
+
+
+#: The one kind a caller can be short of somewhere to put. A slot that holds a picture
+#: has nowhere for a video: the composer lays panels out on a canvas and a clip has
+#: nothing to lay out, so handing one back fills the slot with a refusal.
+#:
+#: Every other value is a **preference**, not a requirement, and treating it as one broke
+#: the road it was written for: the footage is only *usually* a video, a still
+#: photographed on the spot is material too, and a source address holding four
+#: photographs is an ordinary geolocation rather than a row to refuse.
+_BINDING_KINDS = frozenset({"image"})
+
+
+def _binding(wants: str) -> bool:
+    """Whether ``wants`` is a slot with nowhere else to put what it is offered."""
+    return wants in _BINDING_KINDS
+
+
+class WrongKind(RuntimeError):
+    """The address holds something, and none of it is what the caller has room for.
+
+    Its own type because it is not a failure to reach the post: the bytes are there and
+    the answer is still no. A proof is composed of pictures, so a post carrying only a
+    clip holds no proof — and saying so at the address, where the analyst can type
+    another one, beats saying it at the preview once the file is already staged.
+    """
 
 
 class UnknownLink(RuntimeError):
@@ -149,13 +179,22 @@ def cookies_from_preference(pref: dict[str, Any] | None) -> dict[str, Any] | Non
     return None
 
 
-def _apply_gallery_cookies(cookies: dict[str, Any] | None) -> None:
-    """Thread a cookie source into gallery-dl via its global config: a browser
-    as a ``[name]`` list, a file as a path string."""
-    if not cookies:
-        return
+def _apply_gallery_config(cookies: dict[str, Any] | None) -> None:
+    """What gallery-dl needs told before it reads a link.
+
+    A cookie source, when there is one: a browser as a ``[name]`` list, a file as a
+    path string.
+
+    And Bluesky's facets, always. An AT Protocol post keeps its links beside its words
+    rather than in them — the words hold what is *printed*, which is an address cut off
+    at an ellipsis — and gallery-dl only carries them when asked. Without it the source
+    a post points at cannot be recovered from anything the import can see.
+    """
     import gallery_dl.config as gdl_config
 
+    gdl_config.set(("extractor", "bluesky"), "metadata", "facets")
+    if not cookies:
+        return
     if cookies.get("browser"):
         gdl_config.set(("extractor",), "cookies", [cookies["browser"]])
     elif cookies.get("file"):
@@ -246,6 +285,17 @@ def _write_sidecar(media_path: Path, data: dict[str, Any]) -> None:
 # from is not something a later edit gets to write over — a case that cannot tell a
 # fetched address from a stated one is holding neither.
 STATED_SOURCE_TYPES = frozenset({"upload", "clipboard", "manual"})
+
+
+def is_address(text: str) -> bool:
+    """Whether a stated origin is an address at all.
+
+    One reading for every surface that lets one be typed: the API refuses on it and
+    the proof import blocks on it, rather than each writing the same three-line test
+    and drifting. An origin that is not a link is a note, and Notes is where it goes.
+    """
+    split = urlsplit(text.strip())
+    return split.scheme in ("http", "https") and bool(split.hostname)
 
 
 def _source_paths(source: dict[str, Any]) -> list[str]:
@@ -607,6 +657,22 @@ def _entry_kind(entry: dict[str, Any] | None) -> str:
 
 
 def _picker_items(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The attachments yt-dlp reports, as picker rows.
+
+    **Only the first is vouched for as the post's own.** yt-dlp's X extractor reads a
+    tweet's media *and* the media of the tweet it quotes into one list — the post's own
+    first, then the quoted one's (`yt_dlp/extractor/twitter.py`, the `(None,
+    'quoted_status')` traversal) — and nothing in what comes back says which is which.
+    A post carrying a clip and quoting another post carrying a clip hands back two, and
+    taking both files somebody else's video and, on the roads that pose material on a
+    point, claims it was recorded there.
+
+    So `own` is a vouch, not a verdict: true where the file is certainly the post's,
+    false where it may be what the post quotes. A picker still lists everything, since
+    a quoted clip is sometimes exactly what the analyst wants; it just is not taken by
+    a rule. The cost is a tweet carrying two of its own clips offering the second
+    unticked, which is the safe side of a distinction the extractor does not draw.
+    """
     items = []
     for i, entry in enumerate(entries, start=1):
         thumb = entry.get("thumbnail")
@@ -618,6 +684,7 @@ def _picker_items(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "title": entry.get("title") or entry.get("id") or f"item {i}",
                 "thumbnail": thumb,
                 "kind": media_kind(f"file.{entry['ext']}") if entry.get("ext") else "file",
+                "own": i == 1,
             }
         )
     return items
@@ -661,8 +728,24 @@ def _register_downloaded_item(
     return result
 
 
+#: What a post's own words are called, extractor by extractor. `content` is X's and
+#: Mastodon's, `description` covers the sites that name it that, and `text` is the
+#: field an AT Protocol record carries — Bluesky's, and the one whose absence made a
+#: Bluesky import arrive with a filename for a title, no position read out of it and
+#: no source link, since every one of those is read from the post's words.
+_POST_TEXT_KEYS = ("content", "description", "text")
+
+#: And what an author is called. A handle is not a display name, so it is the last
+#: resort rather than the first.
+_AUTHOR_KEYS = ("nick", "name", "displayName", "handle")
+
+
 def _gallery_dl_item(file_url: str, kwdict: dict[str, Any]) -> dict[str, Any]:
-    content = (kwdict.get("content") or kwdict.get("description") or "").strip()
+    content = ""
+    for key in _POST_TEXT_KEYS:
+        content = str(kwdict.get(key) or "").strip()
+        if content:
+            break
     first_line = content.splitlines()[0][:120] if content else None
     filename = kwdict.get("filename") or "file"
     ext = kwdict.get("extension") or ""
@@ -675,7 +758,11 @@ def _gallery_dl_item(file_url: str, kwdict: dict[str, Any]) -> dict[str, Any]:
         "kind": media_kind(f"file.{ext}") if ext else "file",
         "title": first_line or filename,
         "description": content or None,
-        "uploader": author.get("nick") or author.get("name"),
+        "uploader": next((author[k] for k in _AUTHOR_KEYS if author.get(k)), None),
+        # The addresses the post *points* at, as the platform records them rather than
+        # as it prints them: a Bluesky link is shown truncated to an ellipsis, so a
+        # scan of the words comes back with half an address and no way to know it.
+        "links": [one for one in (kwdict.get("uris") or []) if isinstance(one, str)],
         "upload_date": date.strftime("%Y%m%d")
         if date is not None and hasattr(date, "strftime")
         else None,
@@ -706,9 +793,21 @@ def _register_gallery_dl_item(
             "description": item.get("description"),
             "uploader": item.get("uploader"),
             "upload_date": item.get("upload_date"),
+            "links": item.get("links") or None,
             "extractor": "gallery-dl",
         },
     )
+
+
+#: A status on a Mastodon server gallery-dl does not name. Its extractor ships three
+#: patterns — mastodon.social, pawoo, baraag — and the fediverse is the one place where
+#: a list of servers can never be the answer, since the point of it is that everybody
+#: runs their own. ``mastodon:<url>`` is gallery-dl's own way of saying "read this
+#: address with that extractor", so a link nothing recognized is offered to it before
+#: being refused. Only a status, and only by shape: an account page is not a download.
+_MASTODON_STATUS = re.compile(
+    r"^https?://[^/?#]+/(?:@[^/?#]+|users/[^/?#]+/statuses)/\d+/?(?:[?#].*)?$"
+)
 
 
 def _download_via_gallery_dl(
@@ -719,6 +818,7 @@ def _download_via_gallery_dl(
     title: str | None = None,
     cookies: dict[str, Any] | None = None,
     stage: Path | None = None,
+    wants: str = "",
 ) -> dict[str, Any]:
     """Fallback for links yt-dlp can't extract at all.
 
@@ -726,28 +826,48 @@ def _download_via_gallery_dl(
     drops photos from what it reports. gallery-dl covers standalone images
     instead: photo tweets, direct image links, Instagram posts, Facebook
     photos. Used when yt-dlp raises (e.g. "No video could be found").
+
+    ``wants`` binds here exactly as it does on the yt-dlp path: a caller with
+    somewhere for a picture and nowhere for a video is answered with nothing rather
+    than with the clip. This is the *last* road, so a wrong kind is a refusal instead
+    of a fallback — and it is the road a video-only post took to reach a slot that
+    holds pictures, which the preview then refused two screens later.
     """
     import gallery_dl.extractor as gdl_extractor
 
-    _apply_gallery_cookies(cookies)
+    _apply_gallery_config(cookies)
     extractor = gdl_extractor.find(url)
+    if extractor is None and _MASTODON_STATUS.match(url):
+        extractor = gdl_extractor.find(f"mastodon:{url}")
     if extractor is None:
         raise UnknownLink(f"no extractor (yt-dlp or gallery-dl) recognizes this link: {url}")
 
     items = [_gallery_dl_item(msg[1], msg[2]) for msg in extractor if msg[0] == 3]  # Message.Url
     if not items:
         raise RuntimeError("gallery-dl found no downloadable media at this link")
+    if _binding(wants) and not any(it["kind"] == wants for it in items):
+        raise WrongKind("nothing at that address is an image")
 
     if index is None and 1 < len(items) <= MAX_PICKER_ITEMS:
         return {
             "multi": True,
             "items": [
-                {"index": i, "title": it["title"], "thumbnail": it["url"], "kind": it["kind"]}
+                {
+                    "index": i,
+                    "title": it["title"],
+                    "thumbnail": it["url"],
+                    "kind": it["kind"],
+                    # gallery-dl drops a quoted tweet before it lists anything
+                    # (`extractor.twitter.quoted`, off), so all of these are the post's.
+                    "own": True,
+                }
                 for i, it in enumerate(items, start=1)
             ],
         }
 
     picked = items[(index or 1) - 1]
+    if _binding(wants) and picked["kind"] != wants:
+        raise WrongKind("that file is not an image")
     return _register_gallery_dl_item(case, extractor, url, picked, title=title, stage=stage)
 
 
@@ -856,6 +976,7 @@ def _fallback_or_needs_auth(
     cookies: dict[str, Any] | None,
     yt_auth: bool,
     stage: Path | None = None,
+    wants: str = "",
 ) -> dict[str, Any]:
     """yt-dlp found nothing — try gallery-dl, but turn a login wall into a
     ``needs_auth`` signal instead of an error, so the UI can offer cookies.
@@ -866,13 +987,18 @@ def _fallback_or_needs_auth(
     """
     try:
         return _download_via_gallery_dl(
-            case, url, index=index, title=title, cookies=cookies, stage=stage
+            case, url, index=index, title=title, cookies=cookies, stage=stage, wants=wants
         )
     except UnknownLink:
         # Not knowing the address is not a refusal — but yt-dlp having *seen* a wall is,
         # and gallery-dl simply not being the tool for that site does not undo it.
         if cookies is None and yt_auth:
             return {"needs_auth": True, "platform": sys.platform}
+        raise
+    except WrongKind:
+        # The post was read and holds nothing this caller has room for. Passed through
+        # before the wall handler below, which would otherwise answer a plain "no
+        # picture here" with a login prompt that could never fix it.
         raise
     except Exception as exc:
         if cookies is None and (yt_auth or _is_gallery_auth_error(exc)):
@@ -882,6 +1008,25 @@ def _fallback_or_needs_auth(
             # platform's own wording, which is a tombstone the analyst cannot act on.
             return {"needs_auth": True, "platform": sys.platform, "refused": True}
         raise
+
+
+class _YtdlpLog:
+    """Catch yt-dlp's console output instead of letting it reach the terminal.
+
+    ``quiet`` silences its progress chatter but not its errors, and the errors
+    it reports here are ones this module answers by itself: "No video could be
+    found in this tweet" is how an image-only post announces itself, one line
+    before gallery-dl downloads it. Printed as ERROR, a download that worked
+    looks broken. What the extractor said stays available under debug logging,
+    and the caller keeps deciding what the user is told.
+    """
+
+    def debug(self, msg: str) -> None:
+        logger.debug("yt-dlp: %s", msg)
+
+    info = debug
+    warning = debug
+    error = debug
 
 
 def download_url(
@@ -950,6 +1095,7 @@ def download_url(
         "outtmpl": str(tmp_dir / "%(title).120B [%(id)s].%(ext)s"),
         "quiet": True,
         "no_warnings": True,
+        "logger": _YtdlpLog(),
         "restrictfilenames": False,
     }
     # Narrow yt-dlp to the one picked entry, as an optimization, ONLY when
@@ -988,7 +1134,7 @@ def download_url(
                 shutil.rmtree(tmp_dir, ignore_errors=True)
                 return _fallback_or_needs_auth(
                     case, url, index=index, title=title, cookies=cookies, yt_auth=yt_auth,
-                    stage=stage,
+                    stage=stage, wants=wants,
                 )
             target_info = entries[0] if entries else info
         else:
@@ -1001,7 +1147,7 @@ def download_url(
                     return {"telegram_only": True}
                 return _fallback_or_needs_auth(
                     case, url, index=index, title=title, cookies=cookies, yt_auth=yt_auth,
-                    stage=stage,
+                    stage=stage, wants=wants,
                 )
 
             if index is None and 1 < total <= MAX_PICKER_ITEMS:
@@ -1017,6 +1163,7 @@ def download_url(
                             "title": info.get("title") or info.get("id") or "item 1",
                             "thumbnail": info.get("thumbnail"),
                             "kind": "video",
+                            "own": True,
                         }
                     ]
                 else:
@@ -1027,6 +1174,9 @@ def download_url(
                         "title": "Telegram photo",
                         "thumbnail": p["url"],
                         "kind": "image",
+                        # An embed page holds one post and quotes nothing, so every
+                        # photo on it is that post's own.
+                        "own": True,
                     }
                     for i, p in enumerate(extra_photos, start=1)
                 ]
@@ -1044,11 +1194,11 @@ def download_url(
         # A slot that holds a picture is not served by the video this post quotes.
         # Handing it back would fill the panel with fifty seconds of footage and say
         # so only at the preview, two screens later.
-        if wants == "image" and _entry_kind(target_info) != "image":
+        if _binding(wants) and _entry_kind(target_info) != wants:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             return _fallback_or_needs_auth(
                 case, url, index=index, title=title, cookies=cookies, yt_auth=yt_auth,
-                stage=stage,
+                stage=stage, wants=wants,
             )
 
         # download from the info we already extracted — no second extraction

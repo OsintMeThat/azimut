@@ -62,10 +62,14 @@
     const space = safeStyle.space;
     const bg = safeStyle.bg ?? BG;
     const tc = textColors(bg);
+    // The preview has no proof behind it, so the band shows the credit line the
+    // style asks for and nothing else: coordinates are content, and a house style
+    // holds none.
+    const footerOn = safeStyle.footerEnabled && safeStyle.footerText !== false;
     const text = {
       captionSize: safeStyle.captionSize ?? CAPTION_SIZE,
       footerSize: safeStyle.footerSize ?? FOOTER_SIZE,
-      footerEnabled: safeStyle.footerEnabled,
+      footerEnabled: footerOn,
     };
     const pnls = panels(safeStyle);
     const { width, height } = docSize(pnls, [], {}, text, [], 'grid', space);
@@ -101,7 +105,7 @@
     });
 
     // footer
-    if (text.footerEnabled) {
+    if (footerOn) {
       const fs = text.footerSize;
       layer.add(new Konva.Text({
         x: space.pad, y: height - space.pad - footerBand(fs) + Math.round((footerBand(fs) - fs) / 2),
@@ -253,7 +257,8 @@
   $effect(() => {
     JSON.stringify([
       style.bg, style.space, style.captionSize, style.footerSize,
-      style.footer, style.footerEnabled, style.footerColor, style.footerAlign, style.captionsEnabled,
+      style.footer, style.footerEnabled, style.footerText, style.footerColor, style.footerAlign,
+      style.captionsEnabled,
       style.panelDirection,
       style.signature, style.signatureText,
     ]);

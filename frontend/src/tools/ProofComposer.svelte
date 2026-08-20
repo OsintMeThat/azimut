@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { fileUrl } from '../lib/fileUrl.js';
   import Konva from 'konva';
   import { api } from '../lib/api.js';
@@ -22,7 +22,9 @@
   import NewProofDialog from './proof/NewProofDialog.svelte';
   import ImportProofDialog from './proof/ImportProofDialog.svelte';
   import PanelCategories from './proof/PanelCategories.svelte';
-  import { bindPanelPointerLifecycle, createCanvasRenderGate } from './proof/canvasLifecycle.js';
+  import { bindPanelPointerLifecycle, createCanvasRenderGate,
+  discardDraft,
+} from './proof/canvasLifecycle.js';
   import { closeStrandedGesture } from '../lib/konvaGesture.js';
   import {
     ANNO_COLORS, PAD, GAP, ROW_GAP, PANEL_H, TWEET_GUIDES,
@@ -30,7 +32,9 @@
     BG, TEXT_MAIN, normSpace, textColors,
     layoutPanels, panelsBottom, freeNormalizeDelta, legendLineHeight, footerBand,
     attributionLine, docSize, offsetShape, autoLayoutRows,
-    autoCoords, formatCoords, autoSource,
+    autoCoords, formatCoords, autoSourceUrls, proofSource, statedSources,
+    specPoints, footerLines, coordsPostLines, proofCoordsLines, MAX_POINTS,
+    normalizeMaterial, resolveSourceUrls,
     toSpec, newId, loadImage, orderedFeatureColors, notesFromShapes,
     templateFromProof, applyProofStyle, normalizeProofStyle, newSignatureText,
     anchoredPos, anchoredOffset, SIG_TEXT_SIZE,
@@ -45,15 +49,23 @@
     filterProofPanelItems, hasProofCanvasContent, proofExportOptions, panelPreview,
   } from '../lib/composer.js';
   import {
+    canFill,
+    fillPaint,
     movedBy,
     nextPanelRow,
     notesAfterRemoval,
     nudgeShape,
     PANEL_SCALE_MAX,
     PANEL_SCALE_MIN,
+    pointsWithTransform,
     scaleFromNode,
+    textBoxPad,
     viewCentrePoint,
   } from '../lib/proofEdits.js';
+  import {
+    ICON_BOX, ICON_SIZE_MIN, PROOF_ICONS,
+    glyphInk, iconByName, iconOrigin, iconSizeFor, isSolidIcon,
+  } from '../lib/proofIcons.js';
   import {
     assetName, base64Of, PASTE_TYPES, MAX_PASTES, MAX_PASTE_BYTES,
   } from '../lib/pasteAsset.js';
@@ -66,7 +78,7 @@
   const SCALE_STEP = 0.05;
 
   const DRAW_TOOLS = [
-    { id: 'select', icon: 'hand', label: 'Select / move', shortcut: 'v' },
+    { id: 'select', icon: 'cursor', label: 'Select / move', shortcut: 'v' },
     { id: 'rect', icon: 'square', label: 'Box', shortcut: 'r' },
     { id: 'ellipse', icon: 'circle', label: 'Ellipse', shortcut: 'e' },
     { id: 'arrow', icon: 'arrow', label: 'Arrow', shortcut: 'a' },
@@ -81,8 +93,16 @@
   const proof = $state({
     title: '', panels: [], pastes: [], shapes: [], notes: {}, legendOrder: [],
     templateId: null, // selected saved house style; its values remain copied below
-    coordsText: '', source: '', // '' → auto-derived from panels; non-empty → manual override
-    pov: false, // the point is where the camera stood, not what it filmed
+    // What the proof concludes on, one row per point, the first one the conclusion.
+    // Always at least one row: an empty one reads as the coordinates the panels
+    // give it, which is what the field has always shown.
+    points: [{ coords: '', label: '', pov: false }],
+    sources: null, // null → traced from the panels; a list → what the analyst states
+    // Case files the proof rests on without composing them, brought in from a stated
+    // source address. They join the chain on save, and the point with it.
+    material: [],
+    footerCoords: false, // whether the plate prints the proof's points
+    footerText: true, // whether the plate prints its credit line
     captionSize: CAPTION_SIZE, legendSize: LEGEND_SIZE, footerSize: FOOTER_SIZE, footer: '',
     footerEnabled: true, // false → no footer line at all
     footerColor: null, // null → auto from the background
@@ -112,6 +132,10 @@
   // Saved proof slug, or null before the first save.
   let savedName = $state(null);
   let dirty = $state(false);
+  // The document as it stands on disk, so an undo that walks all the way back
+  // to it can say the proof is saved again. null until a save or an open has
+  // put something there to match.
+  let savedSnapshot = null;
   // A named proof can exist before it has content. This distinguishes the
   // initial composer shell from a template-only proof the user just created.
   let proofStarted = $state(false);
@@ -154,10 +178,23 @@
       .catch(() => { if (live) proofEntities = []; });
     Promise.all([api.get(`/api/cases/${id}/media`), api.get(`/api/cases/${id}/satellite`)])
       .then(([media, sat]) => {
-        if (live) presentPaths = new Set([...media, ...sat].map((it) => it.path));
+        if (!live) return;
+        presentPaths = new Set([...media, ...sat].map((it) => it.path));
+        caseMedia = media;
       })
-      .catch(() => { if (live) presentPaths = new Set(); });
+      .catch(() => { if (live) { presentPaths = new Set(); caseMedia = []; } });
     return () => { live = false; };
+  });
+
+  /** The case's own media, kept for one question: whether a stated address is already
+   *  in the case. Answered by tracing each file back the way a panel's source line is
+   *  traced, so a frame cut from a downloaded clip counts as that clip's address. */
+  let caseMedia = $state([]);
+  const heldAddresses = $derived.by(() => {
+    const byPath = new Map(caseMedia.map((one) => [one.path, one]));
+    const found = new Set();
+    for (const one of caseMedia) for (const url of resolveSourceUrls(one, byPath)) found.add(url);
+    return found;
   });
 
   // Panels whose media was deleted: the image already drawn stays on the canvas,
@@ -168,8 +205,15 @@
   let tool = $state('select');
   let color = $state(ANNO_COLORS[0]);
   let strokeW = $state(4);
+  // Fill opacity for the closed kinds, 0 to 1. Nothing is filled until the
+  // analyst asks: a box drawn over the evidence must not hide it by default.
+  let fillOpacity = $state(0);
+  let iconName = $state(PROOF_ICONS[0].name); // symbol the stamp tool places
   let guide = $state(null); // null | '16:9' | '4:5' — tweet centre-crop overlay
-  let selectedId = $state(null);
+  // The picked annotations. A press replaces the set, shift adds to it, and a
+  // marquee dragged over the page takes everything it touches. Panels, overlays
+  // and the signature stay single: each is one object, not a family.
+  let selectedIds = $state([]);
   let selectedPanelId = $state(null); // free-layout only: panel picked for move/resize
   let selectedPasteId = $state(null); // pasted image picked for move/resize/frame
   let selectedSig = $state(null); // null | 'logo' | 'text' — signature picked for resize
@@ -269,9 +313,11 @@
     proofStarted = true;
     if (pathDraft) finishPath(false);
     proof.title = spec.title ?? freshTitle();
-    proof.coordsText = spec.coordsText ?? '';
-    proof.pov = spec.pov === true;
-    proof.source = spec.source ?? '';
+    proof.points = editablePoints(spec);
+    proof.footerCoords = spec.footerCoords === true;
+    proof.footerText = spec.footerText !== false;
+    proof.sources = statedSources(spec.sources ?? spec.source ?? null);
+    proof.material = normalizeMaterial(spec.material);
     proof.captionSize = style.captionSize;
     proof.legendSize = style.legendSize;
     proof.footerSize = style.footerSize;
@@ -306,7 +352,7 @@
         })
         .catch(() => {});
     }
-    selectedId = null;
+    selectedIds = [];
     selectedPanelId = null;
     selectedPasteId = null;
     selectedSig = null;
@@ -314,7 +360,10 @@
     appliedTemplate = template
       ? { id: template.id, name: template.name, prevStyle: templateFromProof(proof) }
       : null;
-    dirty = true;
+    // Undoing back to the saved document is not an edit. Measured after the
+    // restore rather than off the snapshot string, since the values above come
+    // back normalised and a raw spec need not match its own normal form.
+    dirty = docSnapshot() !== savedSnapshot;
     requestAnimationFrame(fit);
     // outlast the capture debounce so the restore itself is not re-recorded
     setTimeout(() => (histBusy = false), 400);
@@ -338,8 +387,12 @@
   let canvasRenderGate;
   let drawing = null; // {panel, node, start, box, kind}
   let pathDraft = null; // {panel, box, node, points:[]} — multi-click curve in progress
+  let dragMoved = false; // did the press that is ending turn into a drag?
+  let marquee = null; // {start, add, base, node} — rectangle picking over the page
+  let marqueeEnded = false; // did the press that is ending draw a marquee?
   let spacePan = false; // hold-space panning (manual, so it wins over shape drags)
   let panDrag = null; // {sx, sy, ox, oy} — space/middle-drag pan in progress
+  let gestureSeq = 0; // bumped by every press, so a deferred settle can tell whose
   let textEdit = $state(null); // {id, value, left, top, size} — inline text editor
 
   onMount(() => {
@@ -397,13 +450,28 @@
     };
     const beginPointer = () => {
       closeStranded(); // a new press proves the last gesture is over, however it ended
+      gestureSeq += 1;
       canvasRenderGate?.beginPointer();
     };
     const settlePointer = () => {
       canvasRenderGate?.endPointer();
-      // A frame later, so a gesture that ended normally has already closed
-      // itself and only a stranded one is left to end.
-      requestAnimationFrame(closeStranded);
+      // The pan is the one gesture that cannot wait: it follows the live
+      // pointer, so a move arriving before the frame below would slide the view
+      // after the button was let go. Ended twice on a normal release, which
+      // costs nothing — whichever handler gets there first does it.
+      if (panDrag) endPan();
+      // A frame later for the rest, so a gesture that ended normally has
+      // already closed itself and only a stranded one is left to end. This
+      // listener runs in the capture phase, ahead of the handlers that close
+      // them.
+      const seq = gestureSeq;
+      requestAnimationFrame(() => {
+        closeStranded();
+        // A press that landed inside the frame we waited opened a new gesture:
+        // what is in hand now is not what this release left behind, and
+        // settling it would commit a stroke still being drawn.
+        if (seq === gestureSeq) settleStrandedGesture();
+      });
     };
     // Capture before Konva dispatches the event: selected annotations stop
     // bubbling at their node, so a Stage listener alone cannot see every press.
@@ -457,6 +525,19 @@
     if (tool !== 'curve' && pathDraft) finishPath(false);
   });
 
+  // Picking up a drawing tool puts the document out of reach: nothing on the
+  // canvas is hit-tested or handled, so a press that starts inside an existing
+  // element draws a new one instead of dragging the old. Drawing finds its
+  // surface geometrically (see surfaceAt), never through Konva's hit graph.
+  $effect(() => {
+    tool; // the tool alone: the document has its own rebuild below
+    untrack(() => {
+      if (!stage) return;
+      syncCanvasListening();
+      if (proofHasContent) refreshCanvasUi();
+    });
+  });
+
   // Rebuild only when published document content changes. Selection is UI-only
   // and gets a lightweight refresh below, without recreating every image node.
   $effect(() => {
@@ -469,6 +550,9 @@
       proof.captionSize, proof.legendSize, proof.footerSize, proof.footer,
       proof.footerEnabled, proof.footerColor,
       proof.footerAlign,
+      // the plate prints these when asked, and printing them changes its height:
+      // both have to reach the rebuild, or the picture lags a line behind
+      proof.footerCoords, proof.footerText, proof.points,
       proof.bg, proof.space,
       proof.layout,
       proof.panelDirection,
@@ -481,7 +565,7 @@
   });
 
   $effect(() => {
-    selectedId;
+    selectedIds;
     selectedPanelId;
     selectedPasteId;
     selectedSig;
@@ -496,6 +580,7 @@
     legendSize: proof.legendSize,
     footerSize: proof.footerSize,
     footerEnabled: proof.footerEnabled !== false,
+    footerLines: footerLines(proof, prefs.coordFormat).length,
   });
 
   // Layout boxes + document measure for the active layout mode. Pasted images
@@ -514,13 +599,16 @@
     proof.notes = {};
     proof.legendOrder = [];
     proof.templateId = null;
-    proof.coordsText = '';
-    proof.source = '';
+    proof.points = [blankPoint()];
+    proof.sources = null;
+    proof.material = [];
     proof.captionSize = CAPTION_SIZE;
     proof.legendSize = LEGEND_SIZE;
     proof.footerSize = FOOTER_SIZE;
     proof.footer = '';
     proof.footerEnabled = true;
+    proof.footerCoords = false;
+    proof.footerText = true;
     proof.footerColor = null;
     proof.footerAlign = 'left';
     proof.captionsEnabled = true;
@@ -533,8 +621,9 @@
     proof.palette = [...ANNO_COLORS];
     color = proof.palette[0];
     savedName = null;
+    savedSnapshot = null;
     proofStarted = false;
-    selectedId = null;
+    selectedIds = [];
     selectedPanelId = null;
     selectedPasteId = null;
     selectedSig = null;
@@ -603,9 +692,46 @@
   // Pick the logo or the @handle so the transformer wraps it — click a corner to
   // resize it right on the canvas. Content selections drop, so only one thing
   // ever carries the handles.
+  /**
+   * Pick an annotation, or add it to the ones already picked.
+   *
+   * Shift is the additive key everywhere: on the canvas, and on the rows in the
+   * side column. Picking an annotation drops the panel, overlay or signature
+   * that was picked, since those are transformed on their own terms.
+   */
+  function pickShape(id, additive = false) {
+    if (!additive) selectedIds = [id];
+    else if (selectedIds.includes(id)) selectedIds = selectedIds.filter((x) => x !== id);
+    else selectedIds = [...selectedIds, id];
+    selectedPanelId = null;
+    selectedPasteId = null;
+    selectedSig = null;
+  }
+
+  /**
+   * Press and click on one annotation's node.
+   *
+   * A press on an element that is already part of the family leaves the family
+   * alone, so the whole of it can be dragged from any member. Collapsing to the
+   * one pressed waits for the click, which only lands if the press did not turn
+   * into a drag.
+   */
+  function bindShapePick(node, s) {
+    node.on('pointerdown', (e) => {
+      if (tool !== 'select') return;
+      e.cancelBubble = true;
+      dragMoved = false;
+      if (e.evt.shiftKey || !selectedIds.includes(s.id)) pickShape(s.id, e.evt.shiftKey);
+    });
+    node.on('click tap', (e) => {
+      if (tool !== 'select' || dragMoved || e.evt.shiftKey) return;
+      if (selectedIds.length > 1) pickShape(s.id);
+    });
+  }
+
   function selectSig(which) {
     selectedSig = which;
-    selectedId = null;
+    selectedIds = [];
     selectedPanelId = null;
     selectedPasteId = null;
   }
@@ -613,16 +739,48 @@
   function selectPaste(id) {
     if (tool !== 'select') return;
     selectedPasteId = id;
-    selectedId = null;
+    selectedIds = [];
     selectedPanelId = null;
     selectedSig = null;
   }
 
   function selectPanel(id) {
-    if (tool !== 'select') return;
+    if (tool !== 'select' || marqueeEnded) return;
     selectedPanelId = id;
     selectedPasteId = null;
-    selectedId = null;
+    selectedIds = [];
+    selectedSig = null;
+  }
+
+  /**
+   * Picking from the rows in the side column.
+   *
+   * On the canvas a press with a drawing tool in hand means "draw here", so the
+   * pick handlers above refuse it. A row cannot mean anything else, so instead
+   * of refusing it takes the hand back to Select — where the pick has handles,
+   * answers Delete and can be recoloured. Lighting a row nothing answers to was
+   * a selection visible in one column and absent from the other.
+   */
+  function pickShapeRow(id, additive = false) {
+    tool = 'select';
+    pickShape(id, additive);
+  }
+
+  /** Clicking the lit row again lets go, which is how the thumbnails read. */
+  function pickPanelRow(id) {
+    tool = 'select';
+    marqueeEnded = false;
+    selectedPanelId = selectedPanelId === id ? null : id;
+    selectedPasteId = null;
+    selectedIds = [];
+    selectedSig = null;
+  }
+
+  function pickPasteRow(id) {
+    tool = 'select';
+    selectedPasteId = selectedPasteId === id ? null : id;
+    selectedPanelId = null;
+    selectedIds = [];
     selectedSig = null;
   }
 
@@ -856,7 +1014,7 @@
     if (next === null) return;
     proof.panels[index].row = next;
     normalizeRows();
-    selectedId = null;
+    selectedIds = [];
     dirty = true;
     requestAnimationFrame(fit);
   }
@@ -946,7 +1104,7 @@
     );
     proof.panels.forEach((p, i) => { p.row = rows[i]; p.scale = 1; });
     normalizeRows();
-    selectedId = null;
+    selectedIds = [];
     dirty = true;
     requestAnimationFrame(fit);
   }
@@ -956,7 +1114,7 @@
     proof.shapes = proof.shapes.filter((s) => s.panel !== panel.id);
     proof.panels.splice(index, 1);
     normalizeRows();
-    selectedId = null;
+    selectedIds = [];
     selectedPanelId = null;
     dirty = true;
     requestAnimationFrame(fit);
@@ -1089,7 +1247,7 @@
     if (!paste) return;
     proof.shapes = proof.shapes.filter((s) => s.panel !== paste.id);
     proof.pastes.splice(index, 1);
-    selectedId = null;
+    selectedIds = [];
     if (selectedPasteId === paste.id) selectedPasteId = null;
     dirty = true;
   }
@@ -1151,9 +1309,53 @@
 
   // ---- drawing ----------------------------------------------------------------------
 
+  /**
+   * Who may answer the pointer: only Select, and only when space is not held.
+   *
+   * Konva fills a shape's hit canvas whether or not the shape has a fill, so an
+   * outlined box is hit across its whole inside. Left listening while a drawing
+   * tool is active, a stroke started inside an ellipse dragged that ellipse
+   * instead — and the drag ate the gesture, so the new element died under the
+   * minimum size. Both layers go quiet together: the handles on `uiLayer` sit
+   * over the same pixels the analyst is drawing on.
+   */
+  function syncCanvasListening() {
+    const live = tool === 'select' && !spacePan;
+    docLayer?.listening(live);
+    uiLayer?.listening(live);
+  }
+
   function docPoint() {
     const p = stage.getPointerPosition();
     return { x: (p.x - stage.x()) / stage.scaleX(), y: (p.y - stage.y()) / stage.scaleY() };
+  }
+
+  /** The rectangle between two document points, however it was dragged. */
+  function marqueeBox(a, b) {
+    return {
+      x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
+      width: Math.abs(b.x - a.x), height: Math.abs(b.y - a.y),
+    };
+  }
+
+  /**
+   * The annotations a marquee catches: every one it touches, not only the ones
+   * it swallows whole, which is the forgiving rule and the one Slides uses.
+   *
+   * Measured off the drawn nodes rather than the stored geometry, so a rotated
+   * text, a stroke's width and a panel's scale are all already accounted for.
+   */
+  function shapesTouching(box) {
+    const caught = [];
+    for (const s of proof.shapes) {
+      const node = docLayer.findOne(`#${s.id}`);
+      if (!node) continue;
+      const r = node.getClientRect({ relativeTo: docLayer });
+      const misses = r.x > box.x + box.width || r.x + r.width < box.x
+        || r.y > box.y + box.height || r.y + r.height < box.y;
+      if (!misses) caught.push(s.id);
+    }
+    return caught;
   }
 
   // Annotations are drawn on whatever surface is under the pointer — a panel or
@@ -1162,48 +1364,116 @@
     return surfaceHitTest(surfacesOf(), doc);
   }
 
+  /** Take hold of the view. The cursor says so, since the tool's own crosshair
+   *  would otherwise promise a stroke while the page slides. */
+  function startPan() {
+    const p = stage.getPointerPosition();
+    panDrag = { sx: p.x, sy: p.y, ox: stage.x(), oy: stage.y() };
+    if (containerEl) containerEl.style.cursor = 'grabbing';
+  }
+
+  function endPan() {
+    panDrag = null;
+    if (containerEl) containerEl.style.cursor = spacePan ? 'grab' : '';
+  }
+
   function onPointerDown(e) {
     // space-drag / middle-drag pans regardless of the active tool
     if (spacePan || e.evt.button === 1) {
       e.evt.preventDefault();
-      const p = stage.getPointerPosition();
-      panDrag = { sx: p.x, sy: p.y, ox: stage.x(), oy: stage.y() };
+      startPan();
       return;
     }
+    // Only the primary button acts. A right-drag used to draw a whole
+    // annotation under the context menu the browser was opening over it, and in
+    // Select it cleared the selection and opened a marquee.
+    if ((e.evt.button ?? 0) > 0) return;
     if (tool === 'select') {
-      const onEmpty = e.target === stage || e.target.name() === 'bg';
-      stage.draggable(onEmpty);
-      if (onEmpty) {
-        selectedId = null;
+      dragMoved = false;
+      marqueeEnded = false;
+      const add = e.evt.shiftKey;
+      // Where a drag can mean nothing else, it means picking. On the page around
+      // the panels, and across a panel the grid pins in place — an overlay or a
+      // free-layout panel is dragged instead, and the room outside the page
+      // still pans, which is the gesture that was there before the marquee.
+      const onPage = e.target.name() === 'bg';
+      const parentId = e.target.getParent()?.id() ?? '';
+      const onPinnedPanel = e.target.name() === 'panel-hit'
+        && proof.layout !== 'free'
+        && proof.panels.some((p) => `pg-${p.id}` === parentId);
+      const onEmpty = e.target === stage || onPage;
+      stage.draggable(e.target === stage);
+      // The rectangle about to be dragged replaces what was picked, so let go of
+      // it at the press: handles left standing over a marquee read as a second
+      // selection rather than the one being replaced.
+      if ((onEmpty || onPinnedPanel) && !add) {
+        selectedIds = [];
         selectedPanelId = null;
         selectedPasteId = null;
         selectedSig = null;
+      }
+      if (onPage || onPinnedPanel) {
+        marquee = { start: docPoint(), add, base: [...selectedIds], node: null };
       }
       return;
     }
     stage.draggable(false);
     const hit = surfaceAt(docPoint());
-    if (!hit) return;
+    // Nothing to draw on under the pointer. The room around the page pans in
+    // Select, and it is the same room: a drag that cannot mean an annotation
+    // means the view, rather than nothing at all.
+    if (!hit) {
+      startPan();
+      return;
+    }
     // `panel` here is the surface the annotation binds to: the shape's `panel`
     // field holds a panel id or a pasted image's id.
     const panel = hit.item;
     const group = docLayer.findOne(`#pg-${panel.id}`);
     if (!group) return;
-    // text is placed with a single click (no drag) then edited in the side list
+    // Text is placed with a single click and typed on the spot: placing a label
+    // and saying what it says are one act, so the editor opens over it rather
+    // than leaving the word "Text" on the panel to be found and double-clicked.
+    // The tool goes back to Select because the next act is the editing.
     if (tool === 'text') {
       const s = {
         id: newId('s'), panel: panel.id, kind: 'text', color,
         x: hit.nx, y: hit.ny, text: 'Text', fontSize: 28,
       };
       proof.shapes.push(s);
-      selectedId = s.id;
+      selectedIds = [s.id];
       tool = 'select';
+      dirty = true;
+      // A frame later, because the press that placed the label has a default
+      // action still to come: the browser moves focus off whatever is focused
+      // when a click lands on something that cannot hold it, and an editor
+      // opened inside the pointerdown was blurred — and so committed and
+      // closed — before the analyst could type into it.
+      requestAnimationFrame(() => startTextEdit(s));
+      return;
+    }
+    // A symbol is stamped with one click. Unlike text the tool stays in hand
+    // afterwards, because marking six vehicles is one act, not six.
+    if (tool === 'icon') {
+      const entry = iconByName(iconName);
+      if (!entry) return;
+      const s = {
+        id: newId('s'), panel: panel.id, kind: 'icon', name: entry.name, color,
+        x: hit.nx, y: hit.ny, size: iconSizeFor(hit.box.baseScale),
+        ...(isSolidIcon(entry.name) ? {} : { strokeWidth: strokeW }),
+        ...(fillOpacity > 0 ? { fillOpacity } : {}),
+      };
+      proof.shapes.push(s);
+      selectedIds = [s.id];
       dirty = true;
       return;
     }
     // curve: each click drops a vertex; double-click / Enter finishes
     if (tool === 'curve') {
-      if (pathDraft && pathDraft.panel.id !== panel.id) return;
+      // A vertex dropped on another surface ends the curve where it was and
+      // opens the next one there. Ignoring the click made the canvas look dead
+      // whenever a curve strayed a few pixels past its panel.
+      if (pathDraft && pathDraft.panel.id !== panel.id) finishPath(true);
       if (!pathDraft) {
         const node = new Konva.Line({
           points: [hit.nx, hit.ny], tension: 0.5, stroke: color,
@@ -1230,11 +1500,16 @@
       return;
     }
     const common = { stroke: color, strokeWidth: sw, listening: false };
+    // the draft is drawn with the fill it will be committed with, so the analyst
+    // sees what the box hides while dragging it, not after
+    const paint = canFill(tool) ? fillPaint(color, fillOpacity) : null;
     let node;
     if (tool === 'rect') {
-      node = new Konva.Rect({ x: hit.nx, y: hit.ny, width: 1, height: 1, cornerRadius: 2, ...common });
+      node = new Konva.Rect({
+        x: hit.nx, y: hit.ny, width: 1, height: 1, cornerRadius: 2, fill: paint, ...common,
+      });
     } else if (tool === 'ellipse') {
-      node = new Konva.Ellipse({ x: hit.nx, y: hit.ny, radiusX: 1, radiusY: 1, ...common });
+      node = new Konva.Ellipse({ x: hit.nx, y: hit.ny, radiusX: 1, radiusY: 1, fill: paint, ...common });
     } else {
       node = new Konva.Arrow({
         points: [hit.nx, hit.ny, hit.nx, hit.ny],
@@ -1249,6 +1524,21 @@
   }
 
   function onPointerMove() {
+    if (marquee) {
+      dragMoved = true;
+      const box = marqueeBox(marquee.start, docPoint());
+      if (!marquee.node) {
+        marquee.node = new Konva.Rect({
+          fill: 'rgba(232, 163, 61, 0.12)', stroke: '#e8a33d',
+          strokeWidth: 1 / stage.scaleX(), dash: [4 / stage.scaleX(), 3 / stage.scaleX()],
+          listening: false,
+        });
+        uiLayer.add(marquee.node);
+      }
+      marquee.node.setAttrs(box);
+      uiLayer.batchDraw();
+      return;
+    }
     if (panDrag) {
       const p = stage.getPointerPosition();
       stage.position({ x: panDrag.ox + p.x - panDrag.sx, y: panDrag.oy + p.y - panDrag.sy });
@@ -1292,15 +1582,37 @@
     docLayer.batchDraw();
   }
 
-  function onPointerUp() {
-    if (panDrag) {
-      panDrag = null;
-      return;
-    }
-    if (tool === 'select') {
-      stage.draggable(false);
-      return;
-    }
+  /**
+   * Apply the rectangle dragged over the page, then take it down.
+   *
+   * The box is read off the node rather than recomputed from the pointer: the
+   * node holds what was drawn, which is what the analyst was looking at — and
+   * it is still the right answer when the release landed somewhere the canvas
+   * never heard about it.
+   */
+  function applyMarquee() {
+    if (!marquee) return;
+    const node = marquee.node;
+    const box = node
+      ? { x: node.x(), y: node.y(), width: node.width(), height: node.height() }
+      : null;
+    node?.destroy();
+    uiLayer.batchDraw();
+    const { add, base } = marquee;
+    marquee = null;
+    // A rectangle nobody dragged is a click on the page, which has already
+    // cleared the selection. Below a couple of pixels it is the same thing.
+    if (!box || (box.width <= 2 && box.height <= 2)) return;
+    // The press that opened this rectangle may have been on a panel, and Konva
+    // still calls that a click. Say the rectangle happened, so the panel
+    // underneath does not take the selection back.
+    marqueeEnded = true;
+    const caught = shapesTouching(box);
+    selectedIds = add ? [...new Set([...base, ...caught])] : caught;
+  }
+
+  /** Fold the draft in hand into an annotation, or drop it for being too small. */
+  function commitDrawing() {
     if (!drawing) return;
     const { node, kind, panel } = drawing;
     const box = drawing.box;
@@ -1326,12 +1638,56 @@
     if (shape) {
       const s = {
         id: newId('s'), panel: panel.id, color,
-        strokeWidth: strokeW, ...shape,
+        strokeWidth: strokeW,
+        // only the kinds that can hold one carry the field, and only once asked
+        ...(canFill(kind) && fillOpacity > 0 ? { fillOpacity } : {}),
+        ...shape,
       };
       proof.shapes.push(s);
-      selectedId = s.id;
+      selectedIds = [s.id];
       dirty = true;
     }
+  }
+
+  function onPointerUp() {
+    if (marquee) {
+      applyMarquee();
+      return;
+    }
+    // The window hears the release first and has ended a pan already (see
+    // settlePointer). This stands for the release it does not hear.
+    if (panDrag) {
+      endPan();
+      return;
+    }
+    if (tool === 'select') {
+      stage.draggable(false);
+      // A tool can change under an unreleased pointer, so Select may be holding
+      // someone else's draft. Settle it below rather than returning on it.
+      if (!drawing) return;
+    }
+    commitDrawing();
+  }
+
+  /**
+   * End a gesture the composer runs itself whose release it never heard.
+   *
+   * Konva listens for pointerup on its container and nowhere else, so letting go
+   * over the side column — a hand's width from the canvas edge, and where the
+   * pointer lands whenever a stroke is drawn near the right of a panel — never
+   * reached the handlers above. What was left kept following a bare pointer: a
+   * draft that stretched with no button held, a marquee nothing destroyed and no
+   * selection to show for it. The release happened, so it lands here exactly as
+   * it would have there — which is what `closeStrandedGesture` already does for
+   * the gestures Konva owns. (The pan is ended earlier, in `settlePointer`.)
+   *
+   * Runs a frame after the window heard the release, so a gesture that ended on
+   * the canvas has already settled itself and there is nothing here to find.
+   */
+  function settleStrandedGesture() {
+    if (!stage) return;
+    if (marquee) applyMarquee();
+    if (drawing) commitDrawing();
   }
 
   function finishPath(commit) {
@@ -1347,8 +1703,10 @@
         strokeWidth: strokeW, points: pts, tension: 0.5,
       };
       proof.shapes.push(s);
-      selectedId = s.id;
-      tool = 'select';
+      selectedIds = [s.id];
+      // The tool stays in hand, like the box, the line and the arrow it belongs
+      // beside: three curves in a row is one act, and reaching for `c` between
+      // each of them was the only place a shape tool put the pen down.
       dirty = true;
     } else {
       proof.shapes = [...proof.shapes]; // force rebuild to drop the preview
@@ -1496,18 +1854,25 @@
         fontFamily: 'system-ui, sans-serif', ellipsis: true, wrap: 'none', listening: false,
       }));
     });
-    if (proof.panels.length && proof.footerEnabled !== false) {
+    const printed = proof.footerEnabled !== false ? footerLines(proof, prefs.coordFormat) : [];
+    if (proof.panels.length && printed.length) {
       const footerSize = proof.footerSize ?? 13;
-      const footerText = proof.footer?.trim() || attributionLine(proof.panels);
-      docLayer.add(new Konva.Text({
-        x: pad,
-        y: height - pad - footerBand(footerSize) + Math.round((footerBand(footerSize) - footerSize) / 2),
-        width: width - pad * 2,
-        text: footerText,
-        align: proof.footerAlign === 'right' ? 'right' : 'left',
-        fontSize: footerSize, fill: proof.footerColor || tc.faint,
-        fontFamily: 'system-ui, sans-serif', ellipsis: true, wrap: 'none', listening: false,
-      }));
+      // The coordinates the proof prints sit above its credit line, each on the
+      // line `footerLines` measured them at — one source for the height and for
+      // the drawing, or a proof that grew a line would overflow its own picture.
+      const lines = printed;
+      const band = footerBand(footerSize);
+      lines.forEach((line, i) => {
+        docLayer.add(new Konva.Text({
+          x: pad,
+          y: height - pad - band * (lines.length - i) + Math.round((band - footerSize) / 2),
+          width: width - pad * 2,
+          text: line,
+          align: proof.footerAlign === 'right' ? 'right' : 'left',
+          fontSize: footerSize, fill: proof.footerColor || tc.faint,
+          fontFamily: 'system-ui, sans-serif', ellipsis: true, wrap: 'none', listening: false,
+        }));
+      });
     }
 
     // Pasted images, over the panels and the legend: pixels laid on top of the
@@ -1651,8 +2016,11 @@
     // A whole panel can be selected instead (both modes): corner anchors only
     // (aspect locked, elements scale along), never rotated. In grid mode the
     // resize keeps only the scale — the grid re-flows the position.
-    const selectedNode = selectedId ? docLayer.findOne(`#${selectedId}`) : null;
-    const panelNode = !selectedNode && selectedPanelId
+    const selectedNodes = selectedIds
+      .map((id) => docLayer.findOne(`#${id}`))
+      .filter(Boolean);
+    const selectedNode = selectedNodes.length === 1 ? selectedNodes[0] : null;
+    const panelNode = !selectedNodes.length && selectedPanelId
       ? docLayer.findOne(`#pg-${selectedPanelId}`)
       : null;
     // Panels are scale-clamped *during* the gesture: letting the transform run
@@ -1662,10 +2030,10 @@
     // the logo or the @handle, picked for a corner-resize (aspect locked).
     // a pasted image resizes from its corners with its aspect locked, within the
     // same kind of scale bounds a panel has
-    const pasteNode = !selectedNode && !panelNode && selectedPasteId
+    const pasteNode = !selectedNodes.length && !panelNode && selectedPasteId
       ? docLayer.findOne(`#pg-${selectedPasteId}`)
       : null;
-    const sigNode = !selectedNode && !panelNode && !pasteNode && selectedSig
+    const sigNode = !selectedNodes.length && !panelNode && !pasteNode && selectedSig
       ? docLayer.findOne(selectedSig === 'logo' ? '#sig-logo' : '#sig-text')
       : null;
     const boundPanel = panelNode ? proof.panels.find((p) => p.id === selectedPanelId) : null;
@@ -1680,24 +2048,47 @@
         (newBox.width / stage.scaleX()) * (boundPanel.natural[1] / (boundPanel.natural[0] * PANEL_H));
       return impliedScale < PANEL_SCALE_MIN || impliedScale > PANEL_SCALE_MAX ? oldBox : newBox;
     });
-    transformer.keepRatio(!!sigNode || !!pasteNode);
+    // Handles belong to Select. A drawing tool ignores what is selected, so
+    // showing anchors it will not answer would be a promise the canvas breaks;
+    // the selection itself is kept, and comes back with the hand.
+    const handles = tool === 'select';
+    // Several annotations at once get the border and nothing else: dragging any
+    // one of them drags the rest (Konva moves every node the transformer holds),
+    // while resizing and rotating a family stays out of this first pass.
     transformer.nodes(
-      selectedNode
-        ? [selectedNode]
-        : panelNode ? [panelNode] : pasteNode ? [pasteNode] : sigNode ? [sigNode] : []
+      !handles
+        ? []
+        : selectedNodes.length
+          ? selectedNodes
+          : panelNode ? [panelNode] : pasteNode ? [pasteNode] : sigNode ? [sigNode] : []
     );
     const selKind = selectedShape?.kind;
-    transformer.rotateEnabled(selKind === 'text' || selKind === 'rect' || selKind === 'ellipse');
+    transformer.keepRatio(!!sigNode || !!pasteNode || selKind === 'icon');
+    transformer.rotateEnabled(
+      selKind === 'text' || selKind === 'rect' || selKind === 'ellipse' || selKind === 'icon'
+        || selKind === 'freehand'
+    );
+    // A symbol gets corners only: the side handles are what would let it be
+    // stretched, and a squashed symbol is a different symbol. A freehand stroke
+    // is the one kind with neither vertex handles (too many points to show) nor
+    // a shape to speak of, so it takes the full set: without them a selected
+    // stroke showed a dashed frame and nothing to pull, which reads as a broken
+    // selection rather than a stroke that can only be moved.
     transformer.enabledAnchors(
-      selKind === 'rect' || selKind === 'ellipse'
+      selKind === 'rect' || selKind === 'ellipse' || selKind === 'freehand'
         ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
-        : selKind === 'text' || panelNode || pasteNode || sigNode
+        : selKind === 'text' || selKind === 'icon' || panelNode || pasteNode || sigNode
           ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
           : []
     );
-    drawEndHandles(surfacesOf());
-    drawPanelMoveControls(boxes);
-    drawGuide(width, height);
+    if (handles) {
+      drawEndHandles(surfacesOf());
+      drawPanelMoveControls(boxes);
+    } else {
+      endHandles.destroyChildren();
+      panelCtrls.destroyChildren();
+    }
+    drawGuide(width, height); // the tweet crop is a view, not a handle: it stays
     uiLayer.batchDraw();
   }
 
@@ -1842,7 +2233,7 @@
     let anchor;
     if (s.kind === 'rect') {
       anchor = { x: node.x() + (s.w ?? 0) / 2, y: node.y() + (s.h ?? 0) / 2 };
-    } else if (s.kind === 'ellipse' || s.kind === 'text') {
+    } else if (s.kind === 'ellipse' || s.kind === 'text' || s.kind === 'icon') {
       anchor = { x: node.x(), y: node.y() };
     } else {
       const pts = s.points.map((v, i) => v + (i % 2 === 0 ? node.x() : node.y()));
@@ -1876,7 +2267,7 @@
       const boxed = s.frame || s.bg;
       let node; // the draggable/transformable/selectable node (group when boxed)
       if (boxed) {
-        const pad = Math.round((s.fontSize ?? 28) * 0.28);
+        const pad = textBoxPad(s.fontSize);
         const w = textNode.width() + pad * 2;
         const h = textNode.height() + pad * 2;
         const frameSW = Math.max(2, Math.round((s.fontSize ?? 28) * 0.07));
@@ -1903,20 +2294,15 @@
         textNode.draggable(true);
         node = textNode;
       }
-      node.on('pointerdown', (e) => {
-        if (tool === 'select') {
-          e.cancelBubble = true;
-          selectedId = s.id;
-          selectedPanelId = null;
-          selectedPasteId = null;
-          selectedSig = null;
-        }
-      });
+      bindShapePick(node, s);
       node.on('dblclick dbltap', (e) => {
         e.cancelBubble = true;
-        startTextEdit(s, textNode);
+        startTextEdit(s);
       });
-      node.on('dragstart', () => node.getParent()?.moveToTop());
+      node.on('dragstart', () => {
+        dragMoved = true;
+        node.getParent()?.moveToTop();
+      });
       node.on('dragend', () => {
         const { fromBox, toBox } = rebindOnDrop(s, node);
         const p = toBox ? remapPanelXY(node.x(), node.y(), fromBox, toBox) : { x: node.x(), y: node.y() };
@@ -1935,16 +2321,22 @@
       });
       return node;
     }
+    if (s.kind === 'icon') return makeIconNode(s, panelScale);
     const sw = (s.strokeWidth ?? 4) / panelScale;
     const common = {
       id: s.id, stroke: s.color, strokeWidth: sw, rotation: s.rotation ?? 0,
       draggable: true, hitStrokeWidth: Math.max(sw * 3, 14 / panelScale),
     };
+    const paint = canFill(s.kind) ? fillPaint(s.color, s.fillOpacity) : null;
     let node;
     if (s.kind === 'rect') {
-      node = new Konva.Rect({ x: s.x, y: s.y, width: s.w, height: s.h, cornerRadius: 2, ...common });
+      node = new Konva.Rect({
+        x: s.x, y: s.y, width: s.w, height: s.h, cornerRadius: 2, fill: paint, ...common,
+      });
     } else if (s.kind === 'ellipse') {
-      node = new Konva.Ellipse({ x: s.x, y: s.y, radiusX: s.w / 2, radiusY: s.h / 2, ...common });
+      node = new Konva.Ellipse({
+        x: s.x, y: s.y, radiusX: s.w / 2, radiusY: s.h / 2, fill: paint, ...common,
+      });
     } else if (s.kind === 'curve' || s.kind === 'freehand') {
       node = new Konva.Line({
         points: s.points, tension: s.tension ?? (s.kind === 'freehand' ? 0.25 : 0.5),
@@ -1959,16 +2351,11 @@
         ...common,
       });
     }
-    node.on('pointerdown', (e) => {
-      if (tool === 'select') {
-        e.cancelBubble = true;
-        selectedId = s.id;
-        selectedPanelId = null;
-        selectedPasteId = null;
-        selectedSig = null;
-      }
+    bindShapePick(node, s);
+    node.on('dragstart', () => {
+      dragMoved = true;
+      node.getParent()?.moveToTop();
     });
-    node.on('dragstart', () => node.getParent()?.moveToTop());
     node.on('dragend', () => {
       if (s.kind === 'rect' || s.kind === 'ellipse') {
         const { fromBox, toBox } = rebindOnDrop(s, node);
@@ -2000,6 +2387,13 @@
         s.x = node.x(); s.y = node.y();
         s.w = Math.abs(node.radiusX() * 2 * node.scaleX());
         s.h = Math.abs(node.radiusY() * 2 * node.scaleY());
+      } else if (s.kind === 'freehand') {
+        // The whole transform goes into the samples — the scale, the turn and
+        // the move the anchors implied — and the node goes back to identity.
+        // A stroke has no origin to keep a rotation against.
+        s.points = pointsWithTransform(s.points, node.getTransform().getMatrix());
+        node.position({ x: 0, y: 0 });
+        node.rotation(0);
       }
       s.rotation = node.rotation();
       node.scale({ x: 1, y: 1 });
@@ -2008,17 +2402,102 @@
     return node;
   }
 
-  // ---- inline text editing (double-click a label on the canvas) ---------------
-  function startTextEdit(s, node) {
-    const panelScale = surfacesOf().find((x) => x.id === s.panel)?.box.scale ?? 1;
-    const abs = node.getAbsolutePosition(); // container px, stage transform included
-    selectedId = s.id;
+  /**
+   * A stamped symbol.
+   *
+   * The glyph is drawn in its own 24-unit box and scaled to `size`, so one
+   * number governs it and stretching is not expressible. The group sits on the
+   * anchor point the shape stores — the pin's tip, everything else's centre —
+   * which is what keeps a pin on its pixel while it is resized or turned.
+   */
+  function makeIconNode(s, panelScale) {
+    const entry = iconByName(s.name);
+    const size = s.size ?? iconSizeFor(panelScale);
+    const origin = iconOrigin(s.name, size);
+    const group = new Konva.Group({
+      id: s.id, x: s.x, y: s.y, rotation: s.rotation ?? 0, draggable: true,
+    });
+    // A stroked glyph is mostly holes, so a press has to land on the box rather
+    // than on a 2px line. Invisible to the eye, not to the hit canvas.
+    group.add(new Konva.Rect({
+      x: origin.x, y: origin.y, width: size, height: size, fill: '#000', opacity: 0,
+    }));
+    const disc = s.fillOpacity ?? 0;
+    if (disc > 0) {
+      group.add(new Konva.Circle({
+        x: origin.x + size / 2, y: origin.y + size / 2, radius: size / 2,
+        fill: fillPaint(s.color, disc),
+        // The ring stays at full opacity so a sheer disc keeps an edge; without
+        // it a badge at 30% has no silhouette left to read against the imagery.
+        stroke: s.color, strokeWidth: Math.max(size * 0.035, 0.5), listening: false,
+      }));
+    }
+    if (entry) {
+      const k = size / ICON_BOX;
+      const ink = glyphInk(s.color, disc);
+      group.add(new Konva.Path({
+        data: entry.path, x: origin.x, y: origin.y, scaleX: k, scaleY: k, listening: false,
+        ...(isSolidIcon(s.name)
+          ? { fill: ink, fillRule: 'evenodd' }
+          : {
+              stroke: ink,
+              // the glyph is drawn scaled, so the width is divided back out:
+              // a bigger symbol is a bigger drawing, not a fatter outline
+              strokeWidth: (s.strokeWidth ?? 4) / panelScale / k,
+              lineCap: 'round', lineJoin: 'round',
+            }),
+      }));
+    }
+    bindShapePick(group, s);
+    group.on('dragstart', () => {
+      dragMoved = true;
+      group.getParent()?.moveToTop();
+    });
+    group.on('dragend', () => {
+      const { fromBox, toBox } = rebindOnDrop(s, group);
+      const p = toBox
+        ? remapPanelXY(group.x(), group.y(), fromBox, toBox)
+        : { x: group.x(), y: group.y() };
+      s.x = p.x;
+      s.y = p.y;
+      dirty = true;
+    });
+    group.on('transformend', () => {
+      // Uniform by construction: the transformer keeps the ratio and offers
+      // corners only, so either axis answers for the new side.
+      s.size = Math.max(ICON_SIZE_MIN / panelScale, Math.abs(size * group.scaleX()));
+      s.x = group.x();
+      s.y = group.y();
+      s.rotation = group.rotation();
+      group.scale({ x: 1, y: 1 });
+      dirty = true;
+    });
+    return group;
+  }
+
+  // ---- inline text editing (placed, or double-clicked on the canvas) ---------
+  /**
+   * Open the editor over a label.
+   *
+   * Positioned from the surface's layout box rather than from a Konva node: a
+   * label placed a moment ago has no node yet — the document rebuild is held
+   * back until the gesture settles — and the editor has to open on the click
+   * that placed it rather than a frame later. The box carries the same
+   * transform the node would have been read through.
+   */
+  function startTextEdit(s) {
+    const box = surfacesOf().find((x) => x.id === s.panel)?.box;
+    if (!box) return;
+    // A boxed label insets its glyph by the padding the frame uses, so the
+    // editor opens over the words instead of over the corner.
+    const inset = s.frame || s.bg ? textBoxPad(s.fontSize) : 0;
+    selectedIds = [s.id];
     textEdit = {
       id: s.id,
       value: s.text ?? '',
-      left: abs.x,
-      top: abs.y,
-      size: (s.fontSize ?? 28) * panelScale * stage.scaleX(),
+      left: stage.x() + (box.x + (s.x + inset) * box.scale) * stage.scaleX(),
+      top: stage.y() + (box.y + (s.y + inset) * box.scale) * stage.scaleY(),
+      size: (s.fontSize ?? 28) * box.scale * stage.scaleX(),
       color: s.color,
     };
   }
@@ -2074,7 +2553,7 @@
     if (!target) return;
     const s = { ...offsetShape(clipboard, 26), id: newId('s'), panel: target };
     proof.shapes.push(s);
-    selectedId = s.id;
+    selectedIds = [s.id];
     // cascade further pastes so repeated Ctrl+V steps down-right
     clipboard = offsetShape(s, 0);
     dirty = true;
@@ -2085,11 +2564,22 @@
     pasteShape();
   }
 
+  /** Delete every picked annotation, and drop the legend notes left with nothing. */
+  function deleteSelected() {
+    const going = new Set(selectedIds);
+    const gone = proof.shapes.filter((s) => going.has(s.id));
+    if (!gone.length) return;
+    proof.shapes = proof.shapes.filter((s) => !going.has(s.id));
+    for (const s of gone) proof.notes = notesAfterRemoval(proof.notes, proof.shapes, s);
+    selectedIds = [];
+    dirty = true;
+  }
+
   function deleteShape(id) {
     const gone = proof.shapes.find((s) => s.id === id);
     proof.shapes = proof.shapes.filter((s) => s.id !== id);
     proof.notes = notesAfterRemoval(proof.notes, proof.shapes, gone);
-    if (selectedId === id) selectedId = null;
+    selectedIds = selectedIds.filter((x) => x !== id);
     dirty = true;
   }
 
@@ -2106,21 +2596,26 @@
   const canMoveShapeUp = (i) => hasGroupNeighbor(proof.shapes, i, -1, (s) => s.panel);
   const canMoveShapeDown = (i) => hasGroupNeighbor(proof.shapes, i, 1, (s) => s.panel);
 
-  const KIND_ICON = { rect: 'square', ellipse: 'circle', arrow: 'arrow', line: 'line', curve: 'curve', freehand: 'freehand', text: 'text' };
-  const KIND_LABEL = { rect: 'Box', ellipse: 'Ellipse', arrow: 'Arrow', line: 'Line', curve: 'Curve', freehand: 'Freehand', text: 'Text' };
+  const KIND_ICON = { rect: 'square', ellipse: 'circle', arrow: 'arrow', line: 'line', curve: 'curve', freehand: 'freehand', text: 'text', icon: 'pin' };
+  const KIND_LABEL = { rect: 'Box', ellipse: 'Ellipse', arrow: 'Arrow', line: 'Line', curve: 'Curve', freehand: 'Freehand', text: 'Text', icon: 'Symbol' };
 
-  // Color / stroke controls live-edit the selected shape when there is one, and
-  // always remember the pick as the default for the next drawn shape — the last
-  // colour/width you touched stays your working colour, whether or not something
-  // was selected at the time.
+  // Colour / stroke / fill live-edit everything in hand and always remember the
+  // pick as the default for the next drawn one — the last value you touched
+  // stays your working value. "In hand" means Select: with a drawing tool the
+  // controls set defaults only, so picking a new colour between two strokes no
+  // longer repaints the stroke that came before it (`editableShapes`).
   function setColor(c) {
-    if (selectedShape) {
-      const oldColor = selectedShape.color;
-      selectedShape.color = c;
-      // carry the legend note over if this color is otherwise unused
-      if (canReassignLegendNote(proof.notes, oldColor, c, proof.shapes, selectedShape)) {
-        proof.notes[c] = proof.notes[oldColor];
-        delete proof.notes[oldColor];
+    if (editableShapes.length) {
+      const before = [...new Set(editableShapes.map((s) => s.color))];
+      for (const s of editableShapes) s.color = c;
+      // A legend note is written against a colour. Carry it over for each colour
+      // the recolouring has just emptied, once no shape wears it any more.
+      for (const old of before) {
+        if (old === c) continue;
+        if (canReassignLegendNote(proof.notes, old, c, proof.shapes, null)) {
+          proof.notes[c] = proof.notes[old];
+          delete proof.notes[old];
+        }
       }
       dirty = true;
     }
@@ -2130,16 +2625,29 @@
   function setStroke(w) {
     // Font size is a text-only property, so editing it must not overwrite the
     // stroke-width default used for the next drawn shape.
-    if (selectedShape?.kind === 'text') {
-      selectedShape.fontSize = w;
+    if (editableShape?.kind === 'text') {
+      editableShape.fontSize = w;
       dirty = true;
       return;
     }
-    if (selectedShape) {
-      selectedShape.strokeWidth = w;
+    for (const s of editableShapes) {
+      if (s.kind === 'text') continue; // a font size is not a stroke width
+      if (s.kind === 'icon' && isSolidIcon(s.name)) continue; // a silhouette has no outline
+      s.strokeWidth = w;
       dirty = true;
     }
     strokeW = w;
+  }
+
+  /** Fill opacity, 0 (none) to 1. Only the closed kinds take one. */
+  function setFill(value) {
+    const opacity = Math.min(1, Math.max(0, value));
+    for (const s of editableShapes) {
+      if (!canFill(s.kind)) continue;
+      s.fillOpacity = opacity;
+      dirty = true;
+    }
+    fillOpacity = opacity;
   }
 
   // Arrow-key nudge of the selected element, in panel-natural pixels.
@@ -2147,9 +2655,8 @@
     ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
   };
   function nudgeSelected(dx, dy) {
-    const s = selectedShape;
-    if (!s) return;
-    Object.assign(s, nudgeShape(s, dx, dy));
+    if (!editableShapes.length) return;
+    for (const s of editableShapes) Object.assign(s, nudgeShape(s, dx, dy));
     dirty = true;
   }
 
@@ -2159,9 +2666,22 @@
       exportMenuOpen = false;
       return;
     }
+    // A dialog takes the keyboard with it. A one-letter tool key must not change
+    // the tool on the canvas behind it, and its Escape closes the dialog — that
+    // is not also a reason to put the pen down underneath.
+    if (modalOpen) return;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
     if (pathDraft && (e.key === 'Enter' || e.key === 'Escape')) {
       finishPath(e.key === 'Enter');
+      return;
+    }
+    // Escape mid-drag abandons the shape being drawn, and the tool stays in
+    // hand: cancelling a stroke is no reason to put the pen down. Without this
+    // the draft outlives the keypress and the pointer keeps stretching a shape
+    // that nothing can drop.
+    if (e.key === 'Escape' && drawing) {
+      drawing = discardDraft(drawing);
+      docLayer.batchDraw();
       return;
     }
     // clipboard / undo / save chords
@@ -2169,6 +2689,8 @@
       const k = e.key.toLowerCase();
       // Ctrl+V is deliberately absent: the paste event decides between an image
       // in the system clipboard and a copied annotation (see onPaste).
+      // Copying and duplicating stay open to a drawing tool: they read the last
+      // element rather than changing it, and what they add lands in plain sight.
       if (k === 'c' && selectedId) { e.preventDefault(); copyShape(); }
       else if (k === 'd' && selectedId) { e.preventDefault(); duplicateShape(); }
       else if (k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
@@ -2176,7 +2698,7 @@
       else if (k === 's') { e.preventDefault(); save(); }
       return; // don't fall through to the single-letter tool shortcuts
     }
-    if (NUDGE[e.key] && selectedId) {
+    if (NUDGE[e.key] && editableShapes.length) {
       e.preventDefault();
       const step = e.shiftKey ? 10 : 1;
       nudgeSelected(NUDGE[e.key][0] * step, NUDGE[e.key][1] * step);
@@ -2186,23 +2708,35 @@
       // hold space to pan, whatever the active tool — even over an element
       e.preventDefault();
       spacePan = true;
-      docLayer.listening(false);
+      syncCanvasListening();
       containerEl.style.cursor = 'grab';
       return;
     }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
-      deleteShape(selectedId);
-    } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedPanelId) {
+    // Deleting is a Select act like the others: with a drawing tool in hand the
+    // selection is out of reach, and a key must not erase what is not shown.
+    const erase = (e.key === 'Delete' || e.key === 'Backspace') && tool === 'select';
+    if (erase && editableShapes.length) {
+      deleteSelected();
+    } else if (erase && selectedPanelId) {
       const idx = proof.panels.findIndex((p) => p.id === selectedPanelId);
       if (idx >= 0) removePanel(idx);
-    } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedPasteId) {
+    } else if (erase && selectedPasteId) {
       removePaste(proof.pastes.findIndex((p) => p.id === selectedPasteId));
     } else if (e.key === 'Escape') {
-      selectedId = null;
-      selectedPanelId = null;
-      selectedPasteId = null;
-      selectedSig = null;
-      tool = 'select';
+      // Escape unwinds one level per press: the draft in hand first (above),
+      // then what is picked, and only with nothing left to drop does it put the
+      // pen down. One key, one meaning: drop the most local thing still
+      // standing. Before this it kept the pen while cancelling a stroke and laid
+      // it down when there was no stroke to cancel, so which of the two opposite
+      // things it meant turned on being three pixels from where a drag started.
+      if (visiblePick) {
+        selectedIds = [];
+        selectedPanelId = null;
+        selectedPasteId = null;
+        selectedSig = null;
+      } else {
+        tool = 'select';
+      }
     } else if (e.key === 'v') tool = 'select';
     else if (e.key === 'r') tool = 'rect';
     else if (e.key === 'e') tool = 'ellipse';
@@ -2211,6 +2745,7 @@
     else if (e.key === 'c') tool = 'curve';
     else if (e.key === 'd') tool = 'freehand';
     else if (e.key === 't') tool = 'text';
+    else if (e.key === 's') tool = 'icon';
     else if (e.key === 'f') fit();
   }
 
@@ -2218,7 +2753,7 @@
     if (e.key === ' ' && spacePan) {
       spacePan = false;
       panDrag = null;
-      docLayer?.listening(true);
+      syncCanvasListening();
       if (containerEl) containerEl.style.cursor = '';
     }
   }
@@ -2362,24 +2897,44 @@
   let orphanOffer = $state(null);
   let orphanDeleting = $state(false);
 
-  /** Say yes to the point: it is filed exactly as the automatic path files it. */
+  /** Say yes to the points: they are filed exactly as the automatic path files
+   *  them, and from the spec rather than from what this tab still holds. */
   async function acceptPlaceOffer() {
     if (!placeOffer || placeSaving) return;
     placeSaving = true;
     const offer = placeOffer;
     try {
-      const place = await api.post(
+      const filed = await api.post(
         `/api/cases/${caseState.current.id}/proofs/${encodeURIComponent(offer.name)}/place`,
-        { lat: offer.lat, lon: offer.lon }
       );
       placeOffer = null;
       await reloadCase();
-      toast(`Saved the point as a place: ${place.label}`, 'ok', 2600);
+      toast(placedLabel(filed), 'ok', 2600);
     } catch (e) {
       toast(`Could not save the point: ${e.message}`, 'danger', 6000);
     } finally {
       placeSaving = false;
     }
+  }
+
+  /** The points the question is about, one per line, named when the analyst
+   *  named them — the map is where they will be read, so it names coordinates
+   *  rather than the file. */
+  function offeredPoints(points) {
+    return points
+      .map((one) => {
+        const where = formatCoords({ lat: one.lat, lon: one.lon }, prefs.coordFormat);
+        return one.label ? `${one.label} — ${where}` : where;
+      })
+      .join('\n') + '\n\nnot saved in this case yet.';
+  }
+
+  /** What a save says about the places it wrote. One is named; several are counted,
+   *  because a toast listing five labels is a paragraph nobody reads. */
+  function placedLabel(filed) {
+    const places = filed ?? [];
+    if (places.length === 1) return `Saved the point as a place: ${places[0].label}`;
+    return `Saved ${places.length} points as places`;
   }
 
   /** Say yes to dropping the point the proof moved off. Deleted like any entity,
@@ -2445,20 +3000,24 @@
       savedName = result.name;
       proof.title = result.title;
       dirty = false;
+      savedSnapshot = docSnapshot();
       await reloadCase();
       toast(`Proof saved: ${result.png}`, 'ok');
-      // The point this proof carries. Filed already, or a question — the server
-      // answers with nothing at all when the case already holds that point, so
+      // The points this proof carries. Filed already, or a question — the server
+      // answers with nothing at all when the case already holds them, so
       // re-saving never asks twice.
-      if (result.place?.filed) toast(`Saved the point as a place: ${result.place.label}`, 'ok', 2600);
-      else if (result.place) placeOffer = { name: result.name, ...result.place };
+      if (result.place?.filed?.length) toast(placedLabel(result.place.filed), 'ok', 2600);
+      if (result.place?.asking?.length) {
+        placeOffer = { name: result.name, points: result.place.asking };
+      }
       // Corrected coordinates take the old point back. The place stays on the map
       // until the analyst says otherwise, so it is a question, not a cleanup.
       orphanOffer = result.orphans?.length ? result.orphans : null;
       if (andPost) {
         uiState.postProof = {
           title: result.title,
-          coordsText: displayedCoords,
+          // every point, one per line: the post cites the first and carries the rest
+          coordsText: coordsPostLines(proofCoordsLines(proof, prefs.coordFormat)).join('\n'),
           source: displayedSource,
           attribution: attributionLine(proof.panels),
           png: result.png,
@@ -2559,9 +3118,11 @@
     // during the load has to write back over this proof, not file a new one.
     savedName = entry.name;
     proof.title = spec.title;
-    proof.coordsText = spec.coordsText ?? '';
-    proof.pov = spec.pov === true;
-    proof.source = spec.source ?? '';
+    proof.points = editablePoints(spec);
+    proof.footerCoords = spec.footerCoords === true;
+    proof.footerText = spec.footerText !== false;
+    proof.sources = statedSources(spec.sources ?? spec.source ?? null);
+    proof.material = normalizeMaterial(spec.material);
     proof.captionSize = style.captionSize;
     proof.legendSize = style.legendSize;
     proof.footerSize = style.footerSize;
@@ -2618,15 +3179,105 @@
     }
     openList = null;
     dirty = false;
+    savedSnapshot = docSnapshot();
     anchorHistory();
     requestAnimationFrame(fit);
   }
 
-  const selectedShape = $derived(proof.shapes.find((s) => s.id === selectedId));
-  const activeColor = $derived(selectedShape?.color ?? color);
+  const selectedShapes = $derived(proof.shapes.filter((s) => selectedIds.includes(s.id)));
+  // The one annotation, when exactly one is picked. Everything keyed to a single
+  // kind reads this: the transformer's anchors, the endpoint handles, the size
+  // slider's range. A family of five has no kind of its own.
+  const selectedId = $derived(selectedIds.length === 1 ? selectedIds[0] : null);
+  const selectedShape = $derived(selectedShapes.length === 1 ? selectedShapes[0] : null);
+  // The selection as the controls and the keyboard see it: only Select edits
+  // what is already drawn. A drawing tool leaves the selection standing but out
+  // of reach, so nothing is silently recoloured, moved or deleted behind a
+  // gesture meant for the next element.
+  const editableShapes = $derived(tool === 'select' ? selectedShapes : []);
+  // Whether a pick is showing at all: the canvas handles and the lit rows in the
+  // side column answer to this together, so the two columns never disagree about
+  // what is selected.
+  const selectionLive = $derived(tool === 'select');
+  // What the analyst can see picked. A selection held for the hand's return is
+  // not something Escape has to clear before it can put the pen down.
+  const visiblePick = $derived(
+    selectionLive
+      && (selectedIds.length > 0 || !!selectedPanelId || !!selectedPasteId || !!selectedSig)
+  );
+  // Every dialog that can sit over the composer. A modal owns the keyboard while
+  // it is up, and this is what keeps the canvas shortcuts out from under it.
+  const modalOpen = $derived(
+    picker || newProofOpen || importOpen || openList !== null || discardConfirm
+      || replaceWithNewConfirm || exportPicker || overwritePrompt !== null
+      || placeOffer !== null || orphanOffer !== null || deleteEntry !== null
+      || sourcePick !== null
+  );
+  const editableShape = $derived(editableShapes.length === 1 ? editableShapes[0] : null);
+  const fillableSelection = $derived(editableShapes.some((s) => canFill(s.kind)));
+  // A solid symbol is a silhouette: there is no outline to widen, so the
+  // control stays away rather than sitting there doing nothing.
+  const solidIconOnly = $derived(
+    editableShapes.length
+      ? editableShapes.every((s) => s.kind === 'icon' && isSolidIcon(s.name))
+      : tool === 'icon' && isSolidIcon(iconName),
+  );
+  const activeColor = $derived(editableShape?.color ?? color);
+  const activeFill = $derived(
+    canFill(editableShape?.kind) ? (editableShape.fillOpacity ?? 0) : fillOpacity
+  );
   const featureList = $derived(orderedFeatureColors(proof.shapes, proof.legendOrder));
 
   // Swap a legend entry with its neighbour, persisting the whole resulting
+  // ---- the points the proof concludes on -----------------------------------
+  //
+  // One row per point, the first one the conclusion. A proof with a single point
+  // is the common case and looks exactly as it always did: one field, no cross,
+  // no arrow, nothing to move.
+
+  function blankPoint() {
+    return { coords: '', label: '', pov: false };
+  }
+
+  /** The spec's points as editable rows, always at least one. */
+  function editablePoints(spec) {
+    const stated = specPoints(spec).map((one) => ({ ...one }));
+    return stated.length ? stated : [blankPoint()];
+  }
+
+  /** Add a row. The first one is materialised from the panels first: an empty
+   *  field means "whatever the imagery says", and that answer has to become the
+   *  conclusion in writing before a second point can sit under it. */
+  function addPoint() {
+    if (proof.points.length >= MAX_POINTS) return;
+    if (!proof.points[0].coords.trim()) proof.points[0].coords = displayedCoords;
+    proof.points = [...proof.points, blankPoint()];
+    dirty = true;
+  }
+
+  function removePoint(i) {
+    proof.points = proof.points.filter((_, at) => at !== i);
+    if (!proof.points.length) proof.points = [blankPoint()];
+    dirty = true;
+  }
+
+  /** Move a row up. This is how the conclusion is chosen — POV never reorders
+   *  anything, or checking it would take a coordinate out of a tweet in silence. */
+  function raisePoint(i) {
+    if (i <= 0) return;
+    const order = [...proof.points];
+    [order[i - 1], order[i]] = [order[i], order[i - 1]];
+    proof.points = order;
+    dirty = true;
+  }
+
+  /** A camera stood in one place, so lighting one point puts the others out. */
+  function togglePov(i) {
+    const on = !proof.points[i].pov;
+    proof.points = proof.points.map((one, at) => ({ ...one, pov: on && at === i }));
+    dirty = true;
+  }
+
   // order — this also promotes any color that was only implicitly ordered
   // (first-use) into an explicit, saved position.
   function moveLegendColor(i, delta) {
@@ -2642,9 +3293,158 @@
   // the value auto-derived from the panels (reactive — deleting the first
   // satellite panel falls back to the next, adding media fills the source).
   const displayedCoords = $derived(
-    proof.coordsText.trim() || formatCoords(autoCoords(proof.panels), prefs.coordFormat)
+    proof.points[0]?.coords.trim() || formatCoords(autoCoords(proof.panels), prefs.coordFormat)
   );
-  const displayedSource = $derived(proof.source.trim() || autoSource(proof.panels));
+  const displayedSource = $derived(proofSource(proof));
+  const autoSources = $derived(autoSourceUrls(proof.panels));
+  /** What the Source boxes show: the analyst's own list once there is one — **empty
+   *  included**, since emptying every box is them saying the proof has no public source
+   *  — else the addresses traced from the panels, else one box to type the first into.
+   *  There is always a box: a field with no box is a field nobody can use. */
+  const sourceRows = $derived.by(() => {
+    const rows = proof.sources ?? autoSources;
+    return rows.length ? rows : [''];
+  });
+
+  /** Editing a traced row is what turns the whole list into the proof's own: the traced
+   *  ones come along, so stating a fourth address never means retyping three the panels
+   *  already knew. */
+  function editSource(at, value) {
+    proof.sources = sourceRows.map((row, i) => (i === at ? value : row));
+    dirty = true;
+  }
+
+  function addSource() {
+    proof.sources = [...sourceRows, ''];
+    dirty = true;
+  }
+
+  //: One http(s) address and nothing else, which is what one box holds.
+  const ONE_ADDRESS = /^https?:\/\/\S+$/i;
+
+  /** An address the proof states that the case holds nothing from.
+   *
+   *  Only the ones stated here: an address traced *off* a panel is, by construction,
+   *  already in the case, so offering to fetch it would be offering to fetch a file
+   *  sitting two rows above. */
+  function missingSource(url) {
+    const address = url.trim();
+    return (
+      proof.sources !== null && ONE_ADDRESS.test(address) && !heldAddresses.has(address)
+    );
+  }
+
+  /** Bring what a stated address holds into the case, and let the proof rest on it.
+   *
+   *  A geolocation read from a thread rests on files the case has never seen — the clip
+   *  under the photos, the second angle — and until now the only way in was to leave the
+   *  composer, download them in Media and come back. What lands is filed as ordinary
+   *  media and recorded as this proof's `material`, which is what puts it in the chain
+   *  and, through the chain, on the point.
+   */
+  let sourceJob = $state(null); // { url, progress } while one address is being fetched
+  let sourcePick = $state(null); // { url, items } when the address holds several files
+
+  async function fetchSource(url, indexes = null) {
+    const c = caseState.current;
+    const address = url.trim();
+    if (!c || !address || sourceJob) return;
+    sourceJob = { url: address, progress: {} };
+    try {
+      // Everything it holds, one call each: the analyst named this address as material,
+      // so what hangs off it is material — the same answer the sheet road gives.
+      const landed = [];
+      for (const index of indexes ?? [null]) {
+        const path = await runSourceJob(c.id, address, index);
+        if (path === 'multi') return; // the picker took over; nothing downloaded yet
+        if (path) landed.push(path);
+      }
+      await refreshCaseMedia(c.id);
+      toast(
+        landed.length > 1
+          ? `${landed.length} files added to the case`
+          : 'Added to the case',
+        'ok',
+        1800,
+      );
+    } catch (e) {
+      toast(`${address} could not be downloaded: ${e.message}`, 'danger', 6000);
+    } finally {
+      sourceJob = null;
+    }
+  }
+
+  async function runSourceJob(caseId, url, index) {
+    const { job_id } = await api.post(`/api/cases/${caseId}/media/download`, {
+      url, index, title: null, use_cookies: false,
+    });
+    for (;;) {
+      const status = await api.get(`/api/jobs/${job_id}`);
+      sourceJob = { url, progress: status.progress ?? {} };
+      if (status.status === 'running') {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        continue;
+      }
+      if (status.status !== 'done') throw new Error(status.error || 'the download failed');
+      const result = status.result ?? {};
+      if (result.multi) {
+        // Ticked by default: the address was stated as material, so what it carries is.
+        // Except what the extractor cannot vouch for — past the first attachment it
+        // cannot say whether a clip is the post's own or the one it quotes.
+        sourcePick = {
+          url,
+          items: (result.items ?? []).map((one) => ({ ...one, picked: one.own !== false })),
+        };
+        return 'multi';
+      }
+      if (result.needs_auth) {
+        throw new Error('this link asks for a login — download it from Media, then come back');
+      }
+      const path = result.item?.path ?? result.entity?.attrs?.path;
+      if (path) {
+        // Paired with the address that brought it, so taking that source off the proof
+        // takes this file out of its chain too.
+        proof.material = [
+          ...proof.material.filter((one) => one.path !== path),
+          { path, url },
+        ];
+        dirty = true;
+      }
+      return path ?? null;
+    }
+  }
+
+  /** What a file landing in the case has to update.
+   *
+   *  The composer's own two readings, and the app's: a media downloaded here is a case
+   *  entity like any other, so Board, Graph and the catalog have to hear about it. They
+   *  read the case handed round in state, and without this the file was on disk and
+   *  invisible everywhere else until a reload.
+   */
+  async function refreshCaseMedia(caseId) {
+    caseMedia = await api.get(`/api/cases/${caseId}/media`).catch(() => caseMedia);
+    presentPaths = new Set([...caseMedia.map((one) => one.path), ...presentPaths]);
+    await reloadCase();
+  }
+
+  function takeSourcePick() {
+    const picked = sourcePick.items.filter((one) => one.picked).map((one) => one.index);
+    const { url } = sourcePick;
+    sourcePick = null;
+    if (picked.length) fetchSource(url, picked);
+  }
+
+  function dropSource(at) {
+    proof.sources = sourceRows.filter((_, i) => i !== at);
+    dirty = true;
+  }
+
+  /** Hand the list back to the panels. The only way back from an emptied one, which is
+   *  why the arrow shows the moment the proof states anything of its own. */
+  function resetSources() {
+    proof.sources = null;
+    dirty = true;
+  }
 </script>
 
 <svelte:window onkeydown={onKeydown} onkeyup={onKeyup} onpaste={onPaste} />
@@ -2730,10 +3530,17 @@
       bind:tool
       palette={proof.palette}
       {activeColor}
-      {selectedShape}
+      {activeFill}
+      selectedShape={editableShape}
+      selectedCount={editableShapes.length}
+      {fillableSelection}
+      showStroke={!solidIconOnly}
+      {iconName}
+      setIconName={(name) => { iconName = name; tool = 'icon'; }}
       {strokeW}
       {setColor}
       {setStroke}
+      {setFill}
       {fit}
       layout={proof.layout}
       {setLayoutMode}
@@ -2825,30 +3632,56 @@
                 <Icon name="alert" size={13} />
               </span>
             {/if}
-            {#if proof.coordsText.trim()}
-              <button class="meta-reset" title="Reset to the coordinates from the imagery" onclick={() => { proof.coordsText = ''; dirty = true; }}>
+            {#if proof.points.some((one) => one.coords.trim())}
+              <button class="meta-reset" title="Reset to the coordinates from the imagery" onclick={() => { proof.points = [blankPoint()]; dirty = true; }}>
                 <Icon name="reset" size={12} />
               </button>
             {/if}
           </div>
-          <input
-            class="input meta-input"
-            class:warn={!displayedCoords}
-            placeholder="lat, lon"
-            value={displayedCoords}
-            oninput={(e) => { proof.coordsText = e.target.value; dirty = true; }}
-          />
-          <!-- What the point means. Nothing in the composition can answer it: a
-               rooftop shot is recorded somewhere it never shows, and a distant
-               skyline is shown from kilometres away. -->
-          <label class="meta-check" title="The point is where the camera stood, not what it filmed">
-            <input
-              type="checkbox"
-              checked={proof.pov}
-              onchange={(e) => { proof.pov = e.currentTarget.checked; dirty = true; }}
-            />
-            <span>POV</span>
-          </label>
+          <!-- One row per point the proof concludes on, the first one the
+               conclusion. A single-point proof shows the field it always did. -->
+          {#each proof.points as point, i (i)}
+            <div class="point-row">
+              <input
+                class="input meta-input"
+                class:warn={i === 0 && !displayedCoords}
+                placeholder="lat, lon"
+                value={i === 0 ? displayedCoords : point.coords}
+                oninput={(e) => { proof.points[i].coords = e.target.value; dirty = true; }}
+              />
+              <input
+                class="input point-label"
+                placeholder="label"
+                value={point.label}
+                oninput={(e) => { proof.points[i].label = e.target.value; dirty = true; }}
+              />
+              <!-- What the point means. Nothing in the composition can answer it:
+                   a rooftop shot is recorded somewhere it never shows, and a
+                   distant skyline is shown from kilometres away. -->
+              <button
+                class="point-pov"
+                class:on={point.pov}
+                title="The point is where the camera stood, not what it filmed"
+                onclick={() => togglePov(i)}
+              >
+                <Icon name="eye" size={13} />
+              </button>
+              {#if i > 0}
+                <button class="point-move" title="Make this the proof's conclusion" onclick={() => raisePoint(i)}>
+                  <Icon name="chevronUp" size={13} />
+                </button>
+                <button class="point-drop" title="Remove this point" onclick={() => removePoint(i)}>
+                  <Icon name="x" size={13} />
+                </button>
+              {/if}
+            </div>
+          {/each}
+          {#if proof.points.length < MAX_POINTS}
+            <button class="point-add" onclick={addPoint}>+ point</button>
+          {/if}
+          {#if proof.points.length > 1}
+            <div class="point-hint">The marker says where the camera stood. The first row is the proof's point.</div>
+          {/if}
         </div>
         <div class="meta-field">
           <div class="meta-head">
@@ -2859,28 +3692,65 @@
                 <Icon name="alert" size={13} />
               </span>
             {/if}
-            {#if proof.source.trim()}
-              <button class="meta-reset" title="Reset to the source traced from the media" onclick={() => { proof.source = ''; dirty = true; }}>
+            {#if proof.sources !== null}
+              <button class="meta-reset" title="Reset to the sources traced from the media" onclick={resetSources}>
                 <Icon name="reset" size={12} />
               </button>
             {/if}
+            <button
+              class="meta-add"
+              class:alone={proof.sources === null}
+              title="Add a source"
+              onclick={addSource}
+            >
+              <Icon name="plus" size={12} />
+            </button>
           </div>
-          <input
-            class="input meta-input"
-            class:warn={!displayedSource}
-            placeholder="https://…"
-            value={displayedSource}
-            oninput={(e) => { proof.source = e.target.value; dirty = true; }}
-          />
+          <!-- One row per address. A proof read from a thread rests on the post that
+               published it, the photos beside it and the clip under those, and each of
+               them is a link of its own. -->
+          {#each sourceRows as row, at (at)}
+            <div class="meta-row">
+              <input
+                class="input meta-input"
+                class:warn={!displayedSource}
+                placeholder="https://…"
+                value={row}
+                oninput={(e) => editSource(at, e.target.value)}
+              />
+              {#if missingSource(row)}
+                <!-- The case holds nothing from this address. Offering to fetch it here
+                     is the difference between a proof that names its material and one
+                     that holds it. -->
+                <button
+                  class="meta-fetch"
+                  title="The case has nothing from this address. Download it"
+                  disabled={!!sourceJob}
+                  onclick={() => fetchSource(row)}
+                >
+                  <Icon name={sourceJob?.url === row.trim() ? 'clock' : 'download'} size={12} />
+                </button>
+              {/if}
+              {#if sourceRows.length > 1}
+                <button class="meta-drop" title="Remove this source" onclick={() => dropSource(at)}>
+                  <Icon name="x" size={12} />
+                </button>
+              {/if}
+            </div>
+          {/each}
         </div>
 
         <ProofLayersPanel
           {proof}
           {collapsed}
           {gonePanels}
-          bind:selectedPanelId
-          bind:selectedPasteId
-          bind:selectedId
+          {selectedPanelId}
+          {selectedPasteId}
+          {selectedIds}
+          {selectionLive}
+          selectShape={pickShapeRow}
+          selectPanelRow={pickPanelRow}
+          selectPasteRow={pickPasteRow}
           {activeColor}
           caseId={caseState.current?.id}
           scaleMin={PANEL_SCALE_MIN}
@@ -2958,15 +3828,35 @@
                   bind:value={proof.footerSize} oninput={() => (dirty = true)} />
                 <span class="size-val">{proof.footerSize}</span>
               </div>
-              <label class="adv-label" for="footer-text">Footer text</label>
-              <textarea
-                id="footer-text"
-                class="input footer-input"
-                rows="2"
-                placeholder={attributionLine(proof.panels)}
-                bind:value={proof.footer}
-                oninput={() => (dirty = true)}
-              ></textarea>
+              <!-- The footer lines that change the picture's height, so they
+                   wait to be asked for. -->
+              <label class="sig-check">
+                <input
+                  type="checkbox"
+                  checked={proof.footerCoords === true}
+                  onchange={(e) => { proof.footerCoords = e.currentTarget.checked; dirty = true; }}
+                />
+                <span>Show coordinates</span>
+              </label>
+              <label class="sig-check">
+                <input
+                  type="checkbox"
+                  checked={proof.footerText !== false}
+                  onchange={(e) => { proof.footerText = e.currentTarget.checked; dirty = true; }}
+                />
+                <span>Show text</span>
+              </label>
+              {#if proof.footerText !== false}
+                <label class="adv-label" for="footer-text">Footer text</label>
+                <textarea
+                  id="footer-text"
+                  class="input footer-input"
+                  rows="2"
+                  placeholder={attributionLine(proof.panels)}
+                  bind:value={proof.footer}
+                  oninput={() => (dirty = true)}
+                ></textarea>
+              {/if}
               <div class="size-row">
                 <span>Footer alignment</span>
                 <select class="input" bind:value={proof.footerAlign}
@@ -3155,12 +4045,12 @@
      read, so the question names the coordinates rather than the file. -->
 {#if placeOffer}
   <ConfirmDialog
-    title="Save this point as a place?"
-    message={`${formatCoords({ lat: placeOffer.lat, lon: placeOffer.lon }, prefs.coordFormat)} is not saved in this case yet.`}
-    detail={placeOffer.pov
-      ? 'It joins the map, and the footage this proof composes will say it was recorded there.'
-      : 'It joins the map, and this proof and the files it composes will say they show it.'}
-    confirmLabel="Save the point"
+    title={placeOffer.points.length === 1 ? 'Save this point as a place?' : 'Save these points as places?'}
+    message={offeredPoints(placeOffer.points)}
+    detail={placeOffer.points.some((one) => one.pov)
+      ? 'They join the map, and the footage this proof composes will say it was recorded at the marked one.'
+      : 'They join the map, and this proof and the files it composes will say they show them.'}
+    confirmLabel={placeOffer.points.length === 1 ? 'Save the point' : 'Save the points'}
     tone="default"
     icon="pin"
     busy={placeSaving}
@@ -3260,6 +4150,39 @@
         {/if}
       </div>
     {/if}
+  </Modal>
+{/if}
+
+<!-- A stated address holding several files. Ticked by default: it was named as the
+     proof's material, so what hangs off it is material. -->
+{#if sourcePick}
+  <Modal title="What to bring in" onclose={() => (sourcePick = null)} width="520px">
+    <p class="picker-hint">
+      This address has {sourcePick.items.length} attachments. Ticked ones join the case
+      and the proof rests on them.
+      {#if sourcePick.items.some((one) => one.own === false)}
+        The video extractor also reports what a post quotes, so only the first is ticked.
+      {/if}
+    </p>
+    <ul class="src-pick">
+      {#each sourcePick.items as item (item.index)}
+        <li>
+          <label class="src-pick-row">
+            <input type="checkbox" bind:checked={item.picked} />
+            <span class="src-pick-title">{item.title}</span>
+            <span class="badge">{item.kind}</span>
+          </label>
+        </li>
+      {/each}
+    </ul>
+    <div class="picker-actions">
+      <button class="btn btn-sm" onclick={() => (sourcePick = null)}>Cancel</button>
+      <button
+        class="btn btn-primary btn-sm"
+        disabled={!sourcePick.items.some((one) => one.picked)}
+        onclick={takeSourcePick}
+      >Bring them in</button>
+    </div>
   </Modal>
 {/if}
 
@@ -3437,16 +4360,44 @@
     border-radius: var(--r-sm);
   }
   .meta-reset:hover { color: var(--text-1); background: var(--bg-2); }
-  .meta-check {
+  .meta-add {
     display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    margin-top: 5px;
-    font-size: var(--fs-xs);
     color: var(--text-3);
+    padding: 1px;
+    border-radius: var(--r-sm);
+  }
+  .meta-add.alone { margin-left: auto; } /* no reset button to sit beside */
+  .meta-add:hover { color: var(--text-1); background: var(--bg-2); }
+  .meta-row { display: flex; align-items: center; gap: 4px; }
+  .meta-row + .meta-row { margin-top: 4px; }
+  .meta-row .meta-input { flex: 1; min-width: 0; }
+  .meta-drop {
+    display: inline-flex;
+    color: var(--text-3);
+    padding: 2px;
+    border-radius: var(--r-sm);
+  }
+  .meta-drop:hover { color: var(--danger, #e05c5c); background: var(--bg-2); }
+  .meta-fetch {
+    display: inline-flex;
+    color: var(--warn, #e8a33d);
+    padding: 2px;
+    border-radius: var(--r-sm);
+  }
+  .meta-fetch:hover:not(:disabled) { color: var(--text-1); background: var(--bg-2); }
+  .meta-fetch:disabled { opacity: 0.5; }
+  .src-pick { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 4px; }
+  .src-pick-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
     cursor: pointer;
   }
-  .meta-check:hover { color: var(--text-1); }
+  .src-pick-row:hover { background: var(--bg-2); }
+  .src-pick-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .tpl-settings-link {
     margin-left: auto;
     display: inline-flex;
@@ -3471,6 +4422,28 @@
   .tpl-inline-link:hover { color: var(--text-2); }
   .meta-input { width: 100%; font-size: var(--fs-xs); padding: 5px 8px; }
   .meta-input.warn { border-color: color-mix(in srgb, var(--warn, #e8a33d) 55%, transparent); }
+  /* One point per row. A proof with a single point shows a coordinate field, a
+     label and the marker — no cross, no arrow, nothing to move. */
+  .point-row { display: flex; align-items: center; gap: 4px; }
+  .point-row + .point-row { margin-top: 4px; }
+  .point-row .meta-input { flex: 1; min-width: 0; }
+  .point-label { width: 84px; flex: none; font-size: var(--fs-xs); padding: 5px 8px; }
+  .point-pov, .point-move, .point-drop {
+    display: inline-flex;
+    color: var(--text-3);
+    padding: 2px;
+    border-radius: var(--r-sm);
+  }
+  .point-pov:hover, .point-move:hover { color: var(--text-1); background: var(--bg-2); }
+  .point-pov.on { color: var(--accent, #6ea8fe); background: var(--bg-2); }
+  .point-drop:hover { color: var(--danger, #e05c5c); background: var(--bg-2); }
+  .point-add {
+    margin-top: 5px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+  .point-add:hover { color: var(--text-1); }
+  .point-hint { margin-top: 5px; font-size: var(--fs-xs); color: var(--text-3); }
   .adv-toggle {
     display: flex;
     align-items: center;

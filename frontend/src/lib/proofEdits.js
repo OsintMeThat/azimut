@@ -36,6 +36,26 @@ export function nudgeShape(shape, dx, dy) {
 }
 
 /**
+ * A polyline with a 2×3 affine matrix folded into every vertex.
+ *
+ * `[a, b, c, d, e, f]` is the shape Konva hands back for a node's own
+ * transform: x' = ax + cy + e, y' = bx + dy + f. A freehand stroke is only its
+ * samples — there is no width, no radius and no origin to write a resize into —
+ * so a corner drag has nowhere to live but the points themselves. Folding it in
+ * is what lets the next gesture start from what is drawn instead of from a node
+ * still carrying the last one.
+ */
+export function pointsWithTransform(points, [a, b, c, d, e, f]) {
+  const out = [];
+  for (let i = 0; i < points.length; i += 2) {
+    const x = points[i];
+    const y = points[i + 1];
+    out.push(a * x + c * y + e, b * x + d * y + f);
+  }
+  return out;
+}
+
+/**
  * The legend after an element is deleted.
  *
  * A note is written against a colour, not against the element that first used
@@ -105,4 +125,49 @@ export function viewCentrePoint(view, stage) {
     x: (view.width / 2 - stage.x) / stage.scaleX,
     y: (view.height / 2 - stage.y) / stage.scaleY,
   };
+}
+
+/**
+ * The padding between a boxed label's frame and its glyph, in the label's own
+ * pixels.
+ *
+ * Read twice: once to draw the box, once to place the inline editor over the
+ * glyph inside it. A number that lived in only one of those two put the editor
+ * a few pixels off whatever it was editing.
+ */
+export function textBoxPad(fontSize) {
+  return Math.round((fontSize ?? 28) * 0.28);
+}
+
+/**
+ * Kinds a fill applies to: the closed ones, plus symbols.
+ *
+ * On a symbol the fill is not inside the glyph but behind it — a disc in the
+ * same colour, which is what makes a thin stroked mark survive being laid over
+ * aerial imagery. It rides on this control rather than a second one because it
+ * answers the same question: how much of its own colour does this element put
+ * between the reader and the picture.
+ */
+export function canFill(kind) {
+  return kind === 'rect' || kind === 'ellipse' || kind === 'icon';
+}
+
+/**
+ * The paint a filled shape uses, or null when it has no fill.
+ *
+ * A fill is the element's own colour at a chosen opacity, never a second colour:
+ * the legend is keyed on colour, so a box outlined in one and filled in another
+ * would claim two features where the analyst meant one. Konva has no fill
+ * opacity of its own — node opacity would fade the stroke with it — so the alpha
+ * rides in the colour. Anything that is not a hex colour gets no fill rather
+ * than an opaque one, since a fill that was not asked for hides the evidence.
+ */
+export function fillPaint(color, opacity) {
+  const alpha = Number(opacity);
+  if (!Number.isFinite(alpha) || alpha <= 0) return null;
+  const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(String(color ?? '').trim().toLowerCase());
+  if (!match) return null;
+  const digits = match[1].length === 3 ? match[1].replace(/./g, (c) => c + c) : match[1];
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(digits.slice(i, i + 2), 16));
+  return `rgba(${r}, ${g}, ${b}, ${Math.min(1, alpha)})`;
 }

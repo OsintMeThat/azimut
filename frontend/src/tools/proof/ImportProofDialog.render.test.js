@@ -86,7 +86,9 @@ function press(target, label) {
 }
 
 function field(target, label) {
-  const wrapper = [...target.querySelectorAll('label')].find((node) =>
+  // Source is a set of boxes rather than one, so its wrapper is a div; the rest are
+  // still labels around a single input.
+  const wrapper = [...target.querySelectorAll('label, .import-field')].find((node) =>
     node.querySelector('span')?.textContent.trim().startsWith(label),
   );
   return wrapper?.querySelector('input');
@@ -182,6 +184,67 @@ describe('what the post prefilled', () => {
     const target = await fetched();
     type(field(target, 'Coordinates'), '1.0, 2.0');
     expect(target.textContent).not.toContain('Read from the post');
+  });
+});
+
+describe('a proof read from a thread', () => {
+  async function fetched(urls = ['https://instagram.com/reels/D1']) {
+    fetchAnswers({ slot: 'panel', staged: STAGED, post: { ...POST_TEXT, urls } });
+    const target = open();
+    type(target.querySelector('input.input'), 'https://x.com/a/1');
+    press(target, 'Fetch');
+    await settle();
+    return target;
+  }
+
+  function sourceBoxes(target) {
+    return [...target.querySelectorAll('.import-source-row input')].map((one) => one.value);
+  }
+
+  it('offers a box for every address the post pointed at, not just the first', async () => {
+    // A thread naming the photos and the clip names its material. Picking the first
+    // would be the dialog choosing for the analyst.
+    const target = await fetched([
+      'https://x.com/a/2', 'https://x.com/a/3', 'https://x.com/a/4',
+    ]);
+    expect(sourceBoxes(target)).toEqual([
+      'https://x.com/a/2', 'https://x.com/a/3', 'https://x.com/a/4',
+    ]);
+  });
+
+  it('adds a box, and fetches each address on its own', async () => {
+    const target = await fetched();
+    press(target, 'Add a source');
+    const boxes = [...target.querySelectorAll('.import-source-row input')];
+    expect(boxes).toHaveLength(2);
+
+    type(boxes[1], 'https://x.com/a/2');
+    get.mockResolvedValue({
+      status: 'done',
+      progress: {},
+      result: { slot: 'source', staged: STAGED, held: [STAGED] },
+    });
+    press(target, 'Preview');
+    await settle();
+
+    const asked = post.mock.calls
+      .filter(([path, body]) => path.endsWith('/fetch') && body.slot === 'source')
+      .map(([, body]) => body.url);
+    expect(asked).toEqual(['https://instagram.com/reels/D1', 'https://x.com/a/2']);
+    // And the form states both, in the order the boxes hold them.
+    const asked_preview = post.mock.calls.find(([path]) => path.endsWith('/preview'))[1];
+    expect(asked_preview.source_urls).toEqual([
+      'https://instagram.com/reels/D1', 'https://x.com/a/2',
+    ]);
+  });
+
+  it('drops a box without touching what the others hold', async () => {
+    const target = await fetched(['https://x.com/a/2', 'https://x.com/a/3']);
+    const drops = [...target.querySelectorAll('.import-source-drop')];
+    expect(drops).toHaveLength(2);
+    drops[0].click();
+    flushSync();
+    expect(sourceBoxes(target)).toEqual(['https://x.com/a/3']);
   });
 });
 
@@ -394,6 +457,77 @@ describe('the two files the import is holding', () => {
   });
 });
 
+describe('what a slot can hold', () => {
+  it('refuses a clip for the picture slot where it is chosen, not two screens later', async () => {
+    // A proof is composed of pictures: the composer lays panels out on a canvas and a
+    // video has nothing to lay out. Ticking one used to download it, fill the picture
+    // slot with it, and say so only at the preview.
+    fetchAnswers({
+      multi: true,
+      items: [
+        { index: 1, title: 'the published picture', thumbnail: null, kind: 'image', own: true },
+        { index: 2, title: 'the clip', thumbnail: null, kind: 'video', own: true },
+      ],
+    });
+    const target = open();
+    type(target.querySelector('input.input'), 'https://x.com/a/1');
+    press(target, 'Fetch');
+    await settle();
+
+    const rows = [...target.querySelectorAll('.import-pick')];
+    expect(rows[0].disabled).toBe(false);
+    expect(rows[0].getAttribute('aria-pressed')).toBe('true');
+    // Shown, so "this post also carries a clip" is legible, and refused.
+    expect(rows[1].disabled).toBe(true);
+    expect(rows[1].getAttribute('aria-pressed')).toBe('false');
+
+    rows[1].click();
+    flushSync();
+    expect(
+      [...target.querySelectorAll('.import-pick')][1].getAttribute('aria-pressed'),
+    ).toBe('false');
+  });
+});
+
+describe('a question nobody has answered yet', () => {
+  it('reports nothing while a picker is open, and nothing once it is cancelled', async () => {
+    // Preview downloads the material first, so an address holding several files raises
+    // the picker mid-press. Reading the case behind that question reported on a state
+    // nobody had agreed to: the picker cancelled, the preview still said "ready", and
+    // Create filed a proof whose source had never been downloaded.
+    fetchAnswers({ slot: 'panel', staged: STAGED, post: POST_TEXT });
+    const target = open();
+    type(target.querySelector('input.input'), 'https://x.com/a/1');
+    press(target, 'Fetch');
+    await settle();
+
+    get.mockResolvedValue({
+      status: 'done',
+      progress: {},
+      result: {
+        multi: true,
+        items: [
+          { index: 1, title: 'the clip', thumbnail: null, kind: 'video', own: true },
+          { index: 2, title: 'the quoted clip', thumbnail: null, kind: 'video', own: false },
+        ],
+      },
+    });
+    press(target, 'Preview');
+    await settle();
+
+    expect(post.mock.calls.some(([path]) => path.endsWith('/preview'))).toBe(false);
+    expect(target.textContent).toContain('Choose the footage');
+    expect(buttons(target)).not.toContain('Create');
+
+    // the picker's own Cancel, not the dialog's
+    [...target.querySelectorAll('button')].filter((one) => one.textContent.trim() === 'Cancel')
+      .at(-1).click();
+    flushSync();
+    expect(target.textContent).not.toContain('Choose the footage');
+    expect(buttons(target)).not.toContain('Create');
+  });
+});
+
 describe('a post with several attachments', () => {
   async function picking() {
     post.mockImplementation((path) => {
@@ -478,9 +612,21 @@ describe('a post with several attachments', () => {
   });
 
   it('downloads only what was ticked', async () => {
-    const target = await picking();
-    // untick the picture that arrived ticked, tick the clip instead
-    await take(target, 0, 1);
+    // Two pictures, both of use to the slot: unticking the first and keeping the second
+    // is a choice the analyst is allowed to make. (A clip is not — see the slot's own
+    // kinds — so it cannot stand in for the second picture here.)
+    fetchAnswers({
+      multi: true,
+      items: [
+        { index: 1, title: 'the overhead', thumbnail: null, kind: 'image', own: true },
+        { index: 2, title: 'the ground shot', thumbnail: null, kind: 'image', own: true },
+      ],
+    });
+    const target = open();
+    type(target.querySelector('input.input'), 'https://x.com/a/1');
+    press(target, 'Fetch');
+    await settle();
+    await take(target, 0); // untick the first; the second stays
 
     const fetches = post.mock.calls.filter(([path]) => path.endsWith('/fetch'));
     expect(fetches.at(-1)[1].index).toBe(2);

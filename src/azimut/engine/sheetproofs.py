@@ -46,6 +46,7 @@ from . import links as link_engine
 from . import satellite as satellite_engine
 from . import sheetroles
 from .sheetpromote import ERROR, JOIN, MAKE, SKIP, UPDATE, counts_of, urls_in
+from .proofimport import MAX_SOURCES
 from .sheets import SheetError, key_index
 
 if TYPE_CHECKING:
@@ -208,7 +209,12 @@ def _decide(
 ) -> dict[str, Any]:
     title = _cell(row, reading.columns, reading.title).strip()
     coords = _cell(row, reading.columns, reading.point).strip()
-    source_url = _first_url(_cell(row, reading.columns, reading.source))
+    # Every address the cell holds, because a geolocation states one point and rests on
+    # whatever was shot at it: the photos, the clip, the second angle. There is no `+` in
+    # a spreadsheet, so a cell listing them is how a hundred rows say it. The published
+    # picture stays one: a row builds one proof, and two pictures would be two.
+    source_urls = urls_in(_cell(row, reading.columns, reading.source))[:MAX_SOURCES]
+    source_url = source_urls[0] if source_urls else ""
     proof_url = _first_url(_cell(row, reading.columns, reading.proof))
     state = _cell(row, reading.columns, reading.status).strip().casefold()
     decision: dict[str, Any] = {
@@ -217,6 +223,9 @@ def _decide(
         "title": title,
         "coords": coords,
         "point": None,
+        "source_urls": source_urls,
+        #: The first of them, which is what the questions asked of one file ask about:
+        #: whether the row has any material at all, and what to name in a refusal.
         "source_url": source_url,
         "proof_url": proof_url,
         "note": _cell(row, reading.columns, reading.note).strip(),
@@ -295,14 +304,21 @@ def _decide(
             decision["action"] = MAKE
         return decision
 
-    if source_url:
-        decision["writes"] = "the footage, posed on its point"
-        held = held_media(case, source_url)
-        if held is not None:
+    if source_urls:
+        decision["writes"] = (
+            "the footage, posed on its point"
+            if len(source_urls) == 1
+            else f"{len(source_urls)} files, posed on one point"
+        )
+        # All of them or none: a row half-downloaded is a row to run, and calling it
+        # "already there" on the strength of its first address would leave the rest out.
+        downloaded = [held_media(case, one) for one in source_urls]
+        leading = downloaded[0]
+        if leading is not None and all(one is not None for one in downloaded):
             decision.update(
                 action=JOIN,
-                entity=held["id"],
-                entity_label=str(held.get("label") or ""),
+                entity=leading["id"],
+                entity_label=str(leading.get("label") or ""),
                 reason="already downloaded: only its point is restated",
             )
         else:

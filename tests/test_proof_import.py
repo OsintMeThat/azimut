@@ -19,6 +19,7 @@ from PIL import Image
 from azimut import layout
 from azimut.engine import geo
 from azimut.engine import links as link_engine
+from azimut.engine import media as media_engine
 from azimut.engine import proofimport as import_engine
 
 POST = """Hoyo de la Puerta, Miranda, Venezuela - 94V4+8XH
@@ -68,7 +69,7 @@ def attach(client, case_id, token, slot, content, filename, source_url=""):
 FORM = {
     "title": "Hoyo de la Puerta",
     "coords": "10.393313, -66.892504",
-    "source_url": "https://instagram.com/reels/DTG728Xk",
+    "source_urls": ["https://instagram.com/reels/DTG728Xk"],
     "note": "Two helicopters heading East",
     "pov": True,
 }
@@ -129,6 +130,30 @@ def test_the_scan_offers_the_post_s_links_but_not_the_post():
     urls = import_engine.scan_urls(POST, exclude="https://x.com/a/1")
     assert urls == ["https://instagram.com/reels/DTG728Xk"]
     assert import_engine.scan_urls("see https://x.com/a/1", exclude="https://x.com/a/1") == []
+
+
+def test_the_links_a_platform_records_are_believed_over_the_ones_it_prints():
+    """Where a post keeps its links decides whether they can be read at all.
+
+    An AT Protocol post prints an address truncated to an ellipsis and keeps the whole
+    of it in a facet beside the words. Scanning the words there hands back half an
+    address with nothing to say it is half — so the recorded ones come first, in their
+    own order, and the scan follows for the platforms that write theirs out in full.
+    """
+    post = import_engine.read_post(
+        {
+            "title": "Quito",
+            "description": "Source: bsky.app/profile/x/post/…\nand https://t.me/chan/9",
+            "links": ["https://x.com/atummundi/status/1"],
+        },
+        "https://bsky.app/profile/scaratlas.bsky.social/post/3mthgt4lups2f",
+    )
+    assert post["urls"][0] == "https://x.com/atummundi/status/1"
+    assert "https://t.me/chan/9" in post["urls"]  # the scan still runs
+
+    # The post's own address is not one of its sources, whichever half named it.
+    own = "https://bsky.app/profile/a/post/1"
+    assert import_engine.read_post({"links": [own], "description": ""}, own)["urls"] == []
 
 
 def test_a_post_that_states_nothing_prefills_nothing():
@@ -282,8 +307,11 @@ def test_the_preview_lists_what_the_import_would_create(client):
     edges = {(e["from"], e["type"], e["to"]) for e in report["links"]}
     assert ("source", link_engine.LOCATED_AT, "place") in edges
     assert ("proof", link_engine.DEPICTS, "place") in edges
-    assert ("panel", link_engine.DERIVED_FROM, "source") in edges
+    # The proof is what the constellation hangs off: it composes the picture and rests
+    # on the material, and both are its own edges.
+    assert ("proof", link_engine.DERIVED_FROM, "source") in edges
     assert ("proof", link_engine.DERIVED_FROM, "panel") in edges
+    assert ("panel", link_engine.DERIVED_FROM, "source") not in edges
 
 
 def test_without_the_camera_on_site_the_footage_shows_the_place(client):
@@ -304,7 +332,7 @@ def test_neither_coordinates_nor_a_source_may_be_left_out(client):
     attach(client, case_id, token, "panel", picture(), "panel.png")
 
     assert preview(client, case_id, token, coords="")["ready"] is False
-    assert preview(client, case_id, token, source_url="")["ready"] is False
+    assert preview(client, case_id, token, source_urls=[])["ready"] is False
     assert "Coordinates are required." in preview(client, case_id, token, coords="")["blocking"]
 
 
@@ -336,9 +364,35 @@ def test_a_missing_source_is_said_once_not_twice(client):
     token = start(client, case_id)
     attach(client, case_id, token, "panel", picture(), "panel.png")
 
-    report = preview(client, case_id, token, source_url="")
+    report = preview(client, case_id, token, source_urls=[])
     assert "A source is required." in report["blocking"]
     assert not any(w["code"] == "no-source-media" for w in report["warnings"])
+
+
+def test_the_source_field_holds_one_address_and_says_so(client):
+    """The field is the address the footage is fetched from as much as the line the
+    proof carries, so two of them is not extra information.
+
+    Pasted as a pair it was posted to the downloader as one address, refused there,
+    and reported as a source that "was not downloaded" — the import went through and
+    filed a proof with no material and a line nothing could be traced from. The
+    preview is where that is said, as it is for the coordinates and the name.
+    """
+    case_id = make_case(client)
+    token = start(client, case_id)
+    attach(client, case_id, token, "panel", picture(), "panel.png")
+
+    report = preview(client, case_id, token, source_urls=["https://x.com/a/1 https://t.me/b/2"])
+    assert report["ready"] is False
+    assert "A source is one address, and this is several." in report["blocking"]
+
+    report = preview(client, case_id, token, source_urls=["handed to me on a stick"])
+    assert report["ready"] is False
+    assert "A source is an address, and this is not one." in report["blocking"]
+
+    # Two of them, each in its own box, is the ordinary thing a thread asks for.
+    two = preview(client, case_id, token, source_urls=["https://x.com/a/1", "https://t.me/b/2"])
+    assert two["ready"] is True
 
 
 def test_a_point_the_case_already_holds_is_reused_not_pinned_twice(client):
@@ -468,13 +522,41 @@ def test_a_name_another_proof_holds_is_refused(client):
 
 
 def test_a_video_cannot_be_the_proof_s_picture(client):
+    """Refused at the door it comes through, and refused again at the preview.
+
+    A proof is composed of pictures: the composer lays panels out on a canvas and a clip
+    has nothing to lay out. Saying so only at the preview meant the file was downloaded,
+    staged and shown as "Proof: clip.mp4" before anything said no — two screens after the
+    choice that made it, with nothing on the screen that made it hinting there was a rule.
+    """
     case_id = make_case(client)
     token = start(client, case_id)
-    attach(client, case_id, token, "panel", b"video-bytes", "clip.mp4")
 
+    refused = client.post(
+        f"/api/cases/{case_id}/proof-imports/{token}/attach",
+        files={"file": ("clip.mp4", b"video-bytes", "application/octet-stream")},
+        data={"slot": "panel"},
+    )
+    assert refused.status_code == 422
+    assert "pictures" in refused.json()["detail"]
+    # and nothing is left holding it
+    assert import_engine.staged_pairs(case_of(case_id), token, import_engine.SLOT_PANEL) == []
+
+    # The preview keeps the line anyway: it is the invariant, whatever put a file there.
+    staged = media_engine.stage_descriptor(
+        _write(case_of(case_id), token, "clip.mp4", b"video-bytes"), {"type": "manual"}
+    )
+    import_engine.fill_slot(case_of(case_id), token, "panel", staged)
     report = preview(client, case_id, token)
     assert report["ready"] is False
     assert any("pictures" in line for line in report["blocking"])
+
+
+def _write(case, token, name, data):
+    """Put bytes in the staging directory without going through a route."""
+    path = import_engine.staging_dir(case, token) / name
+    path.write_bytes(data)
+    return path
 
 
 # -- the commit --------------------------------------------------------------
@@ -503,8 +585,10 @@ def test_the_import_writes_the_graph_the_composer_would_have(client):
 
     assert links_between(case, source_id, place_id) == {link_engine.LOCATED_AT}
     assert links_between(case, proof["id"], place_id) == {link_engine.DEPICTS}
+    # The proof composes the picture and rests on the material: one node the whole
+    # geolocation hangs off, which is what a hand-made proof writes too.
     assert link_engine.DERIVED_FROM in links_between(case, proof["id"], panel_id)
-    assert link_engine.DERIVED_FROM in links_between(case, panel_id, source_id)
+    assert link_engine.DERIVED_FROM in links_between(case, proof["id"], source_id)
 
 
 def test_the_preview_promises_exactly_the_edges_the_commit_writes(client):
@@ -546,12 +630,17 @@ def test_the_proof_is_a_real_proof(client):
 
     listed = client.get(f"/api/cases/{case_id}/proofs").json()
     assert [p["name"] for p in listed] == [name]
-    assert listed[0]["coords"] == {"lat": 10.393313, "lon": -66.892504}
+    assert listed[0]["points"] == [
+        {
+            "lat": 10.393313, "lon": -66.892504,
+            "coords": "10.393313, -66.892504", "label": "", "pov": True,
+        }
+    ]
 
     spec = client.get(f"/api/cases/{case_id}/proofs/{name}").json()
     assert spec["azimut_proof"] == 1
     assert spec["pov"] is True
-    assert spec["source"] == FORM["source_url"]
+    assert spec["sources"] == FORM["source_urls"]
     assert len(spec["panels"]) == 1
     assert spec["panels"][0]["natural"] == [320, 200]
 
@@ -816,6 +905,60 @@ def test_an_origin_that_is_not_a_link_is_refused_on_the_hand_attached_file(clien
         source_url="https://t.me/chan/12",
     )
     assert stated["staged"]["source"]["url"] == "https://t.me/chan/12"
+
+
+def test_a_thread_states_its_point_once_and_rests_on_everything_it_hung_off_it(client):
+    """One published proof, several pieces of material, spread over several posts.
+
+    A geolocation thread states the point in its first post and hangs the photos and the
+    clips it rests on off the ones after it. The composition is the small half — often a
+    single picture the author laid out — and the material is the plural one, which is the
+    opposite of what a slot holding exactly one file could take. Keeping the first of four
+    filed one file and left the other three outside the case entirely.
+
+    Every picture records every piece of material, because which photo of four a composite
+    was laid out from is not something the post says, and a guessed pairing states one
+    edge right and three wrong. The point reaches all of them through that chain.
+    """
+    case_id = make_case(client)
+    token = start(client, case_id)
+    attach(client, case_id, token, "panel", picture(), "composite.png")
+    for at, url in enumerate(("https://x.com/a/2", "https://x.com/a/3", "https://x.com/a/4")):
+        attach(
+            client, case_id, token, "source", f"bytes-{at}".encode(), f"clip{at}.mp4",
+            source_url=url,
+        )
+    urls = ["https://x.com/a/2", "https://x.com/a/3", "https://x.com/a/4"]
+
+    report = preview(client, case_id, token, source_urls=urls)
+    assert report["ready"] is True
+    # One name per file, so a report about four of them can be read.
+    assert [e["slot"] for e in report["entities"]] == [
+        "place", "source", "source 2", "source 3", "panel", "proof",
+    ]
+    edges = {(e["from"], e["type"], e["to"]) for e in report["links"]}
+    for slot in ("source", "source 2", "source 3"):
+        assert ("proof", link_engine.DERIVED_FROM, slot) in edges
+        assert (slot, link_engine.LOCATED_AT, "place") in edges  # POV is on in FORM
+
+    created = commit(client, case_id, token, source_urls=urls)
+    case = case_of(case_id)
+    proof = case.find_entity(attr="spec", value=layout.proof_spec_rel(created["proof"]["name"]))
+    panel = case.get_entity(created["panel"]["id"])
+    sources = [case.get_entity(one["id"]) for one in created["sources"]]
+
+    assert len(sources) == 3
+    assert len({one["id"] for one in sources}) == 3  # three files, not one filed thrice
+    for one in sources:
+        assert link_engine.DERIVED_FROM in links_between(case, proof["id"], one["id"])
+        # and not off the published picture, which is one file among the several rather
+        # than the thing they all hang off
+        assert links_between(case, panel["id"], one["id"]) == set()
+    assert link_engine.DERIVED_FROM in links_between(case, proof["id"], panel["id"])
+
+    # And the proof states all three addresses, so its line traces back to each post.
+    spec = client.get(f"/api/cases/{case_id}/proofs/{created['proof']['name']}").json()
+    assert spec["sources"] == urls
 
 
 def test_a_set_has_no_render_yet_and_still_draws_in_the_graph(client):

@@ -108,6 +108,8 @@ def test_templates_live_beside_settings_not_in_a_case(client, monkeypatch):
         {"signature": {"scale": 2}},
         {"signatureText": {"size": 0}},
         {"footerEnabled": "false"},
+        {"footerText": "false"},
+        {"footerCoords": 1},
     ],
 )
 def test_invalid_proof_render_values_are_rejected(client, data):
@@ -178,3 +180,24 @@ def test_invalid_hand_edited_template_is_not_returned(client):
         }
     )
     assert client.get("/api/templates").json()["proof"] == []
+
+
+def test_a_style_stored_before_the_footer_switches_reads_as_it_looked(client):
+    """The credit line goes on printing, the coordinates go on not printing."""
+    saved = client.post(
+        "/api/templates/proof",
+        json={"name": "Old house style", "data": {"bg": "#101418"}},
+    ).json()
+
+    assert saved["data"]["footerText"] is True
+    assert saved["data"]["footerCoords"] is False
+
+
+def test_a_style_carries_what_the_plate_prints(client):
+    saved = client.post(
+        "/api/templates/proof",
+        json={"name": "Points on the plate", "data": {"footerText": False, "footerCoords": True}},
+    ).json()
+
+    assert saved["data"]["footerText"] is False
+    assert saved["data"]["footerCoords"] is True

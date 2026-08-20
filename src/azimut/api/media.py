@@ -6,7 +6,6 @@ from __future__ import annotations
 import io
 import warnings
 from typing import Any
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 from PIL import Image
@@ -77,10 +76,8 @@ def stated_source(source_url: str) -> str:
     disk) is a note, and Notes is where it goes.
     """
     source_url = source_url.strip()
-    if source_url:
-        split = urlsplit(source_url)
-        if split.scheme not in ("http", "https") or not split.hostname:
-            raise HTTPException(status_code=422, detail="the source must be an http(s) URL")
+    if source_url and not media_engine.is_address(source_url):
+        raise HTTPException(status_code=422, detail="the source must be an http(s) URL")
     return source_url
 
 

@@ -73,3 +73,17 @@ export function createCanvasRenderGate(schedule, cancel, { rebuild, refreshUi })
     },
   };
 }
+
+/**
+ * Drop a draft that is still in hand.
+ *
+ * A tool can change under an unreleased pointer — Escape, a letter shortcut —
+ * and the release then belongs to whichever tool is current, which may well
+ * return before reaching the code that settles the draft. What is left is a
+ * Konva node still tracking the pointer that nothing can commit or destroy.
+ * Callers assign the result back: it is always null.
+ */
+export function discardDraft(draft) {
+  draft?.node?.destroy?.();
+  return null;
+}

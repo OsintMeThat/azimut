@@ -75,12 +75,15 @@ STAGING_PARENT = ".dl"
 MANIFEST = "import.json"
 
 #: The two things an import holds. `panel` is the published picture, `source` the
-#: footage it was read from; either may be filled by a download or by hand.
+#: material it was read from; either may be filled by a download or by hand.
 #:
-#: The panel slot holds **several** pictures, because a post often publishes a geolocation
-#: as a set — the overhead, the ground shot, the match — and taking one and dropping the
-#: rest keeps a third of what was published. They become the panels of one composition,
-#: which is what a proof already is.
+#: **Both slots hold several files, and for opposite reasons.** A post often publishes a
+#: geolocation as a set — the overhead, the ground shot, the match — and taking one and
+#: dropping the rest keeps a third of what was published; those become the panels of one
+#: composition, which is what a proof already is. The material runs the other way: a
+#: thread states one point and hangs the photos and the clips it rests on off several
+#: posts, so a slot that held one file filed one file and left the rest of the case's own
+#: evidence outside it.
 SLOT_PANEL = "panel"
 SLOT_SOURCE = "source"
 SLOTS = (SLOT_PANEL, SLOT_SOURCE)
@@ -88,6 +91,13 @@ SLOTS = (SLOT_PANEL, SLOT_SOURCE)
 #: How many pictures one import composes. A published set is a handful; past this it is an
 #: album, and an album is not a proof.
 MAX_PANELS = 8
+
+#: How much material one proof may rest on. A thread hangs a handful of photos and clips
+#: off its point; past this it is a channel dump, and that is the Media Library's job.
+MAX_SOURCES = 8
+
+#: What each slot may hold at once.
+SLOT_CAPS = {SLOT_PANEL: MAX_PANELS, SLOT_SOURCE: MAX_SOURCES}
 
 #: A staging directory the analyst walked away from. Swept when the next import
 #: opens, so an abandoned tab costs one directory until then and nothing after.
@@ -252,22 +262,44 @@ def fill_slot(case: Case, token: str, slot: str, staged: dict[str, Any]) -> dict
 
 
 def fill_files(
-    case: Case, token: str, slot: str, staged: list[dict[str, Any]]
+    case: Case, token: str, slot: str, staged: list[dict[str, Any]], *, for_url: str = ""
 ) -> dict[str, Any]:
-    """Hold this whole set in a slot, dropping whatever it held that is not in it."""
+    """Hold this set in a slot, dropping whatever it held that is not in it.
+
+    ``for_url`` narrows the replacement to one address: what came from *that* post goes,
+    what came from the others stays. Without it a second source address would have taken
+    the first one's files with it, and retrying one failed address would have taken the
+    lot. The address is written onto each entry rather than read back off the
+    downloader's metadata, because a hand-attached file has no metadata to read.
+    """
     if slot not in SLOTS:
         raise CaseError(f"unknown slot '{slot}'")
-    if slot == SLOT_PANEL and len(staged) > MAX_PANELS:
-        raise CaseError(f"a proof composes at most {MAX_PANELS} pictures")
     draft = read_draft(case, token)
-    keeping = {str(entry.get("filename") or "") for entry in staged}
+    if for_url:
+        staged = [{**entry, "for_url": for_url} for entry in staged]
+        kept = [one for one in _held(draft, slot) if one.get("for_url") != for_url]
+    else:
+        kept = []
+    if len(kept) + len(staged) > SLOT_CAPS[slot]:
+        raise CaseError(
+            f"a proof composes at most {MAX_PANELS} pictures"
+            if slot == SLOT_PANEL
+            else f"a proof rests on at most {MAX_SOURCES} files"
+        )
+    holding = kept + staged
+    keeping = {str(entry.get("filename") or "") for entry in holding}
     for previous in _held(draft, slot):
         name = str(previous.get("filename") or "")
         if name and name not in keeping:
             (staging_dir(case, token) / str(Path(name).name)).unlink(missing_ok=True)
-    draft.setdefault("slots", {})[slot] = staged
+    draft.setdefault("slots", {})[slot] = holding
     _write_draft(case, token, draft)
     return draft
+
+
+def drop_for_url(case: Case, token: str, slot: str, url: str) -> dict[str, Any]:
+    """Let go of what one address put in a slot, files and all."""
+    return fill_files(case, token, slot, [], for_url=url)
 
 
 def record_post(case: Case, token: str, post: dict[str, Any]) -> dict[str, Any]:
@@ -306,10 +338,22 @@ def read_post(source: dict[str, Any], post_url: str) -> dict[str, Any]:
     The first half is universal — every extractor answers with a title, a body,
     an author and a date, or leaves them out. The second half is the scan, and
     it prefills; it never decides.
+
+    **The addresses it points at come from two places.** A platform that records them
+    beside the words is believed first: an AT Protocol post prints a link truncated to
+    an ellipsis and keeps the whole of it in a facet, so scanning the words there gives
+    half an address and nothing to say it is half. The scan follows, for everything that
+    writes its links out in full.
     """
     text = " \n".join(
         part for part in (source.get("title"), source.get("description")) if isinstance(part, str)
     ).strip()[:MAX_POST_TEXT]
+    recorded = [one for one in (source.get("links") or []) if isinstance(one, str) and one]
+    excluded = post_url.rstrip("/").casefold()
+    urls = [one for one in recorded if one.rstrip("/").casefold() != excluded]
+    for one in scan_urls(text, exclude=post_url):
+        if one not in urls:
+            urls.append(one)
     return {
         "url": post_url,
         "title": source.get("title") or "",
@@ -317,7 +361,7 @@ def read_post(source: dict[str, Any], post_url: str) -> dict[str, Any]:
         "uploader": source.get("uploader") or "",
         "upload_date": source.get("upload_date") or "",
         "coords": geo_engine.scan_coords(text),
-        "urls": scan_urls(text, exclude=post_url),
+        "urls": urls[:MAX_SCANNED_URLS],
     }
 
 
@@ -354,6 +398,44 @@ def _stated_gps(path: Path, kind: str) -> dict[str, float] | None:
     return gps if isinstance(gps, dict) and "lat" in gps and "lon" in gps else None
 
 
+def _numbered(slot: str, count: int) -> list[str]:
+    """One name per file a slot holds: `panel`, `panel 2`, `panel 3`.
+
+    The report is a list of *files* and every line of it is about one of them. Calling
+    three of them `panel` made the reading ambiguous — "panel derived-from source", three
+    times, says nothing about which — and made the screen that renders it keyed on a name
+    three rows shared. Numbered from the second, so a slot holding one keeps its name.
+    """
+    return [slot] + [f"{slot} {at}" for at in range(2, count + 1)]
+
+
+def stated_sources(
+    held: list[dict[str, Any]], urls: list[str]
+) -> list[dict[str, Any]]:
+    """What a slot holds for the addresses the form states, in the order it states them.
+
+    The staging directory is a cache and the form is the claim, so an address the analyst
+    took off the list leaves its download behind rather than filing it — the screen and
+    the case cannot drift apart over a row somebody removed. Ordering by the form is also
+    what makes `source 2` in the report mean the second box on the screen.
+
+    A file held for no address at all is one somebody attached without saying where it
+    came from. It is kept, last: the form cannot disown what it cannot name.
+    """
+    by_url: dict[str, list[dict[str, Any]]] = {}
+    for entry in held:
+        by_url.setdefault(str(entry.get("for_url") or ""), []).append(entry)
+    return [one for url in urls for one in by_url.get(url, [])] + by_url.get("", [])
+
+
+def read_source_urls(form: dict[str, Any]) -> list[str]:
+    """The addresses the form states, in the order it states them, without repeats."""
+    stated = form.get("source_urls")
+    if not isinstance(stated, list):
+        stated = [stated] if stated else []
+    return list(dict.fromkeys(str(one or "").strip() for one in stated if str(one or "").strip()))
+
+
 def proof_name(title: str) -> str:
     return layout.slugify(title, "Proof")
 
@@ -371,14 +453,18 @@ def preview(case: Case, token: str, form: dict[str, Any]) -> dict[str, Any]:
     #: is about one of them. Calling three of them `panel` made the reading ambiguous —
     #: "panel derived-from source", three times, says nothing about which — and made the
     #: screen that renders it keyed on a name three rows shared.
-    panel_slots = [SLOT_PANEL] + [f"{SLOT_PANEL} {at}" for at in range(2, len(panels) + 1)]
+    panel_slots = _numbered(SLOT_PANEL, len(panels))
     panel = panels[0] if panels else {}
-    held_source = _held(draft, SLOT_SOURCE)
-    source_media = held_source[0] if held_source else {}
+    source_urls = read_source_urls(form)
+    held_source = stated_sources(_held(draft, SLOT_SOURCE), source_urls)
+    source_slots = _numbered(SLOT_SOURCE, len(held_source))
+    #: Both halves as one list of (name, file), which is the order the report reads in:
+    #: the material first, then the pictures composed out of it.
+    material = list(zip(source_slots, held_source))
+    composed = list(zip(panel_slots, panels))
 
     title = str(form.get("title") or "").strip()
     coords_text = str(form.get("coords") or "").strip()
-    source_url = str(form.get("source_url") or "").strip()
     pov = bool(form.get("pov"))
 
     blocking: list[str] = []
@@ -392,8 +478,18 @@ def preview(case: Case, token: str, form: dict[str, Any]) -> dict[str, Any]:
         blocking.append("A proof is composed of pictures, and this file is not one.")
     if not title:
         blocking.append("The proof needs a name.")
-    if not source_url:
+    if not source_urls:
         blocking.append("A source is required.")
+    elif len(source_urls) > MAX_SOURCES:
+        blocking.append(f"A proof rests on at most {MAX_SOURCES} sources.")
+    elif any(len(scan_urls(one)) > 1 for one in source_urls):
+        # A box is the address its own file is fetched from as well as a line the proof
+        # carries, so two of them pasted into one is not extra information: it is an
+        # address nothing can be downloaded from. The import used to take it, warn that
+        # the source "was not downloaded", and file a proof with no material at all.
+        blocking.append("A source is one address, and this is several.")
+    elif not all(media_engine.is_address(one) for one in source_urls):
+        blocking.append("A source is an address, and this is not one.")
 
     point = geo_engine.parse_coords(coords_text) if coords_text else None
     if not coords_text:
@@ -431,9 +527,7 @@ def preview(case: Case, token: str, form: dict[str, Any]) -> dict[str, Any]:
             )
 
     # -- the material, then the pictures that compose it
-    for slot, staged in ([(SLOT_SOURCE, source_media)] if source_media else []) + [
-        (name, held) for name, held in zip(panel_slots, panels)
-    ]:
+    for slot, staged in material + composed:
         if not staged.get("filename"):
             continue
         held = case.find_entity(attr="sha256", value=staged.get("sha256"))
@@ -447,14 +541,21 @@ def preview(case: Case, token: str, form: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
-    # Only once there is an address to have failed at. With the field still
-    # empty the blocking line above already says so, and saying it twice reads
-    # as two different problems.
-    if source_url and not source_media.get("filename"):
+    # Only for an address that has one. With the field still empty the blocking line
+    # above already says so, and saying it twice reads as two different problems.
+    fetched = {str(one.get("for_url") or "") for one in held_source}
+    missing = [one for one in source_urls if one not in fetched]
+    if missing:
         warnings.append(
             {
                 "code": "no-source-media",
-                "text": "The source was not downloaded, so the proof will carry its address and no file.",
+                "text": (
+                    "The source was not downloaded, so the proof will carry its address "
+                    "and no file."
+                    if len(missing) == 1
+                    else f"{len(missing)} sources were not downloaded, so the proof will "
+                    "carry their addresses and no files."
+                ),
             }
         )
 
@@ -472,21 +573,31 @@ def preview(case: Case, token: str, form: dict[str, Any]) -> dict[str, Any]:
     if point is not None and name and panels:
         verb = link_engine.LOCATED_AT if pov else link_engine.DEPICTS
         kinds = ("image", "video", "audio") if pov else ("image", "video")
-        for slot, staged in ([(SLOT_SOURCE, source_media)] if source_media else []) + [
-            (name_, held) for name_, held in zip(panel_slots, panels)
-        ]:
+        for slot, staged in material + composed:
             if staged.get("filename") and str(staged.get("kind") or "") in kinds:
                 links.append(_edge(slot, verb, "place"))
+        # **The proof rests on the material, and composes the pictures.** Both are its own
+        # edges, which is what makes it the node the constellation hangs off — the reading
+        # somebody looking at the graph is after, since the proof is the finding and a
+        # published picture is one file among the several it was read from. Hanging the
+        # material off the *picture* instead made a media node the hub of the geolocation
+        # and left the proof a leaf beside it.
+        #
+        # It is also the shape the composer writes by hand (`spec.material`, ONTOLOGY §3),
+        # so a proof re-saved there restates exactly these edges rather than losing them.
+        for source_slot, staged in material:
+            if staged.get("filename"):
+                links.append(_edge("proof", link_engine.DERIVED_FROM, source_slot))
         for slot in panel_slots:
-            if source_media.get("filename"):
-                links.append(_edge(slot, link_engine.DERIVED_FROM, SLOT_SOURCE))
             links.append(_edge("proof", link_engine.DERIVED_FROM, slot))
         links.append(_edge("proof", link_engine.DEPICTS, "place"))
 
     # -- what the files say about themselves
     if point is not None:
+        # The first file held, material before pictures. One reading, because the
+        # warning names a position and a distance and two of them read as two points.
         path = staged_path(case, token, SLOT_SOURCE) or staged_path(case, token, SLOT_PANEL)
-        staged = source_media if source_media.get("filename") else panel
+        staged = held_source[0] if held_source else panel
         if path is not None:
             own = _stated_gps(path, str(staged.get("kind") or ""))
             if own is not None:
@@ -589,7 +700,9 @@ def png_bytes(path: Path) -> bytes:
 
 
 def build_spec(
-    panels: list[tuple[str, tuple[int, int]]], form: dict[str, Any]
+    panels: list[tuple[str, tuple[int, int]]],
+    form: dict[str, Any],
+    material: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """The proof an import writes: the pictures it published, the point, the source.
 
@@ -605,7 +718,7 @@ def build_spec(
     one panel is that it had exactly one picture. The note lands on the first — it
     is one sentence about the proof, not a caption per picture.
     """
-    return {
+    spec = {
         "azimut_proof": 1,
         "panels": [
             {
@@ -623,7 +736,14 @@ def build_spec(
         "shapes": [],
         "notes": {},
         "legendOrder": [],
-        "coordsText": str(form.get("coords") or "").strip(),
-        "source": str(form.get("source_url") or "").strip(),
-        "pov": bool(form.get("pov")),
+        # The files the proof rests on without composing them, each with the address it
+        # came from. Written into the spec rather than onto the pictures, so the save
+        # states the edges and a re-save in the composer restates them — and so taking a
+        # source off the proof there takes its files out of the chain with it. The
+        # composer's own Source list writes the same key.
+        "material": [dict(one) for one in material or []],
+        "sources": read_source_urls(form),
     }
+    return satellite_engine.state_points(
+        spec, [{"coords": form.get("coords"), "pov": bool(form.get("pov"))}]
+    )

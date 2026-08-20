@@ -1,5 +1,8 @@
 <script>
   import Icon from '../../components/Icon.svelte';
+  import ProofGlyph from '../../components/ProofGlyph.svelte';
+  import { PROOF_ICONS } from '../../lib/proofIcons.js';
+  import { canFill, fillPaint } from '../../lib/proofEdits.js';
 
   let {
     canUndo,
@@ -10,10 +13,19 @@
     tool = $bindable(),
     palette,
     activeColor,
+    activeFill,
     selectedShape,
+    selectedCount,
+    fillableSelection,
+    // A silhouette has no outline, so the width control is hidden for it. Any
+    // caller that says nothing gets the control.
+    showStroke = true,
+    iconName = PROOF_ICONS[0].name,
+    setIconName = () => {},
     strokeW,
     setColor,
     setStroke,
+    setFill,
     fit,
     layout,
     setLayoutMode,
@@ -23,36 +35,51 @@
     applyMagic,
   } = $props();
 
-  // Colour + size only matter while drawing or when a shape is selected. When
+  // Colour + size only matter while drawing or when something is selected. When
   // the analyst is just panning with Select, they stay hidden so the column
   // packs short enough to fit small screens without spilling controls off the
-  // bottom.
-  const showContextTools = $derived(tool !== 'select' || !!selectedShape);
+  // bottom. `selectedShape` is the one picked annotation and is null for a
+  // family of them, so what is on screen answers to the count.
+  const showContextTools = $derived(tool !== 'select' || selectedCount > 0);
   const sizeValue = $derived(
     selectedShape?.kind === 'text'
       ? (selectedShape.fontSize ?? 28)
       : (selectedShape?.strokeWidth ?? strokeW),
   );
+  // Only the closed kinds hold a fill, so the control follows the box/ellipse
+  // tool — or the box/ellipse in hand.
+  const showFill = $derived(selectedCount > 0 ? fillableSelection : canFill(tool));
+  const fillPercent = $derived(Math.round((activeFill ?? 0) * 100));
 
   // Flyouts: one open at a time. Content stays in the DOM (hidden via CSS) so
   // it renders on the server and can be tested; opening just reveals it.
   let colorOpen = $state(false);
   let sizeOpen = $state(false);
+  let fillOpen = $state(false);
+  let iconOpen = $state(false);
   let overflowOpen = $state(false);
   // Wrapper refs feed outside-click detection; button refs anchor the flyout.
   let colorEl = $state();
   let sizeEl = $state();
+  let fillEl = $state();
+  let iconEl = $state();
   let overflowEl = $state();
   let colorBtn = $state();
   let sizeBtn = $state();
+  let fillBtn = $state();
+  let iconBtn = $state();
   let overflowBtn = $state();
   let colorPos = $state({});
   let sizePos = $state({});
+  let fillPos = $state({});
+  let iconPos = $state({});
   let overflowPos = $state({});
 
   function toggle(which) {
     colorOpen = which === 'color' ? !colorOpen : false;
     sizeOpen = which === 'size' ? !sizeOpen : false;
+    fillOpen = which === 'fill' ? !fillOpen : false;
+    iconOpen = which === 'icon' ? !iconOpen : false;
     overflowOpen = which === 'overflow' ? !overflowOpen : false;
   }
 
@@ -63,6 +90,7 @@
       colorOpen = false;
       sizeOpen = false;
     }
+    if (!showFill) fillOpen = false;
   });
 
   // Flyouts are position:fixed so the toolbar can scroll (overflow-y) without
@@ -84,20 +112,28 @@
     if (sizeOpen && sizeBtn) sizePos = anchor(sizeBtn);
   });
   $effect(() => {
+    if (fillOpen && fillBtn) fillPos = anchor(fillBtn);
+  });
+  $effect(() => {
+    if (iconOpen && iconBtn) iconPos = anchor(iconBtn);
+  });
+  $effect(() => {
     if (overflowOpen && overflowBtn) overflowPos = anchor(overflowBtn);
   });
 
   // Close on outside click (mousedown capture, like Satellite.svelte) or Escape.
   $effect(() => {
-    if (!colorOpen && !sizeOpen && !overflowOpen) return;
+    if (!colorOpen && !sizeOpen && !fillOpen && !iconOpen && !overflowOpen) return;
     const onDown = (e) => {
       if (colorOpen && colorEl && !colorEl.contains(e.target)) colorOpen = false;
       if (sizeOpen && sizeEl && !sizeEl.contains(e.target)) sizeOpen = false;
+      if (fillOpen && fillEl && !fillEl.contains(e.target)) fillOpen = false;
+      if (iconOpen && iconEl && !iconEl.contains(e.target)) iconOpen = false;
       if (overflowOpen && overflowEl && !overflowEl.contains(e.target)) overflowOpen = false;
     };
     const onKey = (e) => {
       if (e.key === 'Escape') {
-        colorOpen = sizeOpen = overflowOpen = false;
+        colorOpen = sizeOpen = fillOpen = iconOpen = overflowOpen = false;
       }
     };
     document.addEventListener('mousedown', onDown, true);
@@ -127,6 +163,40 @@
       <Icon name={entry.icon} size={18} />
     </button>
   {/each}
+  <!-- Symbols: a grid of stamps. The button takes the tool like every other
+       button on this rail — and like the `s` its own tooltip promises — then
+       opens the grid, so re-picking a glyph already chosen is never the price of
+       coming back to the stamp. Lit by the tool in hand, not by the open grid. -->
+  <div class="tb-group" bind:this={iconEl}>
+    <button
+      class="tb-btn"
+      class:active={tool === 'icon'}
+      title="Symbol (s)"
+      onclick={() => { tool = 'icon'; toggle('icon'); }}
+      bind:this={iconBtn}
+    >
+      <ProofGlyph name={iconName} size={18} />
+    </button>
+    <div
+      class="flyout flyout-icons"
+      class:open={iconOpen}
+      style:left={iconPos.left}
+      style:top={iconPos.top}
+      style:bottom={iconPos.bottom}
+    >
+      {#each PROOF_ICONS as entry (entry.name)}
+        <button
+          class="icon-btn"
+          class:active={iconName === entry.name}
+          title={entry.label}
+          aria-label={entry.label}
+          onclick={() => { setIconName(entry.name); iconOpen = false; }}
+        >
+          <ProofGlyph name={entry.name} size={20} />
+        </button>
+      {/each}
+    </div>
+  </div>
   <div class="tb-sep"></div>
   <button class="tb-btn" title="Fit view (f)" onclick={fit}>
     <Icon name="eye" size={18} />
@@ -181,6 +251,7 @@
     </div>
 
     <!-- Size: a horizontal slider for stroke width / font size. -->
+    {#if showStroke}
     <div class="tb-group" bind:this={sizeEl}>
       <button
         class="tb-btn tb-size"
@@ -209,14 +280,47 @@
             ? (selectedShape.fontSize ?? 28)
             : (selectedShape?.strokeWidth ?? strokeW)}
           oninput={(event) => setStroke(+event.target.value)}
-          title={selectedShape?.kind === 'text'
-            ? 'Font size'
-            : selectedShape
-              ? 'Stroke width (selected)'
-              : 'Stroke width'}
+          aria-label={selectedShape?.kind === 'text' ? 'font size' : 'stroke width'}
         />
       </div>
     </div>
+    {/if}
+
+    <!-- Fill: how much of the shape's own colour lands inside it. -->
+    {#if showFill}
+      <div class="tb-group" bind:this={fillEl}>
+        <button
+          class="tb-btn tb-size"
+          class:active={fillOpen}
+          title="Fill"
+          onclick={() => toggle('fill')}
+          bind:this={fillBtn}
+        >
+          <span class="tb-fill" style:background={fillPaint(activeColor, activeFill) ?? 'transparent'}
+          ></span>
+          <span class="tb-size-val">{fillPercent}</span>
+        </button>
+        <div
+          class="flyout flyout-size"
+          class:open={fillOpen}
+          style:left={fillPos.left}
+          style:top={fillPos.top}
+          style:bottom={fillPos.bottom}
+        >
+          <input
+            class="fill-slider"
+            type="range"
+            min="0"
+            max="100"
+            step="5"
+            value={fillPercent}
+            oninput={(event) => setFill(+event.target.value / 100)}
+            title="Fill opacity"
+            aria-label="fill opacity"
+          />
+        </div>
+      </div>
+    {/if}
   {/if}
 
   <div class="tb-sep"></div>
@@ -332,6 +436,14 @@
     border-radius: 50%;
     box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
   }
+  /* A hollow square that fills up as the opacity rises, so the button shows
+     the state it sets. Empty at 0, which is where every shape starts. */
+  .tb-fill {
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    box-shadow: inset 0 0 0 1.5px var(--text-3);
+  }
 
   .tb-group { display: contents; }
 
@@ -353,6 +465,35 @@
     align-items: center;
   }
   .flyout-size { align-items: center; }
+  .flyout-icons {
+    flex-wrap: wrap;
+    gap: 4px;
+    width: 168px;
+    align-items: center;
+  }
+
+  .icon-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm, 5px);
+    color: var(--text-2);
+    background: transparent;
+    cursor: pointer;
+    transition: border-color 0.12s var(--ease), color 0.12s var(--ease);
+  }
+  .icon-btn:hover { border-color: var(--border); color: var(--text-1); }
+  .icon-btn.active {
+    border-color: var(--accent);
+    /* --accent-text is ink for sitting ON the accent, not a foreground: on a
+       transparent button it is near-black, which in the dark theme is invisible.
+       Active follows .tb-btn.active instead — full-strength text, raised back. */
+    color: var(--text-1);
+    background: var(--bg-3);
+  }
   .flyout-overflow { flex-direction: column; gap: 6px; }
   .flyout-row { display: flex; gap: 6px; }
 
@@ -384,7 +525,8 @@
     opacity: 0;
     cursor: pointer;
   }
-  .stroke-slider {
+  .stroke-slider,
+  .fill-slider {
     width: 140px;
     accent-color: var(--accent);
   }

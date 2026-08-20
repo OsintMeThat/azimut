@@ -1673,7 +1673,14 @@ export async function installAppFixture(page, options = {}) {
     if (path === `/api/cases/${CASE_ID}/proofs` && request.method() === 'POST') {
       const payload = request.postDataJSON();
       proofSaves.push(payload);
-      return json(route, { name: 'browser-proof', png: 'proofs/browser-proof.png' });
+      // The title comes back the way the backend answers, canonicalised: the
+      // composer writes it straight into the header, so dropping it here left
+      // the saved document holding a title the composer never gave it.
+      return json(route, {
+        name: 'browser-proof',
+        title: payload.title,
+        png: 'proofs/browser-proof.png',
+      });
     }
 
     if (path === `/api/cases/${caseId}/sheets` && request.method() === 'GET') {
