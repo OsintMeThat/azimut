@@ -258,6 +258,68 @@ def test_rotation_layout_rejects_an_unknown_warp():
         stitch.solve_rotation_layout(_pan([0, 20]), width=800, height=600, warp="planar")
 
 
+class _FakeCv2:
+    """Just enough of cv2 for `_solve_cameras`, with either solver set to blow up.
+
+    OpenCV reports a scene it cannot resolve two ways — `False`, or an assertion
+    thrown from inside the solver — and only the first was ever handled. Driven
+    through a stand-in rather than through real pictures, because the input that
+    makes the real adjuster assert is a property of the OpenCV build, not
+    something a fixture can promise across versions.
+    """
+
+    error = type("error", (Exception,), {})
+
+    def __init__(self, raise_in: str):
+        self._raise_in = raise_in
+
+    class _Camera:
+        def __init__(self):
+            import numpy as np
+
+            self.R = np.eye(3, dtype="float64")
+            self.focal = 500.0
+
+    def _apply(self, which):
+        if self._raise_in == which:
+            raise self.error("(-215:Assertion failed) !err.empty() in function 'update'")
+        return True, [self._Camera(), self._Camera()]
+
+    def detail_HomographyBasedEstimator(self):
+        outer = self
+
+        class _Estimator:
+            def apply(self, feats, pairwise, _):
+                return outer._apply("estimator")
+
+        return _Estimator()
+
+    def detail_BundleAdjusterRay(self):
+        outer = self
+
+        class _Adjuster:
+            def setConfThresh(self, value): ...
+
+            def setRefinementMask(self, mask): ...
+
+            def apply(self, feats, pairwise, cameras):
+                return outer._apply("adjuster")
+
+        return _Adjuster()
+
+
+@pytest.mark.parametrize(
+    ("raise_in", "says"),
+    [("estimator", "estimate the camera rotations"), ("adjuster", "refine the camera rotations")],
+)
+def test_solve_cameras_answers_an_opencv_assertion_like_a_refusal(raise_in, says):
+    # Pieces that match just enough to be paired but not enough to be solved reach
+    # the ray adjuster and make it assert. Uncaught, that is a 500 and a traceback
+    # where the analyst should be reading that these pictures do not solve.
+    with pytest.raises(RuntimeError, match=says):
+        stitch._solve_cameras(_FakeCv2(raise_in), feats=[], pairwise=[])
+
+
 # --- fixed overlays --------------------------------------------------------
 
 
