@@ -88,7 +88,6 @@
       <div class="thumb" class:active={fr.id === session.activeFrameId}>
         <button class="pick" onclick={() => setActive(fr.id)} title={fr.time != null ? `Image ${i + 1} · t=${fr.time.toFixed(2)}s` : `Image ${i + 1}`}>
           <img
-            class:cropped={fr.crop}
             src={fr.url}
             alt={`Image ${i + 1}`}
             style={styleText(cropImgStyle(fr.crop))}

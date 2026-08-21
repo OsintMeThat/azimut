@@ -35,3 +35,23 @@ describe('CollageMenu renaming', () => {
     expect(source).toContain('maxlength="200"');
   });
 });
+
+describe('CollageMenu frame tray', () => {
+  it('numbers the tiles and names them like the Frame tab', () => {
+    expect(source).toContain(
+      "fr.time != null ? `Image ${i + 1} · t=${fr.time.toFixed(2)}s` : `Image ${i + 1}`"
+    );
+    expect(source).toContain('<span class="num">{i + 1}</span>');
+  });
+
+  it('counts how many pieces a frame already has on the collage', () => {
+    expect(source).toContain(
+      'const usedCount = (id) => active?.nodes.filter((n) => n.frameId === id).length ?? 0;'
+    );
+    expect(source).toContain('<span class="tag count">×{used}</span>');
+  });
+
+  it('lets the panel scroll instead of boxing the tray in its own window', () => {
+    expect(source).not.toContain('max-height: 200px');
+  });
+});
