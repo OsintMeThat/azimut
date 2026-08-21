@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 #: What the tool owns inside a case folder. Everything beside it is the
 #: analyst's, and Azimut neither reads nor writes there.
@@ -70,6 +70,7 @@ ENTITY_IMAGES_DIR = "entity-images"
 CASE_SUBDIRS = (
     "media",
     "notes",
+    "sheets",
     "proofs",
     "exports",
     DRAFTS_DIR,
@@ -243,6 +244,21 @@ URL_HOSTILE_CHARS = "#%"
 UNUSABLE_NAME_CHARS = '\\ / : * ? " < > | # %'
 
 
+def names_one_child(name: str) -> bool:
+    """Whether ``name`` addresses one directory entry and cannot climb out of it.
+
+    Asked of both path flavours rather than the host's, because the two disagree
+    about exactly the string an attacker sends: ``..\\case.json`` is a traversal
+    on Windows and an ordinary filename on Linux. A guard that only consulted the
+    running machine's `pathlib` would make the Windows binary the one place the
+    rule does not hold, and the suite — which runs on Linux too — would never see
+    it (`tests/test_regressions.py`).
+    """
+    if not name or name in {".", ".."}:
+        return False
+    return name == PurePosixPath(name).name == PureWindowsPath(name).name
+
+
 def usable_case_name(name: str) -> bool:
     """Whether a folder can hold a case under the name it already has.
 
@@ -395,6 +411,28 @@ def note_rel(folder: str, name: str) -> str:
     return "/".join(["notes", *parts, f"{name}.md"])
 
 
+def sheet_rel(name: str) -> str:
+    """A sheet's table, and deliberately a real CSV in a visible folder.
+
+    The file *is* the sheet: it opens in any spreadsheet, it travels in the bundle
+    as itself, and a case that outlives the app keeps a readable table rather than
+    rows locked in a database. Flat, like proofs and drafts — sheets have no filing
+    tree of their own, so uniqueness is scoped to the case.
+    """
+    return f"sheets/{name}.csv"
+
+
+def sheet_meta_rel(name: str) -> str:
+    """What the grid remembers about a sheet, beside it and out of the way.
+
+    Column widths, hidden columns, the sort, row colours and the entity each cell
+    points at. None of it belongs in the CSV: a width is not a finding, and a
+    column of internal ids in a file handed to someone else is noise. What *is* a
+    finding — a status, a note, a verdict — is a column of the table itself.
+    """
+    return f"sheets/{META_DIR}/{name}.json"
+
+
 def draft_rel(name: str) -> str:
     return f"{DRAFTS_DIR}/{name}.json"
 
@@ -416,7 +454,11 @@ def content_dirs(root: Path) -> tuple[Path, ...]:
     keeps green (`tests/test_artifacts.py`).
     """
     dirs = [tool_root(root) / name for name in CASE_SUBDIRS]
-    dirs += [media(root) / META_DIR, subdir(root, "proofs") / META_DIR]
+    dirs += [
+        media(root) / META_DIR,
+        subdir(root, "proofs") / META_DIR,
+        subdir(root, "sheets") / META_DIR,
+    ]
     return tuple(dirs)
 
 

@@ -47,7 +47,8 @@
   import { entityIcon } from '../lib/entityIcon.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { folderOf } from '../lib/folderTree.js';
-  import { deletedToast } from '../lib/trash.js';
+  import { deletedToast, deleteEntities, entityDeletePrompt } from '../lib/trash.js';
+  import { toggleCheck } from '../lib/gridSelect.js';
   import {
     chipsOf,
     clearAxis,
@@ -111,6 +112,10 @@
   let busyId = $state(null); // the row whose review action is in flight
   let discarding = $state(false); // Details closing with unsaved fields on screen
   let dirty = $state(false); // Details has edits the panel's Save has not taken
+  let selected = $state([]); // the ticked rows, by id
+  let anchor = null; // the last box touched, which shift measures a run from
+  let confirmState = $state(null); // the delete being asked about, or null
+  let confirmBusy = $state(false);
 
   /** The families the case actually holds, read off the summary: a filter offering a
    *  family nothing is filed under is offering an empty answer. */
@@ -382,6 +387,90 @@
     else {
       sortKey = key;
       sortDesc = false;
+    }
+  }
+
+  // ── ticked rows ──────────────────────────────────────────────────────────────
+  /**
+   * Several rows at once, because the mistake is rarely one row.
+   *
+   * An import of the wrong folder, a scraper run that filed forty of the wrong
+   * thing, a paste into the case next to the intended one: undoing that used to
+   * mean opening Details forty times. A box per row gathers what goes, and the
+   * delete behind them lands as **one** trash group, so the Undo in the toast
+   * takes the whole act back rather than the last row of it.
+   *
+   * The boxes cover what is loaded. The table is bounded like every list here, so
+   * a selection cannot claim rows nobody has seen, and the count beside *Show
+   * more* is what says the rest is still out there.
+   */
+  const ticked = $derived(new Set(selected));
+  /** The ticked rows themselves, in the order the table is showing them. It is what
+   *  the bar counts and what Delete sends, so the number on screen is never a row
+   *  the table has since stopped showing. */
+  const chosen = $derived(rows.filter((entity) => ticked.has(entity.id)));
+  const allTicked = $derived(rows.length > 0 && chosen.length === rows.length);
+
+  function tick(entity, shift) {
+    const result = toggleCheck(
+      selected,
+      entity.id,
+      { shift },
+      rows.map((row) => row.id),
+      anchor
+    );
+    selected = result.selected;
+    anchor = result.anchor;
+  }
+
+  function tickAll(on) {
+    selected = on ? rows.map((row) => row.id) : [];
+    anchor = null;
+  }
+
+  function untickAll() {
+    selected = [];
+    anchor = null;
+  }
+
+  // A tick belongs to the answer it was made in. Change the question, the case or
+  // the reading and the boxes go: a row that scrolled out of the narrowing would
+  // still be going, unseen, when Delete is pressed.
+  $effect(() => {
+    caseState.current?.id;
+    JSON.stringify(filter);
+    JSON.stringify(analysisSearch.period);
+    totalling;
+    snapshotReading;
+    untrack(untickAll);
+  });
+
+  async function askDeleteSelected() {
+    if (snapshotReading || confirmState || !caseState.current || !chosen.length) return;
+    const going = chosen;
+    const caseId = caseState.current.id;
+    confirmState = {
+      ...(await entityDeletePrompt(caseId, going)),
+      action: async () => {
+        const result = await deleteEntities(caseId, going.map((entity) => entity.id));
+        await reloadCase();
+        untickAll();
+        deletedToast(caseId, result, going[0].label);
+      },
+    };
+  }
+
+  async function runConfirm() {
+    const asked = confirmState;
+    if (!asked) return;
+    confirmBusy = true;
+    try {
+      await asked.action();
+    } catch (e) {
+      toast(e.message, 'danger');
+    } finally {
+      confirmBusy = false;
+      confirmState = null;
     }
   }
 
@@ -782,12 +871,15 @@
     openId = null;
     snapshotOpen = null;
     filter = normalizeFilter(view.spec?.query?.filter);
+    // Board and Graph read one saved question, and each surface restores only the
+    // presentation it saved. A Graph view opened here brings its question to the rows
+    // and leaves the analyst in the tool they are working in; its lens, folds and
+    // arrangement wait for the Graph, which restores them off the same active view.
+    // The table's own sort is left alone, because such a view never stated one.
+    if (view.surface !== 'board') return;
     const board = view.spec?.board ?? {};
     sortKey = typeof board.sortKey === 'string' ? board.sortKey : '';
     sortDesc = board.sortDesc === true;
-    // Board and Graph read one saved question, so a Graph view opened here is a
-    // request for the other drawing of it. The Timeline keeps its own views.
-    if (view.surface === 'graph') uiState.tool = 'graph';
   }
 
   let appliedViewId = null;
@@ -948,6 +1040,19 @@
     />
   </p>
 
+  <!-- What the ticks come to, and the one thing they are for. Outside the scrolling
+       body so a selection made at the top of eight hundred rows is still actionable
+       at the bottom of them. -->
+  {#if chosen.length}
+    <div class="picked">
+      <span><strong>{chosen.length}</strong> selected</span>
+      <button class="btn btn-ghost btn-sm" onclick={untickAll}>Clear</button>
+      <button class="btn btn-ghost btn-sm drop" onclick={askDeleteSelected}>
+        <Icon name="trash" size={12} /> Delete
+      </button>
+    </div>
+  {/if}
+
   <!-- Dropping a file onto the list files it, the way the Media Library takes one.
        `dragleave` is guarded on the container itself: the event fires for every
        child the pointer crosses, so an unguarded handler flickers the overlay off
@@ -1047,6 +1152,25 @@
       <table class="table">
         <thead>
           <tr>
+            {#if !snapshotReading}
+              <!-- The heading's box reads the selection rather than the rows: ticked
+                   with anything ticked, dashed while it is only part of the table.
+                   So a click on a part-ticked table **clears** it — the browser would
+                   otherwise complete the selection, ticking the very row that had
+                   been left out on purpose, and the state it lands on is the one the
+                   box was already showing. -->
+              <th class="pick">
+                <input
+                  type="checkbox"
+                  aria-label={chosen.length ? 'Clear the selection' : 'Select the rows loaded'}
+                  title={chosen.length ? 'Clear the selection' : 'Select the rows loaded'}
+                  checked={chosen.length > 0}
+                  indeterminate={chosen.length > 0 && !allTicked}
+                  onclick={(e) => e.stopPropagation()}
+                  onchange={() => tickAll(!chosen.length)}
+                />
+              </th>
+            {/if}
             {#each [
               { key: 'label', label: identityColumn },
               { key: 'type', label: 'Type' },
@@ -1093,6 +1217,23 @@
                 }
               }}
             >
+              {#if !snapshotReading}
+                <!-- The click is taken from the row underneath, never from the box
+                     itself: a click always flips the box it is on, so the browser's
+                     own toggle and the state it produces agree, and the rest of a
+                     shift-run is written from the state. -->
+                <td class="pick">
+                  <input
+                    type="checkbox"
+                    aria-label="Select {entity.label}"
+                    checked={ticked.has(entity.id)}
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      tick(entity, e.shiftKey);
+                    }}
+                  />
+                </td>
+              {/if}
               <td>
                 {#if entity.thumb}
                   <img
@@ -1247,6 +1388,22 @@
   </Modal>
 {/if}
 
+{#if confirmState}
+  <ConfirmDialog
+    title={confirmState.title}
+    message={confirmState.message}
+    detail={confirmState.detail}
+    consequences={confirmState.consequences}
+    restorable={confirmState.restorable}
+    confirmLabel={confirmState.confirmLabel}
+    tone={confirmState.tone}
+    icon={confirmState.icon}
+    busy={confirmBusy}
+    onconfirm={runConfirm}
+    oncancel={() => (confirmState = null)}
+  />
+{/if}
+
 {#if discarding}
   <ConfirmDialog
     title="Discard changes?"
@@ -1262,6 +1419,11 @@
   .spacer {
     flex: 1;
   }
+  /* One height across the header. Views comes from a shared component and is `btn-sm`,
+     the tool's own two are not, and three buttons of two heights read as a mistake.
+     Stated from the same tokens a plain `.btn` is built from — its text plus its
+     padding and rule — rather than as a number that would drift from them. */
+  .tool-header :global(.btn) { min-height: calc(var(--fs-sm) * 1.5 + 12px); }
   /* The count reads first because it is the answer; the control that decides how that
      answer is drawn sits at the other end, directly above what it governs. */
   .answer {
@@ -1293,6 +1455,27 @@
   }
   .answer .as-link:hover {
     text-decoration: underline;
+  }
+  /* What the ticks come to. It appears only with a selection, so it is the one bar
+     in the tool that changes the height of what is under it, and it sits above the
+     scrolling body rather than floating over the rows it is about. */
+  .picked {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 16px 6px;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--bg-2);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .picked strong {
+    color: var(--text-1);
+  }
+  .picked .drop:hover {
+    color: var(--danger);
   }
   /* The one scrolling region. `.tool` is a full-height flex column, so the body
      needs min-height:0 or the table pushes the column taller than the viewport and
@@ -1346,6 +1529,19 @@
     background: var(--bg-1);
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
+  }
+  /* The boxes take the width they need and no more, so the identity column keeps
+     the room it had. */
+  .table th.pick,
+  .table td.pick {
+    width: 1%;
+    padding: 6px 8px 6px 2px;
+  }
+  .table .pick input {
+    display: block;
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--accent);
   }
   .sorter {
     display: flex;

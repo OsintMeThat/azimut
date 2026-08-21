@@ -19,7 +19,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 
 | Workspace | Tools today | Future tools land here |
 |---|---|---|
-| **Case** (topbar) | Board, Graph, Timeline | Sheet; v5: Orchestrator |
+| **Case** (topbar) | Board, Graph, Timeline, Sheet | v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect (Selection / Frame / Collage / Analyze) | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
 | **Map** | Satellite, Coords & Sky | **one map, many modes**: Compare, Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
@@ -151,6 +151,28 @@ row's Details.
   case when opened. Every
   later filter, sort, fold, hiding, expansion, camera move and graph drag autosaves;
   the badge says **saving…**, **saved** or **save failed**.
+- **Each surface restores only what it saved.** Opening a Graph view from the Board puts
+  its question on the rows and leaves the analyst where they are; the lens, the folds and
+  the arrangement wait for the Graph, which restores them off the same active view. The
+  row names the surface, so a reading made elsewhere is recognised before it is opened.
+- **Export writes the reading out as a plate**, from Graph and from Timeline alike.
+  A plate is a page rather than a screenshot: a header naming the case, the view, the
+  lens, the question, the window and the clock, the drawing itself, and a legend for
+  its hues and strokes. **SVG** is the default — the drawing is rebuilt as vectors from
+  the same geometry the screen uses, so it zooms without softening and its text stays
+  text — with **PNG** for an image and **Copy image** for the clipboard, which takes no
+  SVG. The image states the scale it will really have, since a wide reading rasterises
+  under twice the page. The page is always drawn on the daylight palette whatever the app
+  is set to, and a Timeline plate is laid out at its own width rather than the browser's,
+  so two analysts export the same file. The header states what the drawing holds and what
+  it leaves out: how many nodes and links are on it, entries with no date, nodes a fold or
+  a focus is holding back, verbs dropped where the drawing is too dense to carry them.
+- **The menu is where a list of readings is kept in order.** Every row states its mode,
+  its surface where the family holds two, and when it was last written — a distance up
+  to a week, then the date, with the exact UTC minute in the tooltip. Past one saved
+  view, **Sort** offers recently updated, name or surface, remembered per family in the
+  browser. **Rename** edits the name in the row itself and is the one edit a snapshot
+  accepts, since a label is not evidence.
 - **A snapshot freezes a reading, not a second case.** It keeps up to 2,000 captured
   entities, their fields and provenance, the relations among them and bounded photo
   previews. Its Search+ controls and every case write are disabled, and its own
@@ -167,11 +189,22 @@ row's Details.
   gesture either way: which of the two it is belongs to the column, not to a second
   control the analyst has to find.
 - **Columns** are the four every entity has — identity, type, folder, created — plus
-  the chosen type's declared fields once a single type is picked. Read-only: editing
-  cells and CSV belong to the Case Sheet. A primary entity photo replaces the type
+  the chosen type's declared fields once a single type is picked. Read-only: a value is
+  edited in that row's Details, and the Case Sheet works on the case's CSV files rather
+  than on these rows. A primary entity photo replaces the type
   icon in the identity column; without one, the icon remains.
 - **A row is a control**: focusable, opened with Enter, and the review clicks inside
   it never open it.
+- **A box per row deletes several at once.** A mistake is rarely one row — a folder
+  imported twice, a scraper run that filed forty of the wrong thing, a paste into the
+  case next door — and undoing that one Details panel at a time is what made a slip
+  expensive. Shift ticks a run and unticks it the same way, and the bar above the table
+  says how many are going. The heading box reads the selection: empty, it takes the
+  rows loaded; part-ticked, it shows a dash and **clears** — completing a selection
+  would tick the row deliberately left out of it. The dialog is the
+  organizer's, word for word, and the delete lands as **one** trash group, so the Undo
+  in the toast takes the whole act back rather than the last row of it. A frozen
+  snapshot has no boxes, since every case write is off there.
 
 **The vocabulary explains itself on hover.** A family, a type, a verb, a rating and a
 declared field each carry one clause from the registry that declares them, shown
@@ -533,7 +566,12 @@ single root to expand from. Expansion is the drill-down.
   away in Details. Each control appears because the **registry** declares it, not
   because the edge holds a value: a ratable verb gets the rating, a verb that takes a
   qualifier gets the word. A proposal gets neither, since reviewing a machine's claim
-  and grading it are two gestures and the API refuses the second first. Nothing may be
+  and grading it are two gestures and the API refuses the second first. **Removing a
+  stated edge is asked for**, in red and in the same words Details uses: the panel is
+  opened to read an edge, *Remove* sat beside two controls that write nothing, and
+  nothing holds a removed edge — re-filing one mints a new id, a new date and a new
+  author. Dismissing a proposal stays one click, because that is the review this panel
+  is for and nothing of the analyst's goes with it. Nothing may be
   written to a line that stands for several, which is why a folded edge offers only its
   sources back.
 - **Folder** draws one of the analyst's own buckets instead of the whole case, read the
@@ -653,7 +691,8 @@ remembered per workspace for the current session. Reloading restores the default
 - **Details** — a drawer over the sidebar, closed with the back arrow or Escape, so
   selecting a row never pushes the case out of view. Every entity uses the same three
   tabs. **Info** holds identity, declared profile fields, file metadata, notes and
-  folder. **Connections** holds placement, relations, mentions, Claims and the
+  folder. An entity that sits on a point shows it, read off the point itself and
+  written in the coordinate format Settings chose. **Connections** holds placement, relations, mentions, Claims and the
   collapsed **Made from & used by** block. **Time** holds dated statements, intrinsic
   media dates and a collapsed Case activity section. A field declared as holding
   sentences is a box that grows, not a line. A
@@ -662,8 +701,11 @@ remembered per workspace for the current session. Reloading restores the default
   form. It accepts several images from the computer or the Media Library, keeps the
   main preview to a normal panel height, and lets one image become primary. A
   computer import stays private to the entity and never enters the Media Library;
-  choosing from Media only stores a reference. Removing a private photo deletes its
-  dedicated copy, while removing a Media choice leaves the media in the case. With
+  choosing from Media only stores a reference. **The two are not one act and are not
+  called one thing.** *Remove* takes a Media choice off the entity and leaves the media
+  in the case, on the click. *Delete this copy* is the other, because a private photo
+  exists nowhere else and is not an artifact, so no Trash holds it and no toast can undo
+  it: it is asked for, in red. One word for both read as the harmless one. With
   no photo, only the two add actions remain and other surfaces keep the entity icon.
   The same two actions appear while creating a supported entity. Photos are staged
   in the form, where one can be chosen as primary, then attached after creation.
@@ -680,8 +722,8 @@ remembered per workspace for the current session. Reloading restores the default
   fields.
 - **Delete** — deleting an artifact moves its registered files and cascade into
   Trash and shows an **Undo** toast. The confirmation uses the neutral tone and
-  states what can be restored. Red is reserved for deleting a case, purging a
-  trash group and emptying Trash.
+  states what can be restored. Red is for what nothing holds afterwards: deleting a
+  case, purging a trash group, emptying Trash, and deleting an entity's private photo.
 
 ## Case switcher
 
@@ -740,8 +782,8 @@ process, warned once and never presented as the ordinary way out.
 
 ## Export folders and backup
 
-Settings → Storage remembers one destination each for note PDFs, media copies
-and proof PNGs. **Change…** opens the shared folder browser, which lists folders
+Settings → Storage remembers one destination each for note PDFs, media copies,
+proof PNGs, analysis plates and sheet CSVs. **Change…** opens the shared folder browser, which lists folders
 only and can create one; the case's `exports/` stays the default. Media Details,
 saved proofs and Notebook use those same destinations. Files already outside a
 case are never overwritten, and concurrent exports reserve distinct numbered
@@ -761,7 +803,9 @@ generic History list.
 
 Ordinary relations render through one component wherever they appear. Two lines carry
 the neighbour's name, then what the edge states and how sure of it. A suggested row
-can be confirmed; any row can be removed. Where a pair supports several verbs or both
+can be confirmed; any row can be removed, and a row the analyst stated asks first — the
+question is written once and read by Details, a Claim's connectors and the Graph's edge
+alike. Where a pair supports several verbs or both
 directions, the reading is selectable. An older out-of-matrix row stays visible and
 removable but cannot be restated. Past six rows the list hides the rest behind one
 click, suggestions first. The registry's headings only appear where a list runs
@@ -905,8 +949,8 @@ autosaves its window, display timezone, display mode, categories, ordered tracks
 their colours, folds, hidden and pinned entries, grouping and entity scope. A Snapshot
 stores up to 5,000 matching
 temporal rows with their exact track assignments and opens read-only. It does not query
-the current case when reopened. Timeline views can be duplicated, deleted through
-Trash, restored and carried in a complete case bundle.
+the current case when reopened. Timeline views can be renamed, duplicated, deleted
+through Trash, restored and carried in a complete case bundle.
 
 A track that includes Statements can create Claims; Media-only and Case activity
 tracks cannot. Clicking empty space creates a point; dragging creates a bounded range.
@@ -998,6 +1042,22 @@ files beyond the loaded page after a case import. Thumbnail failures are scoped
 to their case, so switching cases always reloads previews even when relative
 paths match. Enrich respects an existing confirmed GPS relation during backfill.
 
+**Import asks where the files came from.** A file fetched by hand elsewhere and
+then dropped here carries no address of its own, so a drop or a pick opens one
+field for the whole batch, and stating nothing is a real answer. The last address
+stated prefills the next dialog, since one thread's worth of files rarely arrives
+in a single drop. A batch that landed without one keeps the offer on its toast:
+**Set source** states one for every file that just entered. Later, the Source URL
+field in Details corrects any of them one at a time, and a link on the row reaches
+whatever the file came from, fetched or stated.
+
+An origin is a link, refused when it is not one — on all three doors that take one: an
+upload, a later correction in Details, and the file hand-attached to a proof import, which
+is the one where it is typed rather than carried. It is recorded as **stated, not
+fetched**: the source type stays `upload`, the file stays under **Imports**, and
+only a file brought in by hand takes one — a download already carries the address
+it was pulled from, and a frame's origin is the video it came out of.
+
 The row action for an image, a video or an audio file opens it; for anything the
 app cannot display it opens the folder the file sits in, so the original is opened
 in whatever program owns it rather than copied into Downloads.
@@ -1009,6 +1069,17 @@ characters or resolving a case-insensitive collision. Downloads keep dates and
 remote ids in provenance instead of appending them to the visible name.
 
 ## Map
+
+The search bar in the header proposes matches as you type, in the order they can
+answer: the coordinates the text parses to, saved work in this case, cities from
+a gazetteer shipped with the app (GeoNames, credited under the list), and last
+the geocoder's streets and hamlets. The first three cost no network and appear on
+the keystroke; the geocoder is asked once typing stops, from three characters up,
+and a request it cannot pace is dropped rather than queued, so the list keeps
+what it had. Arrows walk the list, Enter takes the highlighted row, and Enter on
+nothing parses or geocodes the raw text the way the plain box always did. A city
+lands at zoom 12 and a street at 15; a saved item reopens at its own view and
+bearing. Picks are remembered locally and offered back when the bar is empty.
 
 Saved work — places, captures and screenshots filed by the extension — lives in
 one right-hand **Saved** panel, grouped by geography rather than by date. The
@@ -1037,15 +1108,18 @@ spelling. Proofs and posts keep the native name only.
 Saving a place or a capture resolves its country as part of the save, so the item
 appears already grouped. Offline it lands under Unlocated for a later Locate.
 
-Saving a proof turns the coordinates it carries into a place, which is where a
-geolocation stops being text in a spec and joins the map (ONTOLOGY §3). The
-composer's **POV** box beside the coordinates says what the point is: ticked, the
-footage was recorded there; left alone, the footage shows it. Nothing in a
-composition can answer that, which is why it is asked rather than guessed. A capture
-files nothing: ten are taken while hunting one roof, and the point is worth
-minting once, where somebody commits to it. Settings → General → Proofs saves it
-outright or has the composer ask; a point the case already holds is neither
-filed twice nor asked about.
+Saving a proof turns the coordinates it carries into places, which is where a
+geolocation stops being text in a spec and joins the map (ONTOLOGY §3). A proof
+stating three points draws three marks and files three rows under one title,
+told apart by the name each point was given. The marker beside a row says that
+point is where the camera stood, at most one per proof; the others are what the
+footage shows. Nothing in a composition can answer that, which is why it is asked
+rather than guessed. A capture files nothing: ten are taken while hunting one
+roof, and the point is worth minting once, where somebody commits to it.
+Settings → General → Proofs saves them outright or has the composer ask; a point
+the case already holds is neither filed twice nor asked about. Only the first
+point is looked up at save — the rest wait for Locate rather than holding the
+save for a lookup each.
 
 A row the enrichment proposed from a file's GPS carries a `suggested` chip and an
 **accept** action, on the row and in the search modal, so the point is settled
@@ -1120,9 +1194,924 @@ content hash, travels with a rename, and goes when the proof does. A proof needs
 a panel first, since the panels are what give the document its size — moving an
 overlay never resizes the export.
 
+**Coordinates and sources.** Both sit above the panels and both fill themselves in:
+the coordinates from the first panel that carries them, the sources from the address
+each panel's media traces back to.
+
+**Coordinates are a list too**, one row per point, with a `+` to add one. A proof
+often shows more than one place — three impacts, a building, the camera — and each
+row takes an optional name and the marker that says the camera stood there. **The
+first row is the proof's point**: the map mark, the coordinate a post cites, the
+one the export prints. An arrow moves a row up to make it the conclusion; the
+marker never reorders anything, or ticking it would take a coordinate out of a
+tweet without saying so. A single-point proof is the field it has always been.
+The exported picture prints them only when asked (Advanced → Show coordinates):
+unnamed points share one line, a named one takes its own, and the plate grows by
+what it prints. **Show text** switches the credit line off beside it, so a plate
+can carry its points and nothing else; with both off the band takes no height at
+all. A saved house style carries both, and one saved before they existed leaves a
+proof's own answer alone. Posting from the proof carries every point into the tweet, one
+per line, while the place, the plus code and the map links stay the conclusion's.
+
+**Source is a list**, one box per address, with a
+`+` to add one — a proof read from a thread rests on the post that published it, the
+photos beside it and the clip under those. Editing a traced box turns the whole list
+into the proof's own and the traced ones come along, so stating a fourth address never
+means retyping the three the panels already knew. The reset arrow hands the list back
+to the panels, and it is the only way back: **an emptied list is an answer**, not a
+blank to fill in. A proof whose boxes have all been cleared says it has no public
+source — the footage was handed over privately — and the `!` says so rather than the
+panels quietly putting their addresses back and carrying them into the post.
+
+**An address the case holds nothing from** shows a download arrow beside it. Pressing
+it brings the files in as ordinary media and records them as the proof's *material*:
+in its chain, and through the chain on its point, without ever becoming panels. An
+address holding several files asks which, ticked by default, since an address stated
+as material holds material. Only stated addresses offer it — one traced off a panel is
+already in the case by construction.
+
+Wherever a source is *read* rather than edited — the post it is handed to, the Markdown
+report — it is one address per line, and a report renders one link each.
+
 **Frames.** Any panel or overlay takes a coloured border, its own colour and
 thickness, drawn inset so the layout does not shift. A frame is decoration: it
 stays out of the legend, which is still built from annotation colours alone.
+
+**Drawing.** A tool in hand holds the canvas alone. Nothing already drawn answers
+the pointer, so a stroke started inside a box draws a new element instead of
+dragging the old one, and the colour and width you pick set the next element
+rather than repainting the last. The selection stays where it was and its handles
+come back with Select. A box or an ellipse also takes a fill, in its own colour at
+an opacity you choose. Shapes start hollow: a fill hides what is under it, so it
+is asked for rather than given. Fill and outline share one colour, since the
+legend reads colour as the feature. Every shape tool stays in hand, so three
+boxes is three drags. Text is the one that puts the pen down: the editor opens
+where the label was placed, because placing it and saying what it says are one
+act. A label holds more than one line — Shift+Enter opens the second, Enter ends
+the edit.
+
+**What a picked element offers.** A box, an ellipse or a freehand stroke resizes
+from any handle and rotates; a line, an arrow or a curve gets a handle per vertex
+instead, so any point can be re-placed. A stroke is the exception among the
+points-based kinds: it has too many samples to show, so it takes the frame and
+the handles rather than a canvas full of dots.
+
+**Symbols.** A grid of fixed marks — a pin, an impact, vehicles, a building, a
+drone, a camera, an antenna, a north arrow — stamped with one click. The tool
+stays in hand afterwards, since marking six vehicles is one act rather than six.
+A symbol takes the active colour like anything else drawn, so it joins the legend
+by colour and claims no vocabulary the legend cannot say. It resizes from its
+corners with the ratio locked: the box is square and there is one side to change,
+so a squashed symbol is not expressible. The pin hangs from its tip rather than
+its middle, which is what keeps it on its pixel while it is resized. The solid
+marks carry no outline and the width control stays away for them. Fill on a
+symbol is a disc behind the glyph rather than paint inside it — a thin stroke
+over aerial imagery needs something to sit on — and how opaque that disc goes
+stays your call, because it covers the picture.
+
+**Picking several.** Shift adds an element to the ones already picked, on the
+canvas and on the rows in the side column alike. A rectangle dragged over the
+page picks everything it touches, and in grid layout it can be dragged across a
+panel too, since the grid decides where a panel sits and the drag cannot be
+moving it. In free layout that same drag moves the panel, so the rectangle starts
+on the page around it. What a family answers to: colour, stroke width, fill,
+arrow keys, Delete, and a drag from any one of them, which carries the rest.
+Resizing, rotating and copying still want one element, and the handles say so —
+several picked at once show the border and no anchors.
+
+**The gestures.** Escape unwinds one level per press: the draft in hand first,
+then whatever is picked, and only with nothing left to drop does it put the pen
+down. Only the primary button draws. A release the canvas never sees still lands:
+letting go over the side column commits the stroke and applies the rectangle
+rather than leaving either one following a bare pointer. Space or the middle
+button pans, and so does a drag that starts where no tool has anything to draw
+on. A row picked in the side column takes the hand back to Select, since a row
+cannot mean "draw here" — which is also why the rows stop lighting up while a
+drawing tool is in hand: a pick nothing answers to is not shown as one. A dialog
+over the composer keeps the one-letter keys, so `r` never changes the tool
+underneath it.
+
+### Import
+
+**Import** is the third way into the tool, beside composing a proof and opening a
+saved one, and it lives at the foot of the **Create proof** dialog. Paste the address of a post and the picture is downloaded, its text
+read for a position and for the links it points at. Both fill the form and say
+where they came from; neither is applied on its own, and a post that spells
+nothing out leaves the fields empty for you to type into. **Use an image** skips
+the post entirely and opens the same form. A post carrying several attachments
+asks which one, each shown with the poster frame its extractor reported and its
+kind — nothing has been downloaded at that point, so the picture is chosen by
+looking at it. The **pictures arrive ticked and several can be**: a post publishing a
+geolocation as a set — the overhead, the ground shot, the match — published one proof,
+and keeping the first of three keeps a third of it. They become the panels of one
+composition, which is what a proof already is. The footage slot stays single: which
+clip is the source is not something a rule knows. A login wall gives the Media
+Library's cookie prompt — including the one X gives, which reads as a tombstone
+(*Unavailable*) rather than as a refusal, and used to be read as a plain failure, so the
+prompt never appeared on the site that needs it most. *No video could be found in this
+tweet* is deliberately **not** among them: it is also what a perfectly public photo-only
+post gets, and it is the ordinary road to the picture extractor. The prompt opens on **the browser this page is in**, read off the user agent:
+the tab is the analyst's browser, so it is almost always the session being asked for,
+and defaulting to Firefox made a Chrome user answer a question whose answer was on
+screen. **And it is asked once.** Reading a browser's cookie store is reading
+credentials for every site, so it is asked for and stored rather than taken — but a
+session already stored is then *used*, on a wall, without the question coming back. What
+a still-walled line means is therefore one of two things, and it says which: no session
+named, or the named one refused.
+
+The left of the dialog shows **the set the proof will compose**, in order, as a strip
+above the file being looked at. Not the render — laying panels out is the composer's
+canvas — but what is going in, which is the part worth checking before pressing Create.
+The footage sits in that list as its own entry rather than as a page of the proof.
+
+The proof's picture is **asked for as a picture**. The video extractor reads a post
+for its footage, so a post that publishes a geolocation beside a quoted clip hands
+back the clip and the published picture is invisible to it. The image extractor is
+the one that can reach it, and it used to be tried only when nothing at all was
+found — so the panel filled with fifty seconds of video and said so two screens
+later, at the preview. Now a result of the wrong kind counts as nothing found.
+
+Coordinates and a source are required, and **a source is one box per address**.
+A geolocation thread states its point in the post that published it and hangs the
+photos and the clips it rests on off the ones after it, so the addresses the post's
+text pointed at all arrive as boxes and **Add a source** opens another. Each box is
+fetched on its own, says underneath itself what it holds or that it was not
+downloaded, and offers **Attach it** for that one address. Two addresses typed into
+one box is refused: a box is the address its own file comes from, and nothing can be
+downloaded from a pair.
+
+Pressing **Preview** downloads what the boxes point at — the left of the dialog then
+holds every file, the proof picture and the material, with arrows to step between
+them and a video playable before anything is filed — and lists what the import would
+write: each entity marked new or reused, the edges between them, and whatever is
+worth saying first — a point already on the map, a picture the case already holds,
+this post imported before, or a file whose own metadata sits more than 150 m from the
+coordinates entered. A source that could not be downloaded is a warning, not a
+blockage: the proof is created without that file and the address stays on it. An
+address taken off the list leaves its download behind rather than filing it.
+**Create** appears only once the preview comes back clean, and editing a field
+withdraws it.
+
+**The proof is what everything hangs off.** It composes the pictures and rests on the
+material, and both are its own edges, so the graph draws one node for the geolocation
+rather than a media node with the rest strung from it. Which photo of four a composite
+was laid out from is not something a post says, and a guessed pairing would state one
+edge right and the rest wrong.
+
+**One picture exports itself; a set waits for the composer.** A published panel is
+already a rendered proof, so a single-picture import files it as `proofs/<name>.png`
+and is done. Several panels have no render — laying them out is the composer's canvas,
+in the browser — and a second renderer on the server would drift from it at the first
+change to a layout. So a set is filed **without an export**, borrowing the first
+picture's thumbnail so the proof still draws in the graph rather than being the only
+blank node of its own constellation, and the first save in the composer writes the real
+one. Until then it has nothing to export and nothing to carry into a bundle, which is
+the honest cost of a composition nobody composed.
+
+Until then nothing is in the case. Both downloads wait in a staging directory
+under `media/.dl/`, which bundles skip and the Doctor ignores; closing the dialog
+deletes it, and one left behind goes when the next import opens. What Create
+writes is a normal proof: it lists, travels in a bundle, and reopens in the
+composer as a composition to annotate — one panel per picture taken.
+
+## Sheet
+
+A table the analyst works in, which **is** a CSV in the case folder. Three uses no
+other tool covers: a comparison grid, candidates down and criteria across; a worklist
+carrying its own state and a count; and the half-facts that are too soft to be
+entities and too valuable to lose. The graph says what the case believes, a sheet
+says what it is checking.
+
+- **The file is the artifact.** `sheets/<name>.csv`, readable in any spreadsheet, written
+  with a byte-order mark so Excel on Windows reads its accents instead of the machine's
+  legacy codepage, and replaced by **rename rather than in place** so a save that dies
+  half way leaves the previous table whole. A file the system will not take — a
+  spreadsheet holding it open on Windows, a read-only folder — is said in a sentence
+  naming it rather than a 500. A finding is a column of it — a status, a verdict, the reason — so handing the file
+  to someone else hands them the work. Presentation lives in a sidecar
+  (`sheets/.meta/<name>.json`): widths, hidden columns, the sort, row colours, which
+  column stays in view, **what the app knows about each column**, which entity a cell
+  points at, and what a cell said when the case took it. Losing the sidecar costs chips
+  and colours, never a finding.
+- **Two writers on one file, and the grid does not win.** Because the CSV is the
+  artifact, it may be open in a spreadsheet at the same time. A read hands out a
+  stamp of the file and every save presents it back; a save that would write over
+  work the grid never saw is refused. The stamp is also **checked whenever the window
+  comes back** — it is a stat, so it is cheap enough to ask every time — and that one is
+  a warning rather than a refusal: nothing has been stopped, so the banner says the file
+  moved on and waits. Both banners offer to **read the file first**: how many rows it
+  holds that the grid has not, how many cells differ and the first few of them, either
+  way round. Reload and overwrite are each irreversible in the direction that matters,
+  and choosing between them over one sentence made three rows a colleague added and one
+  stray cell the same press. **Both are confirmed**, and reload is the one that needed it
+  most: it looked like the safe way out and it is the analyst's own unsaved edits that it
+  drops, with the undo stack. A file rewritten byte for byte and otherwise unchanged says
+  so and the banner goes.
+- **The sheet's own ceiling is refused at the gesture.** 20 000 rows and 64 columns, which
+  is where a worklist becomes a dataset and a grid in a browser is the wrong tool. Those
+  are the file's bounds, so they used to be answered only by the save — the analyst pasted
+  eight hundred rows over the line, the grid took them, and every autosave from that
+  moment on was refused with the work on screen and unsaved. The paste, the append, the
+  duplicate and the split are refused now, and say how much room is left.
+- **Persistence is the file plus its sidecar, and nothing else.** No named views, no
+  exported plate: a sheet *is* its own saved reading, and a second frozen copy of its
+  state would be a duplicate that drifts. Another reading of the same rows is another
+  sheet — and **duplicating a sheet** forks the work rather than the headings, sidecar
+  and all, which is the button that answer had been missing. Both live in a **footer of the
+  sheet list that does not scroll**, the way the case switcher's own do: they make a sheet
+  out of the one that is open, and a case holding fourteen of them must not scroll them out
+  of reach. The **other** fork takes the
+  columns and leaves the rows, which is what a binder is actually built out of: an inbox, a
+  worklist and a reference table at one schema, and a row that has been worked out **moves
+  up a floor**. **Moving rows asks twice before it writes**: the first screen
+  lists them and lets any be taken back out, because the grid's selection is a drag away
+  from being every row on screen, and the second lines the columns up — one of this sheet's
+  against one of that one's, identical names taken as the answer and a near spelling marked
+  as a guess. What lands carries the rows' colour, their links and what they had already
+  promoted, which is exactly what copying by hand loses; a column pointed at nothing stays
+  behind, said on that screen rather than in the toast afterwards, because the destination's
+  shape is its own and a silent loss reads as a clean move. Both sheets are written by one
+  call and the grid's own undo reaches neither, so the toast carries **Undo**: this sheet
+  goes back as it stood and the rows come out of the other one, refused if the sheet has
+  been typed into since. The reading itself is part
+  of what is written down: **the search and the filters live in the sidecar** with the
+  sort and the hidden columns, so a sheet reopens on the question it was left on rather
+  than on all four hundred rows. Everything that is the grid rather than the table —
+  a filter, a colour, a width, a hidden column, the pinned row — goes out through a
+  **route that writes the sidecar alone and leaves the CSV byte-identical**, because
+  rewriting the file to record that a funnel was clicked moved the modification time the
+  stamp is made of: the analyst's own next save then answered a conflict nobody caused,
+  and a spreadsheet open on the same file was told it had been overwritten. For the same
+  reason a view change never enters the undo stack — `Ctrl+Z` is for what was written,
+  not for what was asked. Undo follows that logic throughout: a typed cell records the
+  cells that changed, not a copy of the table, so a long afternoon on a long sheet stays
+  undoable.
+- **Rows are keyed by an `id` column, in the file.** Nothing hangs on a row's
+  position, because a file sorted in someone else's spreadsheet would move every
+  colour and link one row down. An import that already carries an `id` keeps it
+  rather than being given a second one; a file edited outside and stripped of it is
+  re-keyed in the grid, said so in one line, and written back only on the next save.
+- **A new sheet starts from one of four worklists, or plain.** A verification worklist, a
+  geolocation index, a list of accounts, a run of events: the tables an analyst rebuilds by
+  hand every case, ten minutes of naming columns before any work happens — and each one
+  slightly different, which is why two of their sheets never compare. A template is columns
+  **and** what the app should know about them, so the status column arrives as a state with
+  its four words painted and the coordinates as a point. Renamed and dropped like any others
+  the moment the sheet exists. The five ways of getting rows in — blank, a file, a paste, the
+  case's own entities, rows into the sheet already open — sit under **one `New` button**,
+  because each is asked once per sheet and as five buttons they crowded a header that also
+  carries the title, the subtitle, the sheet list, the export and the delete.
+- **The browser neither reads nor writes CSV.** One parser and one writer, both in
+  `engine/sheets.py`, so an imported file and a saved grid cannot disagree. Import
+  posts the text of a file dropped on the grid, picked from a dialog or pasted into
+  one, and the delimiter is guessed — a semicolon export is a table, not an error. A
+  **workbook** cannot go that way — it is a zip holding several tables — so it goes up whole
+  and comes back as **one sheet per tab under the tabs' own names**, which is how a binder
+  arrives; asking the analyst to export six tabs by hand is asking them not to bother, and
+  the one that gets skipped is always the "How to use" tab saying what the others mean. A
+  tab holding nothing but pasted screenshots reads as empty, and it is **named rather than
+  filed**: two empty sheets nobody asked for are worse than the sentence. A workbook cell
+  has no words, only a number and a display format, so dates land as ISO — the one spelling
+  that means the same thing in every locale, carrying the seconds when a cell has them,
+  because a timecode column is what an offset is counted in — and a cleaning pass restyles
+  the column for anyone who wants it otherwise. **What did not fit is named too**: the tabs
+  past the twenty-fourth, and any tab read only to the twenty-thousandth row or the
+  sixty-fourth column. A thirty thousand row export arriving as twenty thousand under a
+  toast reading *5 tabs filed* is a sheet that looks whole. An import is also all of the
+  tabs or none of them: a tab the filesystem refuses takes the ones already filed back out
+  with it, so the retry does not land a second copy of half a binder.
+- **A clipboard block is not a file, so it is read here.** It is TSV, and a paste is a
+  patch into a selection whose geometry only the browser knows. `Ctrl+V` lands a block
+  from the cursor: rows grow to fit it, columns never do — a block wider than the
+  sheet is clipped and says by how much, because a heading nobody chose is worse than
+  a cell lost — and the key column is never written. A wall of links with no tabs is
+  read as an inbox instead: one row per link. `Ctrl+C` copies the selected rectangle
+  back out, quoted so a spreadsheet reads it whole.
+- **Editing is a grid's.** Press a cell and pull to select a rectangle, shift-click a far
+  corner to do the same in two clicks, typing
+  starts an edit on that character, Enter and Tab commit and move, Escape backs out one
+  step at a time — what is open, then the edit, then the cell itself —
+  arrows walk the cursor in the order the screen shows. `Ctrl+F` reaches the search,
+  `Ctrl+A` ticks every row on screen, `Ctrl+Enter` adds a row, `Ctrl+D` copies the top of
+  the selection down, Home, End and the page keys cross a long sheet, Delete empties the
+  selection. Deep undo, and the sheet autosaves.
+- **A bar above the headings holds the cell under the cursor.** A cell is thirty pixels
+  tall and as wide as its column, and the sentences an analyst writes into a `Title` are
+  neither: the bar is the same cell, full width, where a long value can be read and
+  rewritten. Enter commits and steps down, Escape lets go of what was typed, and the corner
+  pulls the bar open as far as the value needs. It is drawn whether or not a cell is picked
+  — a bar that arrived with the first click pushed the grid down under the pointer, and the
+  drag that click had started painted a selection nobody aimed at. The key column and the
+  columns the app writes are shown and refused, for the reason their cells are.
+- **The grid always ends on an empty line, and writing in it is what makes it a row.**
+  What a spreadsheet does, and Tab off the last cell grows the sheet the same way. A
+  `+ Row` button in the footer stood in for this: a trip to the bottom of the screen and
+  then back to the column being filled, for the most ordinary thing a grid does. The
+  editor opens where the click landed.
+- **The list of gestures has a door.** The grid keeps its power under a right-click, which
+  is right — and a right-click nobody tries is a feature nobody has. `?`, or the `i` in the
+  header, opens one list naming the keys and the gestures. It is not a tour and blocks
+  nothing.
+- **A row can be kept under the heading while the rest scrolls.** A comparison grid is read
+  *against* something — the confirmed case, the sample that sets the standard — and at row
+  twelve that reference had scrolled away, which is the point of the grid gone. Pinned from
+  the gutter, drawn a second time rather than moved, and not drawn at all while the filter
+  leaves it out: a reference the count says is not on screen would be the grid disagreeing
+  with itself.
+- **Rows are thirty pixels, or four lines.** Right for a worklist and wrong for the column
+  the reasoning is written in, so the sheet says which it is and remembers.
+- **A line beside the sheet's name says what the table is for.** The binders carried a
+  whole "How to use" tab of annotated screenshots; most of what it said belongs on the
+  columns it was about, which is what a column's note is, and what is left is a subtitle —
+  so it sits where a subtitle sits, next to the name, and is written in place rather than
+  in a dialog. A pencil beside the name when there is none, since the `i` in that header is
+  the help; no menu row for it anywhere.
+- **A colour can be told what it means.** Six colours and no legend is six colours whose
+  meaning lives in one analyst's head, on a case that gets handed over. Only the ones the
+  sheet actually paints with are worth naming; they are named in a panel and read back in
+  a strip under the rows.
+- **The gutter carries the row's number and its own menu.** The number, because the key is
+  a handle (`r7a3f…`) and nobody says "row r7a3f" out loud; the tick box takes its place on
+  hover or once anything is ticked, since two controls in 34 pixels would be neither. A
+  right-click there inserts a row above or below — where the analyst is reading, rather than
+  four hundred rows below — duplicates rows, paints them, opens one field by field, or
+  deletes them. A duplicate is keyed anew and carries no colour or link of its own: the
+  gesture is a candidate that turns out to be two, and the second one has had no work done
+  on it yet. Every gesture made on one row acts on **the batch when that row is in it**, and
+  the menu's heading says which it is.
+- **Many rows at once, off one selection.** Shift-click in the gutter ticks a range in
+  the order the grid draws; a box in the header ticks everything shown, and only what is
+  shown. Painting, deleting, filling a column and promoting all act on **what is ticked,
+  or failing that on the rows dragged across** — one rule, said in the bar, because two
+  selections that disagreed meant a screenful selected by dragging could not be painted
+  and forty ticked rows could not be copied. The bulk fill leaves out the columns the app
+  writes itself: a value put in one of those is gone by the next save. What those rows can
+  become is **a bar drawn over the last of them** rather than ten more controls in the
+  question bar, where ticking one row wrapped that bar onto a second line and pushed the
+  table down a row height under the pointer that had just done the ticking.
+- **Columns are the analyst's.** Drag a heading to move it, which moves it **in the
+  file** where a collaborator will see it. Insert one on either side of the one being worked
+  on — a verdict next to the claim it judges — and it lands in rename, ready to be named.
+  Duplicate one and the copy carries its cells, its width, its role and its note, but none of
+  its links: a link is the case's answer about one cell, and two cells claiming it would state
+  one edge twice. Rename in the heading itself on a double-click. One column can be kept
+  beside the key while the table scrolls sideways. A URL in a cell is a link, shown as its host: a hundred
+  and twenty characters of query string in a row thirty pixels tall says nothing.
+- **A row can be read down instead of across.** Fourteen columns do not read by
+  scrolling sideways, so a panel shows one row field by field, every box editable, its
+  links live, and how much of it is filled. It walks the rows on screen, not the file's
+  own order. Each field **offers what its column knows**, as the grid's own editor does: a
+  state or a set of values draws its words to click, a yes/no field is a toggle, a date
+  field carries its picker, and a column the app fills is shown rather than typed into.
+  A panel that put a bare box on all fourteen was a worse place to work than the row it
+  was showing, on exactly the columns somebody had set up.
+- **Everything that opens over the grid closes on Escape or a click beside it** —
+  the heading menu, the gutter menu, the filter, the columns list, the sheet list, the export
+  menu, the fill bar, the row panel. Every row of a menu **acts and then closes**, in that
+  order: closing first clears the column the menu was opened about.
+- **Six passes fix a column that came from somewhere else**, and each says what it would do
+  before it does it — how many cells, and the first few as they would come out. Find and
+  replace, on this column or every one, whole-cell or inside the words; the spacing taken out,
+  because `Kherson ` and `Kherson` are two values in every menu and the difference is a
+  character nothing can draw; the casing; a split into as many columns as the separator makes,
+  keeping the original unless told otherwise, and up to eight — a cell that breaks into more
+  is prose with punctuation in it, so the eighth column keeps the whole tail rather than the
+  pass dropping what it could not place; a merge of several into one, empties left out;
+  and the links lifted into a column of their own, as addresses or as bare hosts — eleven rows
+  sourced to one channel is a finding, and it is invisible while the hosts sit inside
+  sentences. They read the rows **on screen**, filter and all, and the count says which. There
+  is no regular-expression box: a pattern with no preview is how a sheet loses a column.
+- **Sort is three states on one control**: up, down, off. A blank cell sinks to the
+  bottom whichever way the arrow points, because blank is "no answer yet" and it must
+  not bury the rows that have one. A **second column breaks the first one's ties** —
+  *by status, then by date* is how a worklist is read, and one key meant re-sorting by
+  hand every time the first tied. It is offered in the heading menu rather than as a
+  fourth state on the heading's own click, since "sort by this" and "sort by this too"
+  one gesture apart would be a trap, and the heading it breaks ties on carries a smaller
+  mark.
+- **Two rows can be folded into one, and one row split into many.** The grid could already
+  find the values said twice and paint them, and then left retyping one row out of three by
+  hand — on an inbox where the same address arrives from three channels, that is the whole
+  job. Merging keeps the fullest answer per column and the first row's key, so its colour,
+  its links and its promotion record survive. The other direction is the shape every "to be
+  sorted" inbox arrives in: a cell holding five links, or `Buk-M2E, ZU23-2, S-300` in a
+  worklist that wants a line each, becomes a row per value with the rest of the row copied
+  down. Splitting a column into *columns* is a different question and lives in the cleaning
+  passes.
+- **A batch of rows can be added to the sheet already open.** Import files a new sheet,
+  which is right the first time and wrong every time after it: the daily batch of links
+  belongs in the worklist that already carries the statuses. Which incoming column lands
+  where is proposed by name and then the analyst's, and **what would be dropped is said
+  before the press** — "40 rows added" over three silently discarded columns is the kind of
+  import somebody finds out about a week later. It lands as one undoable step.
+- **A heading has three doors, split by how often each is wanted.** The **funnel** asks
+  something of the rows and stays lit whether or not the heading is hovered — hiding the
+  gesture made a hundred times a day behind a hover is how an analyst concludes a grid
+  cannot filter. The **short menu**, on the `...` and on a **right-click anywhere on the
+  heading**, is the frequent list: sort either way, filter, insert a column left or right,
+  duplicate it, rename it, the cleaning passes, point its cells at the case, keep it in
+  view, hide, delete. And its last row opens the **setup panel**, which is the rare half.
+  Before the menu existed the `...` opened the panel straight away, so declaring a role had
+  a door and inserting a column beside the one being worked on had none.
+- **The setup panel is what a column *is*, with room.** A name, a role with its own
+  vocabulary, a line of instruction and the readings the role earns do not fit in a popover,
+  and scrolling a menu is how you lose your place in it. So it takes the same right-hand slot
+  the row panel uses — you are either reading a row across its fields or working on a column
+  down the rows — and it **stays open and follows the next heading clicked**, which is what
+  makes declaring six roles six clicks. Escape closes it; a click in the grid does not,
+  because working on a column means clicking cells of it. Nothing the short menu offers is
+  offered here twice: one screen saying a thing in two places is how the two come to
+  disagree.
+- **A column can be told what it holds, and the file keeps the words.** A role lives in
+  the sidecar — a state, a set of values, a point, a date, a picture, and the two the app
+  fills itself — and it is a **lens, never a validator**: `To be found` in a coordinates column
+  and `OK en cours` outside a status vocabulary are what a real binder holds on every
+  page, so they are shown as written and the filter still finds them. The role is
+  suggested from the column and confirmed by hand, never applied on a guess. What the
+  column is shows **in its heading**, and the cells its lens cannot read carry a mark and
+  are reachable as a filter — a column that accepts anything and says nothing about what
+  it skipped is a column whose total nobody can check.
+  - **The sort follows the role**, which is the most visible thing one buys: without it a
+    `dd/MM/yyyy` column puts 1 February before 31 January. A date sorts by the moment, a
+    state by its own vocabulary's order, a counting column by the count, and a cell the
+    role cannot read goes to the end rather than into the middle of January.
+  - A **set of values** draws one chip per value, and clicking one filters on **that
+    value** — `Buk-M2E, ZU23-2` is two answers, so the filter reads them apart rather than
+    comparing the whole cell. Whether a cell may hold several is a question with a box for
+    the separator under it, rather than one box whose placeholder was the word "no". The
+    value menu counts how many rows hold each, which is what the filter hands back. Reading
+    `2x S-125` as two of `S-125` was offered here once and is gone: it kept a **count inside
+    a column of words**, where nothing could total it — a count belongs in a number column
+    beside a column naming what is counted.
+  - The **vocabulary is edited as rows**, not as text: the word, the colour it carries
+    picked from the palette, how many rows use it, and two buttons to move it — because
+    the order *is* the ranking the sort reads, and `to do → in progress → done` is the
+    order of the work rather than the alphabet. A → Z and Z → A are offered and never
+    applied on their own. The panel also says which declared values nothing uses, and
+    offers to take in the words the cells hold that the list has never heard of.
+  - A **state** column starts on four words already painted — to do grey, in progress blue,
+    done green, ruled out red — because that is what makes the grid readable at a glance.
+    A vocabulary the column brought itself is left unpainted: `done` among an imported
+    binder's own words means what the binder meant.
+  - **Yes / no** is two words the column chooses, and a click on the cell flips between
+    them. Two answers is a toggle, not a menu.
+  - A **number** gives **one** answer in the footer, over the rows on screen, and the
+    column says which: nothing, how many were read, a total, an average, or the range it
+    covers. The footer **names the reading it gives** — `total 52 km over 2` — because a
+    total and an average are the same digits from down there. On screen and not in the
+    sheet: filtering to the twelve rows left to check and then being told the total of all
+    four hundred answers a question nobody asked. The column also carries a **unit** —
+    `%`, `€`, `km` — written beside the heading, once, since the cells keep the digits the
+    file holds. It can be repeated after every cell on request, which a column of shares
+    wants and a column of distances mostly does not. `1 200` and `12,5` are read, and
+    `~9` is read because an estimate is
+    still a number; a digit buried in prose is not, because extracting it would also turn
+    `AB-123` into 123. What it could not read is counted beside the answer and is one
+    click from being the only rows on screen.
+  - **A comma is a decimal mark, everywhere and without a switch.** `12,5` is twelve and a
+    half, `1 200` and `1'200` are twelve hundred, and `1,234,567` is refused rather than
+    read as a million: two commas cannot both be decimal marks, and guessing would put a
+    value a thousand times out into a typed field with nothing said. The same reading
+    settles a point, so `48,8` is one number and not a pair of coordinates — a pair needs a
+    separator the comma cannot be mistaken for (`48,8566; 2,3522`, `48,8566 2,3522`) or a
+    full stop already doing the job. Unlike the day-or-month order of a date, which a column
+    carries its own answer to, this one is not configurable: a binder is written in one
+    convention and it is the European one.
+  - **The editor offers what the column knows, and never only that.** A state or a set of
+    values offers its vocabulary beside the box, **narrowed to what is being typed** — on a
+    multi-value column, to the value after the last separator, because that is the one
+    being written. ↑ and ↓ move through it and Enter or Tab takes what is lit; clicking
+    stays a toggle, which is how a list is built and unbuilt with the mouse. A word the
+    column has never heard of can be **taken into its vocabulary from the cell**, which is
+    where the decision is actually made. A date column offers a calendar that writes the
+    form the column already uses, keeping an hour the cell had. The free text box always
+    stays: `OK en cours`, `AFTER` and `To be found` are what the binders write, and an
+    editor offering only a closed list would refuse exactly the cells that carry the
+    reasoning.
+  - A **point** is checked as it is read: two decimals is about a kilometre and says so,
+    and a transposed pair is flagged rather than refused. The column can be put on the
+    map as a session layer, where a coarse point is drawn as the circle it actually
+    claims, and **one cell can go over on its own** from the row being read, which is
+    what a worklist asks far more often; it can be swept for pairs too close to be two
+    places; and it can be
+    rewritten in one form on request — the one action that touches the file, because a
+    role by itself never improves it.
+  - A **date** column says which of three things it holds — a date, a time, or both — and
+    the cell offers the picker made for it. Declared rather than guessed, so a column that
+    is still empty can be told it holds times. A bare `hh:mm` stays a time of day: the
+    binder writes `01:57` for an event whose date is in the sheet's title, and inventing
+    that date would be inventing evidence. The column can **open the Timeline on the
+    period it covers**, which is what that does — it files nothing there.
+  - A **picture** column draws each cell as the picture it names, in the row, with the full
+    size one click away. Two things count as one: an address, and **a file this case
+    already holds**, written as the case-relative path a collaborator reads the same way in
+    a spreadsheet (`media/quai-sud.jpg`). The case's own files are the common case — a
+    geolocation index is worked on the images in the case folder — so **an image dropped on
+    a row** goes into the case's `media/`, the cell cites it by path, and the cell points at
+    the media entity so the graph knows the row rests on it. Only the address kind reaches
+    the network, which the panel says before the role is chosen. A cell holding neither is
+    shown as written and marked, never refused; an absolute path names a disk this case does
+    not travel with, so nothing is drawn for it.
+  - A **source** column declares where the pages a row rests on are written. Links are
+    already live in any cell without a role, so what declaring one buys is a promotion that
+    knows which column to file as bookmarks.
+  - **Another row** says the cells name other rows of this sheet, and which column's words
+    do the naming. Names and not keys, because the file is what a collaborator reads.
+  - An **offset** says the cell is a time either side of a **sync point**, and which one.
+    `-00:01:50` before it, `00:04:04` after; the column sorts by that, which is the order
+    the videos actually run in and is usable long before the sync point has a time. Naming
+    and dating the sync points is one press from here, because a column of offsets is where
+    anybody wants them.
+  - Three columns are written **by the app, into the CSV**: the date a row first appeared,
+    once and never again, a column the app answers, and a column the case holds. All three
+    are in the file rather than beside it because `On map: YES/NO` is exactly the column a
+    collaborator opening the spreadsheet reads. `Added on` dates every empty cell on the next save, including rows
+    already in the sheet, and the panel says so before it is chosen. The answered column
+    holds one of three readings, and the heading says which — a heading drawing a globe over
+    a column counting criteria would lie about it:
+    - **on the map**, whether what the row points at has a place. Restated on every **read**
+      as well as every save, so a place added an hour ago does not leave the sheet reading
+      NO; the read still writes nothing.
+    - **how complete**, how many of the columns it was told to watch are answered, and
+      **score**, how many of them say yes — the one kind of formula this tool has, and the
+      number a comparison grid is built to end each row with. A yes is spelled the way each
+      watched column spells one: a declared yes/no column answers with its own first word,
+      and a tick column somebody typed by hand holds `x`. The cells hold the **bare number**
+      so a spreadsheet can total them; the denominator is said once, in the heading and the
+      panel, rather than four hundred times in cells thirty pixels tall. A column told to
+      watch nothing writes nothing, because a score over the whole sheet would change under
+      the analyst every time a column was added.
+    - **its point** and **what it is joined to**, which are what the case *knows* rather
+      than whether it knows: the coordinates of the entity one named column points at, and
+      the far end of that entity's edges. One hop, and blank where the answer is not one
+      thing.
+    - **still in the case**, whether the case still holds what the row was **built** from.
+      The only one that reads where the row came from rather than what its cells point at,
+      because it is the only one asking about something that may be gone: a link naming a
+      deleted entity is dropped on the next read, so by then the cell that would have
+      answered is already blank. Rows somebody typed themselves stay empty — they were
+      never built from anything.
+  - **Held by the case** is the third, and it is the one role the app writes that still
+    carries a **link**: the cell opens the entity it was filled from. Typing in it is
+    refused, because a refresh rewrites it — a view somebody can type over is a view that
+    starts lying the first time they do.
+  - Losing a role is **said out loud**. Renaming a column in a spreadsheet takes its role
+    and its map layer with it, and a lens configured in ten minutes is not a colour.
+- **A sheet can be built out of the proofs the case already holds, and kept level with
+  them.** The template that fetches and this shape carry almost the same columns and run in
+  opposite directions, so the modal asks which **before** anything else: *one row per
+  entity* takes a type and its fields, *my geolocations* takes neither. The
+  outgoing one is one row per proof, carrying the media it rests on, the place it puts on
+  the map and coordinates read off the graph. Those three columns are the case's and are
+  read-only; Status, Notes and any column added are the analyst's. It offers no *Build
+  proofs* button, because the proofs already exist and there is nothing left to fetch.
+  - **Refresh is a press, never automatic.** A sheet that rewrote itself when it was opened
+    would move a file under somebody who came to read it, and it would fight the stamp that
+    keeps two readers of one file from overwriting each other. It files the proofs added
+    since, restates the columns the case owns, and says what it did.
+  - **It adds and never removes.** A proof deleted since the build keeps its row, its notes
+    and its colour, and answers NO under *In case*. Filtering on that column groups them so
+    they can be deleted in one gesture — but that is the analyst's call, because the notes
+    on those rows are theirs and nothing in the app wrote them.
+- **A column of sources can be asked whether it still answers.** Most of a worklist is
+  links, they rot, and nothing said which ones already had — so a finding could be
+  published on a source gone for a month, and the only way to know was to open four hundred
+  tabs. This is the one part of a sheet that reaches the network and it goes on a press,
+  over the rows on screen, in batches so the count moves. Distinct addresses rather than
+  rows, because eleven rows sourced to one channel hold one address eleven times. Five
+  answers, and keeping them apart is the point: it answered, it answered *not here* (404,
+  410), it answered something else — a login wall, a rate limit — which says nothing about
+  whether the page is there, nothing answered at all, which says as much about the
+  connection, or it was never asked because the sweep ran out of its own time budget. That
+  last one is counted beside the others rather than folded into them: nobody asked, so
+  nothing was learnt about the page. The dead ones are chips that paint their rows. An
+  address on this machine or its own network is refused unasked, and so is a redirect onto
+  one — the addresses come from the sheet, and a sheet arrives by import, by paste or as a
+  workbook somebody sent.
+- **A column of place names can be read into coordinates, and back.** Both directions
+  existed elsewhere in the app and the sheet, which is where a geolocation index is
+  actually worked, could reach neither — so four hundred rows of `Kherson, Ukraine` were
+  typed in by hand. Reading names into points has two halves, and the case comes first:
+  a row whose cell points at an entity the case has placed is answered off the graph,
+  exactly and at once, and only the words left over reach the geocoder. An entity two
+  different points reach is left alone rather than resolved. Two rules hold the rest:
+  **nothing is applied on its own**, since a geocoder's first hit is a guess and a guess
+  written unattended into a column of evidence is indistinguishable from a coordinate
+  somebody read off a photograph; and **only where the target cell is empty**. Distinct
+  values one way — forty places out of four hundred rows — and row by row the other,
+  because five decimals is a metre and rounding two readings together would put one row's
+  answer on another row's ground. The lookups are paced, so they run one at a time with a
+  count and a Stop.
+- **How far along the work is, off whichever column carries it.** One column per sheet,
+  chosen or accepted from a suggestion, never imposed: the footer reads *312 filled · 156
+  left* on any column, or the tally per bucket when that column is a state. It needs no
+  role at all, which is the point — the binder this most has to replace is a geolocation
+  index with no status column, and its question is the fill rate of one column. The count
+  of rows left is **a link**, so those rows are one click away and the chip that appears
+  was asked for. A sheet opens on the question it was left on and on nothing else: posting
+  that filter automatically could not tell a cleared question from one never asked — both
+  are an empty table in the sidecar — so it came back on every reopen, which reads as a
+  filter appearing from nowhere.
+- **A worklist can be built out of what the case already believes.** Promotion runs one way
+  — rows become entities — and until this existed an analyst holding forty places in the graph
+  had two answers, both bad: retype the forty, or work in a Board with nowhere to write a
+  verdict. Say which type and which of its declared fields deserve a column, and the sheet
+  arrives as one row per entity plus the two the work needs, a status and a note. Nothing else
+  travels: a sheet holding every attribute would be a second copy of the graph, and the second
+  copy is the one that goes stale. Each row **points back at what it came from**, in the same
+  place a promotion writes a link, so editing the rows and promoting them again updates those
+  entities rather than minting twins. The sheet gains its `mentions` edges in the same write.
+- **A sheet goes into the case in one declaration and one press.** There were six roads out
+  of a sheet — rows, a column's words, pointing a column at what the case already held, a
+  column of hours, a column of row names — and none of them could draw an edge, because an
+  edge needs *two* columns and each road only ever saw one. A line of a binder says *this
+  person, in that unit, with these sources, at that point*; the case got the nodes and lost
+  the sentence. So: **a mode per column**, then the joins, one plan, one press.
+  - **The mode is offered only where the column's role carries it.** *Ignore* by default,
+    because only what was asked for travels; *one entity per row* for the subject; *one
+    entity per value* for a column of words; and, where the role says so, *Place
+    (coordinates)*, *Bookmark (links)*, *Claim (hours)*, *edges to other rows*. The three
+    that mint one type and only that type are named after it, in the vocabulary's own word,
+    with what the column has to hold beside it.
+  - **The grain of a column of words is the word**, split on the column's own separator, so
+    `Buk-M2E, ZU23-2, S-125` in one cell is three. Forty pieces of kit out of four hundred
+    rows, created where the case has nothing under that word and attached where it has
+    exactly one. What a word *means* is kept on the column rather than on a cell, because
+    one cell cannot hold three links; on a column with no separator each row also points at
+    what its own word means, which is what the answering columns read.
+  - **The joins are not drawn by hand.** For every pair of columns that designates
+    something, the vocabulary is asked what it allows between their two types, and only the
+    pairs with an answer are offered. A person and a point have no verb between them, so
+    that pair never appears at all. The select shows the registry's own *readings* — "is a
+    member of", "has member" — which settles the direction without asking a question about
+    direction, and a pair the vocabulary leaves no choice about arrives filled in. One
+    confidence for the whole pass, applied to the edges that can carry one; the edges enter
+    **confirmed**, because the analyst chose the verb and pressed the button.
+  - **The scope is one for every mode: the ticked rows**, or the visible ones when nothing
+    is ticked, said in those words on the screen. A pass whose halves disagreed about scope
+    is a pass whose count never adds up.
+  - **The plan is read first, and it is the same code the press runs.** Row by row and word
+    by word: a new entity, one attached to something the case already holds, one already
+    sent updated, a row left alone, or a cell that cannot be read at all — then the edges,
+    with the rows that have only one end and why. The button says how much it will write
+    over both layers.
+  - **A name is not an identity.** Two people share a name, so a row matching an entity
+    already in the case is *offered* it, never merged into it behind the analyst's back;
+    attaching is a choice made in the plan. The one exception is the identifier family,
+    where the value is the identity — one address is one email.
+  - **A field is checked before it is stored.** A column mapped onto a declared field goes
+    through the same readings a typed form does, so `about 12` in a number field stops that
+    row and says why instead of landing as text in a field nothing can sum. Nothing else
+    travels: a pass that swept every column would put a worklist's private notes into the
+    case's record of a subject.
+  - **Pressing twice is safe.** The row keeps a link to what it made, so the second press
+    updates it — and only while that link still points at something of the promoted type,
+    since a cell pointing at a place is not a person waiting to be overwritten. An edge
+    already stated is restated rather than stacked.
+  - **A column of coordinates makes places**, with the uncertainty radius the cell's own
+    precision claims: two decimals is about a kilometre, and a place stored without saying
+    so reads on the map as a pinpoint somebody established. Points on their own are that
+    column as the *subject*, typed Place — it is its own point, and nothing asks a second
+    time — and a place is **named by whichever column is the subject**, so a geolocation
+    index names its points by making the title column the subject and this one the point. The verb joining the row to its
+    point is read out of the vocabulary — a structure is *sited at* its ground, a media *was
+    recorded at* its own — and a type the vocabulary puts nowhere is refused at the door
+    rather than given a latitude nothing in the app would show. A **column of addresses**
+    files its pages as bookmarks that mention the row's subject, one per URL however many
+    rows cite it.
+  - **Nothing that owns a file is born from a cell.** A media, a capture, a proof, a post
+    hold bytes and a cell holds an address, so those types are not on offer here at all.
+    Going to fetch the file is the proof import's road, and it is the only one that may.
+  - A **Claim is not something a bare row can become**: a statement carries what it is
+    about, when it applies and what it rests on, and a row promoted on its own would be a
+    statement about nothing. It is a mode of its own, on a column of hours.
+  - **The press is all or nothing.** The file is checked before the first entity is written,
+    the graph and the sheet's own save happen in one transaction, and a file that moved
+    under the analyst takes the whole pass back — where entities without the links that make
+    a second press an update would be minted twice by the retry.
+  - Afterwards the row says whether it still agrees with the case: the sidecar keeps what
+    the cell said when it was taken, and a cell edited since carries a mark. The sheet gains
+    a `mentions` edge per promoted row.
+  - **A sync point with no time is dated from where the hours are declared.** A column of
+    offsets carries its rows' order straight away and their hours only once the shot itself
+    is dated, so the mode that reads them says which sync point it counts from and offers to
+    date it. The sync points open **over** the declaration rather than instead of it: what is
+    on screen is what sent the analyst there, and closing it to ask for one date would be
+    asking them to declare the whole pass twice. Escape answers the dialog on top.
+  - **Ticked rows can be one thing rather than one thing each.** The only shape row-by-row
+    gets wrong by construction, and it is a common one: the binder's geolocation index puts
+    a cross-border event on two lines, one point per country, same title, same source.
+    Promoted separately that is two events and the second is the copy nobody corrects. As a
+    group it is one entity with a place per point, every row pointing at it — so either of
+    them can say it is already in the case. Where two rows disagree about a field the first
+    answer is kept and the preview says which field that was, because rows grouped on
+    purpose differ in the detail; that is why there are two of them.
+- **A geolocation index builds its proofs, which is the one road that fetches files.** Its
+  own button, offered only on a sheet that can feed it — two columns of addresses and one of
+  coordinates — because it is not a mode of the press above: that one is a single transaction
+  precisely because nothing in it touches the network, and this one is a hundred downloads.
+  Three columns and a note say what a row is, and how much of that the row holds decides what
+  it becomes: coordinates alone pin a place, coordinates and the footage pose that media on
+  its ground, and all three write the whole constellation a hand-made proof import writes —
+  the two files, the proof composed of the published picture, and the point they all state.
+  `derived-from` is honest here and only here: the app fetched the bytes and composed the
+  proof, so it observed the derivation. A proof with no footage is **refused**, stricter than
+  importing one post by hand, because a binder holds dozens of those and nobody re-reads them
+  one by one. So is a geolocation with no point, and a proof with no name — a proof's name is
+  its filename.
+  - **The plan downloads nothing.** The three refusals come out of the cells and the three
+    "already there" answers out of the case, so the analyst reads what a hundred downloads
+    would do before one of them starts. Rows ruled out on their status are dropped by default
+    and handed back with one click, because a filter nobody can see is the app deciding which
+    lines of a binder count.
+  - **A source cell may list several addresses.** There is no `+` in a spreadsheet, so a
+    cell holding them separated by spaces is how a hundred rows say what the import dialog
+    says with boxes: one proof, one point, and every file it rests on. The published
+    picture stays one — a row builds one proof, and a second picture would be a second.
+    A row counts as already there only when every one of its addresses is already
+    downloaded, since half a row is a row to run.
+  - **A post with several attachments is answered, not asked about.** That is the ordinary
+    shape here — a published geolocation is a picture and the post carries the material
+    beside it — so a picker would fire on nearly every row, and a hundred rows cannot each
+    raise one. Each slot takes **everything it can use and the extractor vouches for**:
+    the proof takes every picture, since a post publishing a set published one proof of
+    several panels, and the material takes every picture, clip and recording, since a post
+    carrying two photos of the scene carries two things that were shot there. Keeping the
+    first of them keeps half. What is *not* vouched for is left: the video extractor reads
+    a post's media and the media of the post it quotes into one list, and past the first it
+    cannot say whose a clip is. Taking it would file a stranger's video on this row's
+    point, which is a wrong statement where a missing one is only incomplete — and the two
+    screens with somebody in front of them list it instead.
+    A row behind a login wall says the next move rather than the platform's own wording,
+    which is a tombstone nobody can act on: no browser picked in Settings, one picked that
+    is not signed in to that site, or Windows refusing to hand over a Chromium cookie store
+    at all — three different instructions, not one sentence.
+    The two still differ on what happens when nothing matches, because their contents do:
+    a post carrying no picture holds no proof and is a row to do by hand, while the
+    material takes a still photographed on the spot as readily as a clip.
+  - **A hundred rows a press**, against five hundred for the press above, and the door says
+    how many are left over: a cap that only refuses reads as a breakdown where the same cap
+    naming the remainder reads as the queue it is.
+  - **Atomic per row, not over the batch** — the opposite of the press above and for the
+    opposite reason. Failing at row 47 is no reason to hand back the 46 that worked, so the
+    files are fetched into a staging directory first and nothing enters the case until they
+    are held. A row behind a login wall ends as the words **needs a login** rather than as a
+    prompt nobody can answer a hundred times; naming a browser in Settings is what unblocks
+    it, and the next press walks through on its own.
+  - **It runs as a job with a bar and a stop**, because two minutes of downloads is
+    something to watch rather than wait out. Counted in rows, not in bytes: a row is the
+    unit this road is atomic in, and how far down the binder it has got is what the analyst
+    is actually watching. Stopping keeps every row it finished and leaves nothing of the
+    row in flight: that row's bytes are still outside the case. When it ends the screen
+    **says so** — past tense, each row carrying what it turned out to be rather than what
+    it was going to be, and a way out called *Done* rather than a Close that reads as
+    walking away. It also names the one loose end: a proof composed of several pictures has
+    no export until somebody opens it.
+  - **Pressing twice is safe without the sheet remembering anything.** A proof is found by
+    **where it was published**, a media by the page it was downloaded from, a place by its
+    point — so a second press refreshes the point, the note and the name, and downloads
+    nothing. Identity is the address and never the name, because the name is a cell
+    somebody corrects: keyed on it, a corrected title built a second proof beside the first
+    and left the old one standing, which is the duplicate nobody notices since both look
+    right in the list. Corrected, the title now *moves* the proof, spec and export with it.
+    What the sheet keeps is the chips: each cell ends up pointing at what it produced.
+  - **One picture published about two places is one proof.** The binder's cross-border
+    shape — a strike written on two lines, one point per country, same video, same
+    published picture. Row by row that filed two exports of one image under two names and
+    fetched both files twice. Now the rows sharing a published address are one proof: the
+    first composes it, and the others add their point to the **material and to the proof
+    itself** — the published picture is what establishes both positions, and saying so is
+    the whole reason two lines were written about it. The composer's own coordinate field
+    goes on stating one point, and only the edges it wrote are reconciled by a later save:
+    an edge stated by another hand is a separate claim about the same file, so these stand.
+    The proof always `depicts`, whatever POV says, having been composed and recorded
+    nowhere. Two rows under one *name* at two different addresses are still refused: that
+    is a collision over one filename, not one proof. And a row that joins one that did not
+    build — a dead link, a login wall — **fails with that reason** rather than writing a
+    point onto nothing: reported as done, the second position of a cross-border strike
+    disappeared with no red line and no later press to take it again.
+- **The reading is handed over three ways.** The rows on screen as a CSV, the rows ticked as a
+  CSV, or the whole view **copied as a Markdown table** — which is what goes into a note, a
+  ticket or a message, and retyping twelve rows into the Notebook is where citing a sheet
+  stops. The Markdown carries a **quoted header** saying where it came from: the case, the
+  sheet, the filter that was on, the sort, how many rows of how many, and the hour. That is
+  the one thing a sheet plate would have carried and the only part worth keeping — twelve
+  rows pasted with no filter named are a sample presented as a set, and *12 of 468* read
+  without seeing why is worse than no number. A CSV is **written into the folder this case files sheets in** (Settings → Storage,
+  the case's own `exports/` until another is picked), the way a note's PDF and an analysis
+  plate are. Where it lands is named **in the export menu and changed from there** — sending
+  the analyst to Settings to file a table somewhere else was the one export in the app that
+  did that — and the sentence saying where it went carries a button that opens the folder,
+  because a folder nobody finds is a file exported twice. A download instead was the one
+  export nobody could find twice. Inside the case a re-export overwrites so the folder is
+  refreshed in one click; outside it nothing is ever overwritten, because those files are
+  the analyst's.
+- **A column naming other rows of the same sheet becomes real edges.** The binders wrote an
+  order of battle in a column called `Links with others` — a brigade listing its companies,
+  each company naming its brigade back — held together by a spreadsheet validation that
+  cannot survive a row moving, and in the real file it had already decayed to `#REF!`. Here
+  the cell keeps the **words**, because a file whose links read `r7f3a` is one the
+  collaborator opening it cannot follow, and the link is re-read from those words every
+  time: a name points at a row when exactly one other row spells it that way. A name that
+  reaches none, or two, is shown rather than guessed at — the same decay becomes a list of
+  what to fix. The row panel shows the other direction, **who points at this row**, derived
+  rather than kept in a second column that would drift. As a mode of the press it draws
+  `part-of` or `member-of` between the entities both rows are, and an order of battle lands
+  in the one press that makes its units: the modes run in the order their answers depend on
+  each other, so the edges see the subjects the same press just wrote. A row whose end is
+  outside the pass and not in the case yet is said so rather than invented.
+- **An answering column can give the case's answer rather than a yes or no.** `On map`
+  says *whether* the case knows the row's subject and nothing about what it knows, so the
+  coordinates and the parent unit went on being retyped into the column alongside. Two more
+  readings close that: the **point** the case holds for what one named column points at, and
+  **what it is joined to** — the far end of that entity's edges, one hop, written with the
+  column's own separator. The column is named rather than swept, since a sheet may point at
+  the case from a subject column and a place column both. Blank where the case has nothing
+  to say, and blank where two different points reach the same entity: choosing one would be
+  the silent merge the app refuses everywhere.
+- **A column of hours becomes dated statements, not a date field.** The binders do not hold
+  dates. They hold a *reasoning about* one across three or four columns: the hour that was
+  established, the hour that was estimated, and how it was worked out — "the author gave me
+  this time", "a private video shows 1:57", "between 2:00 and 2:10". Copied into one field
+  that is one number and three lost columns, and a Timeline fed that way is a Timeline
+  nobody believes. So each ticked row becomes a **Claim**: about what its subject cell
+  points at, carrying when, how sure, the reasoning, the place its own column names and the
+  sources its links are. A row with no established hour falls back to its estimate **one
+  rung lower in confidence** and the reasoning says which it was, because the binder kept
+  two columns for exactly that difference; a note reading *between 02:00 and 02:10* becomes
+  an interval. Two things are asked for rather than guessed, since guessing either moves
+  evidence in time: which **day** a column of bare clocks belongs to — the binder keeps it
+  in the sheet's title — and which **zone** it is written in, where local is the default and
+  is honest, because a column called `Local time` stamped `Z` is off by however far away the
+  event happened. Pressing again updates the statements rather than filing them twice, and
+  the hours ride in the same press as the subjects they are about.
+- **Rows lined up on a sync point inherit an absolute time from it.** A **sync point** is
+  one moment visible in several rows — a launch, an impact, a shot heard in every video —
+  and each row carries its offset against it: `-00:01:50`, `00:04:04`, which is exactly
+  what the binder's `start synchro` column held. Their **relative order is usable straight
+  away**, before anybody knows what time anything happened; the moment the shot itself is
+  dated, every one of them has a time to the second. Sync points are named and dated on the
+  sheet rather than on the columns, because one serves several of them and a time restated
+  per column will disagree with itself — and a sheet holds more than one, since the binder
+  already had a start and an end. They are reached from the column that uses one, which is
+  the only place anybody wants them. Staying undated is the normal state and costs only the
+  absolute times. What it produces is a **statement**
+  whose reasoning names the moment, never a timestamp written into a cell: that is an
+  inference, and presenting one as an observation is the thing the whole ontology is built
+  to prevent.
+- **A row can carry case files of its own.** The proof of an hour — the screenshot of the
+  message, the emailed reply — sat in two whole tabs of pasted images beside the work it was
+  the proof of, because a spreadsheet has nowhere to put it. Attached to the row from its
+  panel and **referenced, never copied**: the file is already the case's, so nothing new is
+  filed, no artifact is owned twice and the bundle does not drift. The sheet mentions it, so
+  it is reachable from the file's own side too. A row holding links can also ask **what the
+  library already downloaded from them** — matched on the source URL the download recorded,
+  never on a title resembling a filename — which is the two halves of one page that nothing
+  had ever joined.
+- **The question is a search, a chip per clause and a count** — *23 of 1 204*, the
+  denominator being the whole sheet. What the search found is **marked in the cells**, since
+  on a fourteen-column binder the match is often in a column that is off screen. A column is
+  asked four things, and they hold together: which values, whether it is empty or filled, a
+  word it must or must not hold, and — on a column that says it holds numbers or dates — a
+  **bound at either end**, which is the question a list of values cannot ask: *before this
+  date*, *under five kilometres*. The value menu **pages** rather than giving up: it lists the
+  commonest, says how many there are in all, and a box narrows against the whole column, so a
+  column of a hundred and twenty cities is walkable instead of answering "too many to list".
+- **A cell can point at an entity, where that means anything.** The `@` is drawn on a text
+  column and on a point — a yes/no cell, a date, a number and a value out of a vocabulary are
+  not things the case holds an entity for, and an `@` on them read as an offer to point a
+  status at a person. A cell that already carries a link keeps its `@` whatever its column
+  became. It opens the picker, which leads with what the case holds — a count per type — because the analyst usually does not
+  know the label: the cell says `3rd Bde` and the case holds `3rd Separate Brigade`. A
+  bare search bar only works when the answer is already known. Narrowing by type is one
+  click and says how big each answer is first; the arrows and Enter pick without the
+  mouse. The list is **paged, not capped**: it says how many of the matching set are on
+  screen and loads the rest on a press, and the ordering — name or newest, either way —
+  is applied to the whole matching set on the server, because sorting the forty rows
+  already loaded answers a different question. The link is recorded beside the table and
+  the cell takes the entity's name when it was empty, so the CSV still says in words
+  what the graph says in an edge. Each of those becomes a `mentions` edge on save, and
+  clicking the mark opens that entity's Details. **A link does not outlive what it points
+  at.** No sheet shows or saves a link the case cannot answer for: the rule runs on every
+  read and every save, so a sidecar carried in from another case or written against older
+  ids heals itself rather than showing a cell that reads as work already done. Deleting an
+  entity clears it eagerly in every sheet of the case, and an open grid drops it as soon as
+  it hears the case changed, saying how many went — otherwise the next save would write the
+  dead id back over the file the delete had just cleared. The words in the cell stay, since
+  the file has to say in words what the graph said in an edge. Restoring from the trash
+  brings the entity back, not the link.
+- Rows are ticked in the gutter, painted from the annotation palette, and deleted
+  together. Amber is not in that palette: it means selection, so a tick marks the
+  gutter rather than washing the row and hiding the colour just painted on it.
+- **The grid draws its own scrollbars**, one per axis, in a strip beside the table
+  rather than over it. The app's chrome is thin everywhere, which is right for a
+  panel hinting there is more below and wrong here, where the bar is how a wide
+  table is crossed; and on Linux the native ones are overlays that fade out. Drag
+  the thumb, or click the track to jump a panel. The tick column, the row's key and
+  the column kept in view stay put while the table scrolls sideways.
+- Only the rows on screen are in the DOM, so a sheet of twenty thousand scrolls. Row
+  height is fixed: a cell holding sentences shows one line and opens into a box that
+  grows.
 
 ## Notebook
 

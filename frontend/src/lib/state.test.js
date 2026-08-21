@@ -70,6 +70,10 @@ describe('closeCase', () => {
     expect(uiState.timelineRange).toBeNull();
     expect(uiState.mapTimelineRange).toBeNull();
     expect(uiState.gotoCoords).toBeNull();
+    expect(uiState.openNotebook).toBeNull();
+    expect(uiState.focusCapture).toBeNull();
+    expect(uiState.skyAt).toBeNull();
+    expect(uiState.refViewers).toEqual([]);
   });
 });
 
@@ -123,7 +127,7 @@ describe('prefsReady — tools must not race the settings fetch', () => {
 
     await loadPrefs().catch(() => {});
     await expect(prefsReady).resolves.toBeUndefined(); // never hangs a tool
-    expect(prefs.homeView).toEqual({ lat: 48.8584, lon: 2.2945, zoom: 16 });
+    expect(prefs.homeView).toEqual({ lat: 43, lon: 25, zoom: 3 });
   });
 });
 
@@ -277,6 +281,43 @@ describe('case request ownership', () => {
 
     expect(state.caseState.current).toEqual({ id: 'case-b', name: 'Case B' });
     expect(state.caseState.loading).toBe(false);
+  });
+
+  it('drops every handoff meant for the case being left behind', async () => {
+    // Switching cases and closing one share this list. Written out twice they
+    // drifted, and an `openProof` queued in case A was spent against case B.
+    state.caseState.current = { id: 'case-a', name: 'Case A' };
+    api.get.mockResolvedValue({ id: 'case-b', name: 'Case B' });
+    const queued = {
+      composeQueue: ['media/a.jpg'],
+      postProof: { title: 'x' },
+      openProof: 'proof-a',
+      openDraft: 'draft-a',
+      openNotebook: { noteId: 'note-a' },
+      inspectPath: 'media/a.jpg',
+      focusMedia: 'media/a.jpg',
+      focusCapture: 'media/crop.png',
+      openInspect: 'session-a',
+      drawInGraph: { label: 'A question' },
+      openBoardEntity: 'entity-a',
+      openGraphEntity: 'entity-a',
+      timelineFocus: { itemId: 'event-a' },
+      timelineRange: { from: '2026-01-01', to: '2026-02-01' },
+      mapTimelineRange: { from: '2026-01-01', to: '2026-02-01' },
+      gotoCoords: { lat: 1, lon: 2 },
+      skyAt: { lat: 1, lon: 2, date: '2026-01-01', time: '12:00' },
+      refViewers: [{ id: 'v1' }],
+    };
+    Object.assign(state.uiState, queued);
+
+    await state.openCase('case-b');
+
+    for (const key of Object.keys(queued)) {
+      const left = state.uiState[key];
+      expect(Array.isArray(left) ? left : left ?? null, `uiState.${key}`).toEqual(
+        Array.isArray(queued[key]) ? [] : null
+      );
+    }
   });
 
   it('waits for case-owned work and cancels the switch when it cannot be saved', async () => {

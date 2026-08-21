@@ -117,6 +117,20 @@ export function adoptSavedAnalysisView(caseId, view) {
   return true;
 }
 
+/** Carry a rename onto the reading a surface is holding.
+ *
+ *  The label has to land here as well as in the menu: an autosave sends the name it
+ *  is holding, so a live view left on the old one would write it straight back. */
+export function renameAnalysisView(caseId, viewId, name) {
+  if (analysisSearch.caseId !== caseId) return false;
+  const slot = [analysisSearch.catalog, analysisSearch.timeline].find(
+    (candidate) => candidate.activeView?.id === viewId
+  );
+  if (!slot) return false;
+  slot.activeView = { ...slot.activeView, name };
+  return true;
+}
+
 /** Leave the named reading of one family. The catalog question can stay on screen
  *  or be dropped with it. */
 export function leaveAnalysisView(caseId, surface, { clear = false } = {}) {

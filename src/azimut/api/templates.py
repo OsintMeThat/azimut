@@ -93,6 +93,11 @@ class ProofTemplateData(CanonicalModel):
     footerSize: TextSize = 15
     footer: str = Field(default="", max_length=200)
     footerEnabled: StrictBool = True
+    # What the band prints. A style stored before these existed reads with these
+    # defaults, which is what it has always looked like: the credit line prints,
+    # the coordinates do not.
+    footerText: StrictBool = True
+    footerCoords: StrictBool = False
     footerColor: Color | None = None
     footerAlign: Literal["left", "right"] = "left"
     captionsEnabled: StrictBool = True

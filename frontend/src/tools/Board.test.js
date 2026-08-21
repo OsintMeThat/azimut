@@ -273,7 +273,7 @@ describe('a proposal can be settled here', () => {
   });
 
   it('dismisses through the standard delete, so it stays recoverable', () => {
-    expect(source).toContain("import { deletedToast } from '../lib/trash.js'");
+    expect(source).toContain("from '../lib/trash.js'");
     expect(source).toContain('deletedToast(caseId, result, entity.label)');
   });
 
@@ -362,6 +362,27 @@ describe('where a graph-only type is read', () => {
     // a person, an account, a claim have no tool of their own to be reopened in
     expect(source).toContain('uiState.openBoardEntity');
     expect(source).toContain('openId = id;');
+  });
+});
+
+describe('opening a saved view of the other surface', () => {
+  it('brings its question to the rows without moving the analyst', () => {
+    // The two surfaces share one question and restore only what each of them saved:
+    // a Graph view's lens and arrangement wait for the Graph rather than dragging the
+    // analyst there. Handing the question over is a separate, explicit act.
+    const body = source.slice(
+      source.indexOf('async function openAnalysisView'),
+      source.indexOf('let appliedViewId'),
+    );
+    expect(body).toContain("if (view.surface !== 'board') return;");
+    // No tool switch here. "Draw these N" stays: that handoff is asked for.
+    expect(body).not.toContain('uiState.tool');
+  });
+
+  it('leaves the table sorted as it is when the view states no sort', () => {
+    expect(source).toMatch(
+      /if \(view\.surface !== 'board'\) return;\s*const board = view\.spec\?\.board \?\? \{\};/
+    );
   });
 });
 
@@ -493,5 +514,33 @@ describe('Ctrl+V on the table', () => {
   it('refuses to write into a frozen reading, and says why', () => {
     expect(source).toContain("toast('This snapshot is read-only. Leave it to paste.', 'warn')");
     expect(source).toContain('{#if pasted && !snapshotReading}');
+  });
+});
+
+describe('several rows at once', () => {
+  // the gesture itself is driven in `Board.render.test.js`; this holds the wiring
+  // that a rendered click cannot see
+  it('deletes a selection through the trash’s own dialog and route', () => {
+    // one wording and one endpoint for the gesture, shared with the organizer, so
+    // the two surfaces cannot promise different things about the same act
+    expect(source).toContain('entityDeletePrompt');
+    expect(source).toContain('deleteEntities');
+    expect(source).not.toContain('/entities/delete');
+  });
+
+  it('measures a shift-run over the rows on screen, with the shared selection math', () => {
+    expect(source).toContain("import { toggleCheck } from '../lib/gridSelect.js'");
+    expect(source).toContain('rows.map((row) => row.id)');
+  });
+
+  it('drops the ticks when the question they were made in changes', () => {
+    // a row that scrolled out of the narrowing would still be going, unseen
+    expect(source).toContain('untrack(untickAll)');
+  });
+
+  it('offers no box on a frozen reading, where every case write is off', () => {
+    const markup = source.slice(source.indexOf('</script>'));
+    expect(markup).toMatch(/\{#if !snapshotReading\}[\s\S]{0,500}<th class="pick">/);
+    expect(source).toContain('if (snapshotReading || confirmState || !caseState.current');
   });
 });

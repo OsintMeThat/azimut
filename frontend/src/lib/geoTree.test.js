@@ -301,3 +301,15 @@ describe('addressing a row in the tree', () => {
     ]);
   });
 });
+
+describe('a proof of several points', () => {
+  it('finds a row by the name its point was given', () => {
+    // three rows under one title: the label is what tells them apart
+    const rows = [
+      { id: 'p', kind: 'proof', title: 'Harbour strike', label: 'impact 2', geo: {} },
+      { id: 'p', kind: 'proof', title: 'Harbour strike', label: 'caméra', geo: {} },
+    ];
+    expect(filterSaved(rows, { query: 'caméra' })).toHaveLength(1);
+    expect(filterSaved(rows, { query: 'harbour' })).toHaveLength(2);
+  });
+});

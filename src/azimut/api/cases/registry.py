@@ -15,6 +15,7 @@ from fastapi import APIRouter
 from ...engine import entities as entity_engine
 from ...engine import graph as graph_engine
 from ...engine import links as link_engine
+from ...engine import sheetpromote as promote_engine
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
 
@@ -125,6 +126,13 @@ def entity_types() -> list[dict[str, Any]]:
             "family_reads": entity_engine.FAMILY_READS.get(entry.family, ""),
             "icon": entry.icon,
             "manual": entry.manual,
+            # Whether a sheet row may become one. Not the same question as ``manual``
+            # and it drifted the moment it was assumed to be: a ``place`` is never
+            # created by hand because it is born from the map, yet a column of
+            # coordinates is the other honest way to have one; a ``claim`` is created
+            # by hand and a bare row cannot make one, since a statement carries what it
+            # is about, when it applies and what it rests on.
+            "promotable": entry.type in promote_engine.promotable_types(),
             "image_gallery": entry.image_gallery,
             # ``entity.label`` is the primary value, but "Name" is not an honest
             # reading for an IP address, a phone number or a claim. The generated

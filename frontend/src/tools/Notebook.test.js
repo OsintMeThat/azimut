@@ -77,3 +77,21 @@ describe('Notebook note creation', () => {
   });
 
 });
+
+describe('Notebook — the debounced save and the export', () => {
+  const notebook = readFileSync(new URL('./Notebook.svelte', import.meta.url), 'utf8');
+
+  it('writes a pending edit before exporting instead of dropping it', () => {
+    // Switching tabs resets `saved` without touching the timer, so the timer can
+    // hold the only copy of another tab's edit. Cancelling it lost that edit
+    // while the header still read "Saved".
+    expect(notebook).toContain('await flushPendingSave();');
+    expect(notebook).toContain('async function flushPendingSave()');
+    expect(notebook).toContain('if (write) await write();');
+    expect(notebook).not.toMatch(/exportBusy = true;\s*\n\s*try \{\s*\n\s*clearTimeout\(saveTimer\);/);
+  });
+
+  it('still drops the pending edit when the note is being deleted or reset', () => {
+    expect(notebook).toMatch(/function cancelPendingSave\(\) \{[\s\S]*?pendingSave = null;/);
+  });
+});

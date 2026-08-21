@@ -67,5 +67,22 @@ describe('saved analysis views', () => {
   it('keeps a snapshot immutable instead of recapturing it under the same name', () => {
     expect(source).toContain("disabled={slot.activeView?.mode === 'snapshot'}");
     expect(source).toContain('Duplicate the snapshot to keep another copy.');
+    // A label is not a capture: the rename route takes both modes and no spec.
+    expect(source).toContain('api.patch(');
+    expect(source).toContain("{ name: next }");
+  });
+
+  it('reads the list in a remembered order, and only where there is one to read', () => {
+    expect(source).toContain('sortViews(views, order)');
+    expect(source).toContain('order = readViewOrder(family)');
+    expect(source).toContain('writeViewOrder(family, value)');
+    expect(source).toContain('{#if views.length > 1}');
+    expect(source).toContain('{#each orders as choice (choice.id)}');
+  });
+
+  it('dates every row and spells the exact minute out of the way', () => {
+    expect(source).toContain('timeAgo(view.updated_at, now)');
+    expect(source).toContain('title={exactStamp(view.updated_at)}');
+    expect(source).toContain('now = Date.now()');
   });
 });

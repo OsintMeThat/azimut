@@ -37,6 +37,29 @@ describe('Timeline tracks', () => {
     expect(tracks[1].categories).toEqual(['statement']);
   });
 
+  it('settles when the deduped spelling is itself already taken', () => {
+    // A saved or imported view can hold ids that already look deduped. The
+    // suffix used to be fixed per row, so this collided with itself forever and
+    // froze the tab on open. Vitest cannot fail a hang, so the test is the fact
+    // that this call returns at all.
+    const tracks = normalizeTimelineTracks([
+      { id: 't-3', label: 'One' },
+      { id: 't', label: 'Two' },
+      { id: 't', label: 'Three' },
+    ]);
+    const ids = tracks.map((track) => track.id);
+    expect(ids).toHaveLength(3);
+    expect(new Set(ids).size).toBe(3);
+    expect(ids).toContain('t-3');
+  });
+
+  it('keeps ids unique however many rows collide', () => {
+    const ids = normalizeTimelineTracks(
+      Array.from({ length: 6 }, () => ({ id: 'x', label: 'X' }))
+    ).map((track) => track.id);
+    expect(new Set(ids).size).toBe(6);
+  });
+
   it('reorders and duplicates presentation without sharing arrays', () => {
     const tracks = defaultTimelineTracks();
     expect(moveTimelineTrack(tracks, 0, 1).map((track) => track.label)).toEqual(['Media', 'Events']);

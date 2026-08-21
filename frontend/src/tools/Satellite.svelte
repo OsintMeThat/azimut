@@ -11,6 +11,7 @@
   import {
     caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords, prefsReady,
   } from '../lib/state.svelte.js';
+  import { wrapLon } from '../lib/coords.js';
   import { mapLinks } from '../lib/maplinks.js';
   import * as measure from '../lib/measure.js';
   import { markerGeometry, markerSvg } from '../lib/mapMarkers.js';
@@ -27,6 +28,7 @@
   import { dragBearing, pivotPanOffset } from '../lib/satRotate.js';
   import { clampSize, scaledCapture } from '../lib/captureSize.js';
   import { panelWidth } from '../lib/panelWidth.js';
+  import PlaceSearch from './satellite/PlaceSearch.svelte';
   import { assignFolder } from '../lib/filing.js';
   import { saveRelation } from '../lib/relations.svelte.js';
   import { openEntity } from '../lib/navigate.js';
@@ -82,6 +84,7 @@
   import SavedTree from './satellite/SavedTree.svelte';
   import SavedSearch from './satellite/SavedSearch.svelte';
   import SavedOverlay from './satellite/SavedOverlay.svelte';
+  import SheetPointsOverlay from './satellite/SheetPointsOverlay.svelte';
   import TemporalMapOverlay from './satellite/TemporalMapOverlay.svelte';
 
   let mapEl;
@@ -115,6 +118,9 @@
   let temporalMapLoading = $state(false);
   let temporalMapError = $state('');
   let temporalMapSeq = 0;
+  /** A sheet's coordinate column, handed over as points. Session-only, like the layer
+   *  above it, and never part of a capture or a proof. */
+  let sheetPoints = $state(null); // { points, sheet, column }
   // Persist geography or My-work folder grouping across reloads.
   const GROUP_KEY = 'azimut:satelliteSavedGroup';
   let savedGroup = $state(loadSavedGroup());
@@ -429,7 +435,25 @@
     uiState.refViewers = uiState.refViewers.filter((v) => v.id !== id);
   }
 
-  onMount(async () => {
+  // Svelte only honours a cleanup returned from a *synchronous* onMount, and the
+  // setup below has to await the providers and the saved home view. So onMount
+  // stays synchronous and hands back a teardown that runs whatever the async
+  // build registered. Tools are never unmounted today, which is exactly why an
+  // async onMount would have gone on quietly returning a promise nobody calls.
+  onMount(() => {
+    let teardown = null;
+    let gone = false;
+    build().then((cleanup) => {
+      if (gone) cleanup?.();
+      else teardown = cleanup;
+    });
+    return () => {
+      gone = true;
+      teardown?.();
+    };
+  });
+
+  async function build() {
     refreshUsage(); // prefs drive the eco/soft-block fallbacks from the start
     providers = await api.get('/api/satellite/providers');
     await prefsReady; // the home view has to land before the map is built
@@ -460,7 +484,10 @@
     }).addTo(map);
     map.on('moveend zoomend', () => {
       const c = map.getCenter();
-      center = { lat: c.lat, lon: c.lng, zoom: map.getZoom() };
+      // Leaflet keeps counting past ±180° when the analyst pans across the date
+      // line, and every coordinate the app sends is bounded to it — an unwrapped
+      // centre made Capture answer 422 and blocked work over the Pacific.
+      center = { lat: c.lat, lon: wrapLon(c.lng), zoom: map.getZoom() };
     });
     map.on('rotate', () => {
       bearing = Math.round(map.getBearing());
@@ -492,7 +519,7 @@
       offActivated();
       map.remove();
     };
-  });
+  }
 
   function onKeydown(e) {
     if (uiState.tool !== 'satellite') return;
@@ -1231,6 +1258,8 @@
       temporalMap = null;
       temporalMapLoading = false;
       temporalMapError = '';
+      // The points came out of another case's sheet, so they go with it.
+      sheetPoints = null;
     }
     if (!id) {
       return;
@@ -1297,6 +1326,25 @@
       map.setView([target.lat, target.lon], zoom);
       setBearing(Number.isFinite(target.bearing) ? target.bearing : 0);
     }
+  });
+
+  /**
+   * A sheet's column of coordinates, taken as it was handed over.
+   *
+   * No request, unlike the layer below: a sheet's coordinates are text in a CSV, not
+   * entities the case can be asked about, so there is nothing to re-ask and the points
+   * themselves travel. Framed on what arrived, because a layer that lands off screen
+   * reads as a layer that did not land.
+   */
+  $effect(() => {
+    const handed = uiState.mapSheetPoints;
+    if (!mapReady || !handed?.points?.length) return;
+    uiState.mapSheetPoints = null;
+    sheetPoints = handed;
+    const bounds = L.latLngBounds(handed.points.map((point) => [point.lat, point.lon]));
+    tick().then(() => {
+      if (map && bounds.isValid()) map.fitBounds(bounds, { padding: [48, 48], maxZoom: 17 });
+    });
   });
 
   $effect(() => {
@@ -1599,6 +1647,18 @@
     } finally {
       searching = false;
     }
+  }
+
+  /** Fly to a row the search bar proposed. A saved item is opened the way the
+   *  panel opens it — same view, same bearing — and anything else is a point
+   *  with a sensible zoom for what it is: a city, a street, a coordinate. */
+  function goToSuggestion(item) {
+    if (item.row) {
+      openSaved(item.row);
+      return;
+    }
+    if (!map || !Number.isFinite(item.lat) || !Number.isFinite(item.lon)) return;
+    map.setView([item.lat, item.lon], item.zoom ?? Math.max(map.getZoom(), 13));
   }
 
   function setBearing(deg) {
@@ -3054,23 +3114,15 @@
   <div class="tool-header">
     <h2>Satellite</h2>
     <div class="spacer"></div>
-    <form
-      class="go-form"
-      onsubmit={(e) => {
-        e.preventDefault();
-        goTo();
-      }}
-    >
-      <input
-        class="input"
-        placeholder={'50.4501, 30.5234  ·  48°51\'29"N 2°17\'40"E  ·  a place name'}
-        bind:value={coordsText}
-        title="Coordinates (decimal, DMS, MGRS, plus code) or a place name"
-      />
-      <button type="submit" class="btn" disabled={!coordsText.trim() || searching}>
-        <Icon name="search" size={15} /> {searching ? '…' : 'Go'}
-      </button>
-    </form>
+    <PlaceSearch
+      bind:value={coordsText}
+      savedRows={saved}
+      centre={{ lat: center.lat, lon: center.lon }}
+      units={prefs.units}
+      {searching}
+      onpick={goToSuggestion}
+      onsubmit={goTo}
+    />
   </div>
 
   <div class="body">
@@ -3100,6 +3152,22 @@
           onshowproofs={() => (savedKind = 'proofs')}
           onrefresh={reloadCase}
         />
+      {/if}
+
+      {#if sheetPoints}
+        <SheetPointsOverlay map={mapReady ? map : null} points={sheetPoints.points} />
+        <!-- Both temporary layers can be on at once, so this one sits under the other
+             rather than on top of it. -->
+        <div class="temporal-layer-card" class:stacked={temporalMap} aria-label="Sheet map layer">
+          <div>
+            <strong>Sheet</strong>
+            <span>{sheetPoints.sheet} · {sheetPoints.column}</span>
+          </div>
+          <p>{sheetPoints.points.length} point{sheetPoints.points.length === 1 ? '' : 's'} read from the column</p>
+          <nav aria-label="Close the sheet layer">
+            <button class="quiet" onclick={() => (sheetPoints = null)}>Close</button>
+          </nav>
+        </div>
       {/if}
 
       {#if temporalMap}
@@ -3754,7 +3822,7 @@
 {#if extGateOpen}
   <Modal title="Capture needs the browser extension" onclose={() => (extGateOpen = false)} width="460px">
     <p class="shot-hint">
-      Google's terms allow nothing programmatic out of this basemap — a capture
+      Google's terms allow nothing programmatic out of this basemap. A capture
       here is a <strong>screenshot of the tab</strong>, and the Azimut Capture
       extension is what takes it (one grab per click, no screen-share prompt,
       works in fullscreen). Other basemaps are not affected.
@@ -3926,11 +3994,6 @@
   .spacer {
     flex: 1;
   }
-  .go-form {
-    display: flex;
-    gap: 8px;
-    width: min(420px, 36vw);
-  }
   .body {
     flex: 1;
     display: flex;
@@ -3951,6 +4014,7 @@
     inset: 0;
     background: var(--bg-2);
   }
+  .temporal-layer-card.stacked { top: 150px; }
   .temporal-layer-card {
     position: absolute;
     z-index: 720;

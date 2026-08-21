@@ -30,47 +30,81 @@ jobs:
         # Windows exe was a guess; this is what makes "works everywhere" checkable.
         # Filesystem behaviour is where they actually differ — engine/scrapers.py
         # swaps directories, and Windows won't delete an open file.
+        #
+        # `tests` is what each box runs. Everywhere but Windows that is the whole
+        # suite in one job, because -n auto finishes it in about three minutes.
+        # Windows pays roughly eight times as much per test — every one of these
+        # builds a case, and a case is a database, folders and files — so it is the
+        # one box that runs the suite in pieces, and the pieces are cut on measured
+        # cost rather than on the alphabet. Neither signal predicts Windows alone:
+        # by CPU seconds the heaviest range finished first, by test count the
+        # lightest finished last, so the weight is both.
+        #
+        # Then measured again, because the box itself is not a constant: the same
+        # range ran 11 minutes one hour and 24 the next, and `test_repository.py`
+        # alone is half of it. That range is split rather than trusted, since a
+        # slow hour on the 30-minute timeout is a red run for no reason.
+        #
+        # The ranges have to leave no gap: one stopping at test_sc* beside one
+        # starting at test_se* runs everything except the test_sd* somebody adds
+        # next year, and says nothing. `tests/test_ci_shards.py` reads them back
+        # out of this file and fails if they stop covering the directory.
         include:
           - name: Backend (ubuntu-latest, py3.12)
             os: ubuntu-latest
             python: "3.12"
-            tests: all
+            tests: tests
           - name: Backend (macos-latest, py3.12)
             os: macos-latest
             python: "3.12"
-            tests: all
-          # Five fresh Windows processes retain the complete suite while making
-          # progress visible and keeping every shard well below the timeout.
-          - name: Backend (windows-latest, py3.12, A-F)
+            tests: tests
+          - name: Backend (windows-latest, py3.12, 1/7)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_[a-f]*.py
-          - name: Backend (windows-latest, py3.12, G-L)
+            tests: tests/test_[a-d]*.py tests/test_e[a-n]*.py
+          - name: Backend (windows-latest, py3.12, 2/7)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_[g-l]*.py
-          - name: Backend (windows-latest, py3.12, M-O)
+            tests: tests/test_e[o-z]*.py tests/test_[f-i]*.py
+          - name: Backend (windows-latest, py3.12, 3/7)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_[m-o]*.py
-          - name: Backend (windows-latest, py3.12, P-R)
+            tests: tests/test_[j-o]*.py tests/test_p[a-l]*.py
+          - name: Backend (windows-latest, py3.12, 4/7)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_[p-r]*.py
-          - name: Backend (windows-latest, py3.12, S-Z)
+            tests: tests/test_p[m-z]*.py
+          - name: Backend (windows-latest, py3.12, 5/7)
             os: windows-latest
             python: "3.12"
-            tests: tests/test_[s-z]*.py
+            tests: tests/test_[q-r]*.py tests/test_s[a-d]*.py
+          - name: Backend (windows-latest, py3.12, 6/7)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_s[e-h]*.py
+          - name: Backend (windows-latest, py3.12, 7/7)
+            os: windows-latest
+            python: "3.12"
+            tests: tests/test_s[i-z]*.py tests/test_[t-z]*.py
           - name: Backend (ubuntu-latest, py3.11)
             os: ubuntu-latest
             python: "3.11"  # the floor in requires-python
-            tests: all
+            tests: tests
           - name: Backend (ubuntu-latest, py3.13)
             os: ubuntu-latest
             python: "3.13"  # the ceiling we've tested against
-            tests: all
+            tests: tests
     steps:
       - uses: actions/checkout@v7
+      # Defender reads every file as it is written, and this suite writes a whole
+      # case per test. Excluding the three directories the run works in is the
+      # difference between a Windows job that fits the timeout and one that does
+      # not. Best-effort: a runner that refuses the call is slow, not broken.
+      - name: Keep Defender out of the directories the suite writes
+        if: runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: Add-MpPreference -ExclusionPath $env:RUNNER_TEMP, $env:TEMP, $env:GITHUB_WORKSPACE
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
@@ -81,13 +115,13 @@ jobs:
       # --check fails if uv.lock drifted from pyproject.toml (forgot `uv lock`).
       - run: uv lock --check
       - run: uv sync --frozen --extra dev
+      # -n auto spreads the work over the runner's cores. Every test builds its
+      # case under `tmp_path` (see tests/conftest.py) and nothing is scoped wider
+      # than a test, so there is nothing for two workers to collide over. bash on
+      # every OS so the Windows ranges glob the same way they do here.
       - name: Run backend suite
-        if: matrix.tests == 'all'
-        run: uv run pytest -q --durations=20 --durations-min=1
-      - name: Run Windows shard with per-test progress
-        if: matrix.tests != 'all'
         shell: bash
-        run: uv run pytest -vv ${{ matrix.tests }} --durations=20 --durations-min=1
+        run: uv run pytest -q -n auto ${{ matrix.tests }} --durations=20 --durations-min=1
 
   lint:
     name: Lint & type-check (backend)
@@ -97,6 +131,11 @@ jobs:
     # everywhere, so matrix runs would just be identical verdicts. Python
     # 3.12 on purpose — mypy parses numpy's 2.x stubs, which use 3.12 syntax a
     # 3.11 target chokes on. The 3.11 floor stays covered by the pytest matrix.
+    #
+    # Both read `scripts/` and `packaging/` as well as the package. The job's name
+    # says "backend" and it used to mean "src and tests": `packaging/entry.py` is the
+    # script PyInstaller analyses, so it ships inside all three binaries, and nothing
+    # checked it. mypy's own scope is in pyproject; ruff's is spelled out here.
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -105,7 +144,7 @@ jobs:
           prune-cache: true
           python-version: "3.12"
       - run: uv sync --frozen --extra dev
-      - run: uv run ruff check src tests
+      - run: uv run ruff check src tests scripts packaging
       - run: uv run mypy
 
   backend-floating:
@@ -122,7 +161,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - run: uv sync --upgrade --extra dev
-      - run: uv run pytest -q --durations=20 --durations-min=1
+      - run: uv run pytest -q -n auto --durations=20 --durations-min=1
 
   frontend:
     name: Frontend tests + build
@@ -144,9 +183,18 @@ jobs:
       - run: npm run build
 
   browser:
-    name: Browser canvas interactions
+    name: Browser canvas interactions (${{ matrix.browser }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # One job per browser rather than one job running both. The specs stay at a
+    # single Playwright worker on purpose — canvas startup times out when Leaflet
+    # and Konva compete for a runner's cores — so the only way to shorten this
+    # job is to stop making Firefox wait for Chromium. Each job also installs
+    # only the browser it runs.
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
     defaults:
       run:
         working-directory: frontend
@@ -158,5 +206,11 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      - run: npx playwright install --with-deps chromium firefox
-      - run: npm run test:e2e
+      # The browser, not its system libraries: `--with-deps` runs apt as root, and
+      # three of the four browser jobs one afternoon died at the 20-minute timeout
+      # inside `apt-get update` with azure.archive.ubuntu.com answering nothing. The
+      # runner image already carries Chrome and Firefox, so the libraries a Playwright
+      # build links against are there. If one ever is not, the browser fails to launch
+      # and says so in a minute, which is the better failure of the two.
+      - run: npx playwright install ${{ matrix.browser }}
+      - run: npm run test:e2e -- --project=${{ matrix.browser }}

@@ -165,6 +165,12 @@ def _rewind_hidden_layout(case: Case) -> None:
     case._sqlite_cache = workspace._UNSET
 
 
+#: Content directories the layout gained after the `azimut/` wrapper shipped. They
+#: postdate every unwrapped checkpoint, so a rewind removes them rather than putting
+#: them at the case root where they never were.
+POST_WRAPPER_DIRS = frozenset({"sheets"})
+
+
 def rewind_case(case: Case, schema: int) -> None:
     """Reconstruct one folder checkpoint from the final schema-9 layout.
 
@@ -188,6 +194,19 @@ def rewind_case(case: Case, schema: int) -> None:
     if schema < workspace.STORAGE_SCHEMA + 2:
         tool = case.tool_root
         for entry in sorted(tool.iterdir()):
+            if entry.name in POST_WRAPPER_DIRS and entry.is_dir():
+                # A directory the layout gained after the wrapper shipped was never
+                # at a case root, so moving one there would build a shape no real
+                # case has ever had — and the migration would rightly leave it
+                # behind as the analyst's own folder.
+                held = [path for path in entry.rglob("*") if path.is_file()]
+                if held:
+                    raise AssertionError(
+                        f"'{entry.name}' holds {len(held)} file(s) at this checkpoint; "
+                        "rewind it deliberately instead of dropping it here"
+                    )
+                shutil.rmtree(entry)
+                continue
             shutil.move(str(entry), str(case.path / entry.name))
         tool.rmdir()
     case._sqlite_cache = workspace._UNSET

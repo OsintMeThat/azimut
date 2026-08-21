@@ -385,3 +385,49 @@ describe('accepting a proposed point from the Saved panel', () => {
     expect(modal.slice(0, modal.indexOf('/>'))).toContain('onaccept={acceptSaved}');
   });
 });
+
+describe('Satellite — lifecycle and the date line', () => {
+  it('registers a teardown Svelte will actually call', () => {
+    // Svelte only honours a cleanup returned from a *synchronous* onMount, and
+    // the setup awaits the providers and the saved home view.
+    expect(source).toContain('onMount(() => {');
+    expect(source).not.toContain('onMount(async () => {');
+    expect(source).toContain('async function build()');
+    expect(source).toContain('teardown?.();');
+  });
+
+  it('folds the map centre back inside the bounds every route enforces', () => {
+    // Leaflet keeps counting past ±180 across the antimeridian; the capture
+    // route bounds lon to ±180, so an unwrapped centre answered 422.
+    expect(source).toContain("import { wrapLon } from '../lib/coords.js';");
+    expect(source).toContain('center = { lat: c.lat, lon: wrapLon(c.lng), zoom: map.getZoom() };');
+  });
+});
+
+describe('Satellite — the search bar', () => {
+  it('is the suggesting combobox, fed by the case and the map centre', () => {
+    expect(source).toContain("import PlaceSearch from './satellite/PlaceSearch.svelte';");
+    expect(source).toContain('<PlaceSearch');
+    expect(source).toContain('savedRows={saved}');
+    expect(source).toContain('centre={{ lat: center.lat, lon: center.lon }}');
+    expect(source).toContain('units={prefs.units}');
+    // the plain form it replaces is gone, not left beside it
+    expect(source).not.toContain('class="go-form"');
+  });
+
+  it('keeps the old Enter behaviour as the fallback', () => {
+    // Enter with nothing highlighted still parses or geocodes the raw text
+    expect(source).toContain('onsubmit={goTo}');
+    expect(source).toContain("await api.get(`/api/geo/geocode?q=");
+  });
+
+  it('opens a chosen saved item the way the panel does', () => {
+    // same view and bearing as the tree and the modal — one road to a saved place
+    expect(source).toContain('function goToSuggestion(item)');
+    expect(source).toContain('if (item.row) {\n      openSaved(item.row);');
+  });
+
+  it('flies to a proposed point at the zoom that suits what it is', () => {
+    expect(source).toContain('map.setView([item.lat, item.lon], item.zoom ?? Math.max(map.getZoom(), 13));');
+  });
+});

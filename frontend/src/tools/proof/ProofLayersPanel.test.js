@@ -23,3 +23,22 @@ describe('Proof Layers panel hierarchy', () => {
     expect(source).not.toContain('btn-primary btn-sm side-add');
   });
 });
+
+describe('the rows and the canvas agree about what is picked', () => {
+  it('lights a row only while the pick can be acted on', () => {
+    // With a drawing tool in hand the canvas shows no handles and Delete reaches
+    // nothing, so a row lit orange was a selection visible in one column and
+    // absent from the other.
+    expect(source).toContain('class:selected={selectionLive && selectedPanelId === panel.id}');
+    expect(source).toContain('class:selected={selectionLive && selectedPasteId === paste.id}');
+    expect(source).toContain('class:selected={selectionLive && selectedIds.includes(shape.id)}');
+  });
+
+  it('hands a pick back to the composer instead of writing it in place', () => {
+    // Writing selectedPanelId straight through the binding skipped the switch
+    // back to Select that makes the pick answer to anything.
+    expect(source).toContain('onclick={() => selectPanelRow(panel.id)}');
+    expect(source).toContain('onclick={() => selectPasteRow(paste.id)}');
+    expect(source).not.toContain('$bindable');
+  });
+});

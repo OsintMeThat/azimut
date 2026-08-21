@@ -35,27 +35,82 @@ SERVE_PORT: int | None = None
 LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
 
-class NotesPdfBodyLimit:
-    """Bound the one JSON route that can carry binary images before parsing."""
+class BulkBodyLimit:
+    """Bound the JSON routes that carry a payload the browser assembled, before parsing.
+
+    Four of them: a note's PDF export posts its Mermaid diagrams, an analysis plate posts
+    the page itself, a sheet posts a whole table, and saving a proof posts the composer's
+    rendered export plus the images pasted into it. Each is bounded by its own route's
+    number, so the limit stays beside the code that knows what it is for.
+    """
+
+    #: `(method, tail, module, attribute)`, where the tail is the path segments after
+    #: `/api/cases/{case_id}/`. `*` stands for one segment of any value and a trailing
+    #: `...` for any number of further segments — which is what every road out of a
+    #: sheet's promotion needs, since each of them posts the whole table and each has a
+    #: `/preview` beside it. Spelling those out one by one is how `promote/preview` went
+    #: unbounded while `promote` was bounded, and then how `move/undo`, `proofs`, `parse`
+    #: and `meta` went the same way — and then how the composer's own save, the route this
+    #: middleware most obviously exists for, was never on the list at all. Which is why the
+    #: gate is a test rather than this list: `test_hardening.py` enumerates every router the
+    #: app mounts and fails on a body that can carry a table or a picture and answers no
+    #: limit.
+    ANY = "..."
+    ROUTES: tuple[tuple[str, tuple[str, ...], str, str], ...] = (
+        ("POST", ("notes", "pdf"), "notes", "MAX_PDF_BODY_BYTES"),
+        # The note itself, on the three roads that write one. Declared after `notes/pdf`
+        # so the export keeps its own, larger number.
+        ("POST", ("notes",), "notes", "MAX_NOTE_BODY_BYTES"),
+        ("PUT", ("notes",), "notes", "MAX_NOTE_BODY_BYTES"),
+        ("PUT", ("notes", "*"), "notes", "MAX_NOTE_BODY_BYTES"),
+        ("POST", ("plates",), "plates", "MAX_PLATE_BODY_BYTES"),
+        ("POST", ("proofs",), "proofs", "MAX_PROOF_BODY_BYTES"),
+        ("POST", ("sheets",), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "import"), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "parse"), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "*", "promote", ANY), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "*", "move", ANY), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "*", "proofs", ANY), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "*", "points"), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "*", "refresh"), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "*", "csv"), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("PUT", ("sheets", "*", ANY), "sheets", "MAX_SHEET_BODY_BYTES"),
+    )
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    @staticmethod
-    def _matches(scope: Scope) -> bool:
-        parts = str(scope.get("path", "")).split("/")
-        return scope.get("method") == "POST" and len(parts) == 6 and (
-            parts[1], parts[2], parts[4], parts[5]
-        ) == ("api", "cases", "notes", "pdf")
+    @classmethod
+    def _matches(cls, tail: tuple[str, ...], route: tuple[str, ...]) -> bool:
+        open_ended = route[-1:] == (cls.ANY,)
+        wanted = route[:-1] if open_ended else route
+        if len(tail) < len(wanted) or (not open_ended and len(tail) != len(wanted)):
+            return False
+        return all(want in ("*", have) for want, have in zip(wanted, tail))
+
+    @classmethod
+    def _limit(cls, scope: Scope) -> int | None:
+        method = str(scope.get("method", ""))
+        parts = str(scope.get("path", "")).strip("/").split("/")
+        if len(parts) < 4 or parts[0] != "api" or parts[1] != "cases":
+            return None
+        tail = tuple(parts[3:])
+        for want_method, route, module_name, attribute in cls.ROUTES:
+            if method != want_method or not cls._matches(tail, route):
+                continue
+            # Imported lazily so each route owns its limit and a test can lower it
+            # without rebuilding the application.
+            from importlib import import_module
+
+            module = import_module(f".api.{module_name}", package=__package__)
+            return int(getattr(module, attribute))
+        return None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not self._matches(scope):
+        limit = self._limit(scope) if scope["type"] == "http" else None
+        if limit is None:
             await self.app(scope, receive, send)
             return
-
-        # Import lazily so the route owns the limit and tests can lower it
-        # without rebuilding the application.
-        from .api import notes
 
         headers = dict(scope.get("headers", []))
         raw_length = headers.get(b"content-length", b"")
@@ -63,7 +118,7 @@ class NotesPdfBodyLimit:
             content_length = int(raw_length) if raw_length else None
         except ValueError:
             content_length = None
-        if content_length is not None and content_length > notes.MAX_PDF_BODY_BYTES:
+        if content_length is not None and content_length > limit:
             await JSONResponse(
                 {"detail": "request body too large"}, status_code=413
             )(scope, receive, send)
@@ -75,7 +130,7 @@ class NotesPdfBodyLimit:
             if message["type"] != "http.request":
                 break
             chunk = message.get("body", b"")
-            if len(body) + len(chunk) > notes.MAX_PDF_BODY_BYTES:
+            if len(body) + len(chunk) > limit:
                 await JSONResponse(
                     {"detail": "request body too large"}, status_code=413
                 )(scope, receive, send)
@@ -233,17 +288,24 @@ def create_app() -> FastAPI:
 
     from .api import (
         analysis_views, cases, drafts, events, files, folders, ingest, inspect, media,
-        notes, proofs, satellite, settings, templates,
+        notes, plates, proofimports, proofs, satellite, settings, sheetproofs, sheets,
+        templates,
     )
+    from .engine import sheets as sheet_engine
 
     app.include_router(cases.router)
     app.include_router(cases.workspace_router)
     app.include_router(analysis_views.router)
     app.include_router(notes.router)
+    app.include_router(plates.router)
+    app.include_router(sheets.router)
+    # The one sheet road that fetches bytes, so its own module and its own job.
+    app.include_router(sheetproofs.router)
     app.include_router(media.router)
     app.include_router(inspect.router)
     app.include_router(satellite.router)
     app.include_router(proofs.router)
+    app.include_router(proofimports.router)
     app.include_router(drafts.router)
     app.include_router(files.router)
     app.include_router(folders.router)
@@ -251,13 +313,22 @@ def create_app() -> FastAPI:
     app.include_router(ingest.router)
     app.include_router(events.router)
     app.include_router(templates.router)
+    # A sheet's CSV that the filesystem would not take. Handled once for the app rather
+    # than at each of the ten routes that write one: the failure is the same wherever it
+    # happens — a spreadsheet holding the file open on Windows, a read-only folder — and
+    # its answer does not depend on which route hit it. A route added later cannot forget
+    # this, which a per-route `except` could.
+    @app.exception_handler(sheet_engine.SheetUnwritable)
+    async def _sheet_unwritable(_: Request, exc: sheet_engine.SheetUnwritable) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
     # extension-origin CORS, /api/ingest/* only (see ingest.install_cors)
     ingest.install_cors(app)
     # Inside the local guard: a request that isn't allowed to reach the app at
     # all should not learn whether the workspace is there.
     install_availability_guard(app)
-    # Bound diagram-carrying JSON before FastAPI/Pydantic materialises it.
-    app.add_middleware(NotesPdfBodyLimit)
+    # Bound picture-carrying JSON before FastAPI/Pydantic materialises it.
+    app.add_middleware(BulkBodyLimit)
     # last, so it wraps everything: refuse non-loopback Host / cross-origin web
     install_local_guard(app)
 

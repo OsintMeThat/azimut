@@ -51,6 +51,13 @@ MAX_DIAGRAM_TOTAL_BYTES = 16_000_000
 #: receive wrapper before Pydantic materialises the request.
 MAX_PDF_BODY_BYTES = 24_000_000
 
+#: What one note's Markdown may weigh, bounded like every other document the browser
+#: hands back whole (`server.BulkBodyLimit`). Eight mebibytes is some eight million
+#: characters — far past any note somebody writes, and a bound rather than none, which is
+#: what this was. A note embeds its pictures by case-relative path, never as base64, so
+#: the body is text and nothing else.
+MAX_NOTE_BODY_BYTES = 8 * 1024 * 1024
+
 
 class Notes(BaseModel):
     text: str

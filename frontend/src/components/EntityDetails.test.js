@@ -25,7 +25,7 @@ describe('import enrichment details', () => {
     expect(source).toContain('<details class="metadata-details">');
     expect(source).toContain('<summary>EXIF metadata');
     expect(source).toContain('{infoData.taken_at}');
-    expect(source).toContain('formatCoords(infoData.gps)');
+    expect(source).toContain('gpsText(infoData.gps)');
     expect(source).toContain('{#each Object.entries(infoData.exif ?? {}) as [key, value] (key)}');
   });
 

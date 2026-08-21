@@ -502,9 +502,14 @@ def fetch_crop(
 
     def fetch_all(url_template: str) -> list[tuple[int, int, Image.Image | None]]:
         def grab(tx: int, ty: int) -> tuple[int, int, Image.Image | None]:
-            if not (0 <= tx <= max_index and 0 <= ty <= max_index):
+            # Longitude wraps and latitude does not: a crop straddling the
+            # antimeridian asks for tiles past either edge of the grid, and those
+            # are the same tiles read from the other side. Clamping them away
+            # instead left a blank band down the middle of every capture at
+            # ±180°. Rows above the pole have no such twin and stay empty.
+            if not 0 <= ty <= max_index:
                 return tx, ty, None
-            url = tile_url(url_template, tile_z, tx, ty, provider.zoom_offset)
+            url = tile_url(url_template, tile_z, tx % (max_index + 1), ty, provider.zoom_offset)
             return tx, ty, fetch(client, url)
 
         with httpx.Client(
@@ -530,7 +535,11 @@ def fetch_crop(
         px, py = int(tx * ts - left), int(ty * ts - top)
         if tile is None:
             missing += 1
-            if 0 <= tx <= max_index and 0 <= ty <= max_index:
+            # Same bounds `grab` fetched under: x wraps, y does not. A tile past
+            # the antimeridian is a real one the provider had nothing for, so it
+            # is a coverage gap the overzoom fill should try, not an index there
+            # was never imagery for.
+            if 0 <= ty <= max_index:
                 gaps.append((tx, ty))
             continue
         served += 1
@@ -661,9 +670,15 @@ def _overzoom_fill(
             if not unresolved or tile_z - up < 0 or sub < 1:
                 break
 
+            parent_span = 1 << (tile_z - up)
+
             def grab(pxy: tuple[int, int]) -> tuple[tuple[int, int], Image.Image | None]:
                 try:
-                    url = tile_url(url_template, tile_z - up, pxy[0], pxy[1], zoom_offset)
+                    # x wraps here as it does in the main fetch: a gap past the
+                    # antimeridian has a parent, on the other side of the grid.
+                    url = tile_url(
+                        url_template, tile_z - up, pxy[0] % parent_span, pxy[1], zoom_offset
+                    )
                     return pxy, fetch(client, url)
                 except Exception:
                     return pxy, None

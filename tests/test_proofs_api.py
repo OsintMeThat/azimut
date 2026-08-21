@@ -467,6 +467,69 @@ def test_index_carries_the_geography_of_the_source(client, sat_tiles, monkeypatc
     assert row["country_en"] == "Ukraine"
 
 
+def test_index_carries_the_geography_of_the_place_the_proof_filed(client, monkeypatch):
+    """Panels of photos place nothing, and no Locate pass ever reaches a proof.
+    But the point the analyst typed was filed as a place and that one has a
+    country, so the proof files under it instead of under Unlocated."""
+    from azimut.engine import geo
+
+    monkeypatch.setattr(
+        geo,
+        "reverse_geocode",
+        lambda lat, lon, timeout=8, language=None: {
+            "display_name": "x",
+            "attribution": "x",
+            "address": {"country_code": "is", "country": "Ísland"},
+        },
+    )
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={
+            "title": "Photos only",
+            "spec": {**_panels("media/x.jpg"), "coordsText": "64.1466, -21.9426"},
+        },
+    )
+
+    row = _proof_index(client, cid)[0]
+    assert (row["lat"], row["lon"]) == (64.1466, -21.9426)
+    assert row["geo"]["country"] == "Ísland"
+    assert row["country_en"] == "Iceland"
+    assert row["continent"] == "Europe"
+
+
+def test_index_ignores_the_geography_of_a_place_somewhere_else(client, monkeypatch):
+    """Only the point itself answers. A place across the continent is another
+    claim about another spot, and borrowing its country would file the proof
+    under the wrong branch."""
+    from azimut.engine import geo
+
+    monkeypatch.setattr(
+        geo,
+        "reverse_geocode",
+        lambda lat, lon, timeout=8, language=None: {
+            "display_name": "x",
+            "attribution": "x",
+            "address": {"country_code": "ua", "country": "Україна"},
+        },
+    )
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 50.4501, "lon": 30.5234})
+    # the proof states a point of its own, and nothing is filed there to know it
+    client.put("/api/settings/prefs", json={"proof_place_auto": False})
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={
+            "title": "Elsewhere",
+            "spec": {**_panels("media/x.jpg"), "coordsText": "48.8584, 2.2945"},
+        },
+    )
+
+    row = _proof_index(client, cid)[0]
+    assert (row["lat"], row["lon"]) == (48.8584, 2.2945)
+    assert row["geo"] is None  # placed on the map, unlocated in the tree
+
+
 def test_index_lists_the_posts_written_from_a_proof(client, sat_tiles):
     cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
     cap = _sat(client, cid, 50.4501, 30.5234)
@@ -623,7 +686,10 @@ def test_saving_a_proof_files_the_point_it_carries(client):
     assert (places[0]["attrs"]["lat"], places[0]["attrs"]["lon"]) == (50.4501, 30.5234)
     # the analyst's own answer, so there is nothing left to review
     assert places[0]["provenance"]["status"] == "confirmed"
-    assert saved["place"] == {"filed": True, "id": places[0]["id"], "label": places[0]["label"]}
+    assert saved["place"] == {
+        "filed": [{"id": places[0]["id"], "label": places[0]["label"]}],
+        "asking": [],
+    }
 
     # and the proof says it shows that place
     edges = _depicts(cid)
@@ -662,7 +728,7 @@ def test_a_point_the_case_already_holds_is_neither_filed_twice_nor_asked_about(c
 def test_resaving_a_proof_stays_silent(client):
     cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
     spec = _with_coords("50.4501, 30.5234")
-    assert _save(client, cid, "Roof match", spec)["place"]["filed"] is True
+    assert len(_save(client, cid, "Roof match", spec)["place"]["filed"]) == 1
     # the point is in the case now: saving again must not ask, nor pin it twice
     assert _save(client, cid, "Roof match", spec)["place"] is None
     assert len(_places(cid)) == 1
@@ -674,15 +740,13 @@ def test_the_composer_is_asked_when_the_setting_is_off(client):
     saved = _save(client, cid, "Roof match", _with_coords("50.4501, 30.5234"))
 
     assert saved["place"] == {
-        "filed": False, "lat": 50.4501, "lon": 30.5234, "pov": False
+        "filed": [],
+        "asking": [{"lat": 50.4501, "lon": 30.5234, "label": "", "pov": False}],
     }
     assert _places(cid) == []  # nothing is written until the analyst says yes
 
-    filed = client.post(
-        f"/api/cases/{cid}/proofs/Roof match/place",
-        json={"lat": 50.4501, "lon": 30.5234},
-    ).json()
-    assert filed["type"] == "place"
+    filed = client.post(f"/api/cases/{cid}/proofs/Roof match/place").json()
+    assert len(filed) == 1
     assert _depicts(cid)[0]["from"] == graph_read.entity(cid, spec=layout.proof_spec_rel("Roof match"))["id"]
 
 
@@ -692,10 +756,11 @@ def test_answering_twice_files_one_place(client):
     cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
     _save(client, cid, "Roof match", _with_coords("50.4501, 30.5234"))
 
-    body = {"lat": 50.4501, "lon": 30.5234}
-    first = client.post(f"/api/cases/{cid}/proofs/Roof match/place", json=body).json()
-    second = client.post(f"/api/cases/{cid}/proofs/Roof match/place", json=body).json()
-    assert first["id"] == second["id"]
+    first = client.post(f"/api/cases/{cid}/proofs/Roof match/place").json()
+    second = client.post(f"/api/cases/{cid}/proofs/Roof match/place").json()
+    # the second answer finds the point standing and joins it: nothing new to file
+    assert first[0]["id"] == _places(cid)[0]["id"]
+    assert second == []
     assert len(_places(cid)) == 1
 
 
@@ -732,6 +797,50 @@ def test_the_material_the_proof_composes_states_the_same_point(client, sat_tiles
     assert stated[frame["id"]] == "confirmed"
     assert stated[video["id"]] == "confirmed"
     assert stated[graph_read.entity(cid, path=cap["path"])["id"]] == "confirmed"
+
+
+def test_a_proof_rests_on_material_it_never_composed(client, sat_tiles):
+    """The clip under the photos, the second angle nobody cropped: files a geolocation
+    rests on without laying them out.
+
+    A thread states its point in the post that published it and hangs the material off
+    the ones after it. The composer can now bring those in from a stated source address,
+    and what it brings in is the proof's `material` — in the chain, and therefore on the
+    point, without ever being a panel.
+
+    Restated on every save like the panels are, so an address taken off the list takes
+    its edge with it rather than leaving a claim nothing on screen still makes.
+    """
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    case = Case.open(cid)
+    case.add_entity("media", "frame.png", {"path": "media/frame.png", "kind": "image"}, by="user")
+    clip = case.add_entity(
+        "media", "clip.mp4", {"path": "media/clip.mp4", "kind": "video"}, by="user"
+    )
+    angle = case.add_entity(
+        "media", "angle.jpg", {"path": "media/angle.jpg", "kind": "image"}, by="user"
+    )
+    cap = _sat(client, cid, 50.4501, 30.5234)
+
+    spec = _with_coords("50.4501, 30.5234", None, "media/frame.png", cap["path"])
+    spec["material"] = ["media/clip.mp4", "media/angle.jpg"]
+    _save(client, cid, "Roof match", spec)
+
+    proof = graph_read.entity(cid, spec=layout.proof_spec_rel("Roof match"))
+    chain = {lk["to"] for lk in case.links_of(proof["id"]) if lk["type"] == "derived-from"}
+    assert {clip["id"], angle["id"]} <= chain
+
+    # And the point reaches them through that chain, with no second rule for it.
+    place = _places(cid)[0]
+    posed = {lk["from"] for lk in _depicts(cid) if lk["to"] == place["id"]}
+    assert {clip["id"], angle["id"]} <= posed
+
+    # A second save with one address dropped drops its edge, panels untouched.
+    spec["material"] = ["media/clip.mp4"]
+    _save(client, cid, "Roof match", spec)
+    chain = {lk["to"] for lk in case.links_of(proof["id"]) if lk["type"] == "derived-from"}
+    assert clip["id"] in chain
+    assert angle["id"] not in chain
 
 
 def test_a_source_the_verb_does_not_accept_is_skipped(client):
@@ -811,13 +920,11 @@ def test_the_answer_to_the_question_reads_pov_off_the_saved_proof(client):
     saved = _save(client, cid, "From the roof", _with_coords(
         "50.4501, 30.5234", None, "media/clip.mp4", pov=True
     ))
-    assert saved["place"]["pov"] is True  # so the question can say what it means
+    # so the question can say what the point will mean
+    assert saved["place"]["asking"][0]["pov"] is True
 
-    client.post(
-        f"/api/cases/{cid}/proofs/From the roof/place",
-        json={"lat": 50.4501, "lon": 30.5234},
-    )
-    # POV is a property of the proof, not of the answer: the body never carries it
+    client.post(f"/api/cases/{cid}/proofs/From the roof/place")
+    # POV is a property of the point, not of the answer: the request carries nothing
     assert [lk["from"] for lk in _located_at(cid)] == [video["id"]]
 
 
@@ -953,3 +1060,398 @@ def test_a_point_another_proof_still_concludes_on_keeps_its_material(client):
     holding = {lk["from"] for lk in _depicts(cid) if lk["to"] == shared["id"]}
     assert video["id"] in holding
     assert graph_read.entity(cid, spec=layout.proof_spec_rel("First"))["id"] in holding
+
+
+# -- a proof states several points (engine/satellite.spec_points) ---------------
+#
+# Three impacts, a building, the camera that filmed it: each is a point the
+# analyst concluded on, and the first one is the conclusion every surface that
+# can hold a single answer reads.
+
+
+def _points(*entries):
+    """A spec stating these points, `(coords, label, pov)` per entry."""
+    return {
+        "panels": [],
+        "points": [
+            {"coords": coords, "label": label, "pov": pov}
+            for coords, label, pov in entries
+        ],
+    }
+
+
+def test_a_spec_with_no_list_still_states_its_one_point(client):
+    """Nothing migrates: a proof written before the list reads as one point."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    _save(client, cid, "Old shape", _with_coords("50.4501, 30.5234", None, pov=True))
+
+    rows = _proof_index(client, cid)
+    assert [(r["lat"], r["lon"], r["label"]) for r in rows] == [(50.4501, 30.5234, "")]
+    assert len(_places(cid)) == 1
+
+
+def test_every_point_becomes_a_row_and_a_place(client):
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    saved = _save(client, cid, "Harbour strike", _points(
+        ("64.1466, -21.9426", "impact 1", False),
+        ("64.1481, -21.9401", "impact 2", False),
+        ("64.1502, -21.9350", "caméra", True),
+    ))
+
+    # one row per point, all under one proof: the map is about places
+    rows = _proof_index(client, cid)
+    assert len({r["id"] for r in rows}) == 1
+    assert [r["label"] for r in rows] == ["impact 1", "impact 2", "caméra"]
+    assert len({r["key"] for r in rows}) == 3  # three marks, three render keys
+    # and the label names the ground, since a place is otherwise called by its numbers
+    assert sorted(p["label"] for p in _places(cid)) == ["caméra", "impact 1", "impact 2"]
+    assert len(saved["place"]["filed"]) == 3
+
+
+def test_the_first_point_is_the_conclusion_whatever_pov_says(client):
+    """POV does not reorder: it would move a coordinate out of a tweet in silence."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    _save(client, cid, "Harbour strike", _points(
+        ("64.1466, -21.9426", "impact 1", False),
+        ("64.1502, -21.9350", "caméra", True),
+    ))
+    spec = client.get(f"/api/cases/{cid}/proofs/Harbour strike").json()
+
+    from azimut.engine import satellite
+
+    conclusion = satellite.spec_points(spec)[0]
+    assert (conclusion["lat"], conclusion["lon"]) == (64.1466, -21.9426)
+    assert conclusion["pov"] is False  # the camera is the second row, and stays there
+
+
+def test_pov_is_carried_by_its_own_point(client):
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    video = _video(cid)
+    spec = _points(
+        ("64.1466, -21.9426", "impact 1", False),
+        ("64.1502, -21.9350", "caméra", True),
+    )
+    spec["panels"] = _panels("media/clip.mp4")["panels"]
+    _save(client, cid, "Harbour strike", spec)
+
+    camera = _place_by_lat(cid, 64.1502)
+    impact = _place_by_lat(cid, 64.1466)
+    # the camera stood in one place; it shows the impact from there
+    assert [lk["to"] for lk in _located_at(cid)] == [camera["id"]]
+    assert [lk["from"] for lk in _located_at(cid)] == [video["id"]]
+    assert {lk["from"] for lk in _depicts(cid) if lk["to"] == impact["id"]} == {
+        _proof(cid)["id"], video["id"]
+    }
+    # a proof was composed, never recorded: it shows the camera's point too
+    assert _proof(cid)["id"] in {lk["from"] for lk in _depicts(cid) if lk["to"] == camera["id"]}
+
+
+def test_a_second_pov_is_refused_because_a_camera_stood_in_one_place(client):
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    video = _video(cid)
+    spec = _points(
+        ("64.1466, -21.9426", "one", True),
+        ("64.1502, -21.9350", "two", True),
+    )
+    spec["panels"] = _panels("media/clip.mp4")["panels"]
+    _save(client, cid, "Two cameras", spec)
+
+    # the first to claim it keeps it, whatever a hand-written spec asked for
+    assert [lk["from"] for lk in _located_at(cid)] == [video["id"]]
+    assert [lk["to"] for lk in _located_at(cid)] == [_place_by_lat(cid, 64.1466)["id"]]
+
+
+def test_moving_pov_to_another_point_restates_both_verbs(client):
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    video = _video(cid)
+    first = _points(("64.1466, -21.9426", "a", True), ("64.1502, -21.9350", "b", False))
+    first["panels"] = _panels("media/clip.mp4")["panels"]
+    _save(client, cid, "Harbour strike", first)
+    assert [lk["to"] for lk in _located_at(cid)] == [_place_by_lat(cid, 64.1466)["id"]]
+
+    moved = _points(("64.1466, -21.9426", "a", False), ("64.1502, -21.9350", "b", True))
+    moved["panels"] = _panels("media/clip.mp4")["panels"]
+    _save(client, cid, "Harbour strike", moved)
+
+    # the old reading goes rather than piling up beside the new one
+    assert [lk["to"] for lk in _located_at(cid)] == [_place_by_lat(cid, 64.1502)["id"]]
+    assert video["id"] in {lk["from"] for lk in _depicts(cid)
+                           if lk["to"] == _place_by_lat(cid, 64.1466)["id"]}
+
+
+def test_taking_a_point_off_the_list_rends_its_place(client):
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    _save(client, cid, "Harbour strike", _points(
+        ("64.1466, -21.9426", "impact 1", False),
+        ("64.1481, -21.9401", "impact 2", False),
+    ))
+    dropped = _place_by_lat(cid, 64.1481)
+
+    saved = _save(client, cid, "Harbour strike", _points(
+        ("64.1466, -21.9426", "impact 1", False),
+    ))
+
+    # exactly what clearing the single field always did, one line at a time
+    assert saved["orphans"] == [{"id": dropped["id"], "label": dropped["label"]}]
+    assert [lk["to"] for lk in _depicts(cid)] == [_place_by_lat(cid, 64.1466)["id"]]
+
+
+def test_two_points_a_metre_apart_are_one_place(client):
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    _save(client, cid, "Same roof", _points(
+        ("64.1466, -21.9426", "impact 1", False),
+        ("64.14660, -21.94260", "impact 1 again", False),
+    ))
+
+    assert len(_places(cid)) == 1
+    assert len(_proof_index(client, cid)) == 1
+
+
+def test_one_place_keeps_the_pov_the_second_line_ticked(client):
+    """The duplicate goes, its answer about the camera does not. Dropped with the line, a
+    POV ticked on the second of two points a metre apart was a claim the composer showed
+    and the graph never carried."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    video = _video(cid)
+    spec = _points(("64.1466, -21.9426", "roof", False), ("64.14660, -21.94260", "", True))
+    spec["panels"] = _panels("media/clip.mp4")["panels"]
+    _save(client, cid, "Same roof", spec)
+
+    assert len(_places(cid)) == 1
+    assert [lk["from"] for lk in _located_at(cid)] == [video["id"]]
+
+
+def test_a_line_that_reads_as_no_point_is_skipped(client):
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    _save(client, cid, "Prose", _points(
+        ("64.1466, -21.9426", "impact 1", False),
+        ("near the harbour", "impact 2", False),
+    ))
+
+    # prose in the field is a caption, not a point
+    assert [(p["attrs"]["lat"], p["attrs"]["lon"]) for p in _places(cid)] == [(64.1466, -21.9426)]
+
+
+def test_a_spec_cannot_file_a_hundred_places_on_one_save(client):
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    _save(client, cid, "Too many", _points(
+        *((f"64.{1000 + i}, -21.9426", "", False) for i in range(30))
+    ))
+
+    from azimut.engine.satellite import MAX_PROOF_POINTS
+
+    assert len(_places(cid)) == MAX_PROOF_POINTS
+
+
+def test_the_composer_is_asked_about_every_point_it_cannot_file(client):
+    client.put("/api/settings/prefs", json={"proof_place_auto": False})
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    saved = _save(client, cid, "Harbour strike", _points(
+        ("64.1466, -21.9426", "impact 1", False),
+        ("64.1502, -21.9350", "caméra", True),
+    ))
+
+    assert saved["place"]["asking"] == [
+        {"lat": 64.1466, "lon": -21.9426, "label": "impact 1", "pov": False},
+        {"lat": 64.1502, "lon": -21.9350, "label": "caméra", "pov": True},
+    ]
+    assert _places(cid) == []
+
+    filed = client.post(f"/api/cases/{cid}/proofs/Harbour strike/place").json()
+    assert sorted(one["label"] for one in filed) == ["caméra", "impact 1"]
+    # the yes reads the spec, so POV lands on the line that carries it
+    assert [lk["to"] for lk in _located_at(cid)] == []  # no material to place
+
+
+def test_only_the_conclusion_is_looked_up_at_save(client, monkeypatch):
+    """Geography is paced, so three points would hold the save for three seconds.
+    The Locate pass answers for the rest, exactly as an offline save already is."""
+    from azimut.engine import geo
+
+    asked: list[tuple[float, float]] = []
+
+    def _one(lat, lon, timeout=8, language=None):
+        asked.append((lat, lon))
+        return {
+            "display_name": "x",
+            "attribution": "x",
+            "address": {"country_code": "is", "country": "Ísland"},
+        }
+
+    monkeypatch.setattr(geo, "reverse_geocode", _one)
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    _save(client, cid, "Harbour strike", _points(
+        ("64.1466, -21.9426", "impact 1", False),
+        ("64.1481, -21.9401", "impact 2", False),
+        ("64.1502, -21.9350", "caméra", True),
+    ))
+
+    assert asked == [(64.1466, -21.9426)]
+    rows = {r["label"]: r["geo"] for r in _proof_index(client, cid)}
+    assert rows["impact 1"]["country"] == "Ísland"
+    assert rows["impact 2"] is None  # born unlocated, for the Locate pass to pick up
+
+
+def test_stating_a_point_writes_the_list_and_the_mirror():
+    """An older build has to find the conclusion where it has always been."""
+    from azimut.engine import satellite
+
+    spec = satellite.state_points({}, [{"coords": "64.1466, -21.9426", "pov": True}])
+    assert spec["points"] == [{"coords": "64.1466, -21.9426", "pov": True}]
+    assert spec["coordsText"] == "64.1466, -21.9426"
+    assert spec["pov"] is True
+
+
+def test_stating_one_point_over_a_list_replaces_it(client):
+    """A sheet cell must not be swallowed by a list the composer left behind."""
+    from azimut.engine import satellite
+
+    spec = _points(("64.1466, -21.9426", "impact 1", False), ("64.1502, -21.9350", "b", True))
+    satellite.state_points(spec, [{"coords": "48.8584, 2.2945"}])
+
+    assert satellite.spec_points(spec) == [
+        {"lat": 48.8584, "lon": 2.2945, "coords": "48.8584, 2.2945", "label": "", "pov": False}
+    ]
+
+
+def test_a_point_filed_by_another_road_is_a_row_and_a_mark(client):
+    """A sheet row files a point for a proof it never composed. The graph knew
+    two places while the composer opened on one, so the proof said two things."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    _save(client, cid, "Harbour strike", _points(("48.656140, 2.371511", "impact 1", False)))
+    case = Case.open(cid)
+    proof = _proof(cid)
+    # the road the sheet takes: its own place, its own provenance, no re-composition
+    elsewhere = client.post(
+        f"/api/cases/{cid}/satellite/place", json={"lat": 48.656289, "lon": 2.371885}
+    ).json()
+    case.update_entity(elsewhere["id"], {"label": "impact 2"})
+    case.add_link(proof["id"], elsewhere["id"], "depicts", by="sheet-build")
+
+    rows = _proof_index(client, cid)
+    assert [(r["lat"], r["label"]) for r in rows] == [
+        (48.65614, "impact 1"), (48.656289, "impact 2"),
+    ]
+    # and the composer opens on both, the analyst's own row still the conclusion
+    spec = client.get(f"/api/cases/{cid}/proofs/Harbour strike").json()
+    assert [one["coords"] for one in spec["points"]] == ["48.656140, 2.371511", "48.656289, 2.371885"]
+    assert spec["points"][1]["label"] == "impact 2"
+
+
+def _other_road(client, cid, lat, lon, label, *, material=(), verb="depicts"):
+    """A point filed for a proof by a road that never wrote its composition.
+
+    What `api/sheetproofs._added_point` writes for the binder's cross-border shape: its
+    own place, its own provenance, the proof reaching it and the material posed on it.
+    """
+    proof = _proof(cid)
+    case = Case.open(cid)
+    place = client.post(f"/api/cases/{cid}/satellite/place", json={"lat": lat, "lon": lon}).json()
+    case.update_entity(place["id"], {"label": label})
+    case.add_link(proof["id"], place["id"], "depicts", by="sheet-proofs")
+    for entity_id in material:
+        case.add_link(entity_id, place["id"], verb, by="sheet-proofs")
+    return place
+
+
+def test_taking_off_a_point_another_road_filed_withdraws_it_for_good(client):
+    """The composer opens on a point a sheet row filed, as an editable row. So deleting
+    that row has to mean what it says: read on its own provenance, the withdrawal found
+    nothing to take back, the save reported no orphan, and the next open adopted the
+    point again — a row that could not be deleted, coming back with no way to tell why."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    video = _video(cid)
+    spec = {
+        **_panels("media/clip.mp4"),
+        "points": [{"coords": "48.656140, 2.371511", "label": "impact 1", "pov": False}],
+    }
+    _save(client, cid, "Harbour strike", spec)
+    elsewhere = _other_road(client, cid, 48.656289, 2.371885, "impact 2", material=[video["id"]])
+
+    opened = client.get(f"/api/cases/{cid}/proofs/Harbour strike").json()
+    assert [one["label"] for one in opened["points"]] == ["impact 1", "impact 2"]
+
+    kept = {**opened, "points": opened["points"][:1]}
+    saved = _save(client, cid, "Harbour strike", kept)
+
+    # the proof's own edge and the footage the road posed with it, both taken back
+    assert [lk["from"] for lk in _depicts(cid) if lk["to"] == elsewhere["id"]] == []
+    assert saved["orphans"] == [{"id": elsewhere["id"], "label": "impact 2"}]
+    again = client.get(f"/api/cases/{cid}/proofs/Harbour strike").json()
+    assert [one["label"] for one in again["points"]] == ["impact 1"]
+
+
+def test_a_point_kept_from_another_road_is_stated_rather_than_left_alone(client):
+    """The other half of the same rule: a row the analyst leaves standing is a row the
+    proof now states itself, so its material carries the edge the composition means."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    video = _video(cid)
+    _save(client, cid, "Harbour strike", _with_coords("48.656140, 2.371511", None, "media/clip.mp4"))
+    elsewhere = _other_road(client, cid, 48.656289, 2.371885, "impact 2")
+
+    opened = client.get(f"/api/cases/{cid}/proofs/Harbour strike").json()
+    _save(client, cid, "Harbour strike", opened)
+
+    posed = {lk["from"] for lk in _depicts(cid) if lk["to"] == elsewhere["id"]}
+    assert {_proof(cid)["id"], video["id"]} <= posed
+
+
+def test_a_point_a_second_proof_concludes_on_by_another_road_keeps_its_material(client):
+    """`_other_proof_states` read one provenance, so a proof withdrawing its point took
+    the video off a place a sheet-built proof still concludes on."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    video = _video(cid)
+    spec = _with_coords("50.4501, 30.5234", None, "media/clip.mp4")
+    _save(client, cid, "First", spec)
+    shared = _places(cid)[0]
+    case = Case.open(cid)
+    other = case.add_entity("proof", "Built by the sheet", {"spec": "proofs/x.json"}, by="user")
+    case.add_link(other["id"], shared["id"], "depicts", by="sheet-proofs")
+
+    saved = _save(client, cid, "First", _with_coords("48.8584, 2.2945", None, "media/clip.mp4"))
+
+    assert saved["orphans"] == []
+    holding = {lk["from"] for lk in _depicts(cid) if lk["to"] == shared["id"]}
+    assert {video["id"], other["id"]} <= holding
+
+
+def test_the_pov_of_an_adopted_point_is_read_off_this_proof_material(client):
+    """POV says *this* proof's footage was recorded there. Read off any media standing
+    on the point, a second proof's video answered for this one — and the tick came back
+    on, in a composition whose own footage says nothing of the kind."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    _video(cid)
+    _save(client, cid, "Harbour strike", _with_coords("48.656140, 2.371511", None, "media/clip.mp4"))
+    somebody = _video(cid, "theirs.mp4")
+    elsewhere = _other_road(
+        client, cid, 48.656289, 2.371885, "impact 2",
+        material=[somebody["id"]], verb="located-at",
+    )
+
+    opened = client.get(f"/api/cases/{cid}/proofs/Harbour strike").json()
+    adopted = next(one for one in opened["points"] if one.get("label") == "impact 2")
+    assert adopted.get("pov") is not True
+    assert [lk["from"] for lk in _located_at(cid) if lk["to"] == elsewhere["id"]] == [
+        somebody["id"]
+    ]
+
+
+def test_reopening_a_proof_never_rewrites_what_was_typed(client):
+    """Down to the format: somebody who works in DMS typed DMS."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    typed = "48°51'30.2\"N 2°17'40.2\"E"
+    _save(client, cid, "Typed", _points((typed, "", False)))
+
+    spec = client.get(f"/api/cases/{cid}/proofs/Typed").json()
+    assert [one["coords"] for one in spec["points"]] == [typed]
+
+
+def test_a_proof_the_panels_place_opens_with_an_empty_field(client, sat_tiles):
+    """Nothing was typed, so nothing is written into the row: the field shows the
+    panels' own answer and the reset arrow stays away."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    cap = _sat(client, cid, 50.4501, 30.5234)
+    client.post(f"/api/cases/{cid}/proofs", json={"title": "Auto", "spec": _panels(cap["path"])})
+
+    spec = client.get(f"/api/cases/{cid}/proofs/Auto").json()
+    assert spec.get("points") in (None, [])

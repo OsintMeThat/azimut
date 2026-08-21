@@ -503,6 +503,91 @@ def test_a_name_is_claimed_inside_its_own_family(client):
     assert names == {("board", "Week one"), ("timeline", "Week one")}
 
 
+def test_renaming_a_view_leaves_the_reading_it_holds_alone(client):
+    """A label is not a reading, so both modes accept a rename.
+
+    The `PUT` a live view saves through refuses a snapshot on purpose — its capture is
+    evidence. Renaming has to reach it anyway, or a frozen reading is stuck with the
+    name it was given, and the answer stays the menu row rather than the whole capture.
+    """
+    case_id = _case(client, "Renaming")
+    truck = _entity(client, case_id, "vehicle", "White pickup", {"plate": "AB-123-CD"})
+    live = client.post(
+        f"/api/cases/{case_id}/analysis-views", json=_body("Plate watch")
+    ).json()
+    body = _body("Captured plate", mode="snapshot")
+    body["spec"]["capture_ids"] = [truck["id"]]
+    snapshot = client.post(f"/api/cases/{case_id}/analysis-views", json=body).json()
+
+    renamed = client.patch(
+        f"/api/cases/{case_id}/analysis-views/{live['id']}", json={"name": "  Plates  "}
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "Plates"
+    # The row a menu reads, not the recipe: a rename ships no spec back.
+    assert "spec" not in renamed.json()
+    assert renamed.json()["created_at"] == live["created_at"]
+    assert renamed.json()["updated_at"] >= live["updated_at"]
+    assert client.get(
+        f"/api/cases/{case_id}/analysis-views/{live['id']}"
+    ).json()["spec"] == live["spec"]
+
+    frozen = client.patch(
+        f"/api/cases/{case_id}/analysis-views/{snapshot['id']}",
+        json={"name": "Plate capture"},
+    )
+    assert frozen.status_code == 200, frozen.text
+    assert frozen.json()["name"] == "Plate capture"
+    assert frozen.json()["snapshot_count"] == 1
+    reread = client.get(f"/api/cases/{case_id}/analysis-views/{snapshot['id']}").json()
+    assert reread["spec"]["snapshot"] == snapshot["spec"]["snapshot"]
+
+    # A name still belongs to one view of the family, and a whitespace-only name is
+    # not a name.
+    taken = client.patch(
+        f"/api/cases/{case_id}/analysis-views/{snapshot['id']}", json={"name": "plates"}
+    )
+    assert taken.status_code == 409
+    assert client.patch(
+        f"/api/cases/{case_id}/analysis-views/{live['id']}", json={"name": "   "}
+    ).status_code == 400
+    assert client.patch(
+        f"/api/cases/{case_id}/analysis-views/{live['id']}", json={"name": ""}
+    ).status_code == 422
+    assert client.patch(
+        f"/api/cases/{case_id}/analysis-views/v_missing", json={"name": "Nowhere"}
+    ).status_code == 404
+    # Keeping its own name is not a clash with itself.
+    assert client.patch(
+        f"/api/cases/{case_id}/analysis-views/{live['id']}", json={"name": "Plates"}
+    ).status_code == 200
+
+
+def test_a_renamed_view_keeps_its_name_across_a_family(client):
+    """The two lists are separate namespaces for a rename as much as for a save."""
+    case_id = _case(client, "Rename across families")
+    board = client.post(
+        f"/api/cases/{case_id}/analysis-views", json=_body("Week one")
+    ).json()
+    timeline = client.post(
+        f"/api/cases/{case_id}/analysis-views",
+        json={
+            "name": "Tracks", "mode": "live", "surface": "timeline",
+            "spec": {"timeline": {"tracks": []}},
+        },
+    ).json()
+
+    renamed = client.patch(
+        f"/api/cases/{case_id}/analysis-views/{timeline['id']}", json={"name": "Week one"}
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert {
+        (view["surface"], view["name"])
+        for view in client.get(f"/api/cases/{case_id}/analysis-views").json()["views"]
+    } == {("board", "Week one"), ("timeline", "Week one")}
+    assert board["name"] == "Week one"
+
+
 def test_a_timeline_view_keeps_the_clock_and_the_colours_it_was_read_with(client):
     case_id = _case(client, "Zone and colour")
     body = {

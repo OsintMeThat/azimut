@@ -186,3 +186,23 @@ describe('Inspect sessions', () => {
     saveUi.note = '';`);
   });
 });
+
+describe('Inspect — work that outlived what it was started against', () => {
+  it('drops a frame whose session was cleared while it rendered', () => {
+    // `session` is one object mutated in place, so a capture awaiting two round
+    // trips cannot notice a discard or a source switch on its own — the frame
+    // landed in the new session and became the active one.
+    expect(source).toContain('let sessionRun = 0;');
+    expect(source).toContain('sessionRun += 1;');
+    expect(source).toMatch(/async function capture\(time\) \{[\s\S]*?const run = sessionRun;/);
+    expect(source).toMatch(/const dim = await imageSize\(url\);\s*\n\s*if \(run !== sessionRun\)/);
+  });
+
+  it('lets Escape leave the crop it found rather than applying the new one', () => {
+    expect(source).toContain("if (e.key === 'Enter') { e.preventDefault(); commitCrop(); }");
+    expect(source).toContain("else if (e.key === 'Escape') { e.preventDefault(); cancelCrop(); }");
+    expect(source).toContain('function cancelCrop()');
+    expect(source).toContain('activeFrame.crop = cropBefore');
+    expect(source).toContain('cropBefore = activeFrame.crop ? { ...activeFrame.crop } : null;');
+  });
+});

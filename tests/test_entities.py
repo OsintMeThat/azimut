@@ -333,6 +333,60 @@ def test_the_new_verbs_keep_the_approved_endpoint_matrix():
     assert "equipment-type" in by_type["about"].to_types
 
 
+# -- which verbs a pair of types has at all ------------------------------------
+
+
+def test_a_pair_offers_only_the_verbs_the_registry_allows():
+    """`pair_verbs` is the type-only endpoint check, asked before either entity exists.
+
+    Two ordered pairs, two different answers: a media may be *at* a place or *show*
+    one, and a person may only be a member of an organization, own it, or be tied to
+    it. `part-of` is absent on purpose — it runs organization to organization, so a
+    person is never *part of* one.
+    """
+    assert [s.type for s in link_engine.pair_verbs("media", "place")] == [
+        "located-at", "depicts",
+    ]
+    assert [s.type for s in link_engine.pair_verbs("person", "organization")] == [
+        "owns", "member-of", "associated-with",
+    ]
+    assert [s.type for s in link_engine.pair_verbs("organization", "organization")] == [
+        "owns", "part-of", "member-of", "associated-with",
+    ]
+    assert [s.type for s in link_engine.pair_verbs("structure", "place")] == ["sited-at"]
+
+
+def test_a_person_and_a_point_have_no_verb_between_them():
+    """The witness case for a promotion that maps coordinates onto a column of people:
+    the vocabulary joins them by nothing, so the pair is never offered and a latitude
+    never lands on a person as a field nothing shows or edits."""
+    assert link_engine.pair_verbs("person", "place") == ()
+    assert link_engine.pair_verbs("place", "media") == ()
+
+
+def test_a_pair_never_offers_what_only_a_machine_may_state():
+    """`same-image-as` is enrichment's own claim and the derivation chain is recorded
+    by the save that produced it, so neither is a verb a batch of edges may pick."""
+    assert link_engine.pair_verbs("media", "media") == ()
+    offered = {
+        spec.type
+        for a in ("media", "person", "organization", "note", "proof")
+        for b in ("media", "person", "organization", "place")
+        for spec in link_engine.pair_verbs(a, b)
+    }
+    assert offered.isdisjoint({"same-image-as", *link_engine.CHAIN_TYPES})
+
+
+def test_a_pair_can_be_asked_for_one_kind_of_gesture():
+    """A document naming a place is a pointer, not a finding, and the two never share a
+    select — so the caller asks for the action it is drawing."""
+    assert [s.type for s in link_engine.pair_verbs("note", "place")] == ["mentions"]
+    assert link_engine.pair_verbs("note", "place", action="relation") == ()
+    assert [
+        s.type for s in link_engine.pair_verbs("note", "place", action="mention")
+    ] == ["mentions"]
+
+
 # -- what state a thing is in, and how many of it ------------------------------
 
 

@@ -68,7 +68,7 @@ def _draw(size: int) -> Image.Image:
     )
     draw.polygon([px(TIP), px(BASE_W), px(WAIST)], fill=INK)
     draw.polygon([px(TIP), px(BASE_E), px(WAIST)], fill=AMBER)
-    return img.resize((size, size), Image.LANCZOS)
+    return img.resize((size, size), Image.Resampling.LANCZOS)
 
 
 def main() -> None:

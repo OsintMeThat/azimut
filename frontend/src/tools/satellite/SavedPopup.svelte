@@ -157,7 +157,9 @@
         </button>
         <div class="body">
           <button type="button" class="title" onclick={() => onopen(row)}>
-            {row.title || 'Untitled'}
+            <!-- one proof, several points: the name is what tells this mark from
+                 the others under the same title -->
+            {row.label ? `${row.title || 'Untitled'} · ${row.label}` : (row.title || 'Untitled')}
           </button>
           <p class="meta">
             <span class="kind"><Icon name={GLYPH[row.kind] ?? 'pin'} size={10} /> {KIND[row.kind]}</span>

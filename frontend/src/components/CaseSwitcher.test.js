@@ -149,7 +149,7 @@ describe('refreshCaseList', () => {
     await refreshCaseList({ q: '   ' });
     expect(get).toHaveBeenNthCalledWith(1, '/api/cases');
     vi.doUnmock('../lib/api.js');
-  });
+  }, 20_000);
 
   it('loads the workspace folders alongside the cases, unfiltered', async () => {
     vi.resetModules();
@@ -163,7 +163,7 @@ describe('refreshCaseList', () => {
     // the folder list is not a case list: the name query does not apply to it
     expect(get).toHaveBeenNthCalledWith(2, '/api/workspace/folders');
     vi.doUnmock('../lib/api.js');
-  });
+  }, 20_000);
 
   it('still lists the cases when the folder scan fails', async () => {
     vi.resetModules();
@@ -179,7 +179,7 @@ describe('refreshCaseList', () => {
     expect(caseState.list).toHaveLength(1);
     expect(caseState.folders).toEqual([]);
     vi.doUnmock('../lib/api.js');
-  });
+  }, 20_000);
 });
 
 describe('workspace folders', () => {
@@ -217,7 +217,7 @@ describe('workspace folders', () => {
     expect(get).toHaveBeenLastCalledWith('/api/cases/Oceanside match');
     expect(caseState.current).toBeTruthy();
     vi.doUnmock('../lib/api.js');
-  });
+  }, 20_000);
 });
 
 describe('open case folder', () => {

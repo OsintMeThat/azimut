@@ -69,7 +69,8 @@ _MEDIA_CATEGORY_SQL = {
     "satellite": _SATELLITE_SQL,
     # A paste and a drop are one facet: both are material the analyst brought in
     # by hand, which is the question this filter asks. They stay two source types
-    # because only one of them can state where it came from.
+    # because the gesture is part of the record — a screenshot is not a file that
+    # was chosen off a disk, whatever origin was stated for either.
     "upload": "source_type IN ('upload', 'clipboard')",
     "download": "source_type = 'download'",
     "other": "kind NOT IN ('image', 'video')",

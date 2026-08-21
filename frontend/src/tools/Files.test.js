@@ -185,3 +185,14 @@ describe('Ctrl+V on the desktop', () => {
     expect(source).toMatch(/<PasteDialog[^>]*folders=\{allFolders\}/s);
   });
 });
+
+describe('Files — acting on what the view actually shows', () => {
+  it('resolves a selection against the complete folder, not the first page', () => {
+    // List view renders `completeFolderEntities` (the whole open folder) while
+    // move and delete filtered `confirmed` (the first 200 rows case-wide), so
+    // any row past page one silently no-opped.
+    expect(source).toContain('const selectable = $derived(');
+    expect(source).toContain('const ents = selectable.filter((e) => ids.includes(e.id));');
+    expect(source).not.toContain('const ents = confirmed.filter((e) => ids.includes(e.id));');
+  });
+});

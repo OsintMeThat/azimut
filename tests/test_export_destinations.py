@@ -59,7 +59,11 @@ def test_export_destinations_are_remembered_independently(client, tmp_path):
         "notes": str(notes),
         "media": str(media),
         "proofs": "",
+        "views": "",
+        "sheets": "",
     }
+    # Every kind answers, so a new one cannot ship without a folder of its own.
+    assert set(response.json()["export_dirs"]) == set(exportdir.KINDS)
     assert client.get("/api/settings").json()["export_dirs"]["notes"] == str(notes)
 
     reset = client.put("/api/settings/prefs", json={"export_dirs": {"notes": ""}})

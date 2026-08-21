@@ -329,7 +329,15 @@ class Case(CaseStore):
         Normal callers want :meth:`open`. The Case Doctor deliberately needs a
         weaker primitive: a missing ``case.db`` is one of the failures it must
         be able to inspect and repair.
+
+        The id names a folder in the workspace and nothing else. It arrives from
+        a URL path segment, which cannot hold a ``/`` but can hold a ``\\`` — a
+        separator on Windows — so the containment rule is stated here rather than
+        left to the caller: every case route resolves through this one method,
+        and one of them is the delete that removes the folder.
         """
+        if not layout.names_one_child(case_id):
+            raise CaseError(f"case '{case_id}' not found")
         for parent in (config.cases_dir(), config.scratch_dir()):
             path = parent / case_id
             if layout.is_case(path):
@@ -550,9 +558,20 @@ class Case(CaseStore):
                 if not layout.is_case(path):
                     continue
                 case = cls(path)
-                data = case.read()
-                updated_at = data.get("updated_at")
                 health = "ok"
+                try:
+                    data = case.read()
+                except (OSError, json.JSONDecodeError):
+                    # An unreadable manifest must not cost the whole list: this
+                    # is the switcher, and it is also what `_ensure_name_free`
+                    # calls, so one corrupt case.json would otherwise block
+                    # opening *and* creating every other case.
+                    data = {}
+                    health = "needs-attention"
+                if not isinstance(data, dict):
+                    data = {}
+                    health = "needs-attention"
+                updated_at = data.get("updated_at")
                 try:
                     if case._sqlite is not None:
                         updated_at = case._sqlite.updated_at() or updated_at
@@ -887,6 +906,7 @@ class Case(CaseStore):
             "proof": ("spec", layout.proof_spec_rel, "Proof"),
             "inspect-session": ("spec", layout.session_rel, "Inspect"),
             "post": ("draft", layout.draft_rel, "Post"),
+            "sheet": ("path", layout.sheet_rel, "Sheet"),
         }
         rule = rules.get(str(entity.get("type") or ""))
         if rule is None:
@@ -933,6 +953,13 @@ class Case(CaseStore):
             replacements.append((old_export, new_export))
             if (entity.get("attrs") or {}).get("path") == old_export:
                 attrs["path"] = new_export
+        if entity["type"] == "sheet":
+            # The sidecar is named after the table, so it follows it or the grid
+            # reopens with its colours and links hung on nothing.
+            old_meta = layout.sheet_meta_rel(Path(current).stem)
+            new_meta = layout.sheet_meta_rel(canonical)
+            moves.append((self.resolve_inside(old_meta), self.resolve_inside(new_meta)))
+            replacements.append((old_meta, new_meta))
 
         moved: list[tuple[Path, Path]] = []
         applied: list[tuple[str, str]] = []

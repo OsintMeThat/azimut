@@ -99,6 +99,7 @@ export function postReportMarkdown({
   place,
   plusCode,
   coordinates,
+  points = [],
   dms,
   mapLinks = {},
   description,
@@ -138,14 +139,21 @@ export function postReportMarkdown({
       ...location.map(([label, value]) => `| ${label} | ${value} |`),
     ].join('\n'));
   }
-  if (clean(description)) sections.push(`## Assessment\n\n${clean(description)}`);
-  if (clean(source)) {
-    const sourceText = clean(source);
-    const sourceValue = /^https?:\/\//i.test(sourceText)
-      ? `[Open original source](${sourceText})`
-      : sourceText;
-    sections.push(`## Source\n\n${sourceValue}`);
+  // Every point the proof argues, once there is more than one. Location above
+  // is the conclusion — the address the post is written about — and this is the
+  // rest of what the picture shows, which a tweet has no room to name.
+  const listed = (points ?? []).filter((one) => clean(one?.coords));
+  if (listed.length > 1) {
+    sections.push([
+      '## Points',
+      '',
+      '| Point | Coordinates |',
+      '| --- | --- |',
+      ...listed.map((one, i) => `| ${cell(one.label) || `Point ${i + 1}`} | ${inlineCode(one.coords)} |`),
+    ].join('\n'));
   }
+  if (clean(description)) sections.push(`## Assessment\n\n${clean(description)}`);
+  if (clean(source)) sections.push(`## Source\n\n${sourceSection(source)}`);
   const mediaByPath = new Map(
     mediaEntities
       .filter((entity) => entity?.id && entity?.attrs?.path)
@@ -343,13 +351,59 @@ export const DEFAULT_TWEET_BODY = [
   'Source: #source',
 ].join('\n');
 
+/** What separates a point's name from its coordinates, on the one line it gets. */
+export const POINT_SEPARATOR = ' — ';
+
+/** One coordinate line split into its optional name and its coordinates. */
+export function splitPointLine(line) {
+  const text = String(line ?? '').trim();
+  const at = text.indexOf(POINT_SEPARATOR);
+  if (at < 0) return { label: '', coords: text };
+  return {
+    label: text.slice(0, at).trim(),
+    coords: text.slice(at + POINT_SEPARATOR.length).trim(),
+  };
+}
+
+/** The lines a coordinate block holds, dropping the empty ones. */
+export function pointLines(text) {
+  return String(text ?? '')
+    .split('\n')
+    .map(splitPointLine)
+    .filter((one) => one.coords);
+}
+
+/**
+ * The coordinates a post carries, one point per line.
+ *
+ * A proof shows more than one place often enough — three impacts, a building,
+ * the camera — and the analyst reads the numbers, so the tweet carries all of
+ * them rather than the conclusion alone. The first line is the one the post
+ * resolved, so it reads in decimal as it always has; the rest read as they were
+ * written, and a name keeps its line either way.
+ */
+export function postCoordinates(text, { lat, lon } = {}) {
+  const lines = pointLines(text);
+  if (lat != null && lon != null) {
+    const decimal = `${Number(lat).toFixed(6)}, ${Number(lon).toFixed(6)}`;
+    if (lines.length) lines[0] = { ...lines[0], coords: decimal };
+    else lines.push({ label: '', coords: decimal });
+  }
+  return lines
+    .map((one) => (one.label ? `${one.label}${POINT_SEPARATOR}${one.coords}` : one.coords))
+    .join('\n');
+}
+
 /** Resolve the live draft into the string each token stands for ('' when absent). */
-export function tweetFields({ place, plusCode, description, lat, lon, mention, source } = {}) {
+export function tweetFields({
+  place, plusCode, description, lat, lon, coordsText, mention, source,
+} = {}) {
   return {
     place: place?.trim() ?? '',
+    // Place and plus code are one point's address, and that point is the
+    // conclusion: the header of a tweet is about the proof, not about impact 2.
     plusCode: plusCode ?? '',
-    coordinates:
-      lat != null && lon != null ? `${Number(lat).toFixed(6)}, ${Number(lon).toFixed(6)}` : '',
+    coordinates: postCoordinates(coordsText, { lat, lon }),
     description: description?.trim() ?? '',
     mention: mention?.trim() ?? '',
     source: source?.trim() ?? '',
@@ -399,12 +453,40 @@ export function templateUsesPostField(body, field) {
   return tokens.some((token) => lowerBody.includes(token));
 }
 
+//: What an address looks like inside a source line. The composer joins several with
+//: its own separator, so the middle dot ends one as surely as a space does.
+const SOURCE_URL = /https?:\/\/[^\s·]+/gi;
+
+/** Every address a proof's source line holds, in the order it holds them. */
+export function sourceUrls(sourceLine) {
+  return String(sourceLine ?? '').match(SOURCE_URL) ?? [];
+}
+
+/**
+ * The Source section's body: a link per address, or the line as it stands.
+ *
+ * A line that is nothing but addresses becomes one link each, because wrapping the
+ * whole line in a single href made a dead link the moment a proof rested on two
+ * posts. A line carrying anything else is prose the analyst typed, and prose is
+ * printed rather than linked.
+ */
+export function sourceSection(sourceLine) {
+  const text = String(sourceLine ?? '').trim();
+  const urls = sourceUrls(text);
+  if (!urls.length) return text;
+  if (text.replace(SOURCE_URL, ' ').replace(/[\s·,;|]+/g, '')) return text;
+  if (urls.length === 1) return `[Open original source](${urls[0]})`;
+  // A list, because Markdown needs one to break a line at all and a reader needs one to
+  // tell four sources apart.
+  return urls.map((url) => `- [${url}](${url})`).join('\n');
+}
+
 /**
  * Find original downloaded media behind a proof whose source matches the proof
  * source line. Derived PNGs, collages and satellite captures are excluded.
  */
 export function proofSourceMediaPaths(caseData, proofPng, proofSource, mediaItems = []) {
-  const wantedUrls = new Set(String(proofSource ?? '').match(/https?:\/\/[^\s·]+/gi) ?? []);
+  const wantedUrls = new Set(sourceUrls(proofSource));
   if (!wantedUrls.size) return [];
   const entities = Array.isArray(caseData?.entities) ? caseData.entities : [];
   const links = Array.isArray(caseData?.links) ? caseData.links : [];

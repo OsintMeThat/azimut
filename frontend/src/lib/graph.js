@@ -997,7 +997,12 @@ export function nodeRadius(degree) {
  */
 export function shortLabel(label, max = 22) {
   const text = String(label ?? '').trim();
-  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+  // Cut by code point rather than by UTF-16 unit. A slice through a surrogate pair —
+  // an emoji in an account's name is enough — leaves half of one behind, which is not
+  // a character: the canvas draws a blank box and an SVG export cannot be encoded at
+  // all, so the whole plate used to fail on one label.
+  const glyphs = [...text];
+  return glyphs.length <= max ? text : `${glyphs.slice(0, max - 1).join('')}…`;
 }
 
 /**

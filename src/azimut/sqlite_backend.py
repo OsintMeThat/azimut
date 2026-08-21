@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -331,6 +332,12 @@ class SqliteCase:
 
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
+        # The connection a `batch()` is holding open, per thread. Thread-local rather
+        # than a plain attribute because one `SqliteCase` is shared by the request
+        # threads and the job worker, and a sqlite3 connection belongs to the thread
+        # that made it: an attribute would hand one thread's open transaction to
+        # another and raise from somewhere unrelated.
+        self._local = threading.local()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -519,18 +526,49 @@ class SqliteCase:
         # and there is no cross-thread connection to mismanage. Autocommit
         # (isolation_level=None) leaves transaction control explicit — reads run
         # bare, writes wrap in BEGIN IMMEDIATE..COMMIT via `_write`.
-        conn = sqlite3.connect(self.db_path, isolation_level=None)
+        #
+        # Inside a `batch()`, that connection is lent instead. Reads have to join it
+        # or they would be looking at the file as it was before the batch started:
+        # SQLite shows uncommitted rows to the connection that wrote them and to no
+        # other, so a planner that adds an entity and then reads it back would find
+        # nothing. Never closed here — the batch owns its lifetime.
+        ambient = getattr(self._local, "conn", None)
+        if ambient is not None:
+            yield ambient
+            return
+        conn = self._open()
         try:
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute("PRAGMA busy_timeout = 5000")
-            conn.execute("PRAGMA synchronous = FULL")
             yield conn
         finally:
             conn.close()
 
+    def _open(self) -> sqlite3.Connection:
+        """One configured connection. Here rather than inline because `batch()` opens
+        its own and the two must agree on every pragma."""
+        conn = sqlite3.connect(self.db_path, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        # Long enough for a queue, not long enough to hide a deadlock: every write goes
+        # through BEGIN IMMEDIATE, so no waiter is queued behind a lock it holds itself,
+        # and what it waits on is the fsync `synchronous = FULL` charges per commit.
+        # Five seconds held on Linux and ran out on Windows. Eight concurrent downloads
+        # open eighty of these between them, ten per filed item; the whole lot costs two
+        # seconds of lock on Linux and enough more on Windows that one of the eight gave
+        # up on a queue that was still moving.
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA synchronous = FULL")
+        return conn
+
     def _write(self, op: Callable[[sqlite3.Connection], T]) -> T:
-        """Run `op` inside one immediate transaction, rolling back on error."""
+        """Run `op` inside one immediate transaction, rolling back on error.
+
+        Inside a `batch()` there is already a transaction open and it belongs to the
+        batch, so the operation joins it and neither commits nor rolls back: one
+        `COMMIT` for the whole lot is the point of the thing.
+        """
+        ambient = getattr(self._local, "conn", None)
+        if ambient is not None:
+            return op(ambient)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
@@ -540,6 +578,44 @@ class SqliteCase:
             except BaseException:
                 conn.execute("ROLLBACK")
                 raise
+
+    @contextmanager
+    def batch(self) -> Iterator[None]:
+        """One transaction for every store call made inside, on this thread.
+
+        What "all or nothing" costs. A promotion that writes thirty-four entities and
+        thirty-four links makes sixty-nine short transactions on its own, and a failure
+        at the fortieth leaves the first thirty-nine standing — a case half-way through
+        an operation nobody can see the shape of. Wrapped in a batch, the same calls
+        share one `BEGIN IMMEDIATE`: the last one commits them all, and any exception
+        leaves the case exactly as it was.
+
+        **Keep a batch short and keep I/O out of it.** It holds SQLite's write lock for
+        its whole duration, so every other writer — the job worker included — waits on
+        it and then fails on `busy_timeout`. That is precisely why the road that
+        downloads files is atomic per row instead: a batch around a hundred network
+        fetches would lock the case for minutes.
+
+        Not nestable, deliberately. An inner batch would either commit early, breaking
+        the outer promise, or silently do nothing, breaking its own; refusing says which
+        caller is wrong while there is still a stack trace to say it in.
+        """
+        if getattr(self._local, "conn", None) is not None:
+            raise CaseError("a batch is already open on this thread")
+        conn = self._open()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            self._local.conn = conn
+            try:
+                yield
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+            finally:
+                self._local.conn = None
+        finally:
+            conn.close()
 
     @staticmethod
     def _touch(conn: sqlite3.Connection) -> None:
@@ -607,16 +683,27 @@ class SqliteCase:
     # -- reads -------------------------------------------------------------
 
     def snapshot(self) -> dict[str, Any]:
+        # One read transaction, not four bare SELECTs: the connection runs in
+        # autocommit, so without it a write landing between the entities read and
+        # the links read would produce a snapshot whose edges point at nodes it
+        # does not carry. A bundle export runs on the worker thread while the
+        # analyst keeps editing, which is exactly that window.
         with self._connect() as conn:
-            meta = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM meta")}
-            entities = [
-                self._entity(r) for r in conn.execute("SELECT * FROM entities ORDER BY rowid")
-            ]
-            links = [self._link(r) for r in conn.execute("SELECT * FROM links ORDER BY rowid")]
-            folders = [
-                r["path"]
-                for r in conn.execute("SELECT path FROM folders ORDER BY path COLLATE NOCASE")
-            ]
+            conn.execute("BEGIN")
+            try:
+                meta = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM meta")}
+                entities = [
+                    self._entity(r) for r in conn.execute("SELECT * FROM entities ORDER BY rowid")
+                ]
+                links = [self._link(r) for r in conn.execute("SELECT * FROM links ORDER BY rowid")]
+                folders = [
+                    r["path"]
+                    for r in conn.execute("SELECT path FROM folders ORDER BY path COLLATE NOCASE")
+                ]
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
         schema = int(meta.get("schema_version", SQLITE_SCHEMA))
         return {
             "azimut": {"schema": schema, "storage": "sqlite"},
@@ -937,6 +1024,30 @@ class SqliteCase:
         if saved is None:  # pragma: no cover - the insert above is the invariant
             raise CaseError(f"analysis view '{view['id']}' was not saved")
         return saved
+
+    def rename_analysis_view(
+        self, view_id: str, name: str, updated_at: str
+    ) -> dict[str, Any] | None:
+        """Give one saved reading another name, leaving the reading itself alone.
+
+        The spec column is never touched here, so a snapshot keeps the exact bytes it
+        captured: a label is not evidence, and rewriting thousands of frozen rows to
+        change one is both slow and a chance to lose them.
+        """
+
+        def op(conn: sqlite3.Connection) -> bool:
+            cursor = conn.execute(
+                "UPDATE analysis_views SET name = ?, updated_at = ? WHERE id = ?",
+                (name, updated_at, view_id),
+            )
+            renamed = cursor.rowcount > 0
+            if renamed:
+                self._touch(conn)
+            return renamed
+
+        if not self._write(op):
+            return None
+        return self.get_analysis_view(view_id)
 
     def remove_analysis_view(self, view_id: str) -> dict[str, Any] | None:
         """Remove one view and return the recipe Trash needs to restore it."""
@@ -2701,6 +2812,7 @@ class SqliteCase:
         *,
         by: str,
         status: EntityStatus = "confirmed",
+        own_only: bool = False,
     ) -> list[dict[str, Any]]:
         def op(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             if conn.execute("SELECT 1 FROM entities WHERE id = ?", (from_id,)).fetchone() is None:
@@ -2725,7 +2837,13 @@ class SqliteCase:
             }
             # Drop edges no longer wanted; leave the survivors untouched so their
             # id and timestamp are preserved (restating sources, not rebuilding).
-            stale = [(r["id"],) for to_id, r in existing.items() if to_id not in wanted_set]
+            # `own_only` also leaves what another author wrote: the caller's list is
+            # then its own statement rather than the whole truth about this type.
+            stale = [
+                (r["id"],)
+                for to_id, r in existing.items()
+                if to_id not in wanted_set and not (own_only and r["prov_by"] != by)
+            ]
             if stale:
                 conn.executemany("DELETE FROM links WHERE id = ?", stale)
             for to_id in wanted:
@@ -3036,8 +3154,8 @@ class SqliteCase:
                 conn.execute(
                     "INSERT OR REPLACE INTO links"
                     "(id, from_id, to_id, type, prov_by, prov_at, prov_status,"
-                    " prov_source, confidence)"
-                    " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " prov_source, confidence, nature)"
+                    " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         link["id"], link["from"], link["to"], link["type"],
                         prov.get("by", "user"), prov.get("at", _now()),
@@ -3045,6 +3163,9 @@ class SqliteCase:
                         # restoring an eliminated candidate must bring back the
                         # elimination: "I ruled these eleven out" is the finding
                         link.get("confidence"),
+                        # and the qualifier with it: "brother of" is the analyst's
+                        # own reading of the tie, not a decoration on the verb
+                        link.get("nature"),
                     ),
                 )
                 kept += 1

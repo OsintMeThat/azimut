@@ -119,8 +119,11 @@ async function init() {
     $("state-nomap").hidden = false;
     if (tab.title) $("bm-title").value = tab.title;
     const paired = await loadCases($("bm-case"), stored);
+    // Azimut down or unpaired: loadCases has already said so above. Leaving the
+    // button live would answer that message with a click that does nothing, and
+    // the analyst reads it as the extension being broken.
+    $("save-bookmark").disabled = !paired;
     $("save-bookmark").addEventListener("click", async () => {
-      if (!paired) return;
       $("save-bookmark").disabled = true;
       const body = new FormData();
       body.append("url", tab.url);
@@ -195,8 +198,10 @@ async function init() {
     }
   });
 
+  // Same reason as Save place just above: unreachable is shown, not swallowed.
+  $("capture-area").disabled = !paired;
+
   $("capture-area").addEventListener("click", async () => {
-    if (!paired) return;
     // half a coordinate would 422 server-side; catch it where it's fixable
     if ((numOrNull("lat") === null) !== (numOrNull("lon") === null)) {
       status("Latitude and longitude go together. Fill both or neither.", "error");

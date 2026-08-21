@@ -6,10 +6,19 @@
     activateAnalysisView,
     adoptSavedAnalysisView,
     leaveAnalysisView,
+    renameAnalysisView,
     viewFamily,
     viewSlot,
   } from '../lib/analysisSearch.svelte.js';
-  import { copyName } from '../lib/analysisViews.js';
+  import {
+    copyName,
+    exactStamp,
+    readViewOrder,
+    sortViews,
+    timeAgo,
+    viewOrders,
+    writeViewOrder,
+  } from '../lib/analysisViews.js';
   import { closeOnOutsidePointer } from '../lib/dismiss.js';
   import { restoreGroup } from '../lib/trash.js';
   import { caseState, registerCaseChangeGuard, toast } from '../lib/state.svelte.js';
@@ -41,6 +50,17 @@
   let mode = $state('live');
   let busy = $state(false);
   let loadedFor = null;
+  /** The chosen ordering, remembered per family. */
+  let order = $state('recent');
+  let orderedFor = null;
+  const orders = $derived(viewOrders(family));
+  const rows = $derived(sortViews(views, order));
+  /** Read when the menu opens: a popover is not open long enough for "5 min ago"
+   *  to drift, and a ticking clock would redraw the list under the pointer. */
+  let now = $state(Date.now());
+  /** The row being relabelled, and the name being typed into it. */
+  let renaming = $state(null);
+  let draft = $state('');
   let readRun = 0;
   let autoTimer = 0;
   let activeSave = null;
@@ -81,8 +101,26 @@
     loadedFor = caseId;
     menu = false;
     saving = false;
+    renaming = null;
     void read();
   });
+
+  $effect(() => {
+    if (family === orderedFor) return;
+    orderedFor = family;
+    order = readViewOrder(family);
+  });
+
+  function chooseOrder(value) {
+    order = value;
+    writeViewOrder(family, value);
+  }
+
+  function openMenu() {
+    now = Date.now();
+    renaming = null;
+    menu = !menu;
+  }
 
   function updateSummary(view) {
     stored = stored.map((row) => row.id === view.id
@@ -227,6 +265,41 @@
     }
   }
 
+  function startRename(view) {
+    renaming = view.id;
+    draft = view.name;
+  }
+
+  /** Relabel one reading. Both modes accept it: a snapshot's capture is evidence,
+   *  its name is not, so `PATCH` never touches the spec. */
+  async function rename(view) {
+    const caseId = caseState.current?.id;
+    const next = draft.trim();
+    if (!caseId || !next || busy) return;
+    if (next === view.name) {
+      renaming = null;
+      return;
+    }
+    busy = true;
+    try {
+      const saved = await api.patch(
+        `/api/cases/${caseId}/analysis-views/${view.id}`, { name: next }
+      );
+      updateSummary(saved);
+      renameAnalysisView(caseId, view.id, saved.name);
+      renaming = null;
+    } catch (error) {
+      toast(error.message, 'danger');
+    } finally {
+      busy = false;
+    }
+  }
+
+  function focusInput(node) {
+    node.focus();
+    node.select();
+  }
+
   async function duplicate(viewId) {
     const caseId = caseState.current?.id;
     if (!caseId) return;
@@ -245,6 +318,7 @@
   async function remove(view) {
     const caseId = caseState.current?.id;
     if (!caseId) return;
+    if (renaming === view.id) renaming = null;
     try {
       const result = await api.del(`/api/cases/${caseId}/analysis-views/${view.id}`);
       if (slot.activeView?.id === view.id) {
@@ -296,7 +370,7 @@
       class="btn btn-sm"
       aria-expanded={menu}
       disabled={!caseState.current}
-      onclick={() => (menu = !menu)}
+      onclick={openMenu}
     >
       <Icon name="layers" size={13} /> Views{views.length ? ` ${views.length}` : ''}
     </button>
@@ -313,24 +387,69 @@
           >
             <Icon name="save" size={12} /> Save view
           </button>
+          {#if views.length > 1}
+            <label class="sort">
+              Sort
+              <select
+                class="input"
+                value={order}
+                onchange={(event) => chooseOrder(event.currentTarget.value)}
+              >
+                {#each orders as choice (choice.id)}
+                  <option value={choice.id}>{choice.label}</option>
+                {/each}
+              </select>
+            </label>
+          {/if}
         </div>
         {#if views.length}
           <ul>
-            {#each views as view (view.id)}
-              <li>
-                <button class="open" disabled={busy} onclick={() => open(view.id)}>
-                  <strong>{view.name}</strong>
-                  <span>
-                    {view.mode === 'snapshot' ? `${view.snapshot_count} captured` : 'live'}
-                    {#if family === 'catalog'}· {view.surface}{/if}
-                  </span>
-                </button>
-                <button title="Duplicate view" aria-label="Duplicate {view.name}" onclick={() => duplicate(view.id)}>
-                  <Icon name="copy" size={12} />
-                </button>
-                <button title="Delete view" aria-label="Delete {view.name}" onclick={() => remove(view)}>
-                  <Icon name="trash" size={12} />
-                </button>
+            {#each rows as view (view.id)}
+              <li class:editing={renaming === view.id}>
+                {#if renaming === view.id}
+                  <input
+                    class="input"
+                    use:focusInput
+                    bind:value={draft}
+                    maxlength="80"
+                    aria-label="New name for {view.name}"
+                    onkeydown={(event) => {
+                      if (event.key === 'Enter') rename(view);
+                      if (event.key === 'Escape') renaming = null;
+                    }}
+                  />
+                  <button
+                    title="Save name"
+                    aria-label="Save name"
+                    disabled={!draft.trim() || busy}
+                    onclick={() => rename(view)}
+                  >
+                    <Icon name="check" size={12} />
+                  </button>
+                  <button title="Cancel" aria-label="Cancel rename" onclick={() => (renaming = null)}>
+                    <Icon name="x" size={12} />
+                  </button>
+                {:else}
+                  <button class="open" disabled={busy} onclick={() => open(view.id)}>
+                    <strong>{view.name}</strong>
+                    <span>
+                      {view.mode === 'snapshot' ? `${view.snapshot_count} captured` : 'live'}
+                      {#if family === 'catalog'}· {view.surface}{/if}
+                      · <time datetime={view.updated_at} title={exactStamp(view.updated_at)}>
+                        {timeAgo(view.updated_at, now)}
+                      </time>
+                    </span>
+                  </button>
+                  <button title="Rename view" aria-label="Rename {view.name}" onclick={() => startRename(view)}>
+                    <Icon name="edit" size={12} />
+                  </button>
+                  <button title="Duplicate view" aria-label="Duplicate {view.name}" onclick={() => duplicate(view.id)}>
+                    <Icon name="copy" size={12} />
+                  </button>
+                  <button title="Delete view" aria-label="Delete {view.name}" onclick={() => remove(view)}>
+                    <Icon name="trash" size={12} />
+                  </button>
+                {/if}
               </li>
             {/each}
           </ul>
@@ -385,11 +504,18 @@
     padding: 8px; border: 1px solid var(--border-strong); border-radius: var(--r-md);
     background: var(--bg-1); box-shadow: var(--shadow-2);
   }
-  .menu-actions { display: flex; gap: 6px; padding-bottom: 7px; border-bottom: 1px solid var(--border); }
+  .menu-actions {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    padding-bottom: 7px; border-bottom: 1px solid var(--border);
+  }
+  .sort { display: flex; align-items: center; gap: 5px; color: var(--text-3); font-size: var(--fs-xs); }
+  .sort select { padding: 3px 5px; font-size: var(--fs-xs); }
   /* The list's own reset: without it the browser's 40px marker gutter left an empty
      column down the left of every row. */
   ul { max-height: 310px; margin: 6px 0 0; padding: 0; list-style: none; overflow: auto; }
-  li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 2px; }
+  li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 2px; }
+  li.editing { grid-template-columns: minmax(0, 1fr) auto auto; padding: 4px 5px; }
+  li.editing input { width: 100%; }
   li:hover { background: var(--bg-2); }
   li > button:not(.open) { display: flex; padding: 7px 5px; color: var(--text-3); }
   .open { min-width: 0; padding: 7px; text-align: left; }

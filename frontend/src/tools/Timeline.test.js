@@ -304,3 +304,35 @@ describe('measuring between two entries', () => {
     expect(source).toContain('selected = item;\n    against = null;');
   });
 });
+
+describe('exporting the axis', () => {
+  it('serialises the tracks the tool laid out, never a canvas', () => {
+    expect(source).toContain('timelinePlate({');
+    expect(source).toContain('const tracks = $derived(buildTracks(plotWidth));');
+  });
+
+  it('lays the page out at the plate’s width, not the browser’s', () => {
+    // `layoutTimelineItems` packs lanes by the pixels a label takes, so the width it is
+    // given decides what collides and what ends up in a `+n`. Replaying the screen's
+    // answer on a fixed page would put the gaps in the wrong places, and the same saved
+    // view would export differently from a laptop and from a wide monitor.
+    expect(source).toContain('tracks: buildTracks(PLATE_PLOT)');
+    expect(source).toContain('ticks: axisTicks(from, to, PLATE_PLOT, zone)');
+    expect(source).toContain('minorTicks: axisMinorTicks(from, to, PLATE_PLOT, zone)');
+    expect(source).toContain('bands: axisBands(from, to, PLATE_PLOT, zone)');
+    expect(source).toContain('scaleWord: axisScale(from, to, PLATE_PLOT)');
+  });
+
+  it('exports the window and the clock the reading was made on', () => {
+    expect(source).toContain('window: windowWords(from, to, zone)');
+    expect(source).toContain('clock: zoneWord');
+  });
+
+  it('states the entries the axis cannot hold', () => {
+    expect(source).toContain('undated entr${undatedTotal === 1');
+  });
+
+  it('offers the export beside the saved views', () => {
+    expect(source).toContain('<PlateExport surface="timeline" plate={capturePlate}');
+  });
+});

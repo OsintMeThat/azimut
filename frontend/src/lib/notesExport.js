@@ -23,10 +23,23 @@ const MAX_DIAGRAM_EDGE = 2400;
  * Diagrams are rendered with HTML labels off (see lib/mermaid.js), because a
  * `<foreignObject>` is HTML inside the picture and browsers refuse to rasterise
  * one out of an image element — the diagram would come back with empty boxes.
+ *
+ * `scale` and `maxEdge` are the diagram's own numbers by default. An analysis plate
+ * (lib/plateExport.js) is a whole page rather than a figure on one, so it raises the
+ * ceiling; the pair stays here because there is one way to turn an SVG into pixels.
  */
-export function rasterise(svg, { width, height }) {
+/**
+ * The scale a rasterisation will actually use: what was asked for, or what the edge cap
+ * leaves of it. Exported so a caller can say the real number before offering the image
+ * rather than promising a factor the canvas will not give.
+ */
+export function rasterScale({ width, height, scale = DIAGRAM_SCALE, maxEdge = MAX_DIAGRAM_EDGE }) {
+  return Math.min(scale, maxEdge / Math.max(width, height, 1));
+}
+
+export function rasterise(svg, { width, height, scale: wanted = DIAGRAM_SCALE, maxEdge = MAX_DIAGRAM_EDGE }) {
   return new Promise((resolve, reject) => {
-    const scale = Math.min(DIAGRAM_SCALE, MAX_DIAGRAM_EDGE / Math.max(width, height, 1));
+    const scale = rasterScale({ width, height, scale: wanted, maxEdge });
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(width * scale));
     canvas.height = Math.max(1, Math.round(height * scale));

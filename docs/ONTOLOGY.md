@@ -76,6 +76,12 @@ presents it as this logical shape:
   SQLite browse index mirrors searchable fields, plus whether that position
   exists. Entities retain only what the graph needs for identity, links and
   deduplication.
+- A media's origin is `source.url`, mirrored onto `attrs.source_url`, and
+  `source.type` says how it was come by: a `download` fetched that address, while
+  an `upload`, a `clipboard` paste or an adopted `manual` file carries what the
+  analyst stated for it. Only those three can be given or corrected one; what a
+  tool recorded is never written over, since a case that cannot tell a fetched
+  address from a stated one is holding neither.
 
 ## 2. Entity
 
@@ -124,7 +130,7 @@ to one clause — no full stop, no em-dash, under a hundred characters.
 | `class` | a model the case counts with, never one particular object | `equipment-type` |
 | `identifier` | a handle on a system | `account`, `email`, `phone`, `domain`, `ip`, `network` |
 | `collected` | bytes gathered into the case rather than written, so one may depict a place | `media`, `capture` |
-| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `inspect-session`, `bookmark` |
+| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `bookmark` |
 | `place` | a point, never a thing | `place` |
 | `claim` | a statement about the graph, carrying its own reasoning | `claim` |
 
@@ -153,7 +159,7 @@ picture of the case is about it. The line that matters is between the first two 
 |---|---|---|---|
 | `subject` | the case is about it | `person`, `organization`, `vehicle`, `vessel`, `aircraft`, `structure`, `equipment-type`, `account`, `email`, `phone`, `domain`, `ip`, `network`, `media`, `place`, `claim` | a node |
 | `attestation` | a wrapper around something the case already holds | `bookmark`, `proof`, `capture` | folded into the edge that carries its provenance, drawn or not (below) |
-| `annex` | consulted rather than seen, hanging off one node | `note`, `inspect-session` | out of the case readings, drawn by **My work** |
+| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session` | out of the case readings, drawn by **My work** |
 | `deliverable` | what the case produced | `post` | out of the case readings, drawn by **My work** |
 
 A bookmark stays drawn because it is not a leaf: *this account posted it, this
@@ -176,6 +182,7 @@ answer by omission (`tests/test_entities.py`).
 | `post` | document | deliverable | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | document | annex | ✅ | inspect | `spec` (json) | yes |
 | `note` | document | annex | ✅ | notebook | `path`, `folder?` | yes (Markdown) |
+| `sheet` | document | annex | ✅ | sheet | `path` (csv) | yes (CSV + sidecar) |
 | `bookmark` | document | attestation | ✅ | capture extension | `url`, `fetched_at?`, `archive_url?`, `reliability?` | no (a URL) |
 | `person` | actor | subject | ✅ | analyst | `aliases`, `role`, `nationality` | no |
 | `organization` | actor | subject | ✅ | analyst | `echelon`, `country` | no |
@@ -512,7 +519,7 @@ a narrowing can only remove a type, never smuggle one in from elsewhere.
 | `at` | claim → place | where the statement puts its subject | ✅ |
 | `cites` | claim → bookmark/note/proof/media/capture/claim | what the statement rests on | ✅ |
 | `contradicts` | claim → claim | the two statements cannot both hold | ✅ |
-| `mentions` | note/post/proof/bookmark → any other declared entity | the document refers to the entity | ✅ |
+| `mentions` | note/post/proof/bookmark/sheet → any other declared entity | the document refers to the entity | ✅ |
 
 Every manual connector is validated by the API and offered only by its own picker.
 `same-image-as` is machine-only. `part-of`, `in-network`, `cites` and the derivation
@@ -569,13 +576,80 @@ an edge.
 **`mentions` is a pointer, not a derivation.** A document *refers to* something,
 where `derived-from` says the file was built from it; both may sit on the same pair,
 and deleting the target drops the mention with no tombstone. The author is a note,
-post, proof or bookmark; the target is any other declared entity, a Claim included.
+post, proof, bookmark or sheet; the target is any other declared entity, a Claim
+included. A sheet states its mentions from the cells the analyst pointed at an
+entity, restated on every save, so a row naming a subject is visible from that
+subject's side too.
 
 It is the one verb served as its own **action** (`RelationType.action`, `"mention"`)
 under its own heading (`RelationType.group`). A pointer must not borrow the weight of
 a finding, so the split is the registry's and every surface obeys it: **Add relation**
 never turns into **mentions**, **Add mention** has its own target search, an edge is
 only reworded inside its action, and a mention carries no rating (`ratable: false`).
+
+### Promotion, which is how a sheet reaches all of this ✅
+
+A sheet says what is being **checked**; the graph says what the case **believes**.
+Promotion is the one road between them and it runs one way: nothing reads the graph
+back into a cell. **One declaration, one press** (`engine/sheetpass.py`): a binder's line
+holds several of these at once, and only the first is one row per thing
+(`engine/sheetpromote.py`, `engine/sheetclaims.py`).
+
+| Mode | What it makes | Why it is its own answer |
+|---|---|---|
+| a **row** | one entity of the chosen type | the ordinary case |
+| a **group of rows** | one entity, one place per point | a cross-border event is two lines, one point per country; row by row that is two events |
+| a **column's words** | one entity per distinct **word** | four hundred rows hold forty pieces of equipment, and a cell may hold three |
+| a column of **addresses** | a `bookmark` per URL | a cell holds an address, so it becomes the thing that claims to be one |
+| a column of **row names** | `part-of` / `member-of` edges | an order of battle held as text, with a validation that has already decayed |
+| a column of **times** | a `claim` per row | the binder holds a *reasoning about* a time across three columns, not a time |
+
+**And the edges between the columns**, which is what no single-column road could draw: for
+each pair the analyst joined, the vocabulary is asked what it allows between their two
+types (`pair_verbs`), only the pairs with an answer are offered, and the verb is re-checked
+against the registry before anything is written. They enter `confirmed` — the analyst chose
+the reading and pressed the button — and carry the pass's one confidence where the edge is
+`ratable`. An edge is drawn only where **both** ends resolved: a row whose unit is ambiguous
+keeps its entities and loses its edges, with the reason.
+
+Six rules hold across the modes, and they are the reason it is safe to press twice.
+
+**Nothing that owns a file is born from a cell.** A `media`, a `capture`, a `proof`, a
+`post`, an `inspect-session` hold bytes; a cell holds an address. They exist only where the
+app itself fetched the file — the proof import's road (`engine/proofimport.py`), and the
+build a geolocation index presses (`engine/sheetproofs.py`), which is that same road driven
+a row at a time. The rule is not about where the request came from but about who fetched
+the bytes: the build downloads them, so it may state `derived-from`, and the pass never
+touches the network, so it may not.
+
+**A name is not an identity.** Two people share a name, so a label the case already
+holds is *offered* and never merged into on its own. The exception is the
+`identifier` family, where the value **is** the identity (§2).
+
+**The sidecar remembers what came from here.** A promoted cell points at the entity it
+made (`links`), a promoted word points at what it means (`values`), so the second
+press updates instead of minting a twin. What the cell **said** at that moment is kept
+too (`promoted`), which is what lets a row say it has moved on since — a link alone
+cannot, being the same link after the label is rewritten.
+
+**Only the columns asked for travel.** The label, the mapped fields, the point. A
+promotion that swept every column into the graph would put a worklist's private notes
+into the case's own record of a subject.
+
+**A point is a second entity unless the row *is* a place.** Writing a latitude onto a
+structure would put a field on it that nothing in the app declares, shows or edits, so
+the coordinates become a `place` joined by whichever verb the vocabulary allows
+(`sited-at` for a structure), and a type it allows none for is refused at the door.
+
+**An inferred time is a Claim, never a cell.** Ten videos carrying an offset against
+one **sync point** get an absolute time the moment that point is dated — `probable`,
+with the reasoning naming it. Writing that timestamp into a `when` cell would present a
+deduction as an observation. An estimated hour is likewise recorded one rung below an
+established one, because the binder kept two columns for exactly that difference.
+
+**Deleting a sheet keeps what it established.** Its `mentions` edges go with it and
+the entities stay: throwing the worklist away is throwing the worklist away, not the
+subjects it settled.
 
 ### The claim, and how sure it is ✅
 
@@ -682,18 +756,20 @@ subject removes it transitively.
 - It is also read backwards, as geography. The Saved panel counts the proofs
   hanging off each saved point through this edge, and a proof with no point of
   its own is placed at the point of every capture it composes, one hop back.
-  A proof does carry its own point first, though: `coordsText` (what the analyst
-  typed, in any supported format) then `coords` (what the panels gave it, frozen
-  at save). That is what keeps a proof on the map once its capture is deleted —
-  a tombstone records the path, the sha256 and the URL, never coordinates.
+  A proof does carry its own points first, though: `spec.points[]` (what the
+  analyst typed, in any supported format, one entry per point) then `coords`
+  (what the panels gave it, frozen at save). That is what keeps a proof on the
+  map once its capture is deleted — a tombstone records the path, the sha256 and
+  the URL, never coordinates.
 - **Placement reads the same edges further, and in both directions**
   (`satellite.placements`, `GET /entities/{id}/placement`): a video reaches its
   capture three hops away, through the proof that composed a frame of it. Only
   `capture` and `proof` carry a point, and **the artifact carrying one ends the
   walk**. Points deduplicate on the exact pair, never a rounded one, and the nearest
-  hop wins a repeat. Bounded at four hops, 200 entities read and 15 points reported,
-  each with the entity it was read off; a `capture` reports none, its point being its
-  own rather than one the chain placed it at.
+  hop wins a repeat. A proof reports every point it states, so the footage behind a
+  three-point proof answers for all three. Bounded at four hops, 200 entities read
+  and 15 points reported, each with the entity it was read off; a `capture` reports
+  none, its point being its own rather than one the chain placed it at.
 - `attrs.lost_sources[]` stores `{label, type, path, sha256, source_url, at}`.
   Tombstones are keyed by path and never stacked.
 - Every UI deletion uses the same dependency-aware service. The confirmation
@@ -752,10 +828,18 @@ It answers with resolved type lists, so a client never has to know what a family
 
 ### Where a geolocation becomes a point ✅
 
-Saving a proof files the point it carries as a `place` and states
-`proof --depicts--> place` (`satellite.place_for_proof`). The point is what the
-analyst typed into the composer, or what its panels froze and they left standing
-(`own_point`, §3 placement).
+Saving a proof files the points it carries as `place`s and states
+`proof --depicts--> place` for each (`satellite.place_for_proof`). They are what
+the analyst typed into the composer, or what its panels froze and they left
+standing (`spec_points`, §3 placement).
+
+**A proof states as many points as it argues.** Three impacts, a building, the
+camera that filmed it: each is a point somebody concluded on, and they are peers,
+in the order they were typed. **The first is the conclusion** — the map mark, the
+coordinate a post cites, the place a save files first — and nothing else takes
+that rank, POV included: a list that reordered itself would take a coordinate out
+of a tweet without saying so. A point may carry a name, which becomes the `place`'s
+label: "impact 2" reads better in the tree than `64.148100, -21.940100`.
 
 **A capture files nothing.** Ten are taken while hunting one roof and each frames
 a slightly different centre, so filing each would pin the search rather than the
@@ -776,13 +860,18 @@ the moment somebody commits to it. That moment is the proof.
 - **A save restates the point rather than adding one**
   (`satellite.restate_proof_point`), the rule the proof's panels already follow.
   Reopening a proof and correcting the coordinates is an answer withdrawn: the old
-  edges go, or the case reads as two geolocations. Toggling POV changes the verb
-  the last save wrote, and an emptied coordinate field withdraws the point
-  entirely. Only what the composer itself wrote is reconciled — an edge stated by
-  hand in Details, or proposed by import enrichment, is a separate claim about the
-  same file — and a point another proof still concludes on keeps its material.
-  A place the proof let go of that nothing else holds is **offered for deletion,
-  never swept**: it is on the map, and dropping it is the analyst's call.
+  edges go, or the case reads as two geolocations. It reconciles the **whole list**
+  by difference, so a point taken off it rends its place exactly as an emptied
+  field once did, and POV moved to another line changes both verbs. The proof's own
+  edge to a place is reconciled **whoever filed it**: it has one reading, and it is
+  the list the composer opens on, so a row another road filed is a row the analyst
+  can delete. Its **material** is the narrower question — a media reaching a place is
+  one claim among several about that file — so only the two roads that pose a proof's
+  point are restated there (`satellite.POINT_ROADS`), and an edge stated by hand in
+  Details or proposed by import enrichment stays. A point another proof still
+  concludes on keeps its material. A place the proof let go of that nothing else
+  holds is **offered for deletion, never swept**: it is on the map, and dropping it
+  is the analyst's call.
 - **The material the proof composes states the same point**, over the derivation
   closure — the frame, the collage, the video two hops up, the capture. Confirmed,
   because **composing is the assertion**: putting a frame beside a capture and
@@ -790,18 +879,69 @@ the moment somebody commits to it. That moment is the proof.
   their own act is the review everybody clicks through, which is what makes
   `suggested` stop meaning anything where it is real. Being wrong costs one
   removal, since a relation drops alone.
-- **`spec.pov` picks the verb for the material, because the composition cannot.**
+- **POV picks the verb for the material, because the composition cannot.**
   Recorded-at and shows are independent — a rooftop shot was recorded somewhere it
   never shows, a skyline is shown from kilometres away — and a match between a
   frame and an imagery says only that they meet, not whether the camera or its
-  subject was located. The composer asks once (**POV**), and the answer travels in
-  the spec: set, the media are `located-at` the point; unset, they `depicts` it. A
+  subject was located. So it rides on the **point**, not on the proof, and **at
+  most one point carries it**: a camera stood in one place, and two would have one
+  video recorded twice. Set, the media are `located-at` that point; unset, they
+  `depicts` it. A
   `capture` shows it either way, since orbital imagery was recorded nowhere on the
   ground, and so does the proof, which was composed. POV is also the only reading
   that reaches an audio file, which has a place it was made and nothing it shows.
 
+**A point another road filed for the proof is one of its points too.** A sheet
+row states a second position about a picture it already built, under its own
+provenance rather than by composing that picture twice (`sheetproofs._added_point`).
+The graph then holds a point the spec never learned, so everything that asks what
+a proof concludes on reads both (`satellite.proof_points`): the map draws it, and
+the composer **opens on it** instead of beside it. Saving is what makes the spec
+agree; until then, reopening never rewrites what the analyst typed. It arrives as a
+row like any other, which cuts both ways: a save that keeps it states it, and one
+that deletes it withdraws it. Its POV is read off **this** proof's own footage — a
+second proof's clip recorded at the same place answers for that proof and not this
+one.
+
 `proof_place_auto` (Settings → General → Proofs, on by default) decides whether
-the save files it or the composer asks first. Both write the same thing.
+the save files them or the composer asks first. Both write the same thing, and the
+question is plural when the list is.
+
+**Only the conclusion is looked up at save.** Geography is a paced Nominatim call
+(`engine/geo._pace`, 1.1 s apart under one lock), so resolving three points would
+hold the save for three seconds to answer what the Locate pass answers for free.
+The rest are born unlocated, exactly as an offline save already is.
+
+**A proof is derived from what it composes and from what it rests on.** Its panels are
+the pictures laid out on the canvas; its `material` is the footage behind them, brought
+into the case from an address the analyst stated in the composer's Source list. Both are
+restated on every save (`links.sync`), so an address taken off the list drops its edge
+the way a dropped panel does, and the point follows the derivation closure rather than a
+second rule — `restate_proof_point` already poses a proof's place on everything in its
+chain.
+
+**An imported proof is filed by the same rules** (`engine/proofimport.py`). A
+post that publishes a geolocation is a proof and its material written in prose,
+so the import files every file the post points at as `media`, each picture it
+published as a `media` that proof composes, and writes their spec through the
+composer's own save route — one panel per published picture, since a post
+publishing a set published one geolocation. **Both halves are plural, and for
+opposite reasons**: a set of published pictures is one composition, while a thread
+states one point and hangs the photos and the clips it rests on off several posts.
+
+**The proof is the node they all hang off.** It composes the pictures and rests on the
+material, and both are its own `derived-from` edges — the same shape the composer writes
+by hand, and the reading somebody opening the graph is after, since the proof is the
+finding and a published picture is one file among the several it was read from. Hanging
+the material off the *picture* instead made a media node the centre of a geolocation and
+left the proof a leaf beside it. It also asked the import to say which photo of four a
+composite was laid out from, which is not something a post says.
+
+Nothing about the vocabulary changes: the proof `depicts`, the material takes the verb
+POV picks, and the point deduplicates on `COORD_KEY` like any other. The material reaches
+the point because the proof records `derived-from` it — the derivation closure is what the
+placement reads, so a source that is merely named in the text and never downloaded is a
+proof with no material rather than an edge stated about a file the case does not hold.
 
 ### Lenses ✅
 

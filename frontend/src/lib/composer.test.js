@@ -5,6 +5,7 @@ import {
   panelsBlockHeight, panelHeight, captionBand, legendLineHeight, footerBand,
   docSize, legendColumns, legendRowCount, toSpec, offsetShape, copyShapeSpec, autoLayoutRows, TWEET_GUIDES,
   autoCoords, formatCoords, resolveSourceUrls, autoSource, autoSourceUrls,
+  normalizeSources, statedSources,
   proofCoordsText, proofSource, orderedFeatureColors, legendLines,
   dedupeBySrc, satPanelInput, mediaPanelInput,
   SIG_MARGIN, SIG_SCALE, newSignature, signatureBox, signatureOffset, signaturePairPositions,
@@ -20,6 +21,8 @@ import {
   normalizeFrame, newFrame, FRAME_COLOR, FRAME_WIDTH, FRAME_WIDTH_MAX,
   newPaste, pasteBoxes, pasteInsertScale, clampPasteScale, clampPaste,
   surfaces, surfaceHitTest, PASTE_SCALE_MAX, PASTE_SHARE,
+  specPoints, statePoints, proofCoordsLines, coordsPlateLines, coordsPostLines,
+  footerLines, footerBand,
 } from './composer.js';
 
 // natural is [width, height]; PANEL_H drives the per-row scale.
@@ -662,13 +665,95 @@ describe('source — always a link, traced through the derivation chain', () => 
       { meta: { kind: 'media', source_url: 'https://t.me/b/2' } },
     ];
     expect(autoSourceUrls(panels)).toEqual(['https://x.com/a/1', 'https://t.me/b/2']);
-    expect(autoSource(panels)).toBe('https://x.com/a/1  ·  https://t.me/b/2');
+    expect(autoSource(panels)).toBe('https://x.com/a/1\nhttps://t.me/b/2');
   });
 
   it('prefers a manual source override over the auto value', () => {
     const panels = [{ meta: { kind: 'media', source_urls: ['https://x.com/a/1'] } }];
     expect(proofSource({ panels })).toBe('https://x.com/a/1');
-    expect(proofSource({ panels, source: ' https://manual ' })).toBe('https://manual');
+    expect(proofSource({ panels, sources: [' https://manual '] })).toBe('https://manual');
+  });
+
+  it('states every address it was given, on one line', () => {
+    // A proof read from a thread rests on the post, the photos beside it and the clip
+    // under those. The line stays a line: a plate, a post and a report read text.
+    expect(proofSource({ sources: ['https://x.com/a/1', 'https://x.com/a/2'] }))
+      .toBe('https://x.com/a/1\nhttps://x.com/a/2');
+    // Blanks left by an abandoned row, and an address stated twice, are not sources.
+    expect(proofSource({ sources: ['https://x.com/a/1', '  ', 'https://x.com/a/1'] }))
+      .toBe('https://x.com/a/1');
+  });
+
+  it('takes an emptied list as an answer, not as a blank to fill in', () => {
+    // Emptying every box says the proof has no public source — the footage was handed
+    // over privately, and that is not the same as never having said anything. Falling
+    // back to the panels there put addresses back on a proof somebody had just taken
+    // them off, and carried them into the post behind their back.
+    const panels = [{ meta: { kind: 'media', source_urls: ['https://x.com/a/1'] } }];
+    expect(proofSource({ panels, sources: [] })).toBe('');
+    expect(proofSource({ panels, sources: [''] })).toBe(''); // a box cleared of its text
+    expect(proofSource({ panels, sources: null })).toBe('https://x.com/a/1');
+    expect(proofSource({ panels })).toBe('https://x.com/a/1');
+    // And a proof saved before any of this carried '' for "nothing stated".
+    expect(proofSource({ panels, source: '' })).toBe('https://x.com/a/1');
+    expect(statedSources([])).toEqual([]);
+    expect(statedSources(null)).toBeNull();
+    expect(statedSources('')).toBeNull();
+  });
+
+  it('reads a proof saved before the list as a list', () => {
+    // The line the composer wrote itself splits back into its parts...
+    expect(normalizeSources('https://x.com/a/1  ·  https://t.me/b/2'))
+      .toEqual(['https://x.com/a/1', 'https://t.me/b/2']);
+    // ...and anything else the analyst typed is one thing, not one per space.
+    expect(normalizeSources('sent by private message')).toEqual(['sent by private message']);
+    expect(normalizeSources('')).toEqual([]);
+    expect(normalizeSources(null)).toEqual([]);
+  });
+});
+
+describe('material — what a proof rests on without composing it', () => {
+  it('lets a source go and takes its files with it', () => {
+    // Removing a row left the line shorter and the graph exactly as it was, so the
+    // proof said two things: its source list named two posts and its chain named three
+    // files. The address on each file is what makes the list reconcilable at all.
+    const proof = {
+      title: 'T', panels: [], shapes: [],
+      sources: ['https://x.com/a/1', 'https://t.me/b/2'],
+      material: [
+        { path: 'media/clip.mp4', url: 'https://x.com/a/1' },
+        { path: 'media/angle.jpg', url: 'https://t.me/b/2' },
+      ],
+    };
+    expect(toSpec(proof).material.map((one) => one.path)).toEqual([
+      'media/clip.mp4', 'media/angle.jpg',
+    ]);
+
+    proof.sources = ['https://x.com/a/1'];
+    expect(toSpec(proof).material.map((one) => one.path)).toEqual(['media/clip.mp4']);
+
+    proof.sources = [];
+    expect(toSpec(proof).material).toEqual([]);
+  });
+
+  it('keeps a file no address answers for', () => {
+    // Bare paths are what a proof saved before the pairing carried. The list cannot
+    // disown what it cannot name, so they stay.
+    const spec = toSpec({
+      title: 'T', panels: [], shapes: [],
+      sources: ['https://x.com/a/1'],
+      material: ['media/legacy.mp4', { path: 'media/clip.mp4', url: 'https://gone/1' }],
+    });
+    expect(spec.material).toEqual([{ path: 'media/legacy.mp4', url: '' }]);
+  });
+
+  it('answers to the traced addresses when the proof states none of its own', () => {
+    const panels = [{ meta: { kind: 'media', source_urls: ['https://x.com/a/1'] } }];
+    const spec = toSpec({
+      title: 'T', panels, shapes: [], sources: null,
+      material: [{ path: 'media/clip.mp4', url: 'https://x.com/a/1' }],
+    });
+    expect(spec.material.map((one) => one.path)).toEqual(['media/clip.mp4']);
   });
 });
 
@@ -681,14 +766,37 @@ describe('toSpec — coordinates + source persistence', () => {
     };
     const spec = toSpec(proof);
     expect(spec.coords).toEqual({ lat: 3, lon: 4 });
-    expect(spec.coordsText).toBeNull();
-    expect(spec.source).toBeNull();
+    expect(spec.points).toEqual([]); // nothing stated: the panels answer for it
+    expect(spec.coordsText).toBe('');
+    expect(spec.sources).toBeNull();
   });
 
   it('persists manual coordinate + source overrides (trimmed)', () => {
-    const spec = toSpec({ title: 'T', panels: [], shapes: [], coordsText: ' 1, 2 ', source: ' http://s ' });
-    expect(spec.coordsText).toBe('1, 2');
-    expect(spec.source).toBe('http://s');
+    const spec = toSpec({
+      title: 'T', panels: [], shapes: [],
+      points: [{ coords: ' 1, 2 ', label: '', pov: false }],
+      sources: [' http://s ', ' '],
+    });
+    expect(spec.points).toEqual([{ coords: '1, 2' }]);
+    expect(spec.coordsText).toBe('1, 2'); // the mirror, for a build older than the list
+    expect(spec.sources).toEqual(['http://s']);
+  });
+
+  it('states every point, and mirrors the conclusion', () => {
+    const spec = toSpec({
+      title: 'T', panels: [], shapes: [],
+      points: [
+        { coords: '64.1466, -21.9426', label: 'impact 1', pov: false },
+        { coords: '64.1502, -21.9350', label: 'cam', pov: true },
+      ],
+    });
+    expect(spec.points).toEqual([
+      { coords: '64.1466, -21.9426', label: 'impact 1' },
+      { coords: '64.1502, -21.9350', label: 'cam', pov: true },
+    ]);
+    // POV rides on its own point, so the mirror of the first says nothing about it
+    expect(spec.coordsText).toBe('64.1466, -21.9426');
+    expect(spec.pov).toBe(false);
   });
 });
 
@@ -1223,6 +1331,8 @@ describe('templateFromProof — a content-free house style', () => {
       captionSize: 24, legendSize: 22, footerSize: 16,
       footer: 'By the desk',
       footerEnabled: false,
+      footerText: true,
+      footerCoords: false,
       footerColor: '#aabbcc',
       footerAlign: 'left',
       captionsEnabled: false,
@@ -1664,5 +1774,121 @@ describe('pasted images', () => {
 
   it('a proof with no pastes still writes an empty list, so reloads are uniform', () => {
     expect(toSpec({ title: 'x', panels: [], shapes: [], notes: {} }).pastes).toEqual([]);
+  });
+});
+
+
+describe('the points a proof states', () => {
+  it('reads a spec written before the list as the one point it holds', () => {
+    expect(specPoints({ coordsText: '64.1466, -21.9426', pov: true })).toEqual([
+      { coords: '64.1466, -21.9426', label: '', pov: true },
+    ]);
+    expect(specPoints({})).toEqual([]);
+  });
+
+  it('lights one point at most, because a camera stood in one place', () => {
+    const points = specPoints({
+      points: [{ coords: 'a', pov: true }, { coords: 'b', pov: true }],
+    });
+    expect(points.map((one) => one.pov)).toEqual([true, false]);
+  });
+
+  it('drops the list when the mirror says something else', () => {
+    // an older build corrected the field and left the list alone: what it says
+    // is the newer answer
+    expect(specPoints({
+      points: [{ coords: '64.1466, -21.9426' }, { coords: '64.1481, -21.9401' }],
+      coordsText: '48.8584, 2.2945',
+    })).toEqual([{ coords: '48.8584, 2.2945', label: '', pov: false }]);
+  });
+
+  it('keeps the list when nothing wrote the mirror at all', () => {
+    expect(specPoints({ points: [{ coords: 'a' }, { coords: 'b' }] })).toHaveLength(2);
+  });
+
+  it('writes the list and the mirror together', () => {
+    const spec = statePoints({}, [
+      { coords: ' 64.1466, -21.9426 ', label: ' impact 1 ', pov: false },
+      { coords: '', label: 'dropped', pov: false },
+      { coords: '64.1502, -21.9350', label: '', pov: true },
+    ]);
+    expect(spec.points).toEqual([
+      { coords: '64.1466, -21.9426', label: 'impact 1' },
+      { coords: '64.1502, -21.9350', pov: true },
+    ]);
+    expect(spec.coordsText).toBe('64.1466, -21.9426');
+    expect(spec.pov).toBe(false);
+  });
+
+  it('falls back to what the panels give it', () => {
+    const panels = [{ id: 'p1', src: 'a.png', meta: { lat: 3, lon: 4 } }];
+    expect(proofCoordsLines({ panels })).toEqual([{ coords: '3.000000, 4.000000', label: '' }]);
+  });
+});
+
+describe('the coordinates a plate prints', () => {
+  const lines = [
+    { coords: '64.1466, -21.9426', label: '' },
+    { coords: '64.1481, -21.9401', label: '' },
+    { coords: '64.1502, -21.9350', label: 'caméra' },
+  ];
+
+  it('joins the unnamed points, so three impacts cost one line', () => {
+    expect(coordsPlateLines(lines.slice(0, 2))).toEqual(['64.1466, -21.9426 · 64.1481, -21.9401']);
+  });
+
+  it('gives a named point its own line, and leaves the rest joined', () => {
+    expect(coordsPlateLines(lines)).toEqual([
+      '64.1466, -21.9426 · 64.1481, -21.9401',
+      'caméra — 64.1502, -21.9350',
+    ]);
+  });
+
+  it('says nothing on the plate unless the proof asks', () => {
+    const proof = { panels: [], points: [{ coords: '1, 2' }], footer: 'Imagery © Esri' };
+    expect(footerLines(proof)).toEqual(['Imagery © Esri']);
+    expect(footerLines({ ...proof, footerCoords: true })).toEqual(['1, 2', 'Imagery © Esri']);
+  });
+
+  it('measures the band at the number of lines it will draw', () => {
+    expect(footerBand(15, 3)).toBe(footerBand(15) * 3);
+    expect(footerBand(15, 0)).toBe(footerBand(15)); // never less than the attribution
+  });
+
+  it('leaves a post one point per line, since a tweet has no height to save', () => {
+    expect(coordsPostLines(lines)).toEqual([
+      '64.1466, -21.9426',
+      '64.1481, -21.9401',
+      'caméra — 64.1502, -21.9350',
+    ]);
+  });
+});
+
+
+describe('a house style and the footer switches', () => {
+  it('carries both, so a saved style keeps what the plate prints', () => {
+    const t = templateFromProof({ panels: [], footerCoords: true, footerText: false });
+    expect(t.footerCoords).toBe(true);
+    expect(t.footerText).toBe(false);
+  });
+
+  it('leaves a proof alone when an older style says nothing about them', () => {
+    // a template saved before these existed must not take a proof's coordinates
+    // off its plate on the way in
+    const proof = { panels: [], footerCoords: true, footerText: false };
+    applyProofStyle(proof, { bg: '#101418' });
+    expect(proof.footerCoords).toBe(true);
+    expect(proof.footerText).toBe(false);
+  });
+
+  it('takes no band at all when the footer prints nothing', () => {
+    const panels = [{ id: 'p1', src: 'a.png', natural: [100, 100] }];
+    const bare = docSize(panels, [], {}, { footerEnabled: true, footerLines: 0 });
+    const withOne = docSize(panels, [], {}, { footerEnabled: true, footerLines: 1 });
+    expect(withOne.height - bare.height).toBe(footerBand());
+  });
+
+  it('prints nothing when both switches are off', () => {
+    expect(footerLines({ panels: [], footerText: false })).toEqual([]);
   });
 });

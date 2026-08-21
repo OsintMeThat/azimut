@@ -109,6 +109,7 @@
     relationQualifier,
     relationReading,
     relationVerb,
+    retractionWarning,
   } from '../lib/relations.svelte.js';
   import {
     CARD,
@@ -141,11 +142,15 @@
   import { createBookmark } from '../lib/bookmarks.js';
   import { windowWords } from '../lib/timeline.js';
   import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
+  import { graphPlate } from '../lib/graphPlate.js';
+  import { plateFilename } from '../lib/plate.js';
   import Icon, { paths } from '../components/Icon.svelte';
   import AnalysisViews from '../components/AnalysisViews.svelte';
+  import PlateExport from '../components/PlateExport.svelte';
   import AnalysisPeriodBar from '../components/AnalysisPeriodBar.svelte';
   import FilterBar from '../components/FilterBar.svelte';
   import Modal from '../components/Modal.svelte';
+  import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityCreate from '../components/EntityCreate.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
   import PasteDialog from '../components/PasteDialog.svelte';
@@ -462,6 +467,8 @@
   let dirty = $state(false);
   /** The edge under the panel. An edge is a statement, and often the finding. */
   let chosenLink = $state(null);
+  /** A stated edge waiting on the answer to "remove it?": `{ id, words }`. */
+  let retractingEdge = $state(null);
   /** A relation being drawn: where it started, where the pointer is, what it can
    *  legally land on, and the menu once it has landed. */
   let drawing = $state(null);
@@ -862,6 +869,7 @@
   });
 
   const lensHint = $derived(lenses.find((entry) => entry.id === lens)?.hint ?? '');
+  const lensLabel = $derived(lenses.find((entry) => entry.id === lens)?.label ?? lens);
 
   /**
    * Finding a node by name. On a case drawn at a few hundred nodes, hunting one by
@@ -3461,11 +3469,25 @@
     holdOn(back);
   }
 
+  /** Ask before an edge goes, unless it is only a proposal.
+   *
+   *  The panel is opened to *read* an edge, and Remove sat beside Confirm and the rating —
+   *  two controls that change nothing — as the one permanent write in the app that asked
+   *  nothing. Worded in `retractionWarning` so this reads the same as the same act in
+   *  Details. */
+  function askDropLink(edge) {
+    if (snapshotReading) return;
+    const words = retractionWarning(edge);
+    if (words) retractingEdge = { id: edge.id, words };
+    else dropLink(edge.id);
+  }
+
   /** Drop an edge. The case keeps the two entities; only the statement goes. */
   async function dropLink(linkId) {
     if (snapshotReading) return;
     const cid = caseState.current?.id;
     if (!cid) return;
+    retractingEdge = null;
     say('');
     try {
       await api.del(`/api/cases/${cid}/links/${linkId}`);
@@ -4565,6 +4587,57 @@
     };
   }
 
+  /**
+   * The drawing as a page, for the export dialog.
+   *
+   * Handed the scene the canvas is built from and nothing else: the same placement, the
+   * same bends, the same legend the panel shows. Serialising is `lib/graphPlate.js`, so
+   * a plate cannot say something about the drawing that the drawing does not.
+   */
+  function capturePlate() {
+    if (!placed.length) return null;
+    const view = catalogViews.activeView?.name ?? '';
+    const at = new Date().toISOString();
+    // Two ways the drawing is narrower than the case, and both have to be said. A fold
+    // tidies, a focus cuts; the plate resizes to what is left either way, so neither is
+    // visible on the page unless it is written there.
+    const outsideFocus = hiding
+      ? placed.reduce((count, node) => count + (hiding.has(node.id) ? 0 : 1), 0)
+      : 0;
+    const page = graphPlate({
+      meta: {
+        caseName: caseState.current?.name ?? '',
+        surface: 'Graph',
+        view,
+        title: `Graph · ${lensLabel}`,
+        lens: lensLabel,
+        // The question says the window itself — `searchSaid` ends on the fact-time
+        // chip — so the plate does not print it a second time under it.
+        question: searchSaid,
+        aside: [
+          foldedCount ? `${foldedCount} node${foldedCount === 1 ? '' : 's'} folded away` : '',
+          outsideFocus
+            ? `${outsideFocus} node${outsideFocus === 1 ? '' : 's'} outside the focus`
+            : '',
+        ].filter(Boolean).join(' · '),
+        at,
+      },
+      families: legend.filter((entry) => entry.on && entry.count),
+      strokes,
+      placed,
+      edges,
+      bends,
+      byId,
+      hidden: hiding,
+      chainTypes: CHAIN_TYPES,
+      verbOf: (link) => relationVerb(link.type),
+    });
+    return {
+      ...page,
+      filename: plateFilename({ surface: 'graph', view, lens: lensLabel, at }),
+    };
+  }
+
   let appliedViewId = null;
 
   async function applyGraphView(view) {
@@ -4612,11 +4685,11 @@
   }
 
   async function openAnalysisView(view) {
-    if (view.surface !== 'graph') {
-      // The only other surface in this family is the Board: same question, rows.
-      uiState.tool = 'board';
-      return;
-    }
+    // The only other surface in this family is the Board. Its rows are the same
+    // question, and that question reaches the drawing through the shared Search+ on
+    // its own — so there is nothing to restore here, and no reason to take the analyst
+    // out of the tool they are in. The Board applies its sort from the same view.
+    if (view.surface !== 'graph') return;
     await applyGraphView(view);
   }
 
@@ -4814,6 +4887,8 @@
       onleave={leaveAnalysisReading}
     />
 
+    <PlateExport surface="graph" plate={capturePlate} disabled={!caseState.current} />
+
     <span class="spacer"></span>
 
     {#if payload}
@@ -4952,7 +5027,7 @@
          the canvas: a mode with no words is a mode nobody can get out of. -->
     {#if drawing}
       <span class="count connecting">
-        Connecting from {shortLabel(byId.get(drawing.from)?.label ?? '', 18)} — click the
+        Connecting from {shortLabel(byId.get(drawing.from)?.label ?? '', 18)}. Click the
         other end
         <button
           class="as-link"
@@ -5176,7 +5251,7 @@
       <div class="focus walk">
         <span class="on">
           <Icon name="arrowRight" size={13} />
-          Path from {shortLabel(byId.get(asking.from)?.label ?? '', 22)} — click the other
+          Path from {shortLabel(byId.get(asking.from)?.label ?? '', 22)}. Click the other
           end, or find it by name
         </span>
         <button class="icon-btn" onclick={() => (asking = null)} title="Give it up (Esc)">
@@ -5629,7 +5704,7 @@
                 Confirm
               </button>
             {/if}
-            <button class="btn btn-ghost" onclick={() => dropLink(chosenEdge.id)}>Remove</button>
+            <button class="btn btn-ghost" onclick={() => askDropLink(chosenEdge)}>Remove</button>
           </div>{/if}
         {/if}
         <ul class="neighbours">
@@ -5863,6 +5938,18 @@
       links={catalogViews.activeView?.spec?.snapshot?.links ?? []}
     />
   </Modal>
+{/if}
+
+{#if retractingEdge}
+  <ConfirmDialog
+    title={retractingEdge.words.title}
+    message={retractingEdge.words.message}
+    detail={retractingEdge.words.detail}
+    confirmLabel={retractingEdge.words.confirmLabel}
+    tone="danger"
+    onconfirm={() => dropLink(retractingEdge.id)}
+    oncancel={() => (retractingEdge = null)}
+  />
 {/if}
 
 <style>

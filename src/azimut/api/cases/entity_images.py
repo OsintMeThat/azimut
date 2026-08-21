@@ -55,8 +55,9 @@ async def upload_entity_image(
 ) -> dict[str, Any]:
     """Store one private presentation photo outside the Media Library.
 
-    Bounded at the edge like the two other surfaces that swallow an image, and
-    against the same limit: a portrait is a portrait wherever it came from. The
+    Bounded at the edge like every other surface that swallows an image, and against
+    the same limit — ``MAX_IMAGE_BYTES``, whose users are the list: a portrait is a
+    portrait wherever it came from. The
     pixel clamp further in answers a decompression bomb, not a file that is simply
     enormous, and refusing early is what keeps a mistaken drag from filling the
     disk with a temporary nobody asked for.

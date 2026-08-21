@@ -1895,7 +1895,13 @@ test('folds and unfolds from the canvas, where the switch is', async ({ page }) 
   await expect(page.getByText('6 of 7')).toBeVisible();
   await expect(page.getByRole('button', { name: '1 folded' })).toBeVisible();
 
-  await page.mouse.dblclick(at.x, at.y);
+  // Found again rather than clicked at the same pixel. Folding rebuilds the drawing —
+  // Konva throws its layer away and makes a new one — and re-runs the arrangement over
+  // what is left, so the count in the toolbar can be right while the node is neither
+  // where it was nor yet listening. Asking for it back waits for both.
+  const back = await nodeAt(page, 'harbourwatch');
+  await page.getByLabel('Find a node').fill('');
+  await page.mouse.dblclick(back.x, back.y);
   await expect(page.getByText('7 of 7')).toBeVisible();
   await expect(page.getByRole('button', { name: /folded/ })).toHaveCount(0);
 });

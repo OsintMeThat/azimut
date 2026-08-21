@@ -110,7 +110,7 @@ describe('Media Library positions', () => {
     // the row is read by its filename; coordinates belong in the tooltip and on
     // the map, not appended to every title
     expect(source).toContain('function pointLabel(item)');
-    expect(source).toContain('title={`Metadata says ${pointLabel(item)} — show it on the map`}');
+    expect(source).toContain('title={`Show ${pointLabel(item)} on the map`}');
     expect(source).toContain('<Icon name="pin" size={11} />');
     expect(source).not.toContain('{pointLabel(item)}<');
   });
@@ -243,8 +243,16 @@ describe('Media Library browse controls', () => {
     expect(source).toContain('mediaDisplayKind(item)');
   });
 
+  it('opens on the newest files, which is what the library is opened for', () => {
+    // A–Z put a file that arrived a minute ago wherever its filename happened to fall.
+    // The same order the server answers with by default, so the two modes agree.
+    expect(source).toContain("let sort = $state('newest')");
+    expect(source).toContain("let sortDirection = $state('desc')");
+    expect(source).toContain("let headerSort = $state('added')");
+    expect(source).toContain("sort !== 'newest' || sortDirection !== 'desc'");
+  });
+
   it('offers grids plus a plain, sortable details list', () => {
-    expect(source).toContain("let sort = $state('name')");
     expect(source).toContain("let view = $state('large')");
     expect(source).toContain("{ id: 'small', label: 'Small'");
     expect(source).toContain("{ id: 'large', label: 'Large'");
@@ -310,7 +318,7 @@ describe('Media Library browse controls', () => {
 
   it('offers a right-side reset button for all browse filters', () => {
     expect(source).toContain('function resetFilters()');
-    expect(source).toContain("query = '';\n    catFilter = null;\n    folderFilter = null;\n    gpsOnly = false;\n    collectedOnly = true;\n    sort = 'name';\n    sortDirection = 'asc';");
+    expect(source).toContain("query = '';\n    catFilter = null;\n    folderFilter = null;\n    gpsOnly = false;\n    collectedOnly = true;\n    sort = 'newest';\n    sortDirection = 'desc';");
     expect(source).toContain('class="btn btn-ghost btn-sm reset-filters"');
     expect(source).toContain('Reset filters');
     expect(source).toContain('<Icon name="reset" size={13} /> Reset filters');
@@ -351,6 +359,22 @@ describe('Media Library gated-download cookie affordance', () => {
     expect(source).toContain("authPrompt.guidance === 'windows-chromium'");
     expect(source).toContain("authPrompt.platform === 'win32' && CHROMIUM_BROWSERS.has(authPrompt.browser)");
     expect(source).toContain('disabled={authPrompt.busy || chromiumBlocked}');
+  });
+});
+
+describe('Media Library Telegram size wall', () => {
+  it('turns the typed job result into an actionable Telegram prompt', () => {
+    expect(source).toContain("status.status === 'done' && status.result?.telegram_only");
+    expect(source).toContain('telegramPrompt = { url: job.url }');
+    expect(source).toContain('<Modal title="This video needs Telegram"');
+    expect(source).toContain('Save it in Telegram, then import the file here.');
+  });
+
+  it('opens the original link without adding a downloader or login flow', () => {
+    expect(source).toContain('href={telegramPrompt.url}');
+    expect(source).toContain('target="_blank"');
+    expect(source).toContain('rel="noreferrer"');
+    expect(source).toContain('Open in Telegram');
   });
 });
 
@@ -435,5 +459,44 @@ describe('Ctrl+V on the grid', () => {
 
   it('says a duplicate is one already, and files nothing twice', () => {
     expect(source).toContain("toast('Already in the case (same SHA-256)', 'warn')");
+  });
+});
+
+describe('where an imported file came from', () => {
+  it('asks the batch once, on the way in', () => {
+    // a file the analyst downloaded elsewhere carries no address of its own, and
+    // the drop is the first moment anyone can say one
+    expect(source).toContain("import SourceDialog from '../components/SourceDialog.svelte'");
+    expect(source).toContain('pendingImport = { files }');
+    expect(source).toContain('onconfirm={(source) => runImport(pendingImport.files, source)}');
+  });
+
+  it('carries the stated origin on every file of the batch', () => {
+    expect(source).toContain("if (sourceUrl) form.append('source_url', sourceUrl)");
+  });
+
+  it('remembers the last one stated, since a thread arrives in several drops', () => {
+    expect(source).toContain('lastSource = sourceUrl');
+    expect(source).toContain('value={lastSource}');
+  });
+
+  it('offers the batch that landed without one the chance to say it', () => {
+    expect(source).toContain("label: 'Set source'");
+    expect(source).toContain('statingSource = { paths: landed }');
+    expect(source).toContain("api.patch(`/api/cases/${cid}/media`, { path, source_url: sourceUrl })");
+  });
+
+  it('shows a source link on any file that has one, fetched or stated', () => {
+    expect(source).toContain('{#if item.source?.webpage_url ?? item.source?.url}');
+    expect(source).not.toContain("{#if item.source?.type === 'download'}");
+  });
+});
+
+describe('Media Library — broken thumbnails', () => {
+  it('clears the broken flag under the key it was recorded with', () => {
+    // Recorded as `${caseId}/${path}`, so deleting the bare path never matched
+    // and a regenerated thumbnail kept showing the placeholder.
+    expect(source).toContain('next.delete(`${id}/${path}`);');
+    expect(source).not.toContain('next.delete(path);');
   });
 });

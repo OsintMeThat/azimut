@@ -45,6 +45,13 @@ dependencies = [
     # correctly in one document (see docs, and the shaping note below).
     "fpdf2>=2.8,<3",
     "markdown-it-py>=4.0,<5",
+    # Reading a multi-tab workbook into one sheet per tab (engine/sheetxlsx.py). The
+    # binders this tool replaces arrive as .xlsx with five or six tabs, and asking the
+    # analyst to export each one to CSV by hand is asking them not to bother. Pure
+    # Python with its one pure-Python dependency (et-xmlfile), so the three binaries
+    # get the same reader and no build step. Reading only: the case's own table is a
+    # CSV, and writing xlsx would be a second artifact format to keep honest.
+    "openpyxl>=3.1,<4",
     # Text shaping, and not optional: without it Arabic comes out unjoined and
     # Burmese mis-stacked — text that looks like text and is wrong, which is
     # worse than text that is missing. fpdf2 uses it when it is importable,
@@ -91,6 +98,13 @@ dev = [
     # Reads an exported note back, so the PDF tests assert what is on the page
     # rather than that bytes were written. Test-only: nothing ships it.
     "pypdf>=6,<7",
+    # Runs the suite across the machine's cores, which CI asks for with `-n auto`.
+    # The tests were already isolated from each other — every one builds its case
+    # under `tmp_path`, and nothing is scoped wider than a test — so the only
+    # thing serial execution bought was a quarter of an hour per CI run. Not in
+    # `addopts` on purpose: a local run stays serial, because parallel output
+    # interleaves and `-x` and pdb stop being useful the moment it does.
+    "pytest-xdist>=3.6,<4",
     # Static analysis, run in CI (see .github/workflows/ci.yml). ruff is 0.x and
     # ships rule changes between minors, so it's pinned to one minor; mypy to the
     # next major. Both bounds are raised deliberately, after the suite is green.
@@ -155,7 +169,11 @@ line-length = 100
 target-version = "py311"
 
 [tool.mypy]
-files = ["src/azimut"]
+# Every Python file the repo ships or runs, not only the package: `packaging/entry.py`
+# is the script PyInstaller analyses, so it is *inside* all three binaries, and it was
+# checked by nothing. `scripts/` is the release and development tooling. Tests stay out
+# — they are checked by running them.
+files = ["src/azimut", "scripts", "packaging"]
 # yt-dlp, gallery-dl and cv2 ship no type stubs; don't fail on their absence.
 # No python_version pin: mypy runs under the CI interpreter (3.12+), and numpy's
 # 2.x stubs use 3.12 syntax that a 3.11 target can't parse. The 3.11 floor stays

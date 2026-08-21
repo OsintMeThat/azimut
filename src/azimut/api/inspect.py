@@ -386,7 +386,8 @@ def save_session(case_id: str, body: SessionIn) -> dict[str, Any]:
 @router.delete("/cases/{case_id}/inspect/sessions/{name}")
 def delete_session(case_id: str, name: str) -> dict[str, Any]:
     case = get_case(case_id)
-    rel = layout.session_rel(name)
+    # Named the way the save named it — see `api/satellite.delete_search_grid`.
+    rel = layout.session_rel(slugify(name, "session"))
     try:
         case.resolve_inside(rel)
     except CaseError as exc:

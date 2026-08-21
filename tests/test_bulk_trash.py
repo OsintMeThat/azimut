@@ -29,6 +29,50 @@ def test_multi_delete_is_one_trash_group(tmp_workspace):
     assert case.resolve_inside(second["attrs"]["path"]).read_text(encoding="utf-8") == "two"
 
 
+def test_the_route_deletes_a_selection_as_one_undoable_act(client):
+    """The Board's ticked rows and the organizer's selected tiles come this way.
+
+    One request, one trash group, one Undo: sending a row per click would put the
+    selection back a row at a time, which is the same as having no way back.
+    """
+    case_id = client.post("/api/cases", json={"name": "Ticked rows"}).json()["id"]
+    ids = [
+        client.post(
+            f"/api/cases/{case_id}/entities",
+            json={"type": "person", "label": name},
+        ).json()["id"]
+        for name in ("First", "Second", "Third")
+    ]
+
+    deleted = client.post(f"/api/cases/{case_id}/entities/delete", json={"ids": ids[:2]}).json()
+
+    assert set(deleted["deleted"]) == set(ids[:2])
+    listed = client.get(f"/api/cases/{case_id}/trash").json()
+    assert len(listed["groups"]) == 1
+    assert listed["items"] == 2
+
+    restored = client.post(f"/api/cases/{case_id}/trash/{deleted['trash']}/restore")
+    assert restored.status_code == 200
+    held = client.get(f"/api/cases/{case_id}/catalog/entities").json()["items"]
+    assert {row["id"] for row in held} == set(ids)
+
+
+def test_the_route_refuses_a_selection_holding_an_unknown_row(client):
+    """Nothing goes if one id does not resolve: half a delete is the worst answer,
+    since the analyst would have to work out which half."""
+    case_id = client.post("/api/cases", json={"name": "Stale tick"}).json()["id"]
+    kept = client.post(
+        f"/api/cases/{case_id}/entities", json={"type": "person", "label": "Kept"}
+    ).json()["id"]
+
+    answer = client.post(f"/api/cases/{case_id}/entities/delete", json={"ids": [kept, "e_gone"]})
+
+    assert answer.status_code == 404
+    held = client.get(f"/api/cases/{case_id}/catalog/entities").json()["items"]
+    assert [row["id"] for row in held] == [kept]
+    assert client.get(f"/api/cases/{case_id}/trash").json()["items"] == 0
+
+
 def test_recovery_rolls_back_an_interrupted_delete(tmp_workspace):
     case = Case.create("Interrupted delete")
     note = case.create_note("Note", "", "kept")

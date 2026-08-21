@@ -88,7 +88,9 @@
       {#if worked}<span class="worked" role="img" aria-label={worked} title={worked}></span>{/if}
     </span>
     <span class="text">
-      <span class="title">{row.title || 'Untitled'}</span>
+      <!-- A proof arguing three points is three rows under one title. What the
+           analyst called each point is what tells them apart. -->
+      <span class="title">{row.title || 'Untitled'}{#if row.label}<span class="point">· {row.label}</span>{/if}</span>
       <span class="sub">
         <!-- a screenshot filed from a URL that carried no position has none:
              say so rather than printing 0°, 0° -->
@@ -248,6 +250,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .title .point { margin-left: 5px; color: var(--text-3); }
   .open:hover:not(:disabled) .title {
     color: var(--accent);
   }

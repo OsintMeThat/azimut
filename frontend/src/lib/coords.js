@@ -16,6 +16,25 @@ const EP2 = E2 / (1 - E2); // second eccentricity squared
 
 const rad = (deg) => (deg * Math.PI) / 180;
 
+/**
+ * A longitude folded back into [-180, 180].
+ *
+ * Leaflet keeps counting past the antimeridian as the analyst pans, so a map
+ * centre can read 187° after crossing it. Every coordinate the API accepts is
+ * bounded to ±180, so the unwrapped value is refused rather than understood.
+ */
+export function wrapLon(lon) {
+  const value = Number(lon);
+  if (!Number.isFinite(value)) return value;
+  // Returned untouched when it is already a longitude: the modulo below is
+  // floating-point arithmetic, and 2.2945 must not come back as
+  // 2.294499999999971 — this value is written into captures and proofs.
+  if (value >= -180 && value <= 180) return value;
+  const wrapped = ((value + 180) % 360 + 360) % 360 - 180;
+  // 180 and -180 name the same meridian; keep the sign the analyst panned toward
+  return wrapped === -180 && value > 0 ? 180 : wrapped;
+}
+
 /** Decimal degrees, 6 dp (~0.11 m) — the app's native precision. */
 export function formatDD(lat, lon) {
   return `${Number(lat).toFixed(6)}, ${Number(lon).toFixed(6)}`;
@@ -57,7 +76,9 @@ export function utmZone(lat, lon) {
     if (lon < 33) return 35;
     return 37;
   }
-  return Math.floor((lon + 180) / 6) + 1;
+  // Zone 60 ends *at* 180°: without the clamp the antimeridian answers 61, a
+  // zone that does not exist. Mirrors engine/coords.utm_zone.
+  return Math.min(60, Math.floor((lon + 180) / 6) + 1);
 }
 
 // Latitude bands, 8° each from 80°S; I and O are skipped to avoid reading as

@@ -519,3 +519,28 @@ def test_revealing_the_export_folder_takes_no_path_from_the_browser(client, monk
     response = client.post(f"/api/cases/{cid}/{route}")
     assert response.status_code == 200
     assert opened and opened[0].name == "exports"
+
+
+def test_writing_a_note_is_bounded_on_all_three_roads(client, monkeypatch):
+    """The note itself, not only its PDF export.
+
+    `PUT /notes`, `PUT /notes/{id}` and `POST /notes` each carry a whole document, and each
+    was parsed into memory before anything could refuse it — the export beside them had a
+    limit from the first day, which is exactly the asymmetry a hand-written list of routes
+    produces.
+    """
+    cid = make_case(client)
+    monkeypatch.setattr(notes_api, "MAX_NOTE_BODY_BYTES", 20)
+    heavy = b"x" * 40
+    headers = {"content-type": "application/json"}
+
+    assert client.put(f"/api/cases/{cid}/notes", content=heavy, headers=headers).status_code == 413
+    assert (
+        client.put(f"/api/cases/{cid}/notes/whatever", content=heavy, headers=headers).status_code
+        == 413
+    )
+    assert client.post(f"/api/cases/{cid}/notes", content=heavy, headers=headers).status_code == 413
+
+    # And the export keeps its own, larger number rather than inheriting this one.
+    assert notes_api.MAX_PDF_BODY_BYTES > 20
+    assert client.put(f"/api/cases/{cid}/notes", json={"text": "short"}).status_code == 200

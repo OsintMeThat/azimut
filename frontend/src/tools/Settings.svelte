@@ -206,13 +206,15 @@
   // back. A file written before those sections existed is a bare settings blob,
   // so it gets wrapped into the current shape.
   let settingsFile = $state(null);
-  let exportDirs = $state({ notes: '', media: '', proofs: '' });
+  let exportDirs = $state({ notes: '', media: '', proofs: '', views: '' });
   let exportPickerKind = $state(null);
 
   const EXPORT_KINDS = [
     { id: 'notes', label: 'Note PDFs' },
     { id: 'media', label: 'Media copies' },
     { id: 'proofs', label: 'Proof PNGs' },
+    { id: 'views', label: 'Analysis plates' },
+    { id: 'sheets', label: 'Sheet CSVs' },
   ];
 
   async function resetExportDestination(kind) {
@@ -516,7 +518,7 @@
 
   // a live sample so the format choice is legible before it's applied elsewhere
   const coordSample = $derived(
-    formatCoords(Number(home.lat) || 48.8584, Number(home.lon) || 2.2945, prefs.coordFormat)
+    formatCoords(Number(home.lat) || 43, Number(home.lon) || 25, prefs.coordFormat)
   );
 
   onMount(() => {

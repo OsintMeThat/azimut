@@ -168,8 +168,16 @@
             onchange={(e) => (data.footerEnabled = e.target.checked)} /> Show footer</label>
         </span>
         {#if footerOn}
-          <input type="text" placeholder="Composed with Azimut" maxlength="200"
-            bind:value={data.footer} />
+          <!-- What the band prints. A style saved before these existed says
+               nothing about them and leaves a proof's own answer alone. -->
+          <label class="chk"><input type="checkbox" checked={data.footerCoords === true}
+            onchange={(e) => (data.footerCoords = e.target.checked)} /> Show coordinates</label>
+          <label class="chk"><input type="checkbox" checked={data.footerText !== false}
+            onchange={(e) => (data.footerText = e.target.checked)} /> Show text</label>
+          {#if data.footerText !== false}
+            <input type="text" placeholder="Composed with Azimut" maxlength="200"
+              bind:value={data.footer} />
+          {/if}
           <div class="color-row">
             <span>Colour</span>
             <input type="color" value={data.footerColor ?? autoFooterColor}

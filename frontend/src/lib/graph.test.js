@@ -828,6 +828,10 @@ describe('node drawing', () => {
   });
 
   it('survives a label that is not a string', () => {
+    // An emoji is two UTF-16 units: cutting between them leaves half a character,
+    // which no canvas can draw and no file can carry.
+    expect(shortLabel(`${'x'.repeat(20)}🏴war`)).toBe(`${'x'.repeat(20)}🏴…`);
+    expect([...shortLabel(`${'x'.repeat(21)}🏴war`)].every((glyph) => glyph.codePointAt(0) < 0xd800 || glyph.codePointAt(0) > 0xdfff)).toBe(true);
     expect(shortLabel(null)).toBe('');
     expect(shortLabel(42)).toBe('42');
   });

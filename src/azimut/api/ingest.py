@@ -1,9 +1,10 @@
 """REST API for the capture browser extension (extension/ at the repo root).
 
-The extension screenshots a map the user is looking at — an external site
-(Google Earth, Google Maps, Bing, Yandex, OSM) or this app's own Maps JS
-widget basemap — and files it here as a ``capture`` entity, riding the same
-media pipeline as a satellite crop so it lists, opens and exports like one.
+The extension screenshots a map the user is looking at — any site
+``engine/mapsites.SITES`` declares, or this app's own Maps JS widget basemap — and
+files it here as a ``capture`` entity, riding the same media pipeline as a satellite
+crop so it lists, opens and exports like one. The list lives there and only there:
+copied into this sentence it went stale at four of the nine sites.
 
 Trust model: the server already binds localhost only, so the pairing token
 (``config.ingest_token``, shown in Settings, pasted once into the extension)
@@ -65,9 +66,19 @@ ATTRIBUTIONS = {
 
 def require_token(x_azimut_token: str = Header(default="")) -> None:
     """401 unless the request carries the pairing token. Constant-time compare;
-    an unminted token ("") matches nothing."""
+    an unminted token ("") matches nothing.
+
+    Compared as **bytes**, which is what makes this a refusal rather than a crash. Starlette
+    decodes a header as latin-1, so any octet above 0x7f arrives as a non-ASCII string and
+    `compare_digest` raises `TypeError` on one — a 500 on the authentication edge, from a
+    value the caller chooses entirely, with a traceback into the log that
+    `engine/diagnostics.py` keeps for "Report an issue". The same guard exists in
+    `scripts/relaunch.py`, which decodes its token as ASCII and catches the failure.
+    """
     expected = config.load_settings().get("ingest_token") or ""
-    if not expected or not secrets.compare_digest(x_azimut_token, expected):
+    if not expected or not secrets.compare_digest(
+        x_azimut_token.encode("latin-1", "replace"), expected.encode("utf-8")
+    ):
         raise HTTPException(status_code=401, detail="missing or invalid pairing token")
 
 

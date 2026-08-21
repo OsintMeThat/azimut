@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { PANEL_H } from './composer.js';
 import {
+  canFill,
+  fillPaint,
   movedBy,
   nextPanelRow,
   notesAfterRemoval,
   nudgeShape,
   PANEL_SCALE_MAX,
   PANEL_SCALE_MIN,
+  pointsWithTransform,
   scaleFromNode,
+  textBoxPad,
   viewCentrePoint,
 } from './proofEdits.js';
 
@@ -160,5 +164,78 @@ describe('viewCentrePoint', () => {
       { x: 0, y: 0, scaleX: 2, scaleY: 2 }
     );
     expect(point).toEqual({ x: 200, y: 150 });
+  });
+});
+
+describe('a shape fill', () => {
+  it('applies to the closed kinds only', () => {
+    expect(canFill('rect')).toBe(true);
+    expect(canFill('ellipse')).toBe(true);
+    expect(['line', 'arrow', 'curve', 'freehand', 'text'].map(canFill)).toEqual(
+      [false, false, false, false, false]
+    );
+    expect(canFill(undefined)).toBe(false);
+  });
+
+  it('is the shape colour carrying the chosen opacity', () => {
+    expect(fillPaint('#40c4ff', 0.25)).toBe('rgba(64, 196, 255, 0.25)');
+    expect(fillPaint('#FFFFFF', 1)).toBe('rgba(255, 255, 255, 1)');
+    expect(fillPaint('#fff', 0.5)).toBe('rgba(255, 255, 255, 0.5)');
+  });
+
+  it('is nothing at all until an opacity is asked for', () => {
+    expect(fillPaint('#40c4ff', 0)).toBeNull();
+    expect(fillPaint('#40c4ff', undefined)).toBeNull();
+    expect(fillPaint('#40c4ff', -1)).toBeNull();
+  });
+
+  it('refuses a colour it cannot read rather than painting over the evidence', () => {
+    expect(fillPaint('red', 0.5)).toBeNull();
+    expect(fillPaint(null, 0.5)).toBeNull();
+  });
+
+  it('never paints past opaque', () => {
+    expect(fillPaint('#000000', 4)).toBe('rgba(0, 0, 0, 1)');
+  });
+});
+
+describe('pointsWithTransform', () => {
+  // Konva hands back [a, b, c, d, e, f]: x' = ax + cy + e, y' = bx + dy + f.
+  const IDENTITY = [1, 0, 0, 1, 0, 0];
+
+  it('leaves a stroke alone when nothing moved it', () => {
+    expect(pointsWithTransform([0, 0, 10, 4], IDENTITY)).toEqual([0, 0, 10, 4]);
+  });
+
+  it('folds a corner drag into every sample, not just the first', () => {
+    // doubled, then moved 5 right and 1 down
+    expect(pointsWithTransform([0, 0, 10, 4, 20, 8], [2, 0, 0, 2, 5, 1]))
+      .toEqual([5, 1, 25, 9, 45, 17]);
+  });
+
+  it('folds a quarter turn in as well, since a stroke has no origin to keep one against', () => {
+    const quarter = [0, 1, -1, 0, 0, 0]; // 90° clockwise about the panel origin
+    expect(pointsWithTransform([1, 0, 0, 2], quarter)).toEqual([0, 1, -2, 0]);
+  });
+
+  it('answers with a new list rather than editing the one it was given', () => {
+    const points = [1, 2, 3, 4];
+    expect(pointsWithTransform(points, [3, 0, 0, 3, 0, 0])).not.toBe(points);
+    expect(points).toEqual([1, 2, 3, 4]);
+  });
+
+  it('has nothing to fold into an empty stroke', () => {
+    expect(pointsWithTransform([], [2, 0, 0, 2, 5, 5])).toEqual([]);
+  });
+});
+
+describe('textBoxPad', () => {
+  it('grows with the label, so a frame reads the same at any size', () => {
+    expect(textBoxPad(28)).toBe(8);
+    expect(textBoxPad(100)).toBe(28);
+  });
+
+  it('answers for a label that never stated a size', () => {
+    expect(textBoxPad(undefined)).toBe(textBoxPad(28));
   });
 });

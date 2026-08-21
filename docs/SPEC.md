@@ -1,6 +1,6 @@
 # Azimut product overview
 
-Status: **spec v0.3** (2026-08-03). Read in order: Done → Roadmap → Loose ideas.
+Status: **spec v0.3** (2026-08-21). Read in order: Done → Roadmap → Loose ideas.
 Implementation detail belongs in code and tests; see
 [IMAGERY_PROVIDERS.md](IMAGERY_PROVIDERS.md), [UI.md](UI.md),
 [ONTOLOGY.md](ONTOLOGY.md) and
@@ -51,10 +51,11 @@ azimut/        # everything Azimut owns; the rest of the folder is yours
   case.json    # small manifest: name, dates, storage format + schema
   notes.md     # free-form case notes (markdown)
   notes/       # note bodies, named after their title, filed as in the notebook
+  sheets/      # case sheets as plain CSV; .meta/ holds the grid's own state
   media/       # source + captured + extracted media; .meta/ holds the sidecars
   proofs/      # exported PNGs; .meta/ holds the specs and pasted images
-  exports/     # notes exported to PDF, and yours to fill
-  .data/       # case.db: authoritative SQLite graph
+  exports/     # notes as PDF, analysis plates, and yours to fill
+  .data/       # case.db, the authoritative SQLite graph, and entity photos
   .drafts/     # post drafts
   .inspect/    # saved Inspect session specs
   .search/     # saved Grid Search state
@@ -126,26 +127,33 @@ proof for publication.
 | ✅ **Research helpers** | Prepares media for keyless reverse search and saves keyboard-reviewed AOI grids. |
 | ✅ **Reports & templates** | Stores reusable proof and post structures, then prepares sourced Markdown for X, Bluesky or Mastodon. |
 | ✅ **Case Notebook** | Edits linked Markdown notes with local media, Mermaid diagrams, PDF output and remembered export folders. |
-| ✅ **Media at scale** | Handles login-gated downloads, bounded search, searchable pickers, local metadata enrichment and GPS handoff to the map. |
+| ✅ **Media at scale** | Downloads behind a login with a session named once, plus bounded search, searchable pickers, local metadata enrichment and GPS handoff to the map. |
 | ✅ **Storage & recovery** | Uses per-case SQLite and durable jobs, with whole-case bundles, Trash and portable settings backups. |
 | ✅ **Case utilities** | Opens case folders, reports scrubbed diagnostics, keeps filenames in sync and offers explicit Doctor repairs. |
+| ✅ **Workspace portability** | Moves or adopts a workspace safely, recovers hand-added cases and prevents two live instances from sharing it silently. |
+| ✅ **Updates & paste** | Reports available app, downloader and extension updates, then files supported clipboard content from the main case surfaces. |
 | ✅ **Evidence on the map** | Places proofs and derived media through their evidence chain, with stated point uncertainty and traced footprints. |
+| ✅ **Map search** | Answers the search box while typing from saved work, a coordinate parse and a bundled gazetteer, and asks the geocoder only once typing stops. |
 | ✅ **Ontology connections** | Keeps Relations, Mentions, Claim connectors and artifact lineage separate under one validated verb registry. |
-| ✅ **Board & entities** | Provides the sortable Case Board, shared Details, typed creation and primary entity photos. |
-| ✅ **Case graph** | Draws registry-backed lenses with clustered nodes, readable edges, previews and an explicit view budget. |
+| ✅ **Board & entities** | Provides the sortable Case Board, shared Details, typed creation, primary entity photos and a ticked selection deleted as one recoverable act. |
+| ✅ **Case graph** | Draws registry-backed lenses with clustered nodes, readable edges, previews, a view budget and sources folded onto their edges. |
 | ✅ **Working the graph** | Expands, folds, hides, searches and pins nodes per lens, with undo and no case mutation. |
-| ✅ **Graph evidence** | Folds sources onto their edges and exposes derivation, support, source and account counts. |
-| ✅ **Shared analysis views** | Shares one filter and saved-view family between Board and Graph while Timeline keeps readings built for tracks. |
 | ✅ **Claim assessment** | Keeps statement confidence, relation confidence and source reliability separate, with explicit support and contradiction links. |
 | ✅ **Structured findings** | Records associations, duplicate identifiers, asset condition, equipment models and statement totals without inventing missing values. |
 | ✅ **Temporal Claims** | Dates a Claim with guided point, timestamp or interval input and files its subjects, places and evidence atomically. |
-| ✅ **Case Timeline** | Aligns dated statements and media on a windowed UTC axis with uncertainty, density, direct edits and Undated work. |
+| ✅ **Case Timeline** | Aligns dated statements and media on a windowed axis read in UTC or a civil zone, with uncertainty, density, direct edits and Undated work. |
 | ✅ **Timeline readings** | Builds coloured tracks from presets or Search+, then saves a changing Live view or a fixed Snapshot. |
-| ✅ **Timeline clocks & comparison** | Reads the axis in UTC or a chosen civil zone, adds daylight context and compares exact or uncertain entries. |
-| ✅ **Shared fact time** | Passes one fact-time window between Timeline, Board, Graph and a session-only Map layer without mixing in filing dates. |
-| ✅ **Workspace portability** | Moves or adopts a workspace safely, recovers hand-added cases and prevents two live instances from sharing it silently. |
-| ✅ **Updates & paste** | Reports available app, downloader and extension updates, then files supported clipboard content from the main case surfaces. |
-
+| ✅ **Shared analysis views** | Shares one filter, saved-view family and fact-time window between Board, Graph and Map, while Timeline keeps readings built for tracks. |
+| ✅ **Analysis view export** | Writes the Graph or the Timeline out as a vector plate carrying its lens, question, window, clock and legend, or copies it as an image. |
+| ✅ **Case Sheet** | Opens and builds case CSVs in a plain grid: keyed rows, sorts, filters, row colour, clipboard both ways, bulk fill, undo, cells that point at case entities, and a reading handed out as CSV or Markdown. |
+| ✅ **Typed columns** | Types a column in the sidecar as a state, a list, a yes/no, a number, a point, a date or a picture, and lets the sort, the filters, the vocabulary, the map, the Timeline, the progress and the link check read it. |
+| ✅ **A family of sheets** | Files a workbook one sheet per tab, forks a sheet, moves ticked rows under a column mapping, and confirms a reload or an overwrite when the file changed on disk. |
+| ✅ **A sheet into the case, both ways** | Promotes a declared sheet into entities, places, bookmarks, vocabularies, row edges and dated Claims in one transaction, read as a plan first, and builds a worklist back out of what the case holds. |
+| ✅ **Geolocation index** | Lays the case's proofs out one per row with their media, place and coordinates, and builds one proof per row back out of two address columns and a coordinate column, as a stoppable job. |
+| ✅ **Imported proofs** | Turns a published post into a composed proof: every picture a panel, its text read for a position, the addresses it points at fetched as material, and nothing filed before the preview is approved. |
+| ✅ **Import origin** | States one origin for a whole import, offers it to a batch that landed without one, and corrects any file later from Details. |
+| ✅ **Drawing on a proof** | Stamps a fixed set of marks, fills boxes and ellipses at a chosen opacity, keeps every shape tool in hand, and recolours, restyles, nudges, drags or deletes a picked family at once. |
+| ✅ **A proof of several points** | States every place a proof argues, each optionally named and one of them the camera's, files them as places under one title, and carries them into the tweet and onto the exported picture. |
 
 ---
 
@@ -154,18 +162,6 @@ proof for publication.
 Each version delivers one complete daily workflow. Firm ideas move here from
 §7. New tools become tabs or modes in an existing workspace (see
 [UI.md](UI.md)). Releases ship as GitHub `v0.x` tags.
-
-### v2: still to finish (next `v0.2.x`)
-
-| Tool | What it does |
-|------|--------------|
-| **Case Sheet** | Adds editable free columns and CSV/GeoJSON round trips to the shipped Board. Imported loose rows stay outside the graph until promoted. |
-| **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
-| **Saved view management** | Renames and sorts Board, Graph and Timeline views, with their surface and last modification clearly shown. |
-| **Analysis view export** | Copies or exports the visible Graph or Timeline as a PNG with its lens, question, time window, clock and legend. |
-
-Toward v2: split Satellite.svelte into `lib/` modules, before the map engine
-changes under it.
 
 ### v3: GEOINT expansion
 
@@ -191,7 +187,10 @@ changes under it.
 | **Audio Transcript** | Transcribe and translate speech offline; flag acoustic context such as bells, adhan, aircraft or language. |
 | **Ground Imagery** | Ground-level photos: Panoramax/Mapillary/KartaView key-less first; Street View easy link, optional keyed in-app view. |
 | **Panorama** | Stitch a video window / frame set. Auto-stitch already in Inspect; still to do: sample a video window directly, seam blending. |
-| **Proof annotation** | Grow the Geo Proof toolbox: shape fill + dashed strokes, numbered markers, a redaction/blur box; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
+| **Proof annotation** | Grow the Geo Proof toolbox: dashed strokes, numbered markers, a redaction/blur box; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
+| **Detached tool windows** | Opens a tool in its own browser window for a second screen, greyed out in the tab it left and taken back when that window closes. Cross-tool handoffs route to wherever the tool now lives, and the open case follows every window. Read surfaces open as many copies as wanted; the document editors allow one window per document. |
+| **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
+| **Help and tips** | A mark the analyst clicks for the open tool's own guide: what it is for, the controls whose icon does not say it, and its shortcuts. Clicking an entry points at the real button. One panel, one entry per tool. |
 
 Edit Provenance rests on three facts about Adobe renders, kept here so the tool
 can be rebuilt from the spec alone:
@@ -210,7 +209,8 @@ can be rebuilt from the spec alone:
 The result is one track per source file over the render's timecode, with
 GPS-tagged clips promotable to places.
 
-Toward v3: GIF maker; curated tool links; full-text case search; clipboard
+Toward v3: split Satellite.svelte into `lib/` modules, before the map engine
+changes under it; GIF maker; curated tool links; full-text case search; clipboard
 image/URL capture with provenance; EXIF/GPS import suggestions for place and
 time; sun and moon times read against the terrain horizon the 3D map's DEM
 supplies, since a ridge ends the day well before the flat horizon does.
@@ -275,7 +275,6 @@ stops making sense.
 - **Count a statement's independence by origin, not by wrapper:** three collages made from one video are three sources today, and are arguably one. The graph already answers this for a place; changing it for a statement changes a published number.
 - **Free-form montage editor:** consider only if it stays distinct from Geo Proof and Inspect collage.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
-- **Guided companion:** a mark the analyst clicks for a legend of the open tool, covering what it is for and the controls whose icon does not say it. Clicking an entry points at the real button.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
 
 ## 8. Explicit non-goals
@@ -283,8 +282,6 @@ stops making sense.
 - No cloud, accounts, hosted service, or telemetry.
 - No automated geolocation verdict; Azimut files facts for the analyst.
 - No rebuilding specialized OSINT services; Azimut orchestrates them.
-- No spreadsheet engine. The Case Sheet is a view of the graph, not a workbook:
-  no formulas, no cell types, no second copy of the case.
 - No block-evasion scraping. User session cookies are in scope; third-party
   downloader proxies are not because they re-encode media and expose targets.
 - No auto-posting by default. An optional, opt-in X/Twitter API key (Settings,
@@ -320,12 +317,29 @@ stops making sense.
 - **Security posture** (single-user localhost): `127.0.0.1` bind + Host/Origin
   guard (DNS rebinding), 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
   names for images pasted into a proof (no client-chosen path), token-gated
-  ingest island for the extension. The workspace pointer is the one file written
+  ingest island for the extension. A case id and an artifact name each address
+  one directory entry, checked against POSIX *and* Windows path rules so the
+  separator only one of them honours cannot walk out of the workspace. The workspace pointer is the one file written
   outside the workspace, 0600 and holding a path; deleting the copy a move set
   aside acts on this process's own memory, never on a path from the request.
   Accepted risks recorded here: cleartext keys over
-  localhost, the hash-verified scraper updater, and tile/media URL fetches (SSRF
-  only matters if the localhost assumption breaks). The startup update check is
+  localhost, the hash-verified scraper updater, the release workflow's publish job
+  running `softprops/action-gh-release` and `pypa/gh-action-pypi-publish` on mutable
+  refs while it holds the PyPI OIDC identity (the branch ref is the form PyPA
+  documents; every other action in both workflows is pinned by tag or by commit),
+  tile/media URL fetches (SSRF
+  only matters if the localhost assumption breaks), and a download that fails
+  saying only that the content is unavailable being retried with the stored
+  browser session, so a merely deleted post gets the analyst's cookies — kept
+  because a hundred-row press cannot stop on a question and the first attempt is
+  always cookie-less. A sheet's link check refuses a literal loopback, private or
+  link-local address on the first hop and on every redirect; a hostname that
+  resolves to one is not looked up to find out, and what such a hop could learn is
+  "this port answered" and never a body. An imported workbook is bounded on its
+  compressed bytes and on the size its own directory declares once unzipped. The map's search bar answers from
+  a bundled gazetteer and never reaches out on a keystroke; its geocoder layer
+  waits for a pause, and a request the one-per-second pace cannot take is dropped
+  rather than queued. The startup update check is
   the one on-mount network call: opt-out, and read-only against GitHub's
   releases feed plus PyPI's JSON for the two downloaders, both governed by the
   same switch. Release notes are rendered through the Notebook's
@@ -335,11 +349,18 @@ stops making sense.
   about that behavior and local Case media avoids it. Notebook diagrams are the
   one markup DOMPurify does not clear: Mermaid draws its SVG into the preview
   after sanitizing, under its own `strict` level, which escapes labels and drops
-  click handlers. The PDF export is the one place a picture drawn in the browser
-  is posted back: the request, each diagram and their decoded total are bounded
-  before rendering, and every diagram is read as an image,
-  and the note's own text is re-read from disk rather than trusted from the
-  request. Case imports extract only unique, non-symlink members declared
+  click handlers. Three routes take a picture drawn in the browser back: the note
+  PDF export, whose request, diagrams and decoded total are bounded before
+  rendering, every diagram read as an image and the note's own text re-read from
+  disk rather than trusted from the request; the analysis plate, bounded the
+  same way and inspected before it is written, since a plate lands where documents
+  are opened — it must start as an SVG and carry no script, event handler,
+  embedded document or reference leaving the file; and saving a proof, which posts
+  the composer's rendered export and the images pasted into it, bounded as a
+  request and again as a decoded picture. Every body the browser assembles whole —
+  a table, a note, a picture — is refused by size before it is parsed, and the
+  routes are not trusted to a list: `tests/test_hardening.py` walks them.
+  Case imports extract only unique, non-symlink members declared
   by the manifest and matching its SHA-256. Password-protected bundles seal the
   complete ZIP with chunked AES-256-GCM and a scrypt-derived key; filenames stay
   encrypted and the password is never persisted in a job. Import temporarily

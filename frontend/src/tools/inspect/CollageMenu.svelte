@@ -20,7 +20,14 @@
     session.collages.find((c) => c.id === session.activeCollageId) ?? session.collages[0]
   );
 
-  const onCanvas = (id) => active?.nodes.some((n) => n.frameId === id);
+  // How many pieces on this collage came from that tray frame — a tile can be
+  // added several times, and with a long tray that count is the only way to see
+  // what is already placed.
+  const usedCount = (id) => active?.nodes.filter((n) => n.frameId === id).length ?? 0;
+
+  // Same wording as the Frame tab tray, so a frame keeps one name across tabs.
+  const frameLabel = (fr, i) =>
+    fr.time != null ? `Image ${i + 1} · t=${fr.time.toFixed(2)}s` : `Image ${i + 1}`;
   // These controls act on one piece; a multi-piece block is transformed as a
   // whole on the canvas, so the section simply steps aside for it.
   const selected = $derived(
@@ -250,19 +257,29 @@
 
   <div class="section">
     <div class="section-head"><span>Frames</span></div>
-    <div class="grid">
-      {#each session.frames as fr (fr.id)}
+    <div class="tray">
+      {#each session.frames as fr, i (fr.id)}
         {@const look = previewStyle(filters, fr.adjust)}
-        <button class="tile" class:used={onCanvas(fr.id)} onclick={() => addToCollage(fr)} title={onCanvas(fr.id) ? 'Add again (fresh snapshot)' : 'Add to canvas'}>
+        {@const used = usedCount(fr.id)}
+        <button
+          class="thumb"
+          class:used={used > 0}
+          onclick={() => addToCollage(fr)}
+          title={used ? `${frameLabel(fr, i)} · added ${used}×` : frameLabel(fr, i)}
+        >
           <img
-            class:cropped={fr.crop}
             src={fr.url}
-            alt="frame"
+            alt={frameLabel(fr, i)}
             style={styleText(cropImgStyle(fr.crop))}
             style:filter={look.filter}
             style:transform={look.transform}
           />
-          <span class="add"><Icon name="plus" size={12} /></span>
+          <span class="num">{i + 1}</span>
+          {#if used}
+            <span class="tag count">×{used}</span>
+          {:else}
+            <span class="tag"><Icon name="plus" size={11} /></span>
+          {/if}
         </button>
       {/each}
     </div>
@@ -447,39 +464,59 @@
     color: var(--text-2);
     cursor: pointer;
   }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+  .tray {
+    display: flex;
+    flex-wrap: wrap;
     gap: 6px;
-    max-height: 200px;
-    overflow: auto;
   }
-  .tile {
+  .thumb {
     position: relative;
-    aspect-ratio: 1;
+    width: 60px;
+    height: 60px;
     border-radius: var(--r-sm);
     overflow: hidden;
     border: 2px solid transparent;
     padding: 0;
   }
-  .tile.used {
+  .thumb.used {
     border-color: var(--border-strong);
   }
-  .tile img {
+  .thumb img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
   }
-  .tile .add {
+  .num {
     position: absolute;
-    bottom: 3px;
-    right: 3px;
+    top: 2px;
+    left: 2px;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 3px;
+    border-radius: 4px;
+    background: rgba(10, 10, 10, 0.7);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 15px;
+    text-align: center;
+  }
+  .tag {
+    position: absolute;
+    bottom: 2px;
+    right: 2px;
     background: var(--accent);
     color: var(--accent-text);
     border-radius: 4px;
     display: flex;
     padding: 1px;
+  }
+  .tag.count {
+    padding: 0 4px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 15px;
   }
   .modes {
     display: flex;

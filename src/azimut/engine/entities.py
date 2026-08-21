@@ -537,6 +537,13 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
                hint="a prepared thread or report, saved rather than published"),
     EntityType("note", "Note", DOCUMENT, "note", ANNEX,
                hint="a Markdown page in the case notebook"),
+    # A table the analyst works in: a list being worked through, a comparison grid,
+    # rows too soft to be entities yet. `ANNEX` for the same reason a note is one —
+    # it is consulted, and no path through the case runs across it. What it *does*
+    # carry are `mentions` edges, one per cell pointing at an entity, so a row that
+    # names a subject is visible from that subject's side too.
+    EntityType("sheet", "Sheet", DOCUMENT, "table", ANNEX,
+               hint="a CSV table in the case, edited as a grid"),
     EntityType("inspect-session", "Inspect session", DOCUMENT, "inspect", ANNEX,
                hint="saved adjustments over one file, which die with it"),
     # The page a claim rests on. `url` and `fetched_at` are written by whatever

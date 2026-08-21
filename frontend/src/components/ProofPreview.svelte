@@ -19,6 +19,7 @@
     normalizeProofStyle, textColors, attributionLine, loadImage,
     BG, CAPTION_SIZE, FOOTER_SIZE, SIG_SCALE, SIG_TEXT_SIZE,
   } from '../lib/composer.js';
+  import { closeStrandedGesture } from '../lib/konvaGesture.js';
   import { prefs } from '../lib/state.svelte.js';
 
   let { style = $bindable(), logoMissing = $bindable(false) } = $props();
@@ -61,10 +62,14 @@
     const space = safeStyle.space;
     const bg = safeStyle.bg ?? BG;
     const tc = textColors(bg);
+    // The preview has no proof behind it, so the band shows the credit line the
+    // style asks for and nothing else: coordinates are content, and a house style
+    // holds none.
+    const footerOn = safeStyle.footerEnabled && safeStyle.footerText !== false;
     const text = {
       captionSize: safeStyle.captionSize ?? CAPTION_SIZE,
       footerSize: safeStyle.footerSize ?? FOOTER_SIZE,
-      footerEnabled: safeStyle.footerEnabled,
+      footerEnabled: footerOn,
     };
     const pnls = panels(safeStyle);
     const { width, height } = docSize(pnls, [], {}, text, [], 'grid', space);
@@ -100,7 +105,7 @@
     });
 
     // footer
-    if (text.footerEnabled) {
+    if (footerOn) {
       const fs = text.footerSize;
       layer.add(new Konva.Text({
         x: space.pad, y: height - space.pad - footerBand(fs) + Math.round((footerBand(fs) - fs) / 2),
@@ -217,6 +222,22 @@
       cw = host.clientWidth || cw;
       ro.observe(host);
     }
+    // A release the page never sees leaves Konva resizing the signature under a
+    // bare pointer, and the size it settles on never reaches the template. Each
+    // render builds a new transformer, so the live one is read at close time
+    // rather than held. A frame's delay lets a healthy gesture close itself.
+    const closeStranded = () => {
+      if (!stage) return;
+      closeStrandedGesture({
+        transformer: layer.findOne('Transformer'),
+        stage,
+        isDragging: () => Konva.isDragging(),
+      });
+    };
+    const settlePointer = () => requestAnimationFrame(closeStranded);
+    window.addEventListener('pointerup', settlePointer, true);
+    window.addEventListener('pointercancel', settlePointer, true);
+    window.addEventListener('blur', settlePointer);
     // load the real signature once; a missing file flips logoMissing for the editor
     loadImage('/api/settings/signature.png')
       .then((img) => { sigImg = img; logoMissing = false; render(); })
@@ -224,7 +245,11 @@
     render();
     return () => {
       ro.disconnect();
+      window.removeEventListener('pointerup', settlePointer, true);
+      window.removeEventListener('pointercancel', settlePointer, true);
+      window.removeEventListener('blur', settlePointer);
       stage?.destroy();
+      stage = null;
     };
   });
 
@@ -232,7 +257,8 @@
   $effect(() => {
     JSON.stringify([
       style.bg, style.space, style.captionSize, style.footerSize,
-      style.footer, style.footerEnabled, style.footerColor, style.footerAlign, style.captionsEnabled,
+      style.footer, style.footerEnabled, style.footerText, style.footerColor, style.footerAlign,
+      style.captionsEnabled,
       style.panelDirection,
       style.signature, style.signatureText,
     ]);

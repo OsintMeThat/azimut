@@ -207,7 +207,7 @@ def _moon_ecliptic(t: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         - 0.186 * np.sin(ms)  # yearly equation
         - 0.059 * np.sin(2 * mm - 2 * elong)
         - 0.057 * np.sin(mm - 2 * elong + ms)
-        + 0.053 * np.sin(2 * elong + ms)
+        + 0.053 * np.sin(2 * elong + mm)
         + 0.046 * np.sin(2 * elong - ms)
         + 0.041 * np.sin(mm - ms)
         - 0.035 * np.sin(elong)  # parallactic

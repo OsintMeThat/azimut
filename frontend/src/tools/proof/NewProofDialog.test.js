@@ -27,12 +27,21 @@ function props(overrides = {}) {
     caseId: 'case-1',
     togglePanel: vi.fn(),
     requestCreation: vi.fn(),
+    startImport: vi.fn(),
     close: vi.fn(),
     ...overrides,
   };
 }
 
 describe('Create proof dialog', () => {
+  it('offers importing a published proof beside composing one', () => {
+    // The toolbar has no room for a seventh button, so this dialog is the door.
+    const { body } = render(NewProofDialog, { props: props() });
+
+    expect(body).toContain('Import a published proof');
+    expect(source).toContain('onclick={startImport}');
+  });
+
   it('offers the same category chips as the Add-a-panel picker', () => {
     const { body } = render(NewProofDialog, { props: props() });
 

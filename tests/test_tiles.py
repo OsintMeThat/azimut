@@ -707,3 +707,46 @@ def test_esri_capture_date_network_failure_returns_none():
         raise OSError("down")
 
     assert tiles.esri_capture_date(0, 0, 17, get=boom) is None
+
+
+def test_crop_across_the_antimeridian_is_not_half_blank():
+    """Longitude wraps, so the tiles past ±180° are the ones on the other side.
+
+    Clamping them away instead left a blank band down the middle of every
+    capture near the date line — the one place on the planet where a crop is
+    guaranteed to straddle the edge of the grid.
+    """
+    provider = tiles.BUILTIN_PROVIDERS[0]
+    asked: list[int] = []
+    zoom = 6
+    max_index = (1 << zoom) - 1
+
+    def fake_fetch(client, url):
+        # the x the template was filled with, read back off the URL
+        asked.append(int(url.split("/")[-2]))
+        return Image.new("RGB", (256, 256), (10, 120, 10))
+
+    img, prov = tiles.fetch_crop(
+        0.0, 179.98, zoom, 900, 600, provider, fetch_tile=fake_fetch
+    )
+
+    assert prov["tiles_missing"] == 0, "a tile past the antimeridian went unfetched"
+    assert asked, "no tile was requested at all"
+    assert all(0 <= x <= max_index for x in asked), f"out-of-grid tile index: {sorted(set(asked))}"
+    # and the canvas holds imagery edge to edge, not the fill colour
+    assert img.getpixel((2, 300)) == (10, 120, 10)
+    assert img.getpixel((897, 300)) == (10, 120, 10)
+
+
+def test_crop_still_leaves_the_poles_empty():
+    """Latitude does not wrap: above the top row there is no imagery to read from
+    the other side, and inventing some would be a picture of nowhere."""
+    provider = tiles.BUILTIN_PROVIDERS[0]
+
+    def fake_fetch(client, url):
+        return Image.new("RGB", (256, 256), (10, 120, 10))
+
+    _img, prov = tiles.fetch_crop(
+        85.0, 0.0, 3, 700, 700, provider, fetch_tile=fake_fetch
+    )
+    assert prov["tiles_missing"] > 0

@@ -5,7 +5,9 @@ import {
   applyPostTemplateStructure, normalizePostMediaPickerTarget, normPostTemplate, postMediaForType,
   postCharacterCount, postComposeUrl, postReportMarkdown, postTarget,
   proofSourceMediaPaths, renumberMediaTweetText, retargetMediaTweetText,
+  sourceSection, sourceUrls,
   templateFromPost, templateUsesPostField, togglePostMedia,
+  pointLines, postCoordinates, splitPointLine,
 } from './post.js';
 
 const full = {
@@ -380,6 +382,42 @@ describe('post targets', () => {
   });
 });
 
+describe('sourceSection — a proof resting on more than one post', () => {
+  it('links every address when the line is nothing but addresses', () => {
+    // The composer hands over one address per line, so this is the ordinary shape of a
+    // proof built from two posts. A run separated by dots is what proofs saved before
+    // that carried, and it reads the same.
+    const listed = [
+      '- [https://x.com/a/1](https://x.com/a/1)',
+      '- [https://t.me/b/2](https://t.me/b/2)',
+    ].join('\n');
+    expect(sourceSection('https://x.com/a/1\nhttps://t.me/b/2')).toBe(listed);
+    expect(sourceSection('https://x.com/a/1  ·  https://t.me/b/2')).toBe(listed);
+    // One address keeps the reading it always had.
+    expect(sourceSection('https://x.com/a/1')).toBe('[Open original source](https://x.com/a/1)');
+  });
+
+  it('prints prose instead of linking it', () => {
+    expect(sourceSection('handed to me on a stick')).toBe('handed to me on a stick');
+    // A line that starts with an address and goes on saying something used to be
+    // wrapped whole in one href, which is a dead link either way.
+    expect(sourceSection('https://x.com/a/1 reposted from elsewhere')).toBe(
+      'https://x.com/a/1 reposted from elsewhere',
+    );
+    expect(sourceSection('')).toBe('');
+  });
+
+  it('keeps the report and the media matcher reading the same line', () => {
+    const line = 'https://x.com/a/1\nhttps://t.me/b/2';
+    const report = postReportMarkdown({ title: 'Two posts', source: line });
+    expect(report).toContain('- [https://x.com/a/1](https://x.com/a/1)');
+    expect(report).toContain('- [https://t.me/b/2](https://t.me/b/2)');
+    expect(report).not.toContain(`(${line})`); // the one broken href this replaces
+    // And the matcher reads the same block the report just rendered.
+    expect(sourceUrls(line)).toEqual(['https://x.com/a/1', 'https://t.me/b/2']);
+  });
+});
+
 describe('postReportMarkdown', () => {
   it('renders a structured report with links, maps and embedded case media', () => {
     const report = postReportMarkdown({
@@ -413,5 +451,73 @@ describe('postReportMarkdown', () => {
 
   it('always gives an otherwise empty export a title', () => {
     expect(postReportMarkdown()).toBe('# Untitled report\n');
+  });
+});
+
+
+describe('the points a post carries', () => {
+  it('reads a line with a name and a line without', () => {
+    expect(splitPointLine('impact 2 — 64.148100, -21.940100')).toEqual({
+      label: 'impact 2', coords: '64.148100, -21.940100',
+    });
+    expect(splitPointLine('  64.148100, -21.940100 ')).toEqual({
+      label: '', coords: '64.148100, -21.940100',
+    });
+  });
+
+  it('drops the blank lines a pasted block leaves behind', () => {
+    expect(pointLines('64.1466, -21.9426\n\n  \nb — 1, 2')).toEqual([
+      { label: '', coords: '64.1466, -21.9426' },
+      { label: 'b', coords: '1, 2' },
+    ]);
+  });
+
+  it('reads the resolved point in decimal and the rest as written', () => {
+    // the first line is the one the post looked up, so it reads as it always has
+    expect(postCoordinates('64°08\'48"N 21°56\'33"W\nimpact 2 — 64.1481, -21.9401', {
+      lat: 64.1466, lon: -21.9426,
+    })).toBe('64.146600, -21.942600\nimpact 2 — 64.1481, -21.9401');
+  });
+
+  it('keeps the name of the point it resolved', () => {
+    expect(postCoordinates('caméra — 64.1466, -21.9426', { lat: 64.1466, lon: -21.9426 }))
+      .toBe('caméra — 64.146600, -21.942600');
+  });
+
+  it('carries one point exactly as it did before the list', () => {
+    expect(tweetFields({ lat: 48.85, lon: 2.35 }).coordinates).toBe('48.850000, 2.350000');
+  });
+
+  it('carries every point into the tweet, one per line', () => {
+    const fields = tweetFields({
+      lat: 64.1466, lon: -21.9426,
+      coordsText: 'impact 1 — 64.1466, -21.9426\nimpact 2 — 64.1481, -21.9401',
+    });
+    expect(fields.coordinates).toBe(
+      'impact 1 — 64.146600, -21.942600\nimpact 2 — 64.1481, -21.9401'
+    );
+  });
+
+  it('tables the points in the report, once there is more than one', () => {
+    const report = postReportMarkdown({
+      title: 'Harbour strike',
+      coordinates: '64.146600, -21.942600',
+      points: [
+        { label: 'impact 1', coords: '64.1466, -21.9426' },
+        { label: '', coords: '64.1481, -21.9401' },
+      ],
+    });
+    expect(report).toContain('## Points');
+    expect(report).toContain('| impact 1 | `64.1466, -21.9426` |');
+    expect(report).toContain('| Point 2 | `64.1481, -21.9401` |'); // unnamed takes its rank
+  });
+
+  it('leaves a single-point report the shape it had', () => {
+    const report = postReportMarkdown({
+      title: 'One point',
+      coordinates: '64.146600, -21.942600',
+      points: [{ label: '', coords: '64.1466, -21.9426' }],
+    });
+    expect(report).not.toContain('## Points');
   });
 });

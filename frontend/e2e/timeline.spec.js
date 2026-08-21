@@ -175,7 +175,7 @@ async function openTimeline(page, options = {}) {
 test('draws a clear chronology with density, uncertainty and an inspector', async ({ page }, testInfo) => {
   const fixture = await openTimeline(page);
 
-  await expect(page.locator('.tabstrip').getByRole('button')).toHaveText(['Board', 'Graph', 'Timeline']);
+  await expect(page.locator('.tabstrip').getByRole('button')).toHaveText(['Board', 'Graph', 'Timeline', 'Sheet']);
   await expect(page.locator('.track-label strong')).toHaveText(['Events', 'Media']);
   await expect(page.getByRole('button', { name: /Witness arrived/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Vehicle remained/ }).locator('..')).toHaveClass(/period.*approximate.*uncertain/);
@@ -620,7 +620,7 @@ test('keeps entity history in the same three-tab Details model', async ({ page }
     },
   });
   await page.goto('/#board');
-  await page.locator('tbody tr').filter({ hasText: person.label }).locator('td').first().click();
+  await page.locator('tbody tr').filter({ hasText: person.label }).locator('td:not(.pick)').first().click();
   const details = page.getByRole('dialog', { name: 'Details' });
   await expect(details.getByRole('tab')).toHaveText(['Info', 'Connections', 'Time']);
   await details.getByRole('tab', { name: 'Time' }).click();
@@ -641,7 +641,7 @@ test('opens the row handed over from the Time tab', async ({ page }) => {
     },
   });
   await page.goto('/#board');
-  await page.locator('tbody tr').filter({ hasText: mediaEntity.label }).locator('td').first().click();
+  await page.locator('tbody tr').filter({ hasText: mediaEntity.label }).locator('td:not(.pick)').first().click();
   const details = page.getByRole('dialog', { name: 'Details' });
   await details.getByRole('tab', { name: 'Time' }).click();
   await details.getByRole('button', { name: `Open ${mediaEntity.label} in Timeline` }).click();
@@ -667,7 +667,7 @@ test('edits an existing assessment from the Time tab', async ({ page }) => {
     },
   });
   await page.goto('/#board');
-  await page.locator('tbody tr').filter({ hasText: person.label }).locator('td').first().click();
+  await page.locator('tbody tr').filter({ hasText: person.label }).locator('td:not(.pick)').first().click();
   const details = page.getByRole('dialog', { name: 'Details' });
   await details.getByRole('tab', { name: 'Time' }).click();
 
@@ -698,7 +698,7 @@ test('starts a new assessment from an empty form after editing one', async ({ pa
     },
   });
   await page.goto('/#board');
-  await page.locator('tbody tr').filter({ hasText: person.label }).locator('td').first().click();
+  await page.locator('tbody tr').filter({ hasText: person.label }).locator('td:not(.pick)').first().click();
   const details = page.getByRole('dialog', { name: 'Details' });
   await details.getByRole('tab', { name: 'Time' }).click();
 
@@ -721,7 +721,7 @@ test('shows an undated Claim as a missing statement date, not an existing assess
     },
   });
   await page.goto('/#board');
-  await page.locator('tbody tr').filter({ hasText: undatedClaim.label }).locator('td').first().click();
+  await page.locator('tbody tr').filter({ hasText: undatedClaim.label }).locator('td:not(.pick)').first().click();
   const details = page.getByRole('dialog', { name: 'Details' });
   await details.getByRole('tab', { name: 'Time' }).click();
 

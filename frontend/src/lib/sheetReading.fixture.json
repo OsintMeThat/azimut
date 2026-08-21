@@ -1,0 +1,52 @@
+{
+  "why": [
+    "One list of cells, read by both readers, with the one answer they must agree on.",
+    "The browser sorts and picks off a cell; the server dates a Claim off the same cell.",
+    "Two copies of a reader that only claim to mirror each other are two readers, and the",
+    "cell they disagree about is the one an analyst is promoting at that moment. The role",
+    "vocabularies were already gated this way; the readings were not, and they had drifted:",
+    "the server took 99:00 for an hour and the browser took 12:30:75 for a time.",
+    "Read by tests/test_sheets.py and by lib/sheetRoles.test.js. Compared on the fields both",
+    "sides answer: a when's shape and canonical text, a point's numbers and its decimals."
+  ],
+  "when": [
+    { "cell": "01:57", "reads": { "shape": "time", "text": "01:57" } },
+    { "cell": "23:59:59", "reads": { "shape": "time", "text": "23:59" } },
+    { "cell": "12:30:75", "reads": null },
+    { "cell": "24:00", "reads": null },
+    { "cell": "31/01/2026", "reads": { "shape": "moment", "text": "2026-01-31" } },
+    {
+      "cell": "01/02/2026",
+      "role": { "dayFirst": false },
+      "reads": { "shape": "moment", "text": "2026-01-02" }
+    },
+    { "cell": "29/02/2025", "reads": null },
+    { "cell": "03/01/26 06:42", "reads": { "shape": "moment", "text": "2026-01-03T06:42" } },
+    { "cell": "2026-01-03 01:57", "reads": { "shape": "moment", "text": "2026-01-03T01:57" } },
+    { "cell": "03/01/2026 99:00", "reads": null },
+    { "cell": "03/01/2026 12:30:75", "reads": null },
+    {
+      "cell": "Sat, 03 Jan 2026 06:42:02 GMT",
+      "reads": { "shape": "moment", "text": "2026-01-03T06:42" }
+    },
+    { "cell": "?", "reads": null },
+    { "cell": "", "reads": null }
+  ],
+  "point": [
+    { "cell": "48.8566, 2.3522", "reads": { "lat": 48.8566, "lon": 2.3522, "decimals": 4 } },
+    { "cell": "48.8566,2.3522", "reads": { "lat": 48.8566, "lon": 2.3522, "decimals": 4 } },
+    { "cell": "48,8566; 2,3522", "reads": { "lat": 48.8566, "lon": 2.3522, "decimals": 4 } },
+    { "cell": "48,8566 2,3522", "reads": { "lat": 48.8566, "lon": 2.3522, "decimals": 4 } },
+    { "cell": "48.8566N 2.3522E", "reads": { "lat": 48.8566, "lon": 2.3522, "decimals": 4 } },
+    { "cell": "48.8566S 2.3522W", "reads": { "lat": -48.8566, "lon": -2.3522, "decimals": 4 } },
+    {
+      "cell": "48°51'24\"N 2°21'08\"E",
+      "reads": { "lat": 48.8566667, "lon": 2.3522222, "decimals": 4 }
+    },
+    { "cell": "48,8", "reads": null },
+    { "cell": "-1,5", "reads": null },
+    { "cell": "48,8566", "reads": null },
+    { "cell": "not a point", "reads": null },
+    { "cell": "", "reads": null }
+  ]
+}

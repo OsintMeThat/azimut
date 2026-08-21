@@ -45,7 +45,14 @@
     crosshair: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0-1v4m0 12v4M2 12h4m12 0h4',
     user: 'M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm-8 17c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5',
     layers: 'm12 3 9 5-9 5-9-5 9-5Zm-9 9.5 9 5 9-5M3 17l9 5 9-5',
+    // A funnel: what a filter is drawn as everywhere, and deliberately not a
+    // magnifier — that one already means the search over the rows, and two
+    // magnifiers on one screen doing two different things is a third thing to learn.
+    filter: 'M4 5h16l-6.2 7.4V20l-3.6-2.2v-5.4L4 5Z',
     grid: 'M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z',
+    // A table: the frame, its header row, one column divider. Distinct from `grid`
+    // above, which is four equal cells and means an AOI sweep.
+    table: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm-1 4.5h18M10 9.5V19',
     video: 'M4 6h11a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Zm12 4 5-3v10l-5-3',
     image: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm2 12 4-4a1 1 0 0 1 1.4 0l4.6 4M9 9.5h.01',
     audio: 'M9 18V6l10-2v11.5M9 18a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Zm10-2.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z',
@@ -62,6 +69,10 @@
     edit: 'M14 5.5 18.5 10M4 20l1-4.5L16.5 4a2.1 2.1 0 0 1 3 3L8 18.5 4 20Z',
     external: 'M14 4h6v6m0-6L10 14M9 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3',
     grip: 'M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01',
+    // One column of `grip`'s dots: the settings of the thing beside it, rather than
+    // a handle to drag it. A chevron here read as "sort", which is the button next to
+    // this one.
+    more: 'M12 6h.01M12 12h.01M12 18h.01',
     // the three assets, each drawn as itself: one shared handle icon made a lorry,
     // a freighter and an airframe read as the same row in a list of twenty
     car: 'M5 17h14M4 17v-4.5l2-5A1.5 1.5 0 0 1 7.4 6h9.2a1.5 1.5 0 0 1 1.4 1.5l2 5V17M4 12.5h16M7.5 17v2M16.5 17v2M8 14.5h.01M16 14.5h.01',
@@ -98,7 +109,7 @@
     freehand: 'M3 17c3-9 5 5 8-2s4-8 6-2 3-2 4-5',
     arrow: 'M5 19 19 5m0 0h-8m8 0v8',
     text: 'M5 6V4h14v2M12 4v16m-3 0h6',
-    hand: 'M8 12V6a1.5 1.5 0 0 1 3 0v5m0-6.5a1.5 1.5 0 0 1 3 0V11m0-5a1.5 1.5 0 0 1 3 0v9a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L3.5 15A1.6 1.6 0 0 1 6 13.2l2 1.8',
+    cursor: 'm4 3 6.2 15.5 2.2-6.5 6.5-2.2L4 3Z',
     inspect: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm9 16-4.35-4.35M8 11h6m-3-3v6',
     crop: 'M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14',
     screen: 'M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm5 15h6m-3-4v4',

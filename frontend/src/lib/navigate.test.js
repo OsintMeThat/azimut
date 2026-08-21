@@ -128,3 +128,38 @@ describe('a file the app cannot display', () => {
     expect(opensInFileManager(null)).toBe(false);
   });
 });
+
+describe('reopening an artifact in its tool', () => {
+  // The tools take the bare stem the save route slugified. These paths are the
+  // ones the backend records today (`layout.proof_spec_rel` and friends); the
+  // folder prefixes moved once already, and stripping them by name meant every
+  // one of these handed over a name with a directory still glued to it.
+  it('names a proof by its spec file, wherever the spec folder sits', () => {
+    openEntity({ type: 'proof', attrs: { spec: 'proofs/.meta/Rooftop angle.json' } });
+
+    expect(uiState.openProof).toBe('Rooftop angle');
+    expect(uiState.tool).toBe('proof');
+  });
+
+  it('names a post draft by its draft file', () => {
+    openEntity({ type: 'post', attrs: { draft: '.drafts/Quay thread.json' } });
+
+    expect(uiState.openDraft).toBe('Quay thread');
+    expect(uiState.tool).toBe('post');
+  });
+
+  it('names an inspect session by its spec file', () => {
+    openEntity({ type: 'inspect-session', attrs: { spec: '.inspect/Bridge pass.json' } });
+
+    expect(uiState.openInspect).toBe('Bridge pass');
+    expect(uiState.tool).toBe('inspect');
+  });
+
+  it('opens the tool empty rather than on a name it could not read', () => {
+    uiState.openProof = null;
+    openEntity({ type: 'proof', attrs: {} });
+
+    expect(uiState.openProof).toBeNull();
+    expect(uiState.tool).toBe('proof');
+  });
+});

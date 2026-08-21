@@ -17,6 +17,7 @@ browsing; it is not a second copy of the media bytes.
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from typing import Any, Literal, Protocol, runtime_checkable
 
 #: Confidence on an entity or link: an analyst's `confirmed` vs a tool's
@@ -315,6 +316,12 @@ class CaseRepository(Protocol):
     def save_analysis_view(self, view: dict[str, Any]) -> dict[str, Any]:
         ...
 
+    def rename_analysis_view(
+        self, view_id: str, name: str, updated_at: str
+    ) -> dict[str, Any] | None:
+        """Relabel one reading without rewriting the recipe or capture it holds."""
+        ...
+
     def remove_analysis_view(self, view_id: str) -> dict[str, Any] | None:
         ...
 
@@ -472,6 +479,17 @@ class CaseRepository(Protocol):
         """Compare the derived temporal index with its graph and media authorities."""
         ...
 
+    # -- writing several things as one -------------------------------------
+
+    def batch(self) -> AbstractContextManager[None]:
+        """One transaction for every write made inside, or none of them.
+
+        For the caller that has a whole plan to write and no half of it worth
+        keeping — a sheet promotion's entities and the links between them. Short and
+        without I/O: it holds the store's write lock while it is open.
+        """
+        ...
+
     # -- entity mutations --------------------------------------------------
 
     def add_entity(
@@ -527,6 +545,7 @@ class CaseRepository(Protocol):
         *,
         by: str,
         status: EntityStatus = "confirmed",
+        own_only: bool = False,
     ) -> list[dict[str, Any]]:
         ...
 

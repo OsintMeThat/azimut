@@ -6,7 +6,6 @@ from __future__ import annotations
 import io
 import warnings
 from typing import Any
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 from PIL import Image
@@ -50,6 +49,9 @@ class UpdateIn(BaseModel):
     notes: str | None = None
     folder: str | None = None
     title: str | None = None
+    # Where the analyst says a collected file came from. Empty drops the claim;
+    # a download refuses it (engine/media.py).
+    source_url: str | None = Field(default=None, max_length=4000)
 
 
 class ThumbRegenIn(BaseModel):
@@ -62,6 +64,21 @@ class EnrichIn(BaseModel):
 
 class MediaMetadataIn(BaseModel):
     paths: list[str] = Field(max_length=500)
+
+
+def stated_source(source_url: str) -> str:
+    """A hand-typed origin, or a refusal.
+
+    One reading of "source" for every surface that lets one be stated — the paste
+    dialog, an import, a later correction. Links only: the field feeds the entity's
+    ``source_url``, the proof plate's source line and the lineage a lost file leaves
+    behind, all of which are addresses. An origin that is not one (a hand-off, a
+    disk) is a note, and Notes is where it goes.
+    """
+    source_url = source_url.strip()
+    if source_url and not media_engine.is_address(source_url):
+        raise HTTPException(status_code=422, detail="the source must be an http(s) URL")
+    return source_url
 
 
 def with_thumb_state(case: Case, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -247,10 +264,21 @@ def enrich_media(case_id: str, body: EnrichIn) -> dict[str, int]:
 
 
 @router.post("/cases/{case_id}/media/upload")
-async def upload(case_id: str, file: UploadFile) -> dict[str, Any]:
+async def upload(
+    case_id: str,
+    file: UploadFile,
+    source_url: str = Form(default="", max_length=4000),
+) -> dict[str, Any]:
+    """File an uploaded file, with the origin the importer states for it.
+
+    A file fetched by hand and then dropped here carries no address of its own, so
+    the import is the first chance to say where it came from — and for a batch out
+    of one thread, the same chance for all of it.
+    """
     case = get_case(case_id)
-    result = media_engine.import_stream(case, file.filename or "file", file.file)
-    return result
+    return media_engine.import_stream(
+        case, file.filename or "file", file.file, source_url=stated_source(source_url)
+    )
 
 
 @router.post("/cases/{case_id}/media/paste")
@@ -291,17 +319,11 @@ async def paste(
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"not a readable image: {exc}") from exc
 
-    source_url = source_url.strip()
-    if source_url:
-        split = urlsplit(source_url)
-        if split.scheme not in ("http", "https") or not split.hostname:
-            raise HTTPException(status_code=422, detail="the source must be an http(s) URL")
-
     return media_engine.import_paste(
         get_case(case_id),
         file.filename or "pasted-image.png",
         io.BytesIO(raw),
-        source_url=source_url,
+        source_url=stated_source(source_url),
         title=title,
     )
 
@@ -331,7 +353,7 @@ def download(case_id: str, body: DownloadIn) -> dict[str, str]:
             elif d.get("status") == "finished":
                 set_progress({"percent": 100, "stage": "processing"})
 
-        return media_engine.download_url(
+        return media_engine.fetch_url(
             case, url, progress_hook=hook, index=index, title=title, cookies=cookies
         )
 
@@ -345,6 +367,21 @@ def job_status(job_id: str) -> dict[str, Any]:
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
     return job
+
+
+@router.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict[str, bool]:
+    """Ask a job to stop where stopping is safe.
+
+    Only the jobs that took the promise can answer it — a download is one call
+    into yt-dlp and has no safe point inside it, where a sheet building a hundred
+    proofs has one between every two rows. ``stopped`` is false for a job that was
+    already finished, which is the honest answer to cancelling something that is
+    over rather than an error about it.
+    """
+    if jobs.get(job_id) is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return {"stopped": jobs.cancel(job_id)}
 
 
 @router.post("/cases/{case_id}/media/export")
@@ -404,6 +441,8 @@ def update_media_item(case_id: str, body: UpdateIn) -> dict[str, Any]:
         patch["folder"] = body.folder
     if body.title is not None:
         patch["title"] = body.title
+    if body.source_url is not None:
+        patch["source_url"] = stated_source(body.source_url)
     try:
         return media_engine.update_media(case, body.path, patch)
     except (ValueError, CaseError) as exc:

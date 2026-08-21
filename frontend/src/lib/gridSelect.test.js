@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { marqueeHits, marqueeRect, toggleSelection } from './gridSelect.js';
+import { marqueeHits, marqueeRect, toggleCheck, toggleSelection } from './gridSelect.js';
 
 const rect = (id, left, top, right, bottom) => ({ id, left, top, right, bottom });
 
@@ -74,5 +74,52 @@ describe('toggleSelection', () => {
       selected: ['c'],
       anchor: 'c',
     });
+  });
+});
+
+describe('toggleCheck', () => {
+  const order = ['a', 'b', 'c', 'd'];
+
+  it('ticking a box never clears the boxes already ticked', () => {
+    expect(toggleCheck(['a'], 'c', {}, order, 'a')).toEqual({
+      selected: ['a', 'c'],
+      anchor: 'c',
+    });
+  });
+
+  it('clicking a ticked box unticks that one alone', () => {
+    expect(toggleCheck(['a', 'b'], 'a', {}, order, 'b').selected).toEqual(['b']);
+  });
+
+  it('shift ticks the whole run from the last box touched', () => {
+    expect(toggleCheck(['a'], 'd', { shift: true }, order, 'a')).toEqual({
+      selected: ['a', 'b', 'c', 'd'],
+      anchor: 'd',
+    });
+  });
+
+  it('shift on a ticked box unticks the run, so a mis-drag is one gesture back', () => {
+    expect(
+      toggleCheck(['a', 'b', 'c', 'd'], 'c', { shift: true }, order, 'a').selected
+    ).toEqual(['d']);
+  });
+
+  it('runs the other way too', () => {
+    expect(toggleCheck(['d'], 'b', { shift: true }, order, 'd').selected).toEqual([
+      'd',
+      'b',
+      'c',
+    ]);
+  });
+
+  it('shift with no anchor is a plain tick', () => {
+    expect(toggleCheck([], 'c', { shift: true }, order, null)).toEqual({
+      selected: ['c'],
+      anchor: 'c',
+    });
+  });
+
+  it('keeps a tick the current order no longer lists, since it is still going', () => {
+    expect(toggleCheck(['gone'], 'a', {}, order, null).selected).toEqual(['gone', 'a']);
   });
 });

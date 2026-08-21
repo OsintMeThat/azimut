@@ -1737,9 +1737,19 @@ describe('the wrapper is an edge, and the count is what it says', () => {
     expect(split).toBeGreaterThan(start);
     expect(source.slice(start, split)).not.toMatch(/dropLink|ruleOn|rateEdge|qualifyEdge/);
     const row = source.slice(split, end);
-    expect(row).toContain('dropLink(chosenEdge.id)');
+    expect(row).toContain('askDropLink(chosenEdge)');
     expect(row).toContain('rateEdge(chosenEdge.id');
     expect(row).toContain('qualifyEdge(chosenEdge,');
+  });
+
+  it('asks before a stated edge is removed, and not before a proposal', () => {
+    // The panel is opened to read an edge, and Remove sat beside Confirm and the rating —
+    // two controls that write nothing — as the one permanent act that asked nothing.
+    // Nothing holds a removed edge: re-filing one mints a new id, date and author.
+    expect(source).toContain('const words = retractionWarning(edge);');
+    expect(source).toContain('if (words) retractingEdge = { id: edge.id, words };');
+    expect(source).toContain('else dropLink(edge.id);');
+    expect(source).toContain('onconfirm={() => dropLink(retractingEdge.id)}');
   });
 
   it('says where a folded type lives when it cannot be handed back', () => {
@@ -2075,5 +2085,50 @@ describe('Ctrl+V on the drawing', () => {
   it('refuses to write into a frozen reading, and says why', () => {
     expect(source).toContain("say('This snapshot is read-only. Leave it to paste.')");
     expect(source).toContain('{#if pasted && !snapshotReading}');
+  });
+});
+
+describe('opening a saved view of the other surface', () => {
+  it('draws the shared question where it stands, rather than opening the Board', () => {
+    const body = source.slice(
+      source.indexOf('async function openAnalysisView'),
+      source.indexOf('async function leaveAnalysisReading'),
+    );
+    expect(body).toContain("if (view.surface !== 'graph') return;");
+    // No tool switch here. The one on a node's panel stays: that one is asked for.
+    expect(body).not.toContain('uiState.tool');
+    // The mirror is what carries the question across, and it runs while hidden.
+    expect(source).toContain('untrack(() => (searchFilter = normalizeFilter(analysisSearch.filter)))');
+  });
+});
+
+describe('exporting the drawing', () => {
+  it('serialises the scene the canvas is built from, rather than the canvas', () => {
+    // No `toDataURL`, no second layout: the same placement, bends and byId the Konva
+    // stage reads go to `lib/graphPlate.js`, which is why a plate cannot drift.
+    expect(source).toContain('graphPlate({');
+    expect(source).toContain('placed,\n      edges,\n      bends,\n      byId,');
+    expect(source).toContain('hidden: hiding');
+    expect(source).not.toContain('stage.toDataURL');
+  });
+
+  it('carries the reading, not just the picture', () => {
+    expect(source).toContain("surface: 'Graph'");
+    expect(source).toContain('lens: lensLabel');
+    expect(source).toContain('question: searchSaid');
+    expect(source).toContain('families: legend.filter((entry) => entry.on && entry.count)');
+    expect(source).toContain('strokes,');
+  });
+
+  it('says how many nodes the folds and the focus are holding back', () => {
+    // A narrowed picture presented as the whole case is the one lie a plate could tell,
+    // and the drawing resizes to what is left either way — so both have to be written.
+    expect(source).toContain('node${foldedCount === 1');
+    expect(source).toContain('node${outsideFocus === 1');
+    expect(source).toContain('placed.reduce((count, node) => count + (hiding.has(node.id) ? 0 : 1), 0)');
+  });
+
+  it('offers the export beside the saved views', () => {
+    expect(source).toContain('<PlateExport surface="graph" plate={capturePlate}');
   });
 });

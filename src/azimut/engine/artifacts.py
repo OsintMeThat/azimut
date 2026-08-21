@@ -112,6 +112,7 @@ KINDS: dict[str, Kind] = {
     "post": Kind(path_attr="draft"),
     "inspect-session": Kind(path_attr="spec"),
     "note": Kind(path_attr="path"),
+    "sheet": Kind(path_attr="path", companions=(Named(layout.sheet_meta_rel),)),
 }
 
 #: Types with no intrinsic main artifact, and why. Supported entities can still

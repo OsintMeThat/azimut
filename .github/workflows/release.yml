@@ -180,6 +180,13 @@ jobs:
     permissions:
       contents: write   # create the GitHub release + upload assets
       id-token: write   # PyPI Trusted Publishing (OIDC) — no token secret needed
+    # This is the only job holding a publishing identity, and the only one running
+    # third-party actions on a **mutable** ref: a tag can be moved and a branch moves by
+    # design, where `setup-uv` above is pinned by commit. Kept, and recorded as an accepted
+    # risk in docs/SPEC.md §9 rather than left implicit — `@release/v1` is the form PyPA
+    # documents for its own action, and pinning it by digest means tracking their releases
+    # by hand to keep Trusted Publishing working. Pin both by SHA the day that trade stops
+    # being worth it; do not change one without the other.
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8

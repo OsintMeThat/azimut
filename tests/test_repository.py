@@ -9,6 +9,7 @@ open; see tests/test_migrations.py).
 
 from __future__ import annotations
 
+import threading
 from contextlib import contextmanager
 
 import pytest
@@ -108,6 +109,25 @@ def test_sync_links_restates_a_source_set(repo):
     assert tos == {m2["id"], m3["id"]}
     still = next(lk for lk in repo.list_links() if lk["to"] == m2["id"])
     assert still["id"] == kept["id"]
+
+
+def test_sync_links_can_restate_only_what_its_own_author_wrote(repo):
+    """A caller whose list is not the whole truth about that type says so, and the edge
+    another author wrote outlives the restatement. Without it, a sheet reconciling the
+    entities its cells point at deleted the relations somebody stated by hand."""
+    sheet = repo.add_entity("sheet", "Worklist", {"path": "sheets/w.csv"}, by="user")
+    theirs = repo.add_entity("person", "Ivanov", by="user")
+    ours = repo.add_entity("person", "Petrov", by="user")
+    by_hand = repo.add_link(sheet["id"], theirs["id"], "mentions", by="user")
+    repo.sync_links(sheet["id"], "mentions", [ours["id"]], by="sheet", own_only=True)
+
+    held = {lk["id"]: lk for lk in repo.list_links()}
+    assert by_hand["id"] in held
+    assert {lk["to"] for lk in held.values()} == {theirs["id"], ours["id"]}
+
+    # and the sheet still lets go of its own
+    repo.sync_links(sheet["id"], "mentions", [], by="sheet", own_only=True)
+    assert [lk["to"] for lk in repo.list_links()] == [theirs["id"]]
 
 
 def test_remove_link(repo):
@@ -790,3 +810,82 @@ def test_an_ordered_page_reads_the_case_in_order_and_pages_without_repeating(rep
     assert [e["label"] for e in repo.page_entities(order="-label")["items"]] == [
         "delta", "charlie", "bravo", "Alpha", "Alpha",
     ]
+
+
+# -- writing several things as one ---------------------------------------------
+
+
+def test_a_batch_commits_everything_inside_it(repo):
+    """The plain case: a handful of writes, one transaction, all of them there."""
+    with repo.batch():
+        person = repo.add_entity("person", "Ada", by="user")
+        unit = repo.add_entity("organization", "3rd Brigade", by="user")
+        repo.add_link(person["id"], unit["id"], "member-of", by="user")
+
+    assert [e["label"] for e in repo.list_entities()] == ["Ada", "3rd Brigade"]
+    assert [link["type"] for link in repo.list_links()] == ["member-of"]
+
+
+def test_a_failed_batch_leaves_the_case_exactly_as_it_was(repo):
+    """What the primitive exists for. Thirty-nine writes and a fortieth that raises
+    used to leave thirty-nine standing; the case is now either before or after."""
+    kept = repo.add_entity("person", "Already here", by="user")
+
+    with pytest.raises(CaseError):
+        with repo.batch():
+            for index in range(39):
+                repo.add_entity("person", f"Promoted {index}", by="user")
+            repo.add_link(kept["id"], "no-such-entity", "member-of", by="user")
+
+    assert [e["label"] for e in repo.list_entities()] == ["Already here"]
+    assert repo.list_links() == []
+
+
+def test_a_batch_sees_what_it_has_written(repo):
+    """A planner writes an entity and immediately links it, so the read has to run on
+    the batch's own connection: another one would be looking at the file as it was."""
+    with repo.batch():
+        person = repo.add_entity("person", "Ada", by="user")
+        assert repo.get_entity(person["id"])["label"] == "Ada"
+        assert repo.entity_count() == 1
+
+
+def test_a_batch_is_invisible_to_another_thread_until_it_commits(repo):
+    """Two promises in one: uncommitted rows belong to the batch and to nothing else,
+    and the batch's connection is the batch thread's own. One handle is shared by the
+    request threads and the job worker, so a batch that leaked its connection sideways
+    would hand another thread an open transaction and raise from somewhere unrelated."""
+    seen: list[int] = []
+
+    def elsewhere() -> None:
+        seen.append(repo.entity_count())
+
+    with repo.batch():
+        repo.add_entity("person", "Ada", by="user")
+        reader = threading.Thread(target=elsewhere)
+        reader.start()
+        reader.join()
+
+    assert seen == [0]
+    assert repo.entity_count() == 1
+
+
+def test_a_batch_does_not_nest(repo):
+    """An inner batch would either commit early and break the outer promise or do
+    nothing and break its own, so it says which caller is wrong instead."""
+    with pytest.raises(CaseError):
+        with repo.batch():
+            with repo.batch():
+                pass
+
+
+def test_a_batch_that_raised_can_be_followed_by_another(repo):
+    """The ambient connection is cleared on the way out however the way out went, or
+    the first failure would poison every write the case sees afterwards."""
+    with pytest.raises(CaseError):
+        with repo.batch():
+            repo.add_link("nope", "nope-either", "member-of", by="user")
+
+    with repo.batch():
+        repo.add_entity("person", "Ada", by="user")
+    assert repo.entity_count() == 1

@@ -1,7 +1,8 @@
 /**
- * Pure selection math for the desktop organizer's tile grid — kept out of the
- * component so it's unit-tested without a DOM. The component measures tile
- * rects (getBoundingClientRect) and drives these; nothing here touches the DOM.
+ * Pure selection math for the surfaces that let an analyst pick several things at
+ * once — the organizer's tile grid, the board's ticked rows — kept out of the
+ * components so it's unit-tested without a DOM. A component measures tile rects
+ * (getBoundingClientRect) and drives these; nothing here touches the DOM.
  */
 
 /**
@@ -52,4 +53,29 @@ export function toggleSelection(selected, id, { shift = false, meta = false } = 
     }
   }
   return { selected: [id], anchor: id };
+}
+
+/**
+ * Next selection after ticking `id`'s box, given the visual `order` of ids.
+ *
+ * A checkbox is not a tile, so there is no plain-click-replaces-everything here:
+ * ticking one box never clears the others. Shift carries the whole run from the
+ * last box touched to whatever the clicked box just became, which is what makes
+ * un-ticking a run as quick as filling one.
+ * Returns `{ selected, anchor }`; pass the anchor back in on the next call.
+ */
+export function toggleCheck(selected, id, { shift = false } = {}, order = [], anchor = null) {
+  const set = new Set(selected);
+  const on = !set.has(id);
+  let run = [id];
+  if (shift && anchor && anchor !== id) {
+    const a = order.indexOf(anchor);
+    const b = order.indexOf(id);
+    if (a !== -1 && b !== -1) run = order.slice(Math.min(a, b), Math.max(a, b) + 1);
+  }
+  for (const item of run) {
+    if (on) set.add(item);
+    else set.delete(item);
+  }
+  return { selected: [...set], anchor: id };
 }

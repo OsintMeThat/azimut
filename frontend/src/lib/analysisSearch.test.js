@@ -6,6 +6,7 @@ import {
   catalogViews,
   leaveAnalysisView,
   openAnalysisCase,
+  renameAnalysisView,
   setAnalysisFilter,
   setAnalysisPeriod,
   timelineViews,
@@ -155,6 +156,24 @@ describe('the two families of saved views', () => {
     expect(adoptSavedAnalysisView('case-a', { ...view, updated_at: 'later' })).toBe(true);
     expect(timelineViews.activeView.updated_at).toBe('later');
     expect(catalogViews.activeView).toBeNull();
+  });
+
+  it('carries a rename onto the open reading, spec and family untouched', () => {
+    const spec = { timeline: { tracks: [] } };
+    activateAnalysisView('case-a', {
+      id: 'v_time', name: 'Tracks', mode: 'live', surface: 'timeline', spec,
+    });
+
+    expect(renameAnalysisView('case-a', 'v_time', 'Convoy tracks')).toBe(true);
+    expect(timelineViews.activeView.name).toBe('Convoy tracks');
+    // The autosave sends the name it is holding, so an unrenamed spec would be
+    // written back with the old label — the recipe itself stays the same object.
+    expect(timelineViews.activeView.spec).toBe(spec);
+    expect(catalogViews.activeView).toBeNull();
+
+    expect(renameAnalysisView('case-a', 'v_other', 'Nowhere')).toBe(false);
+    expect(renameAnalysisView('case-b', 'v_time', 'Wrong case')).toBe(false);
+    expect(timelineViews.activeView.name).toBe('Convoy tracks');
   });
 
   it('empties both families at the case boundary', () => {

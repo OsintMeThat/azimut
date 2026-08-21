@@ -19,6 +19,7 @@
     caseId,
     togglePanel,
     requestCreation,
+    startImport,
     close,
   } = $props();
 
@@ -136,6 +137,16 @@
     </fieldset>
 
     <div class="new-proof-actions">
+      <!-- The third way into the tool, beside composing one and opening a saved
+           one: a proof somebody already published, brought in whole. -->
+      <button
+        type="button"
+        class="btn new-proof-import"
+        disabled={creating}
+        onclick={startImport}
+      >
+        <Icon name="download" size={15} /> Import a published proof
+      </button>
       <button type="button" class="btn" disabled={creating} onclick={close}>Cancel</button>
       <button type="submit" class="btn btn-primary" disabled={creating}>
         <Icon name="plus" size={15} /> {creating ? 'Creating…' : 'Create proof'}
@@ -268,4 +279,5 @@
     font-size: var(--fs-sm);
   }
   .new-proof-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
+  .new-proof-import { margin-right: auto; }
 </style>

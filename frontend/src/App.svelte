@@ -42,6 +42,7 @@
     { id: 'board', label: TOOL_LABELS.board, load: () => import('./tools/Board.svelte') },
     { id: 'graph', label: TOOL_LABELS.graph, load: () => import('./tools/Graph.svelte') },
     { id: 'timeline', label: TOOL_LABELS.timeline, load: () => import('./tools/Timeline.svelte') },
+    { id: 'sheet', label: TOOL_LABELS.sheet, load: () => import('./tools/Sheet.svelte') },
     { id: 'media', label: TOOL_LABELS.media, load: () => import('./tools/MediaLibrary.svelte') },
     { id: 'files', label: TOOL_LABELS.files, load: () => import('./tools/Files.svelte') },
     { id: 'reverse', label: TOOL_LABELS.reverse, load: () => import('./tools/ReverseSearch.svelte') },

@@ -388,3 +388,101 @@ def test_sky_never_touches_the_network(client, monkeypatch):
         "/api/geo/sky", params={"lat": 48.8584, "lon": 2.2945, "date": "2026-07-30"}
     )
     assert response.status_code == 200
+
+
+# -- /api/geo/suggest: the search bar's instant layer, offline by construction ---------
+
+
+def test_suggest_offers_cities_without_touching_the_network(client, monkeypatch):
+    def explode(*args, **kwargs):
+        raise AssertionError("a keystroke must never reach the geocoder")
+
+    monkeypatch.setattr(geo.httpx, "get", explode)
+
+    body = client.get("/api/geo/suggest", params={"q": "krama"}).json()
+    assert body["cities"][0]["name"] == "Kramatorsk"
+    assert body["cities"][0]["country_name"] == "Ukraine"
+    assert "GeoNames" in body["attribution"]
+    assert body["coords"] is None
+
+
+def test_suggest_recognizes_coordinates_as_they_are_typed(client):
+    body = client.get("/api/geo/suggest", params={"q": "50.4501, 30.5234"}).json()
+    assert body["coords"] == {"lat": 50.4501, "lon": 30.5234}
+    # a coordinate is not a place name, so the gazetteer stays quiet
+    assert body["cities"] == []
+
+
+def test_suggest_honors_the_limit_and_survives_an_empty_query(client):
+    assert len(client.get("/api/geo/suggest", params={"q": "s", "limit": 3}).json()["cities"]) == 3
+    blank = client.get("/api/geo/suggest", params={"q": "  "}).json()
+    assert blank == {"coords": None, "cities": [], "attribution": None}
+
+
+# -- /api/geo/places: the slow layer, dropped rather than queued -----------------------
+
+
+def test_places_returns_several_matches(client, monkeypatch):
+    fake, calls = _fake_get(
+        [
+            {"lat": "48.8584", "lon": "2.2945", "display_name": "Tour Eiffel, Paris", "type": "attraction"},
+            {"lat": "48.86", "lon": "2.29", "display_name": "Rue de la Tour, Paris", "type": "road"},
+        ]
+    )
+    monkeypatch.setattr(geo.httpx, "get", fake)
+
+    body = client.get("/api/geo/places", params={"q": "tour eiffel"}).json()
+    assert [place["display_name"] for place in body["places"]] == [
+        "Tour Eiffel, Paris",
+        "Rue de la Tour, Paris",
+    ]
+    assert body["places"][1]["kind"] == "road"
+    assert body["busy"] is False
+    assert "OpenStreetMap" in body["attribution"]
+    assert calls["params"]["limit"] == 10  # one request feeds any limit the UI asks for
+
+
+def test_places_is_dropped_rather_than_queued_when_the_pace_is_held(client, monkeypatch):
+    fake, _ = _fake_get([{"lat": "1", "lon": "2", "display_name": "Somewhere"}])
+    monkeypatch.setattr(geo.httpx, "get", fake)
+
+    assert client.get("/api/geo/places", params={"q": "first"}).json()["busy"] is False
+    # a second query inside the one-per-second floor waits for nothing: it says so
+    second = client.get("/api/geo/places", params={"q": "second"}).json()
+    assert second == {"places": [], "busy": True, "throttled": False, "attribution": None}
+
+
+def test_places_answers_a_repeated_query_from_memory(client, monkeypatch):
+    calls = []
+
+    def counting(url, params=None, headers=None, timeout=None):
+        calls.append(params["q"])
+        return _FakeResponse([{"lat": "50.45", "lon": "30.52", "display_name": "Kyiv"}])
+
+    monkeypatch.setattr(geo.httpx, "get", counting)
+
+    first = client.get("/api/geo/places", params={"q": "kyiv"}).json()
+    # inside the pace floor, and still answered — the cache spends no slot
+    again = client.get("/api/geo/places", params={"q": " KYIV "}).json()
+    assert again["places"] == first["places"] and again["busy"] is False
+    assert calls == ["kyiv"]
+
+
+def test_places_reports_a_throttled_geocoder_instead_of_an_empty_list(client, monkeypatch):
+    class _Throttled(_FakeResponse):
+        status_code = 429
+
+        def raise_for_status(self):
+            raise RuntimeError("429")
+
+    monkeypatch.setattr(geo.httpx, "get", lambda *a, **k: _Throttled([]))
+    assert client.get("/api/geo/places", params={"q": "paris"}).json()["busy"] is True
+
+    # the 429 is remembered for a minute, so the next query is refused before it
+    # is even sent — and says why, rather than looking like "no such place"
+    body = client.get("/api/geo/places", params={"q": "lyon"}).json()
+    assert body["busy"] is True and body["throttled"] is True
+
+
+def test_places_empty_query_is_422(client):
+    assert client.get("/api/geo/places", params={"q": "   "}).status_code == 422

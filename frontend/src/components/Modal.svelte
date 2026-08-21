@@ -1,11 +1,15 @@
 <script>
   import Icon from './Icon.svelte';
   import { portal } from '../lib/fullscreen.js';
+  import { isTopOverlay, joinOverlays } from '../lib/overlayStack.js';
 
   let { title, onclose, width = '440px', children } = $props();
 
+  const self = {};
+  $effect(() => joinOverlays(self));
+
   function onkeydown(e) {
-    if (e.key === 'Escape') onclose?.();
+    if (e.key === 'Escape' && isTopOverlay(self)) onclose?.();
   }
 </script>
 
@@ -31,6 +35,8 @@
 </div>
 
 <style>
+  /* One z-index for every modal: the second one opened is later in the portal, so it
+     paints over the first without a ladder of numbers nobody can keep straight. */
   .overlay {
     position: fixed;
     inset: 0;

@@ -477,4 +477,17 @@ describe('directed and media-aware endpoints', () => {
     expect(relations.isCurrentConnection(subject, current)).toBe(true);
     expect(relations.isCurrentConnection(subject, older)).toBe(false);
   });
+
+  it('asks before a stated edge is taken back, and never before a proposal', () => {
+    // The words live here so the three surfaces that offer the act cannot word it three
+    // ways, and the split is what keeps the review gesture one click: a tool's proposal
+    // costs the analyst nothing to refuse, their own statement is held nowhere afterwards.
+    expect(relations.retractionWarning({ provenance: { status: 'suggested' } })).toBe(null);
+
+    const stated = relations.retractionWarning({ provenance: { status: 'confirmed' } });
+    expect(stated.title).toBe('Remove this relation?');
+    expect(stated.detail).toContain('Nothing holds a removed edge');
+
+    expect(relations.retractionWarning({}, 'mention').title).toBe('Remove this mention?');
+  });
 });

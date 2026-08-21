@@ -61,4 +61,14 @@ describe('Claim connections', () => {
     expect(references).not.toContain('api.patch');
     expect(references).not.toContain('api.del');
   });
+
+  it('asks before a connector goes, in the words every surface uses', () => {
+    // `about`, `at` and `cites` are what a statement rests on. Dropping one is a write
+    // nothing holds, so it is the same question the Details relations and the Graph's edge
+    // ask, read out of one place rather than worded here.
+    expect(editor).toContain('const words = retractionWarning(link);');
+    expect(editor).toContain('if (words) retracting = { link, words };');
+    expect(editor).toContain('<ConfirmDialog');
+    expect(editor).toContain('onclick={() => askRemove(row.link)}');
+  });
 });

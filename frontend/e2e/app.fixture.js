@@ -73,6 +73,17 @@ const settings = {
   month: '2026-07',
 };
 
+// The offline gazetteer, cut down to what a spec needs: two cities that share a
+// prefix, so ranking is visible, and one street only the geocoder knows about.
+const GAZETTEER = [
+  { name: 'Kramatorsk', region: 'Donetsk', country: 'ua', country_name: 'Ukraine', lat: 48.7311, lon: 37.5678, population: 147145 },
+  { name: 'Kraków', region: 'Lesser Poland', country: 'pl', country_name: 'Poland', lat: 50.0614, lon: 19.9366, population: 755050 },
+];
+
+const GEOCODED = [
+  { lat: 48.8534, lon: 37.6067, display_name: 'Kramatorska Street, Sloviansk, Donetsk Oblast, Ukraine', kind: 'road' },
+];
+
 // A workspace that is present and nobody else's, so the app runs instead of
 // showing the stopped screen (GET /settings/workspace), and no folder in it is
 // waiting to become a case (GET /workspace/folders).
@@ -609,6 +620,9 @@ export async function installAppFixture(page, options = {}) {
     ...settings,
     export_dirs: { ...settings.export_dirs, ...(options.exportDirs ?? {}) },
   };
+  // What the search bar asked for, and in which layer: a spec has to be able to
+  // prove the geocoder was left alone while the analyst was still typing.
+  const geoQueries = { suggest: [], places: [] };
   const settingsWrites = [];
   const folderWrites = [];
   const exportWrites = [];
@@ -664,6 +678,52 @@ export async function installAppFixture(page, options = {}) {
   const uploads = [];
   const pastes = [];
   const revealed = [];
+  const mediaDownloadWrites = [];
+
+  /**
+   * The sheets this case holds, in memory, behaving the way the engine does.
+   *
+   * Enough of the real thing for the grid to be exercised for real: a stamp handed out
+   * by every read and checked by every save, the sidecar written by its own route
+   * without touching the table, and the key column filled in on create. `sheetStamp`
+   * moves on its own when a test wants to play the spreadsheet that edited the file
+   * underneath.
+   */
+  const fixtureSheets = new Map();
+  const sheetWrites = [];
+  let sheetTick = 1000;
+  const nextStamp = () => `${(sheetTick += 1)}-70`;
+  const makeSheet = (title, columns, rows = [], meta = null) => {
+    const id = `sheet-${fixtureSheets.size + 1}`;
+    const held = {
+      id,
+      title,
+      path: `sheets/${title}.csv`,
+      columns: ['id', ...columns],
+      rows: rows.map((row, at) => [`r${at + 1}`, ...row]),
+      // A sheet may arrive with a sidecar: the roles are what make a column offer a
+      // vocabulary, and a spec about that list cannot set one up through the panel.
+      meta: { version: 5, ...(meta ?? {}) },
+      stamp: nextStamp(),
+    };
+    fixtureSheets.set(id, held);
+    return held;
+  };
+  const sheetPayload = (held) => ({
+    id: held.id,
+    title: held.title,
+    path: held.path,
+    columns: [...held.columns],
+    rows: held.rows.map((row) => [...row]),
+    meta: structuredClone(held.meta),
+    stamp: held.stamp,
+    assigned: false,
+    dropped_roles: [],
+    pieces: {},
+  });
+  for (const [title, columns, rows, meta] of options.sheets ?? []) {
+    makeSheet(title, columns, rows, meta);
+  }
 
   const timelineEntity = (id) => fixtureCatalog.find((entity) => entity.id === id)
     ?? fixtureChains[id]?.entity
@@ -1534,6 +1594,18 @@ export async function installAppFixture(page, options = {}) {
       if (!result.duplicate && result.entity) fixtureCatalog.push(result.entity);
       return json(route, result);
     }
+    if (
+      options.mediaDownloadJob &&
+      caseId &&
+      path === `/api/cases/${caseId}/media/download` &&
+      request.method() === 'POST'
+    ) {
+      mediaDownloadWrites.push(request.postDataJSON());
+      return json(route, { job_id: 'media-download-job' });
+    }
+    if (options.mediaDownloadJob && path === '/api/jobs/media-download-job') {
+      return json(route, options.mediaDownloadJob);
+    }
     if (path === `/api/cases/${CASE_ID}/media/page`) {
       return json(route, {
         items: fixtureMedia,
@@ -1605,7 +1677,81 @@ export async function installAppFixture(page, options = {}) {
     if (path === `/api/cases/${CASE_ID}/proofs` && request.method() === 'POST') {
       const payload = request.postDataJSON();
       proofSaves.push(payload);
-      return json(route, { name: 'browser-proof', png: 'proofs/browser-proof.png' });
+      // The title comes back the way the backend answers, canonicalised: the
+      // composer writes it straight into the header, so dropping it here left
+      // the saved document holding a title the composer never gave it.
+      return json(route, {
+        name: 'browser-proof',
+        title: payload.title,
+        png: 'proofs/browser-proof.png',
+      });
+    }
+
+    if (path === `/api/cases/${caseId}/sheets` && request.method() === 'GET') {
+      return json(route, {
+        sheets: [...fixtureSheets.values()].map((held) => ({
+          id: held.id,
+          title: held.title,
+          rows: held.rows.length,
+          columns: held.columns.length,
+        })),
+      });
+    }
+    if (path === `/api/cases/${caseId}/sheets` && request.method() === 'POST') {
+      const body = request.postDataJSON();
+      const made = makeSheet(body.title, body.columns ?? ['Subject', 'Status', 'Notes']);
+      return json(route, { id: made.id, label: made.title, type: 'sheet', attrs: { path: made.path } });
+    }
+    const sheetMatch = path.match(new RegExp(`^/api/cases/${caseId}/sheets/([^/]+)(/meta|/stamp)?$`));
+    if (sheetMatch && fixtureSheets.has(sheetMatch[1])) {
+      const held = fixtureSheets.get(sheetMatch[1]);
+      if (sheetMatch[2] === '/stamp') return json(route, { stamp: held.stamp });
+      if (request.method() === 'GET') return json(route, sheetPayload(held));
+      const body = request.postDataJSON();
+      // The sidecar's own route: it never touches the table, so it never moves the stamp.
+      if (sheetMatch[2] === '/meta') {
+        held.meta = body.meta ?? {};
+        sheetWrites.push({ id: held.id, kind: 'meta' });
+        return json(route, { status: 'saved', meta: structuredClone(held.meta) });
+      }
+      if (body.stamp !== undefined && body.stamp !== held.stamp) {
+        return json(route, { detail: 'this file changed on disk since it was opened' }, 409);
+      }
+      held.columns = body.columns;
+      held.rows = body.rows;
+      held.meta = body.meta ?? {};
+      held.stamp = nextStamp();
+      sheetWrites.push({ id: held.id, kind: 'table', rows: body.rows.length });
+      return json(route, { status: 'saved', ...sheetPayload(held) });
+    }
+
+    // The search bar's two layers. The offline one answers coordinates and a
+    // handful of cities; the geocoder answers streets, and only ever late.
+    if (path === '/api/geo/suggest') {
+      const q = url.searchParams.get('q') ?? '';
+      geoQueries.suggest.push(q);
+      const decimal = /^\s*(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(q);
+      const cities = decimal
+        ? []
+        : GAZETTEER.filter((city) => city.name.toLowerCase().startsWith(q.trim().toLowerCase()));
+      return json(route, {
+        coords: decimal ? { lat: Number(decimal[1]), lon: Number(decimal[2]) } : null,
+        cities,
+        attribution: cities.length ? '© GeoNames (CC BY 4.0)' : null,
+      });
+    }
+    if (path === '/api/geo/places') {
+      const q = url.searchParams.get('q') ?? '';
+      geoQueries.places.push(q);
+      const places = GEOCODED.filter((place) =>
+        place.display_name.toLowerCase().includes(q.trim().toLowerCase())
+      );
+      return json(route, {
+        places,
+        busy: false,
+        throttled: false,
+        attribution: places.length ? '© OpenStreetMap contributors (Nominatim)' : null,
+      });
     }
 
     unexpected.push(`${request.method()} ${path}`);
@@ -1626,8 +1772,19 @@ export async function installAppFixture(page, options = {}) {
     uploads,
     pastes,
     revealed,
+    mediaDownloadWrites,
+    sheetWrites,
+    /** Play the spreadsheet that edited the CSV underneath the grid. */
+    moveSheetOnDisk: (id, change = {}) => {
+      const held = fixtureSheets.get(id);
+      Object.assign(held, change);
+      held.stamp = nextStamp();
+      return held.stamp;
+    },
+    sheetOnDisk: (id) => fixtureSheets.get(id),
     trashWrites,
     bundleCalls,
+    geoQueries,
     settingsWrites,
     folderWrites,
     exportWrites,

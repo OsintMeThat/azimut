@@ -18,6 +18,7 @@ writes, folders, the trash journal, the durable job queue.
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any
 
 from .repository import EntityStatus
@@ -310,6 +311,11 @@ class CaseStore:
     def save_analysis_view(self, view: dict[str, Any]) -> dict[str, Any]:
         return self._graph().save_analysis_view(view)
 
+    def rename_analysis_view(
+        self, view_id: str, name: str, updated_at: str
+    ) -> dict[str, Any] | None:
+        return self._graph().rename_analysis_view(view_id, name, updated_at)
+
     def remove_analysis_view(self, view_id: str) -> dict[str, Any] | None:
         return self._graph().remove_analysis_view(view_id)
 
@@ -325,6 +331,11 @@ class CaseStore:
     def entity_count(self) -> int:
         """Entity total for the case switcher — one indexed count."""
         return self._graph().count_entities()
+
+    def batch(self) -> AbstractContextManager[None]:
+        """One transaction for every store write made inside it. See
+        `sqlite_backend.SqliteCase.batch` for what it costs and when not to."""
+        return self._graph().batch()
 
     def save_temporal_claim(
         self,
@@ -374,6 +385,7 @@ class CaseStore:
         *,
         by: str,
         status: EntityStatus = "confirmed",
+        own_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Make ``from_id``'s outgoing links of ``type_`` exactly ``to_ids``.
 
@@ -381,8 +393,19 @@ class CaseStore:
         edges that are still true are left untouched (same id, same timestamp),
         edges that are no longer true are dropped, new ones are appended. Unknown
         targets and a self-reference are ignored.
+
+        ``own_only`` narrows the dropping to the edges ``by`` wrote itself, and the
+        caller picks it by asking whether its list is the *whole* truth about that
+        type. A proof's spec is: it names every panel the composition holds, and a
+        derivation is never stated by hand, so an edge outside the list is a leftover.
+        A sheet's sidecar is not: `mentions` and a Claim's connectors are relations the
+        analyst may also state in Details, and those are separate claims about the same
+        two entities. Reconciling over them deleted somebody's own statement on a
+        funnel being clicked — permanently, since nothing holds a removed edge.
         """
-        return self._graph().sync_links(from_id, type_, to_ids, by=by, status=status)
+        return self._graph().sync_links(
+            from_id, type_, to_ids, by=by, status=status, own_only=own_only
+        )
 
     def update_link(self, link_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         return self._graph().update_link(link_id, patch)

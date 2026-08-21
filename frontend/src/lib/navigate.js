@@ -19,6 +19,20 @@ function recorded(value) {
   return value === null || value === undefined || value === '' ? NaN : Number(value);
 }
 
+/**
+ * The name a tool reopens an artifact by, read off the path the case recorded.
+ *
+ * Tools are handed a bare stem — the same one the save route slugified — never a
+ * path. Deriving it by stripping a hard-coded folder prefix meant the three
+ * artifact folders that later moved (`proofs/.meta/`, `.drafts/`, `.inspect/`)
+ * silently handed over a name with a directory still glued to it, which no route
+ * could match. Taking the last segment tracks the layout wherever it goes.
+ */
+function specName(path) {
+  if (typeof path !== 'string') return '';
+  return path.split('/').pop().replace(/\.json$/, '');
+}
+
 /** Tool a given entity type opens in (also gates the "Open in tool" button). */
 export const ENTITY_TOOL = {
   media: 'media',
@@ -64,22 +78,19 @@ export function openEntity(entity) {
     return;
   }
   if (entity.type === 'proof') {
-    const spec = entity.attrs?.spec ?? '';
-    const name = spec.replace(/^proofs\//, '').replace(/\.json$/, '');
+    const name = specName(entity.attrs?.spec);
     if (name) uiState.openProof = name;
     uiState.tool = 'proof';
     return;
   }
   if (entity.type === 'post') {
-    const draft = entity.attrs?.draft ?? '';
-    const name = draft.replace(/^exports\//, '').replace(/\.json$/, '');
+    const name = specName(entity.attrs?.draft);
     if (name) uiState.openDraft = name;
     uiState.tool = 'post';
     return;
   }
   if (entity.type === 'inspect-session') {
-    const spec = entity.attrs?.spec ?? '';
-    const name = spec.replace(/^inspect\//, '').replace(/\.json$/, '');
+    const name = specName(entity.attrs?.spec);
     if (name) uiState.openInspect = name;
     uiState.tool = 'inspect';
     return;

@@ -1,8 +1,9 @@
 <script>
   import { api } from '../lib/api.js';
-  import { saveRelation } from '../lib/relations.svelte.js';
+  import { retractionWarning, saveRelation } from '../lib/relations.svelte.js';
   import { toast } from '../lib/state.svelte.js';
   import { entityIcon } from '../lib/entityIcon.js';
+  import ConfirmDialog from './ConfirmDialog.svelte';
   import Icon from './Icon.svelte';
   import RelationPicker from './RelationPicker.svelte';
 
@@ -42,6 +43,8 @@
   let adding = $state(null);
   let busy = $state(false);
   let busyId = $state(null);
+  //: The connector waiting on an answer before it is taken back: `{ link, words }`.
+  let retracting = $state(null);
 
   /** A group's rows. `way` narrows to one reading; without it both are listed, which
    *  is what a symmetric verb wants. */
@@ -65,9 +68,20 @@
     }
   }
 
+  /** A connector is a statement too: `about`, `at` and `cites` are what the Claim rests
+   *  on, and dropping one is not held anywhere. Asked for in the same words the Details
+   *  relations and the Graph's edge use (`retractionWarning`). */
+  function askRemove(link) {
+    if (busyId) return;
+    const words = retractionWarning(link);
+    if (words) retracting = { link, words };
+    else remove(link);
+  }
+
   async function remove(link) {
     if (busyId) return;
     busyId = link.id;
+    retracting = null;
     try {
       await api.del(`/api/cases/${caseId}/links/${link.id}`);
       await onchanged?.();
@@ -108,7 +122,7 @@
                 class="btn btn-ghost btn-sm remove"
                 title="Remove"
                 disabled={busyId === row.link.id}
-                onclick={() => remove(row.link)}
+                onclick={() => askRemove(row.link)}
               ><Icon name="x" size={12} /></button>
             </div>
           {/each}
@@ -131,6 +145,19 @@
     {/if}
   {/each}
 </div>
+
+{#if retracting}
+  <ConfirmDialog
+    title={retracting.words.title}
+    message={retracting.words.message}
+    detail={retracting.words.detail}
+    confirmLabel={retracting.words.confirmLabel}
+    tone="danger"
+    busy={busyId === retracting.link.id}
+    onconfirm={() => remove(retracting.link)}
+    oncancel={() => (retracting = null)}
+  />
+{/if}
 
 <style>
   .claim-connections {

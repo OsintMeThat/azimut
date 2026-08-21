@@ -3,8 +3,8 @@
 Every export used to write into the case's own `exports/` folder. That is still
 the default, but a finished PDF or a media file is usually wanted somewhere the
 case is not — a shared drive, a report folder, the desktop. So each kind of
-export (notes, media, proofs) remembers one destination app-wide, and the analyst
-changes it by browsing the filesystem from here.
+export (notes, media, proofs, analysis plates) remembers one destination app-wide,
+and the analyst changes it by browsing the filesystem from here.
 
 Two rules shape this module:
 
@@ -32,9 +32,10 @@ from typing import Any, BinaryIO, Iterator
 
 from .. import config, layout
 
-#: The exports that remember a destination of their own. Notes and proofs are
-#: documents the analyst files somewhere; media is the original coming back out.
-KINDS = ("notes", "media", "proofs")
+#: The exports that remember a destination of their own. Notes, proofs and analysis
+#: plates are documents the analyst files somewhere; media is the original coming
+#: back out.
+KINDS = ("notes", "media", "proofs", "views", "sheets")
 
 #: The case subdir an export falls back to when its kind has no folder saved.
 CASE_EXPORTS = "exports"
