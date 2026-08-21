@@ -523,7 +523,16 @@ def _solve_cameras(cv2, feats: list[Any], pairwise: list[Any]) -> list[Any]:
     """
     import numpy as np
 
-    ok, cameras = cv2.detail_HomographyBasedEstimator().apply(feats, pairwise, None)
+    # Both solvers answer a scene they cannot resolve two ways: `False`, or an
+    # assertion from inside OpenCV. Pieces that overlap just enough to be matched
+    # but not enough to be solved take the second road — the ray adjuster asserts
+    # on an empty error term rather than reporting failure — and an uncaught
+    # `cv2.error` leaves the route with a 500 and a traceback where the analyst
+    # should be reading that these pictures do not solve. One outcome, one answer.
+    try:
+        ok, cameras = cv2.detail_HomographyBasedEstimator().apply(feats, pairwise, None)
+    except cv2.error:
+        ok = False
     if not ok:
         raise RuntimeError("auto-stitch could not estimate the camera rotations")
     for cam in cameras:
@@ -532,7 +541,10 @@ def _solve_cameras(cv2, feats: list[Any], pairwise: list[Any]) -> list[Any]:
     adjuster = cv2.detail_BundleAdjusterRay()
     adjuster.setConfThresh(STITCH_CONF)
     adjuster.setRefinementMask(np.ones((3, 3), np.uint8))
-    ok, cameras = adjuster.apply(feats, pairwise, cameras)
+    try:
+        ok, cameras = adjuster.apply(feats, pairwise, cameras)
+    except cv2.error:
+        ok = False
     if not ok:
         raise RuntimeError("auto-stitch could not refine the camera rotations")
 
