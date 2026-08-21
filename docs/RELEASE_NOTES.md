@@ -79,6 +79,8 @@ A spreadsheet-style grid over the case's own CSV files.
   composer's save.
 - A malformed extension pairing token is rejected properly instead of returning
   a server error.
+- Auto-stitch says that the pieces do not solve, instead of failing with a server
+  error, when they overlap too little to be placed.
 - Filing several downloads at once no longer fails one of them on a locked
   database, which mostly affected Windows.
 
