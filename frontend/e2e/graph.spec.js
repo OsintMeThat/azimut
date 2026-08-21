@@ -883,7 +883,7 @@ async function trace(page, name) {
 async function askFrom(page, name) {
   await pick(page, name);
   await page.getByRole('button', { name: 'Path to…' }).click();
-  await expect(page.locator('.walk')).toContainText('click the other end');
+  await expect(page.locator('.walk')).toContainText('Click the other end');
 }
 
 const steps = (page) => page.locator('.said-path .node');
