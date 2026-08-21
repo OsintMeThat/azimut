@@ -127,38 +127,33 @@ proof for publication.
 | ✅ **Research helpers** | Prepares media for keyless reverse search and saves keyboard-reviewed AOI grids. |
 | ✅ **Reports & templates** | Stores reusable proof and post structures, then prepares sourced Markdown for X, Bluesky or Mastodon. |
 | ✅ **Case Notebook** | Edits linked Markdown notes with local media, Mermaid diagrams, PDF output and remembered export folders. |
-| ✅ **Media at scale** | Handles login-gated downloads from a gate read in the site's own words, reusing a session named once and keeping the first attempt cookie-less, with bounded search, searchable pickers, local metadata enrichment and GPS handoff to the map. |
+| ✅ **Media at scale** | Downloads behind a login with a session named once, plus bounded search, searchable pickers, local metadata enrichment and GPS handoff to the map. |
 | ✅ **Storage & recovery** | Uses per-case SQLite and durable jobs, with whole-case bundles, Trash and portable settings backups. |
 | ✅ **Case utilities** | Opens case folders, reports scrubbed diagnostics, keeps filenames in sync and offers explicit Doctor repairs. |
+| ✅ **Workspace portability** | Moves or adopts a workspace safely, recovers hand-added cases and prevents two live instances from sharing it silently. |
+| ✅ **Updates & paste** | Reports available app, downloader and extension updates, then files supported clipboard content from the main case surfaces. |
 | ✅ **Evidence on the map** | Places proofs and derived media through their evidence chain, with stated point uncertainty and traced footprints. |
+| ✅ **Map search** | Answers the search box while typing from saved work, a coordinate parse and a bundled gazetteer, and asks the geocoder only once typing stops. |
 | ✅ **Ontology connections** | Keeps Relations, Mentions, Claim connectors and artifact lineage separate under one validated verb registry. |
 | ✅ **Board & entities** | Provides the sortable Case Board, shared Details, typed creation, primary entity photos and a ticked selection deleted as one recoverable act. |
-| ✅ **Case graph** | Draws registry-backed lenses with clustered nodes, readable edges, previews and an explicit view budget. |
+| ✅ **Case graph** | Draws registry-backed lenses with clustered nodes, readable edges, previews, a view budget and sources folded onto their edges. |
 | ✅ **Working the graph** | Expands, folds, hides, searches and pins nodes per lens, with undo and no case mutation. |
-| ✅ **Graph evidence** | Folds sources onto their edges and exposes derivation, support, source and account counts. |
-| ✅ **Shared analysis views** | Shares one filter and saved-view family between Board and Graph while Timeline keeps readings built for tracks. |
 | ✅ **Claim assessment** | Keeps statement confidence, relation confidence and source reliability separate, with explicit support and contradiction links. |
 | ✅ **Structured findings** | Records associations, duplicate identifiers, asset condition, equipment models and statement totals without inventing missing values. |
 | ✅ **Temporal Claims** | Dates a Claim with guided point, timestamp or interval input and files its subjects, places and evidence atomically. |
-| ✅ **Case Timeline** | Aligns dated statements and media on a windowed UTC axis with uncertainty, density, direct edits and Undated work. |
+| ✅ **Case Timeline** | Aligns dated statements and media on a windowed axis read in UTC or a civil zone, with uncertainty, density, direct edits and Undated work. |
 | ✅ **Timeline readings** | Builds coloured tracks from presets or Search+, then saves a changing Live view or a fixed Snapshot. |
-| ✅ **Timeline clocks & comparison** | Reads the axis in UTC or a chosen civil zone, adds daylight context and compares exact or uncertain entries. |
-| ✅ **Shared fact time** | Passes one fact-time window between Timeline, Board, Graph and a session-only Map layer without mixing in filing dates. |
-| ✅ **Workspace portability** | Moves or adopts a workspace safely, recovers hand-added cases and prevents two live instances from sharing it silently. |
-| ✅ **Updates & paste** | Reports available app, downloader and extension updates, then files supported clipboard content from the main case surfaces. |
-| ✅ **Saved view management** | Renames a live or frozen reading in its row and orders each family's list by name, edit or surface, with the surface and last write on show. |
+| ✅ **Shared analysis views** | Shares one filter, saved-view family and fact-time window between Board, Graph and Map, while Timeline keeps readings built for tracks. |
 | ✅ **Analysis view export** | Writes the Graph or the Timeline out as a vector plate carrying its lens, question, window, clock and legend, or copies it as an image. |
-| ✅ **Case Sheet** | Opens and builds case CSVs in a plain grid, with keyed rows, two sort keys, filters, row colour, a pinned reference row, clipboard both ways, bulk fill, undo, a row read down a panel, and cells that point at case entities. |
-| ✅ **Working a sheet** | Sorts, filters, inserts, duplicates, renames, merges, pins, hides and deletes from the heading's own menu, and rewrites an imported column through six passes that say first how many cells they would touch. |
-| ✅ **Two writers on one file** | Notices a CSV changed on disk when the window comes back, reads it as a diff, and confirms the reload or the overwrite rather than choosing for the analyst. |
-| ✅ **Columns that know what they hold** | Types a column in the sidecar as a state, a list, a yes/no, a number, a point, a date or a picture, and lets the sort, the filters, the vocabulary, the map, the Timeline, the progress and the link check read it. |
-| ✅ **A family of sheets** | Files a workbook one sheet per tab, forks a sheet with its rows or with only its columns, and moves ticked rows to another sheet under a column mapping, with the whole move undone from its toast. |
+| ✅ **Case Sheet** | Opens and builds case CSVs in a plain grid: keyed rows, sorts, filters, row colour, clipboard both ways, bulk fill, undo, cells that point at case entities, and a reading handed out as CSV or Markdown. |
+| ✅ **Typed columns** | Types a column in the sidecar as a state, a list, a yes/no, a number, a point, a date or a picture, and lets the sort, the filters, the vocabulary, the map, the Timeline, the progress and the link check read it. |
+| ✅ **A family of sheets** | Files a workbook one sheet per tab, forks a sheet, moves ticked rows under a column mapping, and confirms a reload or an overwrite when the file changed on disk. |
 | ✅ **A sheet into the case, both ways** | Promotes a declared sheet into entities, places, bookmarks, vocabularies, row edges and dated Claims in one transaction, read as a plan first, and builds a worklist back out of what the case holds. |
-| ✅ **A geolocation index into proofs** | Builds one proof per row out of two columns of addresses and a column of coordinates, as a stoppable job that is atomic per row and safe to press twice. |
-| ✅ **Imported proofs** | Turns a published post into a composed proof: every picture a panel, its text read for a position, the footage it points at fetched, and nothing filed before the preview is approved. |
-| ✅ **Where an imported file came from** | States one origin for a whole import, offers it to a batch that landed without one, and corrects any file later from Details without writing over what a download recorded. |
-| ✅ **A reading handed over** | Writes the rows on screen out as a CSV into the folder this case files sheets in, or copies them as a Markdown table carrying the case, the sheet, the filter, the sort, the count and the hour. |
-
+| ✅ **Geolocation index** | Lays the case's proofs out one per row with their media, place and coordinates, and builds one proof per row back out of two address columns and a coordinate column, as a stoppable job. |
+| ✅ **Imported proofs** | Turns a published post into a composed proof: every picture a panel, its text read for a position, the addresses it points at fetched as material, and nothing filed before the preview is approved. |
+| ✅ **Import origin** | States one origin for a whole import, offers it to a batch that landed without one, and corrects any file later from Details. |
+| ✅ **Drawing on a proof** | Stamps a fixed set of marks, fills boxes and ellipses at a chosen opacity, keeps every shape tool in hand, and recolours, restyles, nudges, drags or deletes a picked family at once. |
+| ✅ **A proof of several points** | States every place a proof argues, each optionally named and one of them the camera's, files them as places under one title, and carries them into the tweet and onto the exported picture. |
 
 ---
 
@@ -167,11 +162,6 @@ proof for publication.
 Each version delivers one complete daily workflow. Firm ideas move here from
 §7. New tools become tabs or modes in an existing workspace (see
 [UI.md](UI.md)). Releases ship as GitHub `v0.x` tags.
-
-### v2: still to finish (next `v0.2.x`)
-
-Toward v2: split Satellite.svelte into `lib/` modules, before the map engine
-changes under it.
 
 ### v3: GEOINT expansion
 
@@ -197,7 +187,8 @@ changes under it.
 | **Audio Transcript** | Transcribe and translate speech offline; flag acoustic context such as bells, adhan, aircraft or language. |
 | **Ground Imagery** | Ground-level photos: Panoramax/Mapillary/KartaView key-less first; Street View easy link, optional keyed in-app view. |
 | **Panorama** | Stitch a video window / frame set. Auto-stitch already in Inspect; still to do: sample a video window directly, seam blending. |
-| **Proof annotation** | Grow the Geo Proof toolbox: shape fill + dashed strokes, numbered markers, a redaction/blur box; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
+| **Proof annotation** | Grow the Geo Proof toolbox: dashed strokes, numbered markers, a redaction/blur box; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
+| **Detached tool windows** | Opens a tool in its own browser window for a second screen, greyed out in the tab it left and taken back when that window closes. Cross-tool handoffs route to wherever the tool now lives, and the open case follows every window. Read surfaces open as many copies as wanted; the document editors allow one window per document. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
 | **Help and tips** | A mark the analyst clicks for the open tool's own guide: what it is for, the controls whose icon does not say it, and its shortcuts. Clicking an entry points at the real button. One panel, one entry per tool. |
 
@@ -218,7 +209,8 @@ can be rebuilt from the spec alone:
 The result is one track per source file over the render's timecode, with
 GPS-tagged clips promotable to places.
 
-Toward v3: GIF maker; curated tool links; full-text case search; clipboard
+Toward v3: split Satellite.svelte into `lib/` modules, before the map engine
+changes under it; GIF maker; curated tool links; full-text case search; clipboard
 image/URL capture with provenance; EXIF/GPS import suggestions for place and
 time; sun and moon times read against the terrain horizon the 3D map's DEM
 supplies, since a ridge ends the day well before the flat horizon does.
