@@ -2812,6 +2812,7 @@ class SqliteCase:
         *,
         by: str,
         status: EntityStatus = "confirmed",
+        own_only: bool = False,
     ) -> list[dict[str, Any]]:
         def op(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             if conn.execute("SELECT 1 FROM entities WHERE id = ?", (from_id,)).fetchone() is None:
@@ -2836,7 +2837,13 @@ class SqliteCase:
             }
             # Drop edges no longer wanted; leave the survivors untouched so their
             # id and timestamp are preserved (restating sources, not rebuilding).
-            stale = [(r["id"],) for to_id, r in existing.items() if to_id not in wanted_set]
+            # `own_only` also leaves what another author wrote: the caller's list is
+            # then its own statement rather than the whole truth about this type.
+            stale = [
+                (r["id"],)
+                for to_id, r in existing.items()
+                if to_id not in wanted_set and not (own_only and r["prov_by"] != by)
+            ]
             if stale:
                 conn.executemany("DELETE FROM links WHERE id = ?", stale)
             for to_id in wanted:

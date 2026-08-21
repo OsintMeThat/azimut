@@ -109,6 +109,7 @@
     relationQualifier,
     relationReading,
     relationVerb,
+    retractionWarning,
   } from '../lib/relations.svelte.js';
   import {
     CARD,
@@ -149,6 +150,7 @@
   import AnalysisPeriodBar from '../components/AnalysisPeriodBar.svelte';
   import FilterBar from '../components/FilterBar.svelte';
   import Modal from '../components/Modal.svelte';
+  import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityCreate from '../components/EntityCreate.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
   import PasteDialog from '../components/PasteDialog.svelte';
@@ -465,6 +467,8 @@
   let dirty = $state(false);
   /** The edge under the panel. An edge is a statement, and often the finding. */
   let chosenLink = $state(null);
+  /** A stated edge waiting on the answer to "remove it?": `{ id, words }`. */
+  let retractingEdge = $state(null);
   /** A relation being drawn: where it started, where the pointer is, what it can
    *  legally land on, and the menu once it has landed. */
   let drawing = $state(null);
@@ -3465,11 +3469,25 @@
     holdOn(back);
   }
 
+  /** Ask before an edge goes, unless it is only a proposal.
+   *
+   *  The panel is opened to *read* an edge, and Remove sat beside Confirm and the rating —
+   *  two controls that change nothing — as the one permanent write in the app that asked
+   *  nothing. Worded in `retractionWarning` so this reads the same as the same act in
+   *  Details. */
+  function askDropLink(edge) {
+    if (snapshotReading) return;
+    const words = retractionWarning(edge);
+    if (words) retractingEdge = { id: edge.id, words };
+    else dropLink(edge.id);
+  }
+
   /** Drop an edge. The case keeps the two entities; only the statement goes. */
   async function dropLink(linkId) {
     if (snapshotReading) return;
     const cid = caseState.current?.id;
     if (!cid) return;
+    retractingEdge = null;
     say('');
     try {
       await api.del(`/api/cases/${cid}/links/${linkId}`);
@@ -5009,7 +5027,7 @@
          the canvas: a mode with no words is a mode nobody can get out of. -->
     {#if drawing}
       <span class="count connecting">
-        Connecting from {shortLabel(byId.get(drawing.from)?.label ?? '', 18)} — click the
+        Connecting from {shortLabel(byId.get(drawing.from)?.label ?? '', 18)}. Click the
         other end
         <button
           class="as-link"
@@ -5233,7 +5251,7 @@
       <div class="focus walk">
         <span class="on">
           <Icon name="arrowRight" size={13} />
-          Path from {shortLabel(byId.get(asking.from)?.label ?? '', 22)} — click the other
+          Path from {shortLabel(byId.get(asking.from)?.label ?? '', 22)}. Click the other
           end, or find it by name
         </span>
         <button class="icon-btn" onclick={() => (asking = null)} title="Give it up (Esc)">
@@ -5686,7 +5704,7 @@
                 Confirm
               </button>
             {/if}
-            <button class="btn btn-ghost" onclick={() => dropLink(chosenEdge.id)}>Remove</button>
+            <button class="btn btn-ghost" onclick={() => askDropLink(chosenEdge)}>Remove</button>
           </div>{/if}
         {/if}
         <ul class="neighbours">
@@ -5920,6 +5938,18 @@
       links={catalogViews.activeView?.spec?.snapshot?.links ?? []}
     />
   </Modal>
+{/if}
+
+{#if retractingEdge}
+  <ConfirmDialog
+    title={retractingEdge.words.title}
+    message={retractingEdge.words.message}
+    detail={retractingEdge.words.detail}
+    confirmLabel={retractingEdge.words.confirmLabel}
+    tone="danger"
+    onconfirm={() => dropLink(retractingEdge.id)}
+    oncancel={() => (retractingEdge = null)}
+  />
 {/if}
 
 <style>

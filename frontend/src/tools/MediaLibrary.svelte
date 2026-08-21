@@ -1075,7 +1075,7 @@
                 {#if mediaPoint(item)}
                   <button
                     class="btn btn-ghost btn-sm"
-                    title={`Metadata says ${pointLabel(item)} — show it on the map`}
+                    title={`Show ${pointLabel(item)} on the map`}
                     onclick={() => showOnMap(item)}
                   >
                     <Icon name="pin" size={14} />
@@ -1173,7 +1173,7 @@
               {#if mediaPoint(item)}
                 <button
                   class="gps-badge badge"
-                  title={`Metadata says ${pointLabel(item)} — show it on the map`}
+                  title={`Show ${pointLabel(item)} on the map`}
                   aria-label={`Show ${pointLabel(item)} on the map`}
                   onclick={(e) => showOnMap(item, e)}
                 >

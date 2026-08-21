@@ -48,6 +48,25 @@ ASSET_NAME = re.compile(r"^[0-9a-f]{16}\.(?:png|jpe?g|webp)$")
 MAX_ASSET_BYTES = 20 * 1024 * 1024
 MAX_ASSETS = 12
 
+#: Room for the rendered export. One picture, so it is bounded like the others the
+#: browser hands back (`api/limits.MAX_IMAGE_BYTES`), with the slack a multi-panel
+#: composition needs over a single screenshot.
+MAX_EXPORT_BYTES = 48 * 1024 * 1024
+
+#: What `POST /cases/{id}/proofs` may weigh, refused by `server.BulkBodyLimit` before
+#: Pydantic materialises it. Computed rather than picked, from the two limits the route
+#: already declares: the export plus every pasted image a save may carry, at base64's
+#: four-thirds, plus room for the spec. Guessing a round number here would either refuse a
+#: save the composer considers legal or leave the declared maxima unreachable.
+#:
+#: The ceiling is deliberately high, because those maxima are: twelve pastes at 20 MiB is a
+#: real first save. What this stops is the *unbounded* case — the export field carried no
+#: limit at all, and every refusal in `_decode_assets` arrived after the whole body had
+#: been parsed into memory.
+MAX_PROOF_BODY_BYTES = (
+    (MAX_EXPORT_BYTES + MAX_ASSETS * MAX_ASSET_BYTES) * 4
+) // 3 + 2 * 1024 * 1024
+
 
 class AssetIn(BaseModel):
     """A pasted image the composer is holding but has never written.
@@ -69,7 +88,9 @@ class ProofIn(BaseModel):
     rename_from: str | None = None
     title: str = Field(min_length=1, max_length=200)
     spec: dict[str, Any]
-    png_base64: str | None = None  # rendered export, data URL body
+    # The rendered export, as the data URL's body. Bounded twice: the whole request by
+    # `server.BulkBodyLimit`, and the decoded picture by `MAX_EXPORT_BYTES` below.
+    png_base64: str | None = None
     # Pasted images the spec references but the case does not hold yet. They ride
     # along with the save rather than through an upload of their own, so a proof
     # the analyst never saves leaves nothing behind.
@@ -320,6 +341,11 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
             png_bytes = base64.b64decode(body.png_base64, validate=True)
         except (binascii.Error, ValueError) as exc:
             raise HTTPException(status_code=422, detail="invalid PNG payload") from exc
+        if len(png_bytes) > MAX_EXPORT_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"the export must be under {MAX_EXPORT_BYTES // 1024 // 1024} MB",
+            )
 
     # The export moves with the spec, so a rename saved without fresh pixels
     # keeps the PNG the proof already had rather than dropping it.

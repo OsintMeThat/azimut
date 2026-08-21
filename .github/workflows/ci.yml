@@ -131,6 +131,11 @@ jobs:
     # everywhere, so matrix runs would just be identical verdicts. Python
     # 3.12 on purpose — mypy parses numpy's 2.x stubs, which use 3.12 syntax a
     # 3.11 target chokes on. The 3.11 floor stays covered by the pytest matrix.
+    #
+    # Both read `scripts/` and `packaging/` as well as the package. The job's name
+    # says "backend" and it used to mean "src and tests": `packaging/entry.py` is the
+    # script PyInstaller analyses, so it ships inside all three binaries, and nothing
+    # checked it. mypy's own scope is in pyproject; ruff's is spelled out here.
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -139,7 +144,7 @@ jobs:
           prune-cache: true
           python-version: "3.12"
       - run: uv sync --frozen --extra dev
-      - run: uv run ruff check src tests
+      - run: uv run ruff check src tests scripts packaging
       - run: uv run mypy
 
   backend-floating:

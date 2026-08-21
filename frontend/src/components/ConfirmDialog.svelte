@@ -1,6 +1,7 @@
 <script>
   import Icon from './Icon.svelte';
   import { portal } from '../lib/fullscreen.js';
+  import { isTopOverlay, joinOverlays } from '../lib/overlayStack.js';
 
   // A small, styled confirmation dialog — replaces the browser confirm() popup.
   // Tone drives the accent so an irreversible action reads differently from one
@@ -27,9 +28,34 @@
     oncancel,
   } = $props();
 
+  // Escape belongs to the overlay on top. This dialog usually opens from inside an
+  // entity window, and answering the same press as the window behind it would close
+  // both: the analyst asked to step back one, not to lose the window.
+  const self = {};
+  let cancelBtn = $state(null);
+
+  $effect(() => joinOverlays(self));
+
+  // An alertdialog that leaves the focus behind the veil is unreachable by keyboard, so
+  // move it in. Cancel and not the confirm button: this dialog exists to be read before
+  // it is answered, and the safe half is the one a blind Enter should reach.
+  $effect(() => {
+    const returnTo = document.activeElement;
+    cancelBtn?.focus();
+    return () => {
+      if (returnTo?.isConnected) returnTo.focus?.();
+    };
+  });
+
   function onkeydown(e) {
-    if (e.key === 'Escape') oncancel?.();
-    else if (e.key === 'Enter') onconfirm?.();
+    if (e.key === 'Escape' && isTopOverlay(self)) oncancel?.();
+  }
+
+  // Enter held down on the button that opened this dialog keeps firing keydown, and the
+  // repeats land on whatever now holds the focus — answering the dialog with the very
+  // press that raised it. Only a fresh press counts.
+  function ondialogkeydown(e) {
+    if (e.repeat && (e.key === 'Enter' || e.key === ' ')) e.preventDefault();
   }
 </script>
 
@@ -41,7 +67,14 @@
   onclick={(e) => e.target === e.currentTarget && oncancel?.()}
   role="presentation"
 >
-  <div class="dialog" class:danger={tone === 'danger'} role="alertdialog" aria-label={title}>
+  <div
+    class="dialog"
+    class:danger={tone === 'danger'}
+    role="alertdialog"
+    aria-label={title}
+    tabindex="-1"
+    onkeydown={ondialogkeydown}
+  >
     <div class="head">
       <span class="badge" class:danger={tone === 'danger'}>
         <Icon name={icon} size={18} />
@@ -89,7 +122,7 @@
       </div>
     {/if}
     <div class="actions">
-      <button class="btn" onclick={oncancel} disabled={busy}>Cancel</button>
+      <button class="btn" bind:this={cancelBtn} onclick={oncancel} disabled={busy}>Cancel</button>
       <button
         class="btn {tone === 'danger' ? 'btn-danger' : 'btn-primary'}"
         onclick={onconfirm}

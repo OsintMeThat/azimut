@@ -169,7 +169,11 @@ line-length = 100
 target-version = "py311"
 
 [tool.mypy]
-files = ["src/azimut"]
+# Every Python file the repo ships or runs, not only the package: `packaging/entry.py`
+# is the script PyInstaller analyses, so it is *inside* all three binaries, and it was
+# checked by nothing. `scripts/` is the release and development tooling. Tests stay out
+# — they are checked by running them.
+files = ["src/azimut", "scripts", "packaging"]
 # yt-dlp, gallery-dl and cv2 ship no type stubs; don't fail on their absence.
 # No python_version pin: mypy runs under the CI interpreter (3.12+), and numpy's
 # 2.x stubs use 3.12 syntax that a 3.11 target can't parse. The 3.11 floor stays

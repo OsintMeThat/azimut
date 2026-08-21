@@ -92,7 +92,10 @@ class PlaceIn(BaseModel):
 
 
 class ParseIn(BaseModel):
-    text: str
+    #: One coordinate, however it is spelled. Bounded on the field rather than through
+    #: `server.BulkBodyLimit`: the middleware is for bodies too big to parse, and a
+    #: position never is — what this stops is a paste into the box arriving as a document.
+    text: str = Field(max_length=2000)
 
 
 class SatelliteUpdateIn(BaseModel):

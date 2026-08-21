@@ -328,3 +328,35 @@ def test_a_dated_statement_rests_on_the_pieces_its_row_carries(client):
     claim = case_entities(case_id, "claim")[0]["id"]
     cites = {link["to"] for link in case_links(case_id) if link["type"] == "cites"}
     assert shot["id"] in cites and claim
+
+
+def test_a_citation_added_by_hand_survives_the_next_press(client):
+    """A press restates what the sheet says, not what the Claim knows.
+
+    The row's own connectors are the sheet's to reconcile — repointing a row must move
+    them rather than leave the statement pointing both ways. A source the analyst added
+    in the Claim's own panel is a different claim about the same statement, and nothing
+    holds a removed edge: re-filing one is a new id, a new date and a new author. So the
+    press restates its own and leaves theirs standing.
+    """
+    case_id = make_case(client)
+    sheet = timeline(client, case_id)
+    assert date_rows(client, case_id, sheet).status_code == 200
+    claim = case_entities(case_id, "claim")[0]
+    mine = add(client, case_id, "media", "screenshot.png")
+    stated = client.post(
+        f"/api/cases/{case_id}/links",
+        json={"from_id": claim["id"], "to_id": mine["id"], "type": "cites"},
+    )
+    assert stated.status_code == 200, stated.text
+
+    again = date_rows(client, case_id, read_sheet(client, case_id, sheet["id"]))
+    assert again.status_code == 200, again.text
+
+    cites = [
+        link
+        for link in case_links(case_id)
+        if link["type"] == "cites" and link["from"] == claim["id"]
+    ]
+    assert mine["id"] in {link["to"] for link in cites}
+    assert {link["provenance"]["by"] for link in cites} == {"sheet", "user"}

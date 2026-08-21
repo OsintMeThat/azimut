@@ -267,7 +267,10 @@ def _spawn(command: list[str], cwd: Path) -> subprocess.Popen[bytes]:
         return subprocess.Popen(
             command,
             cwd=cwd,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            # Read by name: the constant is Windows-only, so a type-checker running on
+            # Linux does not know the attribute exists. Zero is what Windows means by
+            # "no extra creation flags", and this branch never runs anywhere else.
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
         )
     return subprocess.Popen(command, cwd=cwd, start_new_session=True)
 

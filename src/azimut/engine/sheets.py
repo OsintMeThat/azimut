@@ -667,6 +667,13 @@ def sync_mentions(case: "Case", sheet_id: str, meta: dict[str, Any]) -> None:
     should mention exactly what its rows now point at, and a link the analyst cleared
     should lose its edge.
 
+    **A function of the sidecar, and only of the sidecar** (``own_only``). ``mentions``
+    is also a relation an analyst may state by hand, and a sheet is one of the documents
+    it can be stated from — so the graph holds two kinds, and reconciling over both let
+    the sidecar-only route delete a claim nobody made in a cell. That route is the one
+    behind a funnel being ticked, which is to say a click that touches no cell was
+    permanently dropping somebody's own statement.
+
     A target the vocabulary refuses is skipped rather than raised: the cell keeps its
     link and the grid keeps working, exactly as a note's body does with a token pointing
     somewhere odd. The sidecar is the record either way — the edges are what make the
@@ -684,7 +691,7 @@ def sync_mentions(case: "Case", sheet_id: str, meta: dict[str, Any]) -> None:
         except CaseError:
             continue
         wanted.append(entity_id)
-    case.sync_links(sheet_id, link_engine.MENTIONS, wanted, by="sheet")
+    case.sync_links(sheet_id, link_engine.MENTIONS, wanted, by="sheet", own_only=True)
 
 
 # -- files --------------------------------------------------------------------

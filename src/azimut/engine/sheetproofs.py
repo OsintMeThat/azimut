@@ -18,6 +18,7 @@ coordinates, source and proof    the whole constellation `engine/proofimport` wr
 a proof with no source           refused: a geolocation nobody can check
 a source or a proof, no point    refused: no geolocation without a point
 a proof with no title            refused: a proof without a name is a file without one
+a proof whose name is taken      refused: a name is also a filename
 ===============================  ===============================================
 
 The fourth is stricter than importing one post by hand, which accepts a proof whose
@@ -194,7 +195,9 @@ class _Claimed:
       rather than composing the picture a second time under another name.
     - **the same name over two addresses** is a collision. A proof's name is its filename,
       so the second would write over the first — refused, as the single-post import
-      refuses a name already taken.
+      refuses a name already taken. Read against the case as well as against the press
+      (`_decide`): a proof already standing under that name is as much in the way as one
+      two rows up, and the row cannot tell which of them it would have overwritten.
     """
 
     __slots__ = ("by_url", "by_name")
@@ -282,12 +285,21 @@ def _decide(
             return decision
         claimed.by_url[proof_url] = name
         claimed.by_name.add(name)
-        # By where it was published first, by its name second: the address is what a proof
-        # *is*, and the name is a cell somebody may have corrected since.
-        held = built_proof(case, proof_url) or case.find_entity(
-            attr="spec", value=layout.proof_spec_rel(name)
-        )
+        # By where it was published, and by that alone. The name is a cell somebody edits,
+        # so a corrected title still finds its own proof — but a name another proof already
+        # holds is a **collision**, whatever that proof was made from, exactly as the
+        # single-post import reads it (`engine/proofimport.blocking`). Read on the name as
+        # well, this wrote a row's single point over a composition it had nothing to do
+        # with: a proof states one point, so `state_points` replaced the list, and a
+        # geolocation concluding on three impacts and a camera came back as one address
+        # nobody had typed. The rule `_Claimed` states between two rows of a press holds
+        # against the case too, and this is where.
+        held = built_proof(case, proof_url)
+        taken = case.find_entity(attr="spec", value=layout.proof_spec_rel(name))
         decision["writes"] = "a proof, its two files and its point"
+        if taken is not None and (held is None or taken["id"] != held["id"]):
+            decision.update(action=ERROR, reason=f"another proof is already called '{name}'")
+            return decision
         if held is not None:
             built_as = str(held.get("label") or name)
             decision.update(

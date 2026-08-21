@@ -862,11 +862,16 @@ the moment somebody commits to it. That moment is the proof.
   Reopening a proof and correcting the coordinates is an answer withdrawn: the old
   edges go, or the case reads as two geolocations. It reconciles the **whole list**
   by difference, so a point taken off it rends its place exactly as an emptied
-  field once did, and POV moved to another line changes both verbs. Only what the composer itself wrote is reconciled — an edge stated by
-  hand in Details, or proposed by import enrichment, is a separate claim about the
-  same file — and a point another proof still concludes on keeps its material.
-  A place the proof let go of that nothing else holds is **offered for deletion,
-  never swept**: it is on the map, and dropping it is the analyst's call.
+  field once did, and POV moved to another line changes both verbs. The proof's own
+  edge to a place is reconciled **whoever filed it**: it has one reading, and it is
+  the list the composer opens on, so a row another road filed is a row the analyst
+  can delete. Its **material** is the narrower question — a media reaching a place is
+  one claim among several about that file — so only the two roads that pose a proof's
+  point are restated there (`satellite.POINT_ROADS`), and an edge stated by hand in
+  Details or proposed by import enrichment stays. A point another proof still
+  concludes on keeps its material. A place the proof let go of that nothing else
+  holds is **offered for deletion, never swept**: it is on the map, and dropping it
+  is the analyst's call.
 - **The material the proof composes states the same point**, over the derivation
   closure — the frame, the collage, the video two hops up, the capture. Confirmed,
   because **composing is the assertion**: putting a frame beside a capture and
@@ -892,7 +897,11 @@ provenance rather than by composing that picture twice (`sheetproofs._added_poin
 The graph then holds a point the spec never learned, so everything that asks what
 a proof concludes on reads both (`satellite.proof_points`): the map draws it, and
 the composer **opens on it** instead of beside it. Saving is what makes the spec
-agree; until then, reopening never rewrites what the analyst typed.
+agree; until then, reopening never rewrites what the analyst typed. It arrives as a
+row like any other, which cuts both ways: a save that keeps it states it, and one
+that deletes it withdraws it. Its POV is read off **this** proof's own footage — a
+second proof's clip recorded at the same place answers for that proof and not this
+one.
 
 `proof_place_auto` (Settings → General → Proofs, on by default) decides whether
 the save files them or the composer asks first. Both write the same thing, and the

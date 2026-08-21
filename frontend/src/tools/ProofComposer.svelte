@@ -3398,7 +3398,7 @@
         return 'multi';
       }
       if (result.needs_auth) {
-        throw new Error('this link asks for a login — download it from Media, then come back');
+        throw new Error('this link asks for a login. Download it from Media, then come back');
       }
       const path = result.item?.path ?? result.entity?.attrs?.path;
       if (path) {
@@ -3637,6 +3637,16 @@
                 <Icon name="reset" size={12} />
               </button>
             {/if}
+            {#if proof.points.length < MAX_POINTS}
+              <button
+                class="meta-add"
+                class:alone={!proof.points.some((one) => one.coords.trim())}
+                title="Add a point"
+                onclick={addPoint}
+              >
+                <Icon name="plus" size={12} />
+              </button>
+            {/if}
           </div>
           <!-- One row per point the proof concludes on, the first one the
                conclusion. A single-point proof shows the field it always did. -->
@@ -3661,7 +3671,7 @@
               <button
                 class="point-pov"
                 class:on={point.pov}
-                title="The point is where the camera stood, not what it filmed"
+                title="Point of view"
                 onclick={() => togglePov(i)}
               >
                 <Icon name="eye" size={13} />
@@ -3676,11 +3686,8 @@
               {/if}
             </div>
           {/each}
-          {#if proof.points.length < MAX_POINTS}
-            <button class="point-add" onclick={addPoint}>+ point</button>
-          {/if}
           {#if proof.points.length > 1}
-            <div class="point-hint">The marker says where the camera stood. The first row is the proof's point.</div>
+            <div class="point-hint">Order decides the conclusion.</div>
           {/if}
         </div>
         <div class="meta-field">
@@ -4437,12 +4444,6 @@
   .point-pov:hover, .point-move:hover { color: var(--text-1); background: var(--bg-2); }
   .point-pov.on { color: var(--accent, #6ea8fe); background: var(--bg-2); }
   .point-drop:hover { color: var(--danger, #e05c5c); background: var(--bg-2); }
-  .point-add {
-    margin-top: 5px;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-  .point-add:hover { color: var(--text-1); }
   .point-hint { margin-top: 5px; font-size: var(--fs-xs); color: var(--text-3); }
   .adv-toggle {
     display: flex;

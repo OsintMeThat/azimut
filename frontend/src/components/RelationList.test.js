@@ -36,9 +36,22 @@ describe('RelationList', () => {
     expect(source).toContain("const noun = action === 'mention' ? 'Mention' : 'Relation';");
     expect(source).toContain('title={suggested ? `Dismiss this ${action}` : `Remove this ${action}`}');
     // the remove button sits outside the suggested-only branch
-    const removeAt = source.indexOf('onclick={own(() => remove(relation.link, suggested, action))}');
+    const removeAt = source.indexOf(
+      'onclick={own(() => askRemove(relation.link, suggested, action))}'
+    );
     const branchEnd = source.indexOf('{/if}', source.indexOf('{#if suggested}'));
     expect(removeAt).toBeGreaterThan(branchEnd);
+  });
+
+  it('asks before a stated relation goes, and not before a proposal', () => {
+    // A proposal is a tool's guess and dismissing it is the review gesture this panel is
+    // for. A relation the analyst stated is the case's own claim, and `remove_relation`
+    // holds it nowhere — so that one is the click that has to be meant.
+    expect(source).toContain('const words = retractionWarning(link, action);');
+    expect(source).toContain('if (words) retracting = { link, suggested, action, words };');
+    expect(source).toContain('else remove(link, suggested, action);');
+    expect(source).toContain('<ConfirmDialog');
+    expect(source).toContain('tone="danger"');
   });
 
   it('corrects a wrong reading on the same edge, without deleting it', () => {
@@ -76,7 +89,7 @@ describe('RelationList', () => {
     for (const wired of [
       'onclick={own(() => walk(relation.entity))}',
       'onclick={own(() => confirm(relation.link))}',
-      'onclick={own(() => remove(relation.link, suggested, action))}',
+      'onclick={own(() => askRemove(relation.link, suggested, action))}',
       'onclick={own(() => (expanded = true))}',
     ]) {
       expect(source).toContain(wired);

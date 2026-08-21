@@ -1737,9 +1737,19 @@ describe('the wrapper is an edge, and the count is what it says', () => {
     expect(split).toBeGreaterThan(start);
     expect(source.slice(start, split)).not.toMatch(/dropLink|ruleOn|rateEdge|qualifyEdge/);
     const row = source.slice(split, end);
-    expect(row).toContain('dropLink(chosenEdge.id)');
+    expect(row).toContain('askDropLink(chosenEdge)');
     expect(row).toContain('rateEdge(chosenEdge.id');
     expect(row).toContain('qualifyEdge(chosenEdge,');
+  });
+
+  it('asks before a stated edge is removed, and not before a proposal', () => {
+    // The panel is opened to read an edge, and Remove sat beside Confirm and the rating —
+    // two controls that write nothing — as the one permanent act that asked nothing.
+    // Nothing holds a removed edge: re-filing one mints a new id, date and author.
+    expect(source).toContain('const words = retractionWarning(edge);');
+    expect(source).toContain('if (words) retractingEdge = { id: edge.id, words };');
+    expect(source).toContain('else dropLink(edge.id);');
+    expect(source).toContain('onconfirm={() => dropLink(retractingEdge.id)}');
   });
 
   it('says where a folded type lives when it cannot be handed back', () => {

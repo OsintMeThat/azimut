@@ -27,10 +27,12 @@
     relationOptions,
     relationQualifier,
     relationReading,
+    retractionWarning,
   } from '../lib/relations.svelte.js';
   import { loadEntityTypes, reliabilityOf } from '../lib/entityTypes.svelte.js';
   import { entityIcon } from '../lib/entityIcon.js';
   import { openEntity } from '../lib/navigate.js';
+  import ConfirmDialog from './ConfirmDialog.svelte';
   import Icon from './Icon.svelte';
 
   let {
@@ -56,6 +58,8 @@
 
   let expanded = $state(false);
   let busyId = $state(null);
+  //: The retraction waiting on an answer: `{ link, suggested, action, words }`.
+  let retracting = $state(null);
 
   /**
    * A row control acts on its own relation, and nothing above it should treat the
@@ -223,10 +227,21 @@
   /** Drop the edge. The same gesture whichever status it had, because a relation
    *  is a statement and taking it back is the only way to correct one — the
    *  wording differs so it reads as "not that" on a proposal and "no longer
-   *  true" on something the analyst had already accepted. */
+   *  true" on something the analyst had already accepted.
+   *
+   *  A proposal goes on the click; a statement the analyst made is asked about first
+   *  (`retractionWarning`), since nothing holds it afterwards. */
+  function askRemove(link, suggested, action) {
+    if (busyId) return;
+    const words = retractionWarning(link, action);
+    if (words) retracting = { link, suggested, action, words };
+    else remove(link, suggested, action);
+  }
+
   async function remove(link, suggested, action) {
     if (busyId) return;
     busyId = link.id;
+    retracting = null;
     try {
       await api.del(`/api/cases/${caseId}/links/${link.id}`);
       const noun = action === 'mention' ? 'Mention' : 'Relation';
@@ -298,7 +313,7 @@
           class="btn btn-ghost btn-sm act no"
           title={suggested ? `Dismiss this ${action}` : `Remove this ${action}`}
           disabled={busyId === relation.link.id}
-          onclick={own(() => remove(relation.link, suggested, action))}
+          onclick={own(() => askRemove(relation.link, suggested, action))}
         >
           <Icon name="x" size={12} />
         </button>
@@ -386,6 +401,19 @@
       <button class="more" onclick={own(() => (expanded = true))}>+ {hidden} more</button>
     {/if}
   </div>
+{/if}
+
+{#if retracting}
+  <ConfirmDialog
+    title={retracting.words.title}
+    message={retracting.words.message}
+    detail={retracting.words.detail}
+    confirmLabel={retracting.words.confirmLabel}
+    tone="danger"
+    busy={busyId === retracting.link.id}
+    onconfirm={() => remove(retracting.link, retracting.suggested, retracting.action)}
+    oncancel={() => (retracting = null)}
+  />
 {/if}
 
 <style>

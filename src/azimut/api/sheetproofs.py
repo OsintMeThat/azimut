@@ -538,12 +538,12 @@ def _added_point(case: Case, decision: dict[str, Any], *, pov: bool) -> dict[str
     So the composition is not written twice — but the point still belongs to it. The
     published proof is what establishes both positions, and that is what the analyst is
     saying by writing two lines about one picture, so **the proof reaches this place too**.
-    Which the vocabulary allows exactly here: a save reconciles only the edges the composer
-    itself wrote (ONTOLOGY §"Where a geolocation becomes a point"), and an edge stated by
-    another hand is a separate claim about the same file. Written under this road's own
-    provenance, it survives every later save — and the composer **opens on it** rather
-    than beside it (``satellite.open_spec``), so the proof reads the same in the tool
-    that made it as it does on the map.
+    Written under this road's own provenance, so the graph says which press wrote it, and
+    the composer **opens on it** rather than beside it (``satellite.open_spec``): the proof
+    reads the same in the tool that made it as it does on the map. Which also means the
+    composer can take it back — a row it shows is a row it owns
+    (``satellite.restate_proof_point``), and a point nothing can delete is worse than one
+    that was never offered.
 
     `depicts` and never `located-at`, whatever POV says: a proof was composed and recorded
     nowhere. POV picks the verb for the material, and only there.

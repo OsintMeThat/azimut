@@ -520,7 +520,7 @@ describe('POV', () => {
   it('asks what the point means, since the composition cannot say', () => {
     // recorded-at and shows are independent: a rooftop shot is recorded
     // somewhere it never shows
-    expect(source).toContain('The point is where the camera stood, not what it filmed');
+    expect(source).toContain('title="Point of view"');
     expect(source).toContain('onclick={() => togglePov(i)}');
   });
 
@@ -550,6 +550,14 @@ describe('the points a proof states', () => {
 
   it('caps the list where the engine caps it', () => {
     expect(source).toContain('if (proof.points.length >= MAX_POINTS) return;');
+  });
+
+  it('grows the list from the head, the way the sources do', () => {
+    const head = source.slice(source.indexOf('<span>Coordinates</span>'), source.indexOf('placeholder="lat, lon"'));
+    expect(head).toContain('{#if proof.points.length < MAX_POINTS}');
+    expect(head).toContain('title="Add a point"');
+    expect(head).toContain('onclick={addPoint}');
+    expect(source).not.toContain('class="point-add"');
   });
 
   it('redraws the plate when a point or the footer switch changes', () => {

@@ -26,9 +26,26 @@ describe('entity photo gallery', () => {
   });
 
   it('detaches without deleting the underlying media', () => {
-    expect(source).toContain('title="Remove from this entity"');
-    expect(source).toContain('/entities/${entity.id}/images/${selected.id}`');
+    expect(source).toContain('/entities/${entity.id}/images/${image.id}`');
     expect(source).not.toContain('/media?path=');
+  });
+
+  it('names the two acts apart, since only one of them is a delete', () => {
+    // "Remove" covered both: a reference the media survives, and the only copy the case
+    // ever had of an imported photo. One word for two outcomes is one of them unannounced.
+    expect(source).toContain("{selected.direct ? 'Delete this copy' : 'Remove'}");
+    expect(source).toContain('Take it off this entity; the media stays in the case');
+    expect(source).not.toContain('title="Remove from this entity"');
+  });
+
+  it('asks before deleting a photo no Trash will hold', () => {
+    // A presentation photo is not an artifact, so `engine/trash.py` never sees it and the
+    // toast carries no Undo: the click has to be the confirmation.
+    expect(source).toContain('if (selected.direct) dropping = selected;');
+    expect(source).toContain('else drop(selected);');
+    expect(source).toContain('<ConfirmDialog');
+    expect(source).toContain('tone="danger"');
+    expect(source).toContain('this cannot be brought back');
   });
 
   it('shows no empty frame and keeps an added main image bounded', () => {

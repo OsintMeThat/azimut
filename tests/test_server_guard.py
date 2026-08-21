@@ -42,3 +42,23 @@ def test_extension_origin_reaches_only_the_ingest_island(client):
     assert client.get("/api/ingest/ping", headers={"origin": ext}).status_code == 401
     # but anywhere else the extension origin is a cross-origin web page
     assert client.get("/api/health", headers={"origin": ext}).status_code == 403
+
+
+def test_a_malformed_pairing_token_is_a_refusal_and_not_a_crash(client):
+    """The one authenticated surface, asked with bytes it never mints.
+
+    Starlette decodes a header as latin-1, so an octet above 0x7f reaches the comparison as
+    a non-ASCII string and `secrets.compare_digest` raises `TypeError` on one. That was a
+    500 on the authentication edge — a refusal reported as a server fault, with a traceback
+    into the log kept for "Report an issue" — from a value any caller chooses.
+    """
+    from azimut import config
+
+    config.save_settings({**config.load_settings(), "ingest_token": "abc123"})
+    right = client.get("/api/ingest/ping", headers={"X-Azimut-Token": b"abc123"})
+    assert right.status_code == 200
+
+    for token in (b"\xe9", b"abc12\xff", b"", "é".encode()):
+        answer = client.get("/api/ingest/ping", headers={"X-Azimut-Token": token})
+        assert answer.status_code == 401, token
+        assert answer.json()["detail"] == "missing or invalid pairing token"

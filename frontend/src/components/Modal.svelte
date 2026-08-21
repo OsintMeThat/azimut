@@ -1,36 +1,15 @@
-<script module>
-  /**
-   * The modals that are open, oldest first.
-   *
-   * Escape is heard on the window, so without this every open modal answers one press: a
-   * dialog opened from inside another — dating a sync point without losing the declaration
-   * that sent you there — would close both and take the work with it. Only the last one
-   * opened acts, which is what Escape means to whoever pressed it.
-   *
-   * A plain array and not `$state`: it is read when a key is pressed, never while
-   * rendering, and a reactive array that an effect both pushes to and depends on is an
-   * effect that re-runs itself for good.
-   */
-  const stack = [];
-</script>
-
 <script>
   import Icon from './Icon.svelte';
   import { portal } from '../lib/fullscreen.js';
+  import { isTopOverlay, joinOverlays } from '../lib/overlayStack.js';
 
   let { title, onclose, width = '440px', children } = $props();
 
   const self = {};
-  $effect(() => {
-    stack.push(self);
-    return () => {
-      const at = stack.indexOf(self);
-      if (at !== -1) stack.splice(at, 1);
-    };
-  });
+  $effect(() => joinOverlays(self));
 
   function onkeydown(e) {
-    if (e.key === 'Escape' && stack.at(-1) === self) onclose?.();
+    if (e.key === 'Escape' && isTopOverlay(self)) onclose?.();
   }
 </script>
 

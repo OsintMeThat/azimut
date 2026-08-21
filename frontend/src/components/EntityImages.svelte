@@ -7,6 +7,7 @@
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, reloadCase, toast } from '../lib/state.svelte.js';
+  import ConfirmDialog from './ConfirmDialog.svelte';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import SearchInput from './SearchInput.svelte';
@@ -24,6 +25,7 @@
   let media = $state([]);
   let picked = $state([]);
   let query = $state('');
+  let dropping = $state(null);
   let loadSeq = 0;
 
   const selected = $derived(
@@ -185,14 +187,31 @@
     }
   }
 
-  async function removeSelected() {
+  /** One button, two acts, and only one of them is a delete.
+   *
+   *  A photo chosen from the Media Library is a reference: taking it off leaves the media
+   *  in the case, so it goes on the click. A photo imported from the computer exists
+   *  nowhere else — this gallery is the only copy the case ever had, and it is not an
+   *  artifact, so there is no Trash behind it and no Undo on the toast. That one is asked
+   *  for, and the two are not called the same thing: `Remove` said nothing about which of
+   *  them the click was about. */
+  function askRemove() {
     if (!selected || busy) return;
+    if (selected.direct) dropping = selected;
+    else drop(selected);
+  }
+
+  async function drop(image) {
     busy = true;
     try {
       const result = await api.del(
-        `/api/cases/${caseState.current.id}/entities/${entity.id}/images/${selected.id}`
+        `/api/cases/${caseState.current.id}/entities/${entity.id}/images/${image.id}`
       );
-      await changed(result.images, 'Photo removed from this entity.');
+      dropping = null;
+      await changed(
+        result.images,
+        image.direct ? 'Photo deleted.' : 'Photo removed from this entity.'
+      );
     } catch (error) {
       toast(error.message, 'danger');
     } finally {
@@ -243,10 +262,12 @@
       {/if}
       <button
         class="btn btn-ghost btn-sm remove"
-        title="Remove from this entity"
-        onclick={removeSelected}
+        title={selected.direct
+          ? 'This copy exists nowhere else'
+          : 'Take it off this entity; the media stays in the case'}
+        onclick={askRemove}
         disabled={busy}
-      >Remove</button>
+      >{selected.direct ? 'Delete this copy' : 'Remove'}</button>
     </div>
     {#if images.length > 1}
       <div class="thumbs" aria-label="Attached photos">
@@ -270,6 +291,19 @@
     {/if}
   {/if}
 </section>
+
+{#if dropping}
+  <ConfirmDialog
+    title="Delete this photo?"
+    message="It was imported into this entity, so the case holds no other copy."
+    detail="The Trash keeps deleted artifacts. A presentation photo is not one, so this cannot be brought back."
+    confirmLabel="Delete"
+    tone="danger"
+    busy={busy}
+    onconfirm={() => drop(dropping)}
+    oncancel={() => (dropping = null)}
+  />
+{/if}
 
 {#if pickerOpen}
   <Modal title="Choose photos" width="620px" onclose={() => (pickerOpen = false)}>

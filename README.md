@@ -52,16 +52,17 @@ to fix a point on the map.*
 
 | Tool | What it does |
 |------|--------------|
-| **Board** | The whole case as one sortable table: typed identity fields per entity, one filter bar whose values are all taken from the case, and shared Details. |
-| **Graph** | The same case drawn. Lenses pick what a reading is about, nodes cluster, edges carry their verb, and a click opens what a node connects to without losing the picture you were reading. |
+| **Board** | The whole case as one sortable table: typed identity fields per entity, one filter bar whose values are all taken from the case, shared Details, and a ticked selection deleted as one recoverable act. |
+| **Graph** | The same case drawn. Lenses pick what a reading is about, nodes cluster, edges carry their verb, and a click opens what a node connects to without losing the picture you were reading. Graph and Timeline both export a reading as an SVG or PNG plate carrying its question, period and legend. |
 | **Timeline** | The same case on a time axis. Dated statements and media stack in coloured tracks, the ruler reads in any zone or at a saved place, date quality is drawn instead of flattened, and the window can be handed to Board, Graph or the map. |
+| **Sheet** | The case's own CSVs in a plain grid: a comparison table, a worklist with its own state, or the half-facts too soft to be entities. Columns can be typed, a workbook arrives one sheet per tab, and a declared sheet promotes into entities, places and dated statements. A worklist can also be built back out of what the case holds. |
 | **Media** | Import local files or download by URL (X, Telegram, TikTok, YouTube, Instagram and more via yt-dlp, with a gallery-dl fallback for image-only posts). Public media is fetched cookie-less; a login-walled post prompts once for a browser session or an exported `cookies.txt`. Each item gets a clean local file, metadata and a SHA-256. Multi-photo posts open a picker. |
 | **Files** | Every saved artifact in one Finder-style view of your folders, not just media: select several, drag them into a folder, search across the lot. |
 | **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services. Nothing uploads on its own. |
 | **Inspect** | A scratch workspace over any photo or video: frame adjustments, editable crop, sharpest-frame capture, hand-made collage with per-piece warp/scale/rotate, auto-stitch to solve a panorama's layout, and ELA hints. Nothing enters the case until you save. |
 | **Satellite** | Coordinates or a place name become an imagery crop. The search bar proposes matches as you type: saved work, coordinates and a bundled city list answer offline, and the geocoder fills in the rest once you pause. Select-area capture, map rotation, measurement tools, reference overlays and editable AOI grids for area review. Esri/OSM by default, plus Sentinel-2 with a date calendar and a cloud-ceiling slider; add a Mapbox or Google key for more basemaps. |
 | **Coords & Sky** | Convert common coordinate formats, copy the result, open map or geocoding links, and read the sun and moon at that point on a date: rise, set, azimuth, altitude, twilights, moon phase and bright-limb angle, in local time and UTC, computed offline. |
-| **Geo Proof** | Start a named proof from a reusable house style, select case panels with search, compose them in a grid or free layout, annotate with colored shapes/freehand/text, and export `proof.png` plus a re-editable spec. |
+| **Geo Proof** | Start a named proof from a reusable house style, or from a published post whose pictures become its panels. Compose case panels in a grid or free layout, annotate with colored shapes, fills, symbols, freehand and text, state every place and every source the proof argues, and export `proof.png` plus a re-editable spec. |
 | **Geo Report** | Turn a proof into a prepared thread for X, Bluesky, or Mastodon: coordinates, plus code, attribution, target-specific character counts, media, and a structured Markdown case note with linked evidence. |
 | **Notebook** | Tabbed Markdown notes with local media, Mermaid diagrams, linked case evidence, broken-reference markers, and PDF export of one note or a whole selection. |
 
@@ -72,27 +73,32 @@ extension, and cross-platform binaries with a bundled ffmpeg.
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
 
-## New in v0.2.8
+## New in v0.2.9
 
-Entities, graph and timeline:
+A table you can work in, and a proof that can argue more than one point.
 
-- Read the whole case as a table, with one filter bar whose values and counts all
-  come from the case, and file a person, an account or a statement by hand.
-- Draw the same question in the Graph: lenses, clustered nodes, verbs on the
-  edges, sources folded onto the edge they stand for, and an undo for the drawing
-  that never writes to the case.
-- Put dated statements and media on a Timeline, in coloured tracks, on any zone's
-  clock, with daylight under the ruler at a saved place.
-- Create and edit dates on the axis itself, and measure two entries without
-  pretending a coarse date is an exact one.
-- Hand one period from Timeline to Board, Graph and a session-only map layer.
-  Fact time never mixes with the date something was filed.
-- Keep statement confidence and source reliability apart, with support and
-  contradiction stated as their own links.
-- Date a statement through a guided editor for a year, a day, a bounded range or
-  a zoned time range, with the raw syntax still accepted.
-- Existing cases upgrade to SQLite schema 17 when they open, and bundles exported
-  by v0.2.7 still import.
+- **Sheet**, a new tool: the case's own CSV files in a spreadsheet-style grid.
+  They still open in Excel, and the grid notices when they change on disk.
+- Type a column (state, list, yes/no, number, coordinates, date, image) and the
+  sheet sorts, filters and maps it properly. Excel workbooks import one tab per
+  sheet.
+- Turn a prepared sheet into entities, places and dated statements after reading
+  a row-by-row plan, or build a worklist out of what the case already holds.
+- Geocode a column of addresses, check a column of links, list every proof in the
+  case, or build one proof per row from columns of links and coordinates.
+- A proof can state several points, name them, mark the camera position, and list
+  several sources, downloading supporting files for a link the case lacks.
+- Import a published post as a proof: its pictures become panels and its text is
+  read for coordinates, with a preview to approve first.
+- Fill shapes at a chosen opacity, stamp ready-made symbols, and move or recolour
+  several at once.
+- Export a Graph or Timeline view as an SVG or PNG plate carrying the case, the
+  question, the period and a legend.
+- The map's search box suggests as you type from saved places, pasted coordinates
+  and 34,000 bundled cities, and only calls the geocoder once you stop.
+- Saved views can be renamed and sorted, Board rows delete as one undoable batch,
+  and removing a relation or an imported entity photo now asks first.
+- Existing cases open unchanged, and older bundles still import.
 
 ## Cases on disk
 
@@ -201,8 +207,8 @@ cd frontend && npm run dev          # UI on :5173
 Checks (CI runs these on every push):
 
 ```bash
-uv run ruff check src tests   # lint
-uv run mypy                    # type-check the backend
+uv run ruff check src tests scripts packaging   # lint
+uv run mypy                    # type-check the package, scripts and packaging
 cd frontend && npm run check   # svelte-check (blocks on errors)
 ```
 
@@ -279,7 +285,7 @@ wheel + Windows/Linux/macOS binaries, attaches them to a GitHub release, and
 publishes to PyPI. **Don't publish by hand.**
 
 ```bash
-git tag v0.2.8 && git push origin v0.2.8
+git tag v0.2.9 && git push origin v0.2.9
 ```
 
 One-time setup: register the repo as a

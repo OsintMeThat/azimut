@@ -1207,6 +1207,20 @@ def test_two_points_a_metre_apart_are_one_place(client):
     assert len(_proof_index(client, cid)) == 1
 
 
+def test_one_place_keeps_the_pov_the_second_line_ticked(client):
+    """The duplicate goes, its answer about the camera does not. Dropped with the line, a
+    POV ticked on the second of two points a metre apart was a claim the composer showed
+    and the graph never carried."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    video = _video(cid)
+    spec = _points(("64.1466, -21.9426", "roof", False), ("64.14660, -21.94260", "", True))
+    spec["panels"] = _panels("media/clip.mp4")["panels"]
+    _save(client, cid, "Same roof", spec)
+
+    assert len(_places(cid)) == 1
+    assert [lk["from"] for lk in _located_at(cid)] == [video["id"]]
+
+
 def test_a_line_that_reads_as_no_point_is_skipped(client):
     cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
     _save(client, cid, "Prose", _points(
@@ -1322,6 +1336,104 @@ def test_a_point_filed_by_another_road_is_a_row_and_a_mark(client):
     spec = client.get(f"/api/cases/{cid}/proofs/Harbour strike").json()
     assert [one["coords"] for one in spec["points"]] == ["48.656140, 2.371511", "48.656289, 2.371885"]
     assert spec["points"][1]["label"] == "impact 2"
+
+
+def _other_road(client, cid, lat, lon, label, *, material=(), verb="depicts"):
+    """A point filed for a proof by a road that never wrote its composition.
+
+    What `api/sheetproofs._added_point` writes for the binder's cross-border shape: its
+    own place, its own provenance, the proof reaching it and the material posed on it.
+    """
+    proof = _proof(cid)
+    case = Case.open(cid)
+    place = client.post(f"/api/cases/{cid}/satellite/place", json={"lat": lat, "lon": lon}).json()
+    case.update_entity(place["id"], {"label": label})
+    case.add_link(proof["id"], place["id"], "depicts", by="sheet-proofs")
+    for entity_id in material:
+        case.add_link(entity_id, place["id"], verb, by="sheet-proofs")
+    return place
+
+
+def test_taking_off_a_point_another_road_filed_withdraws_it_for_good(client):
+    """The composer opens on a point a sheet row filed, as an editable row. So deleting
+    that row has to mean what it says: read on its own provenance, the withdrawal found
+    nothing to take back, the save reported no orphan, and the next open adopted the
+    point again — a row that could not be deleted, coming back with no way to tell why."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    video = _video(cid)
+    spec = {
+        **_panels("media/clip.mp4"),
+        "points": [{"coords": "48.656140, 2.371511", "label": "impact 1", "pov": False}],
+    }
+    _save(client, cid, "Harbour strike", spec)
+    elsewhere = _other_road(client, cid, 48.656289, 2.371885, "impact 2", material=[video["id"]])
+
+    opened = client.get(f"/api/cases/{cid}/proofs/Harbour strike").json()
+    assert [one["label"] for one in opened["points"]] == ["impact 1", "impact 2"]
+
+    kept = {**opened, "points": opened["points"][:1]}
+    saved = _save(client, cid, "Harbour strike", kept)
+
+    # the proof's own edge and the footage the road posed with it, both taken back
+    assert [lk["from"] for lk in _depicts(cid) if lk["to"] == elsewhere["id"]] == []
+    assert saved["orphans"] == [{"id": elsewhere["id"], "label": "impact 2"}]
+    again = client.get(f"/api/cases/{cid}/proofs/Harbour strike").json()
+    assert [one["label"] for one in again["points"]] == ["impact 1"]
+
+
+def test_a_point_kept_from_another_road_is_stated_rather_than_left_alone(client):
+    """The other half of the same rule: a row the analyst leaves standing is a row the
+    proof now states itself, so its material carries the edge the composition means."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    video = _video(cid)
+    _save(client, cid, "Harbour strike", _with_coords("48.656140, 2.371511", None, "media/clip.mp4"))
+    elsewhere = _other_road(client, cid, 48.656289, 2.371885, "impact 2")
+
+    opened = client.get(f"/api/cases/{cid}/proofs/Harbour strike").json()
+    _save(client, cid, "Harbour strike", opened)
+
+    posed = {lk["from"] for lk in _depicts(cid) if lk["to"] == elsewhere["id"]}
+    assert {_proof(cid)["id"], video["id"]} <= posed
+
+
+def test_a_point_a_second_proof_concludes_on_by_another_road_keeps_its_material(client):
+    """`_other_proof_states` read one provenance, so a proof withdrawing its point took
+    the video off a place a sheet-built proof still concludes on."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    video = _video(cid)
+    spec = _with_coords("50.4501, 30.5234", None, "media/clip.mp4")
+    _save(client, cid, "First", spec)
+    shared = _places(cid)[0]
+    case = Case.open(cid)
+    other = case.add_entity("proof", "Built by the sheet", {"spec": "proofs/x.json"}, by="user")
+    case.add_link(other["id"], shared["id"], "depicts", by="sheet-proofs")
+
+    saved = _save(client, cid, "First", _with_coords("48.8584, 2.2945", None, "media/clip.mp4"))
+
+    assert saved["orphans"] == []
+    holding = {lk["from"] for lk in _depicts(cid) if lk["to"] == shared["id"]}
+    assert {video["id"], other["id"]} <= holding
+
+
+def test_the_pov_of_an_adopted_point_is_read_off_this_proof_material(client):
+    """POV says *this* proof's footage was recorded there. Read off any media standing
+    on the point, a second proof's video answered for this one — and the tick came back
+    on, in a composition whose own footage says nothing of the kind."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    _video(cid)
+    _save(client, cid, "Harbour strike", _with_coords("48.656140, 2.371511", None, "media/clip.mp4"))
+    somebody = _video(cid, "theirs.mp4")
+    elsewhere = _other_road(
+        client, cid, 48.656289, 2.371885, "impact 2",
+        material=[somebody["id"]], verb="located-at",
+    )
+
+    opened = client.get(f"/api/cases/{cid}/proofs/Harbour strike").json()
+    adopted = next(one for one in opened["points"] if one.get("label") == "impact 2")
+    assert adopted.get("pov") is not True
+    assert [lk["from"] for lk in _located_at(cid) if lk["to"] == elsewhere["id"]] == [
+        somebody["id"]
+    ]
 
 
 def test_reopening_a_proof_never_rewrites_what_was_typed(client):

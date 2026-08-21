@@ -11,6 +11,8 @@ become what, not yt-dlp. The one thing the stub is faithful about is the three s
 attachments — because each of those is a different word beside a row.
 """
 
+import base64
+import io
 import json
 import random
 import zlib
@@ -989,4 +991,106 @@ def test_a_title_corrected_since_moves_the_proof_instead_of_twinning_it(client, 
     assert result["counts"] == {"built": 0, "restated": 1, "failed": 0}
     assert [entity["label"] for entity in case_entities(case_id, "proof")] == [
         "Bridge strike, south bank"
+    ]
+
+
+def compose_by_hand(client, case_id, title, points):
+    """A proof written in the composer, which is the one this road must not overwrite.
+
+    Saved through the composer's own route so it carries exactly what a hand-made proof
+    carries: a spec holding its list of points, and no panel tracing back to a published
+    address.
+    """
+    spec = {
+        "azimut_proof": 1,
+        "panels": [],
+        "shapes": [],
+        "points": points,
+        "coordsText": points[0]["coords"],
+    }
+    picture = Image.new("RGB", (24, 18), (12, 34, 56))
+    held = io.BytesIO()
+    picture.save(held, "PNG")
+    answer = client.post(
+        f"/api/cases/{case_id}/proofs",
+        json={
+            "title": title,
+            "spec": spec,
+            "png_base64": base64.b64encode(held.getvalue()).decode("ascii"),
+        },
+    )
+    assert answer.status_code == 200, answer.text
+    return answer.json()["name"]
+
+
+def read_spec(case_id, name):
+    from azimut.api.cases import get_case
+    from azimut import layout
+
+    path = get_case(case_id).resolve_inside(layout.proof_spec_rel(name))
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_a_name_another_proof_holds_is_a_collision_and_not_an_already_built(
+    client, monkeypatch
+):
+    """A row must never adopt a proof on the strength of its title alone.
+
+    Keyed on the name as well as on the address, a binder line landed on whatever proof
+    happened to share its title: the plan announced *already built* about a published
+    address the case had never downloaded, and the press then wrote that row's single point
+    over the composition. A proof concludes on one point, so the list was replaced — three
+    impacts and a camera came back as one address nobody had typed, with no undo, because
+    the press's own Undo is about the sheet.
+
+    Refused instead, in the words the single-post import already uses.
+    """
+    stub_downloads(monkeypatch)
+    case_id = make_case(client)
+    stated = [
+        {"coords": "50.0, 30.0", "label": "impact"},
+        {"coords": "50.1, 30.1", "label": "camera", "pov": True},
+    ]
+    name = compose_by_hand(client, case_id, "Bridge strike", stated)
+    before = read_spec(case_id, name)
+
+    sheet = geoloc(client, case_id)  # its one row is titled "Bridge strike" too
+    said = plan(client, case_id, sheet).json()
+    assert [row["action"] for row in said["rows"]] == ["error"]
+    assert said["rows"][0]["reason"] == "another proof is already called 'Bridge strike'"
+    assert said["counts"]["error"] == 1
+
+    # And the press honours the plan: nothing fetched, nothing filed, nothing rewritten.
+    result = press(client, case_id, sheet)
+    assert result["counts"] == {"built": 0, "restated": 0, "failed": 0}
+    assert read_spec(case_id, name) == before
+    assert len(case_entities(case_id, "proof")) == 1
+    assert case_entities(case_id, "media") == []
+
+
+def test_a_rename_onto_a_name_another_proof_holds_is_refused_by_the_plan(client, monkeypatch):
+    """The other half of one rule: the row owns its proof, and still cannot take a name.
+
+    Found by its address, a proof follows a corrected title — but not onto a name somebody
+    else is standing on. That used to be refused by the save, two minutes into a press, as
+    one red line among a hundred; the plan is where a refusal an analyst can act on belongs.
+    """
+    stub_downloads(monkeypatch)
+    case_id = make_case(client)
+    sheet = geoloc(client, case_id)
+    press(client, case_id, sheet)
+    compose_by_hand(client, case_id, "Second reading", [{"coords": "50.0, 30.0"}])
+
+    moved = read_sheet(client, case_id, sheet["id"])
+    moved["meta"] = sheet["meta"]
+    row = list(moved["rows"][0])
+    row[moved["columns"].index("Title")] = "Second reading"
+    moved["rows"] = [row]
+
+    said = plan(client, case_id, moved).json()
+    assert said["rows"][0]["action"] == "error"
+    assert "already called 'Second reading'" in said["rows"][0]["reason"]
+    assert [entity["label"] for entity in case_entities(case_id, "proof")] == [
+        "Bridge strike",
+        "Second reading",
     ]

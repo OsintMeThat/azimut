@@ -566,7 +566,12 @@ single root to expand from. Expansion is the drill-down.
   away in Details. Each control appears because the **registry** declares it, not
   because the edge holds a value: a ratable verb gets the rating, a verb that takes a
   qualifier gets the word. A proposal gets neither, since reviewing a machine's claim
-  and grading it are two gestures and the API refuses the second first. Nothing may be
+  and grading it are two gestures and the API refuses the second first. **Removing a
+  stated edge is asked for**, in red and in the same words Details uses: the panel is
+  opened to read an edge, *Remove* sat beside two controls that write nothing, and
+  nothing holds a removed edge — re-filing one mints a new id, a new date and a new
+  author. Dismissing a proposal stays one click, because that is the review this panel
+  is for and nothing of the analyst's goes with it. Nothing may be
   written to a line that stands for several, which is why a folded edge offers only its
   sources back.
 - **Folder** draws one of the analyst's own buckets instead of the whole case, read the
@@ -696,8 +701,11 @@ remembered per workspace for the current session. Reloading restores the default
   form. It accepts several images from the computer or the Media Library, keeps the
   main preview to a normal panel height, and lets one image become primary. A
   computer import stays private to the entity and never enters the Media Library;
-  choosing from Media only stores a reference. Removing a private photo deletes its
-  dedicated copy, while removing a Media choice leaves the media in the case. With
+  choosing from Media only stores a reference. **The two are not one act and are not
+  called one thing.** *Remove* takes a Media choice off the entity and leaves the media
+  in the case, on the click. *Delete this copy* is the other, because a private photo
+  exists nowhere else and is not an artifact, so no Trash holds it and no toast can undo
+  it: it is asked for, in red. One word for both read as the harmless one. With
   no photo, only the two add actions remain and other surfaces keep the entity icon.
   The same two actions appear while creating a supported entity. Photos are staged
   in the form, where one can be chosen as primary, then attached after creation.
@@ -714,8 +722,8 @@ remembered per workspace for the current session. Reloading restores the default
   fields.
 - **Delete** — deleting an artifact moves its registered files and cascade into
   Trash and shows an **Undo** toast. The confirmation uses the neutral tone and
-  states what can be restored. Red is reserved for deleting a case, purging a
-  trash group and emptying Trash.
+  states what can be restored. Red is for what nothing holds afterwards: deleting a
+  case, purging a trash group, emptying Trash, and deleting an entity's private photo.
 
 ## Case switcher
 
@@ -795,7 +803,9 @@ generic History list.
 
 Ordinary relations render through one component wherever they appear. Two lines carry
 the neighbour's name, then what the edge states and how sure of it. A suggested row
-can be confirmed; any row can be removed. Where a pair supports several verbs or both
+can be confirmed; any row can be removed, and a row the analyst stated asks first — the
+question is written once and read by Details, a Claim's connectors and the Graph's edge
+alike. Where a pair supports several verbs or both
 directions, the reading is selectable. An older out-of-matrix row stays visible and
 removable but cannot be restated. Past six rows the list hides the rest behind one
 click, suggestions first. The registry's headings only appear where a list runs

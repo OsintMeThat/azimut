@@ -474,6 +474,13 @@ def promote(
 def _connect(case: "Case", claim: str, verb: str, targets: list[str]) -> None:
     """State exactly these connectors of one kind, dropping the ones that no longer hold.
 
+    **The ones this press wrote** (``own_only``). What the row says is the sheet's to
+    restate — repointing a row moves the connector rather than leaving the statement
+    pointing both ways — but `about`, `at` and `cites` are also what the Claim's own panel
+    offers, and a source added there is a second claim about the same statement. Read over
+    both, a second press deleted it: no Trash holds a removed edge, and re-filing one is a
+    new id, a new date and a new author.
+
     A target the vocabulary refuses is left out rather than raised, the way a citation is:
     the statement is still worth having, and taking a whole press down over one edge would
     lose the rows that had nothing wrong with them.
@@ -488,4 +495,4 @@ def _connect(case: "Case", claim: str, verb: str, targets: list[str]) -> None:
         except CaseError:
             continue
         wanted.append(target)
-    case.sync_links(claim, verb, wanted, by=BY)
+    case.sync_links(claim, verb, wanted, by=BY, own_only=True)

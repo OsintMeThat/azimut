@@ -1,6 +1,6 @@
 # Azimut product overview
 
-Status: **spec v0.3** (2026-08-03). Read in order: Done → Roadmap → Loose ideas.
+Status: **spec v0.3** (2026-08-21). Read in order: Done → Roadmap → Loose ideas.
 Implementation detail belongs in code and tests; see
 [IMAGERY_PROVIDERS.md](IMAGERY_PROVIDERS.md), [UI.md](UI.md),
 [ONTOLOGY.md](ONTOLOGY.md) and
@@ -55,7 +55,7 @@ azimut/        # everything Azimut owns; the rest of the folder is yours
   media/       # source + captured + extracted media; .meta/ holds the sidecars
   proofs/      # exported PNGs; .meta/ holds the specs and pasted images
   exports/     # notes as PDF, analysis plates, and yours to fill
-  .data/       # case.db: authoritative SQLite graph
+  .data/       # case.db, the authoritative SQLite graph, and entity photos
   .drafts/     # post drafts
   .inspect/    # saved Inspect session specs
   .search/     # saved Grid Search state
@@ -323,7 +323,11 @@ stops making sense.
   outside the workspace, 0600 and holding a path; deleting the copy a move set
   aside acts on this process's own memory, never on a path from the request.
   Accepted risks recorded here: cleartext keys over
-  localhost, the hash-verified scraper updater, tile/media URL fetches (SSRF
+  localhost, the hash-verified scraper updater, the release workflow's publish job
+  running `softprops/action-gh-release` and `pypa/gh-action-pypi-publish` on mutable
+  refs while it holds the PyPI OIDC identity (the branch ref is the form PyPA
+  documents; every other action in both workflows is pinned by tag or by commit),
+  tile/media URL fetches (SSRF
   only matters if the localhost assumption breaks), and a download that fails
   saying only that the content is unavailable being retried with the stored
   browser session, so a merely deleted post gets the analyst's cookies — kept
@@ -345,13 +349,18 @@ stops making sense.
   about that behavior and local Case media avoids it. Notebook diagrams are the
   one markup DOMPurify does not clear: Mermaid draws its SVG into the preview
   after sanitizing, under its own `strict` level, which escapes labels and drops
-  click handlers. Two routes take a picture drawn in the browser back: the note
+  click handlers. Three routes take a picture drawn in the browser back: the note
   PDF export, whose request, diagrams and decoded total are bounded before
   rendering, every diagram read as an image and the note's own text re-read from
-  disk rather than trusted from the request; and the analysis plate, bounded the
+  disk rather than trusted from the request; the analysis plate, bounded the
   same way and inspected before it is written, since a plate lands where documents
   are opened — it must start as an SVG and carry no script, event handler,
-  embedded document or reference leaving the file. Case imports extract only unique, non-symlink members declared
+  embedded document or reference leaving the file; and saving a proof, which posts
+  the composer's rendered export and the images pasted into it, bounded as a
+  request and again as a decoded picture. Every body the browser assembles whole —
+  a table, a note, a picture — is refused by size before it is parsed, and the
+  routes are not trusted to a list: `tests/test_hardening.py` walks them.
+  Case imports extract only unique, non-symlink members declared
   by the manifest and matching its SHA-256. Password-protected bundles seal the
   complete ZIP with chunked AES-256-GCM and a scrypt-derived key; filenames stay
   encrypted and the password is never persisted in a job. Import temporarily

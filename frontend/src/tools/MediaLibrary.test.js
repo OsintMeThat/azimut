@@ -110,7 +110,7 @@ describe('Media Library positions', () => {
     // the row is read by its filename; coordinates belong in the tooltip and on
     // the map, not appended to every title
     expect(source).toContain('function pointLabel(item)');
-    expect(source).toContain('title={`Metadata says ${pointLabel(item)} — show it on the map`}');
+    expect(source).toContain('title={`Show ${pointLabel(item)} on the map`}');
     expect(source).toContain('<Icon name="pin" size={11} />');
     expect(source).not.toContain('{pointLabel(item)}<');
   });

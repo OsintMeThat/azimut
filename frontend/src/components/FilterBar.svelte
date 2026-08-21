@@ -348,7 +348,7 @@
               class="chip-open"
               aria-expanded={open === chip.axis}
               {disabled}
-              title="{axis?.hint ?? ''} — click to change it"
+              title={axis?.hint ?? 'Change this term'}
               onclick={() => chose(chip.axis)}
             >
               {chip.text}

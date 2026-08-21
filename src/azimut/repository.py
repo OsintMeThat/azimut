@@ -545,6 +545,7 @@ class CaseRepository(Protocol):
         *,
         by: str,
         status: EntityStatus = "confirmed",
+        own_only: bool = False,
     ) -> list[dict[str, Any]]:
         ...
 

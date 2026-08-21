@@ -111,6 +111,25 @@ def test_sync_links_restates_a_source_set(repo):
     assert still["id"] == kept["id"]
 
 
+def test_sync_links_can_restate_only_what_its_own_author_wrote(repo):
+    """A caller whose list is not the whole truth about that type says so, and the edge
+    another author wrote outlives the restatement. Without it, a sheet reconciling the
+    entities its cells point at deleted the relations somebody stated by hand."""
+    sheet = repo.add_entity("sheet", "Worklist", {"path": "sheets/w.csv"}, by="user")
+    theirs = repo.add_entity("person", "Ivanov", by="user")
+    ours = repo.add_entity("person", "Petrov", by="user")
+    by_hand = repo.add_link(sheet["id"], theirs["id"], "mentions", by="user")
+    repo.sync_links(sheet["id"], "mentions", [ours["id"]], by="sheet", own_only=True)
+
+    held = {lk["id"]: lk for lk in repo.list_links()}
+    assert by_hand["id"] in held
+    assert {lk["to"] for lk in held.values()} == {theirs["id"], ours["id"]}
+
+    # and the sheet still lets go of its own
+    repo.sync_links(sheet["id"], "mentions", [], by="sheet", own_only=True)
+    assert [lk["to"] for lk in repo.list_links()] == [theirs["id"]]
+
+
 def test_remove_link(repo):
     a = repo.add_entity("person", "A", by="user")
     b = repo.add_entity("account", "B", by="user")

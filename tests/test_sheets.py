@@ -552,36 +552,6 @@ def test_the_types_that_own_a_file_are_the_same_list_on_both_sides():
     assert sorted(re.findall(r"'([^']+)'", match.group(1))) == sorted(artifacts.KINDS)
 
 
-def test_no_sheet_route_carrying_a_table_is_parsed_before_it_is_bounded():
-    """The gate that stops the fifth recurrence, rather than a fifth entry in a list.
-
-    `BulkBodyLimit.ROUTES` is spelled out by hand, and four routes that carry a whole table
-    had been added without one — `parse`, `move/undo`, `proofs` and `meta` — each of them
-    letting Pydantic materialise the body before `normalize` could refuse it. Enumerated
-    here instead: a body model holding a table or the text of a CSV must answer a limit.
-    """
-    from azimut.api import sheetproofs, sheets as sheets_api
-    from azimut.server import BulkBodyLimit
-
-    carries = {"columns", "rows", "text", "meta"}
-    checked = 0
-    for router in (sheets_api.router, sheetproofs.router):
-        for route in router.routes:
-            body = getattr(route, "body_field", None)
-            model = getattr(getattr(body, "field_info", None), "annotation", None)
-            fields = set(getattr(model, "model_fields", {}) or {})
-            if not carries & fields:
-                continue
-            for method in sorted(getattr(route, "methods", set()) & {"POST", "PUT"}):
-                path = re.sub(r"\{[^}]+\}", "x", route.path)
-                limit = BulkBodyLimit._limit({"type": "http", "method": method, "path": path})
-                assert limit is not None, f"{method} {route.path} carries {carries & fields}"
-                checked += 1
-    # The count is the test's own gate: a router that stopped exposing `body_field` would
-    # otherwise make this pass by checking nothing.
-    assert checked >= 8, checked
-
-
 def test_a_comma_is_read_as_a_decimal_mark_and_never_as_a_thousands_separator():
     """One reading of a comma across the app, and it is the European one.
 
@@ -930,6 +900,37 @@ def test_clearing_a_link_drops_its_edge_on_the_next_save(client):
 
     links = case_links(client, case_id)
     assert not [link for link in links if link["type"] == "mentions"]
+
+
+def test_a_mention_stated_by_hand_outlives_a_funnel_being_clicked(client):
+    """The sidecar answers for the cells, and for nothing else.
+
+    `mentions` is a relation the analyst may state, and the sheet is one of the
+    documents it can be stated from — so the graph holds two kinds of them, and only
+    one of them is a function of the sidecar. Reconciling over both meant a filter
+    ticked (the sidecar-only route, which touches no cell) deleted a claim somebody
+    made by hand, with no Trash behind it and nothing said about it.
+    """
+    case_id = make_case(client)
+    sheet = new_sheet(client, case_id, "Candidates")
+    person = client.post(
+        f"/api/cases/{case_id}/entities", json={"type": "person", "label": "Witness A"}
+    ).json()
+    stated = client.post(
+        f"/api/cases/{case_id}/links",
+        json={"from_id": sheet["id"], "to_id": person["id"], "type": "mentions"},
+    )
+    assert stated.status_code == 200, stated.text
+
+    client.put(f"/api/cases/{case_id}/sheets/{sheet['id']}/meta", json={"meta": {}})
+    client.put(
+        f"/api/cases/{case_id}/sheets/{sheet['id']}",
+        json={"columns": ["id", "Subject"], "rows": [["r1", "Witness A"]], "meta": {}},
+    )
+
+    kept = [link for link in case_links(client, case_id) if link["type"] == "mentions"]
+    assert [link["provenance"]["by"] for link in kept] == ["user"]
+    assert kept[0]["to"] == person["id"]
 
 
 def test_deleting_an_entity_clears_the_cells_that_pointed_at_it(client):

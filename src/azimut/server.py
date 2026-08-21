@@ -38,9 +38,10 @@ LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 class BulkBodyLimit:
     """Bound the JSON routes that carry a payload the browser assembled, before parsing.
 
-    Three of them: a note's PDF export posts its Mermaid diagrams, an analysis plate
-    posts the page itself, and a sheet posts a whole table. Each is bounded by its own
-    route's number, so the limit stays beside the code that knows what it is for.
+    Four of them: a note's PDF export posts its Mermaid diagrams, an analysis plate posts
+    the page itself, a sheet posts a whole table, and saving a proof posts the composer's
+    rendered export plus the images pasted into it. Each is bounded by its own route's
+    number, so the limit stays beside the code that knows what it is for.
     """
 
     #: `(method, tail, module, attribute)`, where the tail is the path segments after
@@ -49,13 +50,21 @@ class BulkBodyLimit:
     #: sheet's promotion needs, since each of them posts the whole table and each has a
     #: `/preview` beside it. Spelling those out one by one is how `promote/preview` went
     #: unbounded while `promote` was bounded, and then how `move/undo`, `proofs`, `parse`
-    #: and `meta` went the same way. Which is why the gate is a test rather than this
-    #: list: `test_sheets.py` enumerates the routers and fails on a body that can carry a
-    #: table and answers no limit.
+    #: and `meta` went the same way — and then how the composer's own save, the route this
+    #: middleware most obviously exists for, was never on the list at all. Which is why the
+    #: gate is a test rather than this list: `test_hardening.py` enumerates every router the
+    #: app mounts and fails on a body that can carry a table or a picture and answers no
+    #: limit.
     ANY = "..."
     ROUTES: tuple[tuple[str, tuple[str, ...], str, str], ...] = (
         ("POST", ("notes", "pdf"), "notes", "MAX_PDF_BODY_BYTES"),
+        # The note itself, on the three roads that write one. Declared after `notes/pdf`
+        # so the export keeps its own, larger number.
+        ("POST", ("notes",), "notes", "MAX_NOTE_BODY_BYTES"),
+        ("PUT", ("notes",), "notes", "MAX_NOTE_BODY_BYTES"),
+        ("PUT", ("notes", "*"), "notes", "MAX_NOTE_BODY_BYTES"),
         ("POST", ("plates",), "plates", "MAX_PLATE_BODY_BYTES"),
+        ("POST", ("proofs",), "proofs", "MAX_PROOF_BODY_BYTES"),
         ("POST", ("sheets",), "sheets", "MAX_SHEET_BODY_BYTES"),
         ("POST", ("sheets", "import"), "sheets", "MAX_SHEET_BODY_BYTES"),
         ("POST", ("sheets", "parse"), "sheets", "MAX_SHEET_BODY_BYTES"),

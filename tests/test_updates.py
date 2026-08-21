@@ -143,8 +143,8 @@ def test_update_endpoint_with_check_queries_github(client, monkeypatch):
 # The pair below is the contract, and it moves in one direction only: when a
 # shipped file really changes, set the manifest to the current __version__ and
 # record the new digest here (the failing test prints it).
-EXTENSION_VERSION = "0.2.5"
-EXTENSION_PAYLOAD = "f8141fe57fed06b98f373446d8fc19e932a988d1cc27fdcc7d632ae1b65bb198"
+EXTENSION_VERSION = "0.2.9"
+EXTENSION_PAYLOAD = "783876649d02d0b8b06f34fb10d01bbb23633601e86cdff5adcd7d79fda2be1c"
 
 # Text is digested by its line content: a Windows checkout can carry CRLF, and
 # the gate has to reach the same verdict on the three CI platforms.

@@ -270,3 +270,32 @@ export function saveRelation(caseId, subjectId, choice) {
     choice.direction === 'out' ? [subjectId, choice.entityId] : [choice.entityId, subjectId];
   return api.post(`/api/cases/${caseId}/links`, { from_id, to_id, type: choice.type });
 }
+
+/**
+ * What to ask before an edge is taken back, or `null` when nothing needs asking.
+ *
+ * Two acts wear one button today, and only one of them is irreversible.
+ *
+ * **Dismissing a proposal** is the review gesture these panels exist for. A tool suggested
+ * it, nobody stated it, and refusing it costs the analyst nothing — so it stays one click.
+ *
+ * **Removing a stated relation** is the case retracting its own claim. `remove_relation`
+ * drops the row outright: no Trash holds it, no toast can undo it, and re-filing one later
+ * mints a new id, a new date and a new author (docs/UI.md §Graph). It was the only
+ * permanent write in the app that asked nothing, sitting next to *Confirm* and the rating
+ * in a panel opened to **read** an edge.
+ *
+ * Worded here rather than in each panel so the three surfaces that offer the act — the
+ * Details relations, a Claim's connectors, the Graph's edge — cannot word it three ways.
+ */
+export function retractionWarning(link, action = 'relation') {
+  if (link?.provenance?.status === 'suggested') return null;
+  const noun = action === 'mention' ? 'mention' : 'relation';
+  return {
+    title: `Remove this ${noun}?`,
+    message: 'The case stops stating it.',
+    detail:
+      'Nothing holds a removed edge. Filing it again later is a new statement, with a new date and a new author.',
+    confirmLabel: 'Remove',
+  };
+}

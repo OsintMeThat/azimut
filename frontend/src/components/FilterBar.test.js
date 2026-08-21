@@ -32,7 +32,7 @@ describe('a bar that never changes shape', () => {
     // "I do not know what to click" is the fault a name and a count leave behind
     expect(markup).toContain('<span class="why">{axis.hint}</span>');
     expect(markup).toContain('<span class="why">{question.hint}</span>');
-    expect(markup).toContain('title="{axis?.hint ?? \'\'} — click to change it"');
+    expect(markup).toContain("title={axis?.hint ?? 'Change this term'}");
     expect(markup).toContain('class="heading titled"');
   });
 

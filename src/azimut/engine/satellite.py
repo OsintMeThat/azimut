@@ -179,6 +179,15 @@ def place_for_proof(
 #: for anything it shows; `located-at` for material POV says was recorded there.
 PLACE_VERBS = (links.DEPICTS, links.LOCATED_AT)
 
+#: The roads that pose a proof's point on its **material**, and the whole reason the set
+#: is smaller than "everybody": a proof reaching a place is the proof's own conclusion,
+#: so it is read and withdrawn whoever filed it — but a media reaching a place is one
+#: claim among several about that file, and only these two write one *because a proof
+#: concluded there*. The composer's save, and the sheet's build (`sheetproofs.BY`, named
+#: here rather than imported since that module reads this one). Import enrichment's EXIF
+#: reading and an edge the analyst stated in Details are not this save's to take back.
+POINT_ROADS = ("proof-composer", "sheet-proofs")
+
 
 def restate_proof_point(
     case: Case,
@@ -203,26 +212,25 @@ def restate_proof_point(
     **It has to be the whole list**: this reconciles by difference, so filing one
     point on its own would take back every other point the same proof holds.
 
-    **Only what the composer itself wrote is reconciled** (``by``). An edge the
-    analyst stated by hand in Details, or one import enrichment proposed from a
-    photo's EXIF, is a separate claim about the same file: saving a proof must not
-    silently drop it.
+    **Every point the proof states, whoever filed it.** A sheet row files one for a
+    proof it never composed, and the composer *opens on it* as a row of its own
+    (:func:`open_spec`) — so read on the composer's own provenance, deleting that row
+    found nothing to withdraw: the save reported no orphan, the mark stayed on the map,
+    and the next open adopted the point again. A row that cannot be deleted is worse
+    than one that was never offered. The material is the narrower question, and it keeps
+    its own answer (:data:`POINT_ROADS`).
 
     Answers with the places this proof let go of that nothing else holds — the
     caller asks about deleting them (``api/proofs``), since a point nobody points
     at is the analyst's own leftover to keep or drop, not ours to sweep.
     """
-    material = [
-        entity
-        for entity in (links.derivation_subgraph(case, proof_id) or {}).get("entities", [])
-        if entity["id"] != proof_id
-    ]
+    material = _material_of(case, proof_id)
     wanted = {entry["id"]: bool(entry.get("pov")) for entry in stated}
     released: list[dict[str, Any]] = []
-    for old_id in _stated_places(case, proof_id, by=by):
+    for old_id in _stated_places(case, proof_id):
         if old_id in wanted:
             continue
-        _withdraw_point(case, proof_id, old_id, material, by=by)
+        _withdraw_point(case, proof_id, old_id, material)
         old = case.get_entity(old_id)
         if old is not None and not case.links_of(old_id):
             released.append(old)
@@ -231,18 +239,33 @@ def restate_proof_point(
     return released
 
 
-def _stated_places(case: Case, proof_id: str, *, by: str) -> list[str]:
+def _material_of(case: Case, proof_id: str) -> list[dict[str, Any]]:
+    """The files a proof was composed from, the whole chain down: the frame, the collage,
+    the video two hops up, the capture. Read off the derivation closure rather than the
+    panels, since a frame stands between a proof and the clip it came from."""
+    return [
+        entity
+        for entity in (links.derivation_subgraph(case, proof_id) or {}).get("entities", [])
+        if entity["id"] != proof_id
+    ]
+
+
+def _stated_places(case: Case, proof_id: str) -> list[str]:
     """The points this proof currently concludes on, read off its own edges.
 
     The proof is the only reliable record of where a save put its material: the
     edges it wrote on a video carry no proof id, so what a re-save has to undo is
     read from the composition that wrote them.
+
+    **Whoever wrote them.** A proof reaching a place has one reading — this composition
+    concludes there — so a row filed by another road is a row this list holds, and the
+    same list the composer opens on (:func:`_adopted_points`) is the one a save
+    reconciles. Read on one provenance, the two disagreed and a point nobody could
+    delete was the result.
     """
     seen: list[str] = []
     for link in case.links_of(proof_id):
         if link["from"] != proof_id or link["type"] not in PLACE_VERBS:
-            continue
-        if (link.get("provenance") or {}).get("by") != by:
             continue
         target = case.get_entity(link["to"])
         if target is not None and target["type"] == "place" and link["to"] not in seen:
@@ -250,18 +273,17 @@ def _stated_places(case: Case, proof_id: str, *, by: str) -> list[str]:
     return seen
 
 
-def _other_proof_states(case: Case, place_id: str, proof_id: str, *, by: str) -> bool:
+def _other_proof_states(case: Case, place_id: str, proof_id: str) -> bool:
     """True if another proof still concludes on this point.
 
     Two proofs built from one video can land on the same roof, and the edges they
     wrote on that video are indistinguishable. So a save withdraws its own point
     only while it is the last one claiming it: dropping the material's edge here
-    would undo a conclusion this proof never made.
+    would undo a conclusion this proof never made — including one a sheet built,
+    which is why this asks what the other proof says and not who wrote it down.
     """
     for link in case.links_of(place_id):
         if link["to"] != place_id or link["type"] not in PLACE_VERBS or link["from"] == proof_id:
-            continue
-        if (link.get("provenance") or {}).get("by") != by:
             continue
         source = case.get_entity(link["from"])
         if source is not None and source["type"] == "proof":
@@ -269,25 +291,36 @@ def _other_proof_states(case: Case, place_id: str, proof_id: str, *, by: str) ->
     return False
 
 
-def _drop_stated(case: Case, entity_id: str, place_id: str, verbs: tuple[str, ...], by: str) -> None:
-    """Remove this entity's own statements about a point, and nothing else's."""
+def _drop_stated(
+    case: Case,
+    entity_id: str,
+    place_id: str,
+    verbs: tuple[str, ...],
+    authors: tuple[str, ...] | None,
+) -> None:
+    """Remove statements about a point, from the authors named — and nothing else's.
+
+    ``None`` is every author, which is what a proof's own edge to a place is reconciled
+    on: there is one thing that edge can mean. A media's edge is scoped instead, since
+    the same edge is what a camera's EXIF and the analyst's own hand also write.
+    """
     for link in case.links_of(entity_id):
         if link["from"] != entity_id or link["to"] != place_id or link["type"] not in verbs:
             continue
-        if (link.get("provenance") or {}).get("by") == by:
+        if authors is None or (link.get("provenance") or {}).get("by") in authors:
             case.remove_link(link["id"])
 
 
 def _withdraw_point(
-    case: Case, proof_id: str, place_id: str, material: list[dict[str, Any]], *, by: str
+    case: Case, proof_id: str, place_id: str, material: list[dict[str, Any]]
 ) -> None:
     """Take back a point this proof no longer concludes on, material included."""
-    shared = _other_proof_states(case, place_id, proof_id, by=by)
-    _drop_stated(case, proof_id, place_id, PLACE_VERBS, by)
+    shared = _other_proof_states(case, place_id, proof_id)
+    _drop_stated(case, proof_id, place_id, PLACE_VERBS, None)
     if shared:
         return
     for entity in material:
-        _drop_stated(case, entity["id"], place_id, PLACE_VERBS, by)
+        _drop_stated(case, entity["id"], place_id, PLACE_VERBS, POINT_ROADS)
 
 
 def _state_point(
@@ -345,7 +378,7 @@ def _state_point(
     """
     verb = links.LOCATED_AT if pov else links.DEPICTS
     kinds = ("image", "video", "audio") if pov else ("image", "video")
-    shared = _other_proof_states(case, place_id, proof_id, by=by)
+    shared = _other_proof_states(case, place_id, proof_id)
     case.add_link(proof_id, place_id, links.DEPICTS, by=by, unique=True)
     for entity in material:
         wanted: str | None = None
@@ -355,7 +388,7 @@ def _state_point(
             wanted = verb
         if not shared:
             stale = tuple(v for v in PLACE_VERBS if v != wanted)
-            _drop_stated(case, entity["id"], place_id, stale, by)
+            _drop_stated(case, entity["id"], place_id, stale, POINT_ROADS)
         if wanted is not None:
             case.add_link(entity["id"], place_id, wanted, by=by, unique=True)
 
@@ -667,29 +700,45 @@ def spec_points(spec: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _settled(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One entry per point, one POV at most, capped — whatever order they arrived in."""
+    """One entry per point, one POV at most, capped — whatever order they arrived in.
+
+    A point written twice is one row, and it keeps the answer **either** line gave about
+    the camera: dropped with the duplicate, a POV ticked on the second of two lines a
+    metre apart was an assertion nothing in the graph carried, on a line the composer
+    still showed it on.
+    """
     kept: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    at: dict[str, int] = {}
     pov_taken = False
     for point in points:
         key = coord_key(point["lat"], point["lon"])
-        if key in seen:
+        pov = point["pov"] and not pov_taken
+        if key in at:
+            if pov:
+                kept[at[key]] = {**kept[at[key]], "pov": True}
+                pov_taken = True
             continue
-        seen.add(key)
-        if point["pov"] and pov_taken:
-            point = {**point, "pov": False}
-        pov_taken = pov_taken or point["pov"]
-        kept.append(point)
+        at[key] = len(kept)
+        kept.append({**point, "pov": pov})
+        pov_taken = pov_taken or pov
         if len(kept) == MAX_PROOF_POINTS:
             break
     return kept
 
 
-def _recorded_there(case: Case, place_id: str) -> bool:
-    """True when some material says it was recorded at this point — POV, read off
-    the graph rather than off a spec that never learned about the point."""
+def _recorded_there(case: Case, place_id: str, material: set[str]) -> bool:
+    """True when this proof's material says it was recorded at this point — POV, read off
+    the graph rather than off a spec that never learned about the point.
+
+    **Its own material.** Two proofs conclude on one place often enough, and somebody
+    else's footage being recorded there says nothing about this composition: read on any
+    media at all, a second proof's clip ticked POV on a row of this one, and the next save
+    wrote `located-at` onto footage that had never claimed it.
+    """
     for link in case.links_of(place_id):
         if link["to"] == place_id and link["type"] == links.LOCATED_AT:
+            if link["from"] not in material:
+                continue
             source = case.get_entity(link["from"])
             if source is not None and source["type"] == "media":
                 return True
@@ -717,8 +766,12 @@ def _adopted_points(
 
     A place named by its own coordinates is unnamed — that label is what a place
     with nothing else to say gets — so it arrives as a point with no name.
+
+    The proof's chain is read once, and only when there is an adopted point to read it
+    for: POV is a question about this composition's own footage
+    (:func:`_recorded_there`), and every other proof answers it without a query.
     """
-    found: list[dict[str, Any]] = []
+    found: list[tuple[str, dict[str, Any]]] = []
     for link in incident if incident is not None else case.links_of(proof_id):
         if link["from"] != proof_id or link["type"] not in PLACE_VERBS:
             continue
@@ -732,13 +785,21 @@ def _adopted_points(
         label = str(place.get("label") or "").strip()
         if label == coords_label(point["lat"], point["lon"]):
             label = ""
-        found.append({
-            **point,
-            "coords": coords_label(point["lat"], point["lon"], "dd"),
-            "label": label,
-            "pov": _recorded_there(case, place["id"]),
-        })
-    return found
+        found.append((
+            place["id"],
+            {
+                **point,
+                "coords": coords_label(point["lat"], point["lon"], "dd"),
+                "label": label,
+            },
+        ))
+    if not found:
+        return []
+    material = {entity["id"] for entity in _material_of(case, proof_id)}
+    return [
+        {**point, "pov": _recorded_there(case, place_id, material)}
+        for place_id, point in found
+    ]
 
 
 def proof_points(

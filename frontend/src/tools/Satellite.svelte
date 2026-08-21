@@ -3822,7 +3822,7 @@
 {#if extGateOpen}
   <Modal title="Capture needs the browser extension" onclose={() => (extGateOpen = false)} width="460px">
     <p class="shot-hint">
-      Google's terms allow nothing programmatic out of this basemap — a capture
+      Google's terms allow nothing programmatic out of this basemap. A capture
       here is a <strong>screenshot of the tab</strong>, and the Azimut Capture
       extension is what takes it (one grab per click, no screen-share prompt,
       works in fullscreen). Other basemaps are not affected.
