@@ -7,11 +7,18 @@
    * retype the forty, because the Board has nowhere to write a verdict and the sheet had no
    * way to hear about the graph.
    *
-   * Two answers and one press: which type, and which of its fields deserve a column.
-   * Nothing else travels — a sheet holding every attribute of every entity would be a
-   * second copy of the graph, and the second copy is the one that goes stale. The rows come
-   * back pointing at what they came from, so editing them and promoting them again updates
-   * those entities rather than minting twins.
+   * Two shapes, and the choice is the first thing asked because it decides everything
+   * after it.
+   *
+   * **One row per entity** takes a type and the fields that deserve a column. Nothing else
+   * travels — a sheet holding every attribute of every entity would be a second copy of the
+   * graph, and the second copy is the one that goes stale. The rows come back pointing at
+   * what they came from, so editing them and promoting them again updates those entities
+   * rather than minting twins.
+   *
+   * **My geolocations** takes neither: its shape is fixed, one row per proof with
+   * the media it rests on and the place it puts on the map. That fixed shape is what lets it
+   * be kept level with the case afterwards, which the other one cannot be.
    */
   import Icon from './Icon.svelte';
   import { api } from '../lib/api.js';
@@ -24,6 +31,7 @@
    *  thousand rows nobody works through it, and the honest answer is a filtered Board. */
   const MAX_ROWS = 2000;
 
+  let shape = $state('generic');
   let counts = $state([]);
   let type = $state('');
   let fields = $state([]);
@@ -57,13 +65,19 @@
   // Named after what it holds until the analyst says otherwise, which is what they would
   // have typed anyway.
   $effect(() => {
-    if (!touched && type) title = `${entityLabel(type)} to check`;
+    if (touched) return;
+    if (proofs) title = 'My geolocations';
+    else if (type) title = `${entityLabel(type)} to check`;
   });
 
+  const proofs = $derived(shape === 'proofs');
   const available = $derived(entityFields(type).filter((field) => field.kind !== 'geojson'));
-  const held = $derived(counts.find((entry) => entry.id === type)?.count ?? 0);
+  // The proofs shape counts proofs, whatever type the other branch is sitting on.
+  const held = $derived(
+    counts.find((entry) => entry.id === (proofs ? 'proof' : type))?.count ?? 0,
+  );
   const taken = $derived(Math.min(held, MAX_ROWS));
-  const ready = $derived(Boolean(type && title.trim() && held));
+  const ready = $derived(Boolean((proofs || type) && title.trim() && held));
 
   function toggle(key) {
     fields = fields.includes(key) ? fields.filter((entry) => entry !== key) : [...fields, key];
@@ -71,6 +85,19 @@
 </script>
 
 <div class="from-case">
+  <p class="label">What the sheet is</p>
+  <div class="shapes">
+    <button class="shape" class:on={!proofs} onclick={() => (shape = 'generic')}>
+      <strong>One row per entity</strong>
+      <small>a worklist over a type you choose</small>
+    </button>
+    <button class="shape" class:on={proofs} onclick={() => (shape = 'proofs')}>
+      <strong>My geolocations</strong>
+      <small>one row per proof, kept level with the case</small>
+    </button>
+  </div>
+
+  {#if !proofs}
   <p class="label">What is in it</p>
   {#if counts.length}
     <div class="types">
@@ -84,6 +111,7 @@
   {:else}
     <p class="note">This case holds no entities yet.</p>
   {/if}
+  {/if}
 
   <label class="row">
     <span>Name</span>
@@ -91,7 +119,7 @@
            oninput={() => (touched = true)} />
   </label>
 
-  {#if available.length}
+  {#if !proofs && available.length}
     <p class="label">
       And which fields get a column. None is fine if the sheet only carries your own.
     </p>
@@ -108,7 +136,11 @@
 
   <p class="says" class:none={!ready}>
     {#if !held}
-      This case holds nothing of that type.
+      {proofs ? 'This case holds no proofs yet.' : 'This case holds nothing of that type.'}
+    {:else if proofs}
+      <strong>{taken}</strong> {taken === 1 ? 'row' : 'rows'}, one per proof, with its source
+      media, its place and its coordinates.
+      {#if held > MAX_ROWS}<span>Only the first {MAX_ROWS} by name.</span>{/if}
     {:else}
       <strong>{taken}</strong> {taken === 1 ? 'row' : 'rows'}, one per
       {entityLabel(type).toLowerCase()}, plus a status and a note to work in.
@@ -116,15 +148,20 @@
     {/if}
   </p>
   <p class="note">
-    Each row points back at what it came from, so promoting it later updates that entity instead
-    of making a second one.
+    {#if proofs}
+      The case writes those columns and Refresh keeps them level with it. Status, Notes and any
+      column you add are yours.
+    {:else}
+      Each row points back at what it came from, so promoting it later updates that entity
+      instead of making a second one.
+    {/if}
   </p>
 
   <div class="modal-row">
     <div class="spacer"></div>
     <button class="btn" onclick={onclose}>Cancel</button>
     <button class="btn btn-primary" disabled={busy || !ready}
-            onclick={() => onmake({ title: title.trim(), type, fields, limit: MAX_ROWS })}>
+            onclick={() => onmake({ title: title.trim(), shape, type, fields, limit: MAX_ROWS })}>
       {busy ? 'Building' : 'Build the sheet'}
     </button>
   </div>
@@ -134,6 +171,16 @@
   .from-case { display: flex; flex-direction: column; min-height: 0; }
   .label { color: var(--text-3); font-size: var(--fs-xs); margin: 12px 0 5px; line-height: 1.5; }
   .label:first-child { margin-top: 0; }
+  .shapes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .shape {
+    display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; text-align: left;
+    border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2);
+  }
+  .shape:hover { border-color: var(--border-strong); }
+  .shape.on { border-color: var(--accent); background: var(--accent-soft); }
+  .shape strong { color: var(--text-1); font-size: var(--fs-sm); font-weight: 600; }
+  .shape.on strong { color: var(--accent); }
+  .shape small { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.4; }
   .types { display: flex; flex-wrap: wrap; gap: 4px; }
   .chip {
     display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px;

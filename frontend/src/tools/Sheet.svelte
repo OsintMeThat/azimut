@@ -1512,9 +1512,9 @@
       lastTicked = null;
       return;
     }
-    // Escape with nothing open drops the selection: a rectangle left behind is what makes
-    // the next Delete act on more than the analyst has in mind.
-    if (event.key === 'Escape' && (picked.size || hasRange)) {
+    // Escape with nothing open drops the selection, cursor and all: a rectangle left
+    // behind is what makes the next Delete act on more than the analyst has in mind.
+    if (event.key === 'Escape' && (picked.size || hasRange || cursor.row !== -1)) {
       event.preventDefault();
       dropSelection();
       return;
@@ -1573,13 +1573,14 @@
     }
   }
 
-  /** Both halves of a selection let go at once: the ticks and the dragged rectangle. On
-   *  Escape, and on the bar's own button, since a rectangle left behind is what makes the
-   *  next Delete act on more rows than the analyst has in mind. */
+  /** Every part of a selection let go at once: the ticks, the dragged rectangle and the
+   *  cursor itself. On Escape, and on the bar's own button, since anything left behind is
+   *  what makes the next Delete act on more than the analyst has in mind. */
   function dropSelection() {
     picked = new Set();
     lastTicked = null;
-    anchor = { ...cursor };
+    cursor = { row: -1, column: -1 };
+    anchor = null;
   }
 
   function isKeyColumn(index) {
@@ -1707,7 +1708,7 @@
    *  dashed chip, which says it better than a badge would. */
   function unreadable(rowIndex, column) {
     const role = roles[column.name];
-    if (!role || isChipped(role) || role.kind === 'stamped' || role.kind === 'computed') {
+    if (!role || isChipped(role) || appFilled(column.name)) {
       return false;
     }
     return !readsCell(role, table.rows[rowIndex][column.index]);
@@ -1741,14 +1742,18 @@
    */
   function linkable(name) {
     const kind = roles[name]?.kind;
-    return !kind || kind === 'latlon' || kind === 'picture';
+    // `locked` is here and no other written role is: its whole purpose is a cell that
+    // opens the entity the app filled it from. A stamped date and a computed count point
+    // at nothing, so offering the `@` on them would offer a link to nowhere.
+    return !kind || kind === 'latlon' || kind === 'picture' || kind === 'locked';
   }
 
-  /** Whether the app writes this column rather than the analyst. Those two are typed
-   *  into by nobody: the editor would be a box whose value is overwritten on save. */
+  /** Whether the app writes this column rather than the analyst. None of the three is
+   *  typed into: the editor would be a box whose value is overwritten on the next save,
+   *  or on the next refresh for a column the case owns. */
   function appFilled(name) {
     const kind = roles[name]?.kind;
-    return kind === 'stamped' || kind === 'computed';
+    return kind === 'stamped' || kind === 'computed' || kind === 'locked';
   }
 
   /** Whether an edit may land in this column at all. The row's handle is the case's,
@@ -1759,6 +1764,75 @@
   }
 
   const fillable = $derived(table.columns.filter(writable));
+
+  // -- the cell bar ----------------------------------------------------------
+
+  /**
+   * The cell under the cursor, written in a box wide enough to read it.
+   *
+   * A grid cell is thirty pixels tall and as wide as its column, and the sentences an
+   * analyst writes into `Title` are neither. The bar is the same cell, at the top, with
+   * the whole value in one place: what a spreadsheet's formula bar is for.
+   *
+   * The draft carries **the cell it belongs to**, not just the text. The box loses the
+   * focus by the analyst clicking another cell, and the grid has already moved the cursor
+   * there by the time the blur lands — a draft that only knew its text would be committed
+   * into whichever cell was clicked next.
+   */
+  let barDraft = $state(null); // { row, column, value }
+  const barColumn = $derived(cursor.row === -1 ? null : (table.columns[cursor.column] ?? null));
+  /** What the bar shows when nothing is being typed in it. The open cell editor wins:
+   *  two boxes on one cell that disagree is the worse of the two bugs. */
+  const barCell = $derived.by(() => {
+    if (cursor.row === -1) return '';
+    if (editing && editing.row === cursor.row && editing.column === cursor.column) {
+      return editing.value;
+    }
+    return table.rows[cursor.row]?.[cursor.column] ?? '';
+  });
+  const barValue = $derived(
+    barDraft?.row === cursor.row && barDraft?.column === cursor.column ? barDraft.value : barCell,
+  );
+  const barWritable = $derived(Boolean(barColumn) && writable(barColumn));
+  /** Why the box refuses, when it does. The two reasons are different ones: the key is the
+   *  case's handle on the row, and the stamped columns are rewritten on every save. */
+  const barLocked = $derived.by(() => {
+    if (!barColumn || barWritable) return '';
+    return String(barColumn).toLowerCase() === ID_COLUMN
+      ? 'The row’s handle'
+      : 'Written by the app on every save';
+  });
+
+  /** Taking over from the cell's own editor. Closed rather than left open behind the
+   *  bar, so the value being typed is only ever in one box. */
+  function barFocus() {
+    if (editing) commitEdit();
+  }
+
+  function commitBar({ down = false } = {}) {
+    const draft = barDraft;
+    barDraft = null;
+    if (!draft || !writable(table.columns[draft.column])) return;
+    const before = table.rows[draft.row]?.[draft.column];
+    if (before !== draft.value) {
+      editCells([{ row: draft.row, column: draft.column, before, after: draft.value }]);
+    }
+    if (down) step('down');
+  }
+
+  function onBarKey(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      commitBar({ down: true });
+      scroller?.focus();
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      barDraft = null;
+      scroller?.focus();
+    }
+  }
 
   // -- the clipboard ---------------------------------------------------------
 
@@ -2153,6 +2227,48 @@
    *  coordinates, which is what a geolocation index is. Offered on nothing else, because a
    *  button that answers "this sheet cannot do that" should not have been there. */
   const buildable = $derived(canBuild(columnKinds(table, meta)));
+
+  /** Whether this sheet was built out of the case's proofs, and can therefore be brought
+   *  back level with them. Read off the sidecar rather than off the column names: a sheet
+   *  whose headings happen to spell `Title` is not this shape, and `built` is the record
+   *  only the build writes. */
+  const refreshable = $derived(Object.keys(meta.built ?? {}).length > 0);
+  let refreshing = $state(false);
+
+  /**
+   * Bring a proofs sheet level with the case, on a press.
+   *
+   * Never on open. A sheet that rewrites itself when it is looked at is a sheet whose file
+   * moves under an analyst who only wanted to read it, and it would fight the stamp — which
+   * exists precisely so two readers of one file cannot silently overwrite each other.
+   *
+   * Nothing is ever removed here. A proof deleted since the build keeps its row and says NO
+   * in its `In case` column: the notes on that row are the analyst's, and throwing them away
+   * to tidy the table is not a decision this button gets to make.
+   */
+  async function refreshFromCase() {
+    if (refreshing || !openId) return;
+    refreshing = true;
+    try {
+      const answer = await api.post(`/api/cases/${caseId}/sheets/${openId}/refresh`, {
+        columns: table.columns,
+        rows: table.rows,
+        meta,
+        stamp,
+      });
+      adopt({ ...answer, title });
+      await reloadCase();
+      const said = [
+        answer.added ? `${answer.added} row${answer.added === 1 ? '' : 's'} added` : '',
+        answer.gone ? `${answer.gone} proof${answer.gone === 1 ? '' : 's'} no longer in the case` : '',
+      ].filter(Boolean);
+      toast(said.length ? `${said.join(', ')}.` : 'Already level with the case.');
+    } catch (error) {
+      toast(error.message || 'This sheet could not be refreshed.', 'error');
+    } finally {
+      refreshing = false;
+    }
+  }
 
   function previewBuild(declaration) {
     return api.post(`/api/cases/${caseId}/sheets/${openId}/proofs/preview`, {
@@ -2857,7 +2973,7 @@
    * gone, and the undo reads as having done nothing at all.
    */
   function setRole(name, role) {
-    const touchesFile = appFilled(name) || role?.kind === 'stamped' || role?.kind === 'computed';
+    const touchesFile = appFilled(name) || ['stamped', 'computed', 'locked'].includes(role?.kind);
     structural(
       () => {
         const next = { ...(meta.roles ?? {}) };
@@ -3258,7 +3374,9 @@
   function menuValues(entry) {
     const role = roles[entry.column];
     if (!isChipped(role)) return entry.value ? [entry.value] : [];
-    return cellChips(entry.value, role).map((chip) => chip.value);
+    // Distinct: a cell holding one word twice asks one question, and a menu offering
+    // “Only “S-125”” twice is the same filter drawn twice.
+    return [...new Set(cellChips(entry.value, role).map((chip) => chip.value))];
   }
 
   // -- the grid's own scrollbars ---------------------------------------------
@@ -3726,6 +3844,15 @@
     </div>
   {:else}
     <div class="question">
+      {#if refreshable}
+        <!-- Beside the search rather than up in the header: it acts on the rows, and this
+             bar is the one that does. Pressed, never automatic — refreshing on open would
+             rewrite a file somebody opened to read. It adds and never removes. -->
+        <button class="btn btn-ghost btn-sm" disabled={refreshing} onclick={refreshFromCase}
+                title="File the proofs added since, and restate the columns the case owns">
+          <Icon name="reset" size={13} /> {refreshing ? 'Refreshing' : 'Refresh'}
+        </button>
+      {/if}
       <div class="search">
         <Icon name="search" size={13} />
         <!-- Written by hand rather than bound: the box echoes the keystroke and the grid
@@ -4008,6 +4135,37 @@
       </p>
     {/if}
 
+    <!-- The cell under the cursor, in a box the width of the tool. A cell thirty pixels
+         tall is where a value is read; this is where a long one is written.
+
+         Always drawn, empty and all, rather than appearing with the cursor: a bar that
+         arrives on the first click pushes the grid down under the pointer, and the drag
+         that click started then paints a selection across cells nobody aimed at.
+
+         A textarea rather than a box one line tall, because the cells hold paragraphs and
+         the corner pulls the bar as far open as the value needs. Enter commits it — a
+         newline is Shift+Enter, as it is in the cell's own editor. -->
+    <div class="cell-bar" class:idle={!barColumn}>
+      {#if barColumn}
+        <span class="cell-bar-where">
+          <strong>{shown.indexOf(cursor.row) + 1}</strong>{barColumn}
+        </span>
+      {/if}
+      <textarea class="input cell-bar-box" rows="1" spellcheck="false"
+                aria-label="The cell under the cursor"
+                placeholder={barColumn ? '' : 'Click a cell'}
+                disabled={!barColumn}
+                readonly={Boolean(barColumn) && !barWritable}
+                title={barLocked}
+                value={barValue}
+                onfocus={barFocus}
+                oninput={(event) => (barDraft = {
+                  row: cursor.row, column: cursor.column, value: event.currentTarget.value,
+                })}
+                onkeydown={onBarKey}
+                onblur={() => commitBar()}></textarea>
+    </div>
+
     <div class="grid-panel">
     <div class="grid-wrap" class:dropping
          ondragover={(event) => { event.preventDefault(); dropping = true; }}
@@ -4217,7 +4375,9 @@
                   {/if}
                 {:else if chips}
                   <span class="value chips">
-                    {#each chips as chip (chip.raw)}
+                    <!-- Keyed on the position, not the value: a cell may hold the same
+                         word twice, and a cell is drawn as what it says. -->
+                    {#each chips as chip, at (at)}
                       <button class="cell-chip c-{chip.colour ?? 'none'}"
                               class:unknown={!chip.known} class:tinted={chip.colour}
                               title={chip.known ? chip.value : `${chip.value}, outside this column's words`}
@@ -4281,7 +4441,7 @@
                        hundred and twenty characters of query string in a cell
                        thirty pixels tall says nothing at all. -->
                   <span class="value">
-                    {#each links as url (url)}
+                    {#each links as url, at (at)}
                       <a class="cell-url" href={url} target="_blank" rel="noreferrer noopener"
                          title={url} onclick={(event) => event.stopPropagation()}>
                         {linkLabel(url)}
@@ -4999,6 +5159,35 @@
   .search .input { width: 220px; }
   .count { font-size: var(--fs-sm); color: var(--text-3); }
   .count strong { color: var(--text-1); font-weight: 600; }
+  /* The cell under the cursor. Flat against the grid it belongs to — a bar of its own
+     chrome above a grid of chrome is two headers — and as short as one line of text,
+     since it is drawn whether or not anything is being written in it. */
+  .cell-bar {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 3px 16px; border-bottom: 1px solid var(--border); background: var(--bg-1);
+  }
+  .cell-bar-where {
+    display: inline-flex; align-items: baseline; gap: 6px; flex: none;
+    min-width: 96px; max-width: 220px; padding-top: 5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: var(--fs-xs); color: var(--text-3);
+  }
+  .cell-bar-where strong {
+    color: var(--text-2); font-weight: 600; font-variant-numeric: tabular-nums;
+  }
+  /* One line tall until the corner is pulled, and it stays where it is pulled to: the
+     value the analyst is reading is the reason they opened it that far. */
+  .cell-bar-box {
+    flex: 1; min-width: 0; height: 26px; min-height: 26px; max-height: 40vh;
+    padding: 3px 8px; resize: vertical; line-height: 1.5;
+    font-family: inherit; white-space: pre-wrap; overflow-y: auto;
+  }
+  .cell-bar-box[readonly] { color: var(--text-3); }
+  /* Nothing picked yet: a line of text at the margin rather than an empty field. A box
+     drawn around nothing, with a grab handle on the far end of it, is furniture. */
+  .cell-bar-box:disabled {
+    background: none; border-color: transparent; resize: none; padding-left: 0;
+  }
   .chip {
     display: inline-flex; align-items: center; gap: 6px; padding: 2px 7px;
     border: 1px solid var(--border); border-radius: var(--r-sm);
@@ -5335,7 +5524,13 @@
   .add-column:hover { color: var(--accent); background: var(--bg-2); }
 
   .body { position: relative; width: max-content; min-width: 100%; }
-  .rows { position: absolute; top: 0; left: 0; width: 100%; }
+  /* Both lists are moved with a transform, and a transform is a stacking context: without
+     these two, the ghost simply painted last and sat on top of anything a row put over it.
+     The list a cell editor's offers belong to has to win — the menu opens downwards, so on
+     the last rows of a short sheet it lands right across the empty line, and a click meant
+     for a word added a row instead. */
+  .rows { position: absolute; top: 0; left: 0; width: 100%; z-index: 1; }
+  .rows.ghost { z-index: 0; }
   /* The height is written inline, from the sheet's own answer: a worklist wants thirty
      pixels and the column the reasoning is written in cannot live in one line. */
   /* The colour is a layer over the background rather than the background itself, the way

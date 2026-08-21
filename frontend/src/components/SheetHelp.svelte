@@ -26,7 +26,7 @@
     ['Home / End', 'The first and last column of the row'],
     ['PageUp / PageDown', 'A screenful of rows'],
     ['Ctrl+A', 'Select every row on screen'],
-    ['Escape', 'Close what is open, or drop the selection'],
+    ['Escape', 'Close what is open, then let go of the cell'],
     ['Ctrl+C / Ctrl+V', 'Copy the rectangle, paste a block from the cursor'],
     ['Ctrl+D', 'Copy the top of the selection down'],
     ['Delete', 'Empty the selected cells'],
@@ -50,6 +50,7 @@
     ['Drop a CSV on the grid', 'File it as a new sheet'],
     ['Drop an image on a row', 'Bring it into the case and cite it in that cell'],
     ['The last, empty row', 'Type in it and the row exists'],
+    ['The bar above the headings', 'The cell under the cursor, written full width'],
   ];
 </script>
 

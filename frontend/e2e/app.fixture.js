@@ -693,7 +693,7 @@ export async function installAppFixture(page, options = {}) {
   const sheetWrites = [];
   let sheetTick = 1000;
   const nextStamp = () => `${(sheetTick += 1)}-70`;
-  const makeSheet = (title, columns, rows = []) => {
+  const makeSheet = (title, columns, rows = [], meta = null) => {
     const id = `sheet-${fixtureSheets.size + 1}`;
     const held = {
       id,
@@ -701,7 +701,9 @@ export async function installAppFixture(page, options = {}) {
       path: `sheets/${title}.csv`,
       columns: ['id', ...columns],
       rows: rows.map((row, at) => [`r${at + 1}`, ...row]),
-      meta: { version: 5 },
+      // A sheet may arrive with a sidecar: the roles are what make a column offer a
+      // vocabulary, and a spec about that list cannot set one up through the panel.
+      meta: { version: 5, ...(meta ?? {}) },
       stamp: nextStamp(),
     };
     fixtureSheets.set(id, held);
@@ -719,7 +721,9 @@ export async function installAppFixture(page, options = {}) {
     dropped_roles: [],
     pieces: {},
   });
-  for (const [title, columns, rows] of options.sheets ?? []) makeSheet(title, columns, rows);
+  for (const [title, columns, rows, meta] of options.sheets ?? []) {
+    makeSheet(title, columns, rows, meta);
+  }
 
   const timelineEntity = (id) => fixtureCatalog.find((entity) => entity.id === id)
     ?? fixtureChains[id]?.entity

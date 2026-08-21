@@ -18,10 +18,15 @@
  * `lib/sheet.js` — that one imports this, and the arrow points one way.
  */
 
-/** Every role a column may hold. Mirrors `engine/sheetroles.ROLE_KINDS`. The last three
- *  arrived with the bridge to the case and each is read by something: `url` is the column
- *  a promotion files as sources, `row` points at another row of the same sheet, `offset`
- *  carries a time relative to a named anchor. */
+/** Every role a column may hold. Mirrors `engine/sheetroles.ROLE_KINDS`. `url` is the
+ *  column a promotion files as sources, `row` points at another row of the same sheet,
+ *  `offset` carries a time relative to a named anchor.
+ *
+ *  `locked` is the odd one: a column whose text the **app** owns and the analyst reads. It
+ *  exists because a sheet built out of the case is a view of the case, and a view somebody
+ *  can type over is a view that starts lying the first time they do. Unlike `stamped` and
+ *  `computed` it carries a link — the point of those columns is that the cell opens the
+ *  entity — so `linkable()` admits it where it refuses every other role. */
 export const ROLE_KINDS = [
   'state',
   'choice',
@@ -35,6 +40,7 @@ export const ROLE_KINDS = [
   'offset',
   'stamped',
   'computed',
+  'locked',
 ];
 
 /** What a cell of a `picture` column has to hold before anything is drawn from it: an
@@ -159,13 +165,25 @@ export const MAX_ANCHORS = 12;
  * because a computed column is written into the CSV and the collaborator opening the file
  * is owed the number rather than an empty column.
  *
- * The last two are what `has_point` is not. It answers *whether* the case knows the row's
- * subject; `point` and `relations` answer **what it knows** — the coordinates, and the
- * entities at the far end of its edges. Without them a column pointed at the case said
- * nothing about the case, so the coordinates and the parent unit went on being copied by
- * hand into the column alongside, which is the retyping the whole bridge exists to end.
+ * `point` and `relations` are what `has_point` is not. It answers *whether* the case knows
+ * the row's subject; those two answer **what it knows** — the coordinates, and the entities
+ * at the far end of its edges. Without them a column pointed at the case said nothing about
+ * the case, so the coordinates and the parent unit went on being copied by hand into the
+ * column alongside, which is the retyping the whole bridge exists to end.
+ *
+ * `in_case` is the only one that reads `built` rather than `links`, because it is the only
+ * one asking about an entity that may be **gone**: a link naming something deleted is swept
+ * on the next read, so by the time anyone asks, the cell that would have answered is blank.
+ * The row that lost its proof is exactly the row worth finding.
  */
-export const COMPUTED_NATURES = ['has_point', 'filled_of', 'yes_of', 'point', 'relations'];
+export const COMPUTED_NATURES = [
+  'has_point',
+  'filled_of',
+  'yes_of',
+  'point',
+  'relations',
+  'in_case',
+];
 
 /** The natures that count over a chosen set of columns rather than asking the graph. */
 export const COUNTING_NATURES = ['filled_of', 'yes_of'];

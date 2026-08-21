@@ -273,6 +273,37 @@ describe('opening a sheet', () => {
     expect(target.querySelector('.count').textContent.replace(/\s+/g, ' ')).toContain('3 of 3');
   });
 
+  /**
+   * A cell may say the same thing twice, and the grid draws it.
+   *
+   * Two identical links pasted one after the other, or a word repeated in a column of
+   * words, are ordinary text — and they were fatal: the chips and the links were drawn
+   * from keyed blocks keyed on the value, so the second one aborted the render of the
+   * whole grid. The sheet then stayed on "Opening." on every visit, with nothing wrong
+   * with the file at all.
+   */
+  it('draws a cell that holds the same value twice', async () => {
+    const doubled = {
+      ...structuredClone(SHEET),
+      columns: ['id', 'Sources', 'Status'],
+      rows: [['r1', 'https://x.com/a/1 https://x.com/a/1', 'seen, seen']],
+      meta: {
+        ...structuredClone(SHEET.meta),
+        roles: { Status: { kind: 'choice', values: ['seen'], multi: ',' } },
+      },
+    };
+    get.mockImplementation((path) =>
+      path.includes('/sheets/') && !path.endsWith('/sheets')
+        ? Promise.resolve(structuredClone(doubled))
+        : route(path),
+    );
+    await open();
+
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].querySelectorAll('.cell-url')).toHaveLength(2);
+    expect(rows()[0].querySelectorAll('.cell-chip')).toHaveLength(2);
+  });
+
   it('says so when the file on disk carries no key column', async () => {
     get.mockImplementation((path) =>
       path.includes('/sheets/') && !path.endsWith('/sheets')
@@ -337,6 +368,120 @@ describe('editing a cell', () => {
     key.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     flushSync();
     expect(target.querySelector('.editor')).toBeNull();
+  });
+});
+
+describe('the cell under the cursor', () => {
+  const bar = () => target.querySelector('.cell-bar-box');
+
+  /** Drawn from the start, and empty. It used to arrive with the cursor, which pushed the
+   *  grid down under the pointer mid-click and painted a selection nobody aimed at. */
+  it('is there before a cell is picked, and takes nothing', async () => {
+    await open();
+    expect(bar().disabled).toBe(true);
+    expect(target.querySelector('.cell-bar-where')).toBeNull();
+  });
+
+  it('shows the cell the cursor is on, and says which one', async () => {
+    await open();
+    press(rows()[1].querySelectorAll('.cell:not(.gutter)')[1]);
+    await settle();
+
+    expect(bar().value).toBe('Pont nord');
+    expect(target.querySelector('.cell-bar-where').textContent.replace(/\s+/g, ' ').trim())
+      .toBe('2Subject');
+  });
+
+  it('writes the cell and steps down on Enter', async () => {
+    vi.useFakeTimers();
+    await open();
+    press(rows()[0].querySelectorAll('.cell:not(.gutter)')[1]);
+    await settle();
+
+    bar().value = 'Quai nord';
+    bar().dispatchEvent(new Event('input', { bubbles: true }));
+    bar().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    flushSync();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put.mock.calls[0][1].rows[0]).toEqual(['r1', 'Quai nord', 'ruled out']);
+    // The cursor went down a row, and the box came with it.
+    expect(bar().value).toBe('Pont nord');
+  });
+
+  it('lets go of what was typed on Escape', async () => {
+    await open();
+    press(rows()[0].querySelectorAll('.cell:not(.gutter)')[1]);
+    await settle();
+
+    bar().value = 'Quai nord';
+    bar().dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    bar().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+
+    expect(bar().value).toBe('Quai sud');
+    expect(text(rows()[0])).toEqual(['r1', 'Quai sud', 'ruled out']);
+  });
+
+  /** The blur arrives after the grid has already moved the cursor to the cell that was
+   *  clicked, so a draft that only knew its text landed in the wrong row. */
+  it('writes what was typed into the cell it was typed for, not the one clicked next', async () => {
+    vi.useFakeTimers();
+    await open();
+    press(rows()[0].querySelectorAll('.cell:not(.gutter)')[1]);
+    await settle();
+
+    bar().value = 'Quai nord';
+    bar().dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    // The pointer lands on another row, and only then does the box let go.
+    press(rows()[2].querySelectorAll('.cell:not(.gutter)')[1]);
+    bar().dispatchEvent(new Event('blur', { bubbles: true }));
+    flushSync();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(put.mock.calls[0][1].rows[0]).toEqual(['r1', 'Quai nord', 'ruled out']);
+    expect(put.mock.calls[0][1].rows[2]).toEqual(['r3', 'Gare est', 'to check']);
+  });
+
+  it('goes back to nothing picked on Escape', async () => {
+    await open();
+    press(rows()[0].querySelectorAll('.cell:not(.gutter)')[1]);
+    await settle();
+    expect(bar().disabled).toBe(false);
+
+    target.querySelector('.grid').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
+    await settle();
+
+    expect(target.querySelector('.cell.cursor')).toBeNull();
+    expect(bar().disabled).toBe(true);
+  });
+
+  it('refuses the key column, and says why', async () => {
+    await open();
+    press(rows()[0].querySelectorAll('.cell:not(.gutter)')[0]);
+    await settle();
+
+    expect(bar().readOnly).toBe(true);
+    expect(bar().title).toContain('handle');
+  });
+
+  it('follows the cell editor rather than showing a stale value', async () => {
+    await open();
+    const cell = rows()[0].querySelectorAll('.cell:not(.gutter)')[1];
+    cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    await settle();
+
+    const editor = target.querySelector('.editor');
+    editor.value = 'Quai ouest';
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+
+    expect(bar().value).toBe('Quai ouest');
   });
 });
 

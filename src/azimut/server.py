@@ -63,6 +63,7 @@ class BulkBodyLimit:
         ("POST", ("sheets", "*", "move", ANY), "sheets", "MAX_SHEET_BODY_BYTES"),
         ("POST", ("sheets", "*", "proofs", ANY), "sheets", "MAX_SHEET_BODY_BYTES"),
         ("POST", ("sheets", "*", "points"), "sheets", "MAX_SHEET_BODY_BYTES"),
+        ("POST", ("sheets", "*", "refresh"), "sheets", "MAX_SHEET_BODY_BYTES"),
         ("POST", ("sheets", "*", "csv"), "sheets", "MAX_SHEET_BODY_BYTES"),
         ("PUT", ("sheets", "*", ANY), "sheets", "MAX_SHEET_BODY_BYTES"),
     )

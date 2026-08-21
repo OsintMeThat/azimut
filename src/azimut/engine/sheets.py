@@ -368,8 +368,14 @@ def to_csv(columns: list[str], rows: list[list[str]]) -> str:
 #: files a row hangs off itself, referenced and never copied), ``values`` (what a
 #: column's *words* mean in the case, which is the grain a whole column is promoted at)
 #: and ``description`` (the two lines the binders' "How to use" tab was actually for).
+#: Version 6 adds ``built``: the entity a row was **made from**, which is not the same
+#: thing as the entity its cells point at. A link is dropped the moment the case stops
+#: holding what it names — that is `drop_dead_links`, and it is right to do it — so a
+#: sheet built out of the case had no way to say "this row had a proof and no longer
+#: does". ``built`` is the half that survives the sweep, and it is what the ``in_case``
+#: nature reads.
 #: Additive throughout, and `clean_meta` still reads a 1.
-META_VERSION = 5
+META_VERSION = 6
 
 
 def empty_meta() -> dict[str, Any]:
@@ -394,6 +400,7 @@ def empty_meta() -> dict[str, Any]:
         "attachments": {},
         "values": {},
         "description": "",
+        "built": {},
     }
 
 
@@ -586,6 +593,17 @@ def clean_meta(meta: Any, columns: list[str], rows: list[list[str]]) -> dict[str
     description = meta.get("description")
     if isinstance(description, str):
         clean["description"] = _clean_cell(description).strip()[:MAX_DESCRIPTION]
+
+    # -- version 6: the entity the row was made from --------------------------
+    # Deliberately **not** run through the dead-link sweep below. An id here is a record
+    # of where the row came from, not a claim that the case still holds it, so an entity
+    # that has since been deleted must leave this exactly as it is — that is the one
+    # question `in_case` exists to answer.
+    built = meta.get("built")
+    if isinstance(built, dict):
+        for identity, entity_id in built.items():
+            if identity in identities and isinstance(entity_id, str) and entity_id:
+                clean["built"][identity] = entity_id
     return clean
 
 
@@ -727,15 +745,21 @@ def create(
     and nothing could open. The label is slugified here rather than read back off the
     entity because the store keeps a label verbatim, so the path is known before the
     row exists.
+
+    **The label is the file's own stem, suffix and all.** `target` steps a taken name to
+    `-2` rather than refusing it, and the label used to keep the name that was asked for —
+    so building the same shape twice left two sheets reading `My geolocations` in the list,
+    backed by two different files, with nothing on screen to tell them apart. Taking the
+    stem back is what makes the rule this module states hold at birth: the name *is* the
+    filename.
     """
     names, table = normalize(
         columns if columns is not None else ["Subject", "Status", "Notes"],
         rows if rows is not None else [],
     )
-    label = layout.slugify(title, "Sheet")
-    rel = target(case, label)
+    rel = target(case, layout.slugify(title, "Sheet"))
     write_atomic(case.resolve_inside(rel), to_csv(names, table), encoding=CSV_ENCODING)
-    return case.add_entity("sheet", label, {"path": rel}, by="sheet")
+    return case.add_entity("sheet", Path(rel).stem, {"path": rel}, by="sheet")
 
 
 def discard(case: "Case", entity: dict[str, Any]) -> None:
@@ -799,7 +823,9 @@ def read(case: "Case", entity_id: str) -> dict[str, Any]:
     # memory, so the read still leaves the file byte-identical. Without it an `On map`
     # column said whatever the last save said, and a place added from the map an hour ago
     # left the sheet reading NO until somebody happened to type in it.
-    sheetroles.apply_computed(case, columns, rows, clean["roles"], clean["links"])
+    sheetroles.apply_computed(
+        case, columns, rows, clean["roles"], clean["links"], clean["built"]
+    )
     return {
         "id": entity_id,
         "title": entity.get("label") or "Sheet",
@@ -902,7 +928,9 @@ def write(
     # every row including it. Both write **into the table**, before it is serialised,
     # because both are columns a collaborator opening the CSV is meant to read.
     sheetroles.apply_stamped(names, table, clean["roles"])
-    sheetroles.apply_computed(case, names, table, clean["roles"], clean["links"])
+    sheetroles.apply_computed(
+        case, names, table, clean["roles"], clean["links"], clean["built"]
+    )
     write_atomic(path, to_csv(names, table), encoding=CSV_ENCODING)
     write_atomic(meta_path, json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"columns": names, "rows": table, "meta": clean, "stamp": stamp(path)}
@@ -1114,10 +1142,10 @@ def duplicate(
 
 
 #: What the sidecar keeps per row, and therefore what travels when a row moves to
-#: another sheet. Colours and links are keyed by the row key; `promoted` and
-#: `attachments` are too. Everything else in the sidecar belongs to the column or to the
+#: another sheet. Colours and links are keyed by the row key; `promoted`, `attachments`
+#: and `built` are too. Everything else in the sidecar belongs to the column or to the
 #: sheet, and staying behind is what it means for it to belong there.
-ROW_KEYED = ("colours", "links", "promoted", "attachments")
+ROW_KEYED = ("colours", "links", "promoted", "attachments", "built")
 
 
 def column_pairs(

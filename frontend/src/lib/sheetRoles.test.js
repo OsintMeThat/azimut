@@ -73,6 +73,7 @@ describe('the role record', () => {
       'offset',
       'stamped',
       'computed',
+      'locked',
     ]);
   });
 
@@ -216,6 +217,7 @@ describe('the role record', () => {
       'yes_of',
       'point',
       'relations',
+      'in_case',
     ]);
     expect(COUNTING_NATURES).toEqual(['filled_of', 'yes_of']);
     expect(LINKED_NATURES).toEqual(['point', 'relations']);

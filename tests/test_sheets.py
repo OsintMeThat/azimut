@@ -169,7 +169,7 @@ def test_the_sidecar_keeps_roles_notes_and_the_progress_column():
         ["id", "Status", "Coordinates"],
         [],
     )
-    assert clean["version"] == sheet_engine.META_VERSION == 5
+    assert clean["version"] == sheet_engine.META_VERSION == 6
     assert set(clean["roles"]) == {"Status", "Coordinates"}, "a role needs its column"
     assert clean["roles"]["Status"]["values"] == ["seen", "geolocated"], "the order is the ranking"
     assert clean["notes"] == {"Status": "where this row got to"}

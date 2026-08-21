@@ -1479,11 +1479,20 @@ says what it is checking.
   back out, quoted so a spreadsheet reads it whole.
 - **Editing is a grid's.** Press a cell and pull to select a rectangle, shift-click a far
   corner to do the same in two clicks, typing
-  starts an edit on that character, Enter and Tab commit and move, Escape cancels,
+  starts an edit on that character, Enter and Tab commit and move, Escape backs out one
+  step at a time — what is open, then the edit, then the cell itself —
   arrows walk the cursor in the order the screen shows. `Ctrl+F` reaches the search,
   `Ctrl+A` ticks every row on screen, `Ctrl+Enter` adds a row, `Ctrl+D` copies the top of
   the selection down, Home, End and the page keys cross a long sheet, Delete empties the
   selection. Deep undo, and the sheet autosaves.
+- **A bar above the headings holds the cell under the cursor.** A cell is thirty pixels
+  tall and as wide as its column, and the sentences an analyst writes into a `Title` are
+  neither: the bar is the same cell, full width, where a long value can be read and
+  rewritten. Enter commits and steps down, Escape lets go of what was typed, and the corner
+  pulls the bar open as far as the value needs. It is drawn whether or not a cell is picked
+  — a bar that arrived with the first click pushed the grid down under the pointer, and the
+  drag that click had started painted a selection nobody aimed at. The key column and the
+  columns the app writes are shown and refused, for the reason their cells are.
 - **The grid always ends on an empty line, and writing in it is what makes it a row.**
   What a spreadsheet does, and Tab off the last cell grows the sheet the same way. A
   `+ Row` button in the footer stood in for this: a trip to the bottom of the screen and
@@ -1703,10 +1712,10 @@ says what it is checking.
     the videos actually run in and is usable long before the sync point has a time. Naming
     and dating the sync points is one press from here, because a column of offsets is where
     anybody wants them.
-  - Two columns are written **by the app, into the CSV**: the date a row first appeared,
-    once and never again, and a column the app answers. Both are in the file rather than
-    beside it because `On map: YES/NO` is exactly the column a collaborator opening the
-    spreadsheet reads. `Added on` dates every empty cell on the next save, including rows
+  - Three columns are written **by the app, into the CSV**: the date a row first appeared,
+    once and never again, a column the app answers, and a column the case holds. All three
+    are in the file rather than beside it because `On map: YES/NO` is exactly the column a
+    collaborator opening the spreadsheet reads. `Added on` dates every empty cell on the next save, including rows
     already in the sheet, and the panel says so before it is chosen. The answered column
     holds one of three readings, and the heading says which — a heading drawing a globe over
     a column counting criteria would lie about it:
@@ -1726,8 +1735,34 @@ says what it is checking.
       than whether it knows: the coordinates of the entity one named column points at, and
       the far end of that entity's edges. One hop, and blank where the answer is not one
       thing.
+    - **still in the case**, whether the case still holds what the row was **built** from.
+      The only one that reads where the row came from rather than what its cells point at,
+      because it is the only one asking about something that may be gone: a link naming a
+      deleted entity is dropped on the next read, so by then the cell that would have
+      answered is already blank. Rows somebody typed themselves stay empty — they were
+      never built from anything.
+  - **Held by the case** is the third, and it is the one role the app writes that still
+    carries a **link**: the cell opens the entity it was filled from. Typing in it is
+    refused, because a refresh rewrites it — a view somebody can type over is a view that
+    starts lying the first time they do.
   - Losing a role is **said out loud**. Renaming a column in a spreadsheet takes its role
     and its map layer with it, and a lens configured in ten minutes is not a colour.
+- **A sheet can be built out of the proofs the case already holds, and kept level with
+  them.** The template that fetches and this shape carry almost the same columns and run in
+  opposite directions, so the modal asks which **before** anything else: *one row per
+  entity* takes a type and its fields, *my geolocations* takes neither. The
+  outgoing one is one row per proof, carrying the media it rests on, the place it puts on
+  the map and coordinates read off the graph. Those three columns are the case's and are
+  read-only; Status, Notes and any column added are the analyst's. It offers no *Build
+  proofs* button, because the proofs already exist and there is nothing left to fetch.
+  - **Refresh is a press, never automatic.** A sheet that rewrote itself when it was opened
+    would move a file under somebody who came to read it, and it would fight the stamp that
+    keeps two readers of one file from overwriting each other. It files the proofs added
+    since, restates the columns the case owns, and says what it did.
+  - **It adds and never removes.** A proof deleted since the build keeps its row, its notes
+    and its colour, and answers NO under *In case*. Filtering on that column groups them so
+    they can be deleted in one gesture — but that is the analyst's call, because the notes
+    on those rows are theirs and nothing in the app wrote them.
 - **A column of sources can be asked whether it still answers.** Most of a worklist is
   links, they rot, and nothing said which ones already had — so a finding could be
   published on a source gone for a month, and the only way to know was to open four hundred

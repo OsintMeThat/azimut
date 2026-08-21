@@ -67,6 +67,7 @@
   const WRITTEN = [
     { id: 'stamped', label: 'Added on', hint: 'the app dates every empty cell here' },
     { id: 'computed', label: 'Answered by the app', hint: 'on the map, or a count over other columns' },
+    { id: 'locked', label: 'Held by the case', hint: 'the app writes it and keeps it level with the case' },
   ];
   const KINDS = [...READINGS, ...WRITTEN];
 
@@ -79,6 +80,7 @@
     { id: 'yes_of', label: 'Score', hint: 'how many of the chosen columns say yes' },
     { id: 'point', label: 'Its point', hint: 'where the case puts what a column points at' },
     { id: 'relations', label: 'What it is joined to', hint: 'the far end of that entity\'s edges' },
+    { id: 'in_case', label: 'Still in the case', hint: 'NO once what the row was built from is deleted' },
   ];
 
   const SUMMARY_WORDS = {
@@ -101,7 +103,7 @@
    *  sending a date column to the Timeline when it can read a third of it is worth
    *  knowing before, not after. */
   const reads = $derived(
-    role && kind !== 'stamped' && kind !== 'computed'
+    role && !['stamped', 'computed', 'locked'].includes(kind)
       ? readable(table, column.index, role)
       : null,
   );
@@ -483,6 +485,12 @@
       rewritten after that. It goes into the file.
     </p>
   {/if}
+  {#if kind === 'locked'}
+    <p class="menu-note">
+      The case holds this column. Refresh rewrites it, so typing here would be overwritten. The
+      cell still opens what it points at.
+    </p>
+  {/if}
   {#if kind === 'computed'}
     <p class="what">What it answers</p>
     <div class="kinds">
@@ -556,6 +564,11 @@
         {:else}
           What the case has joined <code>{role.from}</code>'s entity to, one hop out.
         {/if}
+      </p>
+    {:else if role.of === 'in_case'}
+      <p class="menu-note">
+        NO once the case stops holding what the row was built from. Rows you typed yourself
+        stay blank: they were never built from anything.
       </p>
     {:else}
       <p class="menu-note">YES when the row points at something with a place.</p>

@@ -34,7 +34,7 @@ and a 409 telling them to reload is the only honest answer to two writers.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -146,15 +146,24 @@ def import_sheet(case_id: str, body: SheetImportIn) -> dict[str, Any]:
 
 
 class SheetFromCaseIn(SheetIn):
-    """A worklist to build out of the catalog: which type, and which of its fields.
+    """A worklist to build out of the catalog, in one of two shapes.
 
-    The fields are named rather than swept: a sheet holding every attribute of every
-    entity would be a second copy of the graph, and the second copy is the one that goes
-    stale. Anything the type does not declare is dropped rather than refused, the same
-    rule a promotion's column mapping follows.
+    ``generic`` is the one that was here first: one row per entity of a chosen type, with
+    the fields the analyst named. The fields are named rather than swept, because a sheet
+    holding every attribute of every entity would be a second copy of the graph, and the
+    second copy is the one that goes stale. Anything the type does not declare is dropped
+    rather than refused, the same rule a promotion's column mapping follows.
+
+    ``proofs`` reads the edges instead of the attributes: one row per proof, carrying the
+    media it was made from and the place it puts on the map. It takes neither ``type``
+    nor ``fields`` — its shape is fixed, which is what lets it be kept level with the case
+    afterwards.
     """
 
-    type: str = Field(min_length=1, max_length=40)
+    shape: Literal["generic", "proofs"] = "generic"
+    # Required by `generic` and unread by `proofs`, so it cannot be a required field on
+    # the model: a caller asking for the proofs shape has no type to name.
+    type: str = Field(default="", max_length=40)
     fields: list[str] = Field(default_factory=list, max_length=sheet_engine.MAX_COLUMNS)
     limit: int = Field(default=fromcase_engine.MAX_FROM_CASE, ge=1)
 
@@ -169,9 +178,15 @@ def sheet_from_case(case_id: str, body: SheetFromCaseIn) -> dict[str, Any]:
     gains its ``mentions`` edges by the same code every other save uses.
     """
     case = get_case(case_id)
+    if body.shape == "generic" and not body.type.strip():
+        raise HTTPException(status_code=422, detail="a worklist needs a type to be built from")
     try:
-        built = fromcase_engine.build(
-            case, entity_type=body.type, fields=body.fields, limit=body.limit
+        built = (
+            fromcase_engine.build_proofs(case, limit=body.limit)
+            if body.shape == "proofs"
+            else fromcase_engine.build(
+                case, entity_type=body.type, fields=body.fields, limit=body.limit
+            )
         )
         entity = sheet_engine.create(case, body.title.strip(), built["columns"], built["rows"])
         saved = sheet_engine.write(
@@ -498,6 +513,49 @@ def save_sheet(case_id: str, sheet_id: str, body: SheetSaveIn) -> dict[str, Any]
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     _sync_mentions(case, sheet_id, saved["meta"])
     return {"status": "saved", **saved}
+
+
+class SheetRefreshIn(SheetSaveIn):
+    """The proofs sheet as the grid holds it, to be brought level with the case.
+
+    The table travels with the request for the same reason a move's does: the analyst
+    presses this on what is on screen, and the copy on disk may be a minute behind. The
+    stamp is presented and the write refused if the file moved underneath.
+    """
+
+
+@router.post("/{case_id}/sheets/{sheet_id}/refresh")
+def refresh_sheet(case_id: str, sheet_id: str, body: SheetRefreshIn) -> dict[str, Any]:
+    """Add the proofs filed since this sheet was built, and rewrite what the case owns.
+
+    Pressed, never automatic. Refreshing on open would mean that looking at a sheet
+    changes it — and it would fight the stamp, which exists so that two readers of one
+    file cannot overwrite each other silently.
+
+    Nothing is ever removed. A proof deleted since the build keeps its row and answers NO
+    in `In case`; what happens to that row is the analyst's decision, because the notes on
+    it are theirs.
+    """
+    case = get_case(case_id)
+    try:
+        fresh = fromcase_engine.refresh_proofs(case, body.columns, body.rows, body.meta)
+        saved = sheet_engine.write(
+            case, sheet_id, fresh["columns"], fresh["rows"], fresh["meta"], expected=body.stamp
+        )
+    except CaseError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except sheet_engine.SheetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except sheet_engine.SheetError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _sync_mentions(case, sheet_id, saved["meta"])
+    return {
+        "status": "saved",
+        **saved,
+        "added": fresh["added"],
+        "updated": fresh["updated"],
+        "gone": fresh["gone"],
+    }
 
 
 class SheetExportIn(BaseModel):

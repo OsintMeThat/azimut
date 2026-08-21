@@ -42,10 +42,16 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..workspace import Case
 
-#: Every role a column may hold. Mirrors `lib/sheetRoles.ROLE_KINDS`. The last three
-#: arrived with the bridge to the case and each is read by something: ``url`` is the
+#: Every role a column may hold. Mirrors `lib/sheetRoles.ROLE_KINDS`. ``url`` is the
 #: column a promotion files as sources, ``row`` points at another row of the same
 #: sheet, ``offset`` carries a time relative to a named anchor.
+#:
+#: ``locked`` is the odd one and the newest: a column whose text the **app** owns and
+#: the analyst reads. It exists because a sheet built out of the case is a view of the
+#: case, and a view somebody can type over is a view that starts lying the first time
+#: they do. Unlike `stamped` and `computed` it carries a **link** — the whole point of
+#: those columns is that the cell opens the entity — so `linkable()` admits it where it
+#: refuses every other role.
 ROLE_KINDS = (
     "state",
     "choice",
@@ -59,6 +65,7 @@ ROLE_KINDS = (
     "offset",
     "stamped",
     "computed",
+    "locked",
 )
 
 #: The state vocabulary a column starts with, in order. Mirrors
@@ -99,6 +106,12 @@ WHEN_SHAPES = ("date", "time", "datetime")
 #:     Where the case puts what one column's cell points at, as ``lat, lon``.
 #: ``relations``
 #:     What the case has joined that same entity to, as the labels at the far end.
+#: ``in_case``
+#:     Whether the case still holds the entity this row was **built from**. Reads
+#:     ``built`` rather than ``links``, and that is the difference that makes it work: a
+#:     link to a deleted entity is swept on the next read, so by the time anyone asks,
+#:     the cell that would have answered is already blank. The row that has lost its
+#:     proof is exactly the row worth finding, and this is the column that finds it.
 #:
 #: The two counting ones are arithmetic over the row's own cells, so they could have been
 #: read in the browser — they are here because a computed column is **written into the
@@ -109,7 +122,7 @@ WHEN_SHAPES = ("date", "time", "datetime")
 #: and nothing about *what* it knows, so the coordinates and the parent unit went on being
 #: copied by hand into the next column along. One hop, like `has_point`: the relations of
 #: the relations answer a question nobody put.
-COMPUTED_NATURES = ("has_point", "filled_of", "yes_of", "point", "relations")
+COMPUTED_NATURES = ("has_point", "filled_of", "yes_of", "point", "relations", "in_case")
 
 #: The natures that count over a chosen set of columns rather than asking the graph.
 COUNTING_NATURES = ("filled_of", "yes_of")
@@ -869,11 +882,12 @@ def apply_computed(
     rows: list[list[str]],
     roles: dict[str, Any],
     links: dict[str, Any],
+    built: dict[str, Any] | None = None,
 ) -> int:
     """Restate every ``computed`` column from what the case, or the row, currently says.
 
     Read-only in the grid and rewritten here on every save, so the answer never drifts.
-    Five natures, in three families:
+    Six natures, in four families:
 
     ``has_point``
         ``links`` is the sidecar's cell-to-entity table, and a row counts as placed when
@@ -892,6 +906,12 @@ def apply_computed(
         column is named rather than swept, because a sheet may point at the case from a
         subject column and a place column both, and "whatever this row points at" would
         answer about whichever the walk reached first.
+    ``in_case``
+        Whether the case still holds what the row was **built** from. The only nature
+        that reads `built` instead of `links`, because it is the only one asking about an
+        entity that may be gone — and a link naming something gone is swept before it
+        gets here. A row nobody built writes nothing: the question does not apply to a
+        line somebody typed themselves.
 
     A nature whose answer cannot be had writes an **empty cell** rather than a word: a
     row whose subject the case does not place has no coordinates, and `unknown` spelled
@@ -913,6 +933,13 @@ def apply_computed(
     wants_points = any(nature in ("has_point", "point") for nature in natures.values())
     reached = _points_by_entity(case) if wants_points else {}
     placed = set(reached)
+    # One bounded lookup for the whole table rather than one per row, the same bargain
+    # every other nature here strikes: the ids are the sidecar's and the answer is the
+    # case's, so the question is asked once.
+    made = {str(key): str(value) for key, value in (built or {}).items() if value}
+    alive: set[str] = set()
+    if made and "in_case" in natures.values():
+        alive = {str(entity["id"]) for entity in case.entities_by_ids(sorted(set(made.values())))}
     joined = _relations_by_entity(case) if "relations" in natures.values() else {}
     # Which cells each counting column reads, what a yes looks like in each of them, and
     # which column each linked nature follows. Resolved once rather than per row: twenty
@@ -944,6 +971,9 @@ def apply_computed(
             nature = natures[name]
             if nature == "has_point":
                 answer = mapped
+            elif nature == "in_case":
+                source = made.get(identity)
+                answer = "" if not source else (COMPUTED_YES if source in alive else COMPUTED_NO)
             elif nature in COUNTING_NATURES:
                 answer = _counted(row, counted.get(name) or [], accepts.get(name) or [], nature)
             else:

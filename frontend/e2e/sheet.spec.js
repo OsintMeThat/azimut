@@ -78,6 +78,45 @@ test('Tab off the last cell grows the sheet', async ({ page }) => {
   await expect.poll(() => fixture.sheetOnDisk('sheet-1').rows.length).toBe(before + 1);
 });
 
+/**
+ * The vocabulary a column offers opens **downwards**, so on the last row of a short sheet
+ * it lands right across the empty line the grid ends on. Both lists are moved with a
+ * transform — a stacking context each — and the empty line, drawn last, simply painted on
+ * top: a click meant for a word added a row instead, and the word was never written.
+ */
+test('a word offered over the empty last line is the thing that is clicked', async ({ page }) => {
+  const fixture = await installAppFixture(page, {
+    sheets: [['Candidates', ['Subject', 'Status'], [
+      ['Quai sud', ''],
+      ['Pont nord', ''],
+      ['Rue basse', ''],
+    ], { roles: { Status: { kind: 'choice', values: ['to check', 'seen', 'ruled out'] } } }]],
+  });
+  await openSheet(page);
+
+  const rowsBefore = fixture.sheetOnDisk('sheet-1').rows.length;
+  await focusCell(page, 2, 2);
+  await page.keyboard.press('Enter');
+  const offers = page.locator('.offers');
+  await expect(offers).toBeVisible();
+
+  // Whichever word happens to land over the empty line, taken by a click on the word.
+  const ghost = await page.locator('.rows.ghost .row').boundingBox();
+  const words = await offers.getByRole('button').all();
+  let over = null;
+  for (const word of words) {
+    const box = await word.boundingBox();
+    if (box.y < ghost.y + ghost.height && box.y + box.height > ghost.y) over = word;
+    if (over) break;
+  }
+  expect(over).not.toBeNull();
+  const chosen = (await over.textContent()).trim();
+  await over.click();
+
+  await expect(cell(page, 2, 2)).toContainText(chosen);
+  expect(fixture.sheetOnDisk('sheet-1').rows.length).toBe(rowsBefore);
+});
+
 test('the search narrows the rows and is remembered without rewriting the CSV', async ({ page }) => {
   const fixture = await installAppFixture(page, { sheets: SHEETS });
   await openSheet(page);

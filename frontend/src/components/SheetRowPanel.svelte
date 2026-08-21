@@ -83,7 +83,7 @@
   };
   /** Whether the app writes this column rather than the analyst. Typing into one of those
    *  is typing into a value the next save overwrites, which the grid already refuses. */
-  const appFilled = (name) => ['stamped', 'computed'].includes(roles[name]?.kind);
+  const appFilled = (name) => ['stamped', 'computed', 'locked'].includes(roles[name]?.kind);
   const held = (field) => {
     const separator = roles[field.name]?.multi;
     return new Set(
