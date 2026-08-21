@@ -481,7 +481,9 @@ test('explains the vocabulary where it uses it', async ({ page }) => {
   await expect(families.getByTitle(claimReads)).toBeVisible();
   await families.getByTitle(claimReads).click();
   // And the resulting chip keeps the axis explanation reachable.
-  await expect(page.getByTitle(/the broad reading: who, what, where — click to change it/i)).toBeVisible();
+  await expect(
+    page.locator('.chips').getByTitle(/the broad reading: who, what, where/i)
+  ).toBeVisible();
 
   // and the create menu says what the type it is about to file actually is
   await page.getByRole('button', { name: 'New entity' }).click();
