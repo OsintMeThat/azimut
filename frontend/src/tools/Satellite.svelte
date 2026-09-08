@@ -1,17 +1,21 @@
 <script>
   import { onMount, tick } from 'svelte';
   import { fileUrl } from '../lib/fileUrl.js';
-  import L from 'leaflet';
-  import 'leaflet/dist/leaflet.css';
+  // The map is lib/map's: the engine, its layers, what is drawn on them and the
+  // drag gestures. Nothing in this file knows which engine that is.
+  import { createMapEngine } from '../lib/map/engine.js';
+  import { createBasemaps } from '../lib/map/basemap.js';
+  import { createSurface } from '../lib/map/surface.js';
+  import { createSentinelState } from './satellite/state/sentinel.svelte.js';
+  import { createSavedState } from './satellite/state/saved.svelte.js';
   import { api } from '../lib/api.js';
   import { setAnalysisPeriod } from '../lib/analysisSearch.svelte.js';
   import { temporalMapQuery } from '../lib/temporalMap.js';
   import { windowWords } from '../lib/timeline.js';
-  import { filterSaved, isMode, pendingLocate } from '../lib/geoTree.js';
+  import { isMode } from '../lib/geoTree.js';
   import {
     caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords, prefsReady,
   } from '../lib/state.svelte.js';
-  import { wrapLon } from '../lib/coords.js';
   import { mapLinks } from '../lib/maplinks.js';
   import * as measure from '../lib/measure.js';
   import { markerGeometry, markerSvg } from '../lib/mapMarkers.js';
@@ -25,7 +29,7 @@
     upRuns,
   } from '../lib/skyOverlay.js';
   import * as gridSearch from '../lib/gridSearch.js';
-  import { dragBearing, pivotPanOffset } from '../lib/satRotate.js';
+  import { startRectDrag, startRotateDrag } from '../lib/map/gestures.js';
   import { clampSize, scaledCapture } from '../lib/captureSize.js';
   import { panelWidth } from '../lib/panelWidth.js';
   import PlaceSearch from './satellite/PlaceSearch.svelte';
@@ -65,21 +69,22 @@
     dateAfterCoverage,
   } from '../lib/sentinel.js';
   import { createViewer, nextZ, restack } from '../lib/refViewers.js';
-  import { loadGoogleMaps, createSatelliteMutant } from '../lib/gmaps.js';
   import { matchesQuery } from '../lib/mediaFilter.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
   import SearchInput from '../components/SearchInput.svelte';
   import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
-  import FolderSelect from '../components/FolderSelect.svelte';
-  import RelationList from '../components/RelationList.svelte';
-  import RelationPicker from '../components/RelationPicker.svelte';
   import RefViewer from './RefViewer.svelte';
   import MapToolCluster from './satellite/MapToolCluster.svelte';
   import SunPanel from './satellite/SunPanel.svelte';
   import GridSearchPanel from './satellite/GridSearchPanel.svelte';
   import SentinelPicker from './satellite/SentinelPicker.svelte';
+  import ScreenshotDialog from './satellite/ScreenshotDialog.svelte';
+  import ExtensionGate from './satellite/ExtensionGate.svelte';
+  import RefPicker from './satellite/RefPicker.svelte';
+  import CaptureDetails from './satellite/CaptureDetails.svelte';
+  import PlaceDialog from './satellite/PlaceDialog.svelte';
   import CaptureOptions from './satellite/CaptureOptions.svelte';
   import SavedTree from './satellite/SavedTree.svelte';
   import SavedSearch from './satellite/SavedSearch.svelte';
@@ -89,8 +94,10 @@
 
   let mapEl;
   let toolEl; // Browser fullscreen target.
-  let map = $state.raw(null);
-  let tileLayer;
+  // The map, through lib/map's façade: no engine type reaches this file's
+  // camera, projection or event code.
+  let engine = $state.raw(null);
+  let basemaps = null; // lib/map/basemap.js: the imagery layer and the labels over it
   let providers = $state([]);
   let providerId = $state('esri-world-imagery');
   let coordsText = $state('');
@@ -99,7 +106,7 @@
   let center = $state({ ...prefs.homeView });
   let markerStyle = $state('none'); // 'crosshair' | 'pin' | 'none'
   let moveMode = $state(false); // pin decoupled from center, draggable
-  let marker = null; // Leaflet marker instance while in move mode
+  let markerSurface = null; // lib/map/surface.js — holds the pin while in move mode
   let markerLatLng = $state(null); // {lat, lon} of the moved pin
   let bearing = $state(0);
   // Middle-drag rotates the map around the grabbed point.
@@ -108,10 +115,9 @@
   let capturing = $state(false);
   let captureHover = $state(false); // previewing the crop frame (capture group hover)
   let hideOverlays = $state(false); // frame/marquee outlines must not land in a screen crop
-  // One compact Saved index for places, captures and filed screenshots.
-  let saved = $state([]);
-  let savedKind = $state('all');
-  let savedQuery = $state('');
+  // The case's saved work — both indexes, the panel's filter and the Locate
+  // pass — is its own store (state/saved.svelte.js).
+  const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
   let savedSearchOpen = $state(false);
   let savedOverlay = $state(false); // map layer: off by default, session only
   let temporalMap = $state(null); // Timeline handoff, session-only
@@ -121,18 +127,7 @@
   /** A sheet's coordinate column, handed over as points. Session-only, like the layer
    *  above it, and never part of a capture or a proof. */
   let sheetPoints = $state(null); // { points, sheet, column }
-  // Persist geography or My-work folder grouping across reloads.
-  const GROUP_KEY = 'azimut:satelliteSavedGroup';
-  let savedGroup = $state(loadSavedGroup());
   let hoveredSavedId = $state(null); // shared by the tree, the modal and the map
-  // Proofs use a separate mode because they can borrow capture coordinates.
-  // Fetch them only when that mode opens.
-  let savedProofs = $state([]);
-  let savedFor = null; // case id held by both Saved indexes
-  let proofsFor = null; // the case id savedProofs was loaded for
-  const savedRows = $derived(isMode(savedKind) ? savedProofs : saved);
-  // The map layer follows the Saved panel filter.
-  const savedShown = $derived(filterSaved(savedRows, { kind: savedKind, query: savedQuery }));
   let revealSavedId = $state(null);
   let capturesCollapsed = $state(false);
   // the Saved panel's left edge is a drag handle; the width sticks across reloads
@@ -150,9 +145,6 @@
   // OSM labels overlay: a transparent labels-only layer laid over the imagery so
   // roads / place names are readable without hiding the satellite view (item 1).
   let osmOverlay = $state(false);
-  let labelsLayer = null;
-  const LABELS_URL =
-    'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png';
   // The labels overlay only makes sense over satellite imagery — over a street
   // base map (OSM) it just doubles the road/place labels, so it's disabled then
   // and force-off if the provider changes to a non-imagery one (item 1).
@@ -165,55 +157,21 @@
   const isWidgetBase = $derived(!!currentProvider?.widget);
   const captureBlocked = $derived(currentProvider?.capturable === false && !isWidgetBase);
 
-  // --- Sentinel-2: which layer, and over which window (lib/sentinel.js) ---
-  // Sentinel-2 is the one basemap with choices in it. Both live here and are
-  // packed onto the provider id, which is what the map, the capture and the
-  // cache all key on.
-  let s2Layer = $state(DEFAULT_LAYER);
-  // One date, not a range: a Sentinel-2 image *is* a pass on a day. (The WMTS
-  // window underneath is a range, so we send day/day — but a range is a mosaic
-  // of several passes, which is not a thing you can point at and date.)
-  let s2Date = $state(''); // '' = the layer's default, i.e. the most recent pass
-  // Cloud ceiling, in percent. 100 = render whatever passed overhead, which is
-  // the default because the *instance* has a filter of its own (20% in the
-  // standard template) and a scene above it renders as nothing at all: without
-  // saying MAXCC=100 we would be hiding cloudy days without ever saying so.
-  let s2Maxcc = $state(DEFAULT_MAXCC);
-  let s2MenuOpen = $state(false);
-  let s2MenuEl = $state(); // bound to the popover wrapper — outside-click detection
-  let s2Layers = $state([]); // [{id,label,hint}] — catalogue until the instance is asked
-  let s2LayersSource = $state('');
-  let s2LayersAsked = false; // the instance is asked once per session, on first open
-  // The month the calendar is showing, and the passes found in it:
-  // { 'YYYY-MM-DD': {cloud, granules} }. A day with no entry has no imagery and
-  // is not selectable — the same rule the Copernicus browser follows.
-  let s2Month = $state(monthOf(''));
-  let s2Passes = $state({});
-  let s2PassesFor = $state(''); // the month+place s2Passes describes
-  let s2PassesBusy = $state(false);
-  let s2PassesNote = $state('');
-  let s2VerifyingDate = $state('');
-  let s2CoverageRev = $state(0);
-  // The newest pass over this point — what "most recent" is actually showing.
-  // The layer's default window renders the latest acquisition, so naming it is
-  // the difference between a dated image and an undated one.
-  let s2Latest = $state('');
-  let s2LatestFor = $state(''); // the place s2Latest was resolved for
+  // --- Sentinel-2: which layer, and over which window ---
+  // The one basemap with choices in it. What has been asked, what came back and
+  // what is still in flight all live in its own store; the choices ride on the
+  // provider id, which is what the map, the capture and the cache key on.
+  const s2 = createSentinelState({
+    place: () => ({ lat: center.lat, lon: center.lon }),
+    onBilled: refreshUsage,
+    notify: toast,
+    api,
+  });
   const isSentinel = $derived(currentProvider?.id === SENTINEL_ID);
-  // A half-typed date is not a date: it stays "most recent" rather than
-  // becoming a request the backend would refuse.
-  const s2Window = $derived(
-    validDay(s2Date) ? { from: s2Date, to: s2Date } : { from: '', to: '' }
-  );
   // A pinned day *is* the acquisition date — the one provider that can answer
   // "when was this taken?" without being asked.
-  const s2PinnedDate = $derived(isSentinel && s2Window.from ? s2Window.from : null);
-  const s2LayerHint = $derived(s2Layers.find((l) => l.id === s2Layer)?.hint ?? '');
-  const s2LayerLabel = $derived(
-    s2Layers.find((l) => l.id === s2Layer)?.label ?? s2Layer.replace(/_/g, ' ').toLowerCase()
-  );
-  // the pill is small: "false colour (infrared)" doesn't fit, "FALSE COLOR" does
-  const s2LayerShort = $derived(s2Layer.replace(/_/g, ' '));
+  const s2PinnedDate = $derived(isSentinel && s2.window.from ? s2.window.from : null);
+  let s2MenuEl = $state(); // bound to the popover wrapper — outside-click detection
 
   // --- keyed-provider usage (IMAGERY_PROVIDERS.md) ---
   // Metered tiles are proxied through the backend, which counts each one it
@@ -274,7 +232,7 @@
   // (lib/sentinel.js), so none of them can be rendered from one window and
   // filed as another.
   const displayedProviderId = $derived(
-    variantId(displayedBaseId, { layer: s2Layer, ...s2Window, maxcc: s2Maxcc })
+    variantId(displayedBaseId, s2.variant)
   );
   // memoized so the layer is only rebuilt when the cell actually changes
   // (i.e. crossing the z17 boost bracket), not on every zoom step
@@ -297,7 +255,7 @@
   // Measure tools (item 5): distance / area / angle drawn on the map.
   let measureMode = $state(null); // null | 'distance' | 'area' | 'angle'
   let measurePoints = $state([]);
-  let measureLayer = null;
+  let measureSurface = null; // lib/map/surface.js
   let toolsOpen = $state(false);
 
   // External-maps quick links, in the SAVED panel (item 6).
@@ -323,15 +281,11 @@
   let renameText = $state(''); // the title being typed while renaming
   let reviewKey = $state(null); // 'i:j' of the cell under review, or null
   let gridSaveTimer; // debounce the persist call
-  let gridLayer = null; // Leaflet layerGroup of the cells
-  let gridAoiLayer = null; // Leaflet layerGroup of the area outline + handles
-  let gridDraftLayer = null; // Leaflet layerGroup of the in-progress polygon
-  let gridRenderer = null; // one shared canvas renderer for all the cells
-  let cellRects = new Map(); // 'i:j' -> Leaflet rectangle (for cheap restyles)
-  let aoiOutline = null; // Leaflet path: the area's dashed outline
+  let gridCells = null; // lib/map/surface.js — the lattice, on a canvas
+  let gridAoi = null; // …the area outline and its drag handles
+  let gridDraft = null; // …the polygon being placed
   let dragBounds = null; // live rect bounds while a corner handle is dragged
   let liveVerts = null; // live polygon vertices while a vertex handle is dragged
-  let draftLine = null; // Leaflet polyline of the in-progress polygon
   const gridCov = $derived(grid ? gridSearch.coverage(grid) : null);
   const savedOthers = $derived(gridList.filter((g) => g.name !== gridName));
   const GRID_MAX_CELLS = gridSearch.MAX_CELLS;
@@ -339,11 +293,17 @@
   // clearly over dark imagery; cleared greys the cell out; flagged fills yellow
   // (chosen over red so it reads for colour-blind analysts too).
   const CELL_STYLE = {
-    unchecked: { color: '#ffffff', weight: 1, opacity: 0.7, fill: true, fillColor: '#fff', fillOpacity: 0 },
-    cleared: { color: '#ffffff', weight: 1, opacity: 0.55, fill: true, fillColor: '#2b3040', fillOpacity: 0.62 },
-    flagged: { color: '#ffcf33', weight: 1.5, opacity: 1, fill: true, fillColor: '#ffdb4d', fillOpacity: 0.6 },
+    unchecked: { stroke: '#ffffff', strokeWidth: 1, strokeOpacity: 0.7, fill: '#fff', fillOpacity: 0 },
+    cleared: { stroke: '#ffffff', strokeWidth: 1, strokeOpacity: 0.55, fill: '#2b3040', fillOpacity: 0.62 },
+    flagged: { stroke: '#ffcf33', strokeWidth: 1.5, strokeOpacity: 1, fill: '#ffdb4d', fillOpacity: 0.6 },
   };
-  const AOI_STYLE = { color: '#f5a623', weight: 1.5, opacity: 0.9, fill: false, dashArray: '5 4', interactive: false };
+  const AOI_STYLE = {
+    stroke: '#f5a623',
+    strokeWidth: 1.5,
+    strokeOpacity: 0.9,
+    dash: '5 4',
+    interactive: false,
+  };
   const CORNERS = ['sw', 'se', 'nw', 'ne']; // rect resize handles
 
 
@@ -354,27 +314,10 @@
   let refPicker = $state(false); // the "pick an image" modal
   let refMedia = $state([]); // case images available to reference
   let refLoading = $state(false);
-  let refQuery = $state('');
-  let refBrowserOpen = $state(false); // "…" swaps the grid for the folder browser
-  let refBrowsePath = $state('');
-  let refBrowseSelection = $state(null);
   let refSeq = 0; // id source for spawned windows
-  const REF_SEARCH_MIN = 6; // below that, the grid is easier to scan than to search
-
-  // Same free-text match as the Media Library (filename, title, notes, folder,
-  // download source), so what works there works here.
-  const visibleRefMedia = $derived(
-    caseState.current ? refMedia.filter((m) => matchesQuery(m, refQuery)) : []
-  );
-  const refBrowserEntries = $derived(
-    refMedia.map((m) => ({ ...m, id: m.path, attrs: { folder: m.folder ?? '' } }))
-  );
 
   async function openRefPicker() {
     refPicker = true;
-    refQuery = '';
-    resetRefBrowser();
-    refBrowserOpen = false;
     refLoading = true;
     try {
       const id = caseState.current?.id;
@@ -386,31 +329,6 @@
     } finally {
       refLoading = false;
     }
-  }
-
-  function resetRefBrowser() {
-    refBrowsePath = '';
-    refBrowseSelection = null;
-  }
-
-  function toggleRefBrowser() {
-    if (refBrowserOpen) {
-      refBrowserOpen = false;
-      return;
-    }
-    refQuery = '';
-    resetRefBrowser();
-    refBrowserOpen = true;
-  }
-
-  function openRefFolder(path) {
-    refBrowsePath = path;
-    refBrowseSelection = null;
-  }
-
-  function confirmRefBrowser() {
-    const item = refBrowserEntries.find((entry) => entry.path === refBrowseSelection);
-    if (item) addRef(item);
   }
 
   function addRef(item) {
@@ -458,45 +376,32 @@
     providers = await api.get('/api/satellite/providers');
     await prefsReady; // the home view has to land before the map is built
     center = { ...prefs.homeView };
-    // leaflet-rotate patches the global L, so expose it before importing.
-    window.L = L;
-    await import('leaflet-rotate');
-    map = L.map(mapEl, {
-      center: [center.lat, center.lon],
-      zoom: center.zoom,
-      zoomControl: false,
-      attributionControl: true,
-      rotate: true,
-      rotateControl: false,
-      touchRotate: true,
-      shiftKeyRotate: true,
+    engine = await createMapEngine(mapEl, {
+      view: center,
+      imperial: prefs.units === 'imperial',
+    });
+    basemaps = createBasemaps(engine, {
+      onMeteredTiles: refreshUsage,
+      // one billed map load, counted where it happens (the proxy can't see it)
+      onWidgetLoad: (provider) =>
+        api.post(`/api/satellite/usage/${provider.meter}`).then(refreshUsage).catch(() => {}),
+      onWidgetAuthFailure,
+      onWidgetFailed: (provider, error) => {
+        toast(`Google Maps failed to load: ${error.message}`, 'danger', 6000);
+        providerId = 'esri-world-imagery';
+      },
     });
     setLayer();
-    setOverlay();
-    // stacked below the top-left tool cluster (fullscreen/labels/measure) via
-    // CSS offset below, instead of Leaflet's default corner margin
-    L.control.zoom({ position: 'topleft' }).addTo(map);
-    // judging feature sizes (buildings, roads) needs a scale reference
-    L.control.scale({
-      metric: prefs.units !== 'imperial',
-      imperial: prefs.units === 'imperial',
-      position: 'bottomright',
-    }).addTo(map);
-    map.on('moveend zoomend', () => {
-      const c = map.getCenter();
-      // Leaflet keeps counting past ±180° when the analyst pans across the date
-      // line, and every coordinate the app sends is bounded to it — an unwrapped
-      // centre made Capture answer 422 and blocked work over the Pacific.
-      center = { lat: c.lat, lon: wrapLon(c.lng), zoom: map.getZoom() };
+    basemaps.setLabels(osmOverlay);
+    // the façade wraps the centre back inside ±180 for us, which is what every
+    // route the capture reaches enforces
+    const offSettled = engine.on('view-settled', (view) => {
+      center = { lat: view.lat, lon: view.lon, zoom: view.zoom };
     });
-    map.on('rotate', () => {
-      bearing = Math.round(map.getBearing());
+    const offRotate = engine.on('rotate', (view) => {
+      bearing = Math.round(view.bearing);
     });
-    map.on('click', onMapClick);
-    // keep tiles seam-free (see deSeamTiles): re-flatten after any reposition,
-    // and un-flatten right before a zoom so the reposition doesn't double-offset
-    map.on('moveend zoomend viewreset rotateend', scheduleDeSeam);
-    map.on('zoomstart', reSeamTiles);
+    const offClick = engine.on('click', onMapClick);
     // middle-mouse drag rotates the view (item 3). Capture-phase so we can stop
     // the event before Leaflet's own container drag handler (which treats the
     // middle button as a pan) ever sees it — otherwise a turn also pans.
@@ -517,7 +422,14 @@
       window.removeEventListener('keydown', onKeydown);
       document.removeEventListener('fullscreenchange', onFullscreenChange);
       offActivated();
-      map.remove();
+      offSettled();
+      offRotate();
+      offClick();
+      basemaps.dispose();
+      for (const surface of [measureSurface, sunSurface, markerSurface, gridCells, gridAoi, gridDraft]) {
+        surface?.destroy();
+      }
+      engine.destroy();
     };
   }
 
@@ -554,286 +466,23 @@
     else if (fullscreen && !document.fullscreenElement) toggleFullscreen();
   }
 
-  // --- OSM labels overlay (item 1) ---
-  function setOverlay() {
-    if (!map) return;
-    if (osmOverlay && !labelsLayer) {
-      labelsLayer = L.tileLayer(LABELS_URL, {
-        subdomains: 'abcd',
-        maxZoom: 20,
-        pane: 'overlayPane', // above the imagery tiles, below markers/controls
-        attribution: '© OpenStreetMap contributors © CARTO',
-      }).addTo(map);
-      labelsLayer.on('load tileload', scheduleDeSeam); // keep overlay seam-free too
-    } else if (!osmOverlay && labelsLayer) {
-      labelsLayer.remove();
-      labelsLayer = null;
-    }
-  }
-
   // force the labels overlay off whenever the base isn't imagery (item 1)
   $effect(() => {
     if (!baseIsImagery && osmOverlay) osmOverlay = false;
   });
 
   $effect(() => {
-    osmOverlay; // toggle the labels overlay
-    setOverlay();
+    basemaps?.setLabels(osmOverlay);
   });
-
-  // --- Sentinel-2 layers & passes ---
-  // The catalogue costs nothing and reaches no network (the backend answers it
-  // from its own list); `check` asks the user's instance what it really serves,
-  // which is the only authority — a configuration can rename or drop any layer.
-  async function loadS2Layers(check = false, quiet = false) {
-    try {
-      const r = await api.get(`/api/satellite/sentinel/layers${check ? '?check=true' : ''}`);
-      s2Layers = r.layers ?? [];
-      s2LayersSource = r.source ?? '';
-      // a layer that vanished with the list can't stay selected
-      if (s2Layers.length && !s2Layers.some((l) => l.id === s2Layer)) s2Layer = s2Layers[0].id;
-      if (quiet) return;
-      if (check && r.detail) toast(r.detail, 'warn', 6000);
-      else if (check && r.source === 'instance') {
-        toast(`${r.layers.length} layers read from your instance`, 'ok');
-      }
-    } catch (e) {
-      toast(`Sentinel-2 layers: ${e.message}`, 'danger');
-    }
-  }
-
-  function toggleS2Menu() {
-    s2MenuOpen = !s2MenuOpen;
-    if (!s2MenuOpen) return;
-    // Ask the instance what it actually serves, once per session. The built-in
-    // list is only a fallback: a configuration serves whatever it was built
-    // with, and offering a layer that isn't there just 400s when picked.
-    if (!s2LayersAsked) {
-      s2LayersAsked = true;
-      loadS2Layers(true, true);
-    } else if (!s2Layers.length) {
-      loadS2Layers(false);
-    }
-    loadS2Passes();
-  }
-
-  // Passes are looked up per month *and* per place — Sentinel-2's swath means
-  // the answer genuinely differs a few km away. Cached so paging back to a
-  // month already seen is free; the key is the map centre rounded to ~100 m,
-  // because a nudge of the map is not a new question.
-  const s2PassCache = new Map();
-  const s2PassPending = new Map();
-  const s2CoverageCache = new Map();
-  const s2PlaceKey = () => sentinelPlaceKey(center.lat, center.lon);
-  // the ceiling is part of the question: the same day is available under 100%
-  // and a gap under 20%, so a cached answer must not outlive the number
-  const s2CoverageKey = (day, place = s2PlaceKey(), layer = s2Layer, maxcc = s2Maxcc) =>
-    `${layer}@${maxcc}@${day}@${place}`;
-  let s2PassRequestId = 0;
-  let s2PickRequestId = 0;
-
-  /**
-   * One month's passes over one place: `{ 'YYYY-MM-DD': {cloud, granules} }`,
-   * or null when the lookup failed. Cached — paging back to a month already
-   * seen must not spend a second request.
-   */
-  async function fetchS2Month(
-    month, place, force = false, lat = center.lat, lon = center.lon
-  ) {
-    const key = `${month}@${place}`;
-    if (!force && s2PassCache.has(key)) return s2PassCache.get(key);
-    if (!force && s2PassPending.has(key)) return s2PassPending.get(key);
-    if (force) s2PassCache.delete(key);
-    const { from, to } = monthBounds(month);
-    const request = (async () => {
-      try {
-        const r = await api.get(
-          `/api/satellite/sentinel/dates?lat=${lat}&lon=${lon}` +
-          `&start=${from}&end=${to}`
-        );
-        const byDay = {};
-        for (const d of r.dates) byDay[d.date] = { cloud: d.cloud, granules: d.granules };
-        s2PassCache.set(key, byDay);
-        refreshUsage(); // the lookup is billed: keep the pill honest
-        return byDay;
-      } catch {
-        return null;
-      }
-    })();
-    s2PassPending.set(key, request);
-    try {
-      return await request;
-    } finally {
-      if (s2PassPending.get(key) === request) s2PassPending.delete(key);
-    }
-  }
-
-  /**
-   * Which days Sentinel-2 actually passed over this point, and how cloudy each
-   * was. This is what makes the calendar honest: a day with no pass is not
-   * selectable, so you can't pick a date, pay for a tile and discover it was a
-   * coverage gap. One metadata request per month (~1/100th of a tile's
-   * processing units), only while the picker is open.
-   */
-  async function loadS2Passes(force = false) {
-    const requestId = ++s2PassRequestId;
-    const lat = center.lat;
-    const lon = center.lon;
-    const place = s2PlaceKey();
-    const key = `${s2Month}@${place}`;
-    s2PassesBusy = true;
-    s2PassesNote = '';
-    const days = await fetchS2Month(s2Month, place, force, lat, lon);
-    if (requestId !== s2PassRequestId) return;
-    if (days) {
-      s2Passes = days;
-      s2PassesFor = key;
-      if (!Object.keys(days).length) s2PassesNote = 'No Sentinel-2 pass here this month.';
-    } else {
-      // an empty month and a failed lookup are different facts. Never blur them:
-      // greying every day out because the network hiccuped would be a lie about
-      // what exists.
-      s2Passes = {};
-      s2PassesFor = '';
-      s2PassesNote = 'Could not read this month’s passes. The days below do not confirm coverage.';
-    }
-    s2PassesBusy = false;
-  }
-
-  function stepS2Month(delta) {
-    s2Month = addMonths(s2Month, delta);
-    loadS2Passes();
-  }
-
-  /**
-   * Which pass "most recent" is showing. Sentinel-2 revisits every ~5 days, so
-   * this month usually answers it; early in a month it may not, and one step
-   * back does. Two requests at worst, once per place — the alternative is a
-   * basemap that can't say what date it is showing, which for satellite
-   * imagery is most of the point.
-   */
-  async function resolveS2Latest() {
-    const place = s2PlaceKey();
-    const maxcc = s2Maxcc;
-    const key = `${place}@${maxcc}`;
-    if (s2LatestFor === key) return;
-    const today = isoDay(new Date());
-    for (const month of [monthOf(today), addMonths(monthOf(today), -1)]) {
-      const days = await fetchS2Month(month, place);
-      if (days === null) return; // lookup failed — say nothing rather than guess
-      // the ceiling drops cloudy passes from the tiles, so "most recent" is the
-      // newest pass it still allows, not the newest pass there is
-      const latest = latestAllowedPass(days, today, maxcc);
-      if (latest) {
-        s2Latest = latest;
-        s2LatestFor = key;
-        return;
-      }
-    }
-    // no pass in ~2 months: real (deep polar winter, persistent gaps) — the
-    // pill falls back to "most recent" rather than inventing a date
-    s2Latest = '';
-    s2LatestFor = key;
-  }
-
-  function clearS2Date() {
-    s2PickRequestId += 1;
-    s2VerifyingDate = '';
-    s2Date = '';
-  }
-
-  function s2DateStatus(day) {
-    s2CoverageRev;
-    return s2CoverageCache.get(s2CoverageKey(day));
-  }
-
-  /** Is this day's pass above the ceiling, i.e. filtered out of the tiles? */
-  function s2Filtered(day) {
-    return overCloudCeiling(s2Passes[day]?.cloud, s2Maxcc);
-  }
-
-  /**
-   * A new cloud ceiling. It reaches the tiles through the provider id, so the
-   * only thing left to settle is a pinned date the new ceiling excludes: that
-   * day renders nothing, so it goes back to most recent rather than to a blank
-   * map nobody asked for.
-   */
-  function setS2Maxcc(value) {
-    const ceiling = Math.round(Number(value));
-    if (!validMaxcc(ceiling) || ceiling === s2Maxcc) return;
-    s2Maxcc = ceiling;
-    if (s2Date && overCloudCeiling(s2Passes[s2Date]?.cloud, ceiling)) {
-      const cloud = cloudLabel(s2Passes[s2Date].cloud);
-      const day = s2Date;
-      clearS2Date();
-      toast(`${day} is ${cloud}, over the ${ceiling}% ceiling. Back to most recent.`, 'warn');
-    }
-  }
-
-  async function pickS2Date(day) {
-    if (day === s2Date) {
-      clearS2Date();
-      return;
-    }
-    if (!s2Passes[day] || s2PassesStale || s2PassesBusy || s2VerifyingDate) return;
-    if (s2Filtered(day)) {
-      toast(`${day} is ${cloudLabel(s2Passes[day].cloud)}, over the ${s2Maxcc}% ceiling.`, 'warn');
-      return;
-    }
-
-    const lat = center.lat;
-    const lon = center.lon;
-    const place = s2PlaceKey();
-    const layer = s2Layer;
-    const maxcc = s2Maxcc;
-    const key = s2CoverageKey(day, place, layer, maxcc);
-    const known = s2CoverageCache.get(key);
-    if (known === true) {
-      s2Date = day;
-      return;
-    }
-    if (known === false) {
-      toast(`No imagery at the crosshair on ${day}.`, 'warn');
-      return;
-    }
-
-    const requestId = ++s2PickRequestId;
-    s2VerifyingDate = day;
-    try {
-      const result = await api.get(coverageRequestPath({ lat, lon, layer, date: day, maxcc }));
-      s2CoverageCache.set(key, result.available === true);
-      s2CoverageRev += 1;
-      refreshUsage();
-      if (requestId !== s2PickRequestId) return;
-      if (place !== s2PlaceKey() || layer !== s2Layer || maxcc !== s2Maxcc) {
-        toast('The view changed. Pick the date again.', 'warn');
-        return;
-      }
-      s2Date = dateAfterCoverage(s2Date, day, result.available);
-      if (!result.available) toast(`No imagery at the crosshair on ${day}.`, 'warn');
-    } catch (e) {
-      if (requestId === s2PickRequestId) {
-        toast(`Could not check imagery for ${day}: ${e.message}`, 'danger');
-      }
-    } finally {
-      if (requestId === s2PickRequestId) s2VerifyingDate = '';
-    }
-  }
-
-  // The passes on screen describe the place they were fetched for; once the map
-  // has moved somewhere else they are stale and must not grey out real imagery.
-  const s2PassesStale = $derived(
-    !!s2PassesFor && s2PassesFor !== `${s2Month}@${s2PlaceKey()}`
-  );
 
   // While the picker is open, a settled pan refreshes its dates. The stale
   // cells are disabled immediately; the debounce avoids a request per frame.
   $effect(() => {
-    if (!s2MenuOpen || !isSentinel) return;
-    s2Month;
-    s2PlaceKey();
+    if (!s2.menuOpen || !isSentinel) return;
+    s2.month;
+    s2.placeKey;
     clearTimeout(s2PassTimer);
-    s2PassTimer = setTimeout(() => loadS2Passes(), 600);
+    s2PassTimer = setTimeout(() => s2.loadPasses(), 600);
     return () => clearTimeout(s2PassTimer);
   });
   let s2PassTimer;
@@ -846,10 +495,10 @@
     if (!mapReady || displayedBaseId !== SENTINEL_ID) return;
     center.lat;
     center.lon;
-    s2Maxcc; // a new ceiling can make a different pass the most recent one
+    s2.maxcc; // a new ceiling can make a different pass the most recent one
     clearTimeout(s2LatestTimer);
     // debounced: panning must not spend a request per frame
-    s2LatestTimer = setTimeout(() => resolveS2Latest().catch(() => {}), 900);
+    s2LatestTimer = setTimeout(() => s2.resolveLatest().catch(() => {}), 900);
   });
   let s2LatestTimer;
 
@@ -883,39 +532,15 @@
   // cursor sweeps, with a sober target marking the pivot. Leaflet only rotates
   // about the centre, so after each bearing change we pan the grabbed geographic
   // point back under the cursor — keeping it pinned exactly where you grabbed.
-  const ROTATE_DEADZONE = 8; // px to leave the pivot before the spoke is fixed
   function onMiddleRotateStart(e) {
-    if (e.button !== 1 || !map) return;
-    // own the gesture: no Leaflet pan, no browser middle-click autoscroll
-    e.stopPropagation();
-    e.preventDefault();
-    const rect = mapEl.getBoundingClientRect();
-    const grab = L.point(e.clientX - rect.left, e.clientY - rect.top);
-    const pivotLatLng = map.containerPointToLatLng(grab); // the pinned location
-    const startBearing = map.getBearing();
-    const startScreen = { x: e.clientX, y: e.clientY };
-    rotatePivot = { x: grab.x, y: grab.y };
-    rotating = true;
-    let startAngle = null; // reference spoke, fixed once out of the deadzone
-    const move = (ev) => {
-      if (startAngle === null) {
-        if (Math.hypot(ev.clientX - startScreen.x, ev.clientY - startScreen.y) < ROTATE_DEADZONE) return;
-        startAngle = { x: ev.clientX, y: ev.clientY };
-        return;
-      }
-      setBearing(dragBearing(startBearing, startScreen, startAngle, { x: ev.clientX, y: ev.clientY }));
-      // re-pin: pan the grabbed location back under the grab point
-      const now = map.latLngToContainerPoint(pivotLatLng);
-      const [dx, dy] = pivotPanOffset(grab, now);
-      if (dx || dy) map.panBy([dx, dy], { animate: false });
-    };
-    const up = () => {
-      rotating = false;
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
-    };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
+    if (e.button !== 1 || !engine) return;
+    startRotateDrag(engine, e, {
+      onPivot: (pivot) => {
+        rotatePivot = pivot;
+        rotating = true;
+      },
+      onEnd: () => (rotating = false),
+    });
   }
 
   function startEditBearing() {
@@ -963,35 +588,35 @@
     }
     fullscreen = !fullscreen;
     await tick();
-    map?.invalidateSize();
+    engine?.invalidateSize();
   }
 
   function onFullscreenChange() {
     if (document.fullscreenElement === toolEl) fullscreen = true;
     else if (!document.fullscreenElement) fullscreen = false;
-    tick().then(() => map?.invalidateSize());
+    tick().then(() => engine?.invalidateSize());
   }
 
   // --- measure tools (item 5) ---
-  function onMapClick(e) {
+  /** Where the analyst clicked, `{ lat, lon }` from the façade. */
+  function onMapClick(at) {
     // Grid Search polygon: each click drops a vertex
     if (gridDraw === 'polygon') {
-      polyDraft = [...polyDraft, { lat: e.latlng.lat, lon: e.latlng.lng }];
+      polyDraft = [...polyDraft, at];
       renderDraft();
       return;
     }
     // Sun & moon: one click plants the anchor the day's path is drawn from
     if (sunPlacing) {
-      sunAnchor = { lat: e.latlng.lat, lon: e.latlng.lng };
+      sunAnchor = at;
       sunSky = null;
       sunPlacing = false;
       return;
     }
     if (!measureMode) return;
-    const pt = { lat: e.latlng.lat, lon: e.latlng.lng };
     // an angle is exactly three points; a fourth click starts a fresh angle
     if (measureMode === 'angle' && measurePoints.length >= 3) measurePoints = [];
-    measurePoints = [...measurePoints, pt];
+    measurePoints = [...measurePoints, at];
     redrawMeasure();
   }
 
@@ -999,7 +624,7 @@
     measureMode = measureMode === m ? null : m;
     if (measureMode) selectArmed = false; // measuring and marquee can't both be armed
     measurePoints = [];
-    measureLayer?.clearLayers();
+    measureSurface?.clear();
   }
 
   // toggling the panel shut also drops any active measure tool — otherwise the
@@ -1011,31 +636,31 @@
 
   function clearMeasure() {
     measurePoints = [];
-    measureLayer?.clearLayers();
+    measureSurface?.clear();
   }
 
+  const MEASURE_STROKE = { stroke: '#f5a623', strokeWidth: 2.5, strokeOpacity: 0.95 };
+  const MEASURE_DOT = {
+    radius: 4,
+    stroke: '#fff',
+    strokeWidth: 2,
+    fill: '#f5a623',
+    fillOpacity: 1,
+  };
+
   function redrawMeasure() {
-    if (!map) return;
-    if (!measureLayer) measureLayer = L.layerGroup().addTo(map);
-    measureLayer.clearLayers();
-    const latlngs = measurePoints.map((p) => [p.lat, p.lon]);
-    const stroke = { color: '#f5a623', weight: 2.5, opacity: 0.95 };
-    if (measureMode === 'area' && latlngs.length >= 2) {
-      L.polygon(latlngs, { ...stroke, fillColor: '#f5a623', fillOpacity: 0.15 }).addTo(
-        measureLayer
-      );
-    } else if (latlngs.length >= 2) {
-      L.polyline(latlngs, stroke).addTo(measureLayer);
-    }
-    for (const p of measurePoints) {
-      L.circleMarker([p.lat, p.lon], {
-        radius: 4,
-        color: '#fff',
-        weight: 2,
-        fillColor: '#f5a623',
-        fillOpacity: 1,
-      }).addTo(measureLayer);
-    }
+    if (!engine) return;
+    measureSurface ??= createSurface(engine);
+    const path =
+      measurePoints.length < 2
+        ? null
+        : measureMode === 'area'
+          ? { kind: 'polygon', points: measurePoints, style: { ...MEASURE_STROKE, fill: '#f5a623', fillOpacity: 0.15 } }
+          : { kind: 'line', points: measurePoints, style: MEASURE_STROKE };
+    measureSurface.set([
+      path,
+      ...measurePoints.map((point) => ({ kind: 'dot', at: point, style: MEASURE_DOT })),
+    ]);
   }
 
   const measureReadout = $derived.by(() => {
@@ -1069,151 +694,30 @@
       if (row.source_url && !fullscreen) window.open(row.source_url, '_blank', 'noopener,noreferrer');
       return;
     }
-    if (!map) return;
-    map.setView([row.lat, row.lon], Number(row.zoom) || map.getZoom());
-    setBearing(Number(row.bearing) || 0);
+    if (!engine) return;
+    engine.setView(row, Number(row.zoom) || engine.getZoom());
+    setBearing(row.bearing);
   }
 
-  // --- tile seam fix ---
-  // Leaflet positions each tile with a `translate3d(...)` transform, which
-  // promotes it to its own GPU layer. At fractional OS display scaling (e.g.
-  // 125/150%) an integer CSS position lands on a half physical pixel, so every
-  // tile edge is antialiased independently and bleeds the map background as a
-  // faint white grid — browser- and zoom-independent. Painting tiles with plain
-  // left/top (no transform, no backface-visibility promotion — see CSS) keeps
-  // them in the shared pane layer, where neighbouring edges meet on whole
-  // pixels. Rotation/zoom still use their own pane transforms, so both keep
-  // working. We convert after Leaflet positions the tiles, and revert to
-  // transform positioning just before a zoom so the reposition is glitch-free.
-  let deSeamRaf = 0;
-  function deSeamTiles() {
-    deSeamRaf = 0;
-    if (!mapEl) return;
-    for (const t of mapEl.querySelectorAll('.leaflet-tile')) {
-      const m = /translate3d\((-?[\d.]+)px,\s*(-?[\d.]+)px/.exec(t.style.transform);
-      if (!m) continue; // already flat, or a rotated matrix we shouldn't touch
-      t.style.left = m[1] + 'px';
-      t.style.top = m[2] + 'px';
-      t.style.transform = 'none';
-    }
-  }
-  function scheduleDeSeam() {
-    if (!deSeamRaf) deSeamRaf = requestAnimationFrame(deSeamTiles);
-  }
-  // put the translate transform back before Leaflet repositions tiles for a new
-  // zoom, so a tile is never briefly offset by both left/top and translate3d
-  function reSeamTiles() {
-    if (!mapEl) return;
-    for (const t of mapEl.querySelectorAll('.leaflet-tile')) {
-      if (t.style.transform === 'none' && t.style.left) {
-        t.style.transform = `translate3d(${t.style.left}, ${t.style.top}, 0)`;
-        t.style.left = '';
-        t.style.top = '';
-      }
-    }
-  }
-
-  // The Google widget layer is created ONCE and reused across basemap
-  // switches: every google.maps.Map instantiation is a billed dynamic map
-  // load, while re-adding the same layer costs nothing. Never destroyed
-  // until the tool unmounts, for the same reason.
-  let mutantLayer = null;
-
-  async function setWidgetLayer(p) {
-    try {
-      await loadGoogleMaps(p.url, {
-        onAuthFailure: async () => {
-          // Google's only key-rejection signal — can fire minutes after a
-          // clean load. Persist the verdict (benches the basemap), tell the
-          // user, and let the provider refetch fall the map back to Esri.
-          try {
-            await api.post(`/api/settings/keys/${p.meter}/status`, {
-              ok: false,
-              detail: 'Google rejected the Maps JavaScript key (gm_authFailure)',
-            });
-          } catch { /* the toast still tells the user */ }
-          toast('Google rejected the Maps JavaScript key. Basemap disabled; see Settings', 'danger', 8000);
-          providers = await api.get('/api/satellite/providers');
-        },
-      });
-    } catch (e) {
-      toast(`Google Maps failed to load: ${e.message}`, 'danger', 6000);
-      providerId = 'esri-world-imagery';
-      return;
-    }
-    if (displayedProvider?.id !== p.id) return; // user moved on while loading
-    if (!mutantLayer) {
-      mutantLayer = createSatelliteMutant(p.max_zoom, p.attribution);
-      // one billed map load, counted where it happens (the proxy can't see it)
-      api.post(`/api/satellite/usage/${p.meter}`).then(refreshUsage).catch(() => {});
-    }
-    // Already the live layer — leave it alone. Returning to this tab refetches
-    // the providers, and the fresh objects re-run the layer effect, so this is
-    // the common path rather than an edge case. Re-adding costs no map load
-    // (the mutant reuses its google.maps.Map), but Leaflet drops and re-clones
-    // every tile in the grid, which reads on screen as a reloading map.
-    if (tileLayer === mutantLayer) return;
-    if (tileLayer) tileLayer.remove();
-    if (map.getZoom() > p.max_zoom) map.setZoom(p.max_zoom);
-    tileLayer = mutantLayer.addTo(map);
-  }
-
+  // The layers are lib/map's (basemap.js); what reaches them from here is which
+  // provider to show and what a billed one owes the usage pill and Settings.
   function setLayer() {
-    const p = displayedProvider;
-    if (!p || !map) return;
-    if (p.widget) {
-      setWidgetLayer(p);
-      return;
-    }
-    // every provider goes through the backend tile proxy: keys and session
-    // tokens stay server-side, every billed tile is counted exactly once
-    // (browser cache hits never reach the proxy), cacheable providers share
-    // the disk tile cache, and coverage gaps come back overzoomed instead of
-    // as "not yet available" placards. Only {s} subdomain templates (custom
-    // providers) stay direct — the proxy can't expand those.
-    const url = p.url.includes('{s}') ? p.url : `/api/tiles/${displayedProviderId}/{z}/{x}/{y}`;
-    // maxZoom caps the map itself (no map-level maxZoom is set), which is what
-    // keeps a shallower provider (OpenTopoMap, z17) from ever being asked for
-    // tiles it would answer with a "max zoom layer" placard — and keeps the
-    // view zoom at or under the provider max, which capture sizing relies on.
-    const opts = { attribution: p.attribution, maxZoom: p.max_zoom };
-    // Where a provider's pixels stop short of its useful view (Sentinel-2:
-    // native z14, view z18), Leaflet keeps requesting the native level and
-    // scales those tiles up in CSS. The extra zoom therefore costs nothing —
-    // asking Sentinel Hub for z18 would buy its upsampling of the same pixels,
-    // 16× the tiles, every one billed.
-    if (p.max_native_zoom != null) opts.maxNativeZoom = p.max_native_zoom;
-    // grid cell in CSS px (lib/usage.js layerCell): bigger tiles offset the
-    // URL z down (512 → -1, 1024 → -2); an oversample halves the cell so each
-    // tile is shown downscaled — deeper zoom on screen. Google's mid-zoom
-    // mosaics are genuinely softer than its deep ones (verified), so this is
-    // what makes the paid imagery actually look paid.
-    if (displayedCell !== 256 || p.tile_size > 256) {
-      opts.tileSize = displayedCell;
-      opts.zoomOffset = -Math.log2(displayedCell / 256);
-      opts.minNativeZoom = 0; // never ask for negative URL z at world zooms
-    }
-    if (p.meter) {
-      // billed tiles: skip the throwaway fetches Leaflet makes mid-zoom-animation
-      // (intermediate zoom levels that get discarded). Deliberately NOT
-      // updateWhenIdle: it delays sharp tiles until the map fully settles,
-      // leaving the scaled-up previous zoom (visible blur) on screen — and it
-      // saves nothing, since each visible tile is only ever fetched once.
-      opts.updateWhenZooming = false;
-      opts.keepBuffer = 4;
-    }
-    if (tileLayer) tileLayer.remove();
-    // Past its maxZoom Leaflet drops a grid layer entirely rather than upscale
-    // it, so switching to a shallower provider (OpenTopoMap, z17) while zoomed
-    // deeper would leave a blank map. Pull the view back to what it can serve.
-    if (map.getZoom() > p.max_zoom) map.setZoom(p.max_zoom);
-    tileLayer = L.tileLayer(url, opts).addTo(map);
-    tileLayer.on('load tileload', scheduleDeSeam);
-    if (p.meter) {
-      refreshUsage();
-      // 'load' fires once all visible tiles are in — keep the pill current
-      tileLayer.on('load', refreshUsage);
-    }
+    if (!displayedProvider || !basemaps) return;
+    basemaps.show(displayedProvider, displayedProviderId, displayedCell);
+  }
+
+  // Google rejected the Maps JavaScript key. Persist the verdict (which benches
+  // the basemap), tell the user, and let the provider refetch fall the map back
+  // to Esri.
+  async function onWidgetAuthFailure(provider) {
+    try {
+      await api.post(`/api/settings/keys/${provider.meter}/status`, {
+        ok: false,
+        detail: 'Google rejected the Maps JavaScript key (gm_authFailure)',
+      });
+    } catch { /* the toast still tells the user */ }
+    toast('Google rejected the Maps JavaScript key. Basemap disabled; see Settings', 'danger', 8000);
+    providers = await api.get('/api/satellite/providers');
   }
 
   $effect(() => {
@@ -1237,23 +741,20 @@
     api.get('/api/satellite/providers').then((r) => (providers = r));
   });
 
+  // A different case drops everything this one was holding: both indexes, the
+  // dialogs open over them, and the two session layers.
+  let openFor = null;
   $effect(() => {
     const id = caseState.current?.id;
     caseState.rev; // re-fetch when the case is reloaded elsewhere (e.g. sidebar delete)
-    if (savedFor !== id) {
-      savedFor = id;
-      saved = [];
-      savedProofs = [];
-      proofsFor = null;
+    if (openFor !== id) {
+      openFor = id;
       savedSearchOpen = false;
       hoveredSavedId = null;
       revealSavedId = null;
       deleteTarget = null;
       notesItem = null;
       placeModal = null;
-      locateStopped = true;
-      locateGeneration += 1;
-      locating = null;
       temporalMapSeq += 1;
       temporalMap = null;
       temporalMapLoading = false;
@@ -1261,44 +762,23 @@
       // The points came out of another case's sheet, so they go with it.
       sheetPoints = null;
     }
-    if (!id) {
-      return;
-    }
-    let live = true;
-    api
-      .get(`/api/cases/${id}/satellite/index`)
-      .then((rows) => { if (live) saved = rows; })
-      .catch(() => { if (live) saved = []; });
-    return () => { live = false; };
+    return savedWork.load(id);
   });
 
-  // The proofs index, read the first time the Proofs position is opened. Keyed
-  // on the case *and its revision*: filing or saving a proof reloads the case,
-  // and a stale list would still show the folder the proof just left.
-  $effect(() => {
-    const id = caseState.current?.id;
-    const stamp = `${id}:${caseState.rev}`;
-    if (!id || !isMode(savedKind) || proofsFor === stamp) return;
-    proofsFor = stamp;
-    let live = true;
-    api
-      .get(`/api/cases/${id}/proofs/index`)
-      .then((rows) => { if (live) savedProofs = rows; })
-      .catch(() => { if (live) { savedProofs = []; proofsFor = null; } });
-    return () => { live = false; };
-  });
+  // The proofs index, read the first time the Proofs position is opened.
+  $effect(() => savedWork.loadProofs(caseState.current?.id, caseState.rev));
 
   // another workspace asked to show one capture: clear whatever filter is on so
   // it can't be hidden, then let the tree open its branch and scroll to it
   $effect(() => {
     const path = uiState.focusCapture;
     if (!path) return;
-    const row = saved.find((item) => item.path === path);
+    const row = savedWork.rows.find((item) => item.path === path);
     if (!row) return;
     uiState.focusCapture = null;
     capturesCollapsed = false;
-    savedKind = 'all';
-    savedQuery = '';
+    savedWork.kind = 'all';
+    savedWork.query = '';
     revealSavedId = row.id;
   });
 
@@ -1309,7 +789,7 @@
     uiState.sidebarOpen; // track the global sidebar toggle
     uiState.sidebarW; // …and its width, live through a resize drag
     if (!mapReady || uiState.tool !== 'satellite') return;
-    tick().then(() => map?.invalidateSize());
+    tick().then(() => engine?.invalidateSize());
   });
 
   // fly to coordinates handed off from the sidebar (place entity click) —
@@ -1322,9 +802,9 @@
       if (target.provider && providers.some((provider) => provider.id === target.provider)) {
         providerId = target.provider;
       }
-      const zoom = Number.isFinite(target.zoom) ? target.zoom : Math.max(map.getZoom(), 16);
-      map.setView([target.lat, target.lon], zoom);
-      setBearing(Number.isFinite(target.bearing) ? target.bearing : 0);
+      const zoom = Number.isFinite(target.zoom) ? target.zoom : Math.max(engine.getZoom(), 16);
+      engine.setView(target, zoom);
+      setBearing(target.bearing);
     }
   });
 
@@ -1341,9 +821,8 @@
     if (!mapReady || !handed?.points?.length) return;
     uiState.mapSheetPoints = null;
     sheetPoints = handed;
-    const bounds = L.latLngBounds(handed.points.map((point) => [point.lat, point.lon]));
     tick().then(() => {
-      if (map && bounds.isValid()) map.fitBounds(bounds, { padding: [48, 48], maxZoom: 17 });
+      engine?.fitPoints(handed.points, { padding: [48, 48], maxZoom: 17 });
     });
   });
 
@@ -1378,13 +857,11 @@
         // it pulled the view out to whatever continents the case has saved work on,
         // which reads as the layer showing everything rather than showing nothing.
         // With nothing to frame, the map stays where the analyst left it.
-        const points = result.items.flatMap((item) =>
-          item.place_entities.map((place) => [place.lat, place.lon])
-        );
+        const points = result.items.flatMap((item) => item.place_entities);
         if (!points.length) return;
         tick().then(() => {
-          if (run !== temporalMapSeq || !map) return;
-          map.fitBounds(L.latLngBounds(points), { padding: [54, 54], maxZoom: 14 });
+          if (run !== temporalMapSeq) return;
+          engine?.fitPoints(points, { padding: [54, 54], maxZoom: 14 });
         });
       })
       .catch((error) => {
@@ -1443,7 +920,7 @@
   let sunSky = $state(null);
   let sunLoading = $state(false);
   let sunPlacing = $state(false);
-  let sunLayer = null;
+  let sunSurface = null; // lib/map/surface.js
   let sunTicket = 0;
 
   function toggleSunMode() {
@@ -1455,7 +932,7 @@
       if (!sunAnchor) sunAnchor = markerLatLng ?? { lat: center.lat, lon: center.lon };
     } else {
       sunPlacing = false;
-      sunLayer?.clearLayers();
+      sunSurface?.clear();
     }
   }
 
@@ -1504,38 +981,24 @@
     return value || fallback;
   }
 
-  // The body itself, as a mark on its own ray: it rides between the anchor, which
-  // stands for the zenith, and the arc, which stands for the horizon, so how far
-  // up it is reads as how close to you it is. The geometry and the glyph are in
-  // `lib/skyOverlay.js`; this only hands them to Leaflet.
-  function bodyIcon(kind, colour, illuminated, waxing) {
-    const size = 20;
-    return L.divIcon({
-      className: 'sky-body', // replaces Leaflet's boxed default
-      html: bodySvg(kind, colour, illuminated, waxing, size),
-      iconSize: [size, size],
-      iconAnchor: [size / 2, size / 2],
-    });
-  }
+  const SKY_BODY_SIZE = 20;
 
   function drawSun() {
-    if (!map) return;
-    if (!sunLayer) sunLayer = L.layerGroup().addTo(map);
-    sunLayer.clearLayers();
-    if (!sunMode || !sunSky || !sunAnchor) return;
+    if (!engine) return;
+    sunSurface ??= createSurface(engine);
+    if (!sunMode || !sunSky || !sunAnchor) {
+      sunSurface.clear();
+      return;
+    }
     const origin = sunAnchor;
-    const bounds = map.getBounds();
     // Sized off the *shorter* side of the view, not its diagonal: the arc is a
     // circle around the anchor, so a radius set by the diagonal runs off the top
     // and bottom of a wide window.
-    const across = map.distance(bounds.getNorthWest(), bounds.getNorthEast());
-    const down = map.distance(bounds.getNorthWest(), bounds.getSouthWest());
+    const { across, down } = engine.viewSpanMeters();
     const reach = Math.min(across, down) * 0.22;
-    const at = (azimuth, scale = 1) => {
-      const point = measure.destination(origin, azimuth, reach * scale);
-      return [point.lat, point.lon];
-    };
+    const at = (azimuth, scale = 1) => measure.destination(origin, azimuth, reach * scale);
     const curve = sunSky.curve;
+    const shapes = [];
 
     for (const body of [
       {
@@ -1554,58 +1017,73 @@
       },
     ]) {
       // Thin and translucent: the imagery underneath is what is being read.
+      const thin = { stroke: body.colour, strokeWidth: 2.5, strokeOpacity: 0.9 };
       for (const run of upRuns(body.altitude)) {
-        L.polyline(
-          run.map((i) => at(body.azimuth[i])),
-          { color: body.colour, weight: 2.5, opacity: 0.9 }
-        ).addTo(sunLayer);
+        shapes.push({ kind: 'line', points: run.map((i) => at(body.azimuth[i])), style: thin });
       }
       for (const { index: i, long } of hourTicks(curve.minutes, body.altitude)) {
-        L.polyline([at(body.azimuth[i], 0.94), at(body.azimuth[i], long ? 1.1 : 1.03)], {
-          color: body.colour,
-          weight: 2.5,
-          opacity: 0.9,
-        })
-          .bindTooltip(`${body.label} ${curve.clock[i]} · az ${Math.round(body.azimuth[i])}°`)
-          .addTo(sunLayer);
+        shapes.push({
+          kind: 'line',
+          points: [at(body.azimuth[i], 0.94), at(body.azimuth[i], long ? 1.1 : 1.03)],
+          style: thin,
+          tip: `${body.label} ${curve.clock[i]} · az ${Math.round(body.azimuth[i])}°`,
+        });
       }
       const altitude = body.altitude[sunIndex];
       const below = isBelow(altitude);
       const reading = bodyReading(
         body.label, curve.clock[sunIndex], body.azimuth[sunIndex], altitude
       );
-      L.polyline([[origin.lat, origin.lon], at(body.azimuth[sunIndex])], {
-        color: body.colour,
-        weight: 3.5,
-        opacity: below ? 0.6 : 1,
-        dashArray: below ? '6 6' : null,
-      })
-        .bindTooltip(reading, { sticky: true })
-        .addTo(sunLayer);
+      shapes.push({
+        kind: 'line',
+        points: [origin, at(body.azimuth[sunIndex])],
+        style: {
+          stroke: body.colour,
+          strokeWidth: 3.5,
+          strokeOpacity: below ? 0.6 : 1,
+          dash: below ? '6 6' : null,
+        },
+        tip: { text: reading, sticky: true },
+      });
       // Nothing rides the ray while the body is under the horizon: the dashed
       // ray already says where it is, and a mark on it would claim it is visible.
+      //
+      // The body itself is a mark on its own ray: it rides between the anchor,
+      // which stands for the zenith, and the arc, which stands for the horizon,
+      // so how far up it is reads as how close to you it is. The geometry and
+      // the glyph are in `lib/skyOverlay.js`.
       if (!below) {
-        L.marker(at(body.azimuth[sunIndex], markScale(altitude)), {
-          icon: bodyIcon(
+        shapes.push({
+          kind: 'marker',
+          at: at(body.azimuth[sunIndex], markScale(altitude)),
+          className: 'sky-body', // replaces the engine's boxed default
+          html: bodySvg(
             body.key,
             body.colour,
             curve.moon_illuminated[sunIndex],
-            sunSky.moon.waxing
+            sunSky.moon.waxing,
+            SKY_BODY_SIZE
           ),
+          size: [SKY_BODY_SIZE, SKY_BODY_SIZE],
+          anchor: [SKY_BODY_SIZE / 2, SKY_BODY_SIZE / 2],
           keyboard: false,
-        })
-          .bindTooltip(body.key === 'moon' ? `${reading} · ${sunSky.moon.phase}` : reading)
-          .addTo(sunLayer);
+          tip: body.key === 'moon' ? `${reading} · ${sunSky.moon.phase}` : reading,
+        });
       }
     }
 
-    L.circleMarker([origin.lat, origin.lon], {
-      radius: 4,
-      color: '#fff',
-      weight: 2,
-      fillColor: themeColour('--accent', '#e8a33d'),
-      fillOpacity: 1,
-    }).addTo(sunLayer);
+    shapes.push({
+      kind: 'dot',
+      at: origin,
+      style: {
+        radius: 4,
+        stroke: '#fff',
+        strokeWidth: 2,
+        fill: themeColour('--accent', '#e8a33d'),
+        fillOpacity: 1,
+      },
+    });
+    sunSurface.set(shapes);
   }
 
   // Redraw on any of: a new day, a new hour, a new anchor, the mode closing.
@@ -1620,9 +1098,7 @@
   // The arc is drawn in metres, so a zoom or a pan has to restretch it.
   $effect(() => {
     if (!mapReady || !sunMode) return;
-    const redraw = () => drawSun();
-    map.on('zoomend moveend', redraw);
-    return () => map.off('zoomend moveend', redraw);
+    return engine.on('view-settled', () => drawSun());
   });
 
   let searching = $state(false);
@@ -1634,13 +1110,13 @@
       // coordinates first (decimal or DMS); anything else is a place name
       try {
         const parsed = await api.post('/api/geo/parse', { text });
-        map.setView([parsed.lat, parsed.lon], Math.max(map.getZoom(), 16));
+        engine.setView(parsed, Math.max(engine.getZoom(), 16));
         return;
       } catch {
         /* not coordinates — fall through to geocoding */
       }
       const place = await api.get(`/api/geo/geocode?q=${encodeURIComponent(text)}`);
-      map.setView([place.lat, place.lon], Math.max(map.getZoom(), 13));
+      engine.setView(place, Math.max(engine.getZoom(), 13));
       if (place.display_name) toast(place.display_name, 'info', 5000);
     } catch {
       toast('No match. Try coordinates ("50.4501, 30.5234"), DMS, or a place name', 'danger');
@@ -1657,13 +1133,12 @@
       openSaved(item.row);
       return;
     }
-    if (!map || !Number.isFinite(item.lat) || !Number.isFinite(item.lon)) return;
-    map.setView([item.lat, item.lon], item.zoom ?? Math.max(map.getZoom(), 13));
+    if (!engine || !Number.isFinite(item.lat) || !Number.isFinite(item.lon)) return;
+    engine.setView(item, item.zoom ?? Math.max(engine.getZoom(), 13));
   }
 
   function setBearing(deg) {
-    if (!map) return;
-    map.setBearing(((deg % 360) + 360) % 360);
+    engine?.setBearing(deg); // the façade normalises whatever it is handed
   }
 
   function resetNorth() {
@@ -1720,19 +1195,15 @@
   let selectArmed = $state(false); // marquee mode: drag a box on the map to capture
   let selRect = $state(null); // live marquee { x0, y0, x1, y1 } in map-container px
 
+  const PIN = 'pin'; // the one shape on the move-mode surface
+
   function markerIcon(style) {
     const { size, anchor } = markerGeometry(style);
-    return L.divIcon({
-      className: 'sat-marker',
-      iconSize: size,
-      iconAnchor: anchor,
-      html: markerSvg(style),
-    });
+    return { className: 'sat-marker', html: markerSvg(style), size, anchor };
   }
 
   function removeMarker() {
-    if (marker) marker.remove();
-    marker = null;
+    markerSurface?.clear();
     markerLatLng = null;
   }
 
@@ -1743,17 +1214,20 @@
       removeMarker();
       return;
     }
-    const c = map.getCenter();
-    marker = L.marker(c, {
-      draggable: true,
-      icon: markerIcon(markerStyle),
-      zIndexOffset: 1000,
-    }).addTo(map);
-    markerLatLng = { lat: c.lat, lon: c.lng };
-    marker.on('drag move', () => {
-      const p = marker.getLatLng();
-      markerLatLng = { lat: p.lat, lon: p.lng };
-    });
+    const c = engine.camera();
+    markerSurface ??= createSurface(engine);
+    markerLatLng = { lat: c.lat, lon: c.lon };
+    markerSurface.set([
+      {
+        id: PIN,
+        kind: 'marker',
+        at: markerLatLng,
+        ...markerIcon(markerStyle),
+        draggable: true,
+        zIndex: 1000,
+        onDrag: (at) => (markerLatLng = at),
+      },
+    ]);
   }
 
   // keep the live marker's look in sync with the chosen style; leaving move
@@ -1762,42 +1236,42 @@
     if (markerStyle === 'none' && moveMode) {
       moveMode = false;
       removeMarker();
-    } else if (marker) {
-      marker.setIcon(markerIcon(markerStyle));
+    } else if (markerSurface?.has(PIN)) {
+      markerSurface.patch(PIN, { icon: markerIcon(markerStyle) });
     }
   });
 
-  // The single capture path. `centerLL` frames the crop (a Leaflet LatLng);
-  // `baseW`/`baseH` are the crop size at the current view zoom, then scaled to
-  // the chosen output resolution. `rectCss` is the same frame as a rectangle in
-  // map-container px — only the widget path needs it, since it crops screen
-  // pixels rather than stitching tiles. The recorded point is the moved pin (if
-  // any), else the crop centre.
-  async function doCapture(centerLL, baseW, baseH, rectCss) {
+  // The single capture path. `framedOn` is the `{ lat, lon }` the crop is
+  // framed on; `baseW`/`baseH` are the crop size at the current view zoom, then
+  // scaled to the chosen output resolution. `rectCss` is the same frame as a
+  // rectangle in map-container px — only the widget path needs it, since it
+  // crops screen pixels rather than stitching tiles. The recorded point is the
+  // moved pin (if any), else the crop centre.
+  async function doCapture(framedOn, baseW, baseH, rectCss) {
     if (capturing) return;
     // widget basemaps have no tiles to stitch: same frame, screen pixels
-    if (isWidgetBase) return doWidgetCapture(centerLL, rectCss);
+    if (isWidgetBase) return doWidgetCapture(framedOn, rectCss);
     capturing = true;
     const { zoom, width, height, mult } = scaledCapture(
       baseW, baseH, resolution, center.zoom, providerMaxZoom
     );
-    let marker_x = 0, marker_y = 0, marker_lat = centerLL.lat, marker_lon = centerLL.lng;
-    if (moveMode && marker) {
-      const ll = marker.getLatLng();
-      marker_lat = ll.lat;
-      marker_lon = ll.lng;
+    let marker_x = 0, marker_y = 0, marker_lat = framedOn.lat, marker_lon = framedOn.lon;
+    if (moveMode && markerLatLng) {
+      const pin = markerLatLng; // the drag keeps it current, so it is the pin
+      marker_lat = pin.lat;
+      marker_lon = pin.lon;
       // pin offset from the crop centre in container px (already accounts for
       // rotation), scaled up to the output pixel size
-      const c0 = map.latLngToContainerPoint(centerLL);
-      const cp = map.latLngToContainerPoint(ll);
+      const c0 = engine.latLngToContainerPoint(framedOn);
+      const cp = engine.latLngToContainerPoint(pin);
       marker_x = Math.round((cp.x - c0.x) * mult);
       marker_y = Math.round((cp.y - c0.y) * mult);
     }
     try {
       const c = await ensureCase();
       const result = await api.post(`/api/cases/${c.id}/satellite/capture`, {
-        lat: centerLL.lat,
-        lon: centerLL.lng,
+        lat: framedOn.lat,
+        lon: framedOn.lon,
         zoom,
         width,
         height,
@@ -1834,7 +1308,7 @@
   function captureCentered() {
     const [w, h] = presetSize;
     const r = mapEl.getBoundingClientRect();
-    doCapture(map.getCenter(), w, h, {
+    doCapture(engine.camera(), w, h, {
       x: (r.width - w) / 2,
       y: (r.height - h) / 2,
       w,
@@ -1912,7 +1386,7 @@
   }
 
   // The widget arm of doCapture: grab the tab via the extension, crop, file.
-  async function doWidgetCapture(centerLL, rect) {
+  async function doWidgetCapture(framedOn, rect) {
     if (!extensionVersion()) {
       extGateOpen = true;
       return;
@@ -1939,7 +1413,7 @@
       const img = await extFrame();
       const canvas = await shotCropCanvas(img, rect, Math.round(rect.w), Math.round(rect.h));
       const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
-      await fileScreenshot(blob, centerLL, true);
+      await fileScreenshot(blob, framedOn, true);
     } catch (e) {
       if (e.needsActivation) {
         // one-time per tab: the browser only lets the extension screenshot a
@@ -1966,12 +1440,12 @@
   // coordinates are the centre of a registered crop (the frame paths) or just
   // the map view at filing time (a pasted screenshot) — the backend keeps that
   // distinction in provenance.
-  async function fileScreenshot(blob, centerLL, framed) {
+  async function fileScreenshot(blob, framedOn, framed) {
     const c = await ensureCase();
     const form = new FormData();
     form.append('image', blob, 'screenshot.png');
-    form.append('lat', String(centerLL ? centerLL.lat : center.lat));
-    form.append('lon', String(centerLL ? centerLL.lng : center.lon));
+    form.append('lat', String(framedOn ? framedOn.lat : center.lat));
+    form.append('lon', String(framedOn ? framedOn.lon : center.lon));
     form.append('zoom', String(center.zoom));
     form.append('bearing', String(bearing));
     form.append('provider', currentProvider.id);
@@ -1988,79 +1462,32 @@
   }
 
   // --- manual screenshot dialog (fallback: paste / drop) ---
+  // The dialog owns its own preview and paste handling; these are the two acts
+  // it needs from the tool — a frame of this tab, and filing what it holds.
   let shotOpen = $state(false);
-  let shotBlob = $state(null);
-  let shotPreview = $state(''); // object URL for the <img> preview
-  let shotBusy = $state(false);
 
-  function shotReset() {
-    if (shotPreview) URL.revokeObjectURL(shotPreview);
-    shotBlob = null;
-    shotPreview = '';
-  }
-  function shotClose() {
-    shotReset();
-    shotOpen = false;
-  }
-  function shotTake(file) {
-    if (!file || !file.type?.startsWith('image/')) return;
-    shotReset();
-    shotBlob = file;
-    shotPreview = URL.createObjectURL(file);
-  }
-  function onShotPaste(e) {
-    const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith('image/'));
-    if (item) {
-      e.preventDefault();
-      shotTake(item.getAsFile());
-    }
-  }
-  function onShotDrop(e) {
-    e.preventDefault();
-    shotTake(e.dataTransfer?.files?.[0]);
-  }
-
-  // One-click grab of the whole map view into the dialog's preview: the same
-  // extension frame as a framed capture, minus the crop, at native resolution.
-  // The preview is what lets the user judge it before filing. The dialog itself
-  // is only reachable with the extension present (no extension → the gate points
-  // at Settings instead), so this grab is always available here.
-  let shotGrabbing = $state(false);
-  async function shotGrab() {
-    if (shotGrabbing) return;
-    shotGrabbing = true;
+  /** The whole map view as a PNG blob, through the extension. Null if refused. */
+  async function grabView() {
     try {
       const img = await extFrame();
-      const r0 = mapEl.getBoundingClientRect();
-      const canvas = await shotCropCanvas(img, { x: 0, y: 0, w: r0.width, h: r0.height });
-      const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
-      if (blob) shotTake(new File([blob], 'screenshot.png', { type: 'image/png' }));
+      const rect = mapEl.getBoundingClientRect();
+      const canvas = await shotCropCanvas(img, { x: 0, y: 0, w: rect.width, h: rect.height });
+      return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
     } catch (e) {
       // extension missing or refused — the paste path still works
       toast(`Screen capture unavailable (${e.message}). Paste a screenshot instead`, 'warn', 6000);
-    } finally {
-      shotGrabbing = false;
+      return null;
     }
   }
-  // paste works anywhere while the dialog is open — no need to focus a zone
-  $effect(() => {
-    if (!shotOpen) return;
-    window.addEventListener('paste', onShotPaste);
-    return () => window.removeEventListener('paste', onShotPaste);
-  });
 
-  async function shotSave() {
-    if (!shotBlob || shotBusy) return;
-    shotBusy = true;
+  /** File what the dialog holds, at the map view rather than a registered frame. */
+  async function fileScreenshotBlob(blob) {
     try {
-      // a pasted image is not registered to any frame: its coordinates are the
-      // map view at filing time, and provenance says so (framed: false)
-      await fileScreenshot(shotBlob, null, false);
-      shotClose();
+      await fileScreenshot(blob, null, false);
+      return true;
     } catch (e) {
       toast(`Could not file the screenshot: ${e.message}`, 'danger', 6000);
-    } finally {
-      shotBusy = false;
+      return false;
     }
   }
 
@@ -2076,9 +1503,9 @@
 
   // …and the Sentinel-2 layer/date popover
   $effect(() => {
-    if (!s2MenuOpen) return;
+    if (!s2.menuOpen) return;
     const onDocMousedown = (e) => {
-      if (s2MenuEl && !s2MenuEl.contains(e.target)) s2MenuOpen = false;
+      if (s2MenuEl && !s2MenuEl.contains(e.target)) s2.menuOpen = false;
     };
     document.addEventListener('mousedown', onDocMousedown, true);
     return () => document.removeEventListener('mousedown', onDocMousedown, true);
@@ -2096,50 +1523,26 @@
   }
 
   function onSelectStart(e) {
-    if (!selectArmed || e.button !== 0 || !map) return;
-    // own the gesture so Leaflet doesn't pan while we draw the box
-    e.stopPropagation();
-    e.preventDefault();
-    const rect = mapEl.getBoundingClientRect();
-    const start = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    selRect = { x0: start.x, y0: start.y, x1: start.x, y1: start.y };
-    const move = (ev) => {
-      let x1 = ev.clientX - rect.left;
-      let y1 = ev.clientY - rect.top;
-      if (ratioValue) {
-        // lock the box to the chosen aspect ratio, sized from the larger delta
-        const dx = x1 - start.x;
-        const dy = y1 - start.y;
-        let w = Math.abs(dx);
-        let h = Math.abs(dy);
-        if (w / h > ratioValue) h = w / ratioValue;
-        else w = h * ratioValue;
-        x1 = start.x + (dx < 0 ? -w : w);
-        y1 = start.y + (dy < 0 ? -h : h);
-      }
-      selRect = { x0: start.x, y0: start.y, x1, y1 };
-    };
-    const up = () => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
-      finishSelect();
-    };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
+    if (!selectArmed || e.button !== 0 || !engine) return;
+    startRectDrag(engine, e, {
+      ratio: ratioValue,
+      onChange: (rect) => (selRect = rect),
+      onDone: finishSelect,
+    });
   }
 
-  function finishSelect() {
-    const r = selRect;
+  function finishSelect(r) {
     selRect = null;
     if (!r) return;
     const w = Math.abs(r.x1 - r.x0);
     const h = Math.abs(r.y1 - r.y0);
     if (w < 12 || h < 12) return; // an accidental click / tiny drag: ignore
-    const centerLL = map.containerPointToLatLng(
-      L.point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)
-    );
+    const framedOn = engine.containerPointToLatLng({
+      x: (r.x0 + r.x1) / 2,
+      y: (r.y0 + r.y1) / 2,
+    });
     selectArmed = false; // one box per arm — re-arm to draw another
-    doCapture(centerLL, Math.round(w), Math.round(h), {
+    doCapture(framedOn, Math.round(w), Math.round(h), {
       x: Math.min(r.x0, r.x1),
       y: Math.min(r.y0, r.y1),
       w,
@@ -2170,24 +1573,19 @@
   }
 
   function ensureGridLayers() {
-    if (!map) return;
-    if (!gridRenderer) gridRenderer = L.canvas({ padding: 0.5 });
-    if (!gridLayer) gridLayer = L.layerGroup();
-    if (!gridAoiLayer) gridAoiLayer = L.layerGroup();
-    if (!gridDraftLayer) gridDraftLayer = L.layerGroup();
+    if (!engine) return;
+    // the lattice runs to hundreds of cells: one SVG node each is what makes a
+    // pan stutter, so it draws on a canvas
+    gridCells ??= createSurface(engine, { renderer: 'canvas' });
+    gridAoi ??= createSurface(engine);
+    gridDraft ??= createSurface(engine);
     syncGridVisibility();
   }
 
   // the eye toggle keeps the grid but drops its layers off the map so you can
   // read the bare imagery underneath, then puts them back
   function syncGridVisibility() {
-    if (!map) return;
-    for (const lyr of [gridLayer, gridAoiLayer, gridDraftLayer]) {
-      if (!lyr) continue;
-      const on = map.hasLayer(lyr);
-      if (gridHidden && on) map.removeLayer(lyr);
-      else if (!gridHidden && !on) map.addLayer(lyr);
-    }
+    for (const surface of [gridCells, gridAoi, gridDraft]) surface?.visible(!gridHidden);
   }
 
   function toggleGridHidden() {
@@ -2212,57 +1610,44 @@
   }
 
   function clearGridLayers() {
-    cellRects.clear();
-    aoiOutline = null;
-    draftLine = null;
-    gridLayer?.clearLayers();
-    gridAoiLayer?.clearLayers();
-    gridDraftLayer?.clearLayers();
+    gridCells?.clear();
+    gridAoi?.clear();
+    gridDraft?.clear();
   }
 
-  function gridHandleIcon() {
-    return L.divIcon({ className: 'grid-handle', iconSize: [16, 16], iconAnchor: [8, 8] });
-  }
-
-  function cellLatLngBounds(i, j) {
-    const b = gridSearch.cellBounds(grid, i, j);
-    return [[b.south, b.west], [b.north, b.east]];
-  }
+  // a handle is an empty box the CSS draws; the shape only says where it is
+  const GRID_HANDLE = { className: 'grid-handle', size: [16, 16], anchor: [8, 8] };
 
   function cellStyle(key) {
     const base = CELL_STYLE[grid?.statuses[key] || 'unchecked'];
     // the cell under review gets a bright cyan outline — distinct from the
     // yellow flag and the grey cleared fill for colour-blind readability
-    return key === reviewKey ? { ...base, color: '#33c9ff', weight: 2.5, opacity: 1 } : base;
+    return key === reviewKey
+      ? { ...base, stroke: '#33c9ff', strokeWidth: 2.5, strokeOpacity: 1 }
+      : base;
   }
 
   function renderGrid() {
     ensureGridLayers();
-    gridLayer.clearLayers();
-    cellRects.clear();
-    if (!grid) return;
-    for (const [i, j] of gridSearch.cellsInAoi(grid)) {
-      const key = gridSearch.cellKey(i, j);
-      const rect = L.rectangle(cellLatLngBounds(i, j), {
-        renderer: gridRenderer,
-        bubblingMouseEvents: false,
-        ...cellStyle(key),
-      });
-      rect.on('click', (e) => {
-        L.DomEvent.stop(e);
-        cycleCell(i, j);
-      });
-      rect.on('contextmenu', (e) => {
-        L.DomEvent.stop(e);
-        flagCell(i, j);
-      });
-      rect.addTo(gridLayer);
-      cellRects.set(key, rect);
+    if (!grid) {
+      gridCells.clear();
+      return;
     }
+    gridCells.set(
+      [...gridSearch.cellsInAoi(grid)].map(([i, j]) => ({
+        id: gridSearch.cellKey(i, j),
+        kind: 'rect',
+        bounds: gridSearch.cellBounds(grid, i, j),
+        style: cellStyle(gridSearch.cellKey(i, j)),
+        onClick: () => cycleCell(i, j),
+        onContextMenu: () => flagCell(i, j),
+      }))
+    );
   }
 
+  // One cell of a thousand, on every keypress of a sweep: never a rebuild.
   function restyleCell(key) {
-    cellRects.get(key)?.setStyle(cellStyle(key));
+    gridCells?.patch(key, { style: cellStyle(key) });
   }
 
   function setReview(key) {
@@ -2298,40 +1683,76 @@
   // --- editing the area of interest (rect corners / polygon vertices) ---
   // The area box + handles show only while editing the area; once a grid is
   // drawn the box is hidden and just the cells remain.
+  const AOI_OUTLINE = 'outline'; // the one shape the drag handles reshape live
+
   function renderAoi() {
     ensureGridLayers();
-    gridAoiLayer.clearLayers();
-    aoiOutline = null;
-    if (!grid || !editArea) return;
-    const b = gridSearch.aoiBounds(grid.aoi);
-    if (grid.aoi.type === 'rect') {
-      aoiOutline = L.rectangle([[b.south, b.west], [b.north, b.east]], AOI_STYLE).addTo(gridAoiLayer);
-      for (const corner of CORNERS) {
-        const m = L.marker(gridSearch.cornerLatLng(b, corner), {
-          draggable: true,
-          keyboard: false,
-          icon: gridHandleIcon(),
-          zIndexOffset: 1200,
-        });
-        m.on('dragstart', () => (dragBounds = { ...gridSearch.aoiBounds(grid.aoi) }));
-        m.on('drag', (e) => onCornerDrag(corner, e.target.getLatLng()));
-        m.on('dragend', commitResize);
-        m.addTo(gridAoiLayer);
-      }
-    } else {
-      aoiOutline = L.polygon(grid.aoi.vertices, AOI_STYLE).addTo(gridAoiLayer);
-      addVertHandles();
+    if (!grid || !editArea) {
+      gridAoi.clear();
+      return;
     }
+    const b = gridSearch.aoiBounds(grid.aoi);
+    const handle = (id, at, onDragStart, onDrag) => ({
+      id,
+      kind: 'marker',
+      at,
+      ...GRID_HANDLE,
+      draggable: true,
+      keyboard: false,
+      zIndex: 1200,
+      onDragStart,
+      onDrag,
+      onDragEnd: () => (grid.aoi.type === 'rect' ? commitResize() : commitVertEdit()),
+    });
+    if (grid.aoi.type === 'rect') {
+      gridAoi.set([
+        { id: AOI_OUTLINE, kind: 'rect', bounds: b, style: AOI_STYLE },
+        ...CORNERS.map((corner) => {
+          const [lat, lon] = gridSearch.cornerLatLng(b, corner);
+          return handle(
+            corner,
+            { lat, lon },
+            () => (dragBounds = { ...gridSearch.aoiBounds(grid.aoi) }),
+            (at) => onCornerDrag(corner, at)
+          );
+        }),
+      ]);
+      return;
+    }
+    // reshape a confirmed polygon: a draggable handle on every vertex
+    gridAoi.set([
+      {
+        id: AOI_OUTLINE,
+        kind: 'polygon',
+        points: grid.aoi.vertices.map(([lat, lon]) => ({ lat, lon })),
+        style: AOI_STYLE,
+      },
+      ...grid.aoi.vertices.map(([lat, lon], k) =>
+        handle(
+          k,
+          { lat, lon },
+          () => (liveVerts = grid.aoi.vertices.map((vertex) => [...vertex])),
+          (at) => onVertexDrag(k, at)
+        )
+      ),
+    ]);
   }
 
-  function onCornerDrag(corner, latlng) {
+  function onCornerDrag(corner, at) {
     if (!dragBounds) return;
-    if (corner[0] === 'n') dragBounds.north = latlng.lat;
-    else dragBounds.south = latlng.lat;
-    if (corner[1] === 'e') dragBounds.east = latlng.lng;
-    else dragBounds.west = latlng.lng;
-    const b = gridSearch.normalizeBounds(dragBounds);
-    aoiOutline?.setBounds([[b.south, b.west], [b.north, b.east]]);
+    if (corner[0] === 'n') dragBounds.north = at.lat;
+    else dragBounds.south = at.lat;
+    if (corner[1] === 'e') dragBounds.east = at.lon;
+    else dragBounds.west = at.lon;
+    gridAoi.patch(AOI_OUTLINE, { bounds: gridSearch.normalizeBounds(dragBounds) });
+  }
+
+  function onVertexDrag(k, at) {
+    if (!liveVerts) return;
+    liveVerts[k] = [at.lat, at.lon];
+    gridAoi.patch(AOI_OUTLINE, {
+      points: liveVerts.map(([lat, lon]) => ({ lat, lon })),
+    });
   }
 
   function commitResize() {
@@ -2348,27 +1769,6 @@
     renderGrid();
     renderAoi();
     scheduleGridSave();
-  }
-
-  // reshape a confirmed polygon: draggable handles on every vertex
-  function addVertHandles() {
-    grid.aoi.vertices.forEach((v, k) => {
-      const m = L.marker([v[0], v[1]], {
-        draggable: true,
-        keyboard: false,
-        icon: gridHandleIcon(),
-        zIndexOffset: 1200,
-      });
-      m.on('dragstart', () => (liveVerts = grid.aoi.vertices.map((x) => [...x])));
-      m.on('drag', (e) => {
-        if (!liveVerts) return;
-        const ll = e.target.getLatLng();
-        liveVerts[k] = [ll.lat, ll.lng];
-        aoiOutline?.setLatLngs(liveVerts);
-      });
-      m.on('dragend', commitVertEdit);
-      m.addTo(gridAoiLayer);
-    });
   }
 
   function commitVertEdit() {
@@ -2404,8 +1804,7 @@
     gridDraw = type;
     // hide the current cells while drawing so map clicks reach the canvas
     // (polygon vertices) instead of being swallowed by a cell underneath
-    gridLayer?.clearLayers();
-    cellRects.clear();
+    gridCells?.clear();
     if (type === 'polygon') {
       polyDraft = [];
       renderDraft();
@@ -2417,80 +1816,72 @@
     gridDraw = null;
     polyDraft = [];
     selRect = null;
-    draftLine = null;
-    gridDraftLayer?.clearLayers();
+    gridDraft?.clear();
     if (wasDrawing && grid) renderGrid(); // restore the cells hidden while drawing
   }
 
   // rectangle area: drag a box (mirrors the capture marquee, reusing selRect for
   // the live outline). Armed while gridDraw === 'rect'.
   function onGridRectStart(e) {
-    if (gridDraw !== 'rect' || e.button !== 0 || !map) return;
-    e.stopPropagation();
-    e.preventDefault();
-    const rect = mapEl.getBoundingClientRect();
-    const start = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    selRect = { x0: start.x, y0: start.y, x1: start.x, y1: start.y };
-    const move = (ev) => {
-      selRect = { x0: start.x, y0: start.y, x1: ev.clientX - rect.left, y1: ev.clientY - rect.top };
-    };
-    const up = () => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
-      finishGridRect();
-    };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
+    if (gridDraw !== 'rect' || e.button !== 0 || !engine) return;
+    startRectDrag(engine, e, {
+      onChange: (rect) => (selRect = rect),
+      onDone: finishGridRect,
+    });
   }
 
-  function finishGridRect() {
-    const r = selRect;
+  function finishGridRect(r) {
     selRect = null;
     gridDraw = null;
     if (!r || Math.abs(r.x1 - r.x0) < 12 || Math.abs(r.y1 - r.y0) < 12) {
       if (grid) renderGrid(); // stray click: restore the cells hidden to draw
       return;
     }
-    const p1 = map.containerPointToLatLng(L.point(r.x0, r.y0));
-    const p2 = map.containerPointToLatLng(L.point(r.x1, r.y1));
+    const p1 = engine.containerPointToLatLng({ x: r.x0, y: r.y0 });
+    const p2 = engine.containerPointToLatLng({ x: r.x1, y: r.y1 });
     doApplyArea({
       type: 'rect',
-      bounds: gridSearch.normalizeBounds({ south: p1.lat, north: p2.lat, west: p1.lng, east: p2.lng }),
+      bounds: gridSearch.normalizeBounds({ south: p1.lat, north: p2.lat, west: p1.lon, east: p2.lon }),
     });
   }
 
   // polygon area: click to drop vertices (handled in onMapClick), drag the
   // handles to adjust, Confirm to build.
-  function draftLatLngs() {
-    return gridSearch.closeRing(polyDraft.map((p) => [p.lat, p.lon]));
+  const DRAFT_RING = 'ring';
+
+  function draftRing() {
+    return gridSearch.closeRing(polyDraft.map((point) => [point.lat, point.lon]))
+      .map(([lat, lon]) => ({ lat, lon }));
   }
 
   function renderDraft() {
     ensureGridLayers();
-    gridDraftLayer.clearLayers();
-    draftLine = null;
-    if (gridDraw !== 'polygon') return;
-    draftLine = L.polyline(draftLatLngs(), {
-      color: '#f5a623',
-      weight: 1.5,
-      opacity: 0.95,
-      dashArray: '5 4',
-    }).addTo(gridDraftLayer);
-    polyDraft.forEach((p, k) => {
-      const m = L.marker([p.lat, p.lon], {
+    if (gridDraw !== 'polygon') {
+      gridDraft.clear();
+      return;
+    }
+    gridDraft.set([
+      {
+        id: DRAFT_RING,
+        kind: 'line',
+        points: draftRing(),
+        style: { stroke: '#f5a623', strokeWidth: 1.5, strokeOpacity: 0.95, dash: '5 4' },
+      },
+      ...polyDraft.map((point, k) => ({
+        id: k,
+        kind: 'marker',
+        at: point,
+        ...GRID_HANDLE,
         draggable: true,
         keyboard: false,
-        icon: gridHandleIcon(),
-        zIndexOffset: 1200,
-      });
-      m.on('drag', (e) => {
-        const ll = e.target.getLatLng();
-        polyDraft[k] = { lat: ll.lat, lon: ll.lng };
-        draftLine?.setLatLngs(draftLatLngs());
-      });
-      m.on('dragend', renderDraft);
-      m.addTo(gridDraftLayer);
-    });
+        zIndex: 1200,
+        onDrag: (at) => {
+          polyDraft[k] = at;
+          gridDraft.patch(DRAFT_RING, { points: draftRing() });
+        },
+        onDragEnd: renderDraft,
+      })),
+    ]);
   }
 
   function confirmPolygon() {
@@ -2498,7 +1889,7 @@
     const vertices = polyDraft.map((p) => [p.lat, p.lon]);
     gridDraw = null;
     polyDraft = [];
-    gridDraftLayer?.clearLayers();
+    gridDraft?.clear();
     doApplyArea({ type: 'polygon', vertices });
   }
 
@@ -2536,11 +1927,7 @@
   function flyToCell([i, j]) {
     setReview(gridSearch.cellKey(i, j));
     const b = gridSearch.cellBounds(grid, i, j);
-    map.fitBounds([[b.south, b.west], [b.north, b.east]], {
-      padding: [80, 80],
-      maxZoom: 20,
-      animate: true,
-    });
+    engine.fitBounds(b, { padding: [80, 80], maxZoom: 20, animate: true });
   }
 
   function startReview() {
@@ -2738,14 +2125,7 @@
     const row = deleteTarget;
     try {
       const caseId = caseState.current.id;
-      let result;
-      if (row.kind === 'place') {
-        result = await api.del(`/api/cases/${caseId}/entities/${row.id}`);
-      } else {
-        result = await api.del(
-          `/api/cases/${caseId}/satellite?path=${encodeURIComponent(row.path)}`
-        );
-      }
+      const result = await savedWork.remove(caseId, row);
       deleteTarget = null;
       await reloadCase(); // re-reads the saved index and the case sidebar
       deletedToast(caseId, result, row.title || coordsLabel(row));
@@ -2768,44 +2148,19 @@
    *  relations is accepted with it — the API keeps that invariant, and a point
    *  confirmed here while the edge tying it to its capture stayed proposed would
    *  be the two surfaces disagreeing about one click. */
-  let acceptingId = $state(null);
-  async function acceptSaved(row) {
-    if (acceptingId) return;
-    acceptingId = row.id;
-    try {
-      await api.patch(`/api/cases/${caseState.current.id}/entities/${row.id}`, {
-        status: 'confirmed',
-      });
-      await reloadCase(); // re-reads the saved index and the case sidebar
-      toast('Point accepted', 'ok', 1600);
-    } catch (e) {
-      toast(`Could not accept this point: ${e.message}`, 'danger');
-    } finally {
-      acceptingId = null;
-    }
-  }
+  const acceptSaved = (row) => savedWork.accept(caseState.current.id, row);
 
   // --- details modal (title + notes) ---
+  // The dialog owns the fields; this owns the PATCH and what it means for the
+  // rest of the case.
   let notesItem = $state(null);
-  let notesText = $state('');
-  let notesTitle = $state('');
-  let notesFolder = $state('');
-  let notesSaving = $state(false);
 
-  function openNotes(row) {
-    notesItem = row;
-    notesText = row.notes ?? '';
-    notesTitle = row.title ?? coordsLabel(row);
-    notesFolder = row.folder ?? '';
-  }
-
-  async function saveNotes() {
+  async function saveNotes({ title, folder, notes }) {
     if (!notesItem) return;
-    notesSaving = true;
     try {
       await api.patch(
         `/api/cases/${caseState.current.id}/satellite`,
-        { path: notesItem.path, notes: notesText, title: notesTitle, folder: notesFolder }
+        { path: notesItem.path, notes, title, folder }
       );
       notesItem = null;
       // the mirrored place entity was retitled too — refresh the sidebar
@@ -2813,8 +2168,6 @@
       toast('Saved', 'ok', 1600);
     } catch (e) {
       toast(e.message, 'danger');
-    } finally {
-      notesSaving = false;
     }
   }
 
@@ -2852,47 +2205,12 @@
     capturesCollapsed = !capturesCollapsed;
     // the map container just resized — let Leaflet redraw tiles for the new size
     await tick();
-    map?.invalidateSize();
+    engine?.invalidateSize();
   }
 
-  function loadSavedGroup() {
-    try {
-      return localStorage.getItem(GROUP_KEY) === 'folders' ? 'folders' : 'geo';
-    } catch {
-      return 'geo'; // localStorage unavailable (private mode) — non-fatal
-    }
-  }
-
-  $effect(() => {
-    try {
-      localStorage.setItem(GROUP_KEY, savedGroup);
-    } catch {
-      /* ignore */
-    }
-  });
-
-  // File a saved item into a My-work folder, dropped onto a folder in the
-  // panel. One PATCH through the shared filing route (a capture's sidecar is
-  // the authority, a place carries the folder itself), then the case reload
-  // every other edit here does: the index, the sidebar and the map overlay all
-  // read the new filing from it.
-  async function moveSaved(row, folder) {
-    // the row's kind *is* its entity type, bar the screenshot that rides the
-    // capture type. Filing a proof as a capture would route it to PATCH /media,
-    // the sidecar of an image it is not.
-    const entity = {
-      id: row.id,
-      type: row.kind === 'place' ? 'place' : row.kind === 'proof' ? 'proof' : 'capture',
-      attrs: { path: row.path },
-    };
-    try {
-      await assignFolder(caseState.current.id, entity, folder);
-      await reloadCase();
-      toast(folder ? `Filed in ${folder}` : 'Removed from My work', 'ok', 1600);
-    } catch (e) {
-      toast(e.message, 'danger');
-    }
-  }
+  // Dropped onto a folder in the panel: the index, the sidebar and the map
+  // overlay all read the new filing from the case reload that follows.
+  const moveSaved = (row, folder) => savedWork.move(caseState.current.id, row, folder);
 
   // --- resize: the Saved panel's left edge is a drag handle ---
   const SAVED_KEY_STEP = 16;
@@ -2915,14 +2233,14 @@
       if (!frame) {
         frame = requestAnimationFrame(() => {
           frame = 0;
-          map?.invalidateSize({ animate: false });
+          engine?.invalidateSize({ animate: false });
         });
       }
     };
     const up = () => {
       savedResizing = false;
       if (frame) cancelAnimationFrame(frame);
-      map?.invalidateSize({ animate: false });
+      engine?.invalidateSize({ animate: false });
       savedPanel.saveWidth(savedW); // one write per drag, not one per frame
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
@@ -2938,14 +2256,14 @@
     setSavedWidth(savedW + step);
     savedPanel.saveWidth(savedW);
     await tick();
-    map?.invalidateSize({ animate: false });
+    engine?.invalidateSize({ animate: false });
   }
 
   async function resetSavedWidth() {
     setSavedWidth(savedPanel.DEFAULT_W);
     savedPanel.saveWidth(savedW);
     await tick();
-    map?.invalidateSize({ animate: false });
+    engine?.invalidateSize({ animate: false });
   }
 
   // A width dragged out on a wide screen would eat a narrower window whole, so
@@ -2957,64 +2275,9 @@
     return () => window.removeEventListener('resize', onWindowResize);
   });
 
-  // --- Locate: fill in the country of everything that still has none ---------
-  // One batch per request (Nominatim is one lookup a second), looped until the
-  // backlog is empty. Progress is the stored geography itself, so cancelling
-  // keeps whatever was already resolved and a later pass picks up where this
-  // one stopped.
-  const LOCATE_BATCH = 10;
-  let locating = $state(null); // { done, total } while a pass runs
-  let locateStopped = false;
-  let locateGeneration = 0;
-
-  async function runLocate() {
-    if (locating || !caseState.current) return;
-    const id = caseState.current.id;
-    const generation = ++locateGeneration;
-    locateStopped = false;
-    const total = pendingLocate(saved);
-    locating = { done: 0, total };
-    let located = 0;
-    let failed = 0;
-    let throttled = false;
-    try {
-      let remaining = total;
-      while (remaining > 0 && !locateStopped && generation === locateGeneration) {
-        const batch = await api.post(
-          `/api/cases/${id}/satellite/locate?limit=${LOCATE_BATCH}`
-        );
-        if (generation !== locateGeneration) return;
-        located += batch.located;
-        failed += batch.failed;
-        throttled = Boolean(batch.throttled);
-        // A batch that resolved nothing means the network is down, or that
-        // Nominatim put us in its penalty box — not that the next one will do
-        // better: stop instead of hammering it forever.
-        const stalled = batch.remaining >= remaining;
-        remaining = batch.remaining;
-        locating = { done: total - remaining, total };
-        if (stalled || throttled) break;
-      }
-      if (generation !== locateGeneration) return;
-      const rows = await api.get(`/api/cases/${id}/satellite/index`);
-      if (generation !== locateGeneration) return;
-      saved = rows;
-      toast(
-        throttled
-          ? `Located ${located} of ${total}. OpenStreetMap is rate-limiting this address; wait a minute and run Locate again`
-          : failed
-            ? `Located ${located} of ${total}. ${failed} lookup(s) failed; run Locate again to retry`
-            : `Located ${located} of ${total}`,
-        failed || throttled ? 'warn' : 'ok'
-      );
-    } catch (e) {
-      if (generation === locateGeneration) {
-        toast(`Locate stopped: ${e.message}`, 'danger', 6000);
-      }
-    } finally {
-      if (generation === locateGeneration) locating = null;
-    }
-  }
+  // Locate fills in the country of everything that still has none, one bounded
+  // batch at a time (state/saved.svelte.js).
+  const runLocate = () => savedWork.runLocate(caseState.current?.id);
 
   // --- place edit modal (title + notes), used for both save & later edits ---
   // { id: string|null, title, notes, folder, lat, lon, zoom, bearing }; id null = new
@@ -3116,7 +2379,7 @@
     <div class="spacer"></div>
     <PlaceSearch
       bind:value={coordsText}
-      savedRows={saved}
+      savedRows={savedWork.rows}
       centre={{ lat: center.lat, lon: center.lon }}
       units={prefs.units}
       {searching}
@@ -3139,8 +2402,8 @@
            It draws the panel's current selection, not the whole index. -->
       {#if savedOverlay}
         <SavedOverlay
-          map={mapReady ? map : null}
-          items={savedShown}
+          engine={mapReady ? engine : null}
+          items={savedWork.shown}
           caseId={caseState.current?.id}
           coords={coordsLabel}
           {fullscreen}
@@ -3149,13 +2412,13 @@
           onedit={editSaved}
           onproof={sendToComposer}
           onpost={openLinkedPost}
-          onshowproofs={() => (savedKind = 'proofs')}
+          onshowproofs={() => (savedWork.kind = 'proofs')}
           onrefresh={reloadCase}
         />
       {/if}
 
       {#if sheetPoints}
-        <SheetPointsOverlay map={mapReady ? map : null} points={sheetPoints.points} />
+        <SheetPointsOverlay engine={mapReady ? engine : null} points={sheetPoints.points} />
         <!-- Both temporary layers can be on at once, so this one sits under the other
              rather than on top of it. -->
         <div class="temporal-layer-card" class:stacked={temporalMap} aria-label="Sheet map layer">
@@ -3172,7 +2435,7 @@
 
       {#if temporalMap}
         <TemporalMapOverlay
-          map={mapReady ? map : null}
+          engine={mapReady ? engine : null}
           items={temporalMap.items}
           caseId={caseState.current?.id}
           onopen={openTemporalTimeline}
@@ -3215,7 +2478,7 @@
           {gridMode}
           {toggleGridMode}
           bind:savedOverlay
-          savedCount={saved.length}
+          savedCount={savedWork.rows.length}
           referenceCount={uiState.refViewers.length}
           {openRefPicker}
           {setMeasureMode}
@@ -3359,22 +2622,22 @@
           class="date-pill mono"
           class:exact={!!s2PinnedDate}
           title={s2PinnedDate
-            ? `Sentinel-2 ${s2LayerLabel} from this exact date`
-            : s2Latest
-              ? `Sentinel-2 ${s2LayerLabel}: most recent pass over this point`
-              : `Sentinel-2 ${s2LayerLabel}: most recent pass (open the picker to date it)`}
+            ? `Sentinel-2 ${s2.layerLabel} from this exact date`
+            : s2.latest
+              ? `Sentinel-2 ${s2.layerLabel}: most recent pass over this point`
+              : `Sentinel-2 ${s2.layerLabel}: most recent pass (open the picker to date it)`}
         >
           <Icon name="clock" size={11} />
-          {s2PinnedDate ?? s2Latest ?? ''}
+          {s2PinnedDate ?? s2.latest ?? ''}
           {#if !s2PinnedDate}
-            <span class="tag">{s2Latest ? 'latest' : 'most recent'}</span>
+            <span class="tag">{s2.latest ? 'latest' : 'most recent'}</span>
           {/if}
-          {#if s2Layer !== DEFAULT_LAYER}
-            <span class="tag layer">{s2LayerShort}</span>
+          {#if s2.layer !== DEFAULT_LAYER}
+            <span class="tag layer">{s2.layerShort}</span>
           {/if}
-          {#if s2Maxcc !== DEFAULT_MAXCC}
+          {#if s2.maxcc !== DEFAULT_MAXCC}
             <span class="tag" title="Passes over this cloud cover are not rendered"
-              >≤{s2Maxcc}% cloud</span
+              >≤{s2.maxcc}% cloud</span
             >
           {/if}
         </span>
@@ -3439,33 +2702,12 @@
         {#if isSentinel}
           <SentinelPicker
             bind:menuEl={s2MenuEl}
-            menuOpen={s2MenuOpen}
-            toggleMenu={toggleS2Menu}
-            bind:layer={s2Layer}
-            layers={s2Layers}
-            layerHint={s2LayerHint}
-            layersSource={s2LayersSource}
-            loadLayers={loadS2Layers}
-            bind:date={s2Date}
-            maxcc={s2Maxcc}
-            setMaxcc={setS2Maxcc}
+            {s2}
             {maxccLabel}
-            filtered={s2Filtered}
-            month={s2Month}
             {monthLabel}
-            stepMonth={stepS2Month}
             {monthGrid}
-            passes={s2Passes}
             {cloudClass}
             {cloudLabel}
-            passesBusy={s2PassesBusy}
-            passesNote={s2PassesNote}
-            passesStale={s2PassesStale}
-            verifyingDate={s2VerifyingDate}
-            dateStatus={s2DateStatus}
-            pickDate={pickS2Date}
-            clearDate={clearS2Date}
-            loadPasses={loadS2Passes}
           />
         {/if}
         {#if usagePill}
@@ -3584,7 +2826,7 @@
       >
         <Icon name={capturesCollapsed ? 'chevronLeft' : 'chevronRight'} size={15} />
         <span class="label" style="margin:0">Saved</span>
-        <span class="count">{saved.length}</span>
+        <span class="count">{savedWork.rows.length}</span>
       </button>
       {#if capturesCollapsed}
         <!-- collapsed: header acts as the toggle back to the list -->
@@ -3633,18 +2875,18 @@
           {/if}
 
           <SavedTree
-            rows={savedRows}
+            rows={savedWork.shownRows}
             folders={caseState.current?.folders ?? []}
             caseId={caseState.current?.id}
             coords={coordsLabel}
             {fullscreen}
-            bind:kind={savedKind}
-            bind:query={savedQuery}
-            bind:group={savedGroup}
+            bind:kind={savedWork.kind}
+            bind:query={savedWork.query}
+            bind:group={savedWork.group}
             bind:hoveredId={hoveredSavedId}
             onmove={moveSaved}
             revealId={revealSavedId}
-            {locating}
+            locating={savedWork.locating}
             onopen={openSaved}
             onedit={editSaved}
             ondelete={(row) => (deleteTarget = row)}
@@ -3652,7 +2894,7 @@
             onaccept={acceptSaved}
             onbrowse={() => (savedSearchOpen = true)}
             onlocate={runLocate}
-            oncancelLocate={() => (locateStopped = true)}
+            oncancelLocate={savedWork.stopLocate}
           />
         </div>
       {/if}
@@ -3677,87 +2919,29 @@
   />
 {/if}
 
-<!-- satellite notes modal -->
 {#if notesItem}
-  <Modal title="Capture details" onclose={() => (notesItem = null)} width="420px">
-    <label for="capture-title" style="display:block;font-size:var(--fs-xs);color:var(--text-3);margin-bottom:5px">Title</label>
-    <input
-      id="capture-title"
-      class="input"
-      placeholder={coordsLabel(notesItem)}
-      bind:value={notesTitle}
-    />
-    <label for="capture-folder" style="display:block;font-size:var(--fs-xs);color:var(--text-3);margin:10px 0 5px">Folder</label>
-    <FolderSelect
-      id="capture-folder"
-      bind:value={notesFolder}
-      folders={caseState.current?.folders ?? []}
-      emptyLabel="My work (root)"
-    />
-    <hr style="border:none;border-top:1px solid var(--border);margin:12px 0" />
-    <div class="sat-info-rows">
-      <div class="sat-info-row">
-        <span class="sat-info-label">Coordinates</span>
-        <span class="mono">{coordsLabel(notesItem)}</span>
-      </div>
-      <div class="sat-info-row">
-        <span class="sat-info-label">Provider</span>
-        <span>{notesItem.provider ?? notesItem.site ?? '—'}</span>
-      </div>
-      <div class="sat-info-row">
-        <span class="sat-info-label">Zoom</span>
-        <span>{notesItem.zoom ?? '—'}</span>
-      </div>
-      <div class="sat-info-row">
-        <span class="sat-info-label">Captured</span>
-        <span class="mono">{notesItem.fetched_at?.slice(0, 10)}</span>
-      </div>
-      <div class="sat-info-row">
-        <span class="sat-info-label">Imagery date</span>
-        <span class="mono">{notesItem.imagery_date ?? '—'}</span>
-      </div>
-      <div class="sat-info-row">
-        <span class="sat-info-label">Image</span>
-        <a
-          class="link-out"
-          class:disabled={fullscreen}
-          href={fullscreen ? undefined : fileUrl(caseState.current?.id, notesItem.path)}
-          target="_blank"
-          rel="noreferrer"
-          aria-disabled={fullscreen}
-          title={leavesFullscreen ?? 'Open the full image'}
-        >Open the full image <Icon name="external" size={12} /></a>
-      </div>
-    </div>
-    <hr style="border:none;border-top:1px solid var(--border);margin:12px 0" />
-    <label for="capture-notes" style="display:block;font-size:var(--fs-xs);color:var(--text-3);margin-bottom:5px">Notes</label>
-    <textarea
-      id="capture-notes"
-      class="textarea"
-      rows="5"
-      placeholder="Add observations, links, context…"
-      bind:value={notesText}
-    ></textarea>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn" onclick={() => (notesItem = null)}>Cancel</button>
-      <button class="btn btn-primary" onclick={saveNotes} disabled={notesSaving}>
-        {notesSaving ? 'Saving…' : 'Save'}
-      </button>
-    </div>
-  </Modal>
+  <CaptureDetails
+    row={notesItem}
+    caseId={caseState.current?.id}
+    folders={caseState.current?.folders ?? []}
+    coords={coordsLabel}
+    {leavesFullscreen}
+    onsave={saveNotes}
+    onclose={() => (notesItem = null)}
+  />
 {/if}
 
 <!-- Search every saved item at full width: the same index the tree reads, with
      thumbnails and a sort. No fetch, no network. -->
 {#if savedSearchOpen}
   <SavedSearch
-    rows={savedRows}
+    rows={savedWork.shownRows}
     caseId={caseState.current?.id}
     coords={coordsLabel}
     {fullscreen}
     centre={{ lat: center.lat, lon: center.lon }}
-    bind:kind={savedKind}
-    bind:query={savedQuery}
+    bind:kind={savedWork.kind}
+    bind:query={savedWork.query}
     bind:hoveredId={hoveredSavedId}
     onclose={() => (savedSearchOpen = false)}
     onopen={openSaved}
@@ -3768,226 +2952,55 @@
   />
 {/if}
 
-<!-- The manual way in, for when the Capture button's extension grab can't be
-     used or the screenshot came from somewhere else entirely. -->
-{#if shotOpen && !shotGrabbing}
-  <Modal title="File a screenshot" onclose={shotClose} width="520px">
-    <p class="shot-hint">
-      The <strong>Capture</strong> button already crops this basemap off the screen
-      through the usual frame. Use this when it can't:
-      grab the whole map view below, or paste
-      (<span class="mono">Ctrl+V</span>) / drop your own OS screenshot.
-      Unlike a framed capture, this is filed at the current <em>view</em>
-      (<span class="mono">{fmtCoords(center.lat, center.lon)}</span>, z{center.zoom}).
-      the coordinates describe the map, not a registered crop. The Google attribution
-      is burned into a footer either way; keep Google's on-screen credits inside the
-      frame too.
-    </p>
-    <div style="display:flex;justify-content:center;margin-bottom:10px">
-      <button class="btn btn-primary" onclick={shotGrab} disabled={shotGrabbing}>
-        {#if shotGrabbing}<span class="spinner"></span> Grabbing…{:else}
-          <Icon name="satellite" size={14} /> Capture the view{/if}
-      </button>
-    </div>
-    <div
-      class="shot-zone"
-      class:has-image={!!shotPreview}
-      role="button"
-      tabindex="0"
-      ondrop={onShotDrop}
-      ondragover={(e) => e.preventDefault()}
-    >
-      {#if shotPreview}
-        <img src={shotPreview} alt="screenshot to file" />
-      {:else}
-        <span>Paste (Ctrl+V) or drop the screenshot here</span>
-      {/if}
-    </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      {#if shotPreview}
-        <button class="btn" onclick={shotReset}>Clear</button>
-      {/if}
-      <button class="btn" onclick={shotClose}>Cancel</button>
-      <button class="btn btn-primary" onclick={shotSave} disabled={!shotBlob || shotBusy}>
-        {shotBusy ? 'Filing…' : 'File as capture'}
-      </button>
-    </div>
-  </Modal>
+{#if shotOpen}
+  <ScreenshotDialog
+    view={center}
+    {fmtCoords}
+    grab={grabView}
+    file={fileScreenshotBlob}
+    onclose={() => (shotOpen = false)}
+  />
 {/if}
 
-<!-- Google JS capture gate: this basemap can only be captured through the
-     browser extension (screen pixels are the only thing Google's terms allow
-     out of the widget, and the extension is the promptless way to get them).
-     Explain briefly and point at Settings; never a half-working share flow. -->
 {#if extGateOpen}
-  <Modal title="Capture needs the browser extension" onclose={() => (extGateOpen = false)} width="460px">
-    <p class="shot-hint">
-      Google's terms allow nothing programmatic out of this basemap. A capture
-      here is a <strong>screenshot of the tab</strong>, and the Azimut Capture
-      extension is what takes it (one grab per click, no screen-share prompt,
-      works in fullscreen). Other basemaps are not affected.
-    </p>
-    <p class="shot-hint">
-      Install it from <strong>Settings → Capture extension</strong>, then reload
-      this tab.
-    </p>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn" onclick={() => (extGateOpen = false)}>Cancel</button>
-      <button
-        class="btn btn-primary"
-        onclick={() => {
-          extGateOpen = false;
-          uiState.settingsTab = 'extension';
-          uiState.tool = 'settings';
-        }}
-      >
-        Open Settings
-      </button>
-    </div>
-  </Modal>
+  <ExtensionGate
+    onclose={() => (extGateOpen = false)}
+    onsettings={() => {
+      extGateOpen = false;
+      uiState.settingsTab = 'extension';
+      uiState.tool = 'settings';
+    }}
+  />
 {/if}
 
-<!-- place edit / save-with-details modal -->
 {#if placeModal}
-  <Modal
-    title={placeModal.id ? 'Edit place' : 'Save place'}
+  <PlaceDialog
+    draft={placeModal}
+    caseId={caseState.current?.id}
+    folders={caseState.current?.folders ?? []}
+    saving={placeSaving}
+    coords={placeCoordsLabel}
+    onsave={savePlaceModal}
     onclose={() => (placeModal = null)}
-    width="420px"
-  >
-    <label for="place-title" style="display:block;font-size:var(--fs-xs);color:var(--text-3);margin-bottom:5px">Title</label>
-    <input
-      id="place-title"
-      class="input"
-      placeholder={placeCoordsLabel(placeModal)}
-      bind:value={placeModal.title}
-    />
-    <label for="place-folder" style="display:block;font-size:var(--fs-xs);color:var(--text-3);margin:10px 0 5px">Folder</label>
-    <FolderSelect
-      id="place-folder"
-      bind:value={placeModal.folder}
-      folders={caseState.current?.folders ?? []}
-      emptyLabel="My work (root)"
-    />
-    <hr style="border:none;border-top:1px solid var(--border);margin:12px 0" />
-    <div class="sat-info-rows">
-      <div class="sat-info-row">
-        <span class="sat-info-label">Coordinates</span>
-        <span class="mono">{placeCoordsLabel(placeModal)}</span>
-      </div>
-      <div class="sat-info-row">
-        <span class="sat-info-label">Zoom</span>
-        <span>z{placeModal.zoom}{placeModal.bearing ? ` · ${Math.round(placeModal.bearing)}°` : ''}</span>
-      </div>
-    </div>
-    <hr style="border:none;border-top:1px solid var(--border);margin:12px 0" />
-    <!-- what this point already claims, and why it is being saved — said while
-         the analyst still knows: the photo it geolocates, the video whose
-         metadata pointed here -->
-    <span style="display:block;font-size:var(--fs-xs);color:var(--text-3);margin-bottom:5px">Relations</span>
-    {#if placeModal.relations?.length}
-      <RelationList
-        caseId={caseState.current.id}
-        relations={placeModal.relations}
-        subjectType="place"
-        actionFilter="relation"
-        onwalk={(entity) => { placeModal = null; openEntity(entity); }}
-        onchanged={async () => {
-          await loadPlaceRelations(placeModal?.id);
-          await reloadCase();
-        }}
-      />
-    {/if}
-    <RelationPicker subjectType="place" bind:value={placeModal.relation} />
-    <hr style="border:none;border-top:1px solid var(--border);margin:12px 0" />
-    <label for="place-notes" style="display:block;font-size:var(--fs-xs);color:var(--text-3);margin-bottom:5px">Notes</label>
-    <textarea
-      id="place-notes"
-      class="textarea"
-      rows="5"
-      placeholder="Add observations, links, context…"
-      bind:value={placeModal.notes}
-    ></textarea>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn" onclick={() => (placeModal = null)}>Cancel</button>
-      <button class="btn btn-primary" onclick={savePlaceModal} disabled={placeSaving}>
-        {placeSaving ? 'Saving…' : 'Save'}
-      </button>
-    </div>
-  </Modal>
+    onwalk={(entity) => {
+      placeModal = null;
+      openEntity(entity);
+    }}
+    onchanged={async () => {
+      await loadPlaceRelations(placeModal?.id);
+      await reloadCase();
+    }}
+  />
 {/if}
 
-<!-- reference-image picker: choose a case image to float over the map. Pure
-     scratch aid — the window is never captured or saved. -->
 {#if refPicker}
-  <Modal title="Add reference" onclose={() => (refPicker = false)} width="560px">
-    <p class="ref-hint">
-      Float a case image or video over the map to compare against the imagery.
-      Reference windows are never captured or saved.
-    </p>
-    {#if refLoading}
-      <div class="ref-empty">Loading…</div>
-    {:else if !refMedia.length}
-      <div class="ref-empty">
-        No images or videos in this case yet. Import one in the Media Library first.
-      </div>
-    {:else}
-      {#if refBrowserOpen || refMedia.length > REF_SEARCH_MIN}
-        <div class="ref-search">
-          <SearchInput
-            bind:value={refQuery}
-            placeholder="Search media…"
-            count={`${visibleRefMedia.length}/${refMedia.length}`}
-            width="100%"
-          />
-          <button
-            class="btn btn-ghost btn-sm browse-btn"
-            title={refBrowserOpen ? 'Show every image' : 'Browse folders'}
-            onclick={toggleRefBrowser}
-          >…</button>
-        </div>
-      {/if}
-      {#if refBrowserOpen}
-        <FolderBrowser
-          entries={refBrowserEntries}
-          path={refBrowsePath}
-          rootLabel="Case media"
-          selectedId={refBrowseSelection}
-          matches={(entry) => matchesQuery(entry, refQuery)}
-          emptyText="This folder has no matching media."
-          icon={(entry) => (entry.kind === 'video' ? 'video' : 'image')}
-          label={(entry) => entry.title ?? entry.filename}
-          onnavigate={openRefFolder}
-          onselect={(entry) => (refBrowseSelection = entry.path)}
-          onconfirm={(entry) => addRef(entry)}
-        />
-        <div class="ref-actions">
-          <button class="btn btn-primary btn-sm" disabled={!refBrowseSelection} onclick={confirmRefBrowser}>
-            Add selected
-          </button>
-        </div>
-      {:else if !visibleRefMedia.length}
-        <div class="ref-empty">No media matches this search.</div>
-      {:else}
-        <div class="ref-grid">
-          {#each visibleRefMedia as m (m.path)}
-            <button class="ref-pick" onclick={() => addRef(m)} title={m.title ?? m.filename}>
-              <div class="ref-thumb">
-                {#if m.thumbnail}
-                  <img src={fileUrl(caseState.current.id, m.thumbnail)} alt={m.filename} loading="lazy" />
-                {:else}
-                  <Icon name={m.kind === 'video' ? 'video' : 'image'} size={26} />
-                {/if}
-                {#if m.kind === 'video'}
-                  <span class="ref-kind"><Icon name="video" size={11} /></span>
-                {/if}
-              </div>
-              <span class="ref-name">{m.title ?? m.filename}</span>
-            </button>
-          {/each}
-        </div>
-      {/if}
-    {/if}
-  </Modal>
+  <RefPicker
+    media={refMedia}
+    loading={refLoading}
+    caseId={caseState.current?.id}
+    onpick={addRef}
+    onclose={() => (refPicker = false)}
+  />
 {/if}
 
 <style>
@@ -4190,11 +3203,9 @@
     gap: 8px;
     align-items: flex-start;
   }
-  .map-wrap.measuring :global(.leaflet-container),
-  .map-wrap.selecting :global(.leaflet-container) {
-    cursor: crosshair;
-  }
-  .map-wrap.grid-drawing :global(.leaflet-container) {
+  .map-wrap.measuring :global(.map-surface),
+  .map-wrap.selecting :global(.map-surface),
+  .map-wrap.grid-drawing :global(.map-surface) {
     cursor: crosshair;
   }
 
@@ -4592,196 +3603,5 @@
     color: var(--accent);
   }
 
-  .sat-info-rows {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .sat-info-row {
-    display: flex;
-    gap: 10px;
-    font-size: var(--fs-sm);
-    align-items: baseline;
-  }
-  .sat-info-label {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    min-width: 80px;
-    flex-shrink: 0;
-  }
 
-  /* Leaflet dark-theme adjustments */
-  :global(.leaflet-container) {
-    font-family: var(--font-sans);
-    background: var(--bg-2);
-    image-rendering: smooth;
-  }
-  /* NB: no backface-visibility / transform promotion on tiles — that forces
-     each tile onto its own GPU layer and reintroduces the white seams the
-     deSeamTiles() left/top positioning removes (see script). */
-  :global(.leaflet-control-attribution) {
-    background: rgba(24, 24, 24, 0.85) !important;
-    color: var(--text-3) !important;
-    font-size: 10px;
-  }
-  :global(.leaflet-control-attribution a) {
-    color: var(--text-2) !important;
-  }
-  :global(.leaflet-bar a) {
-    background: var(--bg-2) !important;
-    color: var(--text-1) !important;
-    border-color: var(--border) !important;
-  }
-  :global(.leaflet-bar a:hover) {
-    background: var(--bg-3) !important;
-  }
-  /* zoom +/- (topleft) sits directly under the fullscreen/labels/measure
-     cluster instead of Leaflet's default corner margin, which used to land
-     it right on top of that cluster */
-  :global(.leaflet-top.leaflet-left) {
-    top: 58px !important;
-    left: 12px !important;
-  }
-  :global(.leaflet-top.leaflet-left .leaflet-control) {
-    margin: 0 0 8px !important;
-  }
-  :global(.leaflet-pane) {
-    will-change: transform;
-  }
-  /* Slim ruler-style scale: no boxed panel, just a light bracket + label
-     floating directly on the map so it stays readable over any imagery. */
-  :global(.leaflet-control-scale) {
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    margin: 0 10px 10px 0 !important;
-  }
-  :global(.leaflet-control-scale-line) {
-    background: transparent !important;
-    border: none !important;
-    border-left: 1.5px solid rgba(255, 255, 255, 0.92) !important;
-    border-right: 1.5px solid rgba(255, 255, 255, 0.92) !important;
-    border-bottom: 1.5px solid rgba(255, 255, 255, 0.92) !important;
-    color: #fff !important;
-    font-size: 10px !important;
-    font-weight: 600 !important;
-    line-height: 1.3 !important;
-    padding: 0 4px 1px !important;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85), 0 0 4px rgba(0, 0, 0, 0.5) !important;
-  }
-
-  /* reference-image picker */
-  .ref-hint {
-    font-size: var(--fs-sm);
-    color: var(--text-2);
-    margin: 0 0 12px;
-  }
-  .ref-search {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 10px;
-  }
-  .ref-search :global(.search-box) {
-    flex: 1;
-  }
-  .browse-btn {
-    min-width: 30px;
-    font-size: var(--fs-lg);
-    line-height: 1;
-  }
-  .ref-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 10px;
-  }
-  .shot-hint {
-    font-size: var(--fs-sm);
-    color: var(--text-2);
-    margin: 0 0 12px;
-  }
-  .shot-zone {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 180px;
-    border: 1px dashed var(--border);
-    border-radius: 6px;
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-    overflow: hidden;
-  }
-  .shot-zone.has-image {
-    border-style: solid;
-  }
-  .shot-zone img {
-    max-width: 100%;
-    max-height: 320px;
-    display: block;
-  }
-  .ref-empty {
-    padding: 24px 4px;
-    text-align: center;
-    font-size: var(--fs-sm);
-    color: var(--text-3);
-  }
-  .ref-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 10px;
-    max-height: 52vh;
-    overflow-y: auto;
-  }
-  .ref-pick {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    padding: 0;
-    background: none;
-    border: none;
-    color: var(--text-2);
-    cursor: pointer;
-    text-align: left;
-  }
-  .ref-thumb {
-    position: relative;
-    aspect-ratio: 4 / 3;
-    border-radius: var(--radius-1);
-    overflow: hidden;
-    background: var(--bg-2);
-    display: grid;
-    place-items: center;
-    color: var(--text-3);
-    border: 1px solid var(--border);
-  }
-  .ref-kind {
-    position: absolute;
-    bottom: 4px;
-    right: 4px;
-    display: grid;
-    place-items: center;
-    padding: 2px;
-    border-radius: var(--radius-1);
-    color: #fff;
-    background: rgba(16, 16, 16, 0.75);
-    backdrop-filter: blur(4px);
-  }
-  .ref-pick:hover .ref-thumb {
-    border-color: var(--accent);
-  }
-  .ref-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  .ref-name {
-    font-size: var(--fs-xs);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .ref-pick:hover .ref-name {
-    color: var(--accent);
-  }
 </style>

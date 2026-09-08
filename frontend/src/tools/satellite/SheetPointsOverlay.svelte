@@ -11,12 +11,12 @@
    * worklist of addresses until the circles are drawn. So the imprecision is the shape,
    * and the pin sits on top of it.
    */
-  import L from 'leaflet';
+  import { createSurface } from '../../lib/map/surface.js';
   import { paths } from '../../components/Icon.svelte';
   import { precisionMetres } from '../../lib/sheetRoles.js';
 
-  let { map = null, points = [] } = $props();
-  let group = null;
+  let { engine = null, points = [] } = $props();
+  let surface = null;
 
   const TINT = '#c58af9';
 
@@ -32,49 +32,56 @@
     );
   }
 
-  function icon(point) {
-    const coarse = point.decimals <= COARSE_DECIMALS ? ' sheet-mark-coarse' : '';
-    return L.divIcon({
+  function mark(coarse) {
+    return {
       className: 'sheet-mark-wrap',
-      html: `<span class="sheet-mark${coarse}">${glyph(12)}</span>`,
-      iconSize: [24, 24],
-      iconAnchor: [12, 12],
-    });
+      html: `<span class="sheet-mark${coarse ? ' sheet-mark-coarse' : ''}">${glyph(12)}</span>`,
+      size: [24, 24],
+      anchor: [12, 12],
+    };
   }
 
   $effect(() => {
-    if (!map) return;
-    group?.remove();
-    group = L.layerGroup(
+    if (!engine) return;
+    surface ??= createSurface(engine);
+    surface.set(
       points.flatMap((point) => {
         const metres = precisionMetres(point.decimals);
-        const marker = L.marker([point.lat, point.lon], {
-          icon: icon(point),
-          keyboard: true,
-          title:
-            point.decimals <= COARSE_DECIMALS
-              ? `${point.label} — written to ${point.decimals} decimals, about ${metres} m`
-              : point.label,
-        });
-        marker.bindTooltip(point.label, { direction: 'top', offset: [0, -12] });
-        if (point.decimals > COARSE_DECIMALS) return [marker];
-        const circle = L.circle([point.lat, point.lon], {
-          radius: metres,
-          color: TINT,
-          weight: 1,
-          opacity: 0.75,
-          fillColor: TINT,
-          fillOpacity: 0.08,
-          interactive: false,
-        });
-        return [circle, marker];
-      }),
-    ).addTo(map);
+        const coarse = point.decimals <= COARSE_DECIMALS;
+        const marker = {
+          kind: 'marker',
+          at: point,
+          ...mark(coarse),
+          title: coarse
+            ? `${point.label} — written to ${point.decimals} decimals, about ${metres} m`
+            : point.label,
+          tip: { text: point.label, direction: 'top', offset: [0, -12] },
+        };
+        if (!coarse) return [marker];
+        // the shape first, so the pin stays on top of its own imprecision
+        return [
+          {
+            kind: 'circle',
+            at: point,
+            radiusM: metres,
+            style: {
+              stroke: TINT,
+              strokeWidth: 1,
+              strokeOpacity: 0.75,
+              fill: TINT,
+              fillOpacity: 0.08,
+              interactive: false,
+            },
+          },
+          marker,
+        ];
+      })
+    );
   });
 
   $effect(() => () => {
-    group?.remove();
-    group = null;
+    surface?.destroy();
+    surface = null;
   });
 </script>
 

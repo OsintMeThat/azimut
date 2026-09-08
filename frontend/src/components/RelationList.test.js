@@ -69,7 +69,7 @@ describe('RelationList', () => {
     const hosts = {
       'EntityDetails.svelte': 'subjectType={entity.type}',
       '../tools/satellite/SavedPopup.svelte': "subjectType={row.kind === 'place' ? 'place' : 'capture'}",
-      '../tools/Satellite.svelte': 'subjectType="place"',
+      '../tools/satellite/PlaceDialog.svelte': 'subjectType="place"',
     };
     for (const [host, expected] of Object.entries(hosts)) {
       const body = readFileSync(new URL(host, import.meta.url), 'utf8');

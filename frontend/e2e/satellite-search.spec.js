@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installAppFixture } from './app.fixture.js';
+import { awaitMapReady, installAppFixture } from './app.fixture.js';
 
 const SAVED = [
   {
@@ -22,7 +22,7 @@ const bar = (page) => page.getByRole('combobox', { name: 'Search a place or coor
 test('proposes cities from the first letters, without asking the geocoder', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
 
   await bar(page).fill('kr');
   await expect(page.getByRole('option', { name: /Kramatorsk/ })).toBeVisible();
@@ -38,7 +38,7 @@ test('proposes cities from the first letters, without asking the geocoder', asyn
 test('asks the geocoder once typing stops, and puts its matches last', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
 
   await bar(page).fill('kramatorsk');
   // the city is there straight away; the street arrives after the pause
@@ -53,7 +53,7 @@ test('asks the geocoder once typing stops, and puts its matches last', async ({ 
 test('offers saved work in this case above anything looked up', async ({ page }) => {
   const fixture = await installAppFixture(page, { savedIndex: SAVED });
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
 
   await bar(page).fill('kram');
   await expect(page.locator('#sat-suggestions .head').first()).toHaveText('Saved in this case');
@@ -65,7 +65,7 @@ test('offers saved work in this case above anything looked up', async ({ page })
 test('flies the map to the row the arrows land on', async ({ page }) => {
   await installAppFixture(page);
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
   await expect(page.locator('.hud-coords')).toContainText('48.85'); // the home view, Paris
 
   await bar(page).fill('kramatorsk');
@@ -81,7 +81,7 @@ test('flies the map to the row the arrows land on', async ({ page }) => {
 test('recognises coordinates as they are typed', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
 
   await bar(page).fill('50.4501, 30.5234');
   await expect(page.locator('#sat-suggestions .head').first()).toHaveText('Coordinates');
@@ -96,7 +96,7 @@ test('recognises coordinates as they are typed', async ({ page }) => {
 test('remembers where it was sent, and offers it back on an empty bar', async ({ page }) => {
   await installAppFixture(page);
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
 
   await bar(page).fill('kramatorsk');
   await page.getByRole('option', { name: /Kramatorsk Donetsk/ }).first().click();
@@ -111,7 +111,7 @@ test('remembers where it was sent, and offers it back on an empty bar', async ({
 test('closes on Escape and on a press elsewhere', async ({ page }) => {
   await installAppFixture(page);
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
 
   await bar(page).fill('kram');
   await expect(page.locator('#sat-suggestions')).toBeVisible();

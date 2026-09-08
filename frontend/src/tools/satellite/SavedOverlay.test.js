@@ -5,12 +5,12 @@ const source = readFileSync(new URL('./SavedOverlay.svelte', import.meta.url), '
 
 describe('how precisely a point is pinned', () => {
   it('draws a radius as a circle in metres, not a fixed pixel dot', () => {
-    // L.circleMarker is sized in pixels and would lie at every other zoom
-    expect(source).toContain("L.circle([mark.lat, mark.lon], { ...style, radius: row.radius_m })");
+    // a dot is sized in pixels and would lie at every other zoom
+    expect(source).toContain("kind: 'circle', at: mark, radiusM: row.radius_m");
   });
 
   it('prefers a traced footprint over the circle around it', () => {
-    expect(source).toContain('row.footprint\n      ? [L.geoJSON(row.footprint');
+    expect(source).toContain("row.footprint\n      ? [{ id: `${id}:shape`, kind: 'geojson', geometry: row.footprint, style }]");
   });
 
   it('leaves a point with no precision drawing exactly as before', () => {
@@ -21,8 +21,8 @@ describe('how precisely a point is pinned', () => {
 
   it('keeps the shape under the pin and out of the click path', () => {
     expect(source).toContain('interactive: false');
-    expect(source).toContain('return [...shapesFor(mark), marker];');
-    // one group still holds everything, so a rebuild clears shapes with their pins
-    expect(source).toContain('marks.flatMap((mark) => {');
+    expect(source).toContain('...shapesFor(mark, at),');
+    // one surface still holds everything, so a redraw clears shapes with their pins
+    expect(source).toContain('surface.set(\n      marks.flatMap((mark, at) => [');
   });
 });

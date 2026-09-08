@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { CASE_ID, installAppFixture } from './app.fixture.js';
+import { CASE_ID, awaitMapReady, installAppFixture } from './app.fixture.js';
 
 /**
  * Relations on the map, in a real Leaflet popup.
@@ -72,7 +72,7 @@ test('opens a stacked row’s relations without closing the card', async ({ page
   });
 
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
   await page.getByRole('button', { name: 'Show saved work on the map' }).click();
   await page.locator('.saved-mark').click();
 
@@ -97,7 +97,7 @@ test('corrects the reading of a relation in place, and takes one back', async ({
   });
 
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
   await page.getByRole('button', { name: 'Show saved work on the map' }).click();
   await page.locator('.saved-mark').click();
 
@@ -124,7 +124,7 @@ test('settles a suggested relation from the card, which survives the click', asy
   });
 
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
   await page.getByRole('button', { name: 'Show saved work on the map' }).click();
   await page.locator('.saved-mark').click();
 
@@ -168,7 +168,7 @@ test('shows the findings on the card and leaves the pointers out', async ({ page
   });
 
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
   await page.getByRole('button', { name: 'Show saved work on the map' }).click();
   await page.locator('.saved-mark').click();
 

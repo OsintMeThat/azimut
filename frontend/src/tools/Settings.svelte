@@ -10,7 +10,7 @@
   import { templateFromPost } from '../lib/post.js';
   import { formatCoords, parseHomeView } from '../lib/coords.js';
   import { USAGE_LINKS, ECO_MAX_ZOOM } from '../lib/usage.js';
-  import { probeKey, googleMapsLoadedKey } from '../lib/gmaps.js';
+  import { probeKey, googleMapsLoadedKey } from '../lib/map/gmaps.js';
   import { extensionVersion } from '../lib/extBridge.js';
   import { CASE_FOLDER_LABEL, saveDestination } from '../lib/exportDest.js';
   import Icon from '../components/Icon.svelte';

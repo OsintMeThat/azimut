@@ -90,7 +90,7 @@ Leaflet `GridLayer`.
   pane, and leaflet-rotate already asks the grid for the rotated bounding box.
   The hidden map renders the unrotated viewport, so a turned view can otherwise
   expose blank corners.
-  `lib/gmaps.js` sizes the hidden map to a **square of the container's diagonal,
+  `lib/map/gmaps.js` sizes the hidden map to a **square of the container's diagonal,
   centred**, which covers every bearing at once. Extra tile renders inside one
   map load are free; the billing is per `google.maps.Map`.
 - **Cloned tiles remain off-limits.** Reading them through canvas, html2canvas or

@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { installAppFixture } from './app.fixture.js';
+import { awaitMapReady, installAppFixture } from './app.fixture.js';
 
 test('opens Map with the case sidebar collapsed and lets the user reopen it', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
 
   await expect(page.locator('.sidebar')).toHaveCount(0);
   await page.getByTitle('Toggle case sidebar').click();
@@ -28,17 +28,17 @@ test('opens Map with the case sidebar collapsed and lets the user reopen it', as
   await page.getByTitle('Toggle case sidebar').click();
   await expect(page.locator('.sidebar')).toBeVisible();
   await page.reload();
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
   await expect(page.locator('.sidebar')).toHaveCount(0);
 
   fixture.expectNoUnexpectedRequests();
 });
 
-test('rotates the real Leaflet map with a middle-button gesture', async ({ page }) => {
+test('rotates the real map with a middle-button gesture', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await page.goto('/#satellite');
+  await awaitMapReady(page);
   const map = page.locator('.map');
-  await expect(map).toHaveClass(/leaflet-container/);
   const box = await map.boundingBox();
   expect(box).not.toBeNull();
 
@@ -53,11 +53,11 @@ test('rotates the real Leaflet map with a middle-button gesture', async ({ page 
   fixture.expectNoUnexpectedRequests();
 });
 
-test('captures a marquee drawn on the real Leaflet surface', async ({ page }) => {
+test('captures a marquee drawn on the real map surface', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await page.goto('/#satellite');
+  await awaitMapReady(page);
   const map = page.locator('.map');
-  await expect(map).toHaveClass(/leaflet-container/);
 
   await page.getByRole('button', { name: 'Capture options' }).click();
   await page.getByRole('button', { name: 'Select area', exact: true }).click();

@@ -1,17 +1,17 @@
 <script>
   /**
    * Session-only Saved navigation layer.
-   * Owns the Leaflet group and rebuilds it when items or zoom change.
+   * Owns its drawing surface and rebuilds it when items or zoom change.
    */
   import { mount, unmount } from 'svelte';
-  import L from 'leaflet';
+  import { createSurface } from '../../lib/map/surface.js';
   import { paths } from '../../components/Icon.svelte';
   import { groupSavedMarkers, markerPrecision } from '../../lib/savedMarkers.js';
   import { openEntity } from '../../lib/navigate.js';
   import SavedPopup from './SavedPopup.svelte';
 
   let {
-    map = null,
+    engine = null,
     items = [],
     caseId,
     coords,
@@ -49,20 +49,24 @@
     const worked = mark.items.some((row) => row.proofs > 0)
       ? '<i class="saved-mark-worked"></i>'
       : '';
-    return L.divIcon({
+    return {
       className: 'saved-mark-wrap',
       html: `<span class="saved-mark saved-mark-${kind}">${glyph(GLYPH[kind] ?? 'pin', 13)}${count}${worked}</span>`,
-      iconSize: [24, 24],
-      iconAnchor: [12, 12],
-    });
+      size: [24, 24],
+      anchor: [12, 12],
+    };
   }
 
-  // Mount popup content as a component inside Leaflet's container.
+  // Mount the card's content as a component, inside the popup's own element.
   let mounted = null;
 
   function popupContent(mark) {
     const host = document.createElement('div');
     if (mounted) unmount(mounted);
+    const close = (then) => (arg) => {
+      surface.closePopup();
+      then?.(arg);
+    };
     mounted = mount(SavedPopup, {
       target: host,
       props: {
@@ -70,74 +74,45 @@
         caseId,
         coords,
         fullscreen,
-        onopen: (row) => {
-          map.closePopup();
-          onopen(row);
-        },
-        onedit: (row) => {
-          map.closePopup();
-          onedit(row);
-        },
-        onproof: (row) => {
-          map.closePopup();
-          onproof?.(row);
-        },
-        onpost: (post) => {
-          map.closePopup();
-          onpost?.(post);
-        },
-        onshowproofs: () => {
-          map.closePopup();
-          onshowproofs?.();
-        },
+        onopen: close(onopen),
+        onedit: close(onedit),
+        onproof: close(onproof),
+        onpost: close(onpost),
+        onshowproofs: close(onshowproofs),
         // opening a related media leaves the map, so close the card first — the
         // same gesture as every other row here, rather than a popup that
         // vanishes without saying it would
-        onentity: (entity) => {
-          map.closePopup();
-          openEntity(entity);
-        },
+        onentity: close(openEntity),
         onrefresh: () => onrefresh?.(),
       },
     });
     return host;
   }
 
+  // How tightly the marks are grouped follows the zoom, and only the zoom: a pan
+  // settles at the same zoom, reads the same number, and rebuilds nothing.
   $effect(() => {
-    if (!map) return;
-    const sync = () => (zoom = map.getZoom());
-    sync();
-    map.on('zoomend', sync);
-    return () => map.off('zoomend', sync);
+    if (!engine) return;
+    zoom = engine.getZoom();
+    return engine.on('view-settled', (view) => (zoom = view.zoom));
   });
 
   // Is a card open? Rebuilding the layer destroys it, and the card is a surface
   // the analyst works in — settling relations, reading a stack. So a refreshed
   // index waits for the card to close rather than pulling it out from under them.
   let popupOpen = $state(false);
-  $effect(() => {
-    if (!map) return;
-    const opened = () => (popupOpen = true);
-    const closed = () => (popupOpen = false);
-    map.on('popupopen', opened);
-    map.on('popupclose', closed);
-    return () => {
-      map.off('popupopen', opened);
-      map.off('popupclose', closed);
-    };
-  });
 
-  // The group is replaced by `rebuild` and torn down when the overlay itself goes
-  // away — deliberately not through the data effect's cleanup, which Svelte runs
-  // before every re-run, including one that decides to defer.
-  let group = null;
+  // The surface is redrawn by `rebuild` and torn down when the overlay itself
+  // goes away — deliberately not through the data effect's cleanup, which Svelte
+  // runs before every re-run, including one that decides to defer.
+  let surface = null;
   let builtFor = null; // the case the current layer was built for
 
   $effect(() => {
-    if (!map) return;
+    if (!engine) return;
     return () => {
-      group?.remove();
-      group = null;
+      surface?.destroy();
+      surface = null;
       elements = new Map();
       if (mounted) {
         unmount(mounted);
@@ -151,7 +126,7 @@
     const cid = caseId;
     const precision = markerPrecision(zoom);
     const held = popupOpen; // tracked, so closing the card applies what waited
-    if (!map) return;
+    if (!engine) return;
     // A different case is never deferred: leaving another case's marks on the map
     // would be worse than closing a card.
     if (held && builtFor === cid) return;
@@ -169,53 +144,60 @@
    * A mark with neither returns nothing and draws exactly as it always has —
    * absence is a state, never something to flag.
    */
-  function shapesFor(mark) {
+  function shapesFor(mark, id) {
     const row = mark.items.find((r) => r.footprint || r.radius_m > 0);
     if (!row) return [];
     const style = {
-      color: '#f5a623',
-      weight: 1.5,
-      opacity: 0.9,
-      fillColor: '#f5a623',
+      stroke: '#f5a623',
+      strokeWidth: 1.5,
+      strokeOpacity: 0.9,
+      fill: '#f5a623',
       fillOpacity: 0.12,
       // never steals the click from the pin it sits under
       interactive: false,
     };
     return row.footprint
-      ? [L.geoJSON(row.footprint, { style: () => style })]
-      : [L.circle([mark.lat, mark.lon], { ...style, radius: row.radius_m })];
+      ? [{ id: `${id}:shape`, kind: 'geojson', geometry: row.footprint, style }]
+      : [{ id: `${id}:shape`, kind: 'circle', at: mark, radiusM: row.radius_m, style }];
   }
 
   function rebuild(rows, precision) {
     const marks = groupSavedMarkers(rows, precision);
-    const next = new Map();
-    group?.remove();
-    group = L.layerGroup(
-      marks.flatMap((mark) => {
-        const marker = L.marker([mark.lat, mark.lon], {
-          icon: icon(mark),
+    surface ??= createSurface(engine, {
+      onPopupOpen: () => (popupOpen = true),
+      onPopupClose: () => (popupOpen = false),
+    });
+    surface.set(
+      marks.flatMap((mark, at) => [
+        // the shape first, so the pin stays on top of its own uncertainty
+        ...shapesFor(mark, at),
+        {
+          id: at,
+          kind: 'marker',
+          at: mark,
+          ...icon(mark),
           title: mark.items.length > 1 ? `${mark.items.length} saved here` : mark.items[0].title,
           keyboard: false,
-        });
-        marker.on('add', () => {
-          // one proof can hold two points, so identity here is the row key,
-          // not the entity: hovering either place must light that place
-          for (const row of mark.items) next.set(row.key ?? row.id, marker.getElement());
-        });
-        marker.on('mouseover', () => (hoveredId = mark.items[0].key ?? mark.items[0].id));
-        marker.on('mouseout', () => (hoveredId = null));
-        // every mark opens its card, one item or five: clicking a pin should
-        // tell you what is there before it moves the map out from under you
-        marker.bindPopup(() => popupContent(mark), {
-          className: 'saved-popup',
-          minWidth: 296,
-          maxWidth: 330,
-          autoPanPadding: [24, 24],
-        });
-        // the shape first, so the pin stays on top of its own uncertainty
-        return [...shapesFor(mark), marker];
-      })
-    ).addTo(map);
+          onOver: () => (hoveredId = mark.items[0].key ?? mark.items[0].id),
+          onOut: () => (hoveredId = null),
+          // every mark opens its card, one item or five: clicking a pin should
+          // tell you what is there before it moves the map out from under you
+          popup: {
+            content: () => popupContent(mark),
+            className: 'saved-popup',
+            minWidth: 296,
+            maxWidth: 330,
+          },
+        },
+      ])
+    );
+    // one proof can hold two points, so identity here is the row key, not the
+    // entity: hovering either place must light that place
+    const next = new Map();
+    marks.forEach((mark, at) => {
+      const element = surface.element(at);
+      for (const row of mark.items) next.set(row.key ?? row.id, element);
+    });
     elements = next;
   }
 

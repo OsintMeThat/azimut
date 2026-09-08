@@ -158,13 +158,13 @@ describe('SavedOverlay popup wiring', () => {
     expect(overlay).toContain("import { mount, unmount } from 'svelte'");
     expect(overlay).toContain('mount(SavedPopup');
     expect(overlay).toContain('unmount(mounted)');
-    expect(overlay).toContain('onpost?.(post)');
+    expect(overlay).toContain('onpost: close(onpost)');
   });
 
   it('opens a card for every mark, one item or a stack', () => {
-    expect(overlay).toContain('marker.bindPopup(() => popupContent(mark)');
+    expect(overlay).toContain('content: () => popupContent(mark)');
     // no shortcut path that flies straight there on a single-item mark
-    expect(overlay).not.toContain("marker.on('click'");
+    expect(overlay).not.toContain('onClick');
   });
 
   it('dresses the Leaflet popup as one of the app\'s own surfaces', () => {
@@ -227,7 +227,7 @@ describe('SavedPopup relations', () => {
     expect(source).toContain('await onrefresh?.()');
     expect(source).toContain('relationsByRow[rowKey(row)]?.length ?? Number(row.relations ?? 0)');
     expect(overlay).toContain('if (held && builtFor === cid) return;');
-    expect(overlay).toContain("map.on('popupopen', opened)");
+    expect(overlay).toContain('onPopupOpen: () => (popupOpen = true)');
     // the layer's teardown is not the data effect's cleanup, which Svelte runs
     // before every re-run — including one that decides to defer
     expect(overlay).toContain('function rebuild(rows, precision)');
@@ -242,9 +242,10 @@ describe('SavedPopup relations', () => {
   it('leaves for a related entity’s own tool by closing the card first', () => {
     // every other row in this card closes it before navigating; a popup that
     // vanishes without saying it would reads as a bug
-    expect(overlay).toContain('onentity: (entity) => {');
-    expect(overlay).toContain('map.closePopup();');
-    expect(overlay).toContain('openEntity(entity);');
+    // one closing gesture, applied to every row of the card
+    expect(overlay).toContain('const close = (then) => (arg) => {');
+    expect(overlay).toContain('surface.closePopup();');
+    expect(overlay).toContain('onentity: close(openEntity)');
   });
 });
 

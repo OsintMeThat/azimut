@@ -167,7 +167,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 
 | Tool | What it does |
 |------|--------------|
-| **Map engine (MapLibre)** | Replaces Leaflet with MapLibre GL at 2D parity: same providers, same captures, and the capture tests still verify the pixels. Ships before the 3D map, which builds on it. |
+| **Map engine (MapLibre)** | Replaces Leaflet with MapLibre GL at 2D parity: same providers, same captures, and the capture tests still verify the pixels. The engine already sits behind `lib/map`'s façade, so this rewrites those modules and not the tools. Ships before the 3D map, which builds on it. |
 | **3D map** | Pitch, public DEM terrain and extruded OSM buildings on the MapLibre map. An oblique capture records its pitch beside the bearing, so the view can be reproduced. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. Follows the map engine, which redraws what a capture is made of. |
@@ -209,8 +209,7 @@ can be rebuilt from the spec alone:
 The result is one track per source file over the render's timecode, with
 GPS-tagged clips promotable to places.
 
-Toward v3: split Satellite.svelte into `lib/` modules, before the map engine
-changes under it; GIF maker; curated tool links; full-text case search; clipboard
+Toward v3: GIF maker; curated tool links; full-text case search; clipboard
 image/URL capture with provenance; EXIF/GPS import suggestions for place and
 time; sun and moon times read against the terrain horizon the 3D map's DEM
 supplies, since a ridge ends the day well before the flat horizon does.
@@ -293,9 +292,11 @@ stops making sense.
 
 - **Backend**: Python 3.11+, FastAPI on `localhost`; current processing (ffmpeg,
   yt-dlp, gallery-dl, OpenCV) runs server-side.
-- **Frontend**: Svelte + Leaflet (→ MapLibre) + Konva/canvas, served by the
-  backend, opened in the default browser. Rail = workspaces in pipeline order,
-  tools are tabs inside them (see [UI.md](UI.md)).
+- **Frontend**: Svelte + Konva/canvas, served by the backend, opened in the
+  default browser. The map engine sits behind `lib/map`'s façade — Leaflet
+  today, MapLibre next — so tools speak points, positions and view events and
+  never the engine. Rail = workspaces in pipeline order, tools are tabs inside
+  them (see [UI.md](UI.md)).
 - **Settings and secrets:** in-app tabs group general preferences, publishing,
   imagery, templates, the capture extension, storage and system tools; keys
   stored locally and never bundled into a shared case, monthly usage counters,

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { CASE_ID, installAppFixture } from './app.fixture.js';
+import { CASE_ID, awaitMapReady, installAppFixture } from './app.fixture.js';
 
 const linkedPosts = [
   { id: 'post-1', name: 'panorama-publication', title: 'Panorama publication', target: 'x' },
@@ -49,7 +49,7 @@ test('shows every linked post from a proof popup and opens the selected draft', 
   });
 
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
   await page.getByRole('button', { name: 'Proofs', exact: true }).click();
   await expect(page.getByText('Panorama autostitch test')).toBeVisible();
 

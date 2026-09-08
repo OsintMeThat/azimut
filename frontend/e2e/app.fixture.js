@@ -632,6 +632,11 @@ export async function installAppFixture(page, options = {}) {
   const trashGroups = [...(options.trashGroups ?? [])];
   const trashWrites = [];
   const bundleCalls = [];
+  // The case's saved search grids, held across requests: a sweep auto-saves, so
+  // what was marked is readable from what was written.
+  const fixtureGrids = new Map();
+  const gridWrites = [];
+  const skyQueries = [];
   // Where the graph's nodes have been dragged to, held across requests so a spec
   // can reload the view and find the arrangement still there.
   const graphPins = new Map(Object.entries(options.graphPins ?? {}));
@@ -1492,7 +1497,33 @@ export async function installAppFixture(page, options = {}) {
       bundleCalls.push({ kind: 'job' });
       return json(route, bundleJob);
     }
-    if (caseId && path === `/api/cases/${caseId}/search-grids`) return json(route, []);
+    if (caseId && path === `/api/cases/${caseId}/search-grids`) {
+      return json(route, [...fixtureGrids.values()].map(({ name, spec, title }) => ({
+        name,
+        title,
+        cells: Object.keys(spec.statuses ?? {}).length,
+        cleared: Object.values(spec.statuses ?? {}).filter((s) => s === 'cleared').length,
+        flagged: Object.values(spec.statuses ?? {}).filter((s) => s === 'flagged').length,
+      })));
+    }
+    // The sweep auto-saves on every mark, so a spec can read the marks back out
+    // of what was written rather than out of the canvas they are painted on.
+    const gridMatch = caseId && path.match(new RegExp(`^/api/cases/${caseId}/search-grids/(.+)$`));
+    if (gridMatch) {
+      const name = gridMatch[1];
+      if (request.method() === 'PUT') {
+        const body = request.postDataJSON();
+        fixtureGrids.set(name, { name, spec: body.spec, title: body.title });
+        gridWrites.push({ name, spec: body.spec });
+        return json(route, { status: 'saved' });
+      }
+      if (request.method() === 'DELETE') {
+        fixtureGrids.delete(name);
+        return json(route, { status: 'deleted' });
+      }
+      const held = fixtureGrids.get(name);
+      return held ? json(route, held.spec) : json(route, { detail: 'not found' }, 404);
+    }
     const placementMatch = caseId && path.match(
       new RegExp(`^/api/cases/${caseId}/entities/(.+)/placement$`)
     );
@@ -1740,6 +1771,31 @@ export async function installAppFixture(page, options = {}) {
         attribution: cities.length ? '© GeoNames (CC BY 4.0)' : null,
       });
     }
+    // One day of sun and moon over a point: enough samples for the arc, the hour
+    // ticks and the slider, with the sun up and the moon down at the chosen hour.
+    if (path === '/api/geo/sky') {
+      skyQueries.push({
+        lat: Number(url.searchParams.get('lat')),
+        lon: Number(url.searchParams.get('lon')),
+        date: url.searchParams.get('date') ?? '',
+      });
+      const minutes = Array.from({ length: 25 }, (_, i) => i * 60);
+      return json(route, {
+        date: url.searchParams.get('date') || '2026-06-21',
+        moment: { local: '2026-06-21T12:00:00', utc: '2026-06-21T10:00:00Z' },
+        curve: {
+          minutes,
+          clock: minutes.map((m) => `${String(m / 60).padStart(2, '0')}:00`),
+          sun_azimuth: minutes.map((m) => (m / 1440) * 360),
+          sun_altitude: minutes.map((m) => Math.round(Math.sin((m / 1440) * Math.PI) * 60 - 5)),
+          moon_azimuth: minutes.map((m) => ((m / 1440) * 360 + 180) % 360),
+          moon_altitude: minutes.map((m) => Math.round(Math.sin((m / 1440) * Math.PI + 2) * 40)),
+          moon_illuminated: minutes.map(() => 0.62),
+        },
+        sun: { rise: '05:45', set: '21:55', noon: '13:50' },
+        moon: { phase: 'waxing gibbous', waxing: true, illuminated: 0.62 },
+      });
+    }
     if (path === '/api/geo/places') {
       const q = url.searchParams.get('q') ?? '';
       geoQueries.places.push(q);
@@ -1760,6 +1816,8 @@ export async function installAppFixture(page, options = {}) {
 
   return {
     captures,
+    gridWrites,
+    skyQueries,
     proofSaves,
     linkWrites,
     entityWrites,
@@ -1790,6 +1848,17 @@ export async function installAppFixture(page, options = {}) {
     exportWrites,
     expectNoUnexpectedRequests: () => expect(unexpected).toEqual([]),
   };
+}
+
+/**
+ * Wait for the map to be up.
+ *
+ * The signal is `lib/map`'s own ready flag, not a class the engine happens to
+ * put on its container: a suite that recognises the engine is a suite pinned to
+ * it, and swapping the engine (SPEC v3) would then rewrite every map spec.
+ */
+export async function awaitMapReady(page) {
+  await expect(page.locator('.map[data-map-ready="true"]')).toBeVisible();
 }
 
 export async function openProofWithPanel(page) {

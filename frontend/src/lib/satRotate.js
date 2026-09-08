@@ -2,11 +2,11 @@
  * Middle-drag map rotation for the Satellite tab — the same Google-Earth
  * "grab & turn" as the Frame viewer, but driving a Leaflet map bearing.
  *
- * Leaflet's `setBearing` always rotates about the map centre, so to turn around
- * an arbitrary grabbed point we set the bearing and then pan the map so the
- * grabbed location slides back under the cursor. These two pure helpers hold the
- * bits that are easy to get subtly wrong (the swept-angle bearing and, above
- * all, the *sign* of the compensating pan); the Leaflet glue lives in the tool.
+ * A map rotates about its centre, so to turn around an arbitrary grabbed point
+ * we set the bearing and then pan the map so the grabbed location slides back
+ * under the cursor. These two pure helpers hold the bits that are easy to get
+ * subtly wrong (the swept-angle bearing and, above all, the *sign* of the
+ * compensating pan); the map glue lives in the tool, over `lib/map`'s façade.
  */
 
 import { pointerAngleDeg } from './frameRotate.js';
@@ -24,10 +24,10 @@ export function dragBearing(startBearing, pivot, start, cur) {
 }
 
 /**
- * The `[dx, dy]` to `map.panBy` so a pivot that a bearing change pushed from
+ * The `[dx, dy]` to hand `panBy` so a pivot that a bearing change pushed from
  * `grab` to `now` (both container-pixel points) returns exactly under `grab`.
- * Leaflet's `panBy(offset)` shifts every container point by `-offset`, so to
- * move the pivot by `grab - now` we pan by `now - grab`.
+ * A `panBy(offset)` shifts every container point by `-offset`, so to move the
+ * pivot by `grab - now` we pan by `now - grab`.
  */
 export function pivotPanOffset(grab, now) {
   return [now.x - grab.x, now.y - grab.y];
