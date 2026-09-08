@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import shutil
 import sqlite3
 import threading
@@ -123,9 +122,29 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _slugify(name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    return slug[:MAX_CASE_SLUG].strip("-") or "case"
+def _free_case_path(parent: Path, name: str) -> Path:
+    """A directory in ``parent`` for a case called ``name``, guaranteed free.
+
+    The folder carries the analyst's own name (`layout.case_folder_name`), and a
+    name that lands on a folder already there is numbered rather than refused.
+    Two cases may not share a *name* — the routes refuse that, in the name's own
+    words — but the folder is the tool's business, and different names can
+    perfectly well reduce to one: "Kyiv, 4 June" and "Kyiv — 4 June" do, and so
+    did every pair of names written in a script the old ASCII slug could not
+    spell, which left both of them on the folder `case` and the second case
+    impossible to create at all.
+
+    Never answers with a path that exists, so a case is never born over one.
+    """
+    base = layout.case_folder_name(name)
+    candidate = parent / base
+    index = 2
+    while candidate.exists():
+        suffix = f" {index}"
+        stem = base[: MAX_CASE_SLUG - len(suffix)].rstrip(" .") or "case"
+        candidate = parent / f"{stem}{suffix}"
+        index += 1
+    return candidate
 
 
 def _new_id(prefix: str) -> str:
@@ -257,13 +276,19 @@ class Case(CaseStore):
     @classmethod
     def create(cls, name: str, *, scratch: bool = False) -> "Case":
         """Create a new case. Every case is born on the SQLite backend; a legacy
-        json case only ever arrives from disk and is converted on open."""
+        json case only ever arrives from disk and is converted on open.
+
+        Whether the *name* is free is the caller's question, and the routes ask it
+        (`api/cases/lifecycle._ensure_name_free`) so the analyst hears about their
+        own case rather than about a folder. This only picks a folder to put it
+        in, and picks one nothing is in.
+        """
         parent = config.scratch_dir() if scratch else config.cases_dir()
         parent.mkdir(parents=True, exist_ok=True)
-        slug = _new_id("scratch") if scratch else _slugify(name)
-        path = parent / slug
-        if path.exists():
-            raise CaseError(f"case '{slug}' already exists")
+        # A scratch folder is a generated id, so nothing has to be dodged; the
+        # `mkdir` below is the check, and a uuid collision would be the one to
+        # hear about.
+        path = parent / _new_id("scratch") if scratch else _free_case_path(parent, name)
         path.mkdir()
         return cls._born(path, name)
 
@@ -547,6 +572,28 @@ class Case(CaseStore):
             except OSError:
                 continue  # a file may be open elsewhere (Windows) — next start
         return removed
+
+    @classmethod
+    def name_taken(cls, name: str, *, exclude_id: str | None = None) -> bool:
+        """Whether another case already answers to ``name``.
+
+        Matched on the trimmed name, case-insensitively, because that name is how
+        the analyst tells two cases apart in the switcher — "Kyiv" and "kyiv " are
+        one case to a person and must be one to the app. Scratch cases are skipped
+        (they are all "Scratch session" until promoted), and ``exclude_id`` lets a
+        rename keep the name it already has.
+
+        The rule lives here rather than in the route because the import
+        destination needs the same answer (`engine/bundles.create_import_case`),
+        and two spellings of "already taken" would drift.
+        """
+        wanted = name.strip().casefold()
+        for case in cls.list_all():
+            if case.get("scratch") or case["id"] == exclude_id:
+                continue
+            if str(case.get("name", "")).strip().casefold() == wanted:
+                return True
+        return False
 
     @classmethod
     def list_all(cls, *, q: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
@@ -845,11 +892,9 @@ class Case(CaseStore):
         """Move a scratch case to the workspace root under a proper name."""
         if not self.is_scratch:
             raise CaseError("only scratch cases can be promoted")
-        slug = _slugify(name)
-        dest = config.cases_dir() / slug
-        if dest.exists():
-            raise CaseError(f"case '{slug}' already exists")
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        parent = config.cases_dir()
+        parent.mkdir(parents=True, exist_ok=True)
+        dest = _free_case_path(parent, name)
         self._settle_background_work()
         shutil.move(str(self.path), str(dest))
         promoted = Case(dest)

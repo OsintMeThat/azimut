@@ -135,8 +135,12 @@ def test_a_name_that_would_break_its_own_url_asks_for_a_rename(client):
 
 
 def test_adoption_refuses_a_name_another_case_already_uses(client):
-    client.post("/api/cases", json={"name": "Coast match"})
-    make_folder("Coast match")  # the case above lives under its slug, `coast-match`
+    # Renamed rather than created under this name, because a rename moves the
+    # name and leaves the folder: that is what frees the folder for the analyst
+    # to make one beside it, which is the situation being refused here.
+    made = client.post("/api/cases", json={"name": "Shoreline"}).json()
+    client.patch(f"/api/cases/{made['id']}", json={"name": "Coast match"})
+    make_folder("Coast match")
 
     refused = client.post("/api/workspace/folders/adopt", json={"name": "Coast match"})
 

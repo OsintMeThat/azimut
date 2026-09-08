@@ -245,7 +245,7 @@ def test_adopting_an_empty_folder_leaves_the_old_cases_where_they_are(workspace,
 
     assert config.workspace_root() == fresh
     assert Case.list_all() == []
-    assert (workspace / "harbour-survey").is_dir()
+    assert (workspace / "Harbour survey").is_dir()
 
 
 def test_adopting_creates_the_skeleton_and_keeps_the_workspace_private(workspace, tmp_path):
@@ -283,7 +283,7 @@ def test_a_move_copies_verifies_switches_and_keeps_the_old_folder(workspace, tmp
     assert config.workspace_root() == target
     assert config.read_pointer() == target
     assert [row["name"] for row in Case.list_all()] == ["Harbour survey"]
-    assert (target / "harbour-survey" / "analyst-notes.txt").read_text(encoding="utf-8") == "mine"
+    assert (target / "Harbour survey" / "analyst-notes.txt").read_text(encoding="utf-8") == "mine"
     assert Path(move["kept_aside"]).is_dir()
     assert not workspace.exists()
 
@@ -295,7 +295,7 @@ def test_the_old_folder_is_kept_complete_until_the_analyst_drops_it(workspace, t
     move = _finish()
 
     kept = Path(move["kept_aside"])
-    assert (kept / "harbour-survey" / "azimut" / "case.json").is_file()
+    assert (kept / "Harbour survey" / "azimut" / "case.json").is_file()
 
     removed = workspacemove.discard_old()
 
@@ -365,7 +365,7 @@ def test_a_move_carries_the_empty_directories_a_case_is_born_with(workspace, tmp
     workspacemove.start(str(target))
     _finish()
 
-    moved = target / "harbour-survey"
+    moved = target / "Harbour survey"
     assert sorted(d for d in born if (moved / d).is_dir()) == born
     assert (target / ".azimut" / "bundles").is_dir()
 
@@ -383,7 +383,7 @@ def test_a_move_rebuilds_the_hidden_directories_hidden(workspace, tmp_path, monk
     workspacemove.start(str(tmp_path / "elsewhere"))
     _finish()
 
-    staged = {path for path in hidden if "harbour-survey" in path.parts}
+    staged = {path for path in hidden if "Harbour survey" in path.parts}
     assert {path.name for path in staged} >= {layout.DATA_DIR, layout.INSPECT_DIR}
 
 
@@ -513,7 +513,7 @@ def test_a_kill_at_any_step_leaves_a_complete_workspace(workspace, tmp_path, kil
 
     assert root.is_dir(), "startup would have nothing to open"
     assert [row["name"] for row in Case.list_all()] == ["Harbour survey"]
-    notes = root / "harbour-survey" / "analyst-notes.txt"
+    notes = root / "Harbour survey" / "analyst-notes.txt"
     assert notes.read_text(encoding="utf-8") == "mine"
     assert config.settings_path().is_file()
 
@@ -535,7 +535,7 @@ def test_nothing_is_removed_before_the_copy_is_verified(workspace, tmp_path, kil
     finally:
         workqueue.start_workers = resume
 
-    assert (workspace / "harbour-survey" / "azimut" / "case.json").is_file()
+    assert (workspace / "Harbour survey" / "azimut" / "case.json").is_file()
     assert config.read_pointer() == workspace
 
 
@@ -568,7 +568,7 @@ def test_a_half_copy_left_by_a_kill_is_discarded_by_the_next_attempt(workspace, 
 
     assert not move["error"]
     assert not (target / "half-written.bin").exists()
-    assert (target / "harbour-survey" / "azimut" / "case.json").is_file()
+    assert (target / "Harbour survey" / "azimut" / "case.json").is_file()
 
 
 def test_a_move_interrupted_between_the_rename_and_the_pointer_keeps_both_folders(
@@ -595,5 +595,5 @@ def test_a_move_interrupted_between_the_rename_and_the_pointer_keeps_both_folder
     config.forget_workspace_root()
 
     assert config.workspace_root() == workspace
-    assert (workspace / "harbour-survey" / "azimut" / "case.json").is_file()
-    assert (target / "harbour-survey" / "azimut" / "case.json").is_file()
+    assert (workspace / "Harbour survey" / "azimut" / "case.json").is_file()
+    assert (target / "Harbour survey" / "azimut" / "case.json").is_file()

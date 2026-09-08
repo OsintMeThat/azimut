@@ -838,6 +838,11 @@ def solve_collage_layout(
     piece's recipe, which is how the warp survives to the full-res export. Callers
     must hand in *un-remapped* recipes; a cylinder is not a pinhole view, so
     solving cameras from already-warped pixels would measure the wrong scene.
+
+    ``width`` and ``height`` are the caller's current canvas, and ``canvas`` in the
+    answer is the one the quads are expressed in: the solver grows it to whatever
+    the stitch is worth in source pixels rather than shrinking the stitch to fit.
+    The caller resizes its canvas to match, or the detail is lost on the way back.
     """
     if mode not in STITCH_MODES:
         raise ValueError(f"unknown panorama mode {mode!r}")
@@ -864,6 +869,7 @@ def solve_collage_layout(
             for i, q in sorted(solved["quads"].items())
         ],
         "dropped": solved["dropped"],
+        "canvas": solved["canvas"],
     }
 
 

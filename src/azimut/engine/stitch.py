@@ -57,6 +57,16 @@ MIN_INLIER_RATIO = 0.5
 # back so every homography stays in full-resolution image coordinates.
 WORK_DIM = 1000
 
+# A solved layout comes out in source pixels — five 1080p frames panned across a
+# facade span some 4500 of them — so the canvas follows the stitch rather than
+# the other way round. Fitting that answer into whatever size the collage
+# happened to open at is a downscale, and thin detail (a cable, a pipe) is what
+# goes first. Bounded, because the canvas still has to be composable: the compose
+# route refuses a side over 8192, and the compositor paints RGBA, so 40 MP is
+# already a 160 MB canvas before a single piece is warped onto it.
+MAX_CANVAS_DIM = 8192
+MAX_CANVAS_PIXELS = 40_000_000
+
 _RATIO = 0.75  # Lowe ratio test
 _RANSAC_PX = 4.0
 
@@ -357,12 +367,62 @@ def fit_quads_to_canvas(
     return [[[x * scale + off_x, y * scale + off_y] for x, y in q] for q in quads]
 
 
+def canvas_for_layout(
+    quads: list[Quad],
+    *,
+    detail: float = 1.0,
+    minimum: tuple[int, int] = (1, 1),
+    margin: float = 0.02,
+) -> tuple[int, int]:
+    """The canvas that holds ``quads`` without scaling their pixels down.
+
+    ``detail`` is how many source pixels one unit of the solved geometry is worth:
+    1 for the planar solver, whose homographies are already in full-resolution
+    coordinates, and the work-image factor for the rotation solver, which projects
+    a downscaled copy of every piece. The span is divided by the fraction
+    :func:`fit_quads_to_canvas` leaves usable, so fitting into this answer scales
+    the geometry by exactly one.
+
+    The bounds above hold what the *solver* asks for, and it stays under them by
+    shrinking both sides together, so a clamped canvas still carries the shape it
+    found. They are not a ceiling on the canvas: ``minimum`` is the one the
+    analyst is already working on, and this never answers below it — growing to
+    hold a stitch must not become a way of shrinking a canvas that was already
+    bigger, which would take the size off the pieces sitting on it.
+    """
+    if not quads:
+        return max(1, minimum[0]), max(1, minimum[1])
+    xs = [p[0] for q in quads for p in q]
+    ys = [p[1] for q in quads for p in q]
+    usable = max(1e-6, 1.0 - 2.0 * margin)
+    width = max(1, math.ceil((max(xs) - min(xs)) * detail / usable))
+    height = max(1, math.ceil((max(ys) - min(ys)) * detail / usable))
+    shrink = min(
+        1.0,
+        MAX_CANVAS_DIM / max(width, height),
+        math.sqrt(MAX_CANVAS_PIXELS / (width * height)),
+    )
+    if shrink < 1.0:
+        width = max(1, int(width * shrink))
+        height = max(1, int(height * shrink))
+    width = max(1, minimum[0], width)
+    height = max(1, minimum[1], height)
+    return width, height
+
+
 def solve_layout(images: list[Image.Image], *, width: int, height: int) -> dict[str, Any]:
     """Solve collage quads for ``images`` (canvas pixels), reporting what failed.
 
-    Returns ``{"quads": {index: quad}, "dropped": [index, ...], "anchor": index}``.
-    ``dropped`` holds images that matched nothing (or projected degenerately) —
-    they keep whatever the caller had; nothing is invented for them.
+    Returns ``{"quads": {index: quad}, "dropped": [...], "anchor": index,
+    "canvas": {"width", "height"}}``. ``dropped`` holds images that matched
+    nothing (or projected degenerately) — they keep whatever the caller had;
+    nothing is invented for them.
+
+    ``width`` and ``height`` are the canvas the caller already has, and the answer
+    is fitted into the larger of that and the layout's own extent
+    (:func:`canvas_for_layout`) — so a wide pan of full-resolution frames is not
+    squeezed into a small canvas, which is a downscale of the very detail it was
+    stitched for. ``canvas`` reports the size the quads are expressed in.
     """
     if len(images) < 2:
         raise ValueError("auto-stitch needs at least two pieces")
@@ -414,11 +474,16 @@ def solve_layout(images: list[Image.Image], *, width: int, height: int) -> dict[
         raise RuntimeError("auto-stitch could not place any piece")
 
     order = sorted(solved)
-    fitted = fit_quads_to_canvas([solved[i] for i in order], width, height)
+    # The homographies are in full-resolution coordinates (`_features` scales its
+    # keypoints back), so a unit of this geometry is already one source pixel.
+    raw = [solved[i] for i in order]
+    canvas = canvas_for_layout(raw, minimum=(width, height))
+    fitted = fit_quads_to_canvas(raw, *canvas)
     return {
         "quads": {i: q for i, q in zip(order, fitted)},
         "dropped": sorted(dropped),
         "anchor": anchor,
+        "canvas": {"width": canvas[0], "height": canvas[1]},
     }
 
 
@@ -676,11 +741,12 @@ def solve_rotation_layout(
 ) -> dict[str, Any]:
     """Solve a panorama layout under the rotation model — geometry *and* a remap.
 
-    Returns ``{"quads": {index: quad}, "remaps": {index: params}, "dropped": [...]}``.
-    Each quad is the upright rectangle the piece's remapped pixels fill, in canvas
-    pixels; each remap is the op that produces those pixels from the piece's
-    recipe. ``dropped`` holds the pieces no trusted match reached — the caller
-    leaves them untouched, exactly as in :func:`solve_layout`.
+    Returns ``{"quads": {index: quad}, "remaps": {index: params}, "dropped": [...],
+    "canvas": {"width", "height"}}``. Each quad is the upright rectangle the
+    piece's remapped pixels fill, in canvas pixels; each remap is the op that
+    produces those pixels from the piece's recipe. ``dropped`` holds the pieces no
+    trusted match reached — the caller leaves them untouched, and ``canvas`` sizes
+    the answer, both exactly as in :func:`solve_layout`.
     """
     import numpy as np
 
@@ -741,9 +807,17 @@ def solve_rotation_layout(
         raise RuntimeError("auto-stitch could not place any piece")
 
     order = sorted(quads)
-    fitted = fit_quads_to_canvas([quads[i] for i in order], width, height)
+    raw = [quads[i] for i in order]
+    # This model projects the *work* copy of each piece, so one unit of its
+    # geometry is worth however much the finest piece was downscaled by. Sizing on
+    # the largest factor is what keeps that piece at full detail; a coarser one is
+    # merely upscaled into a canvas with room to spare.
+    detail = max((1.0 / _work_scale(images[i].size) for i in order), default=1.0)
+    canvas = canvas_for_layout(raw, detail=detail, minimum=(width, height))
+    fitted = fit_quads_to_canvas(raw, *canvas)
     return {
         "quads": {i: q for i, q in zip(order, fitted)},
         "remaps": remaps,
         "dropped": sorted(dropped),
+        "canvas": {"width": canvas[0], "height": canvas[1]},
     }

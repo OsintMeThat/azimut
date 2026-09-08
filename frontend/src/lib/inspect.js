@@ -545,6 +545,55 @@ export function scaleQuads(quads, k, center = null) {
   return quads.map((q) => scaleQuad(q, k, c));
 }
 
+// A collage canvas is the resolution ceiling of everything on it: a piece is
+// added at whatever fits it (`initialQuad`), auto-stitch fits its answer into it,
+// and the export follows the pieces' bounds. So the size is the analyst's, within
+// the bounds the compose route accepts (`api/inspect.ComposeIn`).
+export const COLLAGE_MIN_DIM = 16;
+export const COLLAGE_MAX_DIM = 8192;
+export const COLLAGE_DEFAULT_SIZE = { width: 1600, height: 800 };
+
+/** A new, empty collage — one spelling, used wherever one is created. */
+export function newCollage(name) {
+  return {
+    id: uid('cl'),
+    name,
+    ...COLLAGE_DEFAULT_SIZE,
+    background: '#12141c',
+    transparent: true,
+    nodes: [],
+  };
+}
+
+/**
+ * A collage side, held inside the bounds the compose route accepts.
+ *
+ * An empty field is nothing said, not zero: `Number('')` is 0, and clamping that
+ * would answer a cleared box by collapsing the canvas to its floor.
+ */
+export function clampCollageDim(value, fallback) {
+  const typed = String(value ?? '').trim();
+  const n = Math.round(Number(typed));
+  if (!typed || !Number.isFinite(n)) return fallback;
+  return Math.min(COLLAGE_MAX_DIM, Math.max(COLLAGE_MIN_DIM, n));
+}
+
+/**
+ * The canvas an auto-stitch answer asks for, and the factor that carries a piece
+ * it could not place into it.
+ *
+ * The solver works in source pixels and answers with the canvas that holds its
+ * layout at full detail, so the canvas follows the stitch rather than the stitch
+ * being squeezed into the canvas — that squeeze is a downscale of the very detail
+ * the pieces were stitched for. `scale` is the smaller of the two ratios, so an
+ * unplaced piece grows with the canvas without changing shape.
+ */
+export function stitchCanvas(canvas, current) {
+  const width = clampCollageDim(canvas?.width, current.width);
+  const height = clampCollageDim(canvas?.height, current.height);
+  return { width, height, scale: Math.min(width / current.width, height / current.height) };
+}
+
 /** A sensible starting quad: the image scaled to fit `maxW`, placed at (ox, oy). */
 export function initialQuad(natW, natH, maxW, ox, oy) {
   const scale = Math.min(1, maxW / (natW || maxW));

@@ -19,7 +19,7 @@ from azimut.api.naming import slugify
 from azimut.engine.media import safe_filename
 from azimut.engine.thumbnails import THUMB_GEN
 from azimut.layout import CASE_SUBDIRS, TRASH_DIR
-from azimut.workspace import Case, CaseError, _slugify
+from azimut.workspace import Case, CaseError
 
 SOURCE = Path(__file__).resolve().parents[1] / "src" / "azimut"
 
@@ -165,9 +165,34 @@ def test_the_trash_is_no_longer_the_longest_branch() -> None:
     assert branches["trash slot"] < branches["note"]
 
 
+def test_a_generated_case_folder_name_is_always_an_adoptable_one() -> None:
+    """The generator and the check are one rule asked two ways, so whatever
+    `case_folder_name` answers, `usable_case_name` has to accept. Drift here means
+    Azimut naming a folder its own adoption and recovery routes would refuse."""
+    for name in (
+        "Kharkiv Strike", "Маріуполь", "الموصل", "上海", "🛰 pass", "Sortie #4",
+        "100% sûr", "a/b\\c:d", "con", "NUL.txt", "  spaced  ", "trailing dot.",
+        "..", "", "x" * 300,
+    ):
+        folder = layout.case_folder_name(name)
+        assert layout.usable_case_name(folder), f"{name!r} → {folder!r}"
+
+
+def test_a_case_folder_keeps_a_name_no_ascii_slug_could_spell() -> None:
+    assert layout.case_folder_name("Маріуполь") == "Маріуполь"
+    assert layout.case_folder_name("上海") == "上海"
+    # Only what a filesystem or a URL refuses is replaced.
+    assert layout.case_folder_name("Sortie #4") == "Sortie _4"
+    assert layout.case_folder_name("Kyiv: 4 June") == "Kyiv_ 4 June"
+    # A name made of nothing else keeps its shape rather than being emptied.
+    assert layout.case_folder_name("###") == "___"
+    # And one a filesystem leaves with nothing at all still has to land somewhere.
+    assert layout.case_folder_name("...") == "case"
+
+
 def test_every_capped_name_is_actually_capped() -> None:
     """The caps are only real if the functions that build names apply them."""
-    assert len(_slugify("x" * 300)) <= layout.MAX_CASE_SLUG
+    assert len(layout.case_folder_name("x" * 300)) <= layout.MAX_CASE_SLUG
     assert len(slugify("x" * 300, "fallback")) <= layout.MAX_SLUG
     assert len(safe_filename("x" * 300 + ".mp4")) <= layout.MAX_MEDIA_NAME
 

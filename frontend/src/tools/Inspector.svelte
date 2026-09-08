@@ -8,6 +8,7 @@
     adjustDefaults, buildFrameOps, previewStyle, uid, videoSeed, initialQuad, VIDEO_ADJUST_IDS,
     collageBounds, quadFromCropRect, cropImgStyle, cropAspect, styleText, hasVideoEdits,
     normalizeRightAngleRotation, rotationOps, sourceStem, frameSaveNames, autoSaveNames, saveNameOf,
+    newCollage, COLLAGE_DEFAULT_SIZE,
   } from '../lib/inspect.js';
   import {
     isDefaultName, nextName, savedSlugs, savedTitles, savedTitle, slugify, specAttr, specPath,
@@ -95,13 +96,9 @@
   // Loading can be slow because each frame and collage node is rendered in sequence.
   let sessionLoading = $state(false);
 
-  // A session can hold several collages and edits one at a time.
-  function makeCollage(name) {
-    return { id: uid('cl'), name, width: 1600, height: 800, background: '#12141c', transparent: true, nodes: [] };
-  }
-
-  // the live session (reset on source / case change)
-  const _firstCollage = makeCollage('Collage 1');
+  // A session can hold several collages and edits one at a time; this is the
+  // live one (reset on source / case change).
+  const _firstCollage = newCollage('Collage 1');
   // Bumped every time the session is cleared, so work started against the old
   // one can tell it is stale (`resetSession`, `capture`).
   let sessionRun = 0;
@@ -554,7 +551,7 @@
     session.videoRotation = 0;
     session.frames = [];
     session.activeFrameId = null;
-    const c0 = makeCollage('Collage 1');
+    const c0 = newCollage('Collage 1');
     session.collages = [c0];
     session.activeCollageId = c0.id;
     for (const p of Object.values(collagePreviews)) if (p?.url) URL.revokeObjectURL(p.url);
@@ -1203,14 +1200,14 @@
         collages.push({
           id: sc.id ?? uid('cl'),
           name: sc.name ?? `Collage ${collages.length + 1}`,
-          width: sc.width ?? 1600,
-          height: sc.height ?? 800,
+          width: sc.width ?? COLLAGE_DEFAULT_SIZE.width,
+          height: sc.height ?? COLLAGE_DEFAULT_SIZE.height,
           background: sc.background ?? '#12141c',
           transparent: sc.transparent ?? false,
           nodes,
         });
       }
-      if (!collages.length) collages.push(makeCollage('Collage 1'));
+      if (!collages.length) collages.push(newCollage('Collage 1'));
       session.collages = collages;
       session.activeCollageId =
         collages.find((c) => c.id === spec.activeCollageId)?.id ?? collages[0].id;

@@ -15,11 +15,11 @@ import random
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from azimut import config
+from azimut import config, layout
 from azimut.engine.media import THUMB_DIR
 from azimut.layout import PRE_HIDDEN_SIDECAR_SUFFIX
 from legacy_case import LEGACY_SUBDIRS
-from azimut.workspace import Case, _slugify
+from azimut.workspace import Case
 
 # Well-known + deliberately unknown types, so the fixture exercises the "unknown
 # entity/link types stay valid" rule the ontology promises.
@@ -95,7 +95,7 @@ def build_big_case(
     # open it through the one-way migration path.
     parent = config.cases_dir()
     parent.mkdir(parents=True, exist_ok=True)
-    path = parent / _slugify(name)
+    path = parent / layout.case_folder_name(name)
     path.mkdir()
     # The flat, unwrapped shape on purpose: this is a legacy import source, and
     # opening it is what exercises the wrapper migration.

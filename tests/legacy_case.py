@@ -16,7 +16,7 @@ import shutil
 from typing import Any
 
 from azimut import config, layout, workspace
-from azimut.workspace import JSON_SCHEMA, Case, _now, _slugify
+from azimut.workspace import JSON_SCHEMA, Case, _now
 
 #: The content directories as they were before the `azimut/` wrapper.
 LEGACY_SUBDIRS = ("media", "notes", "proofs", "exports", "inspect", "search")
@@ -36,7 +36,7 @@ def write_legacy_json_case(
     with `Case.open` converts it to sqlite."""
     parent = config.scratch_dir() if scratch else config.cases_dir()
     parent.mkdir(parents=True, exist_ok=True)
-    path = parent / _slugify(name)
+    path = parent / layout.case_folder_name(name)
     path.mkdir()
     # Deliberately the flat, unwrapped shape: the tool's files sit at the case
     # root, the way every release before the `azimut/` wrapper wrote them. This
