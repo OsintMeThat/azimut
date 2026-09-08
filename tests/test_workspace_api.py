@@ -111,7 +111,7 @@ def test_using_a_folder_switches_without_moving_anything(pointed_client, tmp_pat
 
     assert body["root"] == str(fresh)
     assert body["cases"] == 0
-    assert (root / "harbour-survey").is_dir()
+    assert (root / "Harbour survey").is_dir()
     assert client.get("/api/cases").json() == []
 
 

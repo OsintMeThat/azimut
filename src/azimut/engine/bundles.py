@@ -937,17 +937,19 @@ def imported_name(name: str) -> str:
 
 
 def create_import_case(name: str) -> Case:
-    """Create a distinct destination, adding a number only when needed."""
+    """Create a destination no other case answers to, numbering only when needed.
+
+    The question is asked of the *name*, not of the folder: `Case.create` now
+    numbers a taken folder itself, so importing the same bundle twice would
+    otherwise leave two cases the switcher shows under one name.
+    """
     base = imported_name(name)
     candidate = base
     index = 2
-    while True:
-        try:
-            return Case.create(candidate)
-        except CaseError:
-            pass
+    while Case.name_taken(candidate):
         candidate = f"{base} {index}"
         index += 1
+    return Case.create(candidate)
 
 
 def _install_running_job(db_path: Path, job: dict[str, Any]) -> None:

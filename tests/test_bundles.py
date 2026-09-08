@@ -130,6 +130,17 @@ def test_sealed_chunks_detect_truncation_before_any_case_swap(bundle_case):
     assert destination.list_entities() == []
 
 
+def test_importing_the_same_bundle_twice_names_the_second_destination_apart(bundle_case):
+    """`Case.create` numbers a taken folder by itself now, so the distinct name
+    the switcher shows has to be asked for on the name, not fallen into."""
+    first = bundles.create_import_case("Source case")
+    second = bundles.create_import_case("Source case")
+
+    assert first.id != second.id
+    assert first.read()["name"] == "Source case (imported)"
+    assert second.read()["name"] == "Source case (imported) 2"
+
+
 @pytest.mark.parametrize("password", [None, "bundle secret"])
 def test_export_import_round_trip_creates_a_new_case(bundle_case, password):
     exported = bundles.export_case(bundle_case, password=password)

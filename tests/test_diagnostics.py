@@ -393,9 +393,9 @@ def test_a_report_that_fits_is_left_whole(ring, tmp_workspace):
 
 
 def test_a_case_name_never_reaches_the_tracker(ring, tmp_workspace):
-    """A case directory is a slug of the name the analyst typed, and in this tool
-    that name is routinely a subject's. The path around it is useful; the segment
-    is not ours to publish."""
+    """A case directory carries the name the analyst typed, and in this tool that
+    name is routinely a subject's. The path around it is useful; the segment is
+    not ours to publish."""
     from azimut import config
 
     log = logging.getLogger("azimut.test")
@@ -408,6 +408,48 @@ def test_a_case_name_never_reaches_the_tracker(ring, tmp_workspace):
     assert "scratch_9f2c" not in captured
     assert "<workspace>/<case>/case.db" in captured.replace("\\", "/")
     assert ".azimut/scratch/<case>/media/a.jpg" in captured.replace("\\", "/")
+
+
+def test_a_case_name_with_spaces_in_it_goes_whole(ring, tmp_workspace):
+    """The folder is the analyst's own name now, so it holds spaces — and a
+    pattern over path segments has to stop at whitespace or it would eat the
+    prose after the path. Redacting the first word only would publish a surname."""
+    from azimut import config
+
+    case = config.cases_dir() / "Operation Blue Heron"
+    case.mkdir(parents=True)
+    (config.scratch_dir() / "Kyiv 4 June").mkdir(parents=True)
+
+    log = logging.getLogger("azimut.test")
+    log.warning("could not open %s: permission denied", case / "azimut" / "case.db")
+    log.warning("still writing %s", config.scratch_dir() / "Kyiv 4 June")
+
+    captured = "\n".join(diagnostics.log_lines())
+
+    assert "Blue" not in captured and "Heron" not in captured
+    assert "Kyiv" not in captured and "June" not in captured
+    assert "<workspace>/<case>/azimut/case.db: permission denied" in captured.replace("\\", "/")
+    assert ".azimut/scratch/<case>" in captured.replace("\\", "/")
+
+
+def test_a_case_name_is_not_taken_out_of_a_longer_folder_name(ring, tmp_workspace):
+    """The names are matched longest first and only where a path names one, so a
+    short case name cannot leave the tail of a longer folder standing, and cannot
+    turn an unrelated directory into a placeholder."""
+    from azimut import config
+
+    (config.cases_dir() / "Kyiv").mkdir(parents=True)
+    (config.cases_dir() / "Kyiv 4 June").mkdir(parents=True)
+
+    log = logging.getLogger("azimut.test")
+    log.warning("could not open %s", config.cases_dir() / "Kyiv 4 June" / "case.db")
+    log.warning("unrelated: /opt/Kyivograd/data.bin")
+
+    captured = "\n".join(diagnostics.log_lines())
+
+    assert "Kyiv" not in captured.replace("Kyivograd", "")
+    assert "<workspace>/<case>/case.db" in captured.replace("\\", "/")
+    assert "/opt/Kyivograd/data.bin" in captured
 
 
 def test_a_credential_in_a_logged_url_is_redacted(ring, tmp_workspace):

@@ -53,20 +53,22 @@ def test_list_cases_respects_limit(client):
 
 def test_case_lifecycle(client):
     created = client.post("/api/cases", json={"name": "Kharkiv Strike"}).json()
-    assert created["id"] == "kharkiv-strike"
+    # The folder is the name the analyst typed, the way every other saved thing
+    # already carries its own (`layout.case_folder_name`).
+    assert created["id"] == "Kharkiv Strike"
     assert graph_read.entities(created["id"]) == []
 
     # duplicate name → 409
     assert client.post("/api/cases", json={"name": "Kharkiv Strike"}).status_code == 409
 
     listed = client.get("/api/cases").json()
-    assert [c["id"] for c in listed] == ["kharkiv-strike"]
+    assert [c["id"] for c in listed] == ["Kharkiv Strike"]
 
-    client.patch("/api/cases/kharkiv-strike", json={"name": "Kharkiv Strike v2"})
-    assert client.get("/api/cases/kharkiv-strike").json()["name"] == "Kharkiv Strike v2"
+    client.patch("/api/cases/Kharkiv Strike", json={"name": "Kharkiv Strike v2"})
+    assert client.get("/api/cases/Kharkiv Strike").json()["name"] == "Kharkiv Strike v2"
 
-    assert client.delete("/api/cases/kharkiv-strike").json()["status"] == "deleted"
-    assert client.get("/api/cases/kharkiv-strike").status_code == 404
+    assert client.delete("/api/cases/Kharkiv Strike").json()["status"] == "deleted"
+    assert client.get("/api/cases/Kharkiv Strike").status_code == 404
 
 
 def test_duplicate_name_rejected_case_insensitively(client):
@@ -76,6 +78,44 @@ def test_duplicate_name_rejected_case_insensitively(client):
     assert client.post("/api/cases", json={"name": "alpha site"}).status_code == 409
     # a genuinely new name is fine
     assert client.post("/api/cases", json={"name": "Beta Site"}).status_code == 200
+
+
+def test_a_case_named_in_another_script_keeps_its_name(client):
+    """The folder used to be an ASCII slug, so a name with no a–z in it landed on
+    the fallback `case` — and the *second* such case could then never be created,
+    refused over a folder whose name nobody had typed."""
+    first = client.post("/api/cases", json={"name": "Маріуполь"})
+    second = client.post("/api/cases", json={"name": "Харків"})
+
+    assert first.status_code == 200 and second.status_code == 200
+    assert first.json()["id"] == "Маріуполь"
+    assert second.json()["id"] == "Харків"
+    assert {c["name"] for c in client.get("/api/cases").json()} == {"Маріуполь", "Харків"}
+
+
+def test_two_names_that_reduce_to_one_folder_both_get_a_case(client):
+    """Different names, one folder: the folder is numbered, because it is the
+    tool's business. Refusing there was a dead end the analyst could not resolve,
+    and the case that already existed must come through untouched."""
+    first = client.post("/api/cases", json={"name": "Kyiv: 4 June"}).json()
+    client.put(f"/api/cases/{first['id']}/notes", json={"text": "# the first case\n"})
+
+    second = client.post("/api/cases", json={"name": "Kyiv? 4 June"})
+
+    assert second.status_code == 200
+    assert second.json()["id"] != first["id"]
+    # The first case still holds its own work — a new case never lands on one.
+    assert "the first case" in client.get(f"/api/cases/{first['id']}/notes").json()["text"]
+    assert len(client.get("/api/cases").json()) == 2
+
+
+def test_a_name_that_would_break_its_own_url_is_filed_under_a_safe_folder(client):
+    """`#` and `%` cut a URL path short, and the folder name is the case id."""
+    created = client.post("/api/cases", json={"name": "Sortie #4 (100% sûr)"}).json()
+
+    assert "#" not in created["id"] and "%" not in created["id"]
+    assert created["name"] == "Sortie #4 (100% sûr)"  # what the analyst sees is kept
+    assert client.get(f"/api/cases/{created['id']}").status_code == 200
 
 
 def test_rename_rejects_existing_name_but_allows_self(client):
@@ -117,8 +157,8 @@ def test_scratch_promote(client):
     promoted = client.post(
         f"/api/cases/{scratch['id']}/promote", json={"name": "Real Case"}
     ).json()
-    assert promoted["id"] == "real-case"
-    assert client.get("/api/cases/real-case").json()["scratch"] is False
+    assert promoted["id"] == "Real Case"
+    assert client.get(f"/api/cases/{promoted['id']}").json()["scratch"] is False
     # old scratch id is gone
     assert client.get(f"/api/cases/{scratch['id']}").status_code == 404
 

@@ -259,26 +259,40 @@ def names_one_child(name: str) -> bool:
     return name == PurePosixPath(name).name == PureWindowsPath(name).name
 
 
+def case_folder_name(name: str | None, fallback: str = "case") -> str:
+    """The folder name a case is given, out of the name the analyst typed.
+
+    `slugify` is this repo's naming rule and answers most of it: the folder is
+    the name Azimut shows, so case, spaces and Unicode survive and only what
+    Windows refuses is replaced. A case folder carries one rule more, because
+    its name *is* the case id and the id travels in a URL path, so
+    `URL_HOSTILE_CHARS` go as well.
+
+    Held to `MAX_CASE_SLUG`, which the path budget above is computed from.
+    """
+    value = str(name or "")
+    for char in URL_HOSTILE_CHARS:
+        value = value.replace(char, "_")
+    return slugify(value, fallback, limit=MAX_CASE_SLUG)
+
+
 def usable_case_name(name: str) -> bool:
     """Whether a folder can hold a case under the name it already has.
 
-    A case made in the app is named by `Case.create`, which slugs whatever was
-    typed. A folder the analyst made themselves arrives already named, and
-    adopting it must not rename it — so the name has to clear on its own the bar
-    a slug clears by construction: inside `MAX_CASE_SLUG` (the path budget above
-    is computed from it), no character Windows refuses, no reserved device name,
-    no leading dot, no trailing dot or space.
+    A case made in the app is named by `Case.create`, which runs whatever was
+    typed through `case_folder_name`. A folder the analyst made themselves
+    arrives already named, and adopting it must not rename it — so the name has
+    to clear on its own the bar a generated one clears by construction.
 
-    `slugify` encodes every one of those rules, so the question is whether the
-    name is already its own slug. Compared against the composed form because
-    macOS hands back decomposed names from a directory listing, and "Café" is
-    not two different folders.
+    Which is exactly this question: is the name already its own answer? Asking it
+    that way is what keeps the folder Azimut names and the folder the analyst
+    named under one rule, with no second spelling to drift from. Compared against
+    the composed form because macOS hands back decomposed names from a directory
+    listing, and "Café" is not two different folders.
     """
     if not name or name in {".", ".."}:
         return False
-    if set(name) & set(URL_HOSTILE_CHARS):
-        return False
-    return slugify(name, "", limit=MAX_CASE_SLUG) == unicodedata.normalize("NFC", name)
+    return case_folder_name(name) == unicodedata.normalize("NFC", name)
 
 
 class LayoutError(ValueError):

@@ -23,8 +23,8 @@ holds a few kilobytes and no log file ever grows in the workspace.
 or a provider key, and an issue is public, so every string goes through
 :func:`scrub`: the home directory and the workspace root collapse to placeholders,
 and so do the account name, the case folder and any credential-shaped query
-parameter. A case folder is a slug of the name the analyst typed, which in this
-tool is routinely a subject's — that one is not a nicety. The workspace path is
+parameter. A case folder carries the name the analyst typed, which in this tool
+is routinely a subject's — that one is not a nicety. The workspace path is
 also absent from the report outright: About shows it locally, a report does not
 need it.
 """
@@ -197,10 +197,12 @@ def scrub(text: str) -> str:
     - this machine's name becomes ``<machine>``. The workspace lock names the
       host holding a folder, which on a corporate laptop is an asset tag and a
       company domain.
-    - a case folder becomes ``<case>``. A case directory is a slug of the name the
-      analyst gave it (``workspace._slugify``), and in this tool that name is
+    - a case folder becomes ``<case>``. A case directory carries the name the
+      analyst gave it (``layout.case_folder_name``), and in this tool that name is
       routinely a subject's — so the segment goes even though the path around it
-      is useful.
+      is useful. Twice over: the folders on disk are matched by name
+      (:func:`_hide_case_folders`), and whatever that misses is caught by
+      position.
     - a credential-shaped query parameter becomes ``<redacted>``
 
     None of this makes an arbitrary string safe to publish; it removes what this
@@ -212,9 +214,15 @@ def scrub(text: str) -> str:
         root = ""
     if root and root not in ("~", "/"):
         text = _path_pattern(root).sub(_WORKSPACE_PLACEHOLDER, text)
-        # Permanent cases now sit directly below the workspace root. The one
-        # reserved first segment is `.azimut`; every other directory there is
-        # an analyst-named case and must not reach a public issue report.
+    # Before the pattern below, which stops at whitespace and would leave two
+    # thirds of "Operation Blue Heron" standing.
+    text = _hide_case_folders(text)
+    if root and root not in ("~", "/"):
+        # The fallback, for a folder the names pass cannot know about: one this
+        # very line reports deleting, or one under a workspace this process has
+        # moved away from. Permanent cases sit directly below the workspace root,
+        # where the one reserved first segment is `.azimut`; every other
+        # directory there is analyst-named and must not reach a public report.
         workspace = re.escape(_WORKSPACE_PLACEHOLDER)
         text = re.sub(
             rf"({workspace})([/\\])(?!\.azimut(?:[/\\]|$))[^/\\\s\"'<>]+",
@@ -268,6 +276,58 @@ def _case_parents() -> tuple[Path, ...]:
         return (config.scratch_dir(),)
     except Exception:
         return ()
+
+
+def _case_folder_names() -> tuple[str, ...]:
+    """The case folder names on disk, longest first.
+
+    Read rather than inferred, because a case folder carries the name the analyst
+    typed (`layout.case_folder_name`) and that name holds spaces. A pattern over
+    path segments has to stop at whitespace — what follows a path on a log line
+    is prose — so on ``Operation Blue Heron`` it would redact one word and
+    publish two. An exact name has no such ambiguity.
+
+    Longest first, so a case called ``Kyiv`` cannot take the front of
+    ``Kyiv 4 June`` and leave the rest of it standing. Dotted directories are
+    skipped: `.azimut` is the workspace's own machinery, and no case folder
+    starts with a dot (`layout.usable_case_name`).
+
+    Two directory listings, on a report that carries at most
+    :data:`LOG_LINES` + 1 scrubbed strings.
+    """
+    try:
+        parents = (config.cases_dir(), *_case_parents())
+    except Exception:
+        return ()
+    names: set[str] = set()
+    for directory in parents:
+        try:
+            names.update(
+                entry.name
+                for entry in directory.iterdir()
+                if not entry.name.startswith(".") and entry.is_dir()
+            )
+        except OSError:  # a workspace that isn't there yet, or isn't readable
+            continue
+    return tuple(sorted(names, key=len, reverse=True))
+
+
+def _hide_case_folders(text: str) -> str:
+    """Replace every case folder named on disk, wherever a path names it.
+
+    Anchored on the separator before the name and a boundary after it, so a case
+    called ``Kyiv`` does not turn ``/Kyivograd/`` into a placeholder. Case
+    insensitive on Windows, for the reason :func:`_path_pattern` gives.
+    """
+    flags = re.IGNORECASE if os.name == "nt" else 0
+    for name in _case_folder_names():
+        text = re.sub(
+            rf"(?<=[/\\]){re.escape(name)}(?=[/\\\s\"'<>]|$)",
+            _CASE_PLACEHOLDER,
+            text,
+            flags=flags,
+        )
+    return text
 
 
 # ---- the report ---------------------------------------------------------------

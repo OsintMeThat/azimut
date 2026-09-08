@@ -27,15 +27,14 @@ workspace_router = APIRouter(prefix="/api/workspace", tags=["cases"])
 
 
 def _ensure_name_free(name: str, *, exclude_id: str | None = None) -> None:
-    """Reject a case name already taken by another (non-scratch) case, matched
-    case-insensitively on the trimmed name. ``exclude_id`` lets a rename keep
-    its own name."""
-    wanted = name.strip().casefold()
-    for c in Case.list_all():
-        if c.get("scratch") or c["id"] == exclude_id:
-            continue
-        if str(c.get("name", "")).strip().casefold() == wanted:
-            raise HTTPException(status_code=409, detail=f"a case named '{name}' already exists")
+    """Reject a case name another case already answers to (`Case.name_taken`).
+
+    The only thing standing between two cases, now that the folder underneath
+    gets numbered instead of refusing: a name is what the analyst reads, so it is
+    what the app protects and what the message is about.
+    """
+    if Case.name_taken(name, exclude_id=exclude_id):
+        raise HTTPException(status_code=409, detail=f"a case named '{name}' already exists")
 
 class CreateCase(BaseModel):
     name: str = Field(min_length=1, max_length=120)
