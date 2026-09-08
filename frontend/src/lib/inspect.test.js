@@ -5,6 +5,8 @@ import {
   quadsBounds, translateQuad, moveQuads, rotateQuads, scaleQuads, pinholeOps,
   buildFrameOps, hasVideoEdits, normalizeRightAngleRotation, rotationOps,
   sourceStem, timecode, frameSaveName, frameSaveNames, autoSaveNames, saveNameOf,
+  newCollage, clampCollageDim, stitchCanvas, COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
+  COLLAGE_DEFAULT_SIZE,
 } from './inspect.js';
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -476,5 +478,71 @@ describe('saveNameOf', () => {
     expect(saveNameOf(item, '   ')).toBe('00-01-00 roof');
     expect(saveNameOf(item, '')).toBe('00-01-00 roof');
     expect(saveNameOf(item)).toBe('00-01-00 roof');
+  });
+});
+
+describe('newCollage', () => {
+  it('starts every collage the same way, whoever creates it', () => {
+    const a = newCollage('Collage 1');
+    expect(a.name).toBe('Collage 1');
+    expect([a.width, a.height]).toEqual([COLLAGE_DEFAULT_SIZE.width, COLLAGE_DEFAULT_SIZE.height]);
+    expect(a.nodes).toEqual([]);
+    expect(a.transparent).toBe(true);
+  });
+
+  it('gives each one its own id and its own node list', () => {
+    const a = newCollage('Collage 1');
+    const b = newCollage('Collage 2');
+    a.nodes.push({});
+    expect(a.id).not.toBe(b.id);
+    expect(b.nodes).toEqual([]);
+  });
+});
+
+describe('clampCollageDim', () => {
+  it('keeps a side the compose route accepts', () => {
+    expect(clampCollageDim(4000, 800)).toBe(4000);
+    expect(clampCollageDim(COLLAGE_MAX_DIM, 800)).toBe(COLLAGE_MAX_DIM);
+  });
+
+  it('holds a number typed past either bound', () => {
+    expect(clampCollageDim(99999, 800)).toBe(COLLAGE_MAX_DIM);
+    expect(clampCollageDim(0, 800)).toBe(COLLAGE_MIN_DIM);
+    expect(clampCollageDim(-40, 800)).toBe(COLLAGE_MIN_DIM);
+  });
+
+  it('rounds a fractional one rather than sizing a canvas in half pixels', () => {
+    expect(clampCollageDim('1600.6', 800)).toBe(1601);
+  });
+
+  it('falls back to the size in place when the field says nothing', () => {
+    expect(clampCollageDim('', 800)).toBe(800);
+    expect(clampCollageDim('wide', 800)).toBe(800);
+    expect(clampCollageDim(null, 800)).toBe(800);
+  });
+});
+
+describe('stitchCanvas', () => {
+  const current = { width: 1600, height: 800 };
+
+  it('takes the canvas the solver asked for', () => {
+    expect(stitchCanvas({ width: 4800, height: 2400 }, current))
+      .toEqual({ width: 4800, height: 2400, scale: 3 });
+  });
+
+  it('scales an unplaced piece by the smaller ratio, so it keeps its shape', () => {
+    const { scale } = stitchCanvas({ width: 6400, height: 1600 }, current);
+    expect(scale).toBe(2); // 4x wider, 2x taller — the piece grows twice
+  });
+
+  it('holds the answer inside the bounds compose accepts', () => {
+    const { width, height } = stitchCanvas({ width: 20000, height: 90000 }, current);
+    expect(width).toBe(COLLAGE_MAX_DIM);
+    expect(height).toBe(COLLAGE_MAX_DIM);
+  });
+
+  it('leaves the canvas alone when the answer says nothing about it', () => {
+    expect(stitchCanvas(undefined, current)).toEqual({ ...current, scale: 1 });
+    expect(stitchCanvas({}, current)).toEqual({ ...current, scale: 1 });
   });
 });

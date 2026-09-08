@@ -110,6 +110,59 @@ def test_fit_quads_to_canvas_handles_empty():
     assert stitch.fit_quads_to_canvas([], 100, 100) == []
 
 
+def test_canvas_for_layout_takes_the_layouts_own_extent():
+    quads = [[[0, 0], [1000, 0], [1000, 400], [0, 400]]]
+    assert stitch.canvas_for_layout(quads, margin=0.0) == (1000, 400)
+
+
+def test_canvas_for_layout_leaves_room_for_the_fitting_margin():
+    # The point of the size: fitting the layout into it scales the geometry by
+    # exactly one, so the pieces land at the resolution they were solved at.
+    quads = [[[0, 0], [1000, 0], [1000, 400], [0, 400]]]
+    fitted = stitch.fit_quads_to_canvas(quads, *stitch.canvas_for_layout(quads))[0]
+    assert fitted[1][0] - fitted[0][0] == pytest.approx(1000, abs=2)
+
+
+def test_canvas_for_layout_counts_source_pixels_per_solved_unit():
+    quads = [[[0, 0], [500, 0], [500, 200], [0, 200]]]
+    assert stitch.canvas_for_layout(quads, detail=3.0, margin=0.0) == (1500, 600)
+
+
+def test_canvas_for_layout_never_shrinks_the_canvas_it_was_given():
+    quads = [[[0, 0], [100, 0], [100, 50], [0, 50]]]
+    assert stitch.canvas_for_layout(quads, minimum=(1600, 800), margin=0.0) == (1600, 800)
+
+
+def test_canvas_for_layout_bounds_a_long_layout_by_its_side():
+    quads = [[[0, 0], [60000, 0], [60000, 20000], [0, 20000]]]
+    width, height = stitch.canvas_for_layout(quads, margin=0.0)
+    assert max(width, height) == stitch.MAX_CANVAS_DIM
+    # Both sides shrink together, so the clamped canvas still carries the shape.
+    assert width / height == pytest.approx(3.0, abs=0.01)
+
+
+def test_canvas_for_layout_bounds_a_layout_by_its_area():
+    quads = [[[0, 0], [8000, 0], [8000, 6000], [0, 6000]]]
+    width, height = stitch.canvas_for_layout(quads, margin=0.0)
+    assert width * height <= stitch.MAX_CANVAS_PIXELS
+    assert width / height == pytest.approx(8000 / 6000, abs=0.01)
+
+
+def test_canvas_for_layout_leaves_a_canvas_already_past_the_bounds_alone():
+    """The bounds hold what the solver asks for, not what the analyst set. A
+    canvas already past them is a resolution they chose, and a function whose job
+    is to grow one must never be the thing that shrinks it — the pieces already
+    on it would be scaled down with it."""
+    quads = [[[0, 0], [8000, 0], [8000, 6000], [0, 6000]]]
+    big = (8192, 8192)  # 67 MP: what the compose route accepts, past the area bound
+
+    assert stitch.canvas_for_layout(quads, minimum=big, margin=0.0) == big
+
+
+def test_canvas_for_layout_handles_empty():
+    assert stitch.canvas_for_layout([], minimum=(320, 240)) == (320, 240)
+
+
 def test_quad_ok_accepts_a_plain_rectangle():
     assert stitch.quad_ok([[0, 0], [10, 0], [10, 10], [0, 10]])
 
@@ -147,10 +200,26 @@ def test_solve_layout_places_pieces_inside_the_canvas():
 
     solved = stitch.solve_layout(pieces, width=1000, height=800)
 
+    canvas = solved["canvas"]
     for quad in solved["quads"].values():
         for x, y in quad:
-            assert -1 <= x <= 1001
-            assert -1 <= y <= 801
+            assert -1 <= x <= canvas["width"] + 1
+            assert -1 <= y <= canvas["height"] + 1
+
+
+def test_solve_layout_grows_the_canvas_rather_than_shrinking_the_pieces():
+    # The canvas the caller has is smaller than one piece. Fitting the stitch into
+    # it would throw away most of the pixels it was solved from, so the answer
+    # comes back on a canvas that holds the layout at its own scale instead.
+    scene = _scene(seed=13)
+    pieces = [scene.crop((0, 0, 500, 500)), scene.crop((300, 0, 800, 500))]
+
+    solved = stitch.solve_layout(pieces, width=240, height=200)
+
+    canvas = solved["canvas"]
+    assert canvas["width"] > 240 and canvas["height"] > 200
+    widths = [quad[1][0] - quad[0][0] for quad in solved["quads"].values()]
+    assert max(widths) == pytest.approx(500, rel=0.05)
 
 
 def test_solve_layout_drops_a_piece_that_matches_nothing():
@@ -215,10 +284,30 @@ def test_rotation_layout_orders_pieces_along_the_pan():
 
 def test_rotation_layout_places_pieces_inside_the_canvas():
     solved = stitch.solve_rotation_layout(_pan([-20, 0, 20]), width=1000, height=800)
+    canvas = solved["canvas"]
     for quad in solved["quads"].values():
         for x, y in quad:
-            assert -1 <= x <= 1001
-            assert -1 <= y <= 801
+            assert -1 <= x <= canvas["width"] + 1
+            assert -1 <= y <= canvas["height"] + 1
+
+
+def test_rotation_layout_sizes_the_canvas_in_source_pixels():
+    """The rotation model solves on a 1000px work copy of every piece, so its
+    geometry has to be read back up to the source before the canvas is sized —
+    otherwise the same pan filmed in 4K would come back at the same detail as a
+    thumbnail of it. Three times the pixels in, three times the canvas out."""
+    small = _pan([-20, 0, 20])
+    big = [v.resize((v.width * 3, v.height * 3)) for v in small]
+
+    # A canvas at the floor, so the answer is the layout's own size and nothing else.
+    coarse = stitch.solve_rotation_layout(small, width=16, height=16)
+    fine = stitch.solve_rotation_layout(big, width=16, height=16)
+
+    assert fine["canvas"]["width"] == pytest.approx(3 * coarse["canvas"]["width"], rel=0.05)
+    assert fine["canvas"]["height"] == pytest.approx(3 * coarse["canvas"]["height"], rel=0.05)
+    # And the pan is worth more than the collage's default canvas, which is the
+    # size it used to be squeezed into.
+    assert fine["canvas"]["width"] > 1600
 
 
 def test_rotation_layout_returns_a_remap_per_placed_piece():

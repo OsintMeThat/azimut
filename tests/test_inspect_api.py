@@ -493,12 +493,38 @@ def test_auto_stitch_solves_quads_without_filing_anything(client):
     body = res.json()
     assert body["dropped"] == []
     assert [n["index"] for n in body["nodes"]] == [0, 1]
+    canvas = body["canvas"]
     for node in body["nodes"]:
         assert len(node["quad"]) == 4
         for x, y in node["quad"]:
-            assert -1 <= x <= 1201 and -1 <= y <= 601
+            assert -1 <= x <= canvas["width"] + 1 and -1 <= y <= canvas["height"] + 1
     # Layout only: auto-stitch is not a Save gate, so no media may appear.
     assert len(client.get(f"/api/cases/{cid}/media").json()) == before
+
+
+def test_auto_stitch_answers_with_the_canvas_the_stitch_is_worth(client):
+    """The quads are only as good as the canvas they are read against, so the
+    route says which one it sized them for. Here the caller's canvas is smaller
+    than a single piece: keeping it would export the stitch at a fraction of the
+    pixels it was solved from."""
+    cid = client.post("/api/cases", json={"name": "StitchCanvas"}).json()["id"]
+    left_png, right_png = _overlapping_pair()
+    a = _upload(client, cid, "left.png", left_png)
+    b = _upload(client, cid, "right.png", right_png)
+
+    body = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={
+            "width": 240, "height": 200,
+            "nodes": [{"path": a["path"]}, {"path": b["path"]}],
+        },
+    ).json()
+
+    # The pieces are 500px crops overlapping by 200, so the panorama is ~800 wide.
+    assert body["canvas"]["width"] > 700
+    assert body["canvas"]["height"] > 200
+    # And the canvas stays composable: compose refuses a side over 8192.
+    assert body["canvas"]["width"] <= 8192 and body["canvas"]["height"] <= 8192
 
 
 def test_auto_stitch_reports_a_piece_it_cannot_place(client):

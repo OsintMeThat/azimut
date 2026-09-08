@@ -1,7 +1,8 @@
 <script>
   import {
-    previewStyle, scaleQuad, rotateQuad, quadCentroid, cropImgStyle, styleText, uid,
-    rotateQuads, scaleQuads, pinholeOps,
+    previewStyle, scaleQuad, rotateQuad, quadCentroid, cropImgStyle, styleText,
+    rotateQuads, scaleQuads, pinholeOps, newCollage, clampCollageDim, stitchCanvas,
+    COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
   } from '../../lib/inspect.js';
   import { api } from '../../lib/api.js';
   import { caseState, toast } from '../../lib/state.svelte.js';
@@ -73,10 +74,19 @@
   function addCollage() {
     const nums = session.collages.map((c) => parseInt((c.name?.match(/\d+/) ?? [])[0]) || 0);
     const next = Math.max(0, ...nums) + 1;
-    const c = { id: uid('cl'), name: `Collage ${next}`, width: 1600, height: 800, background: '#12141c', transparent: true, nodes: [] };
+    const c = newCollage(`Collage ${next}`);
     session.collages.push(c);
     session.activeCollageId = c.id;
     selectedIds = [];
+  }
+
+  // The canvas is the resolution everything on it is worked and exported at, so
+  // it is the analyst's to set. Held inside the bounds compose accepts, and the
+  // field is put back to what was taken so a refused number never sits there.
+  function setDim(event, axis) {
+    const next = clampCollageDim(event.currentTarget.value, active[axis]);
+    active[axis] = next;
+    event.currentTarget.value = next;
   }
 
   function removeCollage(id) {
@@ -170,12 +180,30 @@
     w: n.w, h: n.h, frameOps: n.frameOps, crop: n.crop, save: n.save,
   });
 
+  /**
+   * Resize the canvas to what the solver asked for, carrying the pieces it did
+   * not place along with it. They are scaled uniformly, by the smaller of the two
+   * ratios, so a piece left in place keeps its shape and stays on the canvas.
+   */
+  function applyCanvas(canvas, placed) {
+    if (!canvas) return;
+    const { width, height, scale } = stitchCanvas(canvas, active);
+    if (width === active.width && height === active.height) return;
+    if (scale !== 1) {
+      active.nodes.forEach((n, i) => {
+        if (!placed.has(i)) n.quad = n.quad.map(([x, y]) => [x * scale, y * scale]);
+      });
+    }
+    active.width = width;
+    active.height = height;
+  }
+
   async function autoStitch() {
     if (!active || active.nodes.length < 2) return;
     stitching = true;
     try {
       const nodes = active.nodes;
-      const before = nodes.map(snapshot);
+      const before = { nodes: nodes.map(snapshot), width: active.width, height: active.height };
       const res = await api.post(`/api/cases/${caseState.current.id}/inspect/auto-stitch`, {
         width: active.width,
         height: active.height,
@@ -183,6 +211,11 @@
         // frozen snapshot recipes (path/time/ops), stripped back to pinhole pixels
         nodes: nodes.map((n) => ({ ...n.save, ops: pinholeOps(n.save) })),
       });
+      // A stitch is solved in source pixels, so the canvas follows it: the answer
+      // carries the size that keeps the pieces at full resolution, and the export
+      // is the pieces' bounds, so a canvas left too small *is* the lost detail.
+      // Pieces the solver could not place keep their place as it grows.
+      applyCanvas(res.canvas, new Set(res.nodes.map((n) => n.index)));
       for (const { index, quad, op } of res.nodes) {
         const node = nodes[index];
         const base = pinholeOps(node.save);
@@ -210,10 +243,13 @@
   }
 
   function undoStitch() {
-    for (const snap of undoSnap) {
+    for (const snap of undoSnap.nodes) {
       const node = active.nodes.find((n) => n.id === snap.id);
       if (node) Object.assign(node, snap);
     }
+    // The canvas moved with the stitch, so it comes back with it.
+    active.width = undoSnap.width;
+    active.height = undoSnap.height;
     undoSnap = null;
   }
 </script>
@@ -251,6 +287,33 @@
       {/each}
       <button class="ctab add" onclick={addCollage} title="New collage"><Icon name="plus" size={13} /></button>
     </div>
+    {#if active}
+      <div class="scale-row">
+        <span class="lbl">Canvas</span>
+        <input
+          class="input dim"
+          type="number"
+          min={COLLAGE_MIN_DIM}
+          max={COLLAGE_MAX_DIM}
+          value={active.width}
+          onchange={(e) => setDim(e, 'width')}
+          aria-label="Canvas width in pixels"
+        />
+        <span class="sub">×</span>
+        <input
+          class="input dim"
+          type="number"
+          min={COLLAGE_MIN_DIM}
+          max={COLLAGE_MAX_DIM}
+          value={active.height}
+          onchange={(e) => setDim(e, 'height')}
+          aria-label="Canvas height in pixels"
+        />
+        <span class="sub">px</span>
+      </div>
+      <p class="hint">Pieces are placed and exported at this scale, so raise it to keep a
+        high-resolution frame sharp.</p>
+    {/if}
   </div>
 
   <p class="hint">Drag pieces to arrange them, pull corners to warp; shift-click selects several.</p>
@@ -344,7 +407,8 @@
     <div class="section-head"><span>Auto panorama</span></div>
     <p class="hint">
       Solves the layout from the overlapping imagery itself, then drops the pieces back on the
-      canvas. You can still drag pieces to correct the result.
+      canvas, which grows to hold them at full resolution. You can still drag pieces to correct
+      the result.
     </p>
     <div class="modes">
       {#each MODES as m (m.id)}
@@ -557,6 +621,11 @@
   .scale-row .sub {
     font-size: var(--fs-xs);
     color: var(--text-3);
+  }
+  .dim {
+    width: 5.5em;
+    padding: 4px 6px;
+    font-size: var(--fs-xs);
   }
   .btn.sq {
     min-width: 30px;
