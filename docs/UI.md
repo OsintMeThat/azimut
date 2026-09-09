@@ -1023,10 +1023,15 @@ for a reload that will never come.
 
 ## Sources
 
-The Media Library toolbar keeps explicit maintenance actions beside Import:
-**Thumbnails** repairs missing previews; **Enrich** queues local image
+The Media Library toolbar keeps its explicit maintenance actions behind a `⋮`
+beside Import, because both are repairs pressed once in a while and read as a
+step of importing when they sit next to Download: **Regenerate missing
+thumbnails** repairs missing previews; **Read file metadata** queues local image
 EXIF/perceptual-hash and video metadata backfill for files not processed by the
-current version. A **GPS** toggle beside the type and folder filters narrows the
+current version. The `⋮` stays put on a case with no media, its rows disabled,
+and closes on Escape or a click outside.
+
+A **GPS** toggle beside the type and folder filters narrows the
 list to the files whose own metadata states a position, and appears only in a case
 that holds some; how many is in its tooltip, not in its label. Those rows carry
 one pin glyph — coordinates in the tooltip, not in the title — and clicking it
@@ -1044,7 +1049,7 @@ found identical to an extracted frame stays on the side it came in by. A case ho
 nothing but working files says so instead of offering to import. Thumbnail polling follows all pending case jobs, including
 files beyond the loaded page after a case import. Thumbnail failures are scoped
 to their case, so switching cases always reloads previews even when relative
-paths match. Enrich respects an existing confirmed GPS relation during backfill.
+paths match. Enrichment respects an existing confirmed GPS relation during backfill.
 
 **Import asks where the files came from.** A file fetched by hand elsewhere and
 then dropped here carries no address of its own, so a drop or a pick opens one

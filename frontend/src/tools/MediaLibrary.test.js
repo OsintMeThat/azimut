@@ -76,7 +76,9 @@ describe('Media Library enrichment', () => {
     expect(source).toContain('async function enrichMedia()');
     expect(source).toContain('await api.post(`/api/cases/${id}/media/enrich`, {})');
     expect(source).toContain('title="Read image EXIF, hashes and video metadata locally"');
-    expect(source).toContain('<Icon name="search" size={15} /> Enrich');
+    expect(source).toContain('runUpkeep(enrichMedia)');
+    // no effect reaches for it: the sweep is a press, not a mount
+    expect(source).not.toMatch(/\$effect\([^)]*enrichMedia/);
   });
 
   it('polls media and Suggestions while enrichment is running', () => {
