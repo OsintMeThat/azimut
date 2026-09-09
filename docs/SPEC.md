@@ -282,6 +282,7 @@ stops making sense.
 - **Free-form montage editor:** consider only if it stays distinct from Geo Proof and Inspect collage.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
+- **A front door for the app:** a home surface saying what Azimut is, how a case works and where to start, then keeping the open case in view with recent items, notes and a mini-map of its places, in panels the analyst arranges. The first half is missing today, since a fresh install lands in a workspace with no case and no guidance; the second has to earn its place beside Board, Graph and Timeline, which already read the case.
 - **A deleted case waits before it is gone:** artifacts, entities and bulk deletes are all recoverable, while removing a case is the one act with no way back and only a typed DELETE in front of it. Move the folder aside instead, and empty it later.
 
 ## 8. Explicit non-goals
