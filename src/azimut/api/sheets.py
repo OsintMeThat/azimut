@@ -95,11 +95,19 @@ class SheetSaveIn(BaseModel):
 
 
 def _sheets(case: Any) -> list[dict[str, Any]]:
-    return [
+    """The case's sheets, newest first.
+
+    The same order every other list a tool opens on answers with — captures, proofs,
+    sessions, drafts, media. A case builds tables one after another and the one being
+    worked on is the one just made; filed order put it at the bottom of the list.
+    """
+    sheets = [
         sheet_engine.summary(case, entity)
         for entity in case.list_entities()
         if entity.get("type") == "sheet"
     ]
+    sheets.sort(key=lambda one: one.get("created_at") or "", reverse=True)
+    return sheets
 
 
 @router.get("/{case_id}/sheets")

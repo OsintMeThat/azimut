@@ -1172,6 +1172,24 @@ def test_the_list_says_how_big_each_sheet_is(client):
     assert listed[0]["columns"] == 3
 
 
+def test_the_list_opens_on_the_sheet_just_made(client, monkeypatch):
+    """Newest first, the order every other list a tool opens on answers with —
+    captures, proofs, sessions, drafts, media. A case builds tables one after
+    another and the one being worked on is the one just made; filed order put it
+    at the bottom, under everything the case had ever built."""
+    case_id = make_case(client)
+    for at, title in (
+        ("2026-07-01T09:00:00Z", "First"),
+        ("2026-08-10T09:00:00Z", "Second"),
+        ("2026-09-02T09:00:00Z", "Third"),
+    ):
+        monkeypatch.setattr("azimut.sqlite_backend._now", lambda at=at: at)
+        new_sheet(client, case_id, title)
+
+    listed = client.get(f"/api/cases/{case_id}/sheets").json()["sheets"]
+    assert [one["title"] for one in listed] == ["Third", "Second", "First"]
+
+
 def test_renaming_a_sheet_moves_its_table_and_its_sidecar(client):
     case_id = make_case(client)
     sheet = new_sheet(client, case_id, "Candidates")

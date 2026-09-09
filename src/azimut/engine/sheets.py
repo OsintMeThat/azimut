@@ -1448,5 +1448,9 @@ def summary(case: "Case", entity: dict[str, Any]) -> dict[str, Any]:
         # the move's column mapping — would otherwise read every other sheet in the case
         # whole just to learn its headings.
         "headings": headings,
-        "created_at": (entity.get("prov") or {}).get("at"),
+        # `provenance` is what every reader of an entity writes (sqlite_backend
+        # `_entity`); `prov` was a key nothing in the codebase has ever produced, so
+        # this answered null on every sheet — and the newest-first sort built on it
+        # sorted nothing.
+        "created_at": (entity.get("provenance") or {}).get("at"),
     }
