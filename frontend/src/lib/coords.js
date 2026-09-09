@@ -3,7 +3,7 @@
 // *shown*, per the user's Settings → General choice. Nothing here ever
 // changes what lands on disk, so a case reads the same for every reader.
 //
-// Kept pure and Leaflet-free so it can be unit-tested.
+// Kept pure and free of the map so it can be unit-tested.
 
 export const COORD_FORMATS = ['dd', 'dms', 'mgrs'];
 
@@ -19,7 +19,7 @@ const rad = (deg) => (deg * Math.PI) / 180;
 /**
  * A longitude folded back into [-180, 180].
  *
- * Leaflet keeps counting past the antimeridian as the analyst pans, so a map
+ * A map keeps counting past the antimeridian as the analyst pans, so its
  * centre can read 187° after crossing it. Every coordinate the API accepts is
  * bounded to ±180, so the unwrapped value is refused rather than understood.
  */

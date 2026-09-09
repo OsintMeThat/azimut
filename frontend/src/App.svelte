@@ -300,8 +300,8 @@
   .topbar {
     height: var(--topbar-h);
     flex-shrink: 0;
-    /* own stacking context above the tool canvas: Leaflet's panes (z-index up
-       to 1000) otherwise swallow the case switcher's dropdown */
+    /* own stacking context above the tool canvas: a map's own layers and
+       controls otherwise swallow the case switcher's dropdown */
     position: relative;
     z-index: 1200;
     display: flex;

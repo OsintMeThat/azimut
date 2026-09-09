@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { awaitMapReady, installAppFixture } from './app.fixture.js';
+import { awaitMapReady, installAppFixture, mapPicture, repainted } from './app.fixture.js';
 
 /**
  * What the tool draws on the map, driven in a real browser.
@@ -23,13 +23,22 @@ async function openGrid(page) {
   return fixture;
 }
 
-/** Drag a box over the middle of the map. */
+/**
+ * Drag a box over the middle of the map, and wait for the lattice to appear.
+ *
+ * The cells are declared in one tick and painted a frame later — the engine
+ * builds a layer's features off the main thread — so a click fired in the same
+ * tick can land before there is anything under it to hit. An analyst never
+ * moves that fast; a spec does.
+ */
 async function dragBox(page, from = [140, 130], to = [420, 330]) {
+  const bare = await mapPicture(page);
   const box = await page.locator('.map').boundingBox();
   await page.mouse.move(box.x + from[0], box.y + from[1]);
   await page.mouse.down();
   await page.mouse.move(box.x + to[0], box.y + to[1], { steps: 8 });
   await page.mouse.up();
+  await expect.poll(async () => repainted(bare, await mapPicture(page))).toBe(true);
 }
 
 const coverage = (page) => page.locator('.grid-cov-text');
@@ -97,30 +106,20 @@ test('sweeps with the keyboard, cell after cell', async ({ page }) => {
   await expect(page.getByText('clear · F flag · S skip')).toHaveCount(0);
 });
 
-/** Is anything actually painted on the grid's canvas? */
-const painted = (page) =>
-  page.evaluate(() => {
-    const canvas = document.querySelector('.leaflet-overlay-pane canvas');
-    if (!canvas) return 0;
-    const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
-    let lit = 0;
-    for (let i = 3; i < pixels.length; i += 4) if (pixels[i] > 0) lit += 1;
-    return lit;
-  });
-
 test('hides the grid without closing it, then brings it back', async ({ page }) => {
   await openGrid(page);
   await page.getByRole('button', { name: 'Box' }).click();
-  await dragBox(page);
-  await expect.poll(() => painted(page)).toBeGreaterThan(0);
+  await dragBox(page); // which does not return until the lattice is on screen
+  const drawn = await mapPicture(page);
 
   await page.getByRole('button', { name: 'Hide grid' }).click();
   // the lattice is gone from the imagery, and the grid is still open behind it
-  await expect.poll(() => painted(page)).toBe(0);
+  const hidden = await mapPicture(page);
+  expect(repainted(drawn, hidden)).toBe(true);
   await expect(coverage(page)).toBeVisible();
 
   await page.getByRole('button', { name: 'Show grid' }).click();
-  await expect.poll(() => painted(page)).toBeGreaterThan(0);
+  expect(repainted(hidden, await mapPicture(page))).toBe(true);
 });
 
 test('reshapes the area from its corner handles', async ({ page }) => {
@@ -167,14 +166,15 @@ test('draws the sun and moon arcs for an anchored point, and scrubs the hour', a
   const fixture = await installAppFixture(page);
   await page.goto('/#satellite');
   await awaitMapReady(page);
+  const bare = await mapPicture(page);
   await page.getByRole('button', { name: 'Sun and moon' }).click();
 
   // the day is asked for, then asked again once it comes back named
   await expect.poll(() => fixture.skyQueries.length).toBe(2);
   const marks = page.locator('.sky-body');
   await expect(marks).toHaveCount(1); // the sun is up at midday, the moon is not
-  const arcs = page.locator('.leaflet-overlay-pane path');
-  expect(await arcs.count()).toBeGreaterThan(4);
+  // the arcs, the hour ticks and the two rays are painted on the map itself
+  expect(repainted(bare, await mapPicture(page))).toBe(true);
 
   const before = await marks.first().getAttribute('style');
   const slider = page.getByRole('slider', { name: 'Time of day' });
@@ -192,10 +192,12 @@ test('drops the sky layer when the mode closes', async ({ page }) => {
   await awaitMapReady(page);
   await page.getByRole('button', { name: 'Sun and moon' }).click();
   await expect(page.locator('.sky-body')).toHaveCount(1);
+  const drawn = await mapPicture(page);
 
   await page.getByRole('button', { name: 'Sun and moon' }).click();
   await expect(page.locator('.sky-body')).toHaveCount(0);
-  await expect(page.locator('.leaflet-overlay-pane path')).toHaveCount(0);
+  // and the arcs went with the mark, off the map's own picture
+  expect(repainted(drawn, await mapPicture(page))).toBe(true);
 });
 
 test('carries the coordinates on a dragged pin, and drops it on exit', async ({ page }) => {
@@ -223,6 +225,37 @@ test('carries the coordinates on a dragged pin, and drops it on exit', async ({ 
   await expect(pin).toHaveCount(0);
 });
 
+test('lays the OSM labels over the imagery, and lifts them off again', async ({ page }) => {
+  // The toggle sat on the tool while the layer never heard about it: the effect
+  // that carries it down read the map first, and while the map was still being
+  // built the switch it was watching was never read at all.
+  const fixture = await installAppFixture(page);
+  const imagery = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/tiles/')) imagery.push(request.url());
+  });
+  await page.goto('/#satellite');
+  await awaitMapReady(page);
+  const labels = page.getByLabel('Toggle OSM labels overlay');
+
+  expect(fixture.labelTiles).toEqual([]);
+  await labels.click();
+  await expect.poll(() => fixture.labelTiles.length).toBeGreaterThan(0);
+
+  // off again, and a pan proves it: the imagery is still being fetched and the
+  // labels are not
+  await labels.click();
+  const laid = fixture.labelTiles.length;
+  const painted = imagery.length;
+  const box = await page.locator('.map').boundingBox();
+  await page.mouse.move(box.x + 400, box.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 120, box.y + 120, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => imagery.length).toBeGreaterThan(painted);
+  expect(fixture.labelTiles.length).toBe(laid);
+});
+
 test('measures a path clicked on the map, and clears it', async ({ page }) => {
   await installAppFixture(page);
   await page.goto('/#satellite');
@@ -230,14 +263,17 @@ test('measures a path clicked on the map, and clears it', async ({ page }) => {
   await page.getByRole('button', { name: 'Measure tools' }).click();
   await page.getByRole('button', { name: 'Distance' }).click();
 
+  const bare = await mapPicture(page);
   const box = await page.locator('.map').boundingBox();
   await page.mouse.click(box.x + 160, box.y + 160);
   await page.mouse.click(box.x + 360, box.y + 260);
 
-  // two dots and the line between them
-  await expect(page.locator('.leaflet-overlay-pane path')).toHaveCount(3);
-  await expect(page.locator('.measure-value')).toBeVisible();
+  // two dots and the line between them, and the reading they add up to
+  await expect(page.locator('.measure-value')).toHaveText(/\d+(\.\d+)?\s?(m|km)/);
+  const drawn = await mapPicture(page);
+  expect(repainted(bare, drawn)).toBe(true);
 
   await page.getByRole('button', { name: 'Clear points' }).click();
-  await expect(page.locator('.leaflet-overlay-pane path')).toHaveCount(0);
+  await expect(page.locator('.measure-value')).toHaveCount(0);
+  expect(repainted(drawn, await mapPicture(page))).toBe(true);
 });

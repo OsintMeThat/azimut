@@ -2,12 +2,12 @@ import { test, expect } from '@playwright/test';
 import { CASE_ID, awaitMapReady, installAppFixture } from './app.fixture.js';
 
 /**
- * Relations on the map, in a real Leaflet popup.
+ * Relations on the map, in a real card opened on a mark.
  *
- * The popup is the one surface where a click has somewhere else to go: Leaflet
- * closes a popup when a click reaches the map, and the card's own controls edit
- * only the card. Rendering it server-side cannot tell us whether that holds, so
- * these run in the browser.
+ * The card is the one surface where a click has somewhere else to go: a click
+ * that reaches the map closes it, and the card's own controls edit only the
+ * card. Rendering it server-side cannot tell us whether that holds, so these
+ * run in the browser.
  */
 
 const point = {

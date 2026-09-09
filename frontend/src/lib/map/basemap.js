@@ -7,12 +7,17 @@
  * expensive part and they are not obvious from the code they produce: which
  * providers go through our proxy, where a provider's pixels stop short of its
  * useful view, when a bigger tile is worth asking for, and which layer must
- * never be rebuilt because rebuilding it is billed. `tileTemplate` and
- * `tileLayerOptions` are pure so those rules are read off tests rather than
- * off a running map (`basemap.test.js`).
+ * never be rebuilt because rebuilding it is billed. `tileTemplate`, `tileUrls`,
+ * `sourceMaxZoom` and `rasterSource` are pure so those rules are read off tests
+ * rather than off a running map (`basemap.test.js`).
+ *
+ * Two things the old engine needed here are gone with it, and both are worth
+ * naming so nobody looks for them: a DOM grid of tiles had faint white seams at
+ * fractional display scaling, which one canvas cannot have, and it refetched
+ * throwaway intermediate zoom levels mid-gesture, which a billed provider paid
+ * for. MapLibre overzooms what it already holds instead.
  */
-import L from 'leaflet';
-import { createSatelliteMutant, loadGoogleMaps } from './gmaps.js';
+import { createGoogleGlass, loadGoogleMaps } from './gmaps.js';
 
 // A labels-only layer laid over the imagery: roads and place names readable
 // without hiding the satellite view. Over a street basemap it would only
@@ -20,6 +25,16 @@ import { createSatelliteMutant, loadGoogleMaps } from './gmaps.js';
 const LABELS_URL =
   'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png';
 const LABELS_ATTRIBUTION = '© OpenStreetMap contributors © CARTO';
+const LABELS_MAX_ZOOM = 20;
+
+/** What a `{s}` template is served from when the provider names no hosts. */
+const DEFAULT_SUBDOMAINS = ['a', 'b', 'c'];
+const LABELS_SUBDOMAINS = ['a', 'b', 'c', 'd'];
+
+const IMAGERY = 'basemap-imagery';
+const LABELS = 'basemap-labels';
+/** Ours, so the first layer that is not is where the basemap stops. */
+const OWNED = new Set([IMAGERY, LABELS]);
 
 /**
  * Where a provider's tiles are fetched from.
@@ -36,42 +51,54 @@ export function tileTemplate(provider, providerId) {
 }
 
 /**
- * The grid options one provider is shown with, at a given cell size.
+ * One template → the URLs the engine rotates between.
+ *
+ * MapLibre takes a list of hosts rather than a `{s}` pattern, so the pattern is
+ * expanded here. The proxy's own template has no `{s}` and comes back as itself.
+ */
+export function tileUrls(template, subdomains) {
+  if (!template.includes('{s}')) return [template];
+  const hosts = subdomains?.length ? subdomains : DEFAULT_SUBDOMAINS;
+  return hosts.map((host) => template.replace('{s}', host));
+}
+
+/**
+ * The deepest tile this provider is ever asked for, counted the way the engine
+ * counts tiles.
+ *
+ * Where a provider's pixels stop short of its useful view (Sentinel-2: native
+ * z14, view z18), the engine keeps requesting the last level it has and scales
+ * those tiles up. The extra zoom therefore costs nothing — asking Sentinel Hub
+ * for z18 would buy its upsampling of the same pixels, 16× the tiles, every one
+ * billed. A cell wider than 256 px shifts the whole grid down a level per
+ * doubling, exactly as the URL zoom shifts.
+ */
+export function sourceMaxZoom(provider, cell) {
+  const deepest = provider.max_native_zoom ?? provider.max_zoom;
+  return deepest - Math.log2(cell / 256);
+}
+
+/**
+ * The raster source one provider is served from, at a given cell size.
  *
  * @param {object} provider as `/api/satellite/providers` describes it
+ * @param {string} providerId what the tiles are asked for — Sentinel-2 carries
+ *   its layer, window and cloud ceiling in it (lib/sentinel.js)
  * @param {number} cell grid cell in CSS px (lib/usage.js `layerCell`)
  */
-export function tileLayerOptions(provider, cell) {
-  // maxZoom caps the map itself (no map-level maxZoom is set), which is what
-  // keeps a shallower provider (OpenTopoMap, z17) from ever being asked for
-  // tiles it would answer with a "max zoom layer" placard — and keeps the
-  // view zoom at or under the provider max, which capture sizing relies on.
-  const options = { attribution: provider.attribution, maxZoom: provider.max_zoom };
-  // Where a provider's pixels stop short of its useful view (Sentinel-2:
-  // native z14, view z18), the engine keeps requesting the native level and
-  // scales those tiles up in CSS. The extra zoom therefore costs nothing —
-  // asking Sentinel Hub for z18 would buy its upsampling of the same pixels,
-  // 16× the tiles, every one billed.
-  if (provider.max_native_zoom != null) options.maxNativeZoom = provider.max_native_zoom;
-  // Bigger tiles offset the URL z down (512 → -1, 1024 → -2); an oversample
-  // halves the cell so each tile is shown downscaled — deeper zoom on screen.
-  // Google's mid-zoom mosaics are genuinely softer than its deep ones
-  // (verified), so this is what makes the paid imagery actually look paid.
-  if (cell !== 256 || provider.tile_size > 256) {
-    options.tileSize = cell;
-    options.zoomOffset = -Math.log2(cell / 256);
-    options.minNativeZoom = 0; // never ask for negative URL z at world zooms
-  }
-  if (provider.meter) {
-    // billed tiles: skip the throwaway fetches made mid-zoom-animation
-    // (intermediate zoom levels that get discarded). Deliberately NOT
-    // updateWhenIdle: it delays sharp tiles until the map fully settles,
-    // leaving the scaled-up previous zoom (visible blur) on screen — and it
-    // saves nothing, since each visible tile is only ever fetched once.
-    options.updateWhenZooming = false;
-    options.keepBuffer = 4;
-  }
-  return options;
+export function rasterSource(provider, providerId, cell) {
+  return {
+    type: 'raster',
+    tiles: tileUrls(tileTemplate(provider, providerId), provider.subdomains),
+    // Bigger tiles shift the URL zoom down (512 → -1, 1024 → -2); an oversample
+    // halves the cell so each tile is shown downscaled — deeper zoom on screen.
+    // Google's mid-zoom mosaics are genuinely softer than its deep ones
+    // (verified), so this is what makes the paid imagery actually look paid.
+    tileSize: cell,
+    minzoom: 0,
+    maxzoom: sourceMaxZoom(provider, cell),
+    attribution: provider.attribution,
+  };
 }
 
 /**
@@ -95,76 +122,61 @@ export function createBasemaps(engine, hooks = {}) {
     onWidgetFailed = () => {},
   } = hooks;
 
-  let live = null; // the imagery layer currently on the map
-  // The Google widget layer is created ONCE and reused across basemap
-  // switches: every google.maps.Map instantiation is a billed dynamic map
-  // load, while re-adding the same layer costs nothing. Never destroyed
-  // until the map goes, for the same reason.
-  let widgetLayer = null;
-  let labelsLayer = null;
+  const map = engine.impl;
+  let live = null; // `${providerId}@${cell}` currently on the map, tiles only
+  // The Google widget is created ONCE and reused across basemap switches:
+  // every google.maps.Map instantiation is a billed dynamic map load, while
+  // hiding and showing the one we have costs nothing. Never destroyed until
+  // the map goes, for the same reason.
+  let glass = null;
+  let labels = false;
   let wanted = null; // the provider id last asked for, so a slow load can tell
+  let metered = null; // the billed provider whose tiles we are counting
 
-  // --- tile seam fix ---
-  // The engine positions each tile with a `translate3d(...)` transform, which
-  // promotes it to its own GPU layer. At fractional OS display scaling (e.g.
-  // 125/150%) an integer CSS position lands on a half physical pixel, so every
-  // tile edge is antialiased independently and bleeds the map background as a
-  // faint white grid — browser- and zoom-independent. Painting tiles with plain
-  // left/top (no transform, no backface-visibility promotion — see the tool's
-  // CSS) keeps them in the shared pane layer, where neighbouring edges meet on
-  // whole pixels. Rotation/zoom still use their own pane transforms, so both
-  // keep working. We convert after the tiles are positioned, and revert to
-  // transform positioning just before a zoom so the reposition is glitch-free.
-  //
-  // A DOM grid of tiles is what makes this both possible and necessary: an
-  // engine that paints its tiles into one canvas has neither the seam nor the
-  // hook, and this whole block goes with it.
-  let seamRaf = 0;
-
-  function tiles() {
-    return engine.container?.querySelectorAll('.leaflet-tile') ?? [];
+  // Drawn shapes are appended by `surface.js`, so the first layer this module
+  // does not own is where the basemap stops and the overlays begin.
+  function ceiling() {
+    return map.getLayersOrder().find((id) => !OWNED.has(id));
   }
 
-  function deSeamTiles() {
-    seamRaf = 0;
-    for (const tile of tiles()) {
-      const at = /translate3d\((-?[\d.]+)px,\s*(-?[\d.]+)px/.exec(tile.style.transform);
-      if (!at) continue; // already flat, or a rotated matrix we shouldn't touch
-      tile.style.left = at[1] + 'px';
-      tile.style.top = at[2] + 'px';
-      tile.style.transform = 'none';
-    }
+  function onSourceData(event) {
+    if (!metered || event.sourceId !== IMAGERY || !event.isSourceLoaded) return;
+    // every visible tile is in, so what the proxy counted is now final
+    onMeteredTiles(metered);
   }
+  map.on('sourcedata', onSourceData);
 
-  function scheduleDeSeam() {
-    if (!seamRaf) seamRaf = requestAnimationFrame(deSeamTiles);
+  function dropTiles() {
+    if (map.getLayer(IMAGERY)) map.removeLayer(IMAGERY);
+    if (map.getSource(IMAGERY)) map.removeSource(IMAGERY);
+    live = null;
+    metered = null;
   }
-
-  // put the translate transform back before the tiles are repositioned for a
-  // new zoom, so a tile is never briefly offset by both left/top and translate3d
-  function reSeamTiles() {
-    for (const tile of tiles()) {
-      if (tile.style.transform === 'none' && tile.style.left) {
-        tile.style.transform = `translate3d(${tile.style.left}, ${tile.style.top}, 0)`;
-        tile.style.left = '';
-        tile.style.top = '';
-      }
-    }
-  }
-
-  const unsubscribe = [
-    engine.on('view-settled', scheduleDeSeam),
-    engine.on('view-reset', scheduleDeSeam),
-    engine.on('zoom-start', reSeamTiles),
-  ];
 
   /**
-   * Past its maxZoom the engine drops a grid layer entirely rather than upscale
-   * it, so switching to a shallower provider (OpenTopoMap, z17) while zoomed
-   * deeper would leave a blank map. Pull the view back to what it can serve.
+   * Past its own ceiling the provider has no pixels, and the view has to stop
+   * where capture sizing expects it to: `scaledCapture` reads the view zoom
+   * against the provider maximum. The engine pulls the camera back itself when
+   * the ceiling drops under it, which is what switching to a shallower provider
+   * while zoomed deep needs.
    */
-  function clampToProvider(provider) {
-    if (engine.getZoom() > provider.max_zoom) engine.setZoom(provider.max_zoom);
+  function capZoom(provider) {
+    map.setMaxZoom(provider.max_zoom - 1);
+  }
+
+  function showTiles(provider, providerId, cell) {
+    dropTiles();
+    capZoom(provider);
+    map.addSource(IMAGERY, rasterSource(provider, providerId, cell));
+    map.addLayer(
+      { id: IMAGERY, type: 'raster', source: IMAGERY },
+      map.getLayer(LABELS) ? LABELS : ceiling()
+    );
+    live = `${providerId}@${cell}`;
+    if (provider.meter) {
+      metered = provider;
+      onMeteredTiles(provider);
+    }
   }
 
   async function showWidget(provider) {
@@ -179,32 +191,48 @@ export function createBasemaps(engine, hooks = {}) {
       return;
     }
     if (wanted !== provider.id) return; // user moved on while loading
-    if (!widgetLayer) {
-      widgetLayer = createSatelliteMutant(provider.max_zoom, provider.attribution);
+    dropTiles();
+    capZoom(provider);
+    if (!glass) {
+      glass = createGoogleGlass(engine, {
+        maxZoom: provider.max_zoom,
+        attribution: provider.attribution,
+      });
       onWidgetLoad(provider); // billed where it happens; the proxy cannot see it
     }
-    // Already the live layer — leave it alone. Returning to this tab refetches
-    // the providers, and the fresh objects re-run the layer effect, so this is
-    // the common path rather than an edge case. Re-adding costs no map load
-    // (the mutant reuses its google.maps.Map), but the engine drops and
-    // re-clones every tile in the grid, which reads on screen as a reloading map.
-    if (live === widgetLayer) return;
-    live?.remove();
-    clampToProvider(provider);
-    live = widgetLayer.addTo(engine.leaflet);
+    glass.show();
   }
 
-  function showTiles(provider, providerId, cell) {
-    live?.remove();
-    clampToProvider(provider);
-    const layer = L.tileLayer(tileTemplate(provider, providerId), tileLayerOptions(provider, cell));
-    live = layer.addTo(engine.leaflet);
-    layer.on('load tileload', scheduleDeSeam);
-    if (provider.meter) {
-      onMeteredTiles(provider);
-      // 'load' fires once all visible tiles are in — keep the pill current
-      layer.on('load', () => onMeteredTiles(provider));
-    }
+  function addLabels() {
+    if (map.getLayer(LABELS)) return;
+    map.addSource(LABELS, {
+      type: 'raster',
+      tiles: tileUrls(LABELS_URL, LABELS_SUBDOMAINS),
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: LABELS_MAX_ZOOM,
+      attribution: LABELS_ATTRIBUTION,
+    });
+    map.addLayer(
+      {
+        id: LABELS,
+        type: 'raster',
+        source: LABELS,
+        // Past its own last level the overlay stops rather than being blown up:
+        // a road name upscaled four times over a rooftop is a smear, and this
+        // is what the map before it did. The two ceilings are the same number
+        // and different questions — the source's is the deepest tile, the
+        // layer's is the deepest view, which the engine counts one shallower.
+        maxzoom: LABELS_MAX_ZOOM,
+      },
+      // above the imagery, below anything a tool draws
+      ceiling()
+    );
+  }
+
+  function dropLabels() {
+    if (map.getLayer(LABELS)) map.removeLayer(LABELS);
+    if (map.getSource(LABELS)) map.removeSource(LABELS);
   }
 
   return {
@@ -220,28 +248,31 @@ export function createBasemaps(engine, hooks = {}) {
         showWidget(provider);
         return;
       }
+      glass?.hide();
+      // Already the live layer — leave it alone. Returning to this tab refetches
+      // the providers, and the fresh objects re-run the layer effect, so this is
+      // the common path rather than an edge case; rebuilding it would drop and
+      // refetch every visible tile, which reads on screen as a reloading map.
+      // The cell is part of the answer: an oversampled provider changes it at
+      // one zoom bracket, and that is a different grid of the same tiles.
+      if (live === `${providerId}@${cell}`) {
+        capZoom(provider);
+        return;
+      }
       showTiles(provider, providerId, cell);
     },
 
     setLabels(on) {
-      if (on && !labelsLayer) {
-        labelsLayer = L.tileLayer(LABELS_URL, {
-          subdomains: 'abcd',
-          maxZoom: 20,
-          pane: 'overlayPane', // above the imagery tiles, below markers/controls
-          attribution: LABELS_ATTRIBUTION,
-        }).addTo(engine.leaflet);
-        labelsLayer.on('load tileload', scheduleDeSeam); // keep the overlay seam-free too
-      } else if (!on && labelsLayer) {
-        labelsLayer.remove();
-        labelsLayer = null;
-      }
+      if (on === labels) return;
+      labels = on;
+      if (on) addLabels();
+      else dropLabels();
     },
 
     dispose() {
-      for (const off of unsubscribe) off();
-      if (seamRaf) cancelAnimationFrame(seamRaf);
-      seamRaf = 0;
+      map.off('sourcedata', onSourceData);
+      glass?.destroy();
+      glass = null;
     },
   };
 }

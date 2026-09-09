@@ -63,11 +63,11 @@
 
   /**
    * A row control acts on its own relation, and nothing above it should treat the
-   * click as its own. That matters most in a map popup: Leaflet decides a click
-   * was "on the map" by walking up from the event target to find the popup
-   * container, and these controls replace themselves, so their button can already
-   * be detached by the time the event bubbles — the card would close under the
-   * analyst. Stopping inside the handler rather than on a wrapper, because Svelte
+   * click as its own. That matters most in a map card: a click that reaches the
+   * map closes it, and these controls replace themselves, so their button can
+   * already be gone from the document by the time the event bubbles — the card
+   * would close under the analyst, and no guard that has to find the button
+   * again would help. Stopping inside the handler rather than on a wrapper, because Svelte
    * delegates these clicks to the app root: an ancestor that stopped them would
    * silence the buttons instead of protecting them.
    */

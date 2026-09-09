@@ -1,6 +1,6 @@
 /**
  * Middle-drag map rotation for the Satellite tab — the same Google-Earth
- * "grab & turn" as the Frame viewer, but driving a Leaflet map bearing.
+ * "grab & turn" as the Frame viewer, but driving a map bearing.
  *
  * A map rotates about its centre, so to turn around an arbitrary grabbed point
  * we set the bearing and then pan the map so the grabbed location slides back

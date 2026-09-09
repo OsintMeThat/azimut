@@ -402,12 +402,12 @@
       bearing = Math.round(view.bearing);
     });
     const offClick = engine.on('click', onMapClick);
-    // middle-mouse drag rotates the view (item 3). Capture-phase so we can stop
-    // the event before Leaflet's own container drag handler (which treats the
-    // middle button as a pan) ever sees it — otherwise a turn also pans.
+    // middle-mouse or shift drag rotates the view (item 3). Capture-phase so we
+    // can stop the event before the engine's own container drag handler ever
+    // sees it — otherwise a turn also pans.
     mapEl.addEventListener('mousedown', onMiddleRotateStart, true);
     // left-drag draws the capture marquee when that mode is armed (capture-phase
-    // so Leaflet's pan handler never sees the gesture)
+    // so the engine's pan handler never sees the gesture)
     mapEl.addEventListener('mousedown', onSelectStart, true);
     // left-drag draws a Grid Search area when the rectangle tool is armed
     mapEl.addEventListener('mousedown', onGridRectStart, true);
@@ -472,7 +472,10 @@
   });
 
   $effect(() => {
-    basemaps?.setLabels(osmOverlay);
+    const on = osmOverlay; // read before the guard: `basemaps?.` short-circuits
+    // away the dependency while the map is still being built, and the toggle
+    // then never reaches the layers again (build() applies the opening state).
+    if (basemaps) basemaps.setLabels(on);
   });
 
   // While the picker is open, a settled pan refreshes its dates. The stale
@@ -529,11 +532,16 @@
 
   // --- middle-drag rotate (item 3), Google-Earth style ---
   // Grab a point → the map turns around *that* point (not the centre) as the
-  // cursor sweeps, with a sober target marking the pivot. Leaflet only rotates
+  // cursor sweeps, with a sober target marking the pivot. A map only rotates
   // about the centre, so after each bearing change we pan the grabbed geographic
   // point back under the cursor — keeping it pinned exactly where you grabbed.
   function onMiddleRotateStart(e) {
-    if (e.button !== 1 || !engine) return;
+    if (!engine) return;
+    // Middle button, or shift and the left one — the second was the old map's
+    // own gesture, kept rather than quietly dropped. Never shift over a mode
+    // already waiting for a left drag, though: those own the button.
+    const shiftDrag = e.button === 0 && e.shiftKey && !selectArmed && gridDraw !== 'rect';
+    if (e.button !== 1 && !shiftDrag) return;
     startRotateDrag(engine, e, {
       onPivot: (pivot) => {
         rotatePivot = pivot;
@@ -588,13 +596,13 @@
     }
     fullscreen = !fullscreen;
     await tick();
-    engine?.invalidateSize();
+    engine?.resize();
   }
 
   function onFullscreenChange() {
     if (document.fullscreenElement === toolEl) fullscreen = true;
     else if (!document.fullscreenElement) fullscreen = false;
-    tick().then(() => engine?.invalidateSize());
+    tick().then(() => engine?.resize());
   }
 
   // --- measure tools (item 5) ---
@@ -784,12 +792,12 @@
 
   // the map container resizes when the sidebar toggles or is dragged wider, and
   // reappears from display:none when the tool tab is re-selected (tools stay
-  // mounted) — all need Leaflet to re-measure and redraw tiles for the exposed area
+  // mounted) — all need the map to re-measure and redraw for the exposed area
   $effect(() => {
     uiState.sidebarOpen; // track the global sidebar toggle
     uiState.sidebarW; // …and its width, live through a resize drag
     if (!mapReady || uiState.tool !== 'satellite') return;
-    tick().then(() => engine?.invalidateSize());
+    tick().then(() => engine?.resize());
   });
 
   // fly to coordinates handed off from the sidebar (place entity click) —
@@ -1574,9 +1582,7 @@
 
   function ensureGridLayers() {
     if (!engine) return;
-    // the lattice runs to hundreds of cells: one SVG node each is what makes a
-    // pan stutter, so it draws on a canvas
-    gridCells ??= createSurface(engine, { renderer: 'canvas' });
+    gridCells ??= createSurface(engine);
     gridAoi ??= createSurface(engine);
     gridDraft ??= createSurface(engine);
     syncGridVisibility();
@@ -2203,9 +2209,9 @@
 
   async function toggleCaptures() {
     capturesCollapsed = !capturesCollapsed;
-    // the map container just resized — let Leaflet redraw tiles for the new size
+    // the map container just resized — let the map redraw for the new size
     await tick();
-    engine?.invalidateSize();
+    engine?.resize();
   }
 
   // Dropped onto a folder in the panel: the index, the sidebar and the map
@@ -2233,14 +2239,14 @@
       if (!frame) {
         frame = requestAnimationFrame(() => {
           frame = 0;
-          engine?.invalidateSize({ animate: false });
+          engine?.resize();
         });
       }
     };
     const up = () => {
       savedResizing = false;
       if (frame) cancelAnimationFrame(frame);
-      engine?.invalidateSize({ animate: false });
+      engine?.resize();
       savedPanel.saveWidth(savedW); // one write per drag, not one per frame
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
@@ -2256,14 +2262,14 @@
     setSavedWidth(savedW + step);
     savedPanel.saveWidth(savedW);
     await tick();
-    engine?.invalidateSize({ animate: false });
+    engine?.resize();
   }
 
   async function resetSavedWidth() {
     setSavedWidth(savedPanel.DEFAULT_W);
     savedPanel.saveWidth(savedW);
     await tick();
-    engine?.invalidateSize({ animate: false });
+    engine?.resize();
   }
 
   // A width dragged out on a wide screen would eat a narrower window whole, so
@@ -2564,7 +2570,7 @@
         </div>
       {/if}
 
-      <!-- fixed center marker; a draggable Leaflet marker takes over in move mode -->
+      <!-- fixed center marker; a draggable map marker takes over in move mode -->
       {#if markerStyle !== 'none' && !moveMode}
         <div class="marker-overlay marker-{markerStyle}" aria-hidden="true">
           {#if markerStyle === 'pin'}
@@ -2662,7 +2668,7 @@
           title={bearing ? 'Reset to north' : 'North up · middle-drag the map to rotate'}
           aria-label="Reset to north"
         >
-          <svg width="30" height="30" viewBox="0 0 34 34" style="transform: rotate({-bearing}deg)">
+          <svg width="30" height="30" viewBox="0 0 34 34" style="transform: rotate({bearing}deg)">
             <polygon points="17,4 13,18 17,15 21,18" fill="#e5484d" />
             <polygon points="17,30 13,16 17,19 21,16" fill="#8a93a5" />
           </svg>
@@ -3017,9 +3023,9 @@
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    /* keep the map's z-index range (Leaflet panes/controls up to 1000, our own
-       clusters above them) to itself, so a dialog portalled into the fullscreen
-       tool still lands on top of it */
+    /* keep the map's z-index range (the engine's own controls, our clusters above
+       them, and the widget basemap on a negative layer below) to itself, so a
+       dialog portalled into the fullscreen tool still lands on top of it */
     isolation: isolate;
   }
   .map {
@@ -3195,8 +3201,8 @@
     position: absolute;
     top: 12px;
     left: 12px;
-    /* above Leaflet's own control corners (z-index 1000) so the measure panel
-       is never hidden behind the zoom +/- buttons (item 7) */
+    /* above the engine's own control corners so the measure panel is never
+       hidden behind the zoom +/- buttons (item 7) */
     z-index: 1100;
     display: flex;
     flex-direction: column;

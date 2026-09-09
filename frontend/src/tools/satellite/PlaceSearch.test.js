@@ -70,6 +70,17 @@ describe('choosing', () => {
     expect(source).toContain('onsubmit(value)');
   });
 
+  it('stops the lookup once the question has been answered', () => {
+    // Picking a row is far quicker than the geocoder debounce, so a request
+    // left on the clock reaches Nominatim after the analyst has already moved
+    // the map — and for a typed coordinate it should never have gone at all.
+    expect(source).toContain('function settle() {');
+    expect(source).toContain('clearTimeout(localTimer);\n    clearTimeout(remoteTimer);');
+    expect(source).toContain('function choose(item) {\n    settle();');
+    // …and the same when Enter hands the text to the bar's own search
+    expect(source).toContain("// the bar's own search takes it from here, and asks for itself");
+  });
+
   it('remembers what was picked', () => {
     expect(source).toContain('recents = pushRecent(item)');
   });

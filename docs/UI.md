@@ -1142,7 +1142,7 @@ from the map.
 
 Map controls sit in two clusters. **Tools** (measure, sun & moon, grid search,
 reference image) float top-left. A tool with settings opens its panel beside that
-cluster, never beneath it, because beneath it is where Leaflet's own controls
+cluster, never beneath it, because beneath it is where the map's own controls
 live. **View** — fullscreen, OSM labels, saved work — continues the zoom column
 beneath `+`/`−`, because none of them changes what you are doing, only what you
 see.

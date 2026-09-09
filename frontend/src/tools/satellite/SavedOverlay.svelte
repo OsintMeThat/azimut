@@ -213,13 +213,9 @@
 </script>
 
 <style>
-  /* Leaflet builds these elements itself, outside this component's markup, so
+  /* The map builds these elements itself, outside this component's markup, so
      the marker styles have to be global. One colour family throughout — the
      overlay must read as a single layer, not as a legend. */
-  :global(.saved-mark-wrap) {
-    background: none;
-    border: none;
-  }
   :global(.saved-mark) {
     position: relative;
     display: grid;
@@ -277,32 +273,5 @@
   :global(.saved-mark-wrap:hover .saved-mark) {
     transform: rotate(-45deg) scale(1.25);
     z-index: 500;
-  }
-  /* Leaflet's default popup is a white speech bubble; over imagery it has to be
-     one of the app's own surfaces instead. */
-  :global(.saved-popup .leaflet-popup-content-wrapper) {
-    background: var(--bg-1);
-    color: var(--text-1);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-2);
-    padding: 2px;
-  }
-  :global(.saved-popup .leaflet-popup-content) {
-    margin: 10px 12px;
-    line-height: 1.4;
-  }
-  :global(.saved-popup .leaflet-popup-tip) {
-    background: var(--bg-1);
-    border: 1px solid var(--border-strong);
-    box-shadow: none;
-  }
-  :global(.saved-popup .leaflet-popup-close-button) {
-    color: var(--text-3) !important;
-    padding: 6px 7px 0 0 !important;
-  }
-  :global(.saved-popup .leaflet-popup-close-button:hover) {
-    color: var(--text-1) !important;
-    background: none !important;
   }
 </style>

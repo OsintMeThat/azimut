@@ -86,9 +86,8 @@
 </script>
 
 <style>
-  /* Leaflet builds these outside this component's markup, so they have to be global.
-     The saved layer's geometry in this layer's tint. */
-  :global(.sheet-mark-wrap) { border: 0; background: none; }
+  /* The map builds these outside this component's markup, so they have to be
+     global. The saved layer's geometry in this layer's tint. */
   :global(.sheet-mark) {
     position: relative; display: grid; width: 24px; height: 24px; place-items: center;
     border-radius: 50% 50% 50% 2px; transform: rotate(-45deg);

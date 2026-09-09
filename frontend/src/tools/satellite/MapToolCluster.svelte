@@ -125,7 +125,7 @@
     background: rgba(24, 24, 24, 0.88);
     backdrop-filter: blur(6px);
   }
-  /* stacked directly under Leaflet's zoom bar (top 58px + 64px tall + its 8px
+  /* stacked directly under the engine's zoom bar (top 58px + 64px tall + its 8px
      margin), same width, so +/- and these read as one column of view controls */
   .view-cluster {
     position: absolute;

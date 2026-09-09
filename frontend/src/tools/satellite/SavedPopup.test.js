@@ -167,9 +167,14 @@ describe('SavedOverlay popup wiring', () => {
     expect(overlay).not.toContain('onClick');
   });
 
-  it('dresses the Leaflet popup as one of the app\'s own surfaces', () => {
-    expect(overlay).toContain('.saved-popup .leaflet-popup-content-wrapper');
-    expect(overlay).toContain('background: var(--bg-1)');
+  it('asks for the width its own rows need, and leaves the look to the map', () => {
+    // the card's chrome is one of the app's surfaces, dressed once in
+    // lib/map/engine.css; what belongs here is how wide these rows have to be
+    expect(overlay).toContain("className: 'saved-popup'");
+    expect(overlay).toContain('minWidth: 296');
+    expect(overlay).toContain('maxWidth: 330');
+    // and never the engine's own DOM, which is not this component's to name
+    expect(overlay.toLowerCase()).not.toContain('popup-content');
   });
 
   it('marks a worked capture instead of letting a proof stack a mark on it', () => {
@@ -214,7 +219,7 @@ describe('SavedPopup relations', () => {
     // the auto-open effect writes the state it reads, so it guards on "already
     // open" rather than fetching the row twice
     expect(source).toContain('if (!only || !relationCount(only) || relationsShown(only)) return;');
-    // the toggle keeps its click inside the card, or Leaflet closes it
+    // the toggle keeps its click inside the card, or the map closes it
     expect(source).toContain('event?.stopPropagation();');
   });
 

@@ -10,11 +10,16 @@ const PANEL_SVG = `
     <circle cx="520" cy="76" r="34" fill="#f4c95d"/>
   </svg>`;
 
-const TILE_SVG = `
-  <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256">
-    <rect width="256" height="256" fill="#243747"/>
-    <path d="M0 190L70 120L140 175L210 80L256 140V256H0Z" fill="#4f7047"/>
-  </svg>`;
+// A real raster tile, not an SVG: the map engine decodes tiles into bitmaps,
+// and `createImageBitmap` refuses SVG. 16px of dark ground and a green ridge,
+// scaled up over the tile — enough to tell imagery from an empty map in a
+// failure screenshot.
+const TILE_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAQElEQVR42mNUMXdnIAUwMZAI' +
+    'hrAGbUtSNEBUQ0jKnAS3F5egtiWSBri9aCqw24AmgdUqCGAhxiUoNuAxbKgkDQDARwagm0jS' +
+    'UwAAAABJRU5ErkJggg==',
+  'base64'
+);
 
 const media = [{
   path: PANEL_PATH,
@@ -516,6 +521,65 @@ const providers = [{
   capturable: true,
 }];
 
+/**
+ * The Maps JS basemap, offered only when a spec asks for it (`widget: true`).
+ *
+ * It is the one basemap that is not our tiles: Google's own map renders under
+ * ours. A spec that wants it also wants `fakeGoogleMaps`, so that no key, no
+ * network and no billed map load is involved.
+ */
+const WIDGET_PROVIDER = {
+  id: 'google-js',
+  label: 'Google Satellite (Maps JS)',
+  url: 'https://maps.googleapis.com/maps/api/js?key=fixture',
+  attribution: 'Map data © Google',
+  max_zoom: 21,
+  tile_size: 256,
+  oversample: 1,
+  imagery: true,
+  capturable: false,
+  widget: 'google-maps-js',
+  meter: 'google_js',
+  eco_max_zoom: 0,
+};
+
+/**
+ * Stand in for the Maps JS API before the app loads.
+ *
+ * `loadGoogleMaps` resolves at once when `window.google.maps` is already there,
+ * so this replaces the script, the key and the billing in one go. The map it
+ * builds paints itself magenta, which is how a spec can tell whether it really
+ * shows through our own canvas.
+ */
+export async function fakeGoogleMaps(page) {
+  await page.addInitScript(() => {
+    window.__googleMaps = [];
+    window.google = {
+      maps: {
+        event: {
+          addListenerOnce: (map, name, handler) => map.__once.push([name, handler]),
+          trigger: (map, name) => map.__triggered.push(name),
+        },
+        Map: class {
+          constructor(node, options) {
+            this.node = node;
+            this.options = options;
+            this.cameras = [];
+            this.__once = [];
+            this.__triggered = [];
+            node.style.background = 'rgb(255, 0, 255)';
+            window.__googleMaps.push(this);
+          }
+          moveCamera(camera) {
+            this.cameras.push(camera);
+          }
+          addListener() {}
+        },
+      },
+    };
+  });
+}
+
 function json(route, body, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
@@ -597,18 +661,21 @@ function fixtureTemporalReading(raw) {
 }
 
 /**
- * Run the real Svelte, Konva and Leaflet code while replacing only Azimut's
+ * Run the real Svelte, Konva and map code while replacing only Azimut's
  * local API and files with deterministic fixtures. Any unexpected request is
  * recorded so a passing interaction test cannot silently depend on the network.
  */
 export async function installAppFixture(page, options = {}) {
   const unexpected = [];
+  const labelTiles = [];
   const captures = [];
   const proofSaves = [];
   const fixtureSavedIndex = options.savedIndex ?? savedIndex;
   const fixtureProofIndex = options.proofIndex ?? [];
   const fixtureMedia = (options.media ?? media).map((item) => ({ ...item }));
   const fixtureCases = options.cases ?? [caseOverview];
+  const fixtureProviders = options.widget ? [...providers, WIDGET_PROVIDER] : providers;
+  const widgetLoads = [];
   const fixtureSavedIndexes = options.savedIndexes ?? { [CASE_ID]: fixtureSavedIndex };
   const fixtureProofIndexes = options.proofIndexes ?? { [CASE_ID]: fixtureProofIndex };
   const savedIndexDelays = options.savedIndexDelays ?? {};
@@ -856,6 +923,15 @@ export async function installAppFixture(page, options = {}) {
     const url = new URL(request.url());
     const path = url.pathname;
 
+    // The labels overlay is the one layer served straight from its provider —
+    // the proxy cannot expand a `{s}` template. Answered here, with the same
+    // bytes as a proxied tile, so a spec can prove the overlay was asked for
+    // without the run touching the network.
+    if (url.hostname.endsWith('.basemaps.cartocdn.com')) {
+      labelTiles.push(request.url());
+      return route.fulfill({ contentType: 'image/png', body: TILE_PNG });
+    }
+
     if (url.hostname !== '127.0.0.1') {
       unexpected.push(`${request.method()} ${request.url()}`);
       return route.abort('blockedbyclient');
@@ -873,7 +949,7 @@ export async function installAppFixture(page, options = {}) {
       return route.fulfill({ contentType: 'image/svg+xml', body: PANEL_SVG });
     }
     if (path.startsWith('/api/tiles/')) {
-      return route.fulfill({ contentType: 'image/svg+xml', body: TILE_SVG });
+      return route.fulfill({ contentType: 'image/png', body: TILE_PNG });
     }
     if (path === '/api/events') {
       return route.fulfill({ contentType: 'text/event-stream', body: '' });
@@ -1687,7 +1763,13 @@ export async function installAppFixture(page, options = {}) {
     if (path === `/api/cases/${CASE_ID}/entities/lookup`) {
       return json(route, { entity: fixtureLookupEntities[url.searchParams.get('value')] ?? null });
     }
-    if (path === '/api/satellite/providers') return json(route, providers);
+    if (path === '/api/satellite/providers') return json(route, fixtureProviders);
+    // one billed map load, counted where it happens: the tile proxy cannot see
+    // the Maps JS widget, so the tool reports it itself
+    if (path.startsWith('/api/satellite/usage/') && request.method() === 'POST') {
+      widgetLoads.push(path.split('/').at(-1));
+      return json(route, { ok: true });
+    }
     if (path === '/api/satellite/imagery-date') {
       return json(route, { supported: false, date: null, source: null });
     }
@@ -1816,6 +1898,8 @@ export async function installAppFixture(page, options = {}) {
 
   return {
     captures,
+    labelTiles,
+    widgetLoads,
     gridWrites,
     skyQueries,
     proofSaves,
@@ -1859,6 +1943,24 @@ export async function installAppFixture(page, options = {}) {
  */
 export async function awaitMapReady(page) {
   await expect(page.locator('.map[data-map-ready="true"]')).toBeVisible();
+}
+
+/**
+ * What the map is painting, as bytes.
+ *
+ * A drawn shape has no element of its own — the engine paints every layer of
+ * them into one canvas — so what a spec can hold onto is the picture. Two of
+ * these differ when something was drawn, cleared or restyled, and comparing
+ * them is how a spec says "that appeared" without naming the engine.
+ */
+export async function mapPicture(page) {
+  await expect(page.locator('.map[data-map-ready="true"]')).toBeVisible();
+  return page.locator('.map').screenshot();
+}
+
+/** Did the map's picture change? */
+export function repainted(before, after) {
+  return !before.equals(after);
 }
 
 export async function openProofWithPanel(page) {

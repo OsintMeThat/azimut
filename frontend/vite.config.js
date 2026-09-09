@@ -18,6 +18,14 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.js'],
   },
+  // The map engine parses GeoJSON in a web worker, and asks for it by a URL it
+  // builds at runtime (`new URL('./maplibre-gl-worker.mjs', import.meta.url)`).
+  // No bundler can see through that, so the URL resolved to a file that was
+  // never emitted and the worker silently never started — the map drew imagery
+  // and nothing else. `lib/map/engine.js` hands the engine the bundled worker's
+  // real URL instead; `format: 'es'` is what makes that bundle a module worker,
+  // which is how the engine loads it.
+  worker: { format: 'es' },
   build: {
     outDir: '../src/azimut/static',
     emptyOutDir: true,

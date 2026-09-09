@@ -155,8 +155,8 @@ def providers() -> list[dict[str, Any]]:
             "attribution": p.attribution,
             "max_zoom": p.max_zoom,
             # deepest zoom with real pixels; null = same as max_zoom. The live
-            # map hands it to Leaflet's maxNativeZoom, which magnifies the last
-            # native tile instead of requesting one that doesn't exist.
+            # map stops its requests there and magnifies the last native tile
+            # instead of asking for one that doesn't exist.
             "max_native_zoom": p.max_native_zoom,
             "needs_key": p.needs_key,
             "imagery": p.imagery,
@@ -395,8 +395,8 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
     # Past the provider's native ceiling there is nothing new upstream: Sentinel
     # Hub would upsample its own z14 pixels and bill every tile of it. Skip the
     # fetch and let the climb below magnify the native tile instead — same
-    # pixels, no quota. The live map already stops asking (Leaflet's
-    # maxNativeZoom), so this is the guard for anything that doesn't.
+    # pixels, no quota. The live map already stops asking at that level, so this
+    # is the guard for anything that doesn't.
     native_z = _native_grid_zoom(provider)
     beyond_native = max(0, z - native_z) if native_z is not None else 0
     served = None if beyond_native else _serve_tile(provider, z, x, y)

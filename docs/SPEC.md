@@ -155,6 +155,12 @@ proof for publication.
 | ✅ **Drawing on a proof** | Stamps a fixed set of marks, fills boxes and ellipses at a chosen opacity, keeps every shape tool in hand, and recolours, restyles, nudges, drags or deletes a picked family at once. |
 | ✅ **A proof of several points** | States every place a proof argues, each optionally named and one of them the camera's, files them as places under one title, and carries them into the tweet and onto the exported picture. |
 
+### v3 GEOINT expansion (unreleased)
+
+| Tool | What it does |
+|------|--------------|
+| ✅ **Map engine** | Draws the map on MapLibre GL behind `lib/map`'s façade, at parity: same providers, same captures, same bearing, and the Google widget basemap kept alive under the map's own transparent canvas. |
+
 ---
 
 ## 6. Roadmap
@@ -167,11 +173,11 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 
 | Tool | What it does |
 |------|--------------|
-| **Map engine (MapLibre)** | Replaces Leaflet with MapLibre GL at 2D parity: same providers, same captures, and the capture tests still verify the pixels. The engine already sits behind `lib/map`'s façade, so this rewrites those modules and not the tools. Ships before the 3D map, which builds on it. |
 | **3D map** | Pitch, public DEM terrain and extruded OSM buildings on the MapLibre map. An oblique capture records its pitch beside the bearing, so the view can be reproduced. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
-| **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. Follows the map engine, which redraws what a capture is made of. |
-| **Footprint tracing** | Draws a place's uncertainty as the shape it really is, for a quay, a treeline or an L-shaped block the circle describes badly. The field, its validation and its drawing already ship; only the gesture is missing, and it follows the map engine rather than being written twice. |
+| **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. |
+| **Extension map overlays** | Draws the app's own layers over the maps the extension rides on — Google Maps, Earth, Apple, Bing: the search grid, the sun and moon arcs, the measure tools. The geometry is already pure and shared; what is missing is drawing it over a map the app does not own. |
+| **Footprint tracing** | Draws a place's uncertainty as the shape it really is, for a quay, a treeline or an L-shaped block the circle describes badly. The field, its validation and its drawing already ship; only the gesture is missing. |
 | **Satellite Compare** | Same coords across providers (Esri / Sentinel-2 date slider / Bing / keyed), synced pan/zoom. Copernicus easy link. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
 | **Metadata follow-up** | Explains which common image/video fields were stripped and proposes events from capture times. |
@@ -293,10 +299,10 @@ stops making sense.
 - **Backend**: Python 3.11+, FastAPI on `localhost`; current processing (ffmpeg,
   yt-dlp, gallery-dl, OpenCV) runs server-side.
 - **Frontend**: Svelte + Konva/canvas, served by the backend, opened in the
-  default browser. The map engine sits behind `lib/map`'s façade — Leaflet
-  today, MapLibre next — so tools speak points, positions and view events and
-  never the engine. Rail = workspaces in pipeline order, tools are tabs inside
-  them (see [UI.md](UI.md)).
+  default browser. The map is MapLibre GL behind `lib/map`'s façade, so tools
+  speak points, positions and view events and never the engine. Rail =
+  workspaces in pipeline order, tools are tabs inside them (see
+  [UI.md](UI.md)).
 - **Settings and secrets:** in-app tabs group general preferences, publishing,
   imagery, templates, the capture extension, storage and system tools; keys
   stored locally and never bundled into a shared case, monthly usage counters,

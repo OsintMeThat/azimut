@@ -1,70 +1,26 @@
 /**
- * Google Maps JavaScript API — loader + GoogleMutant layer factory.
+ * Google Maps JavaScript API — loader, key probe, and the basemap under glass.
  *
  * The EEA-viable Google satellite route (docs/IMAGERY_PROVIDERS.md § Google in
- * the EEA): a real google.maps.Map rendered by the official JS API, synced
- * under Leaflet by the GoogleMutant plugin so every Leaflet overlay (measure
- * tools, markers, reference windows, labels) keeps working on top.
+ * the EEA): a real google.maps.Map rendered by the official JS API. Google's
+ * own map is the only thing on the page that may draw those pixels — its terms
+ * forbid taking them out of it — so instead of feeding tiles into our map, this
+ * puts Google's map *underneath* it and keeps the two cameras in step. The
+ * engine's canvas is transparent where nothing is drawn, so the imagery shows
+ * through and every overlay above it (measure tools, marks, grids, labels)
+ * keeps working, untouched and unaware.
  *
  * Local-first: nothing here runs until the user actually selects the widget
  * basemap — the script load *is* the user action needing the network.
  *
  * Billing: one "dynamic map load" per google.maps.Map instantiation; pan/zoom
- * afterwards is free. The mutant layer must therefore be created once and
- * reused across basemap switches — see the layer cache in Satellite.svelte.
+ * afterwards is free. The glass must therefore be created once and hidden
+ * rather than destroyed when the analyst switches basemap — see `basemap.js`.
  */
-// Import the plugin's ESM source and use its exported class directly. Both of
-// its other integration surfaces are broken under a bundler (verified 2026-07):
-// the bare specifier resolves to the "browser" IIFE build, which reads `this.L`
-// and crashes the whole app at load (`this` is undefined in strict ESM), and
-// the .mjs's own `L.gridLayer.googleMutant` factory binds to a global `L` it
-// never imports, so `new L.GridLayer.GoogleMutant` is "not a constructor".
-import GoogleMutant from 'leaflet.gridlayer.googlemutant/src/Leaflet.GoogleMutant.mjs';
+import { exactViewZoom } from './facade.js';
 
-/**
- * GoogleMutant, but able to survive a rotated map.
- *
- * The mutant works by running a hidden google.maps.Map and cloning its <img>
- * tile nodes into a plain Leaflet GridLayer — so the visible tiles rotate with
- * the tile pane like any other layer. What breaks is coverage: the hidden map
- * is sized to the Leaflet container, so Google only ever renders the tiles of
- * an unrotated viewport, while leaflet-rotate asks the grid for the rotated
- * bounding box. The corner tiles are never cloned and the view has holes.
- *
- * Sizing the hidden map to a square of the container's diagonal, centred on it,
- * covers every bearing at once — a rotated W×H rect always fits inside the
- * circle of its own diagonal — so no rotation handler is needed here. It costs
- * extra tile renders inside the hidden map, but not extra billing: the dynamic
- * map load is charged per google.maps.Map, and panning/rendering after it is
- * free.
- */
-class RotatableGoogleMutant extends GoogleMutant {
-  _initMutantContainer() {
-    super._initMutantContainer();
-    this._fitMutantToDiagonal();
-    this._map.on('resize', this._fitMutantToDiagonal, this);
-  }
-
-  onRemove(map) {
-    map.off('resize', this._fitMutantToDiagonal, this);
-    return super.onRemove(map);
-  }
-
-  _fitMutantToDiagonal() {
-    if (!this._map || !this._mutantContainer) return;
-    const size = this._map.getSize();
-    const side = Math.ceil(Math.sqrt(size.x * size.x + size.y * size.y));
-    const style = this._mutantContainer.style;
-    style.width = `${side}px`;
-    style.height = `${side}px`;
-    // the container is .leaflet-top.leaflet-left (pinned at 0,0) — pull it back
-    // by half the overflow so the hidden map stays concentric with Leaflet's,
-    // which is what makes the coverage symmetric on all four sides
-    style.marginLeft = `${Math.round((size.x - side) / 2)}px`;
-    style.marginTop = `${Math.round((size.y - side) / 2)}px`;
-    if (this._mutant) window.google?.maps?.event?.trigger(this._mutant, 'resize');
-  }
-}
+/** Where Google's terms live, for the credit we state when Google's own is absent. */
+const TERMS_URL = 'https://www.google.com/intl/en/help/terms_maps/';
 
 let loadPromise = null;
 let loadedKey = null; // the key the script was loaded with — one per page life
@@ -182,7 +138,146 @@ function keyFromLoaderUrl(url) {
   }
 }
 
-/** A GoogleMutant satellite layer — one billed map load per creation. */
-export function createSatelliteMutant(maxZoom = 21, attribution = 'Map data © Google') {
-  return new RotatableGoogleMutant({ type: 'satellite', maxZoom, attribution });
+/**
+ * Google's own credit, stated by us.
+ *
+ * Only reached if Google's markup stops offering the node this moves upright —
+ * the imagery is never shown bare, and the terms link stays reachable.
+ */
+function statedCredit(attribution) {
+  const holder = document.createDocumentFragment();
+  const text = document.createElement('span');
+  text.textContent = attribution;
+  const terms = document.createElement('a');
+  terms.href = TERMS_URL;
+  terms.target = '_blank';
+  terms.rel = 'noopener noreferrer';
+  terms.textContent = 'Terms';
+  holder.append(text, terms);
+  return holder;
+}
+
+/**
+ * Google's satellite map, under the engine's transparent canvas.
+ *
+ * One billed dynamic map load per call, so `basemap.js` calls it once and hides
+ * the result rather than making another.
+ *
+ * Two things make this work at any bearing. The map div is a square of the
+ * container's *diagonal*, centred on it, because a rotated W×H rectangle always
+ * fits inside the circle of its own diagonal — so every bearing is covered
+ * without asking Google to redraw. And it is turned by CSS rather than by
+ * Google, which has no bearing of its own on a raster satellite map.
+ *
+ * @param {object} engine the façade from `engine.js`
+ * @param {object} [opts]
+ * @param {number} [opts.maxZoom] the provider's own view ceiling
+ * @param {string} [opts.attribution] what to state if Google's own node is gone
+ */
+export function createGoogleGlass(engine, { maxZoom = 21, attribution = 'Map data © Google' } = {}) {
+  const map = engine.impl;
+  const glass = document.createElement('div');
+  glass.className = 'map-glass';
+  glass.hidden = true;
+  const turn = document.createElement('div');
+  turn.className = 'map-glass-turn';
+  const surface = document.createElement('div');
+  surface.className = 'map-glass-map';
+  const credit = document.createElement('div');
+  credit.className = 'map-glass-credit';
+  credit.replaceChildren(statedCredit(attribution));
+  turn.append(surface);
+  glass.append(turn, credit);
+  engine.container.append(glass);
+
+  const centre = map.getCenter();
+  const google = new window.google.maps.Map(surface, {
+    center: { lat: centre.lat, lng: centre.lng },
+    zoom: exactViewZoom(map.getZoom()),
+    mapTypeId: 'satellite',
+    maxZoom,
+    // Our map owns every gesture and every control; this one only ever renders
+    // what it is told to. `pointer-events: none` on the glass says the same
+    // thing to the browser, and both are needed: one stops Google's own
+    // handlers, the other stops the pointer ever reaching them.
+    disableDefaultUI: true,
+    gestureHandling: 'none',
+    keyboardShortcuts: false,
+    // the camera it follows is continuous, so it must be able to sit between
+    // whole levels rather than snapping and drifting out of register
+    isFractionalZoomEnabled: true,
+    tilt: 0,
+  });
+
+  /**
+   * Google's own credit line, kept upright and clickable.
+   *
+   * It renders inside the map div, which is oversized and turned, so at any
+   * bearing it would be rotated and pushed off screen. Moving the node into an
+   * upright holder is the same trick the plugin used before this did.
+   */
+  function homeCredit() {
+    const own = surface.querySelectorAll('.gm-style-cc');
+    if (!own.length) return;
+    credit.replaceChildren(...own);
+  }
+  window.google.maps.event.addListenerOnce(google, 'tilesloaded', homeCredit);
+
+  /** Cover the container at every bearing, centred on it. */
+  function fit() {
+    const width = engine.container.clientWidth;
+    const height = engine.container.clientHeight;
+    const side = Math.ceil(Math.hypot(width, height));
+    turn.style.width = `${side}px`;
+    turn.style.height = `${side}px`;
+    turn.style.left = `${Math.round((width - side) / 2)}px`;
+    turn.style.top = `${Math.round((height - side) / 2)}px`;
+    window.google?.maps?.event?.trigger(google, 'resize');
+  }
+
+  /** Put Google's camera where ours is. */
+  function follow() {
+    const at = map.getCenter();
+    google.moveCamera({
+      center: { lat: at.lat, lng: at.lng },
+      zoom: exactViewZoom(map.getZoom()),
+    });
+    // The app's bearing turns the map clockwise and so does CSS `rotate()`, so
+    // this is the app's own number — the engine counts the same turn the other
+    // way (see `facade.js`).
+    turn.style.transform = `rotate(${-map.getBearing()}deg)`;
+  }
+
+  const onResize = () => {
+    fit();
+    follow();
+  };
+
+  let shown = false;
+
+  function hide() {
+    if (!shown) return;
+    shown = false;
+    glass.hidden = true;
+    map.off('move', follow);
+    map.off('resize', onResize);
+  }
+
+  return {
+    show() {
+      if (shown) return;
+      shown = true;
+      glass.hidden = false;
+      map.on('move', follow);
+      map.on('resize', onResize);
+      onResize();
+    },
+
+    hide,
+
+    destroy() {
+      hide();
+      glass.remove();
+    },
+  };
 }

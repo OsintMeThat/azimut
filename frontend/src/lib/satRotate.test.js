@@ -26,13 +26,13 @@ describe('dragBearing', () => {
 
 describe('pivotPanOffset', () => {
   it('cancels the drift so panBy re-pins the pivot under the grab point', () => {
-    // Leaflet shifts container points by -offset; panning by (now-grab) moves
+    // A pan shifts container points by -offset; panning by (now-grab) moves
     // the drifted pivot (now) back onto grab.
     const grab = { x: 120, y: 80 };
     const now = { x: 135, y: 60 };
     const [dx, dy] = pivotPanOffset(grab, now);
     expect([dx, dy]).toEqual([15, -20]);
-    // apply the -offset shift Leaflet performs → pivot lands back on grab
+    // apply the -offset shift a pan performs → pivot lands back on grab
     expect(now.x - dx).toBe(grab.x);
     expect(now.y - dy).toBe(grab.y);
   });

@@ -43,8 +43,8 @@
   const hiddenPostCount = (row) => Math.max(0, linkedPosts(row).length - 2);
 
   function expandPosts(event, row) {
-    // Leaflet closes a popup when a click reaches the map. This control changes
-    // only the popup's own contents, so keep the event inside the card.
+    // A click that reaches the map closes the card. This control changes only
+    // the card's own contents, so the event stays inside it.
     event.stopPropagation();
     if (!postsExpanded(row)) expandedPostRows = [...expandedPostRows, rowKey(row)];
   }
@@ -114,10 +114,10 @@
   }
 
   function showRelations(event, row) {
-    // Leaflet decides whether a click was "on the map" by walking up from the
-    // event target to find the popup container. This control replaces itself with
-    // the loaded list, so by then the clicked button can already be detached from
-    // the document — the walk finds nothing and the map closes the card under us.
+    // Same, and one thing more: this control replaces itself with the loaded
+    // list, so by the time the click is judged the button can already be gone
+    // from the document. Stopping it here does not depend on the button still
+    // being there to be found.
     // Keeping the event inside the card is what makes that impossible.
     event?.stopPropagation();
     if (!relationsShown(row)) openRows = [...openRows, rowKey(row)];

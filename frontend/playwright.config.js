@@ -7,7 +7,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   // Canvas-heavy browser specs compete for CPU under Playwright's default of
   // one worker per core. Four keeps local runs parallel without turning normal
-  // Leaflet/Konva startup into a timeout; CI stays fully deterministic.
+  // MapLibre/Konva startup into a timeout; CI stays fully deterministic.
   workers: process.env.CI ? 1 : 4,
   reporter: process.env.CI ? 'github' : 'list',
   use: {

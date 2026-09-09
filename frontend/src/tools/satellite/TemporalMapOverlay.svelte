@@ -113,10 +113,9 @@
 </script>
 
 <style>
-  /* Leaflet builds these elements itself, outside this component's markup, so the
+  /* The map builds these elements itself, outside this component's markup, so the
      marker styles have to be global. The saved layer's geometry throughout — the
      teardrop, the badge on its corner, the lift on hover — in this layer's tint. */
-  :global(.temporal-mark-wrap) { border: 0; background: none; }
   :global(.temporal-mark) {
     position: relative;
     display: grid;
@@ -150,29 +149,5 @@
   :global(.temporal-mark-wrap:hover .temporal-mark) {
     z-index: 500;
     transform: rotate(-45deg) scale(1.25);
-  }
-  /* Leaflet's default popup is a white speech bubble; over imagery it has to be one
-     of the app's own surfaces instead. */
-  :global(.temporal-popup .leaflet-popup-content-wrapper) {
-    padding: 2px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--r-lg);
-    background: var(--bg-1);
-    box-shadow: var(--shadow-2);
-    color: var(--text-1);
-  }
-  :global(.temporal-popup .leaflet-popup-content) { margin: 10px 12px; line-height: 1.4; }
-  :global(.temporal-popup .leaflet-popup-tip) {
-    border: 1px solid var(--border-strong);
-    background: var(--bg-1);
-    box-shadow: none;
-  }
-  :global(.temporal-popup .leaflet-popup-close-button) {
-    padding: 6px 7px 0 0 !important;
-    color: var(--text-3) !important;
-  }
-  :global(.temporal-popup .leaflet-popup-close-button:hover) {
-    background: none !important;
-    color: var(--text-1) !important;
   }
 </style>

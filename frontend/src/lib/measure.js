@@ -1,5 +1,5 @@
 // Pure geodesic geometry for the Satellite measure tools (distance / area /
-// angle). Points are { lat, lon } in degrees. Kept free of Leaflet so it can be
+// angle). Points are { lat, lon } in degrees. Kept free of the map so it can be
 // unit-tested; the component only handles drawing and interaction.
 
 const R = 6378137; // Earth radius (m), WGS84 equatorial — matches Web Mercator

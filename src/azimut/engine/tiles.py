@@ -191,7 +191,7 @@ def all_providers() -> list[Provider]:
 
     # Google Satellite via the Maps JavaScript widget — the only official
     # Google satellite route for EEA billing accounts (2025-07-08 policy).
-    # No tiles: the frontend embeds a real google.maps.Map under Leaflet, so
+    # No tiles: the frontend runs a real google.maps.Map under its own map, so
     # capturable=False (fetch_crop has nothing to stitch — captures are the
     # user's own screenshots, filed with attribution burned in), cacheable is
     # moot, and the meter counts *map loads*, not tiles. eco_max_zoom=0 turns

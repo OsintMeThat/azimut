@@ -1,6 +1,6 @@
 // Pure geometry + coverage bookkeeping for the Satellite Grid Search mode. A
 // grid overlays an area of interest with metric cells you sweep one by one,
-// marking each cleared or flagged. Kept free of Leaflet so it can be
+// marking each cleared or flagged. Kept free of the map so it can be
 // unit-tested; the component only handles drawing, flying and persistence.
 //
 // The grid is a fixed metric lattice: cells are addressed by integer (i, j)

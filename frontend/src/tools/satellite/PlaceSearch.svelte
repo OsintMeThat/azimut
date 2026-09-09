@@ -121,7 +121,21 @@
     schedule(value);
   }
 
+  /**
+   * The question has been answered, so stop asking it.
+   *
+   * A lookup still on the clock is a request for a place name nobody wants any
+   * more — and for a typed coordinate, one the geocoder should never have been
+   * troubled with at all. Picking a row is faster than the debounce, so without
+   * this the request goes out after the analyst has already moved the map.
+   */
+  function settle() {
+    clearTimeout(localTimer);
+    clearTimeout(remoteTimer);
+  }
+
   function choose(item) {
+    settle();
     open = false;
     at = -1;
     recents = pushRecent(item);
@@ -144,6 +158,8 @@
       event.preventDefault();
       if (at >= 0 && rows[at]) choose(rows[at]);
       else {
+        // the bar's own search takes it from here, and asks for itself
+        settle();
         open = false;
         onsubmit(value);
       }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('./Satellite.svelte', import.meta.url), 'utf8');
 const cluster = readFileSync(
@@ -7,8 +7,20 @@ const cluster = readFileSync(
   'utf8'
 );
 // The sky overlay's geometry moved to `lib/skyOverlay.js`, where it is exercised
-// against real numbers (`skyOverlay.test.js`); the tool hands it to Leaflet.
+// against real numbers (`skyOverlay.test.js`); the tool hands it to the map.
 const sky = readFileSync(new URL('../lib/skyOverlay.js', import.meta.url), 'utf8');
+
+/** The tool and everything it is made of, for the checks that must hold of all of it. */
+function satelliteSources() {
+  const files = { 'Satellite.svelte': source };
+  const dir = new URL('./satellite/', import.meta.url);
+  for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || entry.name.endsWith('.test.js')) continue;
+    const at = `${entry.parentPath}/${entry.name}`;
+    files[at.slice(at.indexOf('/satellite/') + 1)] = readFileSync(at, 'utf8');
+  }
+  return files;
+}
 
 describe('Satellite saved work', () => {
   // The indexes, the filter, the Locate pass and the row actions are the store's
@@ -171,8 +183,16 @@ describe('the saved panel is resizable', () => {
     expect(source).toContain('savedPanel.saveWidth(savedW); // one write per drag');
   });
 
+  it('leaves the left button to whichever mode is armed for it', () => {
+    // shift and the left button turn the map, but the capture marquee and the
+    // grid box are both waiting on that same drag
+    expect(source).toContain(
+      "e.button === 0 && e.shiftKey && !selectArmed && gridDraw !== 'rect'"
+    );
+  });
+
   it('redraws the map for the new size', () => {
-    expect(source).toContain('engine?.invalidateSize({ animate: false })');
+    expect(source).toContain('engine?.resize()');
   });
 
   it('hides the handle when the panel is collapsed to its rail', () => {
@@ -318,20 +338,24 @@ describe('Satellite — lifecycle and the date line', () => {
   });
 
   it('goes through the façade for the camera, not through the engine', () => {
-    // The engine is still imported for the layers, the drawn overlays and the
-    // drag gestures — steps 2–3 of the split move those too. What must never
-    // come back is a tool moving, projecting or measuring the map itself.
+    // What must never come back is a tool moving, projecting or measuring the
+    // map itself: that is the whole point of `lib/map`, and it is what made
+    // replacing the engine a rewrite of five modules instead of a tool.
     expect(source).toContain("import { createMapEngine } from '../lib/map/engine.js';");
-    expect(source).not.toContain('L.map(');
-    // not even the engine's own class names: its chrome is dressed in
-    // lib/map/engine.css, and a mode armed above the map says so on
-    // `.map-surface`, whichever engine drew it
-    expect(source).not.toContain('leaflet');
     expect(source).not.toContain('map.setView');
     expect(source).not.toContain('map.getCenter');
     expect(source).not.toContain('map.containerPointToLatLng');
     expect(source).not.toContain('map.latLngToContainerPoint');
-    expect(source).not.toContain('leaflet-rotate');
+  });
+
+  it('names no engine at all, not even in a class or a comment', () => {
+    // The engine's chrome is dressed in lib/map/engine.css, and a mode armed
+    // above the map says so on `.map-surface`, whichever engine drew it. This
+    // held across one engine change; it is what will make the next one cheap.
+    for (const [name, text] of Object.entries(satelliteSources())) {
+      expect(text.toLowerCase(), name).not.toContain('leaflet');
+      expect(text.toLowerCase(), name).not.toContain('maplibre');
+    }
   });
 });
 
