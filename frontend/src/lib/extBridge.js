@@ -76,6 +76,50 @@ export function captureTab({ timeoutMs = 4000, win = window } = {}) {
 }
 
 /**
+ * Hand a prepared thread to the extension, which opens the composer and fills it.
+ *
+ * Resolves when the extension **takes** it, not when it has finished: filling is
+ * tens of seconds — a tab, a composer mounting, a file at a time — and the answer
+ * needed here is only whether the app should stand down. What the fill managed is
+ * reported by the extension's own notifications.
+ *
+ * A rejection is not a failure to report: it means the app still owns the
+ * hand-off and opens the intent page itself, exactly as it does with no extension
+ * installed. Absent, switched off, not permitted on that site, silent: one
+ * answer, one fallback.
+ *
+ * Hence the short timeout. It is a question with three cheap checks behind it,
+ * and the caller is holding a click — a browser only lets a page open a tab for a
+ * few seconds after one, so a slow no would spend the click and open nothing. An
+ * old extension that has never heard of this message answers by staying silent,
+ * which is exactly the case the timeout is short for.
+ *
+ * Nothing but paths crosses this channel. The extension fetches the bytes from
+ * the local app with its own pairing token, so no case file is ever posted into
+ * the page, and the token never reaches the app's DOM.
+ */
+export function handOffPost(payload, { timeoutMs = 2000, win = window } = {}) {
+  return new Promise((resolve, reject) => {
+    const id = `post-${++seq}`;
+    const timer = setTimeout(() => {
+      win.removeEventListener('message', onMessage);
+      reject(new Error('the capture extension did not answer'));
+    }, timeoutMs);
+    function onMessage(event) {
+      if (event.origin !== win.location.origin) return;
+      const msg = event.data;
+      if (!msg || msg.channel !== CHANNEL || msg.type !== 'post-handoff-result' || msg.id !== id) return;
+      clearTimeout(timer);
+      win.removeEventListener('message', onMessage);
+      if (msg.ok) resolve(true);
+      else reject(new Error(msg.error || 'the capture extension refused'));
+    }
+    win.addEventListener('message', onMessage);
+    win.postMessage({ channel: CHANNEL, type: 'post-handoff', id, payload }, win.location.origin);
+  });
+}
+
+/**
  * Subscribe to the extension's "activated" signal: the user just clicked the
  * extension on this tab (granting activeTab), so a previously refused capture
  * can now be retried. Returns an unsubscribe function.

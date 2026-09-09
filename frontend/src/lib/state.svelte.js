@@ -24,6 +24,7 @@ export const prefs = $state({
   homeView: { lat: 43, lon: 25, zoom: 3 }, // where Satellite opens
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
   postTarget: 'x', // social composer a fresh post draft starts with
+  postPrefill: true, // let the capture extension fill that composer on Publish
   signatureHandle: '', // account handle stamped onto proofs that opt into it
   updateCheckOnStart: true, // ask GitHub for a newer release when the page loads
   updateDismissedVersion: '', // the release tag muted with "don't show again"
@@ -85,6 +86,7 @@ export function applyPrefs(s) {
   if (s.home_view) prefs.homeView = s.home_view;
   if (s.post_mention !== undefined) prefs.postMention = s.post_mention; // '' = none
   if (s.post_target !== undefined) prefs.postTarget = s.post_target;
+  if (s.post_prefill !== undefined) prefs.postPrefill = s.post_prefill;
   if (s.signature_handle !== undefined) prefs.signatureHandle = s.signature_handle; // '' = none
   if (s.update_check_on_start !== undefined) prefs.updateCheckOnStart = s.update_check_on_start;
   if (s.update_dismissed_version !== undefined)

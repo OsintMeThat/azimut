@@ -125,7 +125,7 @@ proof for publication.
 |------|--------------|
 | ✅ **Coordinates & sky** | Converts coordinates and reads sun, moon, twilight and local time for a saved point on charts or the map. |
 | ✅ **Research helpers** | Prepares media for keyless reverse search and saves keyboard-reviewed AOI grids. |
-| ✅ **Reports & templates** | Stores reusable proof and post structures, then prepares sourced Markdown for X, Bluesky or Mastodon. |
+| ✅ **Reports & templates** | Stores reusable proof and post structures, then prepares sourced Markdown for X or Bluesky. |
 | ✅ **Case Notebook** | Edits linked Markdown notes with local media, Mermaid diagrams, PDF output and remembered export folders. |
 | ✅ **Media at scale** | Downloads behind a login with a session named once, plus bounded search, searchable pickers, local metadata enrichment and GPS handoff to the map. |
 | ✅ **Storage & recovery** | Uses per-case SQLite and durable jobs, with whole-case bundles, Trash and portable settings backups. |
@@ -160,6 +160,7 @@ proof for publication.
 | Tool | What it does |
 |------|--------------|
 | ✅ **Map engine** | Draws the map on MapLibre GL behind `lib/map`'s façade, at parity: same providers, same captures, same bearing, and the Google widget basemap kept alive under the map's own transparent canvas. |
+| ✅ **Composer hand-off** | Fills X's or Bluesky's own composer with a prepared thread: each post in its own box with its pictures, the thread button pressed between them, every box read back afterwards, and Post left to the analyst. |
 
 ---
 
@@ -325,7 +326,14 @@ stops making sense.
 - **Security posture** (single-user localhost): `127.0.0.1` bind + Host/Origin
   guard (DNS rebinding), 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
   names for images pasted into a proof (no client-chosen path), token-gated
-  ingest island for the extension. A case id and an artifact name each address
+  ingest island for the extension. The one route that reads a case file back out
+  of that island — the attachments a composer hand-off carries — fences on the
+  **resolved** path, so `media/../case.json` is refused where a prefix read off
+  the request would have served it. Filling a composer is the extension's only
+  reach past localhost — three social hosts, declared, where it types what the app
+  handed it and reads nothing — and the switch that uses it is in the app
+  (Settings → Publishing), where the analyst already decides how a thread is
+  published. A case id and an artifact name each address
   one directory entry, checked against POSIX *and* Windows path rules so the
   separator only one of them honours cannot walk out of the workspace. The workspace pointer is the one file written
   outside the workspace, 0600 and holding a path; deleting the copy a move set

@@ -33,11 +33,12 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Form, Header, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse
 from PIL import Image
 
 from .. import __version__, config
 from ..engine import geo, mapsites, media as media_engine, satellite as satellite_engine, tiles
-from ..workspace import Case
+from ..workspace import Case, CaseError
 from . import events
 from .cases import get_case
 from .limits import MAX_IMAGE_BYTES
@@ -385,6 +386,51 @@ def ingest_bookmark(
          "title": label, "url": url}
     )
     return {"entity_id": entity["id"], "case_id": case.id, "title": label, "url": url}
+
+
+# ---- reading back: the attachments a hand-off carries -------------------------
+
+#: The two folders a post's attachments live in. The hand-off names its files by
+#: relative path, and this is what keeps that from being a read of the whole case:
+#: a proof PNG and case media are what a thread attaches, and a sidecar, a spec or
+#: a settings file is not something the extension has any business asking for.
+HANDOFF_DIRS = ("media", "proofs")
+
+#: Ceiling for one handed-over file. It travels to the composer as a data URL in a
+#: message, so this is a real limit rather than a policy — and a 40 MB clip refused
+#: here is a clip the analyst attaches by hand, which is what they did before.
+MAX_HANDOFF_BYTES = 24 * 1024 * 1024
+
+
+@router.get("/file", dependencies=[Depends(require_token)])
+def handoff_file(case_id: str, path: str) -> Response:
+    """One case attachment, for the extension to put in a composer.
+
+    The extension holds the pairing token, so it can already file captures and list
+    cases; this lets it read back the two folders a post attaches from. Narrow on
+    purpose — see ``HANDOFF_DIRS``.
+
+    The fence is on the **resolved** path, not on the string asked for.
+    ``resolve_inside`` refuses traversal out of the case, which leaves
+    ``media/../case.json`` — inside the case, and not an attachment. Reading the
+    prefix off the request would have handed that over.
+    """
+    case = get_case(case_id)
+    try:
+        resolved = case.resolve_inside(path)
+    except CaseError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    root = case.tool_root.resolve()
+    if not any(resolved.is_relative_to(root / folder) for folder in HANDOFF_DIRS):
+        raise HTTPException(status_code=403, detail="only media and proofs can be handed over")
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    if resolved.stat().st_size > MAX_HANDOFF_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"a handed-over file must be under {MAX_HANDOFF_BYTES // 1024 // 1024} MB",
+        )
+    return FileResponse(resolved, filename=resolved.name)
 
 
 # ---- extension download: the packaged source, zipped on request ---------------

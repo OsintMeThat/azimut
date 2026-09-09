@@ -297,12 +297,14 @@ def test_import_canonicalizes_known_fields_and_ignores_future_provider_keys(clie
         ("home_view", {"lat": 91.0, "lon": 0.0, "zoom": 12}),
         ("eco_max_zoom", 99),
         ("coord_format", "utm"),
-        ("post_target", "threads"),
         ("update_check_on_start", 1),
         ("tile_providers", [{"id": "bad id", "url": "https://tiles/{z}/{x}/{y}"}]),
     ],
 )
 def test_import_rejects_malformed_known_fields_without_partial_write(client, field, value):
+    """Malformed means the shape is wrong — a latitude past the pole, a negative
+    count, an id with a space. A publishing target this build no longer offers is
+    not that: it is a value Azimut wrote itself, and the test below restores it."""
     before = config.settings_path().read_bytes()
     response = client.post(
         "/api/settings/import",
@@ -334,3 +336,23 @@ def test_a_signature_no_gate_ever_saw_is_left_out_of_the_backup(client):
     # the real thing still travels
     path.write_bytes(PNG)
     assert base64.b64decode(client.get("/api/settings/export").json()["signature_png"]) == PNG
+
+
+def test_a_backup_naming_a_dropped_target_still_restores(client):
+    """Mastodon was a publishing target and is not one any more. A backup written
+    while it was is a whole machine's settings — keys, presets, export folders —
+    and refusing all of it over one preference the analyst re-picks in a click is
+    not a portability boundary, it is a wall."""
+    token = client.post("/api/settings/ingest-token").json()["ingest_token"]
+    r = client.post(
+        "/api/settings/import",
+        json={"settings": {"post_target": "mastodon", "post_mention": "@GeoConfirmed"}},
+    )
+    assert r.status_code == 200, r.text
+    assert sorted(r.json()["imported"]) == ["post_mention", "post_target"]
+    assert client.get("/api/settings").json()["post_target"] == "x"
+    assert token  # and nothing else in the file was lost to the refusal
+
+    # The live route is the other side of that: there the caller is the UI, and a
+    # target it does not offer is a bug rather than a machine's history.
+    assert client.put("/api/settings/prefs", json={"post_target": "mastodon"}).status_code == 422

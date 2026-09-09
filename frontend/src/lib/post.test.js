@@ -3,7 +3,7 @@ import {
   TWEET_TOKENS, DEFAULT_TWEET_BODY, tweetFields, buildTweet1,
   extraPostTweetText, groupPostMedia, mediaTweetText, newPostMediaTweet,
   applyPostTemplateStructure, normalizePostMediaPickerTarget, normPostTemplate, postMediaForType,
-  postCharacterCount, postComposeUrl, postReportMarkdown, postTarget,
+  handoffThread, postCharacterCount, postComposeUrl, postHandoffUrl, postReportMarkdown, postTarget,
   proofSourceMediaPaths, renumberMediaTweetText, retargetMediaTweetText,
   sourceSection, sourceUrls,
   templateFromPost, templateUsesPostField, togglePostMedia,
@@ -368,9 +368,8 @@ describe('post targets', () => {
     expect(postTarget('unknown')).toMatchObject({ id: 'x' });
   });
 
-  it('counts links for X and Mastodon, but graphemes for Bluesky', () => {
+  it('counts links for X, but graphemes for Bluesky', () => {
     expect(postCharacterCount('x', 'A https://example.test/very-long-url')).toBe(25);
-    expect(postCharacterCount('mastodon', 'A https://example.test/very-long-url')).toBe(25);
     expect(postCharacterCount('bluesky', 'A https://example.test/very-long-url')).toBe(36);
     expect(postCharacterCount('bluesky', '👍🏽')).toBe(1);
   });
@@ -378,7 +377,61 @@ describe('post targets', () => {
   it('builds the official compose handoff for each social target', () => {
     expect(postComposeUrl('x', 'A post')).toBe('https://x.com/intent/post?text=A%20post');
     expect(postComposeUrl('bluesky', 'A post')).toBe('https://bsky.app/intent/compose?text=A%20post');
-    expect(postComposeUrl('mastodon', 'A post')).toBe('https://share.joinmastodon.org/#text=A%20post');
+  });
+
+  it('opens the full composer where the extension takes over, since that is the one that threads', () => {
+    // The intent page posts one message. The run of posts under the first is the
+    // whole point of handing over, so it needs the composer that builds a thread.
+    expect(postHandoffUrl('x', 'A post')).toBe('https://x.com/compose/post?text=A%20post');
+    expect(postHandoffUrl('bluesky', 'A post')).toBe('https://bsky.app/intent/compose?text=A%20post');
+  });
+
+  it('opens a dropped or hand-edited target on X, like every other reader of one', () => {
+    // Mastodon was a target and is not: its share link is a redirector that asks
+    // which server first, so nothing could say where the thread was going.
+    expect(postHandoffUrl('mastodon', 'A post')).toBe('https://x.com/compose/post?text=A%20post');
+    expect(postComposeUrl('mastodon', 'A post')).toBe('https://x.com/intent/post?text=A%20post');
+    expect(postTarget('mastodon').id).toBe('x');
+  });
+});
+
+describe('handoffThread — the thread as the extension receives it', () => {
+  it('pairs each post with the case files it carries', () => {
+    const { posts, dropped } = handoffThread([
+      { text: 'Geolocated.', files: ['proofs/strike.png'] },
+      { text: 'Video:', files: ['media/clip.mp4'] },
+    ]);
+
+    expect(posts).toEqual([
+      { text: 'Geolocated.', files: ['proofs/strike.png'] },
+      { text: 'Video:', files: ['media/clip.mp4'] },
+    ]);
+    expect(dropped).toBe(0);
+  });
+
+  it('keeps a post that is only a picture, and drops one that is nothing', () => {
+    const { posts } = handoffThread([
+      { text: '   ', files: ['media/a.jpg'] },
+      { text: '', files: [] },
+      { text: 'Context.' },
+    ]);
+
+    expect(posts).toEqual([
+      { text: '   ', files: ['media/a.jpg'] },
+      { text: 'Context.', files: [] },
+    ]);
+  });
+
+  it('counts what a post cannot carry rather than losing it quietly', () => {
+    const files = ['a.jpg', 'b.jpg', 'c.jpg', 'd.jpg', 'e.jpg', 'f.jpg'];
+    const { posts, dropped } = handoffThread([{ text: 'Five angles', files }]);
+
+    expect(posts[0].files).toEqual(['a.jpg', 'b.jpg', 'c.jpg', 'd.jpg']);
+    expect(dropped).toBe(2);
+  });
+
+  it('survives an absent list', () => {
+    expect(handoffThread()).toEqual({ posts: [], dropped: 0 });
   });
 });
 

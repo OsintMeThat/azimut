@@ -83,6 +83,127 @@ async function ingest(blob, meta) {
   return body;
 }
 
+// --- post hand-off: fill a composer the app prepared ----------------------------
+//
+// The app never posts, and neither does this: the thread is typed into the site's
+// own composer and left there. Everything below is a layer over the path that
+// already worked (the app opens the intent page, the thread is on the clipboard),
+// so every failure returns rather than throws a user into a dead end.
+//
+// There is one switch and it lives in Azimut (Settings → Publishing): the app
+// asks or it does not, and this side has no opinion to add. A second box here
+// would be two answers to one question, and the pair that disagrees is the one
+// nobody can find.
+
+/** One handed-over file, fetched from the app and carried as base64: what
+ *  crosses into the page is a string, and the page turns it back into a file.
+ *  Base64 rather than a `data:` URL because the page rebuilds it with `atob` —
+ *  a fetch over there answers to the site's CSP, and X refuses that one. */
+async function fetchAttachment(backendUrl, token, caseId, path) {
+  const url =
+    `${backendUrl}/api/ingest/file?case_id=${encodeURIComponent(caseId)}` +
+    `&path=${encodeURIComponent(path)}`;
+  const r = await fetch(url, { headers: { "X-Azimut-Token": token } });
+  // Gone, too big, refused: the file is skipped and counted, never fatal. It is
+  // in the case, and attaching it by hand is what the analyst did before.
+  if (!r.ok) return null;
+  const blob = await r.blob();
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const CHUNK = 0x8000; // fromCharCode takes an argument list: chunk it or blow the stack
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return {
+    name: path.split("/").pop(),
+    type: blob.type || "application/octet-stream",
+    data: btoa(binary),
+  };
+}
+
+/** Resolve once the tab has finished loading, so the injection lands on a page. */
+function tabLoaded(tabId, timeoutMs = 20000) {
+  return new Promise((resolve) => {
+    const done = () => {
+      api.tabs.onUpdated.removeListener(onUpdated);
+      clearTimeout(timer);
+      resolve();
+    };
+    // Not an error path: the composer is an app that keeps loading after the
+    // document does, and the injected script waits for it anyway.
+    const timer = setTimeout(done, timeoutMs);
+    function onUpdated(id, info) {
+      if (id === tabId && info.status === "complete") done();
+    }
+    api.tabs.onUpdated.addListener(onUpdated);
+  });
+}
+
+/**
+ * Say yes or no, now, and do the work afterwards.
+ *
+ * The app is holding a click while it waits for this, and a browser only lets a
+ * page open a tab for a few seconds after one. So the answer here has to be about
+ * whether the hand-off is *taken* — one cheap check — and never about how it
+ * went: opening a tab, waiting for a composer to mount and attaching six files is
+ * tens of seconds, and waiting that long to say no would spend the click on
+ * nothing and leave the analyst pressing a dead button.
+ *
+ * Everything after the answer reports itself through notifications.
+ */
+async function handOff(payload) {
+  const { backendUrl, token } = await settings();
+  if (!token) throw new Error("not paired");
+  fillComposer(payload, backendUrl, token).catch((e) =>
+    notify("Azimut hand-off", `${e.message} The thread is on your clipboard.`)
+  );
+  return { ok: true, accepted: true };
+}
+
+async function fillComposer(payload, backendUrl, token) {
+  let skipped = 0;
+  const posts = [];
+  for (const post of payload.posts ?? []) {
+    const files = [];
+    for (const path of post.files ?? []) {
+      const file = await fetchAttachment(backendUrl, token, payload.caseId, path);
+      if (file) files.push(file);
+      else skipped += 1;
+    }
+    posts.push({ text: post.text ?? "", files });
+  }
+  if (skipped) {
+    notify(
+      "Azimut hand-off",
+      `${skipped} file${skipped > 1 ? "s" : ""} could not be handed over. Attach ${skipped > 1 ? "them" : "it"} from the case.`
+    );
+  }
+
+  const tab = await api.tabs.create({ url: payload.url, active: true });
+  await tabLoaded(tab.id);
+  // Both injections run in the page's own world, which is the only place a
+  // composer accepts what we make (see handoff.js). Nothing over there can call
+  // an extension API, so the thread goes in on a global and the report comes back
+  // as the script's return value.
+  const target = { tabId: tab.id };
+  await api.scripting.executeScript({
+    target,
+    world: "MAIN",
+    func: (thread) => {
+      window.__AZIMUT_HANDOFF__ = thread;
+    },
+    args: [{ posts }],
+  });
+  const [done] = await api.scripting.executeScript({
+    target,
+    world: "MAIN",
+    files: ["handoff.js"],
+  });
+  if (done?.result?.error) {
+    notify("Azimut hand-off", `${done.result.error} The thread is on your clipboard.`);
+  }
+}
+
 function notify(title, message) {
   // fire-and-forget: a failed toast must never fail a filed capture
   try {
@@ -143,6 +264,17 @@ async function handle(msg, sender) {
       return { ok: true };
     } catch (e) {
       notify("Azimut capture failed", e.message);
+      return { ok: false, error: e.message };
+    }
+  }
+
+  // The app's Publish button, relayed by bridge.js: open the composer and fill
+  // the thread. Same origin check as the capture route — only the app may ask.
+  if (msg.type === "post-handoff") {
+    if (!sender.tab || !isAppUrl(sender.tab.url)) return { ok: false, error: "not the Azimut app" };
+    try {
+      return await handOff(msg.payload ?? {});
+    } catch (e) {
       return { ok: false, error: e.message };
     }
   }

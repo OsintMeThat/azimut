@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { CASE_ID, awaitMapReady, installAppFixture } from './app.fixture.js';
 
+// The third one names a target this build dropped, which is what a draft saved
+// before that looks like: it is listed, and it opens (on X, by normalizePostTarget).
 const linkedPosts = [
   { id: 'post-1', name: 'panorama-publication', title: 'Panorama publication', target: 'x' },
   { id: 'post-2', name: 'source-follow-up', title: 'Follow-up with sources', target: 'bluesky' },

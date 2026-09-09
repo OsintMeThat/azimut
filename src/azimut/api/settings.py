@@ -100,6 +100,7 @@ class PrefsIn(BaseModel):
     proof_place_auto: bool | None = None
     post_mention: str | None = None  # handle a new post draft is addressed to
     post_target: str | None = None  # social composer a new post draft starts with
+    post_prefill: bool | None = None  # let the extension fill that composer
     signature_handle: str | None = None  # account handle stamped on opted-in proofs
     # app self-update pop-up (engine/updates.py) — check on load, and the tag
     # the user muted with "don't show again"
@@ -127,6 +128,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "proof_place_auto": bool(settings.get("proof_place_auto", True)),
         "post_mention": settings.get("post_mention", DEFAULT_POST_MENTION),
         "post_target": settings.get("post_target", DEFAULT_POST_TARGET),
+        "post_prefill": bool(settings.get("post_prefill", True)),
         "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
         "update_check_on_start": bool(settings.get("update_check_on_start", True)),
         "update_dismissed_version": settings.get("update_dismissed_version", ""),
@@ -256,6 +258,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["post_mention"] = body.post_mention.strip()[:64]
     if body.post_target is not None:
         settings["post_target"] = body.post_target
+    if body.post_prefill is not None:
+        settings["post_prefill"] = bool(body.post_prefill)
     if body.signature_handle is not None:
         settings["signature_handle"] = body.signature_handle.strip()[:64]
     if body.update_check_on_start is not None:
@@ -567,7 +571,8 @@ class ImportedSettings(BaseModel):
     )
     proof_place_auto: bool = True
     post_mention: str = Field(default=DEFAULT_POST_MENTION, max_length=64)
-    post_target: Literal["x", "bluesky", "mastodon"] = DEFAULT_POST_TARGET
+    post_target: str = DEFAULT_POST_TARGET
+    post_prefill: bool = True
     signature_handle: str = Field(default=DEFAULT_SIGNATURE_HANDLE, max_length=64)
     ingest_token: str = Field(default="", max_length=128, pattern=r"^[A-Za-z0-9_-]*$")
     update_check_on_start: bool = True
@@ -598,6 +603,19 @@ class ImportedSettings(BaseModel):
     @classmethod
     def strip_short_text(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("post_target")
+    @classmethod
+    def known_target(cls, value: str) -> str:
+        """A target this build no longer offers falls back rather than failing.
+
+        Typed as a plain string for that reason: a backup written while Mastodon
+        was a target would otherwise be refused *whole* — keys, presets and all —
+        over one preference the analyst can set again in a click. The live PUT
+        still refuses an unknown target, where the caller is the UI and a wrong
+        value is a bug rather than a machine's history.
+        """
+        return value if value in config.POST_TARGETS else DEFAULT_POST_TARGET
 
 
 class ImportIn(BaseModel):

@@ -5,8 +5,8 @@
  *  1. announces the extension to the app (a dataset marker, set at
  *     document_start so it is there before the app mounts, plus a ping
  *     answer for later checks);
- *  2. relays the app's Capture requests to the background worker and hands
- *     the captured frame back.
+ *  2. relays the app's Capture and Publish requests to the background worker and
+ *     hands its answer back.
  *
  * The app keeps all judgment: registration, cropping, filing. The bridge
  * never touches the backend and never sees the pairing token — the app files
@@ -52,6 +52,22 @@
       }
       window.postMessage(
         { channel: CHANNEL, type: "capture-result", id: msg.id, ...result },
+        location.origin
+      );
+    }
+
+    // Geo Report's Publish button: the thread, as paths and text. The worker
+    // reads the files from the app itself, so nothing of the case and nothing of
+    // the pairing token passes through here.
+    if (msg.type === "post-handoff") {
+      let result;
+      try {
+        result = await api.runtime.sendMessage({ type: "post-handoff", payload: msg.payload });
+      } catch (e) {
+        result = { ok: false, error: e.message };
+      }
+      window.postMessage(
+        { channel: CHANNEL, type: "post-handoff-result", id: msg.id, ...result },
         location.origin
       );
     }
