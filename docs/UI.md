@@ -1243,14 +1243,17 @@ stays out of the legend, which is still built from annotation colours alone.
 
 **Drawing.** A tool in hand holds the canvas alone. Nothing already drawn answers
 the pointer, so a stroke started inside a box draws a new element instead of
-dragging the old one, and the colour and width you pick set the next element
-rather than repainting the last. The selection stays where it was and its handles
-come back with Select. A box or an ellipse also takes a fill, in its own colour at
+dragging the old one, and while the tool is held the colour and width you pick set
+the next element rather than repainting the last. The selection stays where it was
+and its handles come back with Select. A box or an ellipse also takes a fill, in its own colour at
 an opacity you choose. Shapes start hollow: a fill hides what is under it, so it
 is asked for rather than given. Fill and outline share one colour, since the
-legend reads colour as the feature. Every shape tool stays in hand, so three
-boxes is three drags. Text is the one that puts the pen down: the editor opens
-where the label was placed, because placing it and saying what it says are one
+legend reads colour as the feature. **A shape puts the pen down when it lands**:
+it is picked and Select comes back with it, so the colour, the width and the note
+go onto what was just drawn. What follows a stroke is nearly always a word about
+it, and every one of those used to draw a second box first. Three boxes in a row
+is the shortcut pressed three times. Text does the same and opens its editor where
+the label was placed, because placing it and saying what it says are one
 act. A label holds more than one line — Shift+Enter opens the second, Enter ends
 the edit.
 
@@ -1261,8 +1264,8 @@ points-based kinds: it has too many samples to show, so it takes the frame and
 the handles rather than a canvas full of dots.
 
 **Symbols.** A grid of fixed marks — a pin, an impact, vehicles, a building, a
-drone, a camera, an antenna, a north arrow — stamped with one click. The tool
-stays in hand afterwards, since marking six vehicles is one act rather than six.
+drone, a camera, an antenna, a north arrow — stamped with one click. The one tool
+that stays in hand afterwards, since marking six vehicles is one act rather than six.
 A symbol takes the active colour like anything else drawn, so it joins the legend
 by colour and claims no vocabulary the legend cannot say. It resizes from its
 corners with the ratio locked: the box is square and there is one side to change,

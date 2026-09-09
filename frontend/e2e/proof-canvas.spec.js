@@ -83,7 +83,11 @@ test('a picked colour becomes the default for the next drawn shape', async ({ pa
   await page.mouse.up();
   await expect(page.locator('.shape-row')).toHaveCount(1);
 
-  // Pick a new colour while that first box is still selected.
+  // Take the Box back up before picking. A shape puts the pen down when it
+  // lands, so a colour chosen straight afterwards repaints it — that is the
+  // point of putting it down. The pick this test is about is the other one:
+  // made with a drawing tool in hand, where it sets the next shape.
+  await page.getByTitle('Box (r)').click();
   await page.getByTitle('Annotation colour').click();
   await page.getByLabel('color #40c4ff').click();
 
@@ -121,7 +125,9 @@ test('a picked stroke width becomes the default for the next drawn shape', async
   await page.mouse.up();
   await expect(page.locator('.shape-row')).toHaveCount(1);
 
-  // Change the stroke width while the first box is still selected.
+  // Box back in hand, so the width sets the next shape rather than the one just
+  // drawn (see the colour test above).
+  await page.getByTitle('Box (r)').click();
   await page.getByTitle('Stroke width', { exact: true }).click();
   await page.locator('.stroke-slider').fill('11');
 
@@ -443,6 +449,9 @@ test('a fill is opt-in, rides the shape colour and survives the save', async ({ 
   await page.mouse.up();
   await expect(page.locator('.shape-row')).toHaveCount(1);
 
+  // Box back in hand, so the fill answers to the next shape and leaves the
+  // hollow one alone (see the colour test above).
+  await page.getByTitle('Box (r)').click();
   await page.getByTitle('Fill', { exact: true }).click();
   await page.getByLabel('fill opacity').fill('40');
 
@@ -471,7 +480,10 @@ test('the fill control is out for the kinds that cannot hold one', async ({ page
   fixture.expectNoUnexpectedRequests();
 });
 
-/** Two boxes side by side on the panel, drawn with the Box tool. */
+/** Two boxes side by side on the panel, drawn with the Box tool. Armed once per
+ *  box, because each one puts the pen down as it lands — three boxes in a row is
+ *  the shortcut pressed three times. The second lands picked with Select already
+ *  back in hand, so no closing click is needed. */
 async function drawTwoBoxes(page) {
   const canvas = page.locator('.konva canvas').first();
   const box = await canvas.boundingBox();
@@ -483,12 +495,14 @@ async function drawTwoBoxes(page) {
   await page.mouse.down();
   await page.mouse.move(cx - 20, cy + 10, { steps: 6 });
   await page.mouse.up();
+  await expect(page.locator('.shape-row')).toHaveCount(1);
+  await page.getByTitle('Box (r)').click();
   await page.mouse.move(cx + 20, cy - 40);
   await page.mouse.down();
   await page.mouse.move(cx + 80, cy + 10, { steps: 6 });
   await page.mouse.up();
   await expect(page.locator('.shape-row')).toHaveCount(2);
-  await page.getByTitle('Select / move (v)').click();
+  await expect(page.getByTitle('Select / move (v)')).toHaveClass(/active/);
   return { cx, cy };
 }
 
@@ -888,9 +902,13 @@ test('a row picked in the side column takes the hand back to Select', async ({ p
   await page.mouse.move(x + 60, y + 40, { steps: 4 });
   await page.mouse.up();
 
-  // Drawn with the Box still in hand: no row lights up, because nothing on the
-  // canvas would answer to it.
+  // The box lands picked with the pen down, so its row is lit already.
   await expect(page.locator('.shape-row')).toHaveCount(1);
+  await expect(page.locator('.shape-row.selected')).toHaveCount(1);
+
+  // Take the Box back up and it goes out: with a drawing tool in hand no row
+  // lights up, because nothing on the canvas would answer to it.
+  await page.getByTitle('Box (r)').click();
   await expect(page.locator('.shape-row.selected')).toHaveCount(0);
 
   await page.locator('.shape-row').click();
@@ -1032,7 +1050,7 @@ test('a freehand stroke resizes from its handles, and its samples take the chang
   fixture.expectNoUnexpectedRequests();
 });
 
-test('a finished curve leaves the tool in hand', async ({ page }) => {
+test('a finished curve puts the pen down, like every shape but the stamp', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await openProofWithPanel(page);
 
@@ -1054,10 +1072,17 @@ test('a finished curve leaves the tool in hand', async ({ page }) => {
   await vertex(cx, cy - 20);
   await page.mouse.dblclick(cx + 40, cy);
   await expect(page.locator('.shape-row')).toHaveCount(1);
-  await expect(curve).toHaveClass(/active/);
+  // Closing the curve picks it and hands Select back, so the colour, the width
+  // and the note go onto what was just drawn — which is nearly always what
+  // follows a stroke.
+  await expect(curve).not.toHaveClass(/active/);
+  await expect(page.getByTitle('Select / move (v)')).toHaveClass(/active/);
+  await expect(page.locator('.shape-row.selected')).toHaveCount(1);
 
-  // Three curves in a row is three drags, not three presses on `c` as well.
+  // A second curve is `c` again: three in a row is the shortcut pressed three
+  // times, not a tool nobody asked to keep.
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 450)));
+  await curve.click();
   await vertex(cx - 40, cy + 25);
   await vertex(cx, cy + 10);
   await page.mouse.dblclick(cx + 40, cy + 25);
