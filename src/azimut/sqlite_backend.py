@@ -51,7 +51,7 @@ from .store.filters import (
 )
 from .store.migrations import _SQLITE_MIGRATIONS
 from .store.rows import (
-    _MADE_HERE_SQL,
+    _PRODUCED_HERE_SQL,
     _MEDIA_CATEGORIES,
     _MEDIA_CATEGORY_SQL,
     _entity_search_text,
@@ -2034,7 +2034,7 @@ class SqliteCase:
         # narrowing, so nothing disappears without a number.
         scope_where = list(base_where)
         if collected_only:
-            base_where.append(f"NOT {_MADE_HERE_SQL}")
+            base_where.append(f"NOT {_PRODUCED_HERE_SQL}")
 
         # Category and GPS are two independent refinements of that base. Each
         # one's own facet count leaves itself out and applies the other, so a
@@ -2121,7 +2121,7 @@ class SqliteCase:
             made_here_count = int(
                 conn.execute(
                     "SELECT COUNT(*) FROM media_items"
-                    f"{clause([*scope_where, *([category_sql] if category_sql else []), *(['has_gps = 1'] if gps else []), _MADE_HERE_SQL])}",
+                    f"{clause([*scope_where, *([category_sql] if category_sql else []), *(['has_gps = 1'] if gps else []), _PRODUCED_HERE_SQL])}",
                     base_params,
                 ).fetchone()[0]
             )

@@ -612,7 +612,9 @@ single root to expand from. Expansion is the drill-down.
   The card names the act instead of the kind — *Frame*, *Collage* — and the panel adds
   one line saying it was made out of material the case already holds. Only the tools
   that compose case material mark their output: an upload carries nothing, since
-  "upload" on an upload says nothing about it.
+  "upload" on an upload says nothing about it. A capture is not one of them — it has
+  no parents to draw, and the ontology files it as collected — though the Media
+  Library still holds it back as a file the app produced.
 - **Previews are the cached thumbnails** the Media Library uses, loaded only for the
   cards actually on screen and only once each. The graph never generates one: a read
   that draws does no CPU work, so an entity whose picture was never cached shows its
@@ -1031,7 +1033,9 @@ one pin glyph — coordinates in the tooltip, not in the title — and clicking 
 flies the map there. **Show N working files** sits on the same independent axis: a
 switch rather than another chip, because the chips answer *show me only X* and are
 single-select where this one is *put X back*. The library opens on what the case
-collected, the frames and collages it made itself held back, and the switch says how
+collected, the frames, collages and captures it produced itself held back — a capture
+is a map the app drew out of tiles or the extension grabbed off the screen, where an
+upload, a paste and a download came from outside — and the switch says how
 many those are rather than leaving them unannounced; the counts and the paging are
 computed with it so the facets never disagree with the list, and toggling it refetches
 because the loaded page is already the collected subset. It reads how the file

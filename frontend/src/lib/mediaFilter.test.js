@@ -228,12 +228,18 @@ describe('what the case made, apart from what it collected', () => {
   const collage = item({ filename: 'collage.png', source: { type: 'inspect', op: 'collage' } });
   const upload = item({ filename: 'handed-over.jpg', source: { type: 'upload' } });
   const capture = item({ filename: 'map.png', source: { type: 'satellite' } });
+  const grabbed = item({
+    filename: 'maps.png',
+    source: { type: 'screenshot', imagery_mode: 'satellite' },
+  });
 
-  it('counts only the tools that compose case material', () => {
+  it('counts only what the app produced, not what the analyst gathered', () => {
     expect(isMadeHere(frame)).toBe(true);
     expect(isMadeHere(collage)).toBe(true);
-    // Original imagery brought into the case, not made out of what it holds.
-    expect(isMadeHere(capture)).toBe(false);
+    // Pixels the app drew out of tiles it fetched, and the same act through the
+    // extension's window: a map view grabbed on purpose.
+    expect(isMadeHere(capture)).toBe(true);
+    expect(isMadeHere(grabbed)).toBe(true);
     expect(isMadeHere(upload)).toBe(false);
     expect(isMadeHere(item())).toBe(false);
     expect(isMadeHere(null)).toBe(false);
@@ -243,11 +249,11 @@ describe('what the case made, apart from what it collected', () => {
     // The in-memory pass a case small enough for one page takes; a large case is
     // filtered in SQL, and both read the same set.
     expect(
-      visibleMedia([frame, upload, capture], { collectedOnly: true, sort: 'name' }).map(
+      visibleMedia([frame, upload, capture, grabbed], { collectedOnly: true, sort: 'name' }).map(
         (i) => i.filename
       )
-    ).toEqual(['handed-over.jpg', 'map.png']);
-    expect(visibleMedia([frame, upload, capture], { collectedOnly: false }).length).toBe(3);
+    ).toEqual(['handed-over.jpg']);
+    expect(visibleMedia([frame, upload, capture, grabbed], { collectedOnly: false }).length).toBe(4);
     expect(visibleMedia([frame, upload], { collectedOnly: true, query: 'frame' })).toEqual([]);
   });
 });

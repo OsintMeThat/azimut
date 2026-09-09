@@ -119,9 +119,10 @@
   );
 
   // --- what the case made, out of the way (independent of type and folder) ---
-  // A geolocation case ends up with 150 extracted frames beside 50 collected
-  // files, and the question "what did we actually collect" has no answer in a
-  // chooser: the chips are single-select and say "show me only X". This is the
+  // A geolocation case ends up with 150 extracted frames and 60 satellite
+  // captures beside 50 collected files, and the question "what did we actually
+  // collect" has no answer in a chooser: the chips are single-select and say
+  // "show me only X". This is the
   // other axis, so it is a switch. On by default — the library opens on what the
   // case collected, and the switch is how the working files come back; it says
   // how many they are rather than leaving them unannounced.
@@ -927,7 +928,7 @@
           type="button"
           aria-pressed={!collectedOnly}
           title={collectedOnly
-            ? `Show the ${madeHereCount} file${madeHereCount > 1 ? 's' : ''} the case made from material it already holds`
+            ? `Show the ${madeHereCount} file${madeHereCount > 1 ? 's' : ''} the case produced itself`
             : 'Show only what the case collected'}
           onclick={toggleCollectedOnly}
         >
