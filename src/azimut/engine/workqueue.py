@@ -123,21 +123,39 @@ start_workers = True
 
 def _run_loop() -> None:
     global _worker_running
-    while True:
-        with _worker_lock:
-            if not _pending:
+    # The normal end clears the flag under the same lock that finds the queue
+    # empty, so a `wake` in flight either sees a live worker or starts one. That
+    # atomicity is the point, and the `finally` below must not undo it.
+    handed_back = False
+    try:
+        while True:
+            with _worker_lock:
+                if not _pending:
+                    _worker_running = False
+                    handed_back = True
+                    return
+                # Claimed before the drain, not after it. `wake` is a no-op while the
+                # case is already pending, so a job enqueued *during* the drain — past
+                # the point this pass read the queue — would have its mark removed by
+                # a pop on the way out and never be drained at all.
+                case_id = next(iter(_pending))
+                case = _pending.pop(case_id)
+            try:
+                drain(case)
+            except Exception:  # a worker must never die on one case's failure
+                pass
+    finally:
+        # Any other way out of this thread — an interpreter shutdown, a
+        # `KeyboardInterrupt`, a `MemoryError`, anything `except Exception` does
+        # not catch — used to leave the flag set with nobody draining. `wake`
+        # then believed a worker was already on it and started none, so every
+        # thumbnail and every queued job after that point waited for a thread
+        # that no longer existed, until the process was restarted. Whatever the
+        # queue still holds is left where it is: the next `wake` starts a fresh
+        # worker, which picks it up.
+        if not handed_back:
+            with _worker_lock:
                 _worker_running = False
-                return
-            # Claimed before the drain, not after it. `wake` is a no-op while the
-            # case is already pending, so a job enqueued *during* the drain — past
-            # the point this pass read the queue — would have its mark removed by
-            # a pop on the way out and never be drained at all.
-            case_id = next(iter(_pending))
-            case = _pending.pop(case_id)
-        try:
-            drain(case)
-        except Exception:  # a worker must never die on one case's failure
-            pass
 
 
 def wake(case: "CaseType") -> None:
@@ -172,6 +190,20 @@ def recover_all() -> None:
             continue
         if has_queued(case):
             wake(case)
+
+
+def _reset_for_tests() -> None:
+    """Test seam: forget the queue and the worker flag.
+
+    Module state outlives a test, and two of them set the flag by hand. Under a
+    randomized order that leaked: a test that inherited `_worker_running = True`
+    with no thread behind it queued its work, was told a worker had it, and
+    waited out its whole budget for a drain that was never going to come.
+    """
+    global _worker_running
+    with _worker_lock:
+        _pending.clear()
+        _worker_running = False
 
 
 def wait_until_idle(timeout: float = 5.0) -> bool:
