@@ -185,16 +185,7 @@ jobs:
   browser:
     name: Browser canvas interactions (${{ matrix.browser }})
     runs-on: ubuntu-latest
-    timeout-minutes: 35
-    # Mesa's software rasterizer, installed below and named here. A runner has no
-    # GPU, and where Chromium falls back to its own bundled SwiftShader, Firefox
-    # asks the system for a driver and turns WebGL off when there is none — so
-    # MapLibre never reached `load`, no map ever said it was ready, and every
-    # spec that opens one failed on an element that was not coming. Chromium
-    # ignores both variables.
-    env:
-      LIBGL_ALWAYS_SOFTWARE: "1"
-      GALLIUM_DRIVER: llvmpipe
+    timeout-minutes: 20
     # One job per browser rather than one job running both. The specs stay at a
     # single Playwright worker on purpose — canvas startup times out when
     # MapLibre and Konva compete for a runner's cores — so the only way to
@@ -222,21 +213,4 @@ jobs:
       # build links against are there. If one ever is not, the browser fails to launch
       # and says so in a minute, which is the better failure of the two.
       - run: npx playwright install ${{ matrix.browser }}
-      # The system libraries the image does not carry and Firefox cannot draw a
-      # map without: its readme lists no mesa package at all. Both stacks, because
-      # a headless Firefox opens GL through **EGL** — installing only the GLX half
-      # left it with nothing to open, which reads in the browser's own console as
-      # `tryNativeGL()` and then `EXHAUSTED_DRIVERS`. Chromium needs none of it:
-      # its software renderer travels inside the browser.
-      # Bounded on purpose — the reason `--with-deps` is not used above is that
-      # apt against the Azure mirrors hung once until the job timed out, and a
-      # step that gives up in five minutes is the better failure of the two.
-      - name: Mesa's software renderer, for Firefox's WebGL
-        if: matrix.browser == 'firefox'
-        timeout-minutes: 5
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libegl1 libgbm1
-          ls -1 /usr/lib/x86_64-linux-gnu/dri | head  # the renderers, named in the log
       - run: npm run test:e2e -- --project=${{ matrix.browser }}

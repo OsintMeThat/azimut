@@ -92,3 +92,25 @@ test('says the map needs WebGL rather than drawing an empty panel without it', a
   await expect(page.getByText('The map needs WebGL, which this browser does not have.')).toBeVisible();
   await expect(page.locator('.map[data-map-ready="true"]')).toHaveCount(0);
 });
+
+test('says it on a browser that has no WebGL of its own, not a stubbed one', async ({ page }) => {
+  // The case above builds the refusal by taking `getContext` away. This one does
+  // not build anything: the CI runner's Firefox is a real browser with no GL
+  // driver under it, which is an environment we cannot fake and no longer have
+  // to. Where WebGL exists — every developer's machine, and Chromium anywhere —
+  // there is nothing here to see and the stubbed case above stands for it.
+  await installAppFixture(page);
+  await page.goto('/#satellite');
+
+  const usable = await page.evaluate(() => {
+    try {
+      return !!document.createElement('canvas').getContext('webgl2');
+    } catch {
+      return false;
+    }
+  });
+  test.skip(usable, 'this browser has WebGL; the stubbed case covers the message');
+
+  await expect(page.getByText('The map needs WebGL, which this browser does not have.')).toBeVisible();
+  await expect(page.locator('canvas')).toHaveCount(0);
+});

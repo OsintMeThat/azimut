@@ -23,29 +23,14 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    // Firefox is given WebGL by hand. A CI runner has no GPU, and where Chromium
-    // falls back to the software renderer it carries inside it, Firefox tries the
-    // native driver, finds none, and stops there — `tryNativeGL()`, then
-    // `FEATURE_FAILURE_WEBGL_EXHAUSTED_DRIVERS`, read off the runner's own
-    // console. So MapLibre never reached `load`, no map said it was ready, and
-    // every spec that opens one failed on an element that was not coming.
-    //
-    // Two prefs, doing two different things: `force-enabled` gets past the
-    // blocklist, and `allow-software` is what lets the fallback be tried at all.
-    // Without the second the first decides nothing, which is how this failure
-    // survived a pref that looked like it addressed it.
-    {
-      name: 'firefox',
-      use: {
-        ...devices['Desktop Firefox'],
-        launchOptions: {
-          firefoxUserPrefs: {
-            'webgl.force-enabled': true,
-            'webgl.allow-software': true,
-            'gfx.webrender.software': true,
-          },
-        },
-      },
-    },
+    // Plain, after four attempts at giving this browser WebGL on a CI runner:
+    // the blocklist turned off, the software fallback allowed, and both halves
+    // of mesa installed each left the console saying the same thing —
+    // `tryNativeGL()`, then `EXHAUSTED_DRIVERS`. Chromium carries its own
+    // software renderer and needs none of that; a patched headless Firefox has
+    // nowhere to fall back to. The map specs skip themselves there and say so
+    // (`awaitMapReady` in `app.fixture.js`); every other spec runs, and locally
+    // Firefox draws the map like anything else.
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
   ],
 });

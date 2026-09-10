@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { CASE_ID, installAppFixture } from './app.fixture.js';
+import { awaitMapReady, CASE_ID, installAppFixture } from './app.fixture.js';
 
 const person = {
   id: 'person-1',
@@ -778,6 +778,7 @@ async function openTimelineOverJune(page, options = {}) {
 test('hands one window from the Timeline to the Map, the Board and back', async ({ page }) => {
   const fixture = await openTimelineOverJune(page);
   await page.getByRole('group', { name: 'Open range' }).getByRole('button', { name: 'Map' }).click();
+  await awaitMapReady(page); // the marks are drawn on it, so it has to be up
 
   const layer = page.getByLabel('Timeline map layer');
   await expect(layer).toContainText('1 Jun – 21 Jun 2026');
@@ -806,6 +807,7 @@ test('hands one window from the Timeline to the Map, the Board and back', async 
 test('opens a statement in the Timeline from its mark on the map', async ({ page }) => {
   const fixture = await openTimelineOverJune(page);
   await page.getByRole('group', { name: 'Open range' }).getByRole('button', { name: 'Map' }).click();
+  await awaitMapReady(page); // the marks are drawn on it, so it has to be up
 
   await page.locator('.temporal-mark').click();
   const popup = page.locator('.temporal-popup');
@@ -830,6 +832,7 @@ test('draws the window and nothing else, framed on what it holds', async ({ page
     },
   });
   await page.getByRole('group', { name: 'Open range' }).getByRole('button', { name: 'Map' }).click();
+  await awaitMapReady(page); // the marks are drawn on it, so it has to be up
 
   await expect(page.locator('.temporal-mark')).toHaveCount(1);
   await expect(page.locator('.saved-mark-place')).toHaveCount(0);
@@ -859,6 +862,7 @@ test('says a window holds nothing placed instead of pulling the map out to say i
   });
   await setWindow(page, '2026-06-18T00:00', '2026-06-19T00:00');
   await page.getByRole('group', { name: 'Open range' }).getByRole('button', { name: 'Map' }).click();
+  await awaitMapReady(page); // the marks are drawn on it, so it has to be up
 
   const layer = page.getByLabel('Timeline map layer');
   await expect(layer).toContainText('None of the 10 dated here carries a place.');
