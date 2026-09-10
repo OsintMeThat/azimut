@@ -48,6 +48,28 @@ def offline_reverse_geocode(monkeypatch):
     geo._reset_pace()
 
 
+@pytest.fixture(autouse=True)
+def a_worker_of_its_own():
+    """No test inherits the previous one's worker.
+
+    `workqueue` keeps its queue and its "a worker is running" flag on the module,
+    which outlives any one test, and two tests set that flag by hand. The suite
+    runs in a randomized order across xdist workers, so the orders that leak a
+    set flag with no live thread behind it come up now and then and not on
+    demand: `wake` believed a worker had the case, started none, and the test
+    waited its whole budget for a drain nobody was doing.
+
+    Set up before the fixtures that own a temporary workspace, so the state is
+    clean before a case exists at all. The worker is waited out first, because
+    clearing the flag under a live thread would let a second one start.
+    """
+    from azimut.engine import workqueue
+
+    workqueue.wait_until_idle(timeout=10)
+    workqueue._reset_for_tests()
+    yield
+
+
 def _let_the_worker_finish() -> None:
     """Wait for the shared background worker before a throwaway workspace is
     removed.

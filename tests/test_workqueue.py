@@ -135,3 +135,27 @@ def test_wait_until_idle_looks_once_more_after_the_deadline(case, monkeypatch):
 
     monkeypatch.setattr(workqueue, "_worker_running", True)
     assert workqueue.wait_until_idle(timeout=0) is False
+
+
+def test_a_worker_that_dies_hands_the_queue_back(case, monkeypatch):
+    """A thread lost to something no `except Exception` catches must not leave the
+    flag set.
+
+    `wake` starts nothing while it believes a worker is draining, so a flag left
+    behind by a dead thread stalled every queued job in the process — a thumbnail
+    that never appeared, with nothing to say why, until a restart.
+    """
+
+    def die(_case):
+        raise KeyboardInterrupt  # not an Exception; the drain's own guard misses it
+
+    monkeypatch.setattr(workqueue, "drain", die)
+    monkeypatch.setitem(workqueue._pending, case.id, case)
+    monkeypatch.setattr(workqueue, "_worker_running", True)
+
+    with pytest.raises(KeyboardInterrupt):
+        workqueue._run_loop()
+
+    assert workqueue._worker_running is False
+    # and the case it never got to is still queued, for the worker after it
+    assert workqueue.wait_until_idle(timeout=0) is True

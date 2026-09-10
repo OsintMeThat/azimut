@@ -112,6 +112,9 @@ def drain(case: "CaseType") -> int:
 
 # -- the single background worker -----------------------------------------
 
+#: The one worker thread's name, which is also how a flag with nothing behind
+#: it is told from one a live thread is holding (`_reset_for_tests`).
+_WORKER_NAME = "azimut-worker"
 _worker_lock = threading.Lock()
 _pending: dict[str, "CaseType"] = {}
 _worker_running = False
@@ -123,21 +126,39 @@ start_workers = True
 
 def _run_loop() -> None:
     global _worker_running
-    while True:
-        with _worker_lock:
-            if not _pending:
+    # The normal end clears the flag under the same lock that finds the queue
+    # empty, so a `wake` in flight either sees a live worker or starts one. That
+    # atomicity is the point, and the `finally` below must not undo it.
+    handed_back = False
+    try:
+        while True:
+            with _worker_lock:
+                if not _pending:
+                    _worker_running = False
+                    handed_back = True
+                    return
+                # Claimed before the drain, not after it. `wake` is a no-op while the
+                # case is already pending, so a job enqueued *during* the drain — past
+                # the point this pass read the queue — would have its mark removed by
+                # a pop on the way out and never be drained at all.
+                case_id = next(iter(_pending))
+                case = _pending.pop(case_id)
+            try:
+                drain(case)
+            except Exception:  # a worker must never die on one case's failure
+                pass
+    finally:
+        # Any other way out of this thread — an interpreter shutdown, a
+        # `KeyboardInterrupt`, a `MemoryError`, anything `except Exception` does
+        # not catch — used to leave the flag set with nobody draining. `wake`
+        # then believed a worker was already on it and started none, so every
+        # thumbnail and every queued job after that point waited for a thread
+        # that no longer existed, until the process was restarted. Whatever the
+        # queue still holds is left where it is: the next `wake` starts a fresh
+        # worker, which picks it up.
+        if not handed_back:
+            with _worker_lock:
                 _worker_running = False
-                return
-            # Claimed before the drain, not after it. `wake` is a no-op while the
-            # case is already pending, so a job enqueued *during* the drain — past
-            # the point this pass read the queue — would have its mark removed by
-            # a pop on the way out and never be drained at all.
-            case_id = next(iter(_pending))
-            case = _pending.pop(case_id)
-        try:
-            drain(case)
-        except Exception:  # a worker must never die on one case's failure
-            pass
 
 
 def wake(case: "CaseType") -> None:
@@ -151,7 +172,7 @@ def wake(case: "CaseType") -> None:
         if _worker_running:
             return
         _worker_running = True
-    threading.Thread(target=_run_loop, name="azimut-worker", daemon=True).start()
+    threading.Thread(target=_run_loop, name=_WORKER_NAME, daemon=True).start()
 
 
 def recover_all() -> None:
@@ -172,6 +193,30 @@ def recover_all() -> None:
             continue
         if has_queued(case):
             wake(case)
+
+
+def _reset_for_tests() -> None:
+    """Test seam: forget the queue, and the worker flag when nothing holds it.
+
+    Module state outlives a test, and two of them set the flag by hand. Under a
+    randomized order that leaked: a test that inherited `_worker_running = True`
+    with no thread behind it queued its work, was told a worker had it, and
+    waited out its whole budget for a drain that was never going to come.
+
+    The flag is only taken back when it is genuinely orphaned. A set flag with a
+    live thread behind it is not stale, it is true — clearing it there would let
+    a second worker start beside the first, and the pair would still be writing
+    when the temporary workspace is removed.
+    """
+    global _worker_running
+    with _worker_lock:
+        _pending.clear()
+        orphaned = not any(
+            thread.name == _WORKER_NAME and thread.is_alive()
+            for thread in threading.enumerate()
+        )
+        if orphaned:
+            _worker_running = False
 
 
 def wait_until_idle(timeout: float = 5.0) -> bool:
