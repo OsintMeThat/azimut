@@ -33,12 +33,30 @@ class FakeDataTransfer {
   setData(type, value) {
     if (type === 'text/plain') this.text = value;
   }
+  getData(type) {
+    return (type === 'text/plain' ? this.text : null) ?? '';
+  }
 }
 
 class FakeClipboardEvent extends Event {
   constructor(type, init = {}) {
     super(type, init);
     this.clipboardData = init.clipboardData;
+  }
+}
+
+/**
+ * Gecko's, which reads a different member.
+ *
+ * Its `ClipboardEventInit` has no `clipboardData`: it builds a clipboard of its
+ * own out of `data`, which is text and nothing else. Not assumed — run against
+ * both engines before it was written down here.
+ */
+class GeckoClipboardEvent extends Event {
+  constructor(type, init = {}) {
+    super(type, init);
+    this.clipboardData = new FakeDataTransfer();
+    if (init.dataType === 'text/plain') this.clipboardData.setData('text/plain', init.data);
   }
 }
 
@@ -75,7 +93,7 @@ const PNG = { name: 'proof.png', type: 'image/png', data: btoa('\x89PNG') };
  */
 function run({
   hostname = 'x.com', posts, html,
-  canType = true, takesPaste = true,
+  canType = true, takesPaste = true, gecko = false,
   onPaste, onAttach, onType, onReady,
 }) {
   document.body.innerHTML = html;
@@ -141,7 +159,13 @@ function run({
     // assigned rather than returned: the file opens with a doc comment, and a
     // `return` with a line break after it returns nothing at all
     `const report = ${source}\n; return report;`
-  )({ hostname }, FakeDataTransfer, FakeClipboardEvent, FakeDragEvent, FakeFile).then((report) => ({
+  )(
+    { hostname },
+    FakeDataTransfer,
+    gecko ? GeckoClipboardEvent : FakeClipboardEvent,
+    FakeDragEvent,
+    FakeFile
+  ).then((report) => ({
     ...report,
     landed,
     typed,
@@ -214,6 +238,45 @@ describe('filling a thread', () => {
     expect(report).toMatchObject({ filled: 0, error: 'Post 1 stayed empty.' });
   });
 
+  it('is pasted into on the engine that spells a clipboard the other way', async () => {
+    // What took X's thread apart on Firefox. The event was built the one way
+    // Chromium reads, so Gecko's composer took an empty clipboard, the post went
+    // in by keystroke instead, and **X never registered it**: the text sat in the
+    // box, the site went on calling the post empty, and the "+" it draws over a
+    // written post was not there. The thread stopped at the post after it, on a
+    // composer that looked filled. It is spelled both ways now; this is the
+    // other engine reading its own.
+    const report = await run({
+      gecko: true,
+      posts: [{ text: 'One.', files: [] }, { text: 'Two.', files: [] }],
+      html: `<div role="dialog">${BOX(0)}${BOX(1)}<button data-testid="addButton"></button></div>`,
+    });
+
+    expect(report.filled).toBe(2);
+    expect(report.error).toBeUndefined();
+    expect(report.pastes).toEqual([
+      { box: 'tweetTextarea_0', text: 'One.', files: [] },
+      { box: 'tweetTextarea_1', text: 'Two.', files: [] },
+    ]);
+    expect(report.typed).toEqual([]); // the site's own road, on both engines
+  });
+
+  it('carries what went wrong into the stop, rather than reporting the stop alone', async () => {
+    // The two belong together: an empty post is *why* the composer would not
+    // open the next one, and the stop on its own reads like the markup moved.
+    const report = await run({
+      canType: false,
+      takesPaste: false,
+      posts: [{ text: 'One.', files: [] }, { text: 'Two.', files: [] }],
+      html: BOX(0),
+    });
+
+    expect(report).toMatchObject({
+      filled: 0,
+      error: 'Post 1 stayed empty. Could not add the next post to the thread.',
+    });
+  }, 15000); // three attempts at the post, then the wait the add button is owed
+
   it('falls back to a paste where the composer keeps no file input', async () => {
     const report = await run({
       posts: [{ text: '', files: [PNG] }],
@@ -224,6 +287,18 @@ describe('filling a thread', () => {
     expect(report.pastes).toEqual([
       { box: 'tweetTextarea_0', text: null, files: [expect.objectContaining({ name: 'proof.png' })] },
     ]);
+  });
+
+  it('drops that file on the page instead, where a paste cannot carry one', async () => {
+    const report = await run({
+      gecko: true,
+      posts: [{ text: '', files: [PNG] }],
+      html: BOX(0),
+    });
+
+    expect(report.filled).toBe(1);
+    expect(report.pastes).toEqual([]);
+    expect(report.dropped.flat()).toEqual([expect.objectContaining({ name: 'proof.png' })]);
   });
 
   it('leaves a box that already holds something, whatever it holds', async () => {
@@ -377,6 +452,41 @@ describe('filling a thread', () => {
     });
 
     expect(pressed).toEqual(['dialog']);
+    expect(report.landed).toEqual([
+      { box: 'tweetTextarea_0', text: 'One.' },
+      { box: 'tweetTextarea_1', text: 'Two.' },
+    ]);
+  });
+
+  it('waits out a "+" the composer holds back while it reads an attachment', async () => {
+    // X takes the button away, or refuses it, until it has finished reading what
+    // was just handed over — and a video is read for far longer than a picture.
+    // Read the moment it was wanted, it was not there yet, and a thread carrying
+    // a clip stopped at the post after it.
+    let pressed = 0;
+    const report = await run({
+      posts: [{ text: 'One.', files: [PNG] }, { text: 'Two.', files: [] }],
+      html: `<div role="dialog">${BOX(0)}${FILE_INPUT(0)}`
+        + '<button data-testid="addButton" aria-disabled="true"></button></div>',
+      onAttach: (input) => {
+        const add = input.parentElement.querySelector('[data-testid="addButton"]');
+        setTimeout(() => add.removeAttribute('aria-disabled'), 1500);
+      },
+      onReady: (doc) => {
+        const add = doc.querySelector('[data-testid="addButton"]');
+        add.addEventListener('click', () => {
+          pressed += 1;
+          if (add.getAttribute('aria-disabled') === 'true') return;
+          const box = doc.createElement('div');
+          box.dataset.testid = 'tweetTextarea_1';
+          box.setAttribute('contenteditable', 'true');
+          add.before(box);
+        });
+      },
+    });
+
+    expect(pressed).toBe(1); // the one it was refusing was never pressed
+    expect(report.filled).toBe(2);
     expect(report.landed).toEqual([
       { box: 'tweetTextarea_0', text: 'One.' },
       { box: 'tweetTextarea_1', text: 'Two.' },

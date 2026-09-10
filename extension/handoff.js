@@ -92,6 +92,24 @@
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  /**
+   * Whether a paste made here carries the `DataTransfer` it was built with.
+   *
+   * Text can go over either spelling (see `paste`), but a file only travels on
+   * the object itself — and Gecko does not take the object, it builds its own
+   * out of text. So there is no such thing as pasting a picture in on Firefox,
+   * and the door that site leaves open is the one below. Asked of a throwaway
+   * event rather than of a browser name.
+   */
+  const CARRIES_FILES = (() => {
+    try {
+      const probe = new DataTransfer();
+      return new ClipboardEvent("paste", { clipboardData: probe }).clipboardData === probe;
+    } catch {
+      return false;
+    }
+  })();
+
   const found = (selectors, keep = () => true) => {
     for (const selector of selectors) {
       let nodes = [];
@@ -121,6 +139,16 @@
   };
 
   const boxes = (site) => found(site.editors, editable);
+
+  /**
+   * A control the composer is offering, rather than one it is holding back.
+   *
+   * X takes its "+" away — or refuses it — while it is still reading what was
+   * just handed over, and a video is read for far longer than a picture ever
+   * was. Pressing what is refused is how a thread carrying a clip stopped at
+   * the post after it.
+   */
+  const pressable = (node) => node.disabled !== true && node.getAttribute?.("aria-disabled") !== "true";
 
   /** Poll for what the page has not drawn yet. A composer is an app inside an
    *  app: "load finished" says nothing about the box existing. */
@@ -178,10 +206,24 @@
    * it is worth a second road rather than a last resort. Nothing here says
    * whether it landed; the box does, above.
    */
-  function paste(target, transfer) {
+  function paste(target, transfer, text) {
     target.focus();
     return target.dispatchEvent(
-      new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer })
+      // Spelled both ways, because the two engines read different members and
+      // each ignores the other's. Chromium takes the `DataTransfer` handed to
+      // `clipboardData`; Gecko has no such member in its `ClipboardEventInit`
+      // and builds its own out of `data`. Sent only one way, Firefox's composer
+      // got an empty clipboard, fell to the typed road, and **never registered
+      // the post**: the text was in the box, X still called it empty, and the
+      // "+" it draws over a written post was not there — so the thread stopped
+      // at the post after it, on a composer that looked filled.
+      new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: transfer,
+        data: text,
+        dataType: text === undefined ? undefined : "text/plain",
+      })
     );
   }
 
@@ -297,7 +339,7 @@
     await aim(box);
     const transfer = new DataTransfer();
     transfer.setData("text/plain", text);
-    paste(box, transfer);
+    paste(box, transfer, text);
     return settled(box);
   }
 
@@ -360,7 +402,9 @@
         return true;
       }
     }
-    return site.dropOnBody ? drop(transfer) : paste(box, transfer);
+    // A paste that cannot carry a file is not a fallback; dropping is the one
+    // road left, and it is the road this browser gave Bluesky all along.
+    return site.dropOnBody || !CARRIES_FILES ? drop(transfer) : paste(box, transfer);
   }
 
   /**
@@ -474,23 +518,35 @@
     // What went wrong on one post does not stop the next: a thread missing its
     // third line still beats a composer holding nothing.
     const notes = [];
+    // Stopping is not a reason to drop what went wrong on the way here: a post
+    // left empty is why a composer refuses to open the next one, and the stop
+    // on its own reads like the markup moved.
+    const stop = (reason) => ({ filled, error: [...notes, reason].join(" ") });
     let box = boxes(site)[0];
     for (let i = 0; i < posts.length; i += 1) {
       if (i > 0) {
         // The **last** one. A composer that draws a footer under every post
         // draws an add button under every post too, and only the one at the end
         // appends — the others insert a post in the middle of the thread.
-        const add = found(site.add).at(-1);
+        //
+        // Waited for, not looked for once: this is the composer's own state, and
+        // it is the last thing here that was read the moment it was wanted. The
+        // patience goes where the reason for it is — a post that handed over a
+        // file is one the composer is still busy with; a post that handed over
+        // nothing owes no wait.
+        //
         // No button, no thread: stop where we are and say so. Half a thread
         // filled beats none, and the rest is one paste away.
-        if (!add) return { filled, error: "Could not add the next post to the thread." };
+        const patience = posts[i - 1].files?.length ? 20000 : 3000;
+        const add = await waitFor(() => found(site.add, pressable).at(-1), patience);
+        if (!add) return stop("Could not add the next post to the thread.");
         press(add);
         const grown = await waitFor(() => nextBox(site, box), 5000);
-        if (!grown) return { filled, error: "The next post did not open." };
+        if (!grown) return stop("The next post did not open.");
         await sleep(250); // it is drawn; let it become the one the composer listens to
         box = nextBox(site, box) ?? grown;
       }
-      if (!box) return { filled, error: "Lost the composer while filling it." };
+      if (!box) return stop("Lost the composer while filling it.");
       const trouble = await fill(site, box, posts[i], i);
       if (trouble) notes.push(trouble);
       else filled += 1;
