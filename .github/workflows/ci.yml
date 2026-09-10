@@ -186,12 +186,12 @@ jobs:
     name: Browser canvas interactions (${{ matrix.browser }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    # Mesa's software rasterizer, named rather than left to a probe. A runner has
-    # no GPU, and where Chromium falls back to its own SwiftShader, Firefox asks
-    # the system for a driver, finds none it trusts, and turns WebGL off — so
+    # Mesa's software rasterizer, installed below and named here. A runner has no
+    # GPU, and where Chromium falls back to its own bundled SwiftShader, Firefox
+    # asks the system for a driver and turns WebGL off when there is none — so
     # MapLibre never reached `load`, no map ever said it was ready, and every
-    # spec that opens one failed on an element that was not coming. llvmpipe is
-    # already on the image; this says to use it. Chromium ignores the variable.
+    # spec that opens one failed on an element that was not coming. Chromium
+    # ignores both variables.
     env:
       LIBGL_ALWAYS_SOFTWARE: "1"
       GALLIUM_DRIVER: llvmpipe
@@ -222,4 +222,17 @@ jobs:
       # build links against are there. If one ever is not, the browser fails to launch
       # and says so in a minute, which is the better failure of the two.
       - run: npx playwright install ${{ matrix.browser }}
+      # The one system library the image does not carry and Firefox cannot draw
+      # a map without: its readme lists no mesa package, so `LIBGL_ALWAYS_SOFTWARE`
+      # named a renderer that was not installed. Chromium needs nothing here.
+      # Bounded on purpose — the reason `--with-deps` is not used above is that
+      # apt against the Azure mirrors hung once until the job timed out, and one
+      # package failing in five minutes is the better failure of the two.
+      - name: Mesa's software renderer, for Firefox's WebGL
+        if: matrix.browser == 'firefox'
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1-mesa-dri libglx-mesa0
+          ls -1 /usr/lib/x86_64-linux-gnu/dri | head  # the renderer, named in the log
       - run: npm run test:e2e -- --project=${{ matrix.browser }}
