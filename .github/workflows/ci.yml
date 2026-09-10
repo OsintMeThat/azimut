@@ -222,17 +222,21 @@ jobs:
       # build links against are there. If one ever is not, the browser fails to launch
       # and says so in a minute, which is the better failure of the two.
       - run: npx playwright install ${{ matrix.browser }}
-      # The one system library the image does not carry and Firefox cannot draw
-      # a map without: its readme lists no mesa package, so `LIBGL_ALWAYS_SOFTWARE`
-      # named a renderer that was not installed. Chromium needs nothing here.
+      # The system libraries the image does not carry and Firefox cannot draw a
+      # map without: its readme lists no mesa package at all. Both stacks, because
+      # a headless Firefox opens GL through **EGL** — installing only the GLX half
+      # left it with nothing to open, which reads in the browser's own console as
+      # `tryNativeGL()` and then `EXHAUSTED_DRIVERS`. Chromium needs none of it:
+      # its software renderer travels inside the browser.
       # Bounded on purpose — the reason `--with-deps` is not used above is that
-      # apt against the Azure mirrors hung once until the job timed out, and one
-      # package failing in five minutes is the better failure of the two.
+      # apt against the Azure mirrors hung once until the job timed out, and a
+      # step that gives up in five minutes is the better failure of the two.
       - name: Mesa's software renderer, for Firefox's WebGL
         if: matrix.browser == 'firefox'
         timeout-minutes: 5
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgl1-mesa-dri libglx-mesa0
-          ls -1 /usr/lib/x86_64-linux-gnu/dri | head  # the renderer, named in the log
+          sudo apt-get install -y --no-install-recommends \
+            libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libegl1 libgbm1
+          ls -1 /usr/lib/x86_64-linux-gnu/dri | head  # the renderers, named in the log
       - run: npm run test:e2e -- --project=${{ matrix.browser }}
