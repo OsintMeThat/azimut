@@ -10,7 +10,7 @@
   import { templateFromPost } from '../lib/post.js';
   import { formatCoords, parseHomeView } from '../lib/coords.js';
   import { USAGE_LINKS, ECO_MAX_ZOOM } from '../lib/usage.js';
-  import { probeKey, googleMapsLoadedKey } from '../lib/gmaps.js';
+  import { probeKey, googleMapsLoadedKey } from '../lib/map/gmaps.js';
   import { extensionVersion } from '../lib/extBridge.js';
   import { CASE_FOLDER_LABEL, saveDestination } from '../lib/exportDest.js';
   import Icon from '../components/Icon.svelte';
@@ -191,6 +191,7 @@
   let home = $state({ lat: '', lon: '', zoom: '' });
   let mention = $state('');
   let postTarget = $state('x');
+  let postPrefill = $state(true);
   let updateOnStart = $state(true); // pop a notice on load when a release is out
   // whether saving a proof files its point as a place, or asks first
   let proofPlaceAuto = $state(true);
@@ -403,6 +404,7 @@
     home = { lat: String(s.home_view.lat), lon: String(s.home_view.lon), zoom: String(s.home_view.zoom) };
     mention = s.post_mention ?? '';
     postTarget = s.post_target ?? 'x';
+    postPrefill = s.post_prefill ?? true;
     updateOnStart = s.update_check_on_start ?? true;
     proofPlaceAuto = s.proof_place_auto ?? true;
     applyPrefs(s); // the rest of the app reads these live
@@ -695,6 +697,7 @@
           {uploadSignature}
           bind:mention
           bind:postTarget
+          bind:postPrefill
           bind:signatureHandle
           bind:sigInput
         />

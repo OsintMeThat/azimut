@@ -13,6 +13,13 @@ import {
 
 const source = readFileSync(new URL('./ProofComposer.svelte', import.meta.url), 'utf8');
 
+/** The body of a top-level function in the component, for the assertions that are
+ *  about one of them rather than about the file. */
+const bodyOfFn = (name) => {
+  const at = source.indexOf(`function ${name}(`);
+  return source.slice(at, source.indexOf('\n  }', at));
+};
+
 describe('Proof Composer empty state', () => {
   it('hides proof-specific chrome until a proof is started', () => {
     const { body } = render(ProofComposer);
@@ -120,13 +127,23 @@ describe('Proof Composer pickers', () => {
   });
 
   it('calls a capture satellite exactly when the Media Library does', () => {
-    expect(source).toContain("import { isSatelliteMedia } from '../lib/mediaFilter.js'");
+    expect(source).toContain("import { isSatelliteMedia, sortItems } from '../lib/mediaFilter.js'");
     expect(source).toContain("kind: isSatelliteMedia(s) ? 'satellite' : 'media'");
     // captures are dropped from the media half by path, so a Street View grab
     // is listed once, under Other images, instead of twice
     expect(source).toContain('const captured = new Set(sats.map((s) => s.path));');
     expect(source).toContain('!captured.has(m.path)');
     expect(source).not.toContain('isSatelliteCapture');
+  });
+
+  it('lists both halves newest first, rather than every capture above every photo', () => {
+    // Each list arrives newest first and concatenating them threw that away. The
+    // picker is opened for the frame cut a minute ago, whichever half it came from.
+    const fetch = bodyOfFn('fetchPanelItems');
+    expect(fetch).toContain("added_at: s.added_at ?? s.fetched_at ?? ''");
+    expect(fetch).toContain("added_at: m.added_at ?? ''");
+    expect(fetch).toContain("'newest'");
+    expect(fetch).toContain('return sortItems(');
   });
 
   it('searches panels by their title, not by the file name', () => {
@@ -541,6 +558,19 @@ describe('the points a proof states', () => {
     // an empty field means "whatever the imagery says", and that answer has to
     // become the conclusion in writing before the list can grow
     expect(source).toContain("if (!proof.points[0].coords.trim()) proof.points[0].coords = displayedCoords;");
+    expect(bodyOfFn('addPoint')).toContain('statePoint0();');
+  });
+
+  it('writes the coordinates down with the name typed onto them', () => {
+    // The save states only what the proof holds: a row with no coordinates is
+    // dropped, and the name typed onto the imagery's answer went with it — no
+    // point in the request, no place filed, and nothing said so.
+    expect(source).toContain('oninput={(e) => namePoint(i, e.target.value)}');
+    expect(bodyOfFn('namePoint')).toContain('if (i === 0) statePoint0();');
+  });
+
+  it('writes them down for POV too, which is the same claim about the same row', () => {
+    expect(bodyOfFn('togglePov')).toContain('if (on) statePoint0();');
   });
 
   it('chooses the conclusion by order, never by POV', () => {
@@ -916,19 +946,37 @@ describe('picking from the side column', () => {
 });
 
 describe('the curve tool', () => {
-  it('stays in hand like the box, the line and the arrow beside it', () => {
-    const finish = source.slice(
-      source.indexOf('function finishPath'),
-      source.indexOf('function commitPasteNode'),
-    );
+  const finish = source.slice(
+    source.indexOf('function finishPath'),
+    source.indexOf('function commitPasteNode'),
+  );
 
+  it('puts the pen down like the box, the line and the arrow beside it', () => {
     expect(finish).toContain("kind: 'curve'");
-    expect(finish).not.toContain("tool = 'select'");
+    expect(finish).toContain('selectedIds = [s.id];');
+    expect(finish).toContain("if (!keepTool) tool = 'select';");
   });
 
   it('ends where it was and opens the next one on a vertex dropped elsewhere', () => {
     // The click used to be dropped in silence, which reads as a dead canvas.
-    expect(down).toContain('if (pathDraft && pathDraft.panel.id !== panel.id) finishPath(true);');
+    // The tool has to survive that close, or the curve it opens is stranded.
+    expect(down).toContain(
+      'if (pathDraft && pathDraft.panel.id !== panel.id) finishPath(true, { keepTool: true });'
+    );
+  });
+});
+
+describe('finishing a shape', () => {
+  const commit = source.slice(
+    source.indexOf('function commitDrawing'),
+    source.indexOf('function onPointerUp'),
+  );
+
+  it('picks it and puts the pen down, so the toolbar edits what was just drawn', () => {
+    // What follows a stroke is almost always a word about it — its colour, its
+    // width, the note it carries — and each of those used to draw a second box.
+    expect(commit).toContain('selectedIds = [s.id];');
+    expect(commit).toContain("tool = 'select';");
   });
 });
 

@@ -125,7 +125,7 @@ proof for publication.
 |------|--------------|
 | ✅ **Coordinates & sky** | Converts coordinates and reads sun, moon, twilight and local time for a saved point on charts or the map. |
 | ✅ **Research helpers** | Prepares media for keyless reverse search and saves keyboard-reviewed AOI grids. |
-| ✅ **Reports & templates** | Stores reusable proof and post structures, then prepares sourced Markdown for X, Bluesky or Mastodon. |
+| ✅ **Reports & templates** | Stores reusable proof and post structures, then prepares sourced Markdown for X or Bluesky. |
 | ✅ **Case Notebook** | Edits linked Markdown notes with local media, Mermaid diagrams, PDF output and remembered export folders. |
 | ✅ **Media at scale** | Downloads behind a login with a session named once, plus bounded search, searchable pickers, local metadata enrichment and GPS handoff to the map. |
 | ✅ **Storage & recovery** | Uses per-case SQLite and durable jobs, with whole-case bundles, Trash and portable settings backups. |
@@ -155,6 +155,13 @@ proof for publication.
 | ✅ **Drawing on a proof** | Stamps a fixed set of marks, fills boxes and ellipses at a chosen opacity, keeps every shape tool in hand, and recolours, restyles, nudges, drags or deletes a picked family at once. |
 | ✅ **A proof of several points** | States every place a proof argues, each optionally named and one of them the camera's, files them as places under one title, and carries them into the tweet and onto the exported picture. |
 
+### v3 GEOINT expansion (unreleased)
+
+| Tool | What it does |
+|------|--------------|
+| ✅ **Map engine** | Draws the map on MapLibre GL behind `lib/map`'s façade, at parity: same providers, same captures, same bearing, and the Google widget basemap kept alive under the map's own transparent canvas. |
+| ✅ **Composer hand-off** | Fills X's or Bluesky's own composer with a prepared thread: each post in its own box with its pictures, the thread button pressed between them, every box read back afterwards, and Post left to the analyst. |
+
 ---
 
 ## 6. Roadmap
@@ -167,11 +174,11 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 
 | Tool | What it does |
 |------|--------------|
-| **Map engine (MapLibre)** | Replaces Leaflet with MapLibre GL at 2D parity: same providers, same captures, and the capture tests still verify the pixels. Ships before the 3D map, which builds on it. |
 | **3D map** | Pitch, public DEM terrain and extruded OSM buildings on the MapLibre map. An oblique capture records its pitch beside the bearing, so the view can be reproduced. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
-| **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. Follows the map engine, which redraws what a capture is made of. |
-| **Footprint tracing** | Draws a place's uncertainty as the shape it really is, for a quay, a treeline or an L-shaped block the circle describes badly. The field, its validation and its drawing already ship; only the gesture is missing, and it follows the map engine rather than being written twice. |
+| **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. |
+| **Extension map overlays** | Draws the app's own layers over the maps the extension rides on — Google Maps, Earth, Apple, Bing: the search grid, the sun and moon arcs, the measure tools. The geometry is already pure and shared; what is missing is drawing it over a map the app does not own. |
+| **Footprint tracing** | Draws a place's uncertainty as the shape it really is, for a quay, a treeline or an L-shaped block the circle describes badly. The field, its validation and its drawing already ship; only the gesture is missing. |
 | **Satellite Compare** | Same coords across providers (Esri / Sentinel-2 date slider / Bing / keyed), synced pan/zoom. Copernicus easy link. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
 | **Metadata follow-up** | Explains which common image/video fields were stripped and proposes events from capture times. |
@@ -209,8 +216,7 @@ can be rebuilt from the spec alone:
 The result is one track per source file over the render's timecode, with
 GPS-tagged clips promotable to places.
 
-Toward v3: split Satellite.svelte into `lib/` modules, before the map engine
-changes under it; GIF maker; curated tool links; full-text case search; clipboard
+Toward v3: GIF maker; curated tool links; full-text case search; clipboard
 image/URL capture with provenance; EXIF/GPS import suggestions for place and
 time; sun and moon times read against the terrain horizon the 3D map's DEM
 supplies, since a ridge ends the day well before the flat horizon does.
@@ -276,6 +282,7 @@ stops making sense.
 - **Free-form montage editor:** consider only if it stays distinct from Geo Proof and Inspect collage.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
+- **A front door for the app:** a home surface saying what Azimut is, how a case works and where to start, then keeping the open case in view with recent items, notes and a mini-map of its places, in panels the analyst arranges. The first half is missing today, since a fresh install lands in a workspace with no case and no guidance; the second has to earn its place beside Board, Graph and Timeline, which already read the case.
 - **A deleted case waits before it is gone:** artifacts, entities and bulk deletes are all recoverable, while removing a case is the one act with no way back and only a typed DELETE in front of it. Move the folder aside instead, and empty it later.
 
 ## 8. Explicit non-goals
@@ -293,9 +300,11 @@ stops making sense.
 
 - **Backend**: Python 3.11+, FastAPI on `localhost`; current processing (ffmpeg,
   yt-dlp, gallery-dl, OpenCV) runs server-side.
-- **Frontend**: Svelte + Leaflet (→ MapLibre) + Konva/canvas, served by the
-  backend, opened in the default browser. Rail = workspaces in pipeline order,
-  tools are tabs inside them (see [UI.md](UI.md)).
+- **Frontend**: Svelte + Konva/canvas, served by the backend, opened in the
+  default browser. The map is MapLibre GL behind `lib/map`'s façade, so tools
+  speak points, positions and view events and never the engine. Rail =
+  workspaces in pipeline order, tools are tabs inside them (see
+  [UI.md](UI.md)).
 - **Settings and secrets:** in-app tabs group general preferences, publishing,
   imagery, templates, the capture extension, storage and system tools; keys
   stored locally and never bundled into a shared case, monthly usage counters,
@@ -318,7 +327,14 @@ stops making sense.
 - **Security posture** (single-user localhost): `127.0.0.1` bind + Host/Origin
   guard (DNS rebinding), 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
   names for images pasted into a proof (no client-chosen path), token-gated
-  ingest island for the extension. A case id and an artifact name each address
+  ingest island for the extension. The one route that reads a case file back out
+  of that island — the attachments a composer hand-off carries — fences on the
+  **resolved** path, so `media/../case.json` is refused where a prefix read off
+  the request would have served it. Filling a composer is the extension's only
+  reach past localhost — three social hosts, declared, where it types what the app
+  handed it and reads nothing — and the switch that uses it is in the app
+  (Settings → Publishing), where the analyst already decides how a thread is
+  published. A case id and an artifact name each address
   one directory entry, checked against POSIX *and* Windows path rules so the
   separator only one of them honours cannot walk out of the workspace. The workspace pointer is the one file written
   outside the workspace, 0600 and holding a path; deleting the copy a move set

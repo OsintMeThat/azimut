@@ -402,3 +402,45 @@ def test_extension_zip_serves_the_packaged_runtime_files(client):
     # the dev harness must not reach an installed browser
     assert not [n for n in names if "node_modules" in n or n.endswith(".test.js")]
     assert "package.json" not in names
+
+
+def _upload(client, cid, name, data):
+    return client.post(
+        f"/api/cases/{cid}/media/upload",
+        files={"file": (name, io.BytesIO(data), "image/png")},
+    ).json()["item"]
+
+
+def test_the_extension_reads_back_the_attachments_a_thread_carries(client):
+    """The hand-off names files by path and the extension fetches the bytes with
+    its own token, so no case file ever passes through the composer's page."""
+    token = _token(client)
+    cid = client.post("/api/cases", json={"name": "Hand-off"}).json()["id"]
+    item = _upload(client, cid, "clip.png", _png_bytes())
+
+    r = client.get(
+        "/api/ingest/file",
+        params={"case_id": cid, "path": item["path"]},
+        headers={"X-Azimut-Token": token},
+    )
+    assert r.status_code == 200
+    assert r.content == _png_bytes()
+    # the same wall as every other ingest route
+    assert client.get("/api/ingest/file", params={"case_id": cid, "path": item["path"]}).status_code == 401
+
+
+def test_reading_back_reaches_attachments_and_nothing_else(client):
+    """A proof PNG and case media are what a post attaches. A sidecar, a spec or a
+    settings file is not something a composer has any business asking for, and
+    traversal is refused before the prefix is even consulted."""
+    token = _token(client)
+    cid = client.post("/api/cases", json={"name": "Narrow"}).json()["id"]
+    headers = {"X-Azimut-Token": token}
+
+    for path in ("case.json", "inspect/session.json", "../../secrets.txt", "media/../case.json"):
+        r = client.get("/api/ingest/file", params={"case_id": cid, "path": path}, headers=headers)
+        assert r.status_code == 403, path
+    missing = client.get(
+        "/api/ingest/file", params={"case_id": cid, "path": "proofs/nothing.png"}, headers=headers
+    )
+    assert missing.status_code == 404

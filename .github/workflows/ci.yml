@@ -187,10 +187,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # One job per browser rather than one job running both. The specs stay at a
-    # single Playwright worker on purpose — canvas startup times out when Leaflet
-    # and Konva compete for a runner's cores — so the only way to shorten this
-    # job is to stop making Firefox wait for Chromium. Each job also installs
-    # only the browser it runs.
+    # single Playwright worker on purpose — canvas startup times out when
+    # MapLibre and Konva compete for a runner's cores — so the only way to
+    # shorten this job is to stop making Firefox wait for Chromium. Each job
+    # also installs only the browser it runs.
     strategy:
       fail-fast: false
       matrix:

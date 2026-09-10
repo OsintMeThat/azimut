@@ -327,7 +327,12 @@ def test_two_sheets_built_the_same_way_are_told_apart(client):
     build(client, case_id)
 
     listed = client.get(f"/api/cases/{case_id}/sheets").json()["sheets"]
-    assert [entry["title"] for entry in listed] == [
+    # Sorted, because the order is not this test's business and is not stable for
+    # three sheets built in the same breath: the list answers newest first, and a
+    # creation stamp is second-resolution, so whether these three separate at all
+    # depends on which side of a tick they land. Ordering is covered on its own
+    # (test_sheets.py, the list opens on the sheet just made).
+    assert sorted(entry["title"] for entry in listed) == [
         "My geolocations",
         "My geolocations-2",
         "My geolocations-3",

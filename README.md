@@ -63,7 +63,7 @@ to fix a point on the map.*
 | **Satellite** | Coordinates or a place name become an imagery crop. The search bar proposes matches as you type: saved work, coordinates and a bundled city list answer offline, and the geocoder fills in the rest once you pause. Select-area capture, map rotation, measurement tools, reference overlays and editable AOI grids for area review. Esri/OSM by default, plus Sentinel-2 with a date calendar and a cloud-ceiling slider; add a Mapbox or Google key for more basemaps. |
 | **Coords & Sky** | Convert common coordinate formats, copy the result, open map or geocoding links, and read the sun and moon at that point on a date: rise, set, azimuth, altitude, twilights, moon phase and bright-limb angle, in local time and UTC, computed offline. |
 | **Geo Proof** | Start a named proof from a reusable house style, or from a published post whose pictures become its panels. Compose case panels in a grid or free layout, annotate with colored shapes, fills, symbols, freehand and text, state every place and every source the proof argues, and export `proof.png` plus a re-editable spec. |
-| **Geo Report** | Turn a proof into a prepared thread for X, Bluesky, or Mastodon: coordinates, plus code, attribution, target-specific character counts, media, and a structured Markdown case note with linked evidence. |
+| **Geo Report** | Turn a proof into a prepared thread for X or Bluesky: coordinates, plus code, attribution, target-specific character counts, media, and a structured Markdown case note with linked evidence. |
 | **Notebook** | Tabbed Markdown notes with local media, Mermaid diagrams, linked case evidence, broken-reference markers, and PDF export of one note or a whole selection. |
 
 Under the hood: reusable proof and thread templates, per-case SQLite with a
@@ -195,7 +195,23 @@ py scripts\relaunch.py            # Windows
 
 The tool rebuilds the frontend, stops the previous Azimut instance started
 through the same tool, and launches the fresh build. It never kills unrelated
-processes by name. Use `--no-browser` to keep it from opening a new tab.
+processes by name. Use `--no-browser` to keep it from opening a new tab, and
+`--ext` to bring the capture extension along (see below).
+
+Working on the extension:
+
+```bash
+python3 scripts/devext.py             # load it into a dev Chrome and Firefox
+python3 scripts/devext.py --watch     # and reload it on every save
+python3 scripts/relaunch.py --ext     # app + extension in one command
+```
+
+It opens a Chrome and a Firefox of its own, loads `extension/` from disk and
+writes the pairing token into it, so an edit needs no reinstall and no paste.
+Each dev browser keeps its profile between runs, and the everyday browsers are
+left alone. Every pass reports when the extension's background restarted, which
+is how you see the new code was taken. `--fresh` starts from an empty profile,
+`python3 scripts/devext.py chrome` (or `firefox`) drives just one.
 
 Frontend development (hot reload, proxied API):
 

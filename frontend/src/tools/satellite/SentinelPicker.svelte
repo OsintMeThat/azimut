@@ -1,68 +1,43 @@
 <script>
   import Icon from '../../components/Icon.svelte';
 
-  let {
-    menuEl = $bindable(),
-    menuOpen,
-    toggleMenu,
-    layer = $bindable(),
-    layers,
-    layerHint,
-    layersSource,
-    loadLayers,
-    date = $bindable(),
-    maxcc,
-    setMaxcc,
-    maxccLabel,
-    filtered,
-    month,
-    monthLabel,
-    stepMonth,
-    monthGrid,
-    passes,
-    cloudClass,
-    cloudLabel,
-    passesBusy,
-    passesNote,
-    passesStale,
-    verifyingDate,
-    dateStatus,
-    pickDate,
-    clearDate,
-    loadPasses,
-  } = $props();
+  /** `s2` is the store from `state/sentinel.svelte.js`: what has been asked,
+   *  what came back, and what is still in flight. The label helpers are pure
+   *  (`lib/sentinel.js`) and are handed over so this stays a view. */
+  let { menuEl = $bindable(), s2, maxccLabel, monthLabel, monthGrid, cloudClass, cloudLabel } =
+    $props();
 
   // The readout tracks the drag; the ceiling only moves on release. Every step
   // in between would be a provider id of its own, and Sentinel-2 tiles are
   // billed — you pay for the number you stopped on, not the ones you passed.
   let dragging = $state(null);
-  const shown = $derived(dragging ?? maxcc);
+  const shown = $derived(dragging ?? s2.maxcc);
 </script>
 
 <div class="s2-wrap" bind:this={menuEl}>
   <button
     class="btn btn-icon"
-    class:on={menuOpen}
-    onclick={toggleMenu}
+    class:on={s2.menuOpen}
+    onclick={s2.toggleMenu}
     title="Sentinel-2 layer and date"
     aria-label="Sentinel-2 layer and date"
   ><Icon name="layers" size={14} /></button>
-  {#if menuOpen}
+  {#if s2.menuOpen}
     <div class="s2-menu card">
       <div class="menu-row">
         <span class="menu-label">Layer</span>
-        <select class="select" bind:value={layer}>
-          {#each layers as entry (entry.id)}
+        <select class="select" bind:value={s2.layer}>
+          {#each s2.layers as entry (entry.id)}
             <option value={entry.id}>{entry.label}</option>
           {/each}
         </select>
       </div>
-      {#if layerHint}<div class="menu-hint">{layerHint}</div>{/if}
+      {#if s2.layerHint}<div class="menu-hint">{s2.layerHint}</div>{/if}
       <div class="menu-hint dim">
-        {layersSource === 'instance'
+        {s2.layersSource === 'instance'
           ? 'These layers come from your configuration.'
           : 'Could not read your configuration; showing the standard layers.'}
-        <button class="linkish" onclick={() => loadLayers(true)}>Refresh</button>
+        <button class="linkish" onclick={() => s2.loadLayers(true)}>Refresh</button>
       </div>
 
       <div class="menu-sep" aria-hidden="true"></div>
@@ -79,7 +54,7 @@
             oninput={(e) => (dragging = Number(e.currentTarget.value))}
             onchange={(e) => {
               dragging = null;
-              setMaxcc(Number(e.currentTarget.value));
+              s2.setMaxcc(Number(e.currentTarget.value));
             }}
             aria-label="Maximum cloud cover"
           />
@@ -95,48 +70,49 @@
       <div class="menu-row">
         <span class="menu-label">Date</span>
         <div class="chips">
-          <button class="chip" class:on={!date} onclick={clearDate}>Most recent</button>
+          <button class="chip" class:on={!s2.date} onclick={s2.clearDate}>Most recent</button>
         </div>
       </div>
 
       <div class="cal">
         <div class="cal-head">
-          <button class="cal-nav" onclick={() => stepMonth(-1)} aria-label="Previous month">
+          <button class="cal-nav" onclick={() => s2.stepMonth(-1)} aria-label="Previous month">
             <Icon name="chevronLeft" size={13} />
           </button>
-          <span class="cal-month">{monthLabel(month)}</span>
-          <button class="cal-nav" onclick={() => stepMonth(1)} aria-label="Next month">
+          <span class="cal-month">{monthLabel(s2.month)}</span>
+          <button class="cal-nav" onclick={() => s2.stepMonth(1)} aria-label="Next month">
             <Icon name="chevronRight" size={13} />
           </button>
         </div>
-        <div class="cal-grid" class:busy={passesBusy}>
+        <div class="cal-grid" class:busy={s2.passesBusy}>
           {#each ['M', 'T', 'W', 'T', 'F', 'S', 'S'] as entry, index (index)}
             <span class="cal-dow" aria-hidden="true">{entry}</span>
           {/each}
-          {#each monthGrid(month) as day, index (day ?? `pad${index}`)}
+          {#each monthGrid(s2.month) as day, index (day ?? `pad${index}`)}
             {#if !day}
               <span class="cal-pad" aria-hidden="true"></span>
             {:else}
-              {@const pass = passes[day]}
-              {@const status = dateStatus(day)}
-              {@const overCeiling = filtered(day)}
+              {@const pass = s2.passes[day]}
+              {@const status = s2.dateStatus(day)}
+              {@const overCeiling = s2.filtered(day)}
               {@const unavailable = status === false || overCeiling}
-              {@const verifying = verifyingDate === day}
+              {@const verifying = s2.verifyingDate === day}
               <button
                 class="cal-day {pass ? cloudClass(pass.cloud) : ''}"
                 class:has={!!pass}
-                class:on={date === day}
+                class:on={s2.date === day}
                 class:unavailable
                 class:verifying
-                disabled={date !== day && (!pass || passesStale || passesBusy || unavailable || !!verifyingDate)}
-                onclick={() => pickDate(day)}
+                disabled={s2.date !== day &&
+                  (!pass || s2.stale || s2.passesBusy || unavailable || !!s2.verifyingDate)}
+                onclick={() => s2.pickDate(day)}
                 title={overCeiling
-                  ? `${day}: ${cloudLabel(pass.cloud)}, over the ${maxcc}% ceiling`
+                  ? `${day}: ${cloudLabel(pass.cloud)}, over the ${s2.maxcc}% ceiling`
                   : unavailable
                     ? `No imagery at the crosshair on ${day}`
                     : verifying
                       ? `Checking imagery for ${day}`
-                      : passesStale
+                      : s2.stale
                         ? `Refreshing dates for this location`
                         : pass
                           ? `${day}: ${cloudLabel(pass.cloud) || 'cloud cover unknown'}`
@@ -147,14 +123,14 @@
         </div>
       </div>
 
-      {#if passesBusy}
+      {#if s2.passesBusy}
         <div class="menu-hint dim">Reading this month's passes…</div>
-      {:else if passesNote}
-        <div class="menu-hint warn">{passesNote}</div>
-      {:else if passesStale}
+      {:else if s2.passesNote}
+        <div class="menu-hint warn">{s2.passesNote}</div>
+      {:else if s2.stale}
         <div class="menu-hint">
           <span class="warn">Refreshing dates for this location.</span>
-          <button class="linkish" onclick={() => loadPasses(true)}>Refresh</button>
+          <button class="linkish" onclick={() => s2.loadPasses(true)}>Refresh</button>
         </div>
       {:else}
         <div class="menu-hint dim">

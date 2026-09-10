@@ -612,7 +612,9 @@ single root to expand from. Expansion is the drill-down.
   The card names the act instead of the kind — *Frame*, *Collage* — and the panel adds
   one line saying it was made out of material the case already holds. Only the tools
   that compose case material mark their output: an upload carries nothing, since
-  "upload" on an upload says nothing about it.
+  "upload" on an upload says nothing about it. A capture is not one of them — it has
+  no parents to draw, and the ontology files it as collected — though the Media
+  Library still holds it back as a file the app produced.
 - **Previews are the cached thumbnails** the Media Library uses, loaded only for the
   cards actually on screen and only once each. The graph never generates one: a read
   that draws does no CPU work, so an entity whose picture was never cached shows its
@@ -1021,17 +1023,24 @@ for a reload that will never come.
 
 ## Sources
 
-The Media Library toolbar keeps explicit maintenance actions beside Import:
-**Thumbnails** repairs missing previews; **Enrich** queues local image
+The Media Library toolbar keeps its explicit maintenance actions behind a `⋮`
+beside Import, because both are repairs pressed once in a while and read as a
+step of importing when they sit next to Download: **Regenerate missing
+thumbnails** repairs missing previews; **Read file metadata** queues local image
 EXIF/perceptual-hash and video metadata backfill for files not processed by the
-current version. A **GPS** toggle beside the type and folder filters narrows the
+current version. The `⋮` stays put on a case with no media, its rows disabled,
+and closes on Escape or a click outside.
+
+A **GPS** toggle beside the type and folder filters narrows the
 list to the files whose own metadata states a position, and appears only in a case
 that holds some; how many is in its tooltip, not in its label. Those rows carry
 one pin glyph — coordinates in the tooltip, not in the title — and clicking it
 flies the map there. **Show N working files** sits on the same independent axis: a
 switch rather than another chip, because the chips answer *show me only X* and are
 single-select where this one is *put X back*. The library opens on what the case
-collected, the frames and collages it made itself held back, and the switch says how
+collected, the frames, collages and captures it produced itself held back — a capture
+is a map the app drew out of tiles or the extension grabbed off the screen, where an
+upload, a paste and a download came from outside — and the switch says how
 many those are rather than leaving them unannounced; the counts and the paging are
 computed with it so the facets never disagree with the list, and toggling it refetches
 because the loaded page is already the collected subset. It reads how the file
@@ -1040,7 +1049,7 @@ found identical to an extracted frame stays on the side it came in by. A case ho
 nothing but working files says so instead of offering to import. Thumbnail polling follows all pending case jobs, including
 files beyond the loaded page after a case import. Thumbnail failures are scoped
 to their case, so switching cases always reloads previews even when relative
-paths match. Enrich respects an existing confirmed GPS relation during backfill.
+paths match. Enrichment respects an existing confirmed GPS relation during backfill.
 
 **Import asks where the files came from.** A file fetched by hand elsewhere and
 then dropped here carries no address of its own, so a drop or a pick opens one
@@ -1142,7 +1151,7 @@ from the map.
 
 Map controls sit in two clusters. **Tools** (measure, sun & moon, grid search,
 reference image) float top-left. A tool with settings opens its panel beside that
-cluster, never beneath it, because beneath it is where Leaflet's own controls
+cluster, never beneath it, because beneath it is where the map's own controls
 live. **View** — fullscreen, OSM labels, saved work — continues the zoom column
 beneath `+`/`−`, because none of them changes what you are doing, only what you
 see.
@@ -1239,14 +1248,17 @@ stays out of the legend, which is still built from annotation colours alone.
 
 **Drawing.** A tool in hand holds the canvas alone. Nothing already drawn answers
 the pointer, so a stroke started inside a box draws a new element instead of
-dragging the old one, and the colour and width you pick set the next element
-rather than repainting the last. The selection stays where it was and its handles
-come back with Select. A box or an ellipse also takes a fill, in its own colour at
+dragging the old one, and while the tool is held the colour and width you pick set
+the next element rather than repainting the last. The selection stays where it was
+and its handles come back with Select. A box or an ellipse also takes a fill, in its own colour at
 an opacity you choose. Shapes start hollow: a fill hides what is under it, so it
 is asked for rather than given. Fill and outline share one colour, since the
-legend reads colour as the feature. Every shape tool stays in hand, so three
-boxes is three drags. Text is the one that puts the pen down: the editor opens
-where the label was placed, because placing it and saying what it says are one
+legend reads colour as the feature. **A shape puts the pen down when it lands**:
+it is picked and Select comes back with it, so the colour, the width and the note
+go onto what was just drawn. What follows a stroke is nearly always a word about
+it, and every one of those used to draw a second box first. Three boxes in a row
+is the shortcut pressed three times. Text does the same and opens its editor where
+the label was placed, because placing it and saying what it says are one
 act. A label holds more than one line — Shift+Enter opens the second, Enter ends
 the edit.
 
@@ -1257,8 +1269,8 @@ points-based kinds: it has too many samples to show, so it takes the frame and
 the handles rather than a canvas full of dots.
 
 **Symbols.** A grid of fixed marks — a pin, an impact, vehicles, a building, a
-drone, a camera, an antenna, a north arrow — stamped with one click. The tool
-stays in hand afterwards, since marking six vehicles is one act rather than six.
+drone, a camera, an antenna, a north arrow — stamped with one click. The one tool
+that stays in hand afterwards, since marking six vehicles is one act rather than six.
 A symbol takes the active colour like anything else drawn, so it joins the legend
 by colour and claims no vocabulary the legend cannot say. It resizes from its
 corners with the ratio locked: the box is square and there is one side to change,

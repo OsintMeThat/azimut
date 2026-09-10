@@ -17,6 +17,8 @@ import time
 import pytest
 from PIL import Image
 
+from jobwait import WAIT
+
 from azimut import layout
 from azimut.engine import media as media_engine
 from azimut.engine import thumbnails, workqueue
@@ -200,14 +202,18 @@ def test_worker_wakes_and_drains_in_the_background(tmp_workspace, monkeypatch):
     c = Case.create("Worker")
     item = _register_video(c)["item"]  # enqueues + wakes the worker
 
-    deadline = time.time() + 5
+    # The worker's own budget, not this test's guess: five seconds is what a
+    # developer's machine spends here and what a loaded ubuntu runner does not,
+    # so the shard failed on a thumbnail that was still being written. Same
+    # wall clock as every other job the suite waits on (`jobwait`).
+    deadline = time.time() + WAIT
     while time.time() < deadline:
         if media_engine.read_item(c, item["path"])["thumbnail"]:
             break
         time.sleep(0.05)
     refreshed = media_engine.read_item(c, item["path"])
     assert refreshed["thumbnail"] and c.resolve_inside(refreshed["thumbnail"]).exists()
-    assert workqueue.wait_until_idle()
+    assert workqueue.wait_until_idle(WAIT)
 
 
 # -- videos shorter than the seek -----------------------------------------

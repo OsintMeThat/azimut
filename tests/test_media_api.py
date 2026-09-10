@@ -9,7 +9,7 @@ import graph_read
 import pytest
 import time
 
-from jobwait import job_result, wait_for_job
+from jobwait import WAIT, job_result, wait_for_job
 from PIL import Image
 
 from azimut.engine.media import safe_filename
@@ -409,26 +409,30 @@ def test_leaving_them_out_scopes_the_counts_too(client):
     assert page["facets"]["kind_counts"]["image"] == 1
 
 
-def test_leaving_them_out_does_not_touch_collected_material(client):
-    """A satellite capture is original imagery brought into the case, not something
-    composed out of what the case already holds. Same for a download and an import."""
+def test_a_capture_is_a_file_the_case_produced_itself(client):
+    """The app drew those pixels out of tiles it fetched, and a geolocation ends with
+    dozens of them. The extension's screenshot is the same act through another window,
+    filed as a capture too, so it is held back with them. What stays is the material
+    that came from outside."""
     from azimut.engine import media as media_engine
     from azimut.workspace import Case
 
     cid = client.post("/api/cases", json={"name": "Untouched"}).json()["id"]
     upload = _upload(client, cid, "orig.png", _png_bytes()).json()["item"]
-    capture = media_engine.import_image(
-        Case.open(cid),
-        Image.new("RGB", (32, 24)),
-        "map.png",
-        {"type": "satellite"},
-        entity_type="capture",
-        dedupe=False,
-    )["item"]
+    case = Case.open(cid)
+    media_engine.import_image(
+        case, Image.new("RGB", (32, 24)), "map.png",
+        {"type": "satellite"}, entity_type="capture", dedupe=False,
+    )
+    media_engine.import_image(
+        case, Image.new("RGB", (32, 24)), "maps-screen.png",
+        {"type": "screenshot", "imagery_mode": "satellite"},
+        entity_type="capture", dedupe=False,
+    )
 
     page = client.get(f"/api/cases/{cid}/media/page", params={"collected_only": "true"}).json()
-    assert {item["path"] for item in page["items"]} == {upload["path"], capture["path"]}
-    assert page["facets"]["made_here_count"] == 0
+    assert {item["path"] for item in page["items"]} == {upload["path"]}
+    assert page["facets"]["made_here_count"] == 2
 
 
 def test_the_switch_reads_how_a_file_entered_not_everything_true_about_it(client):
@@ -1929,7 +1933,15 @@ def test_concurrent_sidecar_merges_do_not_drop_each_other(client, monkeypatch):
     for t in threads:
         t.start()
     for t in threads:
-        t.join(timeout=10)
+        # A join that gives up does not stop the thread: it goes on writing into a
+        # case the teardown is about to delete, which on Windows is a locked
+        # `case.db` and a temp directory that cannot be removed — reported as an
+        # error against whichever test happened to be running. Ten seconds was
+        # this machine's budget for forty merges; the Windows shard commits each
+        # one at `synchronous = FULL` and wants the suite's own. A writer that
+        # really is stuck now says so here, where the stack still means something.
+        t.join(timeout=WAIT)
+        assert not t.is_alive(), "a sidecar writer never finished"
 
     item = media_engine.read_item(case, rel)
     assert item["thumbnail"] == "media/.thumbs/x.jpg"

@@ -76,12 +76,12 @@ _MEDIA_CATEGORY_SQL = {
     "other": "kind NOT IN ('image', 'video')",
 }
 
-#: Rows the case **made** rather than collected, as one predicate. The set is the
-#: relation layer's (`engine/links.py` MADE_HERE), so the list and the graph cannot
-#: come to disagree about what a case collected.
-_MADE_HERE_SQL = (
+#: Rows the app **produced** rather than ones the analyst gathered, as one predicate.
+#: The set is the relation layer's (`engine/links.py` PRODUCED_HERE), which is where the
+#: two sets and the reason they differ by a capture are written down.
+_PRODUCED_HERE_SQL = (
     "COALESCE(source_type, '') IN ("
-    + ", ".join(f"'{route}'" for route in link_engine.MADE_HERE)
+    + ", ".join(f"'{route}'" for route in link_engine.PRODUCED_HERE)
     + ")"
 )
 

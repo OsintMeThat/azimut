@@ -1,7 +1,7 @@
 <script module>
   /** Inline icon set (24×24, stroke-based, lucide-style). No external assets.
-   *  Exported so code that has to build SVG outside a component (the Leaflet
-   *  marker icons) draws from this one set instead of copying paths. */
+   *  Exported so code that has to build SVG outside a component (the map's
+   *  marker glyphs) draws from this one set instead of copying paths. */
   export const paths = {
     // navigation / tools
     media: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm0 11 4.5-4.5a1 1 0 0 1 1.4 0L14 15.5m-1.5-1.5 2.6-2.6a1 1 0 0 1 1.4 0L21 15M9 9.5h.01',

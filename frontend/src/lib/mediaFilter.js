@@ -47,13 +47,16 @@ export function isBroughtIn(item) {
   return BROUGHT_IN.has(item?.source?.type);
 }
 
-/** The tools that make a file out of material the case already holds. Mirrors
- *  `links.MADE_HERE`; the server filters on the same set, and this is the
- *  in-memory pass a case small enough for one page takes instead. */
-const MADE_HERE = new Set(['inspect']);
+/** The tools whose output the app produced rather than the analyst gathered. Mirrors
+ *  `links.PRODUCED_HERE` — a wider set than the graph's `MADE_HERE`, and that file is
+ *  where the two and the reason they differ by a capture are written down. The server
+ *  filters on the same set, and this is the in-memory pass a case small enough for one
+ *  page takes instead. */
+const MADE_HERE = new Set(['inspect', 'satellite', 'screenshot']);
 
-/** Whether the case made this file rather than collected it: an extracted frame,
- *  an adjustment, a collage.
+/** Whether the app produced this file rather than the analyst gathering it: an
+ *  extracted frame, an adjustment, a collage, a capture drawn out of tiles, a map
+ *  the extension grabbed off the screen.
  *
  *  Reads **how the file entered the case**, not everything true about it. Bytes
  *  imported first and later found identical to a frame keep `upload`, because that

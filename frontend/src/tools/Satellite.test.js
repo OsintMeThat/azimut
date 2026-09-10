@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('./Satellite.svelte', import.meta.url), 'utf8');
 const cluster = readFileSync(
@@ -7,74 +7,74 @@ const cluster = readFileSync(
   'utf8'
 );
 // The sky overlay's geometry moved to `lib/skyOverlay.js`, where it is exercised
-// against real numbers (`skyOverlay.test.js`); the tool hands it to Leaflet.
+// against real numbers (`skyOverlay.test.js`); the tool hands it to the map.
 const sky = readFileSync(new URL('../lib/skyOverlay.js', import.meta.url), 'utf8');
 
-describe('Satellite saved work', () => {
-  it('opens the case on one compact index, not on every capture row', () => {
-    expect(source).toContain('/satellite/index');
-    // the flat Places and Captures lists, and everything that served only them
-    expect(source).not.toContain('fetchAllEntities');
-    expect(source).not.toContain('capturesSubCollapsed');
-    expect(source).not.toContain('placesCollapsed');
-    expect(source).not.toContain('cap-list');
-    expect(source).not.toContain('place-list');
-  });
+/** The tool and everything it is made of, for the checks that must hold of all of it. */
+function satelliteSources() {
+  const files = { 'Satellite.svelte': source };
+  const dir = new URL('./satellite/', import.meta.url);
+  for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || entry.name.endsWith('.test.js')) continue;
+    const at = `${entry.parentPath}/${entry.name}`;
+    files[at.slice(at.indexOf('/satellite/') + 1)] = readFileSync(at, 'utf8');
+  }
+  return files;
+}
 
-  it('hands the index to the tree, the search and the map overlay', () => {
+describe('Satellite saved work', () => {
+  // The indexes, the filter, the Locate pass and the row actions are the store's
+  // (`satellite/state/saved.svelte.test.js`, which exercises them for real).
+  // What is this file's business is that the tool hands them over.
+  it('hands one store to the tree, the search and the map overlay', () => {
+    expect(source).toContain("import { createSavedState } from './satellite/state/saved.svelte.js'");
     expect(source).toContain('<SavedTree');
     expect(source).toContain('<SavedSearch');
     expect(source).toContain('<SavedOverlay');
-    expect(source).toContain('rows={savedRows}');
-    expect(source).toContain('items={savedShown}');
+    expect(source).toContain('rows={savedWork.shownRows}');
+    // the overlay draws the panel's filtered selection, never the whole index
+    expect(source).toContain('items={savedWork.shown}');
+    expect(source).not.toContain('items={savedWork.rows}');
   });
 
-  it('draws the panel’s filtered selection on the map, not the whole index', () => {
-    expect(source).toContain(
-      'const savedShown = $derived(filterSaved(savedRows, { kind: savedKind, query: savedQuery }))'
-    );
-    // the overlay must never be handed the unfiltered index again
-    expect(source).not.toContain('items={saved}');
+  it('loads and drops both indexes with the case, through the store', () => {
+    expect(source).toContain('return savedWork.load(id);');
+    expect(source).toContain('savedWork.loadProofs(caseState.current?.id, caseState.rev)');
   });
 
-  it('reads the proofs index only once the Proofs position is opened', () => {
-    // opening a case must not pay for a view it may never show
-    expect(source).toContain('const savedRows = $derived(isMode(savedKind) ? savedProofs : saved)');
-    expect(source).toContain('if (!id || !isMode(savedKind) || proofsFor === stamp) return');
-    expect(source).toContain('`/api/cases/${id}/proofs/index`');
+  it('closes over this case for every row action', () => {
+    // a pass or a PATCH must never land in the case the analyst just left
+    expect(source).toContain('savedWork.accept(caseState.current.id, row)');
+    expect(source).toContain('savedWork.move(caseState.current.id, row, folder)');
+    expect(source).toContain('savedWork.runLocate(caseState.current?.id)');
+    expect(source).toContain('await savedWork.remove(caseId, row)');
   });
 
-  it('files a dragged row through its own entity type', () => {
-    // a proof filed as a capture would be routed to PATCH /media, which is the
-    // sidecar of an image the proof is not
-    expect(source).toContain("row.kind === 'proof' ? 'proof'");
-  });
-
-  it('re-reads the proofs index when the case is reloaded, not only when it changes', () => {
-    // filing a proof reloads the case; keying only on the id would leave the
-    // panel showing the folder the proof just left
-    expect(source).toContain('const stamp = `${id}:${caseState.rev}`');
-  });
-
-  it('drops both saved indexes before loading a different case', () => {
+  it('drops the dialogs and the session layers before another case', () => {
     const effect = source.slice(
-      source.indexOf('if (savedFor !== id)'),
-      source.indexOf('return () => { live = false; };', source.indexOf('if (savedFor !== id)'))
+      source.indexOf('if (openFor !== id)'),
+      source.indexOf('return savedWork.load(id);')
     );
-    expect(effect).toContain('saved = []');
-    expect(effect).toContain('savedProofs = []');
-    expect(effect).toContain('proofsFor = null');
     expect(effect).toContain('savedSearchOpen = false');
     expect(effect).toContain('deleteTarget = null');
     expect(effect).toContain('notesItem = null');
     expect(effect).toContain('placeModal = null');
-    expect(effect).toContain('locateGeneration += 1');
-    expect(effect.indexOf('saved = []')).toBeLessThan(effect.indexOf('/satellite/index'));
+    expect(effect).toContain('temporalMap = null');
+    expect(effect).toContain('sheetPoints = null');
   });
 
-  it('ignores an earlier case response after the case changes', () => {
-    expect(source).toContain('.then((rows) => { if (live) saved = rows; })');
-    expect(source).toContain('return () => { live = false; };');
+  it('keeps the map overlay off by default and out of the case file', () => {
+    expect(source).toContain('let savedOverlay = $state(false)');
+    expect(source).toContain('{#if savedOverlay}');
+    expect(cluster).toContain('savedOverlay = $bindable()');
+    expect(cluster).toContain('onclick={() => (savedOverlay = !savedOverlay)}');
+    // nothing about the overlay is written back to the case — session only
+    expect(source).not.toContain('savedOverlay:');
+  });
+
+  it('shares one hovered id between the panel and the map', () => {
+    expect(source).toContain('let hoveredSavedId = $state(null)');
+    expect((source.match(/bind:hoveredId=\{hoveredSavedId\}/g) ?? []).length).toBe(3);
   });
 
   it('opens a proof rather than queueing it as a panel of a new one', () => {
@@ -88,53 +88,9 @@ describe('Satellite saved work', () => {
     expect(source).toContain('onpost={openLinkedPost}');
   });
 
-  it('shares one hovered id between the panel and the map', () => {
-    expect(source).toContain('let hoveredSavedId = $state(null)');
-    expect((source.match(/bind:hoveredId=\{hoveredSavedId\}/g) ?? []).length).toBe(3);
-  });
-
-  it('keeps the map overlay off by default and out of the case file', () => {
-    expect(source).toContain('let savedOverlay = $state(false)');
-    expect(source).toContain('{#if savedOverlay}');
-    expect(cluster).toContain('savedOverlay = $bindable()');
-    expect(cluster).toContain('onclick={() => (savedOverlay = !savedOverlay)}');
-    // nothing about the overlay is written back to the case — session only
-    expect(source).not.toContain('savedOverlay:');
-  });
-
-  it('runs Locate in bounded batches that can be stopped', () => {
-    expect(source).toContain('/satellite/locate?limit=${LOCATE_BATCH}');
-    expect(source).toContain(
-      'while (remaining > 0 && !locateStopped && generation === locateGeneration)'
-    );
-    expect(source).toContain('oncancelLocate={() => (locateStopped = true)}');
-  });
-
-  it('stops the Locate loop when a batch resolves nothing', () => {
-    // offline, every batch comes back with the same backlog — looping on that
-    // would hammer Nominatim forever
-    expect(source).toContain('const stalled = batch.remaining >= remaining');
-    expect(source).toContain('if (stalled || throttled) break;');
-  });
-
-  it('stops and says so when OpenStreetMap is rate-limiting the address', () => {
-    // a 429 is not a lookup failure: running the pass again is exactly the
-    // wrong advice, so the pass ends and the toast says to wait
-    expect(source).toContain('throttled = Boolean(batch.throttled)');
-    expect(source).toContain('OpenStreetMap is rate-limiting this address');
-  });
-
-  it('does not let a Locate pass continue in another case', () => {
-    expect(source).toContain('const id = caseState.current.id');
-    expect(source).toContain('const generation = ++locateGeneration');
-    expect(source).toContain('generation === locateGeneration');
-    expect(source).toContain('`/api/cases/${id}/satellite/locate?limit=${LOCATE_BATCH}`');
-    expect(source).toContain('if (generation !== locateGeneration) return');
-  });
-
   it('reveals a capture the case sidebar points at, whatever the filter was', () => {
-    expect(source).toContain("savedKind = 'all'");
-    expect(source).toContain("savedQuery = ''");
+    expect(source).toContain("savedWork.kind = 'all'");
+    expect(source).toContain("savedWork.query = ''");
     expect(source).toContain('revealSavedId = row.id');
   });
 });
@@ -146,65 +102,59 @@ describe('Capture extension settings handoff', () => {
 });
 
 describe('filing saved work from its details dialog', () => {
+  const captureDialog = readFileSync(
+    new URL('./satellite/CaptureDetails.svelte', import.meta.url),
+    'utf8'
+  );
+
   it('offers the same folder picker the rest of the app uses, in both dialogs', () => {
-    expect(source).toContain("import FolderSelect from '../components/FolderSelect.svelte'");
-    expect(source).toContain('bind:value={notesFolder}');
-    expect(source).toContain('bind:value={placeModal.folder}');
-    expect((source.match(/emptyLabel="My work \(root\)"/g) ?? []).length).toBe(2);
+    expect(captureDialog).toContain("import FolderSelect from '../../components/FolderSelect.svelte'");
+    expect(captureDialog).toContain('bind:value={folder}');
+    expect(captureDialog).toContain('emptyLabel="My work (root)"');
+    const placeDialog = readFileSync(
+      new URL('./satellite/PlaceDialog.svelte', import.meta.url),
+      'utf8'
+    );
+    expect(placeDialog).toContain("import FolderSelect from '../../components/FolderSelect.svelte'");
+    expect(placeDialog).toContain('bind:value={draft.folder}');
+    expect(placeDialog).toContain('emptyLabel="My work (root)"');
   });
 
   it('opens each dialog on the folder the item is already in', () => {
-    expect(source).toContain("notesFolder = row.folder ?? ''");
+    expect(captureDialog).toContain("let folder = $state(row.folder ?? '')");
     expect(source).toContain("folder: row.folder ?? ''");
   });
 
   it('files a capture in the patch it already sends', () => {
-    expect(source).toContain('title: notesTitle, folder: notesFolder');
+    expect(source).toContain('{ path: notesItem.path, notes, title, folder }');
   });
 
   it('files a place, whether it is being saved or edited', () => {
     expect(source).toContain("attrs: { notes: m.notes.trim(), folder: m.folder ?? '' }");
-    expect(source).toMatch(/notes: m\.notes,\s*\n\s*folder: m\.folder,/);
+    expect(source).toContain('folder: m.folder,');
   });
 });
 
-describe('reference picker search', () => {
-  it('searches the case media instead of only listing it', () => {
-    expect(source).toContain("import { matchesQuery } from '../lib/mediaFilter.js'");
-    expect(source).toContain('matchesQuery(m, refQuery)');
-    expect(source).toContain('{#each visibleRefMedia as m (m.path)}');
+describe('reference windows', () => {
+  // the picker itself is `satellite/RefPicker.svelte`, which owns the search,
+  // the folder browser and what an empty case says
+  it('reads the case media once, when the picker opens', () => {
+    expect(source).toContain('async function openRefPicker()');
+    expect(source).toContain('`/api/cases/${id}/media`');
+    expect(source).toContain("m.kind === 'image' || m.kind === 'video'");
   });
 
-  it('only shows the box once the grid is long enough to need it', () => {
-    expect(source).toContain('const REF_SEARCH_MIN = 6');
+  it('spawns the window the picker handed back, and closes it', () => {
+    expect(source).toContain('onpick={addRef}');
+    expect(source).toContain('createViewer(`ref-${++refSeq}`, item');
+    expect(source).toContain('refPicker = false;');
   });
 
-  it('opens the picker on a cleared query', () => {
-    expect(source).toMatch(/refPicker = true;\s*\n\s*refQuery = '';/);
-  });
-
-  it('tells the user when the search matched nothing', () => {
-    expect(source).toContain('No media matches this search.');
-  });
-
-  it('swaps the grid for the folder browser behind the "…" button', () => {
-    expect(source).toContain('<FolderBrowser');
-    expect(source).toContain('onclick={toggleRefBrowser}');
-    expect(source).toContain('entries={refBrowserEntries}');
-    expect(source).toContain("rootLabel=\"Case media\"");
-    // the browser reads the folder off attrs, like every other picker
-    expect(source).toContain("attrs: { folder: m.folder ?? '' }");
-  });
-
-  it('keeps the search box up while browsing and filters the rows with it', () => {
-    expect(source).toContain('{#if refBrowserOpen || refMedia.length > REF_SEARCH_MIN}');
-    expect(source).toContain('matches={(entry) => matchesQuery(entry, refQuery)}');
-  });
-
-  it('adds the browsed pick on double-click or the confirm button', () => {
-    expect(source).toContain('onconfirm={(entry) => addRef(entry)}');
-    expect(source).toContain('disabled={!refBrowseSelection}');
-    expect(source).toContain('onclick={confirmRefBrowser}');
+  it('keeps the windows out of the case: session state, never captured', () => {
+    // they live in uiState for the tab's life, and the crop hides them
+    expect(source).toContain('uiState.refViewers');
+    expect(source).not.toContain('refViewers:');
+    expect(source).toContain('.map-wrap.grabbing');
   });
 });
 
@@ -233,8 +183,16 @@ describe('the saved panel is resizable', () => {
     expect(source).toContain('savedPanel.saveWidth(savedW); // one write per drag');
   });
 
+  it('leaves the left button to whichever mode is armed for it', () => {
+    // shift and the left button turn the map, but the capture marquee and the
+    // grid box are both waiting on that same drag
+    expect(source).toContain(
+      "e.button === 0 && e.shiftKey && !selectArmed && gridDraw !== 'rect'"
+    );
+  });
+
   it('redraws the map for the new size', () => {
-    expect(source).toContain('map?.invalidateSize({ animate: false })');
+    expect(source).toContain('engine?.resize()');
   });
 
   it('hides the handle when the panel is collapsed to its rail', () => {
@@ -244,29 +202,14 @@ describe('the saved panel is resizable', () => {
 
 describe('filing saved work by dragging it in the panel', () => {
   it('hands the tree both groupings, the case folders and a move handler', () => {
-    expect(source).toContain('bind:group={savedGroup}');
-    expect(source).toContain('folders={caseState.current?.folders ?? []}');
+    expect(source).toContain('bind:group={savedWork.group}');
     expect(source).toContain('onmove={moveSaved}');
-  });
-
-  it('remembers which grouping the panel was left on', () => {
-    expect(source).toContain("const GROUP_KEY = 'azimut:satelliteSavedGroup'");
-    expect(source).toContain('let savedGroup = $state(loadSavedGroup())');
-    expect(source).toContain('localStorage.setItem(GROUP_KEY, savedGroup)');
-  });
-
-  it('moves through the shared filing route, then reloads the case', () => {
-    expect(source).toContain("import { assignFolder } from '../lib/filing.js'");
-    expect(source).toContain('await assignFolder(caseState.current.id, entity, folder)');
-    expect(source).toContain(
-      "type: row.kind === 'place' ? 'place' : row.kind === 'proof' ? 'proof' : 'capture'"
-    );
-    expect(source).toContain('await reloadCase();\n      toast(');
+    expect(source).toContain('folders={caseState.current?.folders ?? []}');
   });
 
   it('leaves folder browsing out of the search modal', () => {
-    expect(source).not.toContain('savedBrowsing');
-    expect(source).not.toContain('bind:path=');
+    const modal = source.slice(source.indexOf('<SavedSearch'));
+    expect(modal).not.toContain('onmove');
   });
 });
 
@@ -304,8 +247,9 @@ describe('sun and moon mode', () => {
     // the anchor stands for the zenith and the arc for the horizon, the same
     // radial convention as the compass rosette
     expect(sky).toContain('return (90 - altitude) / 90;');
-    expect(source).toContain('at(body.azimuth[sunIndex], markScale(altitude))');
-    expect(source).toContain('function bodyIcon(kind, colour, illuminated, waxing)');
+    expect(source).toContain('at: at(body.azimuth[sunIndex], markScale(altitude))');
+    // the glyph is skyOverlay's; the tool only says where the mark rides
+    expect(source).toContain('html: bodySvg(');
   });
 
   it('leaves the ray bare while the body is under the horizon', () => {
@@ -324,14 +268,14 @@ describe('sun and moon mode', () => {
   it('names the altitude on the mark and on the ray', () => {
     expect(sky).toContain('alt ${Math.round(altitude)}°');
     expect(source).toContain('bodyReading(');
-    expect(source).toContain("bindTooltip(body.key === 'moon'");
+    expect(source).toContain("tip: body.key === 'moon' ? `${reading} · ${sunSky.moon.phase}` : reading");
   });
 
   it('keeps a body below the horizon on the map, dashed', () => {
     expect(source).toContain('const altitude = body.altitude[sunIndex]');
     expect(sky).toContain('return altitude < 0;');
     expect(source).toContain('const below = isBelow(altitude)');
-    expect(source).toContain("dashArray: below ? '6 6' : null");
+    expect(source).toContain("dash: below ? '6 6' : null");
   });
 
   it('scrubs the hour without asking the backend again', () => {
@@ -347,15 +291,15 @@ describe('sun and moon mode', () => {
   });
 
   it('sizes the arc off the shorter side of the view, so it stays on screen', () => {
-    // a radius set by the diagonal runs off the top and bottom of a wide window
+    // a radius set by the diagonal runs off the top and bottom of a wide window.
+    // How far the view reaches each way is the façade's answer (facade.test.js);
+    // which of the two the arc rides on is this tool's.
+    expect(source).toContain('const { across, down } = engine.viewSpanMeters()');
     expect(source).toContain('Math.min(across, down) * 0.22');
-    expect(source).toContain('bounds.getNorthWest(), bounds.getNorthEast()');
   });
 
   it('restretches the arc when the view moves, since it is drawn in metres', () => {
-    expect(source).toContain("map.on('zoomend moveend', redraw)");
-    expect(source).toContain("map.off('zoomend moveend', redraw)");
-    expect(source).toContain('bounds.getNorthWest(), bounds.getSouthWest()');
+    expect(source).toContain("return engine.on('view-settled', () => drawSun())");
   });
 
   it('takes the handoff from Coords & Sky into the same mode', () => {
@@ -368,21 +312,9 @@ describe('sun and moon mode', () => {
 });
 
 describe('accepting a proposed point from the Saved panel', () => {
-  // import enrichment still proposes places from a file's GPS, and the panel
-  // reading them is where they are settled
-  it('sends the same PATCH the sidebar does, so one click means one thing', () => {
-    expect(source).toContain("status: 'confirmed',");
-    expect(source).toContain('onaccept={acceptSaved}');
-  });
-
-  it('re-reads the case, or the row would keep claiming it is proposed', () => {
-    const fn = source.slice(source.indexOf('async function acceptSaved'));
-    expect(fn.slice(0, fn.indexOf('\n  }'))).toContain('await reloadCase()');
-  });
-
-  it('offers it in the search modal too, which lists the same index', () => {
-    const modal = source.slice(source.indexOf('<SavedSearch'));
-    expect(modal.slice(0, modal.indexOf('/>'))).toContain('onaccept={acceptSaved}');
+  it('offers it wherever the panel lists a row', () => {
+    // the tree and the search modal read the same index, so both offer it
+    expect((source.match(/onaccept=\{acceptSaved\}/g) ?? []).length).toBe(2);
   });
 });
 
@@ -396,11 +328,34 @@ describe('Satellite — lifecycle and the date line', () => {
     expect(source).toContain('teardown?.();');
   });
 
-  it('folds the map centre back inside the bounds every route enforces', () => {
-    // Leaflet keeps counting past ±180 across the antimeridian; the capture
-    // route bounds lon to ±180, so an unwrapped centre answered 422.
-    expect(source).toContain("import { wrapLon } from '../lib/coords.js';");
-    expect(source).toContain('center = { lat: c.lat, lon: wrapLon(c.lng), zoom: map.getZoom() };');
+  it('takes the centre as the façade hands it over, and never rewraps it', () => {
+    // Folding a centre back inside ±180 across the antimeridian is stated once,
+    // in lib/map (facade.test.js). A tool that reached for wrapLon again would
+    // be the second place that guarantee could be got wrong.
+    expect(source).toContain("engine.on('view-settled', (view) => {");
+    expect(source).toContain('center = { lat: view.lat, lon: view.lon, zoom: view.zoom };');
+    expect(source).not.toContain('wrapLon');
+  });
+
+  it('goes through the façade for the camera, not through the engine', () => {
+    // What must never come back is a tool moving, projecting or measuring the
+    // map itself: that is the whole point of `lib/map`, and it is what made
+    // replacing the engine a rewrite of five modules instead of a tool.
+    expect(source).toContain("import { createMapEngine } from '../lib/map/engine.js';");
+    expect(source).not.toContain('map.setView');
+    expect(source).not.toContain('map.getCenter');
+    expect(source).not.toContain('map.containerPointToLatLng');
+    expect(source).not.toContain('map.latLngToContainerPoint');
+  });
+
+  it('names no engine at all, not even in a class or a comment', () => {
+    // The engine's chrome is dressed in lib/map/engine.css, and a mode armed
+    // above the map says so on `.map-surface`, whichever engine drew it. This
+    // held across one engine change; it is what will make the next one cheap.
+    for (const [name, text] of Object.entries(satelliteSources())) {
+      expect(text.toLowerCase(), name).not.toContain('leaflet');
+      expect(text.toLowerCase(), name).not.toContain('maplibre');
+    }
   });
 });
 
@@ -408,7 +363,7 @@ describe('Satellite — the search bar', () => {
   it('is the suggesting combobox, fed by the case and the map centre', () => {
     expect(source).toContain("import PlaceSearch from './satellite/PlaceSearch.svelte';");
     expect(source).toContain('<PlaceSearch');
-    expect(source).toContain('savedRows={saved}');
+    expect(source).toContain('savedRows={savedWork.rows}');
     expect(source).toContain('centre={{ lat: center.lat, lon: center.lon }}');
     expect(source).toContain('units={prefs.units}');
     // the plain form it replaces is gone, not left beside it
@@ -428,6 +383,6 @@ describe('Satellite — the search bar', () => {
   });
 
   it('flies to a proposed point at the zoom that suits what it is', () => {
-    expect(source).toContain('map.setView([item.lat, item.lon], item.zoom ?? Math.max(map.getZoom(), 13));');
+    expect(source).toContain('engine.setView(item, item.zoom ?? Math.max(engine.getZoom(), 13));');
   });
 });

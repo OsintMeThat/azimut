@@ -9,13 +9,13 @@
    * is transient.
    */
   import { mount, unmount } from 'svelte';
-  import L from 'leaflet';
+  import { createSurface } from '../../lib/map/surface.js';
   import { paths } from '../../components/Icon.svelte';
   import { groupTemporalMapItems } from '../../lib/temporalMap.js';
   import TemporalPopup from './TemporalPopup.svelte';
 
-  let { map = null, items = [], caseId = '', onopen = () => {} } = $props();
-  let group = null;
+  let { engine = null, items = [], caseId = '', onopen = () => {} } = $props();
+  let surface = null;
   let mounted = null;
 
   function glyph(name, size) {
@@ -28,15 +28,15 @@
 
   function icon(mark) {
     const count = mark.items.length > 1 ? `<i class="temporal-mark-count">${mark.items.length}</i>` : '';
-    return L.divIcon({
+    return {
       className: 'temporal-mark-wrap',
       html: `<span class="temporal-mark">${glyph('clock', 13)}${count}</span>`,
-      iconSize: [24, 24],
-      iconAnchor: [12, 12],
-    });
+      size: [24, 24],
+      anchor: [12, 12],
+    };
   }
 
-  function popup(mark) {
+  function card(mark) {
     const host = document.createElement('div');
     if (mounted) unmount(mounted);
     mounted = mount(TemporalPopup, {
@@ -46,61 +46,65 @@
         items: mark.items,
         caseId,
         onopen: (item) => {
-          map.closePopup();
+          surface.closePopup();
           onopen(item);
         },
         // Following a row leaves the map, so the card closes first — the same gesture
         // as the saved layer's, rather than a popup that vanishes without saying it
         // would.
-        onleave: () => map.closePopup(),
+        onleave: () => surface.closePopup(),
       },
     });
     return host;
   }
 
-  function shape(mark) {
+  /** How tightly the statement is placed, as the shape under its pin. */
+  function area(mark) {
     const style = {
-      color: '#35b6a0',
-      weight: 1.5,
-      opacity: 0.9,
-      fillColor: '#35b6a0',
+      stroke: '#35b6a0',
+      strokeWidth: 1.5,
+      strokeOpacity: 0.9,
+      fill: '#35b6a0',
       fillOpacity: 0.12,
       interactive: false,
     };
-    if (mark.footprint) return L.geoJSON(mark.footprint, { style: () => style });
+    if (mark.footprint) return { kind: 'geojson', geometry: mark.footprint, style };
     if (Number(mark.radius_m) > 0) {
-      return L.circle([mark.lat, mark.lon], { ...style, radius: Number(mark.radius_m) });
+      return { kind: 'circle', at: mark, radiusM: Number(mark.radius_m), style };
     }
     return null;
   }
 
   $effect(() => {
     const marks = groupTemporalMapItems(items);
-    if (!map) return;
-    group?.remove();
-    group = L.layerGroup(marks.flatMap((mark) => {
-      const marker = L.marker([mark.lat, mark.lon], {
-        icon: icon(mark),
-        keyboard: true,
-        title: mark.items.length === 1
-          ? mark.items[0].label
-          : `${mark.items.length} statements at ${mark.label}`,
-      });
-      marker.bindPopup(() => popup(mark), {
-        className: 'temporal-popup',
-        minWidth: 272,
-        maxWidth: 320,
-        autoPanPadding: [24, 24],
-      });
-      // The shape first, so the pin stays on top of its own uncertainty.
-      const area = shape(mark);
-      return area ? [area, marker] : [marker];
-    })).addTo(map);
+    if (!engine) return;
+    surface ??= createSurface(engine);
+    surface.set(
+      marks.flatMap((mark) => [
+        // the shape first, so the pin stays on top of its own uncertainty
+        area(mark),
+        {
+          kind: 'marker',
+          at: mark,
+          ...icon(mark),
+          title:
+            mark.items.length === 1
+              ? mark.items[0].label
+              : `${mark.items.length} statements at ${mark.label}`,
+          popup: {
+            content: () => card(mark),
+            className: 'temporal-popup',
+            minWidth: 272,
+            maxWidth: 320,
+          },
+        },
+      ])
+    );
   });
 
   $effect(() => () => {
-    group?.remove();
-    group = null;
+    surface?.destroy();
+    surface = null;
     if (mounted) {
       unmount(mounted);
       mounted = null;
@@ -109,10 +113,9 @@
 </script>
 
 <style>
-  /* Leaflet builds these elements itself, outside this component's markup, so the
+  /* The map builds these elements itself, outside this component's markup, so the
      marker styles have to be global. The saved layer's geometry throughout — the
      teardrop, the badge on its corner, the lift on hover — in this layer's tint. */
-  :global(.temporal-mark-wrap) { border: 0; background: none; }
   :global(.temporal-mark) {
     position: relative;
     display: grid;
@@ -146,29 +149,5 @@
   :global(.temporal-mark-wrap:hover .temporal-mark) {
     z-index: 500;
     transform: rotate(-45deg) scale(1.25);
-  }
-  /* Leaflet's default popup is a white speech bubble; over imagery it has to be one
-     of the app's own surfaces instead. */
-  :global(.temporal-popup .leaflet-popup-content-wrapper) {
-    padding: 2px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--r-lg);
-    background: var(--bg-1);
-    box-shadow: var(--shadow-2);
-    color: var(--text-1);
-  }
-  :global(.temporal-popup .leaflet-popup-content) { margin: 10px 12px; line-height: 1.4; }
-  :global(.temporal-popup .leaflet-popup-tip) {
-    border: 1px solid var(--border-strong);
-    background: var(--bg-1);
-    box-shadow: none;
-  }
-  :global(.temporal-popup .leaflet-popup-close-button) {
-    padding: 6px 7px 0 0 !important;
-    color: var(--text-3) !important;
-  }
-  :global(.temporal-popup .leaflet-popup-close-button:hover) {
-    background: none !important;
-    color: var(--text-1) !important;
   }
 </style>

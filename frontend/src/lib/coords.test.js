@@ -189,7 +189,7 @@ describe('utmZone', () => {
 });
 
 describe('wrapLon', () => {
-  it('folds a longitude Leaflet kept counting past the date line', () => {
+  it('folds a longitude the map kept counting past the date line', () => {
     // Panning west across the antimeridian leaves the map centre at 187°, which
     // every API bound refuses — Capture answered 422 and the tool went dead.
     expect(wrapLon(187)).toBeCloseTo(-173, 10);

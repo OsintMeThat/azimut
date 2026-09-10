@@ -2,7 +2,7 @@
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { fetchAllEntities, lookupEntity, fetchDerivation } from '../lib/catalog.js';
-  import { caseState, uiState, toast, reloadCase, prefs } from '../lib/state.svelte.js';
+  import { caseState, uiState, toast, reloadCase, prefs, updatesState } from '../lib/state.svelte.js';
   import { templatesState } from '../lib/state.svelte.js';
   import { createNote } from '../lib/notes.js';
   import { openNotebook } from '../lib/navigate.js';
@@ -19,7 +19,9 @@
     normalizePostMediaPickerTarget, postMediaForType, renumberMediaTweetText, retargetMediaTweetText,
     normalizePostTarget, POST_TARGETS, postCharacterCount, postComposeUrl, postReportMarkdown,
     postTarget, templateUsesPostField, togglePostMedia, pointLines,
+    handoffThread, postHandoffUrl,
   } from '../lib/post.js';
+  import { extensionOutdated, extensionVersion, handOffPost } from '../lib/extBridge.js';
   import { bidiSafe } from '../lib/bidi.js';
   import { matchesQuery } from '../lib/mediaFilter.js';
   import Icon from '../components/Icon.svelte';
@@ -975,9 +977,80 @@
 
   // ---- publish handoff (Azimut never posts on the analyst's behalf) --------
 
+  /**
+   * The thread as the extension receives it: what to type, and which case files
+   * to attach to each post. Paths only — the extension reads the bytes from the
+   * app with its own pairing token, so no case file passes through the page.
+   */
+  function handoffPayload() {
+    return handoffThread([
+      { text: bidiSafe(tweet1), files: proofPng ? [proofPng] : [] },
+      ...(mediaEnabled && mediaType !== 'none'
+        ? [{ text: bidiSafe(tweet2Text()), files: mediaPaths }]
+        : []),
+      ...extraTweets.map((tweet, i) => ({
+        text: bidiSafe(extraTweetText(tweet, i + 3)),
+        files: tweet.mediaPaths,
+      })),
+    ]);
+  }
+
+  /**
+   * Why the extension did not take the thread, in a sentence the analyst can act
+   * on — or null when there is nothing they could do about it.
+   *
+   * The switch is on and an extension is installed, so **the difference between
+   * "it filled the composer" and "it didn't" has to be visible**: a Publish that
+   * quietly does the old thing looks like a broken button, and the two reasons it
+   * is usually the old thing — an extension older than the app, or one never
+   * paired — are both one click away from fixed. Silence is kept for the case
+   * that is not: an extension that answered something else.
+   */
+  function handOffExcuse(error) {
+    const installed = extensionVersion();
+    if (/did not answer/.test(error.message)) {
+      // A build that predates this feature has no route for the message and says
+      // nothing at all, which is what the short timeout is really detecting.
+      return extensionOutdated(installed, updatesState.extensionBundled)
+        ? 'Your capture extension is older than Azimut. Reinstall it from Settings → Capture extension to fill the composer.'
+        : null;
+    }
+    return /paired/.test(error.message) ? `Composer not filled: ${error.message}.` : null;
+  }
+
+  /**
+   * Let the extension open the composer and fill the thread, if it can.
+   *
+   * True when it took the hand-off — the tab is open and the app has nothing left
+   * to do. False for every other case: no extension, switched off, not permitted
+   * on that site, a target it cannot fill. The caller opens the intent page
+   * exactly as it always did, so the feature can only ever be a layer over the
+   * working path, never a step in front of it.
+   */
+  async function tryHandOff() {
+    if (!prefs.postPrefill || !extensionVersion()) return false;
+    const url = postHandoffUrl(target, bidiSafe(tweet1));
+    if (!url || !caseState.current) return false;
+    const { posts, dropped } = handoffPayload();
+    if (!posts.length) return false;
+    try {
+      await handOffPost({ url, caseId: caseState.current.id, posts });
+      // What it manages is the extension's to report — it is still filling while
+      // this runs. What is said here is what is already true.
+      const left = dropped ? ` ${dropped} file${dropped > 1 ? 's' : ''} over the per-post limit stayed behind.` : '';
+      toast(`${targetInfo.label} is opening with the thread.${left} Nothing was posted.`, 'info', 4200);
+      return true;
+    } catch (e) {
+      const excuse = handOffExcuse(e);
+      if (excuse) toast(excuse, 'warn', 6000);
+      return false;
+    }
+  }
+
   async function publish() {
     // Social intents prefill the first post only. The rest is copied as replies.
     await copyAll(false);
+    if (await tryHandOff()) return;
     const url = postComposeUrl(target, bidiSafe(tweet1));
     window.open(url, '_blank', 'noopener,noreferrer');
     toast(`Opened ${targetInfo.label}. Posts copied for replies.`, 'info', 3200);
@@ -1187,33 +1260,6 @@
           ></textarea>
         </div>
 
-        {#if caseState.current}
-          <div class="field">
-            <div class="proof-head">
-              <span class="label" style="margin:0">Attached proof</span>
-              {#if proofPng}
-                <button class="btn btn-ghost btn-sm" onclick={() => copyImage(proofHref)} title="Copy this image">
-                  <Icon name="copy" size={13} /> Copy image
-                </button>
-                <button class="btn btn-ghost btn-sm" onclick={openProofPicker} title="Attach a different proof">
-                  <Icon name="proof" size={13} /> Change
-                </button>
-                <button class="btn btn-ghost btn-sm danger-hover" onclick={clearProof} title="Detach proof">
-                  <Icon name="x" size={13} />
-                </button>
-              {/if}
-            </div>
-            {#if proofPng}
-              <a href={proofHref} target="_blank" rel="noreferrer">
-                <img class="proof-preview card" src={proofHref} alt="proof" />
-              </a>
-            {:else}
-              <button class="btn btn-ghost btn-sm proof-attach" onclick={openProofPicker}>
-                <Icon name="proof" size={14} /> Attach a proof
-              </button>
-            {/if}
-          </div>
-        {/if}
       </div>
 
       <!-- right column: the thread -->
@@ -1241,6 +1287,38 @@
             oninput={() => (tweet1Edited = true)}
             rows="11"
           ></textarea>
+          <!-- The proof is this post's attachment, so it rides on this card the way
+               every other post carries its media. Read across the column, the thread
+               is what will be published, picture by picture. -->
+          {#if caseState.current}
+            <div class="media-attach">
+              {#if proofPng}
+                <span class="attach-chip">
+                  <a href={proofHref} target="_blank" rel="noreferrer" title={proofPng}>
+                    {proofPng.replace(/^proofs\//, '')}
+                  </a>
+                  <button class="chip-x" onclick={clearProof} title="Detach proof">
+                    <Icon name="x" size={11} />
+                  </button>
+                </span>
+                <button class="btn btn-ghost btn-sm" onclick={() => copyImage(proofHref)} title="Copy this image">
+                  <Icon name="copy" size={13} /> Copy image
+                </button>
+                <button class="btn btn-ghost btn-sm" onclick={openProofPicker} title="Attach a different proof">
+                  <Icon name="proof" size={13} /> Change
+                </button>
+              {:else}
+                <button class="btn btn-ghost btn-sm" onclick={openProofPicker}>
+                  <Icon name="proof" size={13} /> Attach a proof
+                </button>
+              {/if}
+            </div>
+            {#if proofPng}
+              <a href={proofHref} target="_blank" rel="noreferrer">
+                <img class="proof-preview card" src={proofHref} alt="proof" />
+              </a>
+            {/if}
+          {/if}
         </div>
 
         <!-- Post 2: media (Video / Image) -->
@@ -1612,17 +1690,6 @@
     object-fit: contain;
     padding: 6px;
   }
-  .proof-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 6px;
-  }
-  .proof-attach {
-    align-self: flex-start;
-    border: 1px dashed var(--border);
-  }
-
   /* Thread / tweet blocks */
   .tweet-block {
     padding: 12px 14px;

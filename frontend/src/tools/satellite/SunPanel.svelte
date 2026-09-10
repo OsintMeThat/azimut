@@ -1,7 +1,7 @@
 <script>
   // Sun & moon mode: the day's path drawn from one anchored point, with an hour
   // you can drag. Anchored beside the tool cluster like the measure panel, so it
-  // can never end up under Leaflet's own controls.
+  // can never end up under the engine's own controls.
   //
   // Dragging the hour costs nothing: the whole day arrived in one response at
   // ten-minute steps, so the slider reads an array. Only a new date asks the

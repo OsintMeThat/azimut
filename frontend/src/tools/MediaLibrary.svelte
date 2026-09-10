@@ -119,9 +119,10 @@
   );
 
   // --- what the case made, out of the way (independent of type and folder) ---
-  // A geolocation case ends up with 150 extracted frames beside 50 collected
-  // files, and the question "what did we actually collect" has no answer in a
-  // chooser: the chips are single-select and say "show me only X". This is the
+  // A geolocation case ends up with 150 extracted frames and 60 satellite
+  // captures beside 50 collected files, and the question "what did we actually
+  // collect" has no answer in a chooser: the chips are single-select and say
+  // "show me only X". This is the
   // other axis, so it is a switch. On by default — the library opens on what the
   // case collected, and the switch is how the working files come back; it says
   // how many they are rather than leaving them unannounced.
@@ -306,8 +307,16 @@
     lightboxItem = lightboxImages[next];
   }
 
-  function onLightboxKey(e) {
-    if (!lightboxItem || uiState.tool !== 'media') return;
+  // One handler for the tool's two overlays: the lightbox owns the arrows, the
+  // upkeep menu only needs the Escape, and it reads first because it is the one
+  // that can be open while the lightbox is not.
+  function onMediaKey(e) {
+    if (uiState.tool !== 'media') return;
+    if (e.key === 'Escape' && upkeepOpen) {
+      upkeepOpen = false;
+      return;
+    }
+    if (!lightboxItem) return;
     if (e.key === 'Escape') lightboxItem = null;
     else if (e.key === 'ArrowLeft') lightboxStep(-1);
     else if (e.key === 'ArrowRight') lightboxStep(1);
@@ -412,6 +421,20 @@
       1500
     );
   });
+
+  // --- upkeep ---
+  // Both sweeps below are repairs pressed once in a while: regenerate what
+  // failed, read the metadata a version that could not read it left behind. As
+  // header buttons they sat next to Download and Import, which read as if they
+  // were a step of importing, and they took that much room all day for a press
+  // a month. So they live behind the `⋮`, and what each one found is still said
+  // out loud after it runs, by the toast.
+  let upkeepOpen = $state(false);
+
+  function runUpkeep(sweep) {
+    upkeepOpen = false; // never leave the menu hanging over the request it sent
+    sweep();
+  }
 
   // Queue (re)generation: a single failed thumbnail (path given) or every
   // missing/failed one across the case. The worker drains the queue; the poll
@@ -837,22 +860,48 @@
     <button class="btn" onclick={() => fileInput.click()}>
       <Icon name="upload" size={15} /> Import
     </button>
-    <button
-      class="btn"
-      onclick={() => regenerateThumbs()}
-      title="Regenerate missing or failed thumbnails"
-      disabled={!items.length}
-    >
-      <Icon name="reset" size={15} /> Thumbnails
-    </button>
-    <button
-      class="btn"
-      onclick={enrichMedia}
-      title="Read image EXIF, hashes and video metadata locally"
-      disabled={!items.length}
-    >
-      <Icon name="search" size={15} /> Enrich
-    </button>
+    <!-- The two upkeep sweeps, behind one door. The door stays put on an empty
+         case with its rows disabled: a header that reorganises itself on the
+         first import is a header nobody learns. -->
+    <div class="upkeep">
+      <button
+        class="btn upkeep-toggle"
+        onclick={() => (upkeepOpen = !upkeepOpen)}
+        aria-label="Media upkeep"
+        aria-haspopup="menu"
+        aria-expanded={upkeepOpen}
+      >
+        <Icon name="more" size={15} stroke={2.6} />
+      </button>
+      {#if upkeepOpen}
+        <button
+          class="upkeep-backdrop"
+          onclick={() => (upkeepOpen = false)}
+          aria-label="Close the upkeep menu"
+        ></button>
+        <div class="upkeep-menu card" role="menu" aria-label="Media upkeep">
+          <button
+            class="upkeep-option"
+            role="menuitem"
+            onclick={() => runUpkeep(regenerateThumbs)}
+            disabled={!items.length}
+          >
+            <Icon name="reset" size={14} />
+            <span>Regenerate missing thumbnails</span>
+          </button>
+          <button
+            class="upkeep-option"
+            role="menuitem"
+            onclick={() => runUpkeep(enrichMedia)}
+            title="Read image EXIF, hashes and video metadata locally"
+            disabled={!items.length}
+          >
+            <Icon name="search" size={14} />
+            <span>Read file metadata</span>
+          </button>
+        </div>
+      {/if}
+    </div>
     <input
       type="file"
       multiple
@@ -927,7 +976,7 @@
           type="button"
           aria-pressed={!collectedOnly}
           title={collectedOnly
-            ? `Show the ${madeHereCount} file${madeHereCount > 1 ? 's' : ''} the case made from material it already holds`
+            ? `Show the ${madeHereCount} file${madeHereCount > 1 ? 's' : ''} the case produced itself`
             : 'Show only what the case collected'}
           onclick={toggleCollectedOnly}
         >
@@ -1436,7 +1485,7 @@
 {/if}
 
 <!-- lightbox -->
-<svelte:window onkeydown={onLightboxKey} />
+<svelte:window onkeydown={onMediaKey} />
 {#if lightboxItem}
   <div
     class="lightbox"
@@ -1539,6 +1588,48 @@
     display: flex;
     gap: 8px;
     width: min(480px, 40vw);
+  }
+
+  /* upkeep menu */
+  .upkeep {
+    position: relative;
+    display: flex;
+  }
+  .upkeep-toggle {
+    min-width: 30px;
+    padding-inline: 6px;
+  }
+  .upkeep-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    cursor: default;
+  }
+  .upkeep-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 100;
+    min-width: 250px;
+    padding: 5px;
+    box-shadow: var(--shadow-2);
+  }
+  .upkeep-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 9px;
+    border-radius: var(--r-sm);
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    text-align: left;
+  }
+  .upkeep-option:hover:not(:disabled) {
+    background: var(--bg-2);
+  }
+  .upkeep-option:disabled {
+    color: var(--text-3);
   }
 
   /* folder filter bar */

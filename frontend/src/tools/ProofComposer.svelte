@@ -5,7 +5,7 @@
   import { api } from '../lib/api.js';
   import { lookupEntity, fetchAllEntities } from '../lib/catalog.js';
   import { matchesTerms } from '../lib/folderBrowse.js';
-  import { isSatelliteMedia } from '../lib/mediaFilter.js';
+  import { isSatelliteMedia, sortItems } from '../lib/mediaFilter.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords } from '../lib/state.svelte.js';
   import { templatesState } from '../lib/state.svelte.js';
@@ -802,24 +802,33 @@
     // exactly when the Media Library does (isSatelliteMedia), so a Street View
     // grab reads the same on both screens.
     const captured = new Set(sats.map((s) => s.path));
-    return dedupeBySrc([
-      ...sats.map((s) => ({
-        ...satPanelInput(s, prefs.coordFormat),
-        label: `${fmtCoords(s.lat, s.lon)} · z${s.zoom}`,
-        ...panelPreview(s),
-        kind: isSatelliteMedia(s) ? 'satellite' : 'media',
-        folder: s.folder ?? '',
-      })),
-      ...media
-        .filter((m) => m.kind === 'image' && !captured.has(m.path))
-        .map((m) => ({
-          ...mediaPanelInput(m, media),
-          label: m.title || m.filename,
-          ...panelPreview(m),
-          kind: 'media',
-          folder: m.folder ?? '',
+    // Newest first, across both halves at once. Each list arrives in that order
+    // already, so concatenating them filed every capture above every photo — the
+    // picker is opened for the frame cut a minute ago, and a proof of a strike is
+    // built out of whichever of the two came in last.
+    return sortItems(
+      dedupeBySrc([
+        ...sats.map((s) => ({
+          ...satPanelInput(s, prefs.coordFormat),
+          label: `${fmtCoords(s.lat, s.lon)} · z${s.zoom}`,
+          ...panelPreview(s),
+          kind: isSatelliteMedia(s) ? 'satellite' : 'media',
+          folder: s.folder ?? '',
+          added_at: s.added_at ?? s.fetched_at ?? '',
         })),
-    ]);
+        ...media
+          .filter((m) => m.kind === 'image' && !captured.has(m.path))
+          .map((m) => ({
+            ...mediaPanelInput(m, media),
+            label: m.title || m.filename,
+            ...panelPreview(m),
+            kind: 'media',
+            folder: m.folder ?? '',
+            added_at: m.added_at ?? '',
+          })),
+      ]),
+      'newest'
+    );
   }
 
   async function openNewProofDialog() {
@@ -1473,7 +1482,7 @@
       // A vertex dropped on another surface ends the curve where it was and
       // opens the next one there. Ignoring the click made the canvas look dead
       // whenever a curve strayed a few pixels past its panel.
-      if (pathDraft && pathDraft.panel.id !== panel.id) finishPath(true);
+      if (pathDraft && pathDraft.panel.id !== panel.id) finishPath(true, { keepTool: true });
       if (!pathDraft) {
         const node = new Konva.Line({
           points: [hit.nx, hit.ny], tension: 0.5, stroke: color,
@@ -1645,6 +1654,14 @@
       };
       proof.shapes.push(s);
       selectedIds = [s.id];
+      // The pen goes down with the shape. What follows a stroke is almost always
+      // a word about it — its colour, its width, the note it carries — and the
+      // toolbar edits the picked annotation, so leaving the tool in hand meant
+      // every one of those first drew a second box nobody wanted. Drawing three
+      // in a row is `r`, `r`, `r`, which is what the shortcuts are for. The
+      // stamp is the exception and keeps the tool: marking six vehicles is one
+      // act, not six.
+      tool = 'select';
       dirty = true;
     }
   }
@@ -1690,7 +1707,9 @@
     if (drawing) commitDrawing();
   }
 
-  function finishPath(commit) {
+  /** Close the curve in hand. `keepTool` for the one caller that is opening the
+   *  next curve in the same gesture, where putting the pen down would strand it. */
+  function finishPath(commit, { keepTool = false } = {}) {
     if (!pathDraft) return;
     const { node, points, panel } = pathDraft;
     pathDraft = null;
@@ -1704,9 +1723,9 @@
       };
       proof.shapes.push(s);
       selectedIds = [s.id];
-      // The tool stays in hand, like the box, the line and the arrow it belongs
-      // beside: three curves in a row is one act, and reaching for `c` between
-      // each of them was the only place a shape tool put the pen down.
+      // The pen goes down, like the box, the line and the arrow it belongs beside:
+      // the curve is picked so the toolbar edits it (see commitDrawing).
+      if (!keepTool) tool = 'select';
       dirty = true;
     } else {
       proof.shapes = [...proof.shapes]; // force rebuild to drop the preview
@@ -3245,12 +3264,26 @@
     return stated.length ? stated : [blankPoint()];
   }
 
-  /** Add a row. The first one is materialised from the panels first: an empty
-   *  field means "whatever the imagery says", and that answer has to become the
+  /**
+   * Write the first row's coordinates down, if the field is still showing the
+   * imagery's answer rather than one somebody typed.
+   *
+   * An empty field means "whatever the imagery says", and a save states only what
+   * the proof holds: `statePoints` drops a row with no coordinates, and the whole
+   * row goes with it. So naming that point, or calling it the camera, used to be
+   * dropped too — the label was typed, the POST carried no point at all, and
+   * nothing was filed. Anything that turns the row into a claim materialises the
+   * answer first, which is what adding a second row already did.
+   */
+  function statePoint0() {
+    if (!proof.points[0].coords.trim()) proof.points[0].coords = displayedCoords;
+  }
+
+  /** Add a row. The first one is materialised first: that answer has to become the
    *  conclusion in writing before a second point can sit under it. */
   function addPoint() {
     if (proof.points.length >= MAX_POINTS) return;
-    if (!proof.points[0].coords.trim()) proof.points[0].coords = displayedCoords;
+    statePoint0();
     proof.points = [...proof.points, blankPoint()];
     dirty = true;
   }
@@ -3274,7 +3307,16 @@
   /** A camera stood in one place, so lighting one point puts the others out. */
   function togglePov(i) {
     const on = !proof.points[i].pov;
+    if (on) statePoint0(); // POV is a claim about the point: state it (see statePoint0)
     proof.points = proof.points.map((one, at) => ({ ...one, pov: on && at === i }));
+    dirty = true;
+  }
+
+  /** Name a point. The first row's coordinates are written down with it, or the
+   *  name is typed onto a row the save drops (see statePoint0). */
+  function namePoint(i, value) {
+    proof.points[i].label = value;
+    if (i === 0) statePoint0();
     dirty = true;
   }
 
@@ -3663,7 +3705,7 @@
                 class="input point-label"
                 placeholder="label"
                 value={point.label}
-                oninput={(e) => { proof.points[i].label = e.target.value; dirty = true; }}
+                oninput={(e) => namePoint(i, e.target.value)}
               />
               <!-- What the point means. Nothing in the composition can answer it:
                    a rooftop shot is recorded somewhere it never shows, and a

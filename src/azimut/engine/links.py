@@ -63,14 +63,27 @@ LOST = "lost_sources"
 #: case already holds, rather than collected. Matched against a media item's recorded
 #: ``source.type``, which the browse index carries as a column.
 #:
-#: Here rather than in either of the two modules that read it, because both would
-#: otherwise keep their own copy and one of them would be wrong: the graph marks these
-#: nodes and the Media Library hides these rows, and the two have to mean the same set
-#: or the picture and the list disagree about what the case collected. An upload, a
-#: download and a satellite capture are original material brought in, and are
-#: deliberately not here. A future tool that composes case material joins by stamping
-#: its own name and being added to this line.
+#: Here rather than in the module that reads it, because the answer is about the
+#: derivation chain and this is where that chain is defined. An upload, a download and
+#: a satellite capture are original material brought in — bytes gathered rather than
+#: written, which is what puts `media` and `capture` in the `collected` family
+#: (ONTOLOGY §2) — and are deliberately not here. A future tool that composes case
+#: material joins by stamping its own name and being added to this line.
 MADE_HERE: tuple[str, ...] = ("inspect",)
+
+#: The wider set the **Media Library** holds back: not "composed out of what the case
+#: holds" but "produced by the app rather than gathered by the analyst".
+#:
+#: Two questions, so two sets, and the difference is a capture. The graph asks the
+#: first — a node that says it was made here is saying its parents are in the picture —
+#: and a capture has no parents to draw: it is imagery, and the ontology files it as
+#: collected. The library asks the second, which is *what did I actually bring in*, and
+#: there a capture is noise: a geolocation ends with sixty of them beside the handful of
+#: files the case collected, and the Satellite tool's own Saved panel is where they are
+#: read. The extension's screenshot is the same act through another window — a map view
+#: grabbed on purpose, filed as a capture — so it is held back with them. What stays out
+#: is material that came from outside: an upload, a paste, a download.
+PRODUCED_HERE: tuple[str, ...] = (*MADE_HERE, "satellite", "screenshot")
 
 #: Exact artifact contract. These are not ordinary relations: producing tools
 #: record them, and the pair decides delete behaviour. A file path resolving to an

@@ -17,7 +17,7 @@ import json
 import random
 import zlib
 
-from jobwait import job_result
+from jobwait import WAIT, job_result
 from PIL import Image
 
 from test_sheet_bridge import (
@@ -793,7 +793,7 @@ def test_a_cancelled_press_keeps_the_rows_it_finished_and_leaves_no_half_row(
     def wait(url):
         if url == "https://ex.org/slow":
             reached.set()
-            held.wait(10)
+            held.wait(WAIT)
 
     stub_downloads(monkeypatch, before=wait)
     case_id = make_case(client)
@@ -810,7 +810,9 @@ def test_a_cancelled_press_keeps_the_rows_it_finished_and_leaves_no_half_row(
         f"/api/cases/{case_id}/sheets/{sheet['id']}/proofs", json=build_body(sheet)
     )
     job_id = started.json()["job_id"]
-    assert reached.wait(10)
+    # The press has to have started before the cancel means anything, and the
+    # Windows shard spends twenty times longer getting there than this box does.
+    assert reached.wait(WAIT)
     assert client.post(f"/api/jobs/{job_id}/cancel").json() == {"stopped": True}
     held.set()
     result = job_result(client, job_id)

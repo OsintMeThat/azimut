@@ -13,7 +13,7 @@
     "check": "svelte-check --output human --threshold warning"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1",
+    "@playwright/test": "^1.63.0",
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "happy-dom": "^20.10.6",
     "svelte": "^5.0.0",
@@ -26,9 +26,7 @@
     "@fontsource/oxanium": "^5.2.8",
     "dompurify": "^3.4.13",
     "konva": "^9.3.0",
-    "leaflet": "^1.9.4",
-    "leaflet-rotate": "^0.2.8",
-    "leaflet.gridlayer.googlemutant": "^0.16.0",
+    "maplibre-gl": "^6.8.0",
     "marked": "^17.0.6",
     "mermaid": "^11.16.1"
   }

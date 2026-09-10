@@ -26,16 +26,17 @@ export const MAX_POST_MEDIA = 4;
 
 /**
  * Publishing targets share the same prepared thread, but apply their own
- * character rules and handoff URL. Mastodon uses its documented default here;
- * an individual server may advertise a different limit.
+ * character rules and composer address.
+ *
+ * Mastodon was here and was dropped: there is no one address to open. Its share
+ * link is a redirector that asks which server first, so the app could not say
+ * where the thread was going, and the extension could not fill a page nobody
+ * knew the name of — one target of three behaving differently, invisibly, until
+ * Publish was pressed. A draft saved with it opens on X (normalizePostTarget).
  */
 export const POST_TARGETS = Object.freeze({
   x: { id: 'x', label: 'X', limit: 280, limitLabel: '280' },
   bluesky: { id: 'bluesky', label: 'Bluesky', limit: 300, limitLabel: '300' },
-  mastodon: {
-    id: 'mastodon', label: 'Mastodon', limit: 500, limitLabel: '500 default',
-    limitHelp: 'Your server may use another limit.',
-  },
 });
 
 const URL_RE = /https?:\/\/\S+/g;
@@ -50,7 +51,7 @@ export function postTarget(target) {
   return POST_TARGETS[normalizePostTarget(target)];
 }
 
-/** X and Mastodon reserve a fixed length for every HTTP(S) URL. */
+/** X reserves a fixed length for every HTTP(S) URL, whatever the URL is. */
 export function weightedUrlLength(text) {
   const value = String(text ?? '');
   const stripped = value.replace(URL_RE, '');
@@ -77,14 +78,51 @@ export function postCharacterCount(target, text) {
 /** Build a compose handoff for the first post. Replies stay on the clipboard. */
 export function postComposeUrl(target, text) {
   const encoded = encodeURIComponent(String(text ?? ''));
-  switch (normalizePostTarget(target)) {
-    case 'bluesky':
-      return `https://bsky.app/intent/compose?text=${encoded}`;
-    case 'mastodon':
-      return `https://share.joinmastodon.org/#text=${encoded}`;
-    default:
-      return `https://x.com/intent/post?text=${encoded}`;
+  return normalizePostTarget(target) === 'bluesky'
+    ? `https://bsky.app/intent/compose?text=${encoded}`
+    : `https://x.com/intent/post?text=${encoded}`;
+}
+
+/**
+ * Where the capture extension opens the thread.
+ *
+ * The **full** composer rather than the intent page, because that is the one that
+ * builds a thread: the intent posts a single message, and the whole point here is
+ * the run of posts under the first.
+ *
+ * The text rides in the URL as well as being typed, so the first post is filled
+ * even when the page changes under the script and nothing else lands.
+ */
+export function postHandoffUrl(target, text) {
+  const encoded = encodeURIComponent(String(text ?? ''));
+  return normalizePostTarget(target) === 'bluesky'
+    ? `https://bsky.app/intent/compose?text=${encoded}`
+    : `https://x.com/compose/post?text=${encoded}`;
+}
+
+/** What one post may carry: four images, or one video, is every site's rule. */
+export const MAX_HANDOFF_FILES = 4;
+
+/**
+ * The thread as the extension hands it over: one entry per post, in order, each
+ * with the text to type and the case files to attach.
+ *
+ * A post with no text and no file is not a post; one with a picture and no text
+ * is. Anything past the per-post limit is **counted, not dropped in silence** —
+ * the caller says how many stayed behind, since the alternative is a thread that
+ * looks complete and is missing an image.
+ */
+export function handoffThread(posts) {
+  const kept = [];
+  let dropped = 0;
+  for (const post of posts ?? []) {
+    const text = String(post?.text ?? '');
+    const files = (post?.files ?? []).filter(Boolean);
+    if (!text.trim() && !files.length) continue;
+    if (files.length > MAX_HANDOFF_FILES) dropped += files.length - MAX_HANDOFF_FILES;
+    kept.push({ text, files: files.slice(0, MAX_HANDOFF_FILES) });
   }
+  return { posts: kept, dropped };
 }
 
 /**

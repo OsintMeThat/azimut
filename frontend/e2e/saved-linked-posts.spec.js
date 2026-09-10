@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { CASE_ID, installAppFixture } from './app.fixture.js';
+import { CASE_ID, awaitMapReady, installAppFixture } from './app.fixture.js';
 
+// The third one names a target this build dropped, which is what a draft saved
+// before that looks like: it is listed, and it opens (on X, by normalizePostTarget).
 const linkedPosts = [
   { id: 'post-1', name: 'panorama-publication', title: 'Panorama publication', target: 'x' },
   { id: 'post-2', name: 'source-follow-up', title: 'Follow-up with sources', target: 'bluesky' },
@@ -49,7 +51,7 @@ test('shows every linked post from a proof popup and opens the selected draft', 
   });
 
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
   await page.getByRole('button', { name: 'Proofs', exact: true }).click();
   await expect(page.getByText('Panorama autostitch test')).toBeVisible();
 
@@ -86,6 +88,7 @@ test('clears capture rows before a different case index arrives', async ({ page 
   });
 
   await page.goto('/#satellite');
+  await awaitMapReady(page); // the rows are read beside a map, and one mark is on it
   const savedPanel = page.locator('.captures');
   await expect(savedPanel.getByText('Capture A', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Show saved work on the map' }).click();
@@ -114,6 +117,7 @@ test('clears proof rows before a different case proof index arrives', async ({ p
   });
 
   await page.goto('/#satellite');
+  await awaitMapReady(page); // the panel is the map tool's, and it opens with it
   await page.getByRole('button', { name: 'Proofs', exact: true }).click();
   await expect(page.getByText('Proof A')).toBeVisible();
   await page.getByTitle('Switch case').click();

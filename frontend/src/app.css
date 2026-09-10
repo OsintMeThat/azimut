@@ -155,7 +155,7 @@
   color-scheme: light;
 }
 
-/* Surfaces that sit *over imagery* — the Satellite map with its Leaflet
+/* Surfaces that sit *over imagery* — the Satellite map with its own
    controls (zoom, scale, attribution) and floating tool clusters — were tuned
    for the dark palette and must stay dark in every theme, or they clash with
    the tiles beneath them. Opt in with class="dark-surface": it re-pins the

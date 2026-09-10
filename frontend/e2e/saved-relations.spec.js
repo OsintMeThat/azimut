@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test';
-import { CASE_ID, installAppFixture } from './app.fixture.js';
+import { CASE_ID, awaitMapReady, installAppFixture } from './app.fixture.js';
 
 /**
- * Relations on the map, in a real Leaflet popup.
+ * Relations on the map, in a real card opened on a mark.
  *
- * The popup is the one surface where a click has somewhere else to go: Leaflet
- * closes a popup when a click reaches the map, and the card's own controls edit
- * only the card. Rendering it server-side cannot tell us whether that holds, so
- * these run in the browser.
+ * The card is the one surface where a click has somewhere else to go: a click
+ * that reaches the map closes it, and the card's own controls edit only the
+ * card. Rendering it server-side cannot tell us whether that holds, so these
+ * run in the browser.
  */
 
 const point = {
@@ -72,7 +72,7 @@ test('opens a stacked row’s relations without closing the card', async ({ page
   });
 
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
   await page.getByRole('button', { name: 'Show saved work on the map' }).click();
   await page.locator('.saved-mark').click();
 
@@ -97,7 +97,7 @@ test('corrects the reading of a relation in place, and takes one back', async ({
   });
 
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
   await page.getByRole('button', { name: 'Show saved work on the map' }).click();
   await page.locator('.saved-mark').click();
 
@@ -124,7 +124,7 @@ test('settles a suggested relation from the card, which survives the click', asy
   });
 
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
   await page.getByRole('button', { name: 'Show saved work on the map' }).click();
   await page.locator('.saved-mark').click();
 
@@ -168,7 +168,7 @@ test('shows the findings on the card and leaves the pointers out', async ({ page
   });
 
   await page.goto('/#satellite');
-  await expect(page.locator('.map')).toHaveClass(/leaflet-container/);
+  await awaitMapReady(page);
   await page.getByRole('button', { name: 'Show saved work on the map' }).click();
   await page.locator('.saved-mark').click();
 

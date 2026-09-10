@@ -8,6 +8,10 @@ without scanning process names or killing unrelated Vite/Azimut instances.
 When that handshake finds nothing (a server started by hand, or one whose
 launcher was killed hard), the port itself is reclaimed: whoever still listens
 on it is stopped so the relaunch never hits "address already in use".
+
+``--ext`` hands the capture extension to the same loop: once the server answers,
+`devext.py` loads it into a dev Chrome and Firefox and pairs it with the running
+app, and ``--watch-ext`` reloads it there on every save.
 """
 
 from __future__ import annotations
@@ -318,7 +322,45 @@ def _run_process(
         raise
 
 
-def run(*, port: int, no_browser: bool) -> int:
+def _load_devext() -> Any:
+    """Import the sibling script by path, so pytest can load this one by path too."""
+    directory = str(Path(__file__).resolve().parent)
+    if directory not in sys.path:
+        sys.path.insert(0, directory)
+    import devext
+
+    return devext
+
+
+def _serve_extension(
+    browsers: list[str], port: int, watch: bool, stop_requested: threading.Event
+) -> None:
+    """Wait for the server, then load the extension into the dev browsers.
+
+    Pairing reads the token from the running app, so this waits for the port the
+    frontend build is still delaying. A failure here never stops the app.
+    """
+    devext = _load_devext()
+    deadline = time.monotonic() + 300
+    while _port_is_free(port):
+        if stop_requested.wait(0.3) or time.monotonic() > deadline:
+            return
+    options = devext.Options(browsers=browsers, url=f"http://127.0.0.1:{port}")
+    try:
+        devext.sync(options)
+        if watch:
+            devext.watch(options, stop_requested)
+    except (RuntimeError, OSError) as exc:
+        print(f"extension: {exc}", file=sys.stderr)
+
+
+def run(
+    *,
+    port: int,
+    no_browser: bool,
+    extension_browsers: list[str] | None = None,
+    watch_extension: bool = False,
+) -> int:
     if _stop_previous(STATE_PATH):
         print("Stopped the previous managed Azimut instance.")
     stopped = _free_port(port)
@@ -339,11 +381,24 @@ def run(*, port: int, no_browser: bool) -> int:
         command = [str(_venv_python(ROOT)), "-m", "azimut.cli", "--port", str(port)]
         if no_browser:
             command.append("--no-browser")
+        if extension_browsers:
+            threading.Thread(
+                target=_serve_extension,
+                args=(extension_browsers, port, watch_extension, control.stop_requested),
+                daemon=True,
+            ).start()
         print(f"Starting Azimut on http://127.0.0.1:{port}")
         result = _run_process(command, ROOT, control.stop_requested)
         return 0 if result is None else result
     finally:
         control.close()
+
+
+def extension_browsers(choice: str | None, watch: bool) -> list[str] | None:
+    """Which dev browsers to sync, or None when --ext was not asked for."""
+    if choice is None:
+        return ["chrome", "firefox"] if watch else None
+    return ["chrome", "firefox"] if choice == "all" else [choice]
 
 
 def main() -> int:
@@ -352,11 +407,28 @@ def main() -> int:
     )
     parser.add_argument("--port", type=int, default=8477)
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument(
+        "--ext",
+        nargs="?",
+        const="all",
+        choices=["chrome", "firefox", "all"],
+        help="load and pair the capture extension in a dev browser (see devext.py)",
+    )
+    parser.add_argument(
+        "--watch-ext",
+        action="store_true",
+        help="keep reloading the extension on every save (implies --ext)",
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
     try:
-        return run(port=args.port, no_browser=args.no_browser)
+        return run(
+            port=args.port,
+            no_browser=args.no_browser,
+            extension_browsers=extension_browsers(args.ext, args.watch_ext),
+            watch_extension=args.watch_ext,
+        )
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

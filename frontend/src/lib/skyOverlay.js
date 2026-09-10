@@ -3,7 +3,7 @@
  *
  * The overlay answers one question — *where was the light coming from, and how
  * high was it* — by drawing each body's track as an arc around the anchor point.
- * Leaflet owns the drawing; what is here is everything that decides *what* to
+ * The map owns the drawing; what is here is everything that decides *what* to
  * draw, kept apart because it is arithmetic over a day's samples and nothing
  * else. That makes it checkable: an arc that closes through the hours a body
  * spends below the horizon, or an hour tick on a sample that is under it, is a

@@ -1,0 +1,191 @@
+/*
+ * The engine's own chrome, dressed as one of the app's surfaces.
+ *
+ * These selectors are the engine's DOM, not ours, which is why they live beside
+ * the module that builds it rather than in whichever tool happens to hold a map:
+ * a second map surface would otherwise inherit the widget's default white
+ * speech-bubble look, and swapping the engine would have to hunt for these rules
+ * in a tool's stylesheet.
+ *
+ * The popup is here for the same reason and one more: MapLibre draws the card's
+ * pointer as a border triangle whose colour depends on which of eight sides the
+ * card opened towards. That is eight rules of engine trivia, and no tool should
+ * have to know it. A tool names its own card class and sets what is genuinely
+ * its own — the width it needs — through `--popup-min-width`.
+ *
+ * Loaded by `engine.js`, so it arrives with the engine and leaves with it.
+ */
+
+.maplibregl-map {
+  font-family: var(--font-sans);
+  background: var(--bg-2);
+  /* A stacking context of its own, so the widget basemap's negative layer
+     (below) stays inside this element: paints over its background, under its
+     canvas. Without it the layer drops behind that background and the basemap
+     is simply a black rectangle. */
+  isolation: isolate;
+}
+
+/* The engine puts its grab cursor on the canvas, which would win over a tool's
+   own rule for an armed mode. Hold the cursor on the surface instead, where a
+   tool can say `crosshair` and be obeyed. */
+.map-surface {
+  cursor: grab;
+}
+.map-surface:active {
+  cursor: grabbing;
+}
+.map-surface .maplibregl-canvas-container.maplibregl-interactive,
+.map-surface .maplibregl-canvas-container.maplibregl-interactive:active {
+  cursor: inherit;
+}
+
+.maplibregl-ctrl.maplibregl-ctrl-attrib {
+  background: rgba(24, 24, 24, 0.85);
+  color: var(--text-3);
+  font-size: 10px;
+}
+.maplibregl-ctrl-attrib a {
+  color: var(--text-2);
+}
+
+/* zoom +/- (topleft) sits directly under the tool cluster instead of the
+   engine's default corner margin, which used to land it on top of that cluster */
+.maplibregl-ctrl-top-left .maplibregl-ctrl {
+  margin: 58px 0 8px 12px;
+}
+.maplibregl-ctrl-group {
+  background: var(--bg-2);
+  box-shadow: 0 0 0 1px var(--border);
+}
+.maplibregl-ctrl-group button + button {
+  border-top-color: var(--border);
+}
+.maplibregl-ctrl-group button:hover {
+  background: var(--bg-3);
+}
+/* The engine's +/- glyphs are dark-on-light images, not text, so they are
+   turned rather than recoloured — and turned back under the light theme, where
+   dark on white is what the button already wants. */
+.maplibregl-ctrl-group .maplibregl-ctrl-icon {
+  filter: invert(1);
+}
+:root[data-theme='light'] .maplibregl-ctrl-group .maplibregl-ctrl-icon {
+  filter: none;
+}
+
+/* Slim ruler-style scale: no boxed panel, just a light bracket + label floating
+   directly on the map so it stays readable over any imagery. */
+.maplibregl-ctrl-scale {
+  border-color: rgba(255, 255, 255, 0.92);
+  border-width: 0 1.5px 1.5px;
+  background: transparent;
+  padding: 0 4px 1px;
+  margin: 0 10px 10px 0;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.85),
+    0 0 4px rgba(0, 0, 0, 0.5);
+}
+
+/* The card a mark opens, over imagery: one of the app's surfaces, not the
+   engine's white bubble. A tool sets `--popup-min-width` for the width its own
+   content needs. */
+.maplibregl-popup-content {
+  min-width: var(--popup-min-width, 0);
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-2);
+  color: var(--text-1);
+  line-height: 1.4;
+}
+.maplibregl-popup-close-button {
+  padding: 4px 7px 0 0;
+  color: var(--text-3);
+  font-size: 15px;
+}
+.maplibregl-popup-close-button:hover {
+  background: none;
+  color: var(--text-1);
+}
+/* The pointer is the card's own surface, not its edge: the engine draws it as a
+   border triangle, so a border colour is the only thing that reaches it — and
+   the edge colour is translucent, which left the pointer all but invisible. */
+.maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+  border-bottom-color: var(--bg-1);
+}
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+  border-top-color: var(--bg-1);
+}
+.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: var(--bg-1);
+}
+.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: var(--bg-1);
+}
+
+/* The Google widget basemap (lib/map/gmaps.js) renders in its own map, under
+   the engine's canvas. A negative z-index is what puts it there: inside the
+   stacking context above, it paints over the container's background and under
+   everything in flow, the canvas included. It never takes the pointer — our map
+   owns every gesture — but the credit line does, so Google's terms link stays
+   clickable. */
+.map-glass {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.map-glass-turn {
+  position: absolute;
+  transform-origin: 50% 50%;
+}
+.map-glass-map {
+  width: 100%;
+  height: 100%;
+}
+.map-glass-credit {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 8px;
+  padding: 1px 5px;
+  background: rgba(24, 24, 24, 0.85);
+  color: var(--text-3);
+  font-size: 10px;
+  pointer-events: auto;
+}
+.map-glass-credit a {
+  color: var(--text-2);
+}
+
+/* What a shape says about itself under the cursor: the reading on a sky ray,
+   the label on a sheet point. Never a card — it carries no controls and closes
+   itself, so it takes no chrome and no pointer. */
+.maplibregl-popup.map-tip {
+  z-index: 700;
+}
+.map-tip .maplibregl-popup-content {
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--bg-0) 92%, transparent);
+  box-shadow: var(--shadow-1);
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.map-tip .maplibregl-popup-tip {
+  display: none;
+}

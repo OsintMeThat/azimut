@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from 'vitest';
-import { extensionVersion, extensionOutdated, captureTab, onActivated } from './extBridge.js';
+import { extensionVersion, extensionOutdated, captureTab, handOffPost, onActivated } from './extBridge.js';
 
 // The bridge protocol is the app's only path to widget pixels, so what these
 // tests pin is the contract: detection reads the content script's marker, and
@@ -98,5 +98,46 @@ describe('onActivated', () => {
     off();
     await announce();
     expect(calls).toBe(1); // unsubscribed — no further calls
+  });
+});
+
+// The same fake, answering hand-offs. The app's fallback hangs on this reply,
+// so what is pinned is that only a correlated `ok` counts as taken.
+function fakePostBridge(answer) {
+  const onMessage = (event) => {
+    const msg = event.data;
+    if (!msg || msg.channel !== 'azimut-capture-ext' || msg.type !== 'post-handoff') return;
+    window.postMessage(
+      { channel: 'azimut-capture-ext', type: 'post-handoff-result', id: msg.id, ...answer(msg) },
+      window.location.origin
+    );
+  };
+  window.addEventListener('message', onMessage);
+  return () => window.removeEventListener('message', onMessage);
+}
+
+describe('handOffPost', () => {
+  it('resolves as soon as the extension takes it, not when it has finished', async () => {
+    // filling is tens of seconds; the answer needed here is only whether the app
+    // should stand down, and it is needed while the click can still open a tab
+    const off = fakePostBridge(() => ({ ok: true, accepted: true }));
+    await expect(handOffPost({ posts: [] })).resolves.toBe(true);
+    off();
+  });
+
+  it('rejects when the extension declines, so the app opens the page itself', async () => {
+    const off = fakePostBridge(() => ({ ok: false, error: 'not enabled for this site' }));
+    await expect(handOffPost({ posts: [] })).rejects.toThrow('not enabled for this site');
+    off();
+  });
+
+  it('rejects on silence, which is what no extension installed looks like', async () => {
+    await expect(handOffPost({ posts: [] }, { timeoutMs: 120 })).rejects.toThrow('did not answer');
+  });
+
+  it('ignores a reply meant for another request', async () => {
+    const off = fakePostBridge((msg) => ({ ok: true, accepted: true, id: `${msg.id}-not` }));
+    await expect(handOffPost({ posts: [] }, { timeoutMs: 120 })).rejects.toThrow('did not answer');
+    off();
   });
 });

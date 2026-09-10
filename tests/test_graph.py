@@ -1096,6 +1096,26 @@ def test_collected_material_carries_no_origin(client):
     assert "origin" not in node and "op" not in node
 
 
+def test_a_capture_carries_no_origin_either(client):
+    """The two sets differ by exactly this node (`links.PRODUCED_HERE`). A node saying
+    it was made here is saying its parents are in the picture, and a capture has none:
+    it is imagery, filed as collected. The Media Library still holds it back, because
+    the question there is what the analyst gathered."""
+    from PIL import Image
+
+    from azimut.engine import media as media_engine
+    from azimut.workspace import Case
+
+    cid = _case(client, "capture origin")
+    capture = media_engine.import_image(
+        Case.open(cid), Image.new("RGB", (32, 24)), "map.png",
+        {"type": "satellite"}, entity_type="capture", dedupe=False,
+    )["item"]
+
+    node = _node(_graph(client, cid), _entity_at(client, cid, capture["path"]))
+    assert "origin" not in node and "op" not in node
+
+
 def test_a_media_entity_the_index_never_saw_claims_no_origin(client):
     """Unlike the kind, nothing writes the route to the entity, so there is no
     fallback to read — and a default here would be the drawing inventing where a

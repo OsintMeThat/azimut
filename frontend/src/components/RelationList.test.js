@@ -69,7 +69,7 @@ describe('RelationList', () => {
     const hosts = {
       'EntityDetails.svelte': 'subjectType={entity.type}',
       '../tools/satellite/SavedPopup.svelte': "subjectType={row.kind === 'place' ? 'place' : 'capture'}",
-      '../tools/Satellite.svelte': 'subjectType="place"',
+      '../tools/satellite/PlaceDialog.svelte': 'subjectType="place"',
     };
     for (const [host, expected] of Object.entries(hosts)) {
       const body = readFileSync(new URL(host, import.meta.url), 'utf8');
@@ -78,10 +78,10 @@ describe('RelationList', () => {
   });
 
   it('keeps its clicks to itself, inside each handler', () => {
-    // In a Leaflet popup, a click that looks like it reached the map closes the
-    // card. These controls replace themselves, so their button can be detached by
-    // the time the event bubbles and Leaflet's walk up to the popup container
-    // finds nothing. It has to be stopped *in* the handler: Svelte delegates these
+    // In a map card, a click that looks like it reached the map closes the
+    // card. These controls replace themselves, so their button can be gone from
+    // the document by the time the event bubbles. It has to be stopped *in* the
+    // handler: Svelte delegates these
     // clicks to the app root, so an ancestor that stopped them would silence the
     // buttons instead of shielding them.
     expect(source).toContain('function own(handler)');

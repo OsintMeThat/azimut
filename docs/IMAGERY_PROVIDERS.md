@@ -69,7 +69,7 @@ EEA, so Azimut supports both products:
 | | Google Satellite (tiles) | Google Satellite (Maps JS) |
 |---|---|---|
 | Works in the EEA | **no** (403) | yes |
-| Rendering | XYZ tiles through our proxy | a real `google.maps.Map` under Leaflet (GoogleMutant plugin, Beerware licence) |
+| Rendering | XYZ tiles through our proxy | a real `google.maps.Map` under our own map, which is transparent where nothing is drawn |
 | Captures | stitched crop, attribution burned | **screen pixels only** from one tab screenshot taken by the capture extension; attribution burned, `method:"screenshot"`, `framed:true` |
 | Capture frame | any size (tiles are fetched) | limited to the map view; no resolution multiplier |
 | Rotation / oversample / marquee | yes | **rotation + marquee yes**, oversample no |
@@ -78,21 +78,28 @@ EEA, so Azimut supports both products:
 
 Both keys can be saved at once: each lights its own basemap, and the EEA failure
 path benches the tiles one automatically (below) leaving the widget on offer.
-Leaflet keeps all interaction, so measure tools, places, reference windows and
-the labels overlay work unchanged over the widget.
+Our own map keeps all interaction, so measure tools, places, reference windows
+and the labels overlay work unchanged over the widget.
 
 ### Maps JS widget behavior
 
-GoogleMutant runs a hidden `google.maps.Map` and clones its `<img>` tiles into a
-Leaflet `GridLayer`.
+Google's own map renders in its own element **under** ours, and ours is
+transparent where nothing is drawn (`lib/map/gmaps.js`, "under glass"). It takes
+no pointer events: every gesture and every control is ours, and Google's camera
+is moved to follow ours on each frame.
 
-- **Rotation works.** The visible tiles are Leaflet tiles in the rotatable tile
-  pane, and leaflet-rotate already asks the grid for the rotated bounding box.
-  The hidden map renders the unrotated viewport, so a turned view can otherwise
-  expose blank corners.
-  `lib/gmaps.js` sizes the hidden map to a **square of the container's diagonal,
-  centred**, which covers every bearing at once. Extra tile renders inside one
-  map load are free; the billing is per `google.maps.Map`.
+- **Rotation works.** Google has no bearing of its own on a raster satellite
+  map, so its element is turned by CSS. A turned rectangle would expose blank
+  corners, so the element is a **square of the container's diagonal, centred**,
+  which covers every bearing at once — a rotated W×H rectangle always fits
+  inside the circle of its own diagonal. Extra tile renders inside one map load
+  are free; the billing is per `google.maps.Map`.
+- **The credit line is moved upright.** Google renders it inside that oversized,
+  turned element, where a bearing would rotate it off screen. It is re-homed
+  into a fixed holder at the bottom right, which is the one part of the layer
+  that does take the pointer, so the terms link stays clickable. If Google's
+  markup ever stops offering that node, the same credit and a terms link are
+  stated by us instead — the imagery is never shown bare.
 - **Cloned tiles remain off-limits.** Reading them through canvas, html2canvas or
   their URLs is programmatic extraction forbidden by Google's terms. The
   capture path therefore goes through the **capture extension** (`extension/`,
@@ -260,7 +267,8 @@ ship at 10 m/px from three levels out, so the view runs to z18 while requests
 stop at 14 and magnify the last native tile without extra requests. Asking
 Sentinel Hub for z18 would bill 16 times as many tiles for server-side upsampling.
 
-Leaflet's `maxNativeZoom` does it on the live map; `fetch_crop` mirrors it so a
+The live map stops its tile requests at that level and scales the last one up;
+`fetch_crop` mirrors it so a
 capture matches the screen, and records `native_zoom` +
 `native_meters_per_pixel` next to `zoom`. This records that the native resolution
 is lower than the display zoom implies. The tile proxy
@@ -312,7 +320,7 @@ in evidence imagery.
 
 **Billing units.** Both bill per tile served. Google's 2D Map Tiles SKU is
 "Request that returns a 2D map tile" (session and viewport requests are free);
-Mapbox Static Tiles bills per tile request when used with Leaflet. Free tiers:
+Mapbox Static Tiles bills per tile request on a live map. Free tiers:
 Google 100k/month then $0.60/1k (plus hard limits of 15k tiles/day and 6k/min per
 project), Mapbox 200k/month then $0.50/1k (alerts only, no hard cap). Metered
 tiles are proxied through the backend so the counter matches billing exactly;

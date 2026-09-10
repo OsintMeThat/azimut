@@ -158,18 +158,23 @@ describe('SavedOverlay popup wiring', () => {
     expect(overlay).toContain("import { mount, unmount } from 'svelte'");
     expect(overlay).toContain('mount(SavedPopup');
     expect(overlay).toContain('unmount(mounted)');
-    expect(overlay).toContain('onpost?.(post)');
+    expect(overlay).toContain('onpost: close(onpost)');
   });
 
   it('opens a card for every mark, one item or a stack', () => {
-    expect(overlay).toContain('marker.bindPopup(() => popupContent(mark)');
+    expect(overlay).toContain('content: () => popupContent(mark)');
     // no shortcut path that flies straight there on a single-item mark
-    expect(overlay).not.toContain("marker.on('click'");
+    expect(overlay).not.toContain('onClick');
   });
 
-  it('dresses the Leaflet popup as one of the app\'s own surfaces', () => {
-    expect(overlay).toContain('.saved-popup .leaflet-popup-content-wrapper');
-    expect(overlay).toContain('background: var(--bg-1)');
+  it('asks for the width its own rows need, and leaves the look to the map', () => {
+    // the card's chrome is one of the app's surfaces, dressed once in
+    // lib/map/engine.css; what belongs here is how wide these rows have to be
+    expect(overlay).toContain("className: 'saved-popup'");
+    expect(overlay).toContain('minWidth: 296');
+    expect(overlay).toContain('maxWidth: 330');
+    // and never the engine's own DOM, which is not this component's to name
+    expect(overlay.toLowerCase()).not.toContain('popup-content');
   });
 
   it('marks a worked capture instead of letting a proof stack a mark on it', () => {
@@ -214,7 +219,7 @@ describe('SavedPopup relations', () => {
     // the auto-open effect writes the state it reads, so it guards on "already
     // open" rather than fetching the row twice
     expect(source).toContain('if (!only || !relationCount(only) || relationsShown(only)) return;');
-    // the toggle keeps its click inside the card, or Leaflet closes it
+    // the toggle keeps its click inside the card, or the map closes it
     expect(source).toContain('event?.stopPropagation();');
   });
 
@@ -227,7 +232,7 @@ describe('SavedPopup relations', () => {
     expect(source).toContain('await onrefresh?.()');
     expect(source).toContain('relationsByRow[rowKey(row)]?.length ?? Number(row.relations ?? 0)');
     expect(overlay).toContain('if (held && builtFor === cid) return;');
-    expect(overlay).toContain("map.on('popupopen', opened)");
+    expect(overlay).toContain('onPopupOpen: () => (popupOpen = true)');
     // the layer's teardown is not the data effect's cleanup, which Svelte runs
     // before every re-run — including one that decides to defer
     expect(overlay).toContain('function rebuild(rows, precision)');
@@ -242,9 +247,10 @@ describe('SavedPopup relations', () => {
   it('leaves for a related entity’s own tool by closing the card first', () => {
     // every other row in this card closes it before navigating; a popup that
     // vanishes without saying it would reads as a bug
-    expect(overlay).toContain('onentity: (entity) => {');
-    expect(overlay).toContain('map.closePopup();');
-    expect(overlay).toContain('openEntity(entity);');
+    // one closing gesture, applied to every row of the card
+    expect(overlay).toContain('const close = (then) => (arg) => {');
+    expect(overlay).toContain('surface.closePopup();');
+    expect(overlay).toContain('onentity: close(openEntity)');
   });
 });
 

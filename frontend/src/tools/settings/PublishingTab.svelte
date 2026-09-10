@@ -16,6 +16,7 @@
     uploadSignature,
     mention = $bindable(),
     postTarget = $bindable(),
+    postPrefill = $bindable(),
     signatureHandle = $bindable(),
     sigInput = $bindable(),
   } = $props();
@@ -53,6 +54,22 @@
         >{option.label}</button>
       {/each}
     </div>
+  </div>
+  <div class="row">
+    <div class="row-label">
+      <span>Let the extension fill the composer</span>
+      <span class="row-hint">
+        Publish types the thread and attaches the proof, then stops. Nothing is
+        ever posted. Needs the capture extension; without it, Publish opens the
+        page as usual.
+      </span>
+    </div>
+    <input
+      type="checkbox"
+      bind:checked={postPrefill}
+      onchange={() => savePrefs({ post_prefill: postPrefill })}
+      aria-label="Let the extension fill the composer"
+    />
   </div>
 </section>
 

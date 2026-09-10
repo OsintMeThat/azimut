@@ -112,6 +112,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # The social composer a new post draft starts with. A saved draft keeps its
     # own target so a later preference change never rewrites it.
     "post_target": "x",
+    # Whether Publish lets the capture extension fill that composer — the thread
+    # typed in, the proof and the media attached, nothing posted. The only switch
+    # for it: the extension keeps none of its own, so this is where the answer
+    # lives. On, because with no extension installed it changes nothing — the app
+    # opens the intent page as it always did.
+    "post_prefill": True,
     # The handle stamped onto proofs when a proof/template enables it. Empty
     # means no account-handle slot can render.
     "signature_handle": "",
@@ -148,7 +154,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 # frontend/src/lib/coords.js and frontend/src/lib/measure.js.
 COORD_FORMATS = ("dd", "dms", "mgrs")
 UNIT_SYSTEMS = ("metric", "imperial")
-POST_TARGETS = ("x", "bluesky", "mastodon")
+POST_TARGETS = ("x", "bluesky")
 
 # Documented monthly free allowances per meter, in billed requests (verified
 # 2026-07: Google 2D Map Tiles 100k then $0.60/1k, and ≤15k/day; Mapbox Static

@@ -107,3 +107,87 @@ describe('Post Composer — coordinates that no longer parse', () => {
     );
   });
 });
+
+describe('the attached proof', () => {
+  const card = source.slice(
+    source.indexOf('<!-- Post 1: geolocation -->'),
+    source.indexOf('<!-- Post 2: media (Video / Image) -->'),
+  );
+
+  it('rides on the geolocation post, which is the post that carries it', () => {
+    // It used to sit in the field column, a screen away from the text it is
+    // published with, and reading the thread said nothing about the picture.
+    expect(card).toContain('onclick={openProofPicker}');
+    expect(card).toContain('<img class="proof-preview card" src={proofHref} alt="proof" />');
+    expect(source).not.toContain('class="proof-head"');
+    expect(source).not.toContain('Attached proof');
+  });
+
+  it('carries it the way every other post carries its media', () => {
+    expect(card).toContain('<div class="media-attach">');
+    expect(card).toContain('<span class="attach-chip">');
+    expect(card).toContain('onclick={clearProof}');
+  });
+});
+
+describe('handing the thread to the extension', () => {
+  const publish = source.slice(source.indexOf('function handoffPayload'), source.indexOf('<div class="tool">'));
+
+  it('sends paths, never files: the extension reads the bytes from the app itself', () => {
+    expect(publish).toContain('files: proofPng ? [proofPng] : []');
+    expect(publish).toContain('files: mediaPaths');
+    expect(publish).toContain('files: tweet.mediaPaths');
+    expect(publish).toContain('caseId: caseState.current.id');
+    expect(publish).not.toContain('base64');
+  });
+
+  it('falls back to the page it always opened, for every way the hand-off can fail', () => {
+    // absent, off, not permitted, a target it cannot fill: one answer, one path
+    expect(publish).toContain('|| !extensionVersion()) return false;');
+    expect(publish).toContain('if (!url || !caseState.current) return false;');
+    expect(publish).toMatch(/catch \(e\) \{[\s\S]*?return false;/);
+    expect(publish).toContain('if (await tryHandOff()) return;');
+    expect(publish).toContain('window.open(url, \'_blank\', \'noopener,noreferrer\')');
+  });
+
+  it('copies the thread before handing it over, so a short fill is never a loss', () => {
+    const body = source.slice(source.indexOf('async function publish()'), source.indexOf('</script>'));
+    expect(body.indexOf('await copyAll(false);')).toBeLessThan(body.indexOf('tryHandOff()'));
+  });
+
+  it('says nothing was posted, because nothing was', () => {
+    expect(publish).toContain('Nothing was posted.');
+  });
+});
+
+describe('the Settings switch for filling the composer', () => {
+  it('is what Publish asks first, so turning it off is the end of it', () => {
+    expect(source).toContain('if (!prefs.postPrefill || !extensionVersion()) return false;');
+  });
+
+  it('claims only what is true when it says it: the fill is still running', () => {
+    expect(source).toContain('is opening with the thread.');
+    expect(source).not.toContain('Filled ${filled}');
+  });
+});
+
+describe('when the extension does not take the thread', () => {
+  const excuse = source.slice(source.indexOf('function handOffExcuse'), source.indexOf('* Let the extension open'));
+
+  it('names the one reason the analyst can act on: an extension older than the app', () => {
+    // A build that predates the feature has no route for the message and says
+    // nothing at all, so Publish quietly did the old thing and read as broken.
+    expect(excuse).toContain('extensionOutdated(installed, updatesState.extensionBundled)');
+    expect(excuse).toContain('Reinstall it from Settings → Capture extension');
+  });
+
+  it('passes on the extension\'s own answer when pairing is what is missing', () => {
+    expect(excuse).toContain('/paired/.test(error.message)');
+    expect(excuse).toContain('Composer not filled:');
+  });
+
+  it('stays quiet otherwise, since the fallback is the behaviour they know', () => {
+    expect(excuse).toContain(': null;');
+    expect(source).toContain('if (excuse) toast(excuse, \'warn\', 6000);');
+  });
+});

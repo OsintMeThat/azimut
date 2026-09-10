@@ -191,3 +191,19 @@ def test_windows_npm_wrapper_uses_cmd(monkeypatch: pytest.MonkeyPatch):
         "run",
         "build",
     ]
+
+
+@pytest.mark.parametrize(
+    ("choice", "watch", "expected"),
+    [
+        (None, False, None),
+        (None, True, ["chrome", "firefox"]),
+        ("all", False, ["chrome", "firefox"]),
+        ("chrome", False, ["chrome"]),
+        ("firefox", True, ["firefox"]),
+    ],
+)
+def test_which_dev_browsers_the_extension_flags_ask_for(
+    choice: str | None, watch: bool, expected: list[str] | None
+):
+    assert relaunch.extension_browsers(choice, watch) == expected
