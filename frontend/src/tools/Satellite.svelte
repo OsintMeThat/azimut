@@ -141,6 +141,7 @@
   let savedW = $state(savedPanel.loadWidth());
   let savedResizing = $state(false);
   let mapReady = $state(false);
+  let mapRefused = $state(false);
 
   // OSM labels overlay: a transparent labels-only layer laid over the imagery so
   // roads / place names are readable without hiding the satellite view (item 1).
@@ -376,10 +377,21 @@
     providers = await api.get('/api/satellite/providers');
     await prefsReady; // the home view has to land before the map is built
     center = { ...prefs.homeView };
-    engine = await createMapEngine(mapEl, {
-      view: center,
-      imperial: prefs.units === 'imperial',
-    });
+    try {
+      engine = await createMapEngine(mapEl, {
+        view: center,
+        imperial: prefs.units === 'imperial',
+      });
+    } catch (e) {
+      // The engine draws through WebGL and a browser can refuse it: an old
+      // driver, a machine with no GPU, a profile hardened to turn it off. It
+      // throws on the way up, and nothing below this line means anything
+      // without a map — so the tool says so instead of drawing an empty panel
+      // and leaving the analyst to wonder which part broke.
+      console.error(e);
+      mapRefused = true;
+      return null;
+    }
     basemaps = createBasemaps(engine, {
       onMeteredTiles: refreshUsage,
       // one billed map load, counted where it happens (the proxy can't see it)
@@ -2404,6 +2416,10 @@
     >
       <div class="map" bind:this={mapEl}></div>
 
+      {#if mapRefused}
+        <p class="map-refused">The map needs WebGL, which this browser does not have.</p>
+      {/if}
+
       <!-- saved work on the map: navigation only, off by default, session-only.
            It draws the panel's current selection, not the whole index. -->
       {#if savedOverlay}
@@ -3032,6 +3048,16 @@
     position: absolute;
     inset: 0;
     background: var(--bg-2);
+  }
+  .map-refused {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    margin: 0;
+    padding: 0 24px;
+    text-align: center;
+    color: var(--text-2);
   }
   .temporal-layer-card.stacked { top: 150px; }
   .temporal-layer-card {

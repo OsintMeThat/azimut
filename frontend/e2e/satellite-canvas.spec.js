@@ -75,3 +75,20 @@ test('captures a marquee drawn on the real map surface', async ({ page }) => {
   expect(fixture.captures[0].height).toBeGreaterThan(100);
   fixture.expectNoUnexpectedRequests();
 });
+
+test('says the map needs WebGL rather than drawing an empty panel without it', async ({ page }) => {
+  // A browser can refuse WebGL: an old driver, a machine with no GPU, a profile
+  // hardened to turn it off. The engine throws on the way up, and the tool used
+  // to swallow it and leave the panel blank for good.
+  await page.addInitScript(() => {
+    const real = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (kind, ...rest) {
+      return String(kind).startsWith('webgl') ? null : real.call(this, kind, ...rest);
+    };
+  });
+  await installAppFixture(page);
+  await page.goto('/#satellite');
+
+  await expect(page.getByText('The map needs WebGL, which this browser does not have.')).toBeVisible();
+  await expect(page.locator('.map[data-map-ready="true"]')).toHaveCount(0);
+});

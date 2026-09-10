@@ -23,6 +23,18 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    // Firefox is given WebGL by hand. A CI runner has no GPU, and Firefox will
+    // not fall back to a software renderer for WebGL on its own the way Chromium
+    // does — so MapLibre never reached `load`, the map never said it was ready,
+    // and every spec that opens one failed waiting on an element that was not
+    // coming. Measured with the GL drivers taken out from under it: without this
+    // pref the map specs fail, with it they pass.
+    {
+      name: 'firefox',
+      use: {
+        ...devices['Desktop Firefox'],
+        launchOptions: { firefoxUserPrefs: { 'webgl.force-enabled': true } },
+      },
+    },
   ],
 });
