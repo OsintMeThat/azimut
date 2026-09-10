@@ -9,7 +9,7 @@ import graph_read
 import pytest
 import time
 
-from jobwait import job_result, wait_for_job
+from jobwait import WAIT, job_result, wait_for_job
 from PIL import Image
 
 from azimut.engine.media import safe_filename
@@ -1933,7 +1933,15 @@ def test_concurrent_sidecar_merges_do_not_drop_each_other(client, monkeypatch):
     for t in threads:
         t.start()
     for t in threads:
-        t.join(timeout=10)
+        # A join that gives up does not stop the thread: it goes on writing into a
+        # case the teardown is about to delete, which on Windows is a locked
+        # `case.db` and a temp directory that cannot be removed — reported as an
+        # error against whichever test happened to be running. Ten seconds was
+        # this machine's budget for forty merges; the Windows shard commits each
+        # one at `synchronous = FULL` and wants the suite's own. A writer that
+        # really is stuck now says so here, where the stack still means something.
+        t.join(timeout=WAIT)
+        assert not t.is_alive(), "a sidecar writer never finished"
 
     item = media_engine.read_item(case, rel)
     assert item["thumbnail"] == "media/.thumbs/x.jpg"
