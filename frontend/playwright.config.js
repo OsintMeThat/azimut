@@ -23,17 +23,28 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    // Firefox is given WebGL by hand. A CI runner has no GPU, and Firefox will
-    // not fall back to a software renderer for WebGL on its own the way Chromium
-    // does — so MapLibre never reached `load`, the map never said it was ready,
-    // and every spec that opens one failed waiting on an element that was not
-    // coming. Measured with the GL drivers taken out from under it: without this
-    // pref the map specs fail, with it they pass.
+    // Firefox is given WebGL by hand. A CI runner has no GPU, and where Chromium
+    // falls back to the software renderer it carries inside it, Firefox tries the
+    // native driver, finds none, and stops there — `tryNativeGL()`, then
+    // `FEATURE_FAILURE_WEBGL_EXHAUSTED_DRIVERS`, read off the runner's own
+    // console. So MapLibre never reached `load`, no map said it was ready, and
+    // every spec that opens one failed on an element that was not coming.
+    //
+    // Two prefs, doing two different things: `force-enabled` gets past the
+    // blocklist, and `allow-software` is what lets the fallback be tried at all.
+    // Without the second the first decides nothing, which is how this failure
+    // survived a pref that looked like it addressed it.
     {
       name: 'firefox',
       use: {
         ...devices['Desktop Firefox'],
-        launchOptions: { firefoxUserPrefs: { 'webgl.force-enabled': true } },
+        launchOptions: {
+          firefoxUserPrefs: {
+            'webgl.force-enabled': true,
+            'webgl.allow-software': true,
+            'gfx.webrender.software': true,
+          },
+        },
       },
     },
   ],
