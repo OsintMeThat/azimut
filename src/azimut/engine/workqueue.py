@@ -112,6 +112,9 @@ def drain(case: "CaseType") -> int:
 
 # -- the single background worker -----------------------------------------
 
+#: The one worker thread's name, which is also how a flag with nothing behind
+#: it is told from one a live thread is holding (`_reset_for_tests`).
+_WORKER_NAME = "azimut-worker"
 _worker_lock = threading.Lock()
 _pending: dict[str, "CaseType"] = {}
 _worker_running = False
@@ -169,7 +172,7 @@ def wake(case: "CaseType") -> None:
         if _worker_running:
             return
         _worker_running = True
-    threading.Thread(target=_run_loop, name="azimut-worker", daemon=True).start()
+    threading.Thread(target=_run_loop, name=_WORKER_NAME, daemon=True).start()
 
 
 def recover_all() -> None:
@@ -193,17 +196,27 @@ def recover_all() -> None:
 
 
 def _reset_for_tests() -> None:
-    """Test seam: forget the queue and the worker flag.
+    """Test seam: forget the queue, and the worker flag when nothing holds it.
 
     Module state outlives a test, and two of them set the flag by hand. Under a
     randomized order that leaked: a test that inherited `_worker_running = True`
     with no thread behind it queued its work, was told a worker had it, and
     waited out its whole budget for a drain that was never going to come.
+
+    The flag is only taken back when it is genuinely orphaned. A set flag with a
+    live thread behind it is not stale, it is true — clearing it there would let
+    a second worker start beside the first, and the pair would still be writing
+    when the temporary workspace is removed.
     """
     global _worker_running
     with _worker_lock:
         _pending.clear()
-        _worker_running = False
+        orphaned = not any(
+            thread.name == _WORKER_NAME and thread.is_alive()
+            for thread in threading.enumerate()
+        )
+        if orphaned:
+            _worker_running = False
 
 
 def wait_until_idle(timeout: float = 5.0) -> bool:
