@@ -88,6 +88,7 @@ test('clears capture rows before a different case index arrives', async ({ page 
   });
 
   await page.goto('/#satellite');
+  await awaitMapReady(page); // the rows are read beside a map, and one mark is on it
   const savedPanel = page.locator('.captures');
   await expect(savedPanel.getByText('Capture A', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Show saved work on the map' }).click();
@@ -116,6 +117,7 @@ test('clears proof rows before a different case proof index arrives', async ({ p
   });
 
   await page.goto('/#satellite');
+  await awaitMapReady(page); // the panel is the map tool's, and it opens with it
   await page.getByRole('button', { name: 'Proofs', exact: true }).click();
   await expect(page.getByText('Proof A')).toBeVisible();
   await page.getByTitle('Switch case').click();
