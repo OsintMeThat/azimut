@@ -185,7 +185,16 @@ jobs:
   browser:
     name: Browser canvas interactions (${{ matrix.browser }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
+    # Mesa's software rasterizer, named rather than left to a probe. A runner has
+    # no GPU, and where Chromium falls back to its own SwiftShader, Firefox asks
+    # the system for a driver, finds none it trusts, and turns WebGL off — so
+    # MapLibre never reached `load`, no map ever said it was ready, and every
+    # spec that opens one failed on an element that was not coming. llvmpipe is
+    # already on the image; this says to use it. Chromium ignores the variable.
+    env:
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      GALLIUM_DRIVER: llvmpipe
     # One job per browser rather than one job running both. The specs stay at a
     # single Playwright worker on purpose — canvas startup times out when
     # MapLibre and Konva compete for a runner's cores — so the only way to
