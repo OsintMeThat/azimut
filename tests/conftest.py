@@ -1,4 +1,6 @@
 import tempfile
+import threading
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -62,10 +64,23 @@ def a_worker_of_its_own():
     Set up before the fixtures that own a temporary workspace, so the state is
     clean before a case exists at all. The worker is waited out first, because
     clearing the flag under a live thread would let a second one start.
+
+    Waited out *to the end of the thread*, not just until the queue reads empty.
+    `_reset_for_tests` keeps the flag when a worker is still alive — rightly, the
+    flag is true then — but a test that starts in that state queues its work, is
+    told a worker already has it, and starts none; and if the live one reaches
+    the end of its queue in between, it leaves with the new work undrained. The
+    test then waits its whole budget for a thumbnail nobody is rendering. Which
+    box shows it is a coin toss, since what leaks the thread is the test that ran
+    before it, and that is the randomized order's to choose.
     """
     from azimut.engine import workqueue
 
-    workqueue.wait_until_idle(timeout=10)
+    workqueue.wait_until_idle(timeout=60)
+    deadline = time.monotonic() + 60
+    for thread in threading.enumerate():
+        if thread.name == workqueue._WORKER_NAME and thread.is_alive():
+            thread.join(max(0.0, deadline - time.monotonic()))
     workqueue._reset_for_tests()
     yield
 
