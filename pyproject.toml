@@ -169,6 +169,13 @@ packages = ["src/azimut"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Print every thread's stack when one test runs longer than this, using the
+# stdlib's own faulthandler rather than a plugin. A test that hangs on a runner
+# we don't have takes the job's whole budget and is then killed with no name
+# attached: the shard reports a percentage and nothing else. This turns that
+# into a traceback. Well above the slowest test the suite has (`jobwait.WAIT`
+# is 60), so a healthy run never prints.
+faulthandler_timeout = 180
 
 [tool.ruff]
 # Match the codebase's existing wrap. Default rule set (E/F/W) only — this is a
