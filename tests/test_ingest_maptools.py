@@ -198,28 +198,21 @@ def test_reference_media_is_searched_and_bounded(client):
     assert page["total"] == 5
 
 
-def test_sky_answers_without_the_network(client, monkeypatch):
-    # the panel has to work on a map tab with no connection: the computation is
-    # local, and a test that lets it reach the network would not prove that
-    import socket
-
-    # Both of these happen before the socket goes away, and the order is the
-    # whole point. `_headers` mints the token over the client, and the request
-    # that does it is the first one this client makes — which is where the test
-    # loop builds the socket pair it wakes itself with. Refuse that and the loop
-    # has no wakeup channel: the call never returns, on a runner where nothing
-    # times out it hangs the shard, and the Windows box is the one that shows it
-    # because its proactor loop builds that pair on first use where the selector
-    # loop builds it up front.
-    headers = _headers(client)
-    client.get("/api/ingest/sky", params={"lat": 0, "lon": 0}, headers=headers)
-
-    def refuse(*args, **kwargs):
-        raise AssertionError("the sky route must not touch the network")
-
-    monkeypatch.setattr(socket, "socket", refuse)
+def test_sky_answers_the_panel_for_a_point(client):
+    # The panel has to work on a map tab with no connection, and that guarantee
+    # is held one layer down, where it can be held honestly:
+    # `test_sky.py::test_sky_does_not_touch_the_network` makes every socket
+    # explode and calls the computation directly.
+    #
+    # It cannot be re-proved through this route, because the client that would
+    # ask is itself a loop that opens sockets to talk to its own server thread:
+    # taking `socket.socket` away does not stop the route reaching out, it stops
+    # the request arriving, and the call never returns. That deadlock has no
+    # timeout under it, so it costs the whole Windows shard — twice, before the
+    # traceback said so. What is left here is what only this layer can answer:
+    # the route exists, takes a point, and hands the panel the shape it draws.
     day = client.get(
-        "/api/ingest/sky", params={"lat": 48.8584, "lon": 2.2945}, headers=headers
+        "/api/ingest/sky", params={"lat": 48.8584, "lon": 2.2945}, headers=_headers(client)
     ).json()
     assert day["curve"]["clock"]
     assert len(day["curve"]["sun_altitude"]) == len(day["curve"]["clock"])
