@@ -33,6 +33,7 @@ from ..engine import (
     tiles,
 )
 from ..workspace import Case, CaseError
+from . import events
 from .cases import delete_by_path, get_case
 from .limits import MAX_IMAGE_BYTES
 from .naming import slugify
@@ -111,6 +112,17 @@ class GridSaveIn(BaseModel):
     # sanity-checks it. A human title rides alongside for the picker.
     spec: dict[str, Any]
     title: str | None = None
+    #: Which revision of the file this spec was built from, when the client is
+    #: replacing a grid rather than creating one. A sweep is worked from the app
+    #: and from the capture extension against one file, so a whole-spec save
+    #: arriving from an older copy is refused instead of putting back the marks
+    #: the other side has since made.
+    #:
+    #: A counter rather than ``updated_at``: timestamps here are second
+    #: resolution, and two writes inside one second carry the same string — which
+    #: is exactly the case this guard exists for. Omitted means "I am not
+    #: claiming to know" and the save goes through.
+    base_revision: int | None = None
 
 
 # Search grids are saved sweeps a case can hold several of (spec §5 "Grid
@@ -121,6 +133,18 @@ GRID_MAX_STATUSES = 50000
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def saved_changed(case: Case) -> None:
+    """Say that this case's saved work moved (``api/events.py``).
+
+    The Saved panel is drawn in two places at once — the app's own map, and every
+    map panel the extension has open — and only one of them made the request that
+    got here. The other hears this and re-reads the index; the one that wrote it
+    re-reads a list it already has, which costs a few KB over loopback and is the
+    price of not having to tell each surface which of them was the author.
+    """
+    events.publish({"type": "saved", "case_id": case.id})
 
 
 # A save waits this long for a country, and no longer. Online, the answer is
@@ -786,6 +810,7 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
         dedupe=False,  # a capture is 1:1 with its entity — never collapse re-captures
     )
     locate_on_save(case, result["entity"]["id"], marker_lat, marker_lon)
+    saved_changed(case)
 
     return {"path": result["item"]["path"], "title": label, **provenance}
 
@@ -884,6 +909,7 @@ async def capture_screenshot(
         dedupe=False,
     )
     locate_on_save(case, result["entity"]["id"], lat, lon)
+    saved_changed(case)
     return {"path": result["item"]["path"], "title": label, **provenance}
 
 
@@ -901,6 +927,7 @@ def save_place(case_id: str, body: PlaceIn) -> dict[str, Any]:
         case, body.lat, body.lon, body.zoom, body.bearing, body.title, extra_attrs=extra
     )
     locate_on_save(case, entity["id"], body.lat, body.lon)
+    saved_changed(case)
     return entity
 
 
@@ -977,6 +1004,7 @@ def delete_capture(case_id: str, path: str) -> dict[str, Any]:
             media_engine.delete_media_files(case, path)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    saved_changed(case)
     return result
 
 
@@ -1007,6 +1035,7 @@ def update_capture(case_id: str, body: SatelliteUpdateIn) -> dict[str, Any]:
         updated = media_engine.update_media(case, body.path, patch)
     except (ValueError, CaseError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    saved_changed(case)
     # flatten the capture provenance up, like the listing does, so the client
     # gets the same shape back as GET /satellite
     return {**(updated.get("source") or {}), **updated}
@@ -1083,6 +1112,13 @@ def _validate_grid_spec(value: Any) -> dict[str, Any]:
     return value
 
 
+def _revision(spec: dict[str, Any]) -> int:
+    """How many times this grid has been written. Absent in files saved before
+    the counter existed, which read as revision zero."""
+    value = spec.get("revision")
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
 def _read_grid(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -1103,6 +1139,89 @@ def _write_grid_atomic(path: Path, spec: dict[str, Any]) -> None:
         os.replace(tmp_path, path)
     finally:
         tmp_path.unlink(missing_ok=True)
+
+
+def apply_grid_marks(case, name: str, marks: dict[str, Any]) -> dict[str, Any]:
+    """Set or clear individual cells on a saved grid, leaving the rest alone.
+
+    A sweep is now worked from two places — the app's own map and, through the
+    extension, whatever map the analyst happens to be on — against one file. The
+    whole-spec save below cannot serve both: it carries every cell, so a client
+    holding a copy from five minutes ago puts back the marks the other one made
+    in between, and nothing says so.
+
+    A patch has no such copy in it. `null` clears a cell, so unmarking still
+    works, and two sweeps that touched different cells both land. Two that
+    touched the same one resolve last-writer-wins, which is what an analyst
+    marking the same cell twice would expect anyway.
+    """
+    spec_path = case.resolve_inside(layout.grid_rel(slugify(name, "grid")))
+    if not spec_path.exists():
+        raise HTTPException(status_code=404, detail="grid not found")
+    try:
+        spec = _read_grid(spec_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"corrupt grid: {exc}") from exc
+
+    revision = _revision(spec)
+    statuses = dict(spec.get("statuses") or {})
+    for key, value in marks.items():
+        if value is None:
+            statuses.pop(str(key), None)
+        elif value in GRID_STATUSES:
+            statuses[str(key)] = value
+        else:
+            raise HTTPException(status_code=400, detail=f"unknown mark: {value!r}")
+    if len(statuses) > GRID_MAX_STATUSES:
+        raise HTTPException(status_code=400, detail="grid has too many cells")
+
+    spec["statuses"] = statuses
+    spec["updated_at"] = _now()
+    # a patch moves the file on too, so a whole-spec save built before it is
+    # recognised as behind rather than written over the top
+    spec["revision"] = revision + 1
+    _write_grid_atomic(spec_path, spec)
+    # The other surfaces working this sweep re-read it off this. The revision
+    # rides along because the one that sent these marks hears the nudge too, and
+    # a revision it is already holding is how it knows to stay put.
+    events.publish({
+        "type": "grid-marks",
+        "case_id": case.id,
+        "name": spec_path.stem,
+        "revision": spec["revision"],
+    })
+    return {
+        "name": spec_path.stem,
+        "updated_at": spec["updated_at"],
+        "revision": spec["revision"],
+        "cleared": sum(1 for v in statuses.values() if v == "cleared"),
+        "flagged": sum(1 for v in statuses.values() if v == "flagged"),
+    }
+
+
+class GridMarksBody(BaseModel):
+    #: ``"i:j" -> "cleared" | "flagged" | null``, null meaning "back to
+    #: unchecked". The app's own half of what the extension sends to
+    #: ``/api/ingest/grid/marks``; see ``apply_grid_marks`` for why a sweep is
+    #: patched rather than saved whole.
+    marks: dict[str, Any]
+
+
+@router.post("/cases/{case_id}/search-grids/{name}/marks")
+def mark_search_grid(case_id: str, name: str, body: GridMarksBody) -> dict[str, Any]:
+    """Mark cells on a saved grid without writing the rest of it.
+
+    The app used to save a swept cell by putting its whole copy of the spec back,
+    which was fine while it was the only thing sweeping. It is not: the same grid
+    is worked from the extension's panel over another map, and a whole-spec save
+    either loses that panel's marks or is refused as behind — and "reload it and
+    redo your last mark" is a poor answer to two people sweeping one area, which
+    is what a search grid is for.
+
+    So marks travel as a patch from both sides now, and only the geometry — a
+    redrawn area, a rename — still writes a spec.
+    """
+    return apply_grid_marks(get_case(case_id), name, body.marks)
 
 
 @router.get("/cases/{case_id}/search-grids")
@@ -1146,7 +1265,12 @@ def get_search_grid(case_id: str, name: str) -> dict[str, Any]:
 
 @router.put("/cases/{case_id}/search-grids/{name}")
 def save_search_grid(case_id: str, name: str, body: GridSaveIn) -> dict[str, Any]:
-    """Create or replace one grid. The client owns the name (a stable slug)."""
+    """Create or replace one grid. The client owns the name (a stable slug).
+
+    This is for the shape: a fresh area, a reshaped one, a rename. A marked cell
+    goes to ``/marks`` instead, so that the two surfaces sweeping one grid do not
+    write over each other — see ``apply_grid_marks``.
+    """
     case = get_case(case_id)
     slug = slugify(name, "grid")
     spec = dict(body.spec)
@@ -1172,8 +1296,32 @@ def save_search_grid(case_id: str, name: str, body: GridSaveIn) -> dict[str, Any
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     spec_path = case.resolve_inside(layout.grid_rel(slug))
+    on_disk = 0
+    if spec_path.exists():
+        try:
+            on_disk = _revision(_read_grid(spec_path))
+        except ValueError:
+            on_disk = 0  # unreadable: the save is the repair, let it through
+        if body.base_revision is not None and body.base_revision != on_disk:
+            raise HTTPException(
+                status_code=409,
+                detail="this grid changed elsewhere since this copy of it was built",
+            )
+    spec["revision"] = on_disk + 1
     _write_grid_atomic(spec_path, spec)
-    return {"name": slug, "title": spec["title"], "updated_at": spec["updated_at"]}
+    events.publish({
+        "type": "grid",
+        "case_id": case.id,
+        "name": slug,
+        "title": spec["title"],
+        "revision": spec["revision"],
+    })
+    return {
+        "name": slug,
+        "title": spec["title"],
+        "updated_at": spec["updated_at"],
+        "revision": spec["revision"],
+    }
 
 
 @router.delete("/cases/{case_id}/search-grids/{name}")
@@ -1191,4 +1339,7 @@ def delete_search_grid(case_id: str, name: str) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     existed = spec_path.exists()
     spec_path.unlink(missing_ok=True)
+    if existed:
+        # a panel holding this sweep open is drawing a file that is gone
+        events.publish({"type": "grid-removed", "case_id": case.id, "name": spec_path.stem})
     return {"deleted": existed}

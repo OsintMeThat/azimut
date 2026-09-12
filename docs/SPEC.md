@@ -161,6 +161,14 @@ proof for publication.
 |------|--------------|
 | ✅ **Map engine** | Draws the map on MapLibre GL behind `lib/map`'s façade, at parity: same providers, same captures, same bearing, and the Google widget basemap kept alive under the map's own transparent canvas. |
 | ✅ **Composer hand-off** | Fills X's or Bluesky's own composer with a prepared thread: each post in its own box with its pictures, the thread button pressed between them, every box read back afterwards, and Post left to the analyst. |
+| ✅ **Extension update button** | The app owns the extension's folder, so an update is one click instead of a reinstall: it rewrites the files, the extension restarts and re-attaches to the open tab. Points the analyst at the copy to remove when two are loaded, and stages the write when a browser holds the old files. |
+| ✅ **Home** | Where the app opens, on the mark rather than a fifth rail seat. With a case it is a dashboard: what is outstanding as four tiles, the last work filed with the case's own thumbnails, the case's saved points on a map of their own — the app's engine, the keyless imagery, pan and zoom and nothing that writes — and the case by family in the Graph's own hues. The tiles are the Board's standing questions, so pressing one lands on exactly the rows it counted; a case holding nothing is offered the three ways material gets in instead. With no case it is the front door: what Azimut is, the rail as a sequence, and the first case named from the page. |
+| ✅ **Guide** | One section per workspace, between two that set up (what a case is, the capture extension) and three worked examples, and two that close: every key the app listens for, and what to do when something does not work. The `?` in the topbar opens it on the section written about the tab being stood in. Tests fail when a tool joins the rail undocumented, when a recipe names a tool that does not exist, and when a key is filed under a tab the app no longer has. |
+| ✅ **Extension map tools** | Measure, media pins, sun and moon, a search grid, and reference windows holding the case's own images and videos, drawn over the maps the extension rides on. Scale comes from what each site writes about itself, checked in a real browser first (`docs/MAP_SITES.md`); the first zoom measures where that site draws its centre, since five of them do not put it in the middle of the window; a pitched or panoramic camera switches geometry off with its reason shown, and a view zoomed out to a globe keeps drawing, dimmed, saying it drifts at the edges. A turned compass keeps its measurement — a scale is pixels per degree, and every reading undoes the bearing before it divides. |
+| ✅ **One case, every window on it** | A point saved, a grid drawn or a cell swept appears at once in the app, in a second app tab and in every map the panel is open on — no reload, no button. The app says what changed over its own nudge channel, the extension's worker holds one stream for all its panels, and each side re-reads only what the nudge names. A sweep worked from two places keeps both hands' marks: what travels is the cells that were marked, never a copy of the grid. |
+| ✅ **Engine hand-off** | A Reverse Search button opens the engine with the case picture already in its own uploader, so one press asks the question. Lens, Yandex, Bing and TinEye; the clipboard road stays underneath, for a missing extension and for a page that has moved its markup. |
+| ✅ **Signed Firefox add-on** | Firefox refuses an unsigned extension and forgets an unpacked one on exit, so it installs an AMO-signed XPI and updates itself from the manifest each release publishes. The extension reports how the browser installed it, so Settings tells the folder it owns apart from the package it cannot touch and offers no button that would rewrite sealed bytes. The browser owning that update costs two answers the app gives instead: it names a copy that is behind at once, offline, rather than waiting out the daily check, and names the one state it cannot cause — an add-on updated past the Azimut running beside it. |
+| ✅ **Map-site recalibration** | The gesture sequence that measured those sites is a command: it drives them again across two browsers, four windows and two browser zooms, and rebuilds the fixture both suites read (`docs/MAP_SITES.md`). |
 
 ---
 
@@ -177,7 +185,6 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **3D map** | Pitch, public DEM terrain and extruded OSM buildings on the MapLibre map. An oblique capture records its pitch beside the bearing, so the view can be reproduced. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. |
-| **Extension map overlays** | Draws the app's own layers over the maps the extension rides on — Google Maps, Earth, Apple, Bing: the search grid, the sun and moon arcs, the measure tools. The geometry is already pure and shared; what is missing is drawing it over a map the app does not own. |
 | **Footprint tracing** | Draws a place's uncertainty as the shape it really is, for a quay, a treeline or an L-shaped block the circle describes badly. The field, its validation and its drawing already ship; only the gesture is missing. |
 | **Satellite Compare** | Same coords across providers (Esri / Sentinel-2 date slider / Bing / keyed), synced pan/zoom. Copernicus easy link. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
@@ -188,7 +195,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Sky Clock** | Marks a shadow, the sun or the moon in an image or a video frame, with the horizon and north giving the angles, then renders the year as a day × hour heatmap of the slots that fit. A visible moon also carries phase and bright-limb angle, which usually cuts a year down to a few instants. |
 | **Case KMZ** | One self-contained file per case: a pin per place, carrying the notes and proof images it is linked to, opened in Google Earth. Frozen rather than live, because only the web Earth remains and it follows no network link. |
 | **Imagery Wayback** | Esri World Imagery archive as a date slider: one view across every published release, key-less. |
-| **Event layers** | Date-stamped overlays that support or contradict an event: NASA FIRMS thermal hotspots, archived weather and METAR. |
+| **Event layers** | Date-stamped overlays that support or contradict an event: NASA FIRMS thermal hotspots (the live pass and the archive back to 2000, each sensor's real reach asked rather than assumed), archived weather and METAR. |
 | **Shot contact sheet** | Splits a video into shots (ffmpeg scene detection) and picks frames from a clickable grid of timecodes. |
 | **OCR** | Reads signs and plates on import (tesseract, a native binary rather than a wheel), and detects script and language. |
 | **Audio Transcript** | Transcribe and translate speech offline; flag acoustic context such as bells, adhan, aircraft or language. |
@@ -197,7 +204,6 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Proof annotation** | Grow the Geo Proof toolbox: dashed strokes, numbered markers, a redaction/blur box; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
 | **Detached tool windows** | Opens a tool in its own browser window for a second screen, greyed out in the tab it left and taken back when that window closes. Cross-tool handoffs route to wherever the tool now lives, and the open case follows every window. Read surfaces open as many copies as wanted; the document editors allow one window per document. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
-| **Help and tips** | A mark the analyst clicks for the open tool's own guide: what it is for, the controls whose icon does not say it, and its shortcuts. Clicking an entry points at the real button. One panel, one entry per tool. |
 
 Edit Provenance rests on three facts about Adobe renders, kept here so the tool
 can be rebuilt from the spec alone:
@@ -282,7 +288,8 @@ stops making sense.
 - **Free-form montage editor:** consider only if it stays distinct from Geo Proof and Inspect collage.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
-- **A front door for the app:** a home surface saying what Azimut is, how a case works and where to start, then keeping the open case in view with recent items, notes and a mini-map of its places, in panels the analyst arranges. The first half is missing today, since a fresh install lands in a workspace with no case and no guidance; the second has to earn its place beside Board, Graph and Timeline, which already read the case.
+- **More on the home page:** the case's own notes beside the tiles, and panels the analyst arranges rather than a fixed grid. Each has to earn its place there rather than beside Board, Graph and Timeline, which already read the case.
+- **A stack of map overlays:** one toggle per transparent layer instead of the single labels slot, OpenRailwayMap first. A capture stitches one provider, so an overlay stays screen-only until that changes.
 - **A deleted case waits before it is gone:** artifacts, entities and bulk deletes are all recoverable, while removing a case is the one act with no way back and only a typed DELETE in front of it. Move the folder aside instead, and empty it later.
 
 ## 8. Explicit non-goals
@@ -330,11 +337,40 @@ stops making sense.
   ingest island for the extension. The one route that reads a case file back out
   of that island — the attachments a composer hand-off carries — fences on the
   **resolved** path, so `media/../case.json` is refused where a prefix read off
-  the request would have served it. Filling a composer is the extension's only
-  reach past localhost — three social hosts, declared, where it types what the app
-  handed it and reads nothing — and the switch that uses it is in the app
-  (Settings → Publishing), where the analyst already decides how a thread is
-  published. A case id and an artifact name each address
+  the request would have served it. Filling a composer and handing a picture to a
+  reverse-image engine are the extension's only reach past localhost — eight
+  hosts, declared, where it writes what the app gave it and reads nothing — and
+  each switch that uses one is in the app (Settings → Publishing, Settings →
+  General), where the analyst already decides how a thread is published and which
+  engine gets the picture. The engine road carries the image itself rather than a
+  path, since what Reverse Search prepares is a canvas frame that exists nowhere
+  on disk, and it is the one hand-off whose page acts on what it is given: these
+  engines search as soon as they hold a picture, which is what the button was
+  pressed for. Seven of those hosts are the engine or the composer itself; the
+  eighth is `www.google.com`, which is broader than the rest and is an accepted
+  risk rather than an oversight: Lens redirects `lens.google.com` to the search
+  home page and draws its uploader there, so the grant has to cover wherever that
+  redirect lands. It buys nothing beyond that — the extension injects only into a
+  tab it opened itself, at a URL the app handed it, and reads nothing back.
+  Updating that extension writes the app's *own* bundled bytes into
+  one fixed workspace path and takes nothing off the request — no path, no
+  payload — so it sits on the settings router rather than in the ingest island,
+  where the extension-origin CORS would have reached it; the message that then
+  restarts the extension is only reachable from the app's own localhost page,
+  names the install it means, and its worst outcome is an extension that
+  restarts. The map tools widen that island by five read routes and two writes,
+  each trimmed to what a panel draws — saved points without their thumbnails or
+  link tallies, a sweep's own spec, a case's images and videos by name — and the panel
+  itself reaches them only through the worker's own allowlist, since a content
+  script's fetch would carry the map site's origin and be refused. Keeping those
+  panels in step adds one more, and it is the narrowest of them: a read-only
+  stream of what changed, never of what it says, so an event names a case and a
+  file and the panel re-reads it through the routes it already had. The worker
+  holds it and no panel is given it, which is the same fence as the rest — and
+  it is deliberately not on the relay's allowlist, being one answer that never
+  ends. The bytes of a
+  picture come back over the hand-off's own route, behind the same fence: media
+  and proofs, resolved, and nothing else in the case. A case id and an artifact name each address
   one directory entry, checked against POSIX *and* Windows path rules so the
   separator only one of them honours cannot walk out of the workspace. The workspace pointer is the one file written
   outside the workspace, 0600 and holding a path; deleting the copy a move set
@@ -356,12 +392,19 @@ stops making sense.
   compressed bytes and on the size its own directory declares once unzipped. The map's search bar answers from
   a bundled gazetteer and never reaches out on a keystroke; its geocoder layer
   waits for a pause, and a request the one-per-second pace cannot take is dropped
-  rather than queued. The startup update check is
-  the one on-mount network call: opt-out, and read-only against GitHub's
+  rather than queued. Two things reach out on mount and no
+  others. The startup update check: opt-out, and read-only against GitHub's
   releases feed plus PyPI's JSON for the two downloaders, both governed by the
-  same switch. Release notes are rendered through the Notebook's
+  same switch. And the home page's map of the case, which fetches basemap tiles
+  for the points the case already holds — through the same proxy as every other
+  map, from the keyless unmetered provider only, so it spends no allowance and
+  asks for nothing a case with no saved point would. Release notes are rendered through the Notebook's
   DOMPurify-sanitized Markdown renderer rather than as raw HTML. The capture
-  extension is compared locally, so it is answered with the switch off. Remote images embedded in a
+  extension is compared locally, so it is answered with the switch off — except
+  the Firefox copy, which Mozilla signs and the browser therefore updates itself:
+  it polls the release's update manifest on its own schedule, past any switch the
+  app has, and is recorded here as an accepted risk for the only permanent
+  Firefox install that exists. Remote images embedded in a
   Notebook note contact their host whenever the preview opens; Notebook warns
   about that behavior and local Case media avoids it. Notebook diagrams are the
   one markup DOMPurify does not clear: Mermaid draws its SVG into the preview

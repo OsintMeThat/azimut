@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import shutil
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from bigcase import build_big_case
 from legacy_case import write_legacy_json_case
 
 from azimut import layout, workspace
+from azimut.engine import extinstall
 from azimut.engine import links as link_engine
 from azimut.engine import media as media_engine
 from azimut.engine import thumbnails
@@ -146,6 +147,37 @@ def test_wheel_bundles_the_frontend_and_leaves_dev_tooling_out():
     root = Path(__file__).resolve().parent.parent
     assert (root / "tests" / "bigcase.py").exists()
     assert not (root / "src" / "azimut" / "bigcase.py").exists()
+
+
+def test_wheel_ships_every_file_the_extension_runs_on():
+    """The extension is distributed *by* the wheel: a pip or binary user has no
+    checkout, so Settings and ``/api/ingest/extension.zip`` both serve the copy
+    packaged here.
+
+    Those two paths list the source folder (``extinstall.shipped_files``), while
+    the wheel is assembled from a hand-written ``force-include`` map — so in a
+    checkout a new extension file is picked up and every test passes, and the
+    release quietly leaves it out. That is how ``handoff.js`` shipped broken:
+    ``background.js`` injects it by name into a folder that did not have it.
+    """
+    root = Path(__file__).resolve().parent.parent
+    included = _pyproject()["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+    packaged = {PurePosixPath(name) for name in included}
+
+    def is_packaged(rel: PurePosixPath) -> bool:
+        # a directory entry (icons/) covers everything under it
+        return any(rel == entry or entry in rel.parents for entry in packaged)
+
+    source = root / "extension"
+    missing = [
+        f"extension/{name}"
+        for name, _ in extinstall.shipped_files(source)
+        if not is_packaged(PurePosixPath("extension") / name)
+    ]
+    assert not missing, f"the extension runs these but the wheel omits them: {missing}"
+
+    # …and nothing is listed that no longer exists, which would fail the build
+    assert not [str(entry) for entry in packaged if not (root / entry).exists()]
 
 
 def test_pdf_font_licenses_are_complete_and_packaged():

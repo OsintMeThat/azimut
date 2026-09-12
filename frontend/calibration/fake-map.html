@@ -1,0 +1,161 @@
+<!doctype html>
+<!--
+  A slippy map with nothing behind it, for proving the calibration protocol
+  without a network.
+
+  The recorder's whole claim is that driving a map with a known gesture and
+  reading its address bar afterwards recovers where that map draws its camera.
+  Against a real site that claim can only be checked against itself. Here the
+  layout is *chosen* — a header of `head` pixels, a side panel of `panel` — so
+  the answer is known before the question is asked, and `e2e/map-calibration.spec.js`
+  drives this page exactly as `record.mjs` drives openstreetmap.org.
+
+  It behaves the way the real one does in the two ways that matter: the camera
+  is the centre of what the chrome leaves, not of the window, and the address
+  bar is rewritten when a gesture ends rather than while it is running. The
+  coordinates are rounded to five decimals, as OpenStreetMap rounds its own.
+
+  Query: ?head=<px>&panel=<px>. Fragment: #map=<zoom>/<lat>/<lon>, which is
+  OpenStreetMap's own form, so `engine/mapsites.py` reads this page for real.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fake slippy map</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0b0c; color: #ddd;
+               font: 13px system-ui, sans-serif; }
+  #head  { position: fixed; top: 0; left: 0; right: 0; background: #1b2430; display: flex;
+           align-items: center; padding: 0 12px; box-sizing: border-box; }
+  #panel { position: fixed; left: 0; bottom: 0; background: #161c24; box-sizing: border-box;
+           padding: 10px; }
+  #map   { position: fixed; right: 0; bottom: 0; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="head">fake map</div>
+<div id="panel"></div>
+<div id="map"><canvas></canvas></div>
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const HEAD = Number(params.get('head') ?? 0);
+  const PANEL = Number(params.get('panel') ?? 0);
+  document.getElementById('head').style.height = `${HEAD}px`;
+  document.getElementById('panel').style.width = `${PANEL}px`;
+  document.getElementById('panel').style.top = `${HEAD}px`;
+  const mapEl = document.getElementById('map');
+  mapEl.style.top = `${HEAD}px`;
+  mapEl.style.left = `${PANEL}px`;
+
+  const TILE = 256;
+  const MAX_LAT = 85.05112877980659;
+  const rad = (d) => (d * Math.PI) / 180;
+  const deg = (r) => (r * 180) / Math.PI;
+  const size = (z) => TILE * 2 ** z;
+
+  const project = (lat, lon, z) => ({
+    x: ((lon + 180) / 360) * size(z),
+    y: ((1 - Math.log(Math.tan(rad(lat)) + 1 / Math.cos(rad(lat))) / Math.PI) / 2) * size(z),
+  });
+  const unproject = (x, y, z) => {
+    const n = Math.PI - (2 * Math.PI * y) / size(z);
+    return {
+      lat: deg(Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)))),
+      lon: (x / size(z)) * 360 - 180,
+    };
+  };
+
+  const read = () => {
+    const m = /map=(\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)/.exec(location.hash);
+    return m
+      ? { zoom: Number(m[1]), lat: Number(m[2]), lon: Number(m[3]) }
+      : { zoom: 15, lat: 47.388462, lon: 2.352785 };
+  };
+  let view = read();
+
+  /** Five decimals, the way OpenStreetMap writes them — about a metre, and the
+   *  floor under everything a measurement of this page can claim. */
+  const write = () => {
+    location.hash = `map=${view.zoom}/${view.lat.toFixed(5)}/${view.lon.toFixed(5)}`;
+    draw();
+  };
+
+  const canvas = mapEl.querySelector('canvas');
+  function draw() {
+    const ratio = window.devicePixelRatio || 1;
+    const w = mapEl.clientWidth;
+    const h = mapEl.clientHeight;
+    canvas.width = Math.round(w * ratio);
+    canvas.height = Math.round(h * ratio);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.fillStyle = '#10161d';
+    ctx.fillRect(0, 0, w, h);
+    // a graticule, so a screenshot of a failing run shows something moving
+    const centre = project(view.lat, view.lon, view.zoom);
+    ctx.strokeStyle = '#243447';
+    ctx.beginPath();
+    for (let step = -4; step <= 4; step += 1) {
+      const line = project(view.lat, view.lon + step * 0.01, view.zoom);
+      const across = project(view.lat + step * 0.01, view.lon, view.zoom);
+      ctx.moveTo(w / 2 + (line.x - centre.x), 0);
+      ctx.lineTo(w / 2 + (line.x - centre.x), h);
+      ctx.moveTo(0, h / 2 + (across.y - centre.y));
+      ctx.lineTo(w, h / 2 + (across.y - centre.y));
+    }
+    ctx.stroke();
+  }
+
+  /** Where the map draws its camera, in window pixels — the answer the
+   *  calibration is supposed to arrive at without being told. */
+  window.__TRUE_CENTRE__ = () => ({
+    x: PANEL + (window.innerWidth - PANEL) / 2,
+    y: HEAD + (window.innerHeight - HEAD) / 2,
+  });
+
+  // --- gestures ---------------------------------------------------------------
+
+  let drag = null;
+  window.addEventListener('mousedown', (e) => {
+    drag = { x: e.clientX, y: e.clientY, from: { ...view } };
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!drag) return;
+    // the map moves with the pointer; the address bar hears about it at the end
+    const at = project(drag.from.lat, drag.from.lon, drag.from.zoom);
+    const now = unproject(at.x - (e.clientX - drag.x), at.y - (e.clientY - drag.y), drag.from.zoom);
+    view = { ...view, ...now };
+    draw();
+  });
+  window.addEventListener('mouseup', () => {
+    if (!drag) return;
+    drag = null;
+    write();
+  });
+  window.addEventListener('wheel', (e) => {
+    // one level a notch, about the pixel the pointer is over
+    const step = e.deltaY < 0 ? 1 : -1;
+    const middle = window.__TRUE_CENTRE__();
+    const dx = e.clientX - middle.x;
+    const dy = e.clientY - middle.y;
+    const at = project(view.lat, view.lon, view.zoom);
+    const held = unproject(at.x + dx, at.y + dy, view.zoom);
+    const zoom = Math.max(2, Math.min(20, view.zoom + step));
+    const after = project(held.lat, held.lon, zoom);
+    const centre = unproject(after.x - dx, after.y - dy, zoom);
+    view = { zoom, lat: Math.max(-MAX_LAT, Math.min(MAX_LAT, centre.lat)), lon: centre.lon };
+    write();
+  }, { passive: true });
+
+  window.addEventListener('resize', draw);
+  window.addEventListener('hashchange', () => {
+    view = read();
+    draw();
+  });
+  write();
+})();
+</script>
+</body>
+</html>

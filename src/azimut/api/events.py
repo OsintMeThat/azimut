@@ -9,6 +9,32 @@ the local-first rule: the browser talks to its own backend, nothing else.
 Events are advisory nudges ("case X gained a capture"), never the data itself:
 a consumer reacts by re-fetching through the normal API, so a missed event
 costs a refresh, not correctness.
+
+There are now three kinds of listener — the app's own tab, a second app tab, and
+every map panel the extension has open over someone else's map — and one file
+each of them writes to. So the vocabulary is fixed here rather than left to the
+producers. Every event carries ``case_id``; the rest is what a consumer needs to
+decide whether the nudge is about the thing it is holding:
+
+``capture``       the extension filed a screenshot (``path``, ``title``, ``site``)
+``bookmark``      the extension filed a page (``entity_id``, ``title``, ``url``)
+``place``         the extension filed a point (``entity_id``, ``title``, ``site``)
+``saved``         the app's own saved work changed: a point, a capture, a deletion
+``grid``          a search grid was created or replaced (``name``, ``title``, ``revision``)
+``grid-marks``    cells were marked on a grid (``name``, ``revision``)
+``grid-removed``  a grid was discarded (``name``)
+
+The first three are the ones the analyst cannot see happening, so the app says so
+out loud when they arrive; the rest are quiet and only refresh what they name. The
+grid pair carries the file's ``revision`` because a surface that has just written
+it hears its own nudge back, and a revision it already holds is how it tells that
+apart from someone else's mark.
+
+Two channels, one bus: the app reads ``/api/events`` same-origin, and the
+extension reads ``/api/ingest/events`` with the pairing token — a content script's
+own fetch carries the *map site's* origin, which the local guard refuses, so the
+panel never opens this itself. Its background worker holds one stream for every
+panel (``extension/background.js``).
 """
 
 from __future__ import annotations

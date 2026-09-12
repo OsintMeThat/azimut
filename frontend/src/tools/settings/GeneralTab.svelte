@@ -1,7 +1,8 @@
 <script>
   /**
    * How every tool prints a coordinate, a distance and an area, plus the map's
-   * opening position and what saving a proof does with its point.
+   * opening position, what saving a proof does with its point, and how Reverse
+   * Search reaches an engine.
    *
    * Preferences save on change and the server answers with the canonical value,
    * so nothing here keeps a draft the rest of the app cannot see.
@@ -15,6 +16,7 @@
     savePrefs,
     saveHome,
     proofPlaceAuto = $bindable(),
+    reversePrefill = $bindable(),
   } = $props();
 
   const COORD_CHOICES = [
@@ -112,6 +114,26 @@
       bind:checked={proofPlaceAuto}
       onchange={() => savePrefs({ proof_place_auto: proofPlaceAuto })}
       aria-label="Save a proof's point without asking"
+    />
+  </div>
+</section>
+
+<section class="group">
+  <h3>Reverse search</h3>
+  <div class="row">
+    <div class="row-label">
+      <span>Let the extension open the engine with the image</span>
+      <span class="row-hint">
+        The engine gets the picture instead of you pasting or dragging it, so it
+        searches straight away. Needs the capture extension; without it, the
+        buttons copy or save the image as usual.
+      </span>
+    </div>
+    <input
+      type="checkbox"
+      bind:checked={reversePrefill}
+      onchange={() => savePrefs({ reverse_prefill: reversePrefill })}
+      aria-label="Let the extension open the engine with the image"
     />
   </div>
 </section>

@@ -24,7 +24,7 @@ const html = readFileSync(join(ext, 'popup.html'), 'utf8');
 const $ = (id) => document.getElementById(id);
 
 /** Run the popup against a tab, with `fetch` answering per URL fragment. */
-async function runPopup({ tabUrl, answers }) {
+async function runPopup({ tabUrl, answers, height = 940 }) {
   // Body only, without the <script src> happy-dom refuses to fetch: the source is
   // evaluated below by hand, with the globals a popup really has.
   document.body.innerHTML = html
@@ -53,6 +53,11 @@ async function runPopup({ tabUrl, answers }) {
       },
     },
     runtime: { getManifest: () => ({ version: '0.2.9' }), sendMessage: vi.fn(async () => ({ ok: true })) },
+    scripting: {
+      executeScript: vi.fn(async () =>
+        height === null ? Promise.reject(new Error('cannot access')) : [{ result: height }]
+      ),
+    },
   };
 
   globalThis.fetch = vi.fn(async (url) => {
@@ -128,5 +133,42 @@ describe('a map page with the app answering', () => {
 
     expect($('capture-area').disabled).toBe(false);
     expect($('save-place').disabled).toBe(false);
+  });
+});
+
+describe('how tall the map is drawn', () => {
+  /**
+   * Apple states the span its view covers and Google's satellite mode the metres
+   * its viewport is high. Either is a scale only next to the number of pixels it
+   * was drawn in, and that number is the one thing the app cannot see — so the
+   * popup reads it off the tab and sends it with the URL.
+   */
+  const asked = () => globalThis.fetch.mock.calls.map(([url]) => String(url));
+
+  it('goes with the URL to the app', async () => {
+    await runPopup({
+      tabUrl: 'https://maps.apple.com/frame?center=48.85,2.29&span=0.02,0.03',
+      answers: {
+        '/parse': ok({ site: 'apple-maps', label: 'Apple Maps', lat: 48.85, lon: 2.29, zoom: 17 }),
+        '/cases': ok([{ id: 'c1', name: 'Case one' }]),
+      },
+    });
+
+    expect(asked().some((url) => url.includes('/parse') && url.includes('height=940'))).toBe(true);
+  });
+
+  it('is left out rather than guessed when the tab refuses to be read', async () => {
+    await runPopup({
+      tabUrl: 'https://maps.apple.com/frame?center=48.85,2.29&span=0.02,0.03',
+      height: null,
+      answers: {
+        '/parse': ok({ site: 'apple-maps', label: 'Apple Maps', lat: 48.85, lon: 2.29, zoom: null }),
+        '/cases': ok([{ id: 'c1', name: 'Case one' }]),
+      },
+    });
+
+    const parse = asked().find((url) => url.includes('/parse'));
+    expect(parse).toBeTruthy();
+    expect(parse).not.toContain('height=');
   });
 });

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { markerGeometry, markerSvg, MARKER_GEOMETRY } from './mapMarkers.js';
+import { readFileSync } from 'node:fs';
+import {
+  markerGeometry,
+  markerSvg,
+  MARKER_GEOMETRY,
+  TEARDROP,
+  TEARDROP_CARD_OFFSET,
+} from './mapMarkers.js';
 
 describe('markerSvg', () => {
   it('draws the pin as a teardrop with an eye in it', () => {
@@ -49,5 +56,40 @@ describe('markerGeometry', () => {
       const [w, h] = markerGeometry(style).size;
       expect(markerSvg(style)).toContain(`width="${w}" height="${h}"`);
     }
+  });
+});
+
+/**
+ * The mark the overlays put on a saved point. It is CSS rather than an SVG — a
+ * 24 px box with one sharp corner, turned 45° — so what is pinned here is the
+ * arithmetic that turns that rotation into an anchor, and the agreement with
+ * `extension/mapdraw.js`, which draws the same shape on other people's maps
+ * and cannot import this file.
+ */
+describe('the teardrop on a saved point', () => {
+  it('anchors on the sharp corner, half a diagonal below the middle', () => {
+    const [, height] = TEARDROP.size;
+    expect(TEARDROP.anchor[0]).toBe(TEARDROP.size[0] / 2);
+    expect(TEARDROP.anchor[1]).toBeCloseTo(height / 2 + (height / 2) * Math.SQRT2, 6);
+  });
+
+  it('stands the body clear of the point rather than around it', () => {
+    // What `surface.js` turns the anchor into: the element's centre, relative
+    // to the coordinate. Negative is upward, which is where the body goes.
+    const offsetY = TEARDROP.size[1] / 2 - TEARDROP.anchor[1];
+    expect(offsetY).toBeCloseTo(-16.97, 2);
+  });
+
+  it('hangs a card off the point far enough to clear that body', () => {
+    expect(TEARDROP_CARD_OFFSET).toBeGreaterThanOrEqual(
+      TEARDROP.anchor[1] - TEARDROP.size[1] / 2
+    );
+  });
+
+  it('states the same geometry the extension draws with', () => {
+    const source = readFileSync(new URL('../../../extension/mapdraw.js', import.meta.url), 'utf8');
+    const box = Number(/const MARK = (\d+);/.exec(source)[1]);
+    expect(box).toBe(TEARDROP.size[1]);
+    expect(source).toContain('const MARK_TIP = (MARK / 2) * Math.SQRT2;');
   });
 });

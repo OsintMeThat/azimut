@@ -15,6 +15,19 @@ describe('UPLOAD_PAGES', () => {
     }
   });
 
+  it("opens Bing's upload view, not the page that redirects to marketing", () => {
+    // /visualsearch answers with explore.microsoft.com, which has nothing to
+    // drop a file on and no uploader to hand one to.
+    expect(byId.bing.url).toContain('iss=sbiupload');
+    expect(byId.bing.url).not.toContain('visualsearch');
+  });
+
+  it('lets the extension reach every one of them', () => {
+    // Each is declared in the manifest and answered for in extension/reverse.js;
+    // an engine flagged here that neither knows would open and do nothing.
+    expect(UPLOAD_PAGES.every((e) => e.fill)).toBe(true);
+  });
+
   it('flags Google Lens as the only paste engine; the rest are drag-only', () => {
     expect(byId.google.paste).toBe(true);
     expect(byId.yandex.paste).toBe(false);

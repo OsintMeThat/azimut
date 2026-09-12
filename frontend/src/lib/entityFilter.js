@@ -84,7 +84,7 @@ export const QUESTIONS = [
   {
     id: 'loose',
     label: 'Nothing linked yet',
-    hint: 'in the case, connected to nothing — the unexploited material',
+    hint: 'in the case, and connected to nothing at all',
     terms: { connections: 'none' },
   },
   {

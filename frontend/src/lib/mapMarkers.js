@@ -45,3 +45,28 @@ export function markerSvg(style) {
 export function markerGeometry(style) {
   return style === 'pin' ? MARKER_GEOMETRY.pin : MARKER_GEOMETRY.crosshair;
 }
+
+/**
+ * The teardrop the map draws on a saved point, in every overlay that draws one.
+ *
+ * It is a 24 px box with one sharp corner, turned 45° so that corner hangs
+ * straight down — and the corner is the claim, the same way the pin's tip is.
+ * A rotation moves it half a diagonal below the middle of the box, so that is
+ * where the anchor goes; anchored on the middle, as it used to be, every mark
+ * sat 17 px above what it pointed at, which is ten metres at zoom 18 and five
+ * at zoom 19.
+ *
+ * `extension/mapdraw.js` draws the same shape on other people's maps and
+ * repeats these numbers, because a classic script cannot import this one.
+ */
+const TEARDROP_BOX = 24;
+const TEARDROP_TIP = (TEARDROP_BOX / 2) * Math.SQRT2;
+
+export const TEARDROP = {
+  size: [TEARDROP_BOX, TEARDROP_BOX],
+  anchor: [TEARDROP_BOX / 2, TEARDROP_BOX / 2 + TEARDROP_TIP],
+};
+
+/** How far a mark's card hangs off the point, now that the body is all above
+ *  it: the whole diagonal, or the card opens over the mark it belongs to. */
+export const TEARDROP_CARD_OFFSET = Math.round(2 * TEARDROP_TIP);

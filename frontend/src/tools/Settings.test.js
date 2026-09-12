@@ -116,6 +116,13 @@ describe('Settings sections', () => {
     expect(general).toContain('Off, the composer asks each time.');
   });
 
+  it('switches the reverse-search hand-off from General, checked by default', () => {
+    expect(general).toContain('reverse_prefill: reversePrefill');
+    expect(shell).toContain('reversePrefill = s.reverse_prefill ?? true');
+    expect(general).toContain('Let the extension open the engine with the image');
+    expect(general).toContain('so it\n        searches straight away');
+  });
+
   it('manages all three export folders from Storage', () => {
     expect(shell).toContain("{ id: 'notes', label: 'Note PDFs' }");
     expect(shell).toContain("{ id: 'media', label: 'Media copies' }");

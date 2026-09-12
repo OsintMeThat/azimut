@@ -1,13 +1,23 @@
 <script>
   import { onMount, tick } from 'svelte';
-  import { fileUrl } from '../lib/fileUrl.js';
   // The map is lib/map's: the engine, its layers, what is drawn on them and the
-  // drag gestures. Nothing in this file knows which engine that is.
-  import { createMapEngine } from '../lib/map/engine.js';
-  import { createBasemaps } from '../lib/map/basemap.js';
+  // drag gestures. Nothing in this file knows which engine that is — and the
+  // map itself is a surface (satellite/MapSurface.svelte), which is what lets a
+  // second one be mounted beside this one.
   import { createSurface } from '../lib/map/surface.js';
+  import MapSurface from './satellite/MapSurface.svelte';
   import { createSentinelState } from './satellite/state/sentinel.svelte.js';
   import { createSavedState } from './satellite/state/saved.svelte.js';
+  import { createImageryState, FALLBACK_PROVIDER } from './satellite/state/imagery.svelte.js';
+  import { createMeasureState, HINTS as MEASURE_HINT } from './satellite/state/measure.svelte.js';
+  import { createSkyState } from './satellite/state/sky.svelte.js';
+  import { createGridState } from './satellite/state/grid.svelte.js';
+  import { createRefsState } from './satellite/state/refs.svelte.js';
+  import {
+    createCaptureState,
+    PRESETS,
+    RATIOS,
+  } from './satellite/state/capture.svelte.js';
   import { api } from '../lib/api.js';
   import { setAnalysisPeriod } from '../lib/analysisSearch.svelte.js';
   import { temporalMapQuery } from '../lib/temporalMap.js';
@@ -17,63 +27,24 @@
     caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords, prefsReady,
   } from '../lib/state.svelte.js';
   import { mapLinks } from '../lib/maplinks.js';
-  import * as measure from '../lib/measure.js';
   import { markerGeometry, markerSvg } from '../lib/mapMarkers.js';
-  import {
-    bodyReading,
-    bodySvg,
-    hourTicks,
-    isBelow,
-    markScale,
-    nearestSample,
-    upRuns,
-  } from '../lib/skyOverlay.js';
-  import * as gridSearch from '../lib/gridSearch.js';
   import { startRectDrag, startRotateDrag } from '../lib/map/gestures.js';
-  import { clampSize, scaledCapture } from '../lib/captureSize.js';
   import { panelWidth } from '../lib/panelWidth.js';
   import PlaceSearch from './satellite/PlaceSearch.svelte';
   import { assignFolder } from '../lib/filing.js';
   import { saveRelation } from '../lib/relations.svelte.js';
   import { openEntity } from '../lib/navigate.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
-  import { isRegistered, sourceRect, frameFitsView } from '../lib/screenCrop.js';
-  import { extensionVersion, captureTab, onActivated } from '../lib/extBridge.js';
-  import {
-    monthCount,
-    tilesShort,
-    usageBlocked,
-    displayProviderId,
-    layerCell,
-  } from '../lib/usage.js';
+  import { extensionVersion, onActivated } from '../lib/extBridge.js';
   import {
     SENTINEL_ID,
-    DEFAULT_LAYER,
-    DEFAULT_MAXCC,
-    variantId,
-    validDay,
-    validMaxcc,
     maxccLabel,
-    overCloudCeiling,
-    latestAllowedPass,
     cloudLabel,
     cloudClass,
-    isoDay,
-    monthOf,
     monthLabel,
-    monthBounds,
     monthGrid,
-    addMonths,
-    sentinelPlaceKey,
-    coverageRequestPath,
-    dateAfterCoverage,
   } from '../lib/sentinel.js';
-  import { createViewer, nextZ, restack } from '../lib/refViewers.js';
-  import { matchesQuery } from '../lib/mediaFilter.js';
   import Icon from '../components/Icon.svelte';
-  import Modal from '../components/Modal.svelte';
-  import SearchInput from '../components/SearchInput.svelte';
-  import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import RefViewer from './RefViewer.svelte';
   import MapToolCluster from './satellite/MapToolCluster.svelte';
@@ -92,17 +63,22 @@
   import SheetPointsOverlay from './satellite/SheetPointsOverlay.svelte';
   import TemporalMapOverlay from './satellite/TemporalMapOverlay.svelte';
 
-  let mapEl;
   let toolEl; // Browser fullscreen target.
-  // The map, through lib/map's façade: no engine type reaches this file's
-  // camera, projection or event code.
+  // The map surface: it owns the engine, the basemap and everything that
+  // describes the pixels, and hands back the façade and its own container for
+  // the acts this tool owns — flying to a saved point, and the drag gestures it
+  // arms over the map.
+  let surface = $state(null);
+  let mapEl = $state(null);
   let engine = $state.raw(null);
-  let basemaps = null; // lib/map/basemap.js: the imagery layer and the labels over it
-  let providers = $state([]);
-  let providerId = $state('esri-world-imagery');
+  // The catalogue and the month's tally are the tool's, not one map's: a tile
+  // counted against the month is counted once however many surfaces drew it.
+  const imagery = createImageryState({ api });
+  let providerId = $state(FALLBACK_PROVIDER);
   let coordsText = $state('');
-  // Start at the saved home view unless case navigation supplies a position.
-  // Re-read after preferences load because deep links can mount first.
+  // The map opens on the saved home view, so it is not built until preferences
+  // have landed — a deep link can mount this tool first.
+  let homeReady = $state(false);
   let center = $state({ ...prefs.homeView });
   let markerStyle = $state('none'); // 'crosshair' | 'pin' | 'none'
   let moveMode = $state(false); // pin decoupled from center, draggable
@@ -112,9 +88,7 @@
   // Middle-drag rotates the map around the grabbed point.
   let rotating = $state(false);
   let rotatePivot = $state({ x: 0, y: 0 }); // grabbed point, map-wrap-local px
-  let capturing = $state(false);
   let captureHover = $state(false); // previewing the crop frame (capture group hover)
-  let hideOverlays = $state(false); // frame/marquee outlines must not land in a screen crop
   // The case's saved work — both indexes, the panel's filter and the Locate
   // pass — is its own store (state/saved.svelte.js).
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
@@ -149,14 +123,12 @@
   // The labels overlay only makes sense over satellite imagery — over a street
   // base map (OSM) it just doubles the road/place labels, so it's disabled then
   // and force-off if the provider changes to a non-imagery one (item 1).
-  const currentProvider = $derived(providers.find((p) => p.id === providerId));
+  const currentProvider = $derived(imagery.find(providerId));
   const baseIsImagery = $derived(currentProvider?.imagery ?? true);
   // view-only basemaps (capturable=false) keep the map but not the capture
   // button (IMAGERY_PROVIDERS.md). Widget basemaps are also capturable=false —
   // there are no tiles to stitch — but they are *not* blocked: they capture the
   // same way through the same button, from screen pixels rather than tiles.
-  const isWidgetBase = $derived(!!currentProvider?.widget);
-  const captureBlocked = $derived(currentProvider?.capturable === false && !isWidgetBase);
 
   // --- Sentinel-2: which layer, and over which window ---
   // The one basemap with choices in it. What has been asked, what came back and
@@ -164,195 +136,59 @@
   // provider id, which is what the map, the capture and the cache key on.
   const s2 = createSentinelState({
     place: () => ({ lat: center.lat, lon: center.lon }),
-    onBilled: refreshUsage,
+    onBilled: () => imagery.refreshUsage(),
     notify: toast,
     api,
   });
   const isSentinel = $derived(currentProvider?.id === SENTINEL_ID);
-  // A pinned day *is* the acquisition date — the one provider that can answer
-  // "when was this taken?" without being asked.
-  const s2PinnedDate = $derived(isSentinel && s2.window.from ? s2.window.from : null);
   let s2MenuEl = $state(); // bound to the popover wrapper — outside-click detection
 
-  // --- keyed-provider usage (IMAGERY_PROVIDERS.md) ---
-  // Metered tiles are proxied through the backend, which counts each one it
-  // actually serves — this readout just mirrors settings.json.
-  let usageTotals = $state({});
-  let usageMonth = $state('');
-  // keyed-provider prefs mirrored from Settings: overrides lift the 90% soft
-  // block, eco swaps billed basemaps for free imagery when zoomed out
-  // `tiers` is this account's real allowance per meter (the user's correction
-  // where they made one) — a provider's free tier is not ours to hardcode
-  let usagePrefs = $state({ overrides: {}, eco: true, ecoMaxZoom: 15, tiers: null });
-  async function refreshUsage() {
-    try {
-      const s = await api.get('/api/settings');
-      usageTotals = s.usage;
-      usageMonth = s.month;
-      usagePrefs = {
-        overrides: s.usage_overrides ?? {},
-        eco: s.eco_zoom_fallback !== false,
-        ecoMaxZoom: s.eco_max_zoom ?? 15,
-        tiers: s.free_tier ?? null,
-      };
-    } catch {
-      /* readout only — never blocks the map */
-    }
-  }
+  // --- what the map is actually showing (state/imagery.svelte.js) ---
+  // A billed basemap steps aside for free imagery when paused (90% soft block)
+  // or zoomed out (eco). The capture follows the display, so provenance always
+  // matches the pixels.
+  const shown = $derived(imagery.displayed(providerId, center.zoom, s2.variant));
   // small readout near the basemap selector, billed providers only
-  const usagePill = $derived(
-    currentProvider?.meter
-      ? tilesShort(monthCount(usageTotals, currentProvider.meter, usageMonth), currentProvider.meter)
-      : null
-  );
-
-  // What the map actually shows: a billed basemap steps aside for free imagery
-  // when paused (90% soft block) or zoomed out (eco). Captures and the imagery
-  // date follow the display, so provenance always matches the pixels.
-  const meterBlocked = $derived(
-    currentProvider?.meter
-      ? usageBlocked(
-          monthCount(usageTotals, currentProvider.meter, usageMonth),
-          currentProvider.meter,
-          usagePrefs.overrides,
-          usagePrefs.tiers
-        )
-      : false
-  );
-  // the basemap on screen, before Sentinel-2's layer/window choices are folded in
-  const displayedBaseId = $derived(
-    displayProviderId(currentProvider, center.zoom, {
-      eco: usagePrefs.eco,
-      blocked: meterBlocked,
-      ecoMaxZoom: usagePrefs.ecoMaxZoom,
-    })
-  );
-  const displayedProvider = $derived(providers.find((p) => p.id === displayedBaseId));
-  // What every downstream consumer asks for: the tile URL, the capture, the
-  // disk cache. For Sentinel-2 the layer and window ride *on the id*
-  // (lib/sentinel.js), so none of them can be rendered from one window and
-  // filed as another.
-  const displayedProviderId = $derived(
-    variantId(displayedBaseId, s2.variant)
-  );
-  // memoized so the layer is only rebuilt when the cell actually changes
-  // (i.e. crossing the z17 boost bracket), not on every zoom step
-  const displayedCell = $derived(
-    displayedProvider ? layerCell(displayedProvider, center.zoom) : 256
-  );
-
-  // Acquisition date of the imagery under the crosshair — Esri only (item 2).
-  let imageryDate = $state(null); // { supported, date, source } | null
-  let dateReqId = 0;
-  let dateTimer;
+  const usagePill = $derived(imagery.pill(currentProvider));
 
   // Fullscreen: the tool covers the whole viewport; SAVED stays collapsible (item 4).
   let fullscreen = $state(false);
 
-  // Editable bearing readout (item 3): click the number to type an angle.
-  let editingBearing = $state(false);
-  let bearingInput = $state('');
-
-  // Measure tools (item 5): distance / area / angle drawn on the map.
-  let measureMode = $state(null); // null | 'distance' | 'area' | 'angle'
-  let measurePoints = $state([]);
-  let measureSurface = null; // lib/map/surface.js
-  let toolsOpen = $state(false);
+  // Measure tools (item 5): distance / area / angle, in their own store.
+  const measure = createMeasureState({
+    engine: () => engine,
+    units: () => prefs.units,
+  });
 
   // External-maps quick links, in the SAVED panel (item 6).
   let linksOpen = $state(false);
 
   // --- Grid Search (spec §5): overlay a metric grid on an area of interest and
-  // sweep it cell by cell, marking each cleared or flagged. A case can hold
-  // several saved grids (files under search/, working aids, not entities); each
-  // action auto-saves. Persists across basemap changes — its own layer group is
-  // untouched by setLayer().
-  let gridMode = $state(false); // mode armed from the tools bar
-  let grid = $state(null); // the open grid spec (lib/gridSearch.js), or null
-  let gridName = $state(null); // slug of the open grid's file (drives the picker)
-  let gridList = $state([]); // summaries of this case's saved grids (the picker)
-  let gridFor = null; // case id the list was loaded for (plain: load-dedup only)
-  let gridCollapsed = $state(false); // fold the panel down to its header
-  let gridCellM = $state(500); // metric cell size the next area is drawn with
-  let gridDraw = $state(null); // null | 'rect' | 'polygon' — drawing an area
-  let polyDraft = $state([]); // polygon vertices being placed, [{ lat, lon }]
-  let editArea = $state(false); // showing the area box to resize/reshape it
-  let gridHidden = $state(false); // eye toggle: keep the grid but hide it on the map
-  let renamingGrid = $state(false); // editing the open grid's title inline
-  let renameText = $state(''); // the title being typed while renaming
-  let reviewKey = $state(null); // 'i:j' of the cell under review, or null
-  let gridSaveTimer; // debounce the persist call
-  let gridCells = null; // lib/map/surface.js — the lattice, on a canvas
-  let gridAoi = null; // …the area outline and its drag handles
-  let gridDraft = null; // …the polygon being placed
-  let dragBounds = null; // live rect bounds while a corner handle is dragged
-  let liveVerts = null; // live polygon vertices while a vertex handle is dragged
-  const gridCov = $derived(grid ? gridSearch.coverage(grid) : null);
-  const savedOthers = $derived(gridList.filter((g) => g.name !== gridName));
-  const GRID_MAX_CELLS = gridSearch.MAX_CELLS;
-  // status → cell paint. Unchecked is a bright thin outline so the lattice reads
-  // clearly over dark imagery; cleared greys the cell out; flagged fills yellow
-  // (chosen over red so it reads for colour-blind analysts too).
-  const CELL_STYLE = {
-    unchecked: { stroke: '#ffffff', strokeWidth: 1, strokeOpacity: 0.7, fill: '#fff', fillOpacity: 0 },
-    cleared: { stroke: '#ffffff', strokeWidth: 1, strokeOpacity: 0.55, fill: '#2b3040', fillOpacity: 0.62 },
-    flagged: { stroke: '#ffcf33', strokeWidth: 1.5, strokeOpacity: 1, fill: '#ffdb4d', fillOpacity: 0.6 },
-  };
-  const AOI_STYLE = {
-    stroke: '#f5a623',
-    strokeWidth: 1.5,
-    strokeOpacity: 0.9,
-    dash: '5 4',
-    interactive: false,
-  };
-  const CORNERS = ['sw', 'se', 'nw', 'ne']; // rect resize handles
+  // sweep it cell by cell, marking each cleared or flagged. The grids a case
+  // holds, which one is open and where the sweep is are its own store; it keeps
+  // its layers across basemap changes.
+  const grid = createGridState({
+    engine: () => engine,
+    api,
+    notify: toast,
+    caseId: () => caseState.current?.id,
+    ensureCase,
+    reloadCase,
+    coords: fmtCoords,
+    zoom: () => center.zoom,
+  });
 
-
-  // --- reference viewers: floating scratch windows over the map that hold a
-  // media image (the shot to geolocate) so you can eyeball it against the
-  // imagery while panning. Session-only (uiState.refViewers) — never captured,
-  // never saved, dropped when the case changes (see openCase).
-  let refPicker = $state(false); // the "pick an image" modal
-  let refMedia = $state([]); // case images available to reference
-  let refLoading = $state(false);
-  let refSeq = 0; // id source for spawned windows
-
-  async function openRefPicker() {
-    refPicker = true;
-    refLoading = true;
-    try {
-      const id = caseState.current?.id;
-      const media = id ? await api.get(`/api/cases/${id}/media`) : [];
-      refMedia = media.filter((m) => m.kind === 'image' || m.kind === 'video');
-    } catch (e) {
-      toast(`Could not load media: ${e.message}`, 'danger');
-      refMedia = [];
-    } finally {
-      refLoading = false;
-    }
-  }
-
-  function addRef(item) {
-    const vs = uiState.refViewers;
-    const n = vs.length;
-    vs.push(
-      createViewer(`ref-${++refSeq}`, item, {
-        x: 60 + (n % 6) * 26,
-        y: 60 + (n % 6) * 26,
-        z: nextZ(vs),
-      })
-    );
-    refPicker = false;
-  }
-
-  function focusRef(id) {
-    const z = restack(uiState.refViewers, id);
-    for (const v of uiState.refViewers) v.z = z.get(v.id);
-  }
-
-  function closeRef(id) {
-    uiState.refViewers = uiState.refViewers.filter((v) => v.id !== id);
-  }
+  // --- reference windows: floating scratch panes over the map holding a media
+  // image (the shot to geolocate), to eyeball against the imagery while panning.
+  // Session-only (uiState.refViewers) — never captured, never saved, dropped
+  // when the case changes (see openCase). Their own store: state/refs.svelte.js.
+  const refs = createRefsState({
+    api,
+    notify: toast,
+    caseId: () => caseState.current?.id,
+    viewers: () => uiState.refViewers,
+    setViewers: (windows) => (uiState.refViewers = windows),
+  });
 
   // Svelte only honours a cleanup returned from a *synchronous* onMount, and the
   // setup below has to await the providers and the saved home view. So onMount
@@ -373,106 +209,78 @@
   });
 
   async function build() {
-    refreshUsage(); // prefs drive the eco/soft-block fallbacks from the start
-    providers = await api.get('/api/satellite/providers');
+    imagery.refreshUsage(); // prefs drive the eco/soft-block fallbacks from the start
+    await imagery.loadProviders();
     await prefsReady; // the home view has to land before the map is built
     center = { ...prefs.homeView };
-    try {
-      engine = await createMapEngine(mapEl, {
-        view: center,
-        imperial: prefs.units === 'imperial',
-      });
-    } catch (e) {
-      // The engine draws through WebGL and a browser can refuse it: an old
-      // driver, a machine with no GPU, a profile hardened to turn it off. It
-      // throws on the way up, and nothing below this line means anything
-      // without a map — so the tool says so instead of drawing an empty panel
-      // and leaving the analyst to wonder which part broke.
-      console.error(e);
-      mapRefused = true;
-      return null;
-    }
-    basemaps = createBasemaps(engine, {
-      onMeteredTiles: refreshUsage,
-      // one billed map load, counted where it happens (the proxy can't see it)
-      onWidgetLoad: (provider) =>
-        api.post(`/api/satellite/usage/${provider.meter}`).then(refreshUsage).catch(() => {}),
-      onWidgetAuthFailure,
-      onWidgetFailed: (provider, error) => {
-        toast(`Google Maps failed to load: ${error.message}`, 'danger', 6000);
-        providerId = 'esri-world-imagery';
-      },
-    });
-    setLayer();
-    basemaps.setLabels(osmOverlay);
-    // the façade wraps the centre back inside ±180 for us, which is what every
-    // route the capture reaches enforces
-    const offSettled = engine.on('view-settled', (view) => {
-      center = { lat: view.lat, lon: view.lon, zoom: view.zoom };
-    });
-    const offRotate = engine.on('rotate', (view) => {
-      bearing = Math.round(view.bearing);
-    });
-    const offClick = engine.on('click', onMapClick);
-    // middle-mouse or shift drag rotates the view (item 3). Capture-phase so we
-    // can stop the event before the engine's own container drag handler ever
-    // sees it — otherwise a turn also pans.
-    mapEl.addEventListener('mousedown', onMiddleRotateStart, true);
-    // left-drag draws the capture marquee when that mode is armed (capture-phase
-    // so the engine's pan handler never sees the gesture)
-    mapEl.addEventListener('mousedown', onSelectStart, true);
-    // left-drag draws a Grid Search area when the rectangle tool is armed
-    mapEl.addEventListener('mousedown', onGridRectStart, true);
+    homeReady = true; // …and only now is there a view for the surface to open on
     window.addEventListener('keydown', onKeydown);
     document.addEventListener('fullscreenchange', onFullscreenChange);
     // the user clicked the extension after a refused capture — close the loop
     const offActivated = onActivated(() =>
       toast('Extension ready. Press Capture again', 'ok', 5000)
     );
-    mapReady = true;
     return () => {
       window.removeEventListener('keydown', onKeydown);
       document.removeEventListener('fullscreenchange', onFullscreenChange);
       offActivated();
-      offSettled();
-      offRotate();
-      offClick();
-      basemaps.dispose();
-      for (const surface of [measureSurface, sunSurface, markerSurface, gridCells, gridAoi, gridDraft]) {
-        surface?.destroy();
-      }
-      engine.destroy();
+      measure.destroy();
+      sky.destroy();
+      grid.destroy();
+      markerSurface?.destroy();
     };
   }
+
+  /**
+   * The gestures this tool arms over the map, once the surface has one.
+   *
+   * Capture-phase, all three: the engine's own container drag handler must not
+   * see the event first, or a turn also pans and a marquee also drags the map.
+   */
+  $effect(() => {
+    const element = mapEl;
+    if (!element) return;
+    // middle-mouse or shift drag rotates the view
+    element.addEventListener('mousedown', onMiddleRotateStart, true);
+    // left-drag draws the capture marquee when that mode is armed
+    element.addEventListener('mousedown', onSelectDrag, true);
+    // …and a Grid Search area when the rectangle tool is armed
+    element.addEventListener('mousedown', onGridRectStart, true);
+    return () => {
+      element.removeEventListener('mousedown', onMiddleRotateStart, true);
+      element.removeEventListener('mousedown', onSelectDrag, true);
+      element.removeEventListener('mousedown', onGridRectStart, true);
+    };
+  });
 
   function onKeydown(e) {
     if (uiState.tool !== 'satellite') return;
     // a dialog on top owns the keyboard — it closes itself, the map keeps state
-    if (notesItem || placeModal || refPicker || deleteTarget) return;
+    if (notesItem || placeModal || refs.picking || deleteTarget) return;
     const tag = e.target?.tagName;
     const typing = tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable;
     // Enter confirms a polygon area, same as the Confirm button
-    if (gridMode && gridDraw === 'polygon' && !typing && e.key === 'Enter' && polyDraft.length >= 3) {
+    if (grid.on && grid.drawMode === 'polygon' && !typing && e.key === 'Enter') {
       e.preventDefault();
-      confirmPolygon();
+      grid.confirmPolygon();
       return;
     }
     // Grid Search sweep: single-key marks while a cell is under review
-    if (gridMode && reviewKey && !typing) {
+    if (grid.on && grid.reviewKey && !typing) {
       const k = e.key.toLowerCase();
-      if (k === ' ' || k === 'c') return void (e.preventDefault(), markReview('cleared'));
-      if (k === 'f') return void (e.preventDefault(), markReview('flagged'));
-      if (k === 's') return void (e.preventDefault(), reviewAdvance());
-      if (k === 'p') return void (e.preventDefault(), reviewToPlace());
+      if (k === ' ' || k === 'c') return void (e.preventDefault(), grid.markReview('cleared'));
+      if (k === 'f') return void (e.preventDefault(), grid.markReview('flagged'));
+      if (k === 's') return void (e.preventDefault(), grid.advance());
+      if (k === 'p') return void (e.preventDefault(), grid.reviewToPlace());
     }
     if (e.key !== 'Escape') return;
-    if (gridDraw) return cancelGridDraw();
-    if (reviewKey) return stopReview();
-    if (selectArmed) toggleSelect();
-    else if (sizeMenuOpen) sizeMenuOpen = false;
-    else if (sunPlacing) sunPlacing = false;
-    else if (sunMode) toggleSunMode();
-    else if (measureMode) setMeasureMode(null);
+    if (grid.drawMode) return grid.cancelDraw();
+    if (grid.reviewKey) return grid.stopReview();
+    if (capture.armed) toggleSelect();
+    else if (capture.menuOpen) capture.menuOpen = false;
+    else if (sky.placing) sky.togglePlacing();
+    else if (sky.on) toggleSunMode();
+    else if (measure.mode) setMeasureMode(null);
     // native fullscreen already exits on Esc (handled by onFullscreenChange);
     // only the CSS fallback needs an explicit toggle here
     else if (fullscreen && !document.fullscreenElement) toggleFullscreen();
@@ -481,13 +289,6 @@
   // force the labels overlay off whenever the base isn't imagery (item 1)
   $effect(() => {
     if (!baseIsImagery && osmOverlay) osmOverlay = false;
-  });
-
-  $effect(() => {
-    const on = osmOverlay; // read before the guard: `basemaps?.` short-circuits
-    // away the dependency while the map is still being built, and the toggle
-    // then never reaches the layers again (build() applies the opening state).
-    if (basemaps) basemaps.setLabels(on);
   });
 
   // While the picker is open, a settled pan refreshes its dates. The stale
@@ -507,7 +308,7 @@
   // one metadata request, on the user's own action (choosing the basemap), and
   // only once per place. Not on mount: no tab may phone out by being opened.
   $effect(() => {
-    if (!mapReady || displayedBaseId !== SENTINEL_ID) return;
+    if (!mapReady || shown.provider?.id !== SENTINEL_ID) return;
     center.lat;
     center.lon;
     s2.maxcc; // a new ceiling can make a different pass the most recent one
@@ -516,31 +317,6 @@
     s2LatestTimer = setTimeout(() => s2.resolveLatest().catch(() => {}), 900);
   });
   let s2LatestTimer;
-
-  // --- imagery date under the crosshair (item 2) ---
-  async function refreshImageryDate() {
-    const id = ++dateReqId;
-    try {
-      const r = await api.get(
-        `/api/satellite/imagery-date?lat=${center.lat}&lon=${center.lon}` +
-          `&zoom=${center.zoom}&provider=${displayedProviderId}`
-      );
-      if (id === dateReqId) imageryDate = r;
-    } catch {
-      if (id === dateReqId) imageryDate = { supported: true, date: null, source: null };
-    }
-  }
-
-  // debounce: the target moves a lot while panning — only query once it settles
-  $effect(() => {
-    center.lat;
-    center.lon;
-    center.zoom;
-    displayedProviderId;
-    if (!mapReady) return;
-    clearTimeout(dateTimer);
-    dateTimer = setTimeout(refreshImageryDate, 500);
-  });
 
   // --- middle-drag rotate (item 3), Google-Earth style ---
   // Grab a point → the map turns around *that* point (not the centre) as the
@@ -552,7 +328,8 @@
     // Middle button, or shift and the left one — the second was the old map's
     // own gesture, kept rather than quietly dropped. Never shift over a mode
     // already waiting for a left drag, though: those own the button.
-    const shiftDrag = e.button === 0 && e.shiftKey && !selectArmed && gridDraw !== 'rect';
+    const shiftDrag =
+      e.button === 0 && e.shiftKey && !capture.armed && grid.drawMode !== 'rect';
     if (e.button !== 1 && !shiftDrag) return;
     startRotateDrag(engine, e, {
       onPivot: (pivot) => {
@@ -561,17 +338,6 @@
       },
       onEnd: () => (rotating = false),
     });
-  }
-
-  function startEditBearing() {
-    bearingInput = String(bearing);
-    editingBearing = true;
-  }
-
-  function commitBearing() {
-    const v = parseFloat(bearingInput);
-    if (Number.isFinite(v)) setBearing(v);
-    editingBearing = false;
   }
 
   // Actions that leave the tool — switching to another tool, opening a browser
@@ -617,91 +383,22 @@
     tick().then(() => engine?.resize());
   }
 
-  // --- measure tools (item 5) ---
+  // --- what a click on the map means -------------------------------------
+  //
+  // One router, asked in the order the modes exclude each other: a polygon
+  // being placed owns the click, then a sky anchor waiting to be planted, then
+  // the measure tools. Each mode answers whether it took it.
   /** Where the analyst clicked, `{ lat, lon }` from the façade. */
   function onMapClick(at) {
-    // Grid Search polygon: each click drops a vertex
-    if (gridDraw === 'polygon') {
-      polyDraft = [...polyDraft, at];
-      renderDraft();
-      return;
-    }
-    // Sun & moon: one click plants the anchor the day's path is drawn from
-    if (sunPlacing) {
-      sunAnchor = at;
-      sunSky = null;
-      sunPlacing = false;
-      return;
-    }
-    if (!measureMode) return;
-    // an angle is exactly three points; a fourth click starts a fresh angle
-    if (measureMode === 'angle' && measurePoints.length >= 3) measurePoints = [];
-    measurePoints = [...measurePoints, at];
-    redrawMeasure();
+    if (grid.addVertex(at)) return;
+    if (sky.place(at)) return;
+    measure.addPoint(at);
   }
 
-  function setMeasureMode(m) {
-    measureMode = measureMode === m ? null : m;
-    if (measureMode) selectArmed = false; // measuring and marquee can't both be armed
-    measurePoints = [];
-    measureSurface?.clear();
+  function setMeasureMode(mode) {
+    // measuring and the capture marquee can't both be armed
+    if (measure.setMode(mode)) capture.disarm();
   }
-
-  // toggling the panel shut also drops any active measure tool — otherwise the
-  // ruler button stays lit (and the tool stays armed) with the panel gone
-  function toggleTools() {
-    toolsOpen = !toolsOpen;
-    if (!toolsOpen && measureMode) setMeasureMode(null);
-  }
-
-  function clearMeasure() {
-    measurePoints = [];
-    measureSurface?.clear();
-  }
-
-  const MEASURE_STROKE = { stroke: '#f5a623', strokeWidth: 2.5, strokeOpacity: 0.95 };
-  const MEASURE_DOT = {
-    radius: 4,
-    stroke: '#fff',
-    strokeWidth: 2,
-    fill: '#f5a623',
-    fillOpacity: 1,
-  };
-
-  function redrawMeasure() {
-    if (!engine) return;
-    measureSurface ??= createSurface(engine);
-    const path =
-      measurePoints.length < 2
-        ? null
-        : measureMode === 'area'
-          ? { kind: 'polygon', points: measurePoints, style: { ...MEASURE_STROKE, fill: '#f5a623', fillOpacity: 0.15 } }
-          : { kind: 'line', points: measurePoints, style: MEASURE_STROKE };
-    measureSurface.set([
-      path,
-      ...measurePoints.map((point) => ({ kind: 'dot', at: point, style: MEASURE_DOT })),
-    ]);
-  }
-
-  const measureReadout = $derived.by(() => {
-    if (!measureMode || measurePoints.length < 2) return null;
-    if (measureMode === 'distance')
-      return measure.formatDistance(measure.pathLength(measurePoints), prefs.units);
-    if (measureMode === 'area')
-      return measurePoints.length >= 3
-        ? measure.formatArea(measure.polygonArea(measurePoints), prefs.units)
-        : '…';
-    // angle needs a middle vertex
-    return measurePoints.length >= 3
-      ? measure.formatAngle(measure.angleAt(measurePoints[0], measurePoints[1], measurePoints[2]))
-      : '…';
-  });
-
-  const MEASURE_HINT = {
-    distance: 'Click points along the path',
-    area: 'Click the polygon corners',
-    angle: 'Click three points (vertex second)',
-  };
 
   // --- external map links (item 6) ---
   const externalLinks = $derived(mapLinks(displayCoords.lat, displayCoords.lon, center.zoom));
@@ -719,13 +416,6 @@
     setBearing(row.bearing);
   }
 
-  // The layers are lib/map's (basemap.js); what reaches them from here is which
-  // provider to show and what a billed one owes the usage pill and Settings.
-  function setLayer() {
-    if (!displayedProvider || !basemaps) return;
-    basemaps.show(displayedProvider, displayedProviderId, displayedCell);
-  }
-
   // Google rejected the Maps JavaScript key. Persist the verdict (which benches
   // the basemap), tell the user, and let the provider refetch fall the map back
   // to Esri.
@@ -737,19 +427,17 @@
       });
     } catch { /* the toast still tells the user */ }
     toast('Google rejected the Maps JavaScript key. Basemap disabled; see Settings', 'danger', 8000);
-    providers = await api.get('/api/satellite/providers');
+    await imagery.loadProviders();
   }
 
-  $effect(() => {
-    displayedProviderId; // track provider changes (incl. eco/block fallbacks,
-    // and Sentinel-2's layer/window — a new window is a new set of tiles)
-    displayedCell; // and the z17 detail-boost bracket
-    setLayer();
-  });
+  function onWidgetFailed(provider, error) {
+    toast(`Google Maps failed to load: ${error.message}`, 'danger', 6000);
+    providerId = FALLBACK_PROVIDER;
+  }
 
   // a basemap disabled in Settings can leave a stale selection — fall back
   $effect(() => {
-    if (providers.length && !currentProvider) providerId = 'esri-world-imagery';
+    if (imagery.providers.length && !currentProvider) providerId = FALLBACK_PROVIDER;
   });
 
   // re-sync providers + prefs when returning to this tab: Settings may have
@@ -757,8 +445,8 @@
   // eco / override prefs meanwhile (tools stay mounted, so no fresh onMount)
   $effect(() => {
     if (uiState.tool !== 'satellite' || !mapReady) return;
-    refreshUsage();
-    api.get('/api/satellite/providers').then((r) => (providers = r));
+    imagery.refreshUsage();
+    imagery.loadProviders();
   });
 
   // A different case drops everything this one was holding: both indexes, the
@@ -817,9 +505,9 @@
   $effect(() => {
     const target = uiState.gotoCoords;
     if (mapReady && target && Number.isFinite(target.lat) && Number.isFinite(target.lon)) {
-      if (target.provider && !providers.length) return;
+      if (target.provider && !imagery.providers.length) return;
       uiState.gotoCoords = null;
-      if (target.provider && providers.some((provider) => provider.id === target.provider)) {
+      if (target.provider && imagery.find(target.provider)) {
         providerId = target.provider;
       }
       const zoom = Number.isFinite(target.zoom) ? target.zoom : Math.max(engine.getZoom(), 16);
@@ -926,199 +614,54 @@
     temporalMapError = '';
   }
 
-  // --- sun and moon mode ---
+  // --- sun and moon ---
   //
-  // One anchored point, one date, and an hour you drag: the day's path drawn as
-  // the arc the body sweeps while it is up, hour ticks along it, and the bearing
-  // at the chosen moment. Everything drawn is an azimuth, which is the only
-  // celestial quantity a plan view can state honestly; altitude stays in the
-  // panel. Map Measures will absorb this as its general bearing layer.
-  let sunMode = $state(false);
-  let sunAnchor = $state.raw(null); // { lat, lon } — fixed, never the moving view
-  let sunDay = $state(''); // empty: the backend's today at that point
-  let sunIndex = $state(0); // sample of the day the slider is on
-  let sunSky = $state(null);
-  let sunLoading = $state(false);
-  let sunPlacing = $state(false);
-  let sunSurface = null; // lib/map/surface.js
-  let sunTicket = 0;
+  // One anchored point, one date, and an hour you drag, in its own store
+  // (state/sky.svelte.js). The tool keeps only what the mode means *here*:
+  // which other modes it turns off, and where it opens when nothing is planted.
+  const sky = createSkyState({ engine: () => engine, api, notify: toast });
 
   function toggleSunMode() {
-    sunMode = !sunMode;
-    if (sunMode) {
-      if (selectArmed) toggleSelect(); // exclusive with the capture marquee…
-      if (measureMode) setMeasureMode(null); // …the measure tools…
-      if (gridMode) toggleGridMode(); // …and Grid Search
-      if (!sunAnchor) sunAnchor = markerLatLng ?? { lat: center.lat, lon: center.lon };
-    } else {
-      sunPlacing = false;
-      sunSurface?.clear();
+    if (sky.on) {
+      sky.close();
+      return;
     }
+    if (capture.armed) toggleSelect(); // exclusive with the capture marquee…
+    setMeasureMode(null); // …the measure tools…
+    if (grid.on) toggleGridMode(); // …and Grid Search
+    sky.open(markerLatLng ?? { lat: center.lat, lon: center.lon });
   }
 
-  // Wall clock to land the slider on, once the day's samples are in.
-  let handedClock = null;
-
-  // Coords & Sky hands over a point, a date and a time: same mode, second way in,
-  // so there is only ever one rendering of this to keep right.
+  // Coords & Sky hands over a point, a date and a time: same mode, second way
+  // in, so there is only ever one rendering of this to keep right.
   $effect(() => {
     const handed = uiState.skyAt;
     if (!mapReady || !handed) return;
     uiState.skyAt = null;
-    sunAnchor = { lat: handed.lat, lon: handed.lon };
-    sunDay = handed.date ?? '';
-    sunSky = null;
-    sunIndex = 0;
-    handedClock = handed.time ?? null;
-    if (!sunMode) toggleSunMode();
+    if (!sky.on) toggleSunMode();
+    sky.handOff(handed);
   });
 
   $effect(() => {
-    if (!sunMode || !sunAnchor) return;
-    const params = new URLSearchParams({ lat: sunAnchor.lat, lon: sunAnchor.lon });
-    if (sunDay) params.set('date', sunDay);
-    const ticket = ++sunTicket;
-    sunLoading = true;
-    api
-      .get(`/api/geo/sky?${params}`)
-      .then((result) => {
-        if (ticket !== sunTicket) return;
-        sunSky = result;
-        sunDay = result.date;
-        sunIndex = nearestSample(result.curve.clock, handedClock ?? result.moment.local.slice(11, 16));
-        handedClock = null;
-      })
-      .catch(() => {
-        if (ticket === sunTicket) toast('Could not read the sky for that point', 'danger');
-      })
-      .finally(() => {
-        if (ticket === sunTicket) sunLoading = false;
-      });
+    sky.on;
+    sky.anchor;
+    sky.day;
+    sky.load();
   });
-
-  function themeColour(name, fallback) {
-    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return value || fallback;
-  }
-
-  const SKY_BODY_SIZE = 20;
-
-  function drawSun() {
-    if (!engine) return;
-    sunSurface ??= createSurface(engine);
-    if (!sunMode || !sunSky || !sunAnchor) {
-      sunSurface.clear();
-      return;
-    }
-    const origin = sunAnchor;
-    // Sized off the *shorter* side of the view, not its diagonal: the arc is a
-    // circle around the anchor, so a radius set by the diagonal runs off the top
-    // and bottom of a wide window.
-    const { across, down } = engine.viewSpanMeters();
-    const reach = Math.min(across, down) * 0.22;
-    const at = (azimuth, scale = 1) => measure.destination(origin, azimuth, reach * scale);
-    const curve = sunSky.curve;
-    const shapes = [];
-
-    for (const body of [
-      {
-        key: 'sun',
-        label: 'Sun',
-        colour: themeColour('--sky-sun', '#bd8721'),
-        azimuth: curve.sun_azimuth,
-        altitude: curve.sun_altitude,
-      },
-      {
-        key: 'moon',
-        label: 'Moon',
-        colour: themeColour('--sky-moon', '#4a93cc'),
-        azimuth: curve.moon_azimuth,
-        altitude: curve.moon_altitude,
-      },
-    ]) {
-      // Thin and translucent: the imagery underneath is what is being read.
-      const thin = { stroke: body.colour, strokeWidth: 2.5, strokeOpacity: 0.9 };
-      for (const run of upRuns(body.altitude)) {
-        shapes.push({ kind: 'line', points: run.map((i) => at(body.azimuth[i])), style: thin });
-      }
-      for (const { index: i, long } of hourTicks(curve.minutes, body.altitude)) {
-        shapes.push({
-          kind: 'line',
-          points: [at(body.azimuth[i], 0.94), at(body.azimuth[i], long ? 1.1 : 1.03)],
-          style: thin,
-          tip: `${body.label} ${curve.clock[i]} · az ${Math.round(body.azimuth[i])}°`,
-        });
-      }
-      const altitude = body.altitude[sunIndex];
-      const below = isBelow(altitude);
-      const reading = bodyReading(
-        body.label, curve.clock[sunIndex], body.azimuth[sunIndex], altitude
-      );
-      shapes.push({
-        kind: 'line',
-        points: [origin, at(body.azimuth[sunIndex])],
-        style: {
-          stroke: body.colour,
-          strokeWidth: 3.5,
-          strokeOpacity: below ? 0.6 : 1,
-          dash: below ? '6 6' : null,
-        },
-        tip: { text: reading, sticky: true },
-      });
-      // Nothing rides the ray while the body is under the horizon: the dashed
-      // ray already says where it is, and a mark on it would claim it is visible.
-      //
-      // The body itself is a mark on its own ray: it rides between the anchor,
-      // which stands for the zenith, and the arc, which stands for the horizon,
-      // so how far up it is reads as how close to you it is. The geometry and
-      // the glyph are in `lib/skyOverlay.js`.
-      if (!below) {
-        shapes.push({
-          kind: 'marker',
-          at: at(body.azimuth[sunIndex], markScale(altitude)),
-          className: 'sky-body', // replaces the engine's boxed default
-          html: bodySvg(
-            body.key,
-            body.colour,
-            curve.moon_illuminated[sunIndex],
-            sunSky.moon.waxing,
-            SKY_BODY_SIZE
-          ),
-          size: [SKY_BODY_SIZE, SKY_BODY_SIZE],
-          anchor: [SKY_BODY_SIZE / 2, SKY_BODY_SIZE / 2],
-          keyboard: false,
-          tip: body.key === 'moon' ? `${reading} · ${sunSky.moon.phase}` : reading,
-        });
-      }
-    }
-
-    shapes.push({
-      kind: 'dot',
-      at: origin,
-      style: {
-        radius: 4,
-        stroke: '#fff',
-        strokeWidth: 2,
-        fill: themeColour('--accent', '#e8a33d'),
-        fillOpacity: 1,
-      },
-    });
-    sunSurface.set(shapes);
-  }
 
   // Redraw on any of: a new day, a new hour, a new anchor, the mode closing.
   $effect(() => {
-    sunMode;
-    sunSky;
-    sunIndex;
-    sunAnchor;
-    if (mapReady) drawSun();
+    sky.on;
+    sky.sky;
+    sky.index;
+    sky.anchor;
+    if (mapReady) sky.draw();
   });
 
   // The arc is drawn in metres, so a zoom or a pan has to restretch it.
   $effect(() => {
-    if (!mapReady || !sunMode) return;
-    return engine.on('view-settled', () => drawSun());
+    if (!mapReady || !sky.on) return;
+    return engine.on('view-settled', () => sky.draw());
   });
 
   let searching = $state(false);
@@ -1161,10 +704,6 @@
     engine?.setBearing(deg); // the façade normalises whatever it is handed
   }
 
-  function resetNorth() {
-    setBearing(0);
-  }
-
   // --- marker (crosshair / pin), optionally decoupled from center ---
 
   // the coordinates shown & recorded: the moved pin, else the crop center
@@ -1172,48 +711,32 @@
     moveMode && markerLatLng ? markerLatLng : { lat: center.lat, lon: center.lon }
   );
 
-  // --- capture sizing (backend validates 256–4096 px per side; see lib/captureSize.js) ---
-
-  // Standard output sizes for the centred Capture button, named by intent.
-  const PRESETS = [
-    { id: '1200x675', label: 'Tweet 16:9', w: 1200, h: 675 },
-    { id: '1080x1080', label: 'Square', w: 1080, h: 1080 },
-    { id: '1200x630', label: 'OG card', w: 1200, h: 630 },
-    { id: '1280x800', label: 'Wide', w: 1280, h: 800 },
-    { id: 'custom', label: 'Custom', w: 0, h: 0 },
-  ];
-  let preset = $state('1200x675');
-  let customW = $state(1200);
-  let customH = $state(675);
-  // preset dimensions in px — the centred Capture frame + its hover preview
-  const presetSize = $derived.by(() => {
-    if (preset === 'custom') return [clampSize(customW), clampSize(customH)];
-    const p = PRESETS.find((x) => x.id === preset);
-    return [p.w, p.h];
+  // --- capture: what shape the crop is, and filing what is inside it ---
+  // The output size, the marquee's ratio lock, the resolution, which mode the
+  // button re-runs and both roads to a filed crop are its own store
+  // (state/capture.svelte.js). The pixels' provenance is asked of the surface
+  // that drew them, never of the provider that was chosen.
+  const capture = createCaptureState({
+    api,
+    notify: toast,
+    ensureCase,
+    reloadCase,
+    engine: () => engine,
+    element: () => mapEl,
+    view: () => center,
+    bearing: () => bearing,
+    marker: () => ({ style: markerStyle, at: moveMode ? markerLatLng : null }),
+    basemap: () => currentProvider,
+    maxZoom: () => shown.provider?.max_zoom ?? 19,
+    provenance: () => surface.provenance(),
+    onRect: (rect) => (selRect = rect),
+    onArm: () => setMeasureMode(null),
   });
-
-  // Marquee ratio lock (width/height); null = free-form drag.
-  const RATIOS = [
-    { id: 'free', label: 'Free', r: null },
-    { id: '16:9', label: '16:9', r: 16 / 9 },
-    { id: '4:3', label: '4:3', r: 4 / 3 },
-    { id: '1:1', label: '1:1', r: 1 },
-  ];
-  let ratio = $state('free');
-  const ratioValue = $derived(RATIOS.find((x) => x.id === ratio)?.r ?? null);
-
-  // Output resolution: 1 = view zoom, 2 = one zoom deeper (2×), 'max' = provider max.
-  let resolution = $state(1);
-  const providerMaxZoom = $derived(displayedProvider?.max_zoom ?? 19);
-
-  // Single capture button, split-style: the main part re-runs whichever mode
-  // was used last (remembered here); the arrow opens mode + size/ratio/
-  // resolution settings.
-  let captureMode = $state('center'); // 'center' | 'select'
-  let sizeMenuOpen = $state(false); // the mode/size/ratio/resolution popover
-  let sizeMenuEl = $state(); // bound to the popover's wrapper — used to detect outside clicks
-  let selectArmed = $state(false); // marquee mode: drag a box on the map to capture
-  let selRect = $state(null); // live marquee { x0, y0, x1, y1 } in map-container px
+  let sizeMenuEl = $state(); // bound to the popover wrapper — outside-click detection
+  // The live drag outline, in map-container px. Shared chrome: the capture
+  // marquee and the Grid Search rectangle are the same gesture and cannot both
+  // be armed, so one outline serves both.
+  let selRect = $state(null);
 
   const PIN = 'pin'; // the one shape on the move-mode surface
 
@@ -1261,261 +784,14 @@
     }
   });
 
-  // The single capture path. `framedOn` is the `{ lat, lon }` the crop is
-  // framed on; `baseW`/`baseH` are the crop size at the current view zoom, then
-  // scaled to the chosen output resolution. `rectCss` is the same frame as a
-  // rectangle in map-container px — only the widget path needs it, since it
-  // crops screen pixels rather than stitching tiles. The recorded point is the
-  // moved pin (if any), else the crop centre.
-  async function doCapture(framedOn, baseW, baseH, rectCss) {
-    if (capturing) return;
-    // widget basemaps have no tiles to stitch: same frame, screen pixels
-    if (isWidgetBase) return doWidgetCapture(framedOn, rectCss);
-    capturing = true;
-    const { zoom, width, height, mult } = scaledCapture(
-      baseW, baseH, resolution, center.zoom, providerMaxZoom
-    );
-    let marker_x = 0, marker_y = 0, marker_lat = framedOn.lat, marker_lon = framedOn.lon;
-    if (moveMode && markerLatLng) {
-      const pin = markerLatLng; // the drag keeps it current, so it is the pin
-      marker_lat = pin.lat;
-      marker_lon = pin.lon;
-      // pin offset from the crop centre in container px (already accounts for
-      // rotation), scaled up to the output pixel size
-      const c0 = engine.latLngToContainerPoint(framedOn);
-      const cp = engine.latLngToContainerPoint(pin);
-      marker_x = Math.round((cp.x - c0.x) * mult);
-      marker_y = Math.round((cp.y - c0.y) * mult);
-    }
-    try {
-      const c = await ensureCase();
-      const result = await api.post(`/api/cases/${c.id}/satellite/capture`, {
-        lat: framedOn.lat,
-        lon: framedOn.lon,
-        zoom,
-        width,
-        height,
-        // capture what's on screen: the eco/soft-block fallback, if active
-        provider: displayedProviderId,
-        bearing,
-        marker_style: markerStyle,
-        marker_x,
-        marker_y,
-        marker_lat,
-        marker_lon,
-        // second date on the capture: the imagery's acquisition date, if known
-        // a pinned Sentinel-2 window is the acquisition date outright; every
-        // other provider's is Esri's best-effort estimate or nothing
-        imagery_date: s2PinnedDate ?? imageryDate?.date ?? null,
-      });
-      await reloadCase();
-      toast(
-        result.tiles_missing
-          ? `Captured with ${result.tiles_missing} missing tile(s). No imagery was available there`
-          : result.tiles_upscaled
-            ? `Captured. ${result.tiles_upscaled} tile(s) were upscaled from a lower zoom and recorded in provenance`
-            : 'Satellite crop captured & filed',
-        result.tiles_missing || result.tiles_upscaled ? 'warn' : 'ok'
-      );
-    } catch (e) {
-      toast(`Capture failed: ${e.message}`, 'danger', 6000);
-    } finally {
-      capturing = false;
-    }
-  }
-
-  // Centred Capture button: the standard preset size, framed on the map centre.
-  function captureCentered() {
-    const [w, h] = presetSize;
-    const r = mapEl.getBoundingClientRect();
-    doCapture(engine.camera(), w, h, {
-      x: (r.width - w) / 2,
-      y: (r.height - h) / 2,
-      w,
-      h,
-    });
-  }
-
-  // The main capture button runs whichever mode is currently selected —
-  // captureMode itself *is* the "last used mode" memory, so nothing else
-  // needs to track it.
-  async function runCapture() {
-    if (captureBlocked || capturing) return; // view-only basemap
-    // The widget basemap captures from screen pixels via the browser extension
-    // (extBridge.js). Without it there is nothing legitimate to capture with —
-    // gate here, before any frame is drawn, and explain instead of half-working.
-    if (isWidgetBase && !extensionVersion()) {
-      extGateOpen = true;
-      return;
-    }
-    if (captureMode === 'select') toggleSelect();
-    else captureCentered();
-  }
-
-  // --- widget capture: the same crop frame, filled with screen pixels ---
-  //
-  // Google's terms allow a user-taken screenshot with attribution and nothing
-  // programmatic out of the widget: the cloned tiles in the DOM are off-limits,
-  // so the pixels come from the capture extension — one tabs.captureVisibleTab
-  // behind the user's click, the browser-blessed way to screenshot the tab.
-  // No share prompt, no sharing bar, fullscreen stays. That's the only
-  // difference from a tile capture: the frame, the modes (centred preset /
-  // free marquee) and the filing are identical, so the widget goes through
-  // doCapture() like every other basemap.
-  let extGateOpen = $state(false); // "you need the extension" explainer
-
-  // One frame of this tab as a drawable image, via the extension. The frame is
-  // exactly the viewport, so registration is the viewport aspect check — a
-  // mismatch means browser zoom mid-flight or a foreign frame, both refusals.
-  async function extFrame() {
-    const dataUrl = await captureTab();
-    const img = new window.Image();
-    await new Promise((resolve, reject) => {
-      img.onload = resolve;
-      img.onerror = () => reject(new Error('unreadable frame from the extension'));
-      img.src = dataUrl;
-    });
-    if (!isRegistered(img.naturalWidth, img.naturalHeight, window.innerWidth, window.innerHeight)) {
-      throw new Error('the captured frame does not match this view. Try again');
-    }
-    return img;
-  }
-
-  // Map a rect in map-container CSS px onto the captured frame, and render it
-  // at exactly outW × outH (default: the native source pixels). Source pixels
-  // are usually denser than CSS px (devicePixelRatio, Region Capture), so a
-  // requested size is a supersampled downscale rather than a blur-up.
-  async function shotCropCanvas(img, rect, outW, outH) {
-    const src = sourceRect(rect, {
-      mapRect: mapEl.getBoundingClientRect(),
-      viewportWidth: window.innerWidth,
-      videoWidth: img.naturalWidth,
-      videoHeight: img.naturalHeight,
-    });
-    if (!src) {
-      throw new Error('the frame runs past the captured area. Resize the window or pick a smaller size');
-    }
-    const { sx, sy, sw, sh } = src;
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(outW ?? sw);
-    canvas.height = Math.round(outH ?? sh);
-    const ctx = canvas.getContext('2d');
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-    return canvas;
-  }
-
-  // The widget arm of doCapture: grab the tab via the extension, crop, file.
-  async function doWidgetCapture(framedOn, rect) {
-    if (!extensionVersion()) {
-      extGateOpen = true;
-      return;
-    }
-    const mapRect = mapEl.getBoundingClientRect();
-    if (!frameFitsView(rect, mapRect)) {
-      toast(
-        `The ${Math.round(rect.w)}×${Math.round(rect.h)} frame is bigger than the map view. Pick a smaller size or enlarge the window`,
-        'warn', 7000
-      );
-      return;
-    }
-    capturing = true;
-    // The tab frame is the whole viewport, so our own chrome painted over the
-    // map (HUD, controls, reference windows, the frame outline itself) would
-    // land inside the crop. Hide it for the grab — a capture must show the
-    // map, not the app. Only the marker stays: the tile path burns one into
-    // its crop, so dropping it here would be the odd one out.
-    hideOverlays = true;
-    try {
-      // let the hidden chrome actually leave the composited frame
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      await new Promise((r) => setTimeout(r, 60));
-      const img = await extFrame();
-      const canvas = await shotCropCanvas(img, rect, Math.round(rect.w), Math.round(rect.h));
-      const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
-      await fileScreenshot(blob, framedOn, true);
-    } catch (e) {
-      if (e.needsActivation) {
-        // one-time per tab: the browser only lets the extension screenshot a
-        // tab it has been invoked on (activeTab) — not an error, a step
-        toast(
-          'One-time step: click the Azimut Capture icon in the toolbar (or press Alt+Shift+A), then press Capture again',
-          'warn',
-          10000
-        );
-      } else {
-        // Never fall back to the import dialog: a capture that couldn't be
-        // taken must stay untaken. Quietly offering to file some other image
-        // instead is how an unregistered picture ends up wearing a capture's
-        // provenance.
-        toast(`Capture failed: ${e.message}`, 'danger', 7000);
-      }
-    } finally {
-      hideOverlays = false;
-      capturing = false;
-    }
-  }
-
-  // File a screenshot blob as a capture. `framed` records whether the
-  // coordinates are the centre of a registered crop (the frame paths) or just
-  // the map view at filing time (a pasted screenshot) — the backend keeps that
-  // distinction in provenance.
-  async function fileScreenshot(blob, framedOn, framed) {
-    const c = await ensureCase();
-    const form = new FormData();
-    form.append('image', blob, 'screenshot.png');
-    form.append('lat', String(framedOn ? framedOn.lat : center.lat));
-    form.append('lon', String(framedOn ? framedOn.lon : center.lon));
-    form.append('zoom', String(center.zoom));
-    form.append('bearing', String(bearing));
-    form.append('provider', currentProvider.id);
-    form.append('framed', String(!!framed));
-    const result = await api.post(`/api/cases/${c.id}/satellite/screenshot`, form);
-    await reloadCase();
-    toast(
-      framed
-        ? 'Screen crop captured & filed (attribution burned in)'
-        : 'Screenshot filed as a capture (attribution burned in)',
-      'ok'
-    );
-    return result;
-  }
-
-  // --- manual screenshot dialog (fallback: paste / drop) ---
-  // The dialog owns its own preview and paste handling; these are the two acts
-  // it needs from the tool — a frame of this tab, and filing what it holds.
-  let shotOpen = $state(false);
-
-  /** The whole map view as a PNG blob, through the extension. Null if refused. */
-  async function grabView() {
-    try {
-      const img = await extFrame();
-      const rect = mapEl.getBoundingClientRect();
-      const canvas = await shotCropCanvas(img, { x: 0, y: 0, w: rect.width, h: rect.height });
-      return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-    } catch (e) {
-      // extension missing or refused — the paste path still works
-      toast(`Screen capture unavailable (${e.message}). Paste a screenshot instead`, 'warn', 6000);
-      return null;
-    }
-  }
-
-  /** File what the dialog holds, at the map view rather than a registered frame. */
-  async function fileScreenshotBlob(blob) {
-    try {
-      await fileScreenshot(blob, null, false);
-      return true;
-    } catch (e) {
-      toast(`Could not file the screenshot: ${e.message}`, 'danger', 6000);
-      return false;
-    }
-  }
+  // Both roads to a filed crop — the backend stitching tiles, and the extension
+  // grabbing screen pixels for a widget basemap — are state/capture.svelte.js.
 
   // clicking outside the open size/ratio/resolution popover closes it
   $effect(() => {
-    if (!sizeMenuOpen) return;
+    if (!capture.menuOpen) return;
     const onDocMousedown = (e) => {
-      if (sizeMenuEl && !sizeMenuEl.contains(e.target)) sizeMenuOpen = false;
+      if (sizeMenuEl && !sizeMenuEl.contains(e.target)) capture.menuOpen = false;
     };
     document.addEventListener('mousedown', onDocMousedown, true);
     return () => document.removeEventListener('mousedown', onDocMousedown, true);
@@ -1532,316 +808,38 @@
   });
 
   // --- marquee: drag a rectangle on the map to capture exactly that area ---
+  // The frame, the ratio lock and the filing are the store's. What stays here
+  // is the wiring only this file can do: the mode exclusivity, and handing the
+  // store a left-drag off the map element it does not own.
   function toggleSelect() {
-    selectArmed = !selectArmed;
-    if (selectArmed) {
-      sizeMenuOpen = false;
-      if (measureMode) setMeasureMode(null);
-    } else {
-      selRect = null;
-    }
+    capture.toggleSelect();
   }
 
-  function onSelectStart(e) {
-    if (!selectArmed || e.button !== 0 || !engine) return;
-    startRectDrag(engine, e, {
-      ratio: ratioValue,
-      onChange: (rect) => (selRect = rect),
-      onDone: finishSelect,
-    });
+  function onSelectDrag(e) {
+    capture.startSelect(e);
   }
 
-  function finishSelect(r) {
-    selRect = null;
-    if (!r) return;
-    const w = Math.abs(r.x1 - r.x0);
-    const h = Math.abs(r.y1 - r.y0);
-    if (w < 12 || h < 12) return; // an accidental click / tiny drag: ignore
-    const framedOn = engine.containerPointToLatLng({
-      x: (r.x0 + r.x1) / 2,
-      y: (r.y0 + r.y1) / 2,
-    });
-    selectArmed = false; // one box per arm — re-arm to draw another
-    doCapture(framedOn, Math.round(w), Math.round(h), {
-      x: Math.min(r.x0, r.x1),
-      y: Math.min(r.y0, r.y1),
-      w,
-      h,
-    });
-  }
-
-  // --- Grid Search: layers, drawing, sweeping, persistence -------------------
+  // --- Grid Search: the mode, and the gesture that draws a rectangle --------
+  //
+  // The lattice, the sweep and the case's saved grids are the store's
+  // (state/grid.svelte.js). What stays here is what Grid Search means *in this
+  // tool*: which other modes it turns off, and the left-drag that draws an area
+  // — the same gesture as the capture marquee, sharing its live outline.
 
   function toggleGridMode() {
-    gridMode = !gridMode;
-    if (gridMode) {
-      if (selectArmed) toggleSelect(); // exclusive with the capture marquee…
-      if (measureMode) setMeasureMode(null); // …and the measure tools
-      gridHidden = false;
-      ensureGridLayers();
-      refreshGridList();
-      if (grid) {
-        renderGrid();
-        renderAoi();
-      }
-    } else {
-      cancelGridDraw();
-      stopReview();
-      editArea = false;
-      clearGridLayers();
-    }
-  }
-
-  function ensureGridLayers() {
-    if (!engine) return;
-    gridCells ??= createSurface(engine);
-    gridAoi ??= createSurface(engine);
-    gridDraft ??= createSurface(engine);
-    syncGridVisibility();
-  }
-
-  // the eye toggle keeps the grid but drops its layers off the map so you can
-  // read the bare imagery underneath, then puts them back
-  function syncGridVisibility() {
-    for (const surface of [gridCells, gridAoi, gridDraft]) surface?.visible(!gridHidden);
-  }
-
-  function toggleGridHidden() {
-    gridHidden = !gridHidden;
-    syncGridVisibility();
-  }
-
-  function startRename() {
-    if (!grid) return;
-    renameText = grid.title || '';
-    renamingGrid = true;
-  }
-
-  function commitRename() {
-    renamingGrid = false;
-    if (!grid) return;
-    const t = renameText.trim();
-    if (t && t !== grid.title) {
-      grid.title = t;
-      scheduleGridSave();
-    }
-  }
-
-  function clearGridLayers() {
-    gridCells?.clear();
-    gridAoi?.clear();
-    gridDraft?.clear();
-  }
-
-  // a handle is an empty box the CSS draws; the shape only says where it is
-  const GRID_HANDLE = { className: 'grid-handle', size: [16, 16], anchor: [8, 8] };
-
-  function cellStyle(key) {
-    const base = CELL_STYLE[grid?.statuses[key] || 'unchecked'];
-    // the cell under review gets a bright cyan outline — distinct from the
-    // yellow flag and the grey cleared fill for colour-blind readability
-    return key === reviewKey
-      ? { ...base, stroke: '#33c9ff', strokeWidth: 2.5, strokeOpacity: 1 }
-      : base;
-  }
-
-  function renderGrid() {
-    ensureGridLayers();
-    if (!grid) {
-      gridCells.clear();
+    if (grid.on) {
+      grid.exit();
       return;
     }
-    gridCells.set(
-      [...gridSearch.cellsInAoi(grid)].map(([i, j]) => ({
-        id: gridSearch.cellKey(i, j),
-        kind: 'rect',
-        bounds: gridSearch.cellBounds(grid, i, j),
-        style: cellStyle(gridSearch.cellKey(i, j)),
-        onClick: () => cycleCell(i, j),
-        onContextMenu: () => flagCell(i, j),
-      }))
-    );
+    if (capture.armed) toggleSelect(); // exclusive with the capture marquee…
+    setMeasureMode(null); // …and the measure tools
+    grid.open();
   }
 
-  // One cell of a thousand, on every keypress of a sweep: never a rebuild.
-  function restyleCell(key) {
-    gridCells?.patch(key, { style: cellStyle(key) });
-  }
-
-  function setReview(key) {
-    const prev = reviewKey;
-    reviewKey = key;
-    if (prev) restyleCell(prev);
-    if (key) restyleCell(key);
-  }
-
-  function cycleCell(i, j) {
-    const key = gridSearch.cellKey(i, j);
-    // during a sweep, clicking the cell you're reviewing clears it and moves on
-    // (same as the Clear button) — you're looking right at it
-    if (reviewKey && key === reviewKey) {
-      markReview('cleared');
-      return;
-    }
-    const next = gridSearch.cycleStatus(grid.statuses[key]);
-    if (next) grid.statuses[key] = next;
-    else delete grid.statuses[key];
-    restyleCell(key);
-    scheduleGridSave();
-  }
-
-  function flagCell(i, j) {
-    const key = gridSearch.cellKey(i, j);
-    if (grid.statuses[key] === 'flagged') delete grid.statuses[key];
-    else grid.statuses[key] = 'flagged';
-    restyleCell(key);
-    scheduleGridSave();
-  }
-
-  // --- editing the area of interest (rect corners / polygon vertices) ---
-  // The area box + handles show only while editing the area; once a grid is
-  // drawn the box is hidden and just the cells remain.
-  const AOI_OUTLINE = 'outline'; // the one shape the drag handles reshape live
-
-  function renderAoi() {
-    ensureGridLayers();
-    if (!grid || !editArea) {
-      gridAoi.clear();
-      return;
-    }
-    const b = gridSearch.aoiBounds(grid.aoi);
-    const handle = (id, at, onDragStart, onDrag) => ({
-      id,
-      kind: 'marker',
-      at,
-      ...GRID_HANDLE,
-      draggable: true,
-      keyboard: false,
-      zIndex: 1200,
-      onDragStart,
-      onDrag,
-      onDragEnd: () => (grid.aoi.type === 'rect' ? commitResize() : commitVertEdit()),
-    });
-    if (grid.aoi.type === 'rect') {
-      gridAoi.set([
-        { id: AOI_OUTLINE, kind: 'rect', bounds: b, style: AOI_STYLE },
-        ...CORNERS.map((corner) => {
-          const [lat, lon] = gridSearch.cornerLatLng(b, corner);
-          return handle(
-            corner,
-            { lat, lon },
-            () => (dragBounds = { ...gridSearch.aoiBounds(grid.aoi) }),
-            (at) => onCornerDrag(corner, at)
-          );
-        }),
-      ]);
-      return;
-    }
-    // reshape a confirmed polygon: a draggable handle on every vertex
-    gridAoi.set([
-      {
-        id: AOI_OUTLINE,
-        kind: 'polygon',
-        points: grid.aoi.vertices.map(([lat, lon]) => ({ lat, lon })),
-        style: AOI_STYLE,
-      },
-      ...grid.aoi.vertices.map(([lat, lon], k) =>
-        handle(
-          k,
-          { lat, lon },
-          () => (liveVerts = grid.aoi.vertices.map((vertex) => [...vertex])),
-          (at) => onVertexDrag(k, at)
-        )
-      ),
-    ]);
-  }
-
-  function onCornerDrag(corner, at) {
-    if (!dragBounds) return;
-    if (corner[0] === 'n') dragBounds.north = at.lat;
-    else dragBounds.south = at.lat;
-    if (corner[1] === 'e') dragBounds.east = at.lon;
-    else dragBounds.west = at.lon;
-    gridAoi.patch(AOI_OUTLINE, { bounds: gridSearch.normalizeBounds(dragBounds) });
-  }
-
-  function onVertexDrag(k, at) {
-    if (!liveVerts) return;
-    liveVerts[k] = [at.lat, at.lon];
-    gridAoi.patch(AOI_OUTLINE, {
-      points: liveVerts.map(([lat, lon]) => ({ lat, lon })),
-    });
-  }
-
-  function commitResize() {
-    if (!dragBounds || !grid) return;
-    const b = gridSearch.normalizeBounds(dragBounds);
-    dragBounds = null;
-    const resized = gridSearch.resizeRect(grid, b);
-    if (gridSearch.estimateCells(resized) > GRID_MAX_CELLS) {
-      toast(`That area is too fine for ${grid.cell_m} m cells. Keeping the previous size`, 'warn', 5000);
-      renderAoi(); // snap the handles back
-      return;
-    }
-    grid = resized;
-    renderGrid();
-    renderAoi();
-    scheduleGridSave();
-  }
-
-  function commitVertEdit() {
-    if (!liveVerts || !grid) return;
-    const verts = liveVerts;
-    liveVerts = null;
-    const resized = gridSearch.resizePolygon(grid, verts);
-    if (gridSearch.estimateCells(resized) > GRID_MAX_CELLS) {
-      toast(`That shape is too fine for ${grid.cell_m} m cells. Keeping the previous one`, 'warn', 5000);
-      renderAoi();
-      return;
-    }
-    grid = resized;
-    renderGrid();
-    renderAoi();
-    scheduleGridSave();
-  }
-
-  // show the area box to resize (rect corners) or reshape (polygon vertices)
-  function toggleEditArea() {
-    if (!grid) return;
-    stopReview();
-    cancelGridDraw();
-    editArea = !editArea;
-    renderAoi();
-  }
-
-  function startDraw(type) {
-    cancelGridDraw();
-    stopReview();
-    editArea = false;
-    gridHidden = false;
-    gridDraw = type;
-    // hide the current cells while drawing so map clicks reach the canvas
-    // (polygon vertices) instead of being swallowed by a cell underneath
-    gridCells?.clear();
-    if (type === 'polygon') {
-      polyDraft = [];
-      renderDraft();
-    }
-  }
-
-  function cancelGridDraw() {
-    const wasDrawing = gridDraw;
-    gridDraw = null;
-    polyDraft = [];
-    selRect = null;
-    gridDraft?.clear();
-    if (wasDrawing && grid) renderGrid(); // restore the cells hidden while drawing
-  }
-
-  // rectangle area: drag a box (mirrors the capture marquee, reusing selRect for
-  // the live outline). Armed while gridDraw === 'rect'.
+  // rectangle area: drag a box, mirroring the capture marquee and reusing
+  // selRect for the live outline. Armed while the rectangle tool is chosen.
   function onGridRectStart(e) {
-    if (gridDraw !== 'rect' || e.button !== 0 || !engine) return;
+    if (grid.drawMode !== 'rect' || e.button !== 0 || !engine) return;
     startRectDrag(engine, e, {
       onChange: (rect) => (selRect = rect),
       onDone: finishGridRect,
@@ -1850,264 +848,22 @@
 
   function finishGridRect(r) {
     selRect = null;
-    gridDraw = null;
-    if (!r || Math.abs(r.x1 - r.x0) < 12 || Math.abs(r.y1 - r.y0) < 12) {
-      if (grid) renderGrid(); // stray click: restore the cells hidden to draw
-      return;
-    }
-    const p1 = engine.containerPointToLatLng({ x: r.x0, y: r.y0 });
-    const p2 = engine.containerPointToLatLng({ x: r.x1, y: r.y1 });
-    doApplyArea({
-      type: 'rect',
-      bounds: gridSearch.normalizeBounds({ south: p1.lat, north: p2.lat, west: p1.lon, east: p2.lon }),
-    });
-  }
-
-  // polygon area: click to drop vertices (handled in onMapClick), drag the
-  // handles to adjust, Confirm to build.
-  const DRAFT_RING = 'ring';
-
-  function draftRing() {
-    return gridSearch.closeRing(polyDraft.map((point) => [point.lat, point.lon]))
-      .map(([lat, lon]) => ({ lat, lon }));
-  }
-
-  function renderDraft() {
-    ensureGridLayers();
-    if (gridDraw !== 'polygon') {
-      gridDraft.clear();
-      return;
-    }
-    gridDraft.set([
-      {
-        id: DRAFT_RING,
-        kind: 'line',
-        points: draftRing(),
-        style: { stroke: '#f5a623', strokeWidth: 1.5, strokeOpacity: 0.95, dash: '5 4' },
-      },
-      ...polyDraft.map((point, k) => ({
-        id: k,
-        kind: 'marker',
-        at: point,
-        ...GRID_HANDLE,
-        draggable: true,
-        keyboard: false,
-        zIndex: 1200,
-        onDrag: (at) => {
-          polyDraft[k] = at;
-          gridDraft.patch(DRAFT_RING, { points: draftRing() });
-        },
-        onDragEnd: renderDraft,
-      })),
-    ]);
-  }
-
-  function confirmPolygon() {
-    if (polyDraft.length < 3) return;
-    const vertices = polyDraft.map((p) => [p.lat, p.lon]);
-    gridDraw = null;
-    polyDraft = [];
-    gridDraft?.clear();
-    doApplyArea({ type: 'polygon', vertices });
-  }
-
-  // Drawing an area always makes a *new* grid (the case can hold several); the
-  // one you were on stays saved. Resizing the current grid is the handles.
-  async function doApplyArea(aoi) {
-    const cellM = Math.max(10, Number(gridCellM) || 500); // never a NaN lattice
-    const g = gridSearch.createGrid(aoi, cellM);
-    if (gridSearch.estimateCells(g) > GRID_MAX_CELLS) {
-      toast(`That area exceeds the ${GRID_MAX_CELLS}-cell limit. Use a larger cell size.`, 'warn', 6000);
-      renderGrid(); // restore the previous grid we hid to draw
-      return;
-    }
-    await ensureCase(); // a grid is case state; make sure there is one to hold it
-    await flushGridSave(); // persist the grid we're leaving before switching
-    g.title = gridTitleFor(aoi);
-    grid = g;
-    gridName = `grid-${Date.now().toString(36)}`;
-    gridFor = caseState.current?.id;
-    reviewKey = null;
-    editArea = false;
-    gridHidden = false;
-    renderGrid();
-    renderAoi();
-    await saveGrid(); // create it on disk now, then refresh the picker
-    refreshGridList();
-  }
-
-  function gridTitleFor(aoi) {
-    const c = gridSearch.aoiCenter(aoi);
-    return fmtCoords(c.lat, c.lon);
-  }
-
-  // --- sweep loop: fly to a cell, mark it, advance ---
-  function flyToCell([i, j]) {
-    setReview(gridSearch.cellKey(i, j));
-    const b = gridSearch.cellBounds(grid, i, j);
-    engine.fitBounds(b, { padding: [80, 80], maxZoom: 20, animate: true });
-  }
-
-  function startReview() {
-    if (!grid) return;
-    editArea = false;
-    const cell = gridSearch.nextUnchecked(grid, null);
-    if (!cell) {
-      toast('Every cell is marked. Sweep complete', 'ok');
-      return;
-    }
-    flyToCell(cell);
-  }
-
-  function reviewAdvance() {
-    const next = gridSearch.nextUnchecked(grid, reviewKey);
-    if (!next) {
-      setReview(null);
-      toast('Sweep complete', 'ok');
-      return;
-    }
-    flyToCell(next);
-  }
-
-  function markReview(status) {
-    if (!reviewKey) return;
-    if (status) grid.statuses[reviewKey] = status;
-    else delete grid.statuses[reviewKey];
-    restyleCell(reviewKey);
-    scheduleGridSave();
-    reviewAdvance();
-  }
-
-  function stopReview() {
-    if (reviewKey) setReview(null);
-  }
-
-  // flag the cell under review and file its centre as a place (spec §5 — a hit
-  // the analyst promotes into the case graph)
-  async function reviewToPlace() {
-    if (!reviewKey || !grid) return;
-    const [i, j] = gridSearch.parseKey(reviewKey);
-    const c = gridSearch.cellCenter(grid, i, j);
-    grid.statuses[reviewKey] = 'flagged';
-    restyleCell(reviewKey);
-    scheduleGridSave();
-    try {
-      const cs = await ensureCase();
-      await api.post(`/api/cases/${cs.id}/satellite/place`, {
-        lat: c.lat,
-        lon: c.lon,
-        zoom: Math.max(center.zoom, 16),
-        bearing: 0,
-      });
-      await reloadCase();
-      toast('Cell flagged and saved as a place', 'ok');
-    } catch (e) {
-      toast(`Could not save place: ${e.message}`, 'danger', 6000);
-    }
-  }
-
-  // --- the case's saved grids: list, load, new, delete, persist ---
-  function scheduleGridSave() {
-    clearTimeout(gridSaveTimer);
-    gridSaveTimer = setTimeout(saveGrid, 600);
-  }
-
-  // persist any pending change to the *current* grid before we switch away
-  async function flushGridSave() {
-    clearTimeout(gridSaveTimer);
-    await saveGrid();
-  }
-
-  async function saveGrid() {
-    const id = caseState.current?.id;
-    if (!id || !grid || !gridName) return;
-    try {
-      const spec = JSON.parse(JSON.stringify(grid)); // strip the $state proxy
-      await api.put(`/api/cases/${id}/search-grids/${gridName}`, { spec, title: grid.title });
-    } catch (e) {
-      toast(`Could not save the grid: ${e.message}`, 'danger', 5000);
-    }
-  }
-
-  async function refreshGridList() {
-    const id = caseState.current?.id;
-    if (!id) {
-      gridList = [];
-      return;
-    }
-    try {
-      gridList = await api.get(`/api/cases/${id}/search-grids`);
-    } catch {
-      gridList = [];
-    }
-  }
-
-  async function loadGrid(name) {
-    const id = caseState.current?.id;
-    if (!id) return;
-    cancelGridDraw();
-    stopReview();
-    editArea = false;
-    gridHidden = false;
-    await flushGridSave(); // persist the grid we're leaving
-    try {
-      const spec = await api.get(`/api/cases/${id}/search-grids/${name}`);
-      grid = spec;
-      gridName = name;
-      reviewKey = null;
-      ensureGridLayers();
-      renderGrid();
-      renderAoi();
-      refreshGridList(); // the grid we left becomes a picker entry
-    } catch (e) {
-      toast(`Could not load grid: ${e.message}`, 'danger', 6000);
-    }
-  }
-
-  // close the open grid (it stays saved) — the draw buttons then start a fresh one
-  function closeGrid() {
-    grid = null;
-    gridName = null;
-    reviewKey = null;
-    editArea = false;
-    cancelGridDraw();
-    clearGridLayers();
-  }
-
-  // the Discard button: persist any pending rename/marks first, then close, then
-  // refresh the picker so the just-closed grid shows its latest title
-  async function discardOpenGrid() {
-    await flushGridSave();
-    closeGrid();
-    refreshGridList();
-  }
-
-  async function deleteGrid(name) {
-    const id = caseState.current?.id;
-    if (id) {
-      try {
-        await api.del(`/api/cases/${id}/search-grids/${name}`);
-      } catch {
-        /* the file may already be gone — nothing left to do */
+    grid.finishRect(
+      r && {
+        p1: engine.containerPointToLatLng({ x: r.x0, y: r.y0 }),
+        p2: engine.containerPointToLatLng({ x: r.x1, y: r.y1 }),
+        widthPx: Math.abs(r.x1 - r.x0),
+        heightPx: Math.abs(r.y1 - r.y0),
       }
-    }
-    if (gridName === name) closeGrid();
-    refreshGridList();
+    );
   }
 
-  // on case change: refresh the picker and close whatever grid was open
+  // A different case: the grids on disk are its own, and whatever was open
+  // belonged to the last one.
   $effect(() => {
     const id = caseState.current?.id;
     caseState.rev; // re-read after a reload elsewhere
-    if (!mapReady) return;
-    if (gridFor === id) return;
-    gridFor = id;
-    grid = null;
-    gridName = null;
-    reviewKey = null;
-    editArea = false;
-    clearGridLayers();
-    refreshGridList();
+    if (mapReady) grid.forCase(id);
   });
 
   // save just the point (pin if moved, else center) as a navigable place — no image
@@ -2407,19 +1163,35 @@
   </div>
 
   <div class="body">
-    <div
-      class="map-wrap dark-surface"
-      class:measuring={measureMode}
-      class:selecting={selectArmed}
-      class:grid-drawing={!!gridDraw}
-      class:grabbing={hideOverlays}
-    >
-      <div class="map" bind:this={mapEl}></div>
-
-      {#if mapRefused}
-        <p class="map-refused">The map needs WebGL, which this browser does not have.</p>
-      {/if}
-
+    {#if homeReady}
+      <MapSurface
+        bind:this={surface}
+        bind:engine
+        bind:element={mapEl}
+        bind:view={center}
+        bind:bearing
+        bind:ready={mapReady}
+        bind:refused={mapRefused}
+        {imagery}
+        {providerId}
+        {s2}
+        home={prefs.homeView}
+        labels={osmOverlay}
+        imperial={prefs.units === 'imperial'}
+        armed={measure.mode
+          ? 'measuring'
+          : capture.armed
+            ? 'selecting'
+            : grid.drawMode
+              ? 'grid-drawing'
+              : null}
+        grabbing={capture.hiding}
+        onclick={onMapClick}
+        onusage={() => imagery.refreshUsage()}
+        onwidgetload={(meter) => imagery.countLoad(meter)}
+        onwidgetauthfailure={onWidgetAuthFailure}
+        onwidgetfailed={onWidgetFailed}
+      >
       <!-- saved work on the map: navigation only, off by default, session-only.
            It draws the panel's current selection, not the whole index. -->
       {#if savedOverlay}
@@ -2494,70 +1266,67 @@
           {toggleFullscreen}
           bind:osmOverlay
           {baseIsImagery}
-          {toolsOpen}
-          {measureMode}
-          {toggleTools}
-          {gridMode}
+          toolsOpen={measure.panelOpen}
+          measureMode={measure.mode}
+          toggleTools={() => measure.togglePanel()}
+          gridMode={grid.on}
           {toggleGridMode}
           bind:savedOverlay
           savedCount={savedWork.rows.length}
-          referenceCount={uiState.refViewers.length}
-          {openRefPicker}
+          referenceCount={refs.open.length}
+          openRefPicker={() => refs.openPicker()}
           {setMeasureMode}
-          {measureReadout}
+          measureReadout={measure.readout}
           measureHint={MEASURE_HINT}
-          {clearMeasure}
-          {sunMode}
+          clearMeasure={() => measure.clear()}
+          sunMode={sky.on}
           {toggleSunMode}
         />
 
-        {#if sunMode}
+        {#if sky.on}
           <SunPanel
-            sky={sunSky}
-            loading={sunLoading}
-            day={sunDay}
-            index={sunIndex}
-            anchor={sunAnchor}
-            placing={sunPlacing}
-            ondate={(value) => {
-              sunDay = value;
-              sunSky = null;
-            }}
-            onindex={(value) => (sunIndex = value)}
-            onplace={() => (sunPlacing = !sunPlacing)}
+            sky={sky.sky}
+            loading={sky.loading}
+            day={sky.day}
+            index={sky.index}
+            anchor={sky.anchor}
+            placing={sky.placing}
+            ondate={(value) => sky.setDay(value)}
+            onindex={(value) => sky.setIndex(value)}
+            onplace={() => sky.togglePlacing()}
             onclose={toggleSunMode}
           />
         {/if}
 
-        {#if gridMode}
+        {#if grid.on}
           <GridSearchPanel
-            bind:collapsed={gridCollapsed}
-            bind:renaming={renamingGrid}
-            bind:renameText
-            {commitRename}
-            {startRename}
-            {grid}
-            toggleHidden={toggleGridHidden}
-            hidden={gridHidden}
-            coverage={gridCov}
-            {reviewKey}
-            {markReview}
-            {reviewToPlace}
-            {stopReview}
-            {startReview}
-            {editArea}
-            {toggleEditArea}
-            discard={discardOpenGrid}
-            {deleteGrid}
-            {gridName}
-            bind:cellMetres={gridCellM}
-            drawMode={gridDraw}
-            {startDraw}
-            polygonDraft={polyDraft}
-            {confirmPolygon}
-            cancelDraw={cancelGridDraw}
-            savedGrids={savedOthers}
-            {loadGrid}
+            bind:collapsed={grid.collapsed}
+            bind:renaming={grid.renaming}
+            bind:renameText={grid.renameText}
+            commitRename={() => grid.commitRename()}
+            startRename={() => grid.startRename()}
+            grid={grid.grid}
+            toggleHidden={() => grid.toggleHidden()}
+            hidden={grid.hidden}
+            coverage={grid.coverage}
+            reviewKey={grid.reviewKey}
+            markReview={grid.markReview}
+            reviewToPlace={grid.reviewToPlace}
+            stopReview={grid.stopReview}
+            startReview={() => grid.startReview()}
+            editArea={grid.editArea}
+            toggleEditArea={() => grid.toggleEditArea()}
+            discard={() => grid.discard()}
+            deleteGrid={(slug) => grid.remove(slug)}
+            gridName={grid.name}
+            bind:cellMetres={grid.cellMetres}
+            drawMode={grid.drawMode}
+            startDraw={(type) => grid.startDraw(type)}
+            polygonDraft={grid.draft}
+            confirmPolygon={() => grid.confirmPolygon()}
+            cancelDraw={() => grid.cancelDraw()}
+            savedGrids={grid.others}
+            loadGrid={(slug) => grid.load(slug)}
           />
         {/if}
       </div>
@@ -2565,10 +1334,10 @@
       <!-- capture-frame outline: what the centred Capture will cover — only when
            a centred capture is the intent (hovering the capture button, or
            mid-capture) and not while drawing a marquee -->
-      {#if captureMode === 'center' && (captureHover || capturing) && !selectArmed && !selRect}
+      {#if capture.mode === 'center' && (captureHover || capture.busy) && !capture.armed && !selRect}
         <div
           class="frame-overlay"
-          style="width:{presetSize[0]}px;height:{presetSize[1]}px"
+          style="width:{capture.size[0]}px;height:{capture.size[1]}px"
           aria-hidden="true"
         ></div>
       {/if}
@@ -2634,88 +1403,9 @@
         </button>
       </div>
 
-      <!-- imagery acquisition date: a compact, unobtrusive pill in the corner so
-           it doesn't crowd the coordinates readout (item 2) -->
-      {#if isSentinel && displayedBaseId === SENTINEL_ID}
-        <!-- Sentinel-2 says what it is showing: a pinned day is the window the
-             tiles were rendered from; otherwise the layer's default renders the
-             most recent pass, which the calendar lookup has already named. -->
-        <span
-          class="date-pill mono"
-          class:exact={!!s2PinnedDate}
-          title={s2PinnedDate
-            ? `Sentinel-2 ${s2.layerLabel} from this exact date`
-            : s2.latest
-              ? `Sentinel-2 ${s2.layerLabel}: most recent pass over this point`
-              : `Sentinel-2 ${s2.layerLabel}: most recent pass (open the picker to date it)`}
-        >
-          <Icon name="clock" size={11} />
-          {s2PinnedDate ?? s2.latest ?? ''}
-          {#if !s2PinnedDate}
-            <span class="tag">{s2.latest ? 'latest' : 'most recent'}</span>
-          {/if}
-          {#if s2.layer !== DEFAULT_LAYER}
-            <span class="tag layer">{s2.layerShort}</span>
-          {/if}
-          {#if s2.maxcc !== DEFAULT_MAXCC}
-            <span class="tag" title="Passes over this cloud cover are not rendered"
-              >≤{s2.maxcc}% cloud</span
-            >
-          {/if}
-        </span>
-      {:else if imageryDate?.supported}
-        <span
-          class="date-pill mono"
-          title={imageryDate.source
-            ? `Imagery acquired around this date (source: ${imageryDate.source})`
-            : 'Approximate acquisition date of the imagery here'}
-        >
-          <Icon name="clock" size={11} />
-          {imageryDate.date ?? '—'}
-        </span>
-      {/if}
-
-      <!-- lightweight compass: click the rose to reset north; middle-drag the map
-           to rotate; click the number to type an exact bearing (item 3) -->
-      <div class="rotate-ctl">
-        <button
-          class="compass"
-          onclick={resetNorth}
-          title={bearing ? 'Reset to north' : 'North up · middle-drag the map to rotate'}
-          aria-label="Reset to north"
-        >
-          <svg width="30" height="30" viewBox="0 0 34 34" style="transform: rotate({bearing}deg)">
-            <polygon points="17,4 13,18 17,15 21,18" fill="#e5484d" />
-            <polygon points="17,30 13,16 17,19 21,16" fill="#8a93a5" />
-          </svg>
-          <span class="n">N</span>
-        </button>
-        {#if editingBearing}
-          <!-- svelte-ignore a11y_autofocus -->
-          <input
-            class="input deg-input mono"
-            type="number"
-            min="0"
-            max="359"
-            bind:value={bearingInput}
-            autofocus
-            onblur={commitBearing}
-            onkeydown={(e) => {
-              if (e.key === 'Enter') commitBearing();
-              else if (e.key === 'Escape') editingBearing = false;
-            }}
-            aria-label="Set bearing in degrees"
-          />
-        {:else}
-          <button class="deg mono" onclick={startEditBearing} title="Click to type an exact angle">
-            {bearing}°
-          </button>
-        {/if}
-      </div>
-
       <div class="capture-bar card">
         <select class="select" bind:value={providerId} title="Imagery provider">
-          {#each providers as p (p.id)}
+          {#each imagery.providers as p (p.id)}
             <option value={p.id} disabled={p.needs_key}>
               {p.label}{p.needs_key ? ' (needs API key)' : ''}
             </option>
@@ -2738,16 +1428,16 @@
             title="Requests to this billed provider this month"
           >{usagePill}</span>
         {/if}
-        {#if currentProvider?.meter && displayedBaseId !== providerId}
+        {#if shown.fallenBack}
           <span
             class="fallback-pill"
-            class:paused={meterBlocked}
-            title={meterBlocked
+            class:paused={shown.blocked}
+            title={shown.blocked
               ? `${currentProvider.label} passed 90% of its monthly free tier. Free imagery is shown instead. Override in Settings to keep using it (billed).`
               : `Eco mode shows free imagery at low zoom. Zoom in for ${currentProvider.label} detail. Toggle in Settings.`}
           >
-            <Icon name={meterBlocked ? 'alert' : 'leaf'} size={11} />
-            {meterBlocked ? `${currentProvider.label} paused · free imagery` : 'eco · free imagery'}
+            <Icon name={shown.blocked ? 'alert' : 'leaf'} size={11} />
+            {shown.blocked ? `${currentProvider.label} paused · free imagery` : 'eco · free imagery'}
           </span>
         {/if}
         <select class="select" bind:value={markerStyle} title="Marker style">
@@ -2791,35 +1481,36 @@
              active mode. -->
         <CaptureOptions
           bind:menuEl={sizeMenuEl}
-          bind:menuOpen={sizeMenuOpen}
-          bind:mode={captureMode}
+          bind:menuOpen={capture.menuOpen}
+          bind:mode={capture.mode}
           bind:hover={captureHover}
-          {selectArmed}
-          {capturing}
-          blocked={captureBlocked}
-          widgetBase={isWidgetBase}
-          {runCapture}
+          selectArmed={capture.armed}
+          capturing={capture.busy}
+          blocked={capture.blocked}
+          widgetBase={capture.widget}
+          runCapture={() => capture.run()}
           ratios={RATIOS}
-          bind:ratio
+          bind:ratio={capture.ratio}
           presets={PRESETS}
-          bind:preset
-          bind:customWidth={customW}
-          bind:customHeight={customH}
-          bind:resolution
-          openScreenshot={() => (shotOpen = true)}
-          openExtensionGate={() => (extGateOpen = true)}
+          bind:preset={capture.preset}
+          bind:customWidth={capture.customW}
+          bind:customHeight={capture.customH}
+          bind:resolution={capture.resolution}
+          openScreenshot={() => (capture.shotOpen = true)}
+          openExtensionGate={() => (capture.extGate = true)}
         />
       </div>
       <!-- floating reference-image windows (scratch aids over the map) -->
-      {#each uiState.refViewers as v (v.id)}
+      {#each refs.open as pane (pane.id)}
         <RefViewer
-          viewer={v}
+          viewer={pane}
           caseId={caseState.current?.id}
-          onfocus={focusRef}
-          onclose={closeRef}
+          onfocus={(id) => refs.focus(id)}
+          onclose={(id) => refs.close(id)}
         />
       {/each}
-    </div>
+      </MapSurface>
+    {/if}
 
     <aside
       class="captures"
@@ -2974,21 +1665,21 @@
   />
 {/if}
 
-{#if shotOpen}
+{#if capture.shotOpen}
   <ScreenshotDialog
     view={center}
     {fmtCoords}
-    grab={grabView}
-    file={fileScreenshotBlob}
-    onclose={() => (shotOpen = false)}
+    grab={() => capture.grabView()}
+    file={(blob) => capture.fileBlob(blob)}
+    onclose={() => (capture.shotOpen = false)}
   />
 {/if}
 
-{#if extGateOpen}
+{#if capture.extGate}
   <ExtensionGate
-    onclose={() => (extGateOpen = false)}
+    onclose={() => (capture.extGate = false)}
     onsettings={() => {
-      extGateOpen = false;
+      capture.extGate = false;
       uiState.settingsTab = 'extension';
       uiState.tool = 'settings';
     }}
@@ -3015,13 +1706,13 @@
   />
 {/if}
 
-{#if refPicker}
+{#if refs.picking}
   <RefPicker
-    media={refMedia}
-    loading={refLoading}
+    media={refs.media}
+    loading={refs.loading}
     caseId={caseState.current?.id}
-    onpick={addRef}
-    onclose={() => (refPicker = false)}
+    onpick={(item) => refs.add(item)}
+    onclose={() => (refs.picking = false)}
   />
 {/if}
 
@@ -3033,31 +1724,6 @@
     flex: 1;
     display: flex;
     min-height: 0;
-  }
-  .map-wrap {
-    position: relative;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    /* keep the map's z-index range (the engine's own controls, our clusters above
-       them, and the widget basemap on a negative layer below) to itself, so a
-       dialog portalled into the fullscreen tool still lands on top of it */
-    isolation: isolate;
-  }
-  .map {
-    position: absolute;
-    inset: 0;
-    background: var(--bg-2);
-  }
-  .map-refused {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-content: center;
-    margin: 0;
-    padding: 0 24px;
-    text-align: center;
-    color: var(--text-2);
   }
   .temporal-layer-card.stacked { top: 150px; }
   .temporal-layer-card {
@@ -3098,18 +1764,6 @@
   }
   .temporal-layer-card button:hover { text-decoration: underline; }
   .temporal-layer-card .quiet { margin-left: auto; color: var(--text-3); }
-  /* Mid screen-grab: a widget capture crops the map element's *rectangle*, so
-     everything we paint over the map (HUD, control clusters, capture bar,
-     reference windows, the frame outline itself) would land in the capture.
-     Hide our chrome for the grab and leave the map — Google's own credits live
-     inside it and must ride along. The marker is the deliberate exception: the
-     tile path burns one into its crop, so a screen crop keeps its own.
-     :global is load-bearing — the reference windows are a child component, so
-     a scoped selector would skip exactly the overlay the spec says must never
-     be captured. */
-  .map-wrap.grabbing > :global(:not(.map):not(.marker-overlay)) {
-    visibility: hidden;
-  }
   .frame-overlay {
     position: absolute;
     top: 50%;
@@ -3196,23 +1850,6 @@
     color: var(--text-3);
     font-size: var(--fs-xs);
   }
-  /* imagery date: small, low-contrast pill tucked into the bottom-left corner */
-  .date-pill {
-    position: absolute;
-    bottom: 12px;
-    left: 12px;
-    z-index: 600;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    padding: 3px 8px;
-    border-radius: var(--r-sm);
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    background: rgba(24, 24, 24, 0.7);
-    backdrop-filter: blur(6px);
-    pointer-events: none;
-  }
 
   /* fullscreen: the whole tool covers the viewport, above the app chrome */
   .tool.fullscreen {
@@ -3234,11 +1871,6 @@
     flex-direction: column;
     gap: 8px;
     align-items: flex-start;
-  }
-  .map-wrap.measuring :global(.map-surface),
-  .map-wrap.selecting :global(.map-surface),
-  .map-wrap.grid-drawing :global(.map-surface) {
-    cursor: crosshair;
   }
 
   /* draggable square handle for the area corners / polygon vertices */
@@ -3275,69 +1907,6 @@
     white-space: nowrap;
   }
 
-  /* lightweight compass — no heavy card, just the rose + an editable readout */
-  .rotate-ctl {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    z-index: 600;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-  }
-  .compass {
-    position: relative;
-    display: grid;
-    place-items: center;
-    width: 38px;
-    height: 38px;
-    color: var(--text-2);
-    cursor: pointer;
-    /* round translucent backing disc so the rose reads clearly over any
-       imagery — same fill as the degree readout below (item 3) */
-    border-radius: 50%;
-    background: rgba(24, 24, 24, 0.88);
-    backdrop-filter: blur(6px);
-    box-shadow: var(--shadow-1);
-  }
-  .compass:hover {
-    color: var(--accent);
-  }
-  .compass svg {
-    transition: transform 0.1s linear;
-  }
-  .compass .n {
-    position: absolute;
-    top: 1px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 9px;
-    font-weight: 700;
-    color: var(--text-1);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
-    pointer-events: none;
-  }
-  .deg {
-    min-width: 40px;
-    text-align: center;
-    padding: 2px 6px;
-    border-radius: var(--radius-1);
-    font-size: var(--fs-xs);
-    color: var(--text-1);
-    background: rgba(24, 24, 24, 0.88);
-    backdrop-filter: blur(6px);
-    cursor: text;
-  }
-  .deg:hover {
-    color: var(--accent);
-  }
-  .deg-input {
-    width: 52px;
-    padding: 2px 4px;
-    text-align: center;
-    font-size: var(--fs-xs);
-  }
   .capture-bar {
     position: absolute;
     bottom: 34px;
@@ -3401,25 +1970,6 @@
   }
   .fallback-pill.paused {
     color: var(--danger);
-  }
-  /* a pinned date is a fact about the pixels; "latest" is an inference from the
-     pass list — they must not look identical */
-  .date-pill.exact {
-    border-color: var(--ok, #46a758);
-  }
-  .date-pill .tag {
-    font-family: var(--font-sans);
-    font-size: 9px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--text-3);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 0 3px;
-  }
-  .date-pill .tag.layer {
-    color: var(--accent);
-    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   }
   .prov.dates {
     display: flex;

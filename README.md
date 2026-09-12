@@ -58,7 +58,7 @@ to fix a point on the map.*
 | **Sheet** | The case's own CSVs in a plain grid: a comparison table, a worklist with its own state, or the half-facts too soft to be entities. Columns can be typed, a workbook arrives one sheet per tab, and a declared sheet promotes into entities, places and dated statements. A worklist can also be built back out of what the case holds. |
 | **Media** | Import local files or download by URL (X, Telegram, TikTok, YouTube, Instagram and more via yt-dlp, with a gallery-dl fallback for image-only posts). Public media is fetched cookie-less; a login-walled post prompts once for a browser session or an exported `cookies.txt`. Each item gets a clean local file, metadata and a SHA-256. Multi-photo posts open a picker. |
 | **Files** | Every saved artifact in one Finder-style view of your folders, not just media: select several, drag them into a folder, search across the lot. |
-| **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services. Nothing uploads on its own. |
+| **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services. With the capture extension, pressing an engine opens it with the picture already in it. Nothing leaves the machine until you press one. |
 | **Inspect** | A scratch workspace over any photo or video: frame adjustments, editable crop, sharpest-frame capture, hand-made collage with per-piece warp/scale/rotate, auto-stitch to solve a panorama's layout, and ELA hints. Nothing enters the case until you save. |
 | **Satellite** | Coordinates or a place name become an imagery crop. The search bar proposes matches as you type: saved work, coordinates and a bundled city list answer offline, and the geocoder fills in the rest once you pause. Select-area capture, map rotation, measurement tools, reference overlays and editable AOI grids for area review. Esri/OSM by default, plus Sentinel-2 with a date calendar and a cloud-ceiling slider; add a Mapbox or Google key for more basemaps. |
 | **Coords & Sky** | Convert common coordinate formats, copy the result, open map or geocoding links, and read the sun and moon at that point on a date: rise, set, azimuth, altitude, twilights, moon phase and bright-limb angle, in local time and UTC, computed offline. |
@@ -234,9 +234,26 @@ A browser extension (Chrome/Edge and Firefox) captures external map sites
 straight into a case: Google Maps & Earth, Bing, Yandex, OSM, Apple Maps,
 Zoom Earth, Copernicus Browser and Satellites.pro, one screenshot per click
 with coordinates parsed from the URL. It also powers the Capture button on
-the Google (Maps JS) basemap. Install it from **Settings → Capture extension**
-(download the zip, load unpacked, pair with the token shown there); full
-instructions in [extension/README.md](extension/README.md).
+the Google (Maps JS) basemap, fills a composer with a thread Geo Report
+prepared, and opens a reverse-image engine with a picture from the case.
+
+On a 2D map it can draw Azimut's own tools over the site: measure, the case's
+saved points, sun and moon, a search grid that opens in the app afterwards, and
+reference windows holding the case's own images and videos beside the imagery.
+The scale is measured off the map rather than assumed, so the tools switch
+themselves off — with the reason shown — on a view they cannot compute on.
+
+On Chrome, Edge and Brave, install it from **Settings → Capture extension**: the
+app writes the extension into a folder it owns, you load that folder unpacked
+once and paste the pairing token. Because the app owns the folder, later updates
+are one button — it rewrites the files and the extension restarts itself.
+
+Firefox refuses an unsigned extension and forgets an unpacked one on exit, so it
+installs the signed `azimut-capture-<version>.xpi` from the
+[latest release](https://github.com/OsintMeThat/azimut/releases/latest) instead.
+That copy is sealed, so the update button does not apply to it: Firefox reads
+Azimut's own update manifest and replaces the add-on itself. Full instructions in
+[extension/README.md](extension/README.md).
 
 ## Building & releasing
 
@@ -259,12 +276,55 @@ it back, and the release tag must match it.
 
 The capture extension keeps **its own** version: the app release that last
 changed a shipped file, so it lags whenever the extension is left alone.
-Settings reads "bundled newer than installed" as "go reinstall the unpacked
-folder", which is worth saying once and never for a zip that hasn't moved.
-`tests/test_updates.py` digests what `extension.zip` carries and fails either
-way — a change without a bump, or a bump without a change. When you do change
-the extension, set `extension/manifest.json` to the current app version and
-record the digest the failing test prints.
+`tests/test_updates.py` digests what the extension ships and fails either way —
+a change without a bump, or a bump without a change. When you do change the
+extension, set `extension/manifest.json` to the current app version and record
+the digest the failing test prints.
+
+Within a development cycle that version cannot move: it is already the app's own.
+So the update button compares the **digest** instead, which the installed folder
+records in its `install.json` — meaning any edit under `extension/` shows up as
+an available update immediately, with no bump and no restart. That is also the
+loop for testing the updater (`docs/superpowers/specs/2026-09-10-extension-self-update-design.md`).
+
+### Signing the extension for Firefox
+
+Firefox Release enforces extension signing with no override, so the Firefox copy
+is an XPI signed by Mozilla and served from the release. Signing is decoupled
+from publishing: `--channel unlisted` runs automated validation, puts no listing
+on addons.mozilla.org, and hands the file back.
+
+Run it **after** the release carrying that version exists, from a checkout of the
+tag, with credentials from the AMO developer hub:
+
+```bash
+export AMO_JWT_ISSUER=... AMO_JWT_SECRET=...
+python3 scripts/sign_extension.py                    # signs, writes packaging/updates.json
+gh release upload v0.3.0 dist-xpi/azimut-capture-0.3.0.xpi
+```
+
+Then commit `packaging/updates.json`. That file is what
+`browser_specific_settings.gecko.update_url` points at, served raw from `main`,
+and Firefox re-reads it about once a day — so a release that changed the
+extension is not delivered to Firefox users until it lands on the branch.
+
+Two rules the script enforces rather than trusts:
+
+- **It signs what the extension ships**, not the `extension/` directory —
+  `extinstall.shipped_files()`, so the XPI, the .zip and the folder the app owns
+  are the same bytes.
+- **A version is signed once.** AMO refuses a second copy of one it already has,
+  and the extension's version deliberately stays put across releases that leave
+  it alone, so the script stops with that reason instead of failing mid-upload.
+
+The add-on id in `extension/manifest.json` is permanent: AMO reserves it at the
+first signature, and changing it later is a different add-on that loses every
+pairing. `tests/test_extension_signing.py` gates the id, the update URL and the
+manifest's shape.
+
+Nothing about this touches development. `scripts/devext.py` still loads
+`extension/` straight into a dev Firefox as a temporary add-on, which needs no
+signature.
 
 ### Dependencies
 

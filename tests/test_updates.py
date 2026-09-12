@@ -7,16 +7,11 @@ shouldn't be reached."""
 
 from __future__ import annotations
 
-import hashlib
-import json
-from pathlib import PurePosixPath
-
 import httpx
 import pytest
 
 from azimut import __version__
-from azimut.api.ingest import _extension_dir, bundled_extension_version, shipped_extension_files
-from azimut.engine import updates
+from azimut.engine import extinstall, updates
 
 
 class FakeResponse:
@@ -144,34 +139,12 @@ def test_update_endpoint_with_check_queries_github(client, monkeypatch):
 # shipped file really changes, set the manifest to the current __version__ and
 # record the new digest here (the failing test prints it).
 EXTENSION_VERSION = "0.3.0"
-EXTENSION_PAYLOAD = "a72c26be5fe65eabb122ac9c8ff24fde1378f74f94bc7efecc164b208afe3c09"
+EXTENSION_PAYLOAD = "4c1ffa06f9e174599f5d85ae5142ed69e95fbbd7ef0e642df58372926f45bd45"
 
-# Text is digested by its line content: a Windows checkout can carry CRLF, and
-# the gate has to reach the same verdict on the three CI platforms.
-_TEXT_SUFFIXES = {".js", ".json", ".css", ".html", ".md", ".txt"}
-
-
-def _extension_payload_digest() -> str:
-    """Digest everything ``extension.zip`` ships, minus the manifest's own
-    ``version``.
-
-    Leaving the version out is what makes the gate cut both ways: with it in,
-    any bump would change the digest and a gratuitous one would look exactly
-    like a real change."""
-    src = _extension_dir()
-    assert src is not None, "no extension bundled with this checkout"
-    digest = hashlib.sha256()
-    for name, path in shipped_extension_files(src):
-        if name == "manifest.json":
-            manifest = json.loads(path.read_text(encoding="utf-8"))
-            manifest.pop("version", None)
-            data = json.dumps(manifest, sort_keys=True).encode("utf-8")
-        else:
-            data = path.read_bytes()
-            if PurePosixPath(name).suffix in _TEXT_SUFFIXES:
-                data = data.replace(b"\r\n", b"\n")
-        digest.update(f"{name}\0".encode() + data + b"\0")
-    return digest.hexdigest()
+# The digest itself lives in engine/extinstall.py, because the update button
+# compares the same number: what the app ships against what the installed folder
+# was written from. One definition, so the gate and the button cannot disagree.
+# The constants above are what makes it a gate.
 
 
 def test_the_shipped_listing_reads_the_same_on_every_platform():
@@ -183,9 +156,9 @@ def test_the_shipped_listing_reads_the_same_on_every_platform():
     unchanged extension. Sorted by the posix name instead, which is the same
     string on all three.
     """
-    src = _extension_dir()
+    src = extinstall.source_dir()
     assert src is not None
-    names = [name for name, _ in shipped_extension_files(src)]
+    names = [name for name, _ in extinstall.shipped_files(src)]
     assert names == sorted(names)
     assert all("\\" not in name for name in names)
 
@@ -198,8 +171,8 @@ def test_the_extension_version_moves_only_when_the_extension_does():
     quiet and the user keeps running a stale bridge. A version bump with no
     change: everyone is told to reinstall the zip they already have, and a nag
     that cries wolf is a nag nobody reads."""
-    digest = _extension_payload_digest()
-    version = bundled_extension_version()
+    digest = extinstall.payload_digest()
+    version = extinstall.bundled_version()
 
     assert digest == EXTENSION_PAYLOAD, (
         f"the shipped extension changed. Set extension/manifest.json to the current "

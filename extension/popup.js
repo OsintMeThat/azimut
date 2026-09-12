@@ -36,6 +36,29 @@ const origin = (url) => {
   }
 };
 
+/**
+ * How tall the map is drawn in the tab, in CSS pixels, or null.
+ *
+ * Read by injecting one expression, which `activeTab` allows the moment this
+ * popup is opened — and it stays a number about the window, never anything
+ * about the page: the coordinates of a capture are still only ever what the
+ * address bar says. A page that refuses the injection simply has no height,
+ * and the two sites that need one come back without a zoom rather than a
+ * guessed one.
+ */
+async function mapHeight(tabId) {
+  try {
+    const [result] = await api.scripting.executeScript({
+      target: { tabId },
+      func: () => window.innerHeight,
+    });
+    const height = Number(result?.result);
+    return Number.isFinite(height) && height > 0 ? Math.round(height) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function loadCases(select, stored) {
   const { backendUrl, token } = stored;
   let cases;
@@ -96,11 +119,17 @@ async function init() {
     return;
   }
 
-  // everything about the URL is the app's judgment, not ours
+  // everything about the URL is the app's judgment, not ours — except how tall
+  // the map is drawn, which only this side can see. Apple states the span its
+  // view covers and Google's satellite mode the metres its viewport is high;
+  // next to the window's height the app turns either into the zoom the capture
+  // is filed with, and without it neither has one at all.
+  const height = await mapHeight(tab.id);
   let parsed;
   try {
     const r = await fetch(
-      `${stored.backendUrl}/api/ingest/parse?url=${encodeURIComponent(tab.url)}`,
+      `${stored.backendUrl}/api/ingest/parse?url=${encodeURIComponent(tab.url)}`
+        + (height ? `&height=${height}` : ""),
       { headers: { "X-Azimut-Token": stored.token } }
     );
     if (r.status === 401) {
@@ -222,6 +251,15 @@ async function init() {
     });
     if (r?.ok) window.close(); // the overlay takes over; a notification reports the result
     else status(r?.error || "could not start the selection", "error");
+  });
+
+  // The map tools panel. One button both ways: injecting it again is how it
+  // closes (extension/mapoverlay.js), so the popup never has to know whether
+  // the panel is currently up.
+  $("map-tools").addEventListener("click", async () => {
+    const r = await api.runtime.sendMessage({ type: "map-tools", tabId: tab.id });
+    if (r?.ok) window.close();
+    else status(r?.error || "could not open the map tools", "error");
   });
 }
 

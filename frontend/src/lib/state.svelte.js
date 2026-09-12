@@ -10,7 +10,8 @@ import { formatCoords as renderCoords } from './coords.js';
 import { loadWidth, saveWidth, clampWidth } from './sidebar.js';
 import { loadTheme, saveTheme, applyTheme } from './theme.js';
 import { shouldShowUpdate } from './appUpdate.js';
-import { extensionVersion } from './extBridge.js';
+import { extensionVersion, pingExtensions, extensionState } from './extBridge.js';
+import { classify } from './extInstall.js';
 import { loadRelationTypes } from './relations.svelte.js';
 
 /**
@@ -25,6 +26,7 @@ export const prefs = $state({
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
   postTarget: 'x', // social composer a fresh post draft starts with
   postPrefill: true, // let the capture extension fill that composer on Publish
+  reversePrefill: true, // let it hand the image to the engine on Reverse Search
   signatureHandle: '', // account handle stamped onto proofs that opt into it
   updateCheckOnStart: true, // ask GitHub for a newer release when the page loads
   updateDismissedVersion: '', // the release tag muted with "don't show again"
@@ -54,6 +56,11 @@ export const updatesState = $state({
   scrapers: null, // checked downloader entries, or null while never checked
   extensionInstalled: null, // version stamped on <html> by the installed extension
   extensionBundled: '', // version this build ships (GET /api/settings)
+  // The full extension verdict once the probes answer (lib/extInstall.js): which
+  // copy is loaded, whether the app owns it, whether its digest is behind. The
+  // two fields above are the synchronous half, and stay the fallback until this
+  // arrives — a marker read costs nothing, a probe costs a timeout.
+  extension: null,
 });
 
 /** Render a lat/lon the way the user asked for it. The tools' one entry point. */
@@ -87,6 +94,7 @@ export function applyPrefs(s) {
   if (s.post_mention !== undefined) prefs.postMention = s.post_mention; // '' = none
   if (s.post_target !== undefined) prefs.postTarget = s.post_target;
   if (s.post_prefill !== undefined) prefs.postPrefill = s.post_prefill;
+  if (s.reverse_prefill !== undefined) prefs.reversePrefill = s.reverse_prefill;
   if (s.signature_handle !== undefined) prefs.signatureHandle = s.signature_handle; // '' = none
   if (s.update_check_on_start !== undefined) prefs.updateCheckOnStart = s.update_check_on_start;
   if (s.update_dismissed_version !== undefined)
@@ -107,6 +115,10 @@ export function applyPrefs(s) {
  */
 export async function checkForUpdatesOnStart() {
   updatesState.extensionInstalled = extensionVersion();
+  // Deliberately before the gate and deliberately not awaited: reading the app's
+  // own folder and asking the bridges who they are touches no network, so it runs
+  // even with the release check switched off, and nothing else waits on it.
+  checkExtension();
   if (!prefs.updateCheckOnStart) return;
   const [app, scrapers] = await Promise.allSettled([
     api.get('/api/settings/update?check=true'),
@@ -122,6 +134,32 @@ export async function checkForUpdatesOnStart() {
     }
   }
   if (scrapers.status === 'fulfilled') updatesState.scrapers = scrapers.value.scrapers ?? [];
+}
+
+/**
+ * What this browser runs against what the app ships: one local read and the two
+ * bridge probes, reconciled by `classify`.
+ *
+ * This is what lets the badge see a digest move. The version comparison it falls
+ * back on cannot: a release that leaves the extension alone keeps its version,
+ * and within a development cycle the bundled version is already the app's own —
+ * so "behind" and "identical" look the same from a version alone.
+ *
+ * Never throws. A failure leaves `extension` null and the version fallback in
+ * charge, which is where the badge was before this existed.
+ */
+export async function checkExtension() {
+  try {
+    const [server, bridges, managed] = await Promise.all([
+      api.get('/api/settings/extension'),
+      pingExtensions(),
+      extensionState(),
+    ]);
+    updatesState.extension = classify(server, { bridges, managed });
+  } catch {
+    /* the fallback is the badge's previous behaviour, which is a fine answer */
+  }
+  return updatesState.extension;
 }
 
 /** Close the update pop-up. `mute` remembers the tag so it won't show again. */
@@ -176,12 +214,18 @@ export async function deleteTemplate(kind, id) {
 }
 
 export const uiState = $state({
-  tool: 'media', // 'media' | 'inspect' | 'satellite' | 'proof' | 'post' | 'settings'
+  // Where the app opens (lib/workspaces.js). Home rather than a tool, because a
+  // fresh install lands in a workspace with no case, and the Media Library's empty
+  // state cannot say what any of the rail means. A deep link still wins.
+  tool: 'overview',
   theme: loadTheme(), // 'dark' | 'light'; index.html stamps it before first paint
   sidebarOpen: true,
   sidebarW: loadWidth(), // px, drag-resizable and remembered across reloads
   toasts: [],
   settingsTab: null, // settings section id to open when switching to Settings
+  // Guide section to land on when switching to the Guide, from the `?` in the
+  // topbar. Consumed by that tab, so scrolling away afterwards sticks.
+  guideSection: null,
   // cross-tool handoffs (the workbench glue):
   composeQueue: [], // media paths queued for the Proof Composer
   postProof: null, // proof spec handed to the Post Composer

@@ -12,6 +12,7 @@
   import { createSurface } from '../../lib/map/surface.js';
   import { paths } from '../../components/Icon.svelte';
   import { groupTemporalMapItems } from '../../lib/temporalMap.js';
+  import { TEARDROP, TEARDROP_CARD_OFFSET } from '../../lib/mapMarkers.js';
   import TemporalPopup from './TemporalPopup.svelte';
 
   let { engine = null, items = [], caseId = '', onopen = () => {} } = $props();
@@ -31,8 +32,7 @@
     return {
       className: 'temporal-mark-wrap',
       html: `<span class="temporal-mark">${glyph('clock', 13)}${count}</span>`,
-      size: [24, 24],
-      anchor: [12, 12],
+      ...TEARDROP,
     };
   }
 
@@ -96,6 +96,7 @@
             className: 'temporal-popup',
             minWidth: 272,
             maxWidth: 320,
+            offset: TEARDROP_CARD_OFFSET,
           },
         },
       ])

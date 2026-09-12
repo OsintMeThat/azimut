@@ -118,6 +118,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # lives. On, because with no extension installed it changes nothing — the app
     # opens the intent page as it always did.
     "post_prefill": True,
+    # Whether a Reverse Search engine button hands the picture to the extension,
+    # which opens the engine with it already in the uploader. Unlike the
+    # composer above, an engine searches the moment it holds a picture — which is
+    # what the button was pressed for, and it still takes that press. On, because
+    # with no extension installed it changes nothing: the button copies or saves
+    # the image and opens the page, as it always did.
+    "reverse_prefill": True,
     # The handle stamped onto proofs when a proof/template enables it. Empty
     # means no account-handle slot can render.
     "signature_handle": "",
@@ -346,6 +353,22 @@ def runtime_dir() -> Path:
     /usr/local/bin or Program Files, and its own contents are read-only.
     """
     return internal_dir() / "runtime"
+
+
+def extension_dir() -> Path:
+    """The capture extension's own copy, the one the app is allowed to rewrite
+    (engine/extinstall.py).
+
+    An unpacked extension can't write to itself and can't tell anyone where it
+    lives, so the only way "update" becomes a button is for the app to own the
+    folder and the analyst to point the browser at it once.
+
+    Under ``.azimut/`` rather than in plain sight: the workspace root is where
+    cases live, and a stray directory there is a candidate for folder adoption.
+    A hidden path is awkward in a file picker, which is why Settings leads with
+    "copy the path" instead of asking anyone to navigate here.
+    """
+    return internal_dir() / "extension"
 
 
 def settings_dir() -> Path:

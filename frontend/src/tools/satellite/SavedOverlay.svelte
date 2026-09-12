@@ -7,6 +7,7 @@
   import { createSurface } from '../../lib/map/surface.js';
   import { paths } from '../../components/Icon.svelte';
   import { groupSavedMarkers, markerPrecision } from '../../lib/savedMarkers.js';
+  import { TEARDROP, TEARDROP_CARD_OFFSET } from '../../lib/mapMarkers.js';
   import { openEntity } from '../../lib/navigate.js';
   import SavedPopup from './SavedPopup.svelte';
 
@@ -52,8 +53,7 @@
     return {
       className: 'saved-mark-wrap',
       html: `<span class="saved-mark saved-mark-${kind}">${glyph(GLYPH[kind] ?? 'pin', 13)}${count}${worked}</span>`,
-      size: [24, 24],
-      anchor: [12, 12],
+      ...TEARDROP,
     };
   }
 
@@ -187,6 +187,7 @@
             className: 'saved-popup',
             minWidth: 296,
             maxWidth: 330,
+            offset: TEARDROP_CARD_OFFSET,
           },
         },
       ])

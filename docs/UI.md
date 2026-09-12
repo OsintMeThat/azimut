@@ -6,7 +6,7 @@ phasing lives in [SPEC.md](SPEC.md).
 ## Layout anatomy
 
 ```
-┌ topbar: rose+wordmark · case switcher + Board · (spacer) · settings gear · sidebar toggle ┐
+┌ topbar: rose+wordmark (home) · case switcher + Board · (spacer) · guide mark · settings gear · sidebar toggle ┐
 ├ rail ┬ tab strip (only when the workspace has several tools) ┬ case sidebar ┤
 │      │ tool canvas                                           │              │
 └──────┴───────────────────────────────────────────────────────┴──────────────┘
@@ -19,6 +19,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 
 | Workspace | Tools today | Future tools land here |
 |---|---|---|
+| **Home** (the mark) | Overview, Guide | |
 | **Case** (topbar) | Board, Graph, Timeline, Sheet | v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect (Selection / Frame / Collage / Analyze) | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
@@ -33,6 +34,95 @@ links, and its own remembered sidebar. Timeline lives here because it is another
 reading of the case, not a collection or examination stage.
 That sidebar stays closed by default, because the board already lists the same case
 and two lists side by side only ask which one is real.
+
+**Home is not on the rail either**, and for the same reason. It sits on the wordmark,
+which is the one affordance that needs no label and costs no seat, and it is where the
+app opens (`#overview`). Its sidebar starts closed too: the page is read rather than
+worked in, and its whole subject is the case the sidebar would be listing again.
+
+## Home
+
+Two tabs, chosen by who is looking. **Overview** is for somebody who has been here
+before; **Guide** is for somebody who has not.
+
+- **With a case open, the page is a reading, laid out as a dashboard.** The case name
+  and when it was last touched, then a two-column grid: *what is waiting* and the
+  recent work on the left, the case's points and the case by family on the right. It
+  runs to 1180px rather than a 760px reading column, because this page is scanned
+  rather than read and four counts hanging in a ribbon on a wide screen is the emptiest
+  an app can look. Below ~980px the grid stacks in that same order.
+- **What is waiting is the Board's own standing questions, priced.** *To review*,
+  *Nothing linked yet* and *Unfiled* are the same three terms the `+ Filter` menu
+  offers, worded once in `lib/entityFilter.js`; the fourth is the Timeline's undated
+  count. They are drawn as four tiles, two by two, because a number is read at a glance
+  or it is not read. Pressing one hands the **question** to the surface that answers it,
+  through the slot Board and Graph already share, so the table lands on exactly the rows
+  the number counted and the two can never disagree.
+- **A count of nothing stops being a control.** It is dimmed and says zero rather than
+  offering a press that lands on an empty table to confirm what the page already said.
+  With all four at zero the tiles give way to one line, and that line is about the four
+  questions rather than about the case: a case is never finished, so nothing on this
+  page may read as a case that is.
+- **A case holding nothing is not a case that is up to date.** With a total of zero
+  there is no reading to give, so the grid is replaced by the three ways material gets
+  in: media, files, a map capture. It is the screen a first case lands on one second
+  after being named.
+- **The fourth standing question is not in that list.** *Added this week* says what
+  happened rather than what is outstanding, so it leads the recent work instead.
+- **The recent rows carry the case's own pictures.** The catalog already attaches a
+  thumbnail to the rows that have one (`thumb`), so six frames of an afternoon's work
+  are shown rather than six filenames.
+- **The points are on a real map, and it is only a reading.** The saved index is drawn
+  as dots on the same engine the Map tool uses (`overview/PlaceMap.svelte`), framed on
+  the case, capped at 200 points, and the wheel and the drag are all it answers: no
+  capture, no basemap picker, nothing that writes. Hovering a dot names it. The
+  basemap is the keyless, unmetered imagery and nothing else, so opening the page
+  cannot spend a quota. Coming back to the tab re-reads the case, and points that
+  did not change leave the camera where it was put. The foot says how many points the
+  case holds, how many are drawn when that is fewer, and opens the Map tool. With
+  nothing placed there is no map, and the figures take the shoulder instead of leaving
+  a hole.
+- **The case by family is drawn in the Graph's own eight hues** (`--graph-<family>`),
+  each bar measured against the biggest family rather than against the total. One
+  reading of one case cannot be two palettes.
+- **It asks the case nothing new.** Five bounded reads against the open case only: the
+  catalog summary, one timeline page, the newest rows, a count of the last seven days,
+  and the compact saved index the Satellite panel already opens on. Nothing opens a
+  second case to count it, and the only thing that reaches the network is the map of
+  the case, fetching the imagery under its points.
+- **Two notices, both of them answers the startup checks already gave.** A newer release
+  folds its own body open on the page (the check returns it) with a download link, and
+  is silent when the release was muted or the check is switched off. A capture extension
+  that was never installed gets one line pointing at the tab that installs it, and the
+  line disappears the moment one is. Neither is dismissible state: both are conditions
+  that clear themselves, so nothing here is stored and nothing here nags.
+- **With no case open the page is the front door.** A fresh install lands in an empty
+  workspace, where there is nothing to summarise and nothing on screen that says what
+  the rail means: what Azimut is, the rail drawn as the sequence it is, a field that
+  names the first case, and the cases already in the workspace when there are any.
+- **The Guide is one section per workspace**, between two that set up and two that
+  close. Setting up: what a case is, and the capture extension that feeds it —
+  installing it is the first thing the first section says, because it is the one setup
+  step that changes what the app can do. Then **three worked examples**, whole jobs
+  walked tab by tab, because the sections describe tools and somebody arriving has a
+  goal; each step names the tool it happens in and opens it. Closing: **every keystroke
+  the app listens for**, grouped by where it is pressed, and **what to do when something
+  does not work**, symptom by symptom. Static text rather than a tour, and no
+  screenshots: a tour breaks on the first layout change, a screenshot is stale the
+  release after it was taken, and both fail silently. `guide.test.js` fails when a tool
+  joins a workspace and nobody wrote down what it is for, when a recipe sends the reader
+  to a tool that does not exist, and when a key is filed under a tab the app no longer
+  has.
+- **The `?` in the topbar is the way in.** It sits beside the settings gear rather than
+  in each toolbar, so there is one of it, and it opens the Guide on the section written
+  about the tool being stood in (`guideFor`). A tool no section covers opens the guide
+  at the top. It is absent on the Guide itself, which is the answer.
+- **The contents list follows the reading.** It marks whichever section is under the
+  eye as the column scrolls, measured against a line just below the top edge so a
+  heading that has only just passed is the one being read, and the last section takes
+  the foot of the page since a short final section can never reach that line. A press
+  on the list owns the mark until its scroll lands, or the one control that says *go
+  here* would point somewhere else three times on the way.
 
 Rules:
 
@@ -1012,7 +1102,10 @@ holding nothing placed says so in words rather than pulling the map out over unr
 ground.
 
 The marks are the saved layer's own pins in a second tint, because they are the same
-gesture on the same map. A mark's card leads with what each row is — a photograph shows
+gesture on the same map. Every one of them is a teardrop standing on the point: the
+sharp corner is the coordinate and the body hangs above it, in the app and in the
+extension alike. Anchored on its middle, as it was, a mark claimed a spot 17 px
+south of the one it was filed at — ten metres of ground at level 18. A mark's card leads with what each row is — a photograph shows
 itself — and offers both ways on: the entry on the axis it came from, and the thing
 itself in the tool that owns it, with a file the browser can show also opening in its
 own tab. The card's own buttons hand the period to Board or Graph, or close the layer.
@@ -1185,6 +1278,12 @@ metadata is marked `suggested` in both the card and the tree, so a camera's read
 never passes for analyst work. The Save-place dialog carries the matching write:
 one **Relate to…** field says why the point is being saved while the analyst still
 knows.
+
+**The map keeps up with the other windows on the case.** A point saved, a grid
+drawn or a cell swept from the extension's panel over another map lands here
+without a reload, and the same the other way round. A sweep worked from both
+keeps both hands' marks: what is written is the cells that were marked, never the
+grid around them. A grid discarded elsewhere closes here and says so.
 
 ## Geo Proof
 

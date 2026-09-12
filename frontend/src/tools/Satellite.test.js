@@ -10,14 +10,16 @@ const cluster = readFileSync(
 // against real numbers (`skyOverlay.test.js`); the tool hands it to the map.
 const sky = readFileSync(new URL('../lib/skyOverlay.js', import.meta.url), 'utf8');
 
-/** The tool and everything it is made of, for the checks that must hold of all of it. */
+/** The tool and everything it is made of, keyed by the path a failure names, for
+ *  the checks that must hold of all of it. */
 function satelliteSources() {
   const files = { 'Satellite.svelte': source };
   const dir = new URL('./satellite/', import.meta.url);
   for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
     if (!entry.isFile() || entry.name.endsWith('.test.js')) continue;
     const at = `${entry.parentPath}/${entry.name}`;
-    files[at.slice(at.indexOf('/satellite/') + 1)] = readFileSync(at, 'utf8');
+    const key = at.slice(at.indexOf('/satellite/') + 1).replace(/\/{2,}/g, '/');
+    files[key] = readFileSync(at, 'utf8');
   }
   return files;
 }
@@ -136,25 +138,30 @@ describe('filing saved work from its details dialog', () => {
 });
 
 describe('reference windows', () => {
-  // the picker itself is `satellite/RefPicker.svelte`, which owns the search,
-  // the folder browser and what an empty case says
-  it('reads the case media once, when the picker opens', () => {
-    expect(source).toContain('async function openRefPicker()');
-    expect(source).toContain('`/api/cases/${id}/media`');
-    expect(source).toContain("m.kind === 'image' || m.kind === 'video'");
+  // When the case is read, where the windows live and how they stack are the
+  // store's (`satellite/state/refs.svelte.test.js`); the picker itself is
+  // `satellite/RefPicker.svelte`. What is this file's business is that the tool
+  // hands one store to all three places the windows are touched.
+  it('hands one store to the cluster, the picker and the windows', () => {
+    expect(source).toContain("import { createRefsState } from './satellite/state/refs.svelte.js'");
+    expect(source).toContain('referenceCount={refs.open.length}');
+    expect(source).toContain('openRefPicker={() => refs.openPicker()}');
+    expect(source).toContain('{#each refs.open as pane (pane.id)}');
+    expect(source).toContain('onpick={(item) => refs.add(item)}');
   });
 
-  it('spawns the window the picker handed back, and closes it', () => {
-    expect(source).toContain('onpick={addRef}');
-    expect(source).toContain('createViewer(`ref-${++refSeq}`, item');
-    expect(source).toContain('refPicker = false;');
-  });
-
-  it('keeps the windows out of the case: session state, never captured', () => {
-    // they live in uiState for the tab's life, and the crop hides them
-    expect(source).toContain('uiState.refViewers');
+  it('keeps the windows in the session, never in the case', () => {
+    // the store holds no list of its own: it reads and writes the tab's, which
+    // is what makes the windows survive a tool switch and die with the tab
+    expect(source).toContain('viewers: () => uiState.refViewers');
+    expect(source).toContain('setViewers: (windows) => (uiState.refViewers = windows)');
     expect(source).not.toContain('refViewers:');
-    expect(source).toContain('.map-wrap.grabbing');
+  });
+
+  it('leaves them out of a screen capture, wherever the crop is taken', () => {
+    // the rule is stated once, on the surface that owns the grab
+    const surfaces = satelliteSources();
+    expect(surfaces['satellite/MapSurface.svelte']).toContain('.map-wrap.grabbing');
   });
 });
 
@@ -187,7 +194,7 @@ describe('the saved panel is resizable', () => {
     // shift and the left button turn the map, but the capture marquee and the
     // grid box are both waiting on that same drag
     expect(source).toContain(
-      "e.button === 0 && e.shiftKey && !selectArmed && gridDraw !== 'rect'"
+      "e.button === 0 && e.shiftKey && !capture.armed && grid.drawMode !== 'rect'"
     );
   });
 
@@ -214,100 +221,83 @@ describe('filing saved work by dragging it in the panel', () => {
 });
 
 describe('sun and moon mode', () => {
+  // Where the path is anchored, what is asked of the backend and what reaches
+  // the map are the store's (`satellite/state/sky.svelte.test.js`), and the
+  // geometry under it is `lib/skyOverlay.js`, which has its own. What is left
+  // here is what the mode means *in this tool*: one map mode among the others.
   it('is a map mode in the tool cluster, exclusive with the others', () => {
-    expect(source).toContain('let sunMode = $state(false)');
+    expect(source).toContain("import { createSkyState } from './satellite/state/sky.svelte.js'");
     expect(source).toContain('{toggleSunMode}');
     // the same exclusivity the grid mode declares
-    expect(source).toContain('if (selectArmed) toggleSelect()');
-    expect(source).toContain('if (gridMode) toggleGridMode()');
-    expect(source).toContain('else if (sunMode) toggleSunMode()'); // the Esc cascade
+    expect(source).toContain('if (capture.armed) toggleSelect()');
+    expect(source).toContain('if (grid.on) toggleGridMode()');
+    expect(source).toContain('else if (sky.on) toggleSunMode()'); // the Esc cascade
   });
 
-  it('anchors the path to a fixed point, never to the moving view', () => {
-    expect(source).toContain('let sunAnchor = $state.raw(null)');
-    expect(source).toContain('sunAnchor = markerLatLng ?? { lat: center.lat, lon: center.lon }');
-    // and a click can move it
-    expect(source).toContain('if (sunPlacing) {');
+  it('opens on the moved pin when there is one, else on the view', () => {
+    expect(source).toContain('sky.open(markerLatLng ?? { lat: center.lat, lon: center.lon })');
   });
 
-  it('draws only the arc the body sweeps while it is up', () => {
-    expect(sky).toContain('export function upRuns(altitudes)');
-    expect(sky).toContain('if (altitude >= 0)');
-    expect(source).toContain('for (const run of upRuns(body.altitude))');
-    expect(source).toContain('measure.destination(origin, azimuth, reach * scale)');
-  });
-
-  it('ticks the arc hourly, longer every three hours', () => {
-    expect(sky).toContain('if (minute % 60 || altitudes[i] < 0) return');
-    expect(sky).toContain('long: minute % 180 === 0');
-    expect(source).toContain('hourTicks(curve.minutes, body.altitude)');
-  });
-
-  it('rides the body along its own ray, as close to the anchor as it is high', () => {
-    // the anchor stands for the zenith and the arc for the horizon, the same
-    // radial convention as the compass rosette
-    expect(sky).toContain('return (90 - altitude) / 90;');
-    expect(source).toContain('at: at(body.azimuth[sunIndex], markScale(altitude))');
-    // the glyph is skyOverlay's; the tool only says where the mark rides
-    expect(source).toContain('html: bodySvg(');
-  });
-
-  it('leaves the ray bare while the body is under the horizon', () => {
-    // a mark on it would claim the body is visible
-    expect(source).toContain('if (!below) {');
-  });
-
-  it('draws the moon mark at its phase, worked out of the lit fraction', () => {
-    expect(sky).toContain('Math.acos(clamped) * 180) / Math.PI');
-    expect(sky).toContain('litPath(r, illuminated, phaseAngleOf(illuminated))');
-    // a plan view has no vertical, so the bright-limb angle is not used here
-    expect(sky).toContain('glyphRotation(waxing)');
-    expect(sky).not.toContain('glyphRotation(waxing, ');
-  });
-
-  it('names the altitude on the mark and on the ray', () => {
-    expect(sky).toContain('alt ${Math.round(altitude)}°');
-    expect(source).toContain('bodyReading(');
-    expect(source).toContain("tip: body.key === 'moon' ? `${reading} · ${sunSky.moon.phase}` : reading");
-  });
-
-  it('keeps a body below the horizon on the map, dashed', () => {
-    expect(source).toContain('const altitude = body.altitude[sunIndex]');
-    expect(sky).toContain('return altitude < 0;');
-    expect(source).toContain('const below = isBelow(altitude)');
-    expect(source).toContain("dash: below ? '6 6' : null");
-  });
-
-  it('scrubs the hour without asking the backend again', () => {
-    // the whole day arrived in one response, so the slider reads an array
-    expect(sky).toContain('export function nearestSample(clock, wanted)');
-    expect(source).toContain('onindex={(value) => (sunIndex = value)}');
-    expect(source).toMatch(/if \(sunDay\) params\.set\('date', sunDay\)/);
-  });
-
-  it('labels a moment from the payload clock, not from arithmetic on minutes', () => {
-    expect(source).toContain('curve.clock[sunIndex]');
-    expect(source).not.toContain('Math.floor(minute / 60)');
-  });
-
-  it('sizes the arc off the shorter side of the view, so it stays on screen', () => {
-    // a radius set by the diagonal runs off the top and bottom of a wide window.
-    // How far the view reaches each way is the façade's answer (facade.test.js);
-    // which of the two the arc rides on is this tool's.
-    expect(source).toContain('const { across, down } = engine.viewSpanMeters()');
-    expect(source).toContain('Math.min(across, down) * 0.22');
-  });
-
-  it('restretches the arc when the view moves, since it is drawn in metres', () => {
-    expect(source).toContain("return engine.on('view-settled', () => drawSun())");
+  it('redraws the arc when the view moves, since it is drawn in metres', () => {
+    expect(source).toContain("return engine.on('view-settled', () => sky.draw())");
   });
 
   it('takes the handoff from Coords & Sky into the same mode', () => {
     expect(source).toContain('const handed = uiState.skyAt');
     expect(source).toContain('uiState.skyAt = null'); // consumed once, like gotoCoords
-    expect(source).toContain('if (!sunMode) toggleSunMode()');
-    // no computed value travels: the map asks for its own
+    expect(source).toContain('if (!sky.on) toggleSunMode()');
+    // no computed value travels: the store asks for its own
     expect(source).not.toContain('handed.sun');
+  });
+
+  it('hands the panel the store, not a copy of its numbers', () => {
+    expect(source).toContain('<SunPanel');
+    expect(source).toContain('sky={sky.sky}');
+    expect(source).toContain('onindex={(value) => sky.setIndex(value)}');
+  });
+});
+
+describe('the capture button', () => {
+  // The frame, the two roads to a filed crop and every refusal are the store's
+  // (`satellite/state/capture.svelte.test.js`). What is this file's business is
+  // the wiring only it can do: the shared drag outline, the mode exclusivity,
+  // and giving the store the map element it does not own.
+  it('hands one store to the options popover and both dialogs', () => {
+    expect(source).toContain(
+      "import {\n    createCaptureState,\n    PRESETS,\n    RATIOS,\n  } from './satellite/state/capture.svelte.js';"
+    );
+    expect(source).toContain('<CaptureOptions');
+    expect(source).toContain('runCapture={() => capture.run()}');
+    expect(source).toContain('capturing={capture.busy}');
+    expect(source).toContain('{#if capture.shotOpen}');
+    expect(source).toContain('{#if capture.extGate}');
+  });
+
+  it('asks the surface what drew the pixels, never the provider that was picked', () => {
+    // an eco or soft-block fallback means the two differ, and provenance has to
+    // name the imagery actually on screen
+    expect(source).toContain('provenance: () => surface.provenance()');
+  });
+
+  it('shares one live outline with the grid rectangle, since one gesture draws both', () => {
+    expect(source).toContain('onRect: (rect) => (selRect = rect)');
+    expect(source).toContain('let selRect = $state(null);');
+    // …and the grid's own drag writes the same outline
+    expect(source).toContain('onChange: (rect) => (selRect = rect)');
+  });
+
+  it('cannot be armed at the same time as a measure tool', () => {
+    // each direction is stated once: arming the marquee disarms measuring…
+    expect(source).toContain('onArm: () => setMeasureMode(null)');
+    // …and arming a measure tool disarms the marquee
+    expect(source).toContain('if (measure.setMode(mode)) capture.disarm()');
+  });
+
+  it('gives the store the map element rather than reaching for one itself', () => {
+    expect(source).toContain('element: () => mapEl');
+    expect(source).toContain('function onSelectDrag(e)');
+    expect(source).toContain("element.addEventListener('mousedown', onSelectDrag, true)");
+    expect(source).toContain("element.removeEventListener('mousedown', onSelectDrag, true)");
   });
 });
 
@@ -328,24 +318,45 @@ describe('Satellite — lifecycle and the date line', () => {
     expect(source).toContain('teardown?.();');
   });
 
-  it('takes the centre as the façade hands it over, and never rewraps it', () => {
+  it('takes the centre as the surface hands it over, and never rewraps it', () => {
     // Folding a centre back inside ±180 across the antimeridian is stated once,
-    // in lib/map (facade.test.js). A tool that reached for wrapLon again would
-    // be the second place that guarantee could be got wrong.
-    expect(source).toContain("engine.on('view-settled', (view) => {");
-    expect(source).toContain('center = { lat: view.lat, lon: view.lon, zoom: view.zoom };');
-    expect(source).not.toContain('wrapLon');
+    // in lib/map (facade.test.js). A second place reaching for wrapLon would be
+    // a second place that guarantee could be got wrong — and now that the map
+    // is a component, the tool only ever reads the view it reports.
+    const surfaces = satelliteSources();
+    expect(surfaces['satellite/MapSurface.svelte']).toContain(
+      "engine.on('view-settled', (settled) => {"
+    );
+    expect(surfaces['satellite/MapSurface.svelte']).toContain(
+      'view = { lat: settled.lat, lon: settled.lon, zoom: settled.zoom };'
+    );
+    for (const [name, text] of Object.entries(surfaces)) {
+      expect(text, name).not.toContain('wrapLon');
+    }
+  });
+
+  it('builds the map in one place, so a second one costs nothing to mount', () => {
+    // The engine, its basemap and everything describing the pixels are the
+    // surface's; the tool mounts one today and several for Compare.
+    const surfaces = satelliteSources();
+    expect(surfaces['satellite/MapSurface.svelte']).toContain(
+      "import { createMapEngine } from '../../lib/map/engine.js';"
+    );
+    expect(source).toContain("import MapSurface from './satellite/MapSurface.svelte';");
+    expect(source).not.toContain('createMapEngine');
+    expect(source).not.toContain('createBasemaps');
   });
 
   it('goes through the façade for the camera, not through the engine', () => {
     // What must never come back is a tool moving, projecting or measuring the
     // map itself: that is the whole point of `lib/map`, and it is what made
     // replacing the engine a rewrite of five modules instead of a tool.
-    expect(source).toContain("import { createMapEngine } from '../lib/map/engine.js';");
-    expect(source).not.toContain('map.setView');
-    expect(source).not.toContain('map.getCenter');
-    expect(source).not.toContain('map.containerPointToLatLng');
-    expect(source).not.toContain('map.latLngToContainerPoint');
+    for (const [name, text] of Object.entries(satelliteSources())) {
+      expect(text, name).not.toContain('map.setView');
+      expect(text, name).not.toContain('map.getCenter');
+      expect(text, name).not.toContain('map.containerPointToLatLng');
+      expect(text, name).not.toContain('map.latLngToContainerPoint');
+    }
   });
 
   it('names no engine at all, not even in a class or a comment', () => {

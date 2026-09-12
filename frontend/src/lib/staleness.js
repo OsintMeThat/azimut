@@ -10,11 +10,35 @@ import { shouldShowUpdate } from './appUpdate.js';
 import { extensionOutdated } from './extBridge.js';
 
 /**
+ * Is the extension this browser runs behind what the app ships?
+ *
+ * For a copy the app owns, the digest in its install stamp answers it — and it is
+ * the only thing that can: a release that leaves the extension alone keeps its
+ * version, and within a development cycle the bundled version is already the
+ * app's own, so "behind" and "identical" are indistinguishable from a version.
+ *
+ * For a copy loaded from somebody else's folder there is no stamp to read, so the
+ * version is all there is. It is also all the button can act on there, since the
+ * app can only rewrite the folder it owns.
+ *
+ * Same road for Firefox's signed copy, and it is the one place the answer is
+ * worth more than a button: nothing here can update it, but the app ships the
+ * extension and therefore knows its version offline — so it can say "behind"
+ * on the spot rather than wait out the browser's own daily check.
+ */
+function behindWhatWeShip(verdict, bundled) {
+  if (verdict.status === 'absent') return false;
+  if (verdict.installed) return verdict.updateAvailable;
+  return extensionOutdated(verdict.detectedVersion, bundled);
+}
+
+/**
  * @param {{
  *   app?: object|null,
  *   scrapers?: Array<{dist: string, outdated?: boolean}>|null,
  *   extensionInstalled?: string|null,
  *   extensionBundled?: string,
+ *   extension?: object|null,
  * }|null} state  What the startup checks found (state.svelte.js updatesState).
  * @param {string} dismissedVersion  The release tag muted with "don't show again".
  */
@@ -25,8 +49,15 @@ export function updateBadges(state, dismissedVersion = '') {
   // A build that ships no extension has nothing to offer, so it says nothing.
   const bundled = state?.extensionBundled ?? '';
   const installed = state?.extensionInstalled ?? null;
-  const extensionMissing = Boolean(bundled) && !installed;
-  const extensionOld = extensionOutdated(installed, bundled);
+  // The probes' verdict once it has come back. Until then — and if it fails —
+  // the synchronous <html> marker and a version comparison, which is where this
+  // badge lived before the app owned the extension's folder.
+  const verdict = state?.extension ?? null;
+  const extensionMissing =
+    Boolean(bundled) && (verdict ? verdict.status === 'absent' : !installed);
+  const extensionOld = verdict
+    ? behindWhatWeShip(verdict, bundled)
+    : extensionOutdated(installed, bundled);
   const scrapers = (state?.scrapers ?? []).filter((s) => s?.outdated).map((s) => s.dist);
   return {
     app,

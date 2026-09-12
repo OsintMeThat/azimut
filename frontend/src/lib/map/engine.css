@@ -50,9 +50,12 @@
 }
 
 /* zoom +/- (topleft) sits directly under the tool cluster instead of the
-   engine's default corner margin, which used to land it on top of that cluster */
+   engine's default corner margin, which used to land it on top of that cluster.
+   How far down is the tool's own business — a map with no cluster over it says
+   so with `--map-controls-top` — but that it is stacked rather than cornered is
+   the engine's. */
 .maplibregl-ctrl-top-left .maplibregl-ctrl {
-  margin: 58px 0 8px 12px;
+  margin: var(--map-controls-top, 58px) 0 8px 12px;
 }
 .maplibregl-ctrl-group {
   background: var(--bg-2);

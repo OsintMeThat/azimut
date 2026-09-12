@@ -15,12 +15,15 @@
   import { startEvents, onEvent } from './lib/events.js';
   import {
     CASE_WORKSPACE,
+    HOME_WORKSPACE,
     WORKSPACES,
     TOOL_LABELS,
     sidebarOpenForWorkspace,
     workspaceOf,
     toolFromHash,
   } from './lib/workspaces.js';
+  import { guideFor } from './lib/guide.js';
+  import { openGuide } from './lib/navigate.js';
   import { createToolLoader } from './lib/toolLoader.js';
   import { loadEntityTypes } from './lib/entityTypes.svelte.js';
   import Icon from './components/Icon.svelte';
@@ -35,10 +38,13 @@
   import { analysisSearch, leaveAnalysisView } from './lib/analysisSearch.svelte.js';
 
   // The rail holds the pipeline workspaces (docs/UI.md §3); tools are tabs
-  // inside them. Two workspaces sit in the topbar rather than the rail: the
-  // case, which is what the stages file into, and Settings, which is app
-  // plumbing and not part of the working flow at all.
+  // inside them. Three workspaces sit in the topbar rather than the rail: home,
+  // which is where the app opens and is not a stage either; the case, which is
+  // what the stages file into; and Settings, which is app plumbing and not part
+  // of the working flow at all.
   const TOOLS = [
+    { id: 'overview', label: TOOL_LABELS.overview, load: () => import('./tools/Overview.svelte') },
+    { id: 'guide', label: TOOL_LABELS.guide, load: () => import('./tools/Guide.svelte') },
     { id: 'board', label: TOOL_LABELS.board, load: () => import('./tools/Board.svelte') },
     { id: 'graph', label: TOOL_LABELS.graph, load: () => import('./tools/Graph.svelte') },
     { id: 'timeline', label: TOOL_LABELS.timeline, load: () => import('./tools/Timeline.svelte') },
@@ -66,6 +72,10 @@
   let toolErrors = $state.raw({});
   const TOOL_IDS = ALL_TOOLS.map((t) => t.id);
   const toolLabel = (id) => ALL_TOOLS.find((t) => t.id === id)?.label ?? id;
+  // Name the tab the `?` will answer about, so the press is not a leap into a document.
+  const guideTitle = $derived(
+    guideFor(uiState.tool) ? `Guide: ${toolLabel(uiState.tool)}` : 'Read the guide'
+  );
 
   // deep links: tool ids (#media, #proof, …) plus workspace aliases
   // (#compose, #compose/post) — see lib/workspaces.js
@@ -176,14 +186,30 @@
     toast(`Place saved from ${ev.site}: ${ev.title}`, 'ok', 5000);
     if (caseState.current?.id === ev.case_id) reloadCase();
   });
+  // The case's saved work, moved from another window onto it: a second app tab,
+  // or the map panel the extension draws over someone else's map. Silent, unlike
+  // the three above — the analyst did this themselves, just not here — and the
+  // reload is what puts it on the map and in the Saved panel.
+  onEvent('saved', (ev) => {
+    if (caseState.current?.id === ev.case_id) reloadCase();
+  });
 </script>
 
 <div class="shell">
   <header class="topbar">
-    <div class="brand">
+    <!-- The mark is the way home. It costs no rail seat and needs no label, which is
+         the whole reason home lives here: the rail reads as a sequence of stages and
+         an overview is not one of them, exactly as the case is not. -->
+    <button
+      class="brand"
+      class:topbar-active={activeWs?.id === HOME_WORKSPACE.id}
+      title="Home"
+      aria-label="Home"
+      onclick={() => openWorkspace(HOME_WORKSPACE)}
+    >
       <Logo size={27} />
       <span class="brand-name"><Wordmark height={13} /></span>
-    </div>
+    </button>
     <div class="case-group">
       <CaseSwitcher />
       <button
@@ -197,6 +223,20 @@
       </button>
     </div>
     <div class="spacer"></div>
+    <!-- The one mark that answers "what is this tab I am standing in". It sits beside
+         the gear rather than in each toolbar so there is one of it, and it opens the
+         Guide on the section written about the current tool. Silent on the Guide
+         itself, which is the answer. -->
+    {#if uiState.tool !== 'guide'}
+      <button
+        class="btn btn-ghost btn-sm"
+        title={guideTitle}
+        aria-label={guideTitle}
+        onclick={() => openGuide(uiState.tool)}
+      >
+        <Icon name="help" size={16} />
+      </button>
+    {/if}
     <button
       class="btn btn-ghost btn-sm dotted"
       class:topbar-active={uiState.tool === 'settings'}
@@ -315,7 +355,13 @@
     display: flex;
     align-items: center;
     gap: 11px;
-    padding-right: 6px;
+    padding: 4px 8px 4px 4px;
+    margin-left: -4px;
+    border-radius: var(--r-sm);
+    transition: background 0.15s var(--ease);
+  }
+  .brand:hover {
+    background: var(--bg-2);
   }
   .brand-name {
     display: flex;

@@ -20,6 +20,24 @@ export const CASE_WORKSPACE = {
   tools: ['board', 'graph', 'timeline', 'sheet'],
 };
 
+/**
+ * Where the app opens, and the same argument decides where it sits: the rail is a
+ * sequence of stages and home is not one of them, so it hangs off the wordmark in
+ * the topbar rather than taking a fifth rail seat. Every app puts home on its own
+ * mark, which is the one affordance that needs no label.
+ *
+ * Two tabs. *Overview* answers "what is this case waiting on" for somebody who has
+ * been here before; *Guide* answers "what is this app" for somebody who has not. A
+ * fresh install has no case to summarise, so the overview's empty state is the front
+ * door and the guide is one click from it.
+ */
+export const HOME_WORKSPACE = {
+  id: 'home',
+  label: 'Home',
+  icon: 'compass',
+  tools: ['overview', 'guide'],
+};
+
 /** The rail, in investigation order. */
 export const WORKSPACES = [
   { id: 'collect', label: 'Sources', icon: 'download', tools: ['media', 'files', 'reverse'] },
@@ -29,9 +47,11 @@ export const WORKSPACES = [
 ];
 
 /** Every workspace, on the rail or not — what tool lookup and deep links resolve against. */
-export const ALL_WORKSPACES = [CASE_WORKSPACE, ...WORKSPACES];
+export const ALL_WORKSPACES = [HOME_WORKSPACE, CASE_WORKSPACE, ...WORKSPACES];
 
 export const TOOL_LABELS = {
+  overview: 'Overview',
+  guide: 'Guide',
   board: 'Board',
   graph: 'Graph',
   timeline: 'Timeline',
@@ -54,12 +74,15 @@ export function workspaceOf(tool) {
 
 /** Return the session's sidebar state for a workspace, falling back to defaults.
  *
- *  Closed on `map`, which needs the width, and on `case`, where the board already
- *  lists the same entities — two lists of one case side by side is a question about
- *  which one is the real one. */
+ *  Closed on `map`, which needs the width; on `case`, where the board already lists
+ *  the same entities — two lists of one case side by side is a question about which
+ *  one is the real one — and on `home`, which is read rather than worked in and whose
+ *  whole subject is the case the sidebar would be listing again. */
+const SIDEBAR_CLOSED = new Set(['map', 'case', 'home']);
+
 export function sidebarOpenForWorkspace(workspaceId, remembered = {}) {
   if (remembered[workspaceId] !== undefined) return remembered[workspaceId];
-  return workspaceId !== 'map' && workspaceId !== 'case';
+  return !SIDEBAR_CLOSED.has(workspaceId);
 }
 
 /**

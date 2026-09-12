@@ -100,3 +100,96 @@ describe('carryLatest', () => {
     expect(entry.outdated).toBe(false);
   });
 });
+
+describe('updateBadges: the extension verdict', () => {
+  // Once the bridge probes answer, the digest is what decides. The version
+  // cannot: a release that leaves the extension alone keeps its version, and
+  // within a development cycle the bundled version is already the app's own.
+  const verdict = (over = {}) => ({
+    status: 'owned',
+    installed: { version: '0.3.0', extensionId: 'ext-a', loaded: { payload: 'old' } },
+    detectedVersion: '0.3.0',
+    updateAvailable: false,
+    ...over,
+  });
+
+  it('lights the dot on a digest that moved, with both versions identical', () => {
+    const badges = updateBadges({
+      extensionInstalled: '0.3.0',
+      extensionBundled: '0.3.0',
+      extension: verdict({ updateAvailable: true }),
+    });
+    expect(badges.extension).toBe(true);
+    expect(badges.extensionOutdated).toBe(true);
+    expect(badges.tabs.extension).toBe(true);
+    expect(badges.any).toBe(true);
+  });
+
+  it('clears the dot when the running copy carries what the app ships', () => {
+    const badges = updateBadges({
+      extensionInstalled: '0.3.0',
+      extensionBundled: '0.3.0',
+      extension: verdict(),
+    });
+    expect(badges.extension).toBe(false);
+  });
+
+  it('reads the verdict, not the marker, once it has one', () => {
+    // The <html> marker is written by whichever bridge ran last and cannot tell
+    // one copy from another, so a stale version there must not override a
+    // verdict that says the loaded copy is current.
+    const badges = updateBadges({
+      extensionInstalled: '0.2.1',
+      extensionBundled: '0.3.0',
+      extension: verdict(),
+    });
+    expect(badges.extension).toBe(false);
+  });
+
+  it('marks nothing installed from the verdict too', () => {
+    const badges = updateBadges({
+      extensionBundled: '0.3.0',
+      extension: { status: 'absent', installed: null, detectedVersion: null, updateAvailable: false },
+    });
+    expect(badges.extensionMissing).toBe(true);
+    expect(badges.extensionOutdated).toBe(false);
+  });
+
+  it('falls back to versions for a copy the app does not own', () => {
+    // No stamp to compare, and no button that could act on the digest anyway:
+    // the app can only rewrite its own folder.
+    const behind = updateBadges({
+      extensionBundled: '0.3.0',
+      extension: { status: 'foreign', installed: null, detectedVersion: '0.2.1', updateAvailable: false },
+    });
+    expect(behind.extensionOutdated).toBe(true);
+    const current = updateBadges({
+      extensionBundled: '0.3.0',
+      extension: { status: 'foreign', installed: null, detectedVersion: '0.3.0', updateAvailable: false },
+    });
+    expect(current.extensionOutdated).toBe(false);
+    expect(current.extensionMissing).toBe(false);
+  });
+
+  it('says a signed copy is behind without waiting for the browser to notice', () => {
+    // Firefox owns the update and polls once a day. The app cannot act, but it
+    // ships the extension and so knows the version offline — which is the whole
+    // reason to answer here rather than fetch the update manifest ourselves.
+    const behind = updateBadges({
+      extensionBundled: '0.4.0',
+      extension: { status: 'signed', installed: null, detectedVersion: '0.3.0', updateAvailable: false },
+    });
+    expect(behind.extensionOutdated).toBe(true);
+    expect(behind.extensionMissing).toBe(false);
+    const current = updateBadges({
+      extensionBundled: '0.3.0',
+      extension: { status: 'signed', installed: null, detectedVersion: '0.3.0', updateAvailable: false },
+    });
+    expect(current.extensionOutdated).toBe(false);
+  });
+
+  it('keeps the version comparison while the probes have not answered', () => {
+    const badges = updateBadges({ extensionInstalled: '0.2.1', extensionBundled: '0.3.0' });
+    expect(badges.extension).toBe(true);
+  });
+});
