@@ -6,6 +6,7 @@
  */
 import { caseState, toast, uiState } from './state.svelte.js';
 import { mediaKindOf } from './entityIcon.js';
+import { GUIDE, guideFor } from './guide.js';
 import { revealMediaFolder } from './reveal.js';
 
 /**
@@ -170,6 +171,19 @@ export function gotoPoint(lat, lon) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
   uiState.gotoCoords = { lat, lon };
   uiState.tool = 'satellite';
+}
+
+/**
+ * Open the Guide on whatever covers a tool.
+ *
+ * The press means "what is this tab", so it lands on the section written about that
+ * tab. A tool no section covers — Settings, and the two home tabs themselves — opens
+ * the guide at the top, which is where somebody with a general question belongs
+ * anyway.
+ */
+export function openGuide(tool) {
+  uiState.guideSection = guideFor(tool)?.id ?? GUIDE[0].id;
+  uiState.tool = 'guide';
 }
 
 /** Fly the Satellite map to a capture's recorded coordinates (its marker). */

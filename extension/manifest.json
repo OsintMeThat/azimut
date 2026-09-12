@@ -2,14 +2,19 @@
   "manifest_version": 3,
   "name": "Azimut Capture",
   "version": "0.3.0",
-  "description": "File into Azimut: screenshot the map you are looking at (coordinates from the URL), save any other page as a bookmark, or fill a social composer with a thread the app prepared.",
+  "description": "File into Azimut: screenshot the map you are looking at (coordinates from the URL), save any other page as a bookmark, fill a social composer with a thread the app prepared, or open a reverse-image engine with a picture from the case.",
   "permissions": ["activeTab", "scripting", "storage", "notifications"],
   "host_permissions": [
     "http://127.0.0.1/*",
     "http://localhost/*",
     "https://x.com/*",
     "https://twitter.com/*",
-    "https://bsky.app/*"
+    "https://bsky.app/*",
+    "https://lens.google.com/*",
+    "https://www.google.com/*",
+    "https://yandex.com/*",
+    "https://www.bing.com/*",
+    "https://tineye.com/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -50,8 +55,9 @@
   ],
   "browser_specific_settings": {
     "gecko": {
-      "id": "capture-extension@azimut.invalid",
-      "strict_min_version": "115.0"
+      "id": "azimut-capture@osintmethat.github.io",
+      "strict_min_version": "115.0",
+      "update_url": "https://raw.githubusercontent.com/OsintMeThat/azimut/main/packaging/updates.json"
     }
   }
 }

@@ -24,6 +24,10 @@ npm-debug.log*
 playwright-report/
 test-results/
 
+# Browser profile the map-site calibration keeps, so each consent wall is
+# dismissed once rather than every run (frontend/calibration/record.mjs)
+.calibration-profile/
+
 # Editors / IDE
 .idea/
 *.swp
@@ -57,6 +61,10 @@ build-bin/
 
 # Native binaries downloaded by the release workflow
 packaging/vendor/
+
+# Signed extension, downloaded from AMO at release cut and uploaded to the
+# release. The update manifest beside it (packaging/updates.json) is tracked.
+dist-xpi/
 
 # Local-only marketing/presentation assets, never pushed
 .docs/

@@ -126,6 +126,10 @@
     angle: 'M5 4v15h15M5 19 20 6',
     sun: 'M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10ZM12 1v3M12 20v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1 12h3M20 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1',
     moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z',
+    // The guide, wherever it is asked for. A question mark rather than a book: the
+    // press means "what is this tab", not "open a document".
+    help: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-2.3 6.4a2.3 2.3 0 0 1 4.5.7c0 1.5-2.2 2-2.2 3.4M12 16.7h.01',
+    keyboard: 'M3 7h18a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Zm3.5 3.2h.01m3.2 0h.01m3.2 0h.01m3.2 0h.01M8 13.8h8',
   };
 </script>
 

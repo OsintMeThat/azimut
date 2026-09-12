@@ -29,6 +29,16 @@
  */
 export const FREE_TIER = { mapbox: 200_000, google: 100_000, google_js: 10_000, sentinelhub: 30_000 };
 
+/**
+ * The imagery that costs nothing and needs no key.
+ *
+ * Named once because two different rules land on it: a billed basemap steps
+ * aside for it when the month is nearly spent or the view is zoomed out
+ * (`displayProviderId`), and any map that is only a reading shows it and
+ * nothing else — the home page's, which has no basemap picker over it.
+ */
+export const FREE_IMAGERY = 'esri-world-imagery';
+
 /** This account's allowance for a meter: the served figure, else the default. */
 export function freeTier(meter, tiers = null) {
   return tiers?.[meter] ?? FREE_TIER[meter];
@@ -124,9 +134,9 @@ export function displayProviderId(
   { eco = true, blocked = false, ecoMaxZoom = ECO_MAX_ZOOM } = {}
 ) {
   if (!provider?.meter) return provider?.id;
-  if (blocked) return 'esri-world-imagery';
+  if (blocked) return FREE_IMAGERY;
   const threshold = provider.eco_max_zoom ?? ecoMaxZoom;
-  if (eco && zoom <= threshold) return 'esri-world-imagery';
+  if (eco && zoom <= threshold) return FREE_IMAGERY;
   return provider.id;
 }
 

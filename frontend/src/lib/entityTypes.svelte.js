@@ -66,6 +66,13 @@ export function familyReads(family) {
   return registry.types.find((entry) => entry.family === family)?.family_reads ?? '';
 }
 
+/** A family as a screen writes it. The registry stores the slug, and the Board, the
+ *  Graph and the home page each used to capitalise their own copy of it. */
+export function familyTitle(family) {
+  const slug = String(family ?? '');
+  return slug.charAt(0).toUpperCase() + slug.slice(1);
+}
+
 /** The icon that stands for a type, or null until the registry lands.
  *
  *  The registry is where this lives, so adding a type is still one entry in

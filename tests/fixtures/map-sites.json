@@ -1,0 +1,1271 @@
+{
+ "what": "Every URL these map sites wrote about themselves, driven through one gesture sequence.",
+ "why": "The map tools draw on someone else's map from what its URL says. This is the record of what those URLs actually mean \u2014 see docs/MAP_SITES.md \u2014 and both suites read it: tests/test_mapsites.py that the parse still returns these views, frontend/src/lib/extensionMapFrame.test.js that the arithmetic puts them back where the browser had them, and extensionMapEngine.test.js that the panel does it live.",
+ "centre": "Where each site drew the coordinate its address bar named, in window pixels, solved from its own two zooms. Not the middle of the window on five of the nine.",
+ "how": "Rebuilt by scripts/build_map_fixture.py from tests/fixtures/map-sites.raw.json.",
+ "recordings": [
+  {
+   "label": "google-maps",
+   "site": "google-maps",
+   "browser": "chromium",
+   "page_zoom": 1,
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "map_height": 1000,
+   "centre": {
+    "x": 800.0,
+    "y": 500.0
+   },
+   "spread": 0.01,
+   "canvas": null,
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -300,
+    "dy": 200
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 400,
+      "y": 250
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 1248,
+      "y": 720
+     }
+    }
+   ],
+   "steps": [
+    {
+     "url": "https://www.google.com/maps/@47.388462,2.352785,15z?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D",
+     "view": {
+      "lat": 47.388462,
+      "lon": 2.352785,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "google-maps"
+    },
+    {
+     "url": "https://www.google.com/maps/@47.3941855,2.365445,15z?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D",
+     "view": {
+      "lat": 47.3941855,
+      "lon": 2.365445,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "google-maps"
+    },
+    {
+     "url": "https://www.google.com/maps/@47.3978168,2.356862,16z?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D",
+     "view": {
+      "lat": 47.3978168,
+      "lon": 2.356862,
+      "zoom": 16.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "google-maps"
+    },
+    {
+     "url": "https://www.google.com/maps/@47.396219,2.3616685,17z?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D",
+     "view": {
+      "lat": 47.396219,
+      "lon": 2.3616685,
+      "zoom": 17.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "google-maps"
+    }
+   ],
+   "note": "the 2D map, with nothing round it: the camera is the middle of the window"
+  },
+  {
+   "label": "google-maps satellite",
+   "site": "google-maps",
+   "browser": "chromium",
+   "page_zoom": 1,
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "map_height": 1000,
+   "centre": {
+    "x": 799.87,
+    "y": 499.97
+   },
+   "spread": 1.49,
+   "canvas": null,
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -300,
+    "dy": 200
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 400,
+      "y": 250
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 1248,
+      "y": 720
+     }
+    }
+   ],
+   "steps": [
+    {
+     "url": "https://www.google.com/maps/@47.388462,2.352785,3231m/data=!3m1!1e3?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D",
+     "view": {
+      "lat": 47.388462,
+      "lon": 2.352785,
+      "zoom": 15.001498318234315,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "height_m",
+     "site": "google-maps"
+    },
+    {
+     "url": "https://www.google.com/maps/@47.3941855,2.365445,3230m/data=!3m1!1e3?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D",
+     "view": {
+      "lat": 47.3941855,
+      "lon": 2.365445,
+      "zoom": 15.001788226067221,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "height_m",
+     "site": "google-maps"
+    },
+    {
+     "url": "https://www.google.com/maps/@47.3978168,2.356862,1615m/data=!3m1!1e3?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D",
+     "view": {
+      "lat": 47.3978168,
+      "lon": 2.356862,
+      "zoom": 16.00168880482045,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "height_m",
+     "site": "google-maps"
+    },
+    {
+     "url": "https://www.google.com/maps/@47.396219,2.3616685,808m/data=!3m1!1e3?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D",
+     "view": {
+      "lat": 47.396219,
+      "lon": 2.3616685,
+      "zoom": 17.00083951932319,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "height_m",
+     "site": "google-maps"
+    }
+   ],
+   "note": "satellite quotes the viewport's height in metres instead of a level"
+  },
+  {
+   "label": "google-maps with its place panel open",
+   "site": "google-maps",
+   "browser": "chromium",
+   "page_zoom": 1,
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "map_height": 1000,
+   "centre": {
+    "x": 800.0,
+    "y": 500.0
+   },
+   "spread": 0.0,
+   "canvas": null,
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -300,
+    "dy": 200
+   },
+   "zooms": [
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 1248,
+      "y": 720
+     }
+    }
+   ],
+   "steps": [
+    {
+     "url": "https://www.google.com/maps/place/18000+Bourges/@47.081,2.3988,13z/data=!4m6!3m5!1s0x47fa9677b89bb417:0xcbfb282ccd5c85be!8m2!3d47.0812405!4d2.3979615!16zL20vMGwzOXM?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D",
+     "view": {
+      "lat": 47.081,
+      "lon": 2.3988,
+      "zoom": 13.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "google-maps"
+    },
+    {
+     "url": "https://www.google.com/maps/place/18000+Bourges/@47.1040234,2.4494401,13z/data=!4m6!3m5!1s0x47fa9677b89bb417:0xcbfb282ccd5c85be!8m2!3d47.0812405!4d2.3979615!16zL20vMGwzOXM?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D",
+     "view": {
+      "lat": 47.1040234,
+      "lon": 2.4494401,
+      "zoom": 13.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "google-maps"
+    },
+    {
+     "url": "https://www.google.com/maps/place/18000+Bourges/@47.1040234,2.4494401,13z/data=!4m6!3m5!1s0x47fa9677b89bb417:0xcbfb282ccd5c85be!8m2!3d47.0812405!4d2.3979615!16zL20vMGwzOXM?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D",
+     "view": {
+      "lat": 47.1040234,
+      "lon": 2.4494401,
+      "zoom": 13.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "google-maps"
+    },
+    {
+     "url": "https://www.google.com/maps/place/18000+Bourges/@47.0911689,2.4878923,14z/data=!4m6!3m5!1s0x47fa9677b89bb417:0xcbfb282ccd5c85be!8m2!3d47.0812405!4d2.3979615!16zL20vMGwzOXM?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D",
+     "view": {
+      "lat": 47.0911689,
+      "lon": 2.4878923,
+      "zoom": 14.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "google-maps"
+    }
+   ],
+   "note": "the panel covers the map but does not move the camera under it"
+  },
+  {
+   "label": "apple-maps",
+   "site": "apple-maps",
+   "browser": "chromium",
+   "page_zoom": 1,
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "map_height": 1000,
+   "centre": {
+    "x": 867.5,
+    "y": 500.0
+   },
+   "spread": 0.09,
+   "canvas": null,
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -300,
+    "dy": 200
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 400,
+      "y": 250
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 1248,
+      "y": 720
+     }
+    }
+   ],
+   "steps": [
+    {
+     "url": "https://maps.apple.com/frame?z=15&map=satellite&center=47.388462%2C2.352785&span=0.029055%2C0.056434",
+     "view": {
+      "lat": 47.388462,
+      "lon": 2.352785,
+      "zoom": 14.99998634768003,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "span",
+     "site": "apple-maps"
+    },
+    {
+     "url": "https://maps.apple.com/frame?z=15&map=satellite&center=47.393517%2C2.365230&span=0.029052%2C0.056434",
+     "view": {
+      "lat": 47.393517,
+      "lon": 2.36523,
+      "zoom": 14.999996940780553,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "span",
+     "site": "apple-maps"
+    },
+    {
+     "url": "https://maps.apple.com/frame?z=15&map=satellite&center=47.397149%2C2.355199&span=0.014525%2C0.028217",
+     "view": {
+      "lat": 47.397149,
+      "lon": 2.355199,
+      "zoom": 15.99999686323065,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "span",
+     "site": "apple-maps"
+    },
+    {
+     "url": "https://maps.apple.com/frame?z=15&map=satellite&center=47.395551%2C2.359281&span=0.007263%2C0.014108",
+     "view": {
+      "lat": 47.395551,
+      "lon": 2.359281,
+      "zoom": 16.999941303569063,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "span",
+     "site": "apple-maps"
+    }
+   ],
+   "note": "Apple states a span, never a live zoom, and draws 67 px right of centre here"
+  },
+  {
+   "label": "apple-maps in a smaller window",
+   "site": "apple-maps",
+   "browser": "chromium",
+   "page_zoom": 1,
+   "window": {
+    "w": 1200,
+    "h": 760
+   },
+   "map_height": 760,
+   "centre": {
+    "x": 597.5,
+    "y": 380.02
+   },
+   "spread": 0.18,
+   "canvas": null,
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -240,
+    "dy": 160
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 936,
+      "y": 213
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 744,
+      "y": 562
+     }
+    }
+   ],
+   "steps": [
+    {
+     "url": "https://maps.apple.com/frame?z=15&map=satellite&center=47.388462%2C2.352785&span=0.022082%2C0.039268",
+     "view": {
+      "lat": 47.388462,
+      "lon": 2.352785,
+      "zoom": 14.999973302876091,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "span",
+     "site": "apple-maps"
+    },
+    {
+     "url": "https://maps.apple.com/frame?z=15&map=satellite&center=47.392617%2C2.362055&span=0.022080%2C0.045276",
+     "view": {
+      "lat": 47.392617,
+      "lon": 2.362055,
+      "zoom": 14.999990238003937,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "span",
+     "site": "apple-maps"
+    },
+    {
+     "url": "https://maps.apple.com/frame?z=15&map=satellite&center=47.395042%2C2.369318&span=0.011039%2C0.022638",
+     "view": {
+      "lat": 47.395042,
+      "lon": 2.369318,
+      "zoom": 16.000054556399927,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "span",
+     "site": "apple-maps"
+    },
+    {
+     "url": "https://maps.apple.com/frame?z=15&map=satellite&center=47.393721%2C2.370890&span=0.005520%2C0.011319",
+     "view": {
+      "lat": 47.393721,
+      "lon": 2.37089,
+      "zoom": 16.999960042778163,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "span",
+     "site": "apple-maps"
+    }
+   ],
+   "note": "same site, another window: its sidebar collapsed mid-pan and the region it reports grew 140 px, while the camera stayed put"
+  },
+  {
+   "label": "bing-maps",
+   "site": "bing-maps",
+   "browser": "chromium",
+   "page_zoom": 1,
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "map_height": 919,
+   "centre": {
+    "x": 800.02,
+    "y": 540.52
+   },
+   "spread": 0.13,
+   "canvas": null,
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -300,
+    "dy": 200
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 400,
+      "y": 250
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 1248,
+      "y": 720
+     }
+    }
+   ],
+   "steps": [
+    {
+     "url": "https://www.bing.com/maps?cp=47.388462%7E2.352785&lvl=15&style=h",
+     "view": {
+      "lat": 47.388462,
+      "lon": 2.352785,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "bing-maps"
+    },
+    {
+     "url": "https://www.bing.com/maps?cp=47.394273%7E2.365660&lvl=15&style=h",
+     "view": {
+      "lat": 47.394273,
+      "lon": 2.36566,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "bing-maps"
+    },
+    {
+     "url": "https://www.bing.com/maps?cp=47.398492%7E2.357077&lvl=16&style=h",
+     "view": {
+      "lat": 47.398492,
+      "lon": 2.357077,
+      "zoom": 16.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "bing-maps"
+    },
+    {
+     "url": "https://www.bing.com/maps?cp=47.397189%7E2.361883&lvl=17&style=h",
+     "view": {
+      "lat": 47.397189,
+      "lon": 2.361883,
+      "zoom": 17.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "bing-maps"
+    }
+   ],
+   "note": "Bing sits under an 81 px header, so its camera is 40 px down"
+  },
+  {
+   "label": "yandex-maps",
+   "site": "yandex-maps",
+   "browser": "chromium",
+   "page_zoom": 1,
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "map_height": 980,
+   "centre": {
+    "x": 1010.0,
+    "y": 509.99
+   },
+   "spread": 0.0,
+   "canvas": null,
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -300,
+    "dy": 200
+   },
+   "zooms": [
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 1248,
+      "y": 720
+     }
+    }
+   ],
+   "steps": [
+    {
+     "url": "https://yandex.com/maps/?l=sat&ll=2.352785%2C47.388462&z=15",
+     "view": {
+      "lat": 47.388462,
+      "lon": 2.352785,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "ellipsoidal"
+     },
+     "scale_source": "zoom",
+     "site": "yandex-maps"
+    },
+    {
+     "url": "https://yandex.com/maps/?l=sat&ll=2.365660%2C47.394291&z=15",
+     "view": {
+      "lat": 47.394291,
+      "lon": 2.36566,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "ellipsoidal"
+     },
+     "scale_source": "zoom",
+     "site": "yandex-maps"
+    },
+    {
+     "url": "https://yandex.com/maps/?l=sat&ll=2.365660%2C47.394291&z=15",
+     "view": {
+      "lat": 47.394291,
+      "lon": 2.36566,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "ellipsoidal"
+     },
+     "scale_source": "zoom",
+     "site": "yandex-maps"
+    },
+    {
+     "url": "https://yandex.com/maps/?l=sat&ll=2.370767%2C47.391231&z=16",
+     "view": {
+      "lat": 47.391231,
+      "lon": 2.370767,
+      "zoom": 16.0,
+      "bearing": 0,
+      "projection": "ellipsoidal"
+     },
+     "scale_source": "zoom",
+     "site": "yandex-maps"
+    }
+   ],
+   "note": "a 420 px results panel, and the map centred in what is left"
+  },
+  {
+   "label": "yandex-maps in a smaller window",
+   "site": "yandex-maps",
+   "browser": "chromium",
+   "page_zoom": 1,
+   "window": {
+    "w": 1200,
+    "h": 760
+   },
+   "map_height": 740,
+   "centre": {
+    "x": 810.01,
+    "y": 390.0
+   },
+   "spread": 0.04,
+   "canvas": null,
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -240,
+    "dy": 160
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 936,
+      "y": 213
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 744,
+      "y": 562
+     }
+    }
+   ],
+   "steps": [
+    {
+     "url": "https://yandex.com/maps/?l=sat&ll=2.352785%2C47.388462&z=15",
+     "view": {
+      "lat": 47.388462,
+      "lon": 2.352785,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "ellipsoidal"
+     },
+     "scale_source": "zoom",
+     "site": "yandex-maps"
+    },
+    {
+     "url": "https://yandex.com/maps/?l=sat&ll=2.363085%2C47.393125&z=15",
+     "view": {
+      "lat": 47.393125,
+      "lon": 2.363085,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "ellipsoidal"
+     },
+     "scale_source": "zoom",
+     "site": "yandex-maps"
+    },
+    {
+     "url": "https://yandex.com/maps/?l=sat&ll=2.365788%2C47.395704&z=16",
+     "view": {
+      "lat": 47.395704,
+      "lon": 2.365788,
+      "zoom": 16.0,
+      "bearing": 0,
+      "projection": "ellipsoidal"
+     },
+     "scale_source": "zoom",
+     "site": "yandex-maps"
+    },
+    {
+     "url": "https://yandex.com/maps/?l=sat&ll=2.365080%2C47.394451&z=17",
+     "view": {
+      "lat": 47.394451,
+      "lon": 2.36508,
+      "zoom": 17.0,
+      "bearing": 0,
+      "projection": "ellipsoidal"
+     },
+     "scale_source": "zoom",
+     "site": "yandex-maps"
+    }
+   ],
+   "note": "the panel is a fixed width, so the offset does not move with the window"
+  },
+  {
+   "label": "openstreetmap",
+   "site": "openstreetmap",
+   "browser": "chromium",
+   "page_zoom": 1,
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "map_height": 945,
+   "centre": {
+    "x": 800.06,
+    "y": 527.41
+   },
+   "spread": 0.15,
+   "canvas": null,
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -300,
+    "dy": 200
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 400,
+      "y": 250
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 1248,
+      "y": 720
+     }
+    }
+   ],
+   "steps": [
+    {
+     "url": "https://www.openstreetmap.org/#map=15/47.38846/2.35279",
+     "view": {
+      "lat": 47.38846,
+      "lon": 2.35279,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "openstreetmap"
+    },
+    {
+     "url": "https://www.openstreetmap.org/#map=15/47.39427/2.36567",
+     "view": {
+      "lat": 47.39427,
+      "lon": 2.36567,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "openstreetmap"
+    },
+    {
+     "url": "https://www.openstreetmap.org/#map=17/47.400314/2.352791",
+     "view": {
+      "lat": 47.400314,
+      "lon": 2.352791,
+      "zoom": 17.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "openstreetmap"
+    },
+    {
+     "url": "https://www.openstreetmap.org/#map=19/47.399265/2.356396",
+     "view": {
+      "lat": 47.399265,
+      "lon": 2.356396,
+      "zoom": 19.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "openstreetmap"
+    }
+   ],
+   "note": "a 55 px header of its own"
+  },
+  {
+   "label": "openstreetmap in a smaller window",
+   "site": "openstreetmap",
+   "browser": "chromium",
+   "page_zoom": 1,
+   "window": {
+    "w": 1200,
+    "h": 760
+   },
+   "map_height": 705,
+   "centre": {
+    "x": 599.99,
+    "y": 407.39
+   },
+   "spread": 0.51,
+   "canvas": null,
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -240,
+    "dy": 160
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 936,
+      "y": 213
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 744,
+      "y": 562
+     }
+    }
+   ],
+   "steps": [
+    {
+     "url": "https://www.openstreetmap.org/#map=15/47.38846/2.35279",
+     "view": {
+      "lat": 47.38846,
+      "lon": 2.35279,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "openstreetmap"
+    },
+    {
+     "url": "https://www.openstreetmap.org/#map=15/47.39311/2.36309",
+     "view": {
+      "lat": 47.39311,
+      "lon": 2.36309,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "openstreetmap"
+    },
+    {
+     "url": "https://www.openstreetmap.org/#map=16/47.39593/2.37030",
+     "view": {
+      "lat": 47.39593,
+      "lon": 2.3703,
+      "zoom": 16.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "openstreetmap"
+    },
+    {
+     "url": "https://www.openstreetmap.org/#map=17/47.394809/2.371845",
+     "view": {
+      "lat": 47.394809,
+      "lon": 2.371845,
+      "zoom": 17.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "openstreetmap"
+    }
+   ],
+   "note": "same header, same 27 px"
+  },
+  {
+   "label": "satellites-pro",
+   "site": "satellites-pro",
+   "browser": "chromium",
+   "page_zoom": 1,
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "map_height": 1000,
+   "centre": {
+    "x": 799.98,
+    "y": 500.04
+   },
+   "spread": 0.13,
+   "canvas": null,
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -300,
+    "dy": 200
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 400,
+      "y": 250
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 1248,
+      "y": 720
+     }
+    }
+   ],
+   "steps": [
+    {
+     "url": "https://satellites.pro/plan/France_map#47.388462,2.352785,15",
+     "view": {
+      "lat": 47.388462,
+      "lon": 2.352785,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "satellites-pro"
+    },
+    {
+     "url": "https://satellites.pro/plan/France_map#47.394282,2.365665,15",
+     "view": {
+      "lat": 47.394282,
+      "lon": 2.365665,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "satellites-pro"
+    },
+    {
+     "url": "https://satellites.pro/plan/France_map#47.397913,2.357082,16",
+     "view": {
+      "lat": 47.397913,
+      "lon": 2.357082,
+      "zoom": 16.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "satellites-pro"
+    },
+    {
+     "url": "https://satellites.pro/plan/France_map#47.396316,2.361889,17",
+     "view": {
+      "lat": 47.396316,
+      "lon": 2.361889,
+      "zoom": 17.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "satellites-pro"
+    }
+   ],
+   "note": "full-window Leaflet, crosshair dead centre"
+  },
+  {
+   "label": "copernicus-browser",
+   "site": "copernicus-browser",
+   "browser": "chromium",
+   "page_zoom": 1,
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "map_height": 1000,
+   "centre": {
+    "x": 1025.03,
+    "y": 500.44
+   },
+   "spread": 1.25,
+   "canvas": null,
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -300,
+    "dy": 200
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 1200,
+      "y": 300
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 700,
+      "y": 800
+     }
+    }
+   ],
+   "steps": [
+    {
+     "url": "https://browser.dataspace.copernicus.eu/?zoom=15&lat=47.38846&lng=2.35279&themeId=DEFAULT-THEME&visualizationUrl=U2FsdGVkX1%2FOh591qUWIQVhuygSLTCLdP97eGmS5zQ25NfaMPtAny%2B7iaBWrBRMWHceo0SM7zHDOTRRXdWjCHmiwK7%2FaHzykLzK4clL6r%2BgMUbENcl61b3J6RfDgH5rP&datasetId=S2_L2A_CDAS&demSource3D=%22MAPZEN%22&cloudCoverage=30&dateMode=SINGLE",
+     "view": {
+      "lat": 47.38846,
+      "lon": 2.35279,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "copernicus-browser"
+    },
+    {
+     "url": "https://browser.dataspace.copernicus.eu/?zoom=15&lat=47.38846&lng=2.35279&themeId=DEFAULT-THEME&visualizationUrl=U2FsdGVkX1%2FOh591qUWIQVhuygSLTCLdP97eGmS5zQ25NfaMPtAny%2B7iaBWrBRMWHceo0SM7zHDOTRRXdWjCHmiwK7%2FaHzykLzK4clL6r%2BgMUbENcl61b3J6RfDgH5rP&datasetId=S2_L2A_CDAS&demSource3D=%22MAPZEN%22&cloudCoverage=30&dateMode=SINGLE",
+     "view": {
+      "lat": 47.38846,
+      "lon": 2.35279,
+      "zoom": 15.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "copernicus-browser"
+    },
+    {
+     "url": "https://browser.dataspace.copernicus.eu/?zoom=16&lat=47.39138&lng=2.35655&themeId=DEFAULT-THEME&visualizationUrl=U2FsdGVkX1%2FGmRDWk0S6efy25XJJ2clzUiSIIpwrrmrTm6sb%2Fa1Ur1%2FlIpit%2FyPGV1T6lg7lxbq9i8bn1foSJqLSD5hJ8lsxWtow8b7UfY%2Bm4rmjwzE1DzCC93upUVtw&datasetId=S2_L2A_CDAS&demSource3D=%22MAPZEN%22&cloudCoverage=30&dateMode=SINGLE",
+     "view": {
+      "lat": 47.39138,
+      "lon": 2.35655,
+      "zoom": 16.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "copernicus-browser"
+    },
+    {
+     "url": "https://browser.dataspace.copernicus.eu/?zoom=17&lat=47.3892&lng=2.35306&themeId=DEFAULT-THEME&visualizationUrl=U2FsdGVkX1%2F4r%2B4Q6eNW%2F5pehuG8etZw6tN3BYuKmJpyWafolpVfMrn94YvcSgxRrEaYhNjI%2BuLverBqN4FAxti4iFdZL28TcMeeTULZVwB14%2B07bisnmG%2BU%2BJHk83%2FO&datasetId=S2_L2A_CDAS&demSource3D=%22MAPZEN%22&cloudCoverage=30&dateMode=SINGLE",
+     "view": {
+      "lat": 47.3892,
+      "lon": 2.35306,
+      "zoom": 17.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "copernicus-browser"
+    }
+   ],
+   "note": "a 450 px panel; its address bar follows a zoom but not a pan"
+  },
+  {
+   "label": "zoom-earth",
+   "site": "zoom-earth",
+   "browser": "chromium",
+   "page_zoom": 1,
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "map_height": 1000,
+   "centre": {
+    "x": 800.49,
+    "y": 499.94
+   },
+   "spread": 0.0,
+   "canvas": null,
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -300,
+    "dy": 200
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 400,
+      "y": 250
+     }
+    }
+   ],
+   "steps": [
+    {
+     "url": "https://zoom.earth/maps/satellite/#view=47.388462,2.352785,10z",
+     "view": {
+      "lat": 47.388462,
+      "lon": 2.352785,
+      "zoom": 10.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "zoom-earth"
+    },
+    {
+     "url": "https://zoom.earth/maps/satellite/#view=47.570996,2.757906,10z",
+     "view": {
+      "lat": 47.570996,
+      "lon": 2.757906,
+      "zoom": 10.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "zoom-earth"
+    },
+    {
+     "url": "https://zoom.earth/maps/satellite/#view=47.686655,2.48291,11z",
+     "view": {
+      "lat": 47.686655,
+      "lon": 2.48291,
+      "zoom": 11.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "zoom-earth"
+    },
+    {
+     "url": "https://zoom.earth/maps/satellite/#view=47.686655,2.48291,11z",
+     "view": {
+      "lat": 47.686655,
+      "lon": 2.48291,
+      "zoom": 11.0,
+      "bearing": 0,
+      "projection": "webmercator"
+     },
+     "scale_source": "zoom",
+     "site": "zoom-earth"
+    }
+   ],
+   "note": "full window, camera dead centre; its satellite layer stops at level 11"
+  }
+ ],
+ "rounding": {
+  "what": "One site rounds the zoom it writes. Bing's wheel moves a third of a level and its URL carries one decimal, so \"15.3\" is really 15.334 \u2014 a fortieth of a level, two and a third percent of scale, five metres at the edge of a 1600 px window at level 18.",
+  "how": "Six wheel notches about one pixel, from a whole level. The zooms between the whole ones are what the address bar cannot state, and what `zoomFromAnchor` works out from the pixel the zoom held still.",
+  "site": "bing-maps",
+  "browser": "chromium",
+  "window": {
+   "w": 1600,
+   "h": 1000
+  },
+  "at": {
+   "x": 1150,
+   "y": 380
+  },
+  "centre": {
+   "x": 799.75,
+   "y": 540.62
+  },
+  "step": 0.3333333333333333,
+  "steps": [
+   {
+    "url": "https://www.bing.com/maps?cp=48.858370%7E2.294481&lvl=15&style=h",
+    "view": {
+     "lat": 48.85837,
+     "lon": 2.294481,
+     "zoom": 15.0,
+     "bearing": 0,
+     "projection": "webmercator"
+    }
+   },
+   {
+    "url": "https://www.bing.com/maps?cp=48.859307%7E2.297585&lvl=15.3&style=h",
+    "view": {
+     "lat": 48.859307,
+     "lon": 2.297585,
+     "zoom": 15.3,
+     "bearing": 0,
+     "projection": "webmercator"
+    }
+   },
+   {
+    "url": "https://www.bing.com/maps?cp=48.860050%7E2.300048&lvl=15.7&style=h",
+    "view": {
+     "lat": 48.86005,
+     "lon": 2.300048,
+     "zoom": 15.7,
+     "bearing": 0,
+     "projection": "webmercator"
+    }
+   },
+   {
+    "url": "https://www.bing.com/maps?cp=48.860639%7E2.302002&lvl=16&style=h",
+    "view": {
+     "lat": 48.860639,
+     "lon": 2.302002,
+     "zoom": 16.0,
+     "bearing": 0,
+     "projection": "webmercator"
+    }
+   },
+   {
+    "url": "https://www.bing.com/maps?cp=48.861107%7E2.303552&lvl=16.3&style=h",
+    "view": {
+     "lat": 48.861107,
+     "lon": 2.303552,
+     "zoom": 16.3,
+     "bearing": 0,
+     "projection": "webmercator"
+    }
+   },
+   {
+    "url": "https://www.bing.com/maps?cp=48.861478%7E2.304781&lvl=16.7&style=h",
+    "view": {
+     "lat": 48.861478,
+     "lon": 2.304781,
+     "zoom": 16.7,
+     "bearing": 0,
+     "projection": "webmercator"
+    }
+   },
+   {
+    "url": "https://www.bing.com/maps?cp=48.861772%7E2.305757&lvl=17&style=h",
+    "view": {
+     "lat": 48.861772,
+     "lon": 2.305757,
+     "zoom": 17.0,
+     "bearing": 0,
+     "projection": "webmercator"
+    }
+   }
+  ]
+ }
+}

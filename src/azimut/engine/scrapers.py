@@ -32,9 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
-import os
 import shutil
-import stat
 import sys
 import tempfile
 import threading
@@ -48,6 +46,7 @@ from typing import Any
 import httpx
 
 from .. import config
+from . import dirswap
 
 # distribution name on PyPI -> module name it imports as
 SCRAPERS: dict[str, str] = {"yt-dlp": "yt_dlp", "gallery-dl": "gallery_dl"}
@@ -61,64 +60,8 @@ WHEEL_MAX_BYTES = 64 * 1024 * 1024
 
 _lock = threading.Lock()  # updates mutate a shared directory
 
-
-# ---- swapping a directory, on all three platforms ---------------------------
-#
-# Windows is the constraint here. os.replace() onto an *existing* directory
-# fails there (MOVEFILE_REPLACE_EXISTING is file-only), and a file that's open
-# can't be deleted at all. So the destructive step is always a rename — old copy
-# out of the way first, new copy in second, delete the leftovers last. Renames
-# are cheap and near-atomic everywhere; deletes are the part allowed to fail,
-# and by then they can't cost us the package.
-
-
-def _force_writable(func, path, _exc):
-    """rmtree onexc hook: clear the read-only bit Windows refuses to delete through."""
-    try:
-        os.chmod(path, stat.S_IWRITE)
-        func(path)
-    except OSError:
-        pass
-
-
-def _rmtree(path: Path) -> None:
-    # onexc replaced onerror in 3.12; we still support 3.11. The hook ignores its
-    # third argument, which is the only thing that differs between the two.
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=_force_writable)
-    else:
-        shutil.rmtree(path, onerror=_force_writable)
-
-
-def _retire(target: Path) -> Path | None:
-    """Rename `target` out of the way, returning where it went (None if absent)."""
-    if not target.exists():
-        return None
-    retired = target.parent / f".trash-{target.name}-{os.urandom(4).hex()}"
-    target.replace(retired)
-    return retired
-
-
-def _swap_in(staging: Path, target: Path) -> None:
-    """Replace `target` with `staging`, restoring the old copy if the move fails."""
-    retired = _retire(target)
-    try:
-        staging.replace(target)
-    except BaseException:
-        if retired is not None:
-            retired.replace(target)  # put the working copy back
-        raise
-    if retired is not None:
-        # Best-effort: a locked leftover on Windows is litter, not a failure.
-        shutil.rmtree(retired, ignore_errors=True)
-
-
-def _discard(target: Path) -> None:
-    """Remove `target`, making sure it's gone from the import path even if the
-    delete can't finish — the rename is what counts."""
-    retired = _retire(target)
-    if retired is not None:
-        shutil.rmtree(retired, ignore_errors=True)
+# Swapping a directory under a running program is its own problem, and the
+# capture-extension installer has the same one: engine/dirswap.py.
 
 
 # ---- reading what's on disk -------------------------------------------------
@@ -319,7 +262,7 @@ def update(dist: str) -> dict[str, Any]:
                 archive.extractall(staging, members=_safe_members(archive))
             if not (staging / module).is_dir():
                 raise RuntimeError(f"{dist} wheel did not contain a {module}/ package")
-            _swap_in(staging, dist_dir(dist))
+            dirswap.swap_in(staging, dist_dir(dist))
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
@@ -350,7 +293,7 @@ def reset(dist: str) -> dict[str, Any]:
         raise KeyError(dist)
     had = runtime_version(dist)
     with _lock:
-        _discard(dist_dir(dist))
+        dirswap.discard(dist_dir(dist))
     activate()
     return {
         "dist": dist,

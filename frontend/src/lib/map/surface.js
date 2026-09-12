@@ -385,6 +385,10 @@ export function createSurface(engine, { onPopupOpen, onPopupClose } = {}) {
       maxWidth: shape.popup.maxWidth == null ? 'none' : `${shape.popup.maxWidth}px`,
       closeOnClick: true,
       focusAfterOpen: false,
+      // How far off the point the card sits, whichever side it opens on. A mark
+      // anchored on its tip stands above the point, so a card at the point
+      // itself would open over the mark that was clicked.
+      offset: shape.popup.offset ?? 0,
     });
     popup.setLngLat(marker.getLngLat());
     popup.setDOMContent(shape.popup.content());

@@ -44,6 +44,19 @@ REPO = Path(__file__).resolve().parent.parent
 EXT = REPO / "extension"
 STATE = Path.home() / ".cache" / "azimut-devext"
 
+
+def addon_id() -> str:
+    """The extension's Firefox id, read from its own manifest.
+
+    Firefox keys a temporary add-on by this, and AMO reserves it at the first
+    signature, so it is permanent. Read rather than repeated: a copy here would
+    drift the day the id moves and this script would simply stop finding the
+    add-on it just loaded.
+    """
+    manifest = json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
+    return manifest["browser_specific_settings"]["gecko"]["id"]
+
+
 DEFAULT_APP_URL = os.environ.get("AZIMUT_URL", "http://127.0.0.1:8477")
 DEFAULT_CHROME_PORT = 9222
 DEFAULT_FIREFOX_PORT = 6080
@@ -582,9 +595,7 @@ def firefox_background_console(rdp: Firefox) -> str | None:
     own fallback page, the extension's own comes right after.
     """
     addons = rdp.call({"to": "root", "type": "listAddons"})["addons"]
-    mine = next(
-        (a for a in addons if a.get("id") == "capture-extension@azimut.invalid"), None
-    )
+    mine = next((a for a in addons if a.get("id") == addon_id()), None)
     if not mine:
         return None
     watcher = rdp.call({"to": mine["actor"], "type": "getWatcher"})["actor"]

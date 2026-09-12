@@ -23,6 +23,11 @@ from ...engine import timeline as timeline_engine
 from ...engine import trash as trash_engine
 from ...engine.temporal import TemporalError, window_bound
 from ...workspace import Case, CaseError
+from .. import events
+
+#: Entity types that are drawn on a map, and so whose deletion is news to a
+#: surface that is not the one that asked for it (``api/events.py``).
+MAPPED_TYPES = {"place", "capture"}
 
 
 def get_case(case_id: str) -> Case:
@@ -101,6 +106,12 @@ def delete_entities_deep(case: Case, entity_ids: list[str]) -> dict[str, Any]:
         # attached pieces already gone for good. Past the commit there is nothing left to
         # roll back, which is what makes this the safe side of the line.
         sheet_engine.forget_entities(case, set(going_by_id))
+
+        # A point deleted here is still drawn on the app's other tab and on every
+        # map panel the extension has open. Said once, from the one door every
+        # delete comes through, and only when something mapped actually went.
+        if any(entity.get("type") in MAPPED_TYPES for entity in going):
+            events.publish({"type": "saved", "case_id": case.id})
 
         return {
             "status": "deleted",

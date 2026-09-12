@@ -6,6 +6,11 @@ files it here as a ``capture`` entity, riding the same media pipeline as a satel
 crop so it lists, opens and exports like one. The list lives there and only there:
 copied into this sentence it went stale at four of the nine sites.
 
+It also draws: `extension/mapoverlay.js` puts the app's own measure, pins, sky,
+grid and reference tools over whatever 2D map the analyst is on, which is why a
+handful of routes here *read* a case back rather than only filing into one. Each
+is trimmed to what a panel draws, and the reading is as narrow as the filing.
+
 Trust model: the server already binds localhost only, so the pairing token
 (``config.ingest_token``, shown in Settings, pasted once into the extension)
 exists to stop *other* local pages and processes from filing images into
@@ -23,26 +28,51 @@ treatment the widget screenshot endpoint applies.
 from __future__ import annotations
 
 import io
-import json
 import secrets
 import warnings
 import zipfile
+from collections.abc import Callable
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, Form, Header, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import (
+    APIRouter,
+    Depends,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
+from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
+from pydantic import BaseModel
 
 from .. import __version__, config
-from ..engine import geo, mapsites, media as media_engine, satellite as satellite_engine, tiles
+from ..engine import (
+    extinstall,
+    geo,
+    mapsites,
+    media as media_engine,
+    satellite as satellite_engine,
+    tiles,
+)
 from ..workspace import Case, CaseError
 from . import events
 from .cases import get_case
 from .limits import MAX_IMAGE_BYTES
-from .satellite import locate_on_save
+from .satellite import (
+    GridSaveIn,
+    apply_grid_marks,
+    get_search_grid,
+    list_search_grids,
+    locate_on_save,
+    save_search_grid,
+)
+from .satellite import sky_for_point as satellite_sky
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
@@ -118,8 +148,42 @@ def install_cors(app) -> None:
 
 @router.get("/ping", dependencies=[Depends(require_token)])
 def ping() -> dict[str, Any]:
-    """Pairing check: the extension options page proves URL + token in one call."""
-    return {"app": "azimut", "version": __version__}
+    """Pairing check: the extension options page proves URL + token in one call.
+
+    Carries the measurement units as well, since the map tools state distances
+    on top of another map and must not state them in different units from the
+    app that files them.
+    """
+    return {
+        "app": "azimut",
+        "version": __version__,
+        "units": config.load_settings().get("units", "metric"),
+    }
+
+
+@router.get("/events", dependencies=[Depends(require_token)])
+async def ingest_events(request: Request) -> StreamingResponse:
+    """The nudge channel, for the extension (``api/events.py``).
+
+    The same in-process bus the app reads same-origin, offered here because the
+    panel drawn over another map is working the same case from the other side: a
+    point filed in the app, a cell marked on the app's own copy of a sweep, a
+    grid discarded — none of it is a request the panel made, and without this it
+    would draw a case as it was when the tab was opened.
+
+    Read by the background worker, never by a panel: a content script's fetch
+    carries the map site's origin, which the local guard refuses, and it could not
+    hold the pairing token anyway. One stream serves every open panel
+    (``extension/background.js``).
+
+    Nothing of a case crosses here — an event names what changed and the panel
+    re-reads it through the routes it is already allowed.
+    """
+    return StreamingResponse(
+        events.sse_stream(events.subscribe(), request.is_disconnected),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/cases", dependencies=[Depends(require_token)])
@@ -132,14 +196,20 @@ def cases() -> list[dict[str, Any]]:
 
 
 @router.get("/parse", dependencies=[Depends(require_token)])
-def parse(url: str) -> dict[str, Any]:
+def parse(url: str, height: float | None = Query(default=None, gt=0, le=20000)) -> dict[str, Any]:
     """Parse a map URL for the popup's prefill (engine/mapsites.py).
 
     The extension deliberately contains no URL knowledge — formats race sites
     that change without notice, and an app update is easy where an extension
     update is manual. ``{"site": null}`` means "not a map: don't capture here".
+
+    ``height`` is how tall the map is drawn, in CSS pixels, and it is the one
+    thing the caller knows and this side cannot. Two of these sites state their
+    scale as a size rather than as a level — Apple's span in degrees, Google's
+    satellite height in metres — and next to that number they become a zoom like
+    everyone else's. Without it they simply come back without one.
     """
-    return mapsites.parse_map_url(url) or {"site": None}
+    return mapsites.parse_map_url(url, height_px=height) or {"site": None}
 
 
 @router.post("/screenshot", dependencies=[Depends(require_token)])
@@ -388,6 +458,185 @@ def ingest_bookmark(
     return {"entity_id": entity["id"], "case_id": case.id, "title": label, "url": url}
 
 
+# ---- the map tools: reading a case back, over someone else's map ---------------
+#
+# `extension/mapoverlay.js` draws the app's own tools over whatever map the
+# analyst is on. Those tools need three things the capture flow never did: the
+# points already saved in the case, the sun and moon for a point, and the case's
+# search grids.
+#
+# They are routes of their own rather than the app's, because the app's are
+# same-origin and stay that way. The local guard lets an extension origin reach
+# `/api/ingest/*` and nothing else (`server.py`), which is what keeps the pairing
+# token from being a key to the whole API — so every route here is a deliberate,
+# narrow widening of what a paired extension can see, and each one hands back the
+# least it can rather than an app payload forwarded wholesale.
+
+
+class GridWriteIn(BaseModel):
+    case_id: str
+    title: str = ""
+    spec: dict[str, Any]
+
+
+class GridMarksIn(BaseModel):
+    case_id: str
+    name: str
+    #: ``"i:j" -> "cleared" | "flagged" | null``, null meaning "back to
+    #: unchecked". A patch, never a spec: see ``apply_grid_marks``.
+    marks: dict[str, Any]
+
+
+@router.get("/saved", dependencies=[Depends(require_token)])
+def saved_points(case_id: str) -> list[dict[str, Any]]:
+    """The case's saved points, for drawing over another map.
+
+    Trimmed to what a pin needs. The app's own index carries thumbnails, folder
+    counts, continents and link tallies, all of which would cross into the
+    extension for no use: it draws a dot with a name on it.
+    """
+    rows = satellite_engine.saved_index(get_case(case_id))
+    return [
+        {
+            "id": row["id"],
+            "kind": row["kind"],
+            "title": row["title"],
+            "lat": row["lat"],
+            "lon": row["lon"],
+        }
+        for row in rows
+        if row.get("lat") is not None and row.get("lon") is not None
+    ]
+
+
+#: What a reference window can open. The panel paints an image on a canvas and
+#: gives a video to the element of that name; everything else in a case — a PDF,
+#: an audio file — has nothing to show beside a map.
+REFERENCE_KINDS = ("image", "video")
+
+
+@router.get("/media", dependencies=[Depends(require_token)])
+def reference_media(
+    case_id: str,
+    q: str | None = None,
+    kind: str | None = None,
+    sort: str = "newest",
+    limit: int = 60,
+) -> dict[str, Any]:
+    """The case's images and videos, for the panel's reference windows.
+
+    A reference window floats one of them over the map, so the shot being
+    geolocated can be held against the imagery while the map pans under it. It
+    is the same aid the Satellite tab offers, and the same scratch: nothing
+    about one is filed anywhere.
+
+    Bounded, searched and sorted here rather than filtered over there: a case of
+    two thousand files would otherwise cross the extension boundary whole to
+    fill a grid nobody scrolls. ``total`` is what the search actually matched,
+    so the picker can say how much of it is being shown.
+
+    Both kinds at once is two queries merged, because the store filters one kind
+    at a time and a page taken without a filter would be mostly the audio,
+    documents and archives a window cannot open. Each query is asked for the
+    whole page, so the merge only ever drops the tail of the longer list.
+    """
+    case = get_case(case_id)
+    wanted = [kind] if kind in REFERENCE_KINDS else list(REFERENCE_KINDS)
+    limit = max(1, min(limit, 200))
+    items: list[dict[str, Any]] = []
+    total = 0
+    for one in wanted:
+        page = case.page_media_items(kind=one, q=q or None, sort=sort, limit=limit)
+        items.extend(page["items"])
+        total += page.get("total", 0)
+    items.sort(key=_reference_order(sort), reverse=sort == "newest")
+    return {
+        "items": [
+            {
+                "path": item["path"],
+                "filename": item.get("filename") or item["path"].rsplit("/", 1)[-1],
+                "title": item.get("title") or "",
+                "kind": item.get("kind") or "image",
+                "thumbnail": item.get("thumbnail") or "",
+            }
+            for item in items[:limit]
+        ],
+        "total": total,
+    }
+
+
+def _reference_order(sort: str) -> Callable[[dict[str, Any]], tuple[str, str]]:
+    """The key the two kinds are merged on, matching the order they were asked in.
+
+    The path comes second for the same reason the store's own ``ORDER BY`` ends
+    with it: two files filed in the same second are otherwise in whichever order
+    the two queries happened to be run, and a picker that reshuffles itself
+    between two identical searches is one nobody trusts.
+    """
+    if sort == "name":
+        return lambda item: (
+            (item.get("title") or item.get("filename") or "").lower(),
+            item["path"].lower(),
+        )
+    return lambda item: (item.get("added_at") or "", item["path"].lower())
+
+
+@router.get("/sky", dependencies=[Depends(require_token)])
+def sky(lat: float, lon: float, date: str | None = None) -> dict[str, Any]:
+    """Sun and moon for a point, on one local day.
+
+    The same computation the app's Sun & moon panel runs, and like it, offline:
+    nothing in it goes to the network, so the tool works on a map tab with the
+    app's own window closed.
+
+    ``date`` is a local wall-clock day at the point, since that is how the
+    analyst writes it. Left out, it is the day it is there now — which is the
+    question being asked most of the time, and the one that needs no typing.
+    """
+    # every optional parameter is passed explicitly: the app's own route reads
+    # them from the query string, so its defaults are FastAPI markers rather
+    # than the None a direct call would want
+    return satellite_sky(lat=lat, lon=lon, day=date, at=None, zone=None)
+
+
+@router.get("/grids", dependencies=[Depends(require_token)])
+def grids(case_id: str) -> list[dict[str, Any]]:
+    """The case's saved sweeps, as the picker's summaries."""
+    return list_search_grids(case_id)
+
+
+@router.get("/grid", dependencies=[Depends(require_token)])
+def grid(case_id: str, name: str) -> dict[str, Any]:
+    """One saved sweep, whole — the extension draws its lattice and its marks."""
+    return get_search_grid(case_id, name)
+
+
+@router.post("/grid", dependencies=[Depends(require_token)])
+def create_grid(body: GridWriteIn) -> dict[str, Any]:
+    """File a sweep drawn over another map as a grid in the case.
+
+    POST rather than the app's PUT because the CORS allowance for extension
+    origins is GET and POST only (``install_cors``), and widening it for one
+    route would widen it for all of them.
+    """
+    return save_search_grid(
+        body.case_id,
+        body.title or "grid",
+        GridSaveIn(spec=body.spec, title=body.title or None),
+    )
+
+
+@router.post("/grid/marks", dependencies=[Depends(require_token)])
+def mark_grid(body: GridMarksIn) -> dict[str, Any]:
+    """Set or clear cells on a saved sweep, leaving every other cell alone.
+
+    The whole point of the patch: the same grid is open in the app, and a save
+    that carried the extension's copy of it would put back the cells the analyst
+    marked there in between.
+    """
+    return apply_grid_marks(get_case(body.case_id), body.name, body.marks)
+
+
 # ---- reading back: the attachments a hand-off carries -------------------------
 
 #: The two folders a post's attachments live in. The hand-off names its files by
@@ -434,87 +683,29 @@ def handoff_file(case_id: str, path: str) -> Response:
 
 
 # ---- extension download: the packaged source, zipped on request ---------------
-
-# Repo checkout first (development), then the copy hatchling ships inside the
-# wheel (azimut/extension) — same dual-home pattern as the built frontend.
-_EXTENSION_DIRS = (
-    Path(__file__).parents[3] / "extension",
-    Path(__file__).parents[1] / "extension",
-)
-# Runtime files only: the extension's own dev harness (vitest, package.json,
-# lockfile) has no business in an installed browser.
-_ZIP_EXCLUDE_DIRS = {"node_modules", "tests", ".git"}
-_ZIP_EXCLUDE_FILES = {"package.json", "package-lock.json", "vitest.config.js", ".gitignore"}
-
-
-def _extension_dir() -> Path | None:
-    for candidate in _EXTENSION_DIRS:
-        if (candidate / "manifest.json").is_file():
-            return candidate
-    return None
-
-
-def shipped_extension_files(src: Path) -> list[tuple[str, Path]]:
-    """Every file ``extension.zip`` carries, as ``(posix relative name, path)``
-    sorted by name. Paths are posix so the listing is identical on the three
-    release platforms.
-
-    The version gate in ``tests/test_updates.py`` digests exactly this list, so
-    "what the manifest version claims" and "what the user downloads" cannot
-    drift: a change to a shipped file fails the gate until the version moves.
-
-    Ordered by that posix name rather than by ``Path``, which is the whole point:
-    comparing paths is case-insensitive on Windows and case-sensitive everywhere
-    else, so ``README.md`` sorts first on Linux and mid-list on Windows. The gate
-    digests names in order, so sorting by the object would hand the three release
-    platforms three verdicts about one unchanged extension.
-    """
-    shipped: list[tuple[str, Path]] = []
-    for path in src.rglob("*"):
-        rel = path.relative_to(src)
-        if not path.is_file() or path.name in _ZIP_EXCLUDE_FILES:
-            continue
-        if any(part in _ZIP_EXCLUDE_DIRS or part.endswith(".test.js") for part in rel.parts):
-            continue
-        shipped.append((rel.as_posix(), path))
-    return sorted(shipped, key=lambda entry: entry[0])
-
-
-def bundled_extension_version() -> str | None:
-    """The ``version`` of the extension this Azimut build ships. Settings
-    compares it to the version stamped by the *installed* extension
-    (lib/extBridge.js) so it can flag "an update is bundled — re-download and
-    reload". None if no extension is bundled (unusual builds).
-
-    This tracks the extension, not the app: it is the Azimut version whose
-    release last changed a shipped file, so it stays put across releases that
-    leave the extension alone. Bumping it in lock-step with ``__version__``
-    would tell every user to reinstall an identical zip."""
-    src = _extension_dir()
-    if src is None:
-        return None
-    try:
-        manifest = json.loads((src / "manifest.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    version = manifest.get("version")
-    return str(version) if version else None
+#
+# Which files ship, and where this build keeps them, is engine/extinstall.py's
+# question — the same listing feeds the folder the app installs into.
 
 
 @router.get("/extension.zip")
 def extension_zip() -> Response:
-    """The capture extension, zipped for Settings' install flow.
+    """The capture extension, zipped for anyone who'd rather place it themselves.
 
-    Unauthenticated on purpose: it is the installer, it contains no secrets
+    Settings leads with the app-owned folder (``/api/settings/extension/install``)
+    because that's the copy the update button can rewrite. This stays for the
+    analyst who wants the files somewhere of their own choosing.
+
+    Unauthenticated on purpose: it is an installer, it contains no secrets
     (the token is pasted in *after* install), and gating it on the token would
     make pairing circular.
     """
-    src = _extension_dir()
+    src = extinstall.source_dir()
     if src is None:
         raise HTTPException(status_code=404, detail="extension not bundled with this build")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name, path in shipped_extension_files(src):
+        for name, path in extinstall.shipped_files(src):
             zf.write(path, name)
     return Response(
         content=buf.getvalue(),

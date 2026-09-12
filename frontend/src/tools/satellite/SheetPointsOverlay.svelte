@@ -14,6 +14,7 @@
   import { createSurface } from '../../lib/map/surface.js';
   import { paths } from '../../components/Icon.svelte';
   import { precisionMetres } from '../../lib/sheetRoles.js';
+  import { TEARDROP } from '../../lib/mapMarkers.js';
 
   let { engine = null, points = [] } = $props();
   let surface = null;
@@ -36,8 +37,7 @@
     return {
       className: 'sheet-mark-wrap',
       html: `<span class="sheet-mark${coarse ? ' sheet-mark-coarse' : ''}">${glyph(12)}</span>`,
-      size: [24, 24],
-      anchor: [12, 12],
+      ...TEARDROP,
     };
   }
 

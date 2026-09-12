@@ -11,7 +11,10 @@
   import { formatCoords, parseHomeView } from '../lib/coords.js';
   import { USAGE_LINKS, ECO_MAX_ZOOM } from '../lib/usage.js';
   import { probeKey, googleMapsLoadedKey } from '../lib/map/gmaps.js';
-  import { extensionVersion } from '../lib/extBridge.js';
+  import {
+    extensionVersion, extensionState, pingExtensions, reloadExtension, onBridgeHello,
+  } from '../lib/extBridge.js';
+  import { classify, reloadLanded } from '../lib/extInstall.js';
   import { CASE_FOLDER_LABEL, saveDestination } from '../lib/exportDest.js';
   import Icon from '../components/Icon.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
@@ -157,6 +160,14 @@
   let tokenShown = $state(false);
   // Read once per mount because an extension installed mid-session needs a reload.
   const extDetected = extensionVersion();
+  // What the app's own extension folder holds, and which copy the browser runs.
+  // The probe is authoritative in this tab: the <html> marker above is written by
+  // whichever bridge ran last, and two can be loaded at once (extInstall.js).
+  // Seeded from the startup verdict so the tab has content on its first frame,
+  // then re-probed on open: the copies loaded can change while the app is up.
+  let extState = $state(updatesState.extension);
+  let extProbed = $state(false);
+  let extBusy = $state('');
 
   // Every dot in this tool comes from the same place as the one on the Settings
   // icon, so a tab can never disagree with the rail that led the user to it.
@@ -187,11 +198,120 @@
     ingestToken = r.ingest_token;
     toast('New token minted. Every extension must pair again', 'ok', 6000);
   }
+
+  // Ask the server what its folder holds and the browser which copies are
+  // loaded, then let extInstall.js reconcile the two.
+  async function refreshExtension() {
+    const [server, ...probes] = await Promise.all([
+      api.get('/api/settings/extension'),
+      ...probeExtension(),
+    ]);
+    return adoptExtState(classify(server, { bridges: probes[0], managed: probes[1] }));
+  }
+
+  // One verdict, two readers: this tab and the dots. Writing it back is what
+  // makes a dot clear on the click that fixed it instead of on the next reload —
+  // the rule this tool has for every other badge it owns.
+  function adoptExtState(verdict) {
+    extState = verdict;
+    updatesState.extension = verdict;
+    if (verdict.installed?.version) updatesState.extensionInstalled = verdict.installed.version;
+    return verdict;
+  }
+
+  // Both probes, in parallel. `ping` counts what is loaded — every extension
+  // version ever shipped answers it — and `ext-state` identifies the copies new
+  // enough to be managed. An install older than the update button is loud on the
+  // first and silent on the second, which is how it gets recognised instead of
+  // being reported as absent.
+  const probeExtension = () => [pingExtensions(), extensionState()];
+
+  async function installExtension() {
+    extBusy = 'install';
+    try {
+      const server = await api.post('/api/settings/extension/install');
+      const [bridges, managed] = await Promise.all(probeExtension());
+      adoptExtState(classify(server, { bridges, managed }));
+      if (extState.staged) {
+        toast('Files are staged. Close the browser and press again', 'warn', 8000);
+      } else if (extState.status === 'owned' || extState.status === 'duplicate') {
+        toast('Extension folder written', 'ok');
+      } else {
+        // Written, but this browser is not running it yet — which is the whole
+        // remaining step, so the toast says it rather than reporting success.
+        toast('Folder written. Load it in your browser to finish', 'ok', 8000);
+      }
+    } catch (e) {
+      toast(e.message || 'Could not write the extension folder', 'error');
+    } finally {
+      extBusy = '';
+    }
+  }
+
+  async function updateExtension() {
+    extBusy = 'update';
+    try {
+      const server = await api.post('/api/settings/extension/install');
+      if (server.staged) {
+        const [bridges, managed] = await Promise.all(probeExtension());
+        adoptExtState(classify(server, { bridges, managed }));
+        toast('Files are staged. Close the browser and press again', 'warn', 8000);
+        return;
+      }
+      // The id off the fresh response, not the one the last probe saw: this pass
+      // may have minted it.
+      const installId = server.folder?.install_id ?? extState?.installId;
+      // A refusal here is inconclusive, not fatal: the extension dies mid-reply
+      // by design. Either way the verdict comes from probing afterwards.
+      try {
+        await reloadExtension(installId);
+      } catch {
+        /* verified below */
+      }
+      // The restart is asynchronous and re-injects the bridge when it lands, so
+      // the first probe can still reach the context that is going away.
+      for (let attempt = 0; attempt < 4; attempt++) {
+        await new Promise((r) => setTimeout(r, 400));
+        const [bridges, managed] = await Promise.all(probeExtension());
+        if (reloadLanded(server, { bridges, managed })) {
+          adoptExtState(classify(server, { bridges, managed }));
+          toast(`Extension updated to v${extState.installed?.version ?? server.bundled.version}`, 'ok');
+          return;
+        }
+      }
+      const [bridges, managed] = await Promise.all(probeExtension());
+      adoptExtState(classify(server, { bridges, managed }));
+      toast('Folder updated. Reload the extension in your browser', 'warn', 8000);
+    } catch (e) {
+      toast(e.message || 'Could not update the extension', 'error');
+    } finally {
+      extBusy = '';
+    }
+  }
+
+  async function copyExtensionPath() {
+    const path = extState?.path || '';
+    try {
+      await navigator.clipboard.writeText(path);
+      toast('Path copied', 'ok');
+    } catch {
+      toast('Could not copy. Select the path and copy it', 'warn');
+    }
+  }
+
+  async function revealExtension() {
+    try {
+      await api.post('/api/settings/extension/reveal');
+    } catch (e) {
+      toast(e.message || 'Could not open the folder', 'error');
+    }
+  }
   // Keep home-view fields as text until change so partial numbers remain editable.
   let home = $state({ lat: '', lon: '', zoom: '' });
   let mention = $state('');
   let postTarget = $state('x');
   let postPrefill = $state(true);
+  let reversePrefill = $state(true);
   let updateOnStart = $state(true); // pop a notice on load when a release is out
   // whether saving a proof files its point as a place, or asks first
   let proofPlaceAuto = $state(true);
@@ -405,6 +525,7 @@
     mention = s.post_mention ?? '';
     postTarget = s.post_target ?? 'x';
     postPrefill = s.post_prefill ?? true;
+    reversePrefill = s.reverse_prefill ?? true;
     updateOnStart = s.update_check_on_start ?? true;
     proofPlaceAuto = s.proof_place_auto ?? true;
     applyPrefs(s); // the rest of the app reads these live
@@ -533,6 +654,22 @@
   $effect(() => {
     if (tab === 'system' && !report) loadReport();
   });
+
+  // Same rule for the extension: one local read and one bridge probe, when the
+  // tab that shows them is opened.
+  $effect(() => {
+    if (tab === 'extension' && !extProbed) {
+      extProbed = true;
+      refreshExtension().catch((e) => toast(`Could not read the extension: ${e.message}`, 'warn'));
+    }
+  });
+
+  // A bridge announcing itself means the extension just (re)attached, which is
+  // what an update looks like from here. Re-probe so the tab follows without a
+  // page reload.
+  onMount(() => onBridgeHello(() => {
+    if (tab === 'extension') refreshExtension().catch(() => {});
+  }));
 
   $effect(() => {
     if (uiState.tool !== 'settings') return;
@@ -685,6 +822,7 @@
           {savePrefs}
           {saveHome}
           bind:proofPlaceAuto
+          bind:reversePrefill
         />
       {/if}
 
@@ -729,10 +867,15 @@
 
       {#if tab === 'extension'}
         <ExtensionTab
-          {about}
           {badges}
           {extDetected}
           {extOutdated}
+          {extState}
+          {extBusy}
+          {installExtension}
+          {updateExtension}
+          {copyExtensionPath}
+          {revealExtension}
           {ingestToken}
           {copyToken}
           {ensureToken}

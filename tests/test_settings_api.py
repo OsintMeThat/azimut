@@ -776,6 +776,20 @@ def test_display_prefs_default_and_round_trip(client):
     assert reloaded["post_target"] == "bluesky"
 
 
+def test_extension_hand_off_switches_default_on_and_round_trip(client):
+    """Both are on out of the box, because with no extension installed neither
+    changes anything: Publish opens the intent page and a Reverse Search button
+    copies or saves the image, exactly as they did before either existed."""
+    body = client.get("/api/settings").json()
+    assert body["post_prefill"] is True
+    assert body["reverse_prefill"] is True
+
+    saved = client.put("/api/settings/prefs", json={"reverse_prefill": False}).json()
+    assert saved["reverse_prefill"] is False
+    assert saved["post_prefill"] is True  # one switch per question, never one for both
+    assert client.get("/api/settings").json()["reverse_prefill"] is False
+
+
 def test_display_prefs_reject_unknown_values(client):
     assert client.put("/api/settings/prefs", json={"coord_format": "utm"}).status_code == 422
     assert client.put("/api/settings/prefs", json={"units": "furlongs"}).status_code == 422

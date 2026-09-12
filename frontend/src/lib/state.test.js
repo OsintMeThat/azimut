@@ -167,7 +167,11 @@ describe('startup update check', () => {
     api.get.mockClear();
     applyPrefs({ update_check_on_start: false });
     await checkForUpdatesOnStart();
-    expect(api.get).not.toHaveBeenCalled();
+    // The switch governs the network, which is what `?check=true` marks. The
+    // local reads that stay behind — what the app's own extension folder holds —
+    // reach the loopback server and nothing else, so they are not what it gates.
+    expect(api.get.mock.calls.flat().filter((path) => String(path).includes('check=true')))
+      .toEqual([]);
   });
 
   it('records what the downloaders check found', async () => {
@@ -192,10 +196,43 @@ describe('startup update check', () => {
     applyPrefs({ update_check_on_start: false, extension_version: '0.2.5' });
 
     await checkForUpdatesOnStart();
-    expect(api.get).not.toHaveBeenCalled();
+    // The marker on <html> is a synchronous local read, so the version half of
+    // the answer holds even with every request failing.
+    expect(api.get.mock.calls.flat().filter((path) => String(path).includes('check=true')))
+      .toEqual([]);
     expect(updatesState.extensionInstalled).toBe('0.2.1');
     expect(updatesState.extensionBundled).toBe('0.2.5');
     delete document.documentElement.dataset.azimutCaptureExtension;
+  });
+
+  it('reads the extension folder locally, and never on the network switch', async () => {
+    // The digest comparison the badge needs is a disk read on the loopback
+    // server plus two postMessage probes: no third party, nothing to gate.
+    const { api } = await import('./api.js');
+    api.get.mockReset().mockResolvedValue({
+      path: '/w/.azimut/extension',
+      staged: false,
+      bundled: { version: '0.3.0', payload: 'new' },
+      folder: { install_id: 'mine', version: '0.3.0', payload: 'old' },
+    });
+    const { applyPrefs, checkExtension, updatesState } = await freshState();
+    applyPrefs({ update_check_on_start: false });
+
+    await checkExtension();
+
+    expect(api.get).toHaveBeenCalledWith('/api/settings/extension');
+    // Nothing answered the probes here, so the verdict is "nothing loaded" —
+    // and it is a verdict, not a failure.
+    expect(updatesState.extension.status).toBe('absent');
+  });
+
+  it('leaves the version fallback in charge when the folder cannot be read', async () => {
+    const { api } = await import('./api.js');
+    api.get.mockReset().mockRejectedValue(new Error('offline'));
+    const { checkExtension, updatesState } = await freshState();
+
+    await expect(checkExtension()).resolves.toBeFalsy();
+    expect(updatesState.extension).toBe(null);
   });
 
   it('does not surface an offline failure', async () => {

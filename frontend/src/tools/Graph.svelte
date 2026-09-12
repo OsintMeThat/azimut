@@ -96,6 +96,7 @@
     entityLabel,
     entityTypes,
     familyReads,
+    familyTitle,
     loadEntityTypes,
   } from '../lib/entityTypes.svelte.js';
   import {
@@ -321,7 +322,6 @@
   let hiddenFamilies = $state([]);
   /** Every type the case actually holds, from the catalog summary. */
   let caseTypes = $state([]);
-  const familyTitle = (family) => family.charAt(0).toUpperCase() + family.slice(1);
   const searchFamilies = $derived(
     [...new Set(caseTypes.map((type) => entityFamily(type)).filter(Boolean))].sort()
   );

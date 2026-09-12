@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ALL_WORKSPACES,
   CASE_WORKSPACE,
+  HOME_WORKSPACE,
   WORKSPACES,
   TOOL_LABELS,
   sidebarOpenForWorkspace,
@@ -10,13 +11,14 @@ import {
 } from './workspaces.js';
 
 const ALL_TOOLS = [
-  'board', 'graph', 'timeline', 'media', 'files', 'reverse', 'inspect', 'satellite', 'coordinates', 'proof', 'post', 'notebook',
+  'overview', 'guide',
+  'board', 'graph', 'timeline', 'sheet', 'media', 'files', 'reverse', 'inspect', 'satellite', 'coordinates', 'proof', 'post', 'notebook',
   'settings',
 ];
 
 describe('workspaceOf', () => {
   it('maps every tool to exactly one workspace', () => {
-    for (const tool of ['board', 'graph', 'timeline', 'media', 'files', 'reverse', 'inspect', 'satellite', 'coordinates', 'proof', 'post', 'notebook']) {
+    for (const tool of ['overview', 'guide', 'board', 'graph', 'timeline', 'sheet', 'media', 'files', 'reverse', 'inspect', 'satellite', 'coordinates', 'proof', 'post', 'notebook']) {
       const owners = ALL_WORKSPACES.filter((w) => w.tools.includes(tool));
       expect(owners).toHaveLength(1);
       expect(workspaceOf(tool)).toBe(owners[0]);
@@ -30,9 +32,21 @@ describe('workspaceOf', () => {
     expect(workspaceOf('timeline')).toBe(CASE_WORKSPACE);
   });
 
-  it('resolves the case workspace even though the rail never lists it', () => {
-    expect(ALL_WORKSPACES[0]).toBe(CASE_WORKSPACE);
-    expect(ALL_WORKSPACES).toHaveLength(WORKSPACES.length + 1);
+  it('resolves the two workspaces the rail never lists', () => {
+    // the rail is a sequence of stages; neither home nor the case is one, so both
+    // hang off the topbar and both still have to resolve as workspaces
+    expect(ALL_WORKSPACES).toContain(HOME_WORKSPACE);
+    expect(ALL_WORKSPACES).toContain(CASE_WORKSPACE);
+    expect(ALL_WORKSPACES).toHaveLength(WORKSPACES.length + 2);
+  });
+
+  it('keeps home off the rail too, on the mark rather than a fifth seat', () => {
+    expect(WORKSPACES.map((w) => w.id)).not.toContain('home');
+    expect(workspaceOf('overview')).toBe(HOME_WORKSPACE);
+    expect(workspaceOf('guide')).toBe(HOME_WORKSPACE);
+    // two tabs, so the strip draws itself: the overview for somebody who has been
+    // here, the guide for somebody who has not
+    expect(HOME_WORKSPACE.tools).toEqual(['overview', 'guide']);
   });
 
   it('groups media, files and reverse search under collect', () => {
@@ -63,14 +77,20 @@ describe('product-facing labels', () => {
     expect(TOOL_LABELS.proof).toBe('Geo Proof');
     expect(TOOL_LABELS.post).toBe('Geo Report');
     expect(TOOL_LABELS.timeline).toBe('Timeline');
+    // the tab is the overview; "Home" is the workspace the mark opens
+    expect(TOOL_LABELS.overview).toBe('Overview');
+    expect(TOOL_LABELS.guide).toBe('Guide');
   });
 });
 
 describe('sidebarOpenForWorkspace', () => {
-  it('defaults Map and Case closed, and other workspaces open', () => {
+  it('defaults Map, Case and Home closed, and other workspaces open', () => {
     expect(sidebarOpenForWorkspace('map')).toBe(false);
     // the board lists the same case: two lists side by side ask which is the real one
     expect(sidebarOpenForWorkspace('case')).toBe(false);
+    // home is read rather than worked in, and its whole subject is the case the
+    // sidebar would be listing again
+    expect(sidebarOpenForWorkspace('home')).toBe(false);
     expect(sidebarOpenForWorkspace('collect')).toBe(true);
     expect(sidebarOpenForWorkspace('examine')).toBe(true);
   });
@@ -91,9 +111,11 @@ describe('toolFromHash', () => {
   it('accepts a bare workspace id (first tool)', () => {
     expect(toolFromHash('#collect', ALL_TOOLS)).toBe('media');
     expect(toolFromHash('#compose', ALL_TOOLS)).toBe('proof');
-    // off the rail, still a workspace: #case has to keep resolving
+    // off the rail, still a workspace: #case and #home have to keep resolving
     expect(toolFromHash('#case', ALL_TOOLS)).toBe('board');
     expect(toolFromHash('#case/timeline', ALL_TOOLS)).toBe('timeline');
+    expect(toolFromHash('#home', ALL_TOOLS)).toBe('overview');
+    expect(toolFromHash('#home/guide', ALL_TOOLS)).toBe('guide');
   });
 
   it('accepts workspace/tab form', () => {

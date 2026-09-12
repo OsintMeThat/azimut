@@ -68,6 +68,7 @@
     entityLabel,
     entityTypes,
     familyReads,
+    familyTitle,
     loadEntityTypes,
   } from '../lib/entityTypes.svelte.js';
   import { createBookmark } from '../lib/bookmarks.js';
@@ -795,9 +796,6 @@
     }
   });
 
-  /** The slug with a capital, not a second vocabulary: the families are code, and
-   *  inventing readings for them here is how two lists start. */
-  const familyTitle = (family) => family.charAt(0).toUpperCase() + family.slice(1);
 
   /** The question as one sentence, which is what the graph writes over the drawing
    *  so nobody has to remember what they asked two tabs ago. */

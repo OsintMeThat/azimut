@@ -4,7 +4,9 @@ const post = vi.fn().mockResolvedValue({ path: '/cases/c1/azimut/media' });
 vi.mock('./api.js', () => ({ api: { post: (...a) => post(...a), get: vi.fn() } }));
 
 const { caseState, uiState } = await import('./state.svelte.js');
-const { gotoCapture, gotoPoint, openEntity, opensInFileManager } = await import('./navigate.js');
+const { gotoCapture, gotoPoint, openEntity, openGuide, opensInFileManager } = await import(
+  './navigate.js'
+);
 
 beforeEach(() => {
   uiState.tool = 'media';
@@ -14,6 +16,21 @@ beforeEach(() => {
   post.mockClear();
   caseState.current = { id: 'c1', name: 'Case', entities: [], links: [], folders: [] };
   vi.stubGlobal('window', { open: vi.fn() });
+});
+
+describe('openGuide', () => {
+  it('lands on the section written about the tab the mark was pressed from', () => {
+    openGuide('satellite');
+    expect(uiState.tool).toBe('guide');
+    expect(uiState.guideSection).toBe('map');
+  });
+
+  it('opens at the top for a tool no section covers', () => {
+    // Settings is app plumbing rather than a stage, so nothing is written about it;
+    // somebody pressing there has a general question
+    openGuide('settings');
+    expect(uiState.guideSection).toBe('start');
+  });
 });
 
 describe('openEntity', () => {

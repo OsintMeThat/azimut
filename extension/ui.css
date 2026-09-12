@@ -9,6 +9,7 @@
   --accent-text: #141414;
   --border: #333;
   --ok: #58b368;
+  --warn: #d9a441;
   --error: #e5484d;
 }
 
@@ -71,6 +72,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 
 .status { padding: 7px 9px; border-radius: 6px; background: var(--bg-2); border: 1px solid var(--border); }
 .status.ok { border-color: var(--ok); }
+.status.warn { border-color: var(--warn); }
 .status.error { border-color: var(--error); }
 
 footer {

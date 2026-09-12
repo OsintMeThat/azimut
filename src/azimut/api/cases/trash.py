@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 
 from ...engine import trash as trash_engine
 from ...workspace import CaseError
+from .. import events
 from .common import get_case
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
@@ -42,7 +43,13 @@ def restore_trash(case_id: str, group_id: str) -> dict[str, Any]:
     """
     case = get_case(case_id)
     try:
-        return trash_engine.restore(case, group_id)
+        restored = trash_engine.restore(case, group_id)
+        # Whatever came back may be drawn elsewhere — the other app tab, a map
+        # panel over another site. Nudged without asking what was in the group:
+        # a restore is one deliberate press, and the answer costs a re-read of a
+        # compact index (`api/events.py`).
+        events.publish({"type": "saved", "case_id": case.id})
+        return restored
     except CaseError as exc:
         message = str(exc)
         status = 404 if "not found" in message else 409

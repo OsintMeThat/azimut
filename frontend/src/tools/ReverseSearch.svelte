@@ -4,6 +4,11 @@
   // preps the image (clipboard for paste engines, a saved file for drag ones)
   // and each button is a plain link to the engine's page.
   //
+  // With the capture extension installed and the switch in Settings on, a button
+  // instead opens the engine with the image already in its uploader, and the
+  // engine searches. That is a press of the same button, and the clipboard road
+  // is still what every refusal falls back to.
+  //
   // Pick a case photo, or scrub a case video to a frame. Adjustments
   // (brightness, contrast, …) preview live and are baked into the exported
   // image via a same-origin canvas — nothing leaves the machine until an
@@ -11,8 +16,9 @@
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { matchesTerms } from '../lib/folderBrowse.js';
-  import { caseState, uiState, toast } from '../lib/state.svelte.js';
-  import { UPLOAD_PAGES } from '../lib/reverseSearch.js';
+  import { caseState, prefs, uiState, toast } from '../lib/state.svelte.js';
+  import { extensionVersion, handOffReverse } from '../lib/extBridge.js';
+  import { MAX_HANDOFF_BYTES, UPLOAD_PAGES } from '../lib/reverseSearch.js';
   import Modal from '../components/Modal.svelte';
   import Icon from '../components/Icon.svelte';
   import SearchInput from '../components/SearchInput.svelte';
@@ -20,6 +26,10 @@
 
   const PASTE = UPLOAD_PAGES.filter((e) => e.paste);
   const DRAG = UPLOAD_PAGES.filter((e) => !e.paste);
+  // The marker the extension stamps on <html> at document_start. Read once:
+  // installing it with the app already open needs a tab reload either way, and
+  // Settings is where that is said.
+  const extInstalled = extensionVersion();
   const MEDIA_FILTERS = [
     { id: 'all', label: 'All' },
     { id: 'image', label: 'Images' },
@@ -71,6 +81,15 @@
   const srcOf = (item) => fileUrl(caseState.current.id, item.path);
   const nameOf = (item) => (item.label || item.path).replace(/^media\//, '');
   const frameLabel = $derived(selected?.kind === 'video' ? 'frame' : 'image');
+  const downloadName = () =>
+    `reverse-${nameOf(selected).replace(/^.*\//, '').replace(/\.[^.]+$/, '')}.png`;
+
+  // Which engines this press can be handed to, and which are left on the two
+  // gestures. An engine the extension cannot fill keeps its old group, so the
+  // headings never promise more than the buttons under them do.
+  const filled = $derived(prefs.reversePrefill && extInstalled ? UPLOAD_PAGES.filter((e) => e.fill) : []);
+  const pasteLeft = $derived(PASTE.filter((e) => !filled.includes(e)));
+  const dragLeft = $derived(DRAG.filter((e) => !filled.includes(e)));
 
   // -- picker -----------------------------------------------------------------
   async function openPicker() {
@@ -192,28 +211,104 @@
   }
 
   // -- hand-off (buttons are real links, so nothing is popup-blocked) ---------
-  async function copySelection() {
+  //
+  // Which road a press takes is decided **before** anything is awaited: the
+  // button is a real link, and a preventDefault that comes back after a promise
+  // comes back too late to stop it.
+
+  /** Put the PNG on the clipboard. `note` is the toast when it lands; a refusal
+   *  is always reported, since both roads lean on the clipboard. */
+  async function copyPng(pending, note) {
     try {
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob() })]);
-      toast(`Copied the ${frameLabel}. Paste it in the tab with Ctrl+V`, 'ok', 4500);
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pending })]);
+      if (note) toast(note, 'ok', 4500);
+      return true;
     } catch (e) {
       toast(e.message || 'Could not copy the image', 'warn');
+      return false;
     }
+  }
+
+  function savePng(blob, note) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = downloadName();
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(note, 'ok', 4500);
+  }
+
+  async function copySelection() {
+    await copyPng(pngBlob(), `Copied the ${frameLabel}. Paste it in the tab with Ctrl+V`);
   }
 
   async function saveSelection() {
     try {
-      const blob = await pngBlob();
-      const base = nameOf(selected).replace(/^.*\//, '').replace(/\.[^.]+$/, '');
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `reverse-${base}.png`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-      toast(`Saved the ${frameLabel}. Drag it into the tab`, 'ok', 4500);
+      savePng(await pngBlob(), `Saved the ${frameLabel}. Drag it into the tab`);
     } catch (e) {
       toast(e.message || 'Could not save the image', 'warn');
     }
+  }
+
+  /** Base64 of a blob: a message carries no blob, so the bytes cross as a string
+   *  and the extension rebuilds the file inside the engine's page. */
+  async function base64(blob) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    const CHUNK = 0x8000; // fromCharCode takes an argument list: chunk it or blow the stack
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
+  }
+
+  /**
+   * Press an engine the extension can fill.
+   *
+   * The link was stopped, so the tab is the extension's to open and every
+   * refusal has to open it here instead. The image goes on the clipboard first,
+   * while this tab still has focus: it is what the extension's own notice
+   * promises if the engine's page has moved on, and the encode is shared with
+   * the hand-off rather than run a second time.
+   */
+  async function fillEngine(engine) {
+    let blob;
+    const pending = pngBlob();
+    copyPng(pending);
+    try {
+      blob = await pending;
+    } catch (e) {
+      toast(e.message || 'Could not read the image', 'warn');
+      return;
+    }
+    if (blob.size <= MAX_HANDOFF_BYTES) {
+      try {
+        await handOffReverse({
+          url: engine.url,
+          image: { name: downloadName(), type: 'image/png', data: await base64(blob) },
+        });
+        toast(`${engine.label} is opening with the ${frameLabel}.`, 'info', 4200);
+        return;
+      } catch {
+        // Absent, switched off mid-press, not permitted on that site, silent:
+        // one answer, one fallback. Nothing to explain that the toast below
+        // does not say by doing the old thing.
+      }
+    }
+    window.open(engine.url, '_blank', 'noopener,noreferrer');
+    if (engine.paste) toast(`Opened ${engine.label}. Paste the ${frameLabel} with Ctrl+V`, 'info', 4500);
+    else savePng(blob, `Opened ${engine.label}. Drag the saved ${frameLabel} in`);
+  }
+
+  /** The engine buttons' one handler. */
+  function pressEngine(event, engine) {
+    if (!filled.includes(engine)) {
+      if (engine.paste) copySelection();
+      else saveSelection();
+      return;
+    }
+    event.preventDefault();
+    fillEngine(engine);
   }
 
   function openInInspect() {
@@ -232,7 +327,13 @@
 <div class="tool">
   <div class="tool-header">
     <h2>Reverse Search</h2>
-    {#if selected}<span class="sub">Copy or save the {frameLabel}, then hand it to an engine</span>{/if}
+    {#if selected}
+      <span class="sub">
+        {filled.length
+          ? `Send the ${frameLabel} to an engine`
+          : `Copy or save the ${frameLabel}, then hand it to an engine`}
+      </span>
+    {/if}
   </div>
 
   <div class="tool-body">
@@ -318,26 +419,60 @@
           </div>
 
           <div class="engines">
-            <div class="eg-group">
-              <span class="eg-head">Copy, then paste (Ctrl+V) in the tab</span>
-              <div class="eg-list">
-                {#each PASTE as e (e.id)}
-                  <a href={e.url} target="_blank" rel="noreferrer" class="btn engine-btn" onclick={copySelection}>
-                    <Icon name="copy" size={14} /> {e.label}
-                  </a>
-                {/each}
+            {#if filled.length}
+              <div class="eg-group">
+                <span class="eg-head">Opens with the {frameLabel} in it</span>
+                <div class="eg-list">
+                  {#each filled as e (e.id)}
+                    <a
+                      href={e.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      class="btn engine-btn"
+                      onclick={(event) => pressEngine(event, e)}
+                    >
+                      <Icon name="search" size={14} /> {e.label}
+                    </a>
+                  {/each}
+                </div>
               </div>
-            </div>
-            <div class="eg-group">
-              <span class="eg-head">Save, then drag the file into the tab</span>
-              <div class="eg-list">
-                {#each DRAG as e (e.id)}
-                  <a href={e.url} target="_blank" rel="noreferrer" class="btn engine-btn" onclick={saveSelection}>
-                    <Icon name="download" size={14} /> {e.label}
-                  </a>
-                {/each}
+            {/if}
+            {#if pasteLeft.length}
+              <div class="eg-group">
+                <span class="eg-head">Copy, then paste (Ctrl+V) in the tab</span>
+                <div class="eg-list">
+                  {#each pasteLeft as e (e.id)}
+                    <a
+                      href={e.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      class="btn engine-btn"
+                      onclick={(event) => pressEngine(event, e)}
+                    >
+                      <Icon name="copy" size={14} /> {e.label}
+                    </a>
+                  {/each}
+                </div>
               </div>
-            </div>
+            {/if}
+            {#if dragLeft.length}
+              <div class="eg-group">
+                <span class="eg-head">Save, then drag the file into the tab</span>
+                <div class="eg-list">
+                  {#each dragLeft as e (e.id)}
+                    <a
+                      href={e.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      class="btn engine-btn"
+                      onclick={(event) => pressEngine(event, e)}
+                    >
+                      <Icon name="download" size={14} /> {e.label}
+                    </a>
+                  {/each}
+                </div>
+              </div>
+            {/if}
           </div>
 
           {#if selected.kind === 'video'}

@@ -21,6 +21,7 @@ from .. import __version__, config
 from ..engine import (
     diagnostics,
     exportdir,
+    extinstall,
     ffmpeg,
     google_tiles,
     reveal,
@@ -30,7 +31,6 @@ from ..engine import (
     updates,
     workspacemove,
 )
-from .ingest import bundled_extension_version
 from .templates import MAX_PER_KIND as MAX_TEMPLATES_PER_KIND
 
 # A backup carries the signature logo as base64: 4 characters per 3 bytes, plus
@@ -101,6 +101,7 @@ class PrefsIn(BaseModel):
     post_mention: str | None = None  # handle a new post draft is addressed to
     post_target: str | None = None  # social composer a new post draft starts with
     post_prefill: bool | None = None  # let the extension fill that composer
+    reverse_prefill: bool | None = None  # let it open an engine with the image
     signature_handle: str | None = None  # account handle stamped on opted-in proofs
     # app self-update pop-up (engine/updates.py) — check on load, and the tag
     # the user muted with "don't show again"
@@ -129,6 +130,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "post_mention": settings.get("post_mention", DEFAULT_POST_MENTION),
         "post_target": settings.get("post_target", DEFAULT_POST_TARGET),
         "post_prefill": bool(settings.get("post_prefill", True)),
+        "reverse_prefill": bool(settings.get("reverse_prefill", True)),
         "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
         "update_check_on_start": bool(settings.get("update_check_on_start", True)),
         "update_dismissed_version": settings.get("update_dismissed_version", ""),
@@ -168,7 +170,7 @@ def get_settings() -> dict[str, Any]:
         "workspace_root": str(config.workspace_root()),
         # the capture-extension version this build ships — Settings compares it
         # to the installed one (lib/extBridge.js) to flag a stale extension
-        "extension_version": bundled_extension_version(),
+        "extension_version": extinstall.bundled_version(),
         # capture-extension pairing token (api/ingest.py) — reported only if it
         # already exists; loading Settings no longer mints a credential (POST
         # /settings/ingest-token does, on the user's explicit reveal/copy)
@@ -260,6 +262,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["post_target"] = body.post_target
     if body.post_prefill is not None:
         settings["post_prefill"] = bool(body.post_prefill)
+    if body.reverse_prefill is not None:
+        settings["reverse_prefill"] = bool(body.reverse_prefill)
     if body.signature_handle is not None:
         settings["signature_handle"] = body.signature_handle.strip()[:64]
     if body.update_check_on_start is not None:
@@ -328,6 +332,56 @@ def reveal_workspace() -> dict[str, str]:
     except reveal.RevealError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"path": str(root)}
+
+
+# ---- the capture extension's own folder --------------------------------------
+#
+# Deliberately here and not under /api/ingest/: that prefix is the token-gated
+# island whose CORS is opened to *any* extension origin (ingest.install_cors),
+# and a route that writes to disk has no business reachable from one. These are
+# same-origin app routes, behind the Host/Origin guard like the rest of the API.
+
+
+@router.get("/settings/extension")
+def extension_state() -> dict[str, Any]:
+    """What this build ships, what the app's own extension folder holds, and
+    where that folder is. Reads disk, never the network."""
+    return extinstall.state()
+
+
+@router.post("/settings/extension/install")
+def extension_install() -> dict[str, Any]:
+    """Write the shipped extension into the folder the app owns.
+
+    Takes no parameters at all — no path, no payload, nothing off the request.
+    The only bytes it can write are the ones this build already ships, into one
+    fixed place, so the worst an unexpected caller achieves is re-extracting the
+    extension they could have downloaded anyway.
+    """
+    try:
+        return extinstall.install()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=409, detail=f"cannot write the extension folder: {exc}") from exc
+
+
+@router.post("/settings/extension/reveal")
+def reveal_extension() -> dict[str, str]:
+    """Open the extension folder in the system file manager.
+
+    Secondary to copying the path: the folder is under ``.azimut/``, and pasting
+    a path into the browser's "Load unpacked" picker works on all three
+    platforms where a file manager needs a graphical session to open into.
+    """
+    folder = config.extension_dir()
+    if not folder.is_dir():
+        raise HTTPException(status_code=404, detail="the extension is not installed yet")
+    try:
+        reveal.reveal(folder)
+    except reveal.RevealError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"path": str(folder)}
 
 
 class FolderIn(BaseModel):
@@ -451,8 +505,11 @@ def export_settings() -> Response:
 
     Deliberately absent: export destinations (absolute paths chosen on this
     machine), ``cookies.txt`` (a live login session), the cases themselves
-    (portable folders already), and a signature that isn't a valid PNG within
-    the size gate.
+    (portable folders already), the extension folder the app owns
+    (``config.extension_dir()`` — those are this build's own bundled bytes, and
+    the new machine's Install button writes its own copy, which the browser has
+    to be pointed at there anyway), and a signature that isn't a valid PNG
+    within the size gate.
     """
     portable_settings = config.load_settings()
     portable_settings.pop("export_dirs", None)
@@ -573,6 +630,7 @@ class ImportedSettings(BaseModel):
     post_mention: str = Field(default=DEFAULT_POST_MENTION, max_length=64)
     post_target: str = DEFAULT_POST_TARGET
     post_prefill: bool = True
+    reverse_prefill: bool = True
     signature_handle: str = Field(default=DEFAULT_SIGNATURE_HANDLE, max_length=64)
     ingest_token: str = Field(default="", max_length=128, pattern=r"^[A-Za-z0-9_-]*$")
     update_check_on_start: bool = True
