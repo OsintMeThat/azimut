@@ -45,6 +45,18 @@ jobs:
         # alone is half of it. That range is split rather than trusted, since a
         # slow hour on the 30-minute timeout is a red run for no reason.
         #
+        # These ranges look unbalanced by CPU seconds, and re-cutting them by that
+        # number made the run worse rather than better: a split that put
+        # `test_media_api.py` and `test_links_api.py` in one piece — even weight on
+        # paper — failed the shard, because those two are where the suite contends
+        # on locks and threads, and contention does not add up the way CPU seconds
+        # do. `test_concurrent_sidecar_merges_do_not_drop_each_other` alone went to
+        # two minutes there and the thread joins under it ran out. So the weight to
+        # balance is Windows wall clock under `-n auto`, measured on Windows; a
+        # Linux profile is not a stand-in for it, and cheap parallelism is not worth
+        # a red run. Anyone re-cutting these should keep the lock-heavy files apart
+        # and prove it on the box itself.
+        #
         # The ranges have to leave no gap: one stopping at test_sc* beside one
         # starting at test_se* runs everything except the test_sd* somebody adds
         # next year, and says nothing. `tests/test_ci_shards.py` reads them back
