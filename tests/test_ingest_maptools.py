@@ -203,12 +203,23 @@ def test_sky_answers_without_the_network(client, monkeypatch):
     # local, and a test that lets it reach the network would not prove that
     import socket
 
+    # Both of these happen before the socket goes away, and the order is the
+    # whole point. `_headers` mints the token over the client, and the request
+    # that does it is the first one this client makes — which is where the test
+    # loop builds the socket pair it wakes itself with. Refuse that and the loop
+    # has no wakeup channel: the call never returns, on a runner where nothing
+    # times out it hangs the shard, and the Windows box is the one that shows it
+    # because its proactor loop builds that pair on first use where the selector
+    # loop builds it up front.
+    headers = _headers(client)
+    client.get("/api/ingest/sky", params={"lat": 0, "lon": 0}, headers=headers)
+
     def refuse(*args, **kwargs):
         raise AssertionError("the sky route must not touch the network")
 
     monkeypatch.setattr(socket, "socket", refuse)
     day = client.get(
-        "/api/ingest/sky", params={"lat": 48.8584, "lon": 2.2945}, headers=_headers(client)
+        "/api/ingest/sky", params={"lat": 48.8584, "lon": 2.2945}, headers=headers
     ).json()
     assert day["curve"]["clock"]
     assert len(day["curve"]["sun_altitude"]) == len(day["curve"]["clock"])
