@@ -78,10 +78,19 @@ def _let_the_worker_finish() -> None:
     still leave the worker mid-write when its temp directory goes — which on
     POSIX surfaces as a "directory not empty" teardown error and on Windows as a
     locked file. This is the same orderly-shutdown wait the app itself performs.
+
+    The wait is generous because running out of it is silent: `wait_until_idle`
+    reports the timeout in its return value and nothing here can act on it, so
+    the only symptom is the rmtree that follows, failing in whichever test owned
+    the directory. Ten seconds was enough on Linux and not on Windows, where the
+    concurrent-download tests queue eight items' worth of enrichment behind
+    `synchronous = FULL`. An idle worker returns immediately, so the ceiling
+    costs nothing in the normal case; it only has to be above the slowest
+    runner.
     """
     from azimut.engine import workqueue
 
-    workqueue.wait_until_idle(timeout=10)
+    workqueue.wait_until_idle(timeout=60)
 
 
 def _settle_before_the_workspace_goes() -> None:

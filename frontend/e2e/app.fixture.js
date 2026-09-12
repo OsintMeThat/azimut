@@ -991,6 +991,17 @@ export async function installAppFixture(page, options = {}) {
       return json(route, { name: payload.name, path: made });
     }
     if (path === '/api/settings/scrapers') return json(route, { scrapers: [] });
+    // Read on mount by `checkForUpdatesOnStart`, before any tool and whatever the
+    // update switch says, because it touches disk rather than the network. The
+    // fixture has no extension folder, which is the state a fresh install is in.
+    if (path === '/api/settings/extension') {
+      return json(route, {
+        path: '/tmp/fixture/extension',
+        bundled: { version: '0.0.0-fixture', payload: 'fixture-payload' },
+        folder: null,
+        staged: false,
+      });
+    }
     if (path === '/api/settings/ffmpeg') {
       return json(route, { available: true, version: 'fixture', source: 'bundled', path: '/tmp/ffmpeg' });
     }
