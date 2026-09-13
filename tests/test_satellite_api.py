@@ -573,6 +573,31 @@ def test_tile_proxy_reuses_one_pooled_client(client, monkeypatch):
     assert calls["n"] == 3  # three tiles, all served by the one pooled client
 
 
+def test_tile_proxy_climbs_past_a_parent_that_is_not_an_image(client, monkeypatch):
+    """Overzoom fills a coverage gap by magnifying a parent tile. A provider can
+    answer 200 with something that is not an image, and that parent is no use —
+    the climb goes on to the next level rather than failing the map with a 500."""
+    import httpx
+
+    from azimut.api import satellite
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/15/" in request.url.path:  # the gap that starts the climb
+            return httpx.Response(404)
+        if "/14/" in request.url.path:  # 200, and not an image
+            return httpx.Response(
+                200, content=b"<html>upstream hiccup</html>", headers={"content-type": "image/png"}
+            )
+        return httpx.Response(200, content=_png_bytes(), headers={"content-type": "image/png"})
+
+    monkeypatch.setattr(
+        satellite, "_tile_client", httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    r = client.get("/api/tiles/esri-world-imagery/15/16597/11278")
+    assert r.status_code == 200
+    assert r.headers["X-Azimut-Overzoom"] == "2"  # z14 skipped, z13 magnified
+
+
 def test_tile_proxy_benches_google_on_a_persistent_403(client, monkeypatch):
     """A 403 that survives the session re-mint names the key (EEA policy,
     revoked key) — the basemap must stop being offered, with Google's own

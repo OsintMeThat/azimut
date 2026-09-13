@@ -8,6 +8,7 @@ of those walls.
 """
 
 import io
+import os
 import struct
 import zlib
 
@@ -427,6 +428,30 @@ def test_the_extension_reads_back_the_attachments_a_thread_carries(client):
     assert r.content == _png_bytes()
     # the same wall as every other ingest route
     assert client.get("/api/ingest/file", params={"case_id": cid, "path": item["path"]}).status_code == 401
+
+
+def test_a_file_past_the_ceiling_is_refused_with_the_number_in_it(client, monkeypatch):
+    """The bytes cross the extension as base64 in a message, so there is a size
+    past which handing over is not worth the memory. The extension prints this
+    sentence rather than keeping a second copy of the number, so it states it."""
+    from azimut.api import ingest
+
+    token = _token(client)
+    cid = client.post("/api/cases", json={"name": "Heavy"}).json()["id"]
+    # noise, so the PNG on disk is about as big as the pixels it carries
+    noise = Image.frombytes("RGB", (700, 700), os.urandom(700 * 700 * 3))
+    buf = io.BytesIO()
+    noise.save(buf, format="PNG")
+    item = _upload(client, cid, "clip.png", buf.getvalue())
+    monkeypatch.setattr(ingest, "MAX_HANDOFF_BYTES", 1024 * 1024)
+
+    r = client.get(
+        "/api/ingest/file",
+        params={"case_id": cid, "path": item["path"]},
+        headers={"X-Azimut-Token": token},
+    )
+    assert r.status_code == 413
+    assert r.json()["detail"] == "a handed-over file must be under 1 MB"
 
 
 def test_reading_back_reaches_attachments_and_nothing_else(client):
