@@ -491,7 +491,14 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
         parent = _serve_tile(provider, z - up, x >> up, y >> up)
         if parent is None or isinstance(parent, Response):
             continue
-        image = Image.open(io.BytesIO(parent[0])).convert("RGB")
+        try:
+            image = Image.open(io.BytesIO(parent[0])).convert("RGB")
+        except OSError:
+            # A provider can answer 200 with something that is not an image — an
+            # error document, an empty body. That parent is no use, and the next
+            # level up may well be: climbing on is the same answer as a missing
+            # tile, where a 500 would break the map over a gap it is here to fill.
+            continue
         sub = image.width >> up
         if sub < 1:
             break

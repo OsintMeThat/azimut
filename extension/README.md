@@ -157,7 +157,7 @@ over a map must never end up inside the evidence.
 and ordered by the app rather than by this tab: what crosses is one page of a case,
 never the case. A video plays in the window, with its own controls.
 
-Two limits worth knowing. A file has to be **under 24 MB** to be handed over, which
+Two limits worth knowing. A file has to be **under 48 MB** to be handed over, which
 is the same ceiling a published thread's attachments answer to. And a video is the
 one thing here a site can refuse: an image is decoded and painted on a canvas,
 which asks the page's content policy nothing, while a video needs a URL and some

@@ -733,10 +733,12 @@ def mark_grid(body: GridMarksIn) -> dict[str, Any]:
 #: a settings file is not something the extension has any business asking for.
 HANDOFF_DIRS = ("media", "proofs")
 
-#: Ceiling for one handed-over file. It travels to the composer as a data URL in a
-#: message, so this is a real limit rather than a policy — and a 40 MB clip refused
-#: here is a clip the analyst attaches by hand, which is what they did before.
-MAX_HANDOFF_BYTES = 24 * 1024 * 1024
+#: Ceiling for one handed-over file. It crosses the extension's worker/page
+#: boundary as base64 in a message, so this is a real limit rather than a policy:
+#: 48 MB of file is ~64 MB of string, held on both sides while the page rebuilds
+#: the file. A clip refused here is a clip the analyst attaches by hand, which is
+#: what they did before.
+MAX_HANDOFF_BYTES = 48 * 1024 * 1024
 
 
 @router.get("/file", dependencies=[Depends(require_token)])

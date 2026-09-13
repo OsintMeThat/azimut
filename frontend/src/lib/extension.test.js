@@ -269,7 +269,7 @@ describe('handle: map-file (a picture for a reference window)', () => {
     // through rather than a second copy of the number kept over here
     for (const [status, body, message] of [
       [401, '', /pairing token rejected/],
-      [413, '{"detail":"a handed-over file must be under 24 MB"}', /under 24 MB/],
+      [413, '{"detail":"a handed-over file must be under 48 MB"}', /under 48 MB/],
       [404, 'not json at all', /refused that file \(404\)/],
     ]) {
       const fetchImpl = vi.fn(async () => ({ ok: false, status, text: async () => body }));
