@@ -9,10 +9,10 @@
  *    is painted in the app's own tokens and drawn with the app's own icons
  *    (`maptheme.js`), because switching between the app's map and a browser tab
  *    should not feel like switching tools.
- * 2. **The view engine.** Where the camera is, from the app's parse of the URL,
- *    carried between two URLs by the gesture in flight, with the scale measured
- *    off the map itself and the prediction error watched. This is what turns
- *    geometry on and off, and it says why in words when it turns it off.
+ * 2. **The view engine.** Where the camera is and how big the map is drawn,
+ *    from the app's parse of the URL, carried between two URLs by the gesture
+ *    in flight. A gesture moves the drawing and never re-measures it. This is
+ *    what turns geometry on and off, and it says why in words when it does.
  * 3. **The tools**, which are `maptools.js` and know nothing about any of the
  *    above — plus the reference windows, which `mapref.js` paints: case
  *    images and videos held over the map, chrome rather than drawing, and the
@@ -34,8 +34,9 @@
  * that origin is google.com. Every call goes through the worker's `map-api`
  * relay, which speaks as the extension over the routes it is allowed.
  *
- * Injected after mapmath.js, maptheme.js, maptools.js and mapdraw.js. Injecting
- * it a second time closes the panel, which is what the toolbar button does.
+ * Injected after mapmath.js, maptheme.js, maptools.js, mapdraw.js, mapref.js and
+ * maplink.js. Injecting it a second time closes the panel, which is what the
+ * toolbar button does.
  */
 
 (() => {
@@ -51,8 +52,9 @@
   const T = window.AzimutMapTools;
   const D = window.AzimutMapDraw;
   const R = window.AzimutMapRefs;
+  const K = window.AzimutMapLink;
   const THEME = window.AzimutMapTheme;
-  if (!M || !T || !D || !R || !THEME) {
+  if (!M || !T || !D || !R || !K || !THEME) {
     // The files before this one are injected in the same call and share a scope
     // on both browsers. If that ever stops being true the panel would simply
     // never appear, which is the hardest kind of bug to be told about.
@@ -65,9 +67,6 @@
   /** How often the address bar is re-read. These maps rewrite it themselves
    *  without a navigation event, so there is nothing to subscribe to. */
   const URL_POLL_MS = 300;
-  /** How still the pointer must be before it lifts for the pan to count as a
-   *  measurement rather than a fling. */
-  const FLING_PAUSE_MS = 120;
   /** How long after a gesture the address bar is given to catch up, and how
    *  often it is re-read while waiting. */
   const SETTLE_MS = 200;
@@ -75,6 +74,11 @@
   /** Waiting is not forever: a site that never rewrites its URL would leave the
    *  drawing dimmed for good. */
   const SETTLE_GIVE_UP_MS = 2500;
+  /** How long the address bar has to stay the same before the map counts as
+   *  landed. Earth writes its URL several times during one zoom, and ending the
+   *  wait on the first of them drew the marks at a scale the map was only
+   *  passing through. */
+  const SETTLE_QUIET_MS = 400;
   /**
    * How often the open sweep is re-read from the case, when nothing has said to.
    *
@@ -125,8 +129,7 @@
 
   const state = {
     parsed: null, // the app's reading of the current URL
-    view: null, // { lat, lon, zoom, bearing, projection } — parse, plus the gesture in flight
-    calibration: M.createCalibration(),
+    view: null, // { lat, lon, zoom, bearing, projection }; zoom is null until the URL states a scale
     // Where this site draws the coordinate the address bar names, as an offset
     // from the middle of the window. Measured off a zoom, remembered per site,
     // and (0, 0) until one has been made.
@@ -135,12 +138,18 @@
     caseId: "",
     cases: [],
     tool: null, // which tool the panel is showing, or none
+    // `{ field, cursor }` while a date field has its calendar open. One at a
+    // time, and never remembered: it is a gesture, not a setting.
+    cal: null,
     units: "metric",
     note: "", // the last thing that went wrong, shown in the panel
     pinTitle: "",
     gridTitle: "",
     grids: null,
     collapsed: false,
+    // Following the other maps' camera (`linking` below). `asked` is the view
+    // this map was last sent to, kept to say how close it came.
+    link: { on: false, peers: 0, asked: null },
   };
 
   const tools = {
@@ -149,8 +158,9 @@
     sky: T.createSky(),
     grid: T.createGridTool(),
     refs: T.createRefs(),
+    fires: T.createFires(),
   };
-  const ORDER = ["measure", "pins", "sky", "grid", "refs"];
+  const ORDER = ["measure", "pins", "sky", "grid", "refs", "fires"];
   const current = () => (state.tool ? tools[state.tool] : null);
 
   /**
@@ -170,63 +180,30 @@
     };
   }
 
-  /**
-   * Whether geometry is sound right now, and if not, why (maptools.js).
-   *
-   * The residual handed over is the *run* of bad ones, not the last one. These
-   * maps glide on after the finger leaves, so one pan in three lands somewhere
-   * the pointer never went and reads as a large error that is really just
-   * inertia. A projection that has actually changed misses every time.
-   */
-  const verdict = () =>
-    T.verdict(state.parsed, drift >= DRIFT_LIMIT ? modelError : null, !!state.calibration.scale);
+  /** Whether geometry is sound right now, and if not, why (maptools.js). */
+  const verdict = () => T.verdict(state.parsed);
 
   // --- where a coordinate lands, and what a pixel is -------------------------
 
   /**
-   * The shape from the table, the size from the address bar, and the map itself
-   * only where neither says.
+   * The shape from the site table, the size from the address bar, and nothing
+   * from the gesture.
    *
-   * These are different questions with different best answers. *Which*
-   * flattening a site draws in is a fact about the site, and the app's table
-   * (`engine/mapsites.py`) knows it — measuring cannot tell spherical from
-   * elliptical Mercator anyway, they differ by under a percent. *How big* it is
-   * drawn is a number the site itself writes, in one of three ways, and every
-   * one of them was checked against a browser before being believed: a tile
-   * level, a viewport height in metres, a span in degrees (`scale_source`).
+   * *Which* flattening a site draws in is a fact about the site, and the app's
+   * table (`engine/mapsites.py`) knows it. *How big* it is drawn is a number
+   * the site itself writes — a tile level, a viewport height in metres, a span
+   * in degrees, Earth's camera distance (`scale_source`) — and every one was
+   * checked against a browser before being believed.
    *
-   * This used to prefer a scale measured by panning, on the grounds that the
-   * address bar rounds its zoom. That was the wrong trade, and it is what made
-   * the drawing wrong: a drag loses a few pixels to the site's own threshold
-   * and gains a few to its glide, and a pan of 40 px measured through a URL is
-   * a scale off by a tenth — where the stated level is exact to a hundredth of
-   * a zoom. So the URL wins wherever it speaks, and the measurement is kept for
-   * the one view that states nothing at all: Earth, a free camera with no
-   * flattening to name.
+   * This used to fall back on a scale measured by panning where the URL said
+   * none. A drag loses a few pixels to the site's own threshold and gains some
+   * to its glide, the first reading was taken on trust, and every later one
+   * that disagreed was thrown away as a fling: on Earth that drew the marks
+   * four times too close together, for good. A view whose URL states no scale
+   * now draws nothing and says so.
    */
-  const scale = () => (state.calibration.residual == null || state.calibration.residual <= T.RESIDUAL_LIMIT
-    ? state.calibration.scale
-    : null);
-
-  /** The flattenings whose easting is Mercator's, and so whose zoom a measured
-   *  `pxPerLon` names exactly. Equal Earth's is not, and would swallow the very
-   *  difference `identify` uses to recognise it. */
-  const MERCATORS = new Set(["webmercator", "ellipsoidal"]);
-
-  /** The view to project through: the parsed one, with its zoom replaced by a
-   *  measured one only where the URL stated no scale to begin with. */
-  function projected() {
-    if (state.parsed?.scale_source) return state.view;
-    const s = scale();
-    if (!s || !MERCATORS.has(state.view?.projection)) return state.view;
-    const zoom = M.zoomFromScale(s.pxPerLon);
-    return zoom == null ? state.view : { ...state.view, zoom };
-  }
-
   function toScreen(point) {
-    return state.parsed?.projection
-      ? M.toScreen(point, projected(), area())
-      : M.toScreenMeasured(point, state.view, area(), scale());
+    return M.toScreen(point, state.view, area());
   }
 
   /**
@@ -243,9 +220,7 @@
     const point = gesture
       ? { x: (at.x - gesture.dx) / gesture.k, y: (at.y - gesture.dy) / gesture.k }
       : at;
-    return state.parsed?.projection
-      ? M.toLatLon(point, projected(), area())
-      : M.toLatLonMeasured(point, state.view, area(), scale());
+    return M.toLatLon(point, state.view, area());
   }
 
   /** Metres across the shorter side of the window — what the sky arc is drawn
@@ -275,6 +250,14 @@
   });
   const root = host.attachShadow({ mode: "open" });
   document.documentElement.appendChild(host);
+  // Ground first, so it is under the drawing: FIRMS is a picture of what was
+  // burning, and a measured path over it has to stay legible.
+  const ground = document.createElement("div");
+  Object.assign(ground.style, { position: "fixed", inset: "0", pointerEvents: "none", zIndex: "0" });
+  const groundImg = document.createElement("img");
+  Object.assign(groundImg.style, { position: "absolute", display: "none" });
+  ground.appendChild(groundImg);
+  root.appendChild(ground);
   const layer = D.createDrawLayer(root);
 
   let frame = 0;
@@ -317,10 +300,16 @@
   /** Move the canvas the way the map moved. Scaling is about the page origin,
    *  which is where the canvas's own pixels are measured from. */
   function applyGesture() {
-    layer.canvas.style.transform = gesture
+    const moved = gesture
       ? `translate(${gesture.dx}px, ${gesture.dy}px) scale(${gesture.k})`
       : "";
+    layer.canvas.style.transform = moved;
     layer.canvas.style.transformOrigin = "0 0";
+    // The fire picture is ground, so it rides the same transform: it was drawn
+    // for a rectangle of the world, and that rectangle moved with everything
+    // else. Re-asking on every frame of a pan would be a request per frame.
+    ground.style.transform = moved;
+    ground.style.transformOrigin = "0 0";
   }
 
   function clearGesture() {
@@ -333,22 +322,28 @@
    * The map is still moving, and the drawing no longer knows where it is.
    *
    * These maps glide on after the finger leaves and ease into a zoom over a few
-   * hundred milliseconds, and they say nothing about it: the address bar is
-   * rewritten once, at the end. A drag can be followed exactly, because the map
-   * goes where the pointer goes — the glide afterwards and the zoom cannot.
+   * hundred milliseconds. A drag can be followed exactly, because the map goes
+   * where the pointer goes — the glide afterwards and the zoom cannot.
    *
    * So the drawing is dimmed from the moment a gesture ends until the address
-   * bar says where the map landed. Showing a measurement over ground it is no
-   * longer on is the one thing this tool must not do, and dimming says "not
-   * right now" where freezing it in place quietly says "here".
+   * bar has said where the map landed and then stayed put for
+   * `SETTLE_QUIET_MS`. Each reading in between is drawn, dimmed, as it comes:
+   * Earth rewrites its URL several times in one zoom, and the first of those
+   * is a scale the map is only passing through.
    */
   function beginSettle() {
+    lead();
     settling = true;
+    settleMoved = 0;
     layer.canvas.style.opacity = "0.25";
     clearTimeout(settle);
     clearTimeout(giveUp);
     settle = setTimeout(function poll() {
       readUrl();
+      if (settleMoved && Date.now() - settleMoved >= SETTLE_QUIET_MS) {
+        endSettle();
+        return;
+      }
       if (settling) settle = setTimeout(poll, SETTLE_POLL_MS);
     }, SETTLE_MS);
     giveUp = setTimeout(endSettle, SETTLE_GIVE_UP_MS);
@@ -360,6 +355,7 @@
     clearTimeout(settle);
     clearTimeout(giveUp);
     layer.canvas.style.opacity = confidence();
+    leadOn();
   }
 
   /**
@@ -385,6 +381,10 @@
   function paint() {
     const tool = current();
     const say = verdict();
+    // The fire layer is not a tool being held: it stays on while something else
+    // is being measured over it, which is the whole reason to have it here.
+    placeFires();
+    refreshFires();
     if (!tool || !state.view || !say.ok) {
       layer.clear();
       return;
@@ -401,6 +401,177 @@
     layer.render(shapes, toScreen);
   }
 
+  // --- the fire layer --------------------------------------------------------
+  //
+  // Not a drawing: FIRMS answers with a picture of the ground, so what is held
+  // is the rectangle of world that picture covers and where that rectangle is
+  // on screen now. One request per settled view — the panel has no tile grid to
+  // hang tiles on, and the FIRMS allowance is counted in requests.
+
+  /** The picture on screen: `{ src, bounds }`, or null when there is none. */
+  let fireImage = null;
+  let fireAsked = ""; // the view + question it was asked for, so a still map re-asks nothing
+  let fireTimer = 0;
+  let fireSeq = 0;
+  /** How long a settled view is given before the picture is asked for. Panning
+   *  through three towns should not ask about all three. */
+  const FIRE_SETTLE_MS = 400;
+  /** The picture is asked for at the window's size, capped where the app caps
+   *  it: past this it is a bigger bill for NASA rather than a sharper answer. */
+  const FIRE_MAX_PX = 2560;
+
+  /** The ground the window can see, as a rectangle of degrees. */
+  function visibleBounds() {
+    const a = area();
+    const corners = [
+      toLatLon({ x: 0, y: 0 }),
+      toLatLon({ x: a.w, y: 0 }),
+      toLatLon({ x: 0, y: a.h }),
+      toLatLon({ x: a.w, y: a.h }),
+    ];
+    const lats = corners.map((c) => c.lat);
+    const lons = corners.map((c) => c.lon);
+    // A view straddling the antimeridian would come back as a rectangle around
+    // the wrong side of the world. It is a degenerate case for a fire layer and
+    // is skipped rather than drawn wrong.
+    if (Math.max(...lons) - Math.min(...lons) > 180) return null;
+    return {
+      south: Math.max(-85, Math.min(...lats)),
+      north: Math.min(85, Math.max(...lats)),
+      west: Math.min(...lons),
+      east: Math.max(...lons),
+    };
+  }
+
+  /** Put the picture back where its own ground is now. */
+  function placeFires() {
+    if (!fireImage || !state.view || !verdict().ok) {
+      groundImg.style.display = "none";
+      return;
+    }
+    const { south, west, north, east } = fireImage.bounds;
+    const nw = toScreen({ lat: north, lon: west });
+    const ne = toScreen({ lat: north, lon: east });
+    const sw = toScreen({ lat: south, lon: west });
+    const se = toScreen({ lat: south, lon: east });
+    const wide = Math.hypot(ne.x - nw.x, ne.y - nw.y);
+    const tall = Math.hypot(sw.x - nw.x, sw.y - nw.y);
+    // The middle of the picture is the middle of its own corners, and never the
+    // coordinate halfway between its edges: Mercator stretches northwards, so
+    // the mean of two latitudes sits south of the point halfway down the
+    // screen between them. Placed there, the picture rode low — by nothing over
+    // a town and by a tenth of the window over a continent, which is why this
+    // only showed up zoomed out. A diagonal's midpoint survives a turned
+    // compass, which the edges' would not.
+    const middle = { x: (nw.x + se.x) / 2, y: (nw.y + se.y) / 2 };
+    if (!(wide > 0) || !(tall > 0)) {
+      groundImg.style.display = "none";
+      return;
+    }
+    // Out where the site draws a globe, the picture is the thing that drifts
+    // most: it is a flat rectangle of ground laid over a curve, and it covers
+    // the whole window rather than a mark near the middle. So it dims with the
+    // drawing beside it — same 0.55, same sentence in the status line.
+    ground.style.opacity = verdict().far ? "0.55" : "";
+    Object.assign(groundImg.style, {
+      display: "block",
+      left: `${middle.x}px`,
+      top: `${middle.y}px`,
+      width: `${wide}px`,
+      height: `${tall}px`,
+      // The picture is north-up ground; the map may not be. Same sign as the
+      // drawing's own turn: a map with east up points north to the left.
+      transform: `translate(-50%, -50%) rotate(${-(state.view?.bearing || 0)}deg)`,
+    });
+  }
+
+  /** Whether this view is deeper than a detection mark still means anything at. */
+  function firesTooDeep() {
+    const zoom = state.view?.zoom;
+    return zoom != null && zoom > T.FIRE_MAX_ZOOM;
+  }
+
+  /** Ask for the picture this view needs, once it has stopped moving. */
+  function refreshFires() {
+    const asking = tools.fires.query();
+    if (!asking || !state.view || !verdict().ok || gesture) {
+      if (!asking) {
+        fireImage = null;
+        fireAsked = "";
+        placeFires();
+      }
+      return;
+    }
+    // Past the ceiling the app's own map caps its tiles at, the last picture is
+    // kept and re-placed on its own ground — which is what the app does with a
+    // z14 tile at z18. Asking again would buy a bigger smear of the same marks.
+    if (firesTooDeep()) return;
+    const bounds = visibleBounds();
+    if (!bounds) return;
+    // Round the rectangle before it becomes an identity: a map that settles one
+    // metre from where it was is the same picture.
+    const key = JSON.stringify([
+      asking,
+      Object.values(bounds).map((n) => n.toFixed(3)),
+    ]);
+    if (key === fireAsked) return;
+    fireAsked = key;
+    clearTimeout(fireTimer);
+    fireTimer = setTimeout(() => void askFires(bounds, asking), FIRE_SETTLE_MS);
+  }
+
+  /**
+   * What the fire layer can be asked, and whether a key makes it askable.
+   *
+   * The app answers from a catalogue and its own settings file, so this is not
+   * a call to NASA — nothing reaches FIRMS until the layer is on. Asked again
+   * whenever FIRMS refuses, because the app files that refusal against the key
+   * and this is how the seat hears about it.
+   */
+  async function reofferFires() {
+    try {
+      tools.fires.offer(await call("GET", "/api/ingest/firms/sensors"));
+    } catch {
+      // an older app has no such route; the seat then says it needs a key
+    }
+  }
+
+  async function askFires(bounds, asking) {
+    const mine = ++fireSeq;
+    const a = area();
+    const answer = await api.runtime.sendMessage({
+      type: "map-image",
+      path: "/api/ingest/firms",
+      query: {
+        ...bounds,
+        ...asking,
+        width: Math.min(Math.round(a.w), FIRE_MAX_PX),
+        height: Math.min(Math.round(a.h), FIRE_MAX_PX),
+      },
+    });
+    if (mine !== fireSeq) return; // the map moved on while this was in flight
+    if (!answer?.ok) {
+      fireImage = null;
+      fireAsked = ""; // it failed, so the next settle is worth another try
+      state.note = answer?.error || "the app did not answer";
+      placeFires();
+      // FIRMS answers a key it will not take with a *picture* saying so, which
+      // the app recognises and files against the key. So the panel asks again
+      // who it is: a seat that keeps offering a layer the service has already
+      // refused is a seat that asks for the same refusal every time the map
+      // stops moving.
+      await reofferFires();
+      return render();
+    }
+    fireImage = { src: answer.src, bounds };
+    groundImg.src = answer.src;
+    placeFires();
+    if (state.note) {
+      state.note = "";
+      render();
+    }
+  }
+
   /** The rectangle being dragged out, in the app's draft style. */
   function boxShape() {
     const a = toLatLon(box.from);
@@ -414,66 +585,62 @@
 
   // --- the view engine -------------------------------------------------------
   //
-  // Three inputs, in order of authority. The address bar is the truth, and the
-  // app parses it — where the camera is, and, on every site but Earth, how far
-  // out. A gesture in flight is a prediction carrying the drawing between two
-  // truths; it is replaced, never merged, the moment the URL settles. And each
-  // gesture that finishes is an experiment: a pan says whether the drawing
-  // predicted where the map would land, and a zoom says which pixel the site
-  // draws its centre at.
+  // Two inputs, in order of authority. The address bar is the truth, and the
+  // app parses it: where the camera is and how far out. A gesture in flight
+  // carries the drawing between two truths; it is replaced, never merged, the
+  // moment the URL settles. What a finished gesture may still say is where the
+  // site draws its centre, from a zoom about a held pixel — never how big the
+  // map is.
 
   /**
    * Whether `state.view.zoom` is the level the map is really at.
    *
    * A whole level is exact by definition: every one of these sites writes those
-   * without rounding. A fraction may not be — Bing's wheel moves a third of a
-   * level and it writes one decimal — and a zoom worked out from an anchor
-   * (`mapmath.js`) is exact again. Nothing is measured off a view that is not,
-   * because an error there would come out the other side unchanged.
+   * without rounding. A fraction written as a level may not be — Bing's wheel
+   * moves a third of a level and it writes one decimal — and a zoom worked out
+   * from an anchor (`mapmath.js`) is exact again. A zoom the app worked out from
+   * a size (a height in metres, a span, Earth's distance) is exact at any
+   * fraction, because the number it came from was written to the metre or
+   * finer. Nothing is measured off a view that is not exact, because an error
+   * there would come out the other side unchanged.
    */
   let zoomExact = false;
   //. What the address bar last said the zoom was, before any correction — the
   //. only way to tell a pan at this level from a zoom to another one.
   let lastStated = null;
   const wholeLevel = (zoom) => zoom != null && Math.abs(zoom - Math.round(zoom)) < 0.01;
+  const exactLevel = (parsed, zoom) =>
+    zoom != null && (parsed?.scale_source !== "zoom" || wholeLevel(zoom));
   const middleOf = (a) => ({ x: a.x + a.w / 2, y: a.y + a.h / 2 });
 
-  /** Consecutive pans that landed away from the prediction before the tools
-   *  stop drawing. One is inertia; three in a row is a different map. */
-  const DRIFT_LIMIT = 3;
-  let drift = 0;
-  /** Pixels between where the drawing said the map would land and where the
-   *  address bar says it did, last pan. Null until there was one to score. */
-  let modelError = null;
-
   let lastUrl = "";
-  let pending = null; // the pan waiting for the URL to report where it landed
   let drag = null; // the gesture in flight
-  let lastSpan = null; // the camera span the last view stated, if it stated one
-  //. A point the zoom about to happen will keep under the same pixel: the
-  //. coordinate it had before feeds `rescaleFromAnchor`, the whole view before
-  //. feeds `centreFromZoom`.
+  //. The view a zoom about to happen started from, and the pixel it will hold
+  //. still — what `centreFromZoom` solves the site's centre from.
   let zoomAnchor = null;
   //. A zoom too small to solve the frame from, kept in case the next one lands
   //. on the same pixel: notches about one point are one zoom in instalments.
   let frameChain = null;
   let settle = 0;
   let giveUp = 0;
-  let settling = false; // a gesture has ended and the map has not reported in
+  let settling = false; // a gesture has ended and the map has not settled
+  let settleMoved = 0; // when the address bar last changed while settling
 
   /**
    * How tall the map itself is drawn, in CSS pixels — which is not the window
    * on a site that keeps a header above it.
    *
-   * Two views state their scale as a size rather than as a level (Apple's span,
-   * Google satellite's metres), and a size is only a scale next to the number of
-   * pixels it was drawn in. Hand over the window's height where the site drew
-   * the map in less of it and every distance is out by the ratio — Bing's header
-   * is eight percent of a 1000 px window.
+   * Three views state their scale as a size rather than as a level (Apple's
+   * span, Google satellite's metres, Earth's camera distance), and a size is
+   * only a scale next to the number of pixels it was drawn in. Hand over the
+   * window's height where the site drew the map in less of it and every
+   * distance is out by the ratio — Bing's header is eight percent of a 1000 px
+   * window.
    *
    * Nothing is looked up to know it. A map centred in what its chrome leaves is
-   * centred by exactly half of what the chrome took, so the offset already
-   * measured (`measureFrame`) is the measurement of the header, and a scrollbar
+   * centred by exactly half of what the chrome took, so the offset the panel is
+   * drawing from is the measurement of the header, whether it was solved here
+   * (`measureFrame`) or started from the app's table (`seedFrame`). A scrollbar
    * along the bottom falls out of the same arithmetic. It is read in whole
    * pixels and only past a couple of them: a site that draws dead centre solves
    * to a hair either side of zero, and restating the window as 999.35 px would
@@ -494,20 +661,21 @@
   let lastHeight = 0;
 
   async function readUrl(force = false) {
-    // A URL read mid-gesture would replace the prediction that is carrying the
-    // drawing with a coordinate the site wrote a moment ago, which reads as the
-    // overlay stuttering against the map.
+    // A URL read mid-gesture would replace the drawing the pointer is carrying
+    // with a coordinate the site wrote a moment ago, which reads as the overlay
+    // stuttering against the map.
     if (drag) return;
     const height = mapHeight();
     if (location.href === lastUrl && height === lastHeight && !force) return;
+    if (settling && location.href !== lastUrl) settleMoved = Date.now();
     lastUrl = location.href;
     lastHeight = height;
     let parsed;
     try {
       // The height goes with the URL because it is the one fact the app cannot
-      // have and the parse needs: Apple states a span and Google's satellite
-      // view a height in metres, and both are a scale only next to the number
-      // of pixels they were drawn in (`engine/mapsites.py`).
+      // have and the parse needs: Apple states a span, Google's satellite view a
+      // height in metres and Earth a camera distance, and each is a scale only
+      // next to the number of pixels it was drawn in (`engine/mapsites.py`).
       parsed = await call("GET", "/api/ingest/parse", {
         query: { url: lastUrl, height },
       });
@@ -517,16 +685,19 @@
       return;
     }
     adopt(parsed);
+    takeWaitingView();
   }
 
-  /** Take the app's reading as the new truth, and score the prediction it just
-   *  settled. */
+  /** Take the app's reading as the new truth, and learn from the zoom that led
+   *  to it where this site draws its centre. */
   function adopt(parsed) {
     const before = state.view;
     state.parsed = parsed;
+    landedFollow();
     if (!parsed?.site || parsed.lat == null || parsed.lon == null) {
       state.view = null;
       frameChain = null;
+      zoomAnchor = null;
       dropHold();
       clearGesture();
       endSettle();
@@ -534,13 +705,12 @@
       render();
       return;
     }
+    seedFrame(parsed);
     const view = {
       lat: parsed.lat,
       lon: parsed.lon,
-      // A view whose URL states no scale at all — Earth — carries no zoom. The
-      // last one known is kept so the named projection has something to draw
-      // with until the scale is measured, and the measurement replaces it.
-      zoom: parsed.zoom ?? before?.zoom ?? 15,
+      // null until the address bar states a scale, and nothing is drawn until then
+      zoom: parsed.zoom ?? null,
       bearing: parsed.bearing || 0,
       projection: parsed.projection || "webmercator",
     };
@@ -551,45 +721,34 @@
       view.zoom = before.zoom;
     }
     lastStated = parsed.zoom;
-    // A zoom or a rotation makes every *measured* reading stale at once: a
-    // scale is a function of both, so an old sample is an answer about another
-    // map. A camera span is the exception — that number is proportional to
-    // metres per pixel, so the ratio of two of them carries a measured scale
-    // straight through a zoom the address bar never named.
-    // Both comparisons carry a threshold, because both numbers move a little
-    // when nothing has zoomed: a zoom worked out from a height in metres or a
-    // span in degrees depends on the latitude those were quoted at, so a plain
-    // pan north changes it in the fourth decimal. Read as a zoom, that threw
-    // away the pan it had just measured. The smallest real step any of these
-    // sites takes is a fifth of a level.
-    const span = state.parsed?.camera_m ?? null;
+    // A threshold, because a zoom worked out from a size moves a little when
+    // nothing has zoomed: a height in metres depends on the latitude it was
+    // quoted at, and Earth's distance on the ground under the new centre. The
+    // smallest real step any of these sites takes is a fifth of a level.
     const turned = before && before.bearing !== view.bearing;
-    const zoomed = before && Math.abs(before.zoom - view.zoom) > 0.02;
-    const spanned =
-      span != null && lastSpan != null && Math.abs(span - lastSpan) > 0.01 * Math.abs(lastSpan);
+    const zoomed =
+      before?.zoom != null && view.zoom != null && Math.abs(before.zoom - view.zoom) > 0.02;
 
     // A zoom is the one gesture that can say where this site draws its centre,
     // and the same gesture says what the address bar rounded off the zoom it
-    // landed on. Both are taken here, before anything is allowed to reset.
-    //
-    // Which of the two depends on what is already known, and the order keeps
-    // them out of each other's way: a frame is only ever measured from two
-    // zooms that are exact, and a zoom is only ever corrected once a frame is
-    // known. Neither is ever read out of the other's answer.
+    // landed on. Which of the two depends on what is already known, and the
+    // order keeps them out of each other's way: a frame is only ever measured
+    // from two zooms that are exact, and a zoom is only ever corrected once a
+    // frame is known. Neither is ever read out of the other's answer.
     const near = !parsed.far && !zoomAnchor?.far && !zoomAnchor?.adrift;
-    if (zoomAnchor && (zoomed || spanned) && near) {
-      const whole = wholeLevel(view.zoom);
+    if (zoomAnchor && zoomed && near) {
+      const exact = exactLevel(parsed, view.zoom);
       let solved = false;
-      if (zoomAnchor.exact && whole) {
+      if (zoomAnchor.exact && exact) {
         solved = measureFrame(zoomAnchor, view);
       } else if (zoomAnchor.exact && state.framed && parsed.scale_source === "zoom") {
-        const exact = M.zoomFromAnchor(zoomAnchor.view, view, zoomAnchor, middleOf(area()));
-        if (exact != null) {
-          view.zoom = exact;
+        const corrected = M.zoomFromAnchor(zoomAnchor.view, view, zoomAnchor, middleOf(area()));
+        if (corrected != null) {
+          view.zoom = corrected;
           solved = true;
         }
       }
-      zoomExact = whole || solved;
+      zoomExact = exact || solved;
       // A wheel notch is a third of a level on Bing and less on others, which
       // is too little to divide by. Notches about the same pixel are one zoom
       // arriving in instalments, so the view from the start of the run is kept
@@ -603,86 +762,30 @@
             exact: zoomAnchor.exact,
             far: zoomAnchor.far,
           };
-    } else if (zoomed || spanned || before == null) {
-      zoomExact = wholeLevel(view.zoom);
-      if (!near) frameChain = null;
-    } else if (!turned) {
-      // no zoom and no rotation in this reading: the rest of an ease, or a pan
+    } else if (frameHold && !frameHold.touched && !turned) {
+      // the rest of the zoom that is being held: solved again from its anchor
+      if (zoomed) zoomExact = exactLevel(parsed, view.zoom);
       reframe(view);
+    } else if (zoomed || before?.zoom == null) {
+      zoomExact = exactLevel(parsed, view.zoom);
+      if (!near) frameChain = null;
     }
-
-    if (!parsed.scale_source) {
-      // Nothing in the URL says how far out this is, so the map is measured.
-      if (turned || zoomed || spanned) {
-        // A turn on its own changes nothing about how big the ground is drawn.
-        // What is measured is pixels per degree along the world's own axes
-        // (`mapmath.js`), so it survives the view being turned under it —
-        // throwing it away here is what made a rotated Earth ask for another
-        // pan after every nudge of the compass, which reads as a broken tool.
-        const carried = turned && !zoomed && !spanned
-          ? true
-          : carryByAnchor(view) || carryBySpan(span);
-        if (!carried) state.calibration.reset();
-        drift = 0;
-        // The pan that landed with it is dropped only when there is still a
-        // scale for it to disagree with. Nothing carried means nothing is known,
-        // and the drag that just finished is the only reading there is.
-        //
-        // Google Earth is why, and it is the one view this can happen on. Its
-        // camera distance moves with the ground under it — pan over a hill and
-        // `d` changes by more than the threshold — so the panel read an ordinary
-        // drag as a zoom, found no scale to carry through it, and threw away the
-        // measurement that drag had just made. Every time. Which is a tool that
-        // asks for a pan it has already been given, for ever, on the one site
-        // where a pan is the only way to measure anything.
-        if (carried) pending = null;
-      }
-      if (pending && before) {
-        state.calibration.observe(pending.from, view, pending.dx, pending.dy);
-        // What the site actually draws in, settled between the table's answer
-        // and the measurement — each covers the other's blind spot
-        // (mapmath.js). Only where there is a table answer to check: a free
-        // camera names no flattening, and the measurement describes it whole.
-        if (parsed.projection) {
-          const named = M.identify(state.calibration.scale, view, { prefer: view.projection });
-          if (named) view.projection = named;
-        }
-      }
-    } else if (turned || zoomed || spanned) {
-      drift = 0;
-      pending = null;
-    }
-    lastSpan = span;
     zoomAnchor = null;
-    const landed = pending;
-    pending = null;
     state.view = view;
-    if (landed && before) scorePan(landed);
-    // the map has landed and been read, so the canvas goes back to being
-    // untouched, at full strength, and everything is projected from where it
-    // actually is
+    // a site still writing down where the analyst took it, after the wait gave up
+    if (leading) {
+      clearTimeout(leadQuiet);
+      leadQuiet = setTimeout(leadOn, SETTLE_QUIET_MS);
+    }
+    // the map has said where it is, so the canvas goes back to being untouched
+    // and everything is projected from there; the dimming lifts once the
+    // address bar stops moving (`beginSettle`)
     clearGesture();
-    endSettle();
-    if (tools.sky.anchor) tools.sky.fit(spanMetres());
-    // the measured zoom, not the stated one: a satellite view states none at
-    // all, and marks merge by how close together they are on screen
-    tools.pins.atZoom(projected().zoom);
+    if (tools.sky.anchor && verdict().ok) tools.sky.fit(spanMetres());
+    // marks merge by how close together they are on screen, which needs a scale
+    if (view.zoom != null) tools.pins.atZoom(view.zoom);
     releaseGeometryTools();
     render();
-  }
-
-  /** The scale after a zoom, from the point that zoom held still. Exact, and
-   *  free of every assumption about screens, tiles and zoom levels. */
-  function carryByAnchor(view) {
-    const factor = M.rescaleFromAnchor(zoomAnchor, view, area(), state.calibration.scale);
-    return factor != null && state.calibration.rescale(factor);
-  }
-
-  /** Failing that, the ratio of the camera spans the address bar quoted — the
-   *  answer for a view that states one, and for a zoom nobody's cursor drove. */
-  function carryBySpan(span) {
-    if (span == null || lastSpan == null || span === lastSpan) return false;
-    return state.calibration.rescale(lastSpan / span);
   }
 
   /**
@@ -735,6 +838,11 @@
    */
   const FRAMES_KEPT = 4;
   let frames = [];
+  /** Which way the offsets in storage were solved. Before 2, Earth's came out
+   *  of a scale measured off a drag, and a stale one a few pixels out survived
+   *  the zooms after it by being averaged in; they are dropped once, and each
+   *  site measures its centre again on its first zoom. */
+  const FRAMES_VERSION = 2;
 
   const sameWindow = (a, b) =>
     Math.abs(a.w - b.w) <= WINDOW_SAME_PX && Math.abs(a.h - b.h) <= WINDOW_SAME_PX;
@@ -756,6 +864,9 @@
    *  actually moved does not, which is what the jump above is for. */
   const FRAME_SAMPLES = 6;
   let frameSamples = [];
+  /** Whether the offset being drawn from came from the app's site table rather
+   *  than from a zoom on this machine — which is what the tooltip says. */
+  let seeded = false;
   /** A solved offset waiting for the address bar to stop moving, and the zoom
    *  it came from — kept so every reading in between re-solves it. */
   let frameHold = null; // { anchor, value, touched }
@@ -785,9 +896,11 @@
   /**
    * Another reading arrived while an answer was being held.
    *
-   * Same zoom, moved centre, nobody's hand on the map: that is the rest of the
-   * ease, not a pan, and the anchor still describes the map it started from. So
-   * the answer is solved again from the newer reading and the wait restarts.
+   * A moved centre, or a zoom that went on further, and nobody's hand on the
+   * map: that is the rest of the ease, not a new gesture, and the anchor still
+   * describes the map it started from. Earth writes a zoom several times over,
+   * Google writes the level first and the centre after. So the answer is solved
+   * again from the newer reading and the wait restarts.
    */
   function reframe(view) {
     if (!frameHold || frameHold.touched) return;
@@ -824,6 +937,7 @@
     const moved = Math.abs(mean.x - state.frame.x) >= 0.5 || Math.abs(mean.y - state.frame.y) >= 0.5;
     const first = !state.framed;
     state.framed = true;
+    seeded = false;
     if (moved) state.frame = mean;
     // A site that draws dead centre measures to the offset it already had, and
     // the answer is still worth keeping: without this the panel would ask for
@@ -831,37 +945,45 @@
     if (moved || first) save();
   }
 
+  /**
+   * Where this site draws its centre before anything here has measured it.
+   *
+   * The middle of the window was never a neutral starting point — it is a
+   * table entry like any other, and the wrong one on four of these sites. A
+   * results panel or a header takes part of the window and the map is centred
+   * in what is left, which puts Yandex's camera 210 px right of the middle and
+   * Bing's 40 px down: at level 3 that is hundreds of kilometres of ground,
+   * with nothing on screen saying so. Every install started there and stayed
+   * there until the analyst happened to zoom.
+   *
+   * So the app's table hands over what its own calibration run measured
+   * (`engine/mapsites.py`, `_CAMERA_CENTRE`) and the panel starts from that. It
+   * is a starting offset and claims nothing more: it does not count as
+   * measured, the status line still asks for the zoom that would settle it, and
+   * the first solved answer replaces it. A site this machine has already
+   * measured keeps its own answer — a measurement here beats a measurement
+   * somewhere else, always.
+   */
+  function seedFrame(parsed) {
+    if (state.framed || frames.length || !parsed?.centre_hint) return;
+    // A sideways offset is a side panel, and a side panel is the thing that
+    // folds away when the window gets narrow. The table says the narrowest
+    // window each one was measured in; under that this site is centred
+    // horizontally and measured like any other. A header takes height, and a
+    // header is the same height in any window.
+    const wide = window.innerWidth >= (parsed.centre_hint.min_w || 0);
+    const hint = { x: wide ? parsed.centre_hint.x : 0, y: parsed.centre_hint.y };
+    if (!framePlausible(hint)) return;
+    if (hint.x === state.frame.x && hint.y === state.frame.y) return;
+    state.frame = hint;
+    seeded = true;
+  }
+
   /** File the measurement under the window it was taken in. */
   function rememberFrame() {
     if (!state.framed) return;
     const entry = { ...windowSize, x: state.frame.x, y: state.frame.y };
     frames = [entry, ...frames.filter((f) => !sameWindow(f, entry))].slice(0, FRAMES_KEPT);
-  }
-
-  /**
-   * How far the map landed from where the drawing said it would, in pixels.
-   *
-   * A pan moves the map by exactly the pixels the pointer travelled, so the
-   * coordinate that was centred before must now be under the middle of the map
-   * plus those pixels. Projecting it through the view that has just arrived
-   * says whether it is — and that is a test of the whole drawing model at once:
-   * the flattening, the scale, and the zoom the URL claimed. It cannot see the
-   * frame, which slides with the map and cancels; the zoom above is what sees
-   * that.
-   */
-  function scorePan({ from, dx, dy }) {
-    let landed;
-    try {
-      landed = toScreen(from);
-    } catch {
-      return;
-    }
-    const a = area();
-    modelError = Math.hypot(
-      landed.x - (a.x + a.w / 2 + dx),
-      landed.y - (a.y + a.h / 2 + dy)
-    );
-    drift = modelError > T.RESIDUAL_LIMIT ? drift + 1 : 0;
   }
 
   /**
@@ -882,8 +1004,8 @@
 
   /**
    * The map moved under a finger. While it is moving the URL says nothing, so
-   * the view is carried by the pixels the pointer travelled; when the pointer
-   * lifts, that same pixel count becomes the measurement.
+   * the drawing is carried by the pixels the pointer travelled, and nothing is
+   * learned from them.
    */
   function onPointerDown(event) {
     // From here the map moves for a reason the ease cannot account for, so the
@@ -896,7 +1018,6 @@
     drag = {
       x: event.clientX,
       y: event.clientY,
-      from: state.view,
       moved: false,
       base: gesture ?? { dx: 0, dy: 0, k: 1 },
     };
@@ -911,27 +1032,14 @@
     const dy = event.clientY - drag.y;
     if (!drag.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
     drag.moved = true;
-    drag.movedAt = event.timeStamp;
     // the map goes exactly where the pointer goes, so the canvas does too
     gesture = { dx: drag.base.dx + dx, dy: drag.base.dy + dy, k: drag.base.k };
     applyGesture();
   }
 
-  function onPointerUp(event) {
+  function onPointerUp() {
     if (!drag) return;
-    const dx = event.clientX - drag.x;
-    const dy = event.clientY - drag.y;
-    // A pan is only a measurement if the map ended up where the pointer left
-    // it. Let go while still moving and these maps fling on for a few hundred
-    // milliseconds, and the address bar reports the landing — pair that with
-    // the pixels the pointer travelled and the scale comes out too large by
-    // however far it glided. Which is a drawing that fits at the centre of the
-    // screen and drifts outward from it, the exact thing this used to do.
     frameChain = null; // the map has moved: a run of notches is over
-    const still = event.timeStamp - (drag.movedAt ?? 0) >= FLING_PAUSE_MS;
-    if (still && (Math.abs(dx) >= M.MIN_PAN_PX || Math.abs(dy) >= M.MIN_PAN_PX)) {
-      pending = { from: drag.from, dx, dy };
-    }
     const moved = drag.moved;
     drag = null;
     // the map glides on from here, and the drawing cannot follow that. A click
@@ -943,23 +1051,16 @@
    * A zoom, waited out rather than guessed at.
    *
    * A pan can be followed because the map moves exactly with the pointer. A
-   * zoom cannot: the site picks its own step, eases into it over a few hundred
-   * milliseconds, and only then rewrites the address bar. Scaling the canvas by
-   * what a wheel notch *usually* means was worse than doing nothing — the
-   * drawing arrived at the new size before the map did, then corrected itself.
+   * zoom cannot: the site picks its own step and eases into it over a few
+   * hundred milliseconds. Scaling the canvas by what a wheel notch *usually*
+   * means was worse than doing nothing — the drawing arrived at the new size
+   * before the map did, then corrected itself. So the drawing dims and waits,
+   * and comes back at the scale the address bar states.
    *
-   * So the drawing dims and waits. It comes back at the scale the address bar
-   * states, which is the only one anybody knows.
-   */
-  /**
-   * A zoom, waited out — and then read, rather than re-measured.
-   *
-   * Every one of these maps zooms about a point it keeps still: the cursor for
-   * a wheel notch, the click for a double-click. That point's coordinate is
-   * known before the zoom, and it is under the same pixel afterwards, so when
-   * the address bar reports the new centre the new scale falls straight out of
-   * it (`mapmath.js`, `rescaleFromAnchor`). One pan calibrates a map; nothing
-   * after that costs the analyst another.
+   * What the zoom does leave behind is where this site draws its centre: every
+   * one of these maps zooms about a point it keeps still, the cursor for a
+   * wheel notch and the click for a double-click (`mapmath.js`,
+   * `centreFromZoom`).
    */
   function beginZoom(at) {
     // whatever a pan left the canvas offset by is kept rather than undone: it is
@@ -967,8 +1068,7 @@
     zoomAnchor = null;
     if (at && state.view) {
       // The view is kept whole, not just the coordinate under the pointer:
-      // solving for the site's centre needs where the camera was, and that is
-      // true even on a view whose scale nothing has measured yet.
+      // solving for the site's centre needs where the camera was.
       const sameSpot =
         frameChain && Math.abs(frameChain.x - at.x) <= 6 && Math.abs(frameChain.y - at.y) <= 6;
       zoomAnchor = {
@@ -989,16 +1089,7 @@
         // this zoom is allowed to move the drawing and not to measure it.
         adrift: !!gesture,
       };
-      if (state.calibration.scale && verdict().ok) {
-        try {
-          Object.assign(zoomAnchor, toLatLon(at));
-        } catch {
-          /* no coordinate for it; the frame solve does not need one */
-        }
-      }
     }
-    drift = 0;
-    pending = null;
     beginSettle();
   }
 
@@ -1466,6 +1557,237 @@
     }
   }
 
+  // --- linking ---------------------------------------------------------------
+  //
+  // This map and the others on one camera: other panels, and the app's own map
+  // tabs. The worker is the hub (`background.js`, "linked views") and holds
+  // which tabs are linked, because following a view reloads most of these sites
+  // and takes this panel with it.
+  //
+  // A view is followed by writing it into the address bar (`maplink.js`), and a
+  // view is only ever *sent* after the analyst moved this map (`endSettle`). So a
+  // map that arrived somewhere because it was sent there is silent about it, and a
+  // map that stops short of a view — Zoom Earth at 11, Google at 21 — says so in
+  // its own panel instead of asking everything else to come back out to it.
+  //
+  // A map in a background tab is not moved where it stands: it keeps the last view
+  // and takes it when the analyst comes back to the tab. Writing the address bar
+  // reloads most of these sites, and a reload nobody is watching is a reload the
+  // analyst pays for twice — once per gesture on the map being led, and again in
+  // every race it opens: a page still loading has no panel to hand the next view
+  // to, and a browser that granted the tools for one page can refuse them on the
+  // next. One tab, one reload, at the moment its map is looked at.
+
+  let link = null; // the port to the hub, while it is up
+  let linkRetry = 0;
+  /** The view this map was just sent to, until the address bar shows it. Only a
+   *  site that takes the view in its hash is still here to see that. */
+  let following = null;
+  let followedFrom = "";
+  /** A view that arrived while this map could not take it: before the address was
+   *  first read, or with the tab in the background. Only the last one is kept —
+   *  the analyst wants where the other map ended up, not the way it went. */
+  let waitingView = null;
+
+  /**
+   * How long after a gesture the address bar is still the analyst's motion.
+   *
+   * The settle gives up after a couple of seconds so the drawing is never left
+   * dimmed, but Earth writes a drag or a zoom down seconds after the pointer let
+   * go, in more than one go, and without a GPU up to twenty seconds later. A lead
+   * that ended with the settle sent nothing from Earth, or the first of its
+   * readings and never the one it stopped on.
+   */
+  const LEAD_WAIT_MS = 20000;
+  /** `{ until, sent }` while a gesture is leading: the last view handed over,
+   *  or the one the gesture started from. */
+  let leading = null;
+  let leadQuiet = 0;
+
+  /** A gesture began: what the address bar says from here is the analyst's. */
+  function lead() {
+    leading = { until: Date.now() + LEAD_WAIT_MS, sent: leading ? leading.sent : state.view };
+  }
+
+  /**
+   * Hand the view over if the analyst's gesture moved it.
+   *
+   * Only a gesture leads. A view this map was sent to never gets here, which is
+   * what keeps two linked maps from pushing one camera back and forth, and a map
+   * that stopped short of one from dragging the rest back out to where it stopped.
+   */
+  function leadOn() {
+    clearTimeout(leadQuiet);
+    if (!leading || following || settling) return;
+    if (Date.now() > leading.until) {
+      leading = null;
+      return;
+    }
+    if (!state.view || K.sameCamera(state.view, leading.sent)) return;
+    leading.sent = state.view;
+    shareView();
+  }
+
+  function linkSend(message) {
+    try {
+      link?.postMessage(message);
+    } catch {
+      // the port died with the worker; `joinLink` is already opening another
+    }
+  }
+
+  function joinLink() {
+    clearTimeout(linkRetry);
+    if (!api.runtime?.connect) return;
+    try {
+      link = api.runtime.connect({ name: "map-link" });
+    } catch {
+      link = null;
+      linkRetry = setTimeout(joinLink, SYNC_RETRY_MS);
+      return;
+    }
+    link.onMessage.addListener(onLinkMessage);
+    link.onDisconnect.addListener(() => {
+      link = null;
+      linkRetry = setTimeout(joinLink, SYNC_RETRY_MS);
+    });
+    // a worker that was evicted forgot nothing it wrote down, but a panel that
+    // switched the link while it was gone has to say so again
+    if (state.link.on) linkSend({ type: "link", on: true });
+  }
+
+  function onLinkMessage(msg) {
+    if (msg?.type === "link-state") {
+      state.link.on = !!msg.linked;
+      if (msg.asked) state.link.asked = msg.asked;
+      return render();
+    }
+    if (msg?.type === "link-peers") {
+      if (state.link.peers === msg.count) return;
+      state.link.peers = msg.count;
+      return render();
+    }
+    if (msg?.type === "link-note") {
+      state.note = msg.note;
+      return render();
+    }
+    if (msg?.type === "view") followView(msg.view);
+  }
+
+  /** This map's camera, to the others. Pressing the button sends it too: the
+   *  tab that switches the link on is the one the others come to. */
+  function shareView() {
+    if (!state.link.on || !K.followable(state.parsed) || !state.view) return;
+    const view = {
+      lat: state.view.lat,
+      lon: state.view.lon,
+      zoom: state.view.zoom,
+      bearing: state.view.bearing || 0,
+    };
+    if (!K.readable(view)) return;
+    linkSend({ type: "view", view });
+    if (state.link.asked) {
+      state.link.asked = null; // this map leads now, and is wherever the analyst put it
+      render();
+    }
+  }
+
+  /**
+   * Go where another map went.
+   *
+   * Not while the analyst is moving this one: the gesture in hand is the view
+   * that is about to lead, and yanking the map out from under it would read as
+   * the map fighting back. Not on a view that is not a flat map either — Street
+   * View, a pitched camera — because leaving it is the analyst's call, and the
+   * panel says it stayed.
+   */
+  function followView(view) {
+    if (!state.link.on || !K.readable(view) || drag || settling) return;
+    // A panel just put back after a reload hears the view it missed before it
+    // has read its own address, and a tab in the background would reload behind
+    // the analyst: either way the view waits.
+    if (!state.parsed || document.hidden) {
+      waitingView = view;
+      return;
+    }
+    // an Apple place card hides the camera, and the move closes the card
+    const hidden = K.hiddenBy(location.href);
+    if (!K.followable(state.parsed) && !hidden) {
+      state.note = "Linked view not followed: this is not a flat map";
+      return render();
+    }
+    // Against the view this site will really open, not the one it was asked for:
+    // a map held at a ceiling or at Apple's pole limit is already where the ask
+    // puts it, and reloading it to land it back there would undo the drag the
+    // panel just told the analyst to make.
+    if (K.sameCamera(K.reachable(state.parsed.site, view), state.view)) return;
+    const href = K.writeView(state.parsed, location.href, view, mapHeight());
+    if (!href) return;
+    // whatever this map was still writing down, another one leads now
+    leading = null;
+    clearTimeout(leadQuiet);
+    following = view;
+    followedFrom = location.href;
+    state.link.asked = view;
+    linkSend({ type: "follow", view });
+    location.assign(href);
+  }
+
+  /** Take up the view held while this map could not follow it. Dropped if the
+   *  map cannot take it now either — the analyst is on this one, and where they
+   *  put it is the view the others come to. */
+  function takeWaitingView() {
+    if (!waitingView) return;
+    const view = waitingView;
+    waitingView = null;
+    followView(view);
+  }
+
+  /**
+   * The analyst came back to this tab: catch the map up.
+   *
+   * Visibility, not the active tab, is what holds a view back — a tab that is the
+   * front one of a window the analyst is not typing in is still visible, and two
+   * maps side by side on two screens go on following each other the way they read
+   * as doing.
+   */
+  function onShown() {
+    if (!document.hidden) takeWaitingView();
+  }
+
+  /** A follow the site took without reloading has landed: nothing is on its way
+   *  back to this tab any more. */
+  function landedFollow() {
+    if (!following || lastUrl === followedFrom) return;
+    following = null;
+    linkSend({ type: "landed" });
+  }
+
+  function toggleLink() {
+    if (!state.link.on && !state.link.peers) return;
+    state.link.on = !state.link.on;
+    linkSend({ type: "link", on: state.link.on });
+    if (state.link.on) shareView();
+    else state.link.asked = null;
+    render();
+  }
+
+  /** What the link button says, which is also why it may be greyed. */
+  function linkTitle() {
+    if (state.link.on) return "Stop following the other maps";
+    if (!state.link.peers) return "Open another map, here or in Azimut, to link the views";
+    return "Pan and zoom with the other maps";
+  }
+
+  /** The level this map stopped at, when a linked view asked for more. */
+  function linkShort() {
+    if (!state.link.on || !state.view) return "";
+    const pole = K.poleLimit(state.parsed.site, state.link.asked, state.view);
+    if (pole != null) return ` · this map opens no nearer the pole than ${pole.toFixed(1)}°, drag the rest of the way`;
+    const short = K.shortOf(state.link.asked, state.view);
+    return short == null ? "" : ` · as close as this map goes (linked view z${state.link.asked.zoom.toFixed(1)})`;
+  }
+
   // --- the panel -------------------------------------------------------------
 
   const panel = document.createElement("div");
@@ -1506,6 +1828,11 @@
        may shrink: a minmax floor of zero and a zero flex basis, rather than the
        auto minimums a grid track and a flex item take by default, which are the
        content's own width and no smaller. */
+    .beta {
+      margin-left: 6px; padding: 1px 6px; border-radius: 999px;
+      font-size: 9.5px; letter-spacing: .06em; vertical-align: 1px;
+      color: ${t.warn}; border: 1px solid ${t.warn};
+    }
     .body { padding: 9px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; }
     .status { display: flex; gap: 6px; align-items: flex-start; font-size: 11.5px; color: ${t.text2}; }
     .status svg { flex: none; margin-top: 1px; }
@@ -1539,6 +1866,33 @@
       border: 1px solid ${t.border};
     }
     .readout.small { font-size: 12.5px; }
+    /* the calendar: in flow, so the rows under it move down and no edge of this
+       panel — or of the window it floats in — can cut it */
+    .cal-row { display: flex; align-items: center; gap: 8px; }
+    .cal-label { flex: none; width: 34px; font-size: 11px; color: ${t.text3}; }
+    .cal-field {
+      flex: 1; min-width: 0; justify-content: space-between; padding: 4px 7px;
+      font-size: 12px; font-variant-numeric: tabular-nums;
+    }
+    .cal-field.empty { color: ${t.text3}; }
+    .cal {
+      display: flex; flex-direction: column; gap: 3px; padding: 6px;
+      background: ${t.bg2}; border: 1px solid ${t.border}; border-radius: 7px;
+    }
+    .cal-head { display: flex; align-items: center; justify-content: space-between; }
+    .cal-month { font-size: 11px; font-weight: 600; color: ${t.text1}; }
+    .cal-step { padding: 2px; width: 22px; background: none; border-color: transparent; color: ${t.text2}; }
+    .cal-week, .cal-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; }
+    .cal-week span { text-align: center; font-size: 9.5px; color: ${t.text3}; }
+    .cal-day {
+      padding: 3px 0; font-size: 11px; font-variant-numeric: tabular-nums;
+      background: none; border-color: transparent; color: ${t.text2};
+    }
+    .cal-day.out { color: ${t.text3}; opacity: .55; }
+    .cal-day.today { border-color: ${t.borderStrong}; }
+    .cal-day.on { border-color: ${t.accent}; color: ${t.accent}; }
+    .cal-acts { display: flex; justify-content: flex-end; gap: 4px; }
+    .cal-act { padding: 3px 8px; font-size: 11px; }
     /* a name, a note or a coordinate can arrive as one unbroken run of
        characters, and a word that cannot be broken is a box that cannot shrink */
     .readout, .note, .hint { overflow-wrap: anywhere; }
@@ -1581,6 +1935,72 @@
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
   const button = (act, name, label, on, extra = "") =>
     `<button data-act="${act}"${on ? ' data-on="1"' : ""}${extra}>${name ? icon(name) : ""}${label ? `<span>${esc(label)}</span>` : ""}</button>`;
+
+  /**
+   * One seat in the tab row.
+   *
+   * A tool with nothing behind it is greyed where it sits, wearing its own
+   * reason: the app's Layers panel does the same with the fire layer it has no
+   * key for, and a seat that opens on a paragraph about a missing key is a
+   * click spent learning there was nothing to click.
+   */
+  function tab(id) {
+    const tool = tools[id];
+    const usable = tool.offerable !== false;
+    const why = usable ? "" : ` disabled title="${esc(tool.readout(state.units) ?? "")}"`;
+    return button("tab", tool.icon, tool.label, state.tool === id, ` data-tab="${id}"${why}`);
+  }
+
+  /** Today, in the form every date in here is written in. */
+  const todayIso = () => new Date().toISOString().slice(0, 10);
+
+  /**
+   * One date, and the calendar it opens — drawn in the panel, never over it.
+   *
+   * `<input type="date">` came with a calendar of its own, and that calendar is
+   * the browser's: it opens at the size the browser wants, in the browser's
+   * locale, and over the page. On a panel floating at the edge of somebody
+   * else's map it was half outside the window, and read `12/09/2026` where
+   * everything else in here reads `2026-09-12`. So the month is ours, in flow,
+   * pushing the rows under it down.
+   */
+  function dayField(field, label, value, empty, min, max) {
+    const open = state.cal?.field === field;
+    const head = `
+      <button data-act="cal-open" data-field="${field}" class="cal-field${value ? "" : " empty"}"${open ? ' data-on="1"' : ""} aria-expanded="${open}">
+        <span>${esc(value || empty)}</span>${icon(open ? "chevronUp" : "chevronDown", 11)}
+      </button>`;
+    if (!open) return `<div class="cal-row"><span class="cal-label">${esc(label)}</span>${head}</div>`;
+
+    const cursor = state.cal.cursor || T.calMonthOf(value);
+    const back = !T.calMonthOutOfRange(T.calShiftMonth(cursor, -1), min, max);
+    const on = !T.calMonthOutOfRange(T.calShiftMonth(cursor, 1), min, max);
+    const today = todayIso();
+    const cells = T.calMonthDays(cursor)
+      .map((cell) => {
+        const refused = T.calOutOfRange(cell.iso, min, max);
+        const mark = [cell.inMonth ? "" : "out", cell.iso === value ? "on" : "", cell.iso === today ? "today" : ""]
+          .filter(Boolean)
+          .join(" ");
+        return `<button data-act="cal-day" data-day="${cell.iso}" class="cal-day ${mark}" title="${cell.iso}"${refused ? " disabled" : ""}>${cell.day}</button>`;
+      })
+      .join("");
+    return `
+      <div class="cal-row"><span class="cal-label">${esc(label)}</span>${head}</div>
+      <div class="cal">
+        <div class="cal-head">
+          <button data-act="cal-step" data-by="-1" class="cal-step" title="Previous month"${back ? "" : " disabled"}>${icon("chevronLeft", 12)}</button>
+          <span class="cal-month">${esc(T.calMonthLabel(cursor))}</span>
+          <button data-act="cal-step" data-by="1" class="cal-step" title="Next month"${on ? "" : " disabled"}>${icon("chevronRight", 12)}</button>
+        </div>
+        <div class="cal-week">${T.CAL_WEEKDAYS.map((day) => `<span>${day}</span>`).join("")}</div>
+        <div class="cal-days">${cells}</div>
+        <div class="cal-acts">
+          <button data-act="cal-day" data-day="${today}" class="cal-act"${T.calOutOfRange(today, min, max) ? " disabled" : ""}>Today</button>
+          ${field === "last" ? `<button data-act="cal-day" data-day="" class="cal-act"${value ? "" : " disabled"}>Clear</button>` : ""}
+        </div>
+      </div>`;
+  }
 
   function toolBody() {
     const tool = current();
@@ -1646,6 +2066,43 @@
           : `<div class="hint">Hold a case image or video over the map while you pan. Nothing is filed or captured.</div>`}`;
     }
 
+    if (state.tool === "fires") {
+      const fire = tool.state;
+      const dated = fire.window === T.FIRE_DATED;
+      if (!fire.keyed) {
+        return `<div class="hint">NASA FIRMS needs a key. Add one in Azimut Settings → Imagery, then reopen this panel.</div>`;
+      }
+      return `
+        ${button("fires-toggle", fire.on ? "eye" : "eyeOff", fire.on ? "Drawn" : "Draw fires", fire.on, off)}
+        <div class="readout small">${esc(readout)}</div>
+        ${fire.on ? `
+          <div class="row wrap">
+            ${fire.sensors
+              .map((entry) =>
+                button(
+                  "fires-sensor",
+                  "",
+                  entry.label.replace(/\s*\(.*\)\s*$/, ""),
+                  fire.sensor === entry.id,
+                  ` data-sensor="${esc(entry.id)}" title="${esc(entry.label)}"`
+                )
+              )
+              .join("")}
+          </div>
+          <div class="row wrap">
+            ${T.FIRE_WINDOWS.map((entry) =>
+              button("fires-window", "", entry.label, fire.window === entry.id, ` data-window="${esc(entry.id)}" title="Detections from the last ${esc(entry.label.toLowerCase())}"`)
+            ).join("")}
+            ${button("fires-window", "", "Dates", dated, ` data-window="${T.FIRE_DATED}" title="Detections from a past day or range"`)}
+          </div>
+          ${dated ? `
+            ${dayField("first", "From", fire.first, "Pick a day", "", todayIso())}
+            ${dayField("last", "To", fire.last, "That day alone", fire.first, T.fireLastDay(fire.first))}
+            <div class="hint">Up to ${T.FIRE_MAX_RANGE_DAYS} days; blank draws the first day alone.</div>` : ""}
+          ${firesTooDeep() ? `<div class="hint">${fireImage ? `Past z${T.FIRE_MAX_ZOOM} the picture is held rather than asked again.` : `Zoom out to z${T.FIRE_MAX_ZOOM} to ask for detections.`}</div>` : ""}
+        ` : `<div class="hint">Thermal detections from NASA FIRMS, laid over this map.</div>`}`;
+    }
+
     const cover = tool.coverage;
     return `
       ${tool.grid ? "" : `
@@ -1705,19 +2162,20 @@
     const seen = verdict();
     panel.innerHTML = `
       <header>
-        <span class="name">Azimut</span>
+        <span class="name">Azimut${betaBadge()}</span>
+        ${button("link", "link", "", state.link.on, ` class="icon" title="${linkTitle()}"${state.link.on || state.link.peers ? "" : " disabled"}`)}
         ${button("collapse", state.collapsed ? "chevronDown" : "chevronUp", "", false, ' class="icon" title="Fold"')}
         ${button("close", "x", "", false, ' class="icon" title="Close"')}
       </header>
       <div class="body">
         <div class="status ${seen.ok ? "" : "off"}">
-          ${icon(seen.ok ? "satellite" : "alert", 14)}<span${frameTitle()}>${esc(seen.ok ? sound() : seen.why)}</span>
+          ${icon(seen.ok ? "satellite" : "alert", 14)}<span${frameTitle()}>${esc(seen.ok ? sound() : K.hiddenBy(location.href) ?? seen.why)}</span>
         </div>
         <select data-act="case">
           ${state.cases.map((c) => `<option value="${esc(c.id)}"${c.id === state.caseId ? " selected" : ""}>${esc(c.name)}</option>`).join("")}
         </select>
         <div class="tabs">
-          ${ORDER.map((id) => button("tab", tools[id].icon, tools[id].label, state.tool === id, ` data-tab="${id}"`)).join("")}
+          ${ORDER.map((id) => tab(id)).join("")}
         </div>
         ${toolBody()}
         ${state.note ? `<div class="note">${esc(state.note)}</div>` : ""}
@@ -1726,29 +2184,32 @@
     paint();
   }
 
+  /** Google Earth is the site the tools keep up with worst: its camera and its
+   *  3D globe drift from what the URL says, so the panel owns up to it. */
+  function betaBadge() {
+    if (state.parsed?.site !== "google-earth") return "";
+    return ` <span class="beta" title="Drawings drift more on Google Earth than on other maps">Beta</span>`;
+  }
+
   /** The status line when geometry is on: where, what it is drawing in, and
    *  whether it knows yet which pixel this site's centre is under. */
   function sound() {
-    const view = projected();
-    const how = state.parsed?.scale_source
-      ? `${state.parsed.scale_source} from the URL`
-      : scale()
-        ? "measured off the map"
-        : "from the site table";
-    const zoom = view.zoom != null ? ` · z${view.zoom.toFixed(2)}` : "";
-    const drawn = state.parsed?.projection ?? "no named projection";
+    const { zoom } = state.view;
     const framed = state.framed ? "" : " · zoom once to place it";
     const far = verdict().far ? " · drifts at the edges out here" : "";
-    return `${state.parsed.site}${zoom} · ${drawn} (${how})${framed}${far}`;
+    return `${state.parsed.site} · z${zoom.toFixed(2)} · ${state.parsed.projection} (${state.parsed.scale_source} from the URL)${framed}${far}${linkShort()}`;
   }
 
   /** The offset itself, on the line that talks about it. It is the number to
    *  read out when a drawing lands somewhere the ground is not, and there is
    *  nowhere else in the panel it appears. */
   function frameTitle() {
-    if (!state.framed) return "";
     const { x, y } = state.frame;
-    return ` title="centre at ${x.toFixed(0)}, ${y.toFixed(0)} from the middle of a ${windowSize.w}×${windowSize.h} window"`;
+    const at = `centre at ${x.toFixed(0)}, ${y.toFixed(0)}`;
+    if (state.framed) {
+      return ` title="${at} from the middle of a ${windowSize.w}×${windowSize.h} window"`;
+    }
+    return seeded ? ` title="${at}, from the site table until a zoom measures it"` : "";
   }
 
   // --- what the panel's controls do ------------------------------------------
@@ -1760,6 +2221,7 @@
     state.note = "";
 
     if (act === "close") return close();
+    if (act === "link") return toggleLink();
     if (act === "collapse") {
       state.collapsed = !state.collapsed;
       save();
@@ -1769,6 +2231,7 @@
       // Pressing the open tool puts it down. Every mode in this panel toggles,
       // and a tool you cannot put down is one that keeps taking your clicks.
       const wanted = target.dataset.tab;
+      state.cal = null; // an open calendar belongs to the panel it was opened in
       // Leaving a tool puts it down too. An armed tool that is no longer on
       // screen still takes every click on the map, with nothing drawn to
       // explain why the map has stopped answering.
@@ -1823,6 +2286,47 @@
     if (act === "sky-clear") {
       tools.sky.clear();
       syncArmed();
+      return render();
+    }
+
+    if (act === "fires-toggle") {
+      tools.fires.toggle();
+      redraw(); // the layer goes on or off without anything being clicked on the map
+      return render();
+    }
+    if (act === "cal-open") {
+      const field = target.dataset.field;
+      state.cal =
+        state.cal?.field === field
+          ? null
+          : { field, cursor: T.calMonthOf(tools.fires.state[field]) };
+      return render();
+    }
+    if (act === "cal-step" && state.cal) {
+      state.cal = { ...state.cal, cursor: T.calShiftMonth(state.cal.cursor, Number(target.dataset.by)) };
+      return render();
+    }
+    if (act === "cal-day" && state.cal) {
+      tools.fires.set(state.cal.field, target.dataset.day);
+      // A first day moved past the end of its own range takes the end with it,
+      // rather than leaving a question the service would refuse.
+      if (state.cal.field === "first" && T.calOutOfRange(tools.fires.state.last, target.dataset.day, T.fireLastDay(target.dataset.day))) {
+        tools.fires.set("last", "");
+      }
+      state.cal = null;
+      redraw();
+      return render();
+    }
+    if (act === "fires-sensor" || act === "fires-window") {
+      const field = act === "fires-sensor" ? "sensor" : "window";
+      tools.fires.set(field, target.dataset[field]);
+      if (field === "window") state.cal = null; // the fields it belonged to are gone
+      // Switching to Dates with nothing in them would draw nothing and say so;
+      // today is the day being asked about most of the time.
+      if (field === "window" && target.dataset.window === T.FIRE_DATED && !tools.fires.state.first) {
+        tools.fires.set("first", new Date().toISOString().slice(0, 10));
+      }
+      redraw();
       return render();
     }
 
@@ -1960,6 +2464,7 @@
         // each with the window it was measured in, because that is what makes
         // it an answer rather than a number
         frames,
+        framesVersion: FRAMES_VERSION,
       },
     });
   }
@@ -1969,7 +2474,7 @@
     if (!stored) return;
     state.collapsed = !!stored.collapsed;
     if (stored.tool && tools[stored.tool]) state.tool = stored.tool;
-    if (Array.isArray(stored.frames)) {
+    if (Array.isArray(stored.frames) && stored.framesVersion === FRAMES_VERSION) {
       // Anything that could not fit inside this window describes a layout that
       // is gone, and is dropped outright.
       frames = stored.frames.filter(framePlausible).slice(0, FRAMES_KEPT);
@@ -1983,6 +2488,7 @@
       if (best) {
         state.frame = { x: best.x, y: best.y };
         state.framed = !!here;
+        seeded = false; // measured here once, which beats the app's table
         frameSamples = here ? [state.frame] : [];
       }
     }
@@ -2042,6 +2548,11 @@
     rememberFrame(); // file what was measured under the window it was measured in
     windowSize = { w: window.innerWidth, h: window.innerHeight };
     if (moved) {
+      // A window that changed width can have changed which half of the table's
+      // answer applies: a header is a header at any width and a side panel is
+      // not. Nothing measured here is touched — `seedFrame` stands aside for
+      // that, and `rememberFrame` has just filed it.
+      seedFrame(state.parsed);
       // A window dragged back to a shape this site was already measured in is
       // placed again without asking for another zoom, which is what keeping
       // more than one of them is for.
@@ -2072,6 +2583,7 @@
     [window, "dblclick", onDoubleClick, true],
     [window, "wheel", onWheel, { capture: true, passive: true }],
     [window, "resize", onResize, false],
+    [document, "visibilitychange", onShown, false],
     [layer.canvas, "pointerdown", canvasDown, false],
     [layer.canvas, "pointermove", canvasMove, false],
     [layer.canvas, "pointerup", canvasUp, false],
@@ -2081,6 +2593,7 @@
   const gridPoll = setInterval(() => refreshGrid({ poll: true }), GRID_POLL_MS);
   watch = setInterval(keepWatching, WATCH_MS);
   listen();
+  joinLink();
 
   function close() {
     clearInterval(poll);
@@ -2093,6 +2606,17 @@
       /* already gone */
     }
     sync = null;
+    clearTimeout(linkRetry);
+    clearTimeout(leadQuiet);
+    // closing the tools is leaving the link; a reload that follows a view is not
+    // a close, and never gets here
+    if (state.link.on) linkSend({ type: "link", on: false });
+    try {
+      link?.disconnect();
+    } catch {
+      /* already gone */
+    }
+    link = null;
     clearTimeout(giveUp);
     clearTimeout(settle);
     clearTimeout(frameQuiet);
@@ -2116,6 +2640,7 @@
       state.note = e.message;
     }
     await loadCases();
+    await reofferFires();
     await readUrl(true);
   })();
 })();

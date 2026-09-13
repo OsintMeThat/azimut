@@ -64,13 +64,24 @@ describe('the icons', () => {
     }
   });
 
+  /**
+   * Read off the panel's own source rather than listed by hand.
+   *
+   * A hand-kept list only covers the glyphs somebody remembered to add to it,
+   * and `icon()` falls back to the warning triangle for a name it does not
+   * know — so a missing glyph does not break, it draws an alarm where an arrow
+   * belongs, and nothing fails. Which is exactly what the calendar's `‹ ›`
+   * did. Asking the files which names they pass is the gate that would have
+   * caught it.
+   */
   it('covers every glyph the panel and the marks draw', () => {
-    const used = [
-      ...Object.values(theme.SAVED_GLYPH),
-      'ruler', 'pin', 'sun', 'grid', 'polygon', 'square', 'x', 'check', 'undo',
-      'save', 'trash', 'eye', 'eyeOff', 'crosshair', 'chevronUp', 'chevronDown', 'alert',
-      'image', 'video', 'grip', 'minimize',
-    ];
+    const used = new Set(Object.values(theme.SAVED_GLYPH));
+    for (const file of ['mapoverlay.js', 'maptools.js', 'mapdraw.js', 'mapref.js']) {
+      const src = read(`../../../extension/${file}`);
+      for (const [, name] of src.matchAll(/\bicon\(\s*["']([A-Za-z]+)["']/g)) used.add(name);
+      for (const [, name] of src.matchAll(/icon:\s*["']([A-Za-z]+)["']/g)) used.add(name);
+    }
+    expect(used.size).toBeGreaterThan(15); // the scan found the calls, not nothing
     for (const name of used) expect(theme.ICONS, name).toHaveProperty(name);
   });
 

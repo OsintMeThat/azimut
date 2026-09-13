@@ -111,10 +111,13 @@ export async function createMapEngine(container, { view, imperial = false } = {}
   // stacked below the top-left tool cluster (fullscreen/labels/measure) via a
   // CSS offset, instead of the engine's default corner margin
   map.addControl(new NavigationControl({ showCompass: false }), 'top-left');
-  // judging feature sizes (buildings, roads) needs a scale reference
+  // Judging feature sizes (buildings, roads) needs a scale reference, and it
+  // reads under the coordinates rather than in the opposite corner: how far a
+  // pixel goes and where you are are one instrument, and the right-hand corner
+  // is where the acts sit, which used to land Capture on top of the bracket.
   map.addControl(
     new ScaleControl({ unit: imperial ? 'imperial' : 'metric' }),
-    'bottom-right'
+    'bottom-left'
   );
   map.scrollZoom.setWheelZoomRate(WHEEL_ZOOM_RATE);
   // A source cannot be added before the style is up, and `basemap.js` adds one

@@ -3596,7 +3596,7 @@
     <ProofCanvas
       bind:containerEl
       {tool}
-      {textEdit}
+      bind:textEdit
       {focusSelect}
       {commitTextEdit}
       {proofHasContent}

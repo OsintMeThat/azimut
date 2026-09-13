@@ -123,10 +123,13 @@ describe('each section', () => {
     expect(text).toContain('Signature');
   });
 
-  it('Imagery draws one card per keyed provider', () => {
+  it('Imagery draws one card per key, basemap or layer', () => {
     show('imagery');
-    expect(pane().querySelectorAll('.cards .card').length).toBe(4);
+    // four basemaps and NASA FIRMS, which buys a layer over whichever one is
+    // showing rather than a basemap of its own
+    expect(pane().querySelectorAll('.cards .card').length).toBe(5);
     expect(pane().textContent).toContain('Eco mode');
+    expect(pane().textContent).toContain('NASA FIRMS');
   });
 
   it('Templates says when there is nothing stored yet', () => {

@@ -51,6 +51,7 @@ import { clampSize, scaledCapture } from '../../../lib/captureSize.js';
 import { captureTab, extensionVersion } from '../../../lib/extBridge.js';
 import { frameFitsView, isRegistered, sourceRect } from '../../../lib/screenCrop.js';
 import { startRectDrag } from '../../../lib/map/gestures.js';
+import { applyPrefs, prefs } from '../../../lib/state.svelte.js';
 
 /** Standard output sizes for the centred button, named by what they are for. */
 export const PRESETS = [
@@ -102,6 +103,29 @@ export function createCaptureState({
   let hiding = $state(false); // our chrome, out of the way of a tab grab
   let extGate = $state(false); // the "you need the extension" explainer
   let shotOpen = $state(false); // the paste/drop fallback dialog
+
+  /**
+   * The scale bar and north arrow tick, kept in settings.json rather than here.
+   *
+   * Every other option in this menu is answered per session — a size, a ratio,
+   * a resolution are decided for the shot being taken. This one is a house
+   * style: an analyst who wants a scale bar wants it on every capture, and
+   * ticking it again each morning would be the feature failing. So the store
+   * holds no copy of it. `prefs` is the one, filled from settings.json before
+   * any tool reads it, and a click writes both at once.
+   */
+  async function setScaleNorth(on) {
+    const want = !!on;
+    if (want === prefs.captureScaleNorth) return;
+    prefs.captureScaleNorth = want; // the tick answers the click, not the round trip
+    try {
+      applyPrefs(await api.put('/api/settings/prefs', { capture_scale_north: want }));
+    } catch {
+      // The capture still carries what is ticked; only the remembering failed,
+      // and saying so is worth one line rather than undoing their click.
+      notify('That tick applies to this session — it could not be saved', 'warn');
+    }
+  }
 
   /** The chosen output size in px. Custom is clamped to what the backend takes. */
   const size = $derived.by(() => {
@@ -175,6 +199,7 @@ export function createCaptureState({
     form.append('bearing', String(bearing()));
     form.append('provider', basemap().id);
     form.append('framed', String(!!framed));
+    form.append('scale_north', String(prefs.captureScaleNorth));
     const result = await api.post(`/api/cases/${owner.id}/satellite/screenshot`, form);
     await reloadCase();
     notify(
@@ -286,6 +311,7 @@ export function createCaptureState({
         // pinned Sentinel-2 window is that date outright; every other provider's
         // is Esri's best-effort estimate, or nothing.
         imagery_date: pixels.imageryDate,
+        scale_north: prefs.captureScaleNorth,
       });
       await reloadCase();
       notify(
@@ -375,6 +401,14 @@ export function createCaptureState({
     },
     set resolution(value) {
       resolution = value;
+    },
+    // Read and written straight through to the preference, so the tick a second
+    // map tab shows is the same one this tab just set.
+    get scaleNorth() {
+      return prefs.captureScaleNorth;
+    },
+    set scaleNorth(value) {
+      setScaleNorth(value);
     },
     get mode() {
       return mode;

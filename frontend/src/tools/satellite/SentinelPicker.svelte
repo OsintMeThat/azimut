@@ -33,12 +33,14 @@
         </select>
       </div>
       {#if s2.layerHint}<div class="menu-hint">{s2.layerHint}</div>{/if}
-      <div class="menu-hint dim">
-        {s2.layersSource === 'instance'
-          ? 'These layers come from your configuration.'
-          : 'Could not read your configuration; showing the standard layers.'}
-        <button class="linkish" onclick={() => s2.loadLayers(true)}>Refresh</button>
-      </div>
+      <!-- Silent when the layers are the configured ones, which is the normal
+           case and was a line of panel saying so on every open. -->
+      {#if s2.layersSource !== 'instance'}
+        <div class="menu-hint dim">
+          Could not read your configuration; these are the standard layers.
+          <button class="linkish" onclick={() => s2.loadLayers(true)}>Refresh</button>
+        </div>
+      {/if}
 
       <div class="menu-sep" aria-hidden="true"></div>
 
@@ -61,9 +63,7 @@
           <span class="cc-value mono">{maxccLabel(shown)}</span>
         </div>
       </div>
-      <div class="menu-hint dim">
-        Passes cloudier than this are not rendered, and drop out of the calendar.
-      </div>
+      <div class="menu-hint dim">Cloudier passes drop out of the calendar.</div>
 
       <div class="menu-sep" aria-hidden="true"></div>
 
@@ -133,9 +133,7 @@
           <button class="linkish" onclick={() => s2.loadPasses(true)}>Refresh</button>
         </div>
       {:else}
-        <div class="menu-hint dim">
-          Dates with a pass are checked at the crosshair before the map changes.
-        </div>
+        <div class="menu-hint dim">Each date is checked at the crosshair first.</div>
       {/if}
     </div>
   {/if}
@@ -143,22 +141,30 @@
 
 <style>
   .s2-wrap { position: relative; display: flex; }
+  /* Down and to the left of its button, because the picker now rides in the
+     surface's own top-right corner: opening upwards put a calendar off the top
+     of the map, where the surface clips it. The height is capped for the same
+     reason at the other end — a month of passes must not run off the bottom. */
   .s2-menu {
     position: absolute;
-    bottom: calc(100% + 8px);
-    left: 0;
-    width: max-content;
-    max-width: 320px;
+    top: calc(100% + 8px);
+    right: 0;
+    /* Stated rather than grown: at `max-content` the hint lines set the width,
+       the calendar then stretched to fill it, and a month of 40px cells is a
+       date picker the size of the thing it is picking on. */
+    width: 246px;
+    max-height: 70vh;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 12px;
+    gap: 3px;
+    padding: 10px;
     background: rgba(24, 24, 24, 0.96);
     backdrop-filter: blur(6px);
     box-shadow: var(--shadow-2);
     z-index: 700;
   }
-  .s2-menu .select { max-width: 190px; }
+  .s2-menu .select { max-width: 150px; padding: 4px 6px; font-size: var(--fs-xs); }
   .menu-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
   .menu-label { font-size: var(--fs-xs); color: var(--text-3); font-weight: 600; }
   .chips { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
@@ -175,13 +181,13 @@
   }
   .chip:hover { color: var(--text-1); border-color: var(--border-strong); }
   .chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-  .cc { display: flex; align-items: center; gap: 8px; }
-  .cc input[type='range'] { width: 120px; accent-color: var(--accent); cursor: pointer; }
-  .cc-value { font-size: 10px; color: var(--text-2); min-width: 58px; text-align: right; }
-  .menu-hint { font-size: 10px; color: var(--text-3); margin: -1px 0 5px; }
+  .cc { display: flex; align-items: center; gap: 6px; }
+  .cc input[type='range'] { width: 96px; accent-color: var(--accent); cursor: pointer; }
+  .cc-value { font-size: 10px; color: var(--text-2); min-width: 52px; text-align: right; }
+  .menu-hint { font-size: 10px; line-height: 1.35; color: var(--text-3); margin: -1px 0 4px; }
   .menu-hint.dim { opacity: 0.75; }
   .menu-hint .warn, .menu-hint.warn { color: var(--warn, #e2a03f); }
-  .menu-sep { height: 1px; background: var(--border); margin: 4px 0 6px; }
+  .menu-sep { height: 1px; background: var(--border); margin: 3px 0 5px; }
   .linkish {
     background: none;
     border: 0;
@@ -191,12 +197,12 @@
     cursor: pointer;
     text-decoration: underline;
   }
-  .cal { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 6px; }
+  .cal { display: flex; flex-direction: column; gap: 4px; margin: 1px 0 5px; }
   .cal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .cal-month { font-size: var(--fs-xs); font-weight: 600; color: var(--text-1); }
   .cal-nav {
     display: flex;
-    padding: 3px 5px;
+    padding: 2px 4px;
     border: 1px solid var(--border);
     border-radius: var(--r-sm);
     background: var(--bg-2);
@@ -206,9 +212,11 @@
   .cal-nav:hover { color: var(--text-1); border-color: var(--text-3); }
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
   .cal-grid.busy { opacity: 0.5; pointer-events: none; }
-  .cal-dow { text-align: center; font-size: 9px; color: var(--text-3); padding-bottom: 2px; }
+  .cal-dow { text-align: center; font-size: 9px; color: var(--text-3); padding-bottom: 1px; }
   .cal-day {
-    aspect-ratio: 1;
+    /* a square cell grew with the panel; a stated height keeps the month the
+       size of a month whatever else is in here */
+    height: 24px;
     display: flex;
     align-items: center;
     justify-content: center;

@@ -399,12 +399,15 @@ biodiversity records two decades ago.
 | `verbatim` | `verbatimLocality` | what the source said, word for word |
 | `method` | `georeferenceProtocol` | how this point was arrived at |
 
-Three of Darwin Core's rules are kept as written, and each is a test:
+Four of Darwin Core's rules are kept as written, and each is a test:
 
 - **The radius is the smallest enclosing circle**, not a standard deviation, so two
   analysts write the same number.
 - **Zero is not a valid radius.** Empty means *unknown*, a different and honest state;
   `0` would claim infinite precision. Hence a floor of one metre.
+- **A footprint contains the point it belongs to.** A shape traced beside its pin
+  describes somewhere else, and the map let that happen: the polygon drew where it was
+  clicked and the pin stayed where it was.
 - **`verbatim` outlives every reinterpretation.** It is the field people wish they had
   kept.
 
@@ -427,14 +430,18 @@ for graph edges and lineage, and Time for dated statements and intrinsic dates.
 
 The saved index (`GET /cases/{id}/satellite/index`) carries `radius_m` and
 `footprint` so the map overlay draws them without fetching each place: a footprint
-renders as its own polygon, a radius as a circle in metres, and a footprint wins when
-both are set. The map popup states the spread in words (`±500 m`, `traced area`) and
-never edits it.
+renders as its own polygon and a radius as a circle in metres. The map popup states
+the spread in words (`±500 m`, `traced area`) and never edits it.
 
-**`footprint` is stored, validated and drawn, but not yet traceable.** No map offers
-the gesture, so the field is API-only and the panel hides it until a shape exists.
-The tracing tool (SPEC §6, v2) completes it; nothing else about the field changes
-when it lands.
+**The two geometries are one claim, so a place holds one of them.** They answer the
+same question in two forms and the map can draw only one, which meant a radius typed
+over a traced shape vanished from the map without a word. So a write that sets one
+asks for the other to be cleared with it, and the surface doing the writing is the one
+that gets the analyst's consent: tracing says what it replaces before Save, Details
+asks before dropping a shape for a radius. The rule is judged on the patch and not on
+the stored result, so a place written before it holds both and stays editable in every
+other respect — the overlay still prefers its shape. `footprint` is traced on the map
+(UI §7) and never typed, so the panel hides the field until a shape exists.
 
 ### What a source is worth ✅
 

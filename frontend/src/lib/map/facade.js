@@ -38,6 +38,9 @@ const EVENTS = {
   'view-settled': ['moveend'],
   rotate: ['rotate'],
   click: ['click'],
+  // The engine only fires it for a right-click that did not drag, and stops
+  // the browser's own menu once anything listens for it.
+  contextmenu: ['contextmenu'],
 };
 
 /** The vocabulary `on()` accepts. */
@@ -240,11 +243,15 @@ export function mapFacade(map, container) {
      */
     on(name, handler) {
       const events = engineEvents(name);
+      // A pointer event hands over the point; a right-click also where it was
+      // pressed, since a menu opens there. A shape that answers its own click
+      // answers its own right-click too: a flagged grid cell is not also a menu.
       const relay =
-        name === 'click'
+        name === 'click' || name === 'contextmenu'
           ? (event) => {
               if (shapeUnder(event.point)) return;
-              handler({ lat: event.lngLat.lat, lon: wrapLon(event.lngLat.lng) });
+              const at = { lat: event.lngLat.lat, lon: wrapLon(event.lngLat.lng) };
+              handler(name === 'click' ? at : { ...at, x: event.point.x, y: event.point.y });
             }
           : () => handler(camera());
       for (const event of events) map.on(event, relay);

@@ -736,6 +736,36 @@ a:hover {
   font-style: italic;
 }
 
+/* A section heading inside a side panel, foldable: a chevron, an icon, the name
+   in the panel's small caps, and what it holds counted on the right. Global
+   because the sections of one panel are not all written in the same component —
+   the map's Layers list is its own — and a scoped copy is a heading that drifts
+   out of the voice of the one above it. */
+.sub-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 12px 2px 6px;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+}
+.sub-head:hover {
+  color: var(--accent);
+}
+.sub-head .count {
+  margin-left: auto;
+  text-transform: none;
+}
+
 /* Row and value marks, from the annotation palette. Global because three components
    paint with them — the grid's rows and chips, the cell editor's offers, the column
    panel's vocabulary — and a scoped copy per component is three lists that drift. The

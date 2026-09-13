@@ -254,7 +254,7 @@ describe('framing a set of points', () => {
 
 describe('the event vocabulary', () => {
   it('names what happened to the view, not what the engine calls it', () => {
-    expect(MAP_EVENTS).toEqual(['view-settled', 'rotate', 'click']);
+    expect(MAP_EVENTS).toEqual(['view-settled', 'rotate', 'click', 'contextmenu']);
     expect(engineEvents('view-settled')).toEqual(['moveend']);
   });
 
@@ -279,6 +279,26 @@ describe('the event vocabulary', () => {
     mapFacade(map).on('click', seen);
     map.calls.on[0][1]({ point: { x: 1, y: 1 }, lngLat: { lat: 7, lng: 200 } });
     expect(seen).toHaveBeenCalledWith({ lat: 7, lon: -160 });
+  });
+
+  it('hands a right-click the point and where it was pressed, for a menu to open there', () => {
+    const map = stubMap();
+    const seen = vi.fn();
+    mapFacade(map).on('contextmenu', seen);
+    expect(map.calls.on[0][0]).toBe('contextmenu');
+    map.calls.on[0][1]({ point: { x: 120, y: 48 }, lngLat: { lat: 7, lng: 200 } });
+    expect(seen).toHaveBeenCalledWith({ lat: 7, lon: -160, x: 120, y: 48 });
+  });
+
+  it('leaves a right-click on a shape that claims its clicks to that shape', () => {
+    // right-click flags a search-grid cell; a menu opening over it too would be two answers
+    const map = stubMap({ queryRenderedFeatures: () => [{ id: 1 }] });
+    const facade = mapFacade(map);
+    const seen = vi.fn();
+    facade.claimClicks(['cells']);
+    facade.on('contextmenu', seen);
+    map.calls.on[0][1]({ point: { x: 5, y: 6 }, lngLat: { lat: 1, lng: 2 } });
+    expect(seen).not.toHaveBeenCalled();
   });
 
   it('returns the unsubscribe, so nobody can hold half the pair', () => {

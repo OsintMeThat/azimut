@@ -1,0 +1,161 @@
+{
+ "what": "Google Earth screenshots of one camera, a known step east, a known step north and at half the distance, registered against each other.",
+ "how": "frontend/calibration/earth.mjs takes the shots (npm run calibrate:earth); scripts/build_earth_fixture.py registers them.",
+ "why": "Earth states its scale as a camera distance and a field of view. tests/test_mapsites.py checks the parse of each base URL predicts how far the picture moved, and that the camera is drawn at the middle of the window.",
+ "cases": [
+  {
+   "id": "chamonix",
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "base": "https://earth.google.com/web/@45.9237,6.8694,1047.58183037a,3626.26966449d,35y,0h,0t,0r",
+   "east": {
+    "d_lon": 0.004134260751366796,
+    "moved_px": -139.919,
+    "across_px": 0.011
+   },
+   "north": {
+    "d_lat": 0.0028758566415867997,
+    "moved_px": 139.95,
+    "across_px": 0.007
+   },
+   "camera_offset_px": {
+    "x": 0.18,
+    "y": 0.04
+   }
+  },
+  {
+   "id": "cher-1200",
+   "window": {
+    "w": 1200,
+    "h": 760
+   },
+   "base": "https://earth.google.com/web/@47.388462,2.352785,194.50073928a,2054.51135834d,35y,0h,0t,0r",
+   "east": {
+    "d_lon": 0.003166634254567225,
+    "moved_px": -140.029,
+    "across_px": 0.0
+   },
+   "north": {
+    "d_lat": 0.002143887985872412,
+    "moved_px": 140.0,
+    "across_px": 0.002
+   },
+   "camera_offset_px": {
+    "x": -0.1,
+    "y": 0.01
+   }
+  },
+  {
+   "id": "cher-1600",
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "base": "https://earth.google.com/web/@47.388462,2.352785,194.50053456a,2160.80568321d,35y,0h,0t,0r",
+   "east": {
+    "d_lon": 0.0025311545552019338,
+    "moved_px": -140.018,
+    "across_px": -0.002
+   },
+   "north": {
+    "d_lat": 0.0017136528582222645,
+    "moved_px": 139.992,
+    "across_px": 0.001
+   },
+   "camera_offset_px": {
+    "x": -0.13,
+    "y": 0.0
+   }
+  },
+  {
+   "id": "cher-60y",
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "base": "https://earth.google.com/web/@47.388462,2.352785,194.50053456a,2206.63410145d,60y,0h,0t,0r",
+   "east": {
+    "d_lon": 0.004733150856423486,
+    "moved_px": -140.068,
+    "across_px": -0.001
+   },
+   "north": {
+    "d_lat": 0.003204457616717987,
+    "moved_px": 140.029,
+    "across_px": 0.007
+   },
+   "camera_offset_px": {
+    "x": -0.12,
+    "y": -0.01
+   }
+  },
+  {
+   "id": "cher-square",
+   "window": {
+    "w": 1000,
+    "h": 1000
+   },
+   "base": "https://earth.google.com/web/@47.388462,2.352785,194.50053456a,2206.63410145d,35y,0h,0t,0r",
+   "east": {
+    "d_lon": 0.0025848376839012034,
+    "moved_px": -140.004,
+    "across_px": 0.0
+   },
+   "north": {
+    "d_lat": 0.0017499976348558184,
+    "moved_px": 139.975,
+    "across_px": -0.001
+   },
+   "camera_offset_px": {
+    "x": -0.06,
+    "y": 0.02
+   }
+  },
+  {
+   "id": "flevoland",
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "base": "https://earth.google.com/web/@52.455,5.59,-5.53312649a,1550.32598002d,35y,0h,0t,0r",
+   "east": {
+    "d_lon": 0.0020176176667166096,
+    "moved_px": -139.913,
+    "across_px": -0.004
+   },
+   "north": {
+    "d_lat": 0.0012295046090821072,
+    "moved_px": 139.917,
+    "across_px": -0.013
+   },
+   "camera_offset_px": {
+    "x": -0.02,
+    "y": -0.01
+   }
+  },
+  {
+   "id": "france-400km",
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "base": "https://earth.google.com/web/@47.38846198,2.35278498,229.45964543a,313395.88971768d,35y,0h,0t,0r",
+   "east": {
+    "d_lon": 0.36711002738619386,
+    "moved_px": -139.781,
+    "across_px": 0.026
+   },
+   "north": {
+    "d_lat": 0.2485423684058397,
+    "moved_px": 139.871,
+    "across_px": -0.0
+   },
+   "camera_offset_px": {
+    "x": -0.03,
+    "y": 0.0
+   }
+  }
+ ]
+}

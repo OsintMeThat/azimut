@@ -192,7 +192,15 @@ export const GUIDE = [
     points: [
       {
         label: 'Four providers need no key',
-        text: 'Esri, OSM, OpenTopoMap and Sentinel-2 are built in, dated passes included. A keyed provider uses your own key, and a custom XYZ template is accepted.',
+        text: 'Esri, its Wayback archive of past releases, OSM and OpenTopoMap are built in. Sentinel-2 and the other keyed providers use your own key, and a custom XYZ template is accepted.',
+      },
+      {
+        label: 'Right-click the ground',
+        text: 'The menu acts on the point under the cursor: copy it in any format, save it, measure or read the sun from it, see its imagery history, or open it in another map.',
+      },
+      {
+        label: 'Layers cost nothing until they are on',
+        text: 'Borders, roads, railways, power lines, sea marks, GPS traces, fires and night lights are listed in the Saved panel, and none of them is fetched before its switch is pressed.',
       },
       {
         label: 'The search bar answers before it asks',

@@ -1,5 +1,5 @@
 /**
- * The five tools, as state machines with no DOM and no network in them.
+ * The six tools, as state machines with no DOM and no network in them.
  *
  * Each one holds what has been clicked, answers `shapes()` with what should be
  * drawn in geographic coordinates, and `readout()` with the line the panel
@@ -8,11 +8,13 @@
  * exists. Split that way so the part with the rules in it can be tested against
  * numbers instead of against a browser.
  *
- * The fifth, `createRefs`, draws no shape and takes no click on the map: it
- * holds the floating panes a reference is compared from (`mapref.js` paints
- * them). It lives here because what it does hold — where a pane sits, how far
- * into the image it is zoomed — is arithmetic, and arithmetic belongs where
- * it can be checked against the app's own.
+ * Two of them draw no shape and take no click on the map. `createRefs` holds
+ * the floating panes a reference is compared from (`mapref.js` paints them),
+ * and `createFires` holds the question NASA FIRMS is asked, whose answer is a
+ * picture of the ground laid under the drawing. Both live here because what
+ * they hold — where a pane sits, how far into the image it is zoomed, which
+ * stretch of time is being asked about — is arithmetic, and arithmetic belongs
+ * where it can be checked against the app's own.
  *
  * **Much of this is a second copy, and deliberately only as much of one as it
  * needs.** The measures are `lib/measure.js`, the lattice is
@@ -38,12 +40,6 @@
    *  thing anyone sweeps cell by cell. */
   const MAX_CELLS = 20000;
 
-  /** Prediction error, in pixels, past which one pan counts as having landed
-   *  somewhere the model did not expect. Generous, because these maps glide on
-   *  after the finger leaves and a single overshoot says nothing; what makes
-   *  the tools stop is a run of them (`mapoverlay.js`). */
-  const RESIDUAL_LIMIT = 110;
-
   /** Why a view cannot carry the geometric tools, and what to do about it.
    *  Keyed by `engine/mapsites.py`'s `view_kind`; an unknown kind falls back to
    *  the general sentence. Each one names the way out in the words the viewer
@@ -52,25 +48,17 @@
   const REFUSALS = {
     streetview: "These tools work on the map, not in Street View",
     tilted: "These tools work in 2D only, so turn 3D off",
+    globe: "The camera is on a globe this far out, so zoom in",
   };
 
   function refusal(parsed) {
     return REFUSALS[parsed.view_kind] || "This view is not a map to measure on";
   }
 
-  /**
-   * What to do about a view nothing has measured yet — said as the thing to do,
-   * rather than as the state it is in.
-   *
-   * "Pan once" was true and useless. A drag is a measurement only if it moved
-   * far enough on *both* axes — a scale is two numbers and a sideways drag gives
-   * one of them — and only if the map ended where the pointer left it, which
-   * means pausing before letting go, since these viewers glide on and report the
-   * landing. Neither condition was anywhere on screen, so a drag that did not
-   * count looked exactly like one that did, and the line asking for a pan came
-   * back after every one of them.
-   */
-  const MEASURE_ME = "Drag the map across and down, pausing before you let go";
+  /** What a map says while its address bar has not yet stated a scale — an
+   *  Earth link typed with no ground in it, a satellite view before its height
+   *  arrives. The site writes one as soon as the map is moved. */
+  const NO_SCALE = "Move the map once so its address bar gives the scale";
 
   /** …and the one thing that is said rather than refused. This far out the map
    *  is a globe: the middle of the screen is still right, the edges are not,
@@ -81,52 +69,39 @@
   /**
    * Whether geometry is sound on this view, and if not, the sentence to show.
    *
-   * `engine/mapsites.py` owns the URL formats and decides most of it. What is
-   * added here is the one thing only a browser can do: measure.
+   * `engine/mapsites.py` owns the URL formats and decides all of it: which
+   * camera this is, which flattening the site draws in, and which number in the
+   * URL says how big (`scale_source` — a tile level, a height in metres, a span
+   * in degrees, a camera distance). Every one of those was checked against a
+   * browser before being believed (`docs/MAP_SITES.md`). Nothing here second-
+   * guesses them from a gesture: that is what used to put Earth's drawing four
+   * times too small, and then keep it there.
    *
-   * What the app adds is `scale_source`: which number in the URL says how far
-   * out this view is, if any. All three are the site's own arithmetic — a tile
-   * level, a viewport height in metres, a span in degrees — and all three were
-   * checked against a browser before being believed (`docs/MAP_SITES.md`). Where
-   * one of them speaks, the drawing works from the first frame.
-   *
-   * Where none does, the map itself is the only authority and one pan asks it.
-   * That is now a single view: **Earth**, a free camera with no flattening to
-   * name — level, it is a plain uniform scaling of the ground, and a
-   * measurement describes it completely.
-   *
-   * The answer carries `far` as well as `ok`: a view far enough out that the
-   * site has gone to a globe still draws, because a region's worth of marks is
-   * worth seeing at a glance, but it says so and the panel dims it.
+   * The answer carries `far` as well as `ok`, and the two globes it tells apart
+   * are not the same thing. A **flat map drawn far out** — Google and Bing
+   * below level 8 — still has a centre this arithmetic is right about, and
+   * drifts outward from it: that one draws, says so, and is dimmed, because a
+   * region's worth of marks is worth seeing at a glance. A **globe camera** —
+   * Earth's 3D mode past `LEVEL_CEILING_M`, and Google's Earth mode with it —
+   * is a perspective view of a sphere, where Mercator is not right at all.
+   * That one is refused outright and says to zoom in.
    *
    * @param {object|null} parsed the app's reading of the current URL
-   * @param {number|null} residual pixels between prediction and address bar
-   * @param {boolean} measured whether a scale has been read off the map yet
    */
-  function verdict(parsed, residual, measured = false) {
+  function verdict(parsed) {
     if (!parsed || !parsed.site) return { ok: false, why: "This page is not a map Azimut can read" };
     if (parsed.lat == null || parsed.lon == null) {
       return { ok: false, why: "No position in the address bar yet, so move the map once" };
     }
-    if (parsed.view_kind && parsed.view_kind !== "map" && parsed.view_kind !== "globe") {
+    if (parsed.view_kind && parsed.view_kind !== "map") {
       return { ok: false, why: refusal(parsed) };
     }
-    if (residual != null && residual > RESIDUAL_LIMIT) {
-      return {
-        ok: false,
-        why: `The map landed ${Math.round(residual)} px from where it was predicted. Pan once to measure it again`,
-      };
-    }
-    if (!parsed.view_kind) {
+    if (!parsed.view_kind || !parsed.geometry) {
       return { ok: false, why: "This view is not one Azimut can compute on" };
     }
+    if (!parsed.scale_source) return { ok: false, why: NO_SCALE };
     const far = !!parsed.far;
-    const drawn = { ok: true, why: far ? FAR : "", far };
-    // The URL is enough wherever it states a scale. Everywhere else — Earth,
-    // and any view whose address bar has not said how far out it is yet — the
-    // map itself is the only authority, and one drag asks it.
-    if (parsed.geometry && parsed.scale_source) return drawn;
-    return measured ? drawn : { ok: false, why: MEASURE_ME };
+    return { ok: true, why: far ? FAR : "", far };
   }
 
   // --- measure ---------------------------------------------------------------
@@ -1296,10 +1271,208 @@
     };
   }
 
+  // --- the calendar ----------------------------------------------------------
+  //
+  // `lib/calendar.js` a second time, for the same reason the fire question is:
+  // the panel is a classic script and cannot import the app's. A browser's own
+  // date picker was the first answer and the wrong one — it opens over the page
+  // at whatever size it likes, and this panel floats on somebody else's map with
+  // no room to spare. So the month is drawn inside the panel, and the days it
+  // draws are computed here and checked against the app's in
+  // `extensionMapTools.test.js`.
+
+  /** Monday first, two letters, so no two columns wear the same initial. */
+  const CAL_WEEKDAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+  const CAL_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  /** The month a day belongs to, as the cursor a calendar is drawn from. */
+  function calMonthOf(iso, fallback = new Date().toISOString().slice(0, 10)) {
+    const day = String(iso ?? "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day)) return day.slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(day)) return day;
+    return String(fallback).slice(0, 7);
+  }
+
+  /** That cursor, moved by whole months. */
+  function calShiftMonth(cursor, by) {
+    const [year, month] = calMonthOf(cursor).split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1 + by, 1)).toISOString().slice(0, 7);
+  }
+
+  /** `Sep 2026`, the heading between the two arrows. */
+  function calMonthLabel(cursor) {
+    const [year, month] = calMonthOf(cursor).split("-").map(Number);
+    return `${CAL_MONTHS[month - 1]} ${year}`;
+  }
+
+  /** One month's cells, in whole weeks, with the days either side flagged. */
+  function calMonthDays(cursor) {
+    const [year, month] = calMonthOf(cursor).split("-").map(Number);
+    const lead = (new Date(Date.UTC(year, month - 1, 1)).getUTCDay() + 6) % 7;
+    const length = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const cells = [];
+    for (let i = 0; i < Math.ceil((lead + length) / 7) * 7; i += 1) {
+      const at = new Date(Date.UTC(year, month - 1, 1 - lead + i));
+      cells.push({
+        iso: at.toISOString().slice(0, 10),
+        day: at.getUTCDate(),
+        inMonth: at.getUTCMonth() === month - 1,
+      });
+    }
+    return cells;
+  }
+
+  /** Whether a day is outside what the field accepts; an empty bound is none. */
+  function calOutOfRange(iso, min = "", max = "") {
+    if (!asDay(iso)) return true;
+    if (asDay(min) && iso < min) return true;
+    return Boolean(asDay(max) && iso > max);
+  }
+
+  /** …and whether a whole month is, which is what greys an arrow. */
+  function calMonthOutOfRange(cursor, min = "", max = "") {
+    return calMonthDays(cursor)
+      .filter((cell) => cell.inMonth)
+      .every((cell) => calOutOfRange(cell.iso, min, max));
+  }
+
+  // --- fires -----------------------------------------------------------------
+
+  /** The rolling windows FIRMS keeps as layers of their own. Matches
+   *  `lib/map/firms.js`; the cross-check runs both over the same input. */
+  const FIRE_WINDOWS = [
+    { id: "24h", label: "24 h" },
+    { id: "48h", label: "48 h" },
+    { id: "72h", label: "72 h" },
+    { id: "7d", label: "7 days" },
+  ];
+  /** Asking by date rather than by how recent. */
+  const FIRE_DATED = "dates";
+  /** FIRMS refuses a longer range, and counts a long one as several requests. */
+  const FIRE_MAX_RANGE_DAYS = 31;
+  /** …and the zoom past which it stops meaning anything: FIRMS draws a fixed
+   *  symbol per detection and VIIRS resolves 375 m, so deeper is a screen of
+   *  overlapping marks. The app's map caps its tile source at the same level
+   *  (`lib/map/basemap.js`) and keeps showing that level, scaled; asking again
+   *  from here would only buy a bigger version of the same smear. */
+  const FIRE_MAX_ZOOM = 14;
+
+  const asDay = (value) => (/^\d{4}-\d{2}-\d{2}$/.test(String(value ?? "")) ? String(value) : "");
+
+  /** The last day a range starting here may reach. */
+  function fireLastDay(first, maxDays = FIRE_MAX_RANGE_DAYS) {
+    const start = asDay(first);
+    if (!start) return "";
+    const end = new Date(`${start}T00:00:00Z`);
+    end.setUTCDate(end.getUTCDate() + maxDays - 1);
+    return end.toISOString().slice(0, 10);
+  }
+
+  /** Whether this choice is one the service can answer. */
+  function fireAskable({ window: win, first, last } = {}) {
+    if (win !== FIRE_DATED) return FIRE_WINDOWS.some((entry) => entry.id === win);
+    const start = asDay(first);
+    if (!start) return false;
+    const end = asDay(last) || start;
+    return end >= start && end <= fireLastDay(start);
+  }
+
+  /**
+   * NASA FIRMS over somebody else's map.
+   *
+   * It draws no shape and takes no click: what comes back is a picture of the
+   * ground, which `mapoverlay.js` lays under the drawing. What is held here is
+   * the question — which instrument, over what stretch of time — because that
+   * is arithmetic, and arithmetic is checked against the app's own.
+   */
+  function createFires() {
+    const state = {
+      on: false,
+      keyed: false,
+      sensors: [],
+      sensor: "viirs",
+      window: "24h",
+      first: "",
+      last: "",
+    };
+
+    return {
+      id: "fires",
+      label: "Fires",
+      icon: "flame",
+      needsGeometry: true,
+      /** Without a key there is nothing behind this seat, so the panel greys it
+       *  rather than opening on a paragraph explaining the absence. */
+      get offerable() {
+        return state.keyed;
+      },
+      get armed() {
+        return false; // it never waits for a click on the map
+      },
+      get state() {
+        return state;
+      },
+      /** What it is asking for, or null while the question is unfinished. */
+      query() {
+        if (!state.on || !state.keyed || !fireAskable(state)) return null;
+        if (state.window !== FIRE_DATED) return { sensor: state.sensor, window: state.window };
+        const first = asDay(state.first);
+        return {
+          sensor: state.sensor,
+          window: FIRE_DATED,
+          first,
+          last: asDay(state.last) || first,
+        };
+      },
+      set(field, value) {
+        state[field] = value;
+      },
+      toggle() {
+        state.on = !state.on;
+        return state.on;
+      },
+      offer(catalogue) {
+        state.keyed = !!catalogue?.keyed;
+        state.sensors = catalogue?.sensors ?? [];
+      },
+      disarm() {},
+      shapes() {
+        return []; // it is a picture, not a drawing
+      },
+      readout() {
+        if (!state.keyed) return "Add a NASA FIRMS key in Azimut Settings";
+        if (!state.on) return "Detections are not being drawn";
+        if (!fireAskable(state)) return "Pick a date to draw the detections";
+        const name = state.sensors.find((entry) => entry.id === state.sensor)?.label ?? state.sensor;
+        const short = name.replace(/\s*\(.*\)\s*$/, "");
+        if (state.window !== FIRE_DATED) {
+          const win = FIRE_WINDOWS.find((entry) => entry.id === state.window)?.label ?? "";
+          return `${short} · last ${win}`;
+        }
+        const first = asDay(state.first);
+        const last = asDay(state.last);
+        return last && last !== first ? `${short} · ${first} → ${last}` : `${short} · ${first}`;
+      },
+    };
+  }
+
   window.AzimutMapTools = {
     MAX_CELLS,
-    RESIDUAL_LIMIT,
-    MEASURE_ME,
+    FIRE_WINDOWS,
+    FIRE_DATED,
+    FIRE_MAX_RANGE_DAYS,
+    FIRE_MAX_ZOOM,
+    fireAskable,
+    fireLastDay,
+    createFires,
+    CAL_WEEKDAYS,
+    calMonthOf,
+    calShiftMonth,
+    calMonthLabel,
+    calMonthDays,
+    calOutOfRange,
+    calMonthOutOfRange,
+    NO_SCALE,
     verdict,
     createMeasure,
     createPins,

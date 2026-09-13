@@ -4,7 +4,7 @@
   let {
     containerEl = $bindable(),
     tool,
-    textEdit,
+    textEdit = $bindable(),
     focusSelect,
     commitTextEdit,
     proofHasContent,

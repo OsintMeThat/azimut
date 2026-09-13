@@ -30,13 +30,9 @@ export function mapLinks(lat, lon, zoom = 17) {
     {
       id: 'google_earth',
       label: 'Google Earth',
-      // Earth takes a camera distance, not a zoom. Measured, `d` halves for
-      // every level zoomed in, so the shape is a constant over 2^z; the
-      // constant itself is nominal, since turning a distance into a ground
-      // scale needs a field of view and a window height that no link can know.
-      // It lands z17 about 600 m out, and the old fixed 1000 m at every zoom
-      // is what it replaces.
-      url: `https://earth.google.com/web/@${lat},${lon},0a,${earthDistance(z)}d,1y,0h,0t,0r`,
+      // Earth takes a camera distance and a field of view, not a zoom, and it
+      // honours both: `1y` here once opened every link 35 times too close.
+      url: `https://earth.google.com/web/@${lat},${lon},0a,${earthDistance(z, lat)}d,${EARTH_FOV}y,0h,0t,0r`,
     },
     {
       id: 'apple',
@@ -69,16 +65,27 @@ export function mapLinks(lat, lon, zoom = 17) {
   ];
 }
 
+/** Metres of ground per pixel at the equator, zoom 0, on 256-pixel tiles. */
+const EQUATOR_M_PER_PX = (2 * Math.PI * 6378137) / 256;
+
+/** The field of view Earth writes for itself, in degrees. */
+const EARTH_FOV = 35;
+
+/** The window height a link is sized for, in CSS pixels. Earth's view covers
+ *  the same ground in any window, so a shorter one lands a little further out. */
+const EARTH_WINDOW_PX = 1000;
+
 /**
  * How far Google Earth's camera sits from the ground for a tile zoom, in metres.
  *
- * Earth states no zoom at all — it states `d`, the camera's distance from what
- * it is looking at. Measured in a browser, that number halves for every level
- * zoomed in, exactly, which fixes the shape of this: a constant over 2^z. What
- * the measurement cannot fix is the constant, which is a field of view and a
- * window height Earth never writes down — so it is chosen, not derived, and
- * lands a level-17 link about 600 m out.
+ * Earth's 2D map covers `2·d·tan(y/2)` metres of ground across the window's
+ * height, measured in a browser (`engine/mapsites.py`, `_earth_height_m`), so a
+ * level `z` of Web Mercator in a 1000 px window is the `d` below. The ground's
+ * height is not in a link, so Earth draws it that much closer until the map is
+ * first moved.
  */
-function earthDistance(zoom) {
-  return Math.round(78_600_000 / 2 ** Math.max(0, zoom));
+function earthDistance(zoom, lat) {
+  const metresPerPx = (EQUATOR_M_PER_PX * Math.cos((lat * Math.PI) / 180)) / 2 ** Math.max(0, zoom);
+  const halfFov = (EARTH_FOV * Math.PI) / 360;
+  return Math.max(25, Math.round((metresPerPx * EARTH_WINDOW_PX) / (2 * Math.tan(halfFov))));
 }

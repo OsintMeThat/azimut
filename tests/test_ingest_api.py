@@ -444,3 +444,52 @@ def test_reading_back_reaches_attachments_and_nothing_else(client):
         "/api/ingest/file", params={"case_id": cid, "path": "proofs/nothing.png"}, headers=headers
     )
     assert missing.status_code == 404
+
+
+# -- scale bar and north arrow -------------------------------------------------
+
+
+def test_the_popups_tick_draws_the_bar_and_leaves_the_needle_to_a_stated_heading(client):
+    """Google Maps writes no rotation into its URL, so a capture off it gets the
+    bar and no arrow — the popup says to type a bearing for that, and typing one
+    is the analyst stating which way the map was turned."""
+    token = _token(client)
+    cid = client.post("/api/cases", json={"name": "Ingest"}).json()["id"]
+
+    off = _post(client, token=token, case_id=cid).json()
+    assert off["marks"] is None
+
+    no_heading = _post(client, token=token, case_id=cid, scale_north="true").json()
+    assert no_heading["marks"]["scale"].endswith((" m", " km"))
+    assert no_heading["marks"]["north"] is None
+
+    stated = _post(
+        client, token=token, case_id=cid, scale_north="true", bearing="42"
+    ).json()
+    assert stated["marks"]["north"] == 42.0
+
+
+def test_a_grab_off_a_dense_screen_states_its_own_ground(client):
+    token = _token(client)
+    cid = client.post("/api/cases", json={"name": "Ingest"}).json()["id"]
+    one = _post(client, token=token, case_id=cid, scale_north="true", device_scale="1")
+    two = _post(client, token=token, case_id=cid, scale_north="true", device_scale="2")
+    assert one.json()["marks"]["scale"] != two.json()["marks"]["scale"]
+
+
+def test_a_capture_with_no_zoom_in_its_url_gets_no_bar(client):
+    """The bar is arithmetic on a zoom. Without one there is nothing to state,
+    and a capture still files — the position is fixable in the sidebar."""
+    token = _token(client)
+    cid = client.post("/api/cases", json={"name": "Ingest"}).json()["id"]
+    body = _post(
+        client,
+        token=token,
+        case_id=cid,
+        url="https://www.openstreetmap.org/",
+        lat=None,
+        lon=None,
+        zoom=None,
+        scale_north="true",
+    ).json()
+    assert body["marks"] is None

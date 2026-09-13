@@ -18,7 +18,7 @@
  * @param {(id: string, entity: object, folder: string) => Promise<any>} deps.assignFolder
  * @param {() => Promise<any>} deps.reloadCase
  */
-import { filterSaved, isMode, pendingLocate } from '../../../lib/geoTree.js';
+import { filterSaved, isMode, pendingLocate, savedFolders } from '../../../lib/geoTree.js';
 
 const GROUP_KEY = 'azimut:satelliteSavedGroup';
 const LOCATE_BATCH = 10;
@@ -36,6 +36,14 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
   let proofs = $state([]);
   let kind = $state('all');
   let query = $state('');
+  /**
+   * Which folder the map is drawing, or null for every one of them.
+   *
+   * The map's own filter rather than the panel's: the tree browses folders as
+   * branches, and a busy case is read by taking the other folders off the
+   * picture. `null` is all, `''` is what nobody has filed yet.
+   */
+  let folder = $state(null);
   let group = $state(loadGroup());
   let locating = $state(null); // { done, total } while a pass runs
   let acceptingId = $state(null);
@@ -223,6 +231,16 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
     set query(value) {
       query = value;
     },
+    get folder() {
+      return folder;
+    },
+    set folder(value) {
+      folder = value;
+    },
+    /** The folders the rows on offer are filed under, each with its tally. */
+    get folders() {
+      return savedFolders(this.shownRows);
+    },
     get group() {
       return group;
     },
@@ -247,7 +265,7 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
     },
     /** What the panel is showing, which is also what the map layer draws. */
     get shown() {
-      return filterSaved(this.shownRows, { kind, query });
+      return filterSaved(this.shownRows, { kind, query, folder });
     },
     get pending() {
       return pendingLocate(rows);

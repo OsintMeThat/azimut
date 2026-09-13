@@ -506,6 +506,32 @@
     }
   }
 
+  /**
+   * A place says how tightly it is pinned once (ONTOLOGY §2).
+   *
+   * A radius is a circle and a footprint is the shape itself, the map draws one of
+   * them, and the store refuses to hold both — so a radius typed over a traced shape
+   * is a request to drop the shape. It is somebody's traced work, so it is asked for
+   * rather than quietly overwritten on the way past.
+   *
+   * Only when this panel is what changed one of them, which is the same reading the
+   * store takes: a place written before the rule holds both, and saving its notes is
+   * not the moment to make anyone choose.
+   */
+  const precisionClash = $derived(
+    entity?.type === 'place' &&
+      Boolean(infoAttrs.radius_m) &&
+      Boolean(infoAttrs.footprint) &&
+      (infoAttrs.radius_m !== baseline?.attrs?.radius_m ||
+        infoAttrs.footprint !== baseline?.attrs?.footprint)
+  );
+  let dropping = $state(false);
+
+  function askSave() {
+    if (precisionClash) dropping = true;
+    else saveInfo();
+  }
+
   async function saveInfo() {
     if (!entity || infoSaving) return;
     infoSaving = true;
@@ -1127,13 +1153,29 @@
       {#if sourceIssue}<span class="save-problem">{sourceIssue}</span>{/if}
       <button
         class="btn btn-primary btn-sm"
-        onclick={saveInfo}
+        onclick={askSave}
         disabled={infoSaving || Boolean(sourceIssue)}
       >
         {infoSaving ? 'Saving…' : 'Save'}
       </button>
     </div>
   </div>
+{/if}
+
+{#if dropping}
+  <ConfirmDialog
+    title="Drop the traced shape?"
+    message="A place holds either a radius or a footprint, and the radius draws a circle."
+    detail="The shape traced on the map is removed."
+    confirmLabel="Drop the shape"
+    icon="alert"
+    onconfirm={() => {
+      dropping = false;
+      infoAttrs = { ...infoAttrs, footprint: null };
+      saveInfo();
+    }}
+    oncancel={() => (dropping = false)}
+  />
 {/if}
 
 {#if pendingWalk}

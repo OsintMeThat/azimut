@@ -331,10 +331,10 @@ describe('the layers on a map', () => {
     });
   });
 
-  it('stops the labels at their own last level rather than blowing them up', async () => {
+  it('stops an overlay at its own last level rather than blowing it up', async () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();
-      createBasemaps(stubEngine(map)).setLabels(true);
+      createBasemaps(stubEngine(map)).setOverlay('labels', true);
       // the deepest tile, and the deepest view, which the engine counts one
       // shallower — the same number, two questions
       expect(map.sources.get('basemap-labels').maxzoom).toBe(20);
@@ -343,33 +343,204 @@ describe('the layers on a map', () => {
     });
   });
 
-  it('adds the labels layer once and takes it off when asked', async () => {
+  it('adds an overlay once and takes it off when asked', async () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();
       const basemaps = createBasemaps(stubEngine(map));
-      basemaps.setLabels(true);
-      basemaps.setLabels(true);
+      basemaps.setOverlay('labels', true);
+      basemaps.setOverlay('labels', true);
       expect(map.layers.map((l) => l.id)).toEqual(['basemap-labels']);
-      basemaps.setLabels(false);
+      basemaps.setOverlay('labels', false);
       expect(map.layers).toEqual([]);
     });
   });
 
-  it('keeps the labels over the imagery and both under what a tool draws', async () => {
+  it('ignores an overlay it does not have', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      createBasemaps(stubEngine(map)).setOverlay('weather', true);
+      expect(map.layers).toEqual([]);
+    });
+  });
+
+  it('builds a layer that is a question from the question it was asked', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      createBasemaps(stubEngine(map)).setOverlay('firms', true, {
+        sensor: 'modis',
+        window: '48h',
+      });
+      const [url] = map.sources.get('basemap-firms').tiles;
+      // through the app, because the key is NASA's and stays on the backend
+      expect(url).toContain('/api/firms/tiles/{z}/{x}/{y}?');
+      expect(url).toContain('sensor=modis');
+      expect(url).toContain('window=48h');
+    });
+  });
+
+  it('rebuilds that layer when the question changes, and only then', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const basemaps = createBasemaps(stubEngine(map));
+      const params = { sensor: 'viirs', window: '24h' };
+      basemaps.setOverlay('firms', true, params);
+      const first = map.sources.get('basemap-firms');
+      // the same question again is the same tiles: rebuilding would refetch
+      // every one of them, which reads on screen as a reloading map
+      basemaps.setOverlay('firms', true, { ...params });
+      expect(map.sources.get('basemap-firms')).toBe(first);
+
+      basemaps.setOverlay('firms', true, { sensor: 'viirs', window: '7d' });
+      expect(map.sources.get('basemap-firms')).not.toBe(first);
+      expect(map.sources.get('basemap-firms').tiles[0]).toContain('window=7d');
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-firms']);
+    });
+  });
+
+  it('draws the fires over the names, because when it is on it is the subject', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.setOverlay('firms', true, { sensor: 'viirs', window: '24h' });
+      basemaps.setOverlay('labels', true);
+      basemaps.setOverlay('railway', true);
+      expect(map.layers.map((l) => l.id)).toEqual([
+        'basemap-railway',
+        'basemap-labels',
+        'basemap-firms',
+      ]);
+    });
+  });
+
+  it('holds the overlay stack however they are switched on', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const basemaps = createBasemaps(stubEngine(map));
+      // the names last, whichever order they arrive in: a station label under
+      // its own track is a label nobody can read
+      basemaps.setOverlay('labels', true);
+      basemaps.setOverlay('railway', true);
+      expect(map.layers.map((l) => l.id)).toEqual(['basemap-railway', 'basemap-labels']);
+    });
+  });
+
+  it('keeps every overlay over the imagery and all of them under what a tool draws', async () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();
       const basemaps = createBasemaps(stubEngine(map));
       basemaps.show(ESRI, ESRI.id, 256);
-      basemaps.setLabels(true);
-      // a tool's own layer, appended above both
+      basemaps.setOverlay('railway', true);
+      basemaps.setOverlay('labels', true);
+      // a tool's own layer, appended above all three
       map.addLayer({ id: 'sfc-1-fill' });
-      // and now a different provider, which must not land on top of either
+      // and now a different provider, which must not land on top of any of them
       basemaps.show(SENTINEL, 'sentinel2~a~~~CC100', 512);
       expect(map.layers.map((l) => l.id)).toEqual([
         'basemap-imagery',
+        'basemap-railway',
         'basemap-labels',
         'sfc-1-fill',
       ]);
+    });
+  });
+
+  it('draws a vector overlay as all of its layers, and takes them all off together', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.setOverlay('power', true);
+      expect([...map.sources.keys()]).toEqual([
+        'basemap-power-power',
+        'basemap-power-telecoms',
+        'basemap-power-petroleum',
+      ]);
+      expect(map.sources.get('basemap-power-power')).toMatchObject({
+        type: 'vector',
+        tiles: ['https://openinframap.org/map/power/{z}/{x}/{y}.pbf'],
+      });
+      const ids = map.layers.map((l) => l.id);
+      expect(ids[0]).toBe('basemap-power-pipeline');
+      expect(ids).toContain('basemap-power-tower');
+      // every layer reads the source it names, under this overlay's own prefix
+      expect(map.getLayer('basemap-power-mast').source).toBe('basemap-power-telecoms');
+      basemaps.setOverlay('power', false);
+      expect(map.layers).toEqual([]);
+      expect(map.sources.size).toBe(0);
+    });
+  });
+
+  it('slides a vector overlay into the stack as one block', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.setOverlay('labels', true);
+      basemaps.setOverlay('railway', true);
+      basemaps.setOverlay('power', true);
+      const ids = map.layers.map((l) => l.id);
+      // over the tracks, under the names
+      expect(ids[0]).toBe('basemap-railway');
+      expect(ids.at(-1)).toBe('basemap-labels');
+      expect(ids.slice(1, -1).every((id) => id.startsWith('basemap-power-'))).toBe(true);
+    });
+  });
+
+  it('holds the whole stack, lowest first, whatever order the switches were pressed in', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.show(ESRI, ESRI.id, 256);
+      for (const id of ['firms', 'labels', 'boundaries', 'seamarks', 'railway', 'roads', 'gpstraces']) {
+        basemaps.setOverlay(id, true, id === 'firms' ? { sensor: 'viirs', window: '24h' } : undefined);
+      }
+      basemaps.setOverlay('nightlights', true, { source: 'noaa20', day: '2026-09-12' });
+      expect(map.layers.map((l) => l.id)).toEqual([
+        'basemap-imagery',
+        'basemap-nightlights',
+        'basemap-gpstraces',
+        'basemap-roads',
+        'basemap-railway',
+        'basemap-seamarks',
+        'basemap-boundaries',
+        'basemap-labels',
+        'basemap-firms',
+      ]);
+    });
+  });
+
+  it('asks GIBS for the night it was given, and lets its coarse pixels be read zoomed in', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.setOverlay('nightlights', true, { source: 'snpp', day: '2022-02-24' });
+      const source = map.sources.get('basemap-nightlights');
+      expect(source.tiles[0]).toContain('/VIIRS_SNPP_DayNightBand_At_Sensor_Radiance/default/2022-02-24/');
+      expect(source.maxzoom).toBe(8);
+      const layer = map.getLayer('basemap-nightlights');
+      expect(layer.maxzoom).toBe(13);
+      expect(layer.paint['raster-opacity']).toBeLessThan(1);
+
+      basemaps.setOverlay('nightlights', true, { source: 'snpp', day: '2022-02-25' });
+      expect(map.sources.get('basemap-nightlights').tiles[0]).toContain('/2022-02-25/');
+    });
+  });
+
+  it('fetches every key-less overlay straight from its own server, over https', async () => {
+    // none of them is keyed or billed, so none of them needs the app in between;
+    // FIRMS is the one whose key has to stay on the backend
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const { OVERLAY_IDS } = await import('./basemap.js');
+      const params = {
+        firms: { sensor: 'viirs', window: '24h' },
+        nightlights: { source: 'noaa20', day: '2026-09-12' },
+      };
+      const map = stubMap();
+      const basemaps = createBasemaps(stubEngine(map));
+      for (const id of OVERLAY_IDS) basemaps.setOverlay(id, true, params[id]);
+      for (const [id, source] of map.sources) {
+        const expected = id === 'basemap-firms' ? /^\/api\/firms\/tiles\// : /^https:\/\//;
+        for (const url of source.tiles) expect(url, id).toMatch(expected);
+        expect(source.attribution, id).toBeTruthy();
+      }
     });
   });
 

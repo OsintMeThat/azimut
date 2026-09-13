@@ -55,7 +55,7 @@ test('shows every linked post from a proof popup and opens the selected draft', 
   await page.getByRole('button', { name: 'Proofs', exact: true }).click();
   await expect(page.getByText('Panorama autostitch test')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Show saved work on the map' }).click();
+  await page.getByRole('button', { name: 'Saved work', exact: true }).click();
   await page.locator('.saved-mark-proof').click();
 
   const popup = page.locator('.saved-popup');
@@ -91,7 +91,7 @@ test('clears capture rows before a different case index arrives', async ({ page 
   await awaitMapReady(page); // the rows are read beside a map, and one mark is on it
   const savedPanel = page.locator('.captures');
   await expect(savedPanel.getByText('Capture A', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Show saved work on the map' }).click();
+  await page.getByRole('button', { name: 'Saved work', exact: true }).click();
   await expect(page.locator('.saved-mark-capture')).toHaveCount(1);
   await page.getByTitle('Switch case').click();
   await page.locator('.menu .item').filter({ hasText: 'Case B' }).click();

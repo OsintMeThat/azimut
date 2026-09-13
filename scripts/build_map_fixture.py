@@ -38,17 +38,10 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from azimut.engine.mapsites import _mercator_y, parse_map_url  # noqa: E402
+from azimut.engine.mapsites import _CAMERA_CENTRE, _mercator_y, parse_map_url  # noqa: E402
 
 RAW = ROOT / "tests" / "fixtures" / "map-sites.raw.json"
 OUT = ROOT / "tests" / "fixtures" / "map-sites.json"
-
-#: Sites the recorder drives and the fixture leaves out, with the reason. Driving
-#: them is still worth it: a link the app hands out that stopped opening a map is
-#: caught by the run, whatever happens to the recording afterwards.
-EXPECTED_OUT = {
-    "google-earth": "a free camera states no scale, so there is nothing here to check it against",
-}
 
 #: How much the zoom has to have moved between two URLs before the solve below
 #: is worth doing. `extension/mapmath.js` states the same floor, and for the same
@@ -137,8 +130,8 @@ def build(entry: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
     window = entry["window"]
     trouble: list[str] = []
 
-    # The two views that state a size rather than a level — Apple's span,
-    # Google satellite's metres — are only a scale next to the height the map
+    # The views that state a size rather than a level — Apple's span, Earth's
+    # distance, Google satellite's metres — are only a scale next to the height the map
     # was drawn in, and that height is the window's minus whatever chrome sits
     # above or below it. Which is what the solve below measures. So it is run
     # twice: once against the window, then again against the map it found.
@@ -280,11 +273,7 @@ def main() -> int:
 
     recordings: list[dict[str, Any]] = []
     dropped: list[str] = []
-    aside: list[str] = []
     for entry in raw["recorded"]:
-        if entry["site"] in EXPECTED_OUT:
-            aside.append(f"{entry['label']}: {EXPECTED_OUT[entry['site']]}")
-            continue
         recording, trouble = build(entry)
         if recording is None:
             dropped.append(f"{entry['label']} ({entry['browser']}): {'; '.join(trouble)}")
@@ -317,6 +306,14 @@ def main() -> int:
             "solved from its own two zooms.",
         ),
         "how": "Rebuilt by scripts/build_map_fixture.py from tests/fixtures/map-sites.raw.json.",
+        # The offset the app ships as each site's starting answer, carried here
+        # so both suites read one copy of it: `tests/test_mapsites.py` checks it
+        # against the recordings above, and the extension's engine test checks
+        # that a fresh install draws from it (`extensionMapEngine.test.js`).
+        "hints": {
+            site: {"x": at[0], "y": at[1], "min_w": at[2]}
+            for site, at in _CAMERA_CENTRE.items()
+        },
         "recordings": recordings,
     }
     if "rounding" in raw:
@@ -333,10 +330,6 @@ def main() -> int:
     OUT.write_text(json.dumps(out, indent=1) + "\n", encoding="utf-8")
 
     print(f"\n{len(recordings)} recordings → {OUT.relative_to(ROOT)}")
-    if aside:
-        print("driven, and not kept:")
-        for line in aside:
-            print(f"  {line}")
     if dropped:
         print("left out, and why:")
         for line in dropped:

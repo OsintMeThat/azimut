@@ -18,23 +18,164 @@
  * for. MapLibre overzooms what it already holds instead.
  */
 import { createGoogleGlass, loadGoogleMaps } from './gmaps.js';
-
-// A labels-only layer laid over the imagery: roads and place names readable
-// without hiding the satellite view. Over a street basemap it would only
-// double its own labels, which is why the tool keeps it to imagery.
-const LABELS_URL =
-  'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png';
-const LABELS_ATTRIBUTION = '© OpenStreetMap contributors © CARTO';
-const LABELS_MAX_ZOOM = 20;
+import { INFRASTRUCTURE } from './infrastructure.js';
+import { tileTemplate as nightTemplate } from './nightlights.js';
 
 /** What a `{s}` template is served from when the provider names no hosts. */
 const DEFAULT_SUBDOMAINS = ['a', 'b', 'c'];
-const LABELS_SUBDOMAINS = ['a', 'b', 'c', 'd'];
 
 const IMAGERY = 'basemap-imagery';
-const LABELS = 'basemap-labels';
+
+/**
+ * What can be laid over the imagery, in the order they stack — first is
+ * lowest, and the imagery goes under all of them.
+ *
+ * Each is asked for only once the analyst switches it on: a map that is not
+ * showing railways fetches no railway tiles. The key-less ones are fetched
+ * straight from their own servers, which all answer cross-origin, and none of
+ * them is billed. FIRMS is the exception and goes through the app, which is
+ * where its key lives.
+ *
+ * Order matters on screen. The night picture is opaque, so it sits lowest and
+ * everything reads over it. Then lines over the picture, point marks over the
+ * lines, names over all of them (a station name under its own track is a name
+ * nobody reads), and the fires last, because when that layer is on it is the
+ * subject.
+ *
+ * `url` may be a function, for a layer whose address is a question rather than
+ * a constant: FIRMS answers for one sensor over one window, the night lights
+ * for one night, and changing either is a different set of tiles.
+ *
+ * `vector` is a layer drawn from vector tiles by a style of our own: several
+ * sources and several engine layers, switched on and off as one.
+ */
+const OVERLAYS = [
+  {
+    // One night photographed from orbit, or the 2016 baseline (nightlights.js).
+    // Key-less and public domain. Magnified past its 750 m pixels rather than
+    // cut off, because which district went dark is read zoomed in.
+    id: 'nightlights',
+    layer: 'basemap-nightlights',
+    url: nightTemplate,
+    attribution: 'Night lights: NASA EOSDIS GIBS, VIIRS',
+    maxZoom: 8,
+    viewMaxZoom: 13,
+    // just enough of the ground through it to tell which street is lit
+    opacity: 0.85,
+  },
+  {
+    // The raw GPS traces people uploaded to OSM: tracks nobody mapped yet, and
+    // how a site is really driven into.
+    id: 'gpstraces',
+    layer: 'basemap-gpstraces',
+    url: 'https://gps.tile.openstreetmap.org/lines/{z}/{x}/{y}.png',
+    attribution: 'GPS traces © OpenStreetMap contributors',
+    maxZoom: 20,
+  },
+  {
+    // Esri's road reference, drawn for imagery like the labels are.
+    id: 'roads',
+    layer: 'basemap-roads',
+    url: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Esri, HERE, Garmin, © OpenStreetMap contributors',
+    maxZoom: 19,
+  },
+  {
+    // Tracks, yards and stations, drawn as lines over whatever is underneath —
+    // the one OSM rendering that says which of two parallel strips is a railway.
+    id: 'railway',
+    layer: 'basemap-railway',
+    url: 'https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+    subdomains: ['a', 'b', 'c'],
+    attribution: '© OpenStreetMap contributors · style © OpenRailwayMap',
+    maxZoom: 19,
+  },
+  {
+    id: 'power',
+    layer: 'basemap-power',
+    vector: INFRASTRUCTURE,
+    attribution: '© OpenStreetMap contributors · Open Infrastructure Map (CC-BY)',
+  },
+  {
+    // Buoys, lights, harbours and fairways: the sea's own signage.
+    id: 'seamarks',
+    layer: 'basemap-seamarks',
+    url: 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
+    attribution: '© OpenSeaMap contributors',
+    maxZoom: 18,
+  },
+  {
+    // Country, region and district borders with their names. Esri's, under the
+    // same terms as the World Imagery the app already shows.
+    id: 'boundaries',
+    layer: 'basemap-boundaries',
+    url: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Esri, HERE, Garmin, © OpenStreetMap contributors, and the GIS user community',
+    maxZoom: 19,
+  },
+  {
+    // Roads and place names readable without hiding the satellite view. Over a
+    // street basemap it would only double its own labels, which is why the tool
+    // keeps it to imagery.
+    id: 'labels',
+    layer: 'basemap-labels',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
+    subdomains: ['a', 'b', 'c', 'd'],
+    attribution: '© OpenStreetMap contributors © CARTO',
+    maxZoom: 20,
+  },
+  {
+    // Active fire detections, live or from the archive (engine/firms.py). The
+    // key is NASA's and stays on the backend, so this one address is ours.
+    id: 'firms',
+    layer: 'basemap-firms',
+    url: (params) => `/api/firms/tiles/{z}/{x}/{y}?${new URLSearchParams(params)}`,
+    attribution: 'Active fire data: NASA FIRMS',
+    // FIRMS draws a fixed symbol per detection and VIIRS resolves 375 m: deeper
+    // than this is a screen of overlapping marks, and the route refuses it.
+    maxZoom: 14,
+  },
+];
+
+/** The ids a surface can be asked to show, so nothing hard-codes the list. */
+export const OVERLAY_IDS = OVERLAYS.map((overlay) => overlay.id);
+
+/**
+ * The engine layers one overlay is drawn as, lowest first. A raster overlay is
+ * one; a vector overlay is one per entry of its style.
+ */
+export function overlayLayers(overlay) {
+  if (!overlay.vector) return [overlay.layer];
+  return overlay.vector.layers.map((entry) => `${overlay.layer}-${entry.id}`);
+}
+
+/** …and the sources behind them, as `[id, spec]`. */
+export function overlaySources(overlay, params) {
+  const { attribution } = overlay;
+  if (overlay.vector) {
+    return Object.entries(overlay.vector.sources).map(([name, url]) => [
+      `${overlay.layer}-${name}`,
+      { type: 'vector', tiles: [url], minzoom: 0, maxzoom: overlay.vector.maxZoom, attribution },
+    ]);
+  }
+  const template = typeof overlay.url === 'function' ? overlay.url(params ?? {}) : overlay.url;
+  return [
+    [
+      overlay.layer,
+      {
+        type: 'raster',
+        tiles: tileUrls(template, overlay.subdomains),
+        tileSize: 256,
+        minzoom: 0,
+        maxzoom: overlay.maxZoom,
+        attribution,
+      },
+    ],
+  ];
+}
+
 /** Ours, so the first layer that is not is where the basemap stops. */
-const OWNED = new Set([IMAGERY, LABELS]);
+const OWNED = new Set([IMAGERY, ...OVERLAYS.flatMap(overlayLayers)]);
 
 /**
  * Where a provider's tiles are fetched from.
@@ -129,14 +270,36 @@ export function createBasemaps(engine, hooks = {}) {
   // hiding and showing the one we have costs nothing. Never destroyed until
   // the map goes, for the same reason.
   let glass = null;
-  let labels = false;
+  // The overlays currently laid over the imagery, each against the question it
+  // was built to answer (null for the ones that are simply on or off).
+  const shown = new Map();
   let wanted = null; // the provider id last asked for, so a slow load can tell
   let metered = null; // the billed provider whose tiles we are counting
 
   // Drawn shapes are appended by `surface.js`, so the first layer this module
-  // does not own is where the basemap stops and the overlays begin.
+  // does not own is where the basemap stops and a tool's own marks begin.
   function ceiling() {
     return map.getLayersOrder().find((id) => !OWNED.has(id));
+  }
+
+  /** Whether an overlay is on the map, read off its lowest layer. */
+  function isUp(overlay) {
+    return Boolean(map.getLayer(overlayLayers(overlay)[0]));
+  }
+
+  /** The lowest overlay that is up, which is what the imagery goes under. */
+  function lowestOverlay() {
+    const up = OVERLAYS.find(isUp);
+    return up ? overlayLayers(up)[0] : ceiling();
+  }
+
+  /**
+   * Where one overlay is inserted: under the first overlay declared above it
+   * that is already up, so the stack holds however they are switched on.
+   */
+  function under(overlay) {
+    const above = OVERLAYS.slice(OVERLAYS.indexOf(overlay) + 1).find(isUp);
+    return above ? overlayLayers(above)[0] : ceiling();
   }
 
   function onSourceData(event) {
@@ -168,10 +331,7 @@ export function createBasemaps(engine, hooks = {}) {
     dropTiles();
     capZoom(provider);
     map.addSource(IMAGERY, rasterSource(provider, providerId, cell));
-    map.addLayer(
-      { id: IMAGERY, type: 'raster', source: IMAGERY },
-      map.getLayer(LABELS) ? LABELS : ceiling()
-    );
+    map.addLayer({ id: IMAGERY, type: 'raster', source: IMAGERY }, lowestOverlay());
     live = `${providerId}@${cell}`;
     if (provider.meter) {
       metered = provider;
@@ -203,36 +363,41 @@ export function createBasemaps(engine, hooks = {}) {
     glass.show();
   }
 
-  function addLabels() {
-    if (map.getLayer(LABELS)) return;
-    map.addSource(LABELS, {
-      type: 'raster',
-      tiles: tileUrls(LABELS_URL, LABELS_SUBDOMAINS),
-      tileSize: 256,
-      minzoom: 0,
-      maxzoom: LABELS_MAX_ZOOM,
-      attribution: LABELS_ATTRIBUTION,
-    });
+  function addOverlay(overlay, params) {
+    if (isUp(overlay)) return;
+    for (const [id, spec] of overlaySources(overlay, params)) map.addSource(id, spec);
+    const before = under(overlay);
+    if (overlay.vector) {
+      for (const entry of overlay.vector.layers) {
+        map.addLayer(
+          { ...entry, id: `${overlay.layer}-${entry.id}`, source: `${overlay.layer}-${entry.source}` },
+          before
+        );
+      }
+      return;
+    }
     map.addLayer(
       {
-        id: LABELS,
+        id: overlay.layer,
         type: 'raster',
-        source: LABELS,
+        source: overlay.layer,
         // Past its own last level the overlay stops rather than being blown up:
         // a road name upscaled four times over a rooftop is a smear, and this
         // is what the map before it did. The two ceilings are the same number
         // and different questions — the source's is the deepest tile, the
         // layer's is the deepest view, which the engine counts one shallower.
-        maxzoom: LABELS_MAX_ZOOM,
+        // A picture whose coarse pixels are still worth reading zoomed in
+        // states a deeper view of its own.
+        maxzoom: overlay.viewMaxZoom ?? overlay.maxZoom,
+        ...(overlay.opacity != null ? { paint: { 'raster-opacity': overlay.opacity } } : {}),
       },
-      // above the imagery, below anything a tool draws
-      ceiling()
+      before
     );
   }
 
-  function dropLabels() {
-    if (map.getLayer(LABELS)) map.removeLayer(LABELS);
-    if (map.getSource(LABELS)) map.removeSource(LABELS);
+  function dropOverlay(overlay) {
+    for (const id of overlayLayers(overlay)) if (map.getLayer(id)) map.removeLayer(id);
+    for (const [id] of overlaySources(overlay, {})) if (map.getSource(id)) map.removeSource(id);
   }
 
   return {
@@ -262,11 +427,30 @@ export function createBasemaps(engine, hooks = {}) {
       showTiles(provider, providerId, cell);
     },
 
-    setLabels(on) {
-      if (on === labels) return;
-      labels = on;
-      if (on) addLabels();
-      else dropLabels();
+    /**
+     * Lay one overlay over the imagery, or take it off (`OVERLAY_IDS`).
+     *
+     * Idempotent, because the surface re-states every overlay whenever one of
+     * them changes: switching the railways on must not rebuild the labels, and
+     * a rebuilt raster layer is every visible tile refetched.
+     *
+     * `params` is for a layer that is a question — FIRMS's sensor and window.
+     * A different question is a different set of tiles, so that one *is*
+     * rebuilt, and only when the answer it was built with has changed.
+     */
+    setOverlay(id, on, params) {
+      const overlay = OVERLAYS.find((entry) => entry.id === id);
+      if (!overlay) return;
+      const asked = on ? JSON.stringify(params ?? null) : null;
+      if (asked === (shown.get(id) ?? null)) return;
+      if (shown.has(id)) {
+        shown.delete(id);
+        dropOverlay(overlay);
+      }
+      if (on) {
+        shown.set(id, asked);
+        addOverlay(overlay, params);
+      }
     },
 
     dispose() {

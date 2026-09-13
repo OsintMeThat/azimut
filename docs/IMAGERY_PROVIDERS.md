@@ -24,6 +24,7 @@
 | Provider | `needs_key` | auth style | `capturable` | `cacheable` (tile disk cache) | attribution source |
 |----------|:-----------:|------------|:------------:|:-----------------------------:|--------------------|
 | Esri World Imagery | no | — | yes | yes | static string |
+| Esri Wayback | no | — | yes | yes (a release never changes) | static string, release in provenance |
 | OpenStreetMap | no | — | yes | yes | static string |
 | OpenTopoMap | no | — | yes | yes | static string (CC-BY-SA² ) |
 | **Mapbox Satellite** | yes | access token in URL | yes | yes¹ | `© Mapbox © OpenStreetMap` (+ Maxar) |
@@ -325,6 +326,78 @@ Google 100k/month then $0.60/1k (plus hard limits of 15k tiles/day and 6k/min pe
 project), Mapbox 200k/month then $0.50/1k (alerts only, no hard cap). Metered
 tiles are proxied through the backend so the counter matches billing exactly;
 browser cache hits never re-count.
+
+## NASA FIRMS is a keyed layer, not a basemap
+
+Active fire detections (`engine/firms.py`) are the one keyed thing here that is
+not a picture of the ground: they are laid **over** whichever basemap is
+showing, so the key buys a layer and the card in Settings → Imagery carries no
+meter, no free-allowance box and no eco threshold. Nothing about it is billed.
+
+| | |
+|---|---|
+| Credential | one `MAP_KEY`, from the FIRMS page; it serves the global and the US/Canada services alike |
+| Where it goes | **in the path** of every request, which is why the browser never builds one: `/api/firms/tiles/{z}/{x}/{y}` for the app, `/api/ingest/firms` for the extension |
+| Asking | WMS `GetMap` in EPSG:3857 — the projection the tile grid is already in, so a tile is its own square and nothing is reprojected |
+| Live | `fires_viirs_24 / _48 / _72 / _7`, and the same for `fires_viirs_snpp`, `fires_viirs_noaa20` and `fires_modis` |
+| History | the same layer names without the suffix, dated with `TIME=from/to`, up to **31 days** per request |
+| Zoom ceiling | z14. FIRMS draws a fixed symbol per detection and VIIRS resolves 375 m; deeper is a screen of overlapping marks, and the route refuses it |
+| Allowance | 5,000 requests per 10 minutes, and a long range counts as several. Nothing polls, and a layer that is off asks for nothing |
+| Caching | none on disk. The live layers are what is burning now (upstream refreshes every 15 minutes) and a cached fire is a lie with a timestamp; the browser holds one for 5 minutes |
+
+NOAA-21 is left out on purpose: FIRMS gives it the rolling layers and no dated
+one, and a sensor that could answer "now" but not "that day" is a trap in a tool
+whose second question is always the date.
+
+The extension asks differently for the same reason it draws differently: it has
+no tile grid to hang tiles on, so it asks for **one picture of the ground it can
+see** per settled view and lays it under its own drawing, rotated with the map.
+That is also one request where tiles would be a dozen.
+
+## Esri Wayback is one release at a time
+
+Every published release of World Imagery stays online under its own number
+(`engine/wayback.py`). Same imagery, same terms and same attribution as the
+default basemap, and no key. Three services, all asked only after the analyst
+picks the basemap or opens its picker:
+
+| Service | What it answers | Notes |
+|---|---|---|
+| `waybackconfig.json` (S3) | every release: number, title with its date, metadata service | read once per 6 h; numbers are not in date order, so the date sorts. Only metadata services on `metadata.maptiles.arcgis.com` are followed |
+| `MapServer/tilemap/{release}/{z}/{row}/{col}` | `select`: the release that tile was really published in | walking it backwards from the newest lists a point's changes, one small request per change |
+| `World_Imagery_Metadata_*/MapServer/{layer}/query` | `SRC_DATE2` (epoch ms), provider, satellite | layer = 23 − zoom, capped at 13. Slow, a couple of seconds each, so a walk asks up to 12 at once |
+
+What the tilemap calls a change is a change of bytes. Esri republishes pictures
+often, so two filters run over the walk, both keeping the older release: equal
+tile sizes are compared by hash, and neighbours stating the same acquisition day
+and satellite are one picture (observed 2026-09 in Mariupol: three releases over
+one GE01 acquisition of 2023-10-04, re-coloured). A tile or a metadata answer
+that cannot be read is an unknown and never merges anything.
+
+A tile asked of a release it did not change answers `301` to the release that
+did; the proxy follows it and caches under the release asked for. The variant id
+`esri-wayback~{release}` is digits only, since it becomes a path segment and a
+cache directory; the plain `esri-wayback` resolves to the newest release, so its
+id and its cache always name one.
+
+## Key-less overlays
+
+Drawn over any basemap, fetched by the browser straight from their own servers
+(all answer cross-origin), never through the proxy, never cached on disk, never
+in a capture, and never asked for before their switch is on
+(`frontend/src/lib/map/basemap.js`). Checked 2026-09-13.
+
+| Layer | Source | Licence / terms | Notes |
+|---|---|---|---|
+| OSM labels | CARTO `voyager_only_labels` | © OSM contributors © CARTO | imagery only |
+| Borders | Esri `Reference/World_Boundaries_and_Places` | Esri terms, as World Imagery | |
+| Roads | Esri `Reference/World_Transportation` | Esri terms, as World Imagery | imagery only |
+| OSM railways | OpenRailwayMap `standard` | © OSM contributors, style © OpenRailwayMap | |
+| Power lines | Open Infrastructure Map vector tiles (`/map/power`, `/telecoms`, `/petroleum`) | data ODbL, analysis CC-BY 4.0, credit and link required | no published tile usage policy, so the style is ours, requests only follow the view, and nothing is prefetched |
+| Sea marks | OpenSeaMap `seamark` | © OpenSeaMap contributors (CC-BY-SA) | |
+| GPS traces | `gps.tile.openstreetmap.org/lines` | OSMF tile policy | |
+| Night lights | NASA GIBS WMTS, `VIIRS_NOAA20_DayNightBand_At_Sensor_Radiance` (from 2024-03-25), `VIIRS_SNPP_…` (from 2020-11-18, with gaps), `VIIRS_Black_Marble` 2016 | public domain | Level 8 (750 m); opaque, drawn lowest at 85% |
+| Active fires | NASA FIRMS, keyed, through the app | see above | |
 
 ## Deliberately not basemaps
 

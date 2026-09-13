@@ -96,6 +96,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # metres, so a case reads the same whatever the reader's preference.
     "coord_format": "dd",
     "units": "metric",
+    # Whether a capture is filed with a scale bar and a north arrow burned into
+    # it (the capture menu's tick, and the extension popup's own). Off by
+    # default: what is drawn onto somebody's evidence is asked for, never
+    # assumed — and the tick is remembered here so it is asked for once.
+    "capture_scale_north": False,
     # Where the Satellite tab opens before anything points it somewhere else
     # (a case artifact, a "go to coords" handoff). {"lat", "lon", "zoom"}.
     "home_view": {"lat": 43.0, "lon": 25.0, "zoom": 3},

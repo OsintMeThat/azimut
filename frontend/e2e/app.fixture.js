@@ -489,7 +489,18 @@ const entityTypes = [
   },
   { type: 'media', label: 'Media', family: 'collected', icon: 'image', manual: false, group: '', hint: 'a file the case collected', family_reads: 'bytes gathered into the case rather than written', attrs: [] },
   { type: 'capture', label: 'Capture', family: 'collected', icon: 'satellite', manual: false, group: '', hint: 'a map screenshot', family_reads: 'bytes gathered into the case rather than written', attrs: [] },
-  { type: 'place', label: 'Place', family: 'place', icon: 'pin', manual: false, group: 'How precise', hint: 'a saved point', family_reads: 'a point on the map, never a thing standing on it', attrs: [] },
+  {
+    type: 'place', label: 'Place', family: 'place', icon: 'pin', manual: false, group: '',
+    hint: 'a saved point', family_reads: 'a point on the map, never a thing standing on it',
+    // the precision fields, as `engine/entities.py` declares them: a place edited from
+    // the map opens the same panel as the sidebar, and these are what it is opened for
+    attrs: [
+      { key: 'radius_m', label: 'Uncertainty radius (m)', kind: 'number', group: 'How precise', rungs: [{ value: 500, label: 'This neighbourhood' }], options: [], minimum: 1, maximum: 5000000 },
+      { key: 'footprint', label: 'Footprint', kind: 'geojson', rungs: [], options: [], minimum: null, maximum: null },
+      { key: 'verbatim', label: 'As the source put it', kind: 'longtext', rungs: [], options: [], minimum: null, maximum: null },
+      { key: 'method', label: 'How this point was found', kind: 'longtext', rungs: [], options: [], minimum: null, maximum: null },
+    ],
+  },
   { type: 'note', label: 'Note', family: 'document', icon: 'note', manual: false, group: '', hint: 'a Markdown page in the case notebook', family_reads: 'something read rather than gathered', attrs: [] },
   {
     type: 'bookmark', label: 'Bookmark', family: 'document', icon: 'globe', manual: false, group: '',
@@ -1775,6 +1786,17 @@ export async function installAppFixture(page, options = {}) {
       return json(route, { entity: fixtureLookupEntities[url.searchParams.get('value')] ?? null });
     }
     if (path === '/api/satellite/providers') return json(route, fixtureProviders);
+    if (path === '/api/firms/sensors') {
+      return json(route, {
+        keyed: false,
+        sensors: [
+          { id: 'viirs', label: 'VIIRS (S-NPP + NOAA-20)' },
+          { id: 'viirs_noaa20', label: 'VIIRS NOAA-20' },
+          { id: 'modis', label: 'MODIS' },
+        ],
+        max_zoom: 10,
+      });
+    }
     // one billed map load, counted where it happens: the tile proxy cannot see
     // the Maps JS widget, so the tool reports it itself
     if (path.startsWith('/api/satellite/usage/') && request.method() === 'POST') {

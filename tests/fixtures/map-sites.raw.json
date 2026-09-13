@@ -1,161 +1,13 @@
 {
  "what": "Every URL these map sites wrote about themselves, driven through one gesture sequence.",
- "how": "frontend/calibration/protocol.mjs \u2014 open, drag a known number of pixels, zoom about two known pixels. Run it again with `npm run calibrate:maps`.",
- "why": "The raw half of tests/fixtures/map-sites.json. Nothing here has been parsed: scripts/build_map_fixture.py does that, with the app\u2019s own parser.",
+ "how": "frontend/calibration/protocol.mjs — open, drag a known number of pixels, zoom about two known pixels. Run it again with `npm run calibrate:maps`.",
+ "why": "The raw half of tests/fixtures/map-sites.json. Nothing here has been parsed: scripts/build_map_fixture.py does that, with the app’s own parser.",
  "place": {
   "lat": 47.388462,
   "lon": 2.352785,
   "zoom": 15
  },
  "recorded": [
-  {
-   "browser": "chromium",
-   "pageZoom": 1,
-   "deviceScaleFactor": 1,
-   "protocol": "driven by hand, before frontend/calibration/protocol.mjs wrote the sequence down",
-   "site": "google-maps",
-   "label": "google-maps",
-   "link": null,
-   "window": {
-    "w": 1600,
-    "h": 1000
-   },
-   "pan": {
-    "from": 0,
-    "to": 1,
-    "dx": -300,
-    "dy": 200
-   },
-   "zooms": [
-    {
-     "from": 1,
-     "to": 2,
-     "at": {
-      "x": 400,
-      "y": 250
-     }
-    },
-    {
-     "from": 2,
-     "to": 3,
-     "at": {
-      "x": 1248,
-      "y": 720
-     }
-    }
-   ],
-   "canvas": null,
-   "steps": [
-    {
-     "url": "https://www.google.com/maps/@47.388462,2.352785,15z?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
-    },
-    {
-     "url": "https://www.google.com/maps/@47.3941855,2.365445,15z?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
-    },
-    {
-     "url": "https://www.google.com/maps/@47.3978168,2.356862,16z?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
-    },
-    {
-     "url": "https://www.google.com/maps/@47.396219,2.3616685,17z?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
-    }
-   ]
-  },
-  {
-   "browser": "chromium",
-   "pageZoom": 1,
-   "deviceScaleFactor": 1,
-   "protocol": "driven by hand, before frontend/calibration/protocol.mjs wrote the sequence down",
-   "site": "google-maps",
-   "label": "google-maps satellite",
-   "link": null,
-   "window": {
-    "w": 1600,
-    "h": 1000
-   },
-   "pan": {
-    "from": 0,
-    "to": 1,
-    "dx": -300,
-    "dy": 200
-   },
-   "zooms": [
-    {
-     "from": 1,
-     "to": 2,
-     "at": {
-      "x": 400,
-      "y": 250
-     }
-    },
-    {
-     "from": 2,
-     "to": 3,
-     "at": {
-      "x": 1248,
-      "y": 720
-     }
-    }
-   ],
-   "canvas": null,
-   "steps": [
-    {
-     "url": "https://www.google.com/maps/@47.388462,2.352785,3231m/data=!3m1!1e3?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
-    },
-    {
-     "url": "https://www.google.com/maps/@47.3941855,2.365445,3230m/data=!3m1!1e3?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
-    },
-    {
-     "url": "https://www.google.com/maps/@47.3978168,2.356862,1615m/data=!3m1!1e3?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
-    },
-    {
-     "url": "https://www.google.com/maps/@47.396219,2.3616685,808m/data=!3m1!1e3?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
-    }
-   ]
-  },
-  {
-   "browser": "chromium",
-   "pageZoom": 1,
-   "deviceScaleFactor": 1,
-   "protocol": "driven by hand, before frontend/calibration/protocol.mjs wrote the sequence down",
-   "site": "google-maps",
-   "label": "google-maps with its place panel open",
-   "link": null,
-   "window": {
-    "w": 1600,
-    "h": 1000
-   },
-   "pan": {
-    "from": 0,
-    "to": 1,
-    "dx": -300,
-    "dy": 200
-   },
-   "zooms": [
-    {
-     "from": 2,
-     "to": 3,
-     "at": {
-      "x": 1248,
-      "y": 720
-     }
-    }
-   ],
-   "canvas": null,
-   "steps": [
-    {
-     "url": "https://www.google.com/maps/place/18000+Bourges/@47.081,2.3988,13z/data=!4m6!3m5!1s0x47fa9677b89bb417:0xcbfb282ccd5c85be!8m2!3d47.0812405!4d2.3979615!16zL20vMGwzOXM?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
-    },
-    {
-     "url": "https://www.google.com/maps/place/18000+Bourges/@47.1040234,2.4494401,13z/data=!4m6!3m5!1s0x47fa9677b89bb417:0xcbfb282ccd5c85be!8m2!3d47.0812405!4d2.3979615!16zL20vMGwzOXM?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
-    },
-    {
-     "url": "https://www.google.com/maps/place/18000+Bourges/@47.1040234,2.4494401,13z/data=!4m6!3m5!1s0x47fa9677b89bb417:0xcbfb282ccd5c85be!8m2!3d47.0812405!4d2.3979615!16zL20vMGwzOXM?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
-    },
-    {
-     "url": "https://www.google.com/maps/place/18000+Bourges/@47.0911689,2.4878923,14z/data=!4m6!3m5!1s0x47fa9677b89bb417:0xcbfb282ccd5c85be!8m2!3d47.0812405!4d2.3979615!16zL20vMGwzOXM?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
-    }
-   ]
-  },
   {
    "browser": "chromium",
    "pageZoom": 1,
@@ -317,8 +169,276 @@
    "pageZoom": 1,
    "deviceScaleFactor": 1,
    "protocol": "driven by hand, before frontend/calibration/protocol.mjs wrote the sequence down",
-   "site": "yandex-maps",
-   "label": "yandex-maps",
+   "site": "copernicus-browser",
+   "label": "copernicus-browser",
+   "link": null,
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -300,
+    "dy": 200
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 1200,
+      "y": 300
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 700,
+      "y": 800
+     }
+    }
+   ],
+   "canvas": null,
+   "steps": [
+    {
+     "url": "https://browser.dataspace.copernicus.eu/?zoom=15&lat=47.38846&lng=2.35279&themeId=DEFAULT-THEME&visualizationUrl=U2FsdGVkX1%2FOh591qUWIQVhuygSLTCLdP97eGmS5zQ25NfaMPtAny%2B7iaBWrBRMWHceo0SM7zHDOTRRXdWjCHmiwK7%2FaHzykLzK4clL6r%2BgMUbENcl61b3J6RfDgH5rP&datasetId=S2_L2A_CDAS&demSource3D=%22MAPZEN%22&cloudCoverage=30&dateMode=SINGLE"
+    },
+    {
+     "url": "https://browser.dataspace.copernicus.eu/?zoom=15&lat=47.38846&lng=2.35279&themeId=DEFAULT-THEME&visualizationUrl=U2FsdGVkX1%2FOh591qUWIQVhuygSLTCLdP97eGmS5zQ25NfaMPtAny%2B7iaBWrBRMWHceo0SM7zHDOTRRXdWjCHmiwK7%2FaHzykLzK4clL6r%2BgMUbENcl61b3J6RfDgH5rP&datasetId=S2_L2A_CDAS&demSource3D=%22MAPZEN%22&cloudCoverage=30&dateMode=SINGLE"
+    },
+    {
+     "url": "https://browser.dataspace.copernicus.eu/?zoom=16&lat=47.39138&lng=2.35655&themeId=DEFAULT-THEME&visualizationUrl=U2FsdGVkX1%2FGmRDWk0S6efy25XJJ2clzUiSIIpwrrmrTm6sb%2Fa1Ur1%2FlIpit%2FyPGV1T6lg7lxbq9i8bn1foSJqLSD5hJ8lsxWtow8b7UfY%2Bm4rmjwzE1DzCC93upUVtw&datasetId=S2_L2A_CDAS&demSource3D=%22MAPZEN%22&cloudCoverage=30&dateMode=SINGLE"
+    },
+    {
+     "url": "https://browser.dataspace.copernicus.eu/?zoom=17&lat=47.3892&lng=2.35306&themeId=DEFAULT-THEME&visualizationUrl=U2FsdGVkX1%2F4r%2B4Q6eNW%2F5pehuG8etZw6tN3BYuKmJpyWafolpVfMrn94YvcSgxRrEaYhNjI%2BuLverBqN4FAxti4iFdZL28TcMeeTULZVwB14%2B07bisnmG%2BU%2BJHk83%2FO&datasetId=S2_L2A_CDAS&demSource3D=%22MAPZEN%22&cloudCoverage=30&dateMode=SINGLE"
+    }
+   ]
+  },
+  {
+   "browser": "chromium",
+   "pageZoom": 1,
+   "deviceScaleFactor": 1,
+   "site": "google-earth",
+   "label": "google-earth",
+   "link": "https://earth.google.com/web/@47.388462,2.352785,0a,5129d,35y,0h,0t,0r",
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -320,
+    "dy": 200
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 992,
+      "y": 300
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 1280,
+      "y": 740
+     }
+    }
+   ],
+   "canvas": {
+    "x": 0,
+    "y": 0,
+    "w": 1600,
+    "h": 1000
+   },
+   "steps": [
+    {
+     "url": "https://earth.google.com/web/@47.388462,2.352785,0a,5129d,35y,0h,0t,0r/data=CgRCAggBQgIIAEoNCP___________wEQAA"
+    },
+    {
+     "url": "https://earth.google.com/web/@47.39403373,2.36595251,206.49927856a,4922.50082797d,35y,0h,0t,0r/data=CgRCAggBQgIIAEoNCP___________wEQAA"
+    },
+    {
+     "url": "https://earth.google.com/web/@47.39694967,2.37010153,210.01806133a,2360.11894573d,35y,-0h,0t,0r/data=CgRCAggBQgIIAEoNCP___________wEQAA"
+    },
+    {
+     "url": "https://earth.google.com/web/@47.39529375,2.37499289,212.14829276a,1141.56889716d,35y,-0h,0t,0r/data=CgRCAggBQgIIAEoNCP___________wEQAA"
+    }
+   ]
+  },
+  {
+   "browser": "chromium",
+   "pageZoom": 1,
+   "deviceScaleFactor": 1,
+   "site": "google-earth",
+   "label": "google-earth",
+   "link": "https://earth.google.com/web/@47.388462,2.352785,0a,5129d,35y,0h,0t,0r",
+   "window": {
+    "w": 1200,
+    "h": 760
+   },
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -240,
+    "dy": 152
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 744,
+      "y": 228
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 960,
+      "y": 562
+     }
+    }
+   ],
+   "canvas": {
+    "x": 0,
+    "y": 0,
+    "w": 1200,
+    "h": 760
+   },
+   "steps": [
+    {
+     "url": "https://earth.google.com/web/@47.388462,2.352785,0a,5129d,35y,0h,0t,0r/data=CgRCAggBQgIIAEoNCP___________wEQAA"
+    },
+    {
+     "url": "https://earth.google.com/web/@47.39403081,2.36577244,206.20759942a,4922.79230946d,35y,0h,0t,0r/data=CgRCAggBQgIIAEoNCP___________wEQAA"
+    },
+    {
+     "url": "https://earth.google.com/web/@47.39718693,2.37020577,209.93995048a,2151.034749d,35y,0h,0t,0r/data=CgRCAggBQgIIAEoNCP___________wEQAA"
+    },
+    {
+     "url": "https://earth.google.com/web/@47.39542433,2.37535523,211.70640372a,851.59552764d,35y,0h,0t,0r/data=CgRCAggBQgIIAEoNCP___________wEQAA"
+    }
+   ]
+  },
+  {
+   "browser": "chromium",
+   "pageZoom": 1,
+   "deviceScaleFactor": 1,
+   "protocol": "driven by hand, before frontend/calibration/protocol.mjs wrote the sequence down",
+   "site": "google-maps",
+   "label": "google-maps",
+   "link": null,
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -300,
+    "dy": 200
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 400,
+      "y": 250
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 1248,
+      "y": 720
+     }
+    }
+   ],
+   "canvas": null,
+   "steps": [
+    {
+     "url": "https://www.google.com/maps/@47.388462,2.352785,15z?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
+    },
+    {
+     "url": "https://www.google.com/maps/@47.3941855,2.365445,15z?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
+    },
+    {
+     "url": "https://www.google.com/maps/@47.3978168,2.356862,16z?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
+    },
+    {
+     "url": "https://www.google.com/maps/@47.396219,2.3616685,17z?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
+    }
+   ]
+  },
+  {
+   "browser": "chromium",
+   "pageZoom": 1,
+   "deviceScaleFactor": 1,
+   "protocol": "driven by hand, before frontend/calibration/protocol.mjs wrote the sequence down",
+   "site": "google-maps",
+   "label": "google-maps satellite",
+   "link": null,
+   "window": {
+    "w": 1600,
+    "h": 1000
+   },
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -300,
+    "dy": 200
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 400,
+      "y": 250
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 1248,
+      "y": 720
+     }
+    }
+   ],
+   "canvas": null,
+   "steps": [
+    {
+     "url": "https://www.google.com/maps/@47.388462,2.352785,3231m/data=!3m1!1e3?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
+    },
+    {
+     "url": "https://www.google.com/maps/@47.3941855,2.365445,3230m/data=!3m1!1e3?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
+    },
+    {
+     "url": "https://www.google.com/maps/@47.3978168,2.356862,1615m/data=!3m1!1e3?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
+    },
+    {
+     "url": "https://www.google.com/maps/@47.396219,2.3616685,808m/data=!3m1!1e3?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
+    }
+   ]
+  },
+  {
+   "browser": "chromium",
+   "pageZoom": 1,
+   "deviceScaleFactor": 1,
+   "protocol": "driven by hand, before frontend/calibration/protocol.mjs wrote the sequence down",
+   "site": "google-maps",
+   "label": "google-maps with its place panel open",
    "link": null,
    "window": {
     "w": 1600,
@@ -343,68 +463,16 @@
    "canvas": null,
    "steps": [
     {
-     "url": "https://yandex.com/maps/?l=sat&ll=2.352785%2C47.388462&z=15"
+     "url": "https://www.google.com/maps/place/18000+Bourges/@47.081,2.3988,13z/data=!4m6!3m5!1s0x47fa9677b89bb417:0xcbfb282ccd5c85be!8m2!3d47.0812405!4d2.3979615!16zL20vMGwzOXM?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
     },
     {
-     "url": "https://yandex.com/maps/?l=sat&ll=2.365660%2C47.394291&z=15"
+     "url": "https://www.google.com/maps/place/18000+Bourges/@47.1040234,2.4494401,13z/data=!4m6!3m5!1s0x47fa9677b89bb417:0xcbfb282ccd5c85be!8m2!3d47.0812405!4d2.3979615!16zL20vMGwzOXM?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
     },
     {
-     "url": "https://yandex.com/maps/?l=sat&ll=2.365660%2C47.394291&z=15"
+     "url": "https://www.google.com/maps/place/18000+Bourges/@47.1040234,2.4494401,13z/data=!4m6!3m5!1s0x47fa9677b89bb417:0xcbfb282ccd5c85be!8m2!3d47.0812405!4d2.3979615!16zL20vMGwzOXM?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
     },
     {
-     "url": "https://yandex.com/maps/?l=sat&ll=2.370767%2C47.391231&z=16"
-    }
-   ]
-  },
-  {
-   "browser": "chromium",
-   "pageZoom": 1,
-   "deviceScaleFactor": 1,
-   "protocol": "driven by hand, before frontend/calibration/protocol.mjs wrote the sequence down",
-   "site": "yandex-maps",
-   "label": "yandex-maps in a smaller window",
-   "link": null,
-   "window": {
-    "w": 1200,
-    "h": 760
-   },
-   "pan": {
-    "from": 0,
-    "to": 1,
-    "dx": -240,
-    "dy": 160
-   },
-   "zooms": [
-    {
-     "from": 1,
-     "to": 2,
-     "at": {
-      "x": 936,
-      "y": 213
-     }
-    },
-    {
-     "from": 2,
-     "to": 3,
-     "at": {
-      "x": 744,
-      "y": 562
-     }
-    }
-   ],
-   "canvas": null,
-   "steps": [
-    {
-     "url": "https://yandex.com/maps/?l=sat&ll=2.352785%2C47.388462&z=15"
-    },
-    {
-     "url": "https://yandex.com/maps/?l=sat&ll=2.363085%2C47.393125&z=15"
-    },
-    {
-     "url": "https://yandex.com/maps/?l=sat&ll=2.365788%2C47.395704&z=16"
-    },
-    {
-     "url": "https://yandex.com/maps/?l=sat&ll=2.365080%2C47.394451&z=17"
+     "url": "https://www.google.com/maps/place/18000+Bourges/@47.0911689,2.4878923,14z/data=!4m6!3m5!1s0x47fa9677b89bb417:0xcbfb282ccd5c85be!8m2!3d47.0812405!4d2.3979615!16zL20vMGwzOXM?entry=ttu&g_ep=EgoyMDI2MDkwOC4wIKXMDSoASAFQAw%3D%3D"
     }
    ]
   },
@@ -569,8 +637,8 @@
    "pageZoom": 1,
    "deviceScaleFactor": 1,
    "protocol": "driven by hand, before frontend/calibration/protocol.mjs wrote the sequence down",
-   "site": "copernicus-browser",
-   "label": "copernicus-browser",
+   "site": "yandex-maps",
+   "label": "yandex-maps",
    "link": null,
    "window": {
     "w": 1600,
@@ -584,35 +652,79 @@
    },
    "zooms": [
     {
-     "from": 1,
-     "to": 2,
-     "at": {
-      "x": 1200,
-      "y": 300
-     }
-    },
-    {
      "from": 2,
      "to": 3,
      "at": {
-      "x": 700,
-      "y": 800
+      "x": 1248,
+      "y": 720
      }
     }
    ],
    "canvas": null,
    "steps": [
     {
-     "url": "https://browser.dataspace.copernicus.eu/?zoom=15&lat=47.38846&lng=2.35279&themeId=DEFAULT-THEME&visualizationUrl=U2FsdGVkX1%2FOh591qUWIQVhuygSLTCLdP97eGmS5zQ25NfaMPtAny%2B7iaBWrBRMWHceo0SM7zHDOTRRXdWjCHmiwK7%2FaHzykLzK4clL6r%2BgMUbENcl61b3J6RfDgH5rP&datasetId=S2_L2A_CDAS&demSource3D=%22MAPZEN%22&cloudCoverage=30&dateMode=SINGLE"
+     "url": "https://yandex.com/maps/?l=sat&ll=2.352785%2C47.388462&z=15"
     },
     {
-     "url": "https://browser.dataspace.copernicus.eu/?zoom=15&lat=47.38846&lng=2.35279&themeId=DEFAULT-THEME&visualizationUrl=U2FsdGVkX1%2FOh591qUWIQVhuygSLTCLdP97eGmS5zQ25NfaMPtAny%2B7iaBWrBRMWHceo0SM7zHDOTRRXdWjCHmiwK7%2FaHzykLzK4clL6r%2BgMUbENcl61b3J6RfDgH5rP&datasetId=S2_L2A_CDAS&demSource3D=%22MAPZEN%22&cloudCoverage=30&dateMode=SINGLE"
+     "url": "https://yandex.com/maps/?l=sat&ll=2.365660%2C47.394291&z=15"
     },
     {
-     "url": "https://browser.dataspace.copernicus.eu/?zoom=16&lat=47.39138&lng=2.35655&themeId=DEFAULT-THEME&visualizationUrl=U2FsdGVkX1%2FGmRDWk0S6efy25XJJ2clzUiSIIpwrrmrTm6sb%2Fa1Ur1%2FlIpit%2FyPGV1T6lg7lxbq9i8bn1foSJqLSD5hJ8lsxWtow8b7UfY%2Bm4rmjwzE1DzCC93upUVtw&datasetId=S2_L2A_CDAS&demSource3D=%22MAPZEN%22&cloudCoverage=30&dateMode=SINGLE"
+     "url": "https://yandex.com/maps/?l=sat&ll=2.365660%2C47.394291&z=15"
     },
     {
-     "url": "https://browser.dataspace.copernicus.eu/?zoom=17&lat=47.3892&lng=2.35306&themeId=DEFAULT-THEME&visualizationUrl=U2FsdGVkX1%2F4r%2B4Q6eNW%2F5pehuG8etZw6tN3BYuKmJpyWafolpVfMrn94YvcSgxRrEaYhNjI%2BuLverBqN4FAxti4iFdZL28TcMeeTULZVwB14%2B07bisnmG%2BU%2BJHk83%2FO&datasetId=S2_L2A_CDAS&demSource3D=%22MAPZEN%22&cloudCoverage=30&dateMode=SINGLE"
+     "url": "https://yandex.com/maps/?l=sat&ll=2.370767%2C47.391231&z=16"
+    }
+   ]
+  },
+  {
+   "browser": "chromium",
+   "pageZoom": 1,
+   "deviceScaleFactor": 1,
+   "protocol": "driven by hand, before frontend/calibration/protocol.mjs wrote the sequence down",
+   "site": "yandex-maps",
+   "label": "yandex-maps in a smaller window",
+   "link": null,
+   "window": {
+    "w": 1200,
+    "h": 760
+   },
+   "pan": {
+    "from": 0,
+    "to": 1,
+    "dx": -240,
+    "dy": 160
+   },
+   "zooms": [
+    {
+     "from": 1,
+     "to": 2,
+     "at": {
+      "x": 936,
+      "y": 213
+     }
+    },
+    {
+     "from": 2,
+     "to": 3,
+     "at": {
+      "x": 744,
+      "y": 562
+     }
+    }
+   ],
+   "canvas": null,
+   "steps": [
+    {
+     "url": "https://yandex.com/maps/?l=sat&ll=2.352785%2C47.388462&z=15"
+    },
+    {
+     "url": "https://yandex.com/maps/?l=sat&ll=2.363085%2C47.393125&z=15"
+    },
+    {
+     "url": "https://yandex.com/maps/?l=sat&ll=2.365788%2C47.395704&z=16"
+    },
+    {
+     "url": "https://yandex.com/maps/?l=sat&ll=2.365080%2C47.394451&z=17"
     }
    ]
   },
@@ -662,7 +774,7 @@
   }
  ],
  "rounding": {
-  "what": "One site rounds the zoom it writes. Bing's wheel moves a third of a level and its URL carries one decimal, so \"15.3\" is really 15.334 \u2014 a fortieth of a level, two and a third percent of scale, five metres at the edge of a 1600 px window at level 18.",
+  "what": "One site rounds the zoom it writes. Bing's wheel moves a third of a level and its URL carries one decimal, so \"15.3\" is really 15.334 — a fortieth of a level, two and a third percent of scale, five metres at the edge of a 1600 px window at level 18.",
   "how": "Six wheel notches about one pixel, from a whole level. The zooms between the whole ones are what the address bar cannot state, and what `zoomFromAnchor` works out from the pixel the zoom held still.",
   "site": "bing-maps",
   "window": {

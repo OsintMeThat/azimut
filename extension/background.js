@@ -30,7 +30,12 @@ function captureActiveTab(windowId) {
 
 /** Crop a captured frame (dataURL) to a viewport-CSS-px rect. The scale is
  * measured (image width / viewport width), not assumed from devicePixelRatio,
- * so browser zoom can't silently shift the crop — same rule as the app. */
+ * so browser zoom can't silently shift the crop — same rule as the app.
+ *
+ * Returns the crop *and* that scale: the crop keeps the frame's own pixels, so
+ * the file holds `scale` of them per CSS pixel, and a zoom describes CSS
+ * pixels. Anything the app draws with a distance on it needs the ratio, or a
+ * scale bar on a 2× screen states twice the ground it covers. */
 async function cropDataUrl(dataUrl, rect, viewportW) {
   const blob = await (await fetch(dataUrl)).blob();
   const bmp = await createImageBitmap(blob);
@@ -42,7 +47,7 @@ async function cropDataUrl(dataUrl, rect, viewportW) {
   if (sw < 8 || sh < 8) throw new Error("selection too small");
   const canvas = new OffscreenCanvas(sw, sh);
   canvas.getContext("2d").drawImage(bmp, sx, sy, sw, sh, 0, 0, sw, sh);
-  return canvas.convertToBlob({ type: "image/png" });
+  return { blob: await canvas.convertToBlob({ type: "image/png" }), scale };
 }
 
 /** File one screenshot with the backend (POST /api/ingest/screenshot). */
@@ -59,6 +64,10 @@ async function ingest(blob, meta) {
   if (meta.title) form.append("title", meta.title);
   for (const k of ["lat", "lon", "zoom", "bearing"]) {
     if (meta[k] !== null && meta[k] !== undefined && meta[k] !== "") form.append(k, String(meta[k]));
+  }
+  if (meta.marks) {
+    form.append("scale_north", "true");
+    form.append("device_scale", String(meta.deviceScale || 1));
   }
   form.append("captured_at", new Date().toISOString());
   form.append("extension", api.runtime.getManifest().version);
@@ -420,7 +429,13 @@ const MAP_ROUTES = new Set([
   "/api/ingest/grid/marks",
   "/api/ingest/place",
   "/api/ingest/media",
+  "/api/ingest/firms/sensors",
 ]);
+
+// …and the ones that answer with bytes. Separate because the relay above parses
+// what comes back as JSON, and because a route that hands over a picture is
+// worth listing where it can be seen rather than inferred from a content type.
+const MAP_IMAGE_ROUTES = new Set(["/api/ingest/firms"]);
 
 //. Injected in this order: each one reads the globals the ones before it left.
 const MAP_FILES = [
@@ -429,6 +444,7 @@ const MAP_FILES = [
   "maptools.js",
   "mapdraw.js",
   "mapref.js",
+  "maplink.js",
   "mapoverlay.js",
 ];
 
@@ -471,6 +487,34 @@ async function mapApi(msg) {
     throw new Error(typeof detail === "string" ? detail : `the app refused: ${r.status}`);
   }
   return text ? JSON.parse(text) : null;
+}
+
+/**
+ * A picture the app draws for the panel — today, NASA FIRMS over the view.
+ *
+ * Two reasons it is not `mapApi`: what comes back is bytes rather than JSON,
+ * and it is handed over as a data URL because a content script cannot hold the
+ * app's blob URL. The refusal is still read as the app's own sentence, since
+ * FIRMS says exactly what is wrong with a key and that is worth repeating.
+ */
+async function mapImage(msg) {
+  if (!MAP_IMAGE_ROUTES.has(msg.path)) throw new Error(`the map tools may not call ${msg.path}`);
+  const { backendUrl, token } = await settings();
+  if (!token) throw new Error("not paired. Open the extension options and paste the token from Azimut Settings");
+
+  const url = new URL(backendUrl + msg.path);
+  for (const [key, value] of Object.entries(msg.query || {})) {
+    if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
+  }
+  let r;
+  try {
+    r = await fetch(url, { headers: { "X-Azimut-Token": token } });
+  } catch {
+    throw new Error("Azimut is not answering. Is the app running?");
+  }
+  if (!r.ok) throw new Error(await refusal(r));
+  const blob = await r.blob();
+  return `data:${blob.type || "image/png"};base64,${await base64(blob)}`;
 }
 
 /**
@@ -696,6 +740,269 @@ api.runtime.onConnect.addListener((port) => {
   pumpEvents();
 });
 
+// --- linked views --------------------------------------------------------------
+//
+// The app's Link button puts two of its map tabs on one camera over a
+// BroadcastChannel (`frontend/src/lib/map/link.js`). A panel on a site's map
+// cannot join that channel — it is another origin — so the worker is the hub for
+// everything the channel cannot reach: panel to panel, and panel to app, whose
+// bridge opens a port here for each map tab (`bridge.js`).
+//
+// A panel follows a view by writing it into its own address bar
+// (`maplink.js`), and most sites reload for that. A reload takes the panel with
+// it, so two facts have to outlive the page and live here: which tabs are linked,
+// and which one is on its way to a view it was sent. The second is what puts the
+// tools back once the page has loaded (`resumeFollow`), and what keeps a tab
+// counted as a peer while it reloads: without it the tab leading would see its
+// only peer vanish mid-follow and switch its own link off.
+//
+// Nothing here is written down beyond the session, and nothing reaches the
+// network: a camera is not case state.
+
+const LINK_PORT = "map-link";
+/** How long a tab that left to follow a view is waited for. Earth takes a
+ *  dozen seconds to load on a machine without a GPU. */
+const FOLLOW_GRACE_MS = 30000;
+
+/** Every port on the link: `{ tabId, app }`, where `app` is one of the app's
+ *  own map tabs rather than a panel. */
+const linkPorts = new Map();
+/** `{ linked: tabId[], following: { [tabId]: { at, view, pending } } }`,
+ *  mirrored to storage.session because the worker may be evicted between two
+ *  gestures. `pending` is a camera sent while that tab was away reloading. */
+let linkMemo = null;
+/** Tabs whose tools are being put back, so a page that reports "complete" twice
+ *  is not injected twice — a second injection closes the panel. */
+const resuming = new Set();
+
+async function linkMemory() {
+  if (!linkMemo) {
+    const stored = (await api.storage.session.get({ mapLink: null }))?.mapLink;
+    linkMemo = { linked: stored?.linked ?? [], following: stored?.following ?? {} };
+  }
+  return linkMemo;
+}
+
+function rememberLinks() {
+  api.storage.session.set({ mapLink: linkMemo });
+}
+
+/** Tabs still waited for, the stale ones dropped on the way. */
+function waitedFor(memo) {
+  const now = Date.now();
+  for (const [tabId, follow] of Object.entries(memo.following)) {
+    if (now - follow.at >= FOLLOW_GRACE_MS) delete memo.following[tabId];
+  }
+  return memo.following;
+}
+
+/** Only the four numbers of a camera cross the hub, and only real ones. */
+function linkView(view) {
+  const ok =
+    view &&
+    Number.isFinite(view.lat) &&
+    Number.isFinite(view.lon) &&
+    Number.isFinite(view.zoom) &&
+    Math.abs(view.lat) <= 90 &&
+    Math.abs(view.lon) <= 180;
+  if (!ok) return null;
+  return { lat: view.lat, lon: view.lon, zoom: view.zoom, bearing: Number.isFinite(view.bearing) ? view.bearing : 0 };
+}
+
+function linkPost(port, message) {
+  try {
+    port.postMessage(message);
+  } catch {
+    // the tab went while this was in hand; its disconnect is already queued
+  }
+}
+
+/**
+ * Tell every port how many others it could link to.
+ *
+ * A panel counts everything else on the link. An app tab counts only panels,
+ * because it already counts the app's other tabs on its own channel. A tab
+ * reloading on its way to a view counts for both, for as long as it is waited
+ * for.
+ */
+function linkPeers() {
+  const panels = [...linkPorts.values()].filter((who) => !who.app);
+  const present = new Set(panels.map((who) => who.tabId));
+  const returning = linkMemo
+    ? Object.keys(waitedFor(linkMemo)).filter((tabId) => !present.has(Number(tabId))).length
+    : 0;
+  for (const [port, who] of linkPorts) {
+    const count = who.app ? panels.length + returning : linkPorts.size - 1 + returning;
+    linkPost(port, { type: "link-peers", count });
+  }
+}
+
+/**
+ * Keep a camera for every linked tab that is away reloading.
+ *
+ * A panel that left to follow one view is not connected while its page loads,
+ * and the analyst does not wait for it: the map being led goes on moving. Each
+ * of those cameras used to be dropped, and the tab landed on the first and stayed
+ * there. Only the last one matters, and the tab is handed it when it is back.
+ */
+function holdForReturning(memo, view, fromTabId) {
+  const present = new Set([...linkPorts.values()].filter((who) => !who.app).map((who) => who.tabId));
+  let held = false;
+  for (const [tabId, follow] of Object.entries(waitedFor(memo))) {
+    const id = Number(tabId);
+    if (id === fromTabId || present.has(id) || !memo.linked.includes(id)) continue;
+    follow.pending = view;
+    held = true;
+  }
+  if (held) rememberLinks();
+}
+
+async function onLinkMessage(port, msg) {
+  const who = linkPorts.get(port);
+  if (!who || !msg) return;
+  const memo = await linkMemory();
+  if (who.app) {
+    // An app tab only ever speaks a camera, and only to the panels: the app's
+    // other tabs heard it on their own channel.
+    const view = msg.type === "view" ? linkView(msg.view) : null;
+    if (!view) return;
+    for (const [other, them] of linkPorts) {
+      if (!them.app && memo.linked.includes(them.tabId)) linkPost(other, { type: "view", view });
+    }
+    holdForReturning(memo, view, null);
+    return;
+  }
+  if (msg.type === "link") {
+    memo.linked = memo.linked.filter((id) => id !== who.tabId);
+    if (msg.on) memo.linked.push(who.tabId);
+    else delete memo.following[who.tabId];
+    rememberLinks();
+    linkPost(port, { type: "link-state", linked: !!msg.on, asked: null });
+    return;
+  }
+  if (msg.type === "follow") {
+    memo.following[who.tabId] = { at: Date.now(), view: linkView(msg.view) };
+    rememberLinks();
+    // the count drops back once the wait is over, whether or not the tab came
+    setTimeout(linkPeers, FOLLOW_GRACE_MS + 50);
+    return;
+  }
+  if (msg.type === "landed") {
+    // a hash the site took without reloading: the panel never left
+    delete memo.following[who.tabId];
+    rememberLinks();
+    return;
+  }
+  if (msg.type === "view") {
+    const view = linkView(msg.view);
+    if (!view || !memo.linked.includes(who.tabId)) return;
+    for (const [other, them] of linkPorts) {
+      if (other === port) continue;
+      if (them.app || memo.linked.includes(them.tabId)) linkPost(other, { type: "view", view });
+    }
+    holdForReturning(memo, view, who.tabId);
+  }
+}
+
+async function openLink(port) {
+  const tab = port.sender?.tab;
+  if (!tab?.id && tab?.id !== 0) {
+    port.disconnect();
+    return;
+  }
+  const who = { tabId: tab.id, app: isAppUrl(tab.url) };
+  linkPorts.set(port, who);
+  // before anything is awaited, so nothing the port says first is missed
+  port.onMessage.addListener((msg) => onLinkMessage(port, msg));
+  port.onDisconnect.addListener(() => {
+    linkPorts.delete(port);
+    linkPeers();
+  });
+  const memo = await linkMemory();
+  if (!who.app) {
+    // A panel arriving where it was sent: it hears that it is linked, the view
+    // it was sent to (so it can say how close this map came), and whatever the
+    // map it follows did while it was loading. The wait itself stands until it
+    // runs out: a site may load a second document, and the tools go back on that
+    // one too.
+    const follow = waitedFor(memo)[tab.id];
+    const linked = memo.linked.includes(tab.id);
+    linkPost(port, { type: "link-state", linked, asked: follow?.view ?? null });
+    if (follow?.pending && linked) {
+      linkPost(port, { type: "view", view: follow.pending });
+      delete follow.pending;
+      rememberLinks();
+    }
+  }
+  linkPeers();
+}
+
+api.runtime.onConnect.addListener((port) => {
+  if (port.name === LINK_PORT) openLink(port);
+});
+
+/**
+ * Put the tools back on a tab that reloaded to follow a view.
+ *
+ * Only a tab that said it was leaving for one, and only while it is waited for:
+ * a linked tab the analyst reloads, or navigates somewhere else, loses its panel
+ * the way any tab does. The panel is looked for first because a site that takes
+ * the view in its hash reports "complete" without ever unloading it, and
+ * injecting an open panel again is what closes it.
+ *
+ * A browser may refuse, and that is the one real cost of following by address:
+ * where the extension holds no host permission, the tools were only ever allowed
+ * on the page that was open when the button was pressed. The other linked panels
+ * say so rather than leaving a tab that silently stopped following.
+ */
+/** How often, and how far apart, a refused injection is tried again. A page
+ *  that reports "complete" can still be swapping its document, and the first
+ *  refusal is often only that. */
+const RESUME_TRIES = 3;
+const RESUME_RETRY_MS = 1000;
+
+async function resumeFollow(tabId, attempt = 1) {
+  const memo = await linkMemory();
+  const follow = waitedFor(memo)[tabId];
+  if (!follow || resuming.has(tabId)) return;
+  resuming.add(tabId);
+  try {
+    const [probe] = await api.scripting.executeScript({
+      target: { tabId },
+      func: () => Boolean(window.__AZIMUT_MAP_TOOLS__),
+    });
+    if (!probe?.result) await api.scripting.executeScript({ target: { tabId }, files: MAP_FILES });
+  } catch {
+    if (attempt < RESUME_TRIES) {
+      setTimeout(() => resumeFollow(tabId, attempt + 1), RESUME_RETRY_MS);
+      return;
+    }
+    delete memo.following[tabId];
+    memo.linked = memo.linked.filter((id) => id !== tabId);
+    rememberLinks();
+    for (const [port, who] of linkPorts) {
+      if (!who.app) {
+        linkPost(port, { type: "link-note", note: "A linked tab reloaded and the browser kept its tools off. Open them there again" });
+      }
+    }
+    linkPeers();
+  } finally {
+    resuming.delete(tabId);
+  }
+}
+
+api.tabs.onUpdated.addListener((tabId, info) => {
+  if (info?.status === "complete") resumeFollow(tabId);
+});
+
+api.tabs.onRemoved?.addListener(async (tabId) => {
+  const memo = await linkMemory();
+  if (!memo.linked.includes(tabId) && !memo.following[tabId]) return;
+  memo.linked = memo.linked.filter((id) => id !== tabId);
+  delete memo.following[tabId];
+  rememberLinks();
+});
+
 // --- message routes ------------------------------------------------------------
 
 async function handle(msg, sender) {
@@ -737,8 +1044,8 @@ async function handle(msg, sender) {
     if (msg.type === "area-cancelled" || !meta) return { ok: true };
     try {
       const dataUrl = await withoutPanel(sender.tab.id, () => captureActiveTab(sender.tab.windowId));
-      const blob = await cropDataUrl(dataUrl, msg.rect, msg.viewportW);
-      const body = await ingest(blob, meta);
+      const { blob, scale } = await cropDataUrl(dataUrl, msg.rect, msg.viewportW);
+      const body = await ingest(blob, { ...meta, deviceScale: scale });
       notify("Capture filed into Azimut", body.title);
       return { ok: true };
     } catch (e) {
@@ -785,6 +1092,15 @@ async function handle(msg, sender) {
   if (msg.type === "map-api") {
     try {
       return { ok: true, data: await mapApi(msg) };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+
+  // The panel, asking for a picture to lay over the map.
+  if (msg.type === "map-image") {
+    try {
+      return { ok: true, src: await mapImage(msg) };
     } catch (e) {
       return { ok: false, error: e.message };
     }

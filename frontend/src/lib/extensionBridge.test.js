@@ -182,3 +182,89 @@ describe('two instances in one tab', () => {
     expect(posted).toHaveLength(0);
   });
 });
+
+describe('a map tab on the linked views', () => {
+  // The app's map opens a port to the worker's hub through here while it is
+  // mounted, so panels on other sites can hand it their cameras.
+  function linkChrome() {
+    const ports = [];
+    const chrome = makeChrome();
+    chrome.runtime.connect = vi.fn(({ name }) => {
+      const port = {
+        name,
+        listeners: [],
+        gone: [],
+        onMessage: { addListener: (cb) => port.listeners.push(cb) },
+        onDisconnect: { addListener: (cb) => port.gone.push(cb) },
+        postMessage: vi.fn(),
+        disconnect: vi.fn(),
+      };
+      ports.push(port);
+      return port;
+    });
+    return { chrome, ports };
+  }
+
+  it('opens the port only when the app asks', async () => {
+    const { chrome, ports } = linkChrome();
+    inject(chrome);
+    expect(ports).toHaveLength(0);
+    await fromPage({ type: 'map-link', kind: 'open' });
+    expect(ports.map((p) => p.name)).toEqual(['map-link']);
+    await fromPage({ type: 'map-link', kind: 'open' });
+    expect(ports).toHaveLength(1); // one port however often it is asked
+  });
+
+  it('carries the app’s camera to the worker', async () => {
+    const { chrome, ports } = linkChrome();
+    inject(chrome);
+    await fromPage({ type: 'map-link', kind: 'open' });
+    await fromPage({ type: 'map-link', kind: 'view', view: { lat: 1, lon: 2, zoom: 3 } });
+    expect(ports[0].postMessage).toHaveBeenCalledWith({ type: 'view', view: { lat: 1, lon: 2, zoom: 3 } });
+  });
+
+  it('hands the worker’s cameras and counts to the app, under a type the app does not send', async () => {
+    const { chrome, ports } = linkChrome();
+    inject(chrome);
+    await fromPage({ type: 'map-link', kind: 'open' });
+    const posted = [];
+    const spy = vi.spyOn(window, 'postMessage').mockImplementation((d) => posted.push(d));
+    for (const cb of ports[0].listeners) cb({ type: 'view', view: { lat: 1, lon: 2, zoom: 3 } });
+    for (const cb of ports[0].listeners) cb({ type: 'link-peers', count: 2 });
+    spy.mockRestore();
+    expect(posted).toEqual([
+      { channel: CHANNEL, type: 'map-link-event', kind: 'view', view: { lat: 1, lon: 2, zoom: 3 } },
+      { channel: CHANNEL, type: 'map-link-event', kind: 'peers', count: 2 },
+    ]);
+  });
+
+  it('lets the port go when the map closes, and does not reopen it', async () => {
+    const { chrome, ports } = linkChrome();
+    inject(chrome);
+    await fromPage({ type: 'map-link', kind: 'open' });
+    await fromPage({ type: 'map-link', kind: 'close' });
+    expect(ports[0].disconnect).toHaveBeenCalled();
+    vi.useFakeTimers(); // the page's own messages are delivered on real ones
+    try {
+      for (const cb of ports[0].gone) cb();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(ports).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('opens it again when the worker is evicted while the map is open', async () => {
+    const { chrome, ports } = linkChrome();
+    inject(chrome);
+    await fromPage({ type: 'map-link', kind: 'open' });
+    vi.useFakeTimers();
+    try {
+      for (const cb of ports[0].gone) cb();
+      await vi.advanceTimersByTimeAsync(2500);
+      expect(ports).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -57,7 +57,8 @@
 <section class="group">
   <h3>Providers</h3>
   <p class="intro">
-    Add provider keys to unlock more Satellite basemaps; usage appears on each card.
+    Add provider keys to unlock more Satellite basemaps and layers; usage appears on
+    each card.
   </p>
 
   <div class="cards">
@@ -94,14 +95,17 @@
               type="checkbox"
               bind:checked={enabled[k.id]}
               onchange={saveProviderPrefs}
-              title="Show or hide this basemap in the Satellite tab"
-              aria-label="Show {k.label} in the Satellite tab"
+              title="Offer this in the Satellite tab"
+              aria-label="Offer {k.label} in the Satellite tab"
             />
           {/if}
         </div>
 
-        <!-- one line either way: what it would cost, or what it has cost -->
-        {#if keys[k.id] || count}
+        <!-- one line either way: what it would cost, or what it has cost. A
+             key that buys no tiles (FIRMS) has neither, and says so once. -->
+        {#if k.metered === false}
+          {#if !open[k.id]}<p class="card-cost">{k.cost}</p>{/if}
+        {:else if keys[k.id] || count}
           <div class="card-meter">
             <div class="meter-track" aria-hidden="true">
               <div
@@ -173,7 +177,7 @@
 
             <p class="overage">{k.cost}. {k.overage}</p>
 
-            {#if keys[k.id] || count}
+            {#if k.metered !== false && (keys[k.id] || count)}
               {#if usageBlocked(count, k.id, overrides, tiers)}
                 <p class="blocked">
                   <Icon name="alert" size={12} />

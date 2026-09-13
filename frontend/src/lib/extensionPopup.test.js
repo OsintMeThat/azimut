@@ -24,7 +24,7 @@ const html = readFileSync(join(ext, 'popup.html'), 'utf8');
 const $ = (id) => document.getElementById(id);
 
 /** Run the popup against a tab, with `fetch` answering per URL fragment. */
-async function runPopup({ tabUrl, answers, height = 940 }) {
+async function runPopup({ tabUrl, answers, height = 940, stored = {} }) {
   // Body only, without the <script src> happy-dom refuses to fetch: the source is
   // evaluated below by hand, with the globals a popup really has.
   document.body.innerHTML = html
@@ -48,6 +48,7 @@ async function runPopup({ tabUrl, answers, height = 940 }) {
           ...defaults,
           backendUrl: 'http://127.0.0.1:8477',
           token: 'tok-123',
+          ...stored,
         })),
         set: vi.fn(),
       },
@@ -170,5 +171,58 @@ describe('how tall the map is drawn', () => {
     const parse = asked().find((url) => url.includes('/parse'));
     expect(parse).toBeTruthy();
     expect(parse).not.toContain('height=');
+  });
+});
+
+describe('the scale bar and north arrow tick', () => {
+  const googleMaps = (stored) => ({
+    tabUrl: 'https://www.google.fr/maps/@48.85,2.29,17z',
+    stored,
+    answers: {
+      '/parse': ok({ site: 'google-maps', label: 'Google Maps', lat: 48.85, lon: 2.29, zoom: 17 }),
+      '/cases': ok([{ id: 'c1', name: 'Case one' }]),
+    },
+  });
+
+  it('starts off, and a capture taken without it asks for no marks', async () => {
+    await runPopup(googleMaps());
+
+    expect($('marks').checked).toBe(false);
+    $('capture-area').click();
+    const [[msg]] = globalThis.chrome.runtime.sendMessage.mock.calls;
+    expect(msg.meta.marks).toBe(false);
+  });
+
+  it('is remembered the moment it is ticked, and rides with the capture', async () => {
+    await runPopup(googleMaps());
+
+    $('marks').checked = true;
+    $('marks').dispatchEvent(new Event('change'));
+    expect(globalThis.chrome.storage.local.set).toHaveBeenCalledWith({ captureMarks: true });
+
+    $('capture-area').click();
+    const [[msg]] = globalThis.chrome.runtime.sendMessage.mock.calls;
+    expect(msg.meta.marks).toBe(true);
+  });
+
+  it('comes back ticked next time it is opened', async () => {
+    await runPopup(googleMaps({ captureMarks: true }));
+
+    expect($('marks').checked).toBe(true);
+  });
+
+  it('points at the bearing field, since this URL states no rotation', async () => {
+    await runPopup(googleMaps({ captureMarks: true }));
+
+    expect($('marks-note').hidden).toBe(false);
+    $('bearing').value = '42';
+    $('bearing').dispatchEvent(new Event('input'));
+    expect($('marks-note').hidden).toBe(true);
+  });
+
+  it('says nothing about a heading when the marks are not wanted', async () => {
+    await runPopup(googleMaps());
+
+    expect($('marks-note').hidden).toBe(true);
   });
 });

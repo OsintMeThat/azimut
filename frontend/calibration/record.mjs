@@ -104,7 +104,14 @@ async function run() {
         headless: wanted.headless,
         viewport: { width, height },
         deviceScaleFactor: viewport.pageZoom,
-        args: browser === 'chromium' ? [`--window-size=${viewport.w},${viewport.h}`] : [],
+        // A headless Chromium has no GPU, and Earth draws nothing without WebGL.
+        args:
+          browser === 'chromium'
+            ? [
+                `--window-size=${viewport.w},${viewport.h}`,
+                ...(wanted.headless ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : []),
+              ]
+            : [],
       });
       const page = context.pages()[0] ?? (await context.newPage());
       if (wanted.rounding) {

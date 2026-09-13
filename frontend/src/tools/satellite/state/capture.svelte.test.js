@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCaptureState, PRESETS, RATIOS } from './capture.svelte.js';
+import { prefs } from '../../../lib/state.svelte.js';
 
 /**
  * What a capture records, and what it refuses to record.
@@ -56,7 +57,7 @@ function store(overrides = {}) {
 }
 
 beforeEach(() => {
-  api = { post: vi.fn(async () => ({})) };
+  api = { post: vi.fn(async () => ({})), put: vi.fn(async () => ({})) };
   notify = vi.fn();
   reloadCase = vi.fn(async () => {});
   engine = {
@@ -71,6 +72,9 @@ beforeEach(() => {
   rects = [];
   armedOff = 0;
   extension = '1.0.0';
+  // The marks tick lives in the app-wide preference rather than in the store,
+  // so one test ticking it would otherwise arrive ticked in the next.
+  prefs.captureScaleNorth = false;
 });
 
 describe('the output shape', () => {
@@ -318,5 +322,49 @@ describe('the paste fallback', () => {
     const capture = store();
     expect(await capture.fileBlob(new Blob(['x']))).toBe(false);
     expect(notify).toHaveBeenCalledWith(expect.stringContaining('refused'), 'danger', 6000);
+  });
+});
+
+describe('the scale bar and north arrow tick', () => {
+  /**
+   * The one option in this menu that outlives the session. It is not held here:
+   * `prefs` is, so a second map tab shows the same tick and a reload keeps it.
+   */
+  it('starts off, and says so on the capture it takes', async () => {
+    const capture = store();
+    expect(capture.scaleNorth).toBe(false);
+    capture.run();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
+    expect(api.post.mock.calls[0][1].scale_north).toBe(false);
+  });
+
+  it('is remembered in settings the moment it is ticked', async () => {
+    const capture = store();
+    capture.scaleNorth = true;
+    await vi.waitFor(() => expect(api.put).toHaveBeenCalled());
+    expect(api.put.mock.calls[0]).toEqual([
+      '/api/settings/prefs',
+      { capture_scale_north: true },
+    ]);
+    expect(capture.scaleNorth).toBe(true);
+  });
+
+  it('rides on a tile capture and on a screen crop alike', async () => {
+    const capture = store();
+    capture.scaleNorth = true;
+    capture.run();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
+    expect(api.post.mock.calls[0][1].scale_north).toBe(true);
+  });
+
+  it('stays ticked for this session when settings refuse to keep it', async () => {
+    api.put = vi.fn(async () => {
+      throw new Error('no');
+    });
+    const capture = store();
+    capture.scaleNorth = true;
+    await vi.waitFor(() => expect(notify).toHaveBeenCalled());
+    expect(notify.mock.calls[0][1]).toBe('warn');
+    expect(capture.scaleNorth).toBe(true);
   });
 });

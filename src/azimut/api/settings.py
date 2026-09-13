@@ -23,6 +23,7 @@ from ..engine import (
     exportdir,
     extinstall,
     ffmpeg,
+    firms,
     google_tiles,
     reveal,
     scrapers,
@@ -39,8 +40,10 @@ SIGNATURE_B64_MAX_CHARS = 4 * (config.SIGNATURE_MAX_BYTES // 3 + 1) + 1024
 
 router = APIRouter(prefix="/api", tags=["settings"])
 
-# Providers managed by the Settings imagery tab.
-KEYED_PROVIDERS = ("mapbox", "google", "google_js", "sentinelhub")
+# Keys managed by the Settings imagery tab. Not all of them buy a basemap:
+# FIRMS buys a layer laid over whichever one is showing, and is unmetered, so
+# the card it gets there carries no meter and no eco threshold.
+KEYED_PROVIDERS = ("mapbox", "google", "google_js", "sentinelhub", "firms")
 # Providers with configurable eco thresholds. Maps JS is excluded because each
 # widget reload is billed.
 ECO_TUNABLE = ("mapbox", "google", "sentinelhub")
@@ -59,6 +62,8 @@ class KeysIn(BaseModel):
     google_js: str | None = None
     # Sentinel Hub's "key" is a configuration-instance UUID, not a secret token
     sentinelhub: str | None = None
+    # NASA FIRMS MAP_KEY: one key for both the global and the US/Canada service
+    firms: str | None = None
 
 
 class HomeView(BaseModel):
@@ -96,6 +101,8 @@ class PrefsIn(BaseModel):
     coord_format: str | None = None  # one of config.COORD_FORMATS
     units: str | None = None  # one of config.UNIT_SYSTEMS
     home_view: HomeView | None = None  # where the Satellite tab opens
+    # burn a scale bar and a north arrow into captures (the capture menu's tick)
+    capture_scale_north: bool | None = None
     # whether saving a proof files its point as a place, or asks first
     proof_place_auto: bool | None = None
     post_mention: str | None = None  # handle a new post draft is addressed to
@@ -126,6 +133,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "coord_format": settings.get("coord_format", "dd"),
         "units": settings.get("units", "metric"),
         "home_view": settings.get("home_view", DEFAULT_HOME_VIEW),
+        "capture_scale_north": bool(settings.get("capture_scale_north", False)),
         "proof_place_auto": bool(settings.get("proof_place_auto", True)),
         "post_mention": settings.get("post_mention", DEFAULT_POST_MENTION),
         "post_target": settings.get("post_target", DEFAULT_POST_TARGET),
@@ -254,6 +262,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["units"] = body.units
     if body.home_view is not None:
         settings["home_view"] = body.home_view.model_dump()
+    if body.capture_scale_north is not None:
+        settings["capture_scale_north"] = bool(body.capture_scale_north)
     if body.proof_place_auto is not None:
         settings["proof_place_auto"] = bool(body.proof_place_auto)
     if body.post_mention is not None:
@@ -626,6 +636,7 @@ class ImportedSettings(BaseModel):
     home_view: ImportedHomeView = Field(
         default_factory=lambda: ImportedHomeView.model_validate(DEFAULT_HOME_VIEW)
     )
+    capture_scale_north: bool = False
     proof_place_auto: bool = True
     post_mention: str = Field(default=DEFAULT_POST_MENTION, max_length=64)
     post_target: str = DEFAULT_POST_TARGET
@@ -775,6 +786,24 @@ def test_key(provider: str) -> dict[str, Any]:
             response = httpx.get(url, headers={"User-Agent": tiles.USER_AGENT}, timeout=10)
             response.raise_for_status()
             return verdict(True, "tile fetched")
+        except Exception as exc:
+            return verdict(False, str(exc))
+    if provider == "firms":
+        # The key is *asked about*, not used. A GetMap proves nothing here:
+        # FIRMS answers a key it rejects with 200 and a 28 KB picture saying so
+        # (`firms.PLACARD_SHA256`), so a test that fetched a tile called every
+        # bad key good. This endpoint exists to answer the question, and answers
+        # 403 with a sentence when the answer is no.
+        try:
+            response = httpx.get(
+                firms.STATUS_URL,
+                params={"MAP_KEY": key},
+                headers={"User-Agent": tiles.USER_AGENT},
+                timeout=15,
+            )
+            if response.status_code >= 400:
+                return verdict(False, firms.status_error(response.text))
+            return verdict(True, "key accepted")
         except Exception as exc:
             return verdict(False, str(exc))
     if provider == "sentinelhub":

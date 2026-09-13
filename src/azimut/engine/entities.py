@@ -844,6 +844,8 @@ def check_attrs(
         if value is None or value == "":
             continue
         _CHECKS[attr.kind](attr, value)
+    if type_ == "place":
+        _check_place_precision(attrs, current or {})
 
 
 def _check_text(attr: Attr, value: Any) -> None:
@@ -918,6 +920,68 @@ def _count_positions(node: Any, key: str, depth: int = 0) -> int:
             raise CaseError(f"'{key}' has a coordinate off the globe")
         return 1
     return sum(_count_positions(child, key, depth + 1) for child in node)
+
+
+def _check_place_precision(attrs: Mapping[str, Any], current: Mapping[str, Any]) -> None:
+    """How tightly a place is pinned, stated once and around its own point.
+
+    Two rules, both about a shape being a claim somebody can read off the map:
+
+    - **A radius or a footprint, never both.** They answer the same question in two
+      forms, and the map can only draw one of them — which meant the circle silently
+      vanished the moment a shape was traced. So writing one asks for the other to be
+      cleared, and the surface that writes it is the one that gets the analyst's
+      consent first.
+    - **A footprint contains the point it belongs to.** Darwin Core's reading of
+      `footprintWKT`, and the only one that makes sense here: a shape traced beside
+      its pin describes somewhere else.
+
+    Both are judged against the patch rather than the stored result, so a place
+    written before these rules stays editable in every other respect.
+    """
+    radius = attrs.get("radius_m", current.get("radius_m"))
+    shape = attrs.get("footprint", current.get("footprint"))
+    touched = any(
+        key in attrs and attrs[key] != current.get(key) for key in ("radius_m", "footprint")
+    )
+    if radius and shape and touched:
+        raise CaseError("a place holds either a radius or a footprint, not both")
+    if not attrs.get("footprint"):
+        return
+    lat = attrs.get("lat", current.get("lat"))
+    lon = attrs.get("lon", current.get("lon"))
+    if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+        return  # a place with no point of its own has nothing to contradict
+    if not _covers_point(attrs["footprint"], float(lat), float(lon)):
+        raise CaseError("'footprint' must contain the place's own point")
+
+
+def _covers_point(shape: Mapping[str, Any], lat: float, lon: float) -> bool:
+    """Is the point inside one of this shape's outer rings?
+
+    Ray casting, on shapes this module has already validated. `engine.sentinel` owns
+    a second copy on purpose: a granule's geometry arrives from a service that may
+    have swapped the axes, so that one counts either reading as a hit, and here that
+    tolerance would accept a shape traced at the mirrored coordinates.
+    """
+    rings: list[Any] = []
+    coordinates = shape.get("coordinates") or []
+    if shape.get("type") == "Polygon":
+        rings = [coordinates[0]] if coordinates else []
+    else:
+        rings = [polygon[0] for polygon in coordinates if polygon]
+    return any(_inside(ring, lat, lon) for ring in rings)
+
+
+def _inside(ring: list[Any], lat: float, lon: float) -> bool:
+    inside = False
+    for index, position in enumerate(ring):
+        x1, y1 = float(position[0]), float(position[1])
+        following = ring[(index + 1) % len(ring)]
+        x2, y2 = float(following[0]), float(following[1])
+        if (y1 > lat) != (y2 > lat) and lon < (x2 - x1) * (lat - y1) / ((y2 - y1) or 1e-12) + x1:
+            inside = not inside
+    return inside
 
 
 def _check_choice(attr: Attr, value: Any) -> None:

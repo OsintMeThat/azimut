@@ -11,10 +11,15 @@ app.
 It supports six flows:
 
 - On a supported map site, the popup can capture a selected area or save its
-  coordinates as a place.
+  coordinates as a place. A capture can carry a scale bar and a north arrow,
+  ticked in the popup and remembered from then on; the app draws them, from the
+  zoom and the pixel ratio the grab was taken at. Most of these sites write no
+  rotation into their URL, so the needle waits for a bearing in the field above
+  rather than pointing at a guess.
 - On a 2D map, it can draw Azimut's own tools over the site: measure, media
-  pins, sun and moon, a search grid, and the case's own images and videos held
-  over the map.
+  pins, sun and moon, a search grid, the case's own images and videos held over
+  the map, and NASA FIRMS fire detections laid over whatever that map is
+  showing.
 - On another page, it can save the URL and title as a bookmark without
   downloading the page.
 - On Azimut's Google basemap, the in-app Capture button requests the current
@@ -95,7 +100,7 @@ than hidden:
 ## Map tools
 
 **Draw tools over this map**, in the popup, opens a panel over the site you are
-on. Press it again to close it. Five tools share it:
+on. Press it again to close it. Six tools share it:
 
 | Tool | What it does |
 |---|---|
@@ -104,11 +109,43 @@ on. Press it again to close it. Five tools share it:
 | Sun & moon | Plants a point and draws the day's sun and moon arcs around it, with a date and an hour slider. |
 | Grid | Drags a box or clicks out a shape, cuts it into metric cells, and marks each cleared or flagged. The grid is saved into the case and opens in the app's own Grid Search. |
 | Refs | Floats an image or a video from the case over the map, to compare against the imagery while you pan. |
+| Fires | Lays NASA FIRMS thermal detections over the site: the last 24 h to 7 days, or any past day or range up to 31 days picked from a calendar drawn inside the panel. Needs a FIRMS key in Azimut's own Settings — without one the seat is greyed and says so — and stops at z14 where one mark stops meaning one detection. |
 
 Only the open tool draws, and pressing it again puts it down: the map goes back to
 being a map. What you told a tool stays in it — a measured path, a planted point,
-an open sweep all come back when you pick it up again. Reference windows are the
-exception, because they are not on the map: they stay while you measure.
+an open sweep all come back when you pick it up again. Reference windows and the
+fire layer are the exceptions: the windows are not on the map, and the fires are
+ground rather than drawing, so both stay while you measure over them.
+
+**Link the view** with the chain button in the panel's header. It puts this map on
+one camera with the other linked maps: other panels on other sites, and the app's
+own map tabs whose link is pressed. It is greyed until there is a second map to
+link to. Pressing it brings the others to this map; from then on a pan or a zoom
+here moves them, and one there moves this.
+
+A site's map is moved by writing the view into its address bar, so Google, Bing,
+Apple, Yandex, Earth and Copernicus reload to follow, and the panel comes back on
+its own once the page has loaded. OpenStreetMap, Zoom Earth and Satellites.pro take
+it without reloading. Only moving a map yourself leads: a map that arrived because
+it was sent stays quiet.
+
+A tab in the background waits. It keeps the last view it was sent and goes there
+when you come back to it, so a site reloads once instead of once per gesture on the
+map you are moving. A tab you can see follows straight away, including the front
+tab of a window you are not typing in.
+
+Each map follows as close as it goes. Zoom Earth stops at 11, Copernicus at 18,
+Google at 21, and the others are not asked to stop there with it: the status line
+says "as close as this map goes" instead. Street View and a tilted camera are left
+where they are. Apple opens no view nearer a pole than 70.5°, so a view past it
+stops there and the rest is a drag. A map already stopped at the limit is left
+alone by a view asking for the same ground again, rather than reloaded once per
+gesture on the map it follows. While an Apple place card is open the page
+hides where the map is, and the panel waits until the card is closed.
+
+On Firefox the panel may not come back after a reload on Apple, Earth or
+Copernicus, which the extension holds no host permission for. The other panels
+say so, and pressing the toolbar button on that tab puts it back.
 
 **A reference window is scratch.** Drag it by its header, resize it from the
 corner, wheel to zoom into the image, double-click the title bar to fold it away.
@@ -132,53 +169,53 @@ be measurable, and they stay on screen while you use another tool.
 
 **It works from what the site writes about itself.** Every one of these maps states
 how far out it is: a tile level for most of them, a viewport height in metres for
-Google's satellite view, a span in degrees for Apple. Each of those was checked in a
-real browser before being believed — driven at two window sizes, dragged a known
-number of pixels, read back out of the address bar (`docs/MAP_SITES.md`) — and the
-drawing works from the first frame, with nothing to calibrate.
+Google's satellite view, a span in degrees for Apple, a camera distance and a field
+of view for Google Earth. Each of those was checked in a real browser before being
+believed (`docs/MAP_SITES.md`), and the drawing works from the first frame, with
+nothing to calibrate. Nothing is ever measured off a drag: a drag loses pixels to
+the site's own threshold and gains them to its glide, which is how Earth's marks
+once ended up four times too close together.
 
-**Zoom once and it knows where the map's middle is.** The coordinate in the address
+**It starts placed, and a zoom places it better.** The coordinate in the address
 bar is not under the middle of the window on most of these sites: Yandex draws it
 210 px to the right of it, behind its results panel, Bing 40 px down under its
-header. A pan can never see that offset, because it slides along with the map — but
-a zoom can, since every one of these maps zooms about a point it holds still while
-the centre moves underneath. So the first zoom you make measures it, the panel
-remembers it for that site and that window shape, and every zoom after checks it
-again. Until then the panel says "zoom once to place it" in its status line. The
-number it settled on is in the tooltip of that line, which is where to read it
-when something lands somewhere the ground is not.
+header. The app ships what its own calibration run measured, so a fresh install
+draws from the right pixel on the sites whose chrome does not move
+(`docs/MAP_SITES.md`). Apple's sidebar does move — it folds away in a narrow
+window — so Apple starts at the middle and is measured instead.
 
-**Each pan is a check.** The panel predicts where the map will land and compares
-that with what the address bar says. When the prediction drifts, geometry switches
-off and the panel says why instead of drawing something wrong.
+Measuring it takes a zoom. A pan can never see the offset, because it slides along
+with the map; a zoom can, since every one of these maps zooms about a point it
+holds still while the centre moves underneath. So the first zoom you make measures
+it, the panel remembers it for that site and that window shape, and every zoom
+after checks it again. Until then the status line says "zoom once to place it",
+and the tooltip on that line carries the offset being drawn from and where it came
+from — which is what to read when something lands somewhere the ground is not.
 
-**Where the URL is not enough.** Earth states no level and no flattening, only a
-camera distance, so there the map itself is the authority: pan once and it is
-measured. Apple states a live span but a stale `z` — it carries whatever the opening
+**Google Earth is read like the others.** Its 2D map is Web Mercator, drawn about
+the middle of the window, and `d` and `y` in its address bar give the scale. A link
+written by hand, or the app's own "Open in Google Earth", has no ground height in
+it, and Earth draws it nearer than it says. So until you move the map once, which
+is when Earth writes the ground in, the panel shows "Move the map once so its
+address bar gives the scale" and draws nothing.
+
+Apple states a live span but a stale `z` — it carries whatever the opening
 link had and never rewrites it — so the span is read and the `z` ignored. Bing
 rounds: its wheel moves a third of a level and it writes one decimal, so the
 fraction is worked out from the same held pixel rather than read. Whole levels are
 exact everywhere, which is what a double-click lands on.
 
-Earth and 3D mode work with the camera **level**; pitched, the panel refuses them,
-because a cell would land on the wall of the building hiding it. One limit remains
-there that no measurement can remove: **relief**. A level camera still pushes a
-hilltop outward from the centre of the screen by its own height, and no URL says how
-tall the ground is. Flat country is exact; mountains are not, and the further from
-the centre of the screen, the more so.
-
-**Google Earth asks for one drag before it draws.** Its address bar states no
-scale of any kind, so the map itself is the only authority and a drag is the
-question: across *and* down, since a scale is two numbers, and letting go only
-once the map has stopped, because these viewers glide on and report where they
-landed rather than where you let go. The panel says exactly that until it has
-its answer. One drag is the whole cost — zooming, turning and panning after it
-are free.
+Earth's 3D mode and Google's Earth mode work with the camera **level**; pitched,
+the panel refuses them, because a cell would land on the wall of the building hiding
+it. One limit remains there that no measurement can remove: **relief**. A level 3D
+camera still pushes a hilltop outward from the centre of the screen by its own
+height, and no URL says how tall the ground is. Earth's 2D map has no such problem.
 
 **The drawing dims while the map is still moving.** These maps glide on after you
-let go and ease into a zoom, and they say so nowhere — the address bar is rewritten
-once, at the end. A drag is followed exactly, because the map goes where the pointer
-goes; the glide and the zoom are not followed at all. Dimmed means "not right now",
+let go and ease into a zoom. A drag is followed exactly, because the map goes where
+the pointer goes; the glide and the zoom are not followed at all. The drawing comes
+back once the address bar has stopped changing, which on Earth is after the last of
+the several addresses it writes during one zoom. Dimmed means "not right now",
 which is the honest thing for a tool whose output ends up in a case file.
 
 **Saved points are drawn without their names.** Point at a mark to read it, click
@@ -204,18 +241,23 @@ still works wherever geometry is off, anchored on the point the address bar
 names — where the camera stands — and the panel says so.
 
 **Turning the map is fine.** Drag Google Earth's compass and the drawing turns
-with it, keeping the scale it had: what was measured is pixels per degree, and
-degrees do not care which way the screen is facing. Only tilting the camera
-switches the geometric tools off. One gesture that turns *and* zooms at the same
-time asks for a pan again, because nothing in the address bar says which of the
-two moved the scale.
+with it. Only tilting the camera switches the geometric tools off.
 
-Zoomed far out, where these sites start drawing a globe, the tools stay on: the
-middle of the screen is still right, the edges drift, and the drawing is dimmed
-and says so rather than disappearing. It is a look at a region's work, not a
-measurement — zoom in and it is exact again. Sun & moon is the exception and is
-never dimmed: it answers which way the light came from, read at its own anchor,
-and that is right however far out you are.
+Zoomed far out there are two cases and they get different answers. On a **flat
+map drawn small** — Google and Bing below level 8 — the tools stay on: the middle
+of the screen is still right, the edges drift, and the drawing is dimmed and says
+so rather than disappearing. It is a look at a region's work, not a measurement;
+zoom in and it is exact again. Sun & moon is the exception and is never dimmed:
+it answers which way the light came from, read at its own anchor, and that is
+right however far out you are.
+
+On a **globe camera** (Earth's 3D mode more than 150 km out, and Google's Earth
+mode with it) nothing is drawn: no marks, no grid, no fire picture. That view is a
+perspective shot of a sphere, with no point the flat arithmetic is right about
+and no edge the error stays in, so the panel says "The camera is on a globe this
+far out, so zoom in" instead of dimming something nobody can judge. Come down and
+everything draws again. Earth's 2D map stays flat however far out you go, so it is
+never refused.
 
 Where a site's own panel can be collapsed mid-session, the offset moves with it, and
 the drawing is out by that much until the next zoom measures it again. Resizing the

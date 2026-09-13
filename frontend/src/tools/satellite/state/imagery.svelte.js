@@ -32,6 +32,7 @@ import {
   usageBlocked,
 } from '../../../lib/usage.js';
 import { variantId } from '../../../lib/sentinel.js';
+import { WAYBACK_ID, waybackId } from '../../../lib/wayback.js';
 
 export const FALLBACK_PROVIDER = FREE_IMAGERY;
 
@@ -141,7 +142,8 @@ export function createImageryState({ api }) {
      *
      * @param {string} chosenId the provider the surface's selector is on
      * @param {number} zoom that surface's view zoom
-     * @param {object} [variant] Sentinel-2's layer/window/ceiling, if any
+     * @param {object} [variant] Sentinel-2's layer/window/ceiling, or the
+     *   Wayback `release`, whichever the shown basemap reads
      */
     displayed(chosenId, zoom, variant) {
       const chosen = this.find(chosenId);
@@ -157,7 +159,8 @@ export function createImageryState({ api }) {
         provider,
         // what every downstream consumer asks for: the tile URL, the capture,
         // the disk cache — never the bare provider id
-        id: variantId(baseId, variant),
+        id:
+          baseId === WAYBACK_ID ? waybackId(baseId, variant?.release) : variantId(baseId, variant),
         // memoized by the caller so the layer is only rebuilt when the cell
         // actually changes, i.e. crossing the z17 boost bracket
         cell: provider ? layerCell(provider, zoom) : 256,
