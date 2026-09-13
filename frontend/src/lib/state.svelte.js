@@ -23,6 +23,7 @@ export const prefs = $state({
   coordFormat: 'dd', // 'dd' | 'dms' | 'mgrs'
   units: 'metric', // 'metric' | 'imperial'
   homeView: { lat: 43, lon: 25, zoom: 3 }, // where Satellite opens
+  captureScaleNorth: false, // burn a scale bar and a north arrow into captures
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
   postTarget: 'x', // social composer a fresh post draft starts with
   postPrefill: true, // let the capture extension fill that composer on Publish
@@ -91,6 +92,7 @@ export function applyPrefs(s) {
   if (s.coord_format) prefs.coordFormat = s.coord_format;
   if (s.units) prefs.units = s.units;
   if (s.home_view) prefs.homeView = s.home_view;
+  if (s.capture_scale_north !== undefined) prefs.captureScaleNorth = s.capture_scale_north;
   if (s.post_mention !== undefined) prefs.postMention = s.post_mention; // '' = none
   if (s.post_target !== undefined) prefs.postTarget = s.post_target;
   if (s.post_prefill !== undefined) prefs.postPrefill = s.post_prefill;

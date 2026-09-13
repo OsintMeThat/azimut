@@ -9,6 +9,7 @@ import {
   KINDS,
   oneEach,
   pendingLocate,
+  savedFolders,
 } from './geoTree.js';
 
 const ok = (country, code, region, extra = {}) => ({
@@ -311,5 +312,42 @@ describe('a proof of several points', () => {
     ];
     expect(filterSaved(rows, { query: 'caméra' })).toHaveLength(1);
     expect(filterSaved(rows, { query: 'harbour' })).toHaveLength(2);
+  });
+});
+
+describe('showing only the folders wanted on the map', () => {
+  const rows = [
+    UA('a', 'Donetsk Oblast', { kind: 'place', folder: 'Bridges' }),
+    UA('bb', 'Kyiv Oblast', { kind: 'capture', folder: 'Bridges' }),
+    UA('ccc', 'Kyiv Oblast', { kind: 'place', folder: 'Airfields' }),
+    UA('dddd', 'Kyiv Oblast', { kind: 'place' }),
+  ];
+
+  it('lists the folders the rows are actually filed under, with their tallies', () => {
+    expect(savedFolders(rows)).toEqual([
+      { id: 'Airfields', count: 1 },
+      { id: 'Bridges', count: 2 },
+      { id: '', count: 1 }, // what nobody filed, last
+    ]);
+  });
+
+  it('draws every folder until one is asked for', () => {
+    expect(filterSaved(rows, {})).toHaveLength(4);
+    expect(filterSaved(rows, { folder: null })).toHaveLength(4);
+  });
+
+  it('narrows to one folder, and to the unfiled as its own answer', () => {
+    expect(filterSaved(rows, { folder: 'Bridges' }).map((r) => r.id)).toEqual(['a', 'bb']);
+    expect(filterSaved(rows, { folder: '' }).map((r) => r.id)).toEqual(['dddd']);
+  });
+
+  it('narrows with the kind rather than instead of it', () => {
+    expect(filterSaved(rows, { folder: 'Bridges', kind: 'places' }).map((r) => r.id)).toEqual(['a']);
+  });
+
+  it('has nothing to offer for a case whose saved work is unfiled', () => {
+    expect(savedFolders([UA('a', 'Kyiv Oblast', { kind: 'place' })])).toEqual([
+      { id: '', count: 1 },
+    ]);
   });
 });

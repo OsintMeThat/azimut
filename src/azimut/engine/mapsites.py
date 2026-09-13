@@ -21,10 +21,11 @@ out that what it draws drifts away from the middle of the screen. A malformed UR
 known host degrades to "known site, nothing parsed" — parsers never raise.
 
 ``height_px`` is the one fact the caller has and this module cannot: how tall
-the map is drawn in the window it is looking at. Given it, the two sites that
+the map is drawn in the window it is looking at. Given it, the three sites that
 state their scale as a size rather than as a zoom — Apple's ``span``, Google's
-satellite ``,3231m`` — come back with a real ``zoom`` like everyone else, and
-``scale_source`` says which of the three routes the number arrived by. Every
+satellite ``,3231m``, Earth's ``d`` and ``y`` — come back with a real ``zoom``
+like everyone else, and ``scale_source`` says which of the four routes the
+number arrived by. Every
 one of them is measured, not assumed: see ``docs/MAP_SITES.md``, where each
 site's URL is recorded next to what a browser was actually observed doing with
 it.
@@ -32,6 +33,8 @@ it.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import math
 import re
 from datetime import date
@@ -107,17 +110,21 @@ VIEW_TILTED = "tilted"  # a pitched 3D camera
 VIEW_STREET = "streetview"  # a ground-level panorama
 VIEW_GLOBE = "globe"  # level, but far enough out that the Earth is visibly round
 
-#: How high a level camera may sit before the ground under it stops being flat
-#: enough to measure on, in metres.
+#: How high a level 3D camera may sit before the ground under it stops being
+#: flat enough to draw on, in metres.
 #:
 #: A camera pointed straight down at a plane is a plain uniform scaling — the
-#: perspective cancels exactly — so a level 3D view *is* measurable, even though
-#: nothing about it is Web Mercator. What ends that is the Earth's own
-#: curvature: over a span of D the ground drops about D²/8R below the plane, so
-#: at 150 km across it is a couple of hundred metres, a quarter of a percent.
-#: Past this the view is a globe and says so.
+#: perspective cancels exactly — so a level 3D view is drawable near the middle
+#: of the screen. What ends that is the Earth's own curvature: over a span of D
+#: the ground drops about D²/8R below the plane, so at 150 km across it is a
+#: couple of hundred metres, a quarter of a percent. Past this the view is a
+#: globe and says so.
 #:
-#: What this cannot account for is relief. A level camera still displaces a
+#: This is about 3D cameras only: Earth's 3D mode and Maps' Earth mode. Earth's
+#: default 2D mode is a flat Web Mercator map at every distance (measured, and
+#: seen flat with all of Europe on screen), so it has no ceiling.
+#:
+#: What this cannot account for is relief. A level 3D camera still displaces a
 #: hilltop outward from the centre by its own height times the tangent of the
 #: off-axis angle, and no URL says how tall the ground is. Flat country is
 #: exact; mountains are not (extension/README.md says so where the analyst
@@ -199,6 +206,69 @@ def camera_pitch(site_id: str, u) -> float | None:
     return _pitch(block[0]) if block else None
 
 
+def _protobuf_fields(blob: bytes) -> dict[int, int | bytes] | None:
+    """The top-level fields of a protobuf message, or None if it is not one.
+
+    Only what reading Earth's ``data=`` needs: varints and length-delimited
+    fields kept, fixed-width ones skipped, anything else refused.
+    """
+    fields: dict[int, int | bytes] = {}
+    at = 0
+
+    def varint() -> int:
+        nonlocal at
+        value = shift = 0
+        while at < len(blob) and shift < 64:
+            byte = blob[at]
+            at += 1
+            value |= (byte & 0x7F) << shift
+            if byte < 0x80:
+                return value
+            shift += 7
+        raise ValueError("truncated varint")
+
+    try:
+        while at < len(blob):
+            key = varint()
+            number, wire = key >> 3, key & 7
+            if wire == 0:
+                fields[number] = varint()
+            elif wire == 2:
+                size = varint()
+                if at + size > len(blob):
+                    return None
+                fields[number] = blob[at:at + size]
+                at += size
+            elif wire in (1, 5):
+                at += 8 if wire == 1 else 4
+            else:
+                return None
+    except ValueError:
+        return None
+    return fields if at == len(blob) else None
+
+
+def _earth_in_3d(u) -> bool:
+    """Whether Earth is showing its 3D globe rather than its flat 2D map.
+
+    The address bar says so in the base64 protobuf after ``/data=``: pressing
+    Earth's "3D" button adds field 5 = 2 and pitches the camera, pressing it
+    again takes both away. A link with no ``data=`` opens the 2D map. Anything
+    that cannot be read is taken as 3D, whose rules are the stricter ones.
+    """
+    m = re.search(r"/data=([A-Za-z0-9_-]+)", u.path)
+    if not m:
+        return False
+    try:
+        blob = base64.urlsafe_b64decode(m[1] + "=" * (-len(m[1]) % 4))
+    except (binascii.Error, ValueError):
+        return True
+    fields = _protobuf_fields(blob)
+    if fields is None:
+        return True
+    return 5 in fields
+
+
 def _view_kind(site_id: str, u) -> str | None:
     """Which camera the address bar describes, or None when it does not say.
 
@@ -214,7 +284,10 @@ def _view_kind(site_id: str, u) -> str | None:
         block = re.search(r"@[^/]*", u.path)
         if not block:
             return None
-        return _free_camera(block[0], _camera_number(block[0], "d"))
+        if _earth_in_3d(u):
+            return _free_camera(block[0], _camera_number(block[0], "d"))
+        # The 2D map is flat at any distance, so only a pitch stops it being one.
+        return VIEW_TILTED if _pitched(block[0]) else VIEW_MAP
     if site_id == "google-maps":
         block = re.search(r"@[^/]*", u.path)
         if not block:
@@ -279,8 +352,55 @@ _PROJECTIONS = {
     # is a different camera and says so in the URL (``_view_kind``).
     "copernicus-browser": PROJ_SPHERICAL,
     "yandex-maps": PROJ_ELLIPSOIDAL,
-    # google-earth is a globe: a free camera names no flattening, so it is not
-    # named at all and the tools measure it instead.
+    # Earth's 2D map, measured by loading URLs a known step apart and
+    # registering the screenshots: pixels per degree north over pixels per
+    # degree east came out at 1/cos(lat) to 0.03% at 47° and 52°, which is
+    # spherical Mercator and not the ground's own ratio (0.3% away). Its 3D
+    # mode is refused past LEVEL_CEILING_M and is near enough to it below.
+    "google-earth": PROJ_SPHERICAL,
+}
+
+
+#: Where each site draws the coordinate its address bar names, as an offset in
+#: CSS pixels from the middle of the window — the starting answer the extension
+#: places its drawing with until it has measured one of its own.
+#:
+#: The middle of the window is not a neutral default, it is a table entry, and
+#: the wrong one on four of these sites: they keep a results panel or a header
+#: and centre the map in what is left. Yandex's camera sits 210 px right of the
+#: middle, Copernicus's 225, Bing's 40 px down. Until one is measured that is
+#: the whole drawing's error, and at level 3 Bing's 40 px is 450 km of ground.
+#:
+#: Every number came out of a browser (``docs/MAP_SITES.md``), and the two sites
+#: recorded at two window shapes measured the same offset in both — which is
+#: what makes a pixel count portable at all: a panel's width is the site's own
+#: CSS, not the analyst's screen. Sites that measured to the middle are absent
+#: because the middle is the default. ``apple-maps`` is absent for the opposite
+#: reason: its sidebar folds away below some width it never states, so its
+#: offset is 67 px in a wide window and nothing in a narrow one. That one is
+#: measured on the machine it is drawn on or not at all.
+#:
+#: The third number is what keeps the sideways half of this honest, and Apple is
+#: why. A **header** takes height, and its height is the same in a narrow window
+#: as in a wide one — so the vertical offset is claimed at any size. A **side
+#: panel** takes width, and a side panel is exactly the thing that folds away
+#: when the window gets narrow: that is the whole of Apple's 67 px becoming
+#: nothing. So a sideways offset is claimed only at or above the narrowest
+#: window it was actually recorded in, and below that the site starts centred
+#: horizontally and is measured like Apple. Yandex was driven at 1200 and 1600
+#: and measured 210 px in both; Copernicus has been driven at 1600 only, and
+#: says no more than that.
+#:
+#: This is a hint and never an answer. The extension measures the offset off the
+#: first zoom and keeps its own (``extension/mapoverlay.js``, ``seedFrame``),
+#: which is what covers a site that redecorates between two releases;
+#: ``tests/test_mapsites.py`` re-checks every entry here against the recording.
+#: (x, y, the narrowest window x has been measured in — 0 where x is 0)
+_CAMERA_CENTRE = {
+    "bing-maps": (0.0, 40.5, 0),
+    "openstreetmap": (0.0, 27.4, 0),
+    "yandex-maps": (210.0, 10.0, 1200),
+    "copernicus-browser": (225.0, 0.0, 1600),
 }
 
 
@@ -322,13 +442,24 @@ _ZOOM_IS_TILES = {
 #: every one of these sites is scaled in.
 _EQUATOR_M_PER_PX = 2 * math.pi * 6378137 / 256
 
-#: Which of the three things the URL said, for the ``zoom`` that came back.
+#: Which of the four things the URL said, for the ``zoom`` that came back.
 #: Each is a number the site itself wrote about the view it is showing; ``None``
-#: means the URL stated nothing a scale can be read out of, and the caller is on
-#: its own (the extension measures the map instead).
+#: means the URL stated nothing a scale can be read out of, and nothing is
+#: drawn until it does.
 SCALE_ZOOM = "zoom"  # a tile level, the usual case
 SCALE_HEIGHT_M = "height_m"  # Google's satellite view: the viewport, in metres
 SCALE_SPAN = "span"  # Apple: the degrees the region covers
+SCALE_DISTANCE = "distance"  # Earth: the camera's distance to the ground, and its field of view
+
+#: The closest Earth's 2D map lets its camera come to the ground, in metres.
+#: Zoomed in until it stopped, it wrote ``25.00163587d``. A smaller ``d`` is not
+#: a camera Earth placed: loading one link, it once wrote ``1518a,10d`` for a
+#: camera 1528 m up, where ``a`` was not the ground at all.
+EARTH_CLOSEST_M = 24.9
+
+#: Lowest and highest ground there is, in metres (the Dead Sea shore, Everest).
+#: An ``a`` outside it is not the ground, so ``d`` is not a distance to it.
+_GROUND_M = (-450.0, 8900.0)
 
 
 #: Where Mercator is cut, north and south. Every slippy map cuts at this value.
@@ -371,17 +502,46 @@ def _zoom_from_span(span_lat: float, height_px: float, lat: float) -> float | No
     return math.log2(height_px / tall) if tall > 0 else None
 
 
+def _earth_height_m(camera: str) -> float | None:
+    """How tall Earth's view is on the ground, in metres, or None when its URL
+    does not say.
+
+    Measured rather than assumed (``docs/MAP_SITES.md``). Earth draws its map
+    as a camera ``d`` metres above the ground under the middle of the screen,
+    with ``y`` degrees of field of view across the window's height, so the
+    window covers ``2·d·tan(y/2)`` metres top to bottom: screenshots of URLs a
+    known step apart agreed to 0.06% from 2 km to 400 km out, at three window
+    shapes, and at ``y`` of 35 and 60.
+
+    ``d`` is that distance only once Earth has placed the camera itself, which
+    it does on every gesture by writing the ground's height into ``a``. A link
+    typed as ``0a`` with a whole ``d`` has not been placed, and over land 200 m
+    up it is drawn 7% nearer than it says, so it waits for the map to move.
+    """
+    distance = _camera_number(camera, "d")
+    fov = _camera_number(camera, "y")
+    ground = _camera_number(camera, "a")
+    if distance is None or fov is None or ground is None:
+        return None
+    if not 0 < fov < 180 or distance < EARTH_CLOSEST_M:
+        return None
+    if not _GROUND_M[0] <= ground <= _GROUND_M[1]:
+        return None
+    if ground == 0 and re.search(r",-?\d+d(?:,|$)", camera):
+        return None
+    return 2 * distance * math.tan(math.radians(fov) / 2)
+
+
 def _scale(
-    site_id: str, parsed: dict[str, Any], camera: float | None,
-    camera_kind: str | None, height_px: float | None,
+    site_id: str, parsed: dict[str, Any], u, height_px: float | None,
 ) -> tuple[float | None, str | None]:
-    """The zoom this view is at, and which of the three routes it came by.
+    """The zoom this view is at, and which of the four routes it came by.
 
     The order is the order of authority. A tile level is what most of these
     sites state and it is exact. Failing that, a size — Google's metres, Apple's
-    degrees — is exact too, but only to a caller that knows how tall its window
-    is, so it needs ``height_px`` and is otherwise left alone. What is never
-    done is inventing one: no ``height_px``, no zoom.
+    degrees, Earth's distance — is exact too, but only to a caller that knows
+    how tall its window is, so it needs ``height_px`` and is otherwise left
+    alone. What is never done is inventing one: no ``height_px``, no zoom.
     """
     zoom = parsed.get("zoom")
     if zoom is not None and site_id in _ZOOM_IS_TILES:
@@ -389,8 +549,13 @@ def _scale(
     lat = parsed.get("lat")
     if lat is None or not height_px:
         return zoom, None
-    if camera_kind == CAMERA_HEIGHT_M:
-        from_height = _zoom_from_height_m(camera, height_px, lat)
+    block = re.search(r"@[^/]*", u.path)
+    camera = block[0] if block else ""
+    if site_id == "google-earth":
+        from_distance = _zoom_from_height_m(_earth_height_m(camera), height_px, lat)
+        return (from_distance, SCALE_DISTANCE) if from_distance is not None else (None, None)
+    if site_id == "google-maps" and ",3a," not in camera:  # Street View's radius is not a height
+        from_height = _zoom_from_height_m(_camera_number(camera, "m"), height_px, lat)
         if from_height is not None:
             return from_height, SCALE_HEIGHT_M
     span_lat = parsed.get("span_lat")
@@ -399,6 +564,12 @@ def _scale(
         if from_span is not None:
             return from_span, SCALE_SPAN
     return zoom, None
+
+
+def _centre_hint(site_id: str) -> dict[str, float] | None:
+    """The starting offset for this site's camera centre, or None for the middle."""
+    at = _CAMERA_CENTRE.get(site_id)
+    return {"x": at[0], "y": at[1], "min_w": at[2]} if at else None
 
 
 def _projection(site_id: str) -> str | None:
@@ -594,40 +765,6 @@ SITES: list[tuple[str, str, Callable, Callable | None, Callable]] = [
 ]
 
 
-#: What a zoomless Google view quotes instead, and what the number means.
-#:
-#: ``height_m`` is the viewport's own height on the ground, in metres, and it
-#: was checked rather than guessed: a 1000 px window opened at ``15z`` came back
-#: as ``,3231m``, and 1000 px of Web Mercator at that latitude and zoom is
-#: 3233 m. That makes it a scale, exact to the metre it is rounded to, for a
-#: caller that knows how tall its window is.
-#:
-#: ``distance_d`` is Earth's camera distance from the point it looks at. It is
-#: proportional to metres per pixel — halve it and the view zooms by two,
-#: measured — but the constant between them is the camera's field of view,
-#: which the URL does not state. So it carries a scale through a zoom and
-#: nothing more.
-CAMERA_HEIGHT_M = "height_m"
-CAMERA_DISTANCE_D = "distance_d"
-
-
-def _camera_span(site_id: str, u) -> tuple[float | None, str | None]:
-    """How far out a zoomless view is, and in which of the two senses above."""
-    if site_id not in {"google-maps", "google-earth"}:
-        return None, None
-    block = re.search(r"@[^/]*", u.path)
-    if not block:
-        return None, None
-    camera = block[0]
-    if ",3a," in camera:  # Street View's pano radius is not a span
-        return None, None
-    distance = _camera_number(camera, "d")
-    if distance:
-        return distance, CAMERA_DISTANCE_D
-    height = _camera_number(camera, "m")
-    return (height, CAMERA_HEIGHT_M) if height else (None, None)
-
-
 def _drawable(
     site_id: str, parsed: dict[str, Any], kind: str | None, scale_source: str | None
 ) -> dict[str, Any]:
@@ -637,16 +774,22 @@ def _drawable(
     this module is for. ``geometry`` gates what the app *computes* — a search
     grid, a measured line, a sun arc — and it needs two things:
 
-    * a camera pointed straight down (``view_kind``), near or far, since
-      Mercator says nothing about a pitched or panoramic one;
+    * a camera looking straight down at a flat map (``view_kind``), since
+      Mercator says nothing about a pitched, panoramic or globe camera;
     * a projection we can actually invert, named rather than assumed.
 
-    ``far`` is the third fact, and it is a warning rather than a refusal: these
-    maps turn into globes on the way out while their URLs go on quoting a zoom,
-    and out there the middle of the screen is still right while the edges drift.
-    That is a trade worth offering — a sweep of a whole region is worth seeing
-    roughly, and anyone who wants it exact zooms in — so the drawing stays and
-    says so (`maptools.js`, the verdict; `mapoverlay.js` dims it).
+    ``far`` is the third fact, and it is a warning rather than a refusal — but
+    only for the one kind of far it describes. A **flat map drawn far out**
+    (Google and Bing below ``_GLOBE_BELOW``) goes on quoting a tile level while
+    its renderer curves, and out there the middle of the screen is still right
+    while the edges drift: a sweep of a whole region is worth seeing roughly, so
+    the drawing stays and says so (`maptools.js`, the verdict; `mapoverlay.js`
+    dims it). A **globe camera** — Earth's 3D mode past ``LEVEL_CEILING_M``, and
+    Google's Earth mode with it — is a perspective view of a sphere, where this
+    arithmetic is not approximately right but wrong, and ``VIEW_GLOBE`` is
+    refused rather than dimmed. ``far`` stays true there, because it has a
+    second job: it is what stops the extension measuring a site's layout off a
+    view that far out.
 
     A pin is not gated at all: the analyst places it, and where it files is a
     coordinate the address bar already carried. What changes when ``geometry``
@@ -656,10 +799,11 @@ def _drawable(
     projection = _projection(site_id)
     globe_below = _GLOBE_BELOW.get(site_id)
     zoom = parsed.get("zoom")
-    level = kind in (VIEW_MAP, VIEW_GLOBE)
+    level = kind == VIEW_MAP
     return {
         "view_kind": kind,
         "projection": projection,
+        "centre_hint": _centre_hint(site_id),
         "globe_below": globe_below,
         "scale_source": scale_source,
         "geometry": bool(level and projection),
@@ -674,10 +818,10 @@ def parse_map_url(url: str, height_px: float | None = None) -> dict[str, Any] | 
     """Parse a page URL. None = not a map site (the extension stays out).
 
     ``height_px`` is how tall the map is drawn in the caller's window, and it is
-    what turns Apple's span and Google's satellite metres into a zoom. Both of
-    those views were measured to fill the window's full height, which is why one
-    number is enough; a caller that does not know it simply gets no zoom for
-    them, never a guessed one.
+    what turns Apple's span, Google's satellite metres and Earth's camera
+    distance into a zoom. All three views were measured to fill the window's
+    full height, which is why one number is enough; a caller that does not know
+    it simply gets no zoom for them, never a guessed one.
     """
     try:
         u = urlsplit(url)
@@ -695,15 +839,12 @@ def parse_map_url(url: str, height_px: float | None = None) -> dict[str, Any] | 
             parsed = parse(u)
         except Exception:
             parsed = _no_view()  # a weird URL on a known site still captures
-        camera, camera_kind = _camera_span(site_id, u)
-        parsed["zoom"], source = _scale(site_id, parsed, camera, camera_kind, height_px)
+        parsed["zoom"], source = _scale(site_id, parsed, u, height_px)
         return {
             "site": site_id,
             "label": label,
             **parsed,
             "imagery_mode": _imagery_mode(site_id, u),
-            "camera_m": camera,
-            "camera_kind": camera_kind,
             "tilt": camera_pitch(site_id, u),
             **_drawable(site_id, parsed, _view_kind(site_id, u), source),
         }

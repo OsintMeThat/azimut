@@ -30,7 +30,7 @@ const read = (name) => readFileSync(join(root, `extension/${name}`), 'utf8');
 const fixture = JSON.parse(readFileSync(join(root, 'tests/fixtures/map-sites.json'), 'utf8'));
 
 /** The files the panel is injected with, in the order the worker injects them. */
-const PARTS = ['mapmath.js', 'maptheme.js', 'maptools.js', 'mapdraw.js', 'mapref.js'];
+const PARTS = ['mapmath.js', 'maptheme.js', 'maptools.js', 'mapdraw.js', 'mapref.js', 'maplink.js'];
 
 /** How often the panel re-reads the address bar, how long it waits for a
  *  gesture to land, and how long an offset is held before it counts — all three
@@ -68,14 +68,13 @@ beforeAll(() => {
  */
 function parseOf(step, height, drawnIn, extra = {}) {
   const view = step.view;
-  const sized = step.scale_source === 'span' || step.scale_source === 'height_m';
-  const metres = /,(\d+(?:\.\d+)?)m(?:$|[,/?])/.exec(step.url);
+  const sized = ['span', 'height_m', 'distance'].includes(step.scale_source);
   return {
     site: step.site,
     label: step.site,
     lat: view.lat,
     lon: view.lon,
-    zoom: sized ? view.zoom + Math.log2(height / drawnIn) : view.zoom,
+    zoom: sized && view.zoom != null ? view.zoom + Math.log2(height / drawnIn) : view.zoom,
     bearing: view.bearing,
     projection: view.projection,
     view_kind: 'map',
@@ -83,8 +82,6 @@ function parseOf(step, height, drawnIn, extra = {}) {
     far: false,
     globe_below: null,
     scale_source: step.scale_source,
-    camera_m: metres ? Number(metres[1]) : null,
-    camera_kind: metres ? 'height_m' : null,
     imagery_mode: null,
     title: null,
     imagery_date: null,
@@ -100,7 +97,7 @@ function parseOf(step, height, drawnIn, extra = {}) {
  * turns on an address bar that the site rewrites under it — which is a string
  * changing, and never a page load.
  */
-function open({ recording, size, ratio = 1, parse, storage = {}, firefox = false } = {}) {
+function open({ recording, size, ratio = 1, parse, storage = {}, firefox = false, answers = {} } = {}) {
   const win = size ?? recording?.window ?? { w: 1600, h: 1000 };
   window.happyDOM.setViewport({ width: win.w, height: win.h });
   window.devicePixelRatio = ratio;
@@ -119,7 +116,16 @@ function open({ recording, size, ratio = 1, parse, storage = {}, firefox = false
       onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
       sendMessage: vi.fn(async (message) => {
         sent.push(message);
+        // A picture route answers with bytes, which the worker hands over as a
+        // data URL — one pixel of it is enough to place.
+        if (message.type === 'map-image') {
+          return { ok: true, src: 'data:image/png;base64,iVBORw0KGgo=' };
+        }
         if (message.type !== 'map-api') return { ok: true, data: {} };
+        // What the app answers a given route with, when a test cares — the
+        // catalogue behind the fire layer is read on open, and whether a key is
+        // saved is the whole of what it says.
+        if (message.path in answers) return { ok: true, data: answers[message.path] };
         if (message.path === '/api/ingest/parse') {
           return { ok: true, data: parse(message.query) };
         }
@@ -275,6 +281,153 @@ describe('measuring where a site draws its centre', () => {
     // answer rather than a number
     expect(kept.w).toBe(recording.window.w);
     expect(kept.h).toBe(recording.window.h);
+  });
+
+  it('drops an offset saved before the scale stopped being measured off a drag', async () => {
+    // Earth's offsets used to be solved through that scale, and one a few pixels
+    // out was averaged into every zoom after it rather than replaced
+    const recording = fixture.recordings.find((r) => r.site === 'google-earth');
+    const stale = { ...recording.window, x: 14, y: -9 };
+    const drawnIn = recording.map_height ?? recording.window.h;
+    for (const [stored, framed] of [
+      [{ frames: [stale] }, false],
+      [{ frames: [stale], framesVersion: 2 }, true],
+    ]) {
+      panel?.close();
+      panel = open({
+        recording,
+        storage: { 'mapTools:example.invalid': stored },
+        parse: (query) => parseOf(recording.steps.at(-1), Number(query.height), drawnIn),
+      });
+      panel.location.href = recording.steps.at(-1).url;
+      await tick();
+      expect(panel.state.framed).toBe(framed);
+      expect(panel.state.frame).toEqual(framed ? { x: 14, y: -9 } : { x: 0, y: 0 });
+    }
+  });
+});
+
+/**
+ * What the drawing is placed with before anybody has gestured at anything.
+ *
+ * The middle of the window was never a neutral starting point: four of these
+ * sites keep a results panel or a header and centre the map in what is left, so
+ * an install that starts at the middle starts 210 px out on Yandex and stays
+ * there until the analyst happens to zoom. Nothing on screen says so, and at
+ * level 3 Bing's 40 px is 450 km of ground.
+ *
+ * So the app's table hands over what its own calibration run measured and the
+ * panel starts there (`engine/mapsites.py`, `_CAMERA_CENTRE`). The numbers come
+ * from the fixture rather than from a copy here, and `tests/test_mapsites.py`
+ * is what holds them to the recording; what is asserted here is the other half
+ * — that a fresh install draws from them, and that they lose to anything
+ * measured on the machine in front of the analyst.
+ */
+describe('the offset a fresh install starts from', () => {
+  const hints = fixture.hints ?? {};
+  const hinted = fixture.recordings.filter((r) => hints[r.site]);
+
+  /** The panel opened on a recording and then left alone: no wheel, no drag,
+   *  which is every install's first minute on a map. */
+  async function opened(recording, options = {}) {
+    const drawnIn = recording.map_height ?? recording.window.h;
+    const live = open({
+      recording,
+      parse: (query) => {
+        const found = recording.steps.find((s) => s.url === query.url);
+        return found
+          ? parseOf(found, Number(query.height), drawnIn, { centre_hint: hints[recording.site] })
+          : null;
+      },
+      ...options,
+    });
+    live.location.href = recording.steps[0].url;
+    await tick();
+    return live;
+  }
+
+  it('has an answer for every site whose chrome moves the camera', () => {
+    // the drift gate's other end: a site the recording shows off-centre and the
+    // table says nothing about is a site that starts wrong
+    const unplaced = fixture.recordings
+      .filter((r) => !hints[r.site] && Math.hypot(offset(r).x, offset(r).y) >= 4)
+      .map((r) => r.site);
+    // Apple is the one, and on purpose: its sidebar folds away below a width
+    // its URL never states, so its offset is 67 px in a wide window and nothing
+    // in a narrow one. That one is measured on the machine or not at all.
+    expect([...new Set(unplaced)]).toEqual(['apple-maps']);
+  });
+
+  it.each(hinted.map((r) => [r.label, r]))('draws from it on %s, ungestured', async (_l, recording) => {
+    panel = await opened(recording);
+    expect(panel.state.frame.x).toBeCloseTo(hints[recording.site].x, 6);
+    expect(panel.state.frame.y).toBeCloseTo(hints[recording.site].y, 6);
+    // and it is a starting point, not an answer: the panel still asks for the
+    // zoom that would settle it, and says where the number came from
+    expect(panel.state.framed).toBe(false);
+    expect(panel.status()).toContain('zoom once to place it');
+    expect(panel.statusTitle()).toContain('from the site table');
+  });
+
+  it('is replaced by the first zoom that measures one', async () => {
+    const recording = fixture.recordings.find((r) => r.site === 'yandex-maps');
+    const live = await replay(recording, { extra: { centre_hint: { x: 40, y: 40 } } });
+    panel = live;
+    const want = offset(recording);
+    expect(live.state.framed).toBe(true);
+    expect(Math.abs(live.state.frame.x - want.x)).toBeLessThan(1.5);
+    expect(live.statusTitle()).not.toContain('site table');
+  });
+
+  it('loses to an offset this machine measured for itself', async () => {
+    // a table written somewhere else against a browser that is not this one,
+    // versus a measurement taken in this window — the measurement wins
+    const recording = fixture.recordings.find((r) => r.site === 'yandex-maps');
+    const mine = { ...recording.window, x: 188, y: 3 };
+    const drawnIn = recording.map_height ?? recording.window.h;
+    panel = open({
+      recording,
+      storage: { 'mapTools:example.invalid': { frames: [mine], framesVersion: 2 } },
+      parse: (query) =>
+        parseOf(recording.steps[0], Number(query.height), drawnIn, {
+          centre_hint: hints['yandex-maps'],
+        }),
+    });
+    panel.location.href = recording.steps[0].url;
+    await tick();
+    expect(panel.state.frame).toEqual({ x: mine.x, y: mine.y });
+    expect(panel.state.framed).toBe(true);
+    expect(panel.statusTitle()).not.toContain('site table');
+  });
+
+  it('keeps the header and drops the panel in a window narrower than one measured', async () => {
+    // A header takes height and is the same height in any window. A side panel
+    // takes width, and a side panel is the thing that folds away — which is the
+    // whole of Apple's 67 px becoming nothing at 1200. So the sideways half is
+    // claimed only at or above a width the site was recorded in.
+    const recording = fixture.recordings.find((r) => r.site === 'yandex-maps');
+    panel = await opened(recording, { size: { w: 1100, h: 900 } });
+    expect(panel.state.frame).toEqual({ x: 0, y: hints['yandex-maps'].y });
+    expect(panel.state.framed).toBe(false);
+  });
+
+  it('drops the panel half when the window is dragged below a measured width', async () => {
+    const recording = fixture.recordings.find((r) => r.site === 'yandex-maps');
+    panel = await opened(recording, { size: { w: 1600, h: 1000 } });
+    expect(panel.state.frame.x).toBeCloseTo(hints['yandex-maps'].x, 6);
+    window.happyDOM.setViewport({ width: 1100, height: 1000 });
+    window.dispatchEvent(new window.Event('resize'));
+    await tick();
+    expect(panel.state.frame).toEqual({ x: 0, y: hints['yandex-maps'].y });
+  });
+
+  it('is refused outright when it could not fit the window it opened in', async () => {
+    // the same rule a remembered offset is held to: a header taller than half
+    // the window is not a header, it is a layout that is gone
+    const recording = fixture.recordings.find((r) => r.site === 'bing-maps');
+    panel = await opened(recording, { size: { w: 1600, h: 70 } });
+    expect(panel.state.frame).toEqual({ x: 0, y: 0 });
+    expect(panel.statusTitle()).toBe('');
   });
 });
 
@@ -460,7 +613,11 @@ describe('how tall the map is, which is not how tall the window is', () => {
   it('drops a remembered offset that cannot fit the window it opened in', async () => {
     const recording = fixture.recordings.find((r) => r.site === 'yandex-maps');
     const store = {
-      'mapTools:example.invalid': { frames: [{ x: 210, y: 10, w: 380, h: 700 }], panel: null },
+      'mapTools:example.invalid': {
+        frames: [{ x: 210, y: 10, w: 380, h: 700 }],
+        framesVersion: 2,
+        panel: null,
+      },
     };
     // the same 420 px panel, in a window narrower than the offset it implies
     panel = open({
@@ -712,129 +869,210 @@ describe('zoomed out', () => {
   });
 });
 
-// --- the compass ---------------------------------------------------------------
+/**
+ * The other globe, and not the one above.
+ *
+ * A flat map drawn far out still has a centre this arithmetic is right about,
+ * and edges that drift away from it — so it draws, dimmed, and says so. A
+ * perspective camera on a sphere has nothing Mercator is right about: Earth past
+ * its ceiling, and Google's Earth mode with it. Dimming a drawing that is simply
+ * wrong asks the analyst to judge how wrong it is, and nothing on screen tells
+ * them — so out there the panel refuses and says what to do instead.
+ */
+describe('a globe camera, which is not a map', () => {
+  const root = () => document.getElementById('azimut-map-tools').shadowRoot;
+  const google = () => fixture.recordings.find((r) => r.site === 'google-maps');
+  const keyed = {
+    '/api/ingest/firms/sensors': { keyed: true, sensors: [{ id: 'viirs', label: 'VIIRS' }] },
+  };
+  const globe = { extra: { view_kind: 'globe', geometry: false, far: true }, answers: keyed };
+
+  it('says what to do instead of drawing', async () => {
+    panel = await replay(google(), globe);
+    expect(panel.status()).toBe('The camera is on a globe this far out, so zoom in');
+    expect(panel.canvas().style.opacity).toBe('');
+  });
+
+  it('puts no fire picture on the ground, and asks NASA for none', async () => {
+    panel = await replay(google(), globe);
+    panel.pick('fires');
+    root().querySelector('[data-act="fires-toggle"]')?.click();
+    await tick();
+    expect(panel.asks('/api/ingest/firms')).toEqual([]);
+    expect(root().querySelector('img').style.display).toBe('none');
+  });
+
+  it('picks the drawing back up as soon as the camera comes down', async () => {
+    // which is the whole point of saying "zoom in" rather than "not a map"
+    const recording = google();
+    const drawnIn = recording.map_height ?? recording.window.h;
+    let kind = 'globe';
+    panel = open({
+      recording,
+      answers: keyed,
+      parse: (query) => {
+        const found = recording.steps.find((s) => s.url === query.url);
+        return found
+          ? parseOf(found, Number(query.height), drawnIn, {
+              view_kind: kind,
+              geometry: kind === 'map',
+              far: kind === 'globe',
+            })
+          : null;
+      },
+    });
+    panel.location.href = recording.steps[0].url;
+    await tick();
+    expect(panel.status()).toContain('zoom in');
+
+    kind = 'map';
+    panel.location.href = recording.steps[1].url;
+    await tick();
+    expect(panel.status()).not.toContain('zoom in');
+    expect(panel.status()).toContain('google-maps');
+  });
+});
+
+// --- Google Earth --------------------------------------------------------------
 
 /**
- * A free camera that has been turned.
+ * Earth, which states its scale as a camera distance.
  *
- * Google Earth is the one view whose address bar states no scale at all, so its
- * drawing rests entirely on a pan this panel measured — and it is also the one
- * whose compass can be dragged. Turning it threw that measurement away and the
- * panel went back to asking for a pan it had already been given, on every nudge
- * of the compass. Which reads as a tool that does not work on Earth.
- *
- * The measurement is handed over rather than performed: what is under test here
- * is what a *turn* does to one, and `extensionMapMath.test.js` is where a turned
- * drag is measured.
+ * The panel used to think Earth stated none, and measured one off a drag
+ * instead. A drag loses pixels to Earth's threshold and gains them to its
+ * glide; the first reading was taken on trust, every later one that disagreed
+ * was thrown away as a fling, and each zoom carried the error along with it. On
+ * a real case that drew the marks four times too close together until the tab
+ * was closed. The app now reads the scale out of `d` and `y`
+ * (`engine/mapsites.py`), and a gesture moves the drawing and teaches it
+ * nothing.
  */
-describe('a map that has been turned', () => {
-  const HOME = { lat: 48.8584, lon: 2.2945 };
-  const PX_PER_LON = 1000;
-  const PX_PER_LAT = 1500;
+describe('Google Earth', () => {
+  const HOME = { lat: 10.4806, lon: -66.9036 };
+  const SETTLE_QUIET_MS = 400;
 
-  const url = ({ h = 0, lat = HOME.lat, lon = HOME.lon } = {}) =>
-    `https://earth.google.com/web/@${lat},${lon},146a,666d,35y,${h}h,0t,0r`;
+  const url = ({ lat = HOME.lat, lon = HOME.lon, a = '903.25', d = 1000, h = 0 } = {}) =>
+    `https://earth.google.com/web/@${lat},${lon},${a}a,${d}d,35y,${h}h,0t,0r`;
 
-  /** Earth's own reading: a position, a heading, and no scale of any kind. */
+  /**
+   * The app's reading, in the shape `engine/mapsites.py` gives it: Web
+   * Mercator, a zoom one level in for every halving of the distance and a
+   * little further out in a shorter window — or no scale at all for a link
+   * typed as `0a`, which Earth has not placed on the ground yet.
+   */
   function earthParse(query) {
-    const at = /@([\d.-]+),([\d.-]+),[^/]*?([\d.-]+)h/.exec(query.url);
+    const at = /@([\d.-]+),([\d.-]+),([\d.-]+)a,([\d.-]+)d,35y,([\d.-]+)h/.exec(query.url);
     if (!at) return { site: null };
+    const placed = at[3] !== '0';
     return {
       site: 'google-earth',
       label: 'Google Earth',
       lat: Number(at[1]),
       lon: Number(at[2]),
-      zoom: null,
-      bearing: Number(at[3]),
-      projection: null,
+      zoom: placed
+        ? 15 + Math.log2(1000 / Number(at[4])) + Math.log2(Number(query.height) / 1000)
+        : null,
+      bearing: Number(at[5]),
+      projection: 'webmercator',
       view_kind: 'map',
-      geometry: false,
-      scale_source: null,
+      geometry: true,
       far: false,
+      globe_below: null,
+      scale_source: placed ? 'distance' : null,
     };
   }
 
-  /** Two drags on a map held at `bearing`, as the calibration would have read
-   *  them: the world moves along its own axes, so the pointer's travel is turned
-   *  into them to work out where the centre went. */
-  function survey(live, bearing) {
-    const from = { ...HOME, bearing, zoom: 15, projection: 'webmercator' };
-    for (const [dx, dy] of [[200, 0], [0, -150]]) {
-      const world = window.AzimutMapMath.unturn(dx, dy, from);
-      const after = {
-        ...from,
-        lon: from.lon - world.dx / PX_PER_LON,
-        lat: from.lat - world.dy / PX_PER_LAT,
-      };
-      live.state.calibration.observe(from, after, dx, dy);
-    }
+  async function onEarth(first = url()) {
+    panel = open({ parse: earthParse });
+    panel.location.href = first;
+    await tick();
+    return panel;
   }
 
-  async function onEarth({ h = 0 } = {}) {
-    const live = open({ parse: earthParse });
-    live.location.href = url({ h });
+  it('draws from the first address it reads, with no drag asked for', async () => {
+    const live = await onEarth();
+    expect(live.state.view.zoom).toBe(15);
+    expect(live.status()).toContain('google-earth · z15.00 · webmercator (distance from the URL)');
+  });
+
+  it('waits on a typed link until Earth has put its camera on the ground', async () => {
+    // `0a` is how a link is written, and over land 200 m up Earth draws it 7%
+    // nearer than its `d` says; the first gesture writes the ground in
+    const live = await onEarth(url({ a: '0' }));
+    expect(live.status()).toBe('Move the map once so its address bar gives the scale');
+    live.location.href = url({ d: 1000.25 });
     await tick();
-    return live;
-  }
-
-  it('asks for a pan before it will draw, like any view with no scale in its URL', async () => {
-    const live = await onEarth();
-    panel = live;
-    expect(live.status()).toContain('Drag the map across and down');
+    expect(live.status()).toContain('google-earth · z');
   });
 
-  it('keeps the scale it measured when the compass moves', async () => {
+  it('learns nothing from a drag, however far the map glided on after it', async () => {
     const live = await onEarth();
-    panel = live;
-    survey(live, 0);
-    expect(live.state.calibration.scale.pxPerLon).toBeCloseTo(PX_PER_LON, 0);
-
-    live.location.href = url({ h: 45 }); // the same view, turned
+    const send = (type, x, y) =>
+      window.dispatchEvent(new window.MouseEvent(type, { clientX: x, clientY: y, bubbles: true, button: 0 }));
+    send('pointerdown', 800, 500);
+    send('pointermove', 1000, 350);
+    // the canvas goes where the pointer went while the finger is down…
+    expect(live.canvas().style.transform).toBe('translate(200px, -150px) scale(1)');
+    send('pointerup', 1000, 350);
+    // …and Earth lands four drags further on, over a hill that moved `d`
+    live.location.href = url({ lat: HOME.lat + 0.02, lon: HOME.lon - 0.04, a: '1210.5', d: 693.6 });
     await tick();
-
-    expect(live.state.calibration.scale).not.toBe(null);
-    expect(live.state.calibration.scale.pxPerLon).toBeCloseTo(PX_PER_LON, 0);
-    expect(live.status()).toContain('measured off the map');
-    expect(live.status()).not.toContain('Drag the map across and down');
+    expect(live.canvas().style.transform).toBe('');
+    expect(live.state.view.zoom).toBeCloseTo(15 + Math.log2(1000 / 693.6), 9);
+    expect(live.state).not.toHaveProperty('calibration');
   });
 
-  it('draws through it on the turned view', async () => {
-    const live = await onEarth({ h: 90 });
-    panel = live;
-    survey(live, 90);
-    live.pick('measure');
-    // A bearing is the direction the map has *up*, so with east up a point east
-    // of the centre is straight above it — 0.01° at 1000 px per degree is ten
-    // pixels, and none of them sideways.
-    const east = { lat: HOME.lat, lon: HOME.lon + 0.01 };
-    const at = window.AzimutMapMath.toScreenMeasured(
-      east,
-      { ...HOME, bearing: 90, projection: 'webmercator' },
-      { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight },
-      live.state.calibration.scale
-    );
-    expect(at.y).toBeCloseTo(window.innerHeight / 2 - 10, 6);
-    expect(at.x).toBeCloseTo(window.innerWidth / 2, 6);
-  });
-
-  it('still throws it away when the turn came with a zoom', async () => {
-    // Two things moved at once and only one of them is a rotation, so nothing
-    // here can say what the other did to the scale. Asking for a pan is the
-    // honest answer to that, and it is the answer this used to give to a turn.
+  it('keeps the drawing dimmed until Earth stops rewriting a zoom', async () => {
+    // Earth writes its address several times during one zoom. Ending the wait on
+    // the first of them drew the marks at a scale the map was passing through.
     const live = await onEarth();
-    panel = live;
-    survey(live, 0);
-    live.api.runtime.sendMessage.mockImplementation(async (message) => {
-      if (message.type !== 'map-api') return { ok: true, data: {} };
-      if (message.path === '/api/ingest/parse') {
-        return { ok: true, data: { ...earthParse(message.query), zoom: 9 } };
-      }
-      if (message.path === '/api/ingest/ping') return { ok: true, data: { units: 'metric' } };
-      return { ok: true, data: [] };
-    });
+    wheel(1200, 300);
+    live.location.href = url({ d: 780 });
+    await tick(SETTLE_MS + 50);
+    live.location.href = url({ d: 500 });
+    await tick(POLL_MS);
+    expect(live.canvas().style.opacity).toBe('0.25');
+    expect(live.state.view.zoom).toBeCloseTo(16, 9);
+    await tick(SETTLE_QUIET_MS + 2 * POLL_MS);
+    expect(live.canvas().style.opacity).toBe('');
+    expect(live.state.view.zoom).toBeCloseTo(16, 9);
+  });
+
+  it('places its camera from a zoom, since a distance is exact at any fraction', async () => {
+    // A fractional level is only a rounding on a site that writes levels. Earth
+    // writes a distance to the hundredth of a millimetre, so a zoom of 1.4
+    // levels about one pixel says where it draws its centre as well as a whole
+    // one does. Synthesised here; `tests/fixtures/map-sites.json` carries Earth
+    // driven in a browser, which the recordings suite replays.
+    const FRAME = { x: 60, y: -20 };
+    const live = await onEarth();
+    const M = window.AzimutMapMath;
+    const middle = { x: window.innerWidth / 2 + FRAME.x, y: window.innerHeight / 2 + FRAME.y };
+    const at = { x: 1240, y: 290 };
+    const z0 = 15;
+    const d1 = 380;
+    const z1 = 15 + Math.log2(1000 / d1);
+    const c0 = M.project(HOME.lat, HOME.lon, z0);
+    const held = M.unproject(c0.x + at.x - middle.x, c0.y + at.y - middle.y, z0);
+    const p1 = M.project(held.lat, held.lon, z1);
+    const after = M.unproject(p1.x - (at.x - middle.x), p1.y - (at.y - middle.y), z1);
+
+    wheel(at.x, at.y);
+    live.location.href = url({ lat: after.lat, lon: after.lon, d: d1 });
+    await tick();
+    await tick(FRAME_QUIET_MS);
+    expect(live.state.framed).toBe(true);
+    expect(live.state.frame.x).toBeCloseTo(FRAME.x, 1);
+    expect(live.state.frame.y).toBeCloseTo(FRAME.y, 1);
+    expect(live.status()).not.toContain('zoom once to place it');
+  });
+
+  it('keeps its scale when the compass turns', async () => {
+    const live = await onEarth();
     live.location.href = url({ h: 45 });
     await tick();
-    expect(live.state.calibration.scale).toBe(null);
+    expect(live.state.view).toMatchObject({ zoom: 15, bearing: 45 });
+    expect(live.status()).toContain('distance from the URL');
   });
 });
 
@@ -916,120 +1154,153 @@ describe('the sky tool, zoomed out', () => {
 });
 
 /**
- * The first measurement on Google Earth, over ground that is not flat.
+ * The fire layer's seat, with and without the key behind it.
  *
- * Earth is the one view with no scale in its address bar, so a drag is the only
- * way to learn one — and the one view whose camera distance moves on its own,
- * because `d` is measured to the ground and the ground has hills in it. Pan over
- * one and `d` changes by more than the threshold that means "this zoomed".
- *
- * The panel then looked for a scale to carry through that zoom, had none — it
- * was trying to take its first — reset, and threw away the drag that had just
- * measured it. Every time. Which is a tool that asks for a pan it has already
- * been given, on the only site where a pan is the whole answer.
+ * The app greys its Active fires row when no FIRMS key is saved and says why on
+ * the row itself. The panel owes the same answer: a seat that opens on a
+ * paragraph about a missing key is a click spent learning there was nothing to
+ * click.
  */
-describe('measuring a view whose camera moves with the ground', () => {
-  const HOME = { lat: 48.8584, lon: 2.2945 };
-  const PX_PER_LON = 1000;
-  const PX_PER_LAT = 1500;
+describe('the fire layer in the panel', () => {
+  const root = () => document.getElementById('azimut-map-tools').shadowRoot;
+  const seat = () => root().querySelector('[data-tab="fires"]');
+  const google = () => fixture.recordings.find((r) => r.site === 'google-maps');
 
-  const url = ({ lat = HOME.lat, lon = HOME.lon, d = 666 } = {}) =>
-    `https://earth.google.com/web/@${lat},${lon},146a,${d}d,35y,0h,0t,0r`;
+  it('is greyed until a key is saved, and carries the reason', async () => {
+    await replay(google(), { answers: { '/api/ingest/firms/sensors': { keyed: false, sensors: [] } } });
+    expect(seat().disabled).toBe(true);
+    expect(seat().getAttribute('title')).toContain('FIRMS key');
+  });
 
-  /** Earth's reading: a position, a camera distance, and no scale of any kind. */
-  function earthParse(query) {
-    const at = /@([\d.-]+),([\d.-]+),[\d.-]+a,([\d.-]+)d/.exec(query.url);
-    if (!at) return { site: null };
-    return {
-      site: 'google-earth',
-      label: 'Google Earth',
-      lat: Number(at[1]),
-      lon: Number(at[2]),
-      zoom: null,
-      bearing: 0,
-      projection: null,
-      view_kind: 'map',
-      geometry: false,
-      scale_source: null,
-      camera_m: Number(at[3]),
-      camera_kind: 'camera_d',
-      far: false,
-    };
-  }
+  const keyed = {
+    '/api/ingest/firms/sensors': {
+      keyed: true,
+      sensors: [{ id: 'viirs', label: 'VIIRS (S-NPP + NOAA-20)' }],
+    },
+  };
+
+  it('asks for nothing past the zoom where one mark stops meaning one detection', async () => {
+    // the recording ends at z17, which is deeper than the app's own map asks
+    // FIRMS at — it caps its tile source at z14 and scales what it has
+    const live = await replay(google(), { answers: keyed });
+    live.pick('fires');
+    root().querySelector('[data-act="fires-toggle"]').click();
+    await tick();
+    expect(live.asks('/api/ingest/firms')).toEqual([]);
+    expect(root().textContent).toContain('Zoom out to z14');
+  });
+
+  it('asks once the view is one it can answer for', async () => {
+    const live = await replay(google(), { answers: keyed, extra: { zoom: 10 } });
+    live.pick('fires');
+    root().querySelector('[data-act="fires-toggle"]').click();
+    await tick();
+    const asked = live.asks('/api/ingest/firms');
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ sensor: 'viirs', window: '24h' });
+    expect(asked[0].north).toBeGreaterThan(asked[0].south);
+  });
 
   /**
-   * A drag the panel will accept as a measurement: far enough on both axes, and
-   * let go of after the map has stopped. The timestamps are set by hand because
-   * that pause is the whole difference between a pan and a fling, and happy-dom
-   * hands out no clock of its own.
+   * Where the picture lands, zoomed out and away from the equator.
+   *
+   * FIRMS answers with one picture of a rectangle of ground, and that rectangle
+   * is drawn in Web Mercator — where the coordinate halfway between two
+   * latitudes is *not* the pixel halfway between them. Centred on the mean
+   * latitude, the picture rode low: nothing over a town, a tenth of the window
+   * over a continent, which is exactly the complaint about a zoomed-out map.
    */
-  function drag(from, to, pause = 200) {
-    const send = (type, x, y, stamp) => {
-      const event = new window.MouseEvent(type, {
-        clientX: x,
-        clientY: y,
-        bubbles: true,
-        button: 0,
-      });
-      Object.defineProperty(event, 'timeStamp', { value: stamp });
-      window.dispatchEvent(event);
-    };
-    send('pointerdown', from.x, from.y, 0);
-    send('pointermove', to.x, to.y, 10);
-    send('pointerup', to.x, to.y, 10 + pause);
-  }
-
-  /** Where that drag leaves the centre, on a map drawn at the scale above. */
-  const landed = (dx, dy, d) =>
-    url({ lon: HOME.lon - dx / PX_PER_LON, lat: HOME.lat - dy / PX_PER_LAT, d });
-
-  async function onEarth() {
-    const live = open({ parse: earthParse });
-    live.location.href = url();
-    await tick();
-    return live;
-  }
-
-  it('takes the measurement even when the pan moved the camera distance', async () => {
-    const live = await onEarth();
-    panel = live;
-    expect(live.status()).toContain('Drag the map across and down');
-
-    drag({ x: 800, y: 500 }, { x: 1000, y: 350 });
-    // the drag crossed a hill: Earth re-writes `d` as well as the centre
-    live.location.href = landed(200, -150, 720);
+  it('lands on its own ground, where Mercator stretches the north', async () => {
+    const live = await replay(google(), {
+      answers: keyed,
+      extra: { zoom: 4, lat: 55, lon: 10 },
+    });
+    live.pick('fires');
+    root().querySelector('[data-act="fires-toggle"]').click();
     await tick();
 
-    expect(live.state.calibration.scale).not.toBe(null);
-    expect(live.state.calibration.scale.pxPerLon).toBeCloseTo(PX_PER_LON, 0);
-    expect(live.state.calibration.scale.pxPerLat).toBeCloseTo(PX_PER_LAT, 0);
-    expect(live.status()).toContain('measured off the map');
+    const asked = live.asks('/api/ingest/firms')[0];
+    const M = window.AzimutMapMath;
+    const view = live.state.view;
+    const area = { ...live.state.frame, w: window.innerWidth, h: window.innerHeight };
+    const nw = M.toScreen({ lat: asked.north, lon: asked.west }, view, area);
+    const se = M.toScreen({ lat: asked.south, lon: asked.east }, view, area);
+
+    const img = document.getElementById('azimut-map-tools').shadowRoot.querySelector('img');
+    const px = (name) => Number.parseFloat(img.style[name]);
+    // the box is centred and pulled back by half itself, so its north edge is
+    // the top of the ground it was drawn for
+    expect(px('top') - px('height') / 2).toBeCloseTo(nw.y, 1);
+    expect(px('left') - px('width') / 2).toBeCloseTo(nw.x, 1);
+    expect(px('top') + px('height') / 2).toBeCloseTo(se.y, 1);
+
+    // …and the placement it replaced is wrong by enough to see: the mean of the
+    // two latitudes is a different pixel from the middle of the two corners
+    const mean = M.toScreen({ lat: (asked.north + asked.south) / 2, lon: (asked.west + asked.east) / 2 }, view, area);
+    expect(Math.abs(mean.y - (nw.y + se.y) / 2)).toBeGreaterThan(5);
   });
 
-  it('still carries a scale it already had through a real change of distance', async () => {
-    // The other half of the rule: once something is known, a camera that moved
-    // out is a view drawn smaller, and the ratio of the two distances says by
-    // how much — that is the reading, and the drag is not asked for again.
-    const live = await onEarth();
-    panel = live;
-    drag({ x: 800, y: 500 }, { x: 1000, y: 350 });
-    live.location.href = landed(200, -150, 666);
+  it('dims out where the site draws a globe, as the drawing beside it does', async () => {
+    const live = await replay(google(), {
+      answers: keyed,
+      extra: { zoom: 4, lat: 55, lon: 10, far: true },
+    });
+    live.pick('fires');
+    root().querySelector('[data-act="fires-toggle"]').click();
     await tick();
-    const measured = live.state.calibration.scale.pxPerLon;
-
-    live.location.href = url({ d: 1332 }); // twice as far out, nothing else moved
-    await tick();
-    expect(live.state.calibration.scale.pxPerLon).toBeCloseTo(measured / 2, 0);
-    expect(live.status()).toContain('measured off the map');
+    const img = root().querySelector('img');
+    // a flat rectangle of ground laid over a curve, covering the whole window:
+    // the picture drifts further out there than any mark does
+    expect(img.parentElement.style.opacity).toBe('0.55');
+    expect(live.canvas().style.opacity).toBe('0.55');
   });
 
-  it('says what makes a drag count, since a fling looks the same', async () => {
-    const live = await onEarth();
-    panel = live;
-    drag({ x: 800, y: 500 }, { x: 1000, y: 350 }, 10); // let go mid-flight
-    live.location.href = landed(200, -150, 666);
-    await tick();
-    expect(live.state.calibration.scale).toBe(null);
-    expect(live.status()).toContain('pausing before you let go');
+  it('asks a date with a calendar drawn in the panel, never over it', async () => {
+    const live = await replay(google(), {
+      answers: {
+        '/api/ingest/firms/sensors': {
+          keyed: true,
+          sensors: [{ id: 'viirs', label: 'VIIRS (S-NPP + NOAA-20)' }],
+        },
+      },
+    });
+    live.pick('fires');
+    root().querySelector('[data-act="fires-toggle"]').click();
+    root().querySelector('[data-window="dates"]').click();
+
+    // the browser's own picker is what this replaced: it opened over the page,
+    // at the browser's size, in the browser's locale
+    expect(root().querySelector('input[type="date"]')).toBe(null);
+    expect(root().querySelector('.cal')).toBe(null);
+
+    root().querySelector('[data-act="cal-open"][data-field="first"]').click();
+    expect(root().querySelector('.cal')).not.toBe(null);
+    root().querySelector('[data-act="cal-step"][data-by="-1"]').click();
+
+    const day = [...root().querySelectorAll('.cal-day')].find(
+      (b) => !b.disabled && !b.classList.contains('out')
+    );
+    const picked = day.dataset.day;
+    day.click();
+    expect(live.tools.fires.state.first).toBe(picked);
+    expect(root().querySelector('.cal')).toBe(null); // picked, so it is done
+    expect(root().querySelector('[data-act="cal-open"][data-field="first"]').textContent).toContain(
+      picked
+    );
+  });
+
+  it('opens once one is, and none of the other seats was greyed with it', async () => {
+    const live = await replay(google(), {
+      answers: {
+        '/api/ingest/firms/sensors': {
+          keyed: true,
+          sensors: [{ id: 'viirs', label: 'VIIRS (S-NPP + NOAA-20)' }],
+        },
+      },
+    });
+    expect(seat().disabled).toBe(false);
+    expect([...root().querySelectorAll('.tabs button')].filter((b) => b.disabled)).toEqual([]);
+    live.pick('fires');
+    expect(live.state.tool).toBe('fires');
   });
 });

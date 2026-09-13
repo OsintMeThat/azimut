@@ -13,6 +13,8 @@
  * and the case is not a stage: it is what every stage files into. It hangs off
  * the case switcher in the topbar instead, beside the name of the case it opens.
  */
+import { splitHash } from './hash.js';
+
 export const CASE_WORKSPACE = {
   id: 'case',
   label: 'Case',
@@ -91,9 +93,12 @@ export function sidebarOpenForWorkspace(workspaceId, remembered = {}) {
  *   '#<tool>'            — stable pre-workspace links (#media, #proof, …)
  *   '#<workspace>/<tool>' — a specific tab (#compose/post)
  *   '#<workspace>'       — the workspace's first tool (#compose → proof)
+ * Any of them may carry the tool's own state as a query (`#satellite?ll=…`).
  */
 export function toolFromHash(hash, allTools) {
-  const [head, sub] = hash.replace(/^#/, '').split('/');
+  // A tool may keep its own state after the route (`#satellite?ll=…`, see
+  // lib/hash.js); the route is all that names a tool.
+  const [head, sub] = splitHash(hash).route.split('/');
   if (allTools.includes(head)) return head;
   const ws = ALL_WORKSPACES.find((w) => w.id === head);
   if (!ws) return null;

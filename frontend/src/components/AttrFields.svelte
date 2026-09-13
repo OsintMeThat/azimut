@@ -19,11 +19,10 @@
   const fields = $derived(entityFields(type));
 
   /**
-   * A shape can only be traced on a map, and no map offers that gesture yet. So an
-   * empty footprint shows nothing at all: a label over a hint reads as a control
-   * that has stopped working, where absence reads as what it is. It appears the
-   * moment a shape exists — set through the API, or by the drawing tool when it
-   * lands — carrying the summary and the Clear that drops it.
+   * A shape is traced on the map, never typed here. So an empty footprint shows
+   * nothing at all: a label over a hint reads as a control that has stopped working,
+   * where absence reads as what it is. It appears the moment a shape exists, carrying
+   * the summary and the Clear that drops it.
    */
   const shown = $derived(withHeadings(fields.filter((field) => {
     if (exclude.includes(field.key)) return false;

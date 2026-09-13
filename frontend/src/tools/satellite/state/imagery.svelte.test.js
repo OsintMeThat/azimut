@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createImageryState } from './imagery.svelte.js';
 import { FREE_TIER } from '../../../lib/usage.js';
 import { SENTINEL_ID } from '../../../lib/sentinel.js';
+import { WAYBACK_ID } from '../../../lib/wayback.js';
 
 /**
  * The catalogue, and the gap between the basemap chosen and the basemap shown.
@@ -15,6 +16,7 @@ import { SENTINEL_ID } from '../../../lib/sentinel.js';
 const ESRI = { id: 'esri-world-imagery', label: 'Esri', imagery: true };
 const MAPBOX = { id: 'mapbox-satellite', label: 'Mapbox', imagery: true, meter: 'mapbox' };
 const SENTINEL = { id: SENTINEL_ID, label: 'Sentinel-2', imagery: true, meter: 'sentinelhub' };
+const WAYBACK = { id: WAYBACK_ID, label: 'Esri Wayback', imagery: true };
 
 let api;
 let settings;
@@ -42,7 +44,7 @@ beforeEach(() => {
   };
   api = {
     get: vi.fn(async (path) => {
-      if (path === '/api/satellite/providers') return [ESRI, MAPBOX, SENTINEL];
+      if (path === '/api/satellite/providers') return [ESRI, MAPBOX, SENTINEL, WAYBACK];
       return settings;
     }),
     post: vi.fn(async () => ({})),
@@ -52,7 +54,7 @@ beforeEach(() => {
 describe('the catalogue', () => {
   it('is read from the backend, not assumed', async () => {
     const imagery = await loaded();
-    expect(imagery.providers).toHaveLength(3);
+    expect(imagery.providers).toHaveLength(4);
     expect(imagery.find('mapbox-satellite')).toEqual(MAPBOX);
   });
 
@@ -198,6 +200,23 @@ describe('Sentinel-2’s choices ride on the id', () => {
   it('a bare provider carries no variant', async () => {
     const imagery = await loaded();
     expect(imagery.displayed('esri-world-imagery', 16).id).toBe('esri-world-imagery');
+  });
+});
+
+describe('a Wayback release rides on the id too', () => {
+  it('so a capture names the release its pixels came from', async () => {
+    const imagery = await loaded();
+    const variant = { layer: 'TRUE_COLOR', from: '', to: '', maxcc: 100, release: 64776 };
+    expect(imagery.displayed(WAYBACK_ID, 16, variant).id).toBe('esri-wayback~64776');
+    // the newest release is the plain basemap, which the backend names
+    expect(imagery.displayed(WAYBACK_ID, 16, { ...variant, release: null }).id).toBe(WAYBACK_ID);
+  });
+
+  it('never leaks onto another basemap shown beside it', async () => {
+    const imagery = await loaded();
+    const variant = { layer: 'SWIR', from: '', to: '', maxcc: 100, release: 64776 };
+    expect(imagery.displayed(SENTINEL_ID, 16, variant).id).toBe('sentinel2~SWIR');
+    expect(imagery.displayed('esri-world-imagery', 16, variant).id).toBe('esri-world-imagery');
   });
 });
 

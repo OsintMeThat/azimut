@@ -128,6 +128,26 @@
       tierNote:
         'Copernicus documents 10,000 but provisions 30,000, per account; check yours on the dashboard.',
     },
+    {
+      id: 'firms',
+      label: 'NASA FIRMS',
+      gives: 'Active fire layer · live and archive',
+      cost: 'Never billed',
+      field: 'FIRMS MAP_KEY',
+      placeholder: '0123456789abcdef0123456789abcdef',
+      help: 'https://firms.modaps.eosdis.nasa.gov/api/map_key/',
+      // Not a basemap: it buys a layer laid over whichever one is showing, and
+      // nothing meters it. The card leaves out the meter, the allowance box and
+      // the eco threshold, all of which would be answering about tiles nobody
+      // is billed for.
+      metered: false,
+      steps: [
+        'Ask for a MAP_KEY on the FIRMS page below; it arrives by email.',
+        'One key serves both the global and the US/Canada service.',
+      ],
+      overage:
+        'The limit is 5,000 requests per 10 minutes, which only a layer left on while panning could approach.',
+    },
   ];
 
   /** Build the per-provider shape used by key and preference state. */

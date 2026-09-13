@@ -7,12 +7,14 @@
   import { createSurface } from '../lib/map/surface.js';
   import MapSurface from './satellite/MapSurface.svelte';
   import { createSentinelState } from './satellite/state/sentinel.svelte.js';
+  import { createWaybackState } from './satellite/state/wayback.svelte.js';
   import { createSavedState } from './satellite/state/saved.svelte.js';
   import { createImageryState, FALLBACK_PROVIDER } from './satellite/state/imagery.svelte.js';
   import { createMeasureState, HINTS as MEASURE_HINT } from './satellite/state/measure.svelte.js';
   import { createSkyState } from './satellite/state/sky.svelte.js';
   import { createGridState } from './satellite/state/grid.svelte.js';
   import { createRefsState } from './satellite/state/refs.svelte.js';
+  import { createFootprintState } from './satellite/state/footprint.svelte.js';
   import {
     createCaptureState,
     PRESETS,
@@ -22,7 +24,7 @@
   import { setAnalysisPeriod } from '../lib/analysisSearch.svelte.js';
   import { temporalMapQuery } from '../lib/temporalMap.js';
   import { windowWords } from '../lib/timeline.js';
-  import { isMode } from '../lib/geoTree.js';
+  import { isMode, KINDS } from '../lib/geoTree.js';
   import {
     caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords, prefsReady,
   } from '../lib/state.svelte.js';
@@ -35,22 +37,57 @@
   import { saveRelation } from '../lib/relations.svelte.js';
   import { openEntity } from '../lib/navigate.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
-  import { extensionVersion, onActivated } from '../lib/extBridge.js';
+  import { extensionVersion, mapLinkRelay, onActivated } from '../lib/extBridge.js';
+  import { SENTINEL_ID } from '../lib/sentinel.js';
+  import { WAYBACK_ID } from '../lib/wayback.js';
+  import { buildHash, readSolo, splitHash } from '../lib/hash.js';
+  import { readView, readWindowLabel, viewParams } from '../lib/map/view.js';
+  import { createViewLink } from '../lib/map/link.js';
   import {
-    SENTINEL_ID,
-    maxccLabel,
-    cloudLabel,
-    cloudClass,
-    monthLabel,
-    monthGrid,
-  } from '../lib/sentinel.js';
+    askable,
+    DATED as FIRMS_DATED,
+    lastDayOf,
+    summary,
+    tileParams,
+    today,
+    WINDOWS as FIRMS_WINDOWS,
+  } from '../lib/map/firms.js';
+  import {
+    askable as nightCanAsk,
+    COMPOSITE as NIGHT_COMPOSITE,
+    firstNight,
+    lastNight,
+    SENSORS as NIGHT_SENSORS,
+    summary as nightSummary,
+    tileParams as nightParams,
+  } from '../lib/map/nightlights.js';
+  // The map's tools declare themselves once (lib/map/tools.js); the rail, the
+  // panel slot, the surface's cursor and the exclusion between modes are all
+  // read from that declaration rather than written out here per tool.
+  import {
+    arm,
+    armedId,
+    closeOthers,
+    cursorOf,
+    disarm,
+    hasPanel,
+    railEntries,
+    railSections,
+  } from '../lib/map/tools.js';
   import Icon from '../components/Icon.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
+  import Modal from '../components/Modal.svelte';
+  import EntityDetails from '../components/EntityDetails.svelte';
   import RefViewer from './RefViewer.svelte';
-  import MapToolCluster from './satellite/MapToolCluster.svelte';
+  import MapRail from './satellite/MapRail.svelte';
+  import MapLayers from './satellite/MapLayers.svelte';
+  import MapContextMenu from './satellite/MapContextMenu.svelte';
+  import MapStatusBar from './satellite/MapStatusBar.svelte';
+  import MarkerMenu from './satellite/MarkerMenu.svelte';
+  import MeasurePanel from './satellite/MeasurePanel.svelte';
   import SunPanel from './satellite/SunPanel.svelte';
   import GridSearchPanel from './satellite/GridSearchPanel.svelte';
-  import SentinelPicker from './satellite/SentinelPicker.svelte';
+  import FootprintPanel from './satellite/FootprintPanel.svelte';
   import ScreenshotDialog from './satellite/ScreenshotDialog.svelte';
   import ExtensionGate from './satellite/ExtensionGate.svelte';
   import RefPicker from './satellite/RefPicker.svelte';
@@ -62,6 +99,20 @@
   import SavedOverlay from './satellite/SavedOverlay.svelte';
   import SheetPointsOverlay from './satellite/SheetPointsOverlay.svelte';
   import TemporalMapOverlay from './satellite/TemporalMapOverlay.svelte';
+
+  /**
+   * This window, as its own address describes it.
+   *
+   * A second map window is the same app on the same case with its camera
+   * somewhere else, so the camera is what the address carries. Read once, at
+   * build: afterwards the map moves the address, never the other way round.
+   */
+  const opening = splitHash(location.hash);
+  const openingView = readView(opening.params);
+  const windowNumber = readWindowLabel(opening.params);
+  /** Whether this tab is the map on its own; `App.svelte` is what honours it,
+   *  and the map is what has to keep saying so as it rewrites the address. */
+  const solo = readSolo(opening.params);
 
   let toolEl; // Browser fullscreen target.
   // The map surface: it owns the engine, the basemap and everything that
@@ -95,12 +146,14 @@
   let savedSearchOpen = $state(false);
   let savedOverlay = $state(false); // map layer: off by default, session only
   let temporalMap = $state(null); // Timeline handoff, session-only
+  let temporalShown = $state(true); // …and whether its marks are drawn
   let temporalMapLoading = $state(false);
   let temporalMapError = $state('');
   let temporalMapSeq = 0;
   /** A sheet's coordinate column, handed over as points. Session-only, like the layer
    *  above it, and never part of a capture or a proof. */
   let sheetPoints = $state(null); // { points, sheet, column }
+  let sheetShown = $state(true); // …and whether its marks are drawn
   let hoveredSavedId = $state(null); // shared by the tree, the modal and the map
   let revealSavedId = $state(null);
   let capturesCollapsed = $state(false);
@@ -120,6 +173,155 @@
   // OSM labels overlay: a transparent labels-only layer laid over the imagery so
   // roads / place names are readable without hiding the satellite view (item 1).
   let osmOverlay = $state(false);
+  // OpenRailwayMap over the same imagery: which of two parallel strips is a
+  // railway, where a siding ends, what a yard is made of. Unlike the labels it
+  // is worth having over a street base map too, which draws tracks as one
+  // undifferentiated line.
+  let railOverlay = $state(false);
+  /**
+   * The other key-less reference layers, each simply on or off: Esri's borders
+   * and roads, Open Infrastructure Map's power lines, OpenSeaMap's sea marks
+   * and OSM's raw GPS traces. Off by default, so none of them fetches a tile
+   * until its switch is pressed.
+   */
+  const refLayers = $state({
+    boundaries: false,
+    roads: false,
+    power: false,
+    seamarks: false,
+    gpstraces: false,
+  });
+  /**
+   * The night lights: one night's VIIRS pass from NASA GIBS, or the 2016
+   * composite. Key-less, and nothing is asked until the layer is on.
+   */
+  const night = $state({ on: false, source: 'noaa20', day: lastNight() });
+  const nightAskable = $derived(nightCanAsk(night));
+  /**
+   * NASA FIRMS: what was burning, live or on a given day.
+   *
+   * The catalogue is read once on mount from our own backend — it is a list of
+   * sensor names and whether a key is saved, and touches no network. Nothing
+   * is asked of NASA until the layer is switched on.
+   */
+  const fires = $state({
+    on: false,
+    keyed: false,
+    sensors: [],
+    sensor: 'viirs',
+    window: '24h',
+    first: '',
+    last: '',
+  });
+  const firmsAskable = $derived(askable(fires));
+  const firmsSummary = $derived(summary(fires, fires.sensors));
+
+  /**
+   * Which instruments are on offer, and whether the key for them is saved.
+   *
+   * Our own backend, reading a catalogue and a settings file: no network, so it
+   * is safe on mount. Failing quietly leaves the row disabled with its reason,
+   * which is the same state as no key — and is the truth either way.
+   */
+  async function loadFireSensors() {
+    try {
+      const answer = await api.get('/api/firms/sensors');
+      fires.sensors = answer.sensors ?? [];
+      fires.keyed = Boolean(answer.keyed);
+    } catch {
+      fires.keyed = false;
+    }
+  }
+
+  /** The two questions the fire layer asks, as rows under its switch. */
+  const firmsControls = $derived([
+    {
+      label: 'Sensor',
+      options: fires.sensors.map((entry) => ({
+        id: entry.id,
+        // "VIIRS (S-NPP + NOAA-20)" does not fit a panel this wide, and the
+        // instrument is the part being chosen between
+        label: entry.label.replace(/\s*\(.*\)\s*$/, ''),
+        title:
+          entry.id === 'modis'
+            ? `${entry.label} · 1 km, back to 2000`
+            : `${entry.label} · 375 m, back to 2012`,
+      })),
+      value: fires.sensor,
+      pick: (id) => (fires.sensor = id),
+    },
+    {
+      label: 'Showing',
+      options: [
+        ...FIRMS_WINDOWS.map((entry) => ({
+          ...entry,
+          title: `Detections from the last ${entry.label.toLowerCase()}`,
+        })),
+        { id: FIRMS_DATED, label: 'Dates', title: 'Detections from a past day or range' },
+      ],
+      value: fires.window,
+      pick: (id) => {
+        fires.window = id;
+        if (id === FIRMS_DATED && !fires.first) fires.first = today();
+      },
+      dates:
+        fires.window === FIRMS_DATED
+          ? {
+              first: fires.first,
+              last: fires.last,
+              today: today(),
+              // FIRMS refuses a longer range, so the input says so rather than
+              // the map failing on a date that was already typed
+              max: lastDayOf(fires.first),
+              setFirst: (value) => (fires.first = value),
+              setLast: (value) => (fires.last = value),
+            }
+          : null,
+    },
+  ]);
+
+  /** The night layer's question, asked in its row like the fires'. */
+  const nightControls = $derived([
+    {
+      label: 'Showing',
+      options: [
+        ...NIGHT_SENSORS.map((sensor) => ({
+          id: sensor.id,
+          label: sensor.label,
+          title: `${sensor.label} · one night, back to ${sensor.first}`,
+        })),
+        { id: NIGHT_COMPOSITE.id, label: NIGHT_COMPOSITE.label, title: 'Cloud-free composite of 2016' },
+      ],
+      value: night.source,
+      pick: (id) => (night.source = id),
+      day:
+        night.source === NIGHT_COMPOSITE.id
+          ? null
+          : {
+              label: 'Night of',
+              title: 'Night of the pass, around 01:30 local time',
+              value: night.day,
+              min: firstNight(night.source),
+              max: lastNight(),
+              set: (value) => (night.day = value),
+            },
+    },
+  ]);
+
+  /** What the surface is asked to lay over the picture (lib/map/basemap.js). */
+  const overlays = $derived(
+    [
+      osmOverlay && baseIsImagery && 'labels',
+      refLayers.boundaries && 'boundaries',
+      refLayers.roads && baseIsImagery && 'roads',
+      railOverlay && 'railway',
+      refLayers.power && 'power',
+      refLayers.seamarks && 'seamarks',
+      refLayers.gpstraces && 'gpstraces',
+      fires.on && fires.keyed && firmsAskable && { id: 'firms', params: tileParams(fires) },
+      night.on && nightAskable && { id: 'nightlights', params: nightParams(night) },
+    ].filter(Boolean)
+  );
   // The labels overlay only makes sense over satellite imagery — over a street
   // base map (OSM) it just doubles the road/place labels, so it's disabled then
   // and force-off if the provider changes to a non-imagery one (item 1).
@@ -141,15 +343,23 @@
     api,
   });
   const isSentinel = $derived(currentProvider?.id === SENTINEL_ID);
-  let s2MenuEl = $state(); // bound to the popover wrapper — outside-click detection
+
+  // --- Esri Wayback: which release of World Imagery ---
+  // The release rides on the provider id like a Sentinel-2 window, and both
+  // questions it asks (the release list, a point's history) reach Esri, so
+  // neither is asked until the basemap is on screen or its picker is open.
+  const wb = createWaybackState({
+    api,
+    place: () => ({ lat: center.lat, lon: center.lon, zoom: center.zoom }),
+  });
 
   // --- what the map is actually showing (state/imagery.svelte.js) ---
   // A billed basemap steps aside for free imagery when paused (90% soft block)
   // or zoomed out (eco). The capture follows the display, so provenance always
   // matches the pixels.
-  const shown = $derived(imagery.displayed(providerId, center.zoom, s2.variant));
-  // small readout near the basemap selector, billed providers only
-  const usagePill = $derived(imagery.pill(currentProvider));
+  const shown = $derived(
+    imagery.displayed(providerId, center.zoom, { ...s2.variant, release: wb.release })
+  );
 
   // Fullscreen: the tool covers the whole viewport; SAVED stays collapsible (item 4).
   let fullscreen = $state(false);
@@ -162,6 +372,9 @@
 
   // External-maps quick links, in the SAVED panel (item 6).
   let linksOpen = $state(false);
+  // …and the layers list above them, open by default: it is what the panel
+  // says about the map itself.
+  let layersOpen = $state(true);
 
   // --- Grid Search (spec §5): overlay a metric grid on an area of interest and
   // sweep it cell by cell, marking each cleared or flagged. The grids a case
@@ -190,6 +403,16 @@
     setViewers: (windows) => (uiState.refViewers = windows),
   });
 
+  // --- tracing a place's footprint: the shape it really is, rather than the
+  // circle a radius draws around it. Armed from that place's own card.
+  const footprint = createFootprintState({
+    api,
+    notify: toast,
+    caseId: () => caseState.current?.id,
+    engine: () => engine,
+    onSaved: reloadCase,
+  });
+
   // Svelte only honours a cleanup returned from a *synchronous* onMount, and the
   // setup below has to await the providers and the saved home view. So onMount
   // stays synchronous and hands back a teardown that runs whatever the async
@@ -212,8 +435,34 @@
     imagery.refreshUsage(); // prefs drive the eco/soft-block fallbacks from the start
     await imagery.loadProviders();
     await prefsReady; // the home view has to land before the map is built
-    center = { ...prefs.homeView };
+    // The address wins over the saved home view: it is what a detached window,
+    // a reload and a kept link all carry. A basemap named there has to exist —
+    // the catalogue depends on which keys are configured, and an address can be
+    // typed by hand.
+    center = { ...openingHome };
+    if (openingView?.provider && imagery.find(openingView.provider)) {
+      providerId = openingView.provider;
+    }
+    if (windowNumber) document.title = `Azimut · Map ${windowNumber}`;
     homeReady = true; // …and only now is there a view for the surface to open on
+    loadFireSensors();
+    // A peer moved. Applied whatever this tab was doing, because the analyst
+    // asked for that by pressing the link — but only while it is pressed.
+    viewLink = createViewLink(
+      (view) => {
+        if (!linked || !engine) return;
+        engine.setView(view, view.zoom);
+        setBearing(view.bearing);
+      },
+      {
+        onPeers: (count) => {
+          peerMaps = count;
+          if (!count) linked = false;
+        },
+        // the extension's map tools, following on Google, Bing, Earth and the rest
+        relay: mapLinkRelay(),
+      }
+    );
     window.addEventListener('keydown', onKeydown);
     document.addEventListener('fullscreenchange', onFullscreenChange);
     // the user clicked the extension after a refused capture — close the loop
@@ -223,10 +472,13 @@
     return () => {
       window.removeEventListener('keydown', onKeydown);
       document.removeEventListener('fullscreenchange', onFullscreenChange);
+      viewLink?.close();
+      viewLink = null;
       offActivated();
       measure.destroy();
       sky.destroy();
       grid.destroy();
+      footprint.destroy();
       markerSurface?.destroy();
     };
   }
@@ -256,7 +508,7 @@
   function onKeydown(e) {
     if (uiState.tool !== 'satellite') return;
     // a dialog on top owns the keyboard — it closes itself, the map keeps state
-    if (notesItem || placeModal || refs.picking || deleteTarget) return;
+    if (notesItem || placeModal || detailsEntityId || refs.picking || deleteTarget) return;
     const tag = e.target?.tagName;
     const typing = tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable;
     // Enter confirms a polygon area, same as the Confirm button
@@ -274,21 +526,27 @@
       if (k === 'p') return void (e.preventDefault(), grid.reviewToPlace());
     }
     if (e.key !== 'Escape') return;
+    // A menu open over the map is the innermost thing of all.
+    if (pointMenu) return closePointMenu();
+    // Innermost first: what the armed mode is in the middle of, then the mode
+    // itself, then the tool's own frame. A mode no longer has to be named here
+    // to be closed — whatever is armed is what Escape disarms.
     if (grid.drawMode) return grid.cancelDraw();
     if (grid.reviewKey) return grid.stopReview();
-    if (capture.armed) toggleSelect();
-    else if (capture.menuOpen) capture.menuOpen = false;
-    else if (sky.placing) sky.togglePlacing();
-    else if (sky.on) toggleSunMode();
-    else if (measure.mode) setMeasureMode(null);
+    if (capture.menuOpen && !capture.armed) return void (capture.menuOpen = false);
+    if (sky.placing) return sky.togglePlacing();
+    if (armedMode) return disarm(modes);
+    if (capture.menuOpen) return void (capture.menuOpen = false);
     // native fullscreen already exits on Esc (handled by onFullscreenChange);
     // only the CSS fallback needs an explicit toggle here
-    else if (fullscreen && !document.fullscreenElement) toggleFullscreen();
+    if (fullscreen && !document.fullscreenElement) toggleFullscreen();
   }
 
-  // force the labels overlay off whenever the base isn't imagery (item 1)
+  // force the labels overlay off whenever the base isn't imagery (item 1), and
+  // the roads with it: a street map already draws both
   $effect(() => {
     if (!baseIsImagery && osmOverlay) osmOverlay = false;
+    if (!baseIsImagery && refLayers.roads) refLayers.roads = false;
   });
 
   // While the picker is open, a settled pan refreshes its dates. The stale
@@ -317,6 +575,23 @@
     s2LatestTimer = setTimeout(() => s2.resolveLatest().catch(() => {}), 900);
   });
   let s2LatestTimer;
+
+  // Wayback names its releases once it is on screen: the chip reads a date
+  // rather than "Newest", and the picker opens on a list already read.
+  $effect(() => {
+    if (mapReady && shown.provider?.id === WAYBACK_ID) wb.loadReleases();
+  });
+
+  // While its picker is open, a pan that settles in another tile reads that
+  // tile's history. Debounced, and answered from memory for a tile already read.
+  $effect(() => {
+    if (!wb.menuOpen || shown.provider?.id !== WAYBACK_ID) return;
+    if (!wb.stale) return;
+    clearTimeout(wbChangesTimer);
+    wbChangesTimer = setTimeout(() => wb.loadChanges(), 900);
+    return () => clearTimeout(wbChangesTimer);
+  });
+  let wbChangesTimer;
 
   // --- middle-drag rotate (item 3), Google-Earth style ---
   // Grab a point → the map turns around *that* point (not the centre) as the
@@ -383,20 +658,493 @@
     tick().then(() => engine?.resize());
   }
 
+  // --- this window, and the next one ---------------------------------------
+  //
+  // The map is the first tool that opens in more than one window, because two
+  // areas side by side on two screens is what the work actually looks like.
+  // Everything that makes that possible is already here: the case is the one
+  // the workspace last opened, and a point saved or a cell swept reaches every
+  // window over the nudge channel. The only thing a second window needs of its
+  // own is where its camera is — so that goes in the address.
+
+  /**
+   * Where the surface opens: the address when it names a place, else the saved
+   * home view. The surface reads this once, at build — so it has to be the same
+   * answer the tool gave `center`, or the map opens on one and reports the
+   * other.
+   */
+  const openingHome = $derived(
+    openingView?.lat != null
+      ? {
+          lat: openingView.lat,
+          lon: openingView.lon,
+          zoom: openingView.zoom ?? prefs.homeView.zoom,
+        }
+      : prefs.homeView
+  );
+
+  /** The bearing the address asked for, applied once the map exists to turn. */
+  let bearingApplied = false;
+  $effect(() => {
+    if (!mapReady || bearingApplied) return;
+    bearingApplied = true;
+    if (openingView?.bearing) setBearing(openingView.bearing);
+  });
+
+  /**
+   * This window's view, kept in its own address.
+   *
+   * `replaceState`, never push: panning a map is not navigating, and a back
+   * button holding four hundred camera positions is worse than useless.
+   */
+  $effect(() => {
+    if (uiState.tool !== 'satellite' || !mapReady) return;
+    const params = viewParams({
+      lat: center.lat,
+      lon: center.lon,
+      zoom: center.zoom,
+      bearing,
+      provider: providerId,
+    });
+    if (windowNumber) params.w = String(windowNumber);
+    // What this tab *is* rides along with where it is pointed: rewritten
+    // without it, the first pan would turn a detached map back into the whole
+    // app on the next reload.
+    if (solo) params.solo = '1';
+    history.replaceState(null, '', buildHash('satellite', params));
+  });
+
+  /**
+   * This tab following the others, and them following it.
+   *
+   * Off by default and per tab, which is the point: two maps are worth linking
+   * when they are being compared, and in the way of each other the rest of the
+   * time. Nothing here is written down and nothing reaches the network — a
+   * camera is not case state (`lib/map/link.js`).
+   */
+  let linked = $state(false);
+  let viewLink = null;
+  /**
+   * How many other maps are open, the app's tabs and the extension's panels on
+   * other sites together, which is the whole of whether the button means
+   * anything. With none, linking would be pressing a control that pans
+   * nothing — so it greys out, and a link already on is dropped when the last
+   * peer goes rather than left lit over an empty channel.
+   */
+  let peerMaps = $state(0);
+
+  function toggleLink() {
+    if (!peerMaps) return;
+    linked = !linked;
+    if (linked) viewLink?.send({ lat: center.lat, lon: center.lon, zoom: center.zoom, bearing });
+  }
+
+  $effect(() => {
+    if (!linked || !mapReady) return;
+    viewLink?.send({ lat: center.lat, lon: center.lon, zoom: center.zoom, bearing });
+  });
+
+  const WINDOWS_KEY = 'azimut:mapWindows';
+
+  /** The number the next detached window wears. A label, not an identity. */
+  function nextWindowNumber() {
+    let count = 1;
+    try {
+      const seen = Number(localStorage.getItem(WINDOWS_KEY));
+      if (Number.isInteger(seen) && seen > 0) count = seen;
+      localStorage.setItem(WINDOWS_KEY, String(count + 1));
+    } catch { /* a locked-down profile only loses the numbering */ }
+    return count + 1;
+  }
+
+  /**
+   * Open this map again in a tab of its own, on the view it is showing.
+   *
+   * A peer and a whole map, but not a whole app: the tab opens `solo`
+   * (`lib/hash.js`), so the workspace rail, the case bar and the tab strip stay
+   * in the window they belong to. What is left is the map and the map's own
+   * chrome, which is what a second screen is for — the first window is still
+   * where you go somewhere else.
+   *
+   * An ordinary tab rather than a `popup=yes` window: a tab can be torn onto
+   * the second screen, put back, and is what a browser does not refuse.
+   */
+  function detachWindow() {
+    const params = viewParams({
+      lat: center.lat,
+      lon: center.lon,
+      zoom: center.zoom,
+      bearing,
+      provider: providerId,
+    });
+    params.w = String(nextWindowNumber());
+    params.solo = '1';
+    const url = `${location.pathname}${location.search}${buildHash('satellite', params)}`;
+    const opened = window.open(url, '_blank');
+    if (!opened) toast('The browser refused a second tab. Allow pop-ups for this page', 'warn', 8000);
+  }
+
+  // --- the right-click menu: acts on the point under the cursor -------------
+  //
+  // Every act here already exists for the map centre; the menu hands each one
+  // the clicked point instead (lib/map/contextMenu.js). Session chrome, never
+  // part of a capture.
+  let pointMenu = $state(null); // { lat, lon, x, y, frame, lookup }
+  let pointLookupSeq = 0;
+
+  function onMapContextMenu(at) {
+    pointLookupSeq += 1;
+    pointMenu = {
+      ...at,
+      frame: { width: mapEl?.clientWidth ?? 0, height: mapEl?.clientHeight ?? 0 },
+      lookup: null,
+    };
+  }
+
+  function closePointMenu() {
+    pointLookupSeq += 1;
+    pointMenu = null;
+  }
+
+  async function onPointMenu(id, value) {
+    const at = pointMenu;
+    if (!at || !engine) return;
+    const point = { lat: at.lat, lon: at.lon };
+    if (id === 'lookup') return lookUpPoint(point);
+    closePointMenu();
+    if (id === 'copy') {
+      try {
+        await navigator.clipboard.writeText(value);
+        toast('Coordinates copied', 'ok', 1600);
+      } catch {
+        toast('The browser refused the clipboard', 'warn');
+      }
+    } else if (id === 'place') {
+      openNewPlaceAt(point);
+    } else if (id === 'centre') {
+      engine.setView(point, center.zoom);
+    } else if (id === 'measure') {
+      if (!modes.measure.isOn()) arm(modes, 'measure');
+      if (measure.mode !== 'distance') setMeasureMode('distance');
+      measure.addPoint(point);
+    } else if (id === 'sky') {
+      if (!sky.on) arm(modes, 'sky');
+      sky.handOff({ ...point, date: sky.day || undefined });
+    } else if (id === 'history') {
+      providerId = WAYBACK_ID;
+      engine.setView(point, Math.max(center.zoom, 15));
+      await tick();
+      if (!wb.menuOpen) wb.toggleMenu();
+    }
+  }
+
+  /** "What is here?": the geocoder's name for the point, shown in the menu itself. */
+  async function lookUpPoint(point) {
+    const mine = ++pointLookupSeq;
+    pointMenu = { ...pointMenu, lookup: { busy: true } };
+    try {
+      const answer = await api.get(`/api/geo/reverse?lat=${point.lat}&lon=${point.lon}`);
+      if (mine !== pointLookupSeq || !pointMenu) return;
+      pointMenu = {
+        ...pointMenu,
+        lookup: { text: answer.display_name || 'No name for this point' },
+      };
+    } catch (error) {
+      if (mine !== pointLookupSeq || !pointMenu) return;
+      pointMenu = { ...pointMenu, lookup: { error: `Lookup failed: ${error.message}` } };
+    }
+  }
+
+  // The menu is pinned to a screen point, so a zoom or a pan leaves it pointing
+  // at somewhere else. A drag already closes it by pressing outside; the wheel
+  // does not, so the settled view does.
+  $effect(() => {
+    if (!mapReady || !pointMenu) return;
+    return engine.on('view-settled', closePointMenu);
+  });
+
+  /** Arm tracing for one saved place, closing whatever else was armed. */
+  function startTrace(row) {
+    if (!footprint.start(row)) return;
+    closeOthers(modes, 'footprint');
+    toast('Click the corners, then Save', 'info', 4000);
+  }
+
   // --- what a click on the map means -------------------------------------
   //
-  // One router, asked in the order the modes exclude each other: a polygon
-  // being placed owns the click, then a sky anchor waiting to be planted, then
-  // the measure tools. Each mode answers whether it took it.
+  // One router, asked in the order the modes exclude each other: a shape being
+  // traced or placed owns the click, then a sky anchor waiting to be planted,
+  // then the measure tools. Each mode answers whether it took it.
   /** Where the analyst clicked, `{ lat, lon }` from the façade. */
   function onMapClick(at) {
+    if (footprint.addPoint(at)) return;
     if (grid.addVertex(at)) return;
     if (sky.place(at)) return;
     measure.addPoint(at);
   }
 
+  /**
+   * The map's modes, each behind the three questions the registry asks.
+   *
+   * The stores keep what a mode *is* in whatever shape suits it — Grid Search a
+   * boolean, the measure tools a sub-mode string, the capture marquee an armed
+   * flag — and this is where each one answers "are you on", "open" and "close"
+   * in the same words. `lib/map/tools.js` then owns the rule that used to be
+   * written four times over, once in each `toggle…` function: arming anything
+   * closes everything else.
+   *
+   * Declared before `sky` and `capture` exist, which is safe because nothing
+   * here reads a store until a rail seat is pressed.
+   */
+  const modes = {
+    measure: {
+      isOn: () => measure.panelOpen || Boolean(measure.mode),
+      open: () => measure.togglePanel(),
+      close: () => {
+        measure.setMode(null);
+        if (measure.panelOpen) measure.togglePanel();
+      },
+      pointing: () => Boolean(measure.mode),
+    },
+    grid: {
+      isOn: () => grid.on,
+      open: () => grid.open(),
+      close: () => grid.exit(),
+      pointing: () => Boolean(grid.drawMode),
+    },
+    sky: {
+      isOn: () => sky.on,
+      // the planted anchor, or where the analyst is looking
+      open: () => sky.open(markerLatLng ?? { lat: center.lat, lon: center.lon }),
+      close: () => sky.close(),
+    },
+    capture: {
+      isOn: () => Boolean(capture.armed),
+      open: () => capture.toggleSelect(),
+      close: () => capture.disarm(),
+      pointing: () => Boolean(capture.armed),
+    },
+    footprint: {
+      isOn: () => footprint.on,
+      // opened by a place's card handing it the place, never by the rail: there
+      // is no such thing as tracing a footprint for nobody
+      open: () => {},
+      close: () => footprint.cancel(),
+      pointing: () => footprint.on,
+    },
+  };
+
+  /** Which mode is armed, if any — the panel slot, and the rail's amber edge. */
+  const armedMode = $derived.by(() => armedId(modes));
+  /**
+   * The cursor the surface wears.
+   *
+   * Armed is not the same as *pointing*: the measure panel can be open with no
+   * tool chosen in it, and Grid Search can be open on a saved grid nobody is
+   * redrawing. Either would otherwise put a crosshair over a map that has
+   * nothing to do with a click.
+   */
+  const armedCursor = $derived(modes[armedMode]?.pointing?.() ? cursorOf(armedMode) : null);
+  const RAIL = railSections(railEntries());
+  /** The rail's inset from the map's top-left corner, shared with the CSS. */
+  const RAIL_TOP = 12;
+  /** Its own height, so the engine's zoom buttons stack under it rather than
+   *  behind it — and keep doing so when a tool is added to the rail. */
+  let railHeight = $state(0);
+  const railBottom = $derived(RAIL_TOP + railHeight + 8);
+
+  /**
+   * The saved layer's own two questions, asked where the layer is listed.
+   *
+   * The folder row appears only where there is a choice to make: a case whose
+   * saved work all sits in one place gets a control that could only ever be
+   * set back to where it already was.
+   */
+  const savedFilters = $derived.by(() => {
+    const folders = savedWork.folders;
+    const rows = [
+      {
+        label: 'Show',
+        value: savedWork.kind,
+        options: KINDS.map((entry) => ({ id: entry.id, label: entry.label })),
+        pick: (id) => (savedWork.kind = id),
+      },
+    ];
+    if (folders.length > 1) {
+      rows.push({
+        label: 'Folder',
+        value: savedWork.folder ?? 'all',
+        // folders are named by the analyst and there can be dozens, so this one
+        // is a list rather than the row of chips the fixed questions get
+        list: true,
+        options: [
+          { id: 'all', label: 'All', title: 'Every folder' },
+          ...folders.map((entry) => ({
+            id: entry.id,
+            label: entry.id || 'Unfiled',
+            title: `${entry.count} item${entry.count === 1 ? '' : 's'}`,
+          })),
+        ],
+        pick: (id) => (savedWork.folder = id === 'all' ? null : id),
+      });
+    }
+    return rows;
+  });
+
+  /**
+   * What is drawn over the imagery, as the panel on the right lists it.
+   *
+   * The two that arrive from another tool — a sheet's coordinate column, a
+   * Timeline window — are rows only while they are here, so the list never
+   * offers a switch for something that is not on the map. Each keeps a Close
+   * beside its switch, because hiding a layer and being done with it are two
+   * different intentions and used to be the same button.
+   */
+  const layerRows = $derived([
+    {
+      id: 'labels',
+      label: 'OSM labels',
+      on: osmOverlay,
+      disabled: !baseIsImagery,
+      title: baseIsImagery
+        ? 'Roads and place names over the imagery'
+        : 'Only useful over satellite imagery',
+      toggle: () => (osmOverlay = !osmOverlay),
+    },
+    {
+      id: 'railway',
+      label: 'OSM railways',
+      on: railOverlay,
+      title: 'Tracks, sidings and stations, from OpenRailwayMap',
+      toggle: () => (railOverlay = !railOverlay),
+    },
+    {
+      id: 'boundaries',
+      label: 'Borders',
+      on: refLayers.boundaries,
+      title: 'Country, region and district borders, from Esri',
+      toggle: () => (refLayers.boundaries = !refLayers.boundaries),
+    },
+    {
+      id: 'roads',
+      label: 'Roads',
+      on: refLayers.roads,
+      disabled: !baseIsImagery,
+      title: baseIsImagery ? 'Road network over the imagery, from Esri' : 'Only useful over satellite imagery',
+      toggle: () => (refLayers.roads = !refLayers.roads),
+    },
+    {
+      id: 'power',
+      label: 'Power lines',
+      on: refLayers.power,
+      title: 'Power lines by voltage, towers, substations, pipelines and masts, from Open Infrastructure Map',
+      toggle: () => (refLayers.power = !refLayers.power),
+      note: refLayers.power ? 'Towers appear from zoom 14.' : '',
+    },
+    {
+      id: 'seamarks',
+      label: 'Sea marks',
+      on: refLayers.seamarks,
+      title: 'Buoys, lights, harbours and fairways, from OpenSeaMap',
+      toggle: () => (refLayers.seamarks = !refLayers.seamarks),
+    },
+    {
+      id: 'gpstraces',
+      label: 'GPS traces',
+      on: refLayers.gpstraces,
+      title: 'Raw GPS tracks uploaded to OpenStreetMap, mapped or not',
+      toggle: () => (refLayers.gpstraces = !refLayers.gpstraces),
+    },
+    {
+      id: 'firms',
+      label: 'Active fires',
+      on: fires.on,
+      disabled: !fires.keyed,
+      detail: fires.keyed ? firmsSummary : '',
+      title: fires.keyed
+        ? 'Thermal detections from NASA FIRMS, live or from the archive'
+        : 'Add a NASA FIRMS key in Settings → Imagery',
+      toggle: () => (fires.on = !fires.on),
+      // its two questions — which instrument, and over what — are asked in the
+      // row rather than in a card of its own floating somewhere
+      controls: fires.on && fires.keyed ? firmsControls : null,
+      note: fires.on && !firmsAskable ? 'Pick a date to draw the detections.' : '',
+    },
+    {
+      id: 'nightlights',
+      label: 'Night lights',
+      on: night.on,
+      detail: night.on ? nightSummary(night) : '',
+      title: 'The ground at night, from NASA’s VIIRS passes',
+      toggle: () => (night.on = !night.on),
+      controls: night.on ? nightControls : null,
+      note: !night.on
+        ? ''
+        : nightAskable
+          ? 'Cloud hides lights too, so a dark night is not an outage on its own.'
+          : 'Pick a night inside this sensor’s record.',
+    },
+    {
+      id: 'saved',
+      label: 'Saved work',
+      on: savedOverlay,
+      disabled: !savedWork.rows.length,
+      detail: savedWork.shown.length ? String(savedWork.shown.length) : '',
+      title: savedWork.rows.length
+        ? "This case's saved places and captures"
+        : 'Nothing is saved in this case yet',
+      toggle: () => (savedOverlay = !savedOverlay),
+      // Which of them are drawn. The same two answers the Saved panel is asking
+      // — what kind, and which folder — so a map read here and a panel read
+      // beside it can never disagree about what is on the case.
+      controls: savedOverlay && savedWork.rows.length ? savedFilters : null,
+    },
+    ...(sheetPoints
+      ? [
+          {
+            id: 'sheet',
+            label: 'Sheet points',
+            on: sheetShown,
+            detail: `${sheetPoints.sheet} · ${sheetPoints.points.length}`,
+            title: `${sheetPoints.sheet} · ${sheetPoints.column}`,
+            toggle: () => (sheetShown = !sheetShown),
+            actions: [{ label: 'Close', quiet: true, run: () => (sheetPoints = null) }],
+          },
+        ]
+      : []),
+    ...(temporalMap
+      ? [
+          {
+            id: 'timeline',
+            label: 'Timeline points',
+            on: temporalShown,
+            detail: temporalMapLoading
+              ? 'loading…'
+              : temporalMapError
+                ? 'failed'
+                : `${temporalMap.mapped} of ${temporalMap.matched}${temporalMap.truncated ? ', partial' : ''}`,
+            title: windowWords(temporalMap.from, temporalMap.to, 'UTC'),
+            toggle: () => (temporalShown = !temporalShown),
+            actions: [
+              { label: 'Timeline', run: () => openTemporalTimeline() },
+              { label: 'Board', run: () => openTemporalCatalog('board') },
+              { label: 'Graph', run: () => openTemporalCatalog('graph') },
+              { label: 'Close', quiet: true, run: closeTemporalMap },
+            ],
+          },
+        ]
+      : []),
+  ]);
+
+  /** A rail seat was pressed: a mode is armed (and every other closed), an
+   *  action just runs. */
+  function pickTool(id) {
+    if (id === 'reference') return refs.openPicker();
+    arm(modes, id);
+  }
+
   function setMeasureMode(mode) {
-    // measuring and the capture marquee can't both be armed
+    // the sub-mode inside the armed measure tool; arming it is the rail's
     if (measure.setMode(mode)) capture.disarm();
   }
 
@@ -442,11 +1190,15 @@
 
   // re-sync providers + prefs when returning to this tab: Settings may have
   // toggled a basemap off (it must vanish from the selector) or changed the
-  // eco / override prefs meanwhile (tools stay mounted, so no fresh onMount)
+  // eco / override prefs meanwhile (tools stay mounted, so no fresh onMount).
+  // The fire layer's key is the same story and was the same bug — a key pasted
+  // into Settings is a key the map should have on the way back, not after a
+  // reload.
   $effect(() => {
     if (uiState.tool !== 'satellite' || !mapReady) return;
     imagery.refreshUsage();
     imagery.loadProviders();
+    loadFireSensors();
   });
 
   // A different case drops everything this one was holding: both indexes, the
@@ -463,6 +1215,7 @@
       deleteTarget = null;
       notesItem = null;
       placeModal = null;
+      detailsEntityId = null;
       temporalMapSeq += 1;
       temporalMap = null;
       temporalMapLoading = false;
@@ -529,6 +1282,7 @@
     if (!mapReady || !handed?.points?.length) return;
     uiState.mapSheetPoints = null;
     sheetPoints = handed;
+    sheetShown = true;
     tick().then(() => {
       engine?.fitPoints(handed.points, { padding: [48, 48], maxZoom: 17 });
     });
@@ -539,6 +1293,7 @@
     const caseId = caseState.current?.id;
     if (!mapReady || !handed || !caseId) return;
     uiState.mapTimelineRange = null;
+    temporalShown = true;
     const run = ++temporalMapSeq;
     temporalMap = {
       from: handed.from,
@@ -622,14 +1377,7 @@
   const sky = createSkyState({ engine: () => engine, api, notify: toast });
 
   function toggleSunMode() {
-    if (sky.on) {
-      sky.close();
-      return;
-    }
-    if (capture.armed) toggleSelect(); // exclusive with the capture marquee…
-    setMeasureMode(null); // …the measure tools…
-    if (grid.on) toggleGridMode(); // …and Grid Search
-    sky.open(markerLatLng ?? { lat: center.lat, lon: center.lon });
+    arm(modes, 'sky');
   }
 
   // Coords & Sky hands over a point, a date and a time: same mode, second way
@@ -730,7 +1478,10 @@
     maxZoom: () => shown.provider?.max_zoom ?? 19,
     provenance: () => surface.provenance(),
     onRect: (rect) => (selRect = rect),
-    onArm: () => setMeasureMode(null),
+    // The marquee is the one mode armed from outside the rail, so it reports in
+    // rather than being armed through it — otherwise pressing Capture while
+    // Grid Search is drawing leaves two modes waiting for the same left drag.
+    onArm: () => closeOthers(modes, 'capture'),
   });
   let sizeMenuEl = $state(); // bound to the popover wrapper — outside-click detection
   // The live drag outline, in map-container px. Shared chrome: the capture
@@ -797,24 +1548,11 @@
     return () => document.removeEventListener('mousedown', onDocMousedown, true);
   });
 
-  // …and the Sentinel-2 layer/date popover
-  $effect(() => {
-    if (!s2.menuOpen) return;
-    const onDocMousedown = (e) => {
-      if (s2MenuEl && !s2MenuEl.contains(e.target)) s2.menuOpen = false;
-    };
-    document.addEventListener('mousedown', onDocMousedown, true);
-    return () => document.removeEventListener('mousedown', onDocMousedown, true);
-  });
-
   // --- marquee: drag a rectangle on the map to capture exactly that area ---
-  // The frame, the ratio lock and the filing are the store's. What stays here
-  // is the wiring only this file can do: the mode exclusivity, and handing the
-  // store a left-drag off the map element it does not own.
-  function toggleSelect() {
-    capture.toggleSelect();
-  }
-
+  // The frame, the ratio lock and the filing are the store's; arming it closes
+  // the other modes through the registry (`onArm` above). What stays here is
+  // the one thing the store cannot do: hand it a left-drag off the map element
+  // it does not own.
   function onSelectDrag(e) {
     capture.startSelect(e);
   }
@@ -827,13 +1565,7 @@
   // — the same gesture as the capture marquee, sharing its live outline.
 
   function toggleGridMode() {
-    if (grid.on) {
-      grid.exit();
-      return;
-    }
-    if (capture.armed) toggleSelect(); // exclusive with the capture marquee…
-    setMeasureMode(null); // …and the measure tools
-    grid.open();
+    arm(modes, 'grid');
   }
 
   // rectangle area: drag a box, mirroring the capture marquee and reusing
@@ -913,7 +1645,7 @@
   /** The edit action, for whichever kind of row it was pressed on. */
   function editSaved(row) {
     if (row.kind === 'place') openEditPlace(row);
-    else openNotes(row);
+    else notesItem = row;
   }
 
   /** Accept a point a tool proposed, from the panel the analyst is reading it in.
@@ -1058,14 +1790,38 @@
   let placeModal = $state(null);
   let placeSaving = $state(false);
 
+  // --- the full editor, reached from the place dialog ---------------------------
+  // The same body the case sidebar and the Media Library open, so everything a
+  // place holds is editable from the map without this tool keeping a second copy
+  // of that form. Its fields wait for Save, so Escape and the backdrop ask first.
+  let detailsEntityId = $state(null);
+  let detailsDirty = $state(false);
+  let detailsDiscarding = $state(false);
+
+  function closeDetails() {
+    if (detailsDirty) detailsDiscarding = true;
+    else detailsEntityId = null;
+  }
+
+  function openPlaceDetails() {
+    detailsDirty = false; // a fresh panel, whatever the last one was left holding
+    detailsEntityId = placeModal?.id ?? null;
+    placeModal = null;
+  }
+
   function openNewPlace() {
+    openNewPlaceAt(displayCoords);
+  }
+
+  /** The same dialog for any point, such as one right-clicked away from the centre. */
+  function openNewPlaceAt({ lat, lon }) {
     placeModal = {
       id: null,
       title: '',
       notes: '',
       folder: '',
-      lat: displayCoords.lat,
-      lon: displayCoords.lon,
+      lat,
+      lon,
       zoom: center.zoom,
       bearing,
       relation: null, // collected by the gate, filed once the place exists
@@ -1149,7 +1905,9 @@
 
 <div class="tool" class:fullscreen bind:this={toolEl}>
   <div class="tool-header">
-    <h2>Satellite</h2>
+    <!-- Two identical windows on a second screen are otherwise impossible to
+         tell apart; the first one needs no number and says nothing. -->
+    <h2>Satellite{windowNumber ? ` · ${windowNumber}` : ''}</h2>
     <div class="spacer"></div>
     <PlaceSearch
       bind:value={coordsText}
@@ -1160,6 +1918,33 @@
       onpick={goToSuggestion}
       onsubmit={goTo}
     />
+    <!-- What the window does with the tool, not what the tool does with the
+         map: these sit with the title rather than among the map's own controls. -->
+    <button
+      class="btn btn-icon"
+      class:on={linked}
+      onclick={toggleLink}
+      disabled={!peerMaps}
+      title={!peerMaps
+        ? 'Open a second map tab or the extension map tools to link the views'
+        : linked
+          ? 'Stop following the other maps'
+          : 'Pan and zoom with the other maps'}
+      aria-label="Link the view to the other maps"
+    ><Icon name="link" size={15} /></button>
+    <button
+      class="btn btn-icon"
+      onclick={detachWindow}
+      title="Open this map in a tab of its own, on this view"
+      aria-label="Open in a new tab"
+    ><Icon name="external" size={15} /></button>
+    <button
+      class="btn btn-icon"
+      class:on={fullscreen}
+      onclick={toggleFullscreen}
+      title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen map'}
+      aria-label="Toggle fullscreen"
+    ><Icon name={fullscreen ? 'minimize' : 'maximize'} size={15} /></button>
   </div>
 
   <div class="body">
@@ -1172,21 +1957,18 @@
         bind:bearing
         bind:ready={mapReady}
         bind:refused={mapRefused}
+        bind:providerId
         {imagery}
-        {providerId}
         {s2}
-        home={prefs.homeView}
-        labels={osmOverlay}
+        wayback={wb}
+        home={openingHome}
+        {overlays}
         imperial={prefs.units === 'imperial'}
-        armed={measure.mode
-          ? 'measuring'
-          : capture.armed
-            ? 'selecting'
-            : grid.drawMode
-              ? 'grid-drawing'
-              : null}
+        controlsTop={railBottom}
+        armed={armedCursor}
         grabbing={capture.hiding}
         onclick={onMapClick}
+        oncontextmenu={onMapContextMenu}
         onusage={() => imagery.refreshUsage()}
         onwidgetload={(meter) => imagery.countLoad(meter)}
         onwidgetauthfailure={onWidgetAuthFailure}
@@ -1208,126 +1990,113 @@
           onpost={openLinkedPost}
           onshowproofs={() => (savedWork.kind = 'proofs')}
           onrefresh={reloadCase}
+          ontrace={startTrace}
         />
       {/if}
 
-      {#if sheetPoints}
+      <!-- Both handoff layers can be on at once. Neither carries a card of its
+           own any more: what they are and what to do with them is a row in the
+           Layers list, with every other layer. -->
+      {#if sheetPoints && sheetShown}
         <SheetPointsOverlay engine={mapReady ? engine : null} points={sheetPoints.points} />
-        <!-- Both temporary layers can be on at once, so this one sits under the other
-             rather than on top of it. -->
-        <div class="temporal-layer-card" class:stacked={temporalMap} aria-label="Sheet map layer">
-          <div>
-            <strong>Sheet</strong>
-            <span>{sheetPoints.sheet} · {sheetPoints.column}</span>
-          </div>
-          <p>{sheetPoints.points.length} point{sheetPoints.points.length === 1 ? '' : 's'} read from the column</p>
-          <nav aria-label="Close the sheet layer">
-            <button class="quiet" onclick={() => (sheetPoints = null)}>Close</button>
-          </nav>
-        </div>
       {/if}
 
-      {#if temporalMap}
+      {#if temporalMap && temporalShown}
         <TemporalMapOverlay
           engine={mapReady ? engine : null}
           items={temporalMap.items}
           caseId={caseState.current?.id}
           onopen={openTemporalTimeline}
         />
-        <div class="temporal-layer-card" aria-label="Timeline map layer">
-          <div>
-            <strong>Timeline</strong>
-            <span>{windowWords(temporalMap.from, temporalMap.to, 'UTC')}</span>
-          </div>
-          {#if temporalMapLoading}
-            <p>Loading placed statements…</p>
-          {:else if temporalMapError}
-            <p class="error">{temporalMapError}</p>
-          {:else if !temporalMap.matched}
-            <p>Nothing is dated in this window.</p>
-          {:else if !temporalMap.mapped}
-            <p>None of the {temporalMap.matched} dated here carries a place.</p>
-          {:else}
-            <p>{temporalMap.mapped} placed of {temporalMap.matched} dated{temporalMap.truncated ? ', partial' : ''}</p>
-          {/if}
-          <nav aria-label="Open Timeline range">
-            <button onclick={() => openTemporalTimeline()}>Timeline</button>
-            <button onclick={() => openTemporalCatalog('board')}>Board</button>
-            <button onclick={() => openTemporalCatalog('graph')}>Graph</button>
-            <button class="quiet" onclick={closeTemporalMap}>Close</button>
-          </nav>
-        </div>
       {/if}
 
-      <!-- top-left control cluster: fullscreen, OSM labels overlay, measure tools -->
+      <!-- The map's toolbox, and the one slot the armed tool's settings open
+           in. Only verbs live here; what is *drawn* over the imagery is a layer
+           and is listed in the panel on the right. -->
       <div class="map-tools">
-        <MapToolCluster
-          {fullscreen}
-          {toggleFullscreen}
-          bind:osmOverlay
-          {baseIsImagery}
-          toolsOpen={measure.panelOpen}
-          measureMode={measure.mode}
-          toggleTools={() => measure.togglePanel()}
-          gridMode={grid.on}
-          {toggleGridMode}
-          bind:savedOverlay
-          savedCount={savedWork.rows.length}
-          referenceCount={refs.open.length}
-          openRefPicker={() => refs.openPicker()}
-          {setMeasureMode}
-          measureReadout={measure.readout}
-          measureHint={MEASURE_HINT}
-          clearMeasure={() => measure.clear()}
-          sunMode={sky.on}
-          {toggleSunMode}
+        <MapRail
+          sections={RAIL}
+          bind:height={railHeight}
+          state={{
+            measure: { on: modes.measure.isOn() },
+            grid: { on: grid.on },
+            sky: { on: sky.on },
+            reference: {
+              on: refs.open.length > 0,
+              title: refs.open.length
+                ? `${refs.open.length} reference window${refs.open.length === 1 ? '' : 's'} open`
+                : undefined,
+            },
+          }}
+          onpick={pickTool}
         />
 
-        {#if sky.on}
-          <SunPanel
-            sky={sky.sky}
-            loading={sky.loading}
-            day={sky.day}
-            index={sky.index}
-            anchor={sky.anchor}
-            placing={sky.placing}
-            ondate={(value) => sky.setDay(value)}
-            onindex={(value) => sky.setIndex(value)}
-            onplace={() => sky.togglePlacing()}
-            onclose={toggleSunMode}
-          />
-        {/if}
-
-        {#if grid.on}
-          <GridSearchPanel
-            bind:collapsed={grid.collapsed}
-            bind:renaming={grid.renaming}
-            bind:renameText={grid.renameText}
-            commitRename={() => grid.commitRename()}
-            startRename={() => grid.startRename()}
-            grid={grid.grid}
-            toggleHidden={() => grid.toggleHidden()}
-            hidden={grid.hidden}
-            coverage={grid.coverage}
-            reviewKey={grid.reviewKey}
-            markReview={grid.markReview}
-            reviewToPlace={grid.reviewToPlace}
-            stopReview={grid.stopReview}
-            startReview={() => grid.startReview()}
-            editArea={grid.editArea}
-            toggleEditArea={() => grid.toggleEditArea()}
-            discard={() => grid.discard()}
-            deleteGrid={(slug) => grid.remove(slug)}
-            gridName={grid.name}
-            bind:cellMetres={grid.cellMetres}
-            drawMode={grid.drawMode}
-            startDraw={(type) => grid.startDraw(type)}
-            polygonDraft={grid.draft}
-            confirmPolygon={() => grid.confirmPolygon()}
-            cancelDraw={() => grid.cancelDraw()}
-            savedGrids={grid.others}
-            loadGrid={(slug) => grid.load(slug)}
-          />
+        {#if hasPanel(armedMode)}
+          <!-- One slot, one panel: only one mode is ever armed, so the settings
+               for three tools cannot stack or cross each other any more. -->
+          <div class="mode-panel">
+            {#if armedMode === 'measure'}
+              <MeasurePanel
+                mode={measure.mode}
+                setMode={setMeasureMode}
+                clear={() => measure.clear()}
+              />
+            {:else if armedMode === 'sky'}
+              <SunPanel
+                sky={sky.sky}
+                loading={sky.loading}
+                day={sky.day}
+                index={sky.index}
+                anchor={sky.anchor}
+                placing={sky.placing}
+                ondate={(value) => sky.setDay(value)}
+                onindex={(value) => sky.setIndex(value)}
+                onplace={() => sky.togglePlacing()}
+                onclose={toggleSunMode}
+              />
+            {:else if armedMode === 'footprint'}
+              <FootprintPanel
+                place={footprint.place}
+                points={footprint.points.length}
+                complete={footprint.complete}
+                covers={footprint.covers}
+                saving={footprint.saving}
+                undo={() => footprint.undo()}
+                save={() => footprint.save()}
+                cancel={() => footprint.cancel()}
+              />
+            {:else if armedMode === 'grid'}
+              <GridSearchPanel
+                bind:collapsed={grid.collapsed}
+                bind:renaming={grid.renaming}
+                bind:renameText={grid.renameText}
+                commitRename={() => grid.commitRename()}
+                startRename={() => grid.startRename()}
+                grid={grid.grid}
+                toggleHidden={() => grid.toggleHidden()}
+                hidden={grid.hidden}
+                coverage={grid.coverage}
+                reviewKey={grid.reviewKey}
+                markReview={grid.markReview}
+                reviewToPlace={grid.reviewToPlace}
+                stopReview={grid.stopReview}
+                startReview={() => grid.startReview()}
+                editArea={grid.editArea}
+                toggleEditArea={() => grid.toggleEditArea()}
+                discard={() => grid.discard()}
+                deleteGrid={(slug) => grid.remove(slug)}
+                gridName={grid.name}
+                bind:cellMetres={grid.cellMetres}
+                drawMode={grid.drawMode}
+                startDraw={(type) => grid.startDraw(type)}
+                polygonDraft={grid.draft}
+                confirmPolygon={() => grid.confirmPolygon()}
+                cancelDraw={() => grid.cancelDraw()}
+                savedGrids={grid.others}
+                loadGrid={(slug) => grid.load(slug)}
+              />
+            {/if}
+          </div>
         {/if}
       </div>
 
@@ -1393,68 +2162,21 @@
         </div>
       {/if}
 
-      <div class="hud card">
-        <button class="hud-coords mono" onclick={copyCoords} title="Copy coordinates">
-          <Icon name="crosshair" size={13} />
-          {readout}
-          <span class="z">z{center.zoom}</span>
-          {#if moveMode && markerLatLng}<span class="pin-tag">pin</span>{/if}
-          <Icon name="copy" size={12} />
-        </button>
-      </div>
-
-      <div class="capture-bar card">
-        <select class="select" bind:value={providerId} title="Imagery provider">
-          {#each imagery.providers as p (p.id)}
-            <option value={p.id} disabled={p.needs_key}>
-              {p.label}{p.needs_key ? ' (needs API key)' : ''}
-            </option>
-          {/each}
-        </select>
-        {#if isSentinel}
-          <SentinelPicker
-            bind:menuEl={s2MenuEl}
-            {s2}
-            {maxccLabel}
-            {monthLabel}
-            {monthGrid}
-            {cloudClass}
-            {cloudLabel}
-          />
-        {/if}
-        {#if usagePill}
-          <span
-            class="usage-pill mono"
-            title="Requests to this billed provider this month"
-          >{usagePill}</span>
-        {/if}
-        {#if shown.fallenBack}
-          <span
-            class="fallback-pill"
-            class:paused={shown.blocked}
-            title={shown.blocked
-              ? `${currentProvider.label} passed 90% of its monthly free tier. Free imagery is shown instead. Override in Settings to keep using it (billed).`
-              : `Eco mode shows free imagery at low zoom. Zoom in for ${currentProvider.label} detail. Toggle in Settings.`}
-          >
-            <Icon name={shown.blocked ? 'alert' : 'leaf'} size={11} />
-            {shown.blocked ? `${currentProvider.label} paused · free imagery` : 'eco · free imagery'}
-          </span>
-        {/if}
-        <select class="select" bind:value={markerStyle} title="Marker style">
-          <option value="crosshair">✛ crosshair</option>
-          <option value="pin">📍 pin</option>
-          <option value="none">no marker</option>
-        </select>
-        <button
-          class="btn btn-toggle"
-          class:on={moveMode}
-          onclick={toggleMoveMode}
-          disabled={markerStyle === 'none'}
-          title="Move the marker (coordinates follow it)"
-        >
-          <Icon name="crosshair" size={14} /> {moveMode ? 'Moving' : 'Move pin'}
-        </button>
-        <span class="bar-sep" aria-hidden="true"></span>
+      <!-- Where you are and what the armed tool is reading, then the two acts
+           that take something off the map. The imagery provider left this bar
+           for the surface's own corner: it describes the picture, not the
+           tool, and two compared surfaces each show their own. -->
+      <MapStatusBar
+        coords={readout}
+        zoom={center.zoom}
+        pinned={moveMode && !!markerLatLng}
+        copy={copyCoords}
+        reading={measure.mode ? (measure.readout ?? '') : ''}
+        hint={measure.mode && !measure.readout ? MEASURE_HINT[measure.mode] : ''}
+      >
+        <!-- What marks the point and whether it is the centre: one square, set
+             once, beside the two acts that are pressed all day. -->
+        <MarkerMenu bind:style={markerStyle} free={moveMode} toggleFree={toggleMoveMode} />
         <div class="place-save">
           <button
             class="btn place-save-main"
@@ -1496,10 +2218,23 @@
           bind:customWidth={capture.customW}
           bind:customHeight={capture.customH}
           bind:resolution={capture.resolution}
+          bind:scaleNorth={capture.scaleNorth}
           openScreenshot={() => (capture.shotOpen = true)}
           openExtensionGate={() => (capture.extGate = true)}
         />
-      </div>
+      </MapStatusBar>
+      {#if pointMenu}
+        <MapContextMenu
+          at={pointMenu}
+          frame={pointMenu.frame}
+          zoom={center.zoom}
+          format={prefs.coordFormat}
+          {fullscreen}
+          lookup={pointMenu.lookup}
+          onpick={onPointMenu}
+          onclose={closePointMenu}
+        />
+      {/if}
       <!-- floating reference-image windows (scratch aids over the map) -->
       {#each refs.open as pane (pane.id)}
         <RefViewer
@@ -1545,6 +2280,11 @@
         <!-- collapsed: header acts as the toggle back to the list -->
       {:else}
         <div class="panel-scroll">
+          <!-- What is drawn over the imagery. One list, above the case's own
+               work: the labels and the saved pins used to be buttons in the
+               toolbox, and the handoffs floating cards over the map. -->
+          <MapLayers rows={layerRows} bind:open={layersOpen} />
+
           <!-- External maps: quick jumps to maps we can't embed in-tool, at the
                current target coordinates (item 6) -->
           <button type="button" class="sub-head" onclick={() => (linksOpen = !linksOpen)}>
@@ -1688,7 +2428,7 @@
 
 {#if placeModal}
   <PlaceDialog
-    draft={placeModal}
+    bind:draft={placeModal}
     caseId={caseState.current?.id}
     folders={caseState.current?.folders ?? []}
     saving={placeSaving}
@@ -1703,6 +2443,33 @@
       await loadPlaceRelations(placeModal?.id);
       await reloadCase();
     }}
+    ondetails={openPlaceDetails}
+  />
+{/if}
+
+{#if detailsEntityId}
+  <Modal title="Details" onclose={closeDetails} width="520px">
+    <EntityDetails
+      entityId={detailsEntityId}
+      bind:dirty={detailsDirty}
+      onclose={() => (detailsEntityId = null)}
+      ondeleted={() => (detailsEntityId = null)}
+    />
+  </Modal>
+{/if}
+
+{#if detailsDiscarding}
+  <ConfirmDialog
+    title="Discard changes?"
+    message="This place has edits that Save has not taken."
+    confirmLabel="Discard"
+    icon="alert"
+    onconfirm={() => {
+      detailsDiscarding = false;
+      detailsDirty = false;
+      detailsEntityId = null;
+    }}
+    oncancel={() => (detailsDiscarding = false)}
   />
 {/if}
 
@@ -1725,45 +2492,6 @@
     display: flex;
     min-height: 0;
   }
-  .temporal-layer-card.stacked { top: 150px; }
-  .temporal-layer-card {
-    position: absolute;
-    z-index: 720;
-    top: 12px;
-    right: 12px;
-    width: min(330px, calc(100% - 90px));
-    padding: 10px 12px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--r-md);
-    background: color-mix(in srgb, var(--bg-1) 94%, transparent);
-    box-shadow: var(--shadow-2);
-    color: var(--text-2);
-    font-size: var(--fs-xs);
-  }
-  .temporal-layer-card > div {
-    display: flex;
-    gap: 7px;
-    min-width: 0;
-  }
-  .temporal-layer-card strong { color: var(--text-1); }
-  .temporal-layer-card span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .temporal-layer-card p { margin: 6px 0 8px; color: var(--text-3); }
-  .temporal-layer-card .error { color: var(--danger); }
-  .temporal-layer-card nav { display: flex; gap: 9px; }
-  .temporal-layer-card button {
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--accent);
-    font: inherit;
-    cursor: pointer;
-  }
-  .temporal-layer-card button:hover { text-decoration: underline; }
-  .temporal-layer-card .quiet { margin-left: auto; color: var(--text-3); }
   .frame-overlay {
     position: absolute;
     top: 50%;
@@ -1815,41 +2543,6 @@
     fill: currentColor;
     opacity: 0.8;
   }
-  .pin-tag {
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--accent-text, #fff);
-    background: var(--accent);
-    border-radius: 3px;
-    padding: 1px 4px;
-  }
-  .hud {
-    position: absolute;
-    top: 12px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 600;
-    display: flex;
-    background: rgba(24, 24, 24, 0.88);
-    backdrop-filter: blur(6px);
-  }
-  .hud-coords {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 13px;
-    font-size: var(--fs-sm);
-    color: var(--text-1);
-  }
-  .hud-coords:hover {
-    color: var(--accent);
-  }
-  .z {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-  }
 
   /* fullscreen: the whole tool covers the viewport, above the app chrome */
   .tool.fullscreen {
@@ -1859,18 +2552,27 @@
     background: var(--bg-0);
   }
 
-  /* top-left control cluster (fullscreen · OSM labels · measure) */
+  /* The rail, and the single slot its armed tool's settings open in. Above the
+     engine's own control corners, so a panel is never hidden behind the zoom
+     buttons — which the rail now stacks on top of rather than beside. */
   .map-tools {
     position: absolute;
     top: 12px;
     left: 12px;
-    /* above the engine's own control corners so the measure panel is never
-       hidden behind the zoom +/- buttons (item 7) */
     z-index: 1100;
+    /* the rail sits in flow here, so this box is exactly rail-wide — which is
+       what the panel slot beside it measures its offset against */
     display: flex;
     flex-direction: column;
-    gap: 8px;
     align-items: flex-start;
+  }
+  /* The slot itself places; each panel dresses itself, because two of them
+     (the sun path, Grid Search) are draggable or collapsible cards of their
+     own and would have to be undressed to sit in a shared one. */
+  .mode-panel {
+    position: absolute;
+    top: 0;
+    left: calc(100% + 8px);
   }
 
   /* draggable square handle for the area corners / polygon vertices */
@@ -1907,70 +2609,6 @@
     white-space: nowrap;
   }
 
-  .capture-bar {
-    position: absolute;
-    bottom: 34px;
-    /* Centred by auto margins across the full width, NOT by left:50% +
-       translateX: an absolutely positioned box with `left: 50%` may only be as
-       wide as the half it starts at, so the bar was being squeezed to half the
-       map and cut off (or, once it could wrap, folded into a stack of rows).
-       Spanning left:0/right:0 gives it the whole width to size against, and
-       fit-content keeps it hugging its controls. */
-    left: 0;
-    right: 0;
-    margin: 0 auto;
-    width: fit-content;
-    max-width: calc(100% - 20px);
-    z-index: 600;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    /* only ever reached on a genuinely narrow map — a second row beats
-       controls that are off-screen */
-    flex-wrap: wrap;
-    gap: 8px 10px;
-    padding: 10px 12px;
-    background: rgba(24, 24, 24, 0.92);
-    backdrop-filter: blur(6px);
-    box-shadow: var(--shadow-2);
-  }
-  .capture-bar .select {
-    width: auto;
-    /* "OpenTopoMap (topographic · contour lines)" is not worth a row of bar */
-    max-width: 190px;
-  }
-  /* billed-provider tile counter (IMAGERY_PROVIDERS.md) — full readout in Settings */
-  .usage-pill {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    background: var(--bg-2);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    padding: 3px 9px;
-    white-space: nowrap;
-  }
-  .bar-sep {
-    width: 1px;
-    align-self: stretch;
-    background: var(--border);
-    margin: 0 2px;
-  }
-  /* eco / soft-block fallback: the billed basemap stepped aside for free imagery */
-  .fallback-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: var(--fs-xs);
-    color: var(--ok);
-    background: var(--bg-2);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    padding: 3px 9px;
-    white-space: nowrap;
-  }
-  .fallback-pill.paused {
-    color: var(--danger);
-  }
   .prov.dates {
     display: flex;
     align-items: center;
@@ -2004,7 +2642,8 @@
   .btn-toggle {
     white-space: nowrap;
   }
-  .btn-toggle.on {
+  .btn-toggle.on,
+  .btn-icon.on {
     background: var(--accent);
     color: var(--accent-text);
     border-color: var(--accent);
@@ -2098,30 +2737,8 @@
     display: flex;
     flex-direction: column;
   }
-  .sub-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-    padding: 12px 2px 6px;
-    background: none;
-    border: none;
-    font: inherit;
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--text-2);
-    text-align: left;
-    cursor: pointer;
-  }
-  .sub-head:hover {
-    color: var(--accent);
-  }
-  .sub-head .count {
-    margin-left: auto;
-    text-transform: none;
-  }
+  /* `.sub-head` is in app.css: the Layers list writes its own heading, and the
+     two have to read as one panel. */
   .links-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;

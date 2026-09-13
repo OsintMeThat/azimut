@@ -155,6 +155,7 @@ packages = ["src/azimut"]
 "extension/maptools.js" = "azimut/extension/maptools.js"
 "extension/mapdraw.js" = "azimut/extension/mapdraw.js"
 "extension/mapref.js" = "azimut/extension/mapref.js"
+"extension/maplink.js" = "azimut/extension/maplink.js"
 "extension/mapoverlay.js" = "azimut/extension/mapoverlay.js"
 "extension/overlay.js" = "azimut/extension/overlay.js"
 "extension/reverse.js" = "azimut/extension/reverse.js"

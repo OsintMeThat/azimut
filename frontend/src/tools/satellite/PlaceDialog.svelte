@@ -13,7 +13,9 @@
    * coordinates, the zoom and the bearing the map was on, none of which this
    * dialog may change.
    */
+  import { untrack } from 'svelte';
   import Modal from '../../components/Modal.svelte';
+  import ConfirmDialog from '../../components/ConfirmDialog.svelte';
   import FolderSelect from '../../components/FolderSelect.svelte';
   import RelationList from '../../components/RelationList.svelte';
   import RelationPicker from '../../components/RelationPicker.svelte';
@@ -21,7 +23,7 @@
   let {
     /** `{ id, title, notes, folder, lat, lon, zoom, bearing, relation, relations }`;
      *  a null id means this point does not exist yet. */
-    draft,
+    draft = $bindable(),
     caseId,
     folders = [],
     saving = false,
@@ -33,7 +35,28 @@
     onwalk,
     /** A relation was corrected or taken back: re-read them. */
     onchanged,
+    /** Hand this place over to the full editor, which closes this. */
+    ondetails,
   } = $props();
+
+  // The fields here are the ones an analyst fills at the moment of saving; the rest
+  // of what a place holds — how precise it is, the source's wording, how the point
+  // was found — is edited in the panel every other surface opens. So this hands over
+  // rather than growing a second copy of that form, and asks first if anything was
+  // typed: handing over re-reads the place from the case, which would drop it.
+  // read once, on purpose: this is what the dialog opened on, not what it now holds
+  const opened = untrack(() => ({
+    title: draft.title,
+    folder: draft.folder,
+    notes: draft.notes,
+  }));
+  const touched = $derived(
+    draft.title !== opened.title ||
+      draft.folder !== opened.folder ||
+      draft.notes !== opened.notes ||
+      Boolean(draft.relation)
+  );
+  let discarding = $state(false);
 </script>
 
 <Modal title={draft.id ? 'Edit place' : 'Save place'} {onclose} width="420px">
@@ -79,7 +102,15 @@
     placeholder="Add observations, links, context…"
     bind:value={draft.notes}
   ></textarea>
-  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+  <div class="acts">
+    {#if draft.id && ondetails}
+      <button
+        class="btn btn-ghost btn-sm"
+        title="Precision, the source's own wording, how the point was found"
+        onclick={() => (touched ? (discarding = true) : ondetails())}
+      >Edit more details</button>
+    {/if}
+    <div class="spacer"></div>
     <button class="btn" onclick={onclose}>Cancel</button>
     <button class="btn btn-primary" onclick={onsave} disabled={saving}>
       {saving ? 'Saving…' : 'Save'}
@@ -87,7 +118,31 @@
   </div>
 </Modal>
 
+{#if discarding}
+  <ConfirmDialog
+    title="Discard changes?"
+    message="This place has edits that Save has not taken."
+    detail="The full editor opens on what the case holds."
+    confirmLabel="Discard"
+    icon="alert"
+    onconfirm={() => {
+      discarding = false;
+      ondetails();
+    }}
+    oncancel={() => (discarding = false)}
+  />
+{/if}
+
 <style>
+  .acts {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .spacer {
+    flex: 1;
+  }
   .sat-info-rows {
     display: flex;
     flex-direction: column;

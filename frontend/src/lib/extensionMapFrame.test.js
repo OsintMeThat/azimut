@@ -50,6 +50,7 @@ describe('where each site draws its own centre', () => {
       'apple-maps',
       'bing-maps',
       'copernicus-browser',
+      'google-earth',
       'google-maps',
       'openstreetmap',
       'satellites-pro',
@@ -126,7 +127,7 @@ describe('where each site draws its own centre', () => {
     expect(off * METRES_PER_PIXEL(lat, 17)).toBeLessThan(2);
   });
 
-  it('is not the middle of the window on five of the eight', () => {
+  it('is not the middle of the window on five of the nine', () => {
     // The whole point of measuring it. Drawn on the window's centre instead,
     // Yandex is out by 210 px at every zoom — 90 m of ground at level 15 — and
     // no pan can ever see it, because the offset slides with the map.
@@ -162,9 +163,10 @@ describe('where each site draws its own centre', () => {
     .map((site) => [site, recordings.filter((r) => r.site === site)])
     .filter(([, group]) => new Set(group.map((r) => `${r.window.w}x${r.window.h}`)).size > 1);
 
-  it('was driven at more than one window size on three of the sites', () => {
+  it('was driven at more than one window size on four of the sites', () => {
     expect(twice.map(([site]) => site).sort()).toEqual([
       'apple-maps',
+      'google-earth',
       'openstreetmap',
       'yandex-maps',
     ]);
@@ -217,7 +219,7 @@ describe('where each site draws its own centre', () => {
         return [site, Math.round(Math.hypot(a.x - b.x, a.y - b.y))];
       })
     );
-    expect(moved).toEqual({ 'apple-maps': 70, openstreetmap: 0, 'yandex-maps': 0 });
+    expect(moved).toEqual({ 'apple-maps': 70, 'google-earth': 0, openstreetmap: 0, 'yandex-maps': 0 });
   });
 
   it('refuses to answer from a zoom too small to divide by', () => {
@@ -276,6 +278,9 @@ describe('the drawing follows a drag', () => {
       // nothing to say here — the overlay carries that pan on the canvas
       // instead, which is `mapoverlay.js`'s business rather than this file's.
       if (before.lat === after.lat && before.lon === after.lon) return;
+      // Earth opens on a link with no ground in it, which states no scale to
+      // draw the drag through until the drag itself has placed the camera
+      if (before.zoom == null) return;
       const area = {
         x: recording.centre.x - recording.window.w / 2,
         y: recording.centre.y - recording.window.h / 2,

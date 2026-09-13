@@ -30,8 +30,12 @@ async function openGrid(page) {
  * builds a layer's features off the main thread — so a click fired in the same
  * tick can land before there is anything under it to hit. An analyst never
  * moves that fast; a spec does.
+ *
+ * It starts clear of the map's top-left corner on purpose: the rail is a
+ * column, so the armed tool's panel opens beside it over roughly the first
+ * 280 px, and a drag begun under the panel never reaches the map at all.
  */
-async function dragBox(page, from = [140, 130], to = [420, 330]) {
+async function dragBox(page, from = [300, 130], to = [580, 330]) {
   const bare = await mapPicture(page);
   const box = await page.locator('.map').boundingBox();
   await page.mouse.move(box.x + from[0], box.y + from[1]);
@@ -65,7 +69,7 @@ test('marks a cell where it was clicked, and files that mark', async ({ page }) 
   await expect(coverage(page)).toContainText('0/');
 
   const box = await page.locator('.map').boundingBox();
-  await page.mouse.click(box.x + 200, box.y + 200);
+  await page.mouse.click(box.x + 360, box.y + 200);
 
   // one cell cleared: the click reached the shape on the canvas, and only it
   await expect(coverage(page)).toContainText('1/');
@@ -81,7 +85,7 @@ test('flags a cell on a right-click without cycling it', async ({ page }) => {
   await dragBox(page);
 
   const box = await page.locator('.map').boundingBox();
-  await page.mouse.click(box.x + 200, box.y + 200, { button: 'right' });
+  await page.mouse.click(box.x + 360, box.y + 200, { button: 'right' });
 
   await expect(coverage(page)).toContainText('flagged');
   await expect.poll(() => {
@@ -205,8 +209,11 @@ test('carries the coordinates on a dragged pin, and drops it on exit', async ({ 
   await page.goto('/#satellite');
   await awaitMapReady(page);
 
-  await page.getByTitle('Marker style').selectOption('pin');
-  await page.getByTitle('Move the marker (coordinates follow it)').click();
+  // both answers are behind the one square in the strip: what marks the point,
+  // and whether the point is the centre or a pin you drop
+  await page.getByRole('button', { name: 'Marker' }).click();
+  await page.getByRole('radio', { name: 'Pin', exact: true }).click();
+  await page.getByRole('radio', { name: 'Dropped' }).click();
   const pin = page.locator('.sat-marker');
   await expect(pin).toHaveCount(1);
 
@@ -221,7 +228,9 @@ test('carries the coordinates on a dragged pin, and drops it on exit', async ({ 
   // the readout is what a capture files, so it follows the pin, not the centre
   await expect.poll(async () => (await readout.innerText()) !== before).toBe(true);
 
-  await page.getByTitle('Move the marker (coordinates follow it)').click();
+  // dragging on the map closed the menu, which is what a click anywhere else does
+  await page.getByRole('button', { name: 'Marker' }).click();
+  await page.getByRole('radio', { name: 'Centre' }).click();
   await expect(pin).toHaveCount(0);
 });
 
@@ -236,7 +245,8 @@ test('lays the OSM labels over the imagery, and lifts them off again', async ({ 
   });
   await page.goto('/#satellite');
   await awaitMapReady(page);
-  const labels = page.getByLabel('Toggle OSM labels overlay');
+  // the labels are a layer, listed with the others in the panel on the right
+  const labels = page.getByLabel('OSM labels');
 
   expect(fixture.labelTiles).toEqual([]);
   await labels.click();

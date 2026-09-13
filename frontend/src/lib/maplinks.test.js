@@ -66,14 +66,21 @@ describe('mapLinks', () => {
     expect(byId.bing.url).toContain('style=h');
   });
 
-  it('gives Earth a camera distance that follows the zoom', () => {
-    // Earth states no zoom: `d` is a distance, and it halves per level
-    const near = mapLinks(48.8584, 2.2945, 17).find((l) => l.id === 'google_earth');
-    const far = mapLinks(48.8584, 2.2945, 16).find((l) => l.id === 'google_earth');
-    const distance = (link) => Number(/,(\d+)d,/.exec(link.url)[1]);
-    expect(distance(far) / distance(near)).toBeCloseTo(2, 2);
-    expect(distance(near)).toBeGreaterThan(100);
-    expect(distance(near)).toBeLessThan(2000);
+  it('gives Earth the camera that shows the same level in a 1000 px window', () => {
+    // Earth's view is 2·d·tan(y/2) metres tall, measured; z17 at 48.86° is
+    // 0.6 m a pixel, so 1000 px of it is 600 m and d is 600 / (2·tan 17.5°)
+    const earth = (zoom, lat = 48.8584) => mapLinks(lat, 2.2945, zoom).find((l) => l.id === 'google_earth');
+    const camera = (link) => /@[^/]*/.exec(link.url)[0].split(',');
+    const [, , a, d, y, h, t] = camera(earth(17));
+    expect([a, y, h, t]).toEqual(['0a', '35y', '0h', '0t']);
+    const metresPerPx = (156543.03392804097 * Math.cos((48.8584 * Math.PI) / 180)) / 2 ** 17;
+    expect(parseFloat(d)).toBeCloseTo((metresPerPx * 1000) / (2 * Math.tan((17.5 * Math.PI) / 180)), -1);
+    const distance = (link) => parseFloat(camera(link)[3]);
+    expect(distance(earth(16)) / distance(earth(17))).toBeCloseTo(2, 2);
+    // nearer the pole a level is less ground, so the camera comes down
+    expect(distance(earth(17, 70))).toBeLessThan(distance(earth(17, 10)));
+    // …and never under the 25 m Earth stops at
+    expect(distance(earth(23))).toBe(25);
   });
 
   it('never sends Google a viewport height where a zoom belongs', () => {

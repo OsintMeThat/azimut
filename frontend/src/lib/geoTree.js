@@ -43,6 +43,38 @@ function matchesKind(row, kind) {
   return true;
 }
 
+/**
+ * The folder a row was filed under, against the one being asked for.
+ *
+ * `null` is every folder and `''` is the rows nobody filed, which are two
+ * different questions: "show me everything" and "show me what I have not put
+ * away yet".
+ */
+function matchesFolder(row, folder) {
+  if (folder == null) return true;
+  return (row.folder || '') === folder;
+}
+
+/**
+ * The folders the given rows are filed under, each with how many it holds.
+ *
+ * Read off the rows rather than off the case: a folder holding notes and no
+ * saved point would be a switch that hides nothing, and the map's own filter
+ * should only offer what is on the map.
+ */
+export function savedFolders(rows) {
+  const counts = new Map();
+  for (const row of rows ?? []) {
+    const key = row.folder || '';
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([id, count]) => ({ id, count }))
+    // named folders in their own order, and the unfiled rows last: they are a
+    // leftover, not a place
+    .sort((a, b) => (a.id === '' ? 1 : b.id === '' ? -1 : a.id.localeCompare(b.id)));
+}
+
 /** Everything a search over saved work reads: what it is called, what was
  *  written about it, where it is, and who it came from. */
 function savedText(row) {
@@ -81,8 +113,13 @@ export function oneEach(rows) {
 }
 
 /** The rows a kind + query select, in the index's own newest-first order. */
-export function filterSaved(rows, { kind = 'all', query = '' } = {}) {
-  return (rows ?? []).filter((row) => matchesKind(row, kind) && matchesTerms(savedText(row), query));
+export function filterSaved(rows, { kind = 'all', query = '', folder = null } = {}) {
+  return (rows ?? []).filter(
+    (row) =>
+      matchesKind(row, kind) &&
+      matchesFolder(row, folder) &&
+      matchesTerms(savedText(row), query)
+  );
 }
 
 /** How the search modal can order results. The tree has no sort control: its

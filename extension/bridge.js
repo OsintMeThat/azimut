@@ -79,6 +79,55 @@
     },
   };
 
+  // A map tab's end of the linked views (`background.js`, "linked views"). The
+  // app opens it while its map is mounted: panels on other sites hand their
+  // cameras over it, and hear this tab's. A port rather than one message per
+  // camera, because the worker counts who is on the link by who is connected.
+  let link = null;
+  let linkWanted = false;
+  const LINK_RETRY_MS = 2000;
+
+  function openLink() {
+    if (link || !linkWanted || !current()) return;
+    try {
+      link = api.runtime.connect({ name: "map-link" });
+    } catch {
+      link = null;
+      return;
+    }
+    link.onMessage.addListener((msg) => {
+      if (!current()) return;
+      if (msg?.type === "view") post({ type: "map-link-event", kind: "view", view: msg.view });
+      if (msg?.type === "link-peers") post({ type: "map-link-event", kind: "peers", count: msg.count });
+    });
+    // an evicted worker takes the port with it; the next one is a retry away
+    link.onDisconnect.addListener(() => {
+      link = null;
+      if (linkWanted) setTimeout(openLink, LINK_RETRY_MS);
+    });
+  }
+
+  function onLink(msg) {
+    if (msg.kind === "open") {
+      linkWanted = true;
+      openLink();
+    } else if (msg.kind === "close") {
+      linkWanted = false;
+      try {
+        link?.disconnect();
+      } catch {
+        /* already gone */
+      }
+      link = null;
+    } else if (msg.kind === "view" && link) {
+      try {
+        link.postMessage({ type: "view", view: msg.view });
+      } catch {
+        // the port died between the check and the send; the retry reopens it
+      }
+    }
+  }
+
   window.addEventListener("message", async (event) => {
     // same page, same origin, our channel — nothing else is listened to
     if (event.source !== window || event.origin !== location.origin) return;
@@ -87,6 +136,10 @@
 
     if (msg.type === "ping") {
       post({ type: "pong", id: msg.id, version: VERSION });
+      return;
+    }
+    if (msg.type === "map-link") {
+      onLink(msg);
       return;
     }
 

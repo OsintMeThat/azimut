@@ -8,11 +8,12 @@ doesn't), anything else returns None, and nothing ever raises.
 """
 
 import json
+import math
 from pathlib import Path
 
 import pytest
 
-from azimut.engine.mapsites import parse_map_url
+from azimut.engine.mapsites import _mercator_y, parse_map_url
 
 _RECORDED = json.loads(
     (Path(__file__).parent / "fixtures" / "map-sites.json").read_text(encoding="utf-8")
@@ -22,13 +23,24 @@ ROUNDING = _RECORDED["rounding"]
 
 LAT, LON, Z = 45.197652, 11.777344, 6
 
+#: How closely the parse has to predict how far Earth's picture moved. Earth's
+#: own drawing agrees with its formula to about a thousandth at a 35° field of
+#: view, and a few thousandths at 60°, which nobody opens by hand.
+EARTH_SCALE_TOLERANCE = 0.004
+
+#: What Earth writes after ``/data=``: its 2D map, as an analyst's own URL had
+#: it, and a view after pressing Earth's "3D" button.
+EARTH_2D = "CgRCAggCMikKJwolCiExa01obVdjV2t6UmJfTFhSbDFjQ3JPZEJla1p4TWJGVksgAToDCgEwQgIIAEoICI7Vld4EEAE"
+EARTH_3D = "CgRCAggBKAJCAggASg0I____________ARAA"
+
 
 # Mirrors frontend/src/lib/maplinks.js exactly: whatever Azimut can send the
 # user out to, the backend must be able to read back.
 OPEN_IN_LINKS = [
     (f"https://www.google.com/maps/@{LAT},{LON},{Z}z", "google-maps", Z),
     (f"https://www.google.com/maps/@{LAT},{LON},{Z}z/data=!3m1!1e3", "google-maps", Z),
-    (f"https://earth.google.com/web/@{LAT},{LON},0a,600d,1y,0h,0t,0r", "google-earth", None),
+    # a link has no ground in it, so Earth's scale waits for the map to move
+    (f"https://earth.google.com/web/@{LAT},{LON},0a,2733274d,35y,0h,0t,0r", "google-earth", None),
     (f"https://maps.apple.com/?ll={LAT},{LON}&z={Z}&map=satellite", "apple-maps", Z),
     (f"https://www.bing.com/maps?cp={LAT}~{LON}&lvl={Z}&style=h", "bing-maps", Z),
     (f"https://yandex.com/maps/?ll={LON},{LAT}&z={Z}&l=sat", "yandex-maps", Z),
@@ -184,8 +196,7 @@ def test_refusals_and_malformed_input():
         # …and 0t is not pitched at all
         (f"https://www.google.com/maps/@{LAT},{LON},{Z}z,0t", "map"),
         (f"https://www.google.com/maps/@{LAT},{LON},{Z}z", "map"),
-        # Earth's camera is free: level and low it is a map (the perspective of
-        # a straight-down camera cancels), pitched it is not
+        # Earth's 2D map is a map, and pitched (its 3D button) it is not
         (f"https://earth.google.com/web/@{LAT},{LON},0a,1000d,35y,0h,0t,0r", "map"),
         (f"https://earth.google.com/web/@{LAT},{LON},0a,600d,35y,20h,60t,0r", "tilted"),
         # flat-map renderers with no other mode to be in
@@ -217,35 +228,125 @@ def test_satellite_is_still_a_straight_down_map():
     assert parsed["geometry"] is True
 
 
-def test_a_level_free_camera_is_a_map_it_can_be_measured_on():
+def test_earths_2d_map_is_web_mercator_with_its_scale_in_the_url():
     """Earth, and Maps in Earth mode, with the camera level.
 
-    A camera pointed straight down at the ground is a plain uniform scaling —
-    the perspective cancels — so the view is measurable even though nothing in
-    it is Web Mercator. Earth names no flattening, so ``geometry`` declines
-    there and the extension measures the view whole; Maps in Earth mode is still
-    a Google URL and keeps its flattening, and waits only for a scale.
+    Earth's 2D map was registered screenshot against screenshot
+    (``tests/fixtures/earth-scale.json``): Web Mercator, drawn about the middle
+    of the window, ``2·d·tan(y/2)`` metres from top to bottom. So it is a map
+    like any other, with a projection and a scale read out of its URL.
+
+    Maps in Earth mode keeps its flattening and states no scale: Maps rewrites a
+    level ``a`` camera into ``,3231m`` as soon as it lands, so the view waits
+    for that instead.
     """
-    earth = parse_map_url(f"https://earth.google.com/web/@{LAT},{LON},146a,666d,35y,0h,0t,0r")
+    earth = parse_map_url(
+        f"https://earth.google.com/web/@{LAT},{LON},146.5a,666.25d,35y,0h,0t,0r", height_px=1000
+    )
     assert earth["view_kind"] == "map"
-    assert earth["geometry"] is False  # no projection to name
-    assert earth["scale_source"] is None
+    assert earth["projection"] == "webmercator"
+    assert earth["geometry"] is True
+    assert earth["scale_source"] == "distance"
+    assert earth["far"] is False
 
     maps = parse_map_url(f"https://www.google.com/maps/@{LAT},{LON},336a,35y,0t/data=!3m1!1e3")
     assert maps["view_kind"] == "map"
     assert maps["geometry"] is True
-    assert maps["scale_source"] is None  # a free camera quotes no level
+    assert maps["scale_source"] is None
     assert (maps["lat"], maps["lon"]) == (LAT, LON)
 
 
-def test_a_level_camera_far_enough_out_is_a_globe():
-    """Level is not enough on its own: past ``LEVEL_CEILING_M`` the ground under
-    the camera is visibly round, and a flat scale would be wrong by more than
-    the tools are worth."""
-    high = f"https://earth.google.com/web/@{LAT},{LON},146a,900000d,35y,0h,0t,0r"
+def test_only_earths_3d_camera_turns_into_a_globe_far_out():
+    """Earth's 2D map stays a flat Mercator however far out it goes (all of
+    Europe on screen, and 400 km out measured). Its 3D mode is a perspective
+    camera on a sphere, and past ``LEVEL_CEILING_M`` that is a globe. The address
+    bar says which one it is in its ``data=`` blob."""
+    far = f"https://earth.google.com/web/@{LAT},{LON},-0a,202330.09623202d,35y,0h,0t,0r"
+    flat = parse_map_url(f"{far}/data={EARTH_2D}?authuser=0", height_px=934)
+    assert (flat["view_kind"], flat["geometry"], flat["far"]) == ("map", True, False)
+    assert flat["scale_source"] == "distance"
+    globe = parse_map_url(f"{far}/data={EARTH_3D}", height_px=934)
+    assert (globe["view_kind"], globe["geometry"], globe["far"]) == ("globe", False, True)
+    # in close, the 3D camera is still a map
+    near = f"https://earth.google.com/web/@{LAT},{LON},146.5a,666.25d,35y,0h,0t,0r/data={EARTH_3D}"
+    assert parse_map_url(near)["view_kind"] == "map"
+    # a bare link opens the 2D map, and a blob nobody can read is taken as 3D,
+    # whose rules are the stricter ones
+    assert parse_map_url(far)["view_kind"] == "map"
+    assert parse_map_url(f"{far}/data=AAAA")["view_kind"] == "globe"
+
+
+def test_earth_states_no_scale_for_a_camera_it_has_not_placed():
+    """``d`` is a distance to the ground only once Earth has put the camera
+    there, which it does by writing the ground's height into ``a``."""
+
+    def scale(camera: str) -> str | None:
+        url = f"https://earth.google.com/web/@{LAT},{LON},{camera}"
+        return parse_map_url(url, height_px=1000)["scale_source"]
+
+    # Earth's own writing, over land and over the sea
+    assert scale("198.8634048a,2196.68868628d,35y,0h,0t,0r") == "distance"
+    assert scale("-0a,202330.09623202d,35y,0h,0t,0r") == "distance"
+    # a link, written as 0a with a whole d: over 200 m of ground it is drawn 7%
+    # nearer than it says, so it waits for the map to move
+    assert scale("0a,3000d,35y,0h,0t,0r") is None
+    # closer than Earth's map lets a camera come: loading a link, Earth once
+    # wrote this for a camera 1528 m up, where a was not the ground at all
+    assert scale("1518.44008742a,10.0137594d,35y,0h,0t,0r") is None
+    # a height no ground has, and a field of view that is missing or not one
+    assert scale("-7546.56236661a,8346.46045906d,35y,0h,0t,0r") is None
+    assert scale("198.86a,2196.69d,0y,0h,0t,0r") is None
+    assert scale("198.86a,2196.69d,0h,0t,0r") is None
+
+
+def _earth_cases() -> list[dict]:
+    path = Path(__file__).parent / "fixtures" / "earth-scale.json"
+    return json.loads(path.read_text(encoding="utf-8"))["cases"]
+
+
+def test_earths_scale_is_what_its_screenshots_measured():
+    """Every case in ``tests/fixtures/earth-scale.json``, predicted from its URL.
+
+    Each one is a camera Earth placed, opened again a known step east and north,
+    and the screenshots registered to a hundredth of a pixel. The parse of the
+    base URL, through Web Mercator, has to say how far the picture moved — at
+    three window shapes, two fields of view, three latitudes, over mountains and
+    400 km out.
+    """
+    cases = _earth_cases()
+    assert len(cases) >= 6
+    for case in cases:
+        parsed = parse_map_url(case["base"], height_px=case["window"]["h"])
+        assert parsed["scale_source"] == "distance", case["id"]
+        world = 256 * 2 ** parsed["zoom"]
+        east = -case["east"]["d_lon"] / 360 * world
+        step = case["north"]["d_lat"]
+        north = (_mercator_y(parsed["lat"]) - _mercator_y(parsed["lat"] + step)) / 256 * world
+        tolerance = EARTH_SCALE_TOLERANCE
+        assert case["east"]["moved_px"] == pytest.approx(east, rel=tolerance), case["id"]
+        assert case["north"]["moved_px"] == pytest.approx(north, rel=tolerance), case["id"]
+        assert abs(case["east"]["across_px"]) < 0.5, case["id"]
+        assert abs(case["north"]["across_px"]) < 0.5, case["id"]
+
+
+def test_earth_draws_its_camera_at_the_middle_of_the_window():
+    """No table entry for Earth, and this is why: halving the distance draws the
+    ground twice as big about the camera's own pixel, and in every window that
+    pixel was the middle."""
+    for case in _earth_cases():
+        offset = case["camera_offset_px"]
+        assert abs(offset["x"]) < 1.5 and abs(offset["y"]) < 1.5, case["id"]
+
+
+def test_a_level_3d_camera_far_enough_out_is_a_globe():
+    """Level is not enough on its own for a 3D camera: past ``LEVEL_CEILING_M``
+    the ground under it is visibly round, and a flat scale would be wrong by
+    more than the tools are worth."""
+    high = f"https://earth.google.com/web/@{LAT},{LON},146a,900000d,35y,0h,0t,0r/data={EARTH_3D}"
     assert parse_map_url(high)["view_kind"] == "globe"
-    # …and a camera whose height the URL never states is not assumed to be low
-    assert parse_map_url(f"https://earth.google.com/web/@{LAT},{LON}")["view_kind"] == "globe"
+    # …and a 3D camera whose height the URL never states is not assumed to be low
+    bare = f"https://earth.google.com/web/@{LAT},{LON}/data={EARTH_3D}"
+    assert parse_map_url(bare)["view_kind"] == "globe"
 
 
 def test_a_pitched_camera_is_not_a_map_however_it_is_written():
@@ -331,7 +432,17 @@ def test_a_stated_size_becomes_a_zoom_once_the_window_height_is_known():
     )
     assert satellite["scale_source"] == "height_m"
     assert satellite["zoom"] == pytest.approx(15, abs=0.01)
-    assert satellite["camera_kind"] == "height_m"
+
+    # Earth's view covers the same ground in a shorter window, so it is further out
+    earth = (
+        "https://earth.google.com/web/@47.38914743,2.35481038,"
+        "198.8634048a,2196.68868628d,35y,0h,0t,0r"
+    )
+    tall = parse_map_url(earth, height_px=1000)
+    assert tall["scale_source"] == "distance"
+    assert tall["zoom"] == pytest.approx(16.2234, abs=0.001)  # registered: 16.22341
+    shorter = parse_map_url(earth, height_px=760)["zoom"]
+    assert shorter == pytest.approx(tall["zoom"] + math.log2(0.76))
 
     apple = parse_map_url(
         "https://maps.apple.com/frame?map=satellite"
@@ -355,40 +466,13 @@ def test_without_a_window_height_a_stated_size_is_left_alone():
     """No height, no zoom — never a guessed one."""
     satellite = parse_map_url("https://www.google.com/maps/@47.388462,2.352785,3231m/data=!3m1!1e3")
     assert satellite["zoom"] is None and satellite["scale_source"] is None
-    assert satellite["camera_m"] == 3231
+    earth = parse_map_url("https://earth.google.com/web/@47.38,2.35,198.86a,2196.69d,35y,0h,0t,0r")
+    assert earth["zoom"] is None and earth["scale_source"] is None
 
 
 def test_every_recognized_site_answers_the_scale_question():
     for url, _site, _zoom in OPEN_IN_LINKS:
-        assert parse_map_url(url)["scale_source"] in {"zoom", "height_m", "span", None}
-
-
-def test_a_zoomless_view_states_its_camera_span():
-    """The one number these views give about how far out they are.
-
-    Neither can be turned into a zoom here — that needs the size of a window this
-    module never sees — but both are proportional to metres per pixel, which is
-    all a caller needs to carry a scale it measured once through every zoom
-    afterwards.
-    """
-    satellite = parse_map_url(f"https://www.google.com/maps/@{LAT},{LON},4378m/data=!3m1!1e3")
-    assert satellite["camera_m"] == 4378
-    earth = parse_map_url(f"https://earth.google.com/web/@{LAT},{LON},146a,666d,35y,0h,0t,0r")
-    assert earth["camera_m"] == 666
-
-
-def test_a_view_that_names_its_zoom_states_no_span():
-    """A zoom is the better answer and the only one a caller needs, so nothing
-    is invented alongside it."""
-    assert parse_map_url(f"https://www.google.com/maps/@{LAT},{LON},{Z}z")["camera_m"] is None
-    assert parse_map_url(f"https://maps.apple.com/?ll={LAT},{LON}&z={Z}")["camera_m"] is None
-    # Street View's `3a` is a pano radius, not a span across the ground
-    assert parse_map_url(f"https://www.google.com/maps/@{LAT},{LON},3a,75y,90t")["camera_m"] is None
-
-
-def test_every_recognized_site_answers_the_span_question():
-    for url, _site, _zoom in OPEN_IN_LINKS:
-        assert "camera_m" in parse_map_url(url)
+        assert parse_map_url(url)["scale_source"] in {"zoom", "height_m", "span", "distance", None}
 
 
 def test_view_kind_is_unclassified_rather_than_guessed():
@@ -450,8 +534,8 @@ def test_copernicus_2d_map_is_leaflet_and_drawable():
         (f"https://www.google.com/maps/@{LAT},{LON},3a,75y,90h,90t", "streetview"),
         # a pitched one
         (f"https://www.google.com/maps/@{LAT},{LON},1000m,45t", "tilted"),
-        # a globe renderer, which names no flattening to draw in
-        (f"https://earth.google.com/web/@{LAT},{LON},0a,1000d,35y,0h,0t,0r", "globe"),
+        # Earth's 3D camera far enough out to be a globe
+        (f"https://earth.google.com/web/@{LAT},{LON},0a,900000d,35y,0h,0t,0r/data={EARTH_3D}", "globe"),
         # Copernicus Browser in its 3D terrain viewer, which it says in the URL
         (f"https://browser.dataspace.copernicus.eu/?zoom=17&lat={LAT}&lng={LON}"
          '&terrainViewerSettings=%7B%22settings%22%3A%7B%22x%22%3A1%7D%7D', "terrain viewer"),
@@ -470,12 +554,16 @@ def test_yandex_is_elliptical_and_says_so():
 
 
 def test_the_globe_floor_is_a_warning_rather_than_a_floor():
-    """A site becoming a globe does not change its URL shape, so the zoom is the
-    only warning there is — and out there it is a warning, not a refusal.
+    """A *flat map drawn far out* is warned about, not refused.
 
-    The drawing still appears: the middle of the screen is right and the edges
-    drift, which is the trade for seeing a whole region's worth of work at once.
-    ``far`` is what says so, and the panel dims what it draws.
+    A site becoming a globe on the way out does not change its URL shape, so the
+    zoom is the only warning there is — and out there the drawing still appears:
+    the middle of the screen is right and the edges drift, which is the trade for
+    seeing a whole region's worth of work at once. ``far`` is what says so, and
+    the panel dims what it draws.
+
+    The other globe is refused outright — see the test below, and the two are
+    not the same thing.
     """
     low = parse_map_url(f"https://www.google.com/maps/@{LAT},{LON},7z")
     high = parse_map_url(f"https://www.google.com/maps/@{LAT},{LON},8z")
@@ -483,8 +571,10 @@ def test_the_globe_floor_is_a_warning_rather_than_a_floor():
     assert (low["far"], high["far"]) == (True, False)
     assert low["globe_below"] == 8
 
-    # Earth's own globe is the same verdict reached from a camera height
-    earth = parse_map_url(f"https://earth.google.com/web/@{LAT},{LON},0a,900000d,35y,0h,0t,0r")
+    # Earth's own 3D globe is the same verdict reached from a camera height
+    earth = parse_map_url(
+        f"https://earth.google.com/web/@{LAT},{LON},0a,900000d,35y,0h,0t,0r/data={EARTH_3D}"
+    )
     assert earth["view_kind"] == "globe" and earth["far"] is True
 
     # OpenStreetMap has no globe to fall into, so it has no floor
@@ -493,12 +583,35 @@ def test_the_globe_floor_is_a_warning_rather_than_a_floor():
     assert (flat["geometry"], flat["far"]) == (True, False)
 
 
+def test_a_globe_camera_is_refused_where_a_flat_map_drawn_far_out_is_not():
+    """The other globe: a perspective camera on a sphere, which is not a map.
+
+    Google's Earth mode is the case that separates the two, because it is the
+    one view that is a globe camera *and* has a named flattening. Mercator is
+    not approximately right out there, it is wrong — so ``geometry`` declines
+    even though the projection is known, and the extension says to zoom in
+    rather than dimming a drawing nobody can judge (`maptools.js`, ``REFUSALS``).
+    """
+    globe = parse_map_url(f"https://www.google.com/maps/@{LAT},{LON},900000a,35y,0h,0t,0r")
+    assert globe["view_kind"] == "globe"
+    assert globe["projection"] == "webmercator"  # known, and still not enough
+    assert globe["geometry"] is False
+    # `far` stays true out there, because it has a second job: it is what stops
+    # the extension measuring a site's layout off a view that far out
+    assert globe["far"] is True
+
+    # …and the same camera in close is a map, which is the whole point of
+    # measuring the height rather than refusing the site
+    near = parse_map_url(f"https://www.google.com/maps/@{LAT},{LON},1000a,35y,0h,0t,0r")
+    assert (near["view_kind"], near["geometry"], near["far"]) == ("map", True, False)
+
+
 def test_a_pin_is_never_gated_by_any_of_this():
     """Whatever the camera is, the URL still names a point — which is the one a
     pin files on. The verdict only says the *pixel* clicked cannot be trusted."""
     for url in (
         f"https://www.google.com/maps/@{LAT},{LON},3a,75y,90h,90t",
-        f"https://earth.google.com/web/@{LAT},{LON},0a,1000d,35y,0h,0t,0r",
+        f"https://earth.google.com/web/@{LAT},{LON},0a,600d,35y,20h,60t,0r",
     ):
         parsed = parse_map_url(url)
         assert parsed["geometry"] is False
@@ -554,8 +667,8 @@ def test_every_site_this_parser_knows_has_been_driven_in_a_browser():
 
     recorded = {r["site"] for r in RECORDINGS}
     known = {site_id for site_id, *_rest in SITES}
-    assert known - recorded == {"google-earth"}, "only Earth is unrecorded, and on purpose"
-    assert {site for _url, site, _zoom in OPEN_IN_LINKS} <= known | {"google-earth"}
+    assert known == recorded
+    assert {site for _url, site, _zoom in OPEN_IN_LINKS} <= known
 
 
 def test_the_recordings_cover_more_than_one_window():
@@ -654,3 +767,73 @@ def test_the_pitch_is_reported_so_a_refusal_can_name_it():
     assert level["tilt"] == 0
     # a site whose URL states no camera angle says nothing rather than zero
     assert parse_map_url(f"https://www.openstreetmap.org/#map=17/{LAT}/{LON}")["tilt"] is None
+
+
+#: Sites the extension starts unplaced on, and why each is left out of
+#: ``_CAMERA_CENTRE`` rather than measured into it.
+UNHINTED_ON_PURPOSE = {
+    "apple-maps": "its sidebar folds away below a width the URL never states, so"
+    " its offset is 67 px in a wide window and nothing in a narrow one",
+}
+
+
+def test_the_starting_offset_matches_what_the_browser_measured():
+    """The offset the extension starts drawing from, against the recording.
+
+    ``_CAMERA_CENTRE`` is the one place this parser states a number about pixels
+    rather than about a URL, and it exists because the alternative — starting at
+    the middle of the window — is a number too, and the wrong one on four of
+    these sites. So it is held to the recording the same way everything else
+    here is: every entry within a pixel and a half of where a browser drew the
+    camera, in every window the site was recorded in.
+
+    The other half is the drift gate. A site with no entry starts at the middle
+    of the window, which is a claim that the middle is right — so a recording
+    that says otherwise has to be either measured into the table or named in
+    ``UNHINTED_ON_PURPOSE`` with the reason it cannot be.
+    """
+    from azimut.engine.mapsites import _CAMERA_CENTRE, _centre_hint
+
+    for recording in RECORDINGS:
+        offset = (
+            recording["centre"]["x"] - recording["window"]["w"] / 2,
+            recording["centre"]["y"] - recording["window"]["h"] / 2,
+        )
+        hint = _centre_hint(recording["site"])
+        if hint:
+            assert hint["x"] == pytest.approx(offset[0], abs=1.5), recording["label"]
+            assert hint["y"] == pytest.approx(offset[1], abs=1.5), recording["label"]
+            # and a sideways offset is never claimed below a window it has been
+            # measured in, because that is where a side panel folds away
+            if hint["x"]:
+                assert hint["min_w"] <= recording["window"]["w"], recording["label"]
+                assert hint["min_w"] >= min(
+                    r["window"]["w"] for r in RECORDINGS if r["site"] == recording["site"]
+                ), recording["label"]
+        # under a couple of pixels is the solve's own noise, not a layout
+        elif max(abs(o) for o in offset) >= 4:
+            assert recording["site"] in UNHINTED_ON_PURPOSE, (
+                f"{recording['label']} draws its camera {offset} from the middle of the"
+                " window and nothing says so: add it to _CAMERA_CENTRE or say why not"
+            )
+    # and nothing in the table that no browser was ever driven through
+    assert set(_CAMERA_CENTRE) <= {r["site"] for r in RECORDINGS}
+    assert set(UNHINTED_ON_PURPOSE) <= {r["site"] for r in RECORDINGS}
+    assert not set(UNHINTED_ON_PURPOSE) & set(_CAMERA_CENTRE)
+
+
+def test_the_starting_offset_reaches_the_extension_with_the_view():
+    """It travels the one channel the extension reads: the parse of its URL."""
+    hinted = parse_map_url("https://www.bing.com/maps?cp=47.388462~2.352785&lvl=15")
+    # a header, claimed at any width: its height does not change with one
+    assert hinted["centre_hint"] == {"x": 0.0, "y": 40.5, "min_w": 0}
+    # and a site that draws dead centre says nothing rather than saying zero
+    assert parse_map_url("https://www.google.com/maps/@47.388462,2.352785,15z")["centre_hint"] is None
+    # a side panel says how narrow a window it has been seen in, because that is
+    # the thing that folds away (`_CAMERA_CENTRE`)
+    panelled = parse_map_url("https://yandex.com/maps/?ll=2.352785%2C47.388462&z=15")
+    assert panelled["centre_hint"] == {"x": 210.0, "y": 10.0, "min_w": 1200}
+    narrowest = {
+        r["window"]["w"] for r in RECORDINGS if r["site"] == "yandex-maps"
+    }
+    assert panelled["centre_hint"]["min_w"] == min(narrowest)

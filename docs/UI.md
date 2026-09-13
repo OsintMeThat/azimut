@@ -1242,12 +1242,92 @@ Editing a place or a capture (**Edit** on any row) sets its title, note, relatio
 and My-work folder in one dialog, and is the only place a new folder is created
 from the map.
 
-Map controls sit in two clusters. **Tools** (measure, sun & moon, grid search,
-reference image) float top-left. A tool with settings opens its panel beside that
-cluster, never beneath it, because beneath it is where the map's own controls
-live. **View** — fullscreen, OSM labels, saved work — continues the zoom column
-beneath `+`/`−`, because none of them changes what you are doing, only what you
-see.
+Map chrome sorts into four kinds, each with one place, and a tool declares
+which it is (`lib/map/tools.js`) rather than adding a button somewhere.
+
+- **Modes** — what the pointer does: measure, grid search, sun & moon, and the
+  capture marquee, which is armed from the Capture button rather than from a
+  toolbox. Exactly one is ever armed: arming any of them closes the rest, and
+  Escape disarms whatever is. They sit in the **rail**, a column floating in the
+  map's top-left corner with the zoom buttons stacked under it, grouped by a
+  hairline. An armed seat wears the accent as an edge, not as a filled square.
+  Adding a reference window is in the rail too, as a seat that runs instead of
+  arming.
+- **Its settings** open in the rail's one **panel slot**, beside it. One mode is
+  armed, so one panel is open; a panel cannot cross another or the map's own
+  controls.
+- **Layers** — what is drawn over the imagery: OSM labels, borders, roads, OSM
+  railways, power lines, sea marks, GPS traces, active fires, night lights, the
+  case's saved work, and the points another tool handed over (a sheet's
+  coordinate column, a Timeline window). None of them changes what the
+  pointer does, so none takes a rail seat: they are a list in the Saved panel,
+  each with its own switch. A handoff appears in the list when it arrives and
+  leaves when it is closed, and keeps a Close beside its switch, since hiding a
+  layer and being done with it are two different things. A layer that is a
+  question answers it under its own switch rather than in a card floating over
+  the map: a fixed handful of answers as a row of chips under its own label, an
+  open-ended one — the folders the analyst named — as a list.
+- **The picture** — the provider, the Sentinel-2 layer and date, when the pixels
+  were taken, the eco and usage pills, and the compass — belongs to the
+  *surface*, in its own top-right corner. Which imagery is on screen is a
+  property of that map and not of the tool, which is what lets two surfaces sit
+  side by side each saying its own.
+
+A capture can carry a **scale bar and a north arrow**, ticked in the capture
+menu: the bar bottom-left in the analyst's own units, the needle top-right,
+turned so it points at true north on a map that was rotated. Off until asked
+for, then remembered for every capture after it — it is a house style rather
+than a decision per shot. Neither mark is ever invented: the bar states the
+crop's own resolution, the needle the bearing it was filed with, and a pasted
+screenshot gets neither, since its coordinates describe the map view at filing
+time rather than the picture itself. What was drawn is written into the
+capture's provenance.
+
+Underneath, the **status line** reads where you are (coordinates, zoom, and the
+armed tool's own measurement) on the left, and carries the two acts that take
+something off the map — Save place and Capture — on the right. What marks the
+point, and whether that point is the map's centre or a pin dropped somewhere,
+is one small menu beside them: both are set once and the two acts are pressed
+all day. The engine's scale bracket reads under the coordinates, where how far
+a pixel goes and where you are make one instrument. Fullscreen sits with the
+tool's title, because it is what the window does with the tool rather than what
+the tool does with the map.
+
+**Active fires** are NASA FIRMS, and answer two questions with the same marks:
+what is burning now (the last 24, 48 or 72 hours, or the week) and what was
+burning on a given day (any range back through the archive, up to 31 days).
+Which instrument and which stretch of time are chosen in the row itself. It
+needs a key, and says so with the reason rather than failing on the first tile;
+a key pasted into Settings is picked up on the way back to the map. The
+detections stop being drawn past z14, where FIRMS's fixed symbol per detection
+stops meaning one detection.
+
+**The reference layers** are key-less and each is simply on or off: Esri's
+borders (country, region, district, with names) and roads, Open Infrastructure
+Map's power lines, OpenSeaMap's buoys and harbours, and the raw GPS traces people
+uploaded to OSM, which show tracks nobody has mapped yet. None of them fetches a
+tile before its switch is pressed, and the roads follow the labels' rule: over a
+street map they are greyed, since it already draws them. Power lines are drawn
+from vector tiles in the app's own small style, coloured by voltage on Open
+Infrastructure Map's scale, dashed where the line is buried, with towers from
+zoom 14, substations, plants, pipelines and telecom masts. No overlay reaches a
+capture: a capture stitches one provider.
+
+**Night lights** are one night's VIIRS pass from NASA GIBS, around 01:30 local
+time, or the 2016 cloud-free composite to hold it against. The row picks the
+satellite (NOAA-20 back to 2024-03-25, Suomi NPP back to 2020-11-18) and the
+night, from a calendar that stops at each record's first night and at
+yesterday, since today's pass is still being processed. It sits lowest in the
+stack, slightly see-through so the lit street can be named, and the row says
+that cloud hides lights too.
+
+A date is picked from a calendar the app draws, in the panel rather than over
+it. The browser's own opens at its own size, in its own locale, and half
+outside a panel docked to this edge — and a field reading `12/09/2026` in an app
+that writes `2026-09-12` everywhere else is a date nobody can check. The month
+pushes the rows under it down, walks month by month between the bounds the
+service accepts, and greys the days outside them. The extension's panel draws
+the same calendar from its own copy of the arithmetic.
 
 **Sun & moon** draws one date's path from an anchored point: the arc each body
 sweeps while it is up, hour ticks along it, and the bearing at an hour you drag.
@@ -1259,7 +1339,12 @@ body is under the horizon. The anchor is a point and not the map centre, so pann
 leaves the path alone. Coords & Sky opens the same mode with its own point, date
 and time, and hands over no computed value.
 
-The saved-work layer is off by default and session-only: places draw as outlined
+The saved-work layer answers two questions under its own switch: **what kind**
+(all, places, captures, proofs) and **which folder**, offered only where the
+case has more than one to choose between. They are the Saved panel's own
+filter, so a map read here and the panel beside it can never disagree about
+what the case holds, and the layer's count is what is drawn rather than what is
+filed. It is off by default and session-only: places draw as outlined
 pins, captures and screenshots as filled ones, items at the same spot collapse
 into one counted mark, and clicking any mark opens a card
 with its preview, provider, dates and note. A mark whose capture carries proofs
@@ -1278,6 +1363,95 @@ metadata is marked `suggested` in both the card and the tree, so a camera's read
 never passes for analyst work. The Save-place dialog carries the matching write:
 one **Relate to…** field says why the point is being saved while the analyst still
 knows.
+
+**A place's card traces its footprint.** A pin dropped on a guess is what this
+fixes: "somewhere on the north quay" is a quay, and the case has always been
+able to hold that shape — until now the only way to fill it was to paste
+GeoJSON into Details. **Trace footprint** on a saved place arms the map, clicks
+drop the corners, and the panel names the place the whole time, counts what is
+missing and takes back the last corner. Nothing is written before Save, so
+Cancel leaves the place exactly as it was, and two shapes are refused here
+rather than by the store: one under three corners, and one that does not contain
+the pin it belongs to. Saved, it draws under its pin like any other footprint,
+and it replaces whatever said how precise the point was — its earlier shape, or
+the circle a radius drew. The panel names what it is replacing before Save, and
+a radius typed back over a traced shape asks in Details before dropping it: the
+map draws one of the two, so a place states its precision once.
+
+**The place dialog hands over to the full editor.** Title, folder, note and
+*Relate to…* are what an analyst fills at the moment of saving; how precise the
+point is, the source's own wording and how the point was found are edited in the
+panel every other surface opens. **Edit more details** on an existing place opens
+that panel — the same body as the case sidebar — and asks first if the short form
+holds something Save has not taken, since the panel opens on what the case holds.
+
+**Esri Wayback is a basemap of every World Imagery release.** Picking it puts a
+chip beside the provider naming the release on screen, and the chip opens a
+slider through time, oldest left, with a step either way and the list under it.
+The list opens on **Changes here**: only the releases that brought a new picture
+of the tile under the crosshair. Esri's tilemap says which release a tile really
+comes from, and walking it backwards finds each change; a picture Esri published
+again, re-encoded or re-coloured, is folded into its first publication by
+comparing the tile's bytes and the acquisition date and satellite its metadata
+states. Each row carries its release date and, beside it, when the picture was
+taken; the pill under the chip dates the pixels on screen the same way. Narrowed
+to changes, the newest release is named by the change it shows rather than by a
+date no row carries. **Every release** lists all of them, where neighbours
+often look identical because nothing changed there. The history is read when the
+picker opens, takes some seconds (Esri's metadata service is slow), and is read
+again once the map settles in another tile; until it arrives, and when it
+fails, every release stays on offer. The release rides on the provider id
+(`esri-wayback~64776`), so tiles are cached and captures credited under it.
+
+**Right-click the ground** and a menu acts on that point rather than on the
+centre: copy it in every coordinate format, the analyst's own first; ask what
+is there, answered inside the menu; save a place there; start a distance from
+it; anchor the sun and moon on it; open its Wayback history; centre the map
+on it; or open it in another map site. A right-click on a shape that answers
+its own (a search-grid cell) stays that shape's. The menu flips away from the
+map's edges, walks with the arrow keys, and closes on Escape, a press outside,
+or a zoom that moves the ground from under it.
+
+**The map opens in as many tabs as there are screens.** `⧉` beside the title
+opens this map again in a tab of its own, on the view it is showing — a tab
+rather than a pop-up window, because a tab can be torn onto the second screen
+and put back, and is what a browser does not refuse. It opens on the map alone:
+the workspace rail, the case bar and the tab strip are how you get somewhere
+else, and they stay in the window they belong to. It is still a whole map, and
+the tab it left is not greyed out: a read-and-work surface takes as many windows
+as are wanted, while a document editor (Geo Proof, Notebook, Sheet) stays one
+window per document.
+
+What is per window is the camera: where it is pointed, at what zoom and bearing,
+over which imagery. That rides in the window's own address
+(`#satellite?ll=48.8566,2.3522&z=17&b=215&p=esri`), which is what makes a reload
+come back to the same ground and a view worth keeping as a link. An address is
+something a person can type, so a coordinate or a zoom it cannot vouch for
+leaves the map where it was rather than flying it nowhere. Panning rewrites the
+address in place: a back button holding four hundred camera positions would be
+worse than none. Everything else — the case, its saved points, a sweep in
+progress — is shared already, below.
+
+A detached tab carries its number in its title and its heading, because two
+identical maps on a second screen cannot otherwise be told apart, and `solo=1`
+in the same address, which is what keeps it the map alone across a reload. The
+first window is unnumbered. The browser can refuse a second tab, and says so.
+
+**⛓ points the tabs at one camera.** It is greyed until a second map tab is
+open, because linking one tab to nothing is a button that does nothing — the
+tabs say hello to each other on the same channel the camera travels on, and a
+link already on is dropped when the last of them goes. Pressing it hands the
+other linked tabs this tab's view, and from then on a pan or a zoom in any of
+them carries the rest. It is per tab and off by default: two maps are worth linking while they
+are being compared and in the way of each other the rest of the time. Two
+linked tabs on two providers are a first version of Compare — and the camera
+travels between tabs of the same browser, never over the network, because a
+view is not case state. The extension's map tools join the same link from
+Google, Bing, Earth and the other sites they draw on: an open panel counts as a
+second map, follows this tab's camera and leads it (`extension/README.md`). A
+panel in a background tab keeps the view until that tab is looked at, because
+following one costs those sites a reload; the app's own tabs have none to pay
+and follow wherever they are.
 
 **The map keeps up with the other windows on the case.** A point saved, a grid
 drawn or a cell swept from the extension's panel over another map lands here
@@ -2289,3 +2463,19 @@ instrument style of QGIS, Google Earth Pro, Resolve and Lightroom.
    entities with provenance so Suggestions/Details work.
 4. Tests accompany the tool (repo rule); pure logic goes in `lib/` with a
    `.test.js`.
+
+## Adding a tool to the map (checklist)
+
+A tool that works *on* the map is not a rail seat of its own: it joins the map's
+own registry.
+
+1. Declare it in `lib/map/tools.js` — a mode (it changes what a click means), an
+   action (it runs and arms nothing), or a layer (it is drawn and toggled).
+2. A mode says which cursor the surface wears while it is armed, and whether it
+   brings a panel. Its store answers `isOn` / `open` / `close`, plus `pointing`
+   when being armed is not the same as waiting for a click. Exclusion is then
+   automatic — nothing else has to be told the new tool exists.
+3. A mode's reading goes in the status line, not in its panel: a number the map
+   is telling you belongs beside the coordinates.
+4. Keep the rail at seven seats or fewer. The eighth files itself under an
+   existing group with a flyout.

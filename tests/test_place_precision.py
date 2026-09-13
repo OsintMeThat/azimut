@@ -32,6 +32,11 @@ def _patch(client, cid, eid, attrs):
     return client.patch(f"/api/cases/{cid}/entities/{eid}", json={"attrs": attrs})
 
 
+#: A ring around the point `_place` saves, which is where a place's own shape has to
+#: be: lon first, closed, and the pin inside it rather than on a corner.
+AROUND = [[14.54, 53.43], [14.56, 53.43], [14.56, 53.45], [14.54, 53.45], [14.54, 53.43]]
+
+
 # -- nothing is required ------------------------------------------------------
 
 
@@ -140,9 +145,8 @@ def test_the_ladder_is_not_derived_from_plus_code_lengths():
 
 def test_a_footprint_holds_a_polygon_when_a_circle_is_the_wrong_shape(client):
     cid = _new_case(client, "Footprint place")
-    ring = [[14.55, 53.44], [14.56, 53.44], [14.56, 53.45], [14.55, 53.44]]
 
-    res = _place(client, cid, footprint={"type": "Polygon", "coordinates": [ring]})
+    res = _place(client, cid, footprint={"type": "Polygon", "coordinates": [AROUND]})
 
     assert res.status_code == 200, res.text
     assert res.json()["attrs"]["footprint"]["type"] == "Polygon"
@@ -190,6 +194,76 @@ def test_a_footprint_is_bounded_in_size_and_depth(client):
 
     deep = {"type": "Polygon", "coordinates": [[[[[[[0, 0]]]]]]]}
     assert _place(client, cid, footprint=deep).status_code == 400
+
+
+def test_a_footprint_must_contain_the_point_it_belongs_to(client):
+    """A shape traced beside its pin describes somewhere else. The map let it happen:
+    the polygon drew where it was clicked and the pin stayed where it was, and nothing
+    said the two disagreed."""
+    cid = _new_case(client, "Shape elsewhere")
+    elsewhere = [[14.60, 53.50], [14.62, 53.50], [14.62, 53.52], [14.60, 53.50]]
+
+    res = _place(client, cid, footprint={"type": "Polygon", "coordinates": [elsewhere]})
+
+    assert res.status_code == 400
+    assert "contain" in res.json()["detail"]
+
+
+def test_a_multipolygon_counts_as_containing_the_point_in_any_of_its_parts(client):
+    """Two quays are one location, and the pin sits on one of them."""
+    cid = _new_case(client, "Two parts")
+    far = [[14.60, 53.50], [14.62, 53.50], [14.62, 53.52], [14.60, 53.50]]
+
+    res = _place(
+        client, cid, footprint={"type": "MultiPolygon", "coordinates": [[far], [AROUND]]}
+    )
+
+    assert res.status_code == 200, res.text
+
+
+def test_a_place_with_no_point_of_its_own_still_takes_a_footprint(client):
+    """Nothing to contradict: a record promoted from a sheet can hold the shape
+    without holding the pair, and refusing it would lose the only geometry it has."""
+    cid = _new_case(client, "Shape only")
+
+    res = client.post(
+        f"/api/cases/{cid}/entities",
+        json={
+            "type": "place",
+            "label": "Quay 4",
+            "attrs": {"footprint": {"type": "Polygon", "coordinates": [AROUND]}},
+        },
+    )
+
+    assert res.status_code == 200, res.text
+
+
+def test_a_place_states_its_precision_once(client):
+    """A radius and a footprint answer the same question in two forms, and the map
+    draws one of them — so a radius typed over a traced shape used to vanish from the
+    map without a word. Writing one asks for the other to be cleared with it."""
+    cid = _new_case(client, "Both forms")
+    eid = _place(client, cid, radius_m=500).json()["id"]
+    shape = {"type": "Polygon", "coordinates": [AROUND]}
+
+    assert _patch(client, cid, eid, {"footprint": shape}).status_code == 400
+    assert _patch(client, cid, eid, {"footprint": shape, "radius_m": None}).status_code == 200
+    # and the same the other way round, which is the half an analyst types by hand
+    assert _patch(client, cid, eid, {"radius_m": 500}).status_code == 400
+    assert _patch(client, cid, eid, {"radius_m": 500, "footprint": None}).status_code == 200
+
+
+def test_a_place_that_already_held_both_stays_editable(client):
+    """The rule is judged on the patch, not on the stored result: a point written
+    before it holds both, and its notes must not become unsavable because of that."""
+    cid = _new_case(client, "Written earlier")
+    eid = _place(client, cid, radius_m=500).json()["id"]
+    case = Case.open(cid)
+    case.update_entity(eid, {"attrs": {"footprint": {"type": "Polygon", "coordinates": [AROUND]}}})
+
+    assert _patch(client, cid, eid, {"method": "caption only"}).status_code == 200
+    # …and touching either form is still what resolves it
+    assert _patch(client, cid, eid, {"radius_m": 100}).status_code == 400
 
 
 # -- what validation does and does not reach ----------------------------------
@@ -283,14 +357,13 @@ def test_a_footprint_reaches_the_index_whole(client):
     """A traced shape says more than the circle around it, so the overlay gets the
     geometry itself and not a bounding radius computed here."""
     cid = _new_case(client, "Index footprint")
-    ring = [[14.55, 53.44], [14.56, 53.44], [14.56, 53.45], [14.55, 53.44]]
-    eid = _place(client, cid, footprint={"type": "Polygon", "coordinates": [ring]}).json()["id"]
+    eid = _place(client, cid, footprint={"type": "Polygon", "coordinates": [AROUND]}).json()["id"]
 
     row = next(
         r for r in client.get(f"/api/cases/{cid}/satellite/index").json() if r["id"] == eid
     )
 
-    assert row["footprint"] == {"type": "Polygon", "coordinates": [ring]}
+    assert row["footprint"] == {"type": "Polygon", "coordinates": [AROUND]}
 
 
 def test_a_place_with_no_precision_states_none_in_the_index(client):

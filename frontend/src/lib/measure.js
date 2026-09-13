@@ -57,6 +57,27 @@ export function polygonArea(points) {
   return Math.abs((sum * R * R) / 2);
 }
 
+/**
+ * Is `point` inside the ring through `points`?
+ *
+ * Ray casting in degrees, which is what the analyst sees: the shape is judged as it
+ * is drawn on the map rather than on a sphere, and at the size of a traced footprint
+ * the two answers are the same. A point on the edge counts either way.
+ */
+export function containsPoint(points, point) {
+  if (!points || points.length < 3 || !point) return false;
+  let inside = false;
+  for (let i = 0; i < points.length; i++) {
+    const { lat: y1, lon: x1 } = points[i];
+    const { lat: y2, lon: x2 } = points[(i + 1) % points.length];
+    if (y1 > point.lat !== y2 > point.lat) {
+      const crossing = ((x2 - x1) * (point.lat - y1)) / (y2 - y1 || 1e-12) + x1;
+      if (point.lon < crossing) inside = !inside;
+    }
+  }
+  return inside;
+}
+
 /** Interior angle at `vertex` between the rays to `a` and `b`, in degrees. */
 export function angleAt(a, vertex, b) {
   const cosLat = Math.cos(rad(vertex.lat));

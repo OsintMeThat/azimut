@@ -1,6 +1,6 @@
 # Azimut product overview
 
-Status: **spec v0.3** (2026-08-21). Read in order: Done → Roadmap → Loose ideas.
+Status: **spec v0.3** (2026-09-13). Read in order: Done → Roadmap → Loose ideas.
 Implementation detail belongs in code and tests; see
 [IMAGERY_PROVIDERS.md](IMAGERY_PROVIDERS.md), [UI.md](UI.md),
 [ONTOLOGY.md](ONTOLOGY.md) and
@@ -132,7 +132,7 @@ proof for publication.
 | ✅ **Case utilities** | Opens case folders, reports scrubbed diagnostics, keeps filenames in sync and offers explicit Doctor repairs. |
 | ✅ **Workspace portability** | Moves or adopts a workspace safely, recovers hand-added cases and prevents two live instances from sharing it silently. |
 | ✅ **Updates & paste** | Reports available app, downloader and extension updates, then files supported clipboard content from the main case surfaces. |
-| ✅ **Evidence on the map** | Places proofs and derived media through their evidence chain, with stated point uncertainty and traced footprints. |
+| ✅ **Evidence on the map** | Places proofs and derived media through their evidence chain, with stated point uncertainty and footprints drawn under their pins. |
 | ✅ **Map search** | Answers the search box while typing from saved work, a coordinate parse and a bundled gazetteer, and asks the geocoder only once typing stops. |
 | ✅ **Ontology connections** | Keeps Relations, Mentions, Claim connectors and artifact lineage separate under one validated verb registry. |
 | ✅ **Board & entities** | Provides the sortable Case Board, shared Details, typed creation, primary entity photos and a ticked selection deleted as one recoverable act. |
@@ -143,7 +143,7 @@ proof for publication.
 | ✅ **Temporal Claims** | Dates a Claim with guided point, timestamp or interval input and files its subjects, places and evidence atomically. |
 | ✅ **Case Timeline** | Aligns dated statements and media on a windowed axis read in UTC or a civil zone, with uncertainty, density, direct edits and Undated work. |
 | ✅ **Timeline readings** | Builds coloured tracks from presets or Search+, then saves a changing Live view or a fixed Snapshot. |
-| ✅ **Shared analysis views** | Shares one filter, saved-view family and fact-time window between Board, Graph and Map, while Timeline keeps readings built for tracks. |
+| ✅ **Shared analysis views** | Shares one filter, saved-view family and fact-time window between Board and Graph, while Timeline keeps readings built for tracks and the Map only exchanges a window with them. |
 | ✅ **Analysis view export** | Writes the Graph or the Timeline out as a vector plate carrying its lens, question, window, clock and legend, or copies it as an image. |
 | ✅ **Case Sheet** | Opens and builds case CSVs in a plain grid: keyed rows, sorts, filters, row colour, clipboard both ways, bulk fill, undo, cells that point at case entities, and a reading handed out as CSV or Markdown. |
 | ✅ **Typed columns** | Types a column in the sidecar as a state, a list, a yes/no, a number, a point, a date or a picture, and lets the sort, the filters, the vocabulary, the map, the Timeline, the progress and the link check read it. |
@@ -155,20 +155,22 @@ proof for publication.
 | ✅ **Drawing on a proof** | Stamps a fixed set of marks, fills boxes and ellipses at a chosen opacity, keeps every shape tool in hand, and recolours, restyles, nudges, drags or deletes a picked family at once. |
 | ✅ **A proof of several points** | States every place a proof argues, each optionally named and one of them the camera's, files them as places under one title, and carries them into the tweet and onto the exported picture. |
 
-### v3 GEOINT expansion (unreleased)
+### v3 GEOINT expansion (shipped as GitHub `v0.3.0+`)
 
 | Tool | What it does |
 |------|--------------|
-| ✅ **Map engine** | Draws the map on MapLibre GL behind `lib/map`'s façade, at parity: same providers, same captures, same bearing, and the Google widget basemap kept alive under the map's own transparent canvas. |
-| ✅ **Composer hand-off** | Fills X's or Bluesky's own composer with a prepared thread: each post in its own box with its pictures, the thread button pressed between them, every box read back afterwards, and Post left to the analyst. |
-| ✅ **Extension update button** | The app owns the extension's folder, so an update is one click instead of a reinstall: it rewrites the files, the extension restarts and re-attaches to the open tab. Points the analyst at the copy to remove when two are loaded, and stages the write when a browser holds the old files. |
-| ✅ **Home** | Where the app opens, on the mark rather than a fifth rail seat. With a case it is a dashboard: what is outstanding as four tiles, the last work filed with the case's own thumbnails, the case's saved points on a map of their own — the app's engine, the keyless imagery, pan and zoom and nothing that writes — and the case by family in the Graph's own hues. The tiles are the Board's standing questions, so pressing one lands on exactly the rows it counted; a case holding nothing is offered the three ways material gets in instead. With no case it is the front door: what Azimut is, the rail as a sequence, and the first case named from the page. |
-| ✅ **Guide** | One section per workspace, between two that set up (what a case is, the capture extension) and three worked examples, and two that close: every key the app listens for, and what to do when something does not work. The `?` in the topbar opens it on the section written about the tab being stood in. Tests fail when a tool joins the rail undocumented, when a recipe names a tool that does not exist, and when a key is filed under a tab the app no longer has. |
-| ✅ **Extension map tools** | Measure, media pins, sun and moon, a search grid, and reference windows holding the case's own images and videos, drawn over the maps the extension rides on. Scale comes from what each site writes about itself, checked in a real browser first (`docs/MAP_SITES.md`); the first zoom measures where that site draws its centre, since five of them do not put it in the middle of the window; a pitched or panoramic camera switches geometry off with its reason shown, and a view zoomed out to a globe keeps drawing, dimmed, saying it drifts at the edges. A turned compass keeps its measurement — a scale is pixels per degree, and every reading undoes the bearing before it divides. |
-| ✅ **One case, every window on it** | A point saved, a grid drawn or a cell swept appears at once in the app, in a second app tab and in every map the panel is open on — no reload, no button. The app says what changed over its own nudge channel, the extension's worker holds one stream for all its panels, and each side re-reads only what the nudge names. A sweep worked from two places keeps both hands' marks: what travels is the cells that were marked, never a copy of the grid. |
-| ✅ **Engine hand-off** | A Reverse Search button opens the engine with the case picture already in its own uploader, so one press asks the question. Lens, Yandex, Bing and TinEye; the clipboard road stays underneath, for a missing extension and for a page that has moved its markup. |
-| ✅ **Signed Firefox add-on** | Firefox refuses an unsigned extension and forgets an unpacked one on exit, so it installs an AMO-signed XPI and updates itself from the manifest each release publishes. The extension reports how the browser installed it, so Settings tells the folder it owns apart from the package it cannot touch and offers no button that would rewrite sealed bytes. The browser owning that update costs two answers the app gives instead: it names a copy that is behind at once, offline, rather than waiting out the daily check, and names the one state it cannot cause — an add-on updated past the Azimut running beside it. |
-| ✅ **Map-site recalibration** | The gesture sequence that measured those sites is a command: it drives them again across two browsers, four windows and two browser zooms, and rebuilds the fixture both suites read (`docs/MAP_SITES.md`). |
+| ✅ **Map engine** | Draws the map on MapLibre GL behind the `lib/map` façade, with the same providers, captures and bearing. |
+| ✅ **Map chrome** | Puts modes in one rail, layers in the right panel, imagery in the map corner and position in a status line, each tool declared once. |
+| ✅ **Point menu** | Right-clicking the ground copies that point in every format, looks it up, saves, measures, reads the sky or opens its imagery history from it, and links it out. |
+| ✅ **Map windows** | Opens the map in several tabs with the view in the URL, links map tabs and extension panels on other sites to one camera, and syncs saved points, grids and sweeps live to every tab and extension panel. |
+| ✅ **Map layers** | Stacks key-less overlays (borders, roads, railways, power lines, sea marks, GPS traces), NASA FIRMS fires and VIIRS night lights for a chosen day, and filters drawn pins by kind and folder. |
+| ✅ **Imagery Wayback** | Browses every Esri World Imagery release, narrowed to the ones that changed the point, and dates the pixels apart from the release. |
+| ✅ **Capture scale & north** | Adds a scale bar and true-north needle to app and extension captures when resolution and heading are known. |
+| ✅ **Footprint tracing** | Traces a place's uncertainty as a polygon around its pin, in place of the radius. |
+| ✅ **Extension map tools** | Draws measure, media pins, sun and moon, search grids and case media over third-party maps, calibrated per site by a replayable command. |
+| ✅ **Extension updates** | Updates the unpacked extension in one click, installs a signed self-updating Firefox add-on, and flags a copy out of step with the app. |
+| ✅ **Site hand-offs** | Fills the X or Bluesky composer with a prepared thread and uploads a case picture straight into Lens, Yandex, Bing or TinEye. |
+| ✅ **Home & Guide** | Opens on a case dashboard or a front door when no case is open, and `?` opens the Guide on the current tab. |
 
 ---
 
@@ -184,25 +186,24 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 |------|--------------|
 | **3D map** | Pitch, public DEM terrain and extruded OSM buildings on the MapLibre map. An oblique capture records its pitch beside the bearing, so the view can be reproduced. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
-| **Capture scale and north** | Preference-controlled scale bar, north arrow and graticule on app and extension captures. |
-| **Footprint tracing** | Draws a place's uncertainty as the shape it really is, for a quay, a treeline or an L-shaped block the circle describes badly. The field, its validation and its drawing already ship; only the gesture is missing. |
+| **Capture graticule** | The rest of what a plate states about itself: a latitude/longitude grid over app and extension captures, beside the scale bar and north arrow that already ship. |
 | **Satellite Compare** | Same coords across providers (Esri / Sentinel-2 date slider / Bing / keyed), synced pan/zoom. Copernicus easy link. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
+| **Georeferenced overlay** | Pins an image to the ground by three or four matching points: a commercial satellite shot from a post, a drone frame, an old plan. It draws under the map's own marks with an opacity slider, reprojects as the map pans, and is saved in the case with its control points so the fit can be checked. |
 | **Metadata follow-up** | Explains which common image/video fields were stripped and proposes events from capture times. |
 | **Edit Provenance** | Reads a rendered video's own edit history: which source clips it was cut from, in what order, and the GPS, dates and cameras those clips still carry. |
 | **Sky sessions** | Saves a sun or moon lookup as a case artifact: the point, the date and the time, never the numbers they produce. It reopens where it was left, a proof can show its reading, and a statement can cite it. |
 | **Grid sessions in the graph** | Brings the saved AOI grids into the case as entities, adopting the specs already on disk. Grid Search is the last saved tool state living outside the graph, so today nothing can say "this sweep is how I found it". |
 | **Sky Clock** | Marks a shadow, the sun or the moon in an image or a video frame, with the horizon and north giving the angles, then renders the year as a day × hour heatmap of the slots that fit. A visible moon also carries phase and bright-limb angle, which usually cuts a year down to a few instants. |
 | **Case KMZ** | One self-contained file per case: a pin per place, carrying the notes and proof images it is linked to, opened in Google Earth. Frozen rather than live, because only the web Earth remains and it follows no network link. |
-| **Imagery Wayback** | Esri World Imagery archive as a date slider: one view across every published release, key-less. |
-| **Event layers** | Date-stamped overlays that support or contradict an event: NASA FIRMS thermal hotspots (the live pass and the archive back to 2000, each sensor's real reach asked rather than assumed), archived weather and METAR. |
+| **Event layers** | The rest of what dates an event from the sky: archived weather and METAR, beside the fire detections that already ship. |
 | **Shot contact sheet** | Splits a video into shots (ffmpeg scene detection) and picks frames from a clickable grid of timecodes. |
 | **OCR** | Reads signs and plates on import (tesseract, a native binary rather than a wheel), and detects script and language. |
 | **Audio Transcript** | Transcribe and translate speech offline; flag acoustic context such as bells, adhan, aircraft or language. |
 | **Ground Imagery** | Ground-level photos: Panoramax/Mapillary/KartaView key-less first; Street View easy link, optional keyed in-app view. |
 | **Panorama** | Stitch a video window / frame set. Auto-stitch already in Inspect; still to do: sample a video window directly, seam blending. |
 | **Proof annotation** | Grow the Geo Proof toolbox: dashed strokes, numbered markers, a redaction/blur box; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
-| **Detached tool windows** | Opens a tool in its own browser window for a second screen, greyed out in the tab it left and taken back when that window closes. Cross-tool handoffs route to wherever the tool now lives, and the open case follows every window. Read surfaces open as many copies as wanted; the document editors allow one window per document. |
+| **Detached tool windows** | The rule the map already follows, applied to the rest: a read-and-work surface (Board, Graph, Timeline) opens as many tabs as wanted and the tab it left stays live; a document editor opens one window per document and is greyed out where it was. Cross-tool handoffs route to wherever the tool now lives. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
 
 Edit Provenance rests on three facts about Adobe renders, kept here so the tool
@@ -289,7 +290,6 @@ stops making sense.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
 - **More on the home page:** the case's own notes beside the tiles, and panels the analyst arranges rather than a fixed grid. Each has to earn its place there rather than beside Board, Graph and Timeline, which already read the case.
-- **A stack of map overlays:** one toggle per transparent layer instead of the single labels slot, OpenRailwayMap first. A capture stitches one provider, so an overlay stays screen-only until that changes.
 - **A deleted case waits before it is gone:** artifacts, entities and bulk deletes are all recoverable, while removing a case is the one act with no way back and only a typed DELETE in front of it. Move the folder aside instead, and empty it later.
 
 ## 8. Explicit non-goals

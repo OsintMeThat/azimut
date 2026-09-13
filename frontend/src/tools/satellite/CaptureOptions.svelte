@@ -20,6 +20,7 @@
     customWidth = $bindable(),
     customHeight = $bindable(),
     resolution = $bindable(),
+    scaleNorth = $bindable(),
     openScreenshot,
     openExtensionGate,
   } = $props();
@@ -157,6 +158,12 @@
           </div>
           <div class="menu-hint">Captures a deeper zoom for a sharper file.</div>
         {/if}
+
+        <label class="menu-check">
+          <input type="checkbox" bind:checked={scaleNorth} />
+          <span>Scale bar & north arrow</span>
+        </label>
+        <div class="menu-hint last">Drawn into the capture, in your units.</div>
       </div>
     {/if}
   </div>
@@ -229,5 +236,19 @@
   .chip:hover { border-color: var(--border-strong); color: var(--text-1); }
   .chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
   .menu-hint { font-size: 10px; color: var(--text-3); margin: -1px 0 5px; }
+  .menu-hint.last { margin-bottom: 0; }
+  /* The one setting here that outlives the session, so it reads as a switch
+     rather than as one more chip to pick from. */
+  .menu-check {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding-top: 7px;
+    border-top: 1px solid var(--border);
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .menu-check input { accent-color: var(--accent); cursor: pointer; }
   .menu-row + .custom-size { justify-content: flex-end; padding: 2px 0; }
 </style>

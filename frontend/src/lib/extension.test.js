@@ -4,7 +4,7 @@
 // source with a stubbed `chrome` global and exercises the internals it returns.
 // This keeps the extension test-covered from the existing frontend harness
 // instead of a second npm project inside extension/.
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -75,7 +75,7 @@ function load({ chrome = makeChrome(), fetchImpl, imageBitmap, canvasLog } = {})
     'createImageBitmap',
     'OffscreenCanvas',
     'btoa',
-    `${source}\n;return { cropDataUrl, ingest, handle, settings, handOff, handOffReverse, loadedStamp, reattachBridge, frameEvent, panels, pumpEvents, stopEvents };`
+    `${source}\n;return { cropDataUrl, ingest, handle, settings, handOff, handOffReverse, loadedStamp, reattachBridge, frameEvent, panels, pumpEvents, stopEvents, resumeFollow };`
   );
   return factory(
     chrome,
@@ -98,10 +98,18 @@ describe('cropDataUrl', () => {
   it('scales the CSS-px rect by the measured image/viewport ratio', async () => {
     const { cropDataUrl } = load({ fetchImpl, canvasLog });
     // image 2000 px wide over a 1000 px viewport → scale 2
-    const blob = await cropDataUrl('data:x', { x: 10, y: 20, w: 100, h: 50 }, 1000);
+    const { blob } = await cropDataUrl('data:x', { x: 10, y: 20, w: 100, h: 50 }, 1000);
     expect(blob.type).toBe('image/png');
     expect(canvasLog).toContainEqual({ canvas: [200, 100] });
     expect(canvasLog).toContainEqual({ drawImage: [20, 40, 200, 100, 0, 0, 200, 100] });
+  });
+
+  it('hands back the ratio it measured, since a scale bar is drawn from it', async () => {
+    // the crop keeps the frame's own pixels, and a zoom describes CSS pixels:
+    // without this the app would state twice the ground a 2× screen covers
+    const { cropDataUrl } = load({ fetchImpl, canvasLog });
+    const { scale } = await cropDataUrl('data:x', { x: 10, y: 20, w: 100, h: 50 }, 1000);
+    expect(scale).toBe(2);
   });
 
   it('clamps the crop to the captured frame', async () => {
@@ -832,5 +840,299 @@ describe('the nudge stream', () => {
     for (const cb of p.messages) cb({ type: 'watch' });
     await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(2));
     w.leave(p);
+  });
+});
+
+describe('linked views: the hub', () => {
+  /**
+   * Panels on sites' maps and the app's map tabs, all on one camera. The worker
+   * is the hub because a panel cannot hear the app's BroadcastChannel from
+   * another origin — and because following a view reloads most sites, which
+   * takes the panel with it, so which tabs are linked has to live here.
+   */
+  const APP = 'http://127.0.0.1:8477/#satellite';
+  const MAP = 'https://www.google.com/maps/@1,2,15z';
+  const VIEW = { lat: 48.85, lon: 2.29, zoom: 17, bearing: 0 };
+
+  function port(tabId, url = MAP, name = 'map-link') {
+    const p = {
+      name,
+      sender: { tab: { id: tabId, url } },
+      heard: [],
+      listeners: [],
+      gone: [],
+      onMessage: { addListener: (cb) => p.listeners.push(cb) },
+      onDisconnect: { addListener: (cb) => p.gone.push(cb) },
+      postMessage: vi.fn((msg) => p.heard.push(msg)),
+      disconnect: vi.fn(),
+    };
+    return p;
+  }
+
+  // microtasks only, so it works the same under a faked clock
+  const flush = async () => {
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  };
+
+  function hub(chrome = makeChrome()) {
+    const worker = load({ chrome });
+    const listeners = chrome.runtime.onConnect.addListener.mock.calls.map((call) => call[0]);
+    return {
+      ...worker,
+      chrome,
+      async connect(p) {
+        for (const cb of listeners) cb(p);
+        await flush();
+        return p;
+      },
+      async say(p, msg) {
+        for (const cb of p.listeners) cb(msg);
+        await flush();
+      },
+      leave(p) {
+        for (const cb of p.gone) cb();
+      },
+    };
+  }
+
+  const last = (p, type) => p.heard.filter((m) => m.type === type).at(-1);
+
+  it('tells a panel whether it is linked, and how many others it could link to', async () => {
+    const h = hub();
+    const a = await h.connect(port(1));
+    expect(last(a, 'link-state')).toEqual({ type: 'link-state', linked: false, asked: null });
+    expect(last(a, 'link-peers').count).toBe(0);
+    const b = await h.connect(port(2));
+    expect(last(a, 'link-peers').count).toBe(1);
+    expect(last(b, 'link-peers').count).toBe(1);
+  });
+
+  it('counts only panels for an app tab, which hears its own tabs on its channel', async () => {
+    const h = hub();
+    const app = await h.connect(port(9, APP));
+    const other = await h.connect(port(10, APP));
+    expect(last(app, 'link-peers').count).toBe(0);
+    const a = await h.connect(port(1));
+    expect(last(app, 'link-peers').count).toBe(1);
+    expect(last(other, 'link-peers').count).toBe(1);
+    expect(last(a, 'link-peers').count).toBe(2);
+    // …and an app tab is never told whether it is linked: that is the app's
+    expect(app.heard.some((m) => m.type === 'link-state')).toBe(false);
+  });
+
+  it('writes the link down for the session, since a worker can be evicted between gestures', async () => {
+    const h = hub();
+    const a = await h.connect(port(1));
+    await h.say(a, { type: 'link', on: true });
+    expect(last(a, 'link-state').linked).toBe(true);
+    expect(h.chrome.storage.session.set).toHaveBeenLastCalledWith({
+      mapLink: { linked: [1], following: {} },
+    });
+  });
+
+  it('reads it back after a restart', async () => {
+    const chrome = makeChrome();
+    chrome.storage.session.get = vi.fn(async () => ({ mapLink: { linked: [1], following: {} } }));
+    const h = hub(chrome);
+    const a = await h.connect(port(1));
+    expect(last(a, 'link-state').linked).toBe(true);
+  });
+
+  it('hands a linked panel’s camera to the other linked panels and the app, and to nobody else', async () => {
+    const h = hub();
+    const a = await h.connect(port(1));
+    const b = await h.connect(port(2));
+    const idle = await h.connect(port(3));
+    const app = await h.connect(port(9, APP));
+    await h.say(a, { type: 'link', on: true });
+    await h.say(b, { type: 'link', on: true });
+    await h.say(a, { type: 'view', view: VIEW });
+    expect(last(b, 'view')).toEqual({ type: 'view', view: VIEW });
+    expect(last(app, 'view')).toEqual({ type: 'view', view: VIEW });
+    expect(last(idle, 'view')).toBeUndefined();
+    expect(last(a, 'view')).toBeUndefined();
+  });
+
+  it('drops a camera from a panel that is not linked', async () => {
+    const h = hub();
+    const a = await h.connect(port(1));
+    const app = await h.connect(port(9, APP));
+    await h.say(a, { type: 'view', view: VIEW });
+    expect(last(app, 'view')).toBeUndefined();
+  });
+
+  it('hands an app tab’s camera to the linked panels only', async () => {
+    const h = hub();
+    const a = await h.connect(port(1));
+    const app = await h.connect(port(9, APP));
+    const other = await h.connect(port(10, APP));
+    await h.say(a, { type: 'link', on: true });
+    await h.say(app, { type: 'view', view: VIEW });
+    expect(last(a, 'view')).toEqual({ type: 'view', view: VIEW });
+    expect(last(other, 'view')).toBeUndefined();
+  });
+
+  it('carries the four numbers of a camera and nothing else', async () => {
+    const h = hub();
+    const a = await h.connect(port(1));
+    const b = await h.connect(port(2));
+    await h.say(a, { type: 'link', on: true });
+    await h.say(b, { type: 'link', on: true });
+    await h.say(a, { type: 'view', view: { ...VIEW, extra: '<script>' } });
+    expect(last(b, 'view').view).toEqual(VIEW);
+    await h.say(a, { type: 'view', view: { lat: 200, lon: 2, zoom: 3 } });
+    expect(b.heard.filter((m) => m.type === 'view')).toHaveLength(1);
+  });
+
+  it('keeps counting a tab that left to follow a view, and tells it where it was sent', async () => {
+    const h = hub();
+    const a = await h.connect(port(1));
+    const b = await h.connect(port(2));
+    await h.say(b, { type: 'link', on: true });
+    await h.say(b, { type: 'follow', view: VIEW });
+    h.leave(b); // the site reloads
+    expect(last(a, 'link-peers').count).toBe(1);
+    const back = await h.connect(port(2));
+    expect(last(back, 'link-state')).toEqual({ type: 'link-state', linked: true, asked: VIEW });
+  });
+
+  it('stops waiting once the wait runs out', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = hub();
+      const a = await h.connect(port(1));
+      const b = await h.connect(port(2));
+      await h.say(b, { type: 'follow', view: VIEW });
+      h.leave(b);
+      expect(last(a, 'link-peers').count).toBe(1);
+      await vi.advanceTimersByTimeAsync(31000);
+      expect(last(a, 'link-peers').count).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hands a tab back the last camera the analyst moved to while it was reloading', async () => {
+    // the map being led does not wait for its followers: every camera sent while
+    // one was loading used to be dropped, and it stayed on the first
+    const h = hub();
+    const a = await h.connect(port(1));
+    const b = await h.connect(port(2));
+    await h.say(a, { type: 'link', on: true });
+    await h.say(b, { type: 'link', on: true });
+    await h.say(b, { type: 'follow', view: VIEW });
+    h.leave(b);
+    await h.say(a, { type: 'view', view: { ...VIEW, lat: 48.9 } });
+    await h.say(a, { type: 'view', view: { ...VIEW, lat: 49 } });
+    const back = await h.connect(port(2));
+    expect(back.heard.filter((m) => m.type === 'view')).toEqual([{ type: 'view', view: { ...VIEW, lat: 49 } }]);
+    // …once
+    const again = await h.connect(port(2));
+    expect(again.heard.some((m) => m.type === 'view')).toBe(false);
+  });
+
+  it('holds nothing for a tab that switched its link off', async () => {
+    const h = hub();
+    const a = await h.connect(port(1));
+    const b = await h.connect(port(2));
+    await h.say(a, { type: 'link', on: true });
+    await h.say(b, { type: 'link', on: true });
+    await h.say(b, { type: 'follow', view: VIEW });
+    await h.say(b, { type: 'link', on: false });
+    h.leave(b);
+    expect(last(a, 'link-peers').count).toBe(0);
+  });
+
+  it('forgets a follow that a site took in its hash without reloading', async () => {
+    const h = hub();
+    const a = await h.connect(port(1));
+    const b = await h.connect(port(2));
+    await h.say(b, { type: 'follow', view: VIEW });
+    await h.say(b, { type: 'landed' });
+    h.leave(b);
+    expect(last(a, 'link-peers').count).toBe(0);
+  });
+
+  describe('putting the tools back after a reload', () => {
+    async function following(chrome) {
+      const h = hub(chrome);
+      const b = await h.connect(port(2));
+      await h.say(b, { type: 'link', on: true });
+      await h.say(b, { type: 'follow', view: VIEW });
+      h.leave(b);
+      return h;
+    }
+
+    it('injects the panel into a tab that reloaded on its way to a view', async () => {
+      const chrome = makeChrome();
+      chrome.scripting.executeScript = vi.fn(async ({ func }) => (func ? [{ result: false }] : []));
+      const h = await following(chrome);
+      await h.resumeFollow(2);
+      // the bridge is re-attached to the app's own tabs on every worker start
+      const files = chrome.scripting.executeScript.mock.calls
+        .map((c) => c[0].files)
+        .filter((f) => f?.includes('mapoverlay.js'));
+      expect(files).toHaveLength(1);
+      expect(files[0].at(-1)).toBe('mapoverlay.js');
+      expect(files[0]).toContain('maplink.js');
+    });
+
+    it('leaves a panel that is still there alone, since injecting it again closes it', async () => {
+      const chrome = makeChrome();
+      chrome.scripting.executeScript = vi.fn(async ({ func }) => (func ? [{ result: true }] : []));
+      const h = await following(chrome);
+      await h.resumeFollow(2);
+      expect(chrome.scripting.executeScript.mock.calls.some((c) => c[0].files?.includes('mapoverlay.js'))).toBe(
+        false
+      );
+    });
+
+    it('touches no tab that did not leave to follow a view', async () => {
+      const chrome = makeChrome();
+      const h = hub(chrome);
+      await h.resumeFollow(5);
+      expect(chrome.scripting.executeScript.mock.calls.some((c) => c[0].target.tabId === 5)).toBe(false);
+    });
+
+    it('tries again when a page that said it was loaded was still swapping documents', async () => {
+      vi.useFakeTimers();
+      try {
+        const chrome = makeChrome();
+        let refusals = 1;
+        chrome.scripting.executeScript = vi.fn(async ({ func }) => {
+          if (func && refusals-- > 0) throw new Error('Frame with ID 0 was removed');
+          return func ? [{ result: false }] : [];
+        });
+        const h = await following(chrome);
+        await h.resumeFollow(2);
+        await vi.advanceTimersByTimeAsync(1100);
+        const files = chrome.scripting.executeScript.mock.calls.filter((c) => c[0].files?.includes('mapoverlay.js'));
+        expect(files).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('unlinks a tab the browser will not put the tools back on, and says so', async () => {
+      vi.useFakeTimers();
+      onTestFinished(() => vi.useRealTimers());
+      const chrome = makeChrome();
+      chrome.scripting.executeScript = vi.fn(async () => {
+        throw new Error('Cannot access contents of the page');
+      });
+      const h = hub(chrome);
+      const a = await h.connect(port(1));
+      const b = await h.connect(port(2));
+      await h.say(b, { type: 'link', on: true });
+      await h.say(b, { type: 'follow', view: VIEW });
+      h.leave(b);
+      await h.resumeFollow(2);
+      await vi.advanceTimersByTimeAsync(2500); // every try refused
+      vi.useRealTimers();
+      expect(last(a, 'link-note').note).toContain('kept its tools off');
+      expect(last(a, 'link-peers').count).toBe(0);
+      const back = await h.connect(port(2));
+      expect(last(back, 'link-state').linked).toBe(false);
+    });
   });
 });

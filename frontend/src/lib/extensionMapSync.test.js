@@ -26,7 +26,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const read = (name) => readFileSync(join(here, `../../../extension/${name}`), 'utf8');
 
 /** The files the panel is injected with, in the order the worker injects them. */
-const PARTS = ['mapmath.js', 'maptheme.js', 'maptools.js', 'mapdraw.js', 'mapref.js'];
+const PARTS = ['mapmath.js', 'maptheme.js', 'maptools.js', 'mapdraw.js', 'mapref.js', 'maplink.js'];
 
 const CASE = 'case-1';
 const OTHER = 'case-2';
@@ -98,6 +98,7 @@ function open({ answers } = {}) {
   };
 
   const ports = [];
+  const links = []; // the linked-views port (extensionMapLink.test.js covers it)
   const api = {
     storage: {
       local: { get: vi.fn(async (defaults) => ({ ...defaults })), set: vi.fn() },
@@ -121,7 +122,7 @@ function open({ answers } = {}) {
           postMessage: vi.fn((msg) => port.heard.push(msg)),
           disconnect: vi.fn(() => (port.gone = true)),
         };
-        ports.push(port);
+        (info.name === 'map-sync' ? ports : links).push(port);
         return port;
       }),
     },
@@ -313,5 +314,37 @@ describe('an open sweep', () => {
     panel.nudge({ type: 'grid', case_id: CASE, name: 'hillside', revision: 1 });
     await settle(50);
     expect(panel.asks()).not.toContain('/api/ingest/grids');
+  });
+});
+
+describe('the beta badge', () => {
+  const badge = () =>
+    document.getElementById('azimut-map-tools').shadowRoot.querySelector('header .beta');
+
+  it('marks Google Earth, where the tools drift the most', async () => {
+    panel = open({
+      answers: {
+        '/api/ingest/parse': {
+          site: 'google-earth',
+          label: 'Google Earth',
+          lat: 50.45,
+          lon: 30.52,
+          zoom: 17,
+          bearing: 0,
+          projection: 'webmercator',
+          view_kind: 'satellite',
+          geometry: true,
+          scale_source: 'distance',
+        },
+      },
+    });
+    await settle();
+    await vi.waitFor(() => expect(badge()?.textContent).toBe('Beta'));
+  });
+
+  it('stays off every other map', async () => {
+    panel = open();
+    await settle();
+    expect(badge()).toBeNull();
   });
 });

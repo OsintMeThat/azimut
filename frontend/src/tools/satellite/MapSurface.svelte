@@ -24,19 +24,25 @@
    */
   import { onMount, tick } from 'svelte';
   import { createMapEngine } from '../../lib/map/engine.js';
-  import { createBasemaps } from '../../lib/map/basemap.js';
+  import { createBasemaps, OVERLAY_IDS } from '../../lib/map/basemap.js';
   import { DEFAULT_LAYER, DEFAULT_MAXCC, SENTINEL_ID } from '../../lib/sentinel.js';
   import Icon from '../../components/Icon.svelte';
+  import ImageryChip from './ImageryChip.svelte';
 
   let {
     /** The shared catalogue + meter (state/imagery.svelte.js). */
     imagery,
-    /** The basemap this surface is asked to show. */
-    providerId,
+    /** The basemap this surface is asked to show. Changed from its own chip:
+     *  which picture is on screen is the surface's, not the tool's. */
+    providerId = $bindable(),
     /** This surface's Sentinel-2 choices, when that basemap is on it. */
     s2 = null,
-    /** Labels laid over the imagery. Only ever meaningful over a satellite base. */
-    labels = false,
+    /** This surface's Wayback release (state/wayback.svelte.js), likewise. */
+    wayback = null,
+    /** What is laid over the imagery: an id (`OVERLAY_IDS`), or `{ id, params }`
+     *  for one whose address is a question — FIRMS's sensor and window. The
+     *  tool decides which are offered; the surface only puts them on. */
+    overlays = [],
     /** Scale bar in miles rather than metres. */
     imperial = false,
     /** The view the map opens on. Read once, at build. */
@@ -51,12 +57,17 @@
     ready = $bindable(false),
     refused = $bindable(false),
     /** A mode armed above the map, which the cursor says: 'measuring' |
-     *  'selecting' | 'grid-drawing' | null. */
+     *  'selecting' | 'grid-drawing' | 'tracing' | null. */
     armed = null,
     /** Hide this surface's own chrome for a screen capture. */
     grabbing = false,
+    /** How far down the engine's zoom buttons start, so they stack under
+     *  whatever the tool floats in the same corner (see `engine.css`). */
+    controlsTop = 58,
     /** A click on the map, `{ lat, lon }`. */
     onclick = () => {},
+    /** A right-click on the ground, `{ lat, lon, x, y }` in this surface's pixels. */
+    oncontextmenu = () => {},
     /** Metered tiles went out. The proxy counted them; the tally is just stale. */
     onusage = () => {},
     /** A widget basemap was built, which is one billed map load. Nothing but
@@ -82,7 +93,12 @@
    * view is zoomed out. The capture and the imagery date follow the display,
    * so provenance always matches the pixels.
    */
-  const shown = $derived(imagery.displayed(providerId, view.zoom, s2?.variant));
+  const shown = $derived(
+    imagery.displayed(providerId, view.zoom, {
+      ...(s2?.variant ?? {}),
+      release: wayback?.release ?? null,
+    })
+  );
 
   /** A pinned Sentinel-2 day *is* the acquisition date — the one provider that
    *  can answer "when was this taken?" without being asked. */
@@ -138,7 +154,7 @@
       onWidgetFailed: onwidgetfailed,
     });
     showBasemap();
-    basemaps.setLabels(labels);
+    showOverlays();
     // the façade wraps the centre back inside ±180 for us, which is what every
     // route a capture reaches enforces
     const offSettled = engine.on('view-settled', (settled) => {
@@ -148,11 +164,13 @@
       bearing = Math.round(turned.bearing);
     });
     const offClick = engine.on('click', (at) => onclick(at));
+    const offMenu = engine.on('contextmenu', (at) => oncontextmenu(at));
     ready = true;
     return () => {
       offSettled();
       offRotate();
       offClick();
+      offMenu();
       basemaps.dispose();
       engine.destroy();
       engine = null;
@@ -172,11 +190,22 @@
     showBasemap();
   });
 
+  function showOverlays() {
+    const asked = new Map(
+      overlays.map((entry) =>
+        typeof entry === 'string' ? [entry, null] : [entry.id, entry.params ?? null]
+      )
+    );
+    for (const id of OVERLAY_IDS) basemaps.setOverlay(id, asked.has(id), asked.get(id));
+  }
+
   $effect(() => {
-    const on = labels; // read before the guard: `basemaps?.` short-circuits away
-    // the dependency while the map is still being built, and the toggle then
-    // never reaches the layers again (build() applies the opening state).
-    if (basemaps) basemaps.setLabels(on);
+    // Read whole, before the guard, and deeply: `basemaps?.` would short-circuit
+    // the dependency away while the map is still being built, and a toggle would
+    // then never reach the layers again (build() applies the opening state). A
+    // layer that carries a question re-reads when the question changes.
+    JSON.stringify(overlays);
+    if (basemaps) showOverlays();
   });
 
   // debounce: the target moves a lot while panning — only ask once it settles
@@ -229,7 +258,9 @@
   class:measuring={armed === 'measuring'}
   class:selecting={armed === 'selecting'}
   class:grid-drawing={armed === 'grid-drawing'}
+  class:tracing={armed === 'tracing'}
   class:grabbing
+  style:--map-controls-top={`${controlsTop}px`}
 >
   <div class="map" bind:this={mapEl}></div>
 
@@ -239,8 +270,16 @@
 
   {@render children?.()}
 
-  <!-- imagery acquisition date: a compact, unobtrusive pill in the corner so it
-       doesn't crowd the tool's own readouts -->
+  <!-- The picture this surface is showing, when it was taken, and the compass
+       reading how it is turned: all facts about this map and belonging to it,
+       which is what lets two surfaces sit side by side each saying its own. -->
+  <div class="surface-ctl">
+    <ImageryChip {imagery} bind:providerId {s2} {wayback} {shown} />
+
+  <!-- …and when the pixels under the crosshair were taken. Under the provider
+       rather than in the opposite corner: it describes that same picture, and
+       the corner it used to sit in is the instrument's, where the scale bracket
+       reads. -->
   {#if s2 && shown.provider?.id === SENTINEL_ID}
     <!-- Sentinel-2 says what it is showing: a pinned day is the window the tiles
          were rendered from; otherwise the layer's default renders the most
@@ -280,20 +319,27 @@
     </span>
   {/if}
 
-  <!-- lightweight compass: click the rose to reset north; middle-drag the map to
-       rotate; click the number to type an exact bearing -->
-  <div class="rotate-ctl">
+    <!-- Which way is up, as one reading: the needle resets north, the number
+         opens for an exact angle. Middle-dragging the map is what turns it. -->
+    <div class="rotate-ctl" class:turned={bearing !== 0}>
     <button
       class="compass"
       onclick={() => setBearing(0)}
       title={bearing ? 'Reset to north' : 'North up · middle-drag the map to rotate'}
       aria-label="Reset to north"
     >
-      <svg width="30" height="30" viewBox="0 0 34 34" style="transform: rotate({bearing}deg)">
-        <polygon points="17,4 13,18 17,15 21,18" fill="#e5484d" />
-        <polygon points="17,30 13,16 17,19 21,16" fill="#8a93a5" />
+      <svg width="15" height="15" viewBox="0 0 16 16" style="transform: rotate({bearing}deg)">
+        <!-- A needle, not a rose: the outline is the whole instrument and the
+             filled half is north. Two colours and a disc read as decoration. -->
+        <path
+          d="M8 1.6 11.7 14 8 10.9 4.3 14Z"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.3"
+          stroke-linejoin="round"
+        />
+        <path d="M8 1.6 11.7 14 8 10.9Z" fill="currentColor" />
       </svg>
-      <span class="n">N</span>
     </button>
     {#if editingBearing}
       <!-- svelte-ignore a11y_autofocus -->
@@ -316,6 +362,7 @@
         {bearing}°
       </button>
     {/if}
+    </div>
   </div>
 </div>
 
@@ -359,15 +406,12 @@
   }
   .map-wrap.measuring :global(.map-surface),
   .map-wrap.selecting :global(.map-surface),
-  .map-wrap.grid-drawing :global(.map-surface) {
+  .map-wrap.grid-drawing :global(.map-surface),
+  .map-wrap.tracing :global(.map-surface) {
     cursor: crosshair;
   }
-  /* imagery date: small, low-contrast pill tucked into the bottom-left corner */
+  /* imagery date: small, low-contrast pill riding under the provider it dates */
   .date-pill {
-    position: absolute;
-    bottom: 12px;
-    left: 12px;
-    z-index: 600;
     display: flex;
     align-items: center;
     gap: 5px;
@@ -377,12 +421,13 @@
     color: var(--text-3);
     background: rgba(24, 24, 24, 0.7);
     backdrop-filter: blur(6px);
-    pointer-events: none;
+    box-shadow: 0 0 0 1px var(--border);
   }
   /* a pinned date is a fact about the pixels; "latest" is an inference from the
      pass list — they must not look identical */
   .date-pill.exact {
-    border-color: var(--ok, #46a758);
+    color: var(--text-2);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--ok, #46a758) 55%, transparent);
   }
   .date-pill .tag {
     font-family: var(--font-sans);
@@ -398,58 +443,57 @@
     color: var(--accent);
     border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   }
-  /* lightweight compass — no heavy card, just the rose + an editable readout */
-  .rotate-ctl {
+  /* the surface's own corner: what it is showing, then how it is turned */
+  .surface-ctl {
     position: absolute;
     top: 12px;
     right: 12px;
     z-index: 600;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 4px;
+    align-items: flex-end;
+    gap: 8px;
+    /* the column is only as wide as its widest control, so the map stays
+       grabbable everywhere the controls are not */
+    pointer-events: none;
   }
-  .compass {
-    position: relative;
-    display: grid;
-    place-items: center;
-    width: 38px;
-    height: 38px;
-    color: var(--text-2);
-    cursor: pointer;
-    /* round translucent backing disc so the rose reads clearly over any
-       imagery — same fill as the degree readout below (item 3) */
-    border-radius: 50%;
+  .surface-ctl > :global(*) {
+    pointer-events: auto;
+  }
+  /* The needle and its angle are one reading, so they are one control, built
+     like the chips above it: same fill, same 1px ring, same height. The disc
+     and the two-tone rose it replaces read as an ornament on an instrument
+     panel, and were the only round thing on the map. */
+  .rotate-ctl {
+    display: flex;
+    align-items: stretch;
+    height: 30px;
+    border-radius: var(--radius-1);
     background: rgba(24, 24, 24, 0.88);
     backdrop-filter: blur(6px);
-    box-shadow: var(--shadow-1);
+    box-shadow: 0 0 0 1px var(--border);
+  }
+  /* north-up is the resting state and says nothing; a turned map is a fact
+     worth seeing from across the screen */
+  .rotate-ctl.turned {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+  .compass {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    color: var(--text-2);
+    cursor: pointer;
   }
   .compass:hover {
     color: var(--accent);
   }
-  .compass svg {
-    transition: transform 0.1s linear;
-  }
-  .compass .n {
-    position: absolute;
-    top: 1px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 9px;
-    font-weight: 700;
-    color: var(--text-1);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
-    pointer-events: none;
-  }
   .deg {
-    min-width: 40px;
-    text-align: center;
-    padding: 2px 6px;
-    border-radius: var(--radius-1);
+    min-width: 42px;
+    padding: 0 7px 0 5px;
+    text-align: left;
     font-size: var(--fs-xs);
     color: var(--text-1);
-    background: rgba(24, 24, 24, 0.88);
-    backdrop-filter: blur(6px);
     cursor: text;
   }
   .deg:hover {
@@ -457,7 +501,9 @@
   }
   .deg-input {
     width: 52px;
-    padding: 2px 4px;
-    text-align: center;
+    padding: 0 4px;
+    border: none;
+    background: none;
+    text-align: left;
     font-size: var(--fs-xs);
   }</style>

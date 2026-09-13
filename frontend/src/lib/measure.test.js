@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  containsPoint,
   haversine,
   pathLength,
   polygonArea,
@@ -150,5 +151,40 @@ describe('destination', () => {
     const east = destination({ lat: 0, lon: 179.9 }, 90, 40000);
     expect(east.lon).toBeLessThan(0);
     expect(east.lon).toBeGreaterThan(-180);
+  });
+});
+
+describe('containsPoint', () => {
+  // A traced footprint and the pin it belongs to: the shape has to hold the point,
+  // or the place claims an area it does not sit in.
+  const quay = [
+    { lat: 53.43, lon: 14.54 },
+    { lat: 53.43, lon: 14.56 },
+    { lat: 53.45, lon: 14.56 },
+    { lat: 53.45, lon: 14.54 },
+  ];
+
+  it('holds a point inside the ring and refuses one outside it', () => {
+    expect(containsPoint(quay, { lat: 53.44, lon: 14.55 })).toBe(true);
+    expect(containsPoint(quay, { lat: 53.5, lon: 14.6 })).toBe(false);
+  });
+
+  it('reads a concave shape as drawn rather than as its bounding box', () => {
+    // an L: the notch is inside the box and outside the shape
+    const bay = [
+      { lat: 0, lon: 0 },
+      { lat: 0, lon: 4 },
+      { lat: 2, lon: 4 },
+      { lat: 2, lon: 2 },
+      { lat: 4, lon: 2 },
+      { lat: 4, lon: 0 },
+    ];
+    expect(containsPoint(bay, { lat: 1, lon: 1 })).toBe(true);
+    expect(containsPoint(bay, { lat: 3, lon: 3 })).toBe(false);
+  });
+
+  it('is nothing at all without an area or a point', () => {
+    expect(containsPoint(quay.slice(0, 2), { lat: 53.44, lon: 14.55 })).toBe(false);
+    expect(containsPoint(quay, null)).toBe(false);
   });
 });

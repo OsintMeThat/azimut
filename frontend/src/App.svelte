@@ -22,6 +22,7 @@
     workspaceOf,
     toolFromHash,
   } from './lib/workspaces.js';
+  import { readSolo, splitHash } from './lib/hash.js';
   import { guideFor } from './lib/guide.js';
   import { openGuide } from './lib/navigate.js';
   import { createToolLoader } from './lib/toolLoader.js';
@@ -81,9 +82,32 @@
   // (#compose, #compose/post) — see lib/workspaces.js
   const fromHash = toolFromHash(location.hash, TOOL_IDS);
   if (fromHash) uiState.tool = fromHash;
+  // The app owns the route; a tool may keep its own state in the query after it
+  // (the map writes the view its window is on, lib/map/view.js). So this writes
+  // only when the route is not already the open tool — otherwise switching back
+  // and forth would wipe what that tool had put there.
   $effect(() => {
+    if (splitHash(location.hash).route === uiState.tool) return;
     history.replaceState(null, '', `#${uiState.tool}`);
   });
+  /**
+   * A tab opened to hold one tool and nothing else (`lib/hash.js`).
+   *
+   * Read once, at load, because it describes the tab rather than a state the
+   * app moves through: the way out of it is the address, which is the same way
+   * in. Everything it takes away belongs to getting *somewhere else* — the
+   * workspace rail, the case bar, the tab strip, the case sidebar — and a
+   * second screen showing one map is already somewhere.
+   */
+  const solo = readSolo(splitHash(location.hash).params);
+  // Map windows are numbered per window, and the one that opened the app is the
+  // first: a window that was detached carries its own number in the address and
+  // leaves the count alone (tools/Satellite.svelte).
+  if (!splitHash(location.hash).params.has('w')) {
+    try {
+      localStorage.setItem('azimut:mapWindows', '1');
+    } catch { /* a locked-down profile only loses the numbering */ }
+  }
 
   // A frozen reading belongs to the surface that captured it. Carrying a Graph
   // snapshot into Board made the capture look like an incomplete second case and
@@ -196,6 +220,7 @@
 </script>
 
 <div class="shell">
+  {#if !solo}
   <header class="topbar">
     <!-- The mark is the way home. It costs no rail seat and needs no label, which is
          the whole reason home lives here: the rail reads as a sequence of stages and
@@ -256,8 +281,10 @@
       <Icon name="panelRight" size={16} />
     </button>
   </header>
+  {/if}
 
   <div class="main">
+    {#if !solo}
     <nav class="rail">
       {#each WORKSPACES as ws (ws.id)}
         <button
@@ -279,9 +306,10 @@
         <span>{uiState.theme === 'light' ? 'Dark' : 'Light'}</span>
       </button>
     </nav>
+    {/if}
 
     <main class="canvas">
-      {#if activeWs && activeWs.tools.length > 1}
+      {#if !solo && activeWs && activeWs.tools.length > 1}
         <div class="tabstrip">
           {#each activeWs.tools as toolId (toolId)}
             <button
@@ -315,7 +343,7 @@
       </div>
     </main>
 
-    {#if uiState.sidebarOpen}
+    {#if uiState.sidebarOpen && !solo}
       <CaseSidebar />
     {/if}
   </div>

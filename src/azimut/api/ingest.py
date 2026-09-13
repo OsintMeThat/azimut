@@ -54,6 +54,7 @@ from pydantic import BaseModel
 from .. import __version__, config
 from ..engine import (
     extinstall,
+    firms,
     geo,
     mapsites,
     media as media_engine,
@@ -67,6 +68,9 @@ from .limits import MAX_IMAGE_BYTES
 from .satellite import (
     GridSaveIn,
     apply_grid_marks,
+    firms_answer,
+    firms_key,
+    firms_sensors,
     get_search_grid,
     list_search_grids,
     locate_on_save,
@@ -223,6 +227,12 @@ async def ingest_screenshot(
     bearing: float | None = Form(default=None, ge=0, lt=360),
     captured_at: str = Form(default=""),
     title: str = Form(default="", max_length=200),
+    # burn a scale bar and a north arrow into the shot (the popup's tick), and
+    # how many image pixels the grab holds per CSS pixel — a zoom describes CSS
+    # pixels, so without the ratio a 2× screen would be told it covers twice
+    # the ground it does
+    scale_north: bool = Form(default=False),
+    device_scale: float = Form(default=1.0, gt=0, le=8),
     # which extension build took the shot — provenance, nothing else keys on it
     extension: str = Form(default="", max_length=32),
 ) -> dict[str, Any]:
@@ -272,6 +282,24 @@ async def ingest_screenshot(
         raise HTTPException(status_code=422, detail=f"not a readable image: {exc}") from exc
 
     site = parsed["site"]
+    # Neither mark is invented for a map we did not draw: the bar needs the
+    # view's own resolution, and the needle a heading somebody stated — most of
+    # these sites write no rotation into their URL, and the popup's field is
+    # where an analyst says which way the map was turned.
+    marks = (
+        tiles.burn_scale_north(
+            img,
+            meters_per_pixel=(
+                tiles.meters_per_pixel(lat, zoom) / device_scale
+                if lat is not None and zoom is not None
+                else None
+            ),
+            bearing=bearing,
+            units=config.load_settings().get("units", "metric"),
+        )
+        if scale_north
+        else None
+    )
     attribution = ATTRIBUTIONS.get(site, f"© {urlsplit(url).netloc.lower()}")
     img = tiles.burn_attribution(img, attribution)
 
@@ -308,6 +336,7 @@ async def ingest_screenshot(
         "captured_at": captured.isoformat(timespec="seconds") if captured else None,
         "attribution": attribution,
         "attribution_burned": True,
+        "marks": marks,
         "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "width": img.width,
         "height": img.height,
@@ -597,6 +626,65 @@ def sky(lat: float, lon: float, date: str | None = None) -> dict[str, Any]:
     # them from the query string, so its defaults are FastAPI markers rather
     # than the None a direct call would want
     return satellite_sky(lat=lat, lon=lon, day=date, at=None, zone=None)
+
+
+# One screen of somebody else's map is one request: the panel has no tile grid
+# to hang tiles on, so it asks for a single picture over the ground it can see.
+# Capped because the width and the height arrive from a page — a window is at
+# most a few thousand pixels across, and a bigger number is a bigger bill for
+# NASA, not a sharper answer.
+FIRMS_IMAGE_MAX = 2560
+
+
+@router.get("/firms", dependencies=[Depends(require_token)])
+def firms_image(
+    south: float = Query(ge=-90, le=90),
+    west: float = Query(ge=-180, le=180),
+    north: float = Query(ge=-90, le=90),
+    east: float = Query(ge=-180, le=180),
+    width: int = Query(gt=0, le=FIRMS_IMAGE_MAX),
+    height: int = Query(gt=0, le=FIRMS_IMAGE_MAX),
+    sensor: str = "viirs",
+    window: str = "24h",
+    first: str = "",
+    last: str = "",
+) -> Response:
+    """Active fire detections over one rectangle of ground, as a picture.
+
+    The app's own map draws FIRMS as tiles (``/api/firms/tiles``). The panel
+    over Google or Yandex has no tile grid of its own, so it asks for the whole
+    of what it can see at once and lays that over the map — which is also one
+    request per settled view rather than a dozen, and the FIRMS allowance is
+    counted in requests.
+
+    Same key, same guard, same reason as the app's route: NASA puts the
+    MAP_KEY in the path, so it never crosses into a page.
+    """
+    key = firms_key()
+    if not key:
+        raise HTTPException(status_code=404, detail="no FIRMS key saved")
+    if north <= south or east <= west:
+        raise HTTPException(status_code=422, detail="the rectangle has no area")
+    try:
+        url = firms.image_url(
+            key,
+            bounds=firms.bounds_of(south, west, north, east),
+            width=width,
+            height=height,
+            sensor_id=sensor,
+            window=window,
+            first=first,
+            last=last,
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return firms_answer(url)
+
+
+@router.get("/firms/sensors", dependencies=[Depends(require_token)])
+def firms_catalogue() -> dict[str, Any]:
+    """What the panel can offer, and whether a key makes it offerable at all."""
+    return firms_sensors()
 
 
 @router.get("/grids", dependencies=[Depends(require_token)])

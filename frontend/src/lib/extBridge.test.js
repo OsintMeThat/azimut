@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   extensionVersion, extensionOutdated, captureTab, handOffPost, handOffReverse, onActivated,
-  extensionState, pingExtensions, reloadExtension, onBridgeHello,
+  extensionState, pingExtensions, reloadExtension, onBridgeHello, mapLinkRelay,
 } from './extBridge.js';
 
 // The bridge protocol is the app's only path to widget pixels, so what these
@@ -339,5 +339,82 @@ describe('pingExtensions', () => {
     const off = fakeRelay('ping', 'pong', (msg) => ({ version: '0.3.0', id: `${msg.id}-not` }));
     await expect(pingExtensions({ timeoutMs: 60 })).resolves.toEqual([]);
     off();
+  });
+});
+
+describe('mapLinkRelay', () => {
+  // The app's map tab on the extension's linked views: panels on other sites
+  // hand their cameras over it. Two message types, because the page hears its
+  // own postMessage and must never take the camera it sent for one it was handed.
+  const wait = () => new Promise((r) => setTimeout(r, 10));
+  const fromBridge = (message) =>
+    window.postMessage({ channel: 'azimut-capture-ext', ...message }, window.location.origin);
+
+  function watchPage() {
+    const posted = [];
+    const onMessage = (event) => {
+      if (event.data?.type === 'map-link') posted.push(event.data);
+    };
+    window.addEventListener('message', onMessage);
+    return { posted, stop: () => window.removeEventListener('message', onMessage) };
+  }
+
+  it('is nothing without the extension', () => {
+    expect(mapLinkRelay()).toBe(null);
+  });
+
+  it('asks the bridge to open the link, and hands it this tab’s camera', async () => {
+    document.documentElement.dataset.azimutCaptureExtension = '0.3.0';
+    const page = watchPage();
+    const relay = mapLinkRelay();
+    relay.listen({ view() {}, peers() {} });
+    relay.send({ lat: 1, lon: 2, zoom: 3, bearing: 0 });
+    await wait();
+    expect(page.posted.map((m) => m.kind)).toEqual(['open', 'view']);
+    expect(page.posted[1].view).toEqual({ lat: 1, lon: 2, zoom: 3, bearing: 0 });
+    relay.close();
+    page.stop();
+  });
+
+  it('hears panels’ cameras and their count, never its own camera', async () => {
+    document.documentElement.dataset.azimutCaptureExtension = '0.3.0';
+    const views = [];
+    const counts = [];
+    const relay = mapLinkRelay();
+    relay.listen({ view: (v) => views.push(v), peers: (n) => counts.push(n) });
+    relay.send({ lat: 9, lon: 9, zoom: 9 });
+    fromBridge({ type: 'map-link-event', kind: 'view', view: { lat: 1, lon: 2, zoom: 3 } });
+    fromBridge({ type: 'map-link-event', kind: 'peers', count: 2 });
+    await wait();
+    expect(views).toEqual([{ lat: 1, lon: 2, zoom: 3 }]);
+    expect(counts).toEqual([2]);
+    relay.close();
+  });
+
+  it('opens the link again when a restarted extension brings a new bridge', async () => {
+    document.documentElement.dataset.azimutCaptureExtension = '0.3.0';
+    const relay = mapLinkRelay();
+    relay.listen({ view() {}, peers() {} });
+    await wait();
+    const page = watchPage();
+    fromBridge({ type: 'bridge-hello', version: '0.3.1' });
+    await wait();
+    expect(page.posted.map((m) => m.kind)).toEqual(['open']);
+    relay.close();
+    page.stop();
+  });
+
+  it('says goodbye and stops listening when the map closes', async () => {
+    document.documentElement.dataset.azimutCaptureExtension = '0.3.0';
+    const views = [];
+    const page = watchPage();
+    const relay = mapLinkRelay();
+    relay.listen({ view: (v) => views.push(v), peers() {} });
+    relay.close();
+    fromBridge({ type: 'map-link-event', kind: 'view', view: { lat: 1, lon: 2, zoom: 3 } });
+    await wait();
+    expect(views).toEqual([]);
+    expect(page.posted.at(-1).kind).toBe('close');
+    page.stop();
   });
 });

@@ -25,7 +25,7 @@ rather than an afternoon with a browser. See *Recalibrating* at the end.
 |---|---|---|---|
 | Google Maps | `google.com/maps/@47.388462,2.352785,15z` | lat, lon | `z`, tile level, up to 2 decimals |
 | Google Maps (satellite) | `…/@47.388462,2.352785,3231m/data=!3m1!1e3` | lat, lon | `m`, **the viewport's height in metres** |
-| Google Earth | `earth.google.com/web/@47.388462,2.352785,150a,3000d,1y,0h,0t,0r` | lat, lon | `d`, camera distance; `a` ground altitude, `h/t/r` heading, tilt, roll |
+| Google Earth | `earth.google.com/web/@47.388462,2.352785,194.5a,2206.63d,35y,0h,0t,0r` | lat, lon | `d`, camera distance to the ground, and `y`, field of view: the window is `2·d·tan(y/2)` metres tall; `a` ground height, `h/t/r` heading, tilt, roll |
 | Apple Maps | `maps.apple.com/frame?center=47.388462,2.352785&span=0.029055,0.056434&map=satellite` | lat, lon | `span`, the region in degrees (lat delta first) |
 | Bing Maps | `bing.com/maps?cp=47.388462~2.352785&lvl=15.4&style=h` | lat`~`lon | `lvl`, tile level, 1 decimal |
 | Yandex | `yandex.com/maps/?ll=2.352785,47.388462&z=15&l=sat` | **lon, lat** | `z`, tile level |
@@ -77,20 +77,45 @@ edge of a 1600-pixel window at level 18. Whole levels are exact on every site
 here, Bing included; the tools work the fraction out for themselves from the
 pixel the zoom held still (`extension/mapmath.js`, `zoomFromAnchor`).
 
-**Google Earth is a globe with terrain.** `d` halves for every level zoomed in,
-which carries a measured scale through a zoom, but turning it into a ground
-scale needs a field of view no URL states. Level and close in, the tools measure
-it; pitched, they refuse.
+**Google Earth draws a flat map and states it as a camera.** Its default 2D view
+is Web Mercator at every distance, however much of the world is on screen, and
+its address bar describes it as a camera `d` metres above the ground under the
+middle of the window, with `y` degrees of field of view across the window's
+height. So the window covers `2·d·tan(y/2)` metres top to bottom, which is a zoom
+next to the window's height, exactly like Google satellite's `,3231m`. Earth
+honours `y`: the app's own link once wrote `1y` and opened every place 35 times
+too close.
 
-**`d` moves when nobody zoomed.** It is the distance to the ground, and the
-ground has hills in it: pan across one and Earth rewrites `d` by more than the
-one percent that otherwise means the view changed scale. Which is true — closer
-ground is drawn larger — so the ratio of two distances is a real correction and
-is applied as one. What it must not do is throw away the drag that arrived with
-it: that drag is the only way this view is ever measured, and discarding it left
-the panel asking for a pan it had already been given, for ever, over any terrain
-that was not flat. So a reading that carries nothing keeps the drag instead
-(`extension/mapoverlay.js`).
+That was measured without dragging anything (`npm run calibrate:earth`): a camera
+opened again a known step east, a known step north and at half the distance, and
+the screenshots registered against each other. Across three window shapes, two
+fields of view, three latitudes, a mountain range and a camera 400 km out, the
+picture moved what the formula says to a thousandth or better at 35°, north over
+east came out at spherical Mercator's `1/cos(lat)` rather than the ground's own
+ratio, and the camera was the middle of the window to a third of a pixel
+(`tests/fixtures/earth-scale.json`).
+
+**`d` is a distance to the ground only once Earth has put the camera there.** Any
+gesture makes Earth write the ground's height into `a`, and from then on `d`
+follows the ground under the centre: pan over a hill and `d` shrinks while the
+camera stays up, which is the map being drawn bigger, and `d` says so. A link
+typed as `0a` is not placed, and Earth draws it as a camera `d` above sea level:
+over ground 200 m up that is 7% nearer than `d` says. So a `0a` with a whole `d`,
+which is how a link is written and never how Earth writes, states no scale until
+the map moves. Two more states are refused the same way, both seen on loading a
+link: a `d` under the 25 m Earth's map stops at (`1518a,10d`, for a camera 1528 m
+up), and an `a` no ground has.
+
+**Its 3D mode is another camera.** Earth's "3D" button pitches the camera and adds
+field 5 to the protobuf after `/data=`, and pressing it again takes both away. A
+pitched camera is refused like any other. A 3D camera brought back to level is
+drawn as a map in close and refused past `LEVEL_CEILING_M` as a globe; a `data=`
+that cannot be read is taken as 3D.
+
+**Earth writes several addresses for one zoom.** It rewrites the URL as its camera
+eases, each one true for the moment it was written. The panel keeps the drawing
+dimmed until the address bar has stopped changing for 400 ms, and re-solves the
+camera centre from every reading in between.
 
 **"Level" carries a tolerance, and has to.** These viewers write the camera they
 are actually holding, at full precision, and they do not come back to a clean
@@ -103,21 +128,10 @@ is two percent at the two degrees allowed and eleven at ten. Past it the panel
 refuses, and it says so in the viewer's own words — these tools are 2D — rather
 than in the degrees it read, which name no button anyone can press.
 
-**Turning the compass is not zooming it.** Earth is also the one view whose
-`h` an analyst drags, and a scale is pixels per degree along the *world's* axes
-— so a turn changes which way the screen looks at the ground and nothing about
-how big it is drawn. Every measurement therefore undoes the bearing before it
-divides: a drag's travel, a zoom's held pixel, the offset a centre is solved
-from (`extension/mapmath.js`, `unturn`). Read raw, a drag on a map turned 30°
-measured a scale a third out, the next pan missed its prediction, and the tools
-switched themselves off — which is what turning Earth used to do. What is still
-refused is a single gesture that turned *and* zoomed: one offset, two bearings,
-and nothing in the address bar to say which did what.
-
 ## Where each site draws its centre
 
 The coordinate in the address bar is not under the middle of the window. Five of
-the eight put it somewhere else, because their own chrome takes part of the
+the nine put it somewhere else, because their own chrome takes part of the
 screen and the map is centred in what is left — and this is invisible to any
 amount of scale accuracy, since a pan slides the offset along with the map.
 
@@ -131,14 +145,29 @@ amount of scale accuracy, since a pan slides the offset along with the map.
 | OpenStreetMap | 800, 527 | a 55 px header |
 | Satellites.pro | 800, 500 | full-window Leaflet |
 | Zoom Earth | 800, 500 | full window |
+| Google Earth | 800, 500 | the map fills the window; its toolbar and status bar sit over it |
 
-The extension does not ship this table: a panel can be collapsed and a layout
-can change, so it **measures** the offset instead, from the one gesture that can
-see it. A zoom holds one pixel still while the centre moves underneath, which is
-enough to solve for the pixel the centre is drawn at (`extension/mapmath.js`,
-`centreFromZoom`). It is measured on the first zoom, remembered per site and per
-window shape, and re-measured on every zoom after. The table is here as the
-record of what those measurements found, and as what the tests replay.
+The extension **measures** the offset rather than trusting a table, from the one
+gesture that can see it. A zoom holds one pixel still while the centre moves
+underneath, which is enough to solve for the pixel the centre is drawn at
+(`extension/mapmath.js`, `centreFromZoom`). It is measured on the first zoom,
+remembered per site and per window shape, and re-measured on every zoom after.
+
+**But it starts somewhere, and the middle of the window is a table entry too.**
+It was the one the extension used to ship, and it is wrong on four of these
+sites — 210 px on Yandex, 225 on Copernicus, and nothing on screen saying so
+until the analyst happened to zoom. So the four whose offset held steady across
+both recorded window shapes are shipped as starting answers
+(`engine/mapsites.py`, `_CAMERA_CENTRE`), handed to the panel with the parse of
+the URL and replaced by the first offset it measures for itself. A measurement
+on the machine in front of the analyst always wins: over the table, and over one
+taken in another window.
+
+Apple is the exception and stays unhinted. Its sidebar folds away below some
+width its URL never states, so its offset is 67 px in a 1600 px window and
+nothing in a 1200 px one — a starting answer that is right half the time is
+worse than none. `tests/test_mapsites.py` re-checks every entry against the
+recordings above and fails on a site that drifts off-centre without one.
 
 **A zoom is one gesture and several readings.** These sites ease into a zoom
 over a few hundred milliseconds and rewrite the address bar while they are doing
@@ -184,8 +213,9 @@ nothing else. Both claims are held by tests rather than by this paragraph
 **How tall the map is, is measured too.** A map centred in what its chrome
 leaves is centred by exactly half of what the chrome took, so Bing's camera
 sitting 40.5 px low *is* the measurement of its 81 px header. That matters for
-the two views that state a size rather than a level: a span and a height in
-metres are only a scale next to the number of pixels they were drawn in, so the
+the three views that state a size rather than a level: a span, a height in
+metres and Earth's distance are only a scale next to the number of pixels they
+were drawn in, so the
 panel hands the app the map's height rather than the window's
 (`extension/mapoverlay.js`, `mapHeight`), and re-reads the scale when the window
 changes.
@@ -211,22 +241,85 @@ What none of this covers is relief on a 3D camera, and no measurement can: a
 level camera still pushes a hilltop outward from the centre of the screen by its
 own height, and no URL says how tall the ground is.
 
+## Following a linked view
+
+The panel's link button moves a site's map by writing a camera into its address
+(`extension/maplink.js`), so what each site does with a written address decides
+how a follow looks. Measured on 2026-09-13 in Chromium, opening a view over the
+Cher and one at level 23 over Paris, then dragging to make the site write the view
+it was really on.
+
+| Site | Written how | Reloads | Deepest level a link reaches | Address true on arrival |
+|---|---|---|---|---|
+| Google Maps and satellite | `@lat,lon,17z`, layer kept | yes, 3–4 s | 21 | a whole level only: `16.5z` and `1142m` both open at 16 and keep saying 16.5 |
+| Bing | `cp=`, `lvl=` to one decimal | yes, ~2 s | 22 | yes, and past 22 it rewrites the level |
+| Apple | `/frame?center=…&z=` | yes, ~2 s | 19 over Paris | yes: `z` is read on load and the span it writes is live |
+| Copernicus | `zoom=`, `lat=`, `lng=`, acquisition kept | yes, ~3 s | 18 (its wheel goes to 25) | not past 18: `zoom=23` keeps saying 23 |
+| Google Earth | `@lat,lon,a,d,y…`, `data=` kept | yes, ~12 s without a GPU, flying in from space | the 25 m camera floor | yes once placed; `a` is kept, so the scale is out by the change in ground height until a gesture |
+| OpenStreetMap | `#map=17/lat/lon` | no | 19 | not past 19: `#map=20` keeps saying 20 |
+| Zoom Earth | `#view=lat,lon,11z`, day kept | no | 11, Live and HD alike | yes, it rewrites the level |
+| Yandex, Satellites.pro | `ll=`, `#lat,lon,z` | unmeasured | unmeasured | both refuse a headless browser (a bot page, a Cloudflare check) |
+
+Two rules come out of it. A site is given **whole levels** unless a fraction was
+seen to land true (Bing, and Apple and Earth, whose size is read back), because the
+tools take their scale from that address the moment it lands. And a site that
+keeps a level it cannot draw has what is *written* capped at the level it draws
+(`WRITE_CEILING`: Google 21, OpenStreetMap 19, Copernicus 18); the view being
+followed is never capped. `tests/fixtures/map-link-writes.json` holds one write per
+site, written by the extension's test and read back by `tests/test_map_link_writes.py`.
+
+Apple has two more. It opens no view nearer a pole than ±70.4956°, whatever the
+address says and at every zoom, though a drag goes on past it with the address
+following (`OPEN_LAT_LIMIT`); the panel says where it stopped. So a view past the
+limit is **written as the latitude Apple opens** rather than as it was asked, for
+the same reason a level is capped: the address is what the tools read the ground
+from, and one stating a pole the map is not at draws every mark there until Apple
+rewrites it. Written that way, a map already stopped at the limit is where the
+next view asks it to be, so it is left alone instead of reloading once per gesture
+on the map it follows — which is what used to undo the drag the panel had just
+asked for. And a click on a
+label or a long press opens a place card that swaps the address for
+`/place?…&coordinate=…` with no camera in it until the card is closed, so the
+panel says to close it, and a linked view written there closes it.
+
+A follow only ever happens in a tab that is on screen. A panel whose tab is in the
+background keeps the last view it was sent and writes it when the tab is looked at
+again — `document.hidden`, so the front tab of a window that is merely unfocused
+still follows live. Reloading a page nobody is watching costs one reload per gesture
+on the map being led, and each of those races the next: a page still loading has no
+panel to hand the following view to, and a browser that allowed the tools on one
+page can refuse them on the page after it.
+
+`history.pushState` with a `popstate` moves only Earth without a reload; every
+other site ignores it, so it is not used.
+
 ## Zoomed out, where the map becomes a globe
 
-Google and Bing stop drawing a flat map somewhere around level 8 and start
-drawing a globe, and Earth is a globe from the start; their URLs go on quoting a
-zoom either way, so the zoom is the only warning there is.
+There are two of these and they get different answers, because they are not the
+same thing.
 
-Out there the drawing is **kept, dimmed, and labelled** rather than refused. A
+**A flat map drawn far out** is Google and Bing below level 8: the renderer
+curves while the URL goes on quoting a tile level, so the zoom is the only
+warning there is. Out there the drawing is **kept, dimmed and labelled**. A
 globe and a Mercator agree at the point they are anchored on and part company
-away from it, so the middle of the screen is right and the edges drift — which
-is exactly the trade worth making for a look at a whole region's marks at once,
-with the zoom that makes it exact one gesture away. The panel says "drifts at
-the edges out here" and the canvas drops to just over half strength, so nothing
-about it reads as placed.
+away from it, so the middle of the screen is right and the edges drift — the
+trade worth making for a look at a whole region's marks at once, with the zoom
+that makes it exact one gesture away. The panel says "drifts at the edges out
+here" and the canvas drops to just over half strength, so nothing about it reads
+as placed.
 
-Two things it does not do out there: it never *measures* anything from a view
-that far out — the camera centre and the rounded-zoom correction are both taken
+**A globe camera** is Earth's 3D mode past `LEVEL_CEILING_M` (150 km of camera
+distance), and Google's Earth mode with it. That is a perspective view of a
+sphere, not a map drawn small: there is no anchor point Mercator is right about
+and no edge the error is confined to, so nothing is drawn at all — no marks, no
+grid, no fire picture — and the panel says *"The camera is on a globe this far
+out, so zoom in"*. Dimming it instead would ask the analyst to judge how wrong a
+drawing is, with nothing on screen to judge it by. Come down under the ceiling
+and everything draws. Earth's 2D map is neither of the two: it is Web Mercator
+all the way out, and exact there.
+
+Two things neither of them does out there: it never *measures* anything from a
+view that far out — the camera centre and the rounded-zoom correction are taken
 in close, where the site is drawing the flattening it names — and it never stops
 refusing a pitched or panoramic camera, which has no ground plane at all.
 
@@ -239,8 +332,15 @@ changes, or every few months on principle.
 ```
 cd frontend && npm run calibrate:maps     # drives the sites, headed
 python scripts/build_map_fixture.py       # parses what they wrote, solves the camera
+cd frontend && npm run calibrate:earth    # Earth's scale, from registered screenshots
+python scripts/build_earth_fixture.py /tmp/azimut-earth-calibration
 npm test && python -m pytest tests/test_mapsites.py
 ```
+
+Earth has its own run because a drag is too blunt to check a formula against. It
+drags nothing: it opens cameras a known step apart and registers the pictures, in
+a headless browser on SwiftShader, about a minute a case. Earth is in the drag
+and zoom run too, which is what shows its wheel zooms about the cursor.
 
 The whole matrix is ten runs — the nine sites, Google twice for its satellite
 view — across seven windows and two browsers: about an hour of driving, plus

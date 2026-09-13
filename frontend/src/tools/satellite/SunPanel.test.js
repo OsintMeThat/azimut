@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 const panel = readFileSync(new URL('./SunPanel.svelte', import.meta.url), 'utf8');
-const cluster = readFileSync(new URL('./MapToolCluster.svelte', import.meta.url), 'utf8');
 
 describe('Sun & moon panel', () => {
-  it('opens beside the tool cluster, clear of the centred coordinates readout', () => {
-    expect(panel).toContain('left: calc(100% + 8px)');
-    expect(panel).toContain('top: 46px');
+  it('is placed by the rail\'s panel slot rather than placing itself', () => {
+    // it used to carry its own corner, and a `top: 46px` that dodged a
+    // coordinates readout floating above it; both belong to the slot now
+    expect(panel).not.toContain('position: absolute');
+    expect(panel).not.toContain('left: calc(100% + 8px)');
   });
 
   it('can be dragged out of the way of the imagery it describes', () => {
@@ -44,13 +45,5 @@ describe('Sun & moon panel', () => {
     expect(panel).toContain("import MoonGlyph from '../../components/MoonGlyph.svelte'");
     expect(panel).toContain('panning the map leaves it alone');
     expect(panel).toContain("{placing ? 'Click the map' : 'Move'}");
-  });
-});
-
-describe('map tool cluster', () => {
-  it('carries Sun & moon among the tools, not among the view toggles', () => {
-    const tools = cluster.slice(cluster.indexOf('tool-cluster'), cluster.indexOf('view-cluster'));
-    expect(tools).toContain('aria-label="Sun and moon"');
-    expect(tools).toContain('class:on={sunMode}');
   });
 });

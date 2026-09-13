@@ -167,11 +167,8 @@
 
 <style>
   .sun-panel {
-    position: absolute;
-    /* beside the cluster, but below the band the centred coordinates readout
-       occupies: on a narrow map the two would otherwise cross */
-    top: 46px;
-    left: calc(100% + 8px);
+    /* placed by the rail's panel slot, like every other tool's settings; it no
+       longer has to dodge a coordinates readout that used to float above it */
     width: max-content;
     min-width: 234px;
     display: flex;

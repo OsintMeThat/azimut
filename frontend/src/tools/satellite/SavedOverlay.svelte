@@ -24,6 +24,7 @@
     onpost,
     onshowproofs,
     onrefresh,
+    ontrace,
   } = $props();
 
   const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', proof: 'proof' };
@@ -78,6 +79,9 @@
         onedit: close(onedit),
         onproof: close(onproof),
         onpost: close(onpost),
+        // tracing takes over the map, so the card that armed it gets out of
+        // the way first — the same rule as every other act here
+        ontrace: ontrace && close(ontrace),
         onshowproofs: close(onshowproofs),
         // opening a related media leaves the map, so close the card first — the
         // same gesture as every other row here, rather than a popup that
@@ -138,8 +142,10 @@
    * How tightly a mark is pinned, as a shape under its pin (ONTOLOGY §2).
    *
    * A pin dropped on a guess is the lie this fixes: "somewhere on the north quay"
-   * draws as the circle it is. A footprint wins over a radius when both are set,
-   * because a traced shape says more than the circle around it.
+   * draws as the circle it is. A place states its precision in one form, so the two
+   * are alternatives rather than a stack; a point written before that rule holds both
+   * and its traced shape is what draws, because a shape says more than the circle
+   * around it.
    *
    * A mark with neither returns nothing and draws exactly as it always has —
    * absence is a state, never something to flag.

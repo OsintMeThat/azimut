@@ -52,14 +52,31 @@ export const VIEWPORTS = [
 /** How far a level is, in wheel notches, on each site.
  *
  * Bing's wheel moves a third of a level — the reason `zoomFromAnchor` exists —
- * so it takes three to arrive somewhere its URL states exactly. Everyone else
- * steps a whole level a notch. A site that changes this shows up in the build
- * as a zoom too small to solve from, naming itself. */
-const NOTCHES = { 'bing-maps': 3 };
+ * so it takes three to arrive somewhere its URL states exactly. Earth's moves
+ * about a third too, and states the fraction exactly, so three notches are
+ * simply a zoom big enough to solve from. Everyone else steps a whole level a
+ * notch. A site that changes this shows up in the build as a zoom too small to
+ * solve from, naming itself. */
+const NOTCHES = { 'bing-maps': 3, 'google-earth': 3 };
+
+/** How long the address bar has to hold still before a gesture counts as
+ *  landed, per site, in milliseconds. Earth rewrites its URL more than once in
+ *  one zoom, over a second or more on a machine without a GPU, and a shorter
+ *  wait records a view it was only passing through. */
+const QUIET = { 'google-earth': 6000 };
+
+/** How long the address bar has to hold still after a site first opens, where
+ *  that is longer than any other wait. Earth flies in from space on every load
+ *  and pauses on the way down, and a drag started before it lands is ignored. */
+const OPEN_QUIET = { 'google-earth': 8000 };
+
+/** Sites whose address bar can take far longer than any quiet wait to answer a
+ *  gesture, so the run waits for it to change before it waits for it to stop.
+ *  Earth without a GPU wrote a pan twenty seconds after the drag. */
+const SLOW_TO_WRITE = new Set(['google-earth']);
 
 /** Which `mapLinks` entry opens which site of `engine/mapsites.py`, and what
- *  the recording is called. Earth is driven like the rest and left out of the
- *  fixture by the build: a free camera states no scale to check. */
+ *  the recording is called. */
 const FROM_LINKS = [
   ['google', 'google-maps', 'google-maps'],
   ['google_sat', 'google-maps', 'google-maps satellite'],
@@ -92,7 +109,13 @@ export function sites() {
   return [
     ...FROM_LINKS.map(([id, site, label]) => ({ id, site, label, url: links.get(id).url })),
     ...EXTRA,
-  ].map((site) => ({ ...site, notches: NOTCHES[site.site] ?? 1 }));
+  ].map((site) => ({
+    ...site,
+    notches: NOTCHES[site.site] ?? 1,
+    quiet: QUIET[site.site],
+    openQuiet: OPEN_QUIET[site.site],
+    slow: SLOW_TO_WRITE.has(site.site),
+  }));
 }
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -110,8 +133,12 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
  * should click on someone's behalf. The run is headed, it says what it is
  * waiting for, and it waits.
  */
-export async function settle(page, { quiet = 900, timeout = 120_000, say } = {}) {
+export async function settle(page, { quiet = 900, timeout = 120_000, say, changedFrom } = {}) {
   const started = Date.now();
+  // a site slow to write is given the chance to say anything at all first
+  while (changedFrom && page.url() === changedFrom && Date.now() - started < 60_000) {
+    await sleep(150);
+  }
   let last = page.url();
   let still = 0;
   let warned = false;
@@ -231,19 +258,21 @@ async function canvasRect(page) {
  * Returns the raw observation only: URLs, pixels, and the window they were made
  * in. Nothing here parses a URL.
  */
-export async function drive(page, site, { say = () => {}, quiet } = {}) {
+export async function drive(page, site, { say = () => {}, quiet = site.quiet } = {}) {
   const view = page.viewportSize();
   const steps = [];
   const record = (url) => steps.push({ url });
 
   say(`${site.label}: opening`);
   await page.goto(site.url, { waitUntil: 'commit' });
-  record(await settle(page, { say, quiet }));
+  record(await settle(page, { say, quiet: site.openQuiet ?? quiet }));
 
   const by = { dx: -Math.round(view.width * 0.2), dy: Math.round(view.height * 0.2) };
   say(`${site.label}: dragging ${by.dx}, ${by.dy}`);
+  const changedFrom = () => (site.slow ? page.url() : undefined);
+  let from = changedFrom();
   await panBy(page, { x: Math.round(view.width * 0.62), y: Math.round(view.height * 0.55) }, by);
-  record(await settle(page, { say, quiet }));
+  record(await settle(page, { say, quiet, changedFrom: from }));
 
   // Both zooms are taken in the right half and clear of the top, because a
   // gesture over a site's own chrome is not a gesture on its map: Yandex keeps
@@ -257,10 +286,11 @@ export async function drive(page, site, { say = () => {}, quiet } = {}) {
   ]) {
     const at = { x: Math.round(view.width * spot.x), y: Math.round(view.height * spot.y) };
     say(`${site.label}: ${site.notches} notch(es) over ${at.x}, ${at.y}`);
+    from = changedFrom();
     await zoomAt(page, at, site.notches);
-    const from = steps.length - 1;
-    record(await settle(page, { say, quiet }));
-    zooms.push({ from, to: steps.length - 1, at });
+    const before = steps.length - 1;
+    record(await settle(page, { say, quiet, changedFrom: from }));
+    zooms.push({ from: before, to: steps.length - 1, at });
   }
 
   return {

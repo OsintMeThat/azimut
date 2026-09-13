@@ -25,6 +25,7 @@
     onopen,
     onedit,
     onproof,
+    ontrace,
     onpost,
     onshowproofs,
     onentity, // a related entity was picked: leave for its own tool
@@ -244,6 +245,16 @@
               </button>
             {:else}
               <button type="button" class="link" onclick={() => onedit(row)}>Edit</button>
+            {/if}
+            {#if row.kind === 'place' && ontrace}
+              <button
+                type="button"
+                class="link"
+                onclick={() => ontrace(row)}
+                title={row.footprint
+                  ? 'Draw this shape again on the map'
+                  : 'Draw the area this place really covers'}
+              >{row.footprint ? 'Retrace' : 'Trace'} footprint</button>
             {/if}
             {#if row.source_url}
               <a

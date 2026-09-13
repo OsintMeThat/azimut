@@ -775,16 +775,23 @@ async function openTimelineOverJune(page, options = {}) {
   return fixture;
 }
 
+function timelineMapLayer(page) {
+  return page.getByRole('listitem').filter({
+    has: page.getByRole('button', { name: 'Timeline points', exact: true }),
+  });
+}
+
 test('hands one window from the Timeline to the Map, the Board and back', async ({ page }) => {
   const fixture = await openTimelineOverJune(page);
   await page.getByRole('group', { name: 'Open range' }).getByRole('button', { name: 'Map' }).click();
   await awaitMapReady(page); // the marks are drawn on it, so it has to be up
 
-  const layer = page.getByLabel('Timeline map layer');
-  await expect(layer).toContainText('1 Jun – 21 Jun 2026');
+  const layer = timelineMapLayer(page);
+  await expect(layer.getByRole('button', { name: 'Timeline points' }))
+    .toHaveAttribute('title', '1 Jun – 21 Jun 2026');
   // What the window holds, and how much of it the map can show: the layer reads
-  // every category the Timeline was reading, so the count is the whole window.
-  await expect(layer).toContainText('1 placed of 12 dated');
+  // every category the Timeline was reading, so the compact count is the whole window.
+  await expect(layer).toContainText('1 of 12');
   await expect(page.locator('.temporal-mark')).toHaveCount(1);
 
   await layer.getByRole('button', { name: 'Board' }).click();
@@ -836,7 +843,8 @@ test('draws the window and nothing else, framed on what it holds', async ({ page
 
   await expect(page.locator('.temporal-mark')).toHaveCount(1);
   await expect(page.locator('.saved-mark-place')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Show saved work on the map' })).not.toHaveClass(/on/);
+  await expect(page.getByRole('button', { name: 'Saved work', exact: true }))
+    .toHaveAttribute('aria-pressed', 'false');
 
   const framed = await page.evaluate(() => {
     const map = document.querySelector('.map').getBoundingClientRect();
@@ -864,8 +872,8 @@ test('says a window holds nothing placed instead of pulling the map out to say i
   await page.getByRole('group', { name: 'Open range' }).getByRole('button', { name: 'Map' }).click();
   await awaitMapReady(page); // the marks are drawn on it, so it has to be up
 
-  const layer = page.getByLabel('Timeline map layer');
-  await expect(layer).toContainText('None of the 10 dated here carries a place.');
+  const layer = timelineMapLayer(page);
+  await expect(layer).toContainText('0 of 10');
   // Nothing to draw is said in words, not by pulling the view out to two continents
   // of unrelated pins, which is what a map showing everything looks like.
   await expect(page.locator('.temporal-mark')).toHaveCount(0);

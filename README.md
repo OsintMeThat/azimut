@@ -60,7 +60,7 @@ to fix a point on the map.*
 | **Files** | Every saved artifact in one Finder-style view of your folders, not just media: select several, drag them into a folder, search across the lot. |
 | **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services. With the capture extension, pressing an engine opens it with the picture already in it. Nothing leaves the machine until you press one. |
 | **Inspect** | A scratch workspace over any photo or video: frame adjustments, editable crop, sharpest-frame capture, hand-made collage with per-piece warp/scale/rotate, auto-stitch to solve a panorama's layout, and ELA hints. Nothing enters the case until you save. |
-| **Satellite** | Coordinates or a place name become an imagery crop. The search bar proposes matches as you type: saved work, coordinates and a bundled city list answer offline, and the geocoder fills in the rest once you pause. Select-area capture, map rotation, measurement tools, reference overlays and editable AOI grids for area review. Esri/OSM by default, plus Sentinel-2 with a date calendar and a cloud-ceiling slider; add a Mapbox or Google key for more basemaps. |
+| **Satellite** | Coordinates or a place name become an imagery crop. The search bar proposes matches as you type: saved work, coordinates and a bundled city list answer offline, and the geocoder fills in the rest once you pause. Select-area capture with an optional scale bar and north arrow, map rotation, measurement tools, a right-click menu on any point, stacked overlays (borders, roads, railways, power lines, fires, night lights) and editable AOI grids for area review. Esri/OSM by default, plus the Esri Wayback archive and Sentinel-2 with a date calendar and a cloud-ceiling slider; add a Mapbox or Google key for more basemaps. Open it in several tabs and they stay in sync. |
 | **Coords & Sky** | Convert common coordinate formats, copy the result, open map or geocoding links, and read the sun and moon at that point on a date: rise, set, azimuth, altitude, twilights, moon phase and bright-limb angle, in local time and UTC, computed offline. |
 | **Geo Proof** | Start a named proof from a reusable house style, or from a published post whose pictures become its panels. Compose case panels in a grid or free layout, annotate with colored shapes, fills, symbols, freehand and text, state every place and every source the proof argues, and export `proof.png` plus a re-editable spec. |
 | **Geo Report** | Turn a proof into a prepared thread for X or Bluesky: coordinates, plus code, attribution, target-specific character counts, media, and a structured Markdown case note with linked evidence. |
@@ -73,31 +73,27 @@ extension, and cross-platform binaries with a bundled ffmpeg.
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
 
-## New in v0.2.9
+## New in v0.3.0
 
-A table you can work in, and a proof that can argue more than one point.
+A new map with much more on it, and Azimut's tools drawn over other map sites.
 
-- **Sheet**, a new tool: the case's own CSV files in a spreadsheet-style grid.
-  They still open in Excel, and the grid notices when they change on disk.
-- Type a column (state, list, yes/no, number, coordinates, date, image) and the
-  sheet sorts, filters and maps it properly. Excel workbooks import one tab per
-  sheet.
-- Turn a prepared sheet into entities, places and dated statements after reading
-  a row-by-row plan, or build a worklist out of what the case already holds.
-- Geocode a column of addresses, check a column of links, list every proof in the
-  case, or build one proof per row from columns of links and coordinates.
-- A proof can state several points, name them, mark the camera position, and list
-  several sources, downloading supporting files for a link the case lacks.
-- Import a published post as a proof: its pictures become panels and its text is
-  read for coordinates, with a preview to approve first.
-- Fill shapes at a chosen opacity, stamp ready-made symbols, and move or recolour
-  several at once.
-- Export a Graph or Timeline view as an SVG or PNG plate carrying the case, the
-  question, the period and a legend.
-- The map's search box suggests as you type from saved places, pasted coordinates
-  and 34,000 bundled cities, and only calls the geocoder once you stop.
-- Saved views can be renamed and sorted, Board rows delete as one undoable batch,
-  and removing a relation or an imported entity photo now asks first.
+- The map runs on MapLibre, with modes in one rail, layers in a side panel and a
+  status line. Right-click the ground to copy, save, measure, read the sky or open
+  the point's imagery history.
+- **Esri Wayback** as a basemap, narrowed to the releases that changed the point
+  and dated by when the picture was taken.
+- Key-less overlays (borders, roads, railways, power lines, sea marks, GPS
+  traces), NASA FIRMS fires and VIIRS night lights for a chosen day.
+- Several map tabs sharing one camera, with saved points and grid sweeps synced
+  live between them.
+- Captures can carry a scale bar and a north arrow, and a place's uncertainty can
+  be traced as a shape.
+- The capture extension draws measure, saved points, sun and moon, search grids,
+  fires and case media over third-party map sites, and updates from Settings.
+  Firefox gets a signed, self-updating add-on.
+- Geo Report fills the X or Bluesky composer with the whole thread, and Reverse
+  Search drops the picture straight into the engine's uploader.
+- The app opens on a case Home, and `?` opens a Guide on the current tool.
 - Existing cases open unchanged, and older bundles still import.
 
 ## Cases on disk
@@ -361,7 +357,7 @@ wheel + Windows/Linux/macOS binaries, attaches them to a GitHub release, and
 publishes to PyPI. **Don't publish by hand.**
 
 ```bash
-git tag v0.2.9 && git push origin v0.2.9
+git tag v0.3.0 && git push origin v0.3.0
 ```
 
 One-time setup: register the repo as a

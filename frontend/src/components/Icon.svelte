@@ -116,7 +116,12 @@
     reset: 'M4 9a8 8 0 1 1-1.6 4.7M4 9H1m3 0V6',
     undo: 'M8 5 4 9l4 4M4 9h10a6 6 0 0 1 0 12h-4',
     redo: 'm16 5 4 4-4 4m4-4H10a6 6 0 0 0 0 12h4',
-    ghost: 'M5 20V10a7 7 0 0 1 14 0v10l-2.3-2-2.4 2-2.3-2-2.3 2-2.4-2-2.3 2ZM10 10h.01M14 10h.01',
+    // no mark at the point: the crosshair's ring, struck through
+    noMark: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM5.6 5.6l12.8 12.8',
+    // the point held at the middle of the frame
+    centre: 'M4 8V5a1 1 0 0 1 1-1h3m8 0h3a1 1 0 0 1 1 1v3m0 8v3a1 1 0 0 1-1 1h-3m-8 0H5a1 1 0 0 1-1-1v-3m8-4.5v1m-.5-.5h1',
+    // free to be moved anywhere
+    move: 'M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3',
     sliders: 'M4 6h9m4 0h3M4 12h3m4 0h9M4 18h13m4 0h3M13 4v4m0 6v4m4-12v4',
     wand: 'M4 20 13 11M15 3l1.1 3 3 1.1-3 1.1L15 11.3l-1.1-3-3-1.1 3-1.1L15 3ZM19.5 11.5l.6 1.8 1.8.6-1.8.6-.6 1.8-.6-1.8-1.8-.6 1.8-.6.6-1.8Z',
     maximize: 'M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3',
@@ -126,6 +131,9 @@
     angle: 'M5 4v15h15M5 19 20 6',
     sun: 'M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10ZM12 1v3M12 20v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1 12h3M20 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1',
     moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z',
+    // Active fires. A flame rather than the warning triangle it borrowed at
+    // first: a detection is a thing seen, not an alarm raised.
+    flame: 'M12 3c3.2 3.4 5 6 5 8.6a5 5 0 0 1-10 0c0-1.6.6-3 1.9-4.3.1 1.2.6 2 1.4 2.6C10 7.6 10.6 5.3 12 3Z',
     // The guide, wherever it is asked for. A question mark rather than a book: the
     // press means "what is this tab", not "open a document".
     help: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-2.3 6.4a2.3 2.3 0 0 1 4.5.7c0 1.5-2.2 2-2.2 3.4M12 16.7h.01',

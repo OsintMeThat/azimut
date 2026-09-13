@@ -26,6 +26,8 @@ import * as app from './gridSearch.js';
 import * as appSky from './skyOverlay.js';
 import * as appMarkers from './savedMarkers.js';
 import * as appRefs from './refViewers.js';
+import * as appFires from './map/firms.js';
+import * as appCal from './calendar.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const load = (name) => readFileSync(join(here, `../../../extension/${name}`), 'utf8');
@@ -179,12 +181,11 @@ describe('grouping saved work into marks, on both sides', () => {
 });
 
 describe('the geometry verdict', () => {
-  /** The line a view with no stated scale shows until a drag measures it.
-   *  Read from the panel rather than spelled again, so the assertions below say
-   *  which branch was taken; what it says is pinned once, on its own. Read
-   *  through a function because the panel is loaded in `beforeAll`, after this
-   *  block has been walked. */
-  const measureMe = () => ext.MEASURE_ME;
+  /** The line a view with no stated scale shows. Read from the panel rather
+   *  than spelled again, so the assertions below say which branch was taken;
+   *  what it says is pinned once, on its own. Read through a function because
+   *  the panel is loaded in `beforeAll`, after this block has been walked. */
+  const noScale = () => ext.NO_SCALE;
 
   const MAP = {
     site: 'google-maps',
@@ -198,38 +199,49 @@ describe('the geometry verdict', () => {
     geometry: true,
   };
 
-  it('asks for the drag that would measure it, in terms of what makes one count', () => {
-    // "Pan once" was true and useless: a scale is two numbers, so a sideways
-    // drag gives half of one, and a drag let go of mid-flight is a landing the
-    // pointer never made. Neither condition was on screen, so a drag that did
-    // not count looked exactly like one that did.
-    expect(measureMe()).toBe('Drag the map across and down, pausing before you let go');
+  it('asks for the one thing that makes the address bar state a scale', () => {
+    // every site writes its scale again as soon as the map moves, and Earth
+    // writes the ground's height into it, which is what a typed link lacks
+    expect(noScale()).toBe('Move the map once so its address bar gives the scale');
   });
 
   it('lets a straight-down map through', () => {
-    expect(ext.verdict(MAP, null)).toEqual({ ok: true, why: '', far: false });
+    expect(ext.verdict(MAP)).toEqual({ ok: true, why: '', far: false });
   });
 
-  it('draws on Apple from the span its address bar states', () => {
-    // Apple states no usable zoom, but it does state the span its view covers,
-    // which is a scale next to the height it was drawn in — no pan needed.
-    const apple = { ...MAP, site: 'apple-maps', scale_source: 'span' };
-    expect(ext.verdict(apple, null, false)).toEqual({ ok: true, why: '', far: false });
+  it('draws from every scale the app can read out of a URL', () => {
+    // a tile level, Apple's span, Google satellite's height in metres, and
+    // Earth's camera distance through its field of view — each checked against
+    // a browser before it was believed (docs/MAP_SITES.md)
+    for (const [site, source] of [
+      ['google-maps', 'zoom'],
+      ['apple-maps', 'span'],
+      ['google-maps', 'height_m'],
+      ['google-earth', 'distance'],
+    ]) {
+      expect(ext.verdict({ ...MAP, site, zoom: 15.37, scale_source: source })).toEqual({
+        ok: true,
+        why: '',
+        far: false,
+      });
+    }
   });
 
-  it('waits for a measurement where the URL states no scale at all', () => {
-    const mute = { ...MAP, scale_source: null };
-    expect(ext.verdict(mute, null, false).why).toBe(measureMe());
-    expect(ext.verdict(mute, null, true)).toEqual({ ok: true, why: '', far: false });
+  it('draws nothing where the URL states no scale, and learns none from a gesture', () => {
+    // There is no second argument any more. A scale measured off a drag is how
+    // Earth's marks ended up four times too close together, and stayed there.
+    const mute = { ...MAP, zoom: null, scale_source: null };
+    expect(ext.verdict(mute)).toEqual({ ok: false, why: noScale() });
+    expect(ext.verdict.length).toBe(1);
   });
 
   it('refuses a page that is not a map at all', () => {
-    expect(ext.verdict({ site: null }, null).why).toMatch(/not a map Azimut can read/);
-    expect(ext.verdict(null, null).ok).toBe(false);
+    expect(ext.verdict({ site: null }).why).toMatch(/not a map Azimut can read/);
+    expect(ext.verdict(null).ok).toBe(false);
   });
 
   it('waits for the address bar to carry a position', () => {
-    expect(ext.verdict({ ...MAP, lat: null, lon: null }, null).why).toMatch(/move the map once/);
+    expect(ext.verdict({ ...MAP, lat: null, lon: null }).why).toMatch(/move the map once/);
   });
 
   it('names the way out of every view it refuses', () => {
@@ -238,9 +250,9 @@ describe('the geometry verdict', () => {
       ['streetview', 'These tools work on the map, not in Street View'],
       ['tilted', 'These tools work in 2D only, so turn 3D off'],
     ]) {
-      expect(ext.verdict({ ...MAP, view_kind: kind, geometry: false }, null).why).toBe(why);
+      expect(ext.verdict({ ...MAP, view_kind: kind, geometry: false }).why).toBe(why);
     }
-    expect(ext.verdict({ ...MAP, view_kind: 'hologram', geometry: false }, null).why)
+    expect(ext.verdict({ ...MAP, view_kind: 'hologram', geometry: false }).why)
       .toBe('This view is not a map to measure on');
   });
 
@@ -249,70 +261,40 @@ describe('the geometry verdict', () => {
     // is not something anyone can go and switch off. Whether the view is 40° or
     // 3° past level, the way out is the same button, so the sentence is too.
     const tilted = { ...MAP, view_kind: 'tilted', geometry: false, tilt: 39.6 };
-    expect(ext.verdict(tilted, null).why).toBe('These tools work in 2D only, so turn 3D off');
-    expect(ext.verdict({ ...tilted, tilt: null }, null).why)
+    expect(ext.verdict(tilted).why).toBe('These tools work in 2D only, so turn 3D off');
+    expect(ext.verdict({ ...tilted, tilt: null }).why)
       .toBe('These tools work in 2D only, so turn 3D off');
-  });
-
-  it('draws on a satellite view from the height in metres it quotes', () => {
-    // Google drops the zoom in satellite and quotes the viewport's own height
-    // in metres. Next to the number of pixels it was drawn in, that is a zoom,
-    // and the app hands one back (scale_source: height_m).
-    const satellite = { ...MAP, zoom: 15.0015, scale_source: 'height_m' };
-    expect(ext.verdict(satellite, null, false)).toEqual({ ok: true, why: '', far: false });
-
-    // …and without a height to divide by, there is no zoom and no scale
-    const blind = { ...MAP, zoom: null, geometry: false, scale_source: null };
-    expect(ext.verdict(blind, null, false).why).toBe(measureMe());
-    expect(ext.verdict(blind, null, true)).toEqual({ ok: true, why: '', far: false });
-  });
-
-  it('measures its way onto a level Earth view, which names no projection', () => {
-    // a camera pointed straight down is a uniform scaling of the ground, and a
-    // measured scale needs neither a zoom nor a named flattening
-    const earth = { site: 'google-earth', lat: 48.8, lon: 2.3, zoom: null,
-      view_kind: 'map', projection: null, globe_below: null, scale_source: null,
-      geometry: false };
-    expect(ext.verdict(earth, null, false).why).toBe(measureMe());
-    expect(ext.verdict(earth, null, true)).toEqual({ ok: true, why: '', far: false });
   });
 
   it('keeps drawing when the site has gone to a globe, and says it drifts', () => {
     // A whole region's worth of marks is worth seeing at a glance. The middle
     // of the screen is still right out here; the edges are not, and the panel
     // dims what it draws rather than refusing to draw it.
-    const wide = ext.verdict({ ...MAP, zoom: 3, far: true }, null);
+    const wide = ext.verdict({ ...MAP, zoom: 3, far: true });
     expect(wide.ok).toBe(true);
     expect(wide.far).toBe(true);
     expect(wide.why).toBe('Zoomed out: marks drift from the middle of the screen');
 
     // …and in close, nothing is said at all
-    expect(ext.verdict({ ...MAP, far: false }, null)).toEqual({ ok: true, why: '', far: false });
+    expect(ext.verdict({ ...MAP, far: false })).toEqual({ ok: true, why: '', far: false });
   });
 
-  it('still refuses a globe camera whose scale nothing has measured', () => {
-    // Earth far out: no flattening named, no zoom quoted, nothing measured yet
-    const earth = { site: 'google-earth', lat: 48.8, lon: 2.3, zoom: null, view_kind: 'globe',
-      projection: null, globe_below: null, scale_source: null, geometry: false, far: true };
-    expect(ext.verdict(earth, null, false).why).toBe(measureMe());
-    expect(ext.verdict(earth, null, true)).toEqual({
-      ok: true, why: 'Zoomed out: marks drift from the middle of the screen', far: true,
-    });
+  it('refuses a globe camera outright, with a scale or without, and says to zoom in', () => {
+    // The other globe, and not the same thing at all. Above is a flat map drawn
+    // far out, whose centre this arithmetic is still right about. This is a
+    // perspective camera on a sphere — Earth's 3D mode past its ceiling, and
+    // Google's Earth mode with it — where Mercator is not right at all.
+    const earth = { ...MAP, site: 'google-earth', view_kind: 'globe', geometry: false, far: true };
+    for (const source of ['distance', null]) {
+      const said = ext.verdict({ ...earth, scale_source: source });
+      expect(said.ok).toBe(false);
+      expect(said.why).toBe('The camera is on a globe this far out, so zoom in');
+    }
   });
 
   it('falls back to the general refusal when the view names no camera at all', () => {
-    expect(ext.verdict({ ...MAP, view_kind: null, geometry: false, globe_below: null }, null).why)
+    expect(ext.verdict({ ...MAP, view_kind: null, geometry: false, globe_below: null }).why)
       .toBe('This view is not one Azimut can compute on');
-  });
-
-  it('stops drawing when the map stops going where it was predicted', () => {
-    // the overlay only passes a residual once a run of pans has missed — one
-    // overshoot is these maps gliding on after the finger leaves
-    expect(ext.verdict(MAP, ext.RESIDUAL_LIMIT).ok).toBe(true);
-    const drifted = ext.verdict(MAP, ext.RESIDUAL_LIMIT + 40);
-    expect(drifted.ok).toBe(false);
-    expect(drifted.why).toMatch(/^The map landed \d+ px from where it was predicted/);
-    expect(drifted.why).toMatch(/Pan once to measure it again$/);
   });
 });
 
@@ -903,5 +885,161 @@ describe('the reference windows', () => {
     expect(refs.open.map((v) => v.id)).toEqual(['ref-2']);
     refs.clear();
     expect(refs.open).toEqual([]);
+  });
+});
+
+describe('the fire layer, on both sides of the boundary', () => {
+  const SENSORS = [
+    { id: 'viirs', label: 'VIIRS (S-NPP + NOAA-20)' },
+    { id: 'modis', label: 'MODIS (Terra + Aqua)' },
+  ];
+
+  it('offers the same windows and the same limit as the app', () => {
+    expect(ext.FIRE_WINDOWS).toEqual(appFires.WINDOWS);
+    expect(ext.FIRE_DATED).toBe(appFires.DATED);
+    expect(ext.FIRE_MAX_RANGE_DAYS).toBe(appFires.MAX_RANGE_DAYS);
+  });
+
+  it('agrees with the app about what FIRMS will answer', () => {
+    const asked = [
+      { window: '24h' },
+      { window: '7d' },
+      { window: 'dates' },
+      { window: 'dates', first: '2026-08-01' },
+      { window: 'dates', first: '2026-08-01', last: '2026-08-09' },
+      { window: 'dates', first: '2026-08-09', last: '2026-08-01' },
+      { window: 'dates', first: '2026-01-01', last: '2026-03-01' },
+      { window: 'dates', first: 'soon' },
+    ];
+    for (const choice of asked) {
+      expect(ext.fireAskable(choice)).toBe(appFires.askable(choice));
+    }
+  });
+
+  it('stops a range on the same day the app does', () => {
+    for (const first of ['2026-01-01', '2026-02-10', '2026-12-20', '']) {
+      expect(ext.fireLastDay(first)).toBe(appFires.lastDayOf(first));
+    }
+  });
+
+  it('asks for the same thing the app asks for', () => {
+    const fires = ext.createFires();
+    fires.offer({ keyed: true, sensors: SENSORS });
+    fires.toggle();
+    expect(fires.query()).toEqual(appFires.tileParams({ sensor: 'viirs', window: '24h' }));
+
+    fires.set('sensor', 'modis');
+    fires.set('window', 'dates');
+    fires.set('first', '2026-08-01');
+    expect(fires.query()).toEqual(
+      appFires.tileParams({ sensor: 'modis', window: 'dates', first: '2026-08-01' })
+    );
+  });
+
+  it('asks for nothing until the layer is on, keyed and answerable', () => {
+    const fires = ext.createFires();
+    expect(fires.query()).toBe(null); // no key yet
+    fires.offer({ keyed: true, sensors: SENSORS });
+    expect(fires.query()).toBe(null); // …and not switched on
+    fires.toggle();
+    expect(fires.query()).not.toBe(null);
+    fires.set('window', 'dates');
+    expect(fires.query()).toBe(null); // …and waiting for a date
+  });
+
+  it('draws nothing and takes no click, whatever else is being measured', () => {
+    const fires = ext.createFires();
+    fires.offer({ keyed: true, sensors: SENSORS });
+    fires.toggle();
+    expect(fires.armed).toBe(false);
+    expect(fires.shapes()).toEqual([]);
+    fires.disarm();
+    expect(fires.state.on).toBe(true); // putting a tool down is not hiding a layer
+  });
+
+  it('says what it is showing, in the words the app uses', () => {
+    const fires = ext.createFires();
+    expect(fires.readout()).toBe('Add a NASA FIRMS key in Azimut Settings');
+    fires.offer({ keyed: true, sensors: SENSORS });
+    expect(fires.readout()).toBe('Detections are not being drawn');
+    fires.toggle();
+    expect(fires.readout()).toBe('VIIRS · last 24 h');
+    fires.set('window', 'dates');
+    expect(fires.readout()).toBe('Pick a date to draw the detections');
+    fires.set('first', '2026-08-01');
+    expect(fires.readout()).toBe('VIIRS · 2026-08-01');
+  });
+
+  it('stops asking at the zoom the app’s own map stops at', () => {
+    // the app caps the tile source rather than refusing to draw: past this it
+    // keeps showing that level, scaled. The panel holds its one picture the
+    // same way, and neither asks again.
+    const basemap = readFileSync(join(here, './map/basemap.js'), 'utf8');
+    const firms = /id: 'firms',[\s\S]*?maxZoom: (\d+)/.exec(basemap);
+    expect(ext.FIRE_MAX_ZOOM).toBe(Number(firms[1]));
+  });
+
+  it('offers no seat at all until a key is behind it', () => {
+    const fires = ext.createFires();
+    expect(fires.offerable).toBe(false);
+    fires.offer({ keyed: true, sensors: SENSORS });
+    expect(fires.offerable).toBe(true);
+  });
+});
+
+/**
+ * The calendar, which is the sixth thing written twice.
+ *
+ * Both sides draw their own month because the browser's own picker opens over
+ * the page and outside the panel it belongs to. Two calendars is two chances to
+ * disagree about which day a box is, so they are run over the same months here
+ * — including the ones that catch an off-by-one: a month starting on a Sunday,
+ * a leap February, and a year boundary.
+ */
+describe('the calendar, on both sides of the boundary', () => {
+  const MONTHS = ['2026-09', '2026-08', '2027-02', '2024-02', '2026-01', '2026-12', '2026-11'];
+
+  it('starts its weeks on the same day, named the same way', () => {
+    expect(ext.CAL_WEEKDAYS).toEqual(appCal.WEEKDAYS);
+  });
+
+  it('cuts every month into the same boxes', () => {
+    for (const month of MONTHS) {
+      expect(ext.calMonthDays(month), month).toEqual(appCal.monthDays(month));
+      expect(ext.calMonthLabel(month), month).toBe(appCal.monthLabel(month));
+    }
+  });
+
+  it('opens on the same month, from a day or from nothing', () => {
+    for (const value of ['2026-03-04', '2026-03', '', 'soon']) {
+      expect(ext.calMonthOf(value, '2026-09-12'), value).toBe(appCal.monthOf(value, '2026-09-12'));
+    }
+  });
+
+  it('walks months the same way, across both year boundaries', () => {
+    for (const [cursor, by] of [['2026-01', -1], ['2026-12', 1], ['2026-03-31', -1], ['2026-06', 7]]) {
+      expect(ext.calShiftMonth(cursor, by), `${cursor}${by}`).toBe(appCal.shiftMonth(cursor, by));
+    }
+  });
+
+  it('refuses the same days, and greys the same arrows', () => {
+    const bounds = [
+      ['', ''],
+      ['2026-09-10', '2026-09-20'],
+      ['', '2026-09-12'],
+      ['2026-09-12', ''],
+    ];
+    for (const [min, max] of bounds) {
+      for (const day of ['2026-09-09', '2026-09-12', '2026-09-21', '']) {
+        expect(ext.calOutOfRange(day, min, max), `${day} in ${min}..${max}`).toBe(
+          appCal.outOfRange(day, min, max)
+        );
+      }
+      for (const month of MONTHS) {
+        expect(ext.calMonthOutOfRange(month, min, max), `${month} in ${min}..${max}`).toBe(
+          appCal.monthOutOfRange(month, min, max)
+        );
+      }
+    }
   });
 });

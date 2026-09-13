@@ -1108,3 +1108,88 @@ def test_index_counts_relations_and_marks_a_proposed_point(client):
     assert rows["Checkpoint"]["relations"] == 0
     assert rows["Checkpoint"]["status"] == "confirmed"
     assert mine["id"] == rows["Checkpoint"]["id"]
+
+
+# -- scale bar and north arrow -------------------------------------------------
+
+
+def test_capture_burns_the_marks_only_when_the_menu_asked(client, monkeypatch):
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    frame = {"lat": 48.8584, "lon": 2.2945, "zoom": 16, "width": 640, "height": 480}
+
+    plain = client.post(f"/api/cases/{cid}/satellite/capture", json=frame).json()
+    assert plain["marks"] is None
+
+    marked = client.post(
+        f"/api/cases/{cid}/satellite/capture", json={**frame, "scale_north": True}
+    ).json()
+    assert marked["marks"]["scale"].endswith(" m")
+    assert marked["marks"]["north"] == 0.0
+    # and it rides on the filed capture, not only on the answer
+    listed = client.get(f"/api/cases/{cid}/satellite").json()
+    assert [row["marks"] for row in listed].count(None) == 1
+
+
+def test_the_bar_is_read_in_the_analysts_units(client, monkeypatch):
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    frame = {"lat": 48.8584, "lon": 2.2945, "zoom": 16, "width": 640, "height": 480,
+             "scale_north": True}
+
+    client.put("/api/settings/prefs", json={"units": "imperial"})
+    assert client.post(
+        f"/api/cases/{cid}/satellite/capture", json=frame
+    ).json()["marks"]["scale"].endswith(("ft", "mi"))
+
+    client.put("/api/settings/prefs", json={"units": "metric"})
+    assert client.post(
+        f"/api/cases/{cid}/satellite/capture", json=frame
+    ).json()["marks"]["scale"].endswith(("m", "km"))
+
+
+def test_a_screen_crop_takes_the_marks_and_a_pasted_shot_never_does(client):
+    """The bar states what a pixel is worth, and only a registered crop knows:
+    a pasted image's coordinates describe the map view when it was filed."""
+    client.put("/api/settings/keys", json={"google_js": "AIza.js"})
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    shot = {"lat": "48.8584", "lon": "2.2945", "zoom": "18", "provider": "google-js"}
+
+    framed = client.post(
+        f"/api/cases/{cid}/satellite/screenshot",
+        files={"image": ("shot.png", _png_bytes(), "image/png")},
+        data={**shot, "framed": "true", "scale_north": "true"},
+    ).json()
+    assert framed["marks"]["scale"]
+
+    pasted = client.post(
+        f"/api/cases/{cid}/satellite/screenshot",
+        files={"image": ("shot.png", _png_bytes(), "image/png")},
+        data={**shot, "framed": "false", "scale_north": "true"},
+    ).json()
+    assert pasted["marks"] is None
+
+
+def test_a_denser_screen_states_the_ground_it_really_covers(client):
+    """Two of the file's pixels per CSS pixel is half the ground per pixel, so
+    the same view on a 2× screen must not be told it spans twice as far."""
+    client.put("/api/settings/keys", json={"google_js": "AIza.js"})
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    shot = {"lat": "0", "lon": "0", "zoom": "14", "provider": "google-js",
+            "framed": "true", "scale_north": "true"}
+
+    def span(device_scale):
+        body = client.post(
+            f"/api/cases/{cid}/satellite/screenshot",
+            files={"image": ("shot.png", _png_bytes(w=900, h=600), "image/png")},
+            data={**shot, "device_scale": device_scale},
+        ).json()
+        return tiles.scale_span(
+            tiles.meters_per_pixel(0.0, 14) / float(device_scale), 900 * tiles.SCALE_MAX_SHARE
+        )[0], body["marks"]["scale"]
+
+    expected_1x, drawn_1x = span("1")
+    expected_2x, drawn_2x = span("2")
+    assert drawn_1x == expected_1x
+    assert drawn_2x == expected_2x
+    assert drawn_1x != drawn_2x

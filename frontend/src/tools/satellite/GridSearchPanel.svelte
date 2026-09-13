@@ -192,9 +192,7 @@
 
 <style>
   .grid-panel {
-    position: absolute;
-    top: 0;
-    left: calc(100% + 8px);
+    /* placed by the rail's panel slot */
     width: 218px;
     display: flex;
     flex-direction: column;

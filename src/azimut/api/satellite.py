@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from .. import config
 from ..engine import (
     cities,
+    firms,
     geo,
     google_tiles,
     localtime,
@@ -31,6 +32,7 @@ from ..engine import (
     sky,
     tilecache,
     tiles,
+    wayback,
 )
 from ..workspace import Case, CaseError
 from . import events
@@ -80,6 +82,8 @@ class CaptureIn(BaseModel):
     marker_y: int = Field(default=0, ge=-tiles.SIZE_MAX, le=tiles.SIZE_MAX)
     marker_lat: float | None = Field(default=None, ge=-90, le=90)
     marker_lon: float | None = Field(default=None, ge=-180, le=180)
+    # burn a scale bar and a north arrow into the crop (capture menu)
+    scale_north: bool = False
 
 
 class PlaceIn(BaseModel):
@@ -133,6 +137,15 @@ GRID_MAX_STATUSES = 50000
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _units() -> str:
+    """The analyst's measurement system, for anything drawn with a number on it.
+
+    Presentation only, as every display preference is: the capture's own
+    provenance keeps metres whatever the bar says.
+    """
+    return config.load_settings().get("units", "metric")
 
 
 def saved_changed(case: Case) -> None:
@@ -291,6 +304,44 @@ def sentinel_coverage(
         raise HTTPException(status_code=502, detail=f"coverage check failed: {exc}") from exc
     config.record_usage("sentinelhub", 1)
     return result
+
+
+@router.get("/satellite/wayback/releases")
+def wayback_releases() -> dict[str, Any]:
+    """Every World Imagery Wayback release, newest first.
+
+    Asked when the analyst shows the Wayback basemap, never on mount: it is a
+    request to Esri. Key-less and unmetered.
+    """
+    try:
+        listed = wayback.releases()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"could not read the release list: {exc}") from exc
+    return {"releases": [{"release": r.number, "date": r.date} for r in listed]}
+
+
+@router.get("/satellite/wayback/changes")
+def wayback_changes(
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+    zoom: int = Query(ge=1, le=22),
+) -> dict[str, Any]:
+    """The distinct pictures of a point, newest first, each with the release
+    that first published it and when it was taken.
+
+    A few small requests per picture found, so it is asked while the picker is
+    open and answered from memory for the same tile afterwards.
+    """
+    try:
+        found = wayback.local_changes(lat, lon, zoom)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"could not read this point's history: {exc}") from exc
+    return {
+        "changes": [
+            {"release": c.release, "acquired": c.acquired, "source": c.source} for c in found
+        ],
+        "zoom": min(zoom, wayback.MAX_ZOOM),
+    }
 
 
 @router.post("/satellite/usage/{meter}")
@@ -460,6 +511,118 @@ def tile_proxy(provider_id: str, z: int, x: int, y: int) -> Response:
     raise HTTPException(status_code=404, detail="no imagery at this location/zoom")
 
 
+#: What FIRMS means by the placard it draws instead of detections. Its own
+#: wording, which covers both ways a key stops working.
+FIRMS_REFUSED = "FIRMS did not accept this key, or the account is over its limit"
+
+
+def firms_key() -> str | None:
+    """The FIRMS key, if the layer is usable at all.
+
+    Same three questions a keyed basemap answers (``tiles.all_providers``): is
+    there a key, has it been switched off in Settings, and was it last seen
+    failing. A key known to be dead withholds the layer until it changes or a
+    test passes, rather than drawing an empty map over a real one.
+    """
+    settings = config.load_settings()
+    if not settings.get("providers_enabled", {}).get("firms", True):
+        return None
+    if config.provider_key_bad("firms", settings):
+        return None
+    return (settings.get("api_keys") or {}).get("firms")
+
+
+@router.get("/firms/sensors")
+def firms_sensors() -> dict[str, Any]:
+    """What the fire layer can be asked, and whether it can be asked at all.
+
+    Read on mount by the Layers panel, so it touches no network: the sensors
+    and the windows are a catalogue, and ``keyed`` is a look at settings.json.
+    A layer nobody can use says so with the reason rather than failing on the
+    first tile.
+    """
+    return {
+        "keyed": bool(firms_key()),
+        "sensors": [{"id": s.id, "label": s.label} for s in firms.SENSORS],
+        "windows": list(firms.WINDOWS),
+        "max_zoom": firms.MAX_ZOOM,
+        "max_range_days": firms.MAX_RANGE_DAYS,
+    }
+
+
+@router.get("/firms/tiles/{z}/{x}/{y}")
+def firms_tile(
+    z: int,
+    x: int,
+    y: int,
+    sensor: str = "viirs",
+    window: str = "24h",
+    first: str = "",
+    last: str = "",
+) -> Response:
+    """One tile of active fire detections, proxied so the key stays here.
+
+    FIRMS puts the MAP_KEY in the *path*, so a tile URL the browser could build
+    would publish it in the page, in the network log and in a screenshot of
+    either. Everything else is this endpoint translating the map's z/x/y into
+    the bounding box a WMS wants (``engine/firms.py``).
+
+    Never cached to disk: the live layers are what is burning now, refreshed
+    upstream every fifteen minutes, and a cached fire is a lie with a timestamp.
+    """
+    key = firms_key()
+    if not key:
+        raise HTTPException(status_code=404, detail="no FIRMS key saved")
+    if firms.too_deep(z):
+        raise HTTPException(
+            status_code=422,
+            detail=f"FIRMS detections are drawn to z{firms.MAX_ZOOM}; deeper is one mark per pixel",
+        )
+    grid = 1 << z
+    if z < 0 or not (0 <= x < grid) or not (0 <= y < grid):
+        raise HTTPException(status_code=422, detail="tile coordinates out of range")
+    try:
+        url = firms.tile_url(
+            key, sensor_id=sensor, window=window, z=z, x=x, y=y, first=first, last=last
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return firms_answer(url)
+
+
+def firms_answer(url: str) -> Response:
+    """Fetch one FIRMS picture and hand it on, or say what FIRMS said.
+
+    Shared with the extension's own route (``api/ingest.py``): the two ask for
+    different rectangles and want exactly the same handling of a refusal, and
+    FIRMS refuses by answering 200 with an XML report in the body.
+    """
+    try:
+        response = httpx.get(url, headers={"User-Agent": tiles.USER_AGENT}, timeout=20)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"FIRMS unreachable: {exc}") from exc
+    if response.status_code >= 400 or "xml" in response.headers.get("content-type", ""):
+        raise HTTPException(
+            status_code=502, detail=firms.service_error(response.text) or "FIRMS refused the request"
+        )
+    # A key FIRMS will not accept comes back as 200 and a picture saying so.
+    # Nothing in the answer is an error, so without this the map would tile that
+    # placard across the ground. It is an auth-shaped verdict and nothing else,
+    # which is what lets it bench the layer the way a dead basemap key is
+    # benched: the Layers row goes back to "add a key", with the reason.
+    if firms.is_placard(response.content):
+        config.record_provider_status("firms", False, FIRMS_REFUSED)
+        raise HTTPException(status_code=502, detail=FIRMS_REFUSED)
+    return Response(
+        content=response.content,
+        media_type="image/png",
+        # The browser may hold a picture for a few minutes — long enough for a
+        # pan back, short enough that a live layer is still live. FIRMS itself
+        # updates every fifteen.
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
 @router.get("/satellite/imagery-date")
 def imagery_date(
     lat: float = Query(ge=-90, le=90),
@@ -471,7 +634,21 @@ def imagery_date(
 
     Only Esri World Imagery exposes per-scene capture dates; for any other
     provider we report ``supported: false`` so the UI can hide the readout.
+    A Wayback release answers from that release's own metadata, since the
+    pixels under a point differ from one release to the next.
     """
+    base_id, sep, spec = provider.partition(wayback.VARIANT_SEP)
+    if base_id == wayback.BASE_ID:
+        try:
+            number = wayback.parse_variant(spec) if sep else wayback.releases()[0].number
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception:
+            return {"supported": True, "date": None, "source": None}
+        found = wayback.capture_date(lat, lon, int(zoom), number)
+        if found is None:
+            return {"supported": True, "date": None, "source": None}
+        return {"supported": True, **found}
     if provider != "esri-world-imagery":
         return {"supported": False, "date": None, "source": None}
     result = tiles.esri_capture_date(lat, lon, int(zoom))
@@ -770,6 +947,7 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
             provider, bearing=body.bearing, marker_style=body.marker_style,
             marker_x=body.marker_x, marker_y=body.marker_y,
             marker_lat=body.marker_lat, marker_lon=body.marker_lon,
+            scale_north=body.scale_north, units=_units(),
         )
     except tiles.TileFetchError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -825,6 +1003,11 @@ async def capture_screenshot(
     provider: str = Form(),
     bearing: float = Form(default=0.0, ge=0, le=360),
     framed: bool = Form(default=False),
+    scale_north: bool = Form(default=False),
+    # How many image pixels the crop holds per CSS pixel. A zoom describes CSS
+    # pixels, so a 2× screen puts two of the file's pixels inside every one of
+    # them — without this the bar would state twice the ground it covers.
+    device_scale: float = Form(default=1.0, gt=0, le=8),
 ) -> dict[str, Any]:
     """File a user-made screenshot of a widget basemap as a capture.
 
@@ -864,6 +1047,21 @@ async def capture_screenshot(
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"not a readable image: {exc}") from exc
 
+    # Only onto a registered crop. A pasted screenshot's coordinates describe
+    # the map view at filing time rather than the picture itself, so nothing
+    # here knows what a pixel of it is worth — and a bar drawn over that would
+    # be the one mark on the capture that cannot be checked.
+    marks = (
+        tiles.burn_scale_north(
+            img,
+            meters_per_pixel=tiles.meters_per_pixel(lat, zoom) / device_scale,
+            bearing=bearing,
+            units=_units(),
+        )
+        if scale_north and framed
+        else None
+    )
+
     year = datetime.now(timezone.utc).year
     attribution = f"Map data ©{year} Google"
     img = tiles.burn_attribution(img, attribution)
@@ -884,6 +1082,7 @@ async def capture_screenshot(
         "bearing": bearing,
         "attribution": attribution,
         "attribution_burned": True,
+        "marks": marks,
         "plus_code": plus_code,
         "dms": geo.to_dms(lat, lon),
         "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

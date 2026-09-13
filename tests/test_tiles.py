@@ -750,3 +750,86 @@ def test_crop_still_leaves_the_poles_empty():
         85.0, 0.0, 3, 700, 700, provider, fetch_tile=fake_fetch
     )
     assert prov["tiles_missing"] > 0
+
+
+# -- the scale bar and the north arrow -----------------------------------------
+
+
+def test_scale_span_climbs_the_round_ladder():
+    """Every span a bar may state is 1, 2 or 5 × a power of ten, in the unit."""
+    for mpp in (0.05, 0.3, 1.19, 9.55, 76.4, 300.0):
+        label, pixels = tiles.scale_span(mpp, 300)
+        number = float(label.split()[0])
+        decade = number / 10 ** math.floor(math.log10(number))
+        assert round(decade, 6) in (1.0, 2.0, 5.0), label
+        assert pixels <= 300
+
+
+def test_scale_span_reads_in_the_analysts_own_units():
+    metric, _ = tiles.scale_span(1.0, 300)
+    imperial, _ = tiles.scale_span(1.0, 300, "imperial")
+    assert metric.endswith(" m")
+    assert imperial.endswith(" ft")
+    # far enough out, each climbs to its own big unit
+    assert tiles.scale_span(50.0, 300)[0].endswith(" km")
+    assert tiles.scale_span(50.0, 300, "imperial")[0].endswith(" mi")
+
+
+def test_scale_span_refuses_what_it_cannot_back():
+    assert tiles.scale_span(0, 300) is None
+    assert tiles.scale_span(-1.0, 300) is None
+    assert tiles.scale_span(1.0, 0) is None
+    # a bar narrower than its own label is no bar
+    assert tiles.scale_span(1.0, 20) is None
+
+
+def test_burn_scale_north_draws_both_marks_and_says_what_it_drew():
+    img = Image.new("RGB", (900, 600), (60, 70, 60))
+    before = img.tobytes()
+    drawn = tiles.burn_scale_north(img, meters_per_pixel=1.19, bearing=0.0)
+    assert drawn == {"scale": "200 m", "north": 0.0}
+    assert img.tobytes() != before, "nothing was actually drawn"
+
+
+def test_burn_scale_north_draws_neither_mark_without_a_fact_behind_it():
+    """A capture off a map site that states no rotation gets the bar alone, and
+    one with no resolution at all is left exactly as it came in."""
+    img = Image.new("RGB", (900, 600), (60, 70, 60))
+    assert tiles.burn_scale_north(img, meters_per_pixel=1.19, bearing=None) == {
+        "scale": "200 m",
+        "north": None,
+    }
+    bare = Image.new("RGB", (900, 600), (60, 70, 60))
+    untouched = bare.tobytes()
+    assert tiles.burn_scale_north(bare, meters_per_pixel=None, bearing=None) is None
+    assert bare.tobytes() == untouched
+
+
+def test_fetch_crop_leaves_the_marks_off_unless_they_are_asked_for():
+    provider = tiles.BUILTIN_PROVIDERS[0]
+
+    def fake_fetch(client, url):
+        return Image.new("RGB", (256, 256), (10, 120, 10))
+
+    plain, prov = tiles.fetch_crop(48.8584, 2.2945, 17, 640, 480, provider, fetch_tile=fake_fetch)
+    assert prov["marks"] is None
+
+    marked, prov = tiles.fetch_crop(
+        48.8584, 2.2945, 17, 640, 480, provider, scale_north=True, fetch_tile=fake_fetch
+    )
+    assert prov["marks"]["scale"].endswith(" m")
+    assert prov["marks"]["north"] == 0.0
+    assert marked.tobytes() != plain.tobytes()
+
+
+def test_a_turned_crop_records_the_heading_its_needle_points_at():
+    provider = tiles.BUILTIN_PROVIDERS[0]
+
+    def fake_fetch(client, url):
+        return Image.new("RGB", (256, 256), (10, 120, 10))
+
+    _img, prov = tiles.fetch_crop(
+        48.8584, 2.2945, 17, 640, 480, provider,
+        bearing=42.0, scale_north=True, fetch_tile=fake_fetch,
+    )
+    assert prov["marks"]["north"] == 42.0

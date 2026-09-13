@@ -12,12 +12,23 @@ import { awaitMapReady, fakeGoogleMaps, installAppFixture, mapPicture } from './
  * and whether it is ever built twice.
  */
 
+/**
+ * Pick a basemap from the surface's own chip.
+ *
+ * It is a chip and a list rather than a `<select>`: the provider belongs to the
+ * surface, not to the tool, and two compared surfaces each carry their own.
+ */
+async function pickProvider(page, label) {
+  await page.getByRole('button', { name: 'Imagery provider' }).click();
+  await page.getByRole('option', { name: label }).click();
+}
+
 async function openWidget(page) {
   await fakeGoogleMaps(page);
   const fixture = await installAppFixture(page, { widget: true });
   await page.goto('/#satellite');
   await awaitMapReady(page);
-  await page.getByTitle('Imagery provider').selectOption('google-js');
+  await pickProvider(page, 'Google Satellite (Maps JS)');
   await expect(page.locator('.map-glass')).toBeAttached();
   return fixture;
 }
@@ -88,9 +99,9 @@ test('is built once and counted once, however often it is shown', async ({ page 
   expect(await maps(page)).toBe(1);
   await expect.poll(() => fixture.widgetLoads).toEqual(['google_js']);
 
-  await page.getByTitle('Imagery provider').selectOption('esri-world-imagery');
+  await pickProvider(page, 'Esri World Imagery');
   await expect(page.locator('.map-glass')).toHaveAttribute('hidden', '');
-  await page.getByTitle('Imagery provider').selectOption('google-js');
+  await pickProvider(page, 'Google Satellite (Maps JS)');
   await expect(page.locator('.map-glass')).not.toHaveAttribute('hidden', '');
 
   expect(await maps(page)).toBe(1);

@@ -21,7 +21,7 @@ import httpx
 from PIL import Image, ImageDraw, ImageFont
 
 from .. import config
-from . import google_tiles, sentinel
+from . import google_tiles, pdffonts, sentinel, wayback
 
 TILE_SIZE = 256
 SIZE_MAX = 4096  # hard cap on a capture's width/height, in px
@@ -129,6 +129,17 @@ BUILTIN_PROVIDERS: tuple[Provider, ...] = (
         attribution="Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)",
         max_zoom=17,
         imagery=False,
+    ),
+    # Every published release of World Imagery (engine/wayback.py). The same
+    # imagery and terms as the default basemap, one release at a time. The URL
+    # is a placeholder until a release is chosen: get_provider always resolves
+    # one, so no tile is ever asked for without it.
+    Provider(
+        id=wayback.BASE_ID,
+        label="Esri Wayback (imagery archive)",
+        url=wayback.TILE_TEMPLATE.format(release="{release}"),
+        attribution="Esri, Maxar, Earthstar Geographics, and the GIS User Community · World Imagery Wayback",
+        max_zoom=wayback.MAX_ZOOM,
     ),
 )
 
@@ -285,6 +296,8 @@ def get_provider(provider_id: str) -> Provider:
     and a capture's provenance records the id it was actually rendered from.
     """
     base_id, sep, spec = provider_id.partition(sentinel.VARIANT_SEP)
+    if base_id == wayback.BASE_ID:
+        return _wayback_provider(spec if sep else None)
     for provider in all_providers():
         if provider.id == base_id:
             if not sep:
@@ -304,6 +317,36 @@ def get_provider(provider_id: str) -> Provider:
                 ),
             )
     raise KeyError(f"unknown tile provider '{provider_id}'")
+
+
+def _wayback_provider(spec: str | None) -> Provider:
+    """One Wayback release as a provider, the newest when none is named.
+
+    The id always names the release, so a tile proxied for the plain basemap is
+    cached, and a capture filed from it is credited, under the release it came
+    from. Resolving the newest reads the release list, which only ever happens
+    because the analyst chose this basemap.
+    """
+    base = next(p for p in BUILTIN_PROVIDERS if p.id == wayback.BASE_ID)
+    try:
+        number = wayback.parse_variant(spec) if spec is not None else None
+    except ValueError as exc:
+        raise KeyError(str(exc)) from exc
+    try:
+        listed = wayback.releases()
+    except Exception as exc:
+        if number is None:
+            raise KeyError(f"could not read the Wayback release list: {exc}") from exc
+        listed = []  # a named release still draws; only its date is unknown
+    if number is None:
+        number = listed[0].number
+    release = wayback.find(number, listed)
+    return replace(
+        base,
+        id=wayback.variant_id(number),
+        label=f"Esri Wayback · {release.date if release else f'release {number}'}",
+        url=wayback.tile_url(number),
+    )
 
 
 def _sentinel_key_from(url: str) -> str:
@@ -338,8 +381,14 @@ def unproject(x: float, y: float, zoom: int) -> tuple[float, float]:
     return lat, lon
 
 
-def meters_per_pixel(lat: float, zoom: int) -> float:
-    return 156543.03392 * math.cos(math.radians(lat)) / (1 << zoom)
+def meters_per_pixel(lat: float, zoom: float) -> float:
+    """Ground metres one pixel covers at this latitude and zoom.
+
+    Fractional zooms are real here rather than a rounding accident: a capture
+    stitched by this app sits on a whole level, but a map site read off its own
+    URL states things like ``lvl=17.4``, and half a level is 40% of the scale.
+    """
+    return 156543.03392 * math.cos(math.radians(lat)) / (2.0**zoom)
 
 
 # -- crop fetching -------------------------------------------------------------
@@ -422,6 +471,8 @@ def fetch_crop(
     marker_lat: float | None = None,
     marker_lon: float | None = None,
     bearing: float = 0.0,
+    scale_north: bool = False,
+    units: str = "metric",
     fetch_tile: Callable[[httpx.Client, str], Image.Image | None] | None = None,
 ) -> tuple[Image.Image, dict[str, Any]]:
     """Stitch a width×height crop framed on (lat, lon). Returns (image, provenance).
@@ -437,6 +488,11 @@ def fetch_crop(
     ``bearing`` (degrees clockwise from north) rotates the crop: a larger
     north-up canvas is stitched, rotated, then center-cropped to width×height so
     the result matches a map turned to that heading.
+
+    ``scale_north`` burns a scale bar and a north arrow into the crop, read in
+    ``units`` (the analyst's display preference). Off by default: a capture is
+    somebody's evidence, and what is drawn onto it is asked for rather than
+    assumed.
     """
     if provider.needs_key:
         raise TileFetchError(f"provider '{provider.id}' requires an API key (settings.json)")
@@ -584,6 +640,17 @@ def fetch_crop(
         marker_style = "crosshair"
         _draw_crosshair(canvas, mx, my)
 
+    marks = (
+        burn_scale_north(
+            canvas,
+            meters_per_pixel=meters_per_pixel(lat, zoom),
+            bearing=bearing,
+            units=units,
+        )
+        if scale_north
+        else None
+    )
+
     attribution = provider.attribution
     if provider.session == "google":
         # the exact copyright line for this viewport (e.g. "Map data ©2026
@@ -631,6 +698,10 @@ def fetch_crop(
         "marker_style": marker_style,
         "marker_x": int(marker_x),
         "marker_y": int(marker_y),
+        # What was drawn over the imagery, if anything was asked for: the span
+        # the bar states and the heading the needle points at. A reader of the
+        # capture can tell an absent bar from an unbacked one.
+        "marks": marks,
         # kept for backward-compatible readers of older captures
         "crosshair": marker_style != "none",
     }
@@ -797,6 +868,208 @@ def burn_attribution(img: Image.Image, text: str) -> Image.Image:
     font = ImageFont.load_default()
     draw.text((6, img.height + 4), text, fill=(203, 208, 218), font=font)
     return out
+
+
+# -- scale bar and north arrow -------------------------------------------------
+#
+# Two marks, one switch, and both are *claims about the picture* rather than
+# decoration: this is how far that is, and that way is north. So neither is ever
+# invented. A capture with no metres-per-pixel gets no bar, and one whose
+# heading nobody stated gets no arrow — a map site that writes no rotation into
+# its URL is answered with the bar alone instead of an arrow pointing at a
+# guess, and the provenance records exactly what was burned in.
+#
+# Drawn here, in Pillow, because all three roads to a capture pass through this
+# process: the stitched tile crop below, the widget screenshot
+# (api/satellite.py) and the extension's own grab (api/ingest.py). The two
+# screen roads hand in the device pixel ratio their crop was taken at, since a
+# zoom describes CSS pixels and a 2× screen holds two of those per pixel of the
+# file.
+
+#: The 1/2/5×10ⁿ ladder a scale bar's span is chosen from, longest first.
+SCALE_STEPS = (5, 2, 1)
+#: How much of the capture's width the bar may span.
+SCALE_MAX_SHARE = 0.28
+#: Marks are drawn at this factor and downsampled — Pillow has no anti-aliasing
+#: for shapes, and a jagged needle looks like a mistake on somebody's evidence.
+MARK_SUPERSAMPLE = 4
+_FEET_PER_METRE = 3.280839895
+_FEET_PER_MILE = 5280
+
+
+def scale_span(
+    meters_per_pixel: float, max_px: float, units: str = "metric"
+) -> tuple[str, int] | None:
+    """The longest round span fitting ``max_px``, as ``(label, pixels)``.
+
+    Round means the 1/2/5×10ⁿ ladder every map uses, read in the analyst's own
+    units (Settings → General): a bar saying "500 m" is read at a glance where
+    one saying "437 m" is read twice. ``None`` when the arithmetic has nothing
+    to stand on — a zero or negative resolution, or a bar too small to label.
+    """
+    if not (meters_per_pixel > 0) or max_px <= 0:
+        return None
+    imperial = units == "imperial"
+    per_px = meters_per_pixel * (_FEET_PER_METRE if imperial else 1.0)
+    widest = per_px * max_px
+    if widest <= 0:
+        return None
+    decade = 10 ** math.floor(math.log10(widest))
+    span = next((step * decade for step in SCALE_STEPS if step * decade <= widest), decade)
+    pixels = round(span / per_px)
+    if pixels < 24:  # narrower than its own label: no bar rather than a stub
+        return None
+    if imperial:
+        label = f"{_round_label(span / _FEET_PER_MILE)} mi" if span >= _FEET_PER_MILE \
+            else f"{_round_label(span)} ft"
+    else:
+        label = f"{_round_label(span / 1000)} km" if span >= 1000 else f"{_round_label(span)} m"
+    return label, pixels
+
+
+def _round_label(value: float) -> str:
+    """``2.0`` reads as ``2``; ``0.5`` stays ``0.5``."""
+    return f"{value:g}"
+
+
+def _mark_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """The bundled face, at a size. Falls back to Pillow's own if it is missing."""
+    try:
+        return ImageFont.truetype(str(pdffonts.FONT_DIR / "NotoSans-Bold.ttf"), size)
+    except OSError:
+        return ImageFont.load_default()
+
+
+def burn_scale_north(
+    img: Image.Image,
+    *,
+    meters_per_pixel: float | None = None,
+    bearing: float | None = None,
+    units: str = "metric",
+) -> dict[str, Any] | None:
+    """Draw the marks onto ``img`` in place, and report what was drawn.
+
+    Returns ``{"scale": "500 m" | None, "north": 12.0 | None}``, or ``None``
+    when neither mark could be backed — which is what the provenance records,
+    so a reader of the capture is never left wondering whether a missing bar
+    means "no scale" or "scale unknown".
+    """
+    # Sized off the shorter side: the same mark on a 4096px plate and on a
+    # 480px thumbnail-sized crop has to read as the same weight of ink.
+    unit = max(12, min(26, round(min(img.width, img.height) / 40)))
+    margin = round(unit * 1.1)
+    drawn: dict[str, Any] = {"scale": None, "north": None}
+
+    span = (
+        scale_span(meters_per_pixel, img.width * SCALE_MAX_SHARE, units)
+        if meters_per_pixel is not None
+        else None
+    )
+    if span:
+        _draw_scale_bar(img, *span, unit, margin)
+        drawn["scale"] = span[0]
+    if bearing is not None:
+        _draw_north_arrow(img, bearing % 360.0, unit, margin)
+        drawn["north"] = round(bearing % 360.0, 1)
+    return drawn if (drawn["scale"] or drawn["north"] is not None) else None
+
+
+#: White marks over a dark backing: imagery is snow and tarmac and everything
+#: between, so neither colour alone survives every capture.
+_MARK_INK = (255, 255, 255, 240)
+_MARK_BACKING = (10, 12, 16, 205)
+#: The needle's other half, dark enough to hold its own against white ground.
+_MARK_SHADE = (24, 27, 33, 235)
+
+
+def _draw_scale_bar(img: Image.Image, label: str, span_px: int, unit: int, margin: int) -> None:
+    """An open bar with end ticks, its span written above it, bottom-left."""
+    s = MARK_SUPERSAMPLE
+    pad = unit * 2  # room for a label wider than the bar, and for the backing
+    box_w, box_h = span_px + pad * 2, round(unit * 2.4)
+    layer = Image.new("RGBA", (box_w * s, box_h * s), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+
+    thick = max(3, round(unit * 0.24)) * s
+    tick = round(unit * 0.8) * s
+    x0, x1 = pad * s, (pad + span_px) * s
+    base = box_h * s - thick - s
+    edge = max(1, round(s * 1.2))
+
+    for grow, fill in ((edge, _MARK_BACKING), (0, _MARK_INK)):
+        draw.rectangle((x0 - grow, base - grow, x1 + grow, base + thick + grow), fill=fill)
+        for x in (x0, x1 - thick):
+            draw.rectangle(
+                (x - grow, base - tick - grow, x + thick + grow, base + grow), fill=fill
+            )
+
+    _mark_text(draw, ((x0 + x1) / 2, base - tick - round(unit * 0.34) * s), label, unit)
+
+    layer = layer.resize((box_w, box_h), Image.Resampling.LANCZOS)
+    # The padding is room for a label wider than its own bar — "1000 km" over a
+    # short one — so the box is allowed to start left of the margin but never
+    # left of the picture, where that overhang would be cut off mid-word.
+    img.paste(layer, (max(0, margin - pad), img.height - margin - box_h), layer)
+
+
+def _draw_north_arrow(img: Image.Image, bearing: float, unit: int, margin: int) -> None:
+    """A needle and its N, top-right, turned so it points at true north.
+
+    The capture was turned clockwise by the bearing, so north on the page sits
+    that many degrees anticlockwise of up — which is the direction Pillow's
+    ``rotate`` reads, and why the angle goes in unchanged.
+
+    Needle and letter turn together, as one rosette: the N belongs to the point
+    it names, and a letter left upright beside a turned needle reads as a label
+    for the capture rather than for the direction.
+    """
+    s = MARK_SUPERSAMPLE
+    box = round(unit * 4.4)  # square, so no angle can clip a corner off
+    layer = Image.new("RGBA", (box * s, box * s), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+
+    centre = box * s / 2
+    half = round(unit * 0.58) * s  # the needle's half-width at its base
+    tip = centre - round(unit * 1.1) * s
+    base = centre + round(unit * 1.1) * s
+    notch = centre + round(unit * 0.5) * s  # the kite's inner corner, which reads as depth
+    edge = max(2, round(s * 1.6))
+
+    # Two-toned, like every compass needle: over snow the dark half carries it,
+    # over asphalt the pale one does, and the outline holds the silhouette on
+    # both. One ink on its own vanishes into half the imagery there is.
+    draw.polygon(
+        [
+            (centre, tip - edge * 1.8),
+            (centre + half + edge, base + edge),
+            (centre, notch),
+            (centre - half - edge, base + edge),
+        ],
+        fill=_MARK_BACKING,
+    )
+    draw.polygon([(centre, tip), (centre, notch), (centre - half, base)], fill=_MARK_INK)
+    draw.polygon([(centre, tip), (centre + half, base), (centre, notch)], fill=_MARK_SHADE)
+
+    _mark_text(draw, (centre, tip - round(unit * 0.45) * s), "N", unit)
+
+    if bearing:
+        layer = layer.rotate(bearing, resample=Image.Resampling.BICUBIC)
+    layer = layer.resize((box, box), Image.Resampling.LANCZOS)
+    img.paste(layer, (img.width - margin - box, margin), layer)
+
+
+def _mark_text(draw: ImageDraw.ImageDraw, at: tuple[float, float], text: str, unit: int) -> None:
+    """A mark's own label: centred on ``at``, sitting on that baseline."""
+    s = MARK_SUPERSAMPLE
+    draw.text(
+        at,
+        text,
+        font=_mark_font(round(unit * 1.05) * s),
+        fill=_MARK_INK,
+        anchor="ms",
+        stroke_width=max(2, round(s * 1.4)),
+        stroke_fill=_MARK_BACKING,
+    )
 
 
 def _draw_crosshair(img: Image.Image, cx: int, cy: int) -> None:

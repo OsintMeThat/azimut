@@ -97,6 +97,11 @@ async function init() {
     backendUrl: "http://127.0.0.1:8477",
     token: "",
     lastCaseId: "",
+    // The scale bar and north arrow tick. Kept here rather than read from the
+    // app: this popup opens on somebody else's tab and has to answer offline,
+    // and the app's own tick belongs to the map it draws itself. Off until
+    // asked for, then remembered — nobody wants to tick it per capture.
+    captureMarks: false,
   });
   stored.backendUrl = stored.backendUrl.replace(/\/+$/, "");
 
@@ -188,6 +193,22 @@ async function init() {
 
   const paired = await loadCases($("case"), stored);
 
+  // The marks tick, and what it can honestly promise on this page. Neither mark
+  // is invented: the bar needs a zoom, the arrow a bearing, and most of these
+  // sites write no rotation into their URL — so the note points at the field
+  // that would fix it rather than drawing a needle pointing at a guess.
+  const marks = $("marks");
+  marks.checked = !!stored.captureMarks;
+  const syncMarksNote = () => {
+    $("marks-note").hidden = !marks.checked || numOrNull("bearing") !== null;
+  };
+  marks.addEventListener("change", () => {
+    api.storage.local.set({ captureMarks: marks.checked });
+    syncMarksNote();
+  });
+  $("bearing").addEventListener("input", syncMarksNote);
+  syncMarksNote();
+
   // Saving the point needs no pixels — only a position. It stays out of reach
   // until both coordinates are there, parsed from the URL or typed above.
   const placeBtn = $("save-place");
@@ -247,6 +268,7 @@ async function init() {
         lon: numOrNull("lon"),
         zoom: numOrNull("zoom"),
         bearing: numOrNull("bearing"),
+        marks: marks.checked,
       },
     });
     if (r?.ok) window.close(); // the overlay takes over; a notification reports the result

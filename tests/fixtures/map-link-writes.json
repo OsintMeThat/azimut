@@ -1,0 +1,329 @@
+{
+  "_about": "A view written into each map site's address by extension/maplink.js, and what the app's parser must read back from it. Checked from both sides: frontend/src/lib/extensionMapLink.test.js writes, tests/test_map_link_writes.py parses.",
+  "writes": [
+    {
+      "site": "google-maps",
+      "name": "road map, a fraction written as a whole level",
+      "from": "https://www.google.com/maps/@47.388462,2.352785,15z?entry=ttu",
+      "height": 1000,
+      "view": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5,
+        "bearing": 0
+      },
+      "url": "https://www.google.com/maps/@47.4,2.37,17z?entry=ttu",
+      "lands": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 17
+      }
+    },
+    {
+      "site": "google-maps",
+      "name": "satellite metres, layer kept",
+      "from": "https://www.google.com/maps/@47.388462,2.352785,3231m/data=!3m1!1e3?entry=ttu",
+      "height": 1000,
+      "view": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5,
+        "bearing": 0
+      },
+      "url": "https://www.google.com/maps/@47.4,2.37,17z/data=!3m1!1e3?entry=ttu",
+      "lands": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 17
+      }
+    },
+    {
+      "site": "google-maps",
+      "name": "a place page keeps its place",
+      "from": "https://www.google.com/maps/place/Tour+Eiffel/@48.8583701,2.2944813,17z/data=!3m1!4b1",
+      "height": 1000,
+      "view": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5,
+        "bearing": 0
+      },
+      "url": "https://www.google.com/maps/place/Tour+Eiffel/@47.4,2.37,17z/data=!3m1!4b1",
+      "lands": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 17
+      }
+    },
+    {
+      "site": "google-maps",
+      "name": "held to the level it draws",
+      "from": "https://www.google.com/maps/@47.388462,2.352785,15z",
+      "height": 1000,
+      "view": {
+        "lat": 48.85837,
+        "lon": 2.294481,
+        "zoom": 22,
+        "bearing": 0
+      },
+      "url": "https://www.google.com/maps/@48.85837,2.294481,21z",
+      "lands": {
+        "lat": 48.85837,
+        "lon": 2.294481,
+        "zoom": 21
+      }
+    },
+    {
+      "site": "google-earth",
+      "name": "distance from the window height, ground height kept",
+      "from": "https://earth.google.com/web/@47.39999999,2.3703724,211.05401095a,1601.93591136d,35y,0h,0t,0r/data=CgRCAggBQgIIAEoNCP___________wEQAA",
+      "height": 1000,
+      "view": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5,
+        "bearing": 0
+      },
+      "url": "https://earth.google.com/web/@47.4,2.37,211.05401095a,1812.99d,35y,0h,0t,0r/data=CgRCAggBQgIIAEoNCP___________wEQAA",
+      "lands": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5
+      }
+    },
+    {
+      "site": "google-earth",
+      "name": "never closer than Earth places its camera",
+      "from": "https://earth.google.com/web/@48.85,2.29,35a,800d,35y,0h,0t,0r",
+      "height": 1000,
+      "view": {
+        "lat": 48.85837,
+        "lon": 2.294481,
+        "zoom": 23,
+        "bearing": 0
+      },
+      "url": "https://earth.google.com/web/@48.85837,2.294481,35a,25d,35y,0h,0t,0r",
+      "lands": {
+        "lat": 48.85837,
+        "lon": 2.294481,
+        "zoom": 22.6393
+      }
+    },
+    {
+      "site": "google-earth",
+      "name": "a view Earth never placed stays unplaced",
+      "from": "https://earth.google.com/web/@47.388462,2.352785,0a,5129d,35y,0h,0t,0r/data=CgRCAggBQgIIAEoNCP___________wEQAA",
+      "height": 1000,
+      "view": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5,
+        "bearing": 0
+      },
+      "url": "https://earth.google.com/web/@47.4,2.37,0a,1813d,35y,0h,0t,0r/data=CgRCAggBQgIIAEoNCP___________wEQAA",
+      "lands": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": null
+      }
+    },
+    {
+      "site": "bing-maps",
+      "name": "one decimal, style kept",
+      "from": "https://www.bing.com/maps?cp=47.388462%7E2.352785&lvl=15&style=h",
+      "height": 1000,
+      "view": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5,
+        "bearing": 0
+      },
+      "url": "https://www.bing.com/maps?cp=47.4%7E2.37&lvl=16.5&style=h",
+      "lands": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5
+      }
+    },
+    {
+      "site": "yandex-maps",
+      "name": "longitude first, a whole level, layer kept",
+      "from": "https://yandex.com/maps/?ll=2.352785,47.388462&z=15&l=sat",
+      "height": 1000,
+      "view": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5,
+        "bearing": 0
+      },
+      "url": "https://yandex.com/maps/?ll=2.37%2C47.4&z=17&l=sat",
+      "lands": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 17
+      }
+    },
+    {
+      "site": "openstreetmap",
+      "name": "hash, a whole level, layers kept",
+      "from": "https://www.openstreetmap.org/#map=15/47.38846/2.35279&layers=H",
+      "height": 1000,
+      "view": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5,
+        "bearing": 0
+      },
+      "url": "https://www.openstreetmap.org/#map=17/47.4/2.37&layers=H",
+      "lands": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 17
+      }
+    },
+    {
+      "site": "openstreetmap",
+      "name": "held to the level it draws",
+      "from": "https://www.openstreetmap.org/#map=15/47.38846/2.35279",
+      "height": 1000,
+      "view": {
+        "lat": 48.85837,
+        "lon": 2.294481,
+        "zoom": 22,
+        "bearing": 0
+      },
+      "url": "https://www.openstreetmap.org/#map=19/48.85837/2.29448",
+      "lands": {
+        "lat": 48.85837,
+        "lon": 2.294481,
+        "zoom": 19
+      }
+    },
+    {
+      "site": "apple-maps",
+      "name": "a link form stays a link form",
+      "from": "https://maps.apple.com/?ll=47.388462,2.352785&z=15&map=satellite",
+      "height": 1000,
+      "view": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5,
+        "bearing": 0
+      },
+      "url": "https://maps.apple.com/?map=satellite&ll=47.4%2C2.37&z=16.5",
+      "lands": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5
+      }
+    },
+    {
+      "site": "apple-maps",
+      "name": "a place card closed by the move, its address dropped",
+      "from": "https://maps.apple.com/place?map=satellite&z=16&address=2+Route+du+Bois+Bernard,+18380+Presly,+France&coordinate=47.387736,2.353482&name=2+Route+du+Bois+Bernard",
+      "height": 1000,
+      "view": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5,
+        "bearing": 0
+      },
+      "url": "https://maps.apple.com/frame?map=satellite&center=47.4%2C2.37&z=16.5",
+      "lands": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5
+      }
+    },
+    {
+      "site": "apple-maps",
+      "name": "the live span dropped for a z, layer kept",
+      "from": "https://maps.apple.com/frame?center=47.388462%2C2.352785&span=0.029055%2C0.056434&map=satellite",
+      "height": 1000,
+      "view": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5,
+        "bearing": 0
+      },
+      "url": "https://maps.apple.com/frame?map=satellite&center=47.4%2C2.37&z=16.5",
+      "lands": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5
+      }
+    },
+    {
+      "site": "apple-maps",
+      "name": "a view past the pole written as the one Apple opens",
+      "from": "https://maps.apple.com/frame?center=70.1%2C15.6&span=0.029055%2C0.056434&map=satellite",
+      "height": 1000,
+      "view": {
+        "lat": 78.223,
+        "lon": 15.6,
+        "zoom": 12,
+        "bearing": 0
+      },
+      "url": "https://maps.apple.com/frame?map=satellite&center=70.495574%2C15.6&z=12",
+      "lands": {
+        "lat": 70.495574,
+        "lon": 15.6,
+        "zoom": 12
+      }
+    },
+    {
+      "site": "zoom-earth",
+      "name": "hash view, the day kept",
+      "from": "https://zoom.earth/maps/satellite-hd/#view=47.388462,2.352785,11z/date=2026-09-12,pm",
+      "height": 1000,
+      "view": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5,
+        "bearing": 0
+      },
+      "url": "https://zoom.earth/maps/satellite-hd/#view=47.4,2.37,17z/date=2026-09-12,pm",
+      "lands": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 17
+      }
+    },
+    {
+      "site": "satellites-pro",
+      "name": "hash, a whole level",
+      "from": "https://satellites.pro/#47.388462,2.352785,15",
+      "height": 1000,
+      "view": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 16.5,
+        "bearing": 0
+      },
+      "url": "https://satellites.pro/#47.4,2.37,17",
+      "lands": {
+        "lat": 47.4,
+        "lon": 2.37,
+        "zoom": 17
+      }
+    },
+    {
+      "site": "copernicus-browser",
+      "name": "acquisition kept, held to 18",
+      "from": "https://browser.dataspace.copernicus.eu/?zoom=15&lat=47.38846&lng=2.35279&datasetId=S2_L2A_CDAS&fromTime=2026-09-01T00%3A00%3A00.000Z&toTime=2026-09-01T23%3A59%3A59.999Z",
+      "height": 1000,
+      "view": {
+        "lat": 48.85837,
+        "lon": 2.294481,
+        "zoom": 22,
+        "bearing": 0
+      },
+      "url": "https://browser.dataspace.copernicus.eu/?zoom=18&lat=48.85837&lng=2.29448&datasetId=S2_L2A_CDAS&fromTime=2026-09-01T00%3A00%3A00.000Z&toTime=2026-09-01T23%3A59%3A59.999Z",
+      "lands": {
+        "lat": 48.85837,
+        "lon": 2.294481,
+        "zoom": 18
+      }
+    }
+  ]
+}

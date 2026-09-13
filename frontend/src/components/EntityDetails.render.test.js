@@ -28,6 +28,7 @@ const REGISTRY = [
     group: '',
     attrs: [
       { key: 'radius_m', label: 'Uncertainty radius (m)', kind: 'number', rungs: [], minimum: 1 },
+      { key: 'footprint', label: 'Footprint', kind: 'geojson', rungs: [] },
       { key: 'method', label: 'How this point was found', kind: 'longtext', rungs: [] },
     ],
   },
@@ -219,5 +220,65 @@ describe('the source of a file the analyst brought in', () => {
     expect(target.querySelector('#ed-source')).toBe(null);
     const rows = [...target.querySelectorAll('.info-row .info-k')].map((el) => el.textContent);
     expect(rows).toContain('Source');
+  });
+});
+
+describe('a place states its precision once', () => {
+  const PLACE = { ...entity, attrs: { ...entity.attrs } };
+  const SHAPE = { type: 'Polygon', coordinates: [[[2, 1], [3, 1], [3, 2], [2, 1]]] };
+
+  afterEach(() => {
+    Object.assign(entity, PLACE, { attrs: { ...PLACE.attrs } });
+    patch.mockClear();
+  });
+
+  const save = (target) =>
+    [...target.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save');
+
+  it('asks before a typed radius drops the shape somebody traced', async () => {
+    Object.assign(entity, { attrs: { ...PLACE.attrs, radius_m: null, footprint: SHAPE } });
+    const target = await open();
+    await land();
+    const field = target.querySelector('#attr-radius_m');
+    field.value = '500';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+
+    save(target).click();
+    await Promise.resolve();
+    flushSync();
+
+    expect(patch).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('Drop the traced shape?');
+
+    [...document.body.querySelectorAll('button')]
+      .find((b) => b.textContent.trim() === 'Drop the shape')
+      .click();
+    await Promise.resolve();
+
+    expect(patch).toHaveBeenCalledWith(
+      '/api/cases/c1/entities/e1',
+      expect.objectContaining({
+        attrs: expect.objectContaining({ radius_m: 500, footprint: null }),
+      })
+    );
+  });
+
+  it('says nothing when a place written earlier holds both and neither is touched', async () => {
+    // The store judges the patch, not the stored result: saving the notes of a point
+    // written before the rule must not make anybody choose.
+    Object.assign(entity, { attrs: { ...PLACE.attrs, radius_m: 500, footprint: SHAPE } });
+    const target = await open();
+    await land();
+    const notes = target.querySelector('#ed-notes');
+    notes.value = 'two vehicles at the gate';
+    notes.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+
+    save(target).click();
+    await Promise.resolve();
+
+    expect(document.body.textContent).not.toContain('Drop the traced shape?');
+    expect(patch).toHaveBeenCalled();
   });
 });

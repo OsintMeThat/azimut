@@ -186,6 +186,53 @@ export function onBridgeHello(cb, win = window) {
 }
 
 /**
+ * This map tab's end of the extension's linked views, or null without one.
+ *
+ * The extension's map tools panel follows a camera on sites outside the app, and
+ * its worker is the hub between those panels and the app's map tabs
+ * (`background.js`, "linked views"). The bridge holds this tab's port to it;
+ * this is the app side of that, in the shape `map/link.js` takes as a `relay`.
+ *
+ * Two message types rather than one, because the page hears its own
+ * postMessage: `map-link` goes to the bridge and `map-link-event` comes back,
+ * so a camera this tab sends is never mistaken for one it was handed.
+ *
+ * Nothing leaves the machine. The bridge relays to the extension's worker, which
+ * relays to panels in other tabs of the same browser.
+ */
+export function mapLinkRelay({ win = window, doc = document } = {}) {
+  if (!extensionVersion(doc)) return null;
+  let heard = null;
+  const post = (kind, extra) =>
+    win.postMessage({ channel: CHANNEL, type: 'map-link', kind, ...extra }, win.location.origin);
+  function onMessage(event) {
+    if (event.origin !== win.location.origin || !heard) return;
+    const msg = event.data;
+    if (!msg || msg.channel !== CHANNEL) return;
+    // an extension that restarted brought a bridge with no port: ask again
+    if (msg.type === 'bridge-hello') return post('open');
+    if (msg.type !== 'map-link-event') return;
+    if (msg.kind === 'view') heard.view(msg.view);
+    if (msg.kind === 'peers') heard.peers(msg.count);
+  }
+  return {
+    listen(handlers) {
+      heard = handlers;
+      win.addEventListener('message', onMessage);
+      post('open');
+    },
+    send(view) {
+      post('view', { view });
+    },
+    close() {
+      post('close');
+      win.removeEventListener('message', onMessage);
+      heard = null;
+    },
+  };
+}
+
+/**
  * Every live bridge on this tab, as `[{version}]`.
  *
  * `ping` is the one message every version of the extension has ever answered,
