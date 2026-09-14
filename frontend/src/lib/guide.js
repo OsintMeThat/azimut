@@ -80,8 +80,8 @@ export const GUIDE = [
     tools: [],
     points: [
       {
-        label: 'Azimut writes the folder for you',
-        text: 'Settings, then Capture extension: press Install, copy the path it gives you, and load it unpacked in your browser. The pairing token on the same tab is what ties it to this workspace.',
+        label: 'Install it for your browser',
+        text: 'In Chromium, Settings writes a folder that you load unpacked. In Firefox, install the signed XPI attached to the release. The pairing token ties either copy to this workspace.',
       },
       {
         label: 'It files three things',
@@ -92,12 +92,12 @@ export const GUIDE = [
         text: 'Measure, media pins, sun and moon, a search grid and windows holding the case images, on the map sites you were going to use anyway. A pitched or panoramic view switches the geometry off rather than guessing at it.',
       },
       {
-        label: 'It reaches past this machine in exactly one place',
-        text: 'Filling the composer on X or Bluesky with a thread Geo Report prepared. It types what the app handed it and reads nothing back. Everything else it does talks to Azimut on localhost.',
+        label: 'It reaches outside only when you ask',
+        text: 'It can fill a composer on X or Bluesky and send a prepared image to a reverse-search engine. Everything else it sends goes to Azimut on localhost.',
       },
       {
-        label: 'Updating it is one click',
-        text: 'The app owns the folder, so a new release rewrites the files in place and the extension restarts. Settings says when two copies are loaded and which one to remove.',
+        label: 'Updates follow the browser',
+        text: 'Chromium updates its managed folder from Settings. Firefox updates the signed XPI from the release manifest. Settings also warns when two copies are loaded.',
       },
     ],
   },

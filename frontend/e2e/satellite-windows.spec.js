@@ -87,6 +87,31 @@ test('hands a second window the view the first one is showing', async ({ page, c
   await second.close();
 });
 
+test('binds a detached window to its parent case, not shared last-case storage', async ({ page, context }) => {
+  const cases = [
+    { id: 'browser-test', name: 'Case A', scratch: false, entities: [], links: [], folders: [] },
+    { id: 'case-b', name: 'Case B', scratch: false, entities: [], links: [], folders: [] },
+  ];
+  await installAppFixture(page, { cases });
+  await page.goto('/#satellite?ll=50.4501,30.5234&z=13');
+  await awaitMapReady(page);
+  // Another app tab last opened B. localStorage is shared across both windows.
+  await page.evaluate(() => localStorage.setItem('azimut:lastCase', 'case-b'));
+
+  const opening = context.waitForEvent('page');
+  await page.getByRole('button', { name: 'Open in a new tab' }).click();
+  const second = await opening;
+  expect(new URL(second.url()).hash).toContain('case=browser-test');
+  const fixture = await installAppFixture(second, { cases, lastCase: 'case-b' });
+  await second.reload();
+  await awaitMapReady(second);
+  await second.getByRole('button', { name: 'Save place', exact: true }).click();
+
+  await expect.poll(() => fixture.placeWrites.length).toBe(1);
+  expect(fixture.placeWrites[0].caseId).toBe('browser-test');
+  await second.close();
+});
+
 test('opens the detached tab on the map, without the app around it', async ({ page, context }) => {
   await installAppFixture(page);
   await page.goto('/#satellite?ll=50.4501,30.5234&z=13');

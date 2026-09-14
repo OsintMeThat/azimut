@@ -22,7 +22,8 @@ work as before, including the Google basemap.
   release.
 - Stack overlays that need no key: borders, roads, railways, power lines, sea
   marks and GPS traces. Add NASA FIRMS fire detections (with a free FIRMS key in
-  Settings) and VIIRS night lights for a day you pick.
+  Settings) and VIIRS night lights for a day you pick. FIRMS detections remain
+  visible as enlarged squares when you zoom past their native detail.
 - Filter the pins drawn on the map by kind and by folder.
 - Open the map in several tabs. The view is in the address, two tabs can share one
   camera, and a point saved or a grid swept in one appears at once in the others.

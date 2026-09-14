@@ -24,8 +24,8 @@
  * @param {(message: string, kind?: string, ms?: number) => void} deps.notify
  * @param {() => string|undefined} deps.caseId the case the place belongs to
  * @param {() => object|null} deps.engine the map, through the façade
- * @param {() => Promise<any>} deps.onSaved re-read the saved index, so the
- *   traced shape appears under its pin
+ * @param {(caseId: string) => Promise<any>} deps.onSaved re-read the owning
+ *   case's saved index, so the traced shape appears under its pin
  * @param {(engine: object) => object} [deps.surface] the drawing layer factory
  */
 import { createSurface } from '../../../lib/map/surface.js';
@@ -54,12 +54,13 @@ export function createFootprintState({
   onSaved,
   surface = createSurface,
 }) {
-  /** The place being traced: `{ id, title, footprint, radius_m, at }`, or null
-   *  when off. `at` is the pin itself, which the shape has to contain. */
+  /** The place being traced, including its owning case, or null when off.
+   *  `at` is the pin itself, which the shape has to contain. */
   let place = $state(null);
   let points = $state([]);
   let saving = $state(false);
   let layer = null;
+  let operation = 0;
 
   function draw() {
     const map = engine();
@@ -76,6 +77,8 @@ export function createFootprintState({
   }
 
   function stop() {
+    operation += 1;
+    saving = false;
     place = null;
     points = [];
     layer?.clear();
@@ -113,7 +116,8 @@ export function createFootprintState({
 
     /** Begin on a place. Starting again on another one drops the first draft. */
     start(row) {
-      if (!row?.id) return false;
+      const ownerCaseId = caseId();
+      if (!row?.id || !ownerCaseId) return false;
       stop();
       // `null` is a point the place does not have, and it numbers as 0 — which would
       // put every untraced place in the Gulf of Guinea and refuse every shape drawn.
@@ -122,6 +126,7 @@ export function createFootprintState({
       const at = Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
       place = {
         id: row.id,
+        caseId: ownerCaseId,
         title: row.title || 'this place',
         footprint: row.footprint || null,
         radius_m: Number(row.radius_m) > 0 ? Number(row.radius_m) : null,
@@ -150,12 +155,13 @@ export function createFootprintState({
 
     async save() {
       const shape = polygonOf(points);
-      const cid = caseId();
-      if (!shape || !place || !cid || saving) return;
+      const target = place;
+      if (!shape || !target || saving) return;
       if (!covers()) {
         notify('The shape has to contain the place it belongs to', 'warn', 4000);
         return;
       }
+      const run = ++operation;
       saving = true;
       try {
         // attrs merge server-side, so this writes the footprint and leaves
@@ -163,16 +169,20 @@ export function createFootprintState({
         // radius, which the shape replaces: the map draws one of the two, and a
         // circle that survived a tracing it can no longer be seen behind is a
         // precision nobody can read.
-        await api.patch(`/api/cases/${cid}/entities/${place.id}`, {
+        await api.patch(`/api/cases/${target.caseId}/entities/${target.id}`, {
           attrs: { footprint: shape, radius_m: null },
         });
-        stop();
-        await onSaved?.();
+        if (run !== operation || place !== target) return;
+        await onSaved?.(target.caseId);
+        if (run !== operation || place !== target) return;
         notify('Footprint saved', 'ok', 2000);
+        stop();
       } catch (e) {
-        notify(`Could not save the footprint: ${e.message}`, 'danger', 6000);
+        if (run === operation && place === target) {
+          notify(`Could not save the footprint: ${e.message}`, 'danger', 6000);
+        }
       } finally {
-        saving = false;
+        if (run === operation) saving = false;
       }
     },
 

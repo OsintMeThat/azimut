@@ -403,4 +403,34 @@ describe('case request ownership', () => {
     expect(state.caseState.current).toEqual({ id: 'case-a', name: 'Newest' });
     expect(state.caseState.rev).toBe(1);
   });
+
+  it('opens an explicitly named detached-map case instead of the shared last case', async () => {
+    localStorage.setItem('azimut:lastCase', 'case-b');
+    api.get.mockImplementation(async (path) => {
+      if (path === '/api/cases/case-a') return { id: 'case-a', name: 'Case A' };
+      if (path === '/api/cases') return [];
+      if (path === '/api/workspace/folders') return [];
+      return {};
+    });
+
+    await state.initSession('case-a');
+
+    expect(state.caseState.current?.id).toBe('case-a');
+    expect(api.get).not.toHaveBeenCalledWith('/api/cases/case-b');
+  });
+
+  it('does not replace a missing explicit case with the shared last case', async () => {
+    localStorage.setItem('azimut:lastCase', 'case-b');
+    api.get.mockImplementation(async (path) => {
+      if (path === '/api/cases/missing') throw new Error('case not found');
+      if (path === '/api/cases') return [];
+      if (path === '/api/workspace/folders') return [];
+      return {};
+    });
+
+    await expect(state.initSession('missing')).rejects.toThrow('case not found');
+
+    expect(state.caseState.current).toBeNull();
+    expect(api.get).not.toHaveBeenCalledWith('/api/cases/case-b');
+  });
 });

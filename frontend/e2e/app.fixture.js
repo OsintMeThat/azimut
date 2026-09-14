@@ -680,6 +680,7 @@ export async function installAppFixture(page, options = {}) {
   const unexpected = [];
   const labelTiles = [];
   const captures = [];
+  const placeWrites = [];
   const proofSaves = [];
   const fixtureSavedIndex = options.savedIndex ?? savedIndex;
   const fixtureProofIndex = options.proofIndex ?? [];
@@ -925,9 +926,9 @@ export async function installAppFixture(page, options = {}) {
   };
 
   await page.addInitScript((caseId) => {
-    localStorage.setItem('azimut:lastCase', caseId);
+    if (caseId) localStorage.setItem('azimut:lastCase', caseId);
     localStorage.setItem('azimut:theme', 'dark');
-  }, CASE_ID);
+  }, options.lastCase === undefined ? CASE_ID : options.lastCase);
 
   await page.route('**/*', async (route) => {
     const request = route.request();
@@ -1820,6 +1821,16 @@ export async function installAppFixture(page, options = {}) {
         tiles_upscaled: 0,
       });
     }
+    if (caseId && path === `/api/cases/${caseId}/satellite/place` && request.method() === 'POST') {
+      const payload = request.postDataJSON();
+      placeWrites.push({ caseId, ...payload });
+      return json(route, {
+        id: `place-${placeWrites.length}`,
+        type: 'place',
+        label: 'Saved place',
+        attrs: payload,
+      });
+    }
     if (path === `/api/cases/${CASE_ID}/proofs` && request.method() === 'POST') {
       const payload = request.postDataJSON();
       proofSaves.push(payload);
@@ -1931,6 +1942,7 @@ export async function installAppFixture(page, options = {}) {
 
   return {
     captures,
+    placeWrites,
     labelTiles,
     widgetLoads,
     gridWrites,

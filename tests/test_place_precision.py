@@ -182,6 +182,9 @@ def test_a_footprint_is_refused_off_the_globe_or_malformed(client):
     assert post({"type": "Polygon", "coordinates": [[[200, 0], [1, 1], [2, 2], [200, 0]]]}) == 400
     assert post({"type": "Polygon", "coordinates": [[[0, 91], [1, 1], [2, 2], [0, 91]]]}) == 400
     assert post({"type": "Polygon", "coordinates": [[[0], [1, 1], [2, 2], [0]]]}) == 400
+    assert post({"type": "Polygon", "coordinates": [[0, 0], [1, 0], [0, 1], [0, 0]]}) == 400
+    assert post({"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [0, 1], [1, 1]]]}) == 400
+    assert post({"type": "MultiPolygon", "coordinates": [[]]}) == 400
 
 
 def test_a_footprint_is_bounded_in_size_and_depth(client):
@@ -219,6 +222,45 @@ def test_a_multipolygon_counts_as_containing_the_point_in_any_of_its_parts(clien
     )
 
     assert res.status_code == 200, res.text
+
+
+def test_a_point_inside_a_footprint_hole_is_refused(client):
+    cid = _new_case(client, "Point in a hole")
+    hole = [
+        [14.545, 53.435], [14.555, 53.435], [14.555, 53.445],
+        [14.545, 53.445], [14.545, 53.435],
+    ]
+
+    res = _place(
+        client,
+        cid,
+        footprint={"type": "Polygon", "coordinates": [AROUND, hole]},
+    )
+
+    assert res.status_code == 400
+    assert "contain" in res.json()["detail"]
+
+
+def test_a_polygon_boundary_covers_its_place(client):
+    cid = _new_case(client, "Point on boundary")
+    res = _place(
+        client,
+        cid,
+        lat=53.43,
+        footprint={"type": "Polygon", "coordinates": [AROUND]},
+    )
+    assert res.status_code == 200, res.text
+
+
+def test_moving_a_place_must_stay_inside_its_retained_footprint(client):
+    cid = _new_case(client, "Moved point")
+    eid = _place(client, cid, footprint={"type": "Polygon", "coordinates": [AROUND]}).json()["id"]
+
+    assert _patch(client, cid, eid, {"lat": 54.0}).status_code == 400
+    assert _patch(client, cid, eid, {"lon": 15.0}).status_code == 400
+    assert _patch(client, cid, eid, {"lat": 54.0, "lon": 15.0}).status_code == 400
+    # Clearing the old shape in the same patch makes the move explicit.
+    assert _patch(client, cid, eid, {"lat": 54.0, "lon": 15.0, "footprint": None}).status_code == 200
 
 
 def test_a_place_with_no_point_of_its_own_still_takes_a_footprint(client):

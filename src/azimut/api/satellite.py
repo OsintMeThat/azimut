@@ -577,17 +577,17 @@ def firms_tile(
     Never cached to disk: the live layers are what is burning now, refreshed
     upstream every fifteen minutes, and a cached fire is a lie with a timestamp.
     """
+    if z < 0 or firms.too_deep(z):
+        raise HTTPException(
+            status_code=422,
+            detail=f"FIRMS source tiles use zooms 0 through {firms.MAX_ZOOM}",
+        )
+    grid = 1 << z
+    if not (0 <= x < grid) or not (0 <= y < grid):
+        raise HTTPException(status_code=422, detail="tile coordinates out of range")
     key = firms_key()
     if not key:
         raise HTTPException(status_code=404, detail="no FIRMS key saved")
-    if firms.too_deep(z):
-        raise HTTPException(
-            status_code=422,
-            detail=f"FIRMS detections are drawn to z{firms.MAX_ZOOM}; deeper is one mark per pixel",
-        )
-    grid = 1 << z
-    if z < 0 or not (0 <= x < grid) or not (0 <= y < grid):
-        raise HTTPException(status_code=422, detail="tile coordinates out of range")
     try:
         url = firms.tile_url(
             key, sensor_id=sensor, window=window, z=z, x=x, y=y, first=first, last=last
@@ -1362,40 +1362,42 @@ def apply_grid_marks(case, name: str, marks: dict[str, Any]) -> dict[str, Any]:
     marking the same cell twice would expect anyway.
     """
     spec_path = case.resolve_inside(layout.grid_rel(slugify(name, "grid")))
-    if not spec_path.exists():
-        raise HTTPException(status_code=404, detail="grid not found")
-    try:
-        spec = _read_grid(spec_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"corrupt grid: {exc}") from exc
+    # Atomic replacement protects the JSON bytes. The case lock protects the
+    # read/merge/write transaction shared by app tabs and the extension.
+    with case.lock:
+        if not spec_path.exists():
+            raise HTTPException(status_code=404, detail="grid not found")
+        try:
+            spec = _read_grid(spec_path)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"corrupt grid: {exc}") from exc
 
-    revision = _revision(spec)
-    statuses = dict(spec.get("statuses") or {})
-    for key, value in marks.items():
-        if value is None:
-            statuses.pop(str(key), None)
-        elif value in GRID_STATUSES:
-            statuses[str(key)] = value
-        else:
-            raise HTTPException(status_code=400, detail=f"unknown mark: {value!r}")
-    if len(statuses) > GRID_MAX_STATUSES:
-        raise HTTPException(status_code=400, detail="grid has too many cells")
+        revision = _revision(spec)
+        statuses = dict(spec.get("statuses") or {})
+        for key, value in marks.items():
+            if value is None:
+                statuses.pop(str(key), None)
+            elif value in GRID_STATUSES:
+                statuses[str(key)] = value
+            else:
+                raise HTTPException(status_code=400, detail=f"unknown mark: {value!r}")
+        if len(statuses) > GRID_MAX_STATUSES:
+            raise HTTPException(status_code=400, detail="grid has too many cells")
 
-    spec["statuses"] = statuses
-    spec["updated_at"] = _now()
-    # a patch moves the file on too, so a whole-spec save built before it is
-    # recognised as behind rather than written over the top
-    spec["revision"] = revision + 1
-    _write_grid_atomic(spec_path, spec)
-    # The other surfaces working this sweep re-read it off this. The revision
-    # rides along because the one that sent these marks hears the nudge too, and
-    # a revision it is already holding is how it knows to stay put.
-    events.publish({
-        "type": "grid-marks",
-        "case_id": case.id,
-        "name": spec_path.stem,
-        "revision": spec["revision"],
-    })
+        spec["statuses"] = statuses
+        spec["updated_at"] = _now()
+        # a patch moves the file on too, so a whole-spec save built before it is
+        # recognised as behind rather than written over the top
+        spec["revision"] = revision + 1
+        _write_grid_atomic(spec_path, spec)
+        # Publish under the same lock so a later save/delete cannot announce
+        # itself before this earlier mutation.
+        events.publish({
+            "type": "grid-marks",
+            "case_id": case.id,
+            "name": spec_path.stem,
+            "revision": spec["revision"],
+        })
     return {
         "name": spec_path.stem,
         "updated_at": spec["updated_at"],
@@ -1502,26 +1504,27 @@ def save_search_grid(case_id: str, name: str, body: GridSaveIn) -> dict[str, Any
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     spec_path = case.resolve_inside(layout.grid_rel(slug))
-    on_disk = 0
-    if spec_path.exists():
-        try:
-            on_disk = _revision(_read_grid(spec_path))
-        except ValueError:
-            on_disk = 0  # unreadable: the save is the repair, let it through
-        if body.base_revision is not None and body.base_revision != on_disk:
-            raise HTTPException(
-                status_code=409,
-                detail="this grid changed elsewhere since this copy of it was built",
-            )
-    spec["revision"] = on_disk + 1
-    _write_grid_atomic(spec_path, spec)
-    events.publish({
-        "type": "grid",
-        "case_id": case.id,
-        "name": slug,
-        "title": spec["title"],
-        "revision": spec["revision"],
-    })
+    with case.lock:
+        on_disk = 0
+        if spec_path.exists():
+            try:
+                on_disk = _revision(_read_grid(spec_path))
+            except ValueError:
+                on_disk = 0  # unreadable: the save is the repair, let it through
+            if body.base_revision is not None and body.base_revision != on_disk:
+                raise HTTPException(
+                    status_code=409,
+                    detail="this grid changed elsewhere since this copy of it was built",
+                )
+        spec["revision"] = on_disk + 1
+        _write_grid_atomic(spec_path, spec)
+        events.publish({
+            "type": "grid",
+            "case_id": case.id,
+            "name": slug,
+            "title": spec["title"],
+            "revision": spec["revision"],
+        })
     return {
         "name": slug,
         "title": spec["title"],
@@ -1543,9 +1546,10 @@ def delete_search_grid(case_id: str, name: str) -> dict[str, Any]:
         spec_path = case.resolve_inside(layout.grid_rel(slugify(name, "grid")))
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-    existed = spec_path.exists()
-    spec_path.unlink(missing_ok=True)
-    if existed:
-        # a panel holding this sweep open is drawing a file that is gone
-        events.publish({"type": "grid-removed", "case_id": case.id, "name": spec_path.stem})
+    with case.lock:
+        existed = spec_path.exists()
+        spec_path.unlink(missing_ok=True)
+        if existed:
+            # a panel holding this sweep open is drawing a file that is gone
+            events.publish({"type": "grid-removed", "case_id": case.id, "name": spec_path.stem})
     return {"deleted": existed}

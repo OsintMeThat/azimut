@@ -284,6 +284,25 @@ def test_saving_a_point_in_the_app_nudges_the_panels(client):
         events.unsubscribe(q)
 
 
+def test_generic_place_creation_and_edits_nudge_other_maps(client):
+    cid = client.post("/api/cases", json={"name": "Generic points"}).json()["id"]
+    q = events.subscribe()
+    try:
+        place = client.post(
+            f"/api/cases/{cid}/entities",
+            json={"type": "place", "label": "Quay", "attrs": {"lat": 48.85, "lon": 2.29}},
+        ).json()
+        assert q.get_nowait() == {"type": "saved", "case_id": cid}
+
+        client.patch(
+            f"/api/cases/{cid}/entities/{place['id']}",
+            json={"label": "North quay"},
+        )
+        assert q.get_nowait() == {"type": "saved", "case_id": cid}
+    finally:
+        events.unsubscribe(q)
+
+
 def test_deleting_a_point_nudges_the_panels(client):
     cid = client.post("/api/cases", json={"name": "Points"}).json()["id"]
     entity = client.post(

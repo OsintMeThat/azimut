@@ -17,18 +17,25 @@ const A = { lat: 0, lon: 0 };
 const B = { lat: 0, lon: 1 };
 const C = { lat: 1, lon: 1 };
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => (resolve = done));
+  return { promise, resolve };
+}
+
 let api;
 let notify;
 let layer;
 let surface;
 let engine;
 let saved;
+let currentCase;
 
 function store() {
   return createFootprintState({
     api,
     notify,
-    caseId: () => 'case-1',
+    caseId: () => currentCase,
     engine: () => engine,
     onSaved: saved,
     surface,
@@ -42,6 +49,7 @@ beforeEach(() => {
   surface = vi.fn(() => layer);
   engine = { id: 'map' };
   saved = vi.fn(async () => {});
+  currentCase = 'case-1';
 });
 
 describe('a ring as GeoJSON', () => {
@@ -180,5 +188,34 @@ describe('what gets written', () => {
     expect(notify.mock.calls[0][0]).toContain('disk is full');
     expect(trace.points).toHaveLength(3);
     expect(trace.on).toBe(true);
+  });
+
+  it('keeps the case that owned the draft when another case becomes current', async () => {
+    const trace = store();
+    trace.start(PLACE);
+    for (const point of [A, B, C]) trace.addPoint(point);
+    currentCase = 'case-2';
+
+    await trace.save();
+
+    expect(api.patch.mock.calls[0][0]).toBe('/api/cases/case-1/entities/e1');
+    expect(saved).toHaveBeenCalledWith('case-1');
+  });
+
+  it('does not let an old save clear or announce a newer draft', async () => {
+    const pending = deferred();
+    api.patch = vi.fn(() => pending.promise);
+    const trace = store();
+    trace.start(PLACE);
+    for (const point of [A, B, C]) trace.addPoint(point);
+    const oldSave = trace.save();
+
+    trace.start({ ...PLACE, id: 'e2', title: 'Treeline' });
+    pending.resolve({});
+    await oldSave;
+
+    expect(trace.place.id).toBe('e2');
+    expect(saved).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalledWith('Footprint saved', expect.anything(), expect.anything());
   });
 });

@@ -17,7 +17,9 @@ from ...engine import satellite as satellite_engine
 from ...engine import tally as tally_engine
 from ...repository import EntityStatus
 from ...workspace import CaseError
+from .. import events
 from .common import (
+    MAPPED_TYPES,
     _check_attrs,
     _summary,
     delete_entities_deep,
@@ -98,18 +100,21 @@ def add_entity(case_id: str, body: EntityIn) -> dict[str, Any]:
             str(attrs.get("folder", "")).strip(),
             str(attrs.get("content", "")),
         )
-    return case.add_entity(body.type, body.label, body.attrs, by="user", status=body.status)
+    entity = case.add_entity(body.type, body.label, body.attrs, by="user", status=body.status)
+    if body.type in MAPPED_TYPES:
+        events.publish({"type": "saved", "case_id": case.id})
+    return entity
 
 @router.patch("/{case_id}/entities/{entity_id}")
 def update_entity(case_id: str, entity_id: str, body: EntityPatch) -> dict[str, Any]:
     case = get_case(case_id)
+    current = case.get_entity(entity_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail=f"entity '{entity_id}' not found")
     patch = {k: v for k, v in body.model_dump().items() if v is not None}
     if body.attrs is not None:
         # Against the type it will have once patched, and the entity has to exist
         # before its fields can be judged.
-        current = case.get_entity(entity_id)
-        if current is None:
-            raise HTTPException(status_code=404, detail=f"entity '{entity_id}' not found")
         _check_attrs(
             body.type or str(current["type"]),
             body.attrs,
@@ -119,6 +124,8 @@ def update_entity(case_id: str, entity_id: str, body: EntityPatch) -> dict[str, 
         entity = case.update_entity(entity_id, patch)
         if body.status == "confirmed":
             link_engine.confirm_incident_relations(case, entity_id)
+        if current.get("type") in MAPPED_TYPES or entity.get("type") in MAPPED_TYPES:
+            events.publish({"type": "saved", "case_id": case.id})
         return entity
     except CaseError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

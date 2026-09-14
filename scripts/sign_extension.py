@@ -46,8 +46,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.request
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Callable
 
 REPO = Path(__file__).resolve().parent.parent
 EXT = REPO / "extension"
@@ -74,7 +75,7 @@ def gecko_facts() -> dict[str, str]:
     than kept in step by hand."""
     manifest = json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
     gecko = manifest.get("browser_specific_settings", {}).get("gecko", {})
-    missing = [key for key in ("id", "strict_min_version") if not gecko.get(key)]
+    missing = [key for key in ("id", "strict_min_version", "update_url") if not gecko.get(key)]
     if missing or not manifest.get("version"):
         raise SystemExit(
             f"extension/manifest.json is missing {missing or ['version']} — an unlisted "
@@ -84,6 +85,7 @@ def gecko_facts() -> dict[str, str]:
         "id": gecko["id"],
         "version": str(manifest["version"]),
         "strict_min_version": gecko["strict_min_version"],
+        "update_url": gecko["update_url"],
     }
 
 
@@ -141,6 +143,41 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _download(url: str, limit: int) -> bytes:
+    with urllib.request.urlopen(url, timeout=30) as response:
+        body = response.read(limit + 1)
+    if len(body) > limit:
+        raise SystemExit(f"delivery file is larger than the {limit}-byte verification limit")
+    return body
+
+
+def verify_published_delivery(
+    tag: str,
+    fetch: Callable[[str, int], bytes] = _download,
+) -> str:
+    """Verify the public update manifest and the exact XPI bytes it offers.
+
+    This is deliberately an explicit post-release check. Development may have
+    an empty manifest before the first signature, but completed delivery may not.
+    """
+    facts = gecko_facts()
+    try:
+        manifest = json.loads(fetch(facts["update_url"], 1 << 20))
+        updates = manifest["addons"][facts["id"]]["updates"]
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise SystemExit("the published Firefox update manifest is malformed") from exc
+    if len(updates) != 1:
+        raise SystemExit("the published Firefox update manifest must offer exactly one version")
+    entry = updates[0]
+    expected_url = asset_url(tag, facts["version"])
+    if entry.get("version") != facts["version"] or entry.get("update_link") != expected_url:
+        raise SystemExit("the published Firefox update does not match this extension and tag")
+    expected_hash = f"sha256:{hashlib.sha256(fetch(expected_url, 64 << 20)).hexdigest()}"
+    if entry.get("update_hash") != expected_hash:
+        raise SystemExit("the published Firefox XPI does not match its update hash")
+    return expected_url
+
+
 # ---- signing ----------------------------------------------------------------
 
 
@@ -166,6 +203,12 @@ def sign(staging: Path, artifacts: Path) -> Path:
     secret = os.environ.get("AMO_JWT_SECRET")
     if not issuer or not secret:
         raise SystemExit("set AMO_JWT_ISSUER and AMO_JWT_SECRET (AMO developer hub)")
+    signer_env = os.environ.copy()
+    # web-ext supports private authentication through these environment names.
+    # Keeping the values out of argv prevents process listings and command errors
+    # from exposing them.
+    signer_env["WEB_EXT_API_KEY"] = issuer
+    signer_env["WEB_EXT_API_SECRET"] = secret
     subprocess.run(
         [
             "npx",
@@ -178,12 +221,9 @@ def sign(staging: Path, artifacts: Path) -> Path:
             str(artifacts),
             "--channel",
             "unlisted",
-            "--api-key",
-            issuer,
-            "--api-secret",
-            secret,
         ],
         check=True,
+        env=signer_env,
     )
     signed = sorted(artifacts.glob("*.xpi"))
     if not signed:
@@ -213,9 +253,18 @@ def main(argv: list[str] | None = None) -> int:
         default=REPO / "dist-xpi",
         help="where the signed XPI is written (default: dist-xpi/)",
     )
+    parser.add_argument(
+        "--verify-release",
+        action="store_true",
+        help="verify the public update manifest and signed XPI, without signing",
+    )
     options = parser.parse_args(argv)
 
     version = facts["version"]
+    if options.verify_release:
+        link = verify_published_delivery(options.tag)
+        print(f"Firefox delivery verified: {link}")
+        return 0
     if options.from_xpi is None and published_version() == version:
         raise SystemExit(
             f"packaging/updates.json already offers {version}. AMO refuses a version it "
