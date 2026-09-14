@@ -1,7 +1,18 @@
 {
   "addons": {
     "azimut-capture@osintmethat.github.io": {
-      "updates": []
+      "updates": [
+        {
+          "version": "0.3.0",
+          "update_link": "https://github.com/OsintMeThat/azimut/releases/download/v0.3.0/azimut-capture-0.3.0.xpi",
+          "update_hash": "sha256:da6d970e0662395d57965a7acfd4eff8944f3d94c425a35ad800d5a1e338c157",
+          "applications": {
+            "gecko": {
+              "strict_min_version": "115.0"
+            }
+          }
+        }
+      ]
     }
   }
 }
