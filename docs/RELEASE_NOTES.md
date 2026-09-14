@@ -86,9 +86,11 @@ On Intel Macs (macOS 14 or newer), install the Python package instead:
 The downloads are unsigned, so your system will warn you the first time. The
 README explains the prompt for each platform.
 
-Firefox users install the signed `azimut-capture-0.3.0.xpi` attached to this
-release. Chrome, Edge and Brave users install or update the extension from
-Settings → Capture extension.
+Firefox users download the signed `azimut-capture-0.3.0.xpi` attached to this
+release, then open `about:addons` and choose the gear menu → **Install Add-on
+From File**. Pair it with the token shown in Settings → Capture extension.
+Chrome, Edge and Brave users install or update the extension from that same
+Settings page.
 
 Your existing cases open as they are. No export, migration or manual step is
 needed, and older case bundles still import.

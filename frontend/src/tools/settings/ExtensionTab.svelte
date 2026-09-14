@@ -169,8 +169,8 @@
       paste the path. Then reload this tab.
     </p>
     <p class="note">
-      Firefox drops an unpacked extension when it closes, so install the signed
-      <span class="mono">azimut-capture</span> add-on instead. It updates itself.
+      Firefox: download the signed add-on below, then open
+      <span class="mono">about:addons</span> and choose the gear menu → Install Add-on From File.
     </p>
     <div class="scraper-actions">
       <a
