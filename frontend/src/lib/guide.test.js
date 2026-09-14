@@ -76,6 +76,15 @@ describe('the guide tracks the app rather than falling behind it', () => {
     expect(GUIDE[0].points[0].label).toContain('extension');
   });
 
+  it('distinguishes browser installation and names both third-party actions', () => {
+    const extension = GUIDE.find((section) => section.id === 'extension');
+    const copy = extension.points.map((point) => `${point.label} ${point.text}`).join(' ');
+    expect(copy).toContain('Chromium');
+    expect(copy).toContain('Firefox');
+    expect(copy).toContain('reverse-search engine');
+    expect(copy).not.toContain('exactly one place');
+  });
+
   it('reaches a section from a tool, which is how a toolbar mark will ask', () => {
     expect(guideFor('satellite')?.id).toBe('map');
     expect(guideFor('graph')?.id).toBe('case');

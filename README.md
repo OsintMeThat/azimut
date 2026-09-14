@@ -303,6 +303,12 @@ Then commit `packaging/updates.json`. That file is what
 `browser_specific_settings.gecko.update_url` points at, served raw from `main`,
 and Firefox re-reads it about once a day — so a release that changed the
 extension is not delivered to Firefox users until it lands on the branch.
+After that manifest PR is merged, verify the public manifest, asset URL and
+signed bytes together:
+
+```bash
+python3 scripts/sign_extension.py --verify-release
+```
 
 Two rules the script enforces rather than trusts:
 

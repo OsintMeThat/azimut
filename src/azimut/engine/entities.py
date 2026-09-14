@@ -886,40 +886,58 @@ def _check_geojson(attr: Attr, value: Any) -> None:
     lines are refused because a footprint is an area — a point is what `lat`/`lon`
     with a radius already says.
     """
-    if not isinstance(value, dict):
-        raise CaseError(f"'{attr.key}' must be a GeoJSON geometry")
-    if value.get("type") not in ("Polygon", "MultiPolygon"):
-        raise CaseError(f"'{attr.key}' must be a Polygon or MultiPolygon")
-    rings = value.get("coordinates")
-    if not isinstance(rings, list) or not rings:
+    polygons, points = _footprint_polygons(value, attr.key)
+    if not polygons:
         raise CaseError(f"'{attr.key}' has no coordinates")
-    points = _count_positions(rings, attr.key)
-    if points < 3:
-        raise CaseError(f"'{attr.key}' needs at least three points to be an area")
     if points > MAX_FOOTPRINT_POINTS:
         raise CaseError(f"'{attr.key}' holds more than {MAX_FOOTPRINT_POINTS} points")
 
 
-def _count_positions(node: Any, key: str, depth: int = 0) -> int:
-    """Count `[lon, lat]` pairs, checking each as it goes.
+def _footprint_polygons(value: Any, key: str) -> tuple[list[list[list[Any]]], int]:
+    """Return validated Polygon rings and their position count.
 
-    Recursive because a Polygon nests one level deeper than a MultiPolygon's rings,
-    and bounded by ``depth`` so a hand-made payload cannot nest its way past the
-    point cap.
+    Ring structure is checked here rather than inferred recursively. Containment
+    can then rely on every polygon having one closed outer ring followed by zero
+    or more closed holes.
     """
-    if depth > 4:
-        raise CaseError(f"'{key}' is nested too deeply")
-    if not isinstance(node, list):
-        raise CaseError(f"'{key}' has a malformed coordinate")
-    # a position is the innermost list: two numbers, lon then lat
-    if node and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in node):
-        if len(node) < 2:
-            raise CaseError(f"'{key}' has a coordinate that is not a lon/lat pair")
-        lon, lat = float(node[0]), float(node[1])
-        if not (-180 <= lon <= 180 and -90 <= lat <= 90):
-            raise CaseError(f"'{key}' has a coordinate off the globe")
-        return 1
-    return sum(_count_positions(child, key, depth + 1) for child in node)
+    if not isinstance(value, dict):
+        raise CaseError(f"'{key}' must be a GeoJSON geometry")
+    kind = value.get("type")
+    if kind not in ("Polygon", "MultiPolygon"):
+        raise CaseError(f"'{key}' must be a Polygon or MultiPolygon")
+    coordinates = value.get("coordinates")
+    if not isinstance(coordinates, list) or not coordinates:
+        raise CaseError(f"'{key}' has no coordinates")
+    polygons = [coordinates] if kind == "Polygon" else coordinates
+    points = 0
+    for polygon in polygons:
+        if not isinstance(polygon, list) or not polygon:
+            raise CaseError(f"'{key}' has a polygon with no rings")
+        for ring in polygon:
+            if not isinstance(ring, list) or len(ring) < 4:
+                raise CaseError(f"'{key}' has a ring with fewer than four positions")
+            checked: list[tuple[float, float]] = []
+            for position in ring:
+                if not isinstance(position, list) or len(position) < 2:
+                    raise CaseError(f"'{key}' has a coordinate that is not a lon/lat pair")
+                lon, lat = position[0], position[1]
+                if (
+                    isinstance(lon, bool)
+                    or isinstance(lat, bool)
+                    or not isinstance(lon, (int, float))
+                    or not isinstance(lat, (int, float))
+                    or not math.isfinite(float(lon))
+                    or not math.isfinite(float(lat))
+                ):
+                    raise CaseError(f"'{key}' has a malformed coordinate")
+                lon_value, lat_value = float(lon), float(lat)
+                if not (-180 <= lon_value <= 180 and -90 <= lat_value <= 90):
+                    raise CaseError(f"'{key}' has a coordinate off the globe")
+                checked.append((lon_value, lat_value))
+            if checked[0] != checked[-1]:
+                raise CaseError(f"'{key}' has an unclosed ring")
+            points += len(checked)
+    return polygons, points
 
 
 def _check_place_precision(attrs: Mapping[str, Any], current: Mapping[str, Any]) -> None:
@@ -941,47 +959,64 @@ def _check_place_precision(attrs: Mapping[str, Any], current: Mapping[str, Any])
     """
     radius = attrs.get("radius_m", current.get("radius_m"))
     shape = attrs.get("footprint", current.get("footprint"))
-    touched = any(
+    precision_touched = any(
         key in attrs and attrs[key] != current.get(key) for key in ("radius_m", "footprint")
     )
-    if radius and shape and touched:
+    if radius and shape and precision_touched:
         raise CaseError("a place holds either a radius or a footprint, not both")
-    if not attrs.get("footprint"):
+    containment_touched = any(
+        key in attrs and attrs[key] != current.get(key)
+        for key in ("lat", "lon", "footprint")
+    )
+    if not containment_touched or not shape:
         return
     lat = attrs.get("lat", current.get("lat"))
     lon = attrs.get("lon", current.get("lon"))
     if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
         return  # a place with no point of its own has nothing to contradict
-    if not _covers_point(attrs["footprint"], float(lat), float(lon)):
+    if not _covers_point(shape, float(lat), float(lon)):
         raise CaseError("'footprint' must contain the place's own point")
 
 
 def _covers_point(shape: Mapping[str, Any], lat: float, lon: float) -> bool:
-    """Is the point inside one of this shape's outer rings?
+    """Is the point covered by one polygon, excluding the interiors of holes?
 
     Ray casting, on shapes this module has already validated. `engine.sentinel` owns
     a second copy on purpose: a granule's geometry arrives from a service that may
     have swapped the axes, so that one counts either reading as a hit, and here that
     tolerance would accept a shape traced at the mirrored coordinates.
     """
-    rings: list[Any] = []
-    coordinates = shape.get("coordinates") or []
-    if shape.get("type") == "Polygon":
-        rings = [coordinates[0]] if coordinates else []
-    else:
-        rings = [polygon[0] for polygon in coordinates if polygon]
-    return any(_inside(ring, lat, lon) for ring in rings)
+    polygons, _ = _footprint_polygons(shape, "footprint")
+    for polygon in polygons:
+        outer = _ring_location(polygon[0], lat, lon)
+        if outer == "outside":
+            continue
+        if outer == "boundary":
+            return True
+        if any(_ring_location(hole, lat, lon) == "inside" for hole in polygon[1:]):
+            continue
+        # A hole boundary belongs to the polygon boundary under GeoJSON's covers
+        # convention, so only a point strictly inside a hole is excluded.
+        return True
+    return False
 
 
-def _inside(ring: list[Any], lat: float, lon: float) -> bool:
+def _ring_location(ring: list[Any], lat: float, lon: float) -> str:
     inside = False
-    for index, position in enumerate(ring):
+    for index, position in enumerate(ring[:-1]):
         x1, y1 = float(position[0]), float(position[1])
-        following = ring[(index + 1) % len(ring)]
+        following = ring[index + 1]
         x2, y2 = float(following[0]), float(following[1])
+        cross = (lon - x1) * (y2 - y1) - (lat - y1) * (x2 - x1)
+        if (
+            abs(cross) <= 1e-10
+            and min(x1, x2) - 1e-10 <= lon <= max(x1, x2) + 1e-10
+            and min(y1, y2) - 1e-10 <= lat <= max(y1, y2) + 1e-10
+        ):
+            return "boundary"
         if (y1 > lat) != (y2 > lat) and lon < (x2 - x1) * (lat - y1) / ((y2 - y1) or 1e-12) + x1:
             inside = not inside
-    return inside
+    return "inside" if inside else "outside"
 
 
 def _check_choice(attr: Attr, value: Any) -> None:

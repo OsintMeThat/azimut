@@ -1,6 +1,8 @@
 """Satellite capture API: bearing is honored and persisted with provenance."""
 
 import io
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event, Lock
 
 import pytest
 
@@ -753,6 +755,130 @@ def test_search_grid_write_is_atomic(client, monkeypatch):
 
     assert path.read_bytes() == before
     assert list(path.parent.glob(".g.json.*.tmp")) == []
+
+
+def test_concurrent_grid_patches_preserve_both_marks(client, monkeypatch):
+    from azimut.api import satellite
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Concurrent grid"}).json()["id"]
+    client.put(f"/api/cases/{cid}/search-grids/g", json=_rect_grid())
+    case = Case.open(cid)
+    original_write = satellite._write_grid_atomic
+    first_in_write = Event()
+    second_started = Event()
+    second_finished = Event()
+    calls_lock = Lock()
+    calls = 0
+
+    def controlled_write(path, spec):
+        nonlocal calls
+        with calls_lock:
+            position = calls
+            calls += 1
+        if position == 0:
+            first_in_write.set()
+            assert second_started.wait(2)
+            second_finished.wait(0.2)
+        original_write(path, spec)
+
+    def second_patch():
+        second_started.set()
+        try:
+            return satellite.apply_grid_marks(case, "g", {"0:1": "flagged"})
+        finally:
+            second_finished.set()
+
+    monkeypatch.setattr(satellite, "_write_grid_atomic", controlled_write)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(satellite.apply_grid_marks, case, "g", {"0:0": "cleared"})
+        assert first_in_write.wait(2)
+        second = pool.submit(second_patch)
+        first.result(timeout=3)
+        second.result(timeout=3)
+
+    stored = client.get(f"/api/cases/{cid}/search-grids/g").json()
+    assert stored["statuses"] == {"0:0": "cleared", "0:1": "flagged"}
+    assert stored["revision"] == 3
+
+
+def test_two_whole_grid_saves_cannot_accept_the_same_revision(client, monkeypatch):
+    from azimut.api import satellite
+
+    cid = client.post("/api/cases", json={"name": "Concurrent saves"}).json()["id"]
+    client.put(f"/api/cases/{cid}/search-grids/g", json=_rect_grid())
+    current = client.get(f"/api/cases/{cid}/search-grids/g").json()
+    body = satellite.GridSaveIn(spec=current, base_revision=current["revision"])
+    original_write = satellite._write_grid_atomic
+    first_in_write = Event()
+    second_started = Event()
+    second_finished = Event()
+    calls_lock = Lock()
+    calls = 0
+
+    def controlled_write(path, spec):
+        nonlocal calls
+        with calls_lock:
+            position = calls
+            calls += 1
+        if position == 0:
+            first_in_write.set()
+            assert second_started.wait(2)
+            second_finished.wait(0.2)
+        original_write(path, spec)
+
+    def second_save():
+        second_started.set()
+        try:
+            return satellite.save_search_grid(cid, "g", body)
+        finally:
+            second_finished.set()
+
+    monkeypatch.setattr(satellite, "_write_grid_atomic", controlled_write)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(satellite.save_search_grid, cid, "g", body)
+        assert first_in_write.wait(2)
+        second = pool.submit(second_save)
+        first.result(timeout=3)
+        with pytest.raises(satellite.HTTPException) as error:
+            second.result(timeout=3)
+    assert error.value.status_code == 409
+
+
+def test_delete_waits_for_an_inflight_grid_patch(client, monkeypatch):
+    from azimut.api import satellite
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Delete race"}).json()["id"]
+    client.put(f"/api/cases/{cid}/search-grids/g", json=_rect_grid())
+    case = Case.open(cid)
+    original_write = satellite._write_grid_atomic
+    writer_entered = Event()
+    delete_started = Event()
+    delete_finished = Event()
+
+    def controlled_write(path, spec):
+        writer_entered.set()
+        assert delete_started.wait(2)
+        delete_finished.wait(0.2)
+        original_write(path, spec)
+
+    def delete():
+        delete_started.set()
+        try:
+            return satellite.delete_search_grid(cid, "g")
+        finally:
+            delete_finished.set()
+
+    monkeypatch.setattr(satellite, "_write_grid_atomic", controlled_write)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        patching = pool.submit(satellite.apply_grid_marks, case, "g", {"0:0": "cleared"})
+        assert writer_entered.wait(2)
+        deleting = pool.submit(delete)
+        patching.result(timeout=3)
+        assert deleting.result(timeout=3)["deleted"] is True
+
+    assert client.get(f"/api/cases/{cid}/search-grids/g").status_code == 404
 
 
 def test_search_grid_delete_one(client):

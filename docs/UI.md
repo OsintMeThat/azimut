@@ -1298,9 +1298,9 @@ what is burning now (the last 24, 48 or 72 hours, or the week) and what was
 burning on a given day (any range back through the archive, up to 31 days).
 Which instrument and which stretch of time are chosen in the row itself. It
 needs a key, and says so with the reason rather than failing on the first tile;
-a key pasted into Settings is picked up on the way back to the map. The
-detections stop being drawn past z14, where FIRMS's fixed symbol per detection
-stops meaning one detection.
+a key pasted into Settings is picked up on the way back to the map. Source
+tiles stop at z14. Farther in, the map enlarges their pixels into visible
+squares instead of hiding the detections or asking NASA for invented detail.
 
 **The reference layers** are key-less and each is simply on or off: Esri's
 borders (country, region, district, with names) and roads, Open Infrastructure

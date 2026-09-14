@@ -625,6 +625,7 @@ describe('a map in more than one window', () => {
     // back, and it is what a browser does not refuse
     expect(source).toContain("window.open(url, '_blank')");
     expect(source).toContain('params.w = String(nextWindowNumber())');
+    expect(source).toContain('params.case = caseState.current.id');
     expect(source).toContain('The browser refused a second tab');
   });
 

@@ -410,7 +410,9 @@
     notify: toast,
     caseId: () => caseState.current?.id,
     engine: () => engine,
-    onSaved: reloadCase,
+    onSaved: async (ownerCaseId) => {
+      if (caseState.current?.id === ownerCaseId) await reloadCase();
+    },
   });
 
   // Svelte only honours a cleanup returned from a *synchronous* onMount, and the
@@ -779,6 +781,7 @@
     });
     params.w = String(nextWindowNumber());
     params.solo = '1';
+    if (caseState.current?.id) params.case = caseState.current.id;
     const url = `${location.pathname}${location.search}${buildHash('satellite', params)}`;
     const opened = window.open(url, '_blank');
     if (!opened) toast('The browser refused a second tab. Allow pop-ups for this page', 'warn', 8000);
@@ -1222,6 +1225,7 @@
       temporalMapError = '';
       // The points came out of another case's sheet, so they go with it.
       sheetPoints = null;
+      footprint.cancel();
     }
     return savedWork.load(id);
   });

@@ -343,6 +343,21 @@ describe('the layers on a map', () => {
     });
   });
 
+  it('keeps FIRMS detections as visible squares beyond the last source zoom', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      createBasemaps(stubEngine(map)).setOverlay('firms', true, {
+        sensor: 'viirs',
+        window: '24h',
+      });
+      expect(map.sources.get('basemap-firms').maxzoom).toBe(14);
+      expect(map.getLayer('basemap-firms')).toMatchObject({
+        maxzoom: 24,
+        paint: { 'raster-resampling': 'nearest' },
+      });
+    });
+  });
+
   it('adds an overlay once and takes it off when asked', async () => {
     await withStubbedGoogle(async ({ createBasemaps }) => {
       const map = stubMap();

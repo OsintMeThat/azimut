@@ -190,8 +190,13 @@
   // downloaders, the capture extension. The check reads prefs.updateCheckOnStart
   // and the bundled extension version, so it must follow initSession, which
   // loads them.
-  initSession()
-    .catch(() => {})
+  const startupCaseId = solo ? splitHash(location.hash).params.get('case') : null;
+  initSession(startupCaseId)
+    .catch((error) => {
+      if (startupCaseId) {
+        toast(`Could not open this map's case: ${error?.message ?? 'case not found'}`, 'danger', 8000);
+      }
+    })
     .finally(() => checkForUpdatesOnStart());
 
   // Live nudges from our own backend (SSE, same-origin — still local-first):

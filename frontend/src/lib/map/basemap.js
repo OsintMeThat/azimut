@@ -131,9 +131,11 @@ const OVERLAYS = [
     layer: 'basemap-firms',
     url: (params) => `/api/firms/tiles/{z}/{x}/{y}?${new URLSearchParams(params)}`,
     attribution: 'Active fire data: NASA FIRMS',
-    // FIRMS draws a fixed symbol per detection and VIIRS resolves 375 m: deeper
-    // than this is a screen of overlapping marks, and the route refuses it.
+    // The source stops at z14. Past it, MapLibre enlarges those pixels instead
+    // of requesting invented detail, so a detection remains a visible square.
     maxZoom: 14,
+    viewMaxZoom: 24,
+    resampling: 'nearest',
   },
 ];
 
@@ -376,6 +378,9 @@ export function createBasemaps(engine, hooks = {}) {
       }
       return;
     }
+    const paint = {};
+    if (overlay.opacity != null) paint['raster-opacity'] = overlay.opacity;
+    if (overlay.resampling) paint['raster-resampling'] = overlay.resampling;
     map.addLayer(
       {
         id: overlay.layer,
@@ -389,7 +394,7 @@ export function createBasemaps(engine, hooks = {}) {
         // A picture whose coarse pixels are still worth reading zoomed in
         // states a deeper view of its own.
         maxzoom: overlay.viewMaxZoom ?? overlay.maxZoom,
-        ...(overlay.opacity != null ? { paint: { 'raster-opacity': overlay.opacity } } : {}),
+        ...(Object.keys(paint).length ? { paint } : {}),
       },
       before
     );

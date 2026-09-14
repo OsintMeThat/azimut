@@ -408,7 +408,7 @@ export async function openCase(id) {
  * Startup: load the case list and reopen the last-used case (if it still
  * exists on disk). Called once from App on mount.
  */
-export async function initSession() {
+export async function initSession(explicitCaseId = null) {
   // preferences must land before the tools render, or coordinates would flash
   // in the wrong format; a settings read failure is never fatal to a session
   await loadPrefs().catch(() => {});
@@ -418,6 +418,13 @@ export async function initSession() {
   // renders a type slug it would replace a moment later.
   await loadRelationTypes().catch(() => {});
   await refreshCaseList();
+  const requested = typeof explicitCaseId === 'string' ? explicitCaseId.trim() : '';
+  if (requested) {
+    // A detached map names its owner in the URL. Falling back to shared
+    // localStorage here could make the copied view write into another tab's case.
+    await openCase(requested);
+    return;
+  }
   let lastId = null;
   try {
     lastId = localStorage.getItem(LAST_CASE_KEY);

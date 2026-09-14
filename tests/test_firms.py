@@ -181,6 +181,15 @@ def test_a_tile_deeper_than_the_layer_draws_is_refused_with_a_reason(client):
     assert str(firms.MAX_ZOOM) in answer.json()["detail"]
 
 
+@pytest.mark.parametrize("path", ["/api/firms/tiles/-1/0/0", "/api/firms/tiles/3/8/0"])
+def test_invalid_tile_coordinates_are_refused_before_key_lookup(client, monkeypatch, path):
+    def never(*args, **kwargs):
+        raise AssertionError("asked FIRMS for invalid tile coordinates")
+
+    monkeypatch.setattr(httpx, "get", never)
+    assert client.get(path).status_code == 422
+
+
 def test_a_date_the_service_would_refuse_never_reaches_it(client, monkeypatch):
     client.put("/api/settings/keys", json={"firms": "KEY123"})
 

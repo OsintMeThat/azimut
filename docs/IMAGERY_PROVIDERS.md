@@ -341,7 +341,7 @@ meter, no free-allowance box and no eco threshold. Nothing about it is billed.
 | Asking | WMS `GetMap` in EPSG:3857 — the projection the tile grid is already in, so a tile is its own square and nothing is reprojected |
 | Live | `fires_viirs_24 / _48 / _72 / _7`, and the same for `fires_viirs_snpp`, `fires_viirs_noaa20` and `fires_modis` |
 | History | the same layer names without the suffix, dated with `TIME=from/to`, up to **31 days** per request |
-| Zoom ceiling | z14. FIRMS draws a fixed symbol per detection and VIIRS resolves 375 m; deeper is a screen of overlapping marks, and the route refuses it |
+| Zoom ceiling | source tiles stop at z14. Deeper views reuse the z14 tile with nearest-neighbour scaling, keeping each detection visible as a square without another NASA request |
 | Allowance | 5,000 requests per 10 minutes, and a long range counts as several. Nothing polls, and a layer that is off asks for nothing |
 | Caching | none on disk. The live layers are what is burning now (upstream refreshes every 15 minutes) and a cached fire is a lie with a timestamp; the browser holds one for 5 minutes |
 

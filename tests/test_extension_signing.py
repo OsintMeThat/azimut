@@ -10,7 +10,9 @@ error anywhere, it just silently never updates.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -109,6 +111,7 @@ def test_the_generator_reads_the_extension_rather_than_a_copy(gecko):
     assert facts["id"] == gecko["id"]
     assert facts["version"] == extinstall.bundled_version()
     assert facts["strict_min_version"] == gecko["strict_min_version"]
+    assert facts["update_url"] == gecko["update_url"]
 
 
 def test_the_asset_url_names_the_release_that_carries_it():
@@ -161,3 +164,84 @@ def test_no_published_version_before_the_first_signature(monkeypatch, tmp_path):
     manifest.write_text(json.dumps({"addons": {"x@y": {"updates": []}}}), encoding="utf-8")
     monkeypatch.setattr(sign_extension, "UPDATE_MANIFEST", manifest)
     assert sign_extension.published_version() is None
+
+
+def test_signing_credentials_are_passed_in_the_private_environment(monkeypatch, tmp_path):
+    captured = {}
+    monkeypatch.setenv("AMO_JWT_ISSUER", "synthetic-issuer")
+    monkeypatch.setenv("AMO_JWT_SECRET", "synthetic-secret")
+
+    def fake_run(argv, **kwargs):
+        captured.update(argv=argv, kwargs=kwargs)
+        (tmp_path / "signed.xpi").write_bytes(b"signed")
+
+    monkeypatch.setattr(sign_extension.subprocess, "run", fake_run)
+    signed = sign_extension.sign(tmp_path / "payload", tmp_path)
+
+    assert signed.name == "signed.xpi"
+    command = " ".join(captured["argv"])
+    assert "synthetic-issuer" not in command
+    assert "synthetic-secret" not in command
+    assert "--api-key" not in captured["argv"]
+    assert "--api-secret" not in captured["argv"]
+    assert captured["kwargs"]["env"]["WEB_EXT_API_KEY"] == "synthetic-issuer"
+    assert captured["kwargs"]["env"]["WEB_EXT_API_SECRET"] == "synthetic-secret"
+
+
+def test_a_signer_failure_cannot_serialize_the_secret(monkeypatch, tmp_path):
+    monkeypatch.setenv("AMO_JWT_ISSUER", "synthetic-issuer")
+    monkeypatch.setenv("AMO_JWT_SECRET", "synthetic-secret")
+
+    def fail(argv, **kwargs):
+        raise subprocess.CalledProcessError(2, argv, stderr="validation failed")
+
+    monkeypatch.setattr(sign_extension.subprocess, "run", fail)
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        sign_extension.sign(tmp_path / "payload", tmp_path)
+
+    assert "synthetic-issuer" not in str(error.value)
+    assert "synthetic-secret" not in str(error.value)
+
+
+def test_completed_delivery_cannot_pass_with_an_empty_update_list(monkeypatch, gecko):
+    empty = json.dumps({"addons": {gecko["id"]: {"updates": []}}}).encode()
+    monkeypatch.setattr(
+        sign_extension,
+        "gecko_facts",
+        lambda: {
+            "id": gecko["id"],
+            "version": "0.3.0",
+            "strict_min_version": gecko["strict_min_version"],
+            "update_url": UPDATE_URL,
+        },
+    )
+
+    with pytest.raises(SystemExit, match="exactly one version"):
+        sign_extension.verify_published_delivery("v0.3.0", lambda _url, _limit: empty)
+
+
+def test_completed_delivery_verifies_the_public_xpi_hash(monkeypatch, gecko):
+    xpi = b"mozilla-signed-xpi"
+    link = sign_extension.asset_url("v0.3.0", "0.3.0")
+    published = sign_extension.build_update_manifest(
+        gecko["id"],
+        "0.3.0",
+        link,
+        hashlib.sha256(xpi).hexdigest(),
+        gecko["strict_min_version"],
+    )
+    monkeypatch.setattr(
+        sign_extension,
+        "gecko_facts",
+        lambda: {
+            "id": gecko["id"],
+            "version": "0.3.0",
+            "strict_min_version": gecko["strict_min_version"],
+            "update_url": UPDATE_URL,
+        },
+    )
+
+    def fetch(url, _limit):
+        return json.dumps(published).encode() if url == UPDATE_URL else xpi
+
+    assert sign_extension.verify_published_delivery("v0.3.0", fetch) == link
