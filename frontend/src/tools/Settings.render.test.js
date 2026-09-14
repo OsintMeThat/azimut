@@ -141,6 +141,8 @@ describe('each section', () => {
   it('Extension offers the download and the pairing token', () => {
     const text = show('extension');
     expect(text).toContain('Pairing');
+    expect(text).toContain('about:addons');
+    expect(text).toContain('Install Add-on From File');
     expect(pane().querySelector('a[href="/api/ingest/extension.zip"]')).not.toBeNull();
   });
 
