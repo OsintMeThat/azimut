@@ -2022,8 +2022,10 @@ export async function showSaved(page, kind = 'All') {
  * The signal is `lib/map`'s own ready flag, not a class the engine happens to
  * put on its container: a suite that recognises the engine is a suite pinned to
  * it, and swapping the engine (SPEC v3) would then rewrite every map spec.
+ *
+ * `maps` is how many the screen puts up — two, on Compare's linked pair.
  */
-export async function awaitMapReady(page) {
+export async function awaitMapReady(page, maps = 1) {
   // The runner's Firefox has no WebGL and cannot be given any: it asks for a
   // native driver, a box with no GPU has none, and the software path a patched
   // build would take is not there — `tryNativeGL()`, then `EXHAUSTED_DRIVERS`,
@@ -2039,7 +2041,9 @@ export async function awaitMapReady(page) {
     !!process.env.CI && test.info().project.name === 'firefox',
     'the runner\'s Firefox has no WebGL; Chromium answers for the map there'
   );
-  await expect(page.locator('.map[data-map-ready="true"]')).toBeVisible();
+  const ready = page.locator('.map[data-map-ready="true"]');
+  await expect(ready).toHaveCount(maps);
+  await expect(ready.first()).toBeVisible();
 }
 
 /**

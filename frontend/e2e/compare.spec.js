@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installAppFixture } from './app.fixture.js';
+import { awaitMapReady, installAppFixture } from './app.fixture.js';
 
 async function openCompare(page, providerB = 'Esri World Imagery') {
   const fixture = await installAppFixture(page);
@@ -24,7 +24,7 @@ async function openCompare(page, providerB = 'Esri World Imagery') {
     await page.locator('.empty-slot').filter({ has: page.locator('.slot-letter', { hasText: letter }) }).click();
     await page.locator('.provider-card').filter({ hasText: letter === 'A' ? 'Esri World Imagery' : providerB }).click();
   }
-  await expect(page.locator('.map[data-map-ready="true"]')).toHaveCount(2);
+  await awaitMapReady(page, 2);
   return { fixture, errors, saved };
 }
 
@@ -102,7 +102,7 @@ test('spectral frames are requested only by Run, including after reopening and m
   await page.goto('/#compare');
   await page.getByRole('button', { name: 'Open', exact: true }).click();
   await page.locator('.session-open').click();
-  await expect(page.locator('.map[data-map-ready="true"]')).toHaveCount(2);
+  await awaitMapReady(page, 2);
   // Reopening in Difference mode brings its column with it; nothing to click.
   await expect(page.getByLabel('Difference', { exact: true })).toBeVisible();
   await expect(page.locator('button[aria-label="Reset to north"] + button')).toHaveText('35°');
