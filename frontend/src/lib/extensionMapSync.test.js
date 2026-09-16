@@ -321,30 +321,27 @@ describe('the beta badge', () => {
   const badge = () =>
     document.getElementById('azimut-map-tools').shadowRoot.querySelector('header .beta');
 
-  it('marks Google Earth, where the tools drift the most', async () => {
-    panel = open({
-      answers: {
-        '/api/ingest/parse': {
-          site: 'google-earth',
-          label: 'Google Earth',
-          lat: 50.45,
-          lon: 30.52,
-          zoom: 17,
-          bearing: 0,
-          projection: 'webmercator',
-          view_kind: 'satellite',
-          geometry: true,
-          scale_source: 'distance',
-        },
-      },
-    });
-    await settle();
-    await vi.waitFor(() => expect(badge()?.textContent).toBe('Beta'));
-  });
-
-  it('stays off every other map', async () => {
+  it('marks every tool that draws on the ground, on whichever map', async () => {
+    // It used to name Google Earth. The caveat was never about the site: these
+    // four work from what a site writes about its own camera, and all of them
+    // are still settling — so it follows the tool now.
     panel = open();
     await settle();
-    expect(badge()).toBeNull();
+    for (const id of ['measure', 'pins', 'grid', 'fires']) {
+      panel.pick(id);
+      await settle(0);
+      expect(badge()?.textContent, id).toBe('Beta');
+    }
+  });
+
+  it('stays off the tools that measure nothing, and off the panel at rest', async () => {
+    panel = open();
+    await settle();
+    expect(badge()).toBeNull(); // no tool picked yet
+    for (const id of ['sky', 'refs']) {
+      panel.pick(id);
+      await settle(0);
+      expect(badge(), id).toBeNull();
+    }
   });
 });

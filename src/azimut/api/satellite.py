@@ -20,6 +20,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from .. import config
+from ..engine.analysis_models import Zone
 from ..engine import (
     cities,
     firms,
@@ -277,6 +278,45 @@ def sentinel_dates(lat: float, lon: float, start: str, end: str) -> dict[str, An
         raise HTTPException(status_code=502, detail=f"date lookup failed: {exc}") from exc
     config.record_usage("sentinelhub", 1)
     return {"dates": found, "start": start, "end": end}
+
+
+class AcquisitionQuery(BaseModel):
+    """The drawn areas a sweep would cover, and the window to look in."""
+
+    zones: list[Zone] = Field(min_length=1, max_length=32)
+    start: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    end: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+@router.post("/satellite/sentinel/acquisitions")
+def sentinel_acquisitions(body: AcquisitionQuery) -> dict[str, Any]:
+    """Sentinel-2 passes over drawn areas, each with the share of them it covers.
+
+    The question a crosshair lookup cannot answer. An analysis sweep fixes an
+    area, and Sentinel-2's swath does not care where that area's centre is: a
+    day can reach two thirds of it and leave the rest nodata. Asked before the
+    run, that is a number on a row; discovered after it, it is a sweep paid for
+    in tiles that found nothing.
+
+    User-triggered only. Billed as one request on the sentinelhub meter.
+    """
+    instance = _sentinel_instance()
+    if config.usage_blocked("sentinelhub"):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Sentinel Hub is paused: {int(config.BLOCK_SHARE * 100)}% of the monthly "
+            "free tier is used; enable the override in Settings to keep going",
+        )
+    try:
+        found = sentinel.acquisitions(
+            instance, [list(zone.ring()) for zone in body.zones], body.start, body.end
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"pass lookup failed: {exc}") from exc
+    config.record_usage("sentinelhub", 1)
+    return {**found, "start": body.start, "end": body.end}
 
 
 @router.get("/satellite/sentinel/coverage")
@@ -1156,6 +1196,16 @@ def saved_index(case_id: str) -> list[dict[str, Any]]:
     makes no network call of its own.
     """
     return satellite_engine.saved_index(get_case(case_id))
+
+
+@router.get("/cases/{case_id}/satellite/media")
+def media_index(case_id: str) -> list[dict[str, Any]]:
+    """The case's located images and videos, one row per point, newest first.
+
+    Read when the Saved panel's Media position is opened, never on case open:
+    placing a file walks its derivation chain, which the saved index must not pay.
+    """
+    return satellite_engine.media_index(get_case(case_id))
 
 
 @router.post("/cases/{case_id}/satellite/locate")

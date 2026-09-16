@@ -733,17 +733,22 @@ def mark_grid(body: GridMarksIn) -> dict[str, Any]:
 #: a settings file is not something the extension has any business asking for.
 HANDOFF_DIRS = ("media", "proofs")
 
-#: Ceiling for one handed-over file. It crosses the extension's worker/page
-#: boundary as base64 in a message, so this is a real limit rather than a policy:
-#: 48 MB of file is ~64 MB of string, held on both sides while the page rebuilds
-#: the file. A clip refused here is a clip the analyst attaches by hand, which is
-#: what they did before.
-MAX_HANDOFF_BYTES = 48 * 1024 * 1024
+#: Ceiling for one handed-over file. The extension reads it back a chunk at a
+#: time (``Range``, which ``FileResponse`` answers), so what either side holds is
+#: one chunk and never the file — the number is about what is worth carrying into
+#: someone else's page at all, not about the message. A reference window on a
+#: foreign map is meant to reach the same clip the Satellite tab opens, and that
+#: tab streams from disk with no ceiling of its own.
+#:
+#: The composer keeps a smaller one of its own (``MAX_COMPOSER_BYTES`` in
+#: ``extension/background.js``): a thread's attachments are pushed into the page
+#: whole, in one injected payload, so there the string really is the limit.
+MAX_HANDOFF_BYTES = 512 * 1024 * 1024
 
 
 @router.get("/file", dependencies=[Depends(require_token)])
 def handoff_file(case_id: str, path: str) -> Response:
-    """One case attachment, for the extension to put in a composer.
+    """One case attachment, for the extension to put in a composer or a window.
 
     The extension holds the pairing token, so it can already file captures and list
     cases; this lets it read back the two folders a post attaches from. Narrow on
@@ -753,6 +758,9 @@ def handoff_file(case_id: str, path: str) -> Response:
     ``resolve_inside`` refuses traversal out of the case, which leaves
     ``media/../case.json`` — inside the case, and not an attachment. Reading the
     prefix off the request would have handed that over.
+
+    ``FileResponse`` serves a ``Range`` request itself, which is what lets a
+    reference window pull a long video across in pieces.
     """
     case = get_case(case_id)
     try:

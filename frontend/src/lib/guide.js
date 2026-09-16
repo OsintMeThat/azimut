@@ -188,7 +188,7 @@ export const GUIDE = [
     id: 'map',
     title: 'Map',
     lead: 'Where a finding gets a coordinate, and where a coordinate gets a picture.',
-    tools: ['satellite', 'coordinates'],
+    tools: ['satellite', 'compare', 'coordinates'],
     points: [
       {
         label: 'Four providers need no key',
@@ -200,18 +200,26 @@ export const GUIDE = [
       },
       {
         label: 'Layers cost nothing until they are on',
-        text: 'Borders, roads, railways, power lines, sea marks, GPS traces, fires and night lights are listed in the Saved panel, and none of them is fetched before its switch is pressed.',
+        text: 'Roads, railways, power lines, sea marks, GPS traces, fires and night lights are listed in the Saved panel, and none of them is fetched before its switch is pressed. Borders are the one layer the map opens with.',
       },
       {
         label: 'The search bar answers before it asks',
         text: 'Saved places, a pasted coordinate and a bundled gazetteer answer while you type. The geocoder is only asked once you stop.',
       },
       {
+        label: 'Your footage on the map',
+        text: 'Photos and videos stand where a relation, their own GPS or a proof puts them. Press a mark to play everything filed on that spot beside the imagery.',
+      },
+      {
         label: 'A capture is evidence',
         text: 'It records its provider, coordinates, zoom and bearing, so the view can be reproduced and the attribution is already written.',
       },
       {
-        label: 'Coords & Sky is the other tab',
+        label: 'Compare keeps the ground fixed',
+        text: 'Read two locked views side by side, by swipe, opacity or blink. Matched products also get Change assist; notes and shapes stay editable in the saved comparison and appear in its outputs.',
+      },
+      {
+        label: 'Coords & Sky keeps calculations separate',
         text: 'It converts between coordinate formats and reads sun, moon, twilight and local time for one point on a date.',
       },
       {

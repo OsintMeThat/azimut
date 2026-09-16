@@ -33,6 +33,7 @@ from ..engine import (
     workspacemove,
 )
 from .templates import MAX_PER_KIND as MAX_TEMPLATES_PER_KIND
+from ..engine.analysis_models import Recipe
 
 # A backup carries the signature logo as base64: 4 characters per 3 bytes, plus
 # slack for padding and any line breaks a hand-edited file picked up.
@@ -612,6 +613,8 @@ class ImportedSettings(BaseModel):
     """
 
     model_config = ConfigDict(extra="ignore", strict=True, populate_by_name=True)
+
+    analyzers: list[Recipe] = Field(default_factory=list, max_length=100)
 
     schema_version: int = Field(
         default=config.SETTINGS_SCHEMA,

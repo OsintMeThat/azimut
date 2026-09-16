@@ -25,6 +25,10 @@ export const FILE_BACKED = new Set([
   'proof',
   'post',
   'inspect-session',
+  'compare-session',
+  'analysis-zones',
+  'analysis-follow-up',
+  'analysis-run',
   'note',
   'sheet',
 ]);

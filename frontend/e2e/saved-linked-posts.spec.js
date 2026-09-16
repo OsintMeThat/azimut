@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { CASE_ID, awaitMapReady, installAppFixture } from './app.fixture.js';
+import { CASE_ID, awaitMapReady, installAppFixture, showSaved } from './app.fixture.js';
 
 // The third one names a target this build dropped, which is what a draft saved
 // before that looks like: it is listed, and it opens (on X, by normalizePostTarget).
@@ -52,10 +52,9 @@ test('shows every linked post from a proof popup and opens the selected draft', 
 
   await page.goto('/#satellite');
   await awaitMapReady(page);
-  await page.getByRole('button', { name: 'Proofs', exact: true }).click();
+  await showSaved(page, 'Proofs');
   await expect(page.getByText('Panorama autostitch test')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Saved work', exact: true }).click();
   await page.locator('.saved-mark-proof').click();
 
   const popup = page.locator('.saved-popup');
@@ -90,8 +89,8 @@ test('clears capture rows before a different case index arrives', async ({ page 
   await page.goto('/#satellite');
   await awaitMapReady(page); // the rows are read beside a map, and one mark is on it
   const savedPanel = page.locator('.captures');
+  await showSaved(page);
   await expect(savedPanel.getByText('Capture A', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Saved work', exact: true }).click();
   await expect(page.locator('.saved-mark-capture')).toHaveCount(1);
   await page.getByTitle('Switch case').click();
   await page.locator('.menu .item').filter({ hasText: 'Case B' }).click();
@@ -118,7 +117,7 @@ test('clears proof rows before a different case proof index arrives', async ({ p
 
   await page.goto('/#satellite');
   await awaitMapReady(page); // the panel is the map tool's, and it opens with it
-  await page.getByRole('button', { name: 'Proofs', exact: true }).click();
+  await showSaved(page, 'Proofs');
   await expect(page.getByText('Proof A')).toBeVisible();
   await page.getByTitle('Switch case').click();
   await page.locator('.menu .item').filter({ hasText: 'Case B' }).click();

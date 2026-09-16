@@ -293,6 +293,17 @@ def _migrate_16_to_17(conn: sqlite3.Connection) -> None:
     _rebuild_temporal_projection_conn(conn)
 
 
+def _migrate_17_to_18(conn: sqlite3.Connection) -> None:
+    """Project the date a proof states for the material it rests on.
+
+    Nothing about the stored proofs changes: the projection is derived, and it
+    simply did not read that attribute before. A case whose proofs were dated by
+    an older build — the attribute survives a schema it predates — reaches the
+    Timeline on the first open rather than on the next save of each proof.
+    """
+    _rebuild_temporal_projection_conn(conn)
+
+
 # from_version -> function(conn) applying the in-place upgrade to from_version + 1.
 # The whole chain runs inside one immediate transaction in `SqliteCase._upgrade`,
 # which stamps each new schema_version and records each migration as it goes; a
@@ -315,4 +326,5 @@ _SQLITE_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     14: _migrate_14_to_15,
     15: _migrate_15_to_16,
     16: _migrate_16_to_17,
+    17: _migrate_17_to_18,
 }

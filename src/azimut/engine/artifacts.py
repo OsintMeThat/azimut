@@ -111,6 +111,12 @@ KINDS: dict[str, Kind] = {
     ),
     "post": Kind(path_attr="draft"),
     "inspect-session": Kind(path_attr="spec"),
+    # The rendered image is a media working file of its own, not a companion:
+    # a proof may already be built on it, so it outlives the session.
+    "compare-session": Kind(path_attr="spec"),
+    "analysis-zones": Kind(path_attr="spec"),
+    "analysis-follow-up": Kind(path_attr="spec"),
+    "analysis-run": Kind(path_attr="spec", companions=(Named(layout.analysis_assets_rel),)),
     "note": Kind(path_attr="path"),
     "sheet": Kind(path_attr="path", companions=(Named(layout.sheet_meta_rel),)),
 }

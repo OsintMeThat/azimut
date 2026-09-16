@@ -59,7 +59,9 @@ const OVERLAYS = [
     url: nightTemplate,
     attribution: 'Night lights: NASA EOSDIS GIBS, VIIRS',
     maxZoom: 8,
-    viewMaxZoom: 13,
+    // The native product is coarse, but it remains useful as a translucent
+    // context layer while reading a street or site at a deeper map zoom.
+    viewMaxZoom: 24,
     // just enough of the ground through it to tell which street is lit
     opacity: 0.85,
   },
@@ -277,6 +279,8 @@ export function createBasemaps(engine, hooks = {}) {
   const shown = new Map();
   let wanted = null; // the provider id last asked for, so a slow load can tell
   let metered = null; // the billed provider whose tiles we are counting
+  let current = null; // the provider the zoom cap was last taken from
+  let sharedCeiling = null; // a view zoom this map must not pass, whatever it shows
 
   // Drawn shapes are appended by `surface.js`, so the first layer this module
   // does not own is where the basemap stops and a tool's own marks begin.
@@ -326,7 +330,11 @@ export function createBasemaps(engine, hooks = {}) {
    * while zoomed deep needs.
    */
   function capZoom(provider) {
-    map.setMaxZoom(provider.max_zoom - 1);
+    current = provider;
+    // A map linked to another one stops where the shallower of the two does,
+    // or the deeper one would pull its partner's camera past its pixels.
+    const deepest = Math.min(provider.max_zoom, sharedCeiling ?? Infinity);
+    map.setMaxZoom(deepest - 1);
   }
 
   function showTiles(provider, providerId, cell) {
@@ -456,6 +464,15 @@ export function createBasemaps(engine, hooks = {}) {
         shown.set(id, asked);
         addOverlay(overlay, params);
       }
+    },
+
+    /**
+     * Cap the view zoom below the provider's own ceiling, or lift that cap with
+     * null. Compare hands both of its maps the shallower of their two ceilings.
+     */
+    setZoomCeiling(value) {
+      sharedCeiling = Number.isFinite(value) ? value : null;
+      if (current) capZoom(current);
     },
 
     dispose() {

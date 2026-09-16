@@ -21,7 +21,8 @@ import {
   normalizeFrame, newFrame, FRAME_COLOR, FRAME_WIDTH, FRAME_WIDTH_MAX,
   newPaste, pasteBoxes, pasteInsertScale, clampPasteScale, clampPaste,
   surfaces, surfaceHitTest, PASTE_SCALE_MAX, PASTE_SHARE,
-  specPoints, statePoints, proofCoordsLines, coordsPlateLines, coordsPostLines,
+  specPoints, statePoints, statePanelPoint, MAX_POINTS,
+  proofCoordsLines, coordsPlateLines, coordsPostLines,
   footerLines, footerBand,
 } from './composer.js';
 
@@ -1826,6 +1827,55 @@ describe('the points a proof states', () => {
   });
 });
 
+describe('a panel that carries a place', () => {
+  const blank = [{ coords: '', label: '', pov: false }];
+  const panel = (lat, lon) => ({ id: 'p2', src: 'b.png', meta: { kind: 'satellite', lat, lon } });
+
+  it('leaves a proof with no coordinates alone: that panel is the answer', () => {
+    expect(statePanelPoint(blank, panel(48.8584, 2.2945), '')).toEqual(blank);
+  });
+
+  it('adds its place under the one the proof already answers with', () => {
+    // the answer was the panels' own, never typed — it is written down first, or
+    // the next panel would take its place without saying so
+    expect(statePanelPoint(blank, panel(48.8738, 2.295), '48.858400, 2.294500')).toEqual([
+      { coords: '48.858400, 2.294500', label: '', pov: false },
+      { coords: '48.873800, 2.295000', label: '', pov: false },
+    ]);
+  });
+
+  it('leaves a stated conclusion where it is', () => {
+    const stated = [{ coords: 'the camera', label: 'pov', pov: true }];
+    expect(statePanelPoint(stated, panel(1, 2), 'the camera')).toEqual([
+      { coords: 'the camera', label: 'pov', pov: true },
+      { coords: '1.000000, 2.000000', label: '', pov: false },
+    ]);
+  });
+
+  it('says one place once: two captures of one point are one point', () => {
+    const rows = [{ coords: '1.000000, 2.000000', label: '', pov: false }];
+    expect(statePanelPoint(rows, panel(1, 2), '1.000000, 2.000000')).toBe(rows);
+    // …including while the field is still reading it off the panels
+    expect(statePanelPoint(blank, panel(1, 2), '1.000000, 2.000000')).toBe(blank);
+  });
+
+  it('adds nothing for a panel with no place, and nothing past the ceiling', () => {
+    const media = { id: 'p3', src: 'c.png', meta: { kind: 'media' } };
+    expect(statePanelPoint(blank, media, '1.000000, 2.000000')).toBe(blank);
+    const full = Array.from({ length: MAX_POINTS }, (_, i) => ({
+      coords: `${i}.000000, 0.000000`,
+      label: '',
+      pov: false,
+    }));
+    expect(statePanelPoint(full, panel(9, 9), '0.000000, 0.000000')).toBe(full);
+  });
+
+  it('states the place in the reader’s own format', () => {
+    const [, added] = statePanelPoint(blank, panel(48.8584, 2.2945), '48.873800, 2.295000', 'dms');
+    expect(added.coords).toBe('48°51\'30.24"N 2°17\'40.20"E');
+  });
+});
+
 describe('the coordinates a plate prints', () => {
   const lines = [
     { coords: '64.1466, -21.9426', label: '' },
@@ -1890,5 +1940,28 @@ describe('a house style and the footer switches', () => {
 
   it('prints nothing when both switches are off', () => {
     expect(footerLines({ panels: [], footerText: false })).toEqual([]);
+  });
+});
+
+
+describe('the date a proof states for its material', () => {
+  it('never reads one off the panels: a file date is not when the thing happened', () => {
+    // The panel carries the address its media traces back to, and nothing else
+    // about time. An offered date is a date accepted without being read.
+    const panel = mediaPanelInput(
+      { path: 'media/clip.png', taken_at: '2024-03-11T18:40:00', source: { webpage_url: 'https://x.com/a/1' } },
+      [],
+    );
+    expect(Object.keys(panel.meta).sort()).toEqual(['kind', 'source_url', 'source_urls']);
+  });
+
+  it('writes the date and the description into the spec, trimmed, else null', () => {
+    const bare = { panels: [], pastes: [], shapes: [], points: [], notes: {} };
+    const stated = toSpec({ ...bare, when: ' 2024-03-11~ ', description: ' 13 helicopters ' });
+    expect(stated.when).toBe('2024-03-11~');
+    expect(stated.description).toBe('13 helicopters');
+    const blank = toSpec({ ...bare, when: '   ', description: '' });
+    expect(blank.when).toBe(null);
+    expect(blank.description).toBe(null);
   });
 });

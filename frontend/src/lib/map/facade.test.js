@@ -165,6 +165,14 @@ describe('the map façade keeps the engine on its own side', () => {
     mapFacade(map).resize();
     expect(map.calls.resize).toBe(1);
   });
+
+  it('reports the ground rectangle in view, wrapped back inside ±180', () => {
+    expect(mapFacade(stubMap()).viewBounds()).toEqual({ west: 0, south: -1, east: 1, north: 0 });
+    const wrapped = stubMap({
+      getBounds: () => ({ getNorth: () => 10, getSouth: () => 9, getWest: () => 179, getEast: () => 181 }),
+    });
+    expect(mapFacade(wrapped).viewBounds()).toMatchObject({ west: 179, east: -179 });
+  });
 });
 
 describe('framing an extent', () => {
@@ -254,7 +262,7 @@ describe('framing a set of points', () => {
 
 describe('the event vocabulary', () => {
   it('names what happened to the view, not what the engine calls it', () => {
-    expect(MAP_EVENTS).toEqual(['view-settled', 'rotate', 'click', 'contextmenu']);
+    expect(MAP_EVENTS).toEqual(['view-settled', 'view-move', 'rotate', 'click', 'contextmenu']);
     expect(engineEvents('view-settled')).toEqual(['moveend']);
   });
 
@@ -371,5 +379,51 @@ describe('spans and teardown', () => {
     mapFacade(map, container).destroy();
     expect(container.dataset.mapReady).toBeUndefined();
     expect(map.calls.removed).toBe(1);
+  });
+});
+
+describe('capturing the drawn pixels', () => {
+  function capturable({ loaded = true } = {}) {
+    const once = new Map();
+    const copy = { width: 0, height: 0, drawn: null };
+    copy.getContext = () => ({ drawImage: (source) => (copy.drawn = source) });
+    const map = stubMap({
+      isMoving: () => false,
+      areTilesLoaded: () => loaded,
+      getCanvas: () => ({ width: 800, height: 600 }),
+      once: (name, handler) => once.set(name, handler),
+      off: (name) => once.delete(name),
+      triggerRepaint: () => once.get('render')?.(),
+    });
+    vi.stubGlobal('document', { createElement: () => copy });
+    return { map, once, copy };
+  }
+
+  it('reads the canvas inside the frame that drew it, once the tiles are in', async () => {
+    const { map, copy } = capturable();
+    try {
+      const shot = await mapFacade(map).snapshot();
+      expect(shot.complete).toBe(true);
+      expect(shot.canvas).toBe(copy);
+      expect([copy.width, copy.height]).toEqual([800, 600]);
+      expect(copy.drawn).toEqual({ width: 800, height: 600 });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('waits for the map to go idle, and says so when it gave up', async () => {
+    vi.useFakeTimers();
+    const { map, once } = capturable({ loaded: false });
+    try {
+      const waiting = mapFacade(map).snapshot({ timeout: 50 });
+      expect(once.has('idle')).toBe(true);
+      await vi.advanceTimersByTimeAsync(60);
+      const shot = await waiting;
+      expect(shot.complete).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 });

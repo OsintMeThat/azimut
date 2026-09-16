@@ -16,6 +16,10 @@ const ROWS = [
   { id: 'e3', kind: 'screenshot', path: 'media/b.png', title: 'b' },
 ];
 const PROOFS = [{ id: 'p1', kind: 'proof', path: 'proofs/x.png', name: 'x', title: 'x' }];
+const MEDIA = [
+  { id: 'm1', key: 'm1@1,2', kind: 'media', media_kind: 'video', path: 'media/clip.mp4', title: 'clip', lat: 1, lon: 2 },
+  { id: 'm1', key: 'm1@3,4', kind: 'media', media_kind: 'video', path: 'media/clip.mp4', title: 'clip', lat: 3, lon: 4 },
+];
 
 let api;
 let notify;
@@ -37,6 +41,7 @@ beforeEach(() => {
     get: vi.fn(async (path) => {
       calls.push(path);
       if (path.includes('/proofs/index')) return PROOFS;
+      if (path.includes('/satellite/media')) return MEDIA;
       return ROWS;
     }),
     post: vi.fn(async () => ({ located: 0, failed: 0, remaining: 0 })),
@@ -53,43 +58,89 @@ describe('opening a case', () => {
     expect(calls).toEqual(['/api/cases/case-1/satellite/index']);
   });
 
+  it('opens on located media, the position a map is first read for', () => {
+    expect(store().kind).toBe('media');
+  });
+
   it('pays nothing for the proofs index until that position is opened', async () => {
     const saved = store();
+    saved.kind = 'all';
     saved.load('case-1');
-    saved.loadProofs('case-1', 3);
+    saved.loadMode('case-1', 3);
     await vi.waitFor(() => expect(saved.rows).toHaveLength(3));
-    expect(calls.some((path) => path.includes('/proofs/index'))).toBe(false);
+    expect(calls).toEqual(['/api/cases/case-1/satellite/index']);
 
     saved.kind = 'proofs';
-    saved.loadProofs('case-1', 3);
+    saved.loadMode('case-1', 3);
     await vi.waitFor(() => expect(saved.proofs).toHaveLength(1));
     // …and the proofs position reads its own rows, not the compact index
     expect(saved.shownRows).toEqual(PROOFS);
+    expect(calls.some((path) => path.includes('/satellite/media'))).toBe(false);
   });
 
-  it('re-reads the proofs index when the case is reloaded, not only when it changes', async () => {
+  it('reads the media index for the media position, one row per point', async () => {
+    const saved = store();
+    saved.loadMode('case-1', 3);
+    await vi.waitFor(() => expect(saved.media).toHaveLength(2));
+    expect(calls).toEqual(['/api/cases/case-1/satellite/media']);
+    expect(saved.shownRows).toEqual(MEDIA);
+    expect(saved.shown.map((row) => row.key)).toEqual(['m1@1,2', 'm1@3,4']);
+  });
+
+  it('re-reads a mode index when the case is reloaded, not only when it changes', async () => {
     // filing a proof reloads the case; keying only on the id would leave the
     // panel showing the folder the proof just left
     const saved = store();
     saved.kind = 'proofs';
-    saved.loadProofs('case-1', 3);
+    saved.loadMode('case-1', 3);
     await vi.waitFor(() => expect(saved.proofs).toHaveLength(1));
     const before = api.get.mock.calls.length;
-    saved.loadProofs('case-1', 3);
+    saved.loadMode('case-1', 3);
     expect(api.get).toHaveBeenCalledTimes(before); // same revision: nothing to re-read
-    saved.loadProofs('case-1', 4);
+    saved.loadMode('case-1', 4);
     await vi.waitFor(() => expect(api.get.mock.calls.length).toBe(before + 1));
   });
 
-  it('drops both indexes before loading a different case', async () => {
+  it('keeps an answer that arrives after the position was left', async () => {
+    // the stamp is spent when the request goes out, so dropping the answer would
+    // leave the position empty until the case happened to reload
+    let release;
+    api.get = vi.fn(() => new Promise((resolve) => (release = () => resolve(MEDIA))));
+    const saved = store();
+    saved.loadMode('case-1', 1);
+    saved.kind = 'all';
+    release();
+    await vi.waitFor(() => expect(saved.media).toHaveLength(2));
+  });
+
+  it('drops every index before loading a different case', async () => {
     const saved = store();
     saved.load('case-1');
+    saved.loadMode('case-1', 1);
     saved.kind = 'proofs';
-    saved.loadProofs('case-1', 1);
+    saved.loadMode('case-1', 1);
     await vi.waitFor(() => expect(saved.proofs).toHaveLength(1));
+    await vi.waitFor(() => expect(saved.media).toHaveLength(2));
     saved.load('case-2');
     expect(saved.rows).toEqual([]);
     expect(saved.proofs).toEqual([]);
+    expect(saved.media).toEqual([]);
+  });
+
+  it('lands no answer from a case that was left while it was on its way', async () => {
+    let release;
+    api.get = vi.fn(() => new Promise((resolve) => (release = () => resolve(MEDIA))));
+    const saved = store();
+    saved.load('case-1');
+    const first = release;
+    saved.loadMode('case-1', 1);
+    const media = release;
+    saved.load('case-2');
+    first();
+    media();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(saved.media).toEqual([]);
   });
 
   it('ignores an earlier case’s answer once the case has changed', async () => {
@@ -114,6 +165,7 @@ describe('what the panel is showing', () => {
     const saved = store();
     saved.load('case-1');
     await vi.waitFor(() => expect(saved.rows).toHaveLength(3));
+    saved.kind = 'all';
     expect(saved.shown).toHaveLength(3);
     saved.kind = 'places';
     expect(saved.shown.map((row) => row.id)).toEqual(['e1']);
@@ -255,8 +307,15 @@ describe('acting on a row', () => {
       { id: 'e3', type: 'capture', attrs: { path: 'media/b.png' } },
       ''
     );
-    expect(reloadCase).toHaveBeenCalledTimes(2);
-    expect(notify).toHaveBeenLastCalledWith('Removed from My work', 'ok', 1600);
+    // a photo keeps its sidecar in step, through the media route
+    await saved.move('case-1', { id: 'm1', kind: 'media', path: 'media/clip.mp4' }, 'Quays');
+    expect(assignFolder).toHaveBeenLastCalledWith(
+      'case-1',
+      { id: 'm1', type: 'media', attrs: { path: 'media/clip.mp4' } },
+      'Quays'
+    );
+    expect(reloadCase).toHaveBeenCalledTimes(3);
+    expect(notify).toHaveBeenLastCalledWith('Filed in Quays', 'ok', 1600);
   });
 
   it('deletes a place as an entity and a capture as a file', async () => {

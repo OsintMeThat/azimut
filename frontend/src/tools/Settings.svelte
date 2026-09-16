@@ -193,6 +193,10 @@
   // icon, so a tab can never disagree with the rail that led the user to it.
   let badges = $derived(updateBadges(updatesState, prefs.updateDismissedVersion));
   let extOutdated = $derived(badges.extensionOutdated);
+  // Which extension version the app ships, which is also the release tag whose
+  // assets carry the signed XPI. The probe verdict is the sharper source, but it
+  // is null until the probes answer, so the settings value backs it.
+  let extBundled = $derived(extState?.bundledVersion ?? updatesState.extensionBundled);
 
   async function copyToken() {
     try {
@@ -354,7 +358,7 @@
     { id: 'notes', label: 'Note PDFs' },
     { id: 'media', label: 'Media copies' },
     { id: 'proofs', label: 'Proof PNGs' },
-    { id: 'views', label: 'Analysis plates' },
+    { id: 'views', label: 'Views and comparisons' },
     { id: 'sheets', label: 'Sheet CSVs' },
   ];
 
@@ -891,6 +895,7 @@
           {extDetected}
           {extOutdated}
           {extState}
+          {extBundled}
           {extBusy}
           {installExtension}
           {updateExtension}

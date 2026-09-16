@@ -161,10 +161,13 @@ describe('SavedOverlay popup wiring', () => {
     expect(overlay).toContain('onpost: close(onpost)');
   });
 
-  it('opens a card for every mark, one item or a stack', () => {
+  it('opens a card for every mark of saved work, one item or a stack', () => {
     expect(overlay).toContain('content: () => popupContent(mark)');
-    // no shortcut path that flies straight there on a single-item mark
-    expect(overlay).not.toContain('onClick');
+    // no shortcut path that flies straight there on a single-item mark. A mark of
+    // located files is the one that answers its own click, by playing them in the
+    // panel — there is no card for a photo to open.
+    expect(overlay).toContain('isMedia(mark)\n            ? { onClick: () => onmedia?.(mark.items) }');
+    expect((overlay.match(/onClick/g) ?? []).length).toBe(1);
   });
 
   it('asks for the width its own rows need, and leaves the look to the map', () => {

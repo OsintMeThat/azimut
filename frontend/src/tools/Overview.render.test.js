@@ -68,8 +68,13 @@ const answers = async (url) => {
   if (url.includes('/catalog/entities')) return { items: RECENT, total: 30, next_cursor: null };
   return {};
 };
+const checklist = { revision: 0, lists: [{ id: 'default', name: 'Tasks', tasks: [] }] };
 const get = vi.fn(answers);
-vi.mock('../lib/api.js', () => ({ api: { get, post: vi.fn(), del: vi.fn(), patch: vi.fn(), put: vi.fn() }, ApiError: Error }));
+const read = async (url, ...args) => {
+  const result = await get(url, ...args);
+  return url.endsWith('/todos') ? checklist : result;
+};
+vi.mock('../lib/api.js', () => ({ api: { get: read, post: vi.fn(), del: vi.fn(), patch: vi.fn(), put: vi.fn() }, ApiError: Error }));
 
 const createCase = vi.fn(async () => ({ id: 'new' }));
 const openCase = vi.fn(async () => {});
@@ -171,11 +176,12 @@ describe('with a case open', () => {
     ]);
   });
 
-  it('reads the case with five bounded requests and no more', async () => {
+  it('reads the case with five dashboard requests and its checklists', async () => {
     await open();
     const asked = get.mock.calls.map(([url]) => url);
     const paths = asked.filter((url) => url.startsWith('/api/cases/'));
-    expect(paths).toHaveLength(5);
+    expect(paths).toHaveLength(6);
+    expect(paths).toContain('/api/cases/case-a/todos');
     // every one of them capped, counting, or the compact index the map panel already
     // opens on — never a whole-graph read
     expect(paths.filter((url) => url.includes('limit=')).length).toBe(3);

@@ -332,7 +332,9 @@ def test_no_mode_of_this_screen_creates_anything_that_owns_a_file(client):
     from azimut.engine import sheetpromote
 
     offered = set(sheetpromote.promotable_types())
-    assert offered.isdisjoint({"media", "capture", "proof", "post", "inspect-session"})
+    assert offered.isdisjoint({
+        "media", "capture", "proof", "post", "inspect-session", "compare-session"
+    })
 
     case_id = make_case(client)
     sheet = roster(client, case_id)

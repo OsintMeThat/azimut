@@ -635,6 +635,47 @@ export function statePoints(spec, points) {
   return spec;
 }
 
+/**
+ * The rows a proof holds once a panel carrying a place has landed on it.
+ *
+ * A panel with coordinates used to be able to *replace* the proof's answer
+ * without saying so: the field reads the first geo panel (`autoCoords`) while no
+ * row is typed, and in free layout a new panel is prepended — so dropping a
+ * second capture onto the canvas quietly renamed the place the proof concluded
+ * on. In grid layout the same panel went the other way and was never heard at
+ * all: it lands behind the first, and its place was simply lost.
+ *
+ * So the place is added rather than swapped. The answer already on screen is
+ * written down first (`answered`, read before the panel landed), because an
+ * answer the panels happen to give is not one the analyst chose, and the new
+ * point joins the list under it. A proof that had no coordinates at all is left
+ * alone: that panel *is* the answer, and the field reads it off the panels as it
+ * always has.
+ *
+ * @param {Array} points the rows as edited, at least one
+ * @param {object} panel the panel that just landed
+ * @param {string} answered what the proof answered with before it did
+ * @param {string} format the reader's coordinate format
+ */
+export function statePanelPoint(points, panel, answered, format = 'dd') {
+  const { lat, lon } = panel?.meta ?? {};
+  if (lat == null || lon == null) return points;
+  const text = formatCoords({ lat: Number(lat), lon: Number(lon) }, format);
+  if (!text || !answered) return points;
+  const rows = points?.length ? points : [{ coords: '', label: '', pov: false }];
+  if (rows.length >= MAX_POINTS) return points;
+  const stated = rows.map((one) => String(one.coords ?? '').trim()).filter(Boolean);
+  // The same place twice is one place: two captures of one point, taken on two
+  // dates, are the proof's whole subject and must not read as two.
+  if ((stated.length ? stated : [answered]).includes(text)) return points;
+  return [
+    ...rows.map((one, at) =>
+      at === 0 && !String(one.coords ?? '').trim() ? { ...one, coords: answered } : one
+    ),
+    { coords: text, label: '', pov: false },
+  ];
+}
+
 /** Effective coordinates text for a proof/spec: what it concludes on, else auto. */
 export function proofCoordsText(p, format = 'dd') {
   const stated = specPoints(p)[0]?.coords;
@@ -1046,6 +1087,13 @@ export function toSpec(proof) {
     // per line, and the place filed on save takes its verb from that line
     // (engine/satellite.restate_proof_point).
     ...statePoints({}, proof.points),
+    // What the proof says about itself, both optional and neither printed: the
+    // date the material was taken, and the sentence a post is written from. They
+    // are mirrored onto the entity on save — `when` is what the Timeline reads,
+    // the description is the proof's notes — so the graph and search see them
+    // without opening this file (`api/proofs.save_proof`).
+    when: proof.when?.trim() ? proof.when.trim() : null,
+    description: proof.description?.trim() ? proof.description.trim() : null,
     // What the plate's footer prints. `footer` is the credit line itself;
     // `footerText` is whether it prints at all, and `footerCoords` whether the
     // proof's points print above it. Coordinates are off unless asked: they are

@@ -472,7 +472,11 @@ describe('Proof Composer pasted images', () => {
   });
 
   it('reads pasted images back from the proof folder on open', () => {
-    expect(source).toContain('proofs/${entry.name}.assets/${p.asset}');
+    // Beside the spec, under `.meta/`, which is where the save put them. This
+    // assertion held the folder one level up for as long as the code did, and an
+    // overlay nothing had lost reopened as missing. What the two sides agree on is
+    // checked against `layout.proof_assets_rel` itself, in the backend suite.
+    expect(source).toContain('proofs/.meta/${entry.name}.assets/${p.asset}');
     expect(source).toContain("pasteAssets.set(p.asset, { img, data: null, pending: false })");
     // annotations bound to a paste survive the reload with it
     expect(source).toContain('const validSurfaces = new Set([...proof.panels, ...proof.pastes]');
@@ -588,6 +592,31 @@ describe('the points a proof states', () => {
     expect(head).toContain('title="Add a point"');
     expect(head).toContain('onclick={addPoint}');
     expect(source).not.toContain('class="point-add"');
+  });
+
+  it('states a panel’s place under the answer already on screen', () => {
+    // In free layout a new panel lands in *front*, so the auto answer used to
+    // change under the analyst as soon as a second capture was dropped on the
+    // canvas; in grid layout the second place was simply never heard.
+    const body = bodyOfFn('addPanel');
+    expect(body).toContain('const answered = displayedCoords;');
+    expect(body.indexOf('const answered')).toBeLessThan(body.indexOf('proof.panels.unshift(panel)'));
+    expect(body).toContain(
+      'proof.points = statePanelPoint(proof.points, panel, answered, prefs.coordFormat);'
+    );
+  });
+
+  it('opens a row on the ground it names, or on the point above it', () => {
+    // six decimals is a tenth of a metre: the pin is the instrument, not the digits
+    expect(source).toContain('title="Move this point on the map"');
+    expect(source).toContain('onclick={() => (pointMap = { row: i, view: pointMapView(i) })}');
+    const view = bodyOfFn('pointMapView');
+    expect(view).toContain('proof.points.slice(0, i).map((one) => one.coords).reverse()');
+    expect(view).toContain('autoCoords(proof.panels)');
+    expect(view).toContain('{ ...prefs.homeView }');
+    expect(bodyOfFn('movePoint')).toContain(
+      'proof.points[i].coords = formatCoords(point, prefs.coordFormat);'
+    );
   });
 
   it('redraws the plate when a point or the footer switch changes', () => {
@@ -1073,5 +1102,67 @@ describe('the unsaved badge', () => {
     expect(save).toContain('savedSnapshot = docSnapshot();');
     expect(open).toContain('savedSnapshot = docSnapshot();');
     expect(reset).toContain('savedSnapshot = null;');
+  });
+});
+
+describe('Proof Composer — what the proof says about itself', () => {
+  const side = source.slice(source.indexOf('<span>Source</span>'), source.indexOf('<ProofLayersPanel'));
+
+  it('puts the description and the date under Source, the sentence first', () => {
+    expect(side.indexOf('<span>Description</span>')).toBeGreaterThan(-1);
+    expect(side.indexOf('<span>Date</span>')).toBeGreaterThan(side.indexOf('<span>Description</span>'));
+  });
+
+  it('says both are optional, rather than leaving the `!` above to imply it', () => {
+    expect(side.match(/class="meta-optional">optional</g)).toHaveLength(2);
+  });
+
+  it('edits the date with the one temporal editor the app has, compact', () => {
+    expect(side).toContain('<TemporalInput');
+    expect(side).toContain('compact');
+    expect(side).toContain('onchange={(value) => { proof.when = value; dirty = true; }}');
+  });
+
+  it('never marks an empty date as missing, the way a coordinate is', () => {
+    expect(side.slice(side.indexOf('<span>Date</span>'))).not.toContain('meta-warn');
+  });
+
+  it('never fills the date in, from a panel or from anything else', () => {
+    // Coordinates and sources are answered by the panels; a date is not. The
+    // composer must state it because somebody decided it, not because a file
+    // carried a number.
+    expect(source).not.toContain('offeredWhen');
+    expect(source).not.toContain('autoWhen');
+  });
+
+  it('empties it in one press, rather than handing it back to the panels', () => {
+    expect(side).toContain('title="Clear the date"');
+    expect(side).toContain("onclick={() => { proof.when = ''; dirty = true; }}");
+    expect(side).toContain('<Icon name="trash" size={12} />');
+  });
+
+  it('opens on both, and blanks both on a fresh proof', () => {
+    expect(source).toContain("proof.when = typeof spec.when === 'string' ? spec.when : '';");
+    expect(source).toContain(
+      "proof.description = typeof spec.description === 'string' ? spec.description : '';",
+    );
+    expect(bodyOfFn('resetDoc')).toContain("proof.when = '';");
+    expect(bodyOfFn('resetDoc')).toContain("proof.description = '';");
+  });
+
+  it('hands the description to the post it opens', () => {
+    expect(source).toContain('description: proof.description,');
+  });
+});
+
+describe('Proof Composer — dating the material', () => {
+  it('says what the save stated, without asking first', () => {
+    expect(source).toContain("if (result.dated?.length) toast(datedLabel(result.dated), 'ok', 2600);");
+  });
+
+  it('names one file and counts past one, like the places beside it', () => {
+    const body = bodyOfFn('datedLabel');
+    expect(body).toContain('`Dated the material: ${dated[0]}`');
+    expect(body).toContain('`Dated ${dated.length} files this proof rests on`');
   });
 });

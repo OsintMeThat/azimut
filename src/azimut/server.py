@@ -36,12 +36,10 @@ LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
 
 class BulkBodyLimit:
-    """Bound the JSON routes that carry a payload the browser assembled, before parsing.
+    """Bound routes that carry browser-assembled files or documents before parsing.
 
-    Four of them: a note's PDF export posts its Mermaid diagrams, an analysis plate posts
-    the page itself, a sheet posts a whole table, and saving a proof posts the composer's
-    rendered export plus the images pasted into it. Each is bounded by its own route's
-    number, so the limit stays beside the code that knows what it is for.
+    Each route owns its number, so the limit stays beside the code that knows what the
+    payload contains. This covers JSON documents, images and multipart comparison frames.
     """
 
     #: `(method, tail, module, attribute)`, where the tail is the path segments after
@@ -64,6 +62,8 @@ class BulkBodyLimit:
         ("PUT", ("notes",), "notes", "MAX_NOTE_BODY_BYTES"),
         ("PUT", ("notes", "*"), "notes", "MAX_NOTE_BODY_BYTES"),
         ("POST", ("plates",), "plates", "MAX_PLATE_BODY_BYTES"),
+        ("POST", ("compare", "gif"), "compare", "MAX_GIF_BODY_BYTES"),
+        ("POST", ("compare", "sessions", "*", "preview"), "compare", "MAX_GIF_BODY_BYTES"),
         ("POST", ("proofs",), "proofs", "MAX_PROOF_BODY_BYTES"),
         ("POST", ("sheets",), "sheets", "MAX_SHEET_BODY_BYTES"),
         ("POST", ("sheets", "import"), "sheets", "MAX_SHEET_BODY_BYTES"),
@@ -287,7 +287,7 @@ def create_app() -> FastAPI:
     )
 
     from .api import (
-        analysis_views, cases, drafts, events, files, folders, ingest, inspect, media,
+        analysis_views, analyzers, cases, compare, drafts, events, files, folders, ingest, inspect, media,
         notes, plates, proofimports, proofs, satellite, settings, sheetproofs, sheets,
         templates,
     )
@@ -303,6 +303,8 @@ def create_app() -> FastAPI:
     app.include_router(sheetproofs.router)
     app.include_router(media.router)
     app.include_router(inspect.router)
+    app.include_router(compare.router)
+    app.include_router(analyzers.router)
     app.include_router(satellite.router)
     app.include_router(proofs.router)
     app.include_router(proofimports.router)

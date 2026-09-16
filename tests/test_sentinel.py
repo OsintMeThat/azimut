@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import io
 
@@ -280,6 +281,131 @@ def test_dates_raises_rather_than_report_an_empty_sky():
         sentinel.dates("inst-uuid", 48.0, 2.0, "2026-05-01", "2026-05-31", get=get)
 
 
+# -- acquisitions over a drawn area -------------------------------------------
+
+
+def _rect(west, south, east, north):
+    """A drawn area's ring, the way `analysis_models.Zone.ring()` gives it."""
+    return [(west, south), (east, south), (east, north), (west, north)]
+
+
+def _granule(day, west, south, east, north, cloud=5.0):
+    return {
+        "properties": {"date": day, "cloudCoverPercentage": cloud},
+        "geometry": {"type": "Polygon", "coordinates": [[
+            [west, south], [east, south], [east, north], [west, north], [west, south],
+        ]]},
+    }
+
+
+def test_acquisitions_measures_how_much_of_the_area_a_pass_reaches():
+    """The number a crosshair lookup cannot give. Sentinel-2 flies 290 km swaths,
+    so a wide area can have no single day covering it — and pinned to one date
+    anyway, the rest of the sweep reads nodata."""
+    area = _rect(2.0, 48.0, 4.0, 49.0)
+
+    def get(url, params=None, **kwargs):
+        return _response(url, {"features": [
+            # covers the lot
+            _granule("2026-05-11", 1.5, 47.5, 4.5, 49.5, cloud=3.0),
+            # only the western half
+            _granule("2026-05-08", 1.5, 47.5, 3.0, 49.5, cloud=9.0),
+        ]})
+
+    found = sentinel.acquisitions("inst-uuid", [area], "2026-05-01", "2026-05-31", get=get)
+    whole, half = found["dates"]
+    assert whole["date"] == "2026-05-11"  # newest first
+    assert whole["coverage"] == 1.0
+    assert half["date"] == "2026-05-08"
+    assert 0.45 < half["coverage"] < 0.55
+    assert not found["truncated"]
+
+
+def test_acquisitions_adds_up_two_granules_of_the_same_day():
+    """One day, two granules of the same orbit: together they cover the area,
+    and reporting either alone would call a usable date partial."""
+    area = _rect(2.0, 48.0, 4.0, 49.0)
+
+    def get(url, params=None, **kwargs):
+        return _response(url, {"features": [
+            _granule("2026-05-11", 1.5, 47.5, 3.0, 49.5, cloud=40.0),
+            _granule("2026-05-11", 3.0, 47.5, 4.5, 49.5, cloud=4.0),
+        ]})
+
+    entry = sentinel.acquisitions("inst-uuid", [area], "2026-05-01", "2026-05-31", get=get)["dates"][0]
+    assert entry["coverage"] == 1.0
+    assert entry["granules"] == 2
+    # the clearer of the two is the one worth reporting
+    assert entry["cloud"] == 4.0
+
+
+def test_acquisitions_drops_a_day_that_reaches_none_of_the_area():
+    area = _rect(2.0, 48.0, 2.5, 48.5)
+
+    def get(url, params=None, **kwargs):
+        return _response(url, {"features": [_granule("2026-05-04", 8.0, 44.0, 9.0, 45.0)]})
+
+    # a box may intersect the search area while its swath is a province away
+    assert sentinel.acquisitions("inst-uuid", [area], "2026-05-01", "2026-05-31", get=get)["dates"] == []
+
+
+def test_acquisitions_weighs_a_small_area_beside_a_large_one():
+    """Every drawn area gets sampled, so a pass that misses the small one cannot
+    report as full cover just because the big one dwarfs it."""
+    big = _rect(2.0, 48.0, 4.0, 49.0)
+    small = _rect(10.0, 40.0, 10.02, 40.02)
+
+    def get(url, params=None, **kwargs):
+        return _response(url, {"features": [_granule("2026-05-11", 1.5, 47.5, 4.5, 49.5)]})
+
+    entry = sentinel.acquisitions("inst-uuid", [big, small], "2026-05-01", "2026-05-31", get=get)["dates"][0]
+    assert entry["coverage"] < 1.0
+
+
+def test_acquisitions_asks_about_the_whole_set_latitude_first():
+    captured = {}
+
+    def get(url, params=None, **kwargs):
+        captured.update(params)
+        return _response(url, {"features": []})
+
+    sentinel.acquisitions(
+        "inst-uuid", [_rect(2.0, 48.0, 2.5, 48.5), _rect(6.0, 44.0, 6.5, 44.5)],
+        "2026-05-01", "2026-05-31", get=get,
+    )
+    lat_min, lon_min, lat_max, lon_max = (float(v) for v in captured["BBOX"].split(","))
+    # one box around both areas, and EPSG:4326's declared latitude-first order
+    assert lat_min < 44.0 and lat_max > 48.5
+    assert lon_min < 2.0 and lon_max > 6.5
+
+
+def test_acquisitions_says_when_the_catalogue_stopped_short():
+    """Silently truncated, the list reads as "these are all the passes" while
+    the older half is missing."""
+    area = _rect(2.0, 48.0, 2.5, 48.5)
+    crowd = [_granule(f"2026-05-{day:02d}", 1.5, 47.5, 3.0, 49.5) for day in range(1, 31)]
+
+    def get(url, params=None, **kwargs):
+        return _response(url, {"features": crowd * 4})  # 120, past the 100 ceiling
+
+    assert sentinel.acquisitions("inst-uuid", [area], "2026-05-01", "2026-05-31", get=get)["truncated"]
+
+
+@pytest.mark.parametrize("start,end", [
+    ("2026-13-01", "2026-05-31"), ("2026-05-01", "not-a-date"), ("2026-05-31", "2026-05-01"),
+])
+def test_acquisitions_refuses_a_malformed_window(start, end):
+    with pytest.raises(ValueError):
+        sentinel.acquisitions("inst-uuid", [_rect(2.0, 48.0, 2.5, 48.5)], start, end,
+                              get=lambda *a, **k: _response("x", {"features": []}))
+
+
+def test_acquisitions_refuses_an_empty_area_set():
+    with pytest.raises(ValueError):
+        sentinel.acquisitions("inst-uuid", [], "2026-05-01", "2026-05-31",
+                              get=lambda *a, **k: _response("x", {"features": []}))
+
+
 # -- rendered coverage --------------------------------------------------------
 
 
@@ -402,3 +528,116 @@ def test_capabilities_layers_drops_names_that_could_not_be_asked_for():
     # "bad id" can't survive a variant id (URL path segment + cache directory),
     # so offering it would only produce a broken selection
     assert all(" " not in entry["id"] for entry in sentinel.capabilities_layers("i", get=get))
+
+
+# -- spectral index frames ------------------------------------------------------
+
+
+def _rgba_response(url, size):
+    payload = io.BytesIO()
+    Image.new("RGBA", size, (200, 4, 0, 255)).save(payload, format="PNG")
+    return httpx.Response(200, content=payload.getvalue(), request=httpx.Request("GET", url))
+
+
+BOX = (250_000.0, 6_250_000.0, 251_000.0, 6_250_600.0)
+
+
+@pytest.mark.parametrize(
+    ("index", "high", "low"),
+    [("ndvi", "B08", "B04"), ("ndwi", "B03", "B08"), ("nbr", "B08", "B12"), ("ndbi", "B11", "B08")],
+)
+def test_band_frame_asks_for_the_named_normalised_difference(index, high, low):
+    captured = {}
+
+    def get(url, params=None, **kwargs):
+        captured.update(params)
+        return _rgba_response(url, (320, 192))
+
+    body = sentinel.band_frame("inst-uuid", BOX, 320, 192, "2026-05-11", index, 30, get=get)
+
+    script = base64.b64decode(captured["EVALSCRIPT"]).decode("ascii")
+    assert f'bands: ["{high}", "{low}", "SCL", "dataMask"]' in script
+    assert f"p.{high} - p.{low}" in script
+    assert captured["CRS"] == "EPSG:3857"
+    assert captured["BBOX"] == "250000.0,6250000.0,251000.0,6250600.0"
+    assert (captured["WIDTH"], captured["HEIGHT"]) == ("320", "192")
+    assert captured["TIME"] == "2026-05-11/2026-05-11"
+    assert captured["MAXCC"] == "30"
+    assert body.startswith(b"\x89PNG")
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"index": "evi"},
+        {"bbox": (10.0, 10.0, 5.0, 20.0)},
+        {"bbox": (0.0, 0.0, 30_000_000.0, 10.0)},
+        {"width": 4096},
+        {"day": "2026-13-40"},
+    ],
+)
+def test_band_frame_refuses_a_malformed_request_before_sending_it(kwargs):
+    asked = dict(bbox=BOX, width=64, height=64, day="2026-05-11", index="ndvi")
+    asked.update(kwargs)
+
+    def get(*args, **kw):  # pragma: no cover - must never run
+        raise AssertionError("nothing may be sent")
+
+    with pytest.raises(ValueError):
+        sentinel.band_frame(
+            "inst-uuid", asked["bbox"], asked["width"], asked["height"],
+            asked["day"], asked["index"], get=get,
+        )
+
+
+def test_band_frame_refuses_an_image_of_the_wrong_size():
+    with pytest.raises(sentinel.CoverageError):
+        sentinel.band_frame(
+            "inst-uuid", BOX, 64, 64, "2026-05-11", "ndvi",
+            get=lambda url, **kw: _rgba_response(url, (32, 32)),
+        )
+
+
+def test_band_frame_asks_for_infrared_and_water_when_looking_for_vessels():
+    captured = {}
+
+    def get(url, params=None, **kwargs):
+        captured.update(params)
+        return _rgba_response(url, (64, 64))
+
+    sentinel.band_frame("inst-uuid", BOX, 64, 64, "2026-05-11", "vessel", get=get)
+
+    script = base64.b64decode(captured["EVALSCRIPT"]).decode("ascii")
+    assert 'bands: ["B03", "B08", "SCL", "dataMask"]' in script
+    # Near-infrared first, stretched so open water spans a usable part of the
+    # byte, then the scene class, then NDWI, then the data mask.
+    assert f"p.B08 * 255 * {sentinel.NIR_GAIN}" in script
+    assert "p.B03 - p.B08" in script
+    assert "p.SCL" in script
+
+
+def test_band_frame_asks_for_the_short_wave_ratios_when_looking_for_fire():
+    captured = {}
+
+    def get(url, params=None, **kwargs):
+        captured.update(params)
+        return _rgba_response(url, (64, 64))
+
+    sentinel.band_frame("inst-uuid", BOX, 64, 64, "2026-05-11", "fire", get=get)
+
+    script = base64.b64decode(captured["EVALSCRIPT"]).decode("ascii")
+    assert 'bands: ["B08", "B11", "B12", "dataMask"]' in script
+    assert "p.B12 / p.B11" in script
+    assert "p.B12 / p.B08" in script
+    # No scene class: the ratios are what reject cloud, and the fourth channel
+    # is worth more as the data mask.
+    assert "SCL" not in script
+
+
+def test_band_frame_refuses_a_product_it_has_no_evalscript_for():
+    def get(*args, **kwargs):  # pragma: no cover - must never run
+        raise AssertionError("nothing may be sent")
+
+    with pytest.raises(ValueError):
+        sentinel.band_frame("inst-uuid", BOX, 64, 64, "2026-05-11", "thermal", get=get)
+    assert sentinel.PRODUCTS == {"ndvi", "ndwi", "nbr", "ndbi", "vessel", "fire"}

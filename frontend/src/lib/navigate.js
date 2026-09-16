@@ -41,6 +41,10 @@ export const ENTITY_TOOL = {
   place: 'satellite',
   post: 'post',
   'inspect-session': 'inspect',
+  'compare-session': 'compare',
+  'analysis-zones': 'compare',
+  'analysis-follow-up': 'compare',
+  'analysis-run': 'compare',
 };
 
 /**
@@ -94,6 +98,17 @@ export function openEntity(entity) {
     const name = specName(entity.attrs?.spec);
     if (name) uiState.openInspect = name;
     uiState.tool = 'inspect';
+    return;
+  }
+  if (entity.type === 'compare-session') {
+    const name = specName(entity.attrs?.spec);
+    if (name) uiState.openCompare = name;
+    uiState.tool = 'compare';
+    return;
+  }
+  if (['analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {
+    uiState.openAnalyzer = specName(entity.attrs?.spec);
+    uiState.tool = 'compare';
     return;
   }
   if (entity.type === 'place') {

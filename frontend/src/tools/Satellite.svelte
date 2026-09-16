@@ -1,5 +1,5 @@
 <script>
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   // The map is lib/map's: the engine, its layers, what is drawn on them and the
   // drag gestures. Nothing in this file knows which engine that is — and the
   // map itself is a surface (satellite/MapSurface.svelte), which is what lets a
@@ -25,6 +25,7 @@
   import { temporalMapQuery } from '../lib/temporalMap.js';
   import { windowWords } from '../lib/timeline.js';
   import { isMode, KINDS } from '../lib/geoTree.js';
+  import { stackOf } from '../lib/mediaViewer.js';
   import {
     caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords, prefsReady,
   } from '../lib/state.svelte.js';
@@ -97,6 +98,7 @@
   import SavedTree from './satellite/SavedTree.svelte';
   import SavedSearch from './satellite/SavedSearch.svelte';
   import SavedOverlay from './satellite/SavedOverlay.svelte';
+  import MediaViewer from './satellite/MediaViewer.svelte';
   import SheetPointsOverlay from './satellite/SheetPointsOverlay.svelte';
   import TemporalMapOverlay from './satellite/TemporalMapOverlay.svelte';
 
@@ -144,7 +146,18 @@
   // pass — is its own store (state/saved.svelte.js).
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
   let savedSearchOpen = $state(false);
-  let savedOverlay = $state(false); // map layer: off by default, session only
+  // Map layer: on from the start, on the Media position, so a case opens on its
+  // footage already placed. Session-only: the tool stays mounted across tabs, so a
+  // switch pressed off stays off until the app reloads, and nothing is saved.
+  let savedOverlay = $state(true);
+  /**
+   * The located files the panel is playing, or null for the saved-work list.
+   *
+   * `items` is the stack one mark holds, `index` the file on screen. It takes the
+   * panel rather than a window over the map, because the footage is read beside
+   * the imagery it is being matched against.
+   */
+  let mediaView = $state(null);
   let temporalMap = $state(null); // Timeline handoff, session-only
   let temporalShown = $state(true); // …and whether its marks are drawn
   let temporalMapLoading = $state(false);
@@ -181,11 +194,12 @@
   /**
    * The other key-less reference layers, each simply on or off: Esri's borders
    * and roads, Open Infrastructure Map's power lines, OpenSeaMap's sea marks
-   * and OSM's raw GPS traces. Off by default, so none of them fetches a tile
-   * until its switch is pressed.
+   * and OSM's raw GPS traces. Borders start on, because every read of imagery
+   * starts with which side of a line it is on; they are map tiles, the network
+   * a map is opened to use. The rest fetch no tile until their switch is pressed.
    */
   const refLayers = $state({
-    boundaries: false,
+    boundaries: true,
     roads: false,
     power: false,
     seamarks: false,
@@ -1094,7 +1108,7 @@
       disabled: !savedWork.rows.length,
       detail: savedWork.shown.length ? String(savedWork.shown.length) : '',
       title: savedWork.rows.length
-        ? "This case's saved places and captures"
+        ? "This case's saved work, or its located photos and videos"
         : 'Nothing is saved in this case yet',
       toggle: () => (savedOverlay = !savedOverlay),
       // Which of them are drawn. The same two answers the Saved panel is asking
@@ -1157,7 +1171,24 @@
   // fly the map to a capture's recorded point (item 7)
   /** Open one saved item: fly the map to it, or — for a screenshot of a site we
    *  cannot embed, filed without coordinates — reopen the page it came from. */
+  /** Play a stack of located files in the panel, opening the panel if it is shut. */
+  async function openMedia(items, index = 0) {
+    if (!items?.length) return;
+    mediaView = { items, index };
+    if (capturesCollapsed) {
+      capturesCollapsed = false;
+      await tick();
+      engine?.resize();
+    }
+  }
+
   function openSaved(row) {
+    // a file flies the map to where it stands and plays beside it, with every
+    // other file on that metre a press of the arrows away
+    if (row.kind === 'media') {
+      const { items, index } = stackOf(savedWork.shown, row);
+      openMedia(items, index);
+    }
     if (row.lat == null || row.lon == null) {
       if (row.source_url && !fullscreen) window.open(row.source_url, '_blank', 'noopener,noreferrer');
       return;
@@ -1225,13 +1256,30 @@
       temporalMapError = '';
       // The points came out of another case's sheet, so they go with it.
       sheetPoints = null;
+      mediaView = null;
       footprint.cancel();
     }
     return savedWork.load(id);
   });
 
-  // The proofs index, read the first time the Proofs position is opened.
-  $effect(() => savedWork.loadProofs(caseState.current?.id, caseState.rev));
+  // The proofs and media indexes, each read the first time its position is opened.
+  $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
+
+  // A reloaded media index re-reads the stack being played: a file deleted or
+  // unplaced elsewhere leaves it, and the viewer closes once nothing is left.
+  $effect(() => {
+    const fresh = savedWork.media;
+    const open = untrack(() => mediaView);
+    if (!open) return;
+    const byKey = new Map(fresh.map((row) => [row.key, row]));
+    const current = open.items[open.index]?.key;
+    const items = open.items.map((row) => byKey.get(row.key)).filter(Boolean);
+    if (!items.length) {
+      mediaView = null;
+      return;
+    }
+    mediaView = { items, index: Math.max(0, items.findIndex((row) => row.key === current)) };
+  });
 
   // another workspace asked to show one capture: clear whatever filter is on so
   // it can't be hidden, then let the tree open its branch and scroll to it
@@ -1696,6 +1744,12 @@
     uiState.tool = 'proof';
   }
 
+  function openProofByName(proof) {
+    if (!proof?.name) return;
+    uiState.openProof = proof.name;
+    uiState.tool = 'proof';
+  }
+
   function openLinkedPost(post) {
     if (!post.name) return;
     uiState.openDraft = post.name;
@@ -1988,6 +2042,7 @@
           coords={coordsLabel}
           {fullscreen}
           bind:hoveredId={hoveredSavedId}
+          activeKey={mediaView ? mediaView.items[mediaView.index]?.key : null}
           onopen={openSaved}
           onedit={editSaved}
           onproof={sendToComposer}
@@ -1995,6 +2050,7 @@
           onshowproofs={() => (savedWork.kind = 'proofs')}
           onrefresh={reloadCase}
           ontrace={startTrace}
+          onmedia={openMedia}
         />
       {/if}
 
@@ -2278,12 +2334,29 @@
       >
         <Icon name={capturesCollapsed ? 'chevronLeft' : 'chevronRight'} size={15} />
         <span class="label" style="margin:0">Saved</span>
-        <span class="count">{savedWork.rows.length}</span>
+        <!-- what the panel is listing, which is what its position says: the
+             count on a header that reads Media must not be the places index -->
+        <span class="count">{savedWork.shownRows.length}</span>
       </button>
       {#if capturesCollapsed}
         <!-- collapsed: header acts as the toggle back to the list -->
       {:else}
         <div class="panel-scroll">
+          {#if mediaView}
+          <!-- A located file, played in place of the list rather than over the
+               map it is being compared with. Closing it brings the list back as
+               it was left. -->
+          <MediaViewer
+            items={mediaView.items}
+            bind:index={mediaView.index}
+            caseId={caseState.current?.id}
+            coords={coordsLabel}
+            {fullscreen}
+            onclose={() => (mediaView = null)}
+            onmedia={(row) => openEntity({ id: row.id, type: 'media', attrs: { path: row.path } })}
+            onproof={openProofByName}
+          />
+          {:else}
           <!-- What is drawn over the imagery. One list, above the case's own
                work: the labels and the saved pins used to be buttons in the
                toolbox, and the handoffs floating cards over the map. -->
@@ -2353,6 +2426,7 @@
             onlocate={runLocate}
             oncancelLocate={savedWork.stopLocate}
           />
+          {/if}
         </div>
       {/if}
     </aside>

@@ -139,7 +139,7 @@ def test_update_endpoint_with_check_queries_github(client, monkeypatch):
 # shipped file really changes, set the manifest to the current __version__ and
 # record the new digest here (the failing test prints it).
 EXTENSION_VERSION = "0.3.0"
-EXTENSION_PAYLOAD = "6723a66d5221f4465fb87f3031ca9f53772393efcf9d63b4ca28aa8958917a01"
+EXTENSION_PAYLOAD = "a91b35eaeb29427e0519963c6a0a74e67670fbf38f6090b8c553125e7111e96a"
 
 # The digest itself lives in engine/extinstall.py, because the update button
 # compares the same number: what the app ships against what the installed folder

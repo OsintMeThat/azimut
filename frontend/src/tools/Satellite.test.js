@@ -51,9 +51,9 @@ describe('Satellite saved work', () => {
     }
   });
 
-  it('loads and drops both indexes with the case, through the store', () => {
+  it('loads and drops every index with the case, through the store', () => {
     expect(source).toContain('return savedWork.load(id);');
-    expect(source).toContain('savedWork.loadProofs(caseState.current?.id, caseState.rev)');
+    expect(source).toContain('savedWork.loadMode(caseState.current?.id, caseState.rev)');
   });
 
   it('closes over this case for every row action', () => {
@@ -77,8 +77,9 @@ describe('Satellite saved work', () => {
     expect(effect).toContain('sheetPoints = null');
   });
 
-  it('keeps the map overlay off by default and out of the case file', () => {
-    expect(source).toContain('let savedOverlay = $state(false)');
+  it('opens with the map overlay on, and keeps it out of the case file', () => {
+    // a case is opened to be read, and its located work is what a map is read for
+    expect(source).toContain('let savedOverlay = $state(true)');
     expect(source).toContain('{#if savedOverlay}');
     // it is a layer, listed with the other layers rather than sitting in the
     // toolbox: nothing about it changes what the pointer does
@@ -678,10 +679,16 @@ describe('a map in more than one window', () => {
 });
 
 describe('the key-less reference layers', () => {
-  it('fetches no tile from any of them until its switch is pressed', () => {
-    // local-first: a map not showing borders asks Esri nothing about borders
-    const state = source.slice(source.indexOf('const refLayers = $state({'));
-    expect(state.slice(0, 200)).not.toContain('true');
+  it('fetches no tile from any of them until its switch is pressed, borders apart', () => {
+    // local-first: a map not showing power lines asks nobody about power lines.
+    // Borders are the exception and are on from the start — they are map tiles,
+    // which is the network a map is opened to use.
+    const state = source.slice(
+      source.indexOf('const refLayers = $state({'),
+      source.indexOf('const night = $state(')
+    );
+    expect(state).toContain('boundaries: true');
+    expect(state.replace('boundaries: true', '')).not.toContain('true');
     expect(source).toContain("const night = $state({ on: false, source: 'noaa20', day: lastNight() });");
   });
 

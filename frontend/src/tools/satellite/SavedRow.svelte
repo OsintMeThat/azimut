@@ -9,6 +9,7 @@
    */
   import Icon from '../../components/Icon.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
+  import { roadWords } from '../../lib/mediaViewer.js';
 
   let {
     row,
@@ -35,6 +36,11 @@
 
   const isPlace = $derived(row.kind === 'place');
   const isProof = $derived(row.kind === 'proof');
+  // a located file: pressing it plays it beside the map, and it is edited in Media
+  const isMedia = $derived(row.kind === 'media');
+  const glyphName = $derived(
+    isMedia ? (row.media_kind === 'video' ? 'video' : 'image') : (GLYPH[row.kind] ?? 'pin')
+  );
   // A proof borrows the point of the capture it composes, so `All` marks that
   // capture instead of stacking a second mark on it.
   const worked = $derived(row.proofs > 0 ? `${row.proofs} proof${row.proofs > 1 ? 's' : ''} built here` : null);
@@ -44,9 +50,11 @@
   // one string, ellipsized as a whole: truncating bit by bit leaves stubs like
   // "· … ·" in a 300px panel
   const meta = $derived(
-    [row.zoom != null ? `z${Math.round(row.zoom)}` : null, row.provider ?? row.site, row.imagery_date]
-      .filter(Boolean)
-      .join(' · ')
+    isMedia
+      ? roadWords(row)
+      : [row.zoom != null ? `z${Math.round(row.zoom)}` : null, row.provider ?? row.site, row.imagery_date]
+          .filter(Boolean)
+          .join(' · ')
   );
   const blocked = $derived(fullscreen ? 'Exit fullscreen first. This leaves the map' : null);
   const proposed = $derived(row.status === 'suggested');
@@ -71,19 +79,21 @@
     disabled={!flyable && !opensSource}
     title={opensSource
       ? `Open the source page (${row.site ?? 'external map'})`
-      : flyable
-        ? 'Fly the map to this point'
-        : 'No coordinates recorded'}
+      : isMedia
+        ? 'Fly here and play it beside the map'
+        : flyable
+          ? 'Fly the map to this point'
+          : 'No coordinates recorded'}
     onclick={() => onopen(row)}
   >
     <span class="thumb">
       {#if row.thumbnail && caseId}
         <img src={fileUrl(caseId, row.thumbnail)} alt="" loading="lazy" decoding="async" />
       {:else}
-        <Icon name={GLYPH[row.kind] ?? 'pin'} size={dense ? 16 : 14} />
+        <Icon name={glyphName} size={dense ? 16 : 14} />
       {/if}
       {#if row.thumbnail}
-        <span class="badge"><Icon name={GLYPH[row.kind] ?? 'pin'} size={9} /></span>
+        <span class="badge"><Icon name={glyphName} size={9} /></span>
       {/if}
       {#if worked}<span class="worked" role="img" aria-label={worked} title={worked}></span>{/if}
     </span>
@@ -106,6 +116,9 @@
     </span>
   </button>
 
+  <!-- A file is renamed, filed and deleted in Media. Here it is something to look
+       at, and the viewer the row opens carries the ways out. -->
+  {#if !isMedia}
   <div class="actions">
     <!-- Accepting is offered where the point is read, not only in the sidebar:
          the analyst is looking at the map that decides whether the point is
@@ -153,6 +166,7 @@
       </button>
     {/if}
   </div>
+  {/if}
 </div>
 
 <style>

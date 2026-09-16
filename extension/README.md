@@ -157,11 +157,13 @@ over a map must never end up inside the evidence.
 and ordered by the app rather than by this tab: what crosses is one page of a case,
 never the case. A video plays in the window, with its own controls.
 
-Two limits worth knowing. A file has to be **under 48 MB** to be handed over, which
-is the same ceiling a published thread's attachments answer to. And a video is the
-one thing here a site can refuse: an image is decoded and painted on a canvas,
-which asks the page's content policy nothing, while a video needs a URL and some
-sites will not load one. When that happens the window says so.
+Two limits worth knowing. A reference has to be **under 512 MB**, and it crosses in
+pieces, so a long clip opens the way it does in the app's own Satellite tab — the
+window counts up while it arrives. A published thread's attachments answer to a
+lower ceiling, **48 MB**, since those are pushed into the composer's page whole.
+And a video is the one thing here a site can refuse: an image is decoded and
+painted on a canvas, which asks the page's content policy nothing, while a video
+needs a URL and some sites will not load one. When that happens the window says so.
 
 Reference windows work where the geometric tools do not — Street View, a pitched
 camera, a globe — since nothing about holding a reference up needs the ground to

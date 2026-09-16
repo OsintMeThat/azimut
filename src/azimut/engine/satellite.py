@@ -969,8 +969,15 @@ def _place_geo(case: Case) -> dict[tuple[float, float], dict[str, Any]]:
     Locate pass ran and the place a proof filed on the same metre are one spot,
     and only the one that knows its country answers anything.
     """
+    return _geo_by_point(_page_all(case, ["place"]))
+
+
+def _geo_by_point(
+    entities: list[dict[str, Any]],
+) -> dict[tuple[float, float], dict[str, Any]]:
+    """The attrs of each point these entities stand on, a located one winning."""
     found: dict[tuple[float, float], dict[str, Any]] = {}
-    for place in _page_all(case, ["place"]):
+    for place in entities:
         attrs = place.get("attrs") or {}
         key = _at(attrs.get("lat"), attrs.get("lon"))
         if key is not None and not _located(found.get(key) or {}):
@@ -1087,6 +1094,187 @@ def proof_index(
         rows.extend(_proof_row(proof, entity, point) for point in points)
     rows.sort(key=lambda r: r["fetched_at"], reverse=True)
     return rows
+
+
+#: What the Media position draws: photographs and footage. Audio has a place it was
+#: recorded but nothing to look at beside the imagery, and a document has neither.
+MAP_MEDIA_KINDS = ("image", "video")
+
+
+def media_index(case: Case) -> list[dict[str, Any]]:
+    """Located images and videos as map rows, newest first — one row per point.
+
+    A file holds no coordinates (ONTOLOGY §2), so where it stands is read off the
+    graph, by every road that says it:
+
+    - a ``located-at`` or ``depicts`` edge to a place: stated in Details, posed on a
+      proof's material by the point the proof concludes on, or proposed by
+      enrichment from the file's own GPS;
+    - the derivation chain (:func:`placements`), which puts a video where the proof
+      that composed a frame of it stands.
+
+    One file can stand in several places — recorded from a rooftop, showing the
+    crossroads below — and each is a row, as each of a proof's points is. Roads
+    that agree on a point are one row that keeps every one of them, so the map
+    never draws one file twice on the same metre.
+
+    **Only material the case collected.** What the app produced out of that
+    material — a frame cut in Inspect, a capture, a screenshot, a rendered
+    comparison — is working material, and it stands where the thing it was made
+    from already stands: a layer drawing both marks one spot twice and buries the
+    footage under the frames taken out of it. The set is the Media Library's own
+    (``links.PRODUCED_HERE``), so both surfaces answer "what did I bring in" the
+    same way, and the captures are read in Saved work where they belong.
+
+    Only files touching a place or a chain edge are walked. The rest cannot be
+    placed, and one grouped count finds them rather than a walk per file.
+
+    Lazy like the proofs index: read when the Media position is opened.
+    """
+    unrelated = [
+        *(verb.type for verb in links.RELATION_TYPES if verb.type not in PLACE_VERBS),
+        links.MENTIONS,
+        links.SAME_IMAGE_AS,
+        *links.CLAIM_CONNECTION_TYPES,
+    ]
+    linked = case.count_incident_links(exclude_types=unrelated)
+    saved = saved_entities(case)
+    places = {entity["id"]: entity for entity in saved if entity["type"] == "place"}
+    geo = _geo_by_point(saved)
+    proofs = {entity["id"]: entity for entity in _page_all(case, ["proof"])}
+
+    rows: list[dict[str, Any]] = []
+    for item in case.list_media_items():
+        entity_id = item.get("entity_id")
+        if (
+            not entity_id
+            or not linked.get(entity_id)
+            or (item.get("source") or {}).get("type") in links.PRODUCED_HERE
+            or item.get("kind") not in MAP_MEDIA_KINDS
+        ):
+            continue
+        incident = case.links_of(entity_id)
+        spots: dict[tuple[float, float], dict[str, Any]] = {}
+        for link in incident:
+            if link["from"] != entity_id or link["type"] not in PLACE_VERBS:
+                continue
+            place = places.get(link["to"])
+            attrs = (place or {}).get("attrs") or {}
+            point = _point(attrs.get("lat"), attrs.get("lon"))
+            if place is None or point is None:
+                continue
+            proposed = "suggested" in (
+                (link.get("provenance") or {}).get("status"),
+                (place.get("provenance") or {}).get("status"),
+            )
+            _stand(spots, point, {
+                "type": link["type"],
+                "status": "suggested" if proposed else "confirmed",
+            })
+        # A file with no chain edge derives from nothing and nothing derives from
+        # it, so the walk could only come back empty: the edges are already read
+        # here, and asking anyway is two queries per file on a whole library.
+        walked = (
+            placements(case, entity_id)
+            if any(link["type"] in links.CHAIN_TYPES for link in incident)
+            else None
+        )
+        for point in (walked or {}).get("points", []):
+            via = point.get("via") or {}
+            road: dict[str, Any] = {
+                "type": via.get("type"),
+                "id": via.get("id"),
+                "title": via.get("label") or "",
+                "status": "confirmed",
+            }
+            if via.get("id") in proofs:
+                road["name"] = _proof_name(proofs[via["id"]])
+            _stand(spots, point, road)
+        if not spots:
+            continue
+        # the proofs built straight on this file, offered wherever it stands: the
+        # one that placed a row is listed first on that row
+        composed = [
+            proofs[link["from"]]
+            for link in incident
+            if link["type"] == links.DERIVED_FROM
+            and link["to"] == entity_id
+            and link["from"] in proofs
+        ]
+        rows.extend(_media_row(case, item, spot, geo, composed) for spot in spots.values())
+    rows.sort(key=lambda r: r["fetched_at"], reverse=True)
+    return rows
+
+
+def _proof_name(entity: dict[str, Any]) -> str:
+    """The name the composer reopens a proof by: its spec file's stem."""
+    spec = str((entity.get("attrs") or {}).get("spec") or "")
+    return spec.rsplit("/", 1)[-1].removesuffix(".json")
+
+
+def _stand(
+    spots: dict[tuple[float, float], dict[str, Any]],
+    point: dict[str, Any],
+    road: dict[str, Any],
+) -> None:
+    """File one road to a point, merging it with any road already at that metre."""
+    key = _at(point["lat"], point["lon"])
+    if key is None:
+        return
+    spot = spots.setdefault(key, {"lat": point["lat"], "lon": point["lon"], "roads": []})
+    if road not in spot["roads"]:
+        spot["roads"].append(road)
+
+
+def _media_row(
+    case: Case,
+    item: dict[str, Any],
+    spot: dict[str, Any],
+    geo_at: dict[tuple[float, float], dict[str, Any]],
+    composed: list[dict[str, Any]],
+) -> dict[str, Any]:
+    lat, lon = spot["lat"], spot["lon"]
+    key = _at(lat, lon)
+    here = (geo_at.get(key) if key else None) or {}
+    geo = here.get("geo") if isinstance(here.get("geo"), dict) else None
+    thumbnail = item.get("thumbnail")
+    if thumbnail and not case.resolve_inside(str(thumbnail)).exists():
+        thumbnail = None  # evicted by the budget: the row falls back to its glyph
+    linked_proofs: list[dict[str, Any]] = []
+    for road in spot["roads"]:
+        if road.get("name"):
+            linked_proofs.append({"id": road["id"], "name": road["name"], "title": road["title"]})
+    for proof in composed:
+        if all(known["id"] != proof["id"] for known in linked_proofs):
+            linked_proofs.append({
+                "id": proof["id"],
+                "name": _proof_name(proof),
+                "title": proof.get("label") or "",
+            })
+    return {
+        "id": item["entity_id"],
+        "key": f"{item['entity_id']}@{lat},{lon}",
+        "kind": "media",
+        "media_kind": item.get("kind"),
+        "title": item.get("title") or item.get("filename") or "",
+        "folder": item.get("folder") or "",
+        "notes": item.get("notes") or "",
+        "path": item.get("path"),
+        "thumbnail": thumbnail,
+        "lat": lat,
+        "lon": lon,
+        "geo": geo,
+        "continent": continents.continent_for((geo or {}).get("country_code"), lat, lon),
+        "country_en": countries.name_for((geo or {}).get("country_code")),
+        "fetched_at": _utc_stamp(item.get("added_at")),
+        # a file placed only by what a tool proposed reads as a proposal; one road
+        # the analyst stands behind is enough to make the point theirs
+        "status": "suggested"
+        if all(road["status"] == "suggested" for road in spot["roads"])
+        else "confirmed",
+        "roads": spot["roads"],
+        "linked_proofs": linked_proofs,
+    }
 
 
 # -- placement: where the chain puts an entity (ONTOLOGY §3) ----------------------

@@ -555,7 +555,7 @@ class Case(CaseStore):
                 has_graph = bool(case.list_entities() or case.list_links())
             except (OSError, json.JSONDecodeError, sqlite3.Error):
                 continue
-            if has_graph:
+            if has_graph or data.get("todos", {}).get("lists"):
                 continue
             stamp = data.get("updated_at") or data.get("created_at") or ""
             try:
@@ -695,6 +695,21 @@ class Case(CaseStore):
             tmp = self.json_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
             tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             _replace_with_retry(tmp, self.json_path)
+
+    def read_todos(self) -> dict[str, Any]:
+        return self.read().get("todos", {
+            "revision": 0,
+            "lists": [{"id": "default", "name": "Tasks", "tasks": []}],
+        })
+
+    def write_todos(self, todos: dict[str, Any]) -> dict[str, Any]:
+        """Write case metadata atomically; it owns no separate artifact files."""
+        with self._lock:
+            data = self.read()
+            saved = {**todos, "revision": todos["revision"] + 1}
+            data["todos"] = saved
+            self._write_json(data)
+            return saved
 
     # -- graph reads (CaseRepository boundary) ------------------------------
     #
@@ -950,6 +965,7 @@ class Case(CaseStore):
         rules: dict[str, tuple[str, Callable[[str], str], str]] = {
             "proof": ("spec", layout.proof_spec_rel, "Proof"),
             "inspect-session": ("spec", layout.session_rel, "Inspect"),
+            "compare-session": ("spec", layout.compare_session_rel, "Comparison"),
             "post": ("draft", layout.draft_rel, "Post"),
             "sheet": ("path", layout.sheet_rel, "Sheet"),
         }

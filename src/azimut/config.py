@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 SETTINGS_SCHEMA = 1
 
 DEFAULT_SETTINGS: dict[str, Any] = {
+    "analyzers": [],  # portable custom recipes shared by all cases
     # Schema version this build writes. Read back through _settings_schema() so
     # a future breaking rename is migrated rather than silently dropped.
     "schema": SETTINGS_SCHEMA,

@@ -430,9 +430,38 @@ def test_the_extension_reads_back_the_attachments_a_thread_carries(client):
     assert client.get("/api/ingest/file", params={"case_id": cid, "path": item["path"]}).status_code == 401
 
 
+def test_a_reference_window_pulls_a_long_file_across_in_pieces(client):
+    """A reference is often a video, and a video is not one message. The extension
+    asks for a slice at a time (``background.js``, ``mapFile``) and glues them, so
+    what this route has to serve is a ``Range`` — and say how much there is, since
+    a slice that came up short is not on its own the end of the file."""
+    token = _token(client)
+    cid = client.post("/api/cases", json={"name": "Long clip"}).json()["id"]
+    whole = _png_bytes()
+    item = _upload(client, cid, "clip.png", whole)
+    headers = {"X-Azimut-Token": token}
+
+    got = b""
+    offset, total, rounds = 0, None, 0
+    while total is None or offset < total:
+        r = client.get(
+            "/api/ingest/file",
+            params={"case_id": cid, "path": item["path"]},
+            headers={**headers, "Range": f"bytes={offset}-{offset + 63}"},
+        )
+        assert r.status_code == 206
+        total = int(r.headers["content-range"].split("/")[-1])
+        got += r.content
+        offset += len(r.content)
+        rounds += 1
+    assert rounds > 1  # it really was handed over in pieces
+    assert got == whole
+    assert total == len(whole)
+
+
 def test_a_file_past_the_ceiling_is_refused_with_the_number_in_it(client, monkeypatch):
-    """The bytes cross the extension as base64 in a message, so there is a size
-    past which handing over is not worth the memory. The extension prints this
+    """There is a size past which carrying a case file into someone else's page
+    is not worth it, whatever the transfer does. The extension prints this
     sentence rather than keeping a second copy of the number, so it states it."""
     from azimut.api import ingest
 

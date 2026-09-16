@@ -808,3 +808,28 @@ def test_schema_17_rewrites_temporal_bounds_to_fixed_width(tmp_workspace):
     item = reopened.timeline_page(categories=["statement"])["items"][0]
     assert item["earliest"] == "2026-08-11T10:32:14.500000Z"
     assert item["latest"] == "2026-08-11T10:32:14.600000Z"
+
+
+def test_schema_18_projects_a_proof_dated_before_the_projection_read_it(tmp_workspace):
+    case = Case.create("Proof dated by an older build")
+    proof = case.add_entity(
+        "proof",
+        "Kharkiv strike proof",
+        {"spec": "proofs/.meta/Kharkiv strike proof.json", "when": "2024-03-11"},
+        by="proof-composer",
+    )
+    # The state schema 17 left behind: the attribute is on the entity, and the
+    # projection has no row for it because nothing read that attribute yet.
+    with closing(sqlite3.connect(case.db_path)) as conn, conn:
+        conn.execute(
+            "DELETE FROM temporal_items WHERE owner_id = ? AND category = 'statement'",
+            (proof["id"],),
+        )
+        conn.execute("UPDATE meta SET value = '17' WHERE key = 'schema_version'")
+        conn.execute("DELETE FROM schema_migrations WHERE version >= 18")
+
+    reopened = Case.open(case.id)
+
+    items = reopened.timeline_page(categories=["statement"])["items"]
+    assert [item["raw"] for item in items] == ["2024-03-11"]
+    assert items[0]["kind"] == "taken"

@@ -7,10 +7,14 @@
   import { matchesTerms } from '../lib/folderBrowse.js';
   import { isSatelliteMedia, sortItems } from '../lib/mediaFilter.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
+  // Reading a typed pair back into a point: the one parser the app has, and the
+  // one a coordinate row is written in (decimal, hemispheres, or DMS).
+  import { parseLatLon } from '../lib/sheetRoles.js';
   import { caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords } from '../lib/state.svelte.js';
   import { templatesState } from '../lib/state.svelte.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
+  import TemporalInput from '../components/TemporalInput.svelte';
   import SearchInput from '../components/SearchInput.svelte';
   import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
@@ -21,6 +25,7 @@
   import ProofLayersPanel from './proof/ProofLayersPanel.svelte';
   import NewProofDialog from './proof/NewProofDialog.svelte';
   import ImportProofDialog from './proof/ImportProofDialog.svelte';
+  import PointMapDialog from './proof/PointMapDialog.svelte';
   import PanelCategories from './proof/PanelCategories.svelte';
   import { bindPanelPointerLifecycle, createCanvasRenderGate,
   discardDraft,
@@ -33,7 +38,7 @@
     layoutPanels, panelsBottom, freeNormalizeDelta, legendLineHeight, footerBand,
     attributionLine, docSize, offsetShape, autoLayoutRows,
     autoCoords, formatCoords, autoSourceUrls, proofSource, statedSources,
-    specPoints, footerLines, coordsPostLines, proofCoordsLines, MAX_POINTS,
+    specPoints, statePanelPoint, footerLines, coordsPostLines, proofCoordsLines, MAX_POINTS,
     normalizeMaterial, resolveSourceUrls,
     toSpec, newId, loadImage, orderedFeatureColors, notesFromShapes,
     templateFromProof, applyProofStyle, normalizeProofStyle, newSignatureText,
@@ -98,6 +103,13 @@
     // give it, which is what the field has always shown.
     points: [{ coords: '', label: '', pov: false }],
     sources: null, // null → traced from the panels; a list → what the analyst states
+    // When the material was taken, in the case's temporal profile, and the
+    // sentence the proof carries. Both optional, neither printed on the plate:
+    // the date is what puts the proof on the Timeline, the description is what a
+    // post is written from. '' → the panels answer for the date, nothing for the
+    // sentence.
+    when: '',
+    description: '',
     // Case files the proof rests on without composing them, brought in from a stated
     // source address. They join the chain on save, and the point with it.
     material: [],
@@ -225,6 +237,8 @@
   // the only thing this screen owns is the door — and that door is in the New
   // proof dialog rather than the toolbar, which has no room left for a button.
   let importOpen = $state(false);
+  // `{ row, view }` while one point is being moved on the map, else null.
+  let pointMap = $state(null);
   let newProofTemplateId = $state('');
   let newProofPanelPaths = $state([]);
   let newProofQuery = $state('');
@@ -317,6 +331,8 @@
     proof.footerCoords = spec.footerCoords === true;
     proof.footerText = spec.footerText !== false;
     proof.sources = statedSources(spec.sources ?? spec.source ?? null);
+    proof.when = typeof spec.when === 'string' ? spec.when : '';
+    proof.description = typeof spec.description === 'string' ? spec.description : '';
     proof.material = normalizeMaterial(spec.material);
     proof.captionSize = style.captionSize;
     proof.legendSize = style.legendSize;
@@ -601,6 +617,8 @@
     proof.templateId = null;
     proof.points = [blankPoint()];
     proof.sources = null;
+    proof.when = '';
+    proof.description = '';
     proof.material = [];
     proof.captionSize = CAPTION_SIZE;
     proof.legendSize = LEGEND_SIZE;
@@ -975,9 +993,13 @@
         meta: item.meta ?? {},
         img,
       };
+      // what the proof answers with today, read before the panel can change it
+      const answered = displayedCoords;
       // grid: append (rightmost / bottom row); free: a new panel lands in front
       if (proof.layout === 'free') proof.panels.unshift(panel);
       else proof.panels.push(panel);
+      // a panel that carries a place states it, under the point already there
+      proof.points = statePanelPoint(proof.points, panel, answered, prefs.coordFormat);
       dirty = true;
       requestAnimationFrame(fit);
     } catch (e) {
@@ -2956,6 +2978,14 @@
     return `Saved ${places.length} points as places`;
   }
 
+  /** And what it says about the date it stated for the footage. Counted past one,
+   *  for the same reason. */
+  function datedLabel(files) {
+    const dated = files ?? [];
+    if (dated.length === 1) return `Dated the material: ${dated[0]}`;
+    return `Dated ${dated.length} files this proof rests on`;
+  }
+
   /** Say yes to dropping the point the proof moved off. Deleted like any entity,
    *  so it lands in the trash and comes back from there. */
   async function deleteOrphanPlaces() {
@@ -3026,6 +3056,9 @@
       // answers with nothing at all when the case already holds them, so
       // re-saving never asks twice.
       if (result.place?.filed?.length) toast(placedLabel(result.place.filed), 'ok', 2600);
+      // The date went onto the footage as a statement of its own. Never asked —
+      // dating a proof is dating what it rests on — but never silent either.
+      if (result.dated?.length) toast(datedLabel(result.dated), 'ok', 2600);
       if (result.place?.asking?.length) {
         placeOffer = { name: result.name, points: result.place.asking };
       }
@@ -3035,6 +3068,8 @@
       if (andPost) {
         uiState.postProof = {
           title: result.title,
+          // What the post is written from, when the proof carries one.
+          description: proof.description,
           // every point, one per line: the post cites the first and carries the rest
           coordsText: coordsPostLines(proofCoordsLines(proof, prefs.coordFormat)).join('\n'),
           source: displayedSource,
@@ -3141,6 +3176,11 @@
     proof.footerCoords = spec.footerCoords === true;
     proof.footerText = spec.footerText !== false;
     proof.sources = statedSources(spec.sources ?? spec.source ?? null);
+    // Both are completed off the entity on the way out of the API, so a date or a
+    // sentence edited from Details opens here as the case's answer rather than as
+    // the copy this file was written with.
+    proof.when = typeof spec.when === 'string' ? spec.when : '';
+    proof.description = typeof spec.description === 'string' ? spec.description : '';
     proof.material = normalizeMaterial(spec.material);
     proof.captionSize = style.captionSize;
     proof.legendSize = style.legendSize;
@@ -3174,7 +3214,11 @@
     for (const p of spec.pastes ?? []) {
       try {
         const img = await loadImage(
-          fileUrl(caseState.current.id, `proofs/${entry.name}.assets/${p.asset}`)
+          // Mirrors `layout.proof_assets_rel`: pasted images live beside the spec,
+          // under `proofs/.meta/`, and not beside the exported picture. Asking one
+          // folder up found nothing and read as an overlay the case had lost, on a
+          // proof whose file was there the whole time.
+          fileUrl(caseState.current.id, `proofs/.meta/${entry.name}.assets/${p.asset}`)
         );
         if (run !== openRun) return;
         pasteAssets.set(p.asset, { img, data: null, pending: false });
@@ -3309,6 +3353,34 @@
     const on = !proof.points[i].pov;
     if (on) statePoint0(); // POV is a claim about the point: state it (see statePoint0)
     proof.points = proof.points.map((one, at) => ({ ...one, pov: on && at === i }));
+    dirty = true;
+  }
+
+  /** How deep the map opens on a point. A building fits in the frame, which is
+   *  what a proof's point is usually on. */
+  const POINT_ZOOM = 17;
+
+  /**
+   * Where the map opens for one row: the point it already states, else the one
+   * above it, else what the panels answer with, else wherever Settings opens the
+   * map. A row added with `+` is empty by definition, and the point it was added
+   * under is the only thing that says which ground it belongs on.
+   */
+  function pointMapView(i) {
+    const above = proof.points.slice(0, i).map((one) => one.coords).reverse();
+    for (const text of [i === 0 ? displayedCoords : proof.points[i].coords, ...above]) {
+      const read = parseLatLon(text);
+      if (read && !read.outOfBounds) return { lat: read.lat, lon: read.lon, zoom: POINT_ZOOM };
+    }
+    // The panels answer in numbers rather than in text, so this one reads in
+    // whichever format the rows above were written in — MGRS included.
+    const auto = autoCoords(proof.panels);
+    return auto ? { ...auto, zoom: POINT_ZOOM } : { ...prefs.homeView };
+  }
+
+  /** The point the map handed back, written where the row reads it. */
+  function movePoint(i, point) {
+    proof.points[i].coords = formatCoords(point, prefs.coordFormat);
     dirty = true;
   }
 
@@ -3701,6 +3773,15 @@
                 value={i === 0 ? displayedCoords : point.coords}
                 oninput={(e) => { proof.points[i].coords = e.target.value; dirty = true; }}
               />
+              <!-- Six decimals is a tenth of a metre, and nobody moves a corner
+                   of a building by editing digits. -->
+              <button
+                class="point-map"
+                title="Move this point on the map"
+                onclick={() => (pointMap = { row: i, view: pointMapView(i) })}
+              >
+                <Icon name="pin" size={13} />
+              </button>
               <input
                 class="input point-label"
                 placeholder="label"
@@ -3787,6 +3868,59 @@
               {/if}
             </div>
           {/each}
+        </div>
+
+        <!-- One sentence about what the proof shows. It is the proof's notes, so
+             the graph shows it and case search finds it, and it is what a post is
+             written from instead of a filename. -->
+        <div class="meta-field">
+          <div class="meta-head">
+            <Icon name="note" size={13} />
+            <span>Description</span>
+            <span class="meta-optional">optional</span>
+          </div>
+          <textarea
+            class="input meta-input desc-input"
+            rows="2"
+            maxlength="2000"
+            placeholder="A formation of 13 helicopters heading east"
+            value={proof.description}
+            oninput={(e) => { proof.description = e.target.value; dirty = true; }}
+          ></textarea>
+        </div>
+
+        <!-- When the material was taken. Not the day it was published and not the
+             day it was filed — the case already holds both of those, read off the
+             file. This is the analyst's answer, and it is what the Timeline shows
+             the proof at. Nothing of it reaches the plate. -->
+        <div class="meta-field">
+          <div class="meta-head">
+            <Icon name="clock" size={13} />
+            <span>Date</span>
+            <span class="meta-optional">optional</span>
+            <!-- Unlike the coordinates and the source, nothing fills this in and
+                 nothing marks it missing. Both would be the same mistake: the date
+                 a file carries is when it was uploaded or when a camera clock said
+                 it was, and neither is when the thing happened. Offered, it would
+                 be accepted without being read, and this date is stated for the
+                 footage itself. So it is typed on purpose, or it stays unknown —
+                 and the bin empties it back to unknown in one press. -->
+            {#if proof.when.trim()}
+              <button
+                class="meta-clear"
+                title="Clear the date"
+                onclick={() => { proof.when = ''; dirty = true; }}
+              >
+                <Icon name="trash" size={12} />
+              </button>
+            {/if}
+          </div>
+          <TemporalInput
+            id="proof-when"
+            compact
+            value={proof.when}
+            onchange={(value) => { proof.when = value; dirty = true; }}
+          />
         </div>
 
         <ProofLayersPanel
@@ -4020,6 +4154,14 @@
     requestCreation={requestNewProofCreation}
     startImport={() => { newProofOpen = false; importOpen = true; }}
     close={() => (newProofOpen = false)}
+  />
+{/if}
+
+{#if pointMap}
+  <PointMapDialog
+    view={pointMap.view}
+    onpick={(point) => movePoint(pointMap.row, point)}
+    onclose={() => (pointMap = null)}
   />
 {/if}
 
@@ -4401,6 +4543,17 @@
     color: var(--text-2);
   }
   .meta-warn { color: var(--warn, #e8a33d); display: inline-flex; }
+  /* Said outright, because the panel's other headers carry a `!` when they are
+     empty and a reader works the rule out from what is on screen: everything
+     here is a blank waiting to be filled. These two are not. */
+  .meta-optional {
+    margin-left: -2px;
+    font-size: var(--fs-xs);
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--text-3);
+  }
   .meta-reset {
     margin-left: auto;
     display: inline-flex;
@@ -4409,6 +4562,16 @@
     border-radius: var(--r-sm);
   }
   .meta-reset:hover { color: var(--text-1); background: var(--bg-2); }
+  /* Empties an optional field rather than handing it back to what the panels say:
+     nothing ever filled this one in. */
+  .meta-clear {
+    margin-left: auto;
+    display: inline-flex;
+    color: var(--text-3);
+    padding: 1px;
+    border-radius: var(--r-sm);
+  }
+  .meta-clear:hover { color: var(--danger, #e05c5c); background: var(--bg-2); }
   .meta-add {
     display: inline-flex;
     color: var(--text-3);
@@ -4477,16 +4640,17 @@
   .point-row + .point-row { margin-top: 4px; }
   .point-row .meta-input { flex: 1; min-width: 0; }
   .point-label { width: 84px; flex: none; font-size: var(--fs-xs); padding: 5px 8px; }
-  .point-pov, .point-move, .point-drop {
+  .point-map, .point-pov, .point-move, .point-drop {
     display: inline-flex;
     color: var(--text-3);
     padding: 2px;
     border-radius: var(--r-sm);
   }
-  .point-pov:hover, .point-move:hover { color: var(--text-1); background: var(--bg-2); }
+  .point-map:hover, .point-pov:hover, .point-move:hover { color: var(--text-1); background: var(--bg-2); }
   .point-pov.on { color: var(--accent, #6ea8fe); background: var(--bg-2); }
   .point-drop:hover { color: var(--danger, #e05c5c); background: var(--bg-2); }
   .point-hint { margin-top: 5px; font-size: var(--fs-xs); color: var(--text-3); }
+  .desc-input { resize: vertical; min-height: 44px; line-height: 1.35; }
   .adv-toggle {
     display: flex;
     align-items: center;

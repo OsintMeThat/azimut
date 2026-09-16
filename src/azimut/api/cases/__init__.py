@@ -33,6 +33,7 @@ from .registry import router as _registry
 from .timeline import router as _timeline
 from .timeline import timeline
 from .trash import router as _trash
+from .todos import router as _todos
 
 router = APIRouter()
 # Literal paths first — see the module docstring.
@@ -49,6 +50,7 @@ for _sub in (
     _timeline,
     _trash,
     _folders,
+    _todos,
 ):
     router.include_router(_sub)
 

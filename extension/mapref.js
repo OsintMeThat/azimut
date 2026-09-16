@@ -161,7 +161,8 @@
    * @param {object} deps
    * @param {ShadowRoot} deps.root where the panel already lives
    * @param {object} deps.refs the tool holding which windows are open (maptools)
-   * @param {(path: string) => Promise<Blob>} deps.file one case file's bytes
+   * @param {(path: string, onprogress?: (done: number, total: number) => void)
+   *   => Promise<Blob>} deps.file one case file's bytes, reported as they land
    * @param {(params: object) => Promise<object>} deps.search what the case offers
    * @param {() => void} deps.onchange the open list moved; the panel re-reads it
    * @param {(message: string) => void} deps.onnote something to say in the panel
@@ -218,11 +219,24 @@
       };
       wire(pane);
 
-      file(viewer.path).then(
+      file(viewer.path, (done, total) => waiting(pane, done, total)).then(
         (blob) => (moving ? play(pane, blob) : show(pane, blob)),
         (e) => refuse(pane, e.message)
       );
       return pane;
+    }
+
+    /**
+     * How far along the file is, while it is still coming.
+     *
+     * Only ever seen on a file worth waiting for: one that arrives in a single
+     * piece reports `done === total` and is left alone, so a photo never
+     * flickers a percentage on its way in. A long video otherwise sits on
+     * "Loading…" for a minute with nothing to say whether it is moving.
+     */
+    function waiting(pane, done, total) {
+      if (!pane.wait.isConnected || !total || done >= total) return;
+      pane.wait.textContent = `Loading… ${Math.floor((done / total) * 100)}%`;
     }
 
     /** An image: decoded once, then painted at whatever zoom the window holds. */

@@ -5,7 +5,9 @@ cases responsive. The migration from a monolithic `case.json` graph to per-case
 SQLite is complete.
 
 Structured case data lives in SQLite. Images, videos, proof PNGs, drafts, saved
-Inspect sessions and note bodies remain ordinary files inside the case folder.
+Inspect and Compare sessions and note bodies remain ordinary files inside the case folder.
+Compare GIFs explicitly saved to the case are derived media under `media/`; an
+exported copy stays a finished file under `exports/` or the selected Views folder.
 
 ## The shape of the workspace
 
@@ -100,12 +102,14 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
       .thumbs/    #   disposable thumbnail cache
     proofs/       # rendered PNGs
       .meta/      #   editable specs and pasted assets
-    exports/      # what the analyst exports: notes as PDF, and their own files
+    exports/      # finished exports and the analyst's own files
     .data/        # private structured and presentation state
       case.db     #   entities, links, folders, catalog and jobs (SQLite)
       entity-images/ # private, bounded entity photos and their thumbnails
     .drafts/      # post drafts
     .inspect/     # saved Inspect session specs
+    .compare/     # saved Compare session specs
+    .analysis/    # saved areas, watches, runs and the frames behind their results
     .search/      # saved Grid Search state
     .trash/       # deleted artifacts grouped by delete action, in numbered slots
 ```
@@ -132,7 +136,7 @@ new directory level or a raised cap breaks it.
 schema fields. It no longer holds the graph, so the case switcher can identify a
 case without opening its database. `case.db` is the source of truth for mutable
 structured state (entities, links, folders, jobs). The files under `media/`,
-`proofs/`, `.drafts/`, `.inspect/` and `notes/` are the source of truth for their
+`proofs/`, `.drafts/`, `.inspect/`, `.compare/` and `notes/` are the source of truth for their
 own content.
 
 App-wide preferences stay outside cases under `<workspace>/.azimut/settings/`:
@@ -142,7 +146,7 @@ there with independent atomic renames, so a partial move resumes. If both
 locations differ, the current hidden file wins and the legacy copy is retained
 beside it under a `.legacy` name.
 
-For media, proof PNGs, notes, drafts and Inspect sessions, the human-readable
+For media, proof PNGs, notes, drafts, Inspect sessions and Compare sessions, the human-readable
 filename stem is the name Azimut shows. Spaces, case and Unicode survive;
 characters forbidden by Windows are replaced and the returned canonical stem
 is written back to the UI. Renaming moves the file and its companions, rewrites
@@ -267,13 +271,15 @@ review.
 
 ## Database shape
 
-`case.db` is at SQLite schema 17: schema 8 adds nullable `links.confidence`,
+`case.db` is at SQLite schema 18: schema 8 adds nullable `links.confidence`,
 schema 9 rebuilds every row's `search_text`, schema 10 stores graph pins per lens,
 schema 11 adds `links.nature`, schema 12 adds entity photo galleries, schema 13
 adds saved analysis views with their bounded-list count, and schema 14 indexes the
 two columns the catalog orders the whole case by. Schema 15 adds the rebuildable
 temporal projection, schema 16 extends saved analysis views to Timeline recipes
-and snapshots, and schema 17 rewrites temporal bounds to fixed microsecond width.
+and snapshots, schema 17 rewrites temporal bounds to fixed microsecond width, and
+schema 18 rebuilds the projection once more, now that a proof's stated date is
+projected beside the dates its files carry.
 The schema counter is independent of the JSON `CASE_SCHEMA`: the
 manifest's `azimut.storage` field selects the backend, and each format counts its own
 shape upgrades.

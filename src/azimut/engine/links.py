@@ -81,9 +81,10 @@ MADE_HERE: tuple[str, ...] = ("inspect",)
 #: there a capture is noise: a geolocation ends with sixty of them beside the handful of
 #: files the case collected, and the Satellite tool's own Saved panel is where they are
 #: read. The extension's screenshot is the same act through another window — a map view
-#: grabbed on purpose, filed as a capture — so it is held back with them. What stays out
+#: grabbed on purpose, filed as a capture — so it is held back with them, and so is the
+#: image a saved Compare session renders of two such views. What stays out
 #: is material that came from outside: an upload, a paste, a download.
-PRODUCED_HERE: tuple[str, ...] = (*MADE_HERE, "satellite", "screenshot")
+PRODUCED_HERE: tuple[str, ...] = (*MADE_HERE, "satellite", "screenshot", "compare")
 
 #: Exact artifact contract. These are not ordinary relations: producing tools
 #: record them, and the pair decides delete behaviour. A file path resolving to an

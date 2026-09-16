@@ -1,26 +1,8 @@
 <script>
-  /**
-   * Where the app opens: what this case is waiting on, what it looks like, and what
-   * was worked on last.
-   *
-   * Two surfaces in one, chosen by whether a case is open. With a case it is a
-   * reading — four outstanding counts as tiles, the case's points on a map, the last
-   * things filed, and the case by family. Without one it is the front door, because a
-   * fresh install lands in an empty workspace and nothing here could be summarised.
-   *
-   * **It asks the case nothing new.** The waiting counts come from the catalog summary
-   * and one timeline page, both of which the Board and the Timeline already read; the
-   * plate comes from the saved index the Satellite panel opens on. Pressing a row hands
-   * the *question* to the surface that answers it rather than the rows it counted, so
-   * the number here and the count there are one predicate asked twice, and no route,
-   * table or migration was added to put a landing page in front of the app.
-   *
-   * Bounded like every other list (docs/STORAGE_AND_PERFORMANCE.md): five small reads
-   * against the **open** case only. Nothing here opens a second case to count it, and
-   * the only thing that reaches the network is the map of the case, which fetches the
-   * free imagery under its points (`overview/PlaceMap.svelte`). The release card is
-   * not an exception: it shows what the startup check already found, and says nothing
-   * when that check is switched off.
+  /** Case dashboard, or a workspace entry page when no case is open.
+   * Five bounded reads supply the dashboard; CaseTodos owns its metadata read.
+   * The map uses imagery for the saved points. Release notices reuse the startup
+   * check, and do not initiate another network request.
    */
   import { api } from '../lib/api.js';
   import {
@@ -54,6 +36,7 @@
   import Icon from '../components/Icon.svelte';
   import Logo from '../components/Logo.svelte';
   import PlaceMap from './overview/PlaceMap.svelte';
+  import CaseTodos from './overview/CaseTodos.svelte';
 
   const RECENT = 6;
 
@@ -253,8 +236,14 @@
           </button>
         {/if}
 
+        <div class="grid" class:flat={!plate.pins.length} class:empty-case={empty}>
+          <div class="area-todos">
+            {#key caseState.current.id}
+              <CaseTodos caseId={caseState.current.id} />
+            {/key}
+          </div>
         {#if empty}
-          <section>
+          <section class="area-start">
             <h2 class="label">Nothing in this case yet</h2>
             <ul class="steps">
               {#each FIRST_STEPS as step (step.tool)}
@@ -269,7 +258,6 @@
             </ul>
           </section>
         {:else}
-          <div class="grid" class:flat={!plate.pins.length}>
             <section class="area-waiting">
               <h2 class="label">What is waiting</h2>
               {#if !summary}
@@ -360,8 +348,8 @@
                 </ul>
               </section>
             {/if}
-          </div>
         {/if}
+        </div>
 
         <footer class="foot">
           <button class="aside" onclick={() => (uiState.tool = 'guide')}>
@@ -584,7 +572,8 @@
     grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
     grid-template-areas:
       'waiting places'
-      'recent figures';
+      'todos figures'
+      'recent recent';
     gap: 30px 40px;
     align-items: start;
     padding-top: 4px;
@@ -594,7 +583,19 @@
   .grid.flat {
     grid-template-areas:
       'waiting figures'
+      'todos .'
       'recent recent';
+  }
+  .grid.empty-case {
+    grid-template-areas: 'todos start';
+  }
+  .area-todos {
+    grid-area: todos;
+    min-width: 0;
+  }
+  .area-start {
+    grid-area: start;
+    min-width: 0;
   }
   .area-waiting {
     grid-area: waiting;
@@ -610,10 +611,14 @@
   }
   @media (max-width: 980px) {
     .grid,
-    .grid.flat {
+    .grid.flat,
+    .grid.empty-case {
       grid-template-columns: minmax(0, 1fr);
-      grid-template-areas: 'waiting' 'places' 'recent' 'figures';
+      grid-template-areas: 'waiting' 'todos' 'places' 'recent' 'figures';
       gap: 30px;
+    }
+    .grid.empty-case {
+      grid-template-areas: 'todos' 'start';
     }
   }
 

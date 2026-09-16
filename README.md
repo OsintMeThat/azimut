@@ -61,6 +61,7 @@ to fix a point on the map.*
 | **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services. With the capture extension, pressing an engine opens it with the picture already in it. Nothing leaves the machine until you press one. |
 | **Inspect** | A scratch workspace over any photo or video: frame adjustments, editable crop, sharpest-frame capture, hand-made collage with per-piece warp/scale/rotate, auto-stitch to solve a panorama's layout, and ELA hints. Nothing enters the case until you save. |
 | **Satellite** | Coordinates or a place name become an imagery crop. The search bar proposes matches as you type: saved work, coordinates and a bundled city list answer offline, and the geocoder fills in the rest once you pause. Select-area capture with an optional scale bar and north arrow, map rotation, measurement tools, a right-click menu on any point, stacked overlays (borders, roads, railways, power lines, fires, night lights) and editable AOI grids for area review. Esri/OSM by default, plus the Esri Wayback archive and Sentinel-2 with a date calendar and a cloud-ceiling slider; add a Mapbox or Google key for more basemaps. Open it in several tabs and they stay in sync. |
+| **Compare** | Links two dated map views for side-by-side, swipe, fade, blink or assisted change reading. Ground-anchored notes, shapes and measurements follow both maps. Editable sessions and rendered previews stay in the case; attributed PNG/GIF copies go to exports. |
 | **Coords & Sky** | Convert common coordinate formats, copy the result, open map or geocoding links, and read the sun and moon at that point on a date: rise, set, azimuth, altitude, twilights, moon phase and bright-limb angle, in local time and UTC, computed offline. |
 | **Geo Proof** | Start a named proof from a reusable house style, or from a published post whose pictures become its panels. Compose case panels in a grid or free layout, annotate with colored shapes, fills, symbols, freehand and text, state every place and every source the proof argues, and export `proof.png` plus a re-editable spec. |
 | **Geo Report** | Turn a proof into a prepared thread for X or Bluesky: coordinates, plus code, attribution, target-specific character counts, media, and a structured Markdown case note with linked evidence. |
@@ -245,10 +246,11 @@ once and paste the pairing token. Because the app owns the folder, later updates
 are one button — it rewrites the files and the extension restarts itself.
 
 Firefox refuses an unsigned extension and forgets an unpacked one on exit, so it
-installs the signed `azimut-capture-<version>.xpi` from the
-[latest release](https://github.com/OsintMeThat/azimut/releases/latest) instead.
-That copy is sealed, so the update button does not apply to it: Firefox reads
-Azimut's own update manifest and replaces the add-on itself. Full instructions in
+installs the signed `azimut-capture-<version>.xpi` instead. **Settings → Capture
+extension** links that exact file, which rides on the release that last changed
+the extension rather than on the newest one. That copy is sealed, so the update
+button does not apply to it: Firefox reads Azimut's own update manifest and
+replaces the add-on itself. Full instructions in
 [extension/README.md](extension/README.md).
 
 ## Building & releasing

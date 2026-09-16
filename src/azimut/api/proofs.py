@@ -32,9 +32,11 @@ from ..engine import links as link_engine
 from ..engine import media as media_engine
 from ..engine import reveal as reveal_engine
 from ..engine import satellite as satellite_engine
+from ..engine import temporal
 from ..engine import thumbnails as thumbnail_engine
 from ..workspace import Case, CaseError, ensure_dir
 from .cases import delete_by_path, get_case
+from .cases.common import delete_entity_deep
 from .drafts import list_drafts
 from .naming import read_created_at, slugify
 from .satellite import locate_on_save
@@ -104,6 +106,41 @@ def _now() -> str:
 def _write_spec(path: Path, spec: dict[str, Any]) -> None:
     ensure_dir(path.parent)
     path.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+#: What a proof says about itself in words and in time, beside the composition.
+#: Both are optional — a proof with neither is the proof this app shipped with —
+#: and both are mirrored onto the entity, so the graph, the Timeline and search
+#: read them without opening one JSON file per proof.
+_STATED_TEXT_MAX = 2000
+
+
+def _stated_when(spec: dict[str, Any]) -> str:
+    """The date the proof states, checked against the profile the case stores.
+
+    Refused here rather than stored and puzzled over later: a value the temporal
+    parser cannot read would reach the Timeline as a parse error on a row nobody
+    asked for, and the composer has the same profile in front of the analyst.
+    """
+    raw = spec.get("when")
+    if raw in (None, ""):
+        return ""
+    if not isinstance(raw, str):
+        raise HTTPException(status_code=422, detail="a date must be text")
+    value = raw.strip()
+    if not value:
+        return ""
+    try:
+        temporal.parse_temporal(value)
+    except temporal.TemporalError as exc:
+        raise HTTPException(status_code=422, detail=f"unsupported date: {exc}") from exc
+    return value
+
+
+def _stated_description(spec: dict[str, Any]) -> str:
+    """The sentence the proof carries, which is the entity's own notes."""
+    raw = spec.get("description")
+    return raw.strip()[:_STATED_TEXT_MAX] if isinstance(raw, str) else ""
 
 
 def _proof_thumb(case: Case, name: str, data: bytes | None = None) -> str | None:
@@ -264,6 +301,12 @@ def load_proof(case_id: str, name: str) -> dict[str, Any]:
     alone showed one row for a proof the map drew twice, and the next save would
     have written that missing point out of the composition for good. The list comes
     back complete instead, and saving is what makes the spec agree with the map.
+
+    The date and the description are completed the same way, and for the same
+    reason: both are editable from the Details panel — one as an attribute, one as
+    the entity's notes — so opening on the spec alone would show the composer a
+    sentence the case had already replaced, and the next save would write the
+    edit back out.
     """
     case = get_case(case_id)
     try:
@@ -275,7 +318,13 @@ def load_proof(case_id: str, name: str) -> dict[str, Any]:
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
     proof = case.find_entity(attr="spec", value=layout.proof_spec_rel(spec_path.stem))
     if isinstance(spec, dict) and proof is not None:
-        return satellite_engine.open_spec(case, proof["id"], spec)
+        opened = satellite_engine.open_spec(case, proof["id"], spec)
+        attrs = proof.get("attrs") or {}
+        for key, attr in (("when", "when"), ("description", "notes")):
+            stated = attrs.get(attr)
+            if isinstance(stated, str) and stated.strip():
+                opened[key] = stated.strip()
+        return opened
     return spec
 
 
@@ -332,6 +381,10 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
 
     # Decoded up front: a bad batch must be refused before anything is written.
     incoming = _decode_assets(body.assets)
+    # Read up front for the same reason: a date outside the profile is refused
+    # before the rename below moves this proof's export and its pasted images.
+    when = _stated_when(body.spec)
+    description = _stated_description(body.spec)
     # The export too, and for a stronger reason — the rename below deletes the
     # old PNG and moves the assets folder, so a payload refused after that point
     # would leave the proof under its old name with both of them gone.
@@ -375,6 +428,8 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     spec = dict(body.spec)
     spec["azimut_proof"] = 1
     spec["title"] = name
+    spec["when"] = when or None
+    spec["description"] = description or None
     previous = case.resolve_inside(layout.proof_spec_rel(old or name))
     spec.setdefault("created_at", read_created_at(previous) or _now())
     spec["updated_at"] = _now()
@@ -406,6 +461,15 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
         # file per proof.
         if thumb_rel and existing["attrs"].get("thumb") != thumb_rel:
             attrs["thumb"] = thumb_rel
+        # What the proof states about itself travels the same way, and for one more
+        # reason than the thumbnail: `when` is what the Timeline projects the proof
+        # from, and the description is the entity's notes — the text the Details
+        # panel shows and case search finds. Written on every save, empty included,
+        # since clearing the field is the analyst taking the statement back.
+        if existing["attrs"].get("when", "") != when:
+            attrs["when"] = when
+        if existing["attrs"].get("notes", "") != description:
+            attrs["notes"] = description
         if attrs:
             patch["attrs"] = attrs
         case.update_entity(existing["id"], patch)
@@ -418,6 +482,8 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
                 "spec": rel,
                 **({"path": png_rel} if png_rel else {}),
                 **({"thumb": thumb_rel} if thumb_rel else {}),
+                **({"when": when} if when else {}),
+                **({"notes": description} if description else {}),
             },
             by="proof-composer",
         )["id"]
@@ -442,6 +508,20 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
         by="proof-composer",
     )
 
+    # The chain has to be filed before this: the footage behind a panel is reached
+    # by walking it, and a material address added in this same save is on it only
+    # once the sync above has run.
+    dated = _date_the_material(
+        case,
+        proof_id=entity_id,
+        name=name,
+        old=old,
+        rel=rel,
+        old_rel=old_rel,
+        when=when,
+        spec=spec,
+    )
+
     place, released = _place_for(case, entity_id, spec)
     return {
         "name": name,
@@ -450,9 +530,127 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
         "thumb": thumb_rel,
         "spec_path": rel,
         "place": place,
+        # The files this save stated the date for, so the composer can say so. A
+        # save that writes into the graph announces it; it just does not ask.
+        "dated": dated,
         # points this save moved off that nothing holds any more; the composer asks
         "orphans": [{"id": e["id"], "label": e["label"]} for e in released],
     }
+
+
+#: The attribute that binds the dating statement below to the proof that made it.
+#: Keyed by the spec path for the same reason the proof entity itself is found that
+#: way: it is the one value a proof owns, and a rename carries it.
+_STATED_BY = "proof"
+
+#: What the statement holds when nothing but this save has touched it. A Claim that
+#: has grown reasoning, a quote or a confidence is the analyst's own work by then,
+#: and clearing a date in the composer must not delete it.
+_OURS = {"when", "time_role", _STATED_BY}
+
+
+def _source_material(case: Case, spec: dict[str, Any]) -> list[dict[str, Any]]:
+    """The collected files a proof rests on, each read back to its own origin.
+
+    A proof composes a *frame*; the thing that was filmed is the video behind it, so
+    the chain is walked up to whatever nothing else in the case derives from. Captures
+    drop out at the end rather than at the start: a satellite screenshot is dated by
+    the provider's flyover, not by the event, and its own panel may still stand
+    between a crop and the imagery it came from.
+    """
+    paths = [p.get("src") for p in spec.get("panels", []) if p.get("src")]
+    found, _missing = link_engine.resolve(case, paths + _material_paths(spec))
+    roots: dict[str, dict[str, Any]] = {}
+    seen: set[str] = set()
+    frontier = list(found)
+    while frontier:
+        current = frontier.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        entity = case.get_entity(current)
+        if entity is None:
+            continue
+        parents = [
+            link["to"]
+            for link in case.links_of(current)
+            if link["type"] == link_engine.DERIVED_FROM and link["from"] == current
+        ]
+        collected = [
+            parent
+            for parent in parents
+            if (case.get_entity(parent) or {}).get("type") in {"media", "capture"}
+        ]
+        if collected:
+            frontier.extend(collected)
+        elif entity["type"] == "media":
+            roots[current] = entity
+    return list(roots.values())
+
+
+def _dating_label(name: str) -> str:
+    return f"Material of {name} was taken"
+
+
+def _date_the_material(
+    case: Case,
+    *,
+    proof_id: str,
+    name: str,
+    old: str | None,
+    rel: str,
+    old_rel: str | None,
+    when: str,
+    spec: dict[str, Any],
+) -> list[str]:
+    """State the proof's date for the footage it rests on, and answer with what it hit.
+
+    The date belongs to the material, not to the document arguing about it: a video
+    was shot when it was shot, whichever proof says so. It travels as a Claim — the
+    one shape this case has for *an analyst concluded this* — so it carries who said
+    it and what it rests on, and it never writes over the clock the file itself
+    reports. Both readings then sit side by side on that file's Time panel, the
+    statement above the file's own dates.
+
+    One statement per proof, about every source at once. A proof states one date, and
+    one statement about three files says exactly that, where three statements would
+    read as three findings and would have to be kept in step by hand.
+    """
+    standing = case.find_entity(attr=_STATED_BY, value=old_rel or rel)
+    if standing is not None and standing.get("type") != "claim":
+        standing = None
+    sources = _source_material(case, spec) if when else []
+    if not sources:
+        # The date is gone, or nothing collected is left under the proof. The
+        # statement goes with it — unless it has grown past what this save wrote,
+        # which makes it the analyst's and not ours to delete.
+        if standing is not None and set(standing.get("attrs") or {}) <= _OURS:
+            delete_entity_deep(case, standing["id"])
+        return []
+    # The wording is this save's only while nobody has rewritten it. A statement
+    # reworded by hand is the analyst's sentence, and restating the date is no
+    # reason to put our own back over it.
+    written = {_dating_label(name), _dating_label(old)} if old else {_dating_label(name)}
+    label = standing["label"] if standing and standing["label"] not in written else _dating_label(name)
+    case.save_temporal_claim(
+        entity_id=standing["id"] if standing else None,
+        label=label,
+        attrs={
+            **{
+                key: value
+                for key, value in ((standing or {}).get("attrs") or {}).items()
+                if key not in _OURS
+            },
+            "when": when,
+            # What the file shows, as read by whoever composed the proof. The same
+            # role the Timeline's own "this media was captured" correction uses.
+            "time_role": "observed",
+            _STATED_BY: rel,
+        },
+        connectors={"about": [e["id"] for e in sources], "at": [], "cites": [proof_id]},
+        by="proof-composer",
+    )
+    return [str(e.get("label") or "") for e in sources]
 
 
 def _material_paths(spec: dict[str, Any]) -> list[str]:

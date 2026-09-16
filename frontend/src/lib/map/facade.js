@@ -36,6 +36,9 @@ const EVENTS = {
   // MapLibre fires move events for any camera change, a zoom included, so one
   // name covers what used to take two.
   'view-settled': ['moveend'],
+  // Every frame of a movement, for what is drawn over the map in the page
+  // rather than in the engine and has to be placed again as the ground moves.
+  'view-move': ['move'],
   rotate: ['rotate'],
   click: ['click'],
   // The engine only fires it for a right-click that did not drag, and stops
@@ -135,6 +138,10 @@ export function framePadding(padding) {
  * @param {HTMLElement} [container] the element the map was built in
  */
 export function mapFacade(map, container) {
+  // Set while another map's frame is being copied onto this one (`follow`).
+  let following = false;
+  const settledHandlers = new Set();
+
   /**
    * Layers that answer their own click.
    *
@@ -234,8 +241,96 @@ export function mapFacade(map, container) {
       };
     },
 
+    /**
+     * The ground rectangle the camera is looking at. A turned map reports the
+     * box that encloses its corners, which is what a rectangle drawn from the
+     * view has to be anyway.
+     */
+    viewBounds() {
+      const bounds = map.getBounds();
+      return {
+        west: wrapLon(bounds.getWest()),
+        south: bounds.getSouth(),
+        east: wrapLon(bounds.getEast()),
+        north: bounds.getNorth(),
+      };
+    },
+
     /** The container changed size; re-read it. */
     resize: () => map.resize(),
+
+    /**
+     * The camera exactly as the engine holds it, fractional zoom included. Only
+     * a second map copying this one reads it (`cameraLink.js`): anything that
+     * states a view uses `camera()`, which speaks whole app zoom levels.
+     */
+    frame() {
+      const centre = map.getCenter();
+      return { lng: centre.lng, lat: centre.lat, zoom: map.getZoom(), bearing: map.getBearing() };
+    },
+
+    /**
+     * Take another map's frame. While the jump runs this map is only a copy:
+     * it does not settle on a level of its own, and it does not report a
+     * settled view for each intermediate frame. `settled` marks the leader's
+     * last frame, and that one is reported once the jump is done.
+     */
+    follow(next, { settled = false } = {}) {
+      following = true;
+      try {
+        map.jumpTo({ center: [next.lng, next.lat], zoom: next.zoom, bearing: next.bearing });
+      } finally {
+        following = false;
+      }
+      if (settled) for (const handler of settledHandlers) handler(camera());
+    },
+
+    /** True while `follow` is moving this map. */
+    following: () => following,
+
+    /**
+     * The drawn pixels, once every visible tile is in.
+     *
+     * WebGL clears its buffer after each frame reaches the screen, so a canvas
+     * read at any other moment is transparent. The copy is taken inside the
+     * engine's own `render` event, which runs in the same frame as the draw.
+     * `complete` is false when the wait gave up with tiles still loading.
+     */
+    async snapshot({ timeout = 12000 } = {}) {
+      const complete = await new Promise((resolve) => {
+        if (!map.isMoving() && map.areTilesLoaded()) {
+          resolve(true);
+          return;
+        }
+        const timer = setTimeout(() => {
+          map.off('idle', idle);
+          resolve(false);
+        }, timeout);
+        const idle = () => {
+          clearTimeout(timer);
+          resolve(true);
+        };
+        map.once('idle', idle);
+      });
+      const canvas = await new Promise((resolve, reject) => {
+        map.once('render', () => {
+          try {
+            const source = map.getCanvas();
+            const copy = document.createElement('canvas');
+            copy.width = source.width;
+            copy.height = source.height;
+            const context = copy.getContext('2d');
+            if (!context) throw new Error('this browser cannot capture the map');
+            context.drawImage(source, 0, 0);
+            resolve(copy);
+          } catch (error) {
+            reject(error);
+          }
+        });
+        map.triggerRepaint();
+      });
+      return { canvas, complete };
+    },
 
     /**
      * Listen for something happening to the view. Returns the unsubscribe, so
@@ -253,9 +348,15 @@ export function mapFacade(map, container) {
               const at = { lat: event.lngLat.lat, lon: wrapLon(event.lngLat.lng) };
               handler(name === 'click' ? at : { ...at, x: event.point.x, y: event.point.y });
             }
-          : () => handler(camera());
+          : name === 'view-settled'
+            ? () => {
+                if (!following) handler(camera());
+              }
+            : () => handler(camera());
+      if (name === 'view-settled') settledHandlers.add(handler);
       for (const event of events) map.on(event, relay);
       return () => {
+        settledHandlers.delete(handler);
         for (const event of events) map.off(event, relay);
       };
     },

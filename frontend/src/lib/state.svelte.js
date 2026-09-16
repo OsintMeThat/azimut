@@ -237,6 +237,8 @@ export const uiState = $state({
   inspectPath: null, // media path to open in the Inspect tool
   focusMedia: null, // media path to highlight & scroll to in the Media Library
   openInspect: null, // inspect-session name to reopen in the Inspect tool
+  openCompare: null, // compare-session name to reopen in the Compare tool
+  openAnalyzer: null, // saved analysis item stem to reopen without loading imagery
   // Entity id the Board should open Details on. The graph-only types — a person,
   // an account, a claim — have no tool of their own to be reopened in, so the
   // board is where following a relation to one of them lands.
@@ -520,6 +522,8 @@ function clearCaseHandoffs() {
   uiState.focusMedia = null;
   uiState.focusCapture = null;
   uiState.openInspect = null;
+  uiState.openCompare = null;
+  uiState.openAnalyzer = null;
   uiState.drawInGraph = null;
   uiState.openBoardEntity = null;
   uiState.openGraphEntity = null;

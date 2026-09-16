@@ -23,7 +23,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | **Case** (topbar) | Board, Graph, Timeline, Sheet | v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect (Selection / Frame / Collage / Analyze) | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
-| **Map** | Satellite, Coords & Sky | **one map, many modes**: Compare, Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
+| **Map** | Satellite, Compare, Coords & Sky | Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
 | **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
 
 **Case is not on the rail.** The rail reads as a sequence of stages, and the case is
@@ -44,6 +44,16 @@ worked in, and its whole subject is the case the sidebar would be listing again.
 
 Two tabs, chosen by who is looking. **Overview** is for somebody who has been here
 before; **Guide** is for somebody who has not.
+
+- **To-do** appears whenever a case is open, including an empty case. Each named
+  list has its own tab and completed/total count. The block occupies one grid
+  column, beside the start actions in an empty case, and stacks on narrow screens. Enter adds a task; click its
+  text to edit it, check it off, or delete it. The list menu renames or deletes
+  a list, with confirmation for a populated list. Changes save automatically.
+  Lists are case metadata in `case.json`, included in case bundles; they are not
+  graph entities and own no artifact files. Task and list deletions are permanent,
+  outside Trash. Concurrent edits from another browser tab require reloading the
+  lists before saving again.
 
 - **With a case open, the page is a reading, laid out as a dashboard.** The case name
   and when it was last touched, then a two-column grid: *what is waiting* and the
@@ -85,9 +95,10 @@ before; **Guide** is for somebody who has not.
 - **The case by family is drawn in the Graph's own eight hues** (`--graph-<family>`),
   each bar measured against the biggest family rather than against the total. One
   reading of one case cannot be two palettes.
-- **It asks the case nothing new.** Five bounded reads against the open case only: the
+- **The dashboard reads only the open case.** Five bounded summary reads supply the
   catalog summary, one timeline page, the newest rows, a count of the last seven days,
-  and the compact saved index the Satellite panel already opens on. Nothing opens a
+  and the compact saved index the Satellite panel already opens on. A separate read
+  loads the case checklists. Nothing opens a
   second case to count it, and the only thing that reaches the network is the map of
   the case, fetching the imagery under its points.
 - **Two notices, both of them answers the startup checks already gave.** A newer release
@@ -1172,6 +1183,144 @@ remote ids in provenance instead of appending them to the visible name.
 
 ## Map
 
+**Compare assembles two imagery views on one camera.** It starts with empty A/B
+slots and loads tiles only after a source or a starting pair is chosen. Each
+side keeps its provider, Wayback release, Sentinel-2 day and reference layers.
+The source cards and mode controls use the application's shared theme, buttons
+and spacing. Both Layers buttons open the same A/B sheet, including each side's
+FIRMS period, VIIRS night and saved case work.
+
+The mode dock holds two kinds of choice, separated by a rule. Left of it, how the
+pair is *read*: side by side, through a swipe, with B faded over A, or as
+alternating whole frames. Blink has three speeds and can pause on either side.
+Right of it, what gets *computed* over the pair: **Difference** and **Detect**.
+Keys 1–6 switch modes; Space pauses blink. Dragging, zooming or rotating either
+map moves the other in the same frame. Both stop at the lower provider zoom
+ceiling. **Swap A and B** exchanges the complete source stacks and annotation
+sides. One compass in the bar reads the shared turn, resets it to north and takes
+an exact angle.
+
+Each computing mode owns the same column beside the stage: the maps narrow rather
+than being covered, and the dock above is the only switch between the two. Leaving
+the mode closes the column.
+
+**Difference** checks that the sources can be compared before it runs.
+Colour, structure and brightness methods read captured pixels in a worker.
+Sentinel-2 also offers NDVI, NDWI, NBR and NDBI from the actual spectral bands.
+Index frames are fetched only by **Read this view**, one metered request per
+side; reopening a session or moving the camera does not fetch them. A changed
+view must be run again before export. Pixel methods refresh after movement when
+live updates are enabled; disabling them keeps the last mask anchored to the ground.
+These viewport captures depend on display resolution and zoom. Use **Detect**
+for a fixed analysis grid across camera changes.
+**Highlights over** sits above the tabs and says what the reading is laid on: A
+alone, B alone, or both images side by side with the same mask on each — the one
+arrangement that shows what a change went *from* and *to* at the same time.
+**Clouds & shadows** sits beside it, one click, because cloud is the first thing
+that goes wrong in a reading and hunting for the switch that fixes it is the
+wrong first minute. It says which answer it is giving: Sentinel-2's own scene
+classification under a spectral index, and a guess from the picture — bright and
+colourless, or near-black — under the pixel methods. The Filters tab splits cloud
+from shadow and sets the mask margin, which grows the mask past the soft edge
+both tests leave behind.
+Detection, Display and Filters tabs separate the rest of the settings, with hover descriptions.
+The settings panel offers automatic/manual thresholds, tone matching, alignment,
+smoothing, cleanup, minimum area, class filters, palettes and heat/class/outline
+displays. Coverage, highlighted
+area and selectable change zones describe the result. These are candidate pixel
+changes for inspection, not confirmed changes to objects.
+
+**Detect** sweeps a drawn area at native resolution and keeps what it found, for
+Wayback and Copernicus Sentinel-2. Setup reads as three numbered steps, in the
+order the work happens: an area, the imagery, then what to look for.
+
+Step 1 draws rectangles, polygons or circles, or takes the current view as a
+rectangle in one click, and prices the result before anything is fetched — ground
+area, native tiles, frames to fetch and roughly how long. A named area set can be
+saved for this case and reused. An area is grabbed by its edge: dragging inside
+one pans the map as it would anywhere else, a click on the edge shows its corner
+handles, and a press that does not travel selects without nudging the geometry.
+Handles and outlines are projected from the ground, so they stay on it through a
+pan, a zoom or a turn.
+
+Step 2 and the stage share one imagery between them, so what is on screen is what
+a run would sweep. On arrival the maps lead, because what is above the stage is
+usually what you came to analyze. From the first change made here — or straight
+away when the maps show something this cannot read — the direction reverses and
+the maps follow this step; the A/B source cards step aside while Detect is on, so
+there is one place to choose imagery rather than two. An analyzer that reads one
+date shows one map, because there is no pair to compare. The run is blocked, with
+the reason, until each image it needs is named.
+
+On Copernicus, dates are picked from the passes the drawn areas actually have,
+not from a calendar. **Find passes** asks the catalogue once, over the whole set
+of areas at once, and lists what came back newest first with the two facts that
+decide between them: how much of the areas that day's swath reached, and how much
+of it was cloud. Sentinel-2 flies 290 km swaths on a five-day revisit, so a wide
+area can have no single day covering all of it; a partial date can still be
+chosen, and the panel says what share will be left unswept before the run rather
+than after it. A finished run reports the share it really read, so "nothing
+found" and "never looked" stay different answers. The lookup is billed as one
+Copernicus request and never runs on its own.
+
+Step 3 picks the analyzer. Four ship built in: large surface change, vessels on
+water, new structures or ground disturbance, and active fire or hotspot. The last
+two of those read Copernicus bands rather than the rendered picture — vessels from
+near-infrared contrast against the water around them, hotspots from the published
+short-wave infrared ratios — so they are Sentinel-2 only and fetch band frames
+beside the picture, all of them metered. The same **Clouds & shadows** switch sits
+under the analyzer, on for the methods that read Sentinel-2's classification and
+off for the ones that can only guess from the picture — a guess that cannot tell
+cloud from a white roof is never made on anyone's behalf. Methods whose subject
+is itself bright and colourless (smoke, bright shapes on water) or that already
+reject cloud by their band ratios (hotspots) offer no switch at all. Thresholds
+and the analyzer itself open from links rather than sitting in the way; any
+analyzer can be duplicated under a name of its own and is then shared by every
+case.
+
+A **watch** keeps an analyzer, its areas and a date rule together, and
+**Run again** in Saved launches a fresh pass — a weekly harbour review is that
+button, not a background schedule.
+
+**Run** explicitly starts a bounded, cancellable job, up to 4096 native tiles.
+The native analysis grid is independent of map zoom. Opening the panel or
+reopening a saved run reads local state only. Offline runs read only the tile cache and the frames earlier runs
+kept, and a finished run keeps only the tiles that found something — so an
+offline rerun covers what the cache still holds, not the whole of a past sweep.
+Resolving the latest date requires a provider request at run time. Runs preserve their own input snapshots,
+candidate evidence and review state. A finished run keeps the frames of the tiles
+that produced a candidate and drops the rest, so a case grows with what was found
+rather than with how much was swept.
+
+What a sweep produces is a list of candidates, and nothing else reaches the case
+on its own. Review them one at a time: **Keep as a pin** files that one candidate,
+with its own copy of the evidence and its provenance, and is the single act that
+writes to the case; **Dismiss** takes it off the map. Either verdict moves to the
+next candidate still waiting, and a running tally says how many are left. Keeping
+can be undone, which sends the pin and its evidence to Trash. Evidence is enlarged
+by a whole-number factor with no interpolation, so a candidate a dozen pixels
+across can be read without pretending to detail the sensor never recorded. Each
+result layer has its own eye control, and the one under review wears a ring on the
+map. Areas and candidates belong to Detect and are drawn only there; a kept
+candidate is a pin, and pins show wherever case work shows.
+
+Annotations store longitude/latitude points and stay on their ground through pan,
+zoom and rotation. Notes, arrows, boxes, ellipses, lines, freehand strokes, distance
+measures and polygons can belong to A, B or both. Polygon drawing ends with a
+double-click or Enter; Escape cancels. Select a mark to move it or edit its style,
+double-click a note to edit its text, and use Undo/Redo for annotation changes.
+
+**Save comparison** writes the editable version-2 session under `.compare/` and
+updates its rendered media preview in My work (PNG, or GIF for blink). A preview
+used by a derived proof is preserved when a later save creates new pixels.
+**Open** restores the sources, layers, camera, reading mode, blink speed, detection
+settings and annotations; Detect is a place to work rather than a way to read the
+pair, so a session saved from it reopens side by side and its runs stay in the case. Export writes an attributed PNG, blink GIF or divider-sweep GIF
+to the shared Views destination; Copy current PNG uses the clipboard. Exports
+include projected annotations, a scale bar and north arrow. Tile captures wait
+for loaded frames and reject incomplete tiles. Google Maps JS uses the
+user-triggered Azimut Capture extension and retains its on-map credits.
+
 The search bar in the header proposes matches as you type, in the order they can
 answer: the coordinates the text parses to, saved work in this case, cities from
 a gazetteer shipped with the app (GeoNames, credited under the list), and last
@@ -1187,18 +1336,44 @@ Saved work — places, captures and screenshots filed by the extension — lives
 one right-hand **Saved** panel, grouped by geography rather than by date. The
 tree's depth follows the case: one country opens straight on its regions, a
 worldwide case opens on continents. A filter and an
-`All / Places / Captures | Proofs` switch stay pinned above it; a screenshot
+`All / Places / Captures | Proofs · Media` switch stay pinned above it; a screenshot
 counts as a capture. The first three positions filter, and `All` shows
 everything: a proof usually stands on the capture it composes, so that capture
-wears a dot rather than carrying a second mark. **Proofs** past the rule is a
-mode — it swaps the panel to the proofs index (`GET /proofs/index`, read the first time
-that position is opened) and hides places and captures so the two never stack.
+wears a dot rather than carrying a second mark. The two past the rule are
+**modes** — each swaps the panel to its own index and hides the rest, so nothing
+stacks two marks on one spot. **Proofs** reads `GET /proofs/index`, and **Media**
+`GET /satellite/media`; both are read the first time that position is opened,
+never on case open. The panel opens on **Media**, which is what a map is read
+for: where the case's footage stands.
 A proof is placed by the coordinates written in its own spec — the composer's
 coordinate field first, then the point its panels gave it — and only failing
 that by every capture it composes, which is why deleting a capture does not
 unpin the proofs built on it. A proof is filed in My work like any other
 artifact, so the folder grouping works there too; **Locate** does not appear,
 since a proof states or borrows its point and the pass has nothing to look up.
+
+**Media** lists the case's located images and videos, one row per point. A file
+carries no coordinates of its own, so the position is read off the graph, by
+every road that states it: a `located-at` or `depicts` edge to a place, the point
+enrichment proposed from the file's own GPS, and the derivation chain, which puts
+a video where the proof that composed a frame of it stands. A file recorded on a
+roof and showing the street below is a row at each, and roads that agree on a
+point are one row that names them all (`Recorded here · Shows this place · Via
+Roofline`). A file nothing places is not listed, and neither is anything the case
+made out of its own material: a frame cut in Inspect, a capture or a rendered
+comparison stands where its source already stands, and the Media Library holds
+the same set back behind its own switch (`links.PRODUCED_HERE`). Locate has nothing to do here
+either, and the row's own actions are gone: a file is renamed, filed and deleted
+in Media.
+
+Pressing a media row, or its mark on the map, plays the file **in the panel, in
+place of the list**: the footage is read beside the imagery it is being matched
+against, and a window over the map would hide the half being compared. The marks
+stack like any other, so one press opens every file on that metre; `←`/`→` walk
+them, the count says where you are, and `Esc` brings the list back. A focused
+video keeps its own arrows for seeking. The card carries the file's name, its
+point, why it stands there, and the ways out: **Open in Media**, and one button
+per proof built on it. The mark being read stays lit on the map.
 Items with
 no country collect under **Unlocated**, where **Locate** looks them up a batch at
 a time and can be stopped mid-pass. Its left edge resizes from 260 to 560 px,
@@ -1305,9 +1480,10 @@ squares instead of hiding the detections or asking NASA for invented detail.
 **The reference layers** are key-less and each is simply on or off: Esri's
 borders (country, region, district, with names) and roads, Open Infrastructure
 Map's power lines, OpenSeaMap's buoys and harbours, and the raw GPS traces people
-uploaded to OSM, which show tracks nobody has mapped yet. None of them fetches a
-tile before its switch is pressed, and the roads follow the labels' rule: over a
-street map they are greyed, since it already draws them. Power lines are drawn
+uploaded to OSM, which show tracks nobody has mapped yet. Borders start on —
+reading imagery starts with which side of a line the ground is on — and none of
+the others fetches a tile before its switch is pressed. The roads follow the
+labels' rule: over a street map they are greyed, since it already draws them. Power lines are drawn
 from vector tiles in the app's own small style, coloured by voltage on Open
 Infrastructure Map's scale, dashed where the line is buried, with towers from
 zoom 14, substations, plants, pipelines and telecom masts. No overlay reaches a
@@ -1340,14 +1516,18 @@ leaves the path alone. Coords & Sky opens the same mode with its own point, date
 and time, and hands over no computed value.
 
 The saved-work layer answers two questions under its own switch: **what kind**
-(all, places, captures, proofs) and **which folder**, offered only where the
+(all, places, captures, proofs, media) and **which folder**, offered only where the
 case has more than one to choose between. They are the Saved panel's own
 filter, so a map read here and the panel beside it can never disagree about
 what the case holds, and the layer's count is what is drawn rather than what is
-filed. It is off by default and session-only: places draw as outlined
-pins, captures and screenshots as filled ones, items at the same spot collapse
-into one counted mark, and clicking any mark opens a card
-with its preview, provider, dates and note. A mark whose capture carries proofs
+filed. It is on from the start, on the Media
+position, and session-only: the tool stays mounted across tabs, so a switch
+pressed off stays off until the app reloads and nothing is written to the case.
+Places draw as outlined pins, captures and screenshots as filled ones, located
+files as white-ringed ones, items at the same spot collapse
+into one counted mark, and clicking a mark of saved work opens a card
+with its preview, provider, dates and note. A mark of files has no card: it plays
+them in the panel. A mark whose capture carries proofs
 wears a dot up-left; its card names the count and offers **Show proofs**, which
 switches the panel and the layer to the proofs view. In that view the card opens
 the proof in Geo Proof and lists the saved posts written from it. Two post titles
@@ -1444,7 +1624,7 @@ link already on is dropped when the last of them goes. Pressing it hands the
 other linked tabs this tab's view, and from then on a pan or a zoom in any of
 them carries the rest. It is per tab and off by default: two maps are worth linking while they
 are being compared and in the way of each other the rest of the time. Two
-linked tabs on two providers are a first version of Compare — and the camera
+linked tabs on two providers complement Compare on a second screen — and the camera
 travels between tabs of the same browser, never over the network, because a
 view is not case state. The extension's map tools join the same link from
 Google, Bing, Earth and the other sites they draw on: an open panel counts as a
@@ -1471,7 +1651,7 @@ coming back hands the chord back to the system clipboard. It lands in the `Overl
 sits above the panels and the legend, and is moved,
 resized from its corners and framed like anything else on the canvas — you can
 annotate it too. It claims no source: no media is filed, no entity, no
-`derived-from` edge. The file lives in `proofs/<name>.assets/` under its own
+`derived-from` edge. The file lives in `proofs/.meta/<name>.assets/` under its own
 content hash, travels with a rename, and goes when the proof does. A proof needs
 a panel first, since the panels are what give the document its size — moving an
 overlay never resizes the export.
@@ -1487,6 +1667,12 @@ first row is the proof's point**: the map mark, the coordinate a post cites, the
 one the export prints. An arrow moves a row up to make it the conclusion; the
 marker never reorders anything, or ticking it would take a coordinate out of a
 tweet without saying so. A single-point proof is the field it has always been.
+**A panel that carries a place adds it**, under the point already on screen rather
+than in place of it — two captures of one point stay one point, and the answer the
+panels gave is written down before the new one joins it. **The pin beside a row
+opens it on the map**: the basemaps and the reference layers of the Map tool, the
+mark on what the row says, and a click to move it. A row added with `+` opens on
+the point above it, which is the only thing that says which ground it belongs on.
 The exported picture prints them only when asked (Advanced → Show coordinates):
 unnamed points share one line, a named one takes its own, and the plate grows by
 what it prints. **Show text** switches the credit line off beside it, so a plate
@@ -1514,6 +1700,39 @@ already in the case by construction.
 
 Wherever a source is *read* rather than edited — the post it is handed to, the Markdown
 report — it is one address per line, and a report renders one link each.
+
+**Description and date** sit under the source, both marked *optional* and neither
+printed on the plate. Everything above them carries a `!` when it is empty, so a
+panel of blanks otherwise reads as a form to finish.
+
+The **description** is one sentence about what the proof shows. It is the proof's
+notes — the graph shows it and case search finds it — and it is what a post is written
+from, in place of the filename a title usually is. Editing it from the Details panel
+and reopening the proof shows the edit, not the copy the file was written with.
+
+The **date** is when the material was taken, in the same profile a Claim's *When*
+uses — a day, a month, a year, a timestamp or a range, with `~` for approximate and
+`?` for uncertain — edited in the same editor, folded to fit the column.
+
+**Nothing ever fills it in**, unlike the coordinates and the sources beside it. The
+date a file carries is when it was uploaded, or what a camera clock said; neither is
+when the thing happened, and a date offered is a date accepted without being read. So
+it is typed on purpose or it stays unknown, and the bin beside it empties it back to
+unknown. Nothing marks it missing either: plenty of material carries no date anyone
+can defend. A dated proof is what the Timeline shows under **Taken**, beside the dates
+the files themselves carry.
+
+**A date states itself for the footage, not only for the proof.** Saving says so — *Dated
+the material: clip.mp4* — and the video's own Time tab then shows it above the dates read
+out of the file, which it never overwrites. The frame is not dated, the video it was cut
+from is; a satellite capture never is. Changing the date restates it, clearing it takes it
+back, and a statement someone has since added reasoning to is left alone.
+
+**The toolbar is two columns.** In one it stood taller than a laptop window, and the
+colour, width and layout controls sat under the fold behind a scrollbar nobody looks
+for. The separators still mark the groups: history, the drawing tools, then fit and
+layout together. The controls that come and go with a selection are last, so picking a
+shape never reshuffles the buttons above them.
 
 **Frames.** Any panel or overlay takes a coloured border, its own colour and
 thickness, drawn inset so the layout does not shift. A frame is decoration: it

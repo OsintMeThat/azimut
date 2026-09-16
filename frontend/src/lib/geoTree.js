@@ -13,16 +13,18 @@
 import { matchesTerms } from './folderBrowse.js';
 import { haversine } from './measure.js';
 
-/** The switch's four positions. The first three filter the saved rows — a
+/** The switch's five positions. The first three filter the saved rows — a
  *  screenshot is a capture with a different origin, not a thing to choose
- *  between. The fourth is a *mode*: a proof carries no point of its own and
- *  borrows its capture's, so drawing both at once would stack two marks on one
- *  place. It swaps the rows the panel reads instead. */
+ *  between. The last two are *modes*: a proof and a photo carry no point of
+ *  their own and stand where the graph puts them, so drawing them with the
+ *  places they borrow from would stack two marks on one spot. Each swaps the
+ *  rows the panel reads instead. */
 export const KINDS = [
   { id: 'all', label: 'All' },
   { id: 'places', label: 'Places' },
   { id: 'captures', label: 'Captures' },
   { id: 'proofs', label: 'Proofs', mode: true },
+  { id: 'media', label: 'Media', mode: true },
 ];
 
 /** True when this position swaps the row source rather than filtering it. */

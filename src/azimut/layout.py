@@ -52,6 +52,10 @@ TOOL_DIR = "azimut"
 DRAFTS_DIR = ".drafts"
 #: Saved Inspect session specs.
 INSPECT_DIR = ".inspect"
+#: Saved Compare session specs. Their rendered image is a media working file.
+COMPARE_DIR = ".compare"
+# Saved analyzer zones, follow-ups and runs with their owned input frames.
+ANALYSIS_DIR = ".analysis"
 #: Saved Grid Search state.
 SEARCH_DIR = ".search"
 #: Machinery that belongs to a visible sibling: `media/.meta/` holds sidecars,
@@ -75,6 +79,8 @@ CASE_SUBDIRS = (
     "exports",
     DRAFTS_DIR,
     INSPECT_DIR,
+    COMPARE_DIR,
+    ANALYSIS_DIR,
     SEARCH_DIR,
 )
 
@@ -453,6 +459,14 @@ def draft_rel(name: str) -> str:
 
 def session_rel(name: str) -> str:
     return f"{INSPECT_DIR}/{name}.json"
+
+
+def compare_session_rel(name: str) -> str:
+    return f"{COMPARE_DIR}/{name}.json"
+
+
+def analysis_assets_rel(name: str) -> str:
+    return f"{ANALYSIS_DIR}/{name}.assets"
 
 
 def grid_rel(name: str) -> str:

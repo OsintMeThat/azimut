@@ -1,11 +1,12 @@
 /**
  * The case's saved work, as the Map's panel reads it.
  *
- * Two indexes, not one: places, captures and filed screenshots come back in one
- * compact index when a case opens, while proofs are read only once the Proofs
- * position is opened — a case must not pay for a view it may never show. Both
- * are keyed on the case *and its revision*, because filing a proof reloads the
- * case and a stale list would still show the folder the proof just left.
+ * Three indexes, not one: places, captures and filed screenshots come back in
+ * one compact index when a case opens, while proofs and located media are each
+ * read only once their position is opened — a case must not pay for a view it
+ * may never show. Both lazy ones are keyed on the case *and its revision*,
+ * because filing a proof reloads the case and a stale list would still show the
+ * folder the proof just left.
  *
  * `runLocate` is the one long act here: filling in the country of everything
  * that still has none, one batch at a time because Nominatim allows one lookup
@@ -31,10 +32,19 @@ function loadGroup() {
   }
 }
 
+/** Where each mode's rows come from. */
+const MODE_INDEX = {
+  proofs: (caseId) => `/api/cases/${caseId}/proofs/index`,
+  media: (caseId) => `/api/cases/${caseId}/satellite/media`,
+};
+
 export function createSavedState({ api, notify, assignFolder, reloadCase }) {
   let rows = $state([]);
-  let proofs = $state([]);
-  let kind = $state('all');
+  // one list per mode, read the first time that position is opened
+  let modeRows = $state({ proofs: [], media: [] });
+  // Media first: a map opened on a case answers "what footage do I have, and
+  // where" before it lists every pin the analyst has dropped.
+  let kind = $state('media');
   let query = $state('');
   /**
    * Which folder the map is drawing, or null for every one of them.
@@ -48,16 +58,16 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
   let locating = $state(null); // { done, total } while a pass runs
   let acceptingId = $state(null);
 
-  let rowsFor = null; // the case id both indexes were loaded for
-  let proofsFor = null; // the case id *and revision* the proofs index was read for
+  let rowsFor = null; // the case id every index was loaded for
+  let modeFor = { proofs: null, media: null }; // the case id *and revision* each was read for
   let locateStopped = false;
   let locateGeneration = 0;
 
   /** Everything a different case must not inherit. */
   function reset() {
     rows = [];
-    proofs = [];
-    proofsFor = null;
+    modeRows = { proofs: [], media: [] };
+    modeFor = { proofs: null, media: null };
     locateStopped = true;
     locateGeneration += 1;
     locating = null;
@@ -87,26 +97,28 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
     };
   }
 
-  /** The proofs index, the first time the Proofs position is opened. */
-  function loadProofs(caseId, rev) {
+  /**
+   * The index behind the open mode, the first time that position is opened.
+   *
+   * An answer lands only while its case and revision are still the ones asked
+   * about. Leaving the position before it arrives keeps it rather than throwing
+   * it away: that stamp is already spent, and coming back would find nothing.
+   */
+  function loadMode(caseId, rev) {
+    const mode = kind;
     const stamp = `${caseId}:${rev}`;
-    if (!caseId || !isMode(kind) || proofsFor === stamp) return () => {};
-    proofsFor = stamp;
-    let live = true;
+    if (!caseId || !isMode(mode) || modeFor[mode] === stamp) return;
+    modeFor = { ...modeFor, [mode]: stamp };
     api
-      .get(`/api/cases/${caseId}/proofs/index`)
+      .get(MODE_INDEX[mode](caseId))
       .then((answer) => {
-        if (live) proofs = answer;
+        if (modeFor[mode] === stamp) modeRows = { ...modeRows, [mode]: answer };
       })
       .catch(() => {
-        if (live) {
-          proofs = [];
-          proofsFor = null;
-        }
+        if (modeFor[mode] !== stamp) return;
+        modeRows = { ...modeRows, [mode]: [] };
+        modeFor = { ...modeFor, [mode]: null };
       });
-    return () => {
-      live = false;
-    };
   }
 
   async function runLocate(caseId) {
@@ -190,7 +202,7 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
     // the sidecar of an image it is not.
     const entity = {
       id: row.id,
-      type: row.kind === 'place' ? 'place' : row.kind === 'proof' ? 'proof' : 'capture',
+      type: ['place', 'proof', 'media'].includes(row.kind) ? row.kind : 'capture',
       attrs: { path: row.path },
     };
     try {
@@ -217,7 +229,10 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
       rows = value;
     },
     get proofs() {
-      return proofs;
+      return modeRows.proofs;
+    },
+    get media() {
+      return modeRows.media;
     },
     get kind() {
       return kind;
@@ -259,9 +274,9 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
       return acceptingId;
     },
 
-    /** Proofs are their own position, and read their own index. */
+    /** Proofs and media are positions of their own, and read their own index. */
     get shownRows() {
-      return isMode(kind) ? proofs : rows;
+      return isMode(kind) ? modeRows[kind] : rows;
     },
     /** What the panel is showing, which is also what the map layer draws. */
     get shown() {
@@ -273,7 +288,7 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
 
     reset,
     load,
-    loadProofs,
+    loadMode,
     runLocate,
     stopLocate: () => (locateStopped = true),
     accept,
