@@ -653,7 +653,6 @@ def execute(case: Case, job: dict[str, Any]) -> None:
         run.update(status="running", total=len(planned), resolution={"grid_zoom": z,
                    "tile_size": size}, engine_version=1)
         persist_run(case, run)
-        import numpy as np
 
         results: list[dict[str, Any]] = []
         identical = True
