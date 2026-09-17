@@ -21,7 +21,7 @@
     coords,
     fullscreen = false,
     centre = null,
-    kind = $bindable('all'),
+    kind = $bindable('media'),
     query = $bindable(''),
     hoveredId = $bindable(null),
     onclose,
@@ -37,8 +37,8 @@
   const CAP = 200;
 
   let sort = $state('newest');
-  // one line per thing: a proof that touches two places is two marks on the
-  // map, but repeating it here would read as two proofs
+  // one line per thing: a file standing in two places is two marks on the map,
+  // but repeating it here would read as two files
   const found = $derived(sortSaved(oneEach(filterSaved(rows, { kind, query })), sort, centre));
   const shown = $derived(found.slice(0, CAP));
 
@@ -55,7 +55,6 @@
       {#each KINDS as k (k.id)}
         <button
           class="kind"
-          class:mode={k.mode}
           class:on={kind === k.id}
           onclick={() => (kind = k.id)}
         >{k.label}</button>
@@ -132,13 +131,6 @@
   }
   .kind:hover {
     color: var(--text-1);
-  }
-  /* Proofs is a mode, not a refinement of the three to its left */
-  .kind.mode {
-    margin-left: 5px;
-    border-left: 1px solid var(--border);
-    padding-left: 12px;
-    border-radius: 0 2px 2px 0;
   }
   .kind.on {
     background: var(--bg-3);

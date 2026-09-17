@@ -692,7 +692,6 @@ export async function installAppFixture(page, options = {}) {
   const placeWrites = [];
   const proofSaves = [];
   const fixtureSavedIndex = options.savedIndex ?? savedIndex;
-  const fixtureProofIndex = options.proofIndex ?? [];
   // Located files as the Media position reads them (GET /satellite/media).
   const fixtureMediaIndex = options.mediaIndex ?? [];
   const fixtureMedia = (options.media ?? media).map((item) => ({ ...item }));
@@ -700,10 +699,8 @@ export async function installAppFixture(page, options = {}) {
   const fixtureProviders = options.widget ? [...providers, WIDGET_PROVIDER] : providers;
   const widgetLoads = [];
   const fixtureSavedIndexes = options.savedIndexes ?? { [CASE_ID]: fixtureSavedIndex };
-  const fixtureProofIndexes = options.proofIndexes ?? { [CASE_ID]: fixtureProofIndex };
   const fixtureMediaIndexes = options.mediaIndexes ?? { [CASE_ID]: fixtureMediaIndex };
   const savedIndexDelays = options.savedIndexDelays ?? {};
-  const proofIndexDelays = options.proofIndexDelays ?? {};
   const caseDelays = options.caseDelays ?? {};
   const graphDelays = options.graphDelays ?? {};
   const fixtureDrafts = options.drafts ?? {};
@@ -1333,12 +1330,6 @@ export async function installAppFixture(page, options = {}) {
     }
     if (caseId && path === `/api/cases/${caseId}/satellite/media`) {
       return json(route, fixtureMediaIndexes[caseId] ?? []);
-    }
-    if (caseId && path === `/api/cases/${caseId}/proofs/index`) {
-      if (proofIndexDelays[caseId]) {
-        await new Promise((resolve) => setTimeout(resolve, proofIndexDelays[caseId]));
-      }
-      return json(route, fixtureProofIndexes[caseId] ?? []);
     }
     // The case as the catalog answers for it: a spec's own list, or the drawn case so
     // the fixture stands for one case rather than two — the graph's search reads the
@@ -2006,10 +1997,10 @@ export async function installAppFixture(page, options = {}) {
 /**
  * Put the Saved panel, and the layer drawing from it, on one position.
  *
- * The panel opens on **Media**, so a spec about places, captures or proofs asks
- * for its own position rather than assuming the one it used to open on.
+ * The panel opens on **Media**, so a spec about places or captures asks for its
+ * own position rather than assuming the one it used to open on.
  */
-export async function showSaved(page, kind = 'All') {
+export async function showSaved(page, kind) {
   await page
     .getByRole('group', { name: 'What this panel lists' })
     .getByRole('button', { name: kind, exact: true })

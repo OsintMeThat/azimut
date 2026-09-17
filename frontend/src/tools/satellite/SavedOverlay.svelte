@@ -22,15 +22,12 @@
     activeKey = null,
     onopen,
     onedit,
-    onproof,
-    onpost,
-    onshowproofs,
     onrefresh,
     ontrace,
     onmedia,
   } = $props();
 
-  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', proof: 'proof' };
+  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen' };
 
   /** True when every item under a mark is a located file: it opens the viewer. */
   const isMedia = (mark) => mark.kinds.every((kind) => kind === 'media');
@@ -59,7 +56,7 @@
       : (GLYPH[kind] ?? 'pin');
     const count =
       mark.items.length > 1 ? `<i class="saved-mark-count">${mark.items.length}</i>` : '';
-    // A proof borrowing capture coordinates appears as a dot on that capture.
+    // A proof stands on the point it argues, and appears as a dot on it.
     const worked = mark.items.some((row) => row.proofs > 0)
       ? '<i class="saved-mark-worked"></i>'
       : '';
@@ -89,12 +86,9 @@
         fullscreen,
         onopen: close(onopen),
         onedit: close(onedit),
-        onproof: close(onproof),
-        onpost: close(onpost),
         // tracing takes over the map, so the card that armed it gets out of
         // the way first — the same rule as every other act here
         ontrace: ontrace && close(ontrace),
-        onshowproofs: close(onshowproofs),
         // opening a related media leaves the map, so close the card first — the
         // same gesture as every other row here, rather than a popup that
         // vanishes without saying it would

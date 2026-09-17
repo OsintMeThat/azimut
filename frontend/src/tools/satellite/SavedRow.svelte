@@ -32,17 +32,16 @@
     onhover = () => {},
   } = $props();
 
-  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', proof: 'proof' };
+  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen' };
 
   const isPlace = $derived(row.kind === 'place');
-  const isProof = $derived(row.kind === 'proof');
   // a located file: pressing it plays it beside the map, and it is edited in Media
   const isMedia = $derived(row.kind === 'media');
   const glyphName = $derived(
     isMedia ? (row.media_kind === 'video' ? 'video' : 'image') : (GLYPH[row.kind] ?? 'pin')
   );
-  // A proof borrows the point of the capture it composes, so `All` marks that
-  // capture instead of stacking a second mark on it.
+  // A proof stands on the point it argues, which is a place this list already
+  // draws: the point is marked as worked rather than drawn twice.
   const worked = $derived(row.proofs > 0 ? `${row.proofs} proof${row.proofs > 1 ? 's' : ''} built here` : null);
   const flyable = $derived(row.lat != null && row.lon != null);
   // a screenshot with no position can only be reopened where it came from
@@ -98,9 +97,9 @@
       {#if worked}<span class="worked" role="img" aria-label={worked} title={worked}></span>{/if}
     </span>
     <span class="text">
-      <!-- A proof arguing three points is three rows under one title. What the
-           analyst called each point is what tells them apart. -->
-      <span class="title">{row.title || 'Untitled'}{#if row.label}<span class="point">· {row.label}</span>{/if}</span>
+      <!-- A file standing in two places is two rows under one title; the
+           coordinates below are what tell them apart. -->
+      <span class="title">{row.title || 'Untitled'}</span>
       <span class="sub">
         <!-- a screenshot filed from a URL that carried no position has none:
              say so rather than printing 0°, 0° -->
@@ -129,42 +128,31 @@
         <Icon name="check" size={13} />
       </button>
     {/if}
-    {#if isProof}
-      <!-- a proof is edited and deleted in the composer that owns it; here it
-           is a point on the map, and the one thing to do with it is open it -->
+    {#if row.source_url}
+      <a
+        class="act"
+        class:disabled={fullscreen}
+        href={fullscreen ? undefined : row.source_url}
+        target="_blank"
+        rel="noreferrer"
+        aria-disabled={fullscreen}
+        title={blocked ?? `Open the source page (${row.site ?? 'external map'})`}
+      ><Icon name="external" size={13} /></a>
+    {/if}
+    <button class="act" title="Edit title & note" onclick={() => onedit(row)}>
+      <Icon name="note" size={13} />
+    </button>
+    {#if !isPlace}
       <button
         class="act"
         disabled={fullscreen}
-        title={blocked ?? 'Open in Geo Proof'}
+        title={blocked ?? 'Send to Geo Proof'}
         onclick={() => onproof(row)}
       ><Icon name="proof" size={13} /></button>
-    {:else}
-      {#if row.source_url}
-        <a
-          class="act"
-          class:disabled={fullscreen}
-          href={fullscreen ? undefined : row.source_url}
-          target="_blank"
-          rel="noreferrer"
-          aria-disabled={fullscreen}
-          title={blocked ?? `Open the source page (${row.site ?? 'external map'})`}
-        ><Icon name="external" size={13} /></a>
-      {/if}
-      <button class="act" title="Edit title & note" onclick={() => onedit(row)}>
-        <Icon name="note" size={13} />
-      </button>
-      {#if !isPlace}
-        <button
-          class="act"
-          disabled={fullscreen}
-          title={blocked ?? 'Send to Geo Proof'}
-          onclick={() => onproof(row)}
-        ><Icon name="proof" size={13} /></button>
-      {/if}
-      <button class="act danger" title="Delete" onclick={() => ondelete(row)}>
-        <Icon name="trash" size={13} />
-      </button>
     {/if}
+    <button class="act danger" title="Delete" onclick={() => ondelete(row)}>
+      <Icon name="trash" size={13} />
+    </button>
   </div>
   {/if}
 </div>
@@ -264,7 +252,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .title .point { margin-left: 5px; color: var(--text-3); }
   .open:hover:not(:disabled) .title {
     color: var(--accent);
   }

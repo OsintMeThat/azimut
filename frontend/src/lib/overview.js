@@ -130,7 +130,7 @@ export function familyBars(summary, familyOf = () => null) {
 /** How many points the home map draws before it stops. Higher than the plate that
  *  drew them without a map could take: a dense patch there was one smear, and here
  *  it is something to zoom into. The cap is what keeps a case with thousands of
- *  saved points from paying for all of them on a page nobody came to read them on. */
+ *  located files from paying for all of them on a page nobody came to read them on. */
 export const MAP_PINS = 200;
 
 /**
@@ -144,7 +144,7 @@ function coordinate(value) {
 }
 
 /**
- * The case's saved points, as the home map takes them.
+ * The case's located media, as the home map takes them.
  *
  * Coordinates and nothing else: the map projects, frames and draws them
  * (`tools/overview/PlaceMap.svelte`), so this only decides which rows can be drawn
@@ -164,7 +164,6 @@ export function mapPins(rows, { limit = MAP_PINS } = {}) {
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
     points.push({
       id: String(row.key ?? row.id ?? `${lat},${lon}`),
-      kind: row.kind ?? 'place',
       title: row.title ?? '',
       lat,
       lon,

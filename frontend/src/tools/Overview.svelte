@@ -1,8 +1,8 @@
 <script>
   /** Case dashboard, or a workspace entry page when no case is open.
    * Five bounded reads supply the dashboard; CaseTodos owns its metadata read.
-   * The map uses imagery for the saved points. Release notices reuse the startup
-   * check, and do not initiate another network request.
+   * The map uses imagery for the case's located footage. Release notices reuse the
+   * startup check, and do not initiate another network request.
    */
   import { api } from '../lib/api.js';
   import {
@@ -67,7 +67,7 @@
   let summary = $state(null); // catalog counts, or null until the first read lands
   let timeline = $state(null); // one timeline page, read for its undated count
   let recent = $state([]); // the newest rows the case filed
-  let saved = $state([]); // the case's saved points, for the plate
+  let located = $state([]); // the case's located media, for the plate
   let week = $state(0); // how many landed in the last seven days
   let naming = $state(''); // the first case being named, on the front door
   let creating = $state(false);
@@ -79,7 +79,7 @@
    *  so it is offered the three ways material gets in instead. */
   const empty = $derived(Boolean(summary) && Number(summary.total ?? 0) === 0);
   const bars = $derived(familyBars(summary, entityFamily));
-  const plate = $derived(mapPins(saved));
+  const plate = $derived(mapPins(located));
   const touched = $derived(lastTouched(caseState.current, caseState.list));
   const badges = $derived(updateBadges(updatesState, prefs.updateDismissedVersion));
   const notes = $derived(markdownHtml(updatesState.app?.notes ?? ''));
@@ -99,14 +99,14 @@
       api.get(`/api/cases/${id}/timeline?limit=1`),
       api.get(buildCatalogQuery(id, { limit: RECENT, order: '-created' })),
       api.get(buildCatalogQuery(id, { limit: 1, since: weekAgo() })),
-      api.get(`/api/cases/${id}/satellite/index`),
+      api.get(`/api/cases/${id}/satellite/media`),
     ]);
     if (caseState.current?.id !== id) return;
     if (counts.status === 'fulfilled') summary = counts.value;
     if (dates.status === 'fulfilled') timeline = dates.value;
     if (newest.status === 'fulfilled') recent = newest.value?.items ?? [];
     if (lately.status === 'fulfilled') week = Number(lately.value?.total ?? 0);
-    if (points.status === 'fulfilled') saved = Array.isArray(points.value) ? points.value : [];
+    if (points.status === 'fulfilled') located = Array.isArray(points.value) ? points.value : [];
   }
 
   // Re-read when the case changes, when a write reloads it, and when the analyst
@@ -120,7 +120,7 @@
       summary = null;
       timeline = null;
       recent = [];
-      saved = [];
+      located = [];
       week = 0;
       return;
     }

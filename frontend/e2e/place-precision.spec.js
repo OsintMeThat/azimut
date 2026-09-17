@@ -55,7 +55,7 @@ async function openCard(page) {
   });
   await page.goto('/#satellite');
   await awaitMapReady(page);
-  await showSaved(page); // the layer is on, on the Media position
+  await showSaved(page, 'Places'); // the panel opens on Media; these are pins
   await page.locator('.saved-mark').click();
   return fixture;
 }

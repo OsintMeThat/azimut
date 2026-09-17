@@ -82,22 +82,23 @@ before; **Guide** is for somebody who has not.
 - **The recent rows carry the case's own pictures.** The catalog already attaches a
   thumbnail to the rows that have one (`thumb`), so six frames of an afternoon's work
   are shown rather than six filenames.
-- **The points are on a real map, and it is only a reading.** The saved index is drawn
+- **The points are on a real map, and it is only a reading.** The case's located
+  footage (`GET /satellite/media`, the Map panel's own first position) is drawn
   as dots on the same engine the Map tool uses (`overview/PlaceMap.svelte`), framed on
   the case, capped at 200 points, and the wheel and the drag are all it answers: no
   capture, no basemap picker, nothing that writes. Hovering a dot names it. The
   basemap is the keyless, unmetered imagery and nothing else, so opening the page
   cannot spend a quota. Coming back to the tab re-reads the case, and points that
   did not change leave the camera where it was put. The foot says how many points the
-  case holds, how many are drawn when that is fewer, and opens the Map tool. With
-  nothing placed there is no map, and the figures take the shoulder instead of leaving
-  a hole.
+  case holds, how many are drawn when that is fewer, and opens the Map tool. A place
+  nobody filmed is a pin, and pins are read in the Map tool: with no footage placed
+  there is no map here, and the figures take the shoulder instead of leaving a hole.
 - **The case by family is drawn in the Graph's own eight hues** (`--graph-<family>`),
   each bar measured against the biggest family rather than against the total. One
   reading of one case cannot be two palettes.
 - **The dashboard reads only the open case.** Five bounded summary reads supply the
   catalog summary, one timeline page, the newest rows, a count of the last seven days,
-  and the compact saved index the Satellite panel already opens on. A separate read
+  and the located media the Map panel opens on. A separate read
   loads the case checklists. Nothing opens a
   second case to count it, and the only thing that reaches the network is the map of
   the case, fetching the imagery under its points.
@@ -1335,22 +1336,15 @@ bearing. Picks are remembered locally and offered back when the bar is empty.
 Saved work — places, captures and screenshots filed by the extension — lives in
 one right-hand **Saved** panel, grouped by geography rather than by date. The
 tree's depth follows the case: one country opens straight on its regions, a
-worldwide case opens on continents. A filter and an
-`All / Places / Captures | Proofs · Media` switch stay pinned above it; a screenshot
-counts as a capture. The first three positions filter, and `All` shows
-everything: a proof usually stands on the capture it composes, so that capture
-wears a dot rather than carrying a second mark. The two past the rule are
-**modes** — each swaps the panel to its own index and hides the rest, so nothing
-stacks two marks on one spot. **Proofs** reads `GET /proofs/index`, and **Media**
-`GET /satellite/media`; both are read the first time that position is opened,
-never on case open. The panel opens on **Media**, which is what a map is read
-for: where the case's footage stands.
-A proof is placed by the coordinates written in its own spec — the composer's
-coordinate field first, then the point its panels gave it — and only failing
-that by every capture it composes, which is why deleting a capture does not
-unpin the proofs built on it. A proof is filed in My work like any other
-artifact, so the folder grouping works there too; **Locate** does not appear,
-since a proof states or borrows its point and the pass has nothing to look up.
+worldwide case opens on continents. A filter and a `Media / Places / Captures`
+switch stay pinned above it; a screenshot counts as a capture. The panel opens on
+**Media**, which is what a map is read for: where the case's footage stands. That
+position is a **mode** — it reads its own index (`GET /satellite/media`, the first
+time it is opened, never on case open) — while Places and Captures filter the one
+compact index the case opens with. One position is drawn at a time, so nothing
+stacks two marks on one spot. Proofs are not a position of their own: a proof
+stands on the point it argues, which is a place the switch already draws, and
+that place wears a dot and a count instead.
 
 **Media** lists the case's located images and videos, one row per point. A file
 carries no coordinates of its own, so the position is read off the graph, by

@@ -385,265 +385,6 @@ def _sat(client, cid, lat, lon):
     ).json()
 
 
-def _proof_index(client, cid):
-    return client.get(f"/api/cases/{cid}/proofs/index").json()
-
-
-def test_index_inherits_the_point_from_the_capture_it_composes(client, sat_tiles):
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    cap = _sat(client, cid, 50.4501, 30.5234)
-    client.post(
-        f"/api/cases/{cid}/proofs", json={"title": "Kyiv bridge", "spec": _panels(cap["path"])}
-    )
-
-    row = _proof_index(client, cid)[0]
-    assert row["kind"] == "proof"
-    assert row["title"] == "Kyiv bridge"
-    assert row["name"] == "Kyiv bridge"
-    assert (row["lat"], row["lon"]) == (50.4501, 30.5234)
-    assert row["notes"] == ""
-    assert row["folder"] == ""  # unfiled, never null
-
-
-def test_index_places_a_proof_at_each_of_its_source_points(client, sat_tiles):
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    kyiv = _sat(client, cid, 50.4501, 30.5234)
-    paris = _sat(client, cid, 48.8584, 2.2945)
-    client.post(
-        f"/api/cases/{cid}/proofs",
-        json={"title": "Two cities", "spec": _panels(kyiv["path"], paris["path"])},
-    )
-
-    rows = _proof_index(client, cid)
-    assert len({r["id"] for r in rows}) == 1  # one proof…
-    assert sorted(r["lat"] for r in rows) == [48.8584, 50.4501]  # …at both its places
-    assert len({r["key"] for r in rows}) == 2  # but two marks, so two render keys
-
-
-def test_index_folds_panels_that_share_one_point_into_one_row(client, sat_tiles):
-    """Two zooms of the same roof are one place, so they are one mark."""
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    a = _sat(client, cid, 50.4501, 30.5234)
-    b = _sat(client, cid, 50.4501, 30.5234)
-    client.post(
-        f"/api/cases/{cid}/proofs",
-        json={"title": "Same roof", "spec": _panels(a["path"], b["path"])},
-    )
-
-    rows = _proof_index(client, cid)
-    assert [(r["title"], r["lat"]) for r in rows] == [("Same roof", 50.4501)]
-
-
-def test_index_lists_a_proof_with_no_located_source_without_a_point(client):
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    client.post(
-        f"/api/cases/{cid}/proofs", json={"title": "Photos only", "spec": _panels("media/x.jpg")}
-    )
-
-    row = _proof_index(client, cid)[0]
-    assert row["lat"] is None and row["lon"] is None  # it files under Unlocated
-    assert row["title"] == "Photos only"
-
-
-def test_index_carries_the_geography_of_the_source(client, sat_tiles, monkeypatch):
-    from azimut.engine import geo
-
-    monkeypatch.setattr(
-        geo,
-        "reverse_geocode",
-        lambda lat, lon, timeout=8, language=None: {
-            "display_name": "x",
-            "attribution": "x",
-            "address": {"country_code": "ua", "country": "Ukraine", "state": "Donetsk Oblast"},
-        },
-    )
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    cap = _sat(client, cid, 48.0159, 37.8029)
-    client.post(f"/api/cases/{cid}/proofs", json={"title": "Donetsk", "spec": _panels(cap["path"])})
-
-    row = _proof_index(client, cid)[0]
-    assert row["geo"]["country"] == "Ukraine"
-    assert row["continent"] == "Europe"
-    assert row["country_en"] == "Ukraine"
-
-
-def test_index_carries_the_geography_of_the_place_the_proof_filed(client, monkeypatch):
-    """Panels of photos place nothing, and no Locate pass ever reaches a proof.
-    But the point the analyst typed was filed as a place and that one has a
-    country, so the proof files under it instead of under Unlocated."""
-    from azimut.engine import geo
-
-    monkeypatch.setattr(
-        geo,
-        "reverse_geocode",
-        lambda lat, lon, timeout=8, language=None: {
-            "display_name": "x",
-            "attribution": "x",
-            "address": {"country_code": "is", "country": "Ísland"},
-        },
-    )
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    client.post(
-        f"/api/cases/{cid}/proofs",
-        json={
-            "title": "Photos only",
-            "spec": {**_panels("media/x.jpg"), "coordsText": "64.1466, -21.9426"},
-        },
-    )
-
-    row = _proof_index(client, cid)[0]
-    assert (row["lat"], row["lon"]) == (64.1466, -21.9426)
-    assert row["geo"]["country"] == "Ísland"
-    assert row["country_en"] == "Iceland"
-    assert row["continent"] == "Europe"
-
-
-def test_index_ignores_the_geography_of_a_place_somewhere_else(client, monkeypatch):
-    """Only the point itself answers. A place across the continent is another
-    claim about another spot, and borrowing its country would file the proof
-    under the wrong branch."""
-    from azimut.engine import geo
-
-    monkeypatch.setattr(
-        geo,
-        "reverse_geocode",
-        lambda lat, lon, timeout=8, language=None: {
-            "display_name": "x",
-            "attribution": "x",
-            "address": {"country_code": "ua", "country": "Україна"},
-        },
-    )
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 50.4501, "lon": 30.5234})
-    # the proof states a point of its own, and nothing is filed there to know it
-    client.put("/api/settings/prefs", json={"proof_place_auto": False})
-    client.post(
-        f"/api/cases/{cid}/proofs",
-        json={
-            "title": "Elsewhere",
-            "spec": {**_panels("media/x.jpg"), "coordsText": "48.8584, 2.2945"},
-        },
-    )
-
-    row = _proof_index(client, cid)[0]
-    assert (row["lat"], row["lon"]) == (48.8584, 2.2945)
-    assert row["geo"] is None  # placed on the map, unlocated in the tree
-
-
-def test_index_lists_the_posts_written_from_a_proof(client, sat_tiles):
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    cap = _sat(client, cid, 50.4501, 30.5234)
-    saved = client.post(
-        f"/api/cases/{cid}/proofs",
-        json={"title": "Cited", "spec": _panels(cap["path"]), "png_base64": _png_b64()},
-    ).json()
-    client.post(
-        f"/api/cases/{cid}/drafts",
-        json={
-            "title": "First thread",
-            "state": {"proofPng": saved["png"], "target": "bluesky"},
-        },
-    )
-    client.post(
-        f"/api/cases/{cid}/drafts",
-        json={
-            "title": "Follow-up",
-            "state": {"proofPng": saved["png"], "target": "mastodon"},
-        },
-    )
-
-    row = _proof_index(client, cid)[0]
-    assert row["posts"] == 2
-    assert {post["title"] for post in row["linked_posts"]} == {
-        "First thread",
-        "Follow-up",
-    }
-    assert {post["target"] for post in row["linked_posts"]} == {
-        "bluesky",
-        "mastodon",
-    }
-    assert {post["name"] for post in row["linked_posts"]} == {
-        "First thread",
-        "Follow-up",
-    }
-
-
-# -- a proof's own point ---------------------------------------------------------------
-# A proof does carry coordinates: `coordsText` is what the analyst typed in the
-# composer, `coords` is what the panels gave it, frozen at save. Both outlive the
-# capture they came from, so they are read before the derivation is walked.
-
-
-def test_index_prefers_the_coordinates_typed_into_the_composer(client, sat_tiles):
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    cap = _sat(client, cid, 50.4501, 30.5234)
-    client.post(
-        f"/api/cases/{cid}/proofs",
-        json={
-            "title": "Corrected",
-            "spec": {**_panels(cap["path"]), "coordsText": "48.8584, 2.2945"},
-        },
-    )
-
-    rows = _proof_index(client, cid)
-    # the analyst overrode the imagery: one point, theirs
-    assert [(r["lat"], r["lon"]) for r in rows] == [(48.8584, 2.2945)]
-
-
-def test_index_reads_a_hand_typed_point_in_any_supported_format(client):
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    client.post(
-        f"/api/cases/{cid}/proofs",
-        json={"title": "Typed", "spec": {"panels": [], "coordsText": "48°51'30.2\"N 2°17'40.2\"E"}},
-    )
-
-    row = _proof_index(client, cid)[0]
-    assert row["lat"] == pytest.approx(48.8584, abs=1e-3)
-    assert row["lon"] == pytest.approx(2.2945, abs=1e-3)
-
-
-def test_index_keeps_the_point_after_the_capture_is_deleted(client, sat_tiles):
-    """The whole reason a proof stores its own point: outputs outlive sources."""
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    cap = _sat(client, cid, 50.4501, 30.5234)
-    client.post(
-        f"/api/cases/{cid}/proofs",
-        json={
-            "title": "Orphaned",
-            "spec": {**_panels(cap["path"]), "coords": {"lat": 50.4501, "lon": 30.5234}},
-        },
-    )
-    entity = next(e for e in graph_read.entities(cid) if e["type"] == "capture")
-    client.delete(f"/api/cases/{cid}/entities/{entity['id']}")
-
-    row = _proof_index(client, cid)[0]
-    assert (row["lat"], row["lon"]) == (50.4501, 30.5234)  # scarred, not unplaced
-
-
-def test_index_ignores_a_hand_typed_point_it_cannot_read(client, sat_tiles):
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    cap = _sat(client, cid, 50.4501, 30.5234)
-    client.post(
-        f"/api/cases/{cid}/proofs",
-        json={"title": "Prose", "spec": {**_panels(cap["path"]), "coordsText": "near the bridge"}},
-    )
-
-    # unreadable text is not a point, so the derivation still answers
-    assert [(r["lat"], r["lon"]) for r in _proof_index(client, cid)] == [(50.4501, 30.5234)]
-
-
-def test_index_carries_the_my_work_folder_of_the_proof(client, sat_tiles):
-    """A proof is filed like any other artifact, so the panel can group it by
-    folder as well as by place."""
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    cap = _sat(client, cid, 50.4501, 30.5234)
-    client.post(f"/api/cases/{cid}/proofs", json={"title": "Filed", "spec": _panels(cap["path"])})
-    entity = next(e for e in graph_read.entities(cid) if e["type"] == "proof")
-    client.patch(f"/api/cases/{cid}/entities/{entity['id']}", json={"attrs": {"folder": "recon/bridges"}})
-
-    assert _proof_index(client, cid)[0]["folder"] == "recon/bridges"
-
-
 # -- the place a proof files (engine/satellite.place_for_proof) -----------------
 #
 # A geolocation is concluded in the composer, so the point becomes a node here
@@ -1085,12 +826,11 @@ def test_a_spec_with_no_list_still_states_its_one_point(client):
     cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
     _save(client, cid, "Old shape", _with_coords("50.4501, 30.5234", None, pov=True))
 
-    rows = _proof_index(client, cid)
-    assert [(r["lat"], r["lon"], r["label"]) for r in rows] == [(50.4501, 30.5234, "")]
-    assert len(_places(cid)) == 1
+    [place] = _places(cid)
+    assert (place["attrs"]["lat"], place["attrs"]["lon"]) == (50.4501, 30.5234)
 
 
-def test_every_point_becomes_a_row_and_a_place(client):
+def test_every_point_becomes_a_place(client):
     cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
     saved = _save(client, cid, "Harbour strike", _points(
         ("64.1466, -21.9426", "impact 1", False),
@@ -1098,11 +838,9 @@ def test_every_point_becomes_a_row_and_a_place(client):
         ("64.1502, -21.9350", "caméra", True),
     ))
 
-    # one row per point, all under one proof: the map is about places
-    rows = _proof_index(client, cid)
-    assert len({r["id"] for r in rows}) == 1
-    assert [r["label"] for r in rows] == ["impact 1", "impact 2", "caméra"]
-    assert len({r["key"] for r in rows}) == 3  # three marks, three render keys
+    # one place per point: the map is about places, and that is where a proof's
+    # three points are read from
+    assert sorted(p["attrs"]["lat"] for p in _places(cid)) == [64.1466, 64.1481, 64.1502]
     # and the label names the ground, since a place is otherwise called by its numbers
     assert sorted(p["label"] for p in _places(cid)) == ["caméra", "impact 1", "impact 2"]
     assert len(saved["place"]["filed"]) == 3
@@ -1204,7 +942,6 @@ def test_two_points_a_metre_apart_are_one_place(client):
     ))
 
     assert len(_places(cid)) == 1
-    assert len(_proof_index(client, cid)) == 1
 
 
 def test_one_place_keeps_the_pov_the_second_line_ticked(client):
@@ -1287,9 +1024,9 @@ def test_only_the_conclusion_is_looked_up_at_save(client, monkeypatch):
     ))
 
     assert asked == [(64.1466, -21.9426)]
-    rows = {r["label"]: r["geo"] for r in _proof_index(client, cid)}
-    assert rows["impact 1"]["country"] == "Ísland"
-    assert rows["impact 2"] is None  # born unlocated, for the Locate pass to pick up
+    geo_by_label = {p["label"]: (p["attrs"].get("geo") or {}).get("country") for p in _places(cid)}
+    assert geo_by_label["impact 1"] == "Ísland"
+    assert geo_by_label["impact 2"] is None  # born unlocated, for Locate to pick up
 
 
 def test_stating_a_point_writes_the_list_and_the_mirror():
@@ -1314,7 +1051,7 @@ def test_stating_one_point_over_a_list_replaces_it(client):
     ]
 
 
-def test_a_point_filed_by_another_road_is_a_row_and_a_mark(client):
+def test_a_point_filed_by_another_road_is_a_place_of_its_own(client):
     """A sheet row files a point for a proof it never composed. The graph knew
     two places while the composer opened on one, so the proof said two things."""
     cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
@@ -1328,8 +1065,7 @@ def test_a_point_filed_by_another_road_is_a_row_and_a_mark(client):
     case.update_entity(elsewhere["id"], {"label": "impact 2"})
     case.add_link(proof["id"], elsewhere["id"], "depicts", by="sheet-build")
 
-    rows = _proof_index(client, cid)
-    assert [(r["lat"], r["label"]) for r in rows] == [
+    assert sorted((p["attrs"]["lat"], p["label"]) for p in _places(cid)) == [
         (48.65614, "impact 1"), (48.656289, "impact 2"),
     ]
     # and the composer opens on both, the analyst's own row still the conclusion

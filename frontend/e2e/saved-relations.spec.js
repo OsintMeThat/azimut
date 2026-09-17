@@ -73,7 +73,7 @@ test('opens a stacked row’s relations without closing the card', async ({ page
 
   await page.goto('/#satellite');
   await awaitMapReady(page);
-  await showSaved(page); // the layer is on, on the Media position
+  await showSaved(page, 'Places'); // the panel opens on Media; these are pins
   await page.locator('.saved-mark').click();
 
   const popup = page.locator('.saved-popup');
@@ -98,7 +98,7 @@ test('corrects the reading of a relation in place, and takes one back', async ({
 
   await page.goto('/#satellite');
   await awaitMapReady(page);
-  await showSaved(page); // the layer is on, on the Media position
+  await showSaved(page, 'Places'); // the panel opens on Media; these are pins
   await page.locator('.saved-mark').click();
 
   const popup = page.locator('.saved-popup');
@@ -125,7 +125,7 @@ test('settles a suggested relation from the card, which survives the click', asy
 
   await page.goto('/#satellite');
   await awaitMapReady(page);
-  await showSaved(page); // the layer is on, on the Media position
+  await showSaved(page, 'Places'); // the panel opens on Media; these are pins
   await page.locator('.saved-mark').click();
 
   const popup = page.locator('.saved-popup');
@@ -169,7 +169,7 @@ test('shows the findings on the card and leaves the pointers out', async ({ page
 
   await page.goto('/#satellite');
   await awaitMapReady(page);
-  await showSaved(page); // the layer is on, on the Media position
+  await showSaved(page, 'Places'); // the panel opens on Media; these are pins
   await page.locator('.saved-mark').click();
 
   const popup = page.locator('.saved-popup');

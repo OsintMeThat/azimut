@@ -24,8 +24,11 @@ describe('saved-point picker', () => {
     expect(picker).toContain('oneEach(rows).filter(isLocated)');
   });
 
-  it('drops the proofs position, which is a mode of the map panel', () => {
-    expect(picker).toContain('KINDS.filter((k) => !k.mode)');
+  it('offers the saved kinds, where "All" is honestly all of them', () => {
+    // located media has an index of its own and no row in this list, so the
+    // map's three-position switch would offer a position with nothing in it
+    expect(picker).toContain('const kinds = SAVED_KINDS');
+    expect(picker).not.toMatch(/\bKINDS\b/);
   });
 
   it('stays read-only: editing saved work belongs to the map', () => {

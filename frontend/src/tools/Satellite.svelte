@@ -970,6 +970,10 @@
   let railHeight = $state(0);
   const railBottom = $derived(RAIL_TOP + railHeight + 8);
 
+  /** Whether the case has anything the saved layer could draw, on any of its
+   *  three positions — media reads its own index, so one length is not enough. */
+  const savedAnything = $derived(savedWork.rows.length > 0 || savedWork.media.length > 0);
+
   /**
    * The saved layer's own two questions, asked where the layer is listed.
    *
@@ -1105,16 +1109,19 @@
       id: 'saved',
       label: 'Saved work',
       on: savedOverlay,
-      disabled: !savedWork.rows.length,
+      // Either index is enough to have something to draw: a case whose footage
+      // is placed but which nobody has dropped a pin in is exactly the case the
+      // panel opens on Media for.
+      disabled: !savedAnything,
       detail: savedWork.shown.length ? String(savedWork.shown.length) : '',
-      title: savedWork.rows.length
+      title: savedAnything
         ? "This case's saved work, or its located photos and videos"
-        : 'Nothing is saved in this case yet',
+        : 'Nothing is saved or placed in this case yet',
       toggle: () => (savedOverlay = !savedOverlay),
       // Which of them are drawn. The same two answers the Saved panel is asking
       // — what kind, and which folder — so a map read here and a panel read
       // beside it can never disagree about what is on the case.
-      controls: savedOverlay && savedWork.rows.length ? savedFilters : null,
+      controls: savedOverlay && savedAnything ? savedFilters : null,
     },
     ...(sheetPoints
       ? [
@@ -1262,7 +1269,7 @@
     return savedWork.load(id);
   });
 
-  // The proofs and media indexes, each read the first time its position is opened.
+  // The media index, read the first time that position is opened.
   $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
 
   // A reloaded media index re-reads the stack being played: a file deleted or
@@ -1281,8 +1288,8 @@
     mediaView = { items, index: Math.max(0, items.findIndex((row) => row.key === current)) };
   });
 
-  // another workspace asked to show one capture: clear whatever filter is on so
-  // it can't be hidden, then let the tree open its branch and scroll to it
+  // another workspace asked to show one capture: put the panel on the position
+  // that lists it, then let the tree open its branch and scroll to it
   $effect(() => {
     const path = uiState.focusCapture;
     if (!path) return;
@@ -1290,7 +1297,7 @@
     if (!row) return;
     uiState.focusCapture = null;
     capturesCollapsed = false;
-    savedWork.kind = 'all';
+    savedWork.kind = 'captures';
     savedWork.query = '';
     revealSavedId = row.id;
   });
@@ -1733,27 +1740,17 @@
     return fmtCoords(item.lat, item.lon);
   }
 
-  // One action, two directions: a capture goes *into* a new proof, a proof row
-  // opens the proof it already is.
+  /** A capture or a place, queued for the composer to build a proof on. */
   function sendToComposer(item) {
-    if (item.kind === 'proof') {
-      uiState.openProof = item.name;
-    } else if (!uiState.composeQueue.includes(item.path)) {
-      uiState.composeQueue.push(item.path);
-    }
+    if (!uiState.composeQueue.includes(item.path)) uiState.composeQueue.push(item.path);
     uiState.tool = 'proof';
   }
 
+  /** A proof already built on the file being played: open it where it lives. */
   function openProofByName(proof) {
     if (!proof?.name) return;
     uiState.openProof = proof.name;
     uiState.tool = 'proof';
-  }
-
-  function openLinkedPost(post) {
-    if (!post.name) return;
-    uiState.openDraft = post.name;
-    uiState.tool = 'post';
   }
 
   // the HUD readout and everything copied out of it follow the user's
@@ -2045,9 +2042,6 @@
           activeKey={mediaView ? mediaView.items[mediaView.index]?.key : null}
           onopen={openSaved}
           onedit={editSaved}
-          onproof={sendToComposer}
-          onpost={openLinkedPost}
-          onshowproofs={() => (savedWork.kind = 'proofs')}
           onrefresh={reloadCase}
           ontrace={startTrace}
           onmedia={openMedia}

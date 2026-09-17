@@ -120,30 +120,32 @@ describe('SavedTree', () => {
     expect(at({ query: 'bridge' })).not.toContain('built here');
   });
 
-  it('does not offer Locate on proofs, which the pass cannot resolve', () => {
-    // Locate walks saved entities; a proof borrows or states its point, so the
-    // button would run and change nothing
-    const unplaced = { ...rows[0], id: 'pr1', key: 'pr1@x', kind: 'proof', geo: null };
+  it('does not offer Locate on media, which the pass cannot resolve', () => {
+    // Locate walks saved entities; a file borrows the point of whatever places
+    // it, so the button would run and change nothing
+    const unplaced = { ...rows[0], id: 'm1', key: 'm1@x', kind: 'media', geo: null };
 
-    expect(at({ rows: [unplaced], kind: 'proofs' })).not.toContain('Locate');
-    expect(at({ rows: [unplaced], kind: 'all' })).toContain('Locate');
+    expect(at({ rows: [unplaced], kind: 'media' })).not.toContain('Locate');
+    // the same row as a saved point is exactly what the pass is for
+    expect(
+      at({ rows: [{ ...unplaced, kind: 'place' }], kind: 'places' })
+    ).toContain('Locate');
   });
 
-  it('groups proofs by folder too, since a proof is filed like anything else', () => {
-    const proof = {
-      id: 'pr1',
-      key: 'pr1@50.45,30.52',
-      kind: 'proof',
-      name: 'kyiv-bridge',
+  it('groups media by folder too, since a file is filed like anything else', () => {
+    const clip = {
+      id: 'm1',
+      key: 'm1@50.45,30.52',
+      kind: 'media',
+      media_kind: 'video',
       title: 'Kyiv bridge',
       lat: 50.45,
       lon: 30.52,
       geo: ua('Kyiv Oblast'),
       continent: 'Europe',
       fetched_at: '2026-07-21T09:12:04Z',
-      posts: 0,
     };
-    const body = at({ rows: [proof], kind: 'proofs', query: 'kyiv' });
+    const body = at({ rows: [clip], kind: 'media', query: 'kyiv' });
 
     expect(body).toContain('Kyiv bridge');
     expect(body).toContain('Kyiv Oblast');
@@ -152,8 +154,8 @@ describe('SavedTree', () => {
     expect(body).not.toContain('disabled=""');
 
     const filed = at({
-      rows: [{ ...proof, folder: 'recon/bridges' }],
-      kind: 'proofs',
+      rows: [{ ...clip, folder: 'recon/bridges' }],
+      kind: 'media',
       group: 'folders',
       folders: ['recon', 'recon/bridges'],
       query: 'kyiv',
@@ -169,15 +171,21 @@ describe('SavedTree', () => {
 
   it('offers Locate only when something is still resolvable', () => {
     // nocoords and nocountry are settled — asking again would waste a lookup
-    expect(at()).not.toContain('Locate');
-    expect(at({ rows: [...rows, { ...rows[0], id: 'p2', geo: null }] })).toContain('Locate');
-    expect(at({ rows: [...rows, { ...rows[0], id: 'p2', geo: { state: 'failed' } }] })).toContain(
-      'Locate'
-    );
+    expect(at({ kind: 'places' })).not.toContain('Locate');
+    expect(
+      at({ kind: 'places', rows: [...rows, { ...rows[0], id: 'p2', geo: null }] })
+    ).toContain('Locate');
+    expect(
+      at({ kind: 'places', rows: [...rows, { ...rows[0], id: 'p2', geo: { state: 'failed' } }] })
+    ).toContain('Locate');
   });
 
   it('reports progress and offers a way out while a pass runs', () => {
-    const body = at({ locating: { done: 12, total: 134 }, rows: [...rows, { ...rows[0], id: 'p2', geo: null }] });
+    const body = at({
+      kind: 'places',
+      locating: { done: 12, total: 134 },
+      rows: [...rows, { ...rows[0], id: 'p2', geo: null }],
+    });
 
     expect(body).toContain('12');
     expect(body).toContain('134');
@@ -192,7 +200,9 @@ describe('SavedTree', () => {
   });
 
   it('says what an empty panel is empty of, and what a dead search found', () => {
-    expect(at({ rows: [] })).toContain('Save a place or capture a crop');
+    expect(at({ rows: [], kind: 'places' })).toContain('Save a place or capture a crop');
+    // the position the panel opens on is empty of something else entirely
+    expect(at({ rows: [] })).toContain('No photo or video is placed yet');
     expect(at({ query: 'zzzz' })).toContain('Nothing saved matches that');
   });
 });

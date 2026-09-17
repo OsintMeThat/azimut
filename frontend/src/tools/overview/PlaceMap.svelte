@@ -1,8 +1,10 @@
 <script>
   /**
-   * The case's saved points, on the ground they were saved from.
+   * The case's located media, on the ground it was shot from or shows.
    *
-   * A reading and nothing else: satellite imagery under the points, the wheel and
+   * The footage is what a case is built on, so it is what the home page draws: a
+   * place nobody filmed is a pin, and the Map tool is where pins are read. A
+   * reading and nothing else — satellite imagery under the points, the wheel and
    * the drag to look around them, and no act that writes. Everything a point can be
    * worked on with — the card, the capture frame, the other basemaps, the hover tie
    * to the tree — belongs to the Map tool, and the foot of this plate is the way
@@ -55,11 +57,11 @@
   }
 
   /**
-   * One colour for every point, whatever was saved there.
+   * One colour for every point, whatever stands there.
    *
-   * The Map tool tells a place from a capture because it is worked on there; here
-   * the points are one layer saying where the case is, and a legend nobody asked
-   * for would be the only thing to read.
+   * The Map tool tells a photograph from a video because it is worked on there;
+   * here the points are one layer saying where the case is, and a legend nobody
+   * asked for would be the only thing to read.
    */
   function dots() {
     const fill = themeColour('--accent', '#e8a33d');
