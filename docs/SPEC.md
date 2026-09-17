@@ -371,8 +371,9 @@ stops making sense.
   restarts the extension is only reachable from the app's own localhost page,
   names the install it means, and its worst outcome is an extension that
   restarts. The map tools widen that island by five read routes and two writes,
-  each trimmed to what a panel draws — saved points without their thumbnails or
-  link tallies, a sweep's own spec, a case's images and videos by name — and the panel
+  each trimmed to what a panel draws — one position's points without their
+  thumbnails or link tallies, a sweep's own spec, a case's images and videos by
+  name — and the panel
   itself reaches them only through the worker's own allowlist, since a content
   script's fetch would carry the map site's origin and be refused. Keeping those
   panels in step adds one more, and it is the narrowest of them: a read-only

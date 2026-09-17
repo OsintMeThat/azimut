@@ -241,9 +241,23 @@
    * Points at the same spot merge into one counted mark, exactly as the app's
    * Saved layer merges them, and the name belongs to the mark under the pointer
    * or the one held open by a click.
+   *
+   * **One position at a time**, the same three the app's panel offers: the
+   * located footage first, then the points dropped by hand, then the captured
+   * imagery. Each is its own read — the panel calls back for the rows rather
+   * than filtering a set it holds, because media never was in the saved index.
    */
+  /** What the points tool can draw, in the order a case is read. Mirrors the
+   *  app's own switch (`lib/geoTree.KINDS`) and the `kind` the saved route takes. */
+  const PIN_KINDS = [
+    { id: "media", label: "Media" },
+    { id: "places", label: "Places" },
+    { id: "captures", label: "Captures" },
+  ];
+
   function createPins() {
     let rows = [];
+    let kind = PIN_KINDS[0].id;
     let zoom = null;
     let marks = [];
     let dropping = false;
@@ -272,6 +286,20 @@
       get marks() {
         return marks;
       },
+      kinds: PIN_KINDS,
+      get kind() {
+        return kind;
+      },
+      /** Switch position. The rows belong to the position that asked for them,
+       *  so they go with it rather than being drawn under the new label until
+       *  the panel's own read lands. */
+      setKind(next) {
+        if (!PIN_KINDS.some((entry) => entry.id === next) || next === kind) return false;
+        kind = next;
+        rows = [];
+        regroup();
+        return true;
+      },
       get dropping() {
         return dropping;
       },
@@ -284,7 +312,7 @@
       get held() {
         return held;
       },
-      /** The case's saved index, filtered to what can actually be drawn. */
+      /** The rows of the open position, filtered to what can actually be drawn. */
       load(index) {
         rows = (index ?? []).filter(
           (row) => Number.isFinite(row.lat) && Number.isFinite(row.lon)
@@ -361,10 +389,18 @@
         const out = marks.map((mark) => {
           const only = mark.kinds.length === 1 ? mark.kinds[0] : "place";
           const shown = mark.key === hovered || mark.key === held;
+          // a stack of files draws as footage only when all of it is footage,
+          // the way the app's own layer glyphs one (`SavedOverlay.svelte`)
+          const glyph =
+            only === "media"
+              ? mark.items.every((row) => row.media_kind === "video")
+                ? "video"
+                : "image"
+              : (THEME.SAVED_GLYPH[only] ?? "pin");
           return {
             kind: "mark",
             at: { lat: mark.lat, lon: mark.lon },
-            glyph: THEME.SAVED_GLYPH[only] ?? "pin",
+            glyph,
             // a bare place carries no imagery: the app outlines it rather than
             // filling it, so a stack of captures never hides behind one
             place: only === "place",
@@ -393,7 +429,10 @@
             : "Filing the point you clicked";
         }
         if (dropping) return "Click the map to place a point";
-        if (!rows.length) return "Nothing placed in this case yet";
+        if (!rows.length) {
+          const label = PIN_KINDS.find((entry) => entry.id === kind)?.label.toLowerCase();
+          return `No ${label} in this case yet`;
+        }
         const merged = rows.length - marks.length;
         return merged > 0 ? `${rows.length} here, in ${marks.length} marks` : `${rows.length} on this map`;
       },

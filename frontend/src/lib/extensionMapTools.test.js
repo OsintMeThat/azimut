@@ -475,6 +475,42 @@ describe('saved points', () => {
     expect(tool.draft).toBe(null);
   });
 
+  it('draws footage with its own glyph, a stack of it only when all of it is', () => {
+    const tool = ext.createPins();
+    tool.load([
+      { id: 'v', key: 'v', kind: 'media', media_kind: 'video', title: 'Clip', lat: 40, lon: 3 },
+      { id: 'p', key: 'p', kind: 'media', media_kind: 'image', title: 'Photo', lat: 41, lon: 3 },
+    ]);
+    tool.atZoom(18);
+    expect(tool.shapes().map((shape) => shape.glyph)).toEqual(['video', 'image']);
+
+    // one photograph in the stack and the mark is no longer footage of one kind
+    tool.load([
+      { id: 'v', key: 'v', kind: 'media', media_kind: 'video', title: 'Clip', lat: 40, lon: 3 },
+      { id: 'p', key: 'p', kind: 'media', media_kind: 'image', title: 'Photo', lat: 40, lon: 3 },
+    ]);
+    tool.atZoom(18);
+    expect(tool.shapes()[0].glyph).toBe('image');
+  });
+
+  it('opens on the footage, and drops the rows with the position it left', () => {
+    // media is not in the saved index: the rows belong to the position that
+    // asked for them, and the panel reads again rather than filtering
+    const tool = loaded();
+    expect(tool.kind).toBe('media');
+    expect(tool.kinds.map((entry) => entry.id)).toEqual(['media', 'places', 'captures']);
+
+    expect(tool.setKind('captures')).toBe(true);
+    expect(tool.rows).toEqual([]);
+    expect(tool.marks).toEqual([]);
+    expect(tool.readout()).toBe('No captures in this case yet');
+
+    // the position it is already on, and one that does not exist, change nothing
+    expect(tool.setKind('captures')).toBe(false);
+    expect(tool.setKind('proofs')).toBe(false);
+    expect(tool.kind).toBe('captures');
+  });
+
   it('works on a view without geometry', () => {
     expect(ext.createPins().needsGeometry).toBe(false);
   });

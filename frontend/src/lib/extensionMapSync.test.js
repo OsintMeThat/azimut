@@ -156,6 +156,18 @@ function open({ answers } = {}) {
       for (const cb of ports.at(-1).disconnects) cb();
     },
     pick: (id) => root().querySelector(`[data-tab="${id}"]`).click(),
+    /** Press one of the open tool's own controls. */
+    press: (act, data = {}) => {
+      const where = Object.entries(data)
+        .map(([key, value]) => `[data-${key}="${value}"]`)
+        .join('');
+      root().querySelector(`[data-act="${act}"]${where}`).click();
+    },
+    /** A click on the map itself, which is the drawing surface over it. */
+    clickMap: (at = { x: 120, y: 90 }) =>
+      root()
+        .querySelector('canvas')
+        .dispatchEvent(new window.PointerEvent('pointerdown', { clientX: at.x, clientY: at.y })),
     /** Open a saved sweep the way the picker does. */
     openSweep: (name = 'sweep') => {
       const select = root().querySelector('[data-act="grid-open"]');
@@ -223,7 +235,7 @@ describe('the case’s points', () => {
     panel.app['/api/ingest/saved'] = [POINT, { ...POINT, id: 'p2', title: 'The bridge' }];
     panel.nudge({ type: 'place', case_id: CASE, title: 'The bridge' });
     await vi.waitFor(() => expect(panel.tools.pins.rows).toHaveLength(2));
-    expect(panel.queries('/api/ingest/saved').at(-1)).toEqual({ case_id: CASE });
+    expect(panel.queries('/api/ingest/saved').at(-1)).toEqual({ case_id: CASE, kind: 'media' });
   });
 
   it('re-reads them when the app moves its own saved work', async () => {
@@ -242,6 +254,34 @@ describe('the case’s points', () => {
     panel.nudge({ type: 'saved', case_id: OTHER });
     await settle(50);
     expect(panel.asks()).not.toContain('/api/ingest/saved');
+  });
+
+  it('reads one position at a time, the footage first', async () => {
+    // media has an index of its own on the app's side, so switching position is
+    // another read rather than a filter over rows the panel already holds
+    panel = open();
+    await settle();
+    panel.pick('pins');
+    panel.forget();
+    panel.app['/api/ingest/saved'] = [{ ...POINT, id: 'c1', kind: 'capture', title: 'Roof' }];
+    panel.press('pin-kind', { kind: 'captures' });
+    await vi.waitFor(() => expect(panel.tools.pins.rows).toHaveLength(1));
+    expect(panel.queries('/api/ingest/saved').at(-1)).toEqual({ case_id: CASE, kind: 'captures' });
+    expect(panel.tools.pins.kind).toBe('captures');
+  });
+
+  it('goes to the position a point it just filed is on', async () => {
+    // filing one while the footage is drawn would land it on a position that
+    // cannot show it
+    panel = open();
+    await settle();
+    panel.pick('pins');
+    panel.press('pin-drop');
+    panel.clickMap();
+    panel.forget();
+    panel.press('pin-save');
+    await vi.waitFor(() => expect(panel.tools.pins.kind).toBe('places'));
+    expect(panel.queries('/api/ingest/saved').at(-1)).toEqual({ case_id: CASE, kind: 'places' });
   });
 });
 
