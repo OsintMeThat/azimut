@@ -6,7 +6,7 @@ import CloudFilter from './CloudFilter.svelte';
 function render(props = {}) {
   const target = document.createElement('div');
   document.body.append(target);
-  const live = mount(CloudFilter, { target, props: { kind: 'classes', ontoggle: () => {}, ...props } });
+  const live = mount(CloudFilter, { target, props: { ontoggle: () => {}, ...props } });
   flushSync();
   return { target, done: () => { unmount(live); target.remove(); } };
 }
@@ -14,14 +14,6 @@ function render(props = {}) {
 const chip = (target) => target.querySelector('button');
 
 describe('the cloud and shadow filter', () => {
-  it('offers nothing for a method that cannot separate cloud from its subject', () => {
-    // smoke, bright shapes on water and a hotspot: masking cloud would mask
-    // the very thing they look for, so there is no switch to mislead with
-    const { target, done } = render({ kind: '' });
-    expect(chip(target)).toBe(null);
-    done();
-  });
-
   it('turns both cloud and shadow on with one click', () => {
     const ontoggle = vi.fn();
     const { target, done } = render({ clouds: false, shadows: false, ontoggle });
@@ -49,25 +41,10 @@ describe('the cloud and shadow filter', () => {
     shadow.done();
   });
 
-  it('says a guess is a guess, and a classification a classification', () => {
-    // the panel must never let a brightness test pass for a measurement
-    const { target, done } = render({ kind: 'classes', clouds: true });
+  it('says what it reads, which is the sensor and the sun rather than a guess', () => {
+    const { target, done } = render({ clouds: true });
     expect(target.textContent).toContain('scene classification');
-    expect(target.textContent).not.toContain('guess');
-    done();
-
-    const guess = render({ kind: 'picture', clouds: true });
-    expect(guess.target.textContent).toContain('A guess from the picture');
-    guess.done();
-  });
-
-  it('follows one switch when cloud and shadow cannot be split', () => {
-    const ontoggle = vi.fn();
-    const { target, done } = render({ kind: 'picture', split: false, clouds: true, ontoggle });
-    expect(chip(target).getAttribute('aria-pressed')).toBe('true');
-    expect(chip(target).textContent).toContain('Clouds & shadows');
-    chip(target).click();
-    expect(ontoggle).toHaveBeenCalledWith(false);
+    expect(target.textContent).toContain('traced from the sun');
     done();
   });
 });

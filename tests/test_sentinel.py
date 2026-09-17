@@ -530,7 +530,7 @@ def test_capabilities_layers_drops_names_that_could_not_be_asked_for():
     assert all(" " not in entry["id"] for entry in sentinel.capabilities_layers("i", get=get))
 
 
-# -- spectral index frames ------------------------------------------------------
+# -- band frames ----------------------------------------------------------------
 
 
 def _rgba_response(url, size):
@@ -553,11 +553,11 @@ def test_band_frame_asks_for_the_named_normalised_difference(index, high, low):
         captured.update(params)
         return _rgba_response(url, (320, 192))
 
-    body = sentinel.band_frame("inst-uuid", BOX, 320, 192, "2026-05-11", index, 30, get=get)
+    body = sentinel.band_frame("inst-uuid", BOX, 320, 192, "2026-05-11", f"change-{index}", 30, get=get)
 
     script = base64.b64decode(captured["EVALSCRIPT"]).decode("ascii")
-    assert f'bands: ["{high}", "{low}", "SCL", "dataMask"]' in script
-    assert f"p.{high} - p.{low}" in script
+    assert f'bands: ["{high}", "{low}"' in script
+    assert f"(p.{high}) - (p.{low})" in script
     assert captured["CRS"] == "EPSG:3857"
     assert captured["BBOX"] == "250000.0,6250000.0,251000.0,6250600.0"
     assert (captured["WIDTH"], captured["HEIGHT"]) == ("320", "192")
@@ -569,7 +569,7 @@ def test_band_frame_asks_for_the_named_normalised_difference(index, high, low):
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"index": "evi"},
+        {"index": "change-evi"},
         {"bbox": (10.0, 10.0, 5.0, 20.0)},
         {"bbox": (0.0, 0.0, 30_000_000.0, 10.0)},
         {"width": 4096},
@@ -577,7 +577,7 @@ def test_band_frame_asks_for_the_named_normalised_difference(index, high, low):
     ],
 )
 def test_band_frame_refuses_a_malformed_request_before_sending_it(kwargs):
-    asked = dict(bbox=BOX, width=64, height=64, day="2026-05-11", index="ndvi")
+    asked = dict(bbox=BOX, width=64, height=64, day="2026-05-11", index="change-ndvi")
     asked.update(kwargs)
 
     def get(*args, **kw):  # pragma: no cover - must never run
@@ -593,45 +593,73 @@ def test_band_frame_refuses_a_malformed_request_before_sending_it(kwargs):
 def test_band_frame_refuses_an_image_of_the_wrong_size():
     with pytest.raises(sentinel.CoverageError):
         sentinel.band_frame(
-            "inst-uuid", BOX, 64, 64, "2026-05-11", "ndvi",
+            "inst-uuid", BOX, 64, 64, "2026-05-11", "change-ndvi",
             get=lambda url, **kw: _rgba_response(url, (32, 32)),
         )
 
 
-def test_band_frame_asks_for_infrared_and_water_when_looking_for_vessels():
+def _detect_script(product):
     captured = {}
 
     def get(url, params=None, **kwargs):
         captured.update(params)
         return _rgba_response(url, (64, 64))
 
-    sentinel.band_frame("inst-uuid", BOX, 64, 64, "2026-05-11", "vessel", get=get)
-
-    script = base64.b64decode(captured["EVALSCRIPT"]).decode("ascii")
-    assert 'bands: ["B03", "B08", "SCL", "dataMask"]' in script
-    # Near-infrared first, stretched so open water spans a usable part of the
-    # byte, then the scene class, then NDWI, then the data mask.
-    assert f"p.B08 * 255 * {sentinel.NIR_GAIN}" in script
-    assert "p.B03 - p.B08" in script
-    assert "p.SCL" in script
+    sentinel.band_frame("inst-uuid", BOX, 64, 64, "2026-05-11", product, get=get)
+    return base64.b64decode(captured["EVALSCRIPT"]).decode("ascii")
 
 
-def test_band_frame_asks_for_the_short_wave_ratios_when_looking_for_fire():
-    captured = {}
+def test_the_vessel_product_reads_both_infrareds_water_and_the_sky():
+    script = _detect_script("vessel")
+    assert 'bands: ["B03", "B08", "B11", "SCL", "dataMask"]' in script
+    # Near-infrared first and never zero where there is data, so a dark sea
+    # still reads as a reading; short-wave infrared, NDWI, then the sky byte.
+    assert f"Math.max(1, Math.min(255, Math.round((p.B08) * {255 * sentinel.BAND_GAIN:g})))" in script
+    assert f"Math.round((p.B11) * {255 * sentinel.BAND_GAIN:g})" in script
+    assert "(p.B03 - p.B08) / (p.B03 + p.B08)" in script
+    assert f"p.SCL + (p.B08 < {sentinel.DARK_REFLECTANCE} ? {sentinel.DARK_FLAG} : 0)" in script
+    assert "if (!p.dataMask) return [0, 0, 0, 0];" in script
 
-    def get(url, params=None, **kwargs):
-        captured.update(params)
-        return _rgba_response(url, (64, 64))
 
-    sentinel.band_frame("inst-uuid", BOX, 64, 64, "2026-05-11", "fire", get=get)
-
-    script = base64.b64decode(captured["EVALSCRIPT"]).decode("ascii")
-    assert 'bands: ["B08", "B11", "B12", "dataMask"]' in script
+def test_the_fire_product_measures_against_b8a_on_b12s_own_grid():
+    script = _detect_script("fire")
+    assert 'bands: ["B8A", "B11", "B12", "SCL", "dataMask"]' in script
     assert "p.B12 / p.B11" in script
-    assert "p.B12 / p.B08" in script
-    # No scene class: the ratios are what reject cloud, and the fourth channel
-    # is worth more as the data mask.
-    assert "SCL" not in script
+    assert "p.B12 / p.B8A" in script
+    assert "p.B08" not in script   # 10 m against 20 m fakes ratios along sharp edges
+    assert f"p.B8A < {sentinel.DARK_REFLECTANCE}" in script
+
+
+def test_the_surface_product_gives_short_wave_infrared_room_over_desert():
+    script = _detect_script("surface")
+    assert 'bands: ["B04", "B08", "B11", "SCL", "dataMask"]' in script
+    assert f"Math.round((p.B11) * {255 * sentinel.SWIR_GAIN:g})" in script
+
+
+def test_detect_indices_are_sums_of_bands_so_bare_soil_fits():
+    script = _detect_script("index-bsi")
+    assert '"B11", "B04", "B08", "B02", "SCL", "dataMask"' in script
+    assert "((p.B11 + p.B04) - (p.B08 + p.B02))" in script
+    # the dark flag still needs B08, and a normalised difference that lacks it asks for it
+    assert '"B03", "B11", "B08", "SCL", "dataMask"' in _detect_script("index-mndwi")
+
+
+def test_difference_frames_carry_the_same_sky_byte_detect_measures():
+    """The browser decodes R = index, G = sky, A = data; a canvas needs that alpha."""
+    captured = {}
+
+    def get(url, params=None, **kwargs):
+        captured.update(params)
+        return _rgba_response(url, (64, 64))
+
+    sentinel.band_frame("inst-uuid", BOX, 64, 64, "2026-05-11", "change-ndvi", get=get)
+    script = base64.b64decode(captured["EVALSCRIPT"]).decode("ascii")
+    assert f"p.SCL + (p.B08 < {sentinel.DARK_REFLECTANCE} ? {sentinel.DARK_FLAG} : 0), 0, 255]" in script
+    # The cloud filter over the picture methods asks for the sky and nothing else.
+    sentinel.band_frame("inst-uuid", BOX, 64, 64, "2026-05-11", "change-sky", get=get)
+    sky = base64.b64decode(captured["EVALSCRIPT"]).decode("ascii")
+    assert 'bands: ["B08", "SCL", "dataMask"]' in sky
+    assert "return [0, p.SCL" in sky
 
 
 def test_band_frame_refuses_a_product_it_has_no_evalscript_for():
@@ -640,4 +668,8 @@ def test_band_frame_refuses_a_product_it_has_no_evalscript_for():
 
     with pytest.raises(ValueError):
         sentinel.band_frame("inst-uuid", BOX, 64, 64, "2026-05-11", "thermal", get=get)
-    assert sentinel.PRODUCTS == {"ndvi", "ndwi", "nbr", "ndbi", "vessel", "fire"}
+    assert sentinel.PRODUCTS == {
+        "vessel", "fire", "surface", "change-sky",
+        *(f"index-{name}" for name in ("ndvi", "ndwi", "mndwi", "nbr", "ndbi", "bsi")),
+        *(f"change-{name}" for name in ("ndvi", "ndwi", "mndwi", "nbr", "ndbi", "bsi")),
+    }

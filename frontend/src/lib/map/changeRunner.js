@@ -1,7 +1,7 @@
 /**
  * Hand a change detection to the worker, or run it here where there is none.
  *
- * One worker, started on first use and kept: Change assist reruns on every
+ * One worker, started on first use and kept: Difference reruns on every
  * settled camera, and a worker's start-up would cost more than the work. A
  * newer request does not cancel an older one in the worker (a computation
  * cannot be interrupted), so callers compare their own request number.

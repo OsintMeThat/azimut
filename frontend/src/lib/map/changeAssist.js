@@ -1,12 +1,14 @@
 /**
- * What Change assist is allowed to read, and the settings it reads with.
+ * What Difference is allowed to read, and the settings it reads with.
  *
  * A pixel difference is only worth showing when both pictures come from one
  * rendering chain: a highlighted provider or style difference would otherwise
  * pass for a change on the ground. `changeCompatibility` answers that before
  * anything is computed, and grades a fair pair as `matched` (one product, one
  * render) or `indicative` (one chain, but something the analyst should keep in
- * mind). `api/compare.py` refuses the same pairs on save.
+ * mind). It also names the `family` behind the pair, which decides two things a
+ * picture cannot answer on its own: whether Sentinel-2's sky classification can
+ * be fetched for the cloud filter, and whether matching tones is honest.
  *
  * The detection itself lives in `changeDetect.js` and runs in a worker.
  */
@@ -20,12 +22,24 @@ export const CHANGE_METHODS = Object.freeze([
   { id: 'index', label: 'Spectral index', hint: 'Real Sentinel-2 bands for both dates, fetched on demand.' },
 ]);
 
+// The same six indices Detect measures, so a reading here and a sweep there
+// speak of one quantity.
 export const CHANGE_INDICES = Object.freeze([
   { id: 'ndvi', label: 'NDVI', hint: 'Vegetation', gain: 'Greener', loss: 'Vegetation lost' },
   { id: 'ndwi', label: 'NDWI', hint: 'Water', gain: 'Wetter', loss: 'Water receded' },
+  { id: 'mndwi', label: 'MNDWI', hint: 'Water, past built-up land', gain: 'Wetter', loss: 'Water receded' },
   { id: 'nbr', label: 'NBR', hint: 'Burn scars', gain: 'Recovered', loss: 'Burnt' },
   { id: 'ndbi', label: 'NDBI', hint: 'Built-up', gain: 'Built or cleared', loss: 'Less built-up' },
+  { id: 'bsi', label: 'BSI', hint: 'Bare soil', gain: 'Barer', loss: 'Covered' },
 ]);
+
+// How far an index has to move to count, at the sensitivity either end. The
+// published marks sit mid-scale: 0.27 for a burn ratio, 0.25 for vegetation
+// lost. Detect scales the same way, so both modes draw one line.
+export const INDEX_CHANGE = Object.freeze({ loosest: 0.05, strictest: 0.5 });
+
+export const indexThreshold = (sensitivity) =>
+  INDEX_CHANGE.loosest + (INDEX_CHANGE.strictest - INDEX_CHANGE.loosest) * (1 - sensitivity / 100);
 
 export const CHANGE_DISPLAYS = Object.freeze([
   { id: 'classes', label: 'Classes' },
@@ -73,17 +87,18 @@ export const CHANGE_DEFAULTS = Object.freeze({
   index: 'ndvi',
   threshold: 'auto',
   sensitivity: 55,
-  normalize: 'histogram',
+  normalize: 'auto',
   smoothing: 1,
   alignment: 4,
   cleanup: 1,
   min_area: 0,
   ignore_clouds: false,
   ignore_shadows: false,
-  // A cloud fades out at its edges and its shadow has no edge at all, so both
-  // masks stop short of where a reader would put the cloud. Growing them takes
+  // A cloud fades out at its edges and its shadow has no edge at all, so the
+  // mask stops short of where a reader would put the cloud. Growing it takes
   // the fringe that otherwise survives as a ring of highlights around the mask.
-  cloud_margin: 2,
+  // In ground metres, because this reading follows the camera.
+  cloud_margin: 50,
   classes: ['gain', 'loss', 'changed'],
   display: 'classes',
   palette: 'directional',
@@ -91,7 +106,7 @@ export const CHANGE_DEFAULTS = Object.freeze({
   opacity: 70,
   base: 'b',
   visible: true,
-  live: true,
+  blink: false,
 });
 
 const pick = (value, allowed, fallback) => (allowed.includes(value) ? value : fallback);
@@ -112,14 +127,14 @@ export function changeSettings(raw = {}) {
     index: pick(value.index, CHANGE_INDICES.map((entry) => entry.id), CHANGE_DEFAULTS.index),
     threshold: pick(value.threshold, ['auto', 'manual'], CHANGE_DEFAULTS.threshold),
     sensitivity: whole(value.sensitivity, 0, 100, CHANGE_DEFAULTS.sensitivity),
-    normalize: pick(value.normalize, ['none', 'mean', 'histogram'], CHANGE_DEFAULTS.normalize),
+    normalize: pick(value.normalize, ['auto', 'none', 'mean', 'histogram'], CHANGE_DEFAULTS.normalize),
     smoothing: whole(value.smoothing, 0, 4, CHANGE_DEFAULTS.smoothing),
     alignment: whole(value.alignment, 0, 8, CHANGE_DEFAULTS.alignment),
     cleanup: whole(value.cleanup, 0, 3, CHANGE_DEFAULTS.cleanup),
     min_area: Number.isFinite(area) ? Math.min(1_000_000, Math.max(0, area)) : 0,
     ignore_clouds: value.ignore_clouds ?? CHANGE_DEFAULTS.ignore_clouds,
     ignore_shadows: value.ignore_shadows ?? CHANGE_DEFAULTS.ignore_shadows,
-    cloud_margin: whole(value.cloud_margin, 0, 10, CHANGE_DEFAULTS.cloud_margin),
+    cloud_margin: whole(value.cloud_margin, 0, 200, CHANGE_DEFAULTS.cloud_margin),
     classes,
     display: pick(value.display, CHANGE_DISPLAYS.map((entry) => entry.id), CHANGE_DEFAULTS.display),
     palette: pick(value.palette, Object.keys(CHANGE_PALETTES), CHANGE_DEFAULTS.palette),
@@ -127,7 +142,7 @@ export function changeSettings(raw = {}) {
     opacity: whole(value.opacity, 0, 100, CHANGE_DEFAULTS.opacity),
     base: pick(value.base, CHANGE_BASES.map((entry) => entry.id), CHANGE_DEFAULTS.base),
     visible: value.visible !== false,
-    live: value.live !== false,
+    blink: value.blink === true,
   };
 }
 
@@ -141,7 +156,7 @@ function layerReading(side, skipped) {
     });
 }
 
-const refuse = (reason) => ({ ok: false, reason, methods: [] });
+const refuse = (reason) => ({ ok: false, reason, methods: [], clouds: false });
 const PIXEL_METHODS = ['colour', 'structure', 'brightness'];
 const ESRI = new Set(['esri-world-imagery', 'esri-wayback']);
 
@@ -154,7 +169,7 @@ const ESRI = new Set(['esri-world-imagery', 'esri-wayback']);
 export function changeCompatibility(a, b) {
   if (!a?.present || !b?.present) return refuse('Add imagery A and B first.');
   if (a.widget || b.widget) {
-    return refuse('Change assist needs app-rendered pixels, not a web map widget.');
+    return refuse('Difference needs app-rendered pixels, not a web map widget.');
   }
 
   if (a.provider === 'sentinel2' && b.provider === 'sentinel2') {
@@ -175,6 +190,10 @@ export function changeCompatibility(a, b) {
     }
     return {
       ok: true,
+      family: 'sentinel2',
+      // Sentinel-2 carries its own scene classification, so cloud and shadow
+      // are read rather than guessed — the one family where the filter is offered.
+      clouds: true,
       grade: notes.length ? 'indicative' : 'matched',
       label: `Sentinel-2 · ${String(a.sentinel.layer).replace(/_/g, ' ')}`,
       from: dateA,
@@ -196,6 +215,8 @@ export function changeCompatibility(a, b) {
     const mixed = a.provider !== b.provider;
     return {
       ok: true,
+      family: 'esri',
+      clouds: false,
       grade: mixed ? 'indicative' : 'matched',
       label: mixed ? 'Esri World Imagery and Wayback' : 'Esri Wayback',
       from: releaseA == null ? 'latest' : String(releaseA),
@@ -231,6 +252,8 @@ export function changeCompatibility(a, b) {
     }
     return {
       ok: true,
+      family: 'viirs',
+      clouds: false,
       grade: 'matched',
       label: `VIIRS · ${a.nightlights.source === 'noaa20' ? 'NOAA-20' : 'Suomi NPP'}`,
       from: a.nightlights.day,
@@ -240,5 +263,19 @@ export function changeCompatibility(a, b) {
     };
   }
 
-  return refuse('Change assist reads Sentinel-2 passes, Esri releases or VIIRS night lights.');
+  return refuse('Difference reads Sentinel-2 passes, Esri releases or VIIRS night lights.');
+}
+
+/**
+ * Whether a reading needs Sentinel-2 bands, which are fetched and metered.
+ *
+ * A spectral index is nothing but bands. The cloud filter over the picture
+ * methods needs the scene classification behind them, which is one small frame
+ * a side. The reading still follows the camera on the frames already held; what
+ * it will not do is spend a request on a pan.
+ */
+export function changeNeedsFrames(settings, status) {
+  if (settings.method === 'index') return 'index';
+  const filtered = settings.ignore_clouds || settings.ignore_shadows;
+  return status?.clouds && filtered ? 'sky' : '';
 }

@@ -1207,37 +1207,56 @@ the mode closes the column.
 
 **Difference** checks that the sources can be compared before it runs.
 Colour, structure and brightness methods read captured pixels in a worker.
-Sentinel-2 also offers NDVI, NDWI, NBR and NDBI from the actual spectral bands.
-Index frames are fetched only by **Read this view**, one metered request per
-side; reopening a session or moving the camera does not fetch them. A changed
-view must be run again before export. Pixel methods refresh after movement when
-live updates are enabled; disabling them keeps the last mask anchored to the ground.
+Sentinel-2 also offers six spectral indices — NDVI, NDWI, MNDWI, NBR, NDBI and
+BSI, the ones Detect measures — from the actual bands. Band frames are fetched by
+an explicit act only — **Read this view**, or switching the cloud filter on —
+one metered request per side; reopening a session or moving the camera never
+fetches. Each frame is kept with a margin of ground around the view, so the
+reading keeps its bands while the camera stays inside that margin, and past it
+the last reading stays up, marked in the footer as an earlier read, until Run. A changed view must be run again before
+export. A reading recomputes by itself after every move, on the
+frames it holds; what it never does on a pan is spend a request.
 These viewport captures depend on display resolution and zoom. Use **Detect**
 for a fixed analysis grid across camera changes.
 **Highlights over** sits above the tabs and says what the reading is laid on: A
 alone, B alone, or both images side by side with the same mask on each — the one
-arrangement that shows what a change went *from* and *to* at the same time.
+arrangement that shows what a change went *from* and *to* at the same time. The
+eye beside the title hides the overlay, and **Blink** flashes it on and off,
+because a thin highlight over busy imagery is easier to catch moving than still.
 **Clouds & shadows** sits beside it, one click, because cloud is the first thing
-that goes wrong in a reading and hunting for the switch that fixes it is the
-wrong first minute. It says which answer it is giving: Sentinel-2's own scene
-classification under a spectral index, and a guess from the picture — bright and
-colourless, or near-black — under the pixel methods. The Filters tab splits cloud
-from shadow and sets the mask margin, which grows the mask past the soft edge
-both tests leave behind.
+that goes wrong in a reading. It gives Detect's answer, not a guess: Sentinel-2's
+scene classification, grown into the unsure pixels around a real cloud, with
+classified "clouds" too small to be one ignored and each cloud cast away from the
+sun to find the shadows the classification missed — including the ones it read as
+water, which the other date settles. It is offered on a Sentinel-2 pair only,
+because that is where a classification exists; over a picture method it reads one
+small frame a side, fetched by the switch itself so that the highlights on screen
+are always the ones the switch describes.
+The Filters tab splits cloud from shadow and sets the mask margin in ground
+metres, which grows the mask past the soft edge the classification leaves.
 Detection, Display and Filters tabs separate the rest of the settings, with hover descriptions.
 The settings panel offers automatic/manual thresholds, tone matching, alignment,
 smoothing, cleanup, minimum area, class filters, palettes and heat/class/outline
-displays. Coverage, highlighted
-area and selectable change zones describe the result. These are candidate pixel
+displays. A spectral index skips the automatic threshold: it is highlighted past
+a stated index change, the line Detect draws, so panning cannot move it. Tone
+matching defaults to automatic, which means none on Sentinel-2 — two passes
+already corrected to surface reflectance have no exposure left to match, and
+matching them would erase a burn that covers most of the view — and a histogram
+on Esri releases, which carry two renderings. Coverage, highlighted
+area and selectable change zones describe the result, each zone carrying the same
+strength word a Detect candidate does: how far past the line it got. These are candidate pixel
 changes for inspection, not confirmed changes to objects.
 
-**Detect** sweeps a drawn area at native resolution and keeps what it found, for
-Wayback and Copernicus Sentinel-2. Setup reads as three numbered steps, in the
-order the work happens: an area, the imagery, then what to look for.
+**Detect** sweeps a drawn area of Copernicus Sentinel-2 at native resolution and
+keeps what it found. Every detector measures reflectance bands, which a rendered
+picture has already stretched away, so Wayback has nothing to give it. Setup reads
+as three numbered steps, in the order the work happens: an area, the imagery, then
+what to look for.
 
 Step 1 draws rectangles, polygons or circles, or takes the current view as a
-rectangle in one click, and prices the result before anything is fetched — ground
-area, native tiles, frames to fetch and roughly how long. A named area set can be
+rectangle in one click, and prices the result before anything is fetched: ground
+area, native tiles, Copernicus requests and roughly how long. Each date costs two
+requests a tile, the picture reviewed and the bands measured. A named area set can be
 saved for this case and reused. An area is grabbed by its edge: dragging inside
 one pans the map as it would anywhere else, a click on the edge shows its corner
 handles, and a press that does not travel selects without nudging the geometry.

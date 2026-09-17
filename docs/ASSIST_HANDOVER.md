@@ -13,23 +13,34 @@ the work lands in a release. What is *done* is described in
   is the only switch. `lib/map/compare.js` carries the grouping.
 - **No machine-learning model, and not as a fallback.** At Sentinel-2's 10 m a
   pixel a 30 m vessel is three pixels: there is no shape to recognise, and a
-  detector trained on shapes would do worse than the physics. So the two new
-  Copernicus methods read reflectance:
-  - `vessels` — CFAR on B08. Water absorbs near-infrared almost completely, so a
-    hull is an outlier against the sea *around it*; the background comes from a
-    ring with its middle punched out (`analyzers.local_contrast`), which is what
-    makes one threshold work on a calm lagoon and a sunlit swell alike.
-  - `hotspots` — the published short-wave test: B12 above an absolute floor and
-    high against B11 and B08. Cloud is bright in B12 too but bright in its
-    neighbours as well, so its ratios sit at one, and that is what rejects it.
-  Both ride on `sentinel.band_frame`, which already existed for spectral
-  indices. No new dependency: numpy and opencv-python-headless were already in.
-- **Preset names state what is measured, never what it means.** "Vessels on
-  water" is a claim about infrared contrast; "Boats" would have claimed
-  recognition. `signal_score` is signal strength and `confidence` stays null.
+  detector trained on shapes would do worse than the physics. Every method reads
+  a band product (`sentinel.DETECT_PRODUCTS`) and says what it measured.
+- **Detect is Copernicus-only.** Every method measures reflectance, which Wayback
+  pictures have already stretched away. Recipes and watches saved against Wayback
+  or a picture method still load: `colour`, `brightness` and `smoke` map to
+  `surface`, `water_objects` to `vessels`, and a Wayback source comes back undated.
+- **Thresholds come from real scenes.** Calibrated on Bab-el-Mandeb (glint, rough
+  sea), Singapore Strait (dense anchorage, cumulus), Gibraltar, Dover Strait
+  (empty sea), Rumaila flares, California and Cerrado wildfires, Jebel Ali roofs,
+  Egypt's new capital (seven months), Rondônia (dry season) and irrigated desert.
+  What each taught is next to the constant it set, in `engine/analyzers.py`:
+  - `vessels` needs near *and* short-wave infrared contrast against its own ring
+    of sea. Wave crests match hulls in B08 and not in B11. Non-water over 5 ha is
+    land. Sen2Cor calls hulls cloud, so classified cloud under 5 ha is ignored.
+  - `hotspots` is Murphy et al. 2016 on B8A, which shares B12's grid.
+  - `structure` is every band moving the same way with NDVI held; `spots` is a
+    change whose wider neighbourhood mostly held, measured against a ring with a
+    hole punched in it (`SPOT_GUARD`, `SPOT_RING`) — a median box the size of the
+    target read a 90 m mark in the Yemeni desert at 3.5% where it had moved 7%;
+    burn scars must end dark, because dry soil also has a negative NBR.
+  - The global shift between dates is removed but capped at 3%, or a burn
+    covering most of a tile erases itself.
+- **Names say what an analyst looks for.** A candidate carries `margin` (how far
+  past its threshold), a `strength` word and a `measure` in units; the catalogue
+  words each method's reading. `signal_score` and `confidence` are gone.
 - **Disk follows findings, not area.** `prune_frames` drops the frames of tiles
   that produced no candidate, which is what let `MAX_TILES` go from 256 to 4096
-  (313 km a side on Sentinel, 4.9 km on Wayback). The trade is stated in the
+  (313 km a side). The trade is stated in the
   panel and in UI.md: an offline rerun now covers what the tile cache still
   holds, not the whole of a past sweep.
 - **Detect leads the maps.** Inside the mode the A/B source cards are hidden and
@@ -50,23 +61,57 @@ the work lands in a release. What is *done* is described in
 - **Detect's drawing stays in Detect.** Areas and candidate layers render only
   in the mode that explains them. A kept candidate is a pin and shows wherever
   case work shows, which is the honest way for a result to outlive the mode.
+- **Difference reads the same sky as Detect.** `skyMask` in
+  `lib/map/changeDetect.js` is the browser's copy of `analyzers.sky`: the same
+  cloud classes, the same 5 ha floor, the same unsure edge and the same cast
+  away from the sun, turned by the map's bearing because a view can be. Both
+  sides of that port were calibrated on cumulus over the Beauce and over the
+  Kakhovka reservoir bed, which is what turned up the water rule below. The
+  browser gets the bytes from `change-*` frames whose alpha must stay the data
+  mask, because a canvas premultiplies it.
+- **A band frame is fetched by an act, then held.** Run and the cloud switch are
+  the two acts; a pan is not. Each frame is asked for with 20% of the view as
+  margin and kept in `changeCapture`, so a reading that follows the camera keeps
+  working inside that margin and reports `needsFetch` past it, leaving the last
+  reading up and marked out of date. The switch itself runs the reading: leaving
+  an unfiltered mask on screen under an "on" switch is how the first version of
+  this read as broken. There is no live/manual switch any more — the reading
+  always follows the camera, and the only question left is whether a request is
+  spent, which only Run and the cloud switch ever do.
+- **Water is only water when both dates say so.** Sen2Cor reads a deep cloud
+  shadow as water — a fifth of the Ukrainian scene — and a cast that spares
+  water found 0.3% of the shadow instead of 13.7%. Where a second pass exists,
+  `sky(…, other)` asks it; a single-date method (`vessels`) still spares water,
+  which is the sea it works on.
+- **Matching tones is off on Sentinel-2.** The default is `auto`: nothing on
+  Sentinel-2, a histogram on Esri releases. Two L2A passes are corrected and
+  rendered by one formula, so a match can only eat real change — it erased the
+  Cerrado burn, 74% of a tile, leaving 0.3% highlighted where 71% had been. Esri
+  releases carry two renderings and a median tone shift of 15 levels between
+  them, a quarter of the pairs past 25, so there a match still earns its place.
+  Cloud is left out of the estimate either way.
+- **A spectral index is thresholded, not split.** Otsu always finds a line, and
+  after the cloud came out it found one in the noise: 19% of a clear Amazon week
+  highlighted at the floor. Both modes now draw the line at a stated index
+  change, 0.25 at the default sensitivity.
+- **The picture cloud guess is gone.** "Bright and colourless, near-black"
+  marked 94% of Gibraltar and 100% of Dover as shadow — sea and forest — and
+  caught a fifth of the real cloud in Amazonia. The filter now appears on a
+  Sentinel-2 pair only, where a classification exists.
 - **"Watch" is the UI word for a follow-up.** The entity type id stays
   `analysis-follow-up`; renaming storage for a word nobody reads is not worth a
   migration.
 
 ## Still open
 
-1. **No tile halo.** `detect` runs per tile with no overlap; components crossing
-   a seam are merged afterwards by their boxes (`merge`), which can overmerge and
-   can split a target whose halves each fall under `min_area`. Needs boundary
-   tests before multi-tile results can be called robust.
-2. **Promotion saves one evidence part.** `promote` calls `preview_bytes(...)`
-   with the default `part=0`, so a candidate spanning several tiles promotes only
-   its first before/after. The promoted place also carries `evidence` as an
-   attribute rather than a formal link to the filed media.
-   `PREVIEW_EDGE`/`PREVIEW_MARGIN` decide how far the crop is enlarged; the zoom
-   is a whole number and nearest-neighbour on purpose, and that is worth keeping
-   whatever else changes there.
+1. **The tile halo is 32 px.** Products are read with `PAD` pixels of the
+   neighbours, enough for the vessel ring and a coastline, and a candidate
+   crossing a seam is merged and previewed as one stitched picture. Clouds more
+   than 306 m past the edge still cast no shadow into the tile.
+2. **The promoted place carries `evidence` as an attribute** rather than a
+   formal link to the filed media. `PREVIEW_EDGE`/`PREVIEW_MARGIN` decide how far
+   the crop is enlarged; the zoom is a whole number and nearest-neighbour on
+   purpose, and that is worth keeping whatever else changes there.
 3. **Preserved frames are trusted by filename.** `frame` reuses any
    `runs-*.assets/<key>.png` it finds without checking the recorded `sha256`
    against the bytes. The key is derived from the source and tile, not the
@@ -79,21 +124,32 @@ the work lands in a release. What is *done* is described in
    percent and `FULL_COVER = 0.98` is what counts as whole. It answers about the
    granule footprints, which is where imagery exists — not about cloud inside
    them, for which the scene's own figure is the only number on offer and it
-   covers a 110 km granule, not the area drawn. Wayback release dates are
-   publication dates, not acquisition dates. Both distinctions are in the UI
-   copy — keep them.
-6. **The picture cloud test is a guess and must stay opt-in.** Bright and
-   colourless is equally a cloud, a white roof, a gravel pad and fresh snow, and
-   nothing in a rendered image separates them. That is why it lives in its own
-   `guess_clouds` rather than riding on `ignore_clouds`, which means Sentinel-2's
-   scene classification and is on by default. Wiring the two together would
-   silently change what every saved colour recipe finds.
-7. **No measured benchmark.** Sequential bounded tiles are an argument about
-   memory, not a measurement, and no accuracy check against real imagery exists.
-   The detector tests use synthetic frames: they prove the method does what it
-   claims on a controlled input, not that it finds ships in the Bosphorus.
+   covers a 110 km granule, not the area drawn. The distinction is in the UI
+   copy; keep it.
+6. **`CLP`/`CLM` are not read.** On Copernicus Data Space they were zeros for
+   some acquisitions, a thick cloud included. If they become reliable they would
+   help thin cloud edges, but over desert they also flagged dark fields.
+7. **Calibration is visual, not a benchmark.** The scenes above were reviewed by
+   eye in true colour and SWIR, with no AIS or fire perimeter as ground truth.
+   Small boats and whitecaps stay hard to part at the Small size, and seasonal
+   urban shadows read as construction between February and September.
+8. **A size band drops what it finds, silently.** A candidate outside
+   `min_area`/`max_area` is found and then filtered, so a mark between two bands
+   reads as "nothing found". The bands are now written under the buttons and
+   **All** sets neither bound; what is still missing is a count of what the band
+   dropped, which would turn "nothing" into "three, all larger than Small".
+9. **Thin veils the classification misses still highlight.** A haze that neither
+   Sen2Cor nor its unsure class calls cloud leaves change around it. The
+   published multitemporal test (MAJA: blue reflectance rising against the other
+   date) was tried and dropped: on the Amazon pair it grew the mask from 33% to
+   48% of the scene for no drop in what was highlighted, and it would cost a
+   band and split the two modes' masks apart.
+10. **A cloud smaller than 5 ha in a zoomed-in view is not masked.** The floor is
+   ground area, so a small cumulus crossing a close view is ignored the same way
+   a white roof is. Detect has the same floor on a fixed grid, where it is the
+   right call; here the view can be anything.
 
-## Verification at handover
+## Verification at handover (Detect)
 
 - Backend: `2813 passed` (`pytest -q tests/ -p no:randomly`, 17 min).
   One caveat: under `pytest-randomly`'s default ordering a single unrelated test,

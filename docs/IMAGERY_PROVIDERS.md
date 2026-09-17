@@ -168,9 +168,10 @@ z14 ceiling. The JS widget is excluded because replacing it bills another load.
 
 ## Sentinel-2 is a dated mosaic, not a basemap
 
-Use the OGC WMTS endpoint. Catalog provides STAC metadata but no pixels. The
-Process API requires POST and evalscript, so band math remains deferred with
-Satellite Compare.
+Use the OGC WMTS endpoint for pictures. Catalog provides STAC metadata but no
+pixels. Band math goes through WMS GetMap with an `EVALSCRIPT` parameter rather
+than the Process API, which wants a POST and a separate token; see "Detect reads
+band products" below.
 
 ```
 https://sh.dataspace.copernicus.eu/ogc/wmts/{key}?SERVICE=WMTS&REQUEST=GetTile
@@ -280,6 +281,38 @@ detail. The swap is limited to those low-detail views.
 
 PU scales with **area**, so tile size is cost-neutral (1024 → 4 PU, 256 → 0.25 PU):
 Google's big-tile trick buys nothing here. 512 wins on the requests/min limit alone.
+
+### Detect reads band products, not pictures
+
+A Detect sweep fetches, for each tile and date, the WMTS picture the analyst
+reviews and one WMS band product the detector measures (`sentinel.DETECT_PRODUCTS`:
+`vessel`, `fire`, `surface`, `index-*`). Each product is four bytes a pixel, so one
+metered request carries everything a detector reads:
+
+- **The box is padded by 32 px** (`analyzers.PAD`, 306 m) on every side, so a ship's
+  background ring, a coastline and a cloud's edge do not stop at the tile border.
+  Checked against raw bands, the padded frame lands on the tile's grid exactly.
+- **Reflectance is stretched by a gain of 2** (1.6 for short-wave infrared in
+  `surface`). Glint puts open sea near 9% in the near-infrared; the old gain of 8
+  saturated at 12.5%, where hulls and wave crests read the same.
+- **The fourth byte is the sky**: the scene class in the low four bits and a flag
+  for near-infrared under 15%, which is what the engine casts cloud shadows onto.
+- **`CLP`/`CLM` are not used.** On Copernicus Data Space they come back as zeros for
+  some acquisitions, a thick cloud included, and over bright desert they flag dark
+  irrigated fields as cloud when they are there.
+- **Input bands cost processing units**, output bands do not: each product asks for
+  only the bands its detector reads, plus `SCL`.
+
+Products are cached beside their picture under `<variant>~<product>~v<N>`
+(`analyzers.product_cache_id`), so a rerun over the same dates spends nothing,
+and `PRODUCT_VERSION` keeps a frame from an older layout from being decoded as a
+newer one.
+
+Difference asks for the same bands over the view on screen (`sentinel.CHANGE_PRODUCTS`:
+`change-<index>`, and `change-sky` for the sky alone). Those frames are decoded in
+the browser, which draws them into a canvas, so alpha has to stay the data mask —
+a canvas premultiplies it — and the sky byte rides in green instead. Nothing is
+cached: the view is whatever the camera is on.
 
 ### The view goes deeper than the pixels
 
