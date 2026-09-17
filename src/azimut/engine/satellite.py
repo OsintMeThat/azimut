@@ -30,7 +30,6 @@ from . import countries
 from . import geo as geo_engine
 from . import links
 from . import media as media_engine
-from .. import layout
 
 # Saved work is places plus captures; a screenshot filed by the capture
 # extension is a capture with a different origin, not a third entity type.
