@@ -38,14 +38,17 @@ test('linked maps keep annotations on the ground through pan, modes and save', a
   await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2 + 40, { steps: 5 });
   await page.mouse.up();
   await expect(page.locator('.annotation-canvas .mark')).toHaveCount(2);
-  const before = await canvas.locator('path').getAttribute('d');
+  // The drawn outline, not the transparent band laid over it to be grabbed:
+  // both carry the same `d`, so a bare `path` matches two and settles nothing.
+  const outline = canvas.locator('.mark > path:not(.edge)');
+  const before = await outline.getAttribute('d');
   await page.mouse.move(box.x + 100, box.y + 100);
   await page.mouse.down();
   await page.mouse.move(box.x + 180, box.y + 140, { steps: 8 });
   await page.mouse.up();
-  await expect(canvas.locator('path')).not.toHaveAttribute('d', before);
+  await expect(outline).not.toHaveAttribute('d', before);
   await expect.poll(async () => {
-    const paths = await page.locator('.annotation-canvas .mark path').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('d')));
+    const paths = await page.locator('.annotation-canvas .mark > path:not(.edge)').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('d')));
     const numbers = paths.map((path) => path.match(/-?\d+(?:\.\d+)?/g).map(Number));
     return Math.max(...numbers[0].map((n, i) => Math.abs(n - numbers[1][i])));
   }).toBeLessThan(1);
