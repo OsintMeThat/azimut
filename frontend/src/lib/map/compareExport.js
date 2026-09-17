@@ -4,7 +4,7 @@
  * This composes pixels, not the Compare DOM: provider menus, zoom buttons and
  * the swipe handle are controls. The picture is the two aligned images plus
  * what explains them: which source and date each side is, where the camera
- * was, a scale bar and north arrow, the Change assist legend, the credits, and
+ * was, a scale bar and north arrow, the Difference legend, the credits, and
  * the annotations projected onto the ground they were pinned to.
  *
  * Everything is placed from each side's camera frame (`groundFrame.js`), so

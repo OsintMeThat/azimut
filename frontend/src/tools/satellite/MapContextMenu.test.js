@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render } from 'svelte/server';
 import MapContextMenu from './MapContextMenu.svelte';
+import { actionsFor } from '../../lib/map/contextMenu.js';
 
 function props(overrides = {}) {
   return {
@@ -58,5 +59,18 @@ describe('the right-click menu', () => {
     expect(
       render(MapContextMenu, { props: props({ lookup: { error: 'Lookup failed: offline' } }) }).body
     ).toContain('Lookup failed: offline');
+  });
+
+  it('shows only the acts the tool passed, never a row that would do nothing', () => {
+    const { body } = render(MapContextMenu, {
+      props: props({ actions: actionsFor(['lookup', 'place', 'measure']) }),
+    });
+    expect(body).toContain('Measure from here');
+    expect(body).not.toContain('Sun and moon from here');
+    expect(body).not.toContain('Imagery history here');
+    expect(body).not.toContain('Centre the map here');
+    // The point is still copyable and still opens elsewhere: those are not acts.
+    expect(body).toContain('DMS');
+    expect(body).toContain('Open in…');
   });
 });

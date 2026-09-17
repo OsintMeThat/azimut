@@ -4,7 +4,8 @@
 
   let { annotations = [], engine, letter = 'a', units = 'metric', active = true,
     tool = $bindable('select'), selectedId = $bindable(null), colour = '#f6a81a',
-    strokeWidth = 4, fillOpacity = 0, annotationSide = 'both', editVertices = false, onchange = () => {} } = $props();
+    strokeWidth = 4, fillOpacity = 0, annotationSide = 'both', editVertices = false,
+    edgeOnly = false, onchange = () => {} } = $props();
   let svg = $state();
   let revision = $state(0);
   let draft = $state(null);
@@ -13,6 +14,10 @@
 
   /** Below this, a pointer press is a click: a shape is picked, never nudged. */
   const DRAG_SLOP = 4;
+  // A note is a single anchor and a freehand stroke is hundreds of them, so
+  // neither gains anything from grips: one is already dragged whole, the other
+  // would be buried under its own handles.
+  const GRIPPED = new Set(['arrow', 'line', 'measure', 'rect', 'ellipse', 'polygon']);
 
   $effect(() => {
     if (!engine) return;
@@ -35,7 +40,7 @@
   const marks = $derived.by(() =>
     [...annotations.filter((mark) => onSide(mark, letter)), ...(draft ? [draft] : [])]
       .map((mark) => ({ mark, shape: projectMark(mark, project), label: markLabel(mark, units),
-        vertices: editVertices ? mark.points.map(project) : [] }))
+        vertices: editVertices && GRIPPED.has(mark.kind) ? mark.points.map(project) : [] }))
   );
   const pathOf = (shape) => shape.path.map(([x, y], i) => `${i ? 'L' : 'M'}${x},${y}`).join(' ') + (shape.closed ? ' Z' : '');
   function point(event) {
@@ -48,11 +53,42 @@
     return { id: crypto.randomUUID(), kind: tool, side: annotationSide, colour, points,
       stroke_width: strokeWidth, fill_opacity: fillOpacity, font_size: 16, text: '' };
   }
+  /**
+   * Anchor the tool in hand at a ground point and let the pointer draw the rest.
+   *
+   * The right-click menu acts on the point under the cursor, so a measure
+   * started there already has its first end; the second is taken by the next
+   * click rather than by a drag that would have to start somewhere else.
+   */
+  export function startFrom(at) {
+    if (!at || tool === 'select' || tool === 'text' || tool === 'polygon') return;
+    draft = makeMark([at, at]);
+    gesture = { kind: 'trail', start: at };
+  }
+
+  /** The trailing end is set: keep the mark if it spans more than a click. */
+  function settle() {
+    const first = project(draft.points[0]);
+    const last = project(draft.points.at(-1));
+    if (Math.hypot(last[0] - first[0], last[1] - first[1]) >= 3) {
+      onchange([...annotations, draft], true);
+      selectedId = draft.id;
+    }
+    draft = null;
+    gesture = null;
+    tool = 'select';
+  }
+
   function begin(event) {
     if (!active || tool === 'select' || event.button > 0) return;
     const at = point(event);
     if (!at) return;
     event.preventDefault();
+    if (gesture?.kind === 'trail' && draft) {
+      draft = { ...draft, points: [draft.points[0], at] };
+      settle();
+      return;
+    }
     if (tool === 'text') {
       editor = { mark: makeMark([at]), value: '' };
       return;
@@ -78,6 +114,10 @@
   function move(event) {
     const at = point(event);
     if (!at) return;
+    if (gesture?.kind === 'trail') {
+      if (draft) draft = { ...draft, points: [draft.points[0], at] };
+      return;
+    }
     if (gesture && !dragging(event)) return;
     if (gesture?.kind === 'vertex') {
       const points = gesture.mark.points.map((p, i) => i === gesture.index ? at : p);
@@ -93,7 +133,9 @@
     }
   }
   function finish(event) {
-    if (!gesture) return;
+    // A trail is armed, not held: it ends on the next click, not on the release
+    // of whatever press happened to be in flight.
+    if (!gesture || gesture.kind === 'trail') return;
     move(event);
     svg.releasePointerCapture?.(event.pointerId);
     if (gesture.kind === 'move' || gesture.kind === 'vertex') {
@@ -157,6 +199,33 @@
     editor = null;
     tool = 'select';
   }
+  // Clicking the ground beside a mark lets it go. With Select in hand the map
+  // owns the pointer, so that press never reaches this canvas and has to be read
+  // off the document: only a press on a map surface counts, because the rail and
+  // the panels are where a selected mark is worked on. A drag is a pan, not a
+  // click, so the selection survives one. A Detect area is left out — its middle
+  // belongs to the map, so a look inside one would drop the panel's own pick.
+  $effect(() => {
+    if (!active || !selectedId || tool !== 'select' || edgeOnly) return;
+    let from = null;
+    const down = (event) => {
+      if (event.button > 0 || event.target?.closest?.('.annotation-canvas')) return;
+      from = event.target?.closest?.('.map-wrap') ? { x: event.clientX, y: event.clientY } : null;
+    };
+    const up = (event) => {
+      if (from && Math.hypot(event.clientX - from.x, event.clientY - from.y) < DRAG_SLOP) {
+        selectedId = null;
+      }
+      from = null;
+    };
+    document.addEventListener('pointerdown', down, true);
+    document.addEventListener('pointerup', up, true);
+    return () => {
+      document.removeEventListener('pointerdown', down, true);
+      document.removeEventListener('pointerup', up, true);
+    };
+  });
+
   onMount(() => {
     const key = (event) => {
       if (!active || event.target?.closest?.('input, textarea, select')) return;
@@ -175,18 +244,18 @@
   onpointercancel={finish} ondblclick={finishPolygon}>
   {#each marks as { mark, shape, label, vertices } (mark.id)}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <g class="mark" class:area={editVertices} class:selected={selectedId === mark.id} style:color={mark.colour}
+    <g class="mark" class:area={edgeOnly} class:selected={selectedId === mark.id} style:color={mark.colour}
       onpointerdown={(event) => select(event, mark)} ondblclick={(event) => edit(event, mark)}>
       {#if mark.kind !== 'text'}
         <path d={pathOf(shape)} stroke={mark.colour} stroke-width={mark.stroke_width}
           fill={shape.closed ? mark.colour : 'none'} fill-opacity={mark.fill_opacity}
           stroke-dasharray={mark.kind === 'measure' ? '8 6' : undefined} />
-        {#if editVertices}
-          <!-- An area is grabbed by its edge. Its middle belongs to the map, so
-               dragging inside one pans as it would anywhere else. -->
-          <path class="edge" d={pathOf(shape)} fill="none" stroke="transparent"
-            stroke-width={Math.max(16, mark.stroke_width * 4)} />
-        {/if}
+        <!-- A band along the outline, wide enough to hit: a 4px arrow is a
+             target nobody can reliably click twice. For an area it is the only
+             target, its middle belonging to the map so dragging inside one pans
+             as it would anywhere else. -->
+        <path class="edge" d={pathOf(shape)} fill="none" stroke="transparent"
+          stroke-width={Math.max(16, mark.stroke_width * 4)} />
         {#if shape.head}<polygon points={shape.head.map((p) => p.join(',')).join(' ')} fill={mark.colour} />{/if}
       {/if}
       {#if label}
@@ -221,9 +290,9 @@
   .annotation-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 550; pointer-events: none; overflow: hidden; }
   .annotation-canvas.drawing { pointer-events: auto; cursor: crosshair; touch-action: none; }
   .mark { pointer-events: visiblePainted; cursor: move; }
+  .mark .edge { pointer-events: stroke; cursor: move; }
   .mark.area { pointer-events: none; }
-  .mark.area .edge { pointer-events: stroke; cursor: move; }
-  .drawing .mark { pointer-events: none; }
+  .drawing .mark, .drawing .mark .edge { pointer-events: none; }
   .vertex { pointer-events: auto; cursor: crosshair; }
   .vertex .grip { pointer-events: all; }
   .mark path { stroke-linecap: round; stroke-linejoin: round; }

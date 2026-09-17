@@ -42,6 +42,18 @@ export const ACTIONS = [
   { id: 'centre', label: 'Centre the map here', icon: 'crosshair' },
 ];
 
+/**
+ * The acts a tool can actually perform, in the order above.
+ *
+ * Satellite offers all of them; Compare has no sun panel and no measure rail,
+ * so it asks for the subset it can honour rather than showing rows that do
+ * nothing. The order stays the list's, not the caller's, so the menu reads the
+ * same wherever it opens.
+ */
+export function actionsFor(ids) {
+  return ACTIONS.filter((action) => ids.includes(action.id));
+}
+
 /** The external maps, opened on the clicked point at the current zoom. */
 export function openRows(lat, lon, zoom) {
   const round = (value) => Number(value.toFixed(6));

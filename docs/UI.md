@@ -1347,7 +1347,21 @@ Annotations store longitude/latitude points and stay on their ground through pan
 zoom and rotation. Notes, arrows, boxes, ellipses, lines, freehand strokes, distance
 measures and polygons can belong to A, B or both. Polygon drawing ends with a
 double-click or Enter; Escape cancels. Select a mark to move it or edit its style,
-double-click a note to edit its text, and use Undo/Redo for annotation changes.
+double-click a note to edit its text, and use Undo/Redo for annotation changes. A
+selected mark shows its corner handles, so its geometry is corrected where it was
+drawn rather than deleted and redrawn; a note is dragged whole and has none.
+Every mark carries a wide invisible band along its outline, because a four-pixel
+arrow is a target nobody hits twice. Clicking the ground beside a mark lets it go;
+dragging the map is a pan and keeps it. The tool rail packs into two columns, like
+Proof Maker's, so it stays short enough to fit a laptop window. Its colour, width
+and fill panels close on Escape, on their own button, on a press anywhere else,
+and with the button behind them when the selection is dropped.
+
+**Right-click the ground** here too, on either map, for the acts Compare can
+honour: copy the point in every coordinate format, ask what is there, save a
+place there, or start a distance measure from it — the annotation of the same
+name, anchored on the point and closed by the next click. The rows Satellite
+offers for its own rails are left out rather than shown dead.
 
 **Save comparison** writes the editable version-2 session under `.compare/` and
 updates its rendered media preview in My work (PNG, or GIF for blink). A preview

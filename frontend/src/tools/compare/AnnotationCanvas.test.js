@@ -68,11 +68,61 @@ it('treats a press that does not travel as a selection, never as a move', () => 
   expect(onchange.mock.calls.at(-1)[1]).toBe(true);   // one entry to undo, at the end
 });
 
-it('gives an area an edge to grab, so its middle still belongs to the map', () => {
-  stage({ annotations: [area()], editVertices: true, tool: 'select' });
+it('gives every mark an edge to grab, and an area nothing else', () => {
+  stage({ annotations: [area()], tool: 'select' });
   expect(target.querySelectorAll('.edge')).toHaveLength(1);
+  expect(target.querySelector('.mark').classList.contains('area')).toBe(false);
   unmount(live);
 
-  stage({ annotations: [area()], tool: 'select' });
-  expect(target.querySelectorAll('.edge')).toHaveLength(0);
+  // Only a Detect area gives its middle back to the map; an annotation stays
+  // grabbable anywhere it is painted.
+  stage({ annotations: [area()], edgeOnly: true, tool: 'select' });
+  expect(target.querySelector('.mark').classList.contains('area')).toBe(true);
+});
+
+it('hands the selected mark its handles, and leaves a note without any', () => {
+  stage({ annotations: [area()], editVertices: true, selectedId: 'z1', tool: 'select' });
+  expect(target.querySelectorAll('.vertex')).toHaveLength(2);
+  unmount(live);
+
+  const note = { ...area(), kind: 'text', points: [[1, 1]], text: 'Here' };
+  stage({ annotations: [note], editVertices: true, selectedId: 'z1', tool: 'select' });
+  expect(target.querySelectorAll('.vertex')).toHaveLength(0);
+});
+
+it('lets a mark go when the ground beside it is clicked, but not when the map is panned', () => {
+  const map = document.createElement('div');
+  map.className = 'map-wrap';
+  document.body.append(map);
+  stage({ annotations: [area()], editVertices: true, selectedId: 'z1', tool: 'select' });
+  const selected = () => target.querySelector('.mark').classList.contains('selected');
+  expect(selected()).toBe(true);
+
+  press(map, 'pointerdown', 300, 200);
+  press(map, 'pointerup', 380, 240);
+  expect(selected()).toBe(true);              // a drag is a pan, and keeps the pick
+
+  press(map, 'pointerdown', 300, 200);
+  press(map, 'pointerup', 301, 200);
+  expect(selected()).toBe(false);
+  map.remove();
+});
+
+it('anchors a measure on a point handed to it, and closes it on the next click', () => {
+  const onchange = vi.fn();
+  const svg = stage({ annotations: [], editVertices: true, tool: 'measure', onchange });
+  live.startFrom([1, 1]);
+  flushSync();
+
+  // Armed, not held: the release of whatever press was in flight keeps it open.
+  press(svg, 'pointerup', 10, 10);
+  expect(onchange).not.toHaveBeenCalled();
+
+  press(svg, 'pointermove', 60, 10);
+  press(svg, 'pointerdown', 60, 10);
+  const [saved, commit] = onchange.mock.calls.at(-1);
+  expect(commit).toBe(true);
+  expect(saved[0].kind).toBe('measure');
+  expect(saved[0].points[0]).toEqual([1, 1]);
+  expect(saved[0].points[1][0]).toBeCloseTo(6);
 });

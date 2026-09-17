@@ -39,24 +39,27 @@ const SESSION = {
   },
 };
 
+const SIZES = {
+  small: { min_area: 0, max_area: 0, cleanup: 0, smoothing: 0, merge_metres: 0 },
+  medium: { min_area: 2000, max_area: 0, cleanup: 1, smoothing: 0, merge_metres: 30 },
+  large: { min_area: 20000, max_area: 0, cleanup: 1, smoothing: 1, merge_metres: 100 },
+};
 const RECIPE = {
-  id: 'pair', name: 'Large surface change', description: 'Changes to review',
-  phenomenon: 'Change', method: 'colour', providers: ['esri-wayback', 'sentinel2'], zones: [],
-  colour: '#f6a81a', style: 'both',
-  parameters: { sensitivity: 55, min_area: 20, min_score: 0, cleanup: 1, smoothing: 0,
-    normalize: false, index: 'ndvi', direction: 'both', ignore_clouds: true,
-    ignore_shadows: true, merge_metres: 0 },
+  id: 'pair', name: 'Any surface change', description: 'Reflectance that moved',
+  phenomenon: 'Change', method: 'surface', zones: [], colour: '#f6a81a', style: 'both',
+  parameters: { sensitivity: 67, ...SIZES.medium, index: 'ndvi', direction: 'both',
+    ignore_clouds: true, ignore_shadows: true, cloud_margin: 5 },
 };
 const ANALYZERS = {
-  builtins: [RECIPE, { ...RECIPE, id: 'solo', name: 'Vessels on water', method: 'vessels',
-    providers: ['sentinel2'] }],
+  builtins: [RECIPE, { ...RECIPE, id: 'solo', name: 'Vessels', method: 'vessels' }],
   custom: [],
   methods: [
-    { id: 'colour', label: 'Colour change', single: false, sentinel_only: false, classes: false },
-    { id: 'vessels', label: 'Infrared contrast over water', single: true, sentinel_only: true, classes: true },
+    { id: 'surface', label: 'Any reflectance change', single: false, clouds: true, sizes: SIZES,
+      measure: 'Reflectance moved by {value}%' },
+    { id: 'vessels', label: 'Vessels', single: true, clouds: true, sizes: SIZES,
+      measure: '{value}× brighter than the water around it' },
   ],
-  max_tiles: 4096, max_results: 2000,
-  grids: { sentinel2: [13, 512], 'esri-wayback': [19, 256] },
+  max_tiles: 4096, max_results: 2000, grid: [13, 512],
 };
 
 const get = vi.fn(async (path) => {
@@ -99,6 +102,7 @@ const caseState = { current: { id: 'case-a' } };
 vi.mock('../lib/state.svelte.js', () => ({
   caseState,
   ensureCase,
+  fmtCoords: (lat, lon) => `${lat.toFixed(5)}, ${lon.toFixed(5)}`,
   prefs: { homeView: { lat: 48.8566, lon: 2.3522, zoom: 16 }, units: 'metric' },
   prefsReady: Promise.resolve(),
   reloadCase,
@@ -488,6 +492,59 @@ describe('Compare', () => {
     );
   });
 
+  it('acts on the right-clicked point, offering only what Compare can honour', async () => {
+    await open();
+    await add('A');
+    await add('B');
+    engines[0].handlers.contextmenu({ lat: 43.3, lon: 5.4, x: 120, y: 90 });
+    flushSync();
+
+    const menu = target.querySelector('[role="menu"]');
+    expect(menu.textContent).toContain('What is here?');
+    expect(menu.textContent).toContain('Save place here…');
+    expect(menu.textContent).toContain('Measure from here');
+    expect(menu.textContent).not.toContain('Sun and moon from here');
+    expect(menu.textContent).not.toContain('Imagery history here');
+    // It belongs to the surface it opened on, and travels with it.
+    expect(target.querySelector('.surface-shell.primary [role="menu"]')).not.toBeNull();
+
+    button('Measure from here', menu).click();
+    await settle();
+    expect(target.querySelector('[role="menu"]')).toBeNull();
+    expect(target.querySelector('button[title^="Measure"]').getAttribute('aria-pressed')).toBe('true');
+
+    // The first end is the point that was clicked; the next click takes the other.
+    const canvas = target.querySelector('[aria-label="Annotations on imagery A"]');
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 600 });
+    canvas.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 200, clientY: 90 }));
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 200, clientY: 90 }));
+    flushSync();
+    const drawn = [...target.querySelectorAll('.surface-shell.primary .mark path')];
+    expect(drawn.some((path) => path.getAttribute('stroke-dasharray') === '8 6')).toBe(true);
+  });
+
+  it('saves a place on the right-clicked point without leaving the comparison', async () => {
+    await open();
+    await add('A');
+    await add('B');
+    engines[1].handlers.contextmenu({ lat: 43.3, lon: 5.4, x: 40, y: 40 });
+    flushSync();
+    expect(target.querySelector('.surface-shell.secondary [role="menu"]')).not.toBeNull();
+
+    button('Save place here…', target.querySelector('[role="menu"]')).click();
+    await settle();
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog.textContent).toContain('Save place');
+    dialog.querySelector('#place-title').value = 'New quay';
+    dialog.querySelector('#place-title').dispatchEvent(new Event('input', { bubbles: true }));
+    button('Save', dialog).click();
+    await settle();
+    expect(post).toHaveBeenCalledWith(
+      '/api/cases/case-a/satellite/place',
+      expect.objectContaining({ lat: 43.3, lon: 5.4, title: 'New quay' })
+    );
+  });
+
   it('saves a reopenable session and restores sources, layers, mode and camera', async () => {
     await open();
     await add('A');
@@ -534,10 +591,10 @@ describe('Compare', () => {
     const dock = () => target.querySelector('.cmp-dock');
     const stage = () => target.querySelector('.compare-stage');
     expect(stage().classList.contains('solo')).toBe(false);
-    // Inside it, one place to choose imagery, and the maps follow it: world
-    // imagery on A and Wayback on B is no pair, so the step takes the wheel.
+    // Inside it, one place to choose imagery, and the maps follow it: Detect
+    // reads Sentinel-2 bands, so world imagery and Wayback hand over the wheel.
     expect(target.querySelector('.source-bar')).toBeNull();
-    expect(dock().textContent).toContain('so they now show the one below');
+    expect(dock().textContent).toContain('Detect reads Sentinel-2, so the maps now show it.');
     expect(target.querySelectorAll('.surface-shell .map')).toHaveLength(2);
 
     const picker = target.querySelector('select[aria-label="Analyzer"]');
