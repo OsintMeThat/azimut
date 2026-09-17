@@ -155,20 +155,28 @@ def enqueue(case: "CaseType", rel_media: str) -> dict[str, Any]:
 
 
 def on_register(case: "CaseType", rel_media: str, sha256: str, kind: str) -> str | None:
-    """Decide a freshly-registered media file's thumbnail. Cheap image thumbnails
-    render inline (instant feedback); a failed image render and every video are
-    handed to the durable queue. Returns the thumbnail path if produced inline,
-    else None (the worker fills it in and updates the sidecar)."""
+    """Render a freshly-registered media file's thumbnail inline when that is
+    cheap (an image). Returns the thumbnail path, or None when the file needs the
+    queue instead: every video, and an image whose inline render failed.
+
+    It never queues. The caller writes the sidecar first and then calls
+    `queue_if_missing`, because the worker can claim a job the moment it exists
+    and reads that sidecar back to record its result."""
     if kind == "image":
         try:
             return generate(case, rel_media, sha256, kind)
         except ThumbnailError:
-            enqueue(case, rel_media)
             return None
-    if kind == "video":
-        enqueue(case, rel_media)
-        return None
     return None
+
+
+def queue_if_missing(case: "CaseType", rel_media: str, kind: str, thumbnail: str | None) -> None:
+    """Hand a registered file with no thumbnail yet to the durable queue. Called
+    once its sidecar and index row exist: queued earlier, a quick worker found no
+    sidecar and dropped the job, or set the thumbnail only to have the sidecar
+    write that followed put it back to None."""
+    if kind in ("image", "video") and not thumbnail:
+        enqueue(case, rel_media)
 
 
 # -- the enqueued (CPU-heavy) path -----------------------------------------

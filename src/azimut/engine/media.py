@@ -391,8 +391,8 @@ def _register(
     rel_path = f"media/{media_path.name}"
     kind = media_kind(media_path.name)
     # Cheap image thumbnails render inline for instant feedback; a failed image
-    # render and every (CPU-heavy) video are queued to the single worker, which
-    # fills the sidecar in later via `set_thumbnail`.
+    # render and every (CPU-heavy) video are queued to the single worker once the
+    # sidecar exists, and the worker fills it in later via `set_thumbnail`.
     thumb_rel = thumbnail_engine.on_register(case, rel_path, digest, kind)
 
     display_name = media_path.stem
@@ -423,6 +423,7 @@ def _register(
     )
     indexed = {**sidecar, "path": rel_path}
     case.upsert_media_item(indexed, entity_id=entity["id"])
+    thumbnail_engine.queue_if_missing(case, rel_path, kind, thumb_rel)
     # Enrichment runs after the sidecar and index row exist: the handler reads
     # the item back, and the worker can claim the job the moment it is queued.
     enrich_engine.on_register(case, rel_path, kind, entity["id"])
@@ -584,6 +585,7 @@ def relink_existing(
         old_sidecar = _sidecar_path(case.resolve_inside(old_rel))
         if old_sidecar != _sidecar_path(media_path):
             old_sidecar.unlink(missing_ok=True)
+        thumbnail_engine.queue_if_missing(case, rel_path, kind, thumbnail)
         enrich_engine.on_register(case, rel_path, kind, entity_id)
         return {"entity": updated, "item": indexed}
 
@@ -719,6 +721,7 @@ def replace_rendered_bytes(
             )
         indexed = {**item, "path": rel_path}
         case.upsert_media_item(indexed, entity_id=entity["id"] if entity else None)
+        thumbnail_engine.queue_if_missing(case, rel_path, kind, item["thumbnail"])
         return {"entity": entity, "item": indexed}
 
 
