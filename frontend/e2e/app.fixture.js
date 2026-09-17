@@ -21,6 +21,14 @@ const TILE_PNG = Buffer.from(
   'base64'
 );
 
+// A reference overlay is transparent but for the lines it draws. The fixture
+// answers with nothing drawn at all, so a layer that is on never paints over
+// what a spec is looking at underneath it.
+const CLEAR_TILE_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAEklEQVR4nGNgGAWjYBSMAggAAAQQAAFVN1rQAAAAAElFTkSuQmCC',
+  'base64'
+);
+
 const media = [{
   path: PANEL_PATH,
   filename: 'panel.svg',
@@ -679,17 +687,21 @@ function fixtureTemporalReading(raw) {
 export async function installAppFixture(page, options = {}) {
   const unexpected = [];
   const labelTiles = [];
+  const referenceTiles = [];
   const captures = [];
   const placeWrites = [];
   const proofSaves = [];
   const fixtureSavedIndex = options.savedIndex ?? savedIndex;
   const fixtureProofIndex = options.proofIndex ?? [];
+  // Located files as the Media position reads them (GET /satellite/media).
+  const fixtureMediaIndex = options.mediaIndex ?? [];
   const fixtureMedia = (options.media ?? media).map((item) => ({ ...item }));
   const fixtureCases = options.cases ?? [caseOverview];
   const fixtureProviders = options.widget ? [...providers, WIDGET_PROVIDER] : providers;
   const widgetLoads = [];
   const fixtureSavedIndexes = options.savedIndexes ?? { [CASE_ID]: fixtureSavedIndex };
   const fixtureProofIndexes = options.proofIndexes ?? { [CASE_ID]: fixtureProofIndex };
+  const fixtureMediaIndexes = options.mediaIndexes ?? { [CASE_ID]: fixtureMediaIndex };
   const savedIndexDelays = options.savedIndexDelays ?? {};
   const proofIndexDelays = options.proofIndexDelays ?? {};
   const caseDelays = options.caseDelays ?? {};
@@ -942,6 +954,14 @@ export async function installAppFixture(page, options = {}) {
     if (url.hostname.endsWith('.basemaps.cartocdn.com')) {
       labelTiles.push(request.url());
       return route.fulfill({ contentType: 'image/png', body: TILE_PNG });
+    }
+
+    // Esri's reference layers are drawn straight from their host too, and
+    // Borders is the one layer the map opens with — so every map spec asks for
+    // these. Answered here, so no run touches the network to draw a border.
+    if (url.hostname === 'services.arcgisonline.com') {
+      referenceTiles.push(request.url());
+      return route.fulfill({ contentType: 'image/png', body: CLEAR_TILE_PNG });
     }
 
     if (url.hostname !== '127.0.0.1') {
@@ -1310,6 +1330,9 @@ export async function installAppFixture(page, options = {}) {
         await new Promise((resolve) => setTimeout(resolve, savedIndexDelays[caseId]));
       }
       return json(route, fixtureSavedIndexes[caseId] ?? []);
+    }
+    if (caseId && path === `/api/cases/${caseId}/satellite/media`) {
+      return json(route, fixtureMediaIndexes[caseId] ?? []);
     }
     if (caseId && path === `/api/cases/${caseId}/proofs/index`) {
       if (proofIndexDelays[caseId]) {
@@ -1944,6 +1967,7 @@ export async function installAppFixture(page, options = {}) {
     captures,
     placeWrites,
     labelTiles,
+    referenceTiles,
     widgetLoads,
     gridWrites,
     skyQueries,
@@ -1980,13 +2004,28 @@ export async function installAppFixture(page, options = {}) {
 }
 
 /**
+ * Put the Saved panel, and the layer drawing from it, on one position.
+ *
+ * The panel opens on **Media**, so a spec about places, captures or proofs asks
+ * for its own position rather than assuming the one it used to open on.
+ */
+export async function showSaved(page, kind = 'All') {
+  await page
+    .getByRole('group', { name: 'What this panel lists' })
+    .getByRole('button', { name: kind, exact: true })
+    .click();
+}
+
+/**
  * Wait for the map to be up.
  *
  * The signal is `lib/map`'s own ready flag, not a class the engine happens to
  * put on its container: a suite that recognises the engine is a suite pinned to
  * it, and swapping the engine (SPEC v3) would then rewrite every map spec.
+ *
+ * `maps` is how many the screen puts up — two, on Compare's linked pair.
  */
-export async function awaitMapReady(page) {
+export async function awaitMapReady(page, maps = 1) {
   // The runner's Firefox has no WebGL and cannot be given any: it asks for a
   // native driver, a box with no GPU has none, and the software path a patched
   // build would take is not there — `tryNativeGL()`, then `EXHAUSTED_DRIVERS`,
@@ -2002,7 +2041,9 @@ export async function awaitMapReady(page) {
     !!process.env.CI && test.info().project.name === 'firefox',
     'the runner\'s Firefox has no WebGL; Chromium answers for the map there'
   );
-  await expect(page.locator('.map[data-map-ready="true"]')).toBeVisible();
+  const ready = page.locator('.map[data-map-ready="true"]');
+  await expect(ready).toHaveCount(maps);
+  await expect(ready.first()).toBeVisible();
 }
 
 /**

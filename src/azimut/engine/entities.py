@@ -531,8 +531,17 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
     EntityType("capture", "Capture", COLLECTED, "satellite", ATTESTATION,
                hint="a map screenshot, with the provider and view it was taken from"),
     # -- documents ------------------------------------------------------------
+    # `when` is the one fact a proof states that its own pixels cannot: the file
+    # it rests on may carry no date at all, and the date a video was uploaded is
+    # not the date it was shot. The composer writes it, and it is what puts the
+    # proof on the Timeline (`engine/timeline.project_entity`) rather than only
+    # the day it was filed.
     EntityType("proof", "Proof", DOCUMENT, "proof", ATTESTATION,
-               hint="a composed panel image, exported and still editable"),
+               hint="a composed panel image, exported and still editable",
+               attrs=(
+                   Attr("when", "Taken", kind="temporal",
+                        hint="when the material this proof rests on was taken"),
+               )),
     EntityType("post", "Post", DOCUMENT, "post", DELIVERABLE,
                hint="a prepared thread or report, saved rather than published"),
     EntityType("note", "Note", DOCUMENT, "note", ANNEX,
@@ -546,6 +555,16 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
                hint="a CSV table in the case, edited as a grid"),
     EntityType("inspect-session", "Inspect session", DOCUMENT, "inspect", ANNEX,
                hint="saved adjustments over one file, which die with it"),
+    EntityType("compare-session", "Compare session", DOCUMENT, "compare", ANNEX,
+               hint="two map sources, their layers and the shared camera"),
+    EntityType("analysis-zones", "Analysis areas", DOCUMENT, "polygon", ANNEX,
+               hint="saved geographic areas reusable by any Compare analyzer"),
+    # Named "watch" everywhere a user reads it: the type id is storage, and
+    # renaming that would migrate files for a word nobody sees.
+    EntityType("analysis-follow-up", "Analysis watch", DOCUMENT, "clock", ANNEX,
+               hint="an analyzer, its areas and a date rule, rerun on demand"),
+    EntityType("analysis-run", "Analysis run", DOCUMENT, "changes", ANNEX,
+               hint="candidate detections with frozen inputs and review decisions"),
     # The page a claim rests on. `url` and `fetched_at` are written by whatever
     # filed it — the extension is on the page, so the server stamps the moment it
     # was seen — and are not declared here: a declared attr is a field an analyst

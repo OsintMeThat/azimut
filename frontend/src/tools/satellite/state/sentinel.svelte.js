@@ -315,6 +315,9 @@ export function createSentinelState({ place, onBilled, notify, api }) {
     get date() {
       return date;
     },
+    set date(value) {
+      date = validDay(value) ? value : '';
+    },
     get maxcc() {
       return maxcc;
     },

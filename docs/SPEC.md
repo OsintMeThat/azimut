@@ -54,10 +54,12 @@ azimut/        # everything Azimut owns; the rest of the folder is yours
   sheets/      # case sheets as plain CSV; .meta/ holds the grid's own state
   media/       # source + captured + extracted media; .meta/ holds the sidecars
   proofs/      # exported PNGs; .meta/ holds the specs and pasted images
-  exports/     # notes as PDF, analysis plates, and yours to fill
+  exports/     # finished exports and yours to fill
   .data/       # case.db, the authoritative SQLite graph, and entity photos
   .drafts/     # post drafts
   .inspect/    # saved Inspect session specs
+  .compare/    # saved Compare session specs
+  .analysis/   # Detect areas, watches, runs and the frames behind their results
   .search/     # saved Grid Search state
   .trash/      # recoverable artifact payloads, in numbered slots
 ```
@@ -153,24 +155,32 @@ proof for publication.
 | ✅ **Imported proofs** | Turns a published post into a composed proof: every picture a panel, its text read for a position, the addresses it points at fetched as material, and nothing filed before the preview is approved. |
 | ✅ **Import origin** | States one origin for a whole import, offers it to a batch that landed without one, and corrects any file later from Details. |
 | ✅ **Drawing on a proof** | Stamps a fixed set of marks, fills boxes and ellipses at a chosen opacity, keeps every shape tool in hand, and recolours, restyles, nudges, drags or deletes a picked family at once. |
-| ✅ **A proof of several points** | States every place a proof argues, each optionally named and one of them the camera's, files them as places under one title, and carries them into the tweet and onto the exported picture. |
+| ✅ **A proof of several points** | States every place a proof argues — each panel's own included, none of them overwritten — optionally named, one of them the camera's, any of them moved on a map rather than typed; files them as places under one title and carries them into the tweet and onto the exported picture. |
+| ✅ **What a proof says about itself** | Carries an optional sentence, which is its notes and what a post is written from, and an optional date for when its material was taken — never pre-filled, cleared in one press, and shown on the Timeline. |
+| ✅ **A date that reaches the footage** | A dated proof states that date for the sources it rests on — the original, never the frame cut from it or a capture — as one cited statement per proof, restated on every save and never written over the file's own clock. |
 
 ### v3 GEOINT expansion (shipped as GitHub `v0.3.0+`)
 
 | Tool | What it does |
 |------|--------------|
 | ✅ **Map engine** | Draws the map on MapLibre GL behind the `lib/map` façade, with the same providers, captures and bearing. |
-| ✅ **Map chrome** | Puts modes in one rail, layers in the right panel, imagery in the map corner and position in a status line, each tool declared once. |
+| ✅ **Map chrome** | Puts modes in one rail, map layers in their tool panel or popup, imagery in the map corner and position in a status line, each tool declared once. |
 | ✅ **Point menu** | Right-clicking the ground copies that point in every format, looks it up, saves, measures, reads the sky or opens its imagery history from it, and links it out. |
 | ✅ **Map windows** | Opens the map in several tabs with the view in the URL, links map tabs and extension panels on other sites to one camera, and syncs saved points, grids and sweeps live to every tab and extension panel. |
 | ✅ **Map layers** | Stacks key-less overlays (borders, roads, railways, power lines, sea marks, GPS traces), NASA FIRMS fires and VIIRS night lights for a chosen day, and filters drawn pins by kind and folder. |
+| ✅ **Media on the map** | Draws the case's located photos and videos where a relation, a GPS reading or a proof puts them, and plays the stack in the panel beside the imagery. |
 | ✅ **Imagery Wayback** | Browses every Esri World Imagery release, narrowed to the ones that changed the point, and dates the pixels apart from the release. |
+| ✅ **Satellite Compare** | Aligns and annotates two dated views, assists matched-product change reading, saves editable sessions and files or exports attributed PNG/GIF outputs. |
+| ✅ **Compare Detect** | Sweeps drawn areas at native resolution for changes, vessels on water and short-wave hotspots; candidates are reviewed one at a time and only a kept one becomes a case pin, and a saved watch reruns on demand. |
+| ✅ **Passes over an area** | Picks Detect's Copernicus dates from the passes the drawn areas really have, each with the share of them its swath reached, and reports what a finished run actually swept. |
+| ✅ **Cloud & shadow filter** | One click in Difference and Detect, on Sentinel-2's scene classification where there is one and a stated guess from the picture where there is not, with a margin that takes the fringe both masks leave. |
 | ✅ **Capture scale & north** | Adds a scale bar and true-north needle to app and extension captures when resolution and heading are known. |
 | ✅ **Footprint tracing** | Traces a place's uncertainty as a polygon around its pin, in place of the radius. |
 | ✅ **Extension map tools** | Draws measure, media pins, sun and moon, search grids and case media over third-party maps, calibrated per site by a replayable command. |
 | ✅ **Extension updates** | Updates the unpacked extension in one click, installs a signed self-updating Firefox add-on, and flags a copy out of step with the app. |
 | ✅ **Site hand-offs** | Fills the X or Bluesky composer with a prepared thread and uploads a case picture straight into Lens, Yandex, Bing or TinEye. |
 | ✅ **Home & Guide** | Opens on a case dashboard or a front door when no case is open, and `?` opens the Guide on the current tab. |
+| ✅ **Case to-do lists** | Named lists on Home with editable tasks, checkboxes, progress counts and case-bundle persistence. |
 
 ---
 
@@ -187,9 +197,11 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **3D map** | Pitch, public DEM terrain and extruded OSM buildings on the MapLibre map. An oblique capture records its pitch beside the bearing, so the view can be reproduced. |
 | **Camera Resection (GCP)** | Marks matching points photo↔map, then solves camera position, viewing azimuth and rough FOV (OpenCV `solvePnP`) and saves the match as evidence. Its photo canvas and pixel↔angle camera frame are built for two callers: Sky Clock fills the same frame by hand. |
 | **Capture graticule** | The rest of what a plate states about itself: a latitude/longitude grid over app and extension captures, beside the scale bar and north arrow that already ship. |
-| **Satellite Compare** | Same coords across providers (Esri / Sentinel-2 date slider / Bing / keyed), synced pan/zoom. Copernicus easy link. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
 | **Georeferenced overlay** | Pins an image to the ground by three or four matching points: a commercial satellite shot from a post, a drone frame, an old plan. It draws under the map's own marks with an opacity slider, reprojects as the map pans, and is saved in the case with its control points so the fit can be checked. |
+| **Subscribed map layers** | Follows a public My Maps, KML/KMZ or GeoJSON URL and refreshes it automatically only while enabled, while keeping the last snapshot available offline and never rewriting evidence already saved from it. Local KML/KMZ, GeoJSON and GPX files open as fixed case layers. |
+| **GeoConfirmed layer** | Queries GeoConfirmed for a chosen conflict, date or viewport only when enabled, opens each event's original sources and lets selected events enter the case. |
+| **Source directory** | Keeps the accounts, channels and pages worth following for this case, searchable by platform, area and topic, with notes and source reliability; monitoring remains a later opt-in workflow. |
 | **Metadata follow-up** | Explains which common image/video fields were stripped and proposes events from capture times. |
 | **Edit Provenance** | Reads a rendered video's own edit history: which source clips it was cut from, in what order, and the GPS, dates and cameras those clips still carry. |
 | **Sky sessions** | Saves a sun or moon lookup as a case artifact: the point, the date and the time, never the numbers they produce. It reopens where it was left, a proof can show its reading, and a statement can cite it. |
@@ -233,7 +245,7 @@ supplies, since a ridge ends the day well before the flat horizon does.
 | Tool | What it does |
 |------|--------------|
 | **Skyline Matching** | Traces a horizon in a photo and compares it against the DEM profile seen from candidate points, in the same azimuth and elevation frame Camera Resection and Sky Clock already use. Terrain-occluded sun times then split candidates a matching horizon leaves tied. |
-| **Map Board (MyMaps-style)** | Editable case map: custom pins + notes/links, shapes, layers; import/export KML/KMZ/GeoJSON; pins bind to `place`. |
+| **Map Board (MyMaps-style)** | Edits case-owned pins, notes, links and shapes, groups them into analyst-made layers, binds pins to `place` and exports the finished map as KML/KMZ/GeoJSON. |
 | **Evidence Locker** | Track SHA-256, timestamps, source and notes; archive with Wayback; export `evidence.jsonl` under a hash-chained manifest, so any later edit to an exported file is detectable. |
 | **Report Builder** | Assemble proofs/maps/timeline/entities/notes into PDF or one self-contained HTML file with its media embedded, readable offline. |
 | **Case Sync (Git)** | Push a case to a private or public Git remote, pull it back, and diff two revisions, so two analysts can work the same case. |

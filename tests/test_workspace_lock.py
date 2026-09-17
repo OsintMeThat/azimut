@@ -78,6 +78,26 @@ def _holder_process(root: Path) -> subprocess.Popen:
     return child
 
 
+def _acquire_once_free(port: int, timeout: float = 10.0) -> None:
+    """Take the lock a dead holder left behind.
+
+    Windows reports a killed process as gone before it has finished tearing it
+    down, so the handle it held can outlive `wait()` by a moment and the first
+    attempt meets a corpse's lock. What the tests claim is that nobody has to
+    delete a file for the workspace to open again; how long the kernel takes to
+    say so is the operating system's business, not the property under test.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            workspacelock.acquire(port)
+            return
+        except WorkspaceBusy:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
+
+
 # -- another process -----------------------------------------------------------
 
 
@@ -108,7 +128,7 @@ def test_the_lock_dies_with_the_process(workspace):
     child.kill()
     child.wait(timeout=10)
 
-    workspacelock.acquire(8478)  # no exception: the OS let go on its own
+    _acquire_once_free(8478)  # no exception: the OS let go on its own
 
     assert workspacelock.holder() is None
 
@@ -120,7 +140,7 @@ def test_a_clean_exit_leaves_no_payload_to_age(workspace):
 
     # The child's atexit-free path still releases via the OS; what matters is
     # that the next run can take it without judging a corpse.
-    workspacelock.acquire(8478)
+    _acquire_once_free(8478)
 
     assert _payload(workspace)["pid"] == os.getpid()
 

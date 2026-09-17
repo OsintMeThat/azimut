@@ -211,6 +211,18 @@ describe('the layers on a map', () => {
     });
   });
 
+  it('stops a linked map at the shallower of its own and the shared ceiling', async () => {
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const basemaps = createBasemaps(stubEngine(map));
+      basemaps.show({ ...ESRI, max_zoom: 19 }, ESRI.id, 256);
+      basemaps.setZoomCeiling(17);
+      basemaps.setZoomCeiling(21);
+      basemaps.setZoomCeiling(null);
+      expect(map.calls.setMaxZoom).toEqual([[18], [16], [18], [18]]);
+    });
+  });
+
   it('leaves a layer alone when nothing about it changed', async () => {
     // returning to the tab refetches the providers, and the fresh objects re-run
     // the layer effect, so this is the common path rather than an edge case
@@ -531,7 +543,7 @@ describe('the layers on a map', () => {
       expect(source.tiles[0]).toContain('/VIIRS_SNPP_DayNightBand_At_Sensor_Radiance/default/2022-02-24/');
       expect(source.maxzoom).toBe(8);
       const layer = map.getLayer('basemap-nightlights');
-      expect(layer.maxzoom).toBe(13);
+      expect(layer.maxzoom).toBe(24);
       expect(layer.paint['raster-opacity']).toBeLessThan(1);
 
       basemaps.setOverlay('nightlights', true, { source: 'snpp', day: '2022-02-25' });

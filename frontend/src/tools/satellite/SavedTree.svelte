@@ -218,7 +218,11 @@
 
 <div class="tree">
   {#if !rows.length}
-    <p class="none">Save a place or capture a crop. Both land here, grouped by where they are.</p>
+    <p class="none">
+      {kind === 'media'
+        ? 'No photo or video is placed yet. Relate one to a place or build a proof on it.'
+        : 'Save a place or capture a crop. Both land here, grouped by where they are.'}
+    </p>
   {:else if !shown}
     <p class="none">Nothing saved matches that.</p>
   {:else}
@@ -346,9 +350,9 @@
   .kind:hover {
     color: var(--text-1);
   }
-  /* Proofs is a mode, not a refinement of the three to its left: the rule says
-     so without spending a word on it */
-  .kind.mode {
+  /* Proofs and Media are modes, not refinements of the three to their left: one
+     rule before the first of them says so without spending a word on it */
+  .kind:not(.mode) + .kind.mode {
     margin-left: 5px;
     border-left: 1px solid var(--border);
     padding-left: 5px;

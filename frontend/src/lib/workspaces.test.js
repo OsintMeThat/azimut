@@ -12,13 +12,13 @@ import {
 
 const ALL_TOOLS = [
   'overview', 'guide',
-  'board', 'graph', 'timeline', 'sheet', 'media', 'files', 'reverse', 'inspect', 'satellite', 'coordinates', 'proof', 'post', 'notebook',
+  'board', 'graph', 'timeline', 'sheet', 'media', 'files', 'reverse', 'inspect', 'satellite', 'compare', 'coordinates', 'proof', 'post', 'notebook',
   'settings',
 ];
 
 describe('workspaceOf', () => {
   it('maps every tool to exactly one workspace', () => {
-    for (const tool of ['overview', 'guide', 'board', 'graph', 'timeline', 'sheet', 'media', 'files', 'reverse', 'inspect', 'satellite', 'coordinates', 'proof', 'post', 'notebook']) {
+    for (const tool of ['overview', 'guide', 'board', 'graph', 'timeline', 'sheet', 'media', 'files', 'reverse', 'inspect', 'satellite', 'compare', 'coordinates', 'proof', 'post', 'notebook']) {
       const owners = ALL_WORKSPACES.filter((w) => w.tools.includes(tool));
       expect(owners).toHaveLength(1);
       expect(workspaceOf(tool)).toBe(owners[0]);
@@ -55,8 +55,9 @@ describe('workspaceOf', () => {
     expect(workspaceOf('reverse').id).toBe('collect');
   });
 
-  it('groups satellite and coordinates under map', () => {
+  it('groups satellite, compare and coordinates under map', () => {
     expect(workspaceOf('satellite').id).toBe('map');
+    expect(workspaceOf('compare').id).toBe('map');
     expect(workspaceOf('coordinates').id).toBe('map');
   });
 

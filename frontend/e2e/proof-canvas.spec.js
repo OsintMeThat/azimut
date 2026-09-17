@@ -8,10 +8,13 @@ test('a real Konva panel remains interactive after click and drag', async ({ pag
   const canvas = page.locator('.konva canvas').first();
   const box = await canvas.boundingBox();
   expect(box).not.toBeNull();
-  // The stage fills the full tool height while the fitted 16:9 panel sits near
-  // its top. Use a point well inside that image, away from its footer.
+  // The stage centres the fitted panel in whatever room the toolbar leaves it,
+  // so its own middle is the one point that stays well inside the image however
+  // wide the rail gets. Off the page a drag pans the view instead of drawing
+  // (ProofComposer.onPointerDown), which is what a gesture anchored near the
+  // panel's edge turns into the day the canvas loses a few pixels.
   const x = box.x + box.width / 2;
-  const y = box.y + Math.min(180, box.height / 3);
+  const y = box.y + box.height / 2;
 
   await page.mouse.click(x, y);
   await expect(page.locator('.panel-row')).toHaveClass(/selected/);
@@ -400,7 +403,7 @@ test('a stroke started inside a shape draws, and leaves that shape where it was'
   const canvas = page.locator('.konva canvas').first();
   const box = await canvas.boundingBox();
   const cx = box.x + box.width / 2;
-  const cy = box.y + Math.min(180, box.height / 3);
+  const cy = box.y + box.height / 2;
 
   // A box wide enough that the next gesture starts well inside it.
   await page.getByTitle('Box (r)').click();
@@ -438,7 +441,7 @@ test('a fill is opt-in, rides the shape colour and survives the save', async ({ 
   const canvas = page.locator('.konva canvas').first();
   const box = await canvas.boundingBox();
   const cx = box.x + box.width / 2;
-  const cy = box.y + Math.min(180, box.height / 3);
+  const cy = box.y + box.height / 2;
 
   await page.getByTitle('Box (r)').click();
 
@@ -488,7 +491,7 @@ async function drawTwoBoxes(page) {
   const canvas = page.locator('.konva canvas').first();
   const box = await canvas.boundingBox();
   const cx = box.x + box.width / 2;
-  const cy = box.y + Math.min(180, box.height / 3);
+  const cy = box.y + box.height / 2;
 
   await page.getByTitle('Box (r)').click();
   await page.mouse.move(cx - 80, cy - 40);
@@ -627,7 +630,7 @@ test('stamps a symbol, keeps the tool in hand, and saves it', async ({ page }) =
   const canvas = page.locator('.konva canvas').first();
   const box = await canvas.boundingBox();
   const cx = box.x + box.width / 2;
-  const cy = box.y + Math.min(180, box.height / 3);
+  const cy = box.y + box.height / 2;
 
   await page.getByTitle('Symbol (s)').click();
   await page.getByRole('button', { name: 'Tank', exact: true }).click();
@@ -716,7 +719,7 @@ test('a stroke let go off the canvas lands, and stops following the pointer', as
   const box = await canvas.boundingBox();
   const side = await page.locator('aside.side').boundingBox();
   const x = box.x + box.width / 2 - 40;
-  const y = box.y + Math.min(180, box.height / 3);
+  const y = box.y + box.height / 2;
 
   await page.getByTitle('Box (r)').click();
   await page.mouse.move(x, y);
@@ -754,7 +757,7 @@ test('a marquee let go off the canvas selects what it caught and leaves nothing 
   const box = await canvas.boundingBox();
   const side = await page.locator('aside.side').boundingBox();
   const cx = box.x + box.width / 2;
-  const cy = box.y + Math.min(180, box.height / 3);
+  const cy = box.y + box.height / 2;
 
   await page.getByTitle('Box (r)').click();
   await page.mouse.move(cx - 30, cy - 20);
@@ -799,7 +802,7 @@ test('a pan let go off the canvas stops there', async ({ page }) => {
   const box = await canvas.boundingBox();
   const side = await page.locator('aside.side').boundingBox();
   const cx = box.x + box.width / 2;
-  const cy = box.y + Math.min(180, box.height / 3);
+  const cy = box.y + box.height / 2;
 
   await page.mouse.move(cx, cy);
   await page.mouse.down({ button: 'middle' });
@@ -821,7 +824,7 @@ test('the right button neither draws nor drops what is picked', async ({ page })
   const canvas = page.locator('.konva canvas').first();
   const box = await canvas.boundingBox();
   const cx = box.x + box.width / 2;
-  const cy = box.y + Math.min(180, box.height / 3);
+  const cy = box.y + box.height / 2;
 
   await page.getByTitle('Box (r)').click();
   await page.mouse.move(cx - 30, cy - 20);
@@ -855,7 +858,7 @@ test('Escape unwinds one level per press', async ({ page }) => {
   const canvas = page.locator('.konva canvas').first();
   const box = await canvas.boundingBox();
   const x = box.x + box.width / 2 - 40;
-  const y = box.y + Math.min(180, box.height / 3);
+  const y = box.y + box.height / 2;
 
   // Mid-draft: the stroke goes and the pen stays, because cancelling a stroke
   // is no reason to put the pen down.
@@ -894,7 +897,7 @@ test('a row picked in the side column takes the hand back to Select', async ({ p
   const canvas = page.locator('.konva canvas').first();
   const box = await canvas.boundingBox();
   const x = box.x + box.width / 2 - 40;
-  const y = box.y + Math.min(180, box.height / 3);
+  const y = box.y + box.height / 2;
 
   await page.getByTitle('Box (r)').click();
   await page.mouse.move(x, y);
@@ -933,7 +936,7 @@ test('a placed label opens its editor on the spot, and holds two lines', async (
   const canvas = page.locator('.konva canvas').first();
   const box = await canvas.boundingBox();
   const cx = box.x + box.width / 2;
-  const cy = box.y + Math.min(180, box.height / 3);
+  const cy = box.y + box.height / 2;
 
   await page.getByTitle('Text (t)').click();
   await page.mouse.click(cx - 40, cy);
@@ -1009,7 +1012,7 @@ test('a freehand stroke resizes from its handles, and its samples take the chang
   const canvas = page.locator('.konva canvas').first();
   const box = await canvas.boundingBox();
   const cx = box.x + box.width / 2;
-  const cy = box.y + Math.min(180, box.height / 3);
+  const cy = box.y + box.height / 2;
 
   await page.getByTitle('Freehand (d)').click();
   await page.mouse.move(cx - 60, cy - 20);
@@ -1057,7 +1060,7 @@ test('a finished curve puts the pen down, like every shape but the stamp', async
   const canvas = page.locator('.konva canvas').first();
   const box = await canvas.boundingBox();
   const cx = box.x + box.width / 2;
-  const cy = box.y + Math.min(180, box.height / 3);
+  const cy = box.y + box.height / 2;
   const curve = page.getByTitle(/^Curve/);
 
   // Konva calls any two clicks inside its 400 ms window a double-click, whatever

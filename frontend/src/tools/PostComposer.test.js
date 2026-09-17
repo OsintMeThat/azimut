@@ -191,3 +191,15 @@ describe('when the extension does not take the thread', () => {
     expect(source).toContain('if (excuse) toast(excuse, \'warn\', 6000);');
   });
 });
+
+describe('Post Composer — the sentence the proof carries', () => {
+  it('writes the post from the description, and falls back to a renamed title', () => {
+    expect(source).toContain('description = p.description?.trim()');
+    expect(source).toContain("? p.description.trim()\n      : (isDefaultName(p.title, 'proof') ? '' : (p.title ?? ''));");
+  });
+
+  it('prefers it over the filename the picker row showed', () => {
+    expect(source).toContain('const blank = !description.trim();');
+    expect(source).toContain("if (blank && spec.description?.trim()) description = spec.description.trim();");
+  });
+});

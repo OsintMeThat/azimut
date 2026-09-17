@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { awaitMapReady, installAppFixture } from './app.fixture.js';
+import { awaitMapReady, installAppFixture, showSaved } from './app.fixture.js';
 
 /**
  * How tightly a place is pinned, driven in a real browser.
@@ -55,7 +55,7 @@ async function openCard(page) {
   });
   await page.goto('/#satellite');
   await awaitMapReady(page);
-  await page.getByRole('button', { name: 'Saved work' }).click();
+  await showSaved(page); // the layer is on, on the Media position
   await page.locator('.saved-mark').click();
   return fixture;
 }

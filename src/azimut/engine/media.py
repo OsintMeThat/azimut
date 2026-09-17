@@ -391,8 +391,8 @@ def _register(
     rel_path = f"media/{media_path.name}"
     kind = media_kind(media_path.name)
     # Cheap image thumbnails render inline for instant feedback; a failed image
-    # render and every (CPU-heavy) video are queued to the single worker, which
-    # fills the sidecar in later via `set_thumbnail`.
+    # render and every (CPU-heavy) video are queued to the single worker once the
+    # sidecar exists, and the worker fills it in later via `set_thumbnail`.
     thumb_rel = thumbnail_engine.on_register(case, rel_path, digest, kind)
 
     display_name = media_path.stem
@@ -423,6 +423,7 @@ def _register(
     )
     indexed = {**sidecar, "path": rel_path}
     case.upsert_media_item(indexed, entity_id=entity["id"])
+    thumbnail_engine.queue_if_missing(case, rel_path, kind, thumb_rel)
     # Enrichment runs after the sidecar and index row exist: the handler reads
     # the item back, and the worker can claim the job the moment it is queued.
     enrich_engine.on_register(case, rel_path, kind, entity["id"])
@@ -584,6 +585,7 @@ def relink_existing(
         old_sidecar = _sidecar_path(case.resolve_inside(old_rel))
         if old_sidecar != _sidecar_path(media_path):
             old_sidecar.unlink(missing_ok=True)
+        thumbnail_engine.queue_if_missing(case, rel_path, kind, thumbnail)
         enrich_engine.on_register(case, rel_path, kind, entity_id)
         return {"entity": updated, "item": indexed}
 
@@ -644,6 +646,83 @@ def import_produced_file(
     dest = unique_path(media_dir, safe_filename(filename))
     shutil.move(str(src_path), str(dest))
     return _register(case, dest, source, by=by)
+
+
+def import_rendered_bytes(
+    case: Case,
+    data: bytes,
+    title: str,
+    suffix: str,
+    source: dict[str, Any],
+    *,
+    by: str,
+    extra_attrs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """File an image a tool encoded itself (a PNG, an animated GIF) as media.
+
+    ``import_image`` re-encodes a PIL frame as PNG, which would flatten a GIF to
+    its first frame. The bytes here are already final, so they are written as
+    they are, and never collapsed into an identical earlier file: the entity is
+    the tool's output, and the tool may replace it later
+    (`replace_rendered_bytes`).
+    """
+    media_dir = case.subdir("media")
+    dest = unique_path(media_dir, layout.visible_filename(title, suffix))
+    dest.write_bytes(data)
+    return _register(
+        case, dest, source, by=by, extra_attrs=extra_attrs, title=title, dedupe=False
+    )
+
+
+def replace_rendered_bytes(
+    case: Case,
+    rel_path: str,
+    data: bytes,
+    source: dict[str, Any],
+    *,
+    extra_attrs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Swap the pixels of a tool's own output, keeping its name, entity and links.
+
+    The caller decides this is allowed: an output something else was derived
+    from must not change under it (`api/compare.py` checks before calling). The
+    new bytes land beside the file and replace it by rename, so a reader sees the
+    old image or the new one, never half of each. The thumbnail is
+    content-addressed, so it is rendered again for the new digest.
+    """
+    with case.lock:
+        media_path = case.resolve_inside(rel_path)
+        sidecar = _sidecar_path(media_path)
+        if not media_path.is_file() or not sidecar.is_file():
+            raise ValueError(f"no media found for {rel_path!r}")
+        temporary = media_path.with_name(f".{media_path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_bytes(data)
+            temporary.replace(media_path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        digest = sha256_file(media_path)
+        item = json.loads(sidecar.read_text(encoding="utf-8"))
+        kind = media_kind(media_path.name)
+        item.update({
+            "sha256": digest,
+            "size": media_path.stat().st_size,
+            "kind": kind,
+            "source": source,
+            "updated_at": _now(),
+            "thumbnail": thumbnail_engine.on_register(case, rel_path, digest, kind),
+        })
+        _write_sidecar(media_path, item)
+        entity = case.find_entity(attr="path", value=rel_path)
+        if entity:
+            case.update_entity(
+                entity["id"],
+                {"attrs": {"sha256": digest, "kind": kind, **(extra_attrs or {})}},
+            )
+        indexed = {**item, "path": rel_path}
+        case.upsert_media_item(indexed, entity_id=entity["id"] if entity else None)
+        thumbnail_engine.queue_if_missing(case, rel_path, kind, item["thumbnail"])
+        return {"entity": entity, "item": indexed}
 
 
 def _entry_kind(entry: dict[str, Any] | None) -> str:

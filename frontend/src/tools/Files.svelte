@@ -14,7 +14,7 @@
   import { buildTree, subtreeCount, folderOf, flattenPaths, isInFolderSubtree } from '../lib/folderTree.js';
   import { assignFolder, assignFolderBatch } from '../lib/filing.js';
   import { createNote } from '../lib/notes.js';
-  import { openNotebook } from '../lib/navigate.js';
+  import { openEntity, openNotebook } from '../lib/navigate.js';
   import { createBookmark } from '../lib/bookmarks.js';
   import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
   import { marqueeRect, marqueeHits, toggleSelection } from '../lib/gridSelect.js';
@@ -42,7 +42,7 @@
 
   const TYPE_ICON = {
     media: 'image', capture: 'satellite', note: 'note', proof: 'proof',
-    post: 'post', place: 'pin', 'inspect-session': 'inspect', bookmark: 'link',
+    post: 'post', place: 'pin', 'inspect-session': 'inspect', 'compare-session': 'compare', bookmark: 'link',
   };
   const VIDEO_EXTS = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v']);
 
@@ -127,6 +127,7 @@
   const tileThumb = (e) => {
     const path = e.attrs?.path;
     if (e.type === 'proof' && typeof path === 'string' && /\.png$/i.test(path)) return path;
+    if (e.type === 'compare-session' && typeof path === 'string' && /\.(png|gif)$/i.test(path)) return path;
     return pathInfo.get(path)?.thumbnail ?? null;
   };
 
@@ -617,6 +618,10 @@
   function openEntityTile(entity) {
     if (entity.type === 'note') {
       openNotebook(entity.id);
+      return;
+    }
+    if (['compare-session', 'analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {
+      openEntity(entity);
       return;
     }
     infoEntityId = entity.id;

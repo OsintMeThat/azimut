@@ -146,6 +146,21 @@ describe('each section', () => {
     expect(pane().querySelector('a[href="/api/ingest/extension.zip"]')).not.toBeNull();
   });
 
+  it('Extension links the XPI on the release that carries it, not the newest one', () => {
+    // The signed add-on is attached to the release that last moved the extension,
+    // so it is the extension's own version that names the tag and the file. Link
+    // `releases/latest` instead and every release that left `extension/` alone
+    // sends Firefox users to a page with no XPI on it at all.
+    const text = show('extension');
+    expect(text).toContain('azimut-capture-1.0.xpi');
+    const link = pane().querySelector('a[href*="azimut-capture-1.0.xpi"]');
+    expect(link).not.toBeNull();
+    expect(link.getAttribute('href')).toBe(
+      'https://github.com/OsintMeThat/azimut/releases/download/v1.0/azimut-capture-1.0.xpi',
+    );
+    expect(pane().querySelector('a[href$="/releases/latest"]')).toBeNull();
+  });
+
   it('Storage manages all three export folders and the backup', () => {
     const text = show('storage');
     expect(text).toContain('Note PDFs');

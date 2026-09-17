@@ -97,6 +97,7 @@ def _tool_relative(slug: int, media: int) -> dict[str, int]:
         "proof export": len(layout.proof_export_rel(longest_name)),
         "draft": len(layout.draft_rel(longest_name)),
         "session": len(layout.session_rel(longest_name)),
+        "compare session": len(layout.compare_session_rel(longest_name)),
         "grid": len(layout.grid_rel(longest_name)),
         "trash slot": len(f"{layout.TRASH_DIR}/") + TRASH_GROUP_ID + 1 + TRASH_SLOT,
     }

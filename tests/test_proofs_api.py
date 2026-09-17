@@ -1455,3 +1455,330 @@ def test_a_proof_the_panels_place_opens_with_an_empty_field(client, sat_tiles):
 
     spec = client.get(f"/api/cases/{cid}/proofs/Auto").json()
     assert spec.get("points") in (None, [])
+
+
+def test_the_date_and_the_description_travel_to_the_entity(client):
+    cid = client.post("/api/cases", json={"name": "Dated proof"}).json()["id"]
+
+    saved = client.post(
+        f"/api/cases/{cid}/proofs",
+        json={
+            "title": "Dated proof",
+            "spec": {
+                **SPEC,
+                "when": "2024-03-11~",
+                "description": "A formation of 13 helicopters heading east",
+            },
+        },
+    ).json()
+
+    spec = client.get(f"/api/cases/{cid}/proofs/{saved['name']}").json()
+    assert spec["when"] == "2024-03-11~"
+    assert spec["description"] == "A formation of 13 helicopters heading east"
+
+    # On the entity too: the graph reads the date and the notes off the row it
+    # already holds, and the Timeline projects the proof from that attribute.
+    proof = next(e for e in graph_read.entities(cid) if e["type"] == "proof")
+    assert proof["attrs"]["when"] == "2024-03-11~"
+    assert proof["attrs"]["notes"] == "A formation of 13 helicopters heading east"
+
+
+def test_a_dated_proof_states_its_date_on_the_timeline(client):
+    cid = client.post("/api/cases", json={"name": "Proof on the timeline"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Dated proof", "spec": {**SPEC, "when": "2024-03-11"}},
+    )
+
+    items = client.get(
+        f"/api/cases/{cid}/timeline", params={"categories": "statement"}
+    ).json()["items"]
+
+    assert [(item["kind"], item["raw"]) for item in items] == [("taken", "2024-03-11")]
+
+
+def test_a_date_outside_the_profile_is_refused_before_anything_moves(client):
+    cid = client.post("/api/cases", json={"name": "Bad date"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Dated proof", "spec": {**SPEC, "when": "2024-03-11"}},
+    )
+
+    refused = client.post(
+        f"/api/cases/{cid}/proofs",
+        json={
+            "rename_from": "Dated proof",
+            "title": "Renamed proof",
+            "spec": {**SPEC, "when": "late summer"},
+        },
+    )
+
+    assert refused.status_code == 422
+    # The rename never happened: the proof is still the one that was there.
+    assert [p["name"] for p in client.get(f"/api/cases/{cid}/proofs").json()] == [
+        "Dated proof"
+    ]
+    spec = client.get(f"/api/cases/{cid}/proofs/Dated proof").json()
+    assert spec["when"] == "2024-03-11"
+
+
+def test_clearing_the_date_takes_it_off_the_entity(client):
+    cid = client.post("/api/cases", json={"name": "Undated again"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Dated proof", "spec": {**SPEC, "when": "2024-03-11"}},
+    )
+
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"rename_from": "Dated proof", "title": "Dated proof", "spec": SPEC},
+    )
+
+    proof = next(e for e in graph_read.entities(cid) if e["type"] == "proof")
+    assert proof["attrs"]["when"] == ""
+    assert client.get(f"/api/cases/{cid}/proofs/Dated proof").json()["when"] is None
+    assert (
+        client.get(f"/api/cases/{cid}/timeline", params={"categories": "statement"})
+        .json()["items"]
+        == []
+    )
+
+
+def test_a_description_edited_in_the_graph_is_what_reopens(client):
+    cid = client.post("/api/cases", json={"name": "Edited notes"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Dated proof", "spec": {**SPEC, "description": "First reading"}},
+    )
+    proof = next(e for e in graph_read.entities(cid) if e["type"] == "proof")
+
+    client.patch(
+        f"/api/cases/{cid}/entities/{proof['id']}",
+        json={"attrs": {"notes": "Corrected reading", "when": "2024-03-12"}},
+    )
+
+    spec = client.get(f"/api/cases/{cid}/proofs/Dated proof").json()
+    assert spec["description"] == "Corrected reading"
+    assert spec["when"] == "2024-03-12"
+
+
+def _collected_clip(cid, name="clip.png"):
+    """A collected file, as a download would leave it."""
+    from azimut.engine import media as media_engine
+
+    return media_engine.import_image(
+        Case.open(cid),
+        Image.new("RGB", (48, 32), (30, 30, 30)),
+        name,
+        {"type": "download", "webpage_url": "https://x.com/a/status/1"},
+        by="ingest",
+    )["item"]["path"]
+
+
+def _cut_frame(cid, parent, name="clip_frame.png"):
+    """A frame cut out of it: the panel a proof actually composes."""
+    from azimut.engine import media as media_engine
+
+    return media_engine.import_image(
+        Case.open(cid),
+        Image.new("RGB", (48, 32), (60, 60, 60)),
+        name,
+        {"type": "derived", "op": "frame", "from": parent, "time": 69.0},
+        by="inspect",
+    )["item"]["path"]
+
+
+def _claims(cid):
+    return [e for e in graph_read.entities(cid) if e["type"] == "claim"]
+
+
+def test_the_date_states_itself_for_the_footage_behind_the_panel(client):
+    cid = client.post("/api/cases", json={"name": "Dated footage"}).json()["id"]
+    video = _collected_clip(cid)
+    frame = _cut_frame(cid, video)
+
+    saved = client.post(
+        f"/api/cases/{cid}/proofs",
+        json={
+            "title": "Dated proof",
+            "spec": {**_panels(frame), "when": "2024-03-11~"},
+        },
+    ).json()
+
+    # The save says what it wrote, rather than filing into the graph in silence.
+    assert saved["dated"] == ["clip"]
+    claim = _claims(cid)[0]
+    assert claim["attrs"]["when"] == "2024-03-11~"
+    assert claim["attrs"]["time_role"] == "observed"
+    assert claim["label"] == "Material of Dated proof was taken"
+
+    # About the video, not about the frame cut out of it: the thing that was
+    # filmed is the one the date is a fact about.
+    entities = {e["id"]: e for e in graph_read.entities(cid)}
+    subjects = [
+        entities[link["to"]]["label"]
+        for link in graph_read.links(cid)
+        if link["from"] == claim["id"] and link["type"] == "about"
+    ]
+    assert subjects == ["clip"]
+    cites = [
+        entities[link["to"]]["type"]
+        for link in graph_read.links(cid)
+        if link["from"] == claim["id"] and link["type"] == "cites"
+    ]
+    assert cites == ["proof"]
+
+
+def test_the_stated_date_shows_on_the_file_it_is_about(client):
+    cid = client.post("/api/cases", json={"name": "Seen from the video"}).json()["id"]
+    video = _collected_clip(cid)
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Dated proof", "spec": {**_panels(video), "when": "2024-03-11"}},
+    )
+    media = next(e for e in graph_read.entities(cid) if e["type"] == "media")
+
+    page = client.get(
+        f"/api/cases/{cid}/timeline",
+        params={"entity": media["id"], "categories": ["statement", "media"]},
+    ).json()
+
+    stated = [item for item in page["items"] if item["category"] == "statement"]
+    assert [item["raw"] for item in stated] == ["2024-03-11"]
+    # The file's own clock is untouched: the sidecar still says what it said.
+    item = client.get(f"/api/cases/{cid}/media/item", params={"path": video}).json()
+    assert "taken_at" not in item
+
+
+def test_a_satellite_capture_is_never_dated_by_the_proof(client, sat_tiles):
+    cid = client.post("/api/cases", json={"name": "Reference imagery"}).json()["id"]
+    cap = _sat(client, cid, 50.4501, 30.5234)
+
+    saved = client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Dated proof", "spec": {**_panels(cap["path"]), "when": "2024-03-11"}},
+    ).json()
+
+    # Its date is the provider's flyover, and the proof has nothing to say about it.
+    assert saved["dated"] == []
+    assert _claims(cid) == []
+
+
+def test_re_saving_restates_the_date_rather_than_filing_a_second_one(client):
+    cid = client.post("/api/cases", json={"name": "Restated"}).json()["id"]
+    video = _collected_clip(cid)
+    body = {"title": "Dated proof", "spec": {**_panels(video), "when": "2024-03-11"}}
+    client.post(f"/api/cases/{cid}/proofs", json=body)
+
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={
+            "rename_from": "Dated proof",
+            "title": "Renamed proof",
+            "spec": {**_panels(video), "when": "2024-03-12"},
+        },
+    )
+
+    claims = _claims(cid)
+    assert len(claims) == 1
+    assert claims[0]["attrs"]["when"] == "2024-03-12"
+    # The statement follows the rename, like every other file the proof owns.
+    assert claims[0]["label"] == "Material of Renamed proof was taken"
+
+
+def test_clearing_the_date_takes_the_statement_back(client):
+    cid = client.post("/api/cases", json={"name": "Withdrawn"}).json()["id"]
+    video = _collected_clip(cid)
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Dated proof", "spec": {**_panels(video), "when": "2024-03-11"}},
+    )
+
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"rename_from": "Dated proof", "title": "Dated proof", "spec": _panels(video)},
+    )
+
+    assert _claims(cid) == []
+
+
+def test_a_statement_the_analyst_worked_on_is_not_deleted_from_the_composer(client):
+    cid = client.post("/api/cases", json={"name": "Enriched"}).json()["id"]
+    video = _collected_clip(cid)
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Dated proof", "spec": {**_panels(video), "when": "2024-03-11"}},
+    )
+    claim = _claims(cid)[0]
+    client.patch(
+        f"/api/cases/{cid}/entities/{claim['id']}",
+        json={"attrs": {"method": "Matched against the shadow length"}},
+    )
+
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"rename_from": "Dated proof", "title": "Dated proof", "spec": _panels(video)},
+    )
+
+    # Clearing a field in the composer must not delete reasoning written elsewhere.
+    kept = _claims(cid)
+    assert len(kept) == 1
+    assert kept[0]["attrs"]["method"] == "Matched against the shadow length"
+
+
+def test_a_source_taken_off_the_proof_is_no_longer_dated_by_it(client):
+    cid = client.post("/api/cases", json={"name": "Two clips"}).json()["id"]
+    first = _collected_clip(cid, "first.png")
+    second = _collected_clip(cid, "second.png")
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={
+            "title": "Dated proof",
+            "spec": {**_panels(first, second), "when": "2024-03-11"},
+        },
+    )
+
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={
+            "rename_from": "Dated proof",
+            "title": "Dated proof",
+            "spec": {**_panels(first), "when": "2024-03-11"},
+        },
+    )
+
+    claim = _claims(cid)[0]
+    entities = {e["id"]: e for e in graph_read.entities(cid)}
+    subjects = sorted(
+        entities[link["to"]]["label"]
+        for link in graph_read.links(cid)
+        if link["from"] == claim["id"] and link["type"] == "about"
+    )
+    assert subjects == ["first"]
+
+
+def test_a_statement_reworded_by_hand_keeps_its_own_wording(client):
+    cid = client.post("/api/cases", json={"name": "Reworded"}).json()["id"]
+    video = _collected_clip(cid)
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Dated proof", "spec": {**_panels(video), "when": "2024-03-11"}},
+    )
+    claim = _claims(cid)[0]
+    client.patch(
+        f"/api/cases/{cid}/entities/{claim['id']}",
+        json={"label": "The convoy was filmed that morning"},
+    )
+
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={
+            "rename_from": "Dated proof",
+            "title": "Dated proof",
+            "spec": {**_panels(video), "when": "2024-03-12"},
+        },
+    )
+
+    restated = _claims(cid)[0]
+    assert restated["label"] == "The convoy was filmed that morning"
+    assert restated["attrs"]["when"] == "2024-03-12"  # the date is still restated

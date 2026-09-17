@@ -216,6 +216,27 @@ def test_worker_wakes_and_drains_in_the_background(tmp_workspace, monkeypatch):
     assert workqueue.wait_until_idle(WAIT)
 
 
+def test_a_worker_that_claims_at_once_still_records_the_thumbnail(case, monkeypatch):
+    """The job is queued only once the sidecar exists.
+
+    Queued before it, a worker quick enough to claim the job found no sidecar and
+    dropped it as media gone, so the video never got a thumbnail. A macOS runner
+    was that quick. Draining inside `wake` is the quickest a worker can be.
+    """
+    def fake_render(media_path, out_path, kind):
+        out_path.write_bytes(b"\xff\xd8\xff\xe0jpeg")
+        return True
+
+    monkeypatch.setattr(thumbnails, "_render", fake_render)
+    monkeypatch.setattr(workqueue, "wake", workqueue.drain)
+
+    item = _register_video(case)["item"]
+
+    refreshed = media_engine.read_item(case, item["path"])
+    assert refreshed["thumbnail"] and case.resolve_inside(refreshed["thumbnail"]).exists()
+    assert case.list_media_items()[0]["thumbnail"] == refreshed["thumbnail"]
+
+
 # -- videos shorter than the seek -----------------------------------------
 
 

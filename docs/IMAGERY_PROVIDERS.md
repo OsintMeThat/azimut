@@ -224,11 +224,32 @@ both quotas are 30k. The meter tracks requests exactly and slightly overstates P
 so its unit is "request", not
 "tile" (`meterUnit`).
 
-**Granule footprints are checked against the point** (`_covers`). A granule's
+**Granule footprints are checked against the query** (`_covered`). A granule's
 bounding box is a square; its data is the slice of orbit swath inside it. WFS
 answers on the box, so without the check a listed day can render black. The footprint is
 tested under both axis orders: read backwards, every granule on Earth would be
 rejected.
+
+### Over a drawn area, a date also has a coverage share
+
+`sentinel.acquisitions(rings, …)` runs the same WFS query over the union box of
+the areas a Detect sweep would cover, and keeps the footprints instead of
+reducing them to a yes/no. Each date comes back with `coverage`: the share of
+those areas that day's granules actually reach, measured by sampling a few
+hundred points inside the rings and testing each against the footprints — the
+geometry already in the module, so no polygon clipper joins the dependency list.
+Sampling puts the answer within a percent, which is what a "62% of the areas"
+badge can honestly claim; `FULL_COVER = 0.98` is what counts as whole, because a
+ring's own edge lands a point or two outside a granule that in truth reaches it.
+
+This is the question a crosshair lookup cannot answer. Sentinel-2 flies 290 km
+swaths, so an area wider than one has **no** single day covering it, and a date
+picked on its centre sweeps nodata over the rest. The automatic date rules
+(`resolve_dates`) take the newest pass that is both under the cloud ceiling and
+at full cover, and name the best partial share when there is none.
+
+Still one request for the whole set of areas, not one per area. `truncated` says
+the WFS hit its 100-feature ceiling, so older passes in the window are missing.
 
 WFS dates are still candidates. Before changing the map, the picker sends an
 8×8 WMS `dataMask` check for the selected layer and day. A failed check leaves
@@ -383,9 +404,10 @@ id and its cache always name one.
 ## Key-less overlays
 
 Drawn over any basemap, fetched by the browser straight from their own servers
-(all answer cross-origin), never through the proxy, never cached on disk, never
-in a capture, and never asked for before their switch is on
-(`frontend/src/lib/map/basemap.js`). Checked 2026-09-13.
+(all answer cross-origin), never through the proxy, never cached on disk and
+never in a capture. Borders are the one layer the map opens with; every other is
+asked for only once its switch is on (`frontend/src/lib/map/basemap.js`).
+Checked 2026-09-13.
 
 | Layer | Source | Licence / terms | Notes |
 |---|---|---|---|

@@ -134,7 +134,7 @@ def project_entity(entity: dict[str, Any]) -> list[ProjectionRow]:
     # the graph filing timestamp beside the more specific "Added to case" value.
     if type_ in {"media", "capture"}:
         return []
-    return [
+    rows = [
         _project_value(
             id=f"temporal:activity:{entity_id}:filed",
             owner_id=entity_id,
@@ -144,6 +144,23 @@ def project_entity(entity: dict[str, Any]) -> list[ProjectionRow]:
             raw=provenance.get("at"),
         )
     ]
+    # A proof states when the material it rests on was taken — read off the file
+    # when it carried a date, typed when it did not. It is a statement and not a
+    # media fact: the sidecar's own `captured` says what the file claims, this
+    # says what the analyst concluded, and a proof keeps its filing row either way.
+    if type_ == "proof" and attrs.get("when") not in (None, ""):
+        rows.append(
+            _project_value(
+                id=f"temporal:proof:{entity_id}:taken",
+                owner_id=entity_id,
+                authority="entity",
+                category=STATEMENT,
+                kind="taken",
+                raw=attrs.get("when"),
+                time_role="occurred",
+            )
+        )
+    return rows
 
 
 _COMPACT_DATE = re.compile(r"(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})\Z")

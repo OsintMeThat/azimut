@@ -481,6 +481,7 @@ def test_media_browse_index_pages_searches_and_counts_categories(tmp_path):
     assert first["facets"]["category_counts"] == {
         "image": 1,
         "video": 1,
+        "comparison": 0,
         "collage": 0,
         "satellite": 1,
         "upload": 1,

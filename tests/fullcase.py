@@ -41,6 +41,11 @@ class FullCase:
     collage: str = ""
     capture: str = ""
     session: str = ""
+    compare_session: str = ""
+    compare_image: str = ""  # the session's render, a media working file
+    analyzer_zones: str = ""
+    analyzer_followup: str = ""
+    analyzer_run: str = ""
     proof: str = ""
     proof_asset: str = ""
     draft: str = ""
@@ -80,6 +85,15 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
 
     case_id = client.post("/api/cases", json={"name": name}).json()["id"]
     full = FullCase(case_id=case_id)
+
+    # Checklists are manifest metadata, with no graph entity or owned files.
+    response = client.put(f"/api/cases/{case_id}/todos", json={
+        "revision": 0,
+        "lists": [{"id": "checks", "name": "Checks", "tasks": [
+            {"id": "source", "text": "Verify source", "done": True},
+        ]}],
+    })
+    assert response.status_code == 200, response.text
 
     # -- media: two uploads, and a collage composed from both ----------------
     def upload(filename: str, data: bytes) -> str:
@@ -133,6 +147,31 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     )
     assert session.status_code == 200, session.text
     full.session = f".inspect/{session.json()['name']}.json"
+
+    comparison = client.post(
+        f"/api/cases/{case_id}/compare/sessions",
+        json={
+            "title": "Harbour change",
+            "spec": {
+                "version": 2,
+                "camera": {"lat": 48.8584, "lon": 2.2945, "zoom": 17, "bearing": 0},
+                "mode": "swipe",
+                "divider": 55,
+                "opacity": 50,
+                "a": {"present": True, "provider": "esri-world-imagery", "overlays": []},
+                "b": {"present": True, "provider": "osm", "overlays": ["boundaries"]},
+            },
+        },
+    )
+    assert comparison.status_code == 200, comparison.text
+    full.compare_session = f".compare/{comparison.json()['name']}.json"
+    rendered = client.post(
+        f"/api/cases/{case_id}/compare/sessions/{comparison.json()['name']}/preview",
+        files={"image_a": ("comparison.png", _png(color=(90, 60, 30)), "image/png")},
+        data={"format": "png"},
+    )
+    assert rendered.status_code == 200, rendered.text
+    full.compare_image = rendered.json()["path"]
 
     # -- a place, and a relation to the photo ---------------------------------
     place = client.post(
@@ -433,9 +472,26 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     assert timeline_view.status_code == 200, timeline_view.text
     full.timeline_view_id = timeline_view.json()["id"]
 
+    # Analyzer input tiles are deterministic cached provider responses; all
+    # permanent case artifacts are still produced through the public API.
+    from analyzerfixture import sample_input, seed_images
+    analysis = sample_input()
+    seed_images(analysis)
+    for kind, body, attr in (
+        ("zones", {"title": "Port areas", "zones": analysis["zones"]}, "analyzer_zones"),
+        ("followups", analysis, "analyzer_followup"),
+        ("runs", analysis, "analyzer_run"),
+    ):
+        saved = client.post(f"/api/cases/{case_id}/analysis/{kind}", json=body)
+        assert saved.status_code == 200, saved.text
+        setattr(full, attr, f"{layout.ANALYSIS_DIR}/{kind}-{saved.json()['id']}.json")
+
     # Enrichment and thumbnails were queued along the way; let them land, or the
     # caller's first delete races a background write into the same case.
     workqueue.wait_until_idle(timeout=20)
+    run_id = Path(full.analyzer_run).stem.split("-", 1)[1]
+    result = client.get(f"/api/cases/{case_id}/analysis/runs/{run_id}").json()
+    assert result["status"] == "ready", result
 
     entities = client.get(
         f"/api/cases/{case_id}/catalog/entities", params={"limit": 500}

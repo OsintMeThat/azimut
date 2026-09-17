@@ -1,6 +1,7 @@
 """Settings API: API keys management, key tests, usage counters (all offline)."""
 
 import httpx
+import pytest
 
 from azimut import config
 from azimut.engine import google_tiles, scrapers, sentinel
@@ -529,6 +530,55 @@ def test_sentinel_dates_lists_passes_and_counts_the_request(client, monkeypatch)
     # the meter counts what the account is charged for, tile or not
     settings = client.get("/api/settings").json()
     assert settings["usage"]["sentinelhub"][settings["month"]] == 1
+
+
+def _area(west=2.0, south=48.0, east=2.5, north=48.5):
+    return {"id": "harbour", "name": "Harbour", "kind": "rect",
+            "points": [[west, south], [east, north]]}
+
+
+def test_sentinel_acquisitions_reports_cover_over_the_areas_and_counts_the_request(
+    client, monkeypatch
+):
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    payload = (
+        '{"features": [{"properties": {"date": "2026-05-11", "cloudCoverPercentage": 4},'
+        ' "geometry": {"type": "Polygon", "coordinates": [[[1.5, 47.5], [2.2, 47.5],'
+        ' [2.2, 49.5], [1.5, 49.5], [1.5, 47.5]]]}}]}'
+    )
+
+    def get(url, **kwargs):
+        assert "/ogc/wfs/inst-uuid" in url
+        return httpx.Response(200, content=payload.encode(), request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", get)
+    body = client.post("/api/satellite/sentinel/acquisitions", json={
+        "zones": [_area()], "start": "2026-05-01", "end": "2026-05-31",
+    }).json()
+    entry = body["dates"][0]
+    assert entry["date"] == "2026-05-11"
+    # the granule stops at longitude 2.2, so it reaches part of a 2.0…2.5 area
+    assert 0 < entry["coverage"] < 1
+    assert body["truncated"] is False
+    settings = client.get("/api/settings").json()
+    assert settings["usage"]["sentinelhub"][settings["month"]] == 1
+
+
+@pytest.mark.parametrize("patch", [
+    {"zones": []},
+    {"start": "not-a-date"},
+    {"end": "2026-13-01"},
+    {"zones": [{**_area(), "shade": "#fff"}]},  # extra="forbid" on the zone model
+])
+def test_sentinel_acquisitions_refuses_a_malformed_request(client, patch):
+    client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
+    body = {"zones": [_area()], "start": "2026-05-01", "end": "2026-05-31", **patch}
+    assert client.post("/api/satellite/sentinel/acquisitions", json=body).status_code == 422
+
+
+def test_sentinel_acquisitions_without_a_key_is_a_404(client):
+    body = {"zones": [_area()], "start": "2026-05-01", "end": "2026-05-31"}
+    assert client.post("/api/satellite/sentinel/acquisitions", json=body).status_code == 404
 
 
 def test_sentinel_dates_without_a_key_is_a_404(client):

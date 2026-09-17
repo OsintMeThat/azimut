@@ -104,6 +104,16 @@ async function ingest(blob, meta) {
 // would be two answers to one question, and the pair that disagrees is the one
 // nobody can find.
 
+/** What a thread's attachment may weigh.
+ *
+ *  Lower than the app's own ceiling, and the one place in this file that keeps a
+ *  size of its own rather than repeating the app's. It is a different limit, not
+ *  a second copy: a composer's files are *pushed* into the page whole, as one
+ *  injected payload, so the base64 is held on both sides at once. A reference
+ *  window pulls its file a chunk at a time and answers to the app's number
+ *  alone. */
+const MAX_COMPOSER_BYTES = 48 * 1024 * 1024;
+
 /** One handed-over file, fetched from the app and carried as base64: what
  *  crosses into the page is a string, and the page turns it back into a file.
  *  Base64 rather than a `data:` URL because the page rebuilds it with `atob` —
@@ -115,6 +125,7 @@ async function fetchAttachment(backendUrl, token, caseId, path) {
   // in the case, and attaching it by hand is what the analyst did before.
   if (!r.ok) return null;
   const blob = await r.blob();
+  if (blob.size > MAX_COMPOSER_BYTES) return null;
   return {
     name: path.split("/").pop(),
     type: blob.type || "application/octet-stream",
@@ -133,7 +144,11 @@ function fileUrl(backendUrl, caseId, path) {
 /** A blob as base64. What crosses into a page is a string: a message carries no
  *  blob, and both sides rebuild the file from this. */
 async function base64(blob) {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
+  return encode(new Uint8Array(await blob.arrayBuffer()));
+}
+
+/** The same, for bytes already in hand. */
+function encode(bytes) {
   let binary = "";
   const CHUNK = 0x8000; // fromCharCode takes an argument list: chunk it or blow the stack
   for (let i = 0; i < bytes.length; i += CHUNK) {
@@ -517,27 +532,65 @@ async function mapImage(msg) {
   return `data:${blob.type || "image/png"};base64,${await base64(blob)}`;
 }
 
+/** How much of a file crosses in one message.
+ *
+ *  The whole point of the number: base64 of *this* is the biggest string either
+ *  side ever holds, whatever the file weighs. A phone's clip of a street is
+ *  hundreds of megabytes and the window that holds it up against the imagery is
+ *  the reason the panel is open, so the file cannot be the unit. */
+const FILE_CHUNK_BYTES = 4 * 1024 * 1024;
+
+/** The end and the total of a `Content-Range`, or null when the app answered with
+ *  the whole file — an unranged 200, which is what a small file gets. */
+function ranged(header) {
+  const m = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(String(header || ""));
+  return m ? { end: Number(m[2]), total: Number(m[3]) } : null;
+}
+
 /**
- * One of the case's files, for a reference window (`extension/mapref.js`).
+ * One slice of one of the case's files, for a reference window (`mapref.js`).
  *
  * Not `mapApi`: that one parses what comes back as JSON, and this is bytes. The
  * route is written in rather than allowlisted — the panel may ask for a file
  * from the case it has open and for nothing else, and the app's own fence
  * (`api/ingest.py`, ``handoff_file``) is what says which files those are.
+ *
+ * It answers a slice rather than a file because the panel is often holding a
+ * video up, and a video is not 48 MB. `Range` is what `FileResponse` already
+ * serves, so nothing over there had to be built for this: the page asks again
+ * from `next` until `next` is null and glues the pieces into one blob. A slice
+ * short of the chunk size is not the signal — a file whose length divides evenly
+ * would end on a 416 — so the total in `Content-Range` is.
  */
-async function mapFile(caseId, path) {
+async function mapFile(caseId, path, offset = 0) {
   const { backendUrl, token } = await settings();
   if (!token) throw new Error("not paired. Open the extension options and paste the token from Azimut Settings");
   if (!caseId) throw new Error("no case open");
+  const start = Number(offset) || 0;
   let r;
   try {
-    r = await fetch(fileUrl(backendUrl, caseId, path), { headers: { "X-Azimut-Token": token } });
+    r = await fetch(fileUrl(backendUrl, caseId, path), {
+      headers: {
+        "X-Azimut-Token": token,
+        Range: `bytes=${start}-${start + FILE_CHUNK_BYTES - 1}`,
+      },
+    });
   } catch {
     throw new Error("Azimut is not answering. Is the app running?");
   }
   if (!r.ok) throw new Error(await refusal(r));
   const blob = await r.blob();
-  return { type: blob.type || "application/octet-stream", data: await base64(blob) };
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const read = start + bytes.length;
+  // No `Content-Range` means the app ignored the ask and sent everything, which
+  // is a whole file in one message rather than a broken one.
+  const total = ranged(r.headers?.get?.("Content-Range"))?.total ?? read;
+  return {
+    type: blob.type || "application/octet-stream",
+    data: encode(bytes),
+    next: read < total ? read : null,
+    total,
+  };
 }
 
 /** Why the app would not hand a file over, in its own words where it gave any —
@@ -1106,10 +1159,11 @@ async function handle(msg, sender) {
     }
   }
 
-  // The panel, asking for one of the case's files — bytes rather than JSON.
+  // The panel, asking for a slice of one of the case's files — bytes rather than
+  // JSON, and one chunk per message so a long video is not one huge string.
   if (msg.type === "map-file") {
     try {
-      return { ok: true, file: await mapFile(msg.caseId, msg.path) };
+      return { ok: true, file: await mapFile(msg.caseId, msg.path, msg.offset) };
     } catch (e) {
       return { ok: false, error: e.message };
     }

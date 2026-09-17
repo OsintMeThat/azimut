@@ -54,19 +54,22 @@ _MEDIA_CATEGORIES = (
     "video",
     "collage",
     "satellite",
+    "comparison",
     "upload",
     "download",
     "other",
 )
+_NOT_COMPARISON_SQL = "COALESCE(source_type, '') != 'compare'"
 _SATELLITE_SQL = (
     "(COALESCE(source_type, '') = 'satellite' OR "
     "(COALESCE(source_type, '') = 'screenshot' AND imagery_mode = 'satellite'))"
 )
 _MEDIA_CATEGORY_SQL = {
-    "image": f"(kind = 'image' AND NOT {_SATELLITE_SQL})",
+    "image": f"(kind = 'image' AND NOT {_SATELLITE_SQL} AND {_NOT_COMPARISON_SQL})",
     "video": "kind = 'video'",
     "collage": "source_op = 'collage'",
     "satellite": _SATELLITE_SQL,
+    "comparison": "source_type = 'compare'",
     # A paste and a drop are one facet: both are material the analyst brought in
     # by hand, which is the question this filter asks. They stay two source types
     # because the gesture is part of the record — a screenshot is not a file that

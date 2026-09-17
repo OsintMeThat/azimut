@@ -1,0 +1,277 @@
+/* Compare uses the same theme tokens as the other tools. */
+.compare-tool {
+  --cmp-a: var(--info);
+  --cmp-b: var(--accent);
+  --glass: var(--bg-1);
+  --glass-strong: var(--bg-2);
+  --glass-line: var(--border);
+  --glass-line-strong: var(--border-strong);
+  --glass-hover: var(--bg-2);
+  --glass-press: var(--bg-3);
+  --glass-ink: var(--text-1);
+  --glass-muted: var(--text-2);
+  --glass-dim: var(--text-3);
+  --glass-radius: var(--r-sm);
+  --glass-shadow: none;
+}
+
+.cmp-glass {
+  color: var(--glass-ink);
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--glass-radius);
+  box-shadow: var(--glass-shadow);
+}
+
+.cmp-glass.strong {
+  background: var(--glass-strong);
+}
+
+.cmp-letter {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  color: var(--bg-0);
+  font: 800 11px/1 var(--font-sans);
+  letter-spacing: 0;
+}
+.cmp-letter.a { background: var(--cmp-a); }
+.cmp-letter.b { background: var(--cmp-b); }
+.cmp-letter.both {
+  background: linear-gradient(135deg, var(--cmp-a) 50%, var(--cmp-b) 50%);
+}
+
+.cmp-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  color: var(--glass-muted);
+  transition: background 0.12s var(--ease), color 0.12s var(--ease);
+}
+.cmp-icon:hover:not(:disabled) { color: var(--glass-ink); background: var(--glass-hover); }
+.cmp-icon.on { color: var(--accent); background: var(--accent-soft); }
+.cmp-icon:disabled { opacity: 0.38; cursor: not-allowed; }
+
+.cmp-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  background: var(--bg-0);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+.cmp-seg > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--glass-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.12s var(--ease), color 0.12s var(--ease);
+}
+.cmp-seg > button:hover:not(:disabled) { color: var(--glass-ink); background: var(--glass-hover); }
+.cmp-seg > button.on { color: var(--accent); background: var(--accent-soft); }
+.cmp-seg > button:disabled { opacity: 0.4; cursor: not-allowed; }
+.cmp-seg.fill { display: flex; }
+.cmp-seg.fill > button { flex: 1; }
+
+.cmp-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 18px;
+  background: transparent;
+  cursor: pointer;
+}
+.cmp-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--accent) var(--fill, 50%), var(--border-strong) var(--fill, 50%));
+}
+.cmp-range::-moz-range-track {
+  height: 4px;
+  border-radius: 99px;
+  background: var(--border-strong);
+}
+.cmp-range::-moz-range-progress {
+  height: 4px;
+  border-radius: 99px;
+  background: var(--accent);
+}
+.cmp-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 2px solid #111317;
+  border-radius: 50%;
+  background: var(--glass-ink);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+.cmp-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #111317;
+  border-radius: 50%;
+  background: var(--glass-ink);
+}
+.cmp-range:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+.cmp-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 17px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.18);
+  transition: background 0.15s var(--ease);
+}
+.cmp-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #f5f6f7;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  transition: transform 0.15s var(--ease);
+}
+.cmp-switch.on { background: var(--accent); }
+.cmp-switch.on::after { transform: translateX(13px); }
+
+.cmp-kicker {
+  color: var(--glass-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cmp-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The column beside the stage. Both computing modes use it, so setting up a
+   difference and setting up a detection have the same shape: a header that
+   names the mode and says in one line what it reads, a scrolling body, and
+   one action pinned at the foot that never scrolls out of reach. It takes
+   width from the maps rather than covering them — the map stays the thing
+   you are working on. */
+.cmp-dock {
+  display: flex;
+  flex: 0 0 clamp(300px, 26vw, 380px);
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.cmp-dock > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 8px 9px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.cmp-dock > header strong { flex: 1; font-size: var(--fs-sm); }
+.cmp-dock-lead {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+.cmp-dock-body {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+.cmp-dock-foot {
+  display: grid;
+  gap: 7px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.cmp-dock-foot .reason {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-align: center;
+}
+
+/* One numbered step. The number is the whole instruction about order. */
+.cmp-step { display: grid; gap: 8px; }
+.cmp-step > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+.cmp-step > header > strong {
+  flex: 1;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.cmp-step-n {
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  color: var(--text-3);
+  background: var(--bg-3);
+  font: 700 10px/1 var(--font-sans);
+}
+.cmp-step.done .cmp-step-n { color: var(--bg-0); background: var(--accent); }
+.cmp-step .hint { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; margin: 0; }
+.cmp-step .warn { color: var(--warn); font-size: var(--fs-xs); line-height: 1.45; margin: 0; }
+
+/* Inputs inside a dock: label above, control below, never side by side —
+   the column is too narrow for a two-column form to stay readable. */
+.cmp-dock label {
+  display: grid;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.cmp-dock label.check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.cmp-dock input,
+.cmp-dock select,
+.cmp-dock textarea {
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-1);
+  background: var(--bg-2);
+  font-size: var(--fs-xs);
+  accent-color: var(--accent);
+}
+.cmp-dock input[type='range'] { width: 100%; padding: 0; border: none; background: none; }
+.cmp-dock input[type='checkbox'] { width: auto; padding: 0; }
+.cmp-dock input[type='color'] { height: 26px; padding: 2px; }
+.cmp-dock .row { display: flex; align-items: center; gap: 7px; }
+.cmp-dock .row > .grow { flex: 1; min-width: 0; }

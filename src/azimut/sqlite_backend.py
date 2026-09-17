@@ -119,7 +119,10 @@ if TYPE_CHECKING:
 # Schema 16 lets the existing Analysis View store own Timeline recipes and snapshots.
 # Schema 17 rebuilds the derived temporal projection with fixed-width UTC bounds, so
 # SQLite text ordering remains chronological at sub-second precision.
-SQLITE_SCHEMA = 17
+# Schema 18 rebuilds it again, now that a proof's stated date is projected as a
+# statement: proofs dated before the projection could read them still reach the
+# Timeline, without re-saving each one.
+SQLITE_SCHEMA = 18
 
 _SCHEMA = """
 CREATE TABLE meta (

@@ -52,3 +52,15 @@ describe('entity Time tab', () => {
     expect(source).toContain('visibleUndated = $derived(undated.filter');
   });
 });
+
+describe('entity Time tab — which date reads first', () => {
+  it('puts what the analyst concluded above what the file reports', () => {
+    // A proof that dates its footage states it here, and a stated date is the
+    // answer: the file's own clock is what the analyst was correcting or filling
+    // in. Pinned, because the order is the whole of the priority.
+    const about = source.indexOf('Statements about this');
+    const media = source.indexOf('Media dates');
+    expect(about).toBeGreaterThan(-1);
+    expect(media).toBeGreaterThan(about);
+  });
+});

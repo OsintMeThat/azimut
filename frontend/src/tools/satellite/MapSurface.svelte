@@ -15,8 +15,9 @@
    * The camera reports out rather than being driven in: the engine settles a
    * pan on a whole zoom level and wraps a longitude back inside ±180, and a
    * parent that assumed otherwise would fight it. `engine` and `element` are
-   * handed back for the acts a tool owns — flying to a saved point, and the
-   * drag gestures it arms over the map.
+   * handed back for the acts a tool owns — flying to a saved point, the drag
+   * gestures it arms over the map, and linking two surfaces on one camera
+   * (`lib/map/cameraLink.js`).
    *
    * The catalogue and the month's tally are shared (state/imagery.svelte.js):
    * a tile counted against the month is counted once, however many surfaces
@@ -27,6 +28,7 @@
   import { createBasemaps, OVERLAY_IDS } from '../../lib/map/basemap.js';
   import { DEFAULT_LAYER, DEFAULT_MAXCC, SENTINEL_ID } from '../../lib/sentinel.js';
   import Icon from '../../components/Icon.svelte';
+  import Compass from '../../components/Compass.svelte';
   import ImageryChip from './ImageryChip.svelte';
 
   let {
@@ -47,6 +49,8 @@
     imperial = false,
     /** The view the map opens on. Read once, at build. */
     home,
+    /** Satellite starts at home; linked Compare surfaces keep their bound view. */
+    resetToHome = true,
     /** Where the camera is now. Reported out; the engine is what moves it. */
     view = $bindable({ lat: 0, lon: 0, zoom: 2 }),
     bearing = $bindable(0),
@@ -61,6 +65,15 @@
     armed = null,
     /** Hide this surface's own chrome for a screen capture. */
     grabbing = false,
+    /** False hides this surface's own corner (provider, date, compass) for a
+     *  tool that shows them itself, as Compare does over its two maps. */
+    chrome = true,
+    /** When the pixels under the crosshair were taken, reported out:
+     *  `{ date, exact, source }`, or null when nothing can say. */
+    dated = $bindable(null),
+    /** A view zoom this surface stops at below its provider's own ceiling, so
+     *  two linked surfaces stop together. Null leaves the provider in charge. */
+    zoomCeiling = null,
     /** How far down the engine's zoom buttons start, so they stack under
      *  whatever the tool floats in the same corner (see `engine.css`). */
     controlsTop = 58,
@@ -75,18 +88,18 @@
     onwidgetload = () => {},
     onwidgetauthfailure = () => {},
     onwidgetfailed = () => {},
+    /** The settled camera and the turn, for a parent that shares them. */
+    onviewsettled = () => {},
+    onbearingchange = () => {},
     children,
   } = $props();
 
   let mapEl = $state();
   let basemaps = null;
-  let editingBearing = $state(false);
-  let bearingInput = $state('');
   // Acquisition date of the imagery under the crosshair — Esri only.
   let imageryDate = $state(null); // { supported, date, source } | null
   let dateRequest = 0;
   let dateTimer;
-
   /**
    * What this surface actually shows, which is not always what it was asked
    * for: a billed basemap steps aside when the month is nearly spent or the
@@ -105,6 +118,16 @@
   const pinnedDay = $derived(
     shown.provider?.id === SENTINEL_ID && s2?.window.from ? s2.window.from : null
   );
+
+  $effect(() => {
+    dated = pinnedDay
+      ? { date: pinnedDay, exact: true, source: 'Sentinel-2' }
+      : shown.provider?.id === SENTINEL_ID
+        ? s2?.latest ? { date: s2.latest, exact: false, source: 'Sentinel-2' } : null
+        : imageryDate?.supported && imageryDate.date
+          ? { date: imageryDate.date, exact: false, source: imageryDate.source ?? null }
+          : null;
+  });
 
   export function resize() {
     engine?.resize();
@@ -132,7 +155,7 @@
   });
 
   async function build() {
-    view = { ...home };
+    if (resetToHome) view = { ...home };
     try {
       engine = await createMapEngine(mapEl, { view, imperial });
     } catch (e) {
@@ -146,6 +169,7 @@
       return null;
     }
     element = mapEl;
+    engine.setBearing(bearing);
     basemaps = createBasemaps(engine, {
       onMeteredTiles: onusage,
       // one billed map load, counted where it happens (the proxy can't see it)
@@ -153,15 +177,18 @@
       onWidgetAuthFailure: onwidgetauthfailure,
       onWidgetFailed: onwidgetfailed,
     });
+    basemaps.setZoomCeiling(zoomCeiling);
     showBasemap();
     showOverlays();
     // the façade wraps the centre back inside ±180 for us, which is what every
     // route a capture reaches enforces
     const offSettled = engine.on('view-settled', (settled) => {
       view = { lat: settled.lat, lon: settled.lon, zoom: settled.zoom };
+      onviewsettled(settled);
     });
     const offRotate = engine.on('rotate', (turned) => {
       bearing = Math.round(turned.bearing);
+      onbearingchange(turned);
     });
     const offClick = engine.on('click', (at) => onclick(at));
     const offMenu = engine.on('contextmenu', (at) => oncontextmenu(at));
@@ -183,6 +210,11 @@
     if (!shown.provider || !basemaps) return;
     basemaps.show(shown.provider, shown.id, shown.cell);
   }
+
+  $effect(() => {
+    const value = zoomCeiling;
+    if (ready) basemaps?.setZoomCeiling(value);
+  });
 
   $effect(() => {
     shown.id; // a new provider, a new eco/block fallback, a new Sentinel window
@@ -234,17 +266,6 @@
     engine?.setBearing(deg); // the façade normalises whatever it is handed
   }
 
-  function startEditBearing() {
-    bearingInput = String(bearing);
-    editingBearing = true;
-  }
-
-  function commitBearing() {
-    const deg = parseFloat(bearingInput);
-    if (Number.isFinite(deg)) setBearing(deg);
-    editingBearing = false;
-  }
-
   // the container resizes when a panel opens or the window changes, and
   // reappears from display:none when the tool tab is re-selected
   export async function remeasure() {
@@ -273,6 +294,7 @@
   <!-- The picture this surface is showing, when it was taken, and the compass
        reading how it is turned: all facts about this map and belonging to it,
        which is what lets two surfaces sit side by side each saying its own. -->
+  {#if chrome}
   <div class="surface-ctl">
     <ImageryChip {imagery} bind:providerId {s2} {wayback} {shown} />
 
@@ -319,51 +341,10 @@
     </span>
   {/if}
 
-    <!-- Which way is up, as one reading: the needle resets north, the number
-         opens for an exact angle. Middle-dragging the map is what turns it. -->
-    <div class="rotate-ctl" class:turned={bearing !== 0}>
-    <button
-      class="compass"
-      onclick={() => setBearing(0)}
-      title={bearing ? 'Reset to north' : 'North up · middle-drag the map to rotate'}
-      aria-label="Reset to north"
-    >
-      <svg width="15" height="15" viewBox="0 0 16 16" style="transform: rotate({bearing}deg)">
-        <!-- A needle, not a rose: the outline is the whole instrument and the
-             filled half is north. Two colours and a disc read as decoration. -->
-        <path
-          d="M8 1.6 11.7 14 8 10.9 4.3 14Z"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.3"
-          stroke-linejoin="round"
-        />
-        <path d="M8 1.6 11.7 14 8 10.9Z" fill="currentColor" />
-      </svg>
-    </button>
-    {#if editingBearing}
-      <!-- svelte-ignore a11y_autofocus -->
-      <input
-        class="input deg-input mono"
-        type="number"
-        min="0"
-        max="359"
-        bind:value={bearingInput}
-        autofocus
-        onblur={commitBearing}
-        onkeydown={(e) => {
-          if (e.key === 'Enter') commitBearing();
-          else if (e.key === 'Escape') editingBearing = false;
-        }}
-        aria-label="Set bearing in degrees"
-      />
-    {:else}
-      <button class="deg mono" onclick={startEditBearing} title="Click to type an exact angle">
-        {bearing}°
-      </button>
-    {/if}
-    </div>
+    <!-- Which way is up. Middle-dragging the map is what turns it. -->
+    <Compass {bearing} onbearing={setBearing} />
   </div>
+  {/if}
 </div>
 
 <style>
@@ -460,50 +441,4 @@
   .surface-ctl > :global(*) {
     pointer-events: auto;
   }
-  /* The needle and its angle are one reading, so they are one control, built
-     like the chips above it: same fill, same 1px ring, same height. The disc
-     and the two-tone rose it replaces read as an ornament on an instrument
-     panel, and were the only round thing on the map. */
-  .rotate-ctl {
-    display: flex;
-    align-items: stretch;
-    height: 30px;
-    border-radius: var(--radius-1);
-    background: rgba(24, 24, 24, 0.88);
-    backdrop-filter: blur(6px);
-    box-shadow: 0 0 0 1px var(--border);
-  }
-  /* north-up is the resting state and says nothing; a turned map is a fact
-     worth seeing from across the screen */
-  .rotate-ctl.turned {
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
-  }
-  .compass {
-    display: grid;
-    place-items: center;
-    width: 30px;
-    color: var(--text-2);
-    cursor: pointer;
-  }
-  .compass:hover {
-    color: var(--accent);
-  }
-  .deg {
-    min-width: 42px;
-    padding: 0 7px 0 5px;
-    text-align: left;
-    font-size: var(--fs-xs);
-    color: var(--text-1);
-    cursor: text;
-  }
-  .deg:hover {
-    color: var(--accent);
-  }
-  .deg-input {
-    width: 52px;
-    padding: 0 4px;
-    border: none;
-    background: none;
-    text-align: left;
-    font-size: var(--fs-xs);
-  }</style>
+</style>

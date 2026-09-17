@@ -244,10 +244,19 @@ describe('the map tools panel’s own scripts', () => {
   });
 });
 
-describe('handle: map-file (a picture for a reference window)', () => {
+describe('handle: map-file (a picture or a video for a reference window)', () => {
   const png = () => ({
     type: 'image/png',
     arrayBuffer: async () => new Uint8Array([0xff, 0x00, 0x10]).buffer,
+  });
+
+  /** The app answering a `Range` the way `FileResponse` does: the slice, and how
+   *  much file there is behind it. */
+  const slice = (bytes, start, total) => ({
+    ok: true,
+    status: 206,
+    headers: { get: (name) => (name === 'Content-Range' ? `bytes ${start}-${start + bytes.length - 1}/${total}` : null) },
+    blob: async () => ({ type: 'video/mp4', arrayBuffer: async () => new Uint8Array(bytes).buffer }),
   });
 
   it('reads one case file with the pairing token and carries it as base64', async () => {
@@ -257,11 +266,42 @@ describe('handle: map-file (a picture for a reference window)', () => {
     const { handle } = load({ fetchImpl });
 
     const res = await handle({ type: 'map-file', caseId: 'case-1', path: 'media/roof.png' }, {});
-    expect(res).toEqual({ ok: true, file: { type: 'image/png', data: btoa('\xff\x00\x10') } });
+    // no Content-Range: the app sent the whole thing, so there is nothing after it
+    expect(res).toEqual({
+      ok: true,
+      file: { type: 'image/png', data: btoa('\xff\x00\x10'), next: null, total: 3 },
+    });
     expect(fetchImpl.mock.calls[0][0]).toBe(
       'http://127.0.0.1:8477/api/ingest/file?case_id=case-1&path=media%2Froof.png'
     );
     expect(fetchImpl.mock.calls[0][1].headers['X-Azimut-Token']).toBe('tok-123');
+  });
+
+  it('asks for a slice, and says where the next one starts', async () => {
+    // what makes a reference window able to hold a video: the file is never the
+    // unit, so nothing here scales with how long the clip is
+    const fetchImpl = vi.fn(async () => slice([1, 2, 3], 0, 9));
+    const { handle } = load({ fetchImpl });
+
+    const res = await handle(
+      { type: 'map-file', caseId: 'case-1', path: 'media/walk.mp4', offset: 0 },
+      {}
+    );
+    expect(res.file.next).toBe(3);
+    expect(res.file.total).toBe(9);
+    expect(fetchImpl.mock.calls[0][1].headers.Range).toBe(`bytes=0-${4 * 1024 * 1024 - 1}`);
+  });
+
+  it('asks from the offset it was given, and ends on the last slice', async () => {
+    const fetchImpl = vi.fn(async () => slice([7, 8], 7, 9));
+    const { handle } = load({ fetchImpl });
+
+    const res = await handle(
+      { type: 'map-file', caseId: 'case-1', path: 'media/walk.mp4', offset: 7 },
+      {}
+    );
+    expect(fetchImpl.mock.calls[0][1].headers.Range).toBe(`bytes=7-${7 + 4 * 1024 * 1024 - 1}`);
+    expect(res.file).toEqual({ type: 'video/mp4', data: btoa('\x07\x08'), next: null, total: 9 });
   });
 
   it('says which refusal it was, rather than leaving an empty window', async () => {
@@ -269,7 +309,7 @@ describe('handle: map-file (a picture for a reference window)', () => {
     // through rather than a second copy of the number kept over here
     for (const [status, body, message] of [
       [401, '', /pairing token rejected/],
-      [413, '{"detail":"a handed-over file must be under 48 MB"}', /under 48 MB/],
+      [413, '{"detail":"a handed-over file must be under 512 MB"}', /under 512 MB/],
       [404, 'not json at all', /refused that file \(404\)/],
     ]) {
       const fetchImpl = vi.fn(async () => ({ ok: false, status, text: async () => body }));
@@ -391,6 +431,35 @@ describe('handOff: filling a composer the app prepared', () => {
     // and it says so, because a picture missing from a published thread is not
     // something to discover after posting
     await settle(() => expect(chrome.notifications.create).toHaveBeenCalled());
+  });
+
+  it('skips an attachment too heavy to push into the page, where a window would take it', async () => {
+    // The app's ceiling is the one a reference window answers to, and that one
+    // pulls its file a chunk at a time. A thread's files go the other way — the
+    // whole payload is injected at once — so this side keeps a lower number.
+    const chrome = fillingChrome();
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      blob: async () => ({
+        type: 'video/mp4',
+        size: 64 * 1024 * 1024,
+        arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+      }),
+    }));
+    const { handOff } = load({ chrome, fetchImpl });
+    chrome.scripting.executeScript = vi.fn(async () => [{ result: { filled: 2 } }]);
+
+    await handOff(payload);
+
+    await settle(() =>
+      expect(chrome.notifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining('could not be handed over') })
+      )
+    );
+    const [setter] = chrome.scripting.executeScript.mock.calls
+      .map(([one]) => one)
+      .filter((call) => call.world === 'MAIN');
+    expect(setter.args[0].posts[0].files).toEqual([]);
   });
 
   it('says what the fill could not do, since the app was answered long before', async () => {

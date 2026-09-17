@@ -41,7 +41,6 @@ describe('the point the map is reading', () => {
     expect(source).toContain('aria-checked={style === entry.id}');
     expect(source).not.toContain('class="chip"');
     for (const name of ['noMark', 'centre', 'move', 'crosshair', 'pin']) expect(paths[name]).toBeTruthy();
-    expect(paths.ghost).toBeUndefined();
   });
 
   it('opens upwards, because it sits at the foot of the map', () => {

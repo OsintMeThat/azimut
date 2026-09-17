@@ -24,6 +24,7 @@
     extDetected,
     extOutdated,
     extState,
+    extBundled,
     extBusy,
     installExtension,
     updateExtension,
@@ -40,6 +41,17 @@
   // one copy from another, so it only ever says "something is there".
   let status = $derived(extState?.status ?? (extDetected ? 'probing' : 'absent'));
   let version = $derived(extState?.detectedVersion ?? extDetected);
+
+  // The XPI is attached to the release that last moved the extension, which is
+  // the tag matching its own version — not the newest release. Naming the file
+  // is the difference between a download and a hunt through six assets on a page
+  // that may carry none of them.
+  let xpiName = $derived(extBundled ? `azimut-capture-${extBundled}.xpi` : null);
+  let xpiUrl = $derived(
+    xpiName
+      ? `https://github.com/OsintMeThat/azimut/releases/download/v${extBundled}/${xpiName}`
+      : 'https://github.com/OsintMeThat/azimut/releases/latest',
+  );
 </script>
 
 <section class="group">
@@ -169,17 +181,13 @@
       paste the path. Then reload this tab.
     </p>
     <p class="note">
-      Firefox: download the signed add-on below, then open
-      <span class="mono">about:addons</span> and choose the gear menu → Install Add-on From File.
+      Firefox: download the <span class="mono">.xpi</span> below, then open
+      <span class="mono">about:addons</span> → the gear menu → Install Add-on From File.
     </p>
     <div class="scraper-actions">
-      <a
-        class="btn btn-sm dotted"
-        href="https://github.com/OsintMeThat/azimut/releases/latest"
-        target="_blank"
-        rel="noreferrer"
-      >
-        <Icon name="download" size={13} /> Signed add-on for Firefox
+      <a class="btn btn-sm dotted" href={xpiUrl} target="_blank" rel="noreferrer">
+        <Icon name="download" size={13} />
+        {xpiName ?? 'Signed .xpi for Firefox'}
       </a>
       <a class="btn btn-sm dotted" href="/api/ingest/extension.zip" download>
         <Icon name="download" size={13} /> Download as .zip instead

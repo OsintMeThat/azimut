@@ -248,3 +248,24 @@ def test_a_proof_without_pastes_keeps_no_assets_folder(client):
         f"/api/cases/{cid}/proofs", json={"title": "Plain", "spec": _spec(panels=["media/a.jpg"])}
     )
     assert not get_case(cid).resolve_inside(layout.proof_assets_rel("Plain")).exists()
+
+
+def test_the_composer_reads_a_paste_back_where_the_save_wrote_it():
+    """The one server-owned path the frontend spells for itself.
+
+    Everything else a proof holds comes back through the API — the spec names its
+    panels, the list names the export. A pasted image is addressed by the composer
+    building the URL itself, so the two spellings can drift apart in silence, and
+    when they did the composer reported an overlay the case had never lost. Pinned
+    here rather than in the frontend suite, because only this side knows where the
+    save actually put the file.
+    """
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "frontend" / "src" / "tools" / "ProofComposer.svelte"
+    ).read_text(encoding="utf-8")
+
+    folder = layout.proof_assets_rel("${entry.name}")
+    assert f"`{folder}/${{p.asset}}`" in source

@@ -13,6 +13,7 @@ beforeEach(() => {
   uiState.gotoCoords = null;
   uiState.focusCapture = null;
   uiState.openBoardEntity = null;
+  uiState.openCompare = null;
   post.mockClear();
   caseState.current = { id: 'c1', name: 'Case', entities: [], links: [], folders: [] };
   vi.stubGlobal('window', { open: vi.fn() });
@@ -170,6 +171,13 @@ describe('reopening an artifact in its tool', () => {
 
     expect(uiState.openInspect).toBe('Bridge pass');
     expect(uiState.tool).toBe('inspect');
+  });
+
+  it('names a comparison session by its spec file', () => {
+    openEntity({ type: 'compare-session', attrs: { spec: 'comparisons/.meta/Harbour change.json' } });
+
+    expect(uiState.openCompare).toBe('Harbour change');
+    expect(uiState.tool).toBe('compare');
   });
 
   it('opens the tool empty rather than on a name it could not read', () => {

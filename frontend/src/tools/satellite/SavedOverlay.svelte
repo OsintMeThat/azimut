@@ -18,6 +18,8 @@
     coords,
     fullscreen = false,
     hoveredId = $bindable(null),
+    // the stack the media viewer is reading, lit until it closes
+    activeKey = null,
     onopen,
     onedit,
     onproof,
@@ -25,9 +27,13 @@
     onshowproofs,
     onrefresh,
     ontrace,
+    onmedia,
   } = $props();
 
   const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', proof: 'proof' };
+
+  /** True when every item under a mark is a located file: it opens the viewer. */
+  const isMedia = (mark) => mark.kinds.every((kind) => kind === 'media');
 
   let zoom = $state(null);
 
@@ -45,6 +51,12 @@
   function icon(mark) {
     // Mixed stacks use the shared place glyph.
     const kind = mark.kinds.length > 1 ? 'place' : mark.kinds[0];
+    // a stack of files draws as footage only when all of it is footage
+    const name = isMedia(mark)
+      ? mark.items.every((row) => row.media_kind === 'video')
+        ? 'video'
+        : 'image'
+      : (GLYPH[kind] ?? 'pin');
     const count =
       mark.items.length > 1 ? `<i class="saved-mark-count">${mark.items.length}</i>` : '';
     // A proof borrowing capture coordinates appears as a dot on that capture.
@@ -53,7 +65,7 @@
       : '';
     return {
       className: 'saved-mark-wrap',
-      html: `<span class="saved-mark saved-mark-${kind}">${glyph(GLYPH[kind] ?? 'pin', 13)}${count}${worked}</span>`,
+      html: `<span class="saved-mark saved-mark-${kind}">${glyph(name, 13)}${count}${worked}</span>`,
       ...TEARDROP,
     };
   }
@@ -186,15 +198,21 @@
           keyboard: false,
           onOver: () => (hoveredId = mark.items[0].key ?? mark.items[0].id),
           onOut: () => (hoveredId = null),
-          // every mark opens its card, one item or five: clicking a pin should
-          // tell you what is there before it moves the map out from under you
-          popup: {
-            content: () => popupContent(mark),
-            className: 'saved-popup',
-            minWidth: 296,
-            maxWidth: 330,
-            offset: TEARDROP_CARD_OFFSET,
-          },
+          // A file's mark plays it in the panel beside the map, stack and all:
+          // the card is for work filed on a point, and a photo is read by looking.
+          // Every other mark opens its card, one item or five: clicking a pin should
+          // tell you what is there before it moves the map out from under you.
+          ...(isMedia(mark)
+            ? { onClick: () => onmedia?.(mark.items) }
+            : {
+                popup: {
+                  content: () => popupContent(mark),
+                  className: 'saved-popup',
+                  minWidth: 296,
+                  maxWidth: 330,
+                  offset: TEARDROP_CARD_OFFSET,
+                },
+              }),
         },
       ])
     );
@@ -216,6 +234,15 @@
     if (lit && lit !== elements.get(id)) lit.classList.remove('is-hovered');
     lit = id ? (elements.get(id) ?? null) : null;
     lit?.classList.add('is-hovered');
+  });
+
+  // the mark the viewer is reading, kept lit through hovers elsewhere
+  let reading = null;
+  $effect(() => {
+    const next = activeKey ? (elements.get(activeKey) ?? null) : null;
+    if (reading && reading !== next) reading.classList.remove('is-active');
+    reading = next;
+    reading?.classList.add('is-active');
   });
 </script>
 
@@ -276,6 +303,12 @@
     background: #fff;
     box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.55);
   }
+  /* a file is outlined in white, so footage reads apart from the imagery work
+     filed around it without leaving the layer's one colour family */
+  :global(.saved-mark-media) {
+    box-shadow: 0 0 0 1.5px #fff, 0 2px 5px rgba(0, 0, 0, 0.45);
+  }
+  :global(.saved-mark-wrap.is-active .saved-mark),
   :global(.saved-mark-wrap.is-hovered .saved-mark),
   :global(.saved-mark-wrap:hover .saved-mark) {
     transform: rotate(-45deg) scale(1.25);

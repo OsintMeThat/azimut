@@ -1036,6 +1036,13 @@ def test_details_title_edit_moves_every_named_tool_file(client):
             layout.session_rel("New inspect"),
         ),
         (
+            "compare-session",
+            "spec",
+            layout.compare_session_rel("Old comparison"),
+            "New comparison",
+            layout.compare_session_rel("New comparison"),
+        ),
+        (
             "post",
             "draft",
             layout.draft_rel("Old post"),

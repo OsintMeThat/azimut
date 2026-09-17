@@ -358,7 +358,9 @@ def _align_visible_names(case: "Case") -> None:
         media_engine.rename_media(case, path, desired, settle_worker=False)
 
     for entity in list(case.list_entities()):
-        if entity.get("type") in {"note", "proof", "inspect-session", "post"}:
+        if entity.get("type") in {
+            "note", "proof", "inspect-session", "compare-session", "post"
+        }:
             case.update_entity(entity["id"], {"label": entity.get("label") or ""})
 
 

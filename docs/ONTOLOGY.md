@@ -46,9 +46,11 @@ index the ordering was already asking for.
 Schema 15 adds the rebuildable temporal projection. Claims and media metadata remain
 authoritative. Schema 16 lets Analysis Views own Timeline recipes and immutable
 temporal snapshots. Schema 17 rebuilds temporal bounds at fixed microsecond width so
-SQLite text ordering stays chronological. A Timeline view stores presentation and
-track queries, never copies temporal rows into the graph and never creates a temporal
-relation.
+SQLite text ordering stays chronological. Schema 18 rebuilds the projection for the
+date a Proof states: a statement, because the analyst concluded it, beside the media
+rows that report what a file claims about itself. A Timeline view stores presentation
+and track queries, never copies temporal rows into the graph and never creates a
+temporal relation.
 
 Legend: ✅ implemented in code · ⬜ proposed.
 
@@ -130,7 +132,7 @@ to one clause — no full stop, no em-dash, under a hundred characters.
 | `class` | a model the case counts with, never one particular object | `equipment-type` |
 | `identifier` | a handle on a system | `account`, `email`, `phone`, `domain`, `ip`, `network` |
 | `collected` | bytes gathered into the case rather than written, so one may depict a place | `media`, `capture` |
-| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `bookmark` |
+| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `compare-session`, `bookmark` |
 | `place` | a point, never a thing | `place` |
 | `claim` | a statement about the graph, carrying its own reasoning | `claim` |
 
@@ -159,7 +161,7 @@ picture of the case is about it. The line that matters is between the first two 
 |---|---|---|---|
 | `subject` | the case is about it | `person`, `organization`, `vehicle`, `vessel`, `aircraft`, `structure`, `equipment-type`, `account`, `email`, `phone`, `domain`, `ip`, `network`, `media`, `place`, `claim` | a node |
 | `attestation` | a wrapper around something the case already holds | `bookmark`, `proof`, `capture` | folded into the edge that carries its provenance, drawn or not (below) |
-| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session` | out of the case readings, drawn by **My work** |
+| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `compare-session` | out of the case readings, drawn by **My work** |
 | `deliverable` | what the case produced | `post` | out of the case readings, drawn by **My work** |
 
 A bookmark stays drawn because it is not a leaf: *this account posted it, this
@@ -181,6 +183,7 @@ answer by omission (`tests/test_entities.py`).
 | `proof` | document | attestation | ✅ | proof-composer | `spec` (json), `path` (png) | yes |
 | `post` | document | deliverable | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | document | annex | ✅ | inspect | `spec` (json) | yes |
+| `compare-session` | document | annex | ✅ | compare | `spec` (json) | yes |
 | `note` | document | annex | ✅ | notebook | `path`, `folder?` | yes (Markdown) |
 | `sheet` | document | annex | ✅ | sheet | `path` (csv) | yes (CSV + sidecar) |
 | `bookmark` | document | attestation | ✅ | capture extension | `url`, `fetched_at?`, `archive_url?`, `reliability?` | no (a URL) |
@@ -217,7 +220,7 @@ to declare here when built:
 
 | Type | Family | Shape | Note |
 |---|---|---|---|
-| `grid` | document | a spec, like `inspect-session` | Grid Search already writes `.search/<name>.json`; it is **the only saved tool state outside the graph**, so today nothing can say "this sweep is how I found it" |
+| `grid` | document | a spec, like `inspect-session` | Grid Search writes `.search/<name>.json` outside the graph, so today nothing can say "this sweep is how I found it" |
 | `sky-session` | document | a spec, like `inspect-session` | a sun or moon lookup: the point, the date and the time, **never the numbers**. Reopening recomputes; a proof that shows the reading is what freezes it, exactly as a `proof` pairs an editable `spec` with an exported `path` |
 | `ground-image` | collected | file-backed | a provider and a position of its own, which an imported media has not |
 | `report` | document | file-backed | a distinct artifact, like `proof` |
@@ -360,11 +363,22 @@ may form an exact interval. Local-time intervals, mixed date/time intervals, ope
 intervals and the rest of EDTF Level 2 remain outside the announced profile.
 
 Time reads a derived SQLite projection, never a second authority. Claim `when` and
-`time_role` remain on the Claim; capture/publication/imagery dates remain in the media
-sidecar; filing and collection dates remain provenance. The projection labels them
-`statement`, `media` or `case_activity`, and can be deleted and rebuilt from those
-records. A manually assessed media time is therefore a sourced Claim about the media,
-not a rewrite of `taken_at`.
+`time_role` remain on the Claim; a Proof's `when` remains on the Proof;
+capture/publication/imagery dates remain in the media sidecar; filing and collection
+dates remain provenance. The projection labels them `statement`, `media` or
+`case_activity`, and can be deleted and rebuilt from those records. A manually assessed
+media time is therefore a sourced Claim about the media, not a rewrite of `taken_at`.
+
+**A dated Proof states that date for the material it rests on.** The footage was shot
+when it was shot, whichever document argues about it, so saving the proof files one
+Claim — `about` every source it composes, `cites` the proof — rather than leaving the
+date visible only from the proof's side. Three rules keep it honest: the chain is
+walked to the *origin*, so the video is dated and not the frame cut out of it, and a
+capture is never dated at all, its imagery being the provider's flyover; the file's own
+clock is never written over, so both readings sit on its Time panel with the statement
+above them; and one proof owns one statement, restated on every save, withdrawn when
+the date is cleared — unless reasoning has been added to it since, which makes it the
+analyst's and not the composer's to delete.
 
 **Counting Claims counts observations, not objects**: two
 videos of the same destroyed tank are two statements. Azimut does not merge
@@ -482,10 +496,10 @@ A grade is read wherever its source appears, including on a relation row, where 
 sits on the line carrying the entity's name while the edge's own rating sits on the
 line below (§3). Nothing needs one: most bookmarks are never graded.
 
-The file-backed pointers of `proof`, `post` and `inspect-session` (`spec`,
-`draft`, `path`) are not stable: the file's name follows the label, so renaming
-one in its tool rewrites the pointer on the same entity. Look these up by id, or
-re-read the pointer — never cache one across a save.
+The file-backed pointers of `proof`, `post`, `inspect-session` and
+`compare-session` are not stable: the file's name follows the label, so renaming
+one in its tool rewrites its `spec`, `draft` or `path` on the same entity. Look
+these up by id, or re-read the pointer — never cache one across a save.
 
 ## 3. Link
 
@@ -622,7 +636,7 @@ keeps its entities and loses its edges, with the reason.
 Six rules hold across the modes, and they are the reason it is safe to press twice.
 
 **Nothing that owns a file is born from a cell.** A `media`, a `capture`, a `proof`, a
-`post`, an `inspect-session` hold bytes; a cell holds an address. They exist only where the
+`post`, an `inspect-session` or a `compare-session` hold bytes; a cell holds an address. They exist only where the
 app itself fetched the file — the proof import's road (`engine/proofimport.py`), and the
 build a geolocation index presses (`engine/sheetproofs.py`), which is that same road driven
 a row at a time. The rule is not about where the request came from but about who fetched

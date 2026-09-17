@@ -148,12 +148,19 @@ describe('buildGeoTree filtering', () => {
     // A proof sits on the capture it composes, so drawing both at once would
     // stack two marks on one point. The fourth position swaps the source
     // instead: `isMode` tells the panel to fetch, not to filter.
-    expect(KINDS.map((k) => k.id)).toEqual(['all', 'places', 'captures', 'proofs']);
+    expect(KINDS.map((k) => k.id)).toEqual(['all', 'places', 'captures', 'proofs', 'media']);
     expect(isMode('proofs')).toBe(true);
     expect(isMode('all')).toBe(false);
 
     // and the filter itself never has to know about proofs
     expect(filterSaved(rows, { kind: 'proofs' })).toHaveLength(3);
+  });
+
+  it('switches to located media the same way', () => {
+    // a photo stands where a place, a proof or a capture puts it, so it is a
+    // source of its own rather than a filter over the places it borrows from
+    expect(isMode('media')).toBe(true);
+    expect(filterSaved(rows, { kind: 'media' })).toHaveLength(3);
   });
 
   it('lists a two-place proof once, however many marks it draws', () => {

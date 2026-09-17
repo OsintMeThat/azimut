@@ -29,6 +29,7 @@
     centre = null,
     units = 'metric',
     searching = false,
+    listId = 'sat-suggestions',
     onpick,
     onsubmit,
   } = $props();
@@ -179,9 +180,9 @@
       class="input"
       role="combobox"
       aria-expanded={open && rows.length > 0}
-      aria-controls="sat-suggestions"
+      aria-controls={listId}
       aria-autocomplete="list"
-      aria-activedescendant={at >= 0 && rows[at] ? `sat-suggestion-${at}` : undefined}
+      aria-activedescendant={at >= 0 && rows[at] ? `${listId}-${at}` : undefined}
       autocomplete="off"
       aria-label="Search a place or coordinates"
       placeholder={'A place, or 50.4501, 30.5234'}
@@ -203,7 +204,7 @@
   </div>
 
   {#if open && groups.length}
-    <div class="menu card" id="sat-suggestions" role="listbox" aria-label="Matches">
+    <div class="menu card" id={listId} role="listbox" aria-label="Matches">
       {#each groups as group (group.id)}
         <p class="head">{group.label}</p>
         {#each group.items as item (item.key)}
@@ -212,7 +213,7 @@
             type="button"
             class="row"
             class:on={index === at}
-            id={`sat-suggestion-${index}`}
+            id={`${listId}-${index}`}
             role="option"
             aria-selected={index === at}
             onmouseenter={() => (at = index)}

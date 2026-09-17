@@ -201,6 +201,62 @@
   <button class="tb-btn" title="Fit view (f)" onclick={fit}>
     <Icon name="eye" size={18} />
   </button>
+  <!-- Layout, tweet crops and repack live in one overflow flyout. -->
+  <div class="tb-group" bind:this={overflowEl}>
+    <button
+      class="tb-btn"
+      class:active={overflowOpen || layout === 'free' || !!guide}
+      title="Layout, tweet crops & repack"
+      onclick={() => toggle('overflow')}
+      bind:this={overflowBtn}
+    >
+      <Icon name="grid" size={18} />
+    </button>
+    <div
+      class="flyout flyout-overflow"
+      class:open={overflowOpen}
+      style:left={overflowPos.left}
+      style:top={overflowPos.top}
+      style:bottom={overflowPos.bottom}
+    >
+      <div class="flyout-row">
+        <button
+          class="tb-btn"
+          class:active={layout !== 'free'}
+          title="Grid layout: panels flow in rows"
+          onclick={() => setLayoutMode('grid')}
+        >
+          <Icon name="grid" size={18} />
+        </button>
+        <button
+          class="tb-btn"
+          class:active={layout === 'free'}
+          title="Free layout: drag panels anywhere"
+          onclick={() => setLayoutMode('free')}
+        >
+          <Icon name="layers" size={18} />
+        </button>
+      </div>
+      <div class="flyout-row">
+        {#each Object.keys(tweetGuides) as entry (entry)}
+          <button
+            class="tb-btn tb-guide"
+            class:active={guide === entry}
+            title={`Preview the ${entry} tweet crop. Everything outside is cut off`}
+            onclick={() => (guide = guide === entry ? null : entry)}
+          >{entry}</button>
+        {/each}
+        <button
+          class="tb-btn tb-magic"
+          title={`Repack panels toward ${guide ?? '16:9'} and reset panel sizes`}
+          disabled={!panelCount}
+          onclick={applyMagic}
+        >
+          <Icon name="wand" size={18} />
+        </button>
+      </div>
+    </div>
+  </div>
 
   {#if showContextTools}
     <div class="tb-sep"></div>
@@ -323,83 +379,39 @@
     {/if}
   {/if}
 
-  <div class="tb-sep"></div>
-
-  <!-- Layout, tweet crops and repack live in one overflow flyout. -->
-  <div class="tb-group" bind:this={overflowEl}>
-    <button
-      class="tb-btn"
-      class:active={overflowOpen || layout === 'free' || !!guide}
-      title="Layout, tweet crops & repack"
-      onclick={() => toggle('overflow')}
-      bind:this={overflowBtn}
-    >
-      <Icon name="grid" size={18} />
-    </button>
-    <div
-      class="flyout flyout-overflow"
-      class:open={overflowOpen}
-      style:left={overflowPos.left}
-      style:top={overflowPos.top}
-      style:bottom={overflowPos.bottom}
-    >
-      <div class="flyout-row">
-        <button
-          class="tb-btn"
-          class:active={layout !== 'free'}
-          title="Grid layout: panels flow in rows"
-          onclick={() => setLayoutMode('grid')}
-        >
-          <Icon name="grid" size={18} />
-        </button>
-        <button
-          class="tb-btn"
-          class:active={layout === 'free'}
-          title="Free layout: drag panels anywhere"
-          onclick={() => setLayoutMode('free')}
-        >
-          <Icon name="layers" size={18} />
-        </button>
-      </div>
-      <div class="flyout-row">
-        {#each Object.keys(tweetGuides) as entry (entry)}
-          <button
-            class="tb-btn tb-guide"
-            class:active={guide === entry}
-            title={`Preview the ${entry} tweet crop. Everything outside is cut off`}
-            onclick={() => (guide = guide === entry ? null : entry)}
-          >{entry}</button>
-        {/each}
-        <button
-          class="tb-btn tb-magic"
-          title={`Repack panels toward ${guide ?? '16:9'} and reset panel sizes`}
-          disabled={!panelCount}
-          onclick={applyMagic}
-        >
-          <Icon name="wand" size={18} />
-        </button>
-      </div>
-    </div>
-  </div>
 </div>
 
 <style>
+  /* Two columns, always. In one column the rail stood around 750px tall, which
+     is past the bottom of a laptop window once the topbar and the tab strip have
+     taken their share — the colour, the width and the layout controls sat under
+     the fold behind a scrollbar nobody looks for. Fixed rather than responsive: a
+     toolbar that changes shape with the window is one nobody learns.
+     The second column is paid for out of the buttons rather than the canvas: at
+     the size they were, the rail read as a slab beside the picture it serves. A
+     32px box still holds an 18px icon with room around it, and the whole rail
+     ends up 26px wider than the single column it replaces, against some 400px of
+     height it gives back.
+     The groups the separators mark are kept by the grid itself — a separator
+     spans both columns, so the buttons between two of them fill their own rows
+     and read left to right, then down. */
   .toolbar {
-    width: 52px;
+    width: 76px;
     flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    padding: 12px 0;
+    display: grid;
+    grid-template-columns: repeat(2, 32px);
+    justify-content: center;
+    align-content: start;
+    gap: 4px;
+    padding: 8px 0;
     border-right: 1px solid var(--border);
     background: var(--bg-1);
     overflow-y: auto;
     overflow-x: hidden;
   }
   .tb-btn {
-    width: 38px;
-    height: 38px;
+    width: 32px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -408,17 +420,22 @@
     flex-shrink: 0;
   }
   .tb-btn:hover { color: var(--text-1); background: var(--bg-2); }
-  .tb-btn.active { color: var(--text-1); background: var(--bg-3); }
+  /* The tool in hand is a selection, which is what the amber is for elsewhere in
+     the app. Grey on grey said "pressed" and left the rail's own state to be
+     worked out from the cursor. */
+  .tb-btn.active { color: var(--accent); background: var(--accent-soft); }
   .tb-guide { font-size: 11px; font-weight: 700; }
   .tb-magic:not(:disabled) { color: var(--accent); }
   .tb-magic:not(:disabled):hover { background: var(--accent-soft); }
   .tb-magic:disabled { opacity: 0.4; cursor: default; }
+  /* A hairline across the rail rather than a stub under one column: it is the
+     only thing marking the groups, so it reads as a rule and not as a stray mark. */
   .tb-sep {
-    width: 26px;
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    margin: 3px 4px;
     height: 1px;
     background: var(--border);
-    margin: 4px 0;
-    flex-shrink: 0;
   }
   .tb-size { position: relative; }
   .tb-size-val {

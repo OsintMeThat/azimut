@@ -40,6 +40,7 @@ describe('closeCase', () => {
     uiState.inspectPath = 'media/a.jpg';
     uiState.focusMedia = 'media/a.jpg';
     uiState.openInspect = 'session-a';
+    uiState.openAnalyzer = 'runs-123456789abc';
     uiState.drawInGraph = { label: 'A question' };
     uiState.openBoardEntity = 'entity-a';
     uiState.openGraphEntity = 'entity-a';
@@ -63,6 +64,7 @@ describe('closeCase', () => {
     expect(uiState.inspectPath).toBeNull();
     expect(uiState.focusMedia).toBeNull();
     expect(uiState.openInspect).toBeNull();
+    expect(uiState.openAnalyzer).toBeNull();
     expect(uiState.drawInGraph).toBeNull();
     expect(uiState.openBoardEntity).toBeNull();
     expect(uiState.openGraphEntity).toBeNull();
@@ -78,16 +80,16 @@ describe('closeCase', () => {
 });
 
 describe('setSidebarWidth', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.restoreAllMocks());
 
   it('takes a dragged width as-is when it fits', () => {
-    vi.stubGlobal('window', { innerWidth: 1600 });
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1600);
     setSidebarWidth(440);
     expect(uiState.sidebarW).toBe(440);
   });
 
   it('clamps against the live window, not just the fixed bounds', () => {
-    vi.stubGlobal('window', { innerWidth: 900 });
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(900);
     setSidebarWidth(MAX_W); // legal on a wide screen, half the canvas here
     expect(uiState.sidebarW).toBe(450);
 

@@ -115,14 +115,37 @@
    * worker boundary as base64, since a message carries strings and never a
    * blob, and is rebuilt into one here. What `mapref.js` then does with it —
    * decode an image, or hand a video an object URL — is its business.
+   *
+   * It is asked for in pieces (`background.js`, `mapFile`), which is what lets a
+   * reference be a long video rather than a small one. Each piece becomes a blob
+   * of its own straight away: a blob is the browser's to hold and it may keep it
+   * on disk, while an array of half a gigabyte of `Uint8Array` is this tab's
+   * heap. `onprogress` is optional — a thumbnail arrives in one piece and has
+   * nothing to report.
    */
-  async function fetchFile(path) {
-    const answer = await api.runtime.sendMessage({ type: "map-file", caseId: state.caseId, path });
-    if (!answer?.ok) throw new Error(answer?.error || "the app did not answer");
-    const binary = atob(answer.file.data);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-    return new Blob([bytes], { type: answer.file.type });
+  async function fetchFile(path, onprogress) {
+    const parts = [];
+    let type = "application/octet-stream";
+    let offset = 0;
+    for (;;) {
+      const answer = await api.runtime.sendMessage({
+        type: "map-file",
+        caseId: state.caseId,
+        path,
+        offset,
+      });
+      if (!answer?.ok) throw new Error(answer?.error || "the app did not answer");
+      const { file } = answer;
+      const binary = atob(file.data || "");
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      parts.push(new Blob([bytes]));
+      if (file.type) type = file.type;
+      offset = file.next ?? file.total ?? offset + bytes.length;
+      onprogress?.(offset, file.total ?? offset);
+      if (file.next === null || file.next === undefined) break;
+    }
+    return new Blob(parts, { type });
   }
 
   // --- the state the whole panel reads ---------------------------------------
@@ -2184,11 +2207,18 @@
     paint();
   }
 
-  /** Google Earth is the site the tools keep up with worst: its camera and its
-   *  3D globe drift from what the URL says, so the panel owns up to it. */
+  /** The tools that put a shape on the ground, which is the half of the panel
+   *  still settling: each one works from what a site writes about its own camera,
+   *  and every site writes it differently. Reference windows and the sky are not
+   *  in here — neither measures anything. */
+  const BETA_TOOLS = new Set(["measure", "pins", "grid", "fires"]);
+
+  /** Owning up, on whichever map. It used to name Google Earth, where the drift
+   *  is worst, but the caveat was never really about that site: it is about what
+   *  these four draw, so it now follows the tool rather than the map. */
   function betaBadge() {
-    if (state.parsed?.site !== "google-earth") return "";
-    return ` <span class="beta" title="Drawings drift more on Google Earth than on other maps">Beta</span>`;
+    if (!BETA_TOOLS.has(state.tool)) return "";
+    return ` <span class="beta" title="Still settling: check what this tool draws against the map">Beta</span>`;
   }
 
   /** The status line when geometry is on: where, what it is drawing in, and

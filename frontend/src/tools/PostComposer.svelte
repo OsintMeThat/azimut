@@ -221,7 +221,12 @@
   }
 
   function applyProof(p) {
-    description = isDefaultName(p.title, 'proof') ? '' : (p.title ?? '');
+    // The proof's own sentence is what this field is for. A title is a filename,
+    // and most of them are the number the composer handed out, so it only stands
+    // in when the analyst renamed the proof and wrote no description.
+    description = p.description?.trim()
+      ? p.description.trim()
+      : (isDefaultName(p.title, 'proof') ? '' : (p.title ?? ''));
     const proofSourceUrl = p.source ?? p.sources?.[0] ?? '';
     source = proofSourceUrl;
     setProof(p.png ?? null);
@@ -596,12 +601,16 @@
   async function pickProof(item) {
     setProof(item.png);
     proofPickerOpen = false;
-    if (!description.trim() && item.title && !isDefaultName(item.title, 'proof')) {
+    const blank = !description.trim();
+    if (blank && item.title && !isDefaultName(item.title, 'proof')) {
       description = item.title;
     }
     // Pull the proof's coordinates + source into the post so the fields fill in.
     try {
       const spec = await api.get(`/api/cases/${caseState.current.id}/proofs/${item.name}`);
+      // Its sentence, once the spec is here. The picker row carries a filename
+      // and a thumbnail, so the title above was only ever a stand-in for this.
+      if (blank && spec.description?.trim()) description = spec.description.trim();
       const src = proofSource(spec);
       if (src) source = src;
       await preloadProofMedia(item.png, src);

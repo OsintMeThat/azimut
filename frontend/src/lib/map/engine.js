@@ -63,9 +63,16 @@ const WHEEL_ZOOM_RATE = 1 / 15;
  * capture and saved view records one whole number. The gesture itself stays
  * continuous — this only decides where it stops.
  */
-function settleOnLevel(map) {
+function settleOnLevel(map, following) {
   let settling = false;
   map.on('moveend', () => {
+    // A map linked to another one copies its camera frame by frame, fractional
+    // zooms included. The map being handled settles; the copy only follows, or
+    // the two would each start their own snap and pull the pair apart.
+    if (following()) {
+      settling = false;
+      return;
+    }
     // the settling ease ends in a moveend of its own; that one is already level
     if (settling) {
       settling = false;
@@ -123,7 +130,8 @@ export async function createMapEngine(container, { view, imperial = false } = {}
   // A source cannot be added before the style is up, and `basemap.js` adds one
   // as soon as this returns.
   await map.once('load');
-  settleOnLevel(map);
+  const facade = mapFacade(map, container);
+  settleOnLevel(map, facade.following);
   // A stable class for the tool's own cursor rules: a mode armed above the map
   // says so on the surface, whichever engine drew it.
   container.classList.add('map-surface');
@@ -131,5 +139,5 @@ export async function createMapEngine(container, { view, imperial = false } = {}
   // whether the map is up, and asking it to recognise the engine's own class
   // names is how a suite ends up pinned to the engine it was written against.
   container.dataset.mapReady = 'true';
-  return mapFacade(map, container);
+  return facade;
 }

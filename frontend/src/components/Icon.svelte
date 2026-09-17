@@ -6,6 +6,7 @@
     // navigation / tools
     media: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm0 11 4.5-4.5a1 1 0 0 1 1.4 0L14 15.5m-1.5-1.5 2.6-2.6a1 1 0 0 1 1.4 0L21 15M9 9.5h.01',
     satellite: 'M9 4.2 3.6 6.4a1 1 0 0 0-.6.9v11.2a1 1 0 0 0 1.4.9L9 17.4l6 2.4 5.4-2.2a1 1 0 0 0 .6-.9V5.5a1 1 0 0 0-1.4-.9L15 6.6 9 4.2Zm0 0v13.2M15 6.6v13.2',
+    compare: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm8 0v14M7 9h2m6 6h2',
     proof: 'M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm11.5 0v7m-3.5-3.5h7',
     // the case as its graph: one entity and what it holds onto. The three spokes
     // sit on the rose's thirds — north, then 210° and 330° — so the case reads in
@@ -91,6 +92,8 @@
     network: 'M12 3.5a2.25 2.25 0 1 1 0 4.5 2.25 2.25 0 0 1 0-4.5ZM5 16a2.25 2.25 0 1 1 0 4.5A2.25 2.25 0 0 1 5 16Zm14 0a2.25 2.25 0 1 1 0 4.5 2.25 2.25 0 0 1 0-4.5ZM12 8v4m0 0-7 4m7-4 7 4',
     building: 'M5 21V4.5A1 1 0 0 1 6 3.5h7a1 1 0 0 1 1 1V21M14 10h4a1 1 0 0 1 1 1v10M3 21h18M8 7.5h.01M11 7.5h.01M8 11h.01M11 11h.01M8 14.5h3',
     alert: 'M12 3 2.5 19.5h19L12 3Zm0 7v4m0 3.5h.01',
+    // A ghosted collage piece: an editing state, so it must stay distinct from an alert.
+    ghost: 'M12 3a8 8 0 0 0-8 8v10l4-2 4 2 4-2 4 2V11a8 8 0 0 0-8-8Zm-3 8h.01m5.99 0H15',
     info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm0-11v6m0-10h.01',
     clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4v5l3.5 2',
     play: 'm8 5 11 7-11 7V5Z',
@@ -128,6 +131,13 @@
     minimize: 'M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3m8 0v-3a2 2 0 0 1 2-2h3',
     ruler: 'M4 15.5 15.5 4l4.5 4.5L8.5 20 4 15.5Zm3.5-.5 1.5 1.5m1-4.5 1.5 1.5m1-4.5L14 11',
     polygon: 'M12 3.5 20 9.5l-3 9.5H7L4 9.5l8-6Z',
+    // Compare's reading modes: two panes, a divider, a blend, alternation, a change
+    columns: 'M4 5h6.5v14H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm9.5 0H20a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-6.5V5Z',
+    swipe: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm8-2v18m-3-9-1.5 0M16.5 12H15',
+    fade: 'M9 6.5a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11Zm6 0a5.5 5.5 0 1 1 0 11',
+    blink: 'M4 6h7v12H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Zm9 0h7a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-7M16 9.5v5',
+    changes: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm4 9.5 2.5-3 2.5 2 3-4',
+    swap: 'M7 4 3.5 7.5 7 11M3.5 7.5H18M17 13l3.5 3.5L17 20m3.5-3.5H6',
     angle: 'M5 4v15h15M5 19 20 6',
     sun: 'M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10ZM12 1v3M12 20v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1 12h3M20 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1',
     moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z',

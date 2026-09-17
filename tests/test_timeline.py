@@ -62,6 +62,42 @@ def test_a_local_media_time_is_known_but_not_invented_on_the_utc_axis():
     assert row.sortable is False
 
 
+def test_a_dated_proof_states_when_its_material_was_taken():
+    rows = timeline.project_entity(
+        {
+            "id": "e_proof",
+            "type": "proof",
+            "label": "Kharkiv strike proof",
+            "attrs": {"spec": "proofs/.meta/p.json", "when": "2024-03-11~"},
+            "provenance": {"by": "proof-composer", "at": "2026-08-11T10:00:00Z"},
+        }
+    )
+    by_kind = {row.kind: row for row in rows}
+
+    # The filing row stays: when the proof was made and when the footage was shot
+    # are two answers, and the second one replacing the first would lose a date.
+    assert set(by_kind) == {"filed", "taken"}
+    taken = by_kind["taken"]
+    assert taken.category == "statement"
+    assert taken.authority == "entity"
+    assert taken.raw == "2024-03-11~"
+    assert taken.approximate is True
+    assert taken.time_role == "occurred"
+
+
+def test_an_undated_proof_reaches_the_timeline_only_as_a_filing():
+    rows = timeline.project_entity(
+        {
+            "id": "e_proof",
+            "type": "proof",
+            "attrs": {"spec": "proofs/.meta/p.json", "when": ""},
+            "provenance": {"at": "2026-08-11T10:00:00Z"},
+        }
+    )
+
+    assert [row.kind for row in rows] == ["filed"]
+
+
 def test_media_dates_keep_world_time_separate_from_case_activity():
     rows = timeline.project_media(
         {
