@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   coverage,
+  describeMeasure,
   displayGroups,
   framesPerTile,
   mapSource,
   readableDuration,
   marksToZones,
+  sizeBand,
+  sizeOf,
+  sourceLabel,
   viewZone,
   zoneMarks,
   zoneRing,
@@ -18,10 +22,14 @@ describe('saved analysis geometry', () => {
     expect(marksToZones(marks, zones)).toEqual(zones);
     expect(marksToZones([{ ...marks[0], points: [[2, 2], [3, 2], [3, 3]] }], zones)[0].name).toBe('Port');
   });
-  it('restricts sources without silently converting another provider', () => {
+  it('takes only Sentinel-2 from the maps, because Detect reads its bands', () => {
     expect(mapSource({ provider: 'google' })).toBeNull();
-    expect(mapSource({ provider: 'esri-world-imagery' })).toBeNull();
-    expect(mapSource({ provider: 'esri-wayback', wayback_release: 123 })).toMatchObject({ release: 123 });
+    expect(mapSource({ provider: 'esri-wayback', wayback_release: 123 })).toBeNull();
+    expect(mapSource({ provider: 'sentinel2', sentinel: { date: '2026-05-11', layer: 'SWIR', maxcc: 20 } }))
+      .toEqual({ provider: 'sentinel2', date: '2026-05-11', layer: 'SWIR', maxcc: 20 });
+    expect(sourceLabel({ provider: 'sentinel2', date: '2026-05-11' })).toBe('2026-05-11');
+    // runs saved before still say what they read
+    expect(sourceLabel({ provider: 'esri-wayback', release: 7 })).toBe('Wayback release 7');
   });
   it('changes screen clustering without changing saved detection geometry', () => {
     const rows = [{ id: 1, coordinates: [1, 1] }, { id: 2, coordinates: [2, 1] }];
@@ -52,7 +60,7 @@ describe('what a run will cost before it starts', () => {
   });
 
   it('counts native tiles per grid, and never promises less work than the run', () => {
-    // Sentinel's 512px level-13 tiles are 4.9 km across; Wayback's are 76 m.
+    // Sentinel's 512px level-13 tiles are 4.9 km across; a finer grid counts more.
     expect(coverage(kmSquare(0.01), [13, 512]).tiles).toBe(1);
     expect(coverage(kmSquare(0.01), [19, 256]).tiles).toBe(225);
     // Overlapping areas are the same tiles, counted once.
@@ -65,11 +73,9 @@ describe('what a run will cost before it starts', () => {
   });
 
   it('counts the requests a sweep makes, and says how long that is', () => {
-    expect(framesPerTile({ single: false })).toBe(2);
-    expect(framesPerTile({ single: true })).toBe(1);
-    // A band detector fetches the picture reviewed and the bands measured.
-    expect(framesPerTile({ single: true, bands: true })).toBe(2);
-    expect(framesPerTile({ single: false, bands: true })).toBe(4);
+    // Every date fetches the picture reviewed and the bands measured.
+    expect(framesPerTile({ single: true })).toBe(2);
+    expect(framesPerTile({ single: false })).toBe(4);
     expect(readableDuration(20)).toBe('20 s');
     expect(readableDuration(600)).toBe('10 min');
     expect(readableDuration(7200)).toBe('2.0 h');
@@ -80,5 +86,39 @@ describe('what a run will cost before it starts', () => {
     const zone = viewZone({ west: 2, south: 48, east: 3, north: 49 }, 'Harbour');
     expect(zone).toMatchObject({ name: 'Harbour', kind: 'rect', points: [[2, 49], [3, 48]] });
     expect(zone.id).toMatch(/^[a-z0-9-]{8,48}$/);
+  });
+});
+
+describe('what a candidate says about itself', () => {
+  it('fills the words its method gives with its own reading', () => {
+    expect(describeMeasure('{value}× brighter than the water around it', { value: 6.24 }))
+      .toBe('6.2× brighter than the water around it');
+    expect(describeMeasure('Reflectance {signed}% in every band', { signed: -12.4 }))
+      .toBe('Reflectance −12% in every band');
+    expect(describeMeasure('{index} {before} → {after}', { before: 0.612, after: 0.104 }, 'nbr'))
+      .toBe('NBR 0.61 → 0.10');
+  });
+
+  it('says nothing rather than half a sentence', () => {
+    expect(describeMeasure('{value}× brighter', undefined)).toBe('');
+    expect(describeMeasure('{index} {before} → {after}', { before: 0.5 }, 'ndvi')).toBe('');
+    expect(describeMeasure('', { value: 1 })).toBe('');
+  });
+
+  it('knows which size a recipe is at, and when it was tuned by hand', () => {
+    const sizes = { small: { min_area: 0, cleanup: 0 }, medium: { min_area: 250, cleanup: 0 } };
+    expect(sizeOf({ min_area: 250.0, cleanup: 0, sensitivity: 70 }, sizes)).toBe('medium');
+    expect(sizeOf({ min_area: 300, cleanup: 0 }, sizes)).toBe('');
+    expect(sizeOf({ min_area: 0 }, undefined)).toBe('');
+  });
+
+  it('says what a size actually accepts, in ground terms', () => {
+    // The buttons read as "how sensitive"; what they set is a floor and a
+    // ceiling on area, and a mark outside the band is found and then dropped.
+    expect(sizeBand({ min_area: 0, max_area: 800 })).toContain('Up to 800 m²');
+    expect(sizeBand({ min_area: 0, max_area: 800 })).toContain('28 m across');
+    expect(sizeBand({ min_area: 20_000, max_area: 0 })).toContain('From 2 ha up');
+    expect(sizeBand({ min_area: 400, max_area: 8000 })).toContain('400 m² to 8000 m²');
+    expect(sizeBand({ min_area: 0, max_area: 0 })).toContain('Any size');
   });
 });

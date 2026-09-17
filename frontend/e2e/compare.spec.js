@@ -86,7 +86,7 @@ test('spectral frames are requested only by Run, including after reopening and m
     title: 'Spectral', spec: { version: 2, camera: { lat: 48.8584, lon: 2.2945, zoom: 16, bearing: 35 },
       mode: 'change', change_assist: { method: 'index' }, a: side('2026-08-01'), b: side('2026-09-01') },
   } }));
-  await page.route('**/api/compare/sentinel-index', async (route) => {
+  await page.route('**/api/compare/sentinel-frame', async (route) => {
     const body = route.request().postDataJSON();
     requests.push(body);
     const png = await page.evaluate(({ width, height }) => {
@@ -117,9 +117,16 @@ test('spectral frames are requested only by Run, including after reopening and m
   await page.mouse.move(box.x + 180, box.y + 130, { steps: 8 });
   await page.mouse.up();
   await expect(page.locator('.secondary .change-map')).not.toHaveCSS('transform', 'none');
-  await expect(page.getByLabel('Difference', { exact: true })).toContainText('Run again to match it');
+  await expect(page.getByLabel('Difference', { exact: true })).toContainText('Run again to match this view');
   await expect(page.getByRole('button', { name: 'Read this view', exact: true })).toBeEnabled();
   expect(requests).toHaveLength(2);
+  // The cloud filter reads Sentinel-2's own classification, so switching it on
+  // over a picture method asks for the sky then and there, rather than leaving
+  // an unfiltered reading up behind an "on" switch.
+  await page.getByLabel('Method', { exact: true }).selectOption('colour');
+  await page.getByRole('button', { name: /Clouds & shadows/ }).click();
+  await expect.poll(() => requests.length).toBe(4);
+  expect(requests.slice(2).map((request) => request.product)).toEqual(['sky', 'sky']);
   expect(errors).toEqual([]);
 });
 
@@ -133,6 +140,12 @@ test('changes run in the worker and export a composed PNG', async ({ page }) => 
   await page.getByRole('button', { name: 'Difference', exact: true }).click();
   await expect(page.locator('.secondary .change-map')).toBeVisible({ timeout: 20000 });
   await expect(page.getByLabel('Difference', { exact: true })).toContainText('highlighted');
+  // Highlights that come and go are easier to catch over busy imagery.
+  await page.getByRole('button', { name: 'Blink the highlights', exact: true }).click();
+  await expect(page.locator('.secondary .change-map')).toBeHidden();
+  await expect(page.locator('.secondary .change-map')).toBeVisible();
+  await page.getByRole('button', { name: 'Stop blinking the highlights', exact: true }).click();
+  await expect(page.locator('.secondary .change-map')).toBeVisible();
   await page.getByLabel('Method', { exact: true }).selectOption('structure');
   await expect(page.getByLabel('Difference', { exact: true })).toContainText('coverage');
   await page.getByRole('button', { name: 'Export', exact: true }).click();
@@ -145,16 +158,23 @@ test('changes run in the worker and export a composed PNG', async ({ page }) => 
 test('analyzer areas run explicitly, and candidates are reviewed one at a time', async ({ page }) => {
   const { errors } = await openCompare(page, 'Esri Wayback');
   const requests = [];
-  const recipe = { id: 'large-change', name: 'Large surface change', description: 'Pixel changes to review',
-    phenomenon: 'Surface change', method: 'colour', providers: ['esri-wayback', 'sentinel2'], zones: [],
-    colour: '#f6a81a', style: 'both', parameters: { sensitivity: 55, min_area: 20, min_score: 0,
-      cleanup: 1, smoothing: 0, normalize: false, index: 'ndvi', direction: 'both',
-      ignore_clouds: true, ignore_shadows: true, merge_metres: 0 } };
+  const sizes = {
+    small: { min_area: 300, max_area: 0, cleanup: 0, smoothing: 0, merge_metres: 0 },
+    medium: { min_area: 2000, max_area: 0, cleanup: 1, smoothing: 0, merge_metres: 30 },
+    large: { min_area: 20000, max_area: 0, cleanup: 1, smoothing: 1, merge_metres: 100 },
+  };
+  const recipe = { id: 'large-change', name: 'Any surface change', description: 'Reflectance that moved',
+    phenomenon: 'Surface change', method: 'surface', zones: [], colour: '#f6a81a', style: 'both',
+    parameters: { sensitivity: 67, ...sizes.medium, index: 'ndvi', direction: 'both',
+      ignore_clouds: true, ignore_shadows: true, cloud_margin: 5 } };
   await page.route('**/api/compare/analyzers', (route) => route.fulfill({ json: {
-    builtins: [recipe], custom: [], max_tiles: 256, max_results: 2000,
-    methods: [{ id: 'colour', label: 'Colour', single: false, sentinel_only: false, classes: false }],
-    grids: { sentinel2: [13, 512], 'esri-wayback': [19, 256] },
+    builtins: [recipe], custom: [], max_tiles: 4096, max_results: 2000, grid: [13, 512],
+    methods: [{ id: 'surface', label: 'Any reflectance change', single: false, clouds: true, sizes,
+      measure: 'Reflectance moved by {value}%' }],
   } }));
+  await page.route('**/api/satellite/sentinel/acquisitions', (route) => route.fulfill({ json: {
+    dates: [{ date: '2026-05-11', cloud: 2, granules: 1, coverage: 1 },
+      { date: '2026-05-04', cloud: 4, granules: 1, coverage: 1 }], truncated: false } }));
   let saved;
   await page.route('**/api/cases/*/analysis/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -163,10 +183,10 @@ test('analyzer areas run explicitly, and candidates are reviewed one at a time',
       const [[w, n], [e, s]] = input.zones[0].points;
       const row = { id: '0-1', coordinates: [(w + e) / 2, (n + s) / 2],
         bbox: [Math.min(w, e), Math.min(n, s), Math.max(w, e), Math.max(n, s)],
-        area: 90, width: 15, height: 6, signal_score: 0.8, confidence: null,
+        area: 90, width: 15, height: 6, margin: 3.4, strength: 'strong', measure: { value: 18.2 },
         phenomenon: 'Surface change', review: 'new', parts: [{ frames: ['a', 'b'], box: [0, 0, 1, 1] }] };
       saved = { id: '123456789abc', title: input.title, input, status: 'ready', progress: 1, total: 1,
-        count: 1, results: [row], engine_version: 1, created_at: '2026-09-16T00:00:00Z' };
+        count: 1, results: [row], engine_version: 2, created_at: '2026-09-16T00:00:00Z' };
       await route.fulfill({ json: { ...saved, status: 'queued', results: [], count: 0 } });
     } else if (route.request().method() === 'PATCH' && path.includes('/results/')) {
       saved.results[0].review = route.request().postDataJSON().review;
@@ -188,14 +208,19 @@ test('analyzer areas run explicitly, and candidates are reviewed one at a time',
   await page.mouse.move(box.x + 80, box.y + 100);
   await page.mouse.down(); await page.mouse.move(box.x + 190, box.y + 190, { steps: 6 }); await page.mouse.up();
   await expect(page.getByLabel('Area name', { exact: true })).toHaveCount(1);
-  await expect(page.getByLabel('Detect', { exact: true })).toContainText('tiles of 256px');
-  await page.getByRole('button', { name: 'Change imagery, dates or the rule…' }).click();
-  await page.getByLabel('Release A', { exact: true }).selectOption('1');
-  await page.getByLabel('Release B', { exact: true }).selectOption('2');
+  await expect(page.getByLabel('Detect', { exact: true })).toContainText('1 tile');
+  // Wayback on the maps is nothing Detect can read, so it asks for Sentinel-2 dates.
+  await expect(page.getByLabel('Detect', { exact: true })).toContainText('Detect reads Sentinel-2');
+  await page.getByRole('button', { name: 'Change dates or the rule…' }).click();
+  await page.getByRole('button', { name: 'Find passes', exact: true }).click();
+  await page.getByLabel('Use 2026-05-04').getByRole('button', { name: 'A', exact: true }).click();
+  await page.getByLabel('Use 2026-05-11').getByRole('button', { name: 'B', exact: true }).click();
   await page.getByLabel('Analysis name', { exact: true }).fill('Harbour sweep');
+  await page.getByRole('group', { name: 'Target size' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath('analyzers-setup.png') });
   expect(requests).toHaveLength(0);
   await page.getByRole('button', { name: 'Run on 1 area', exact: true }).click();
-  await expect(page.getByText('Signal score 80% · not a calibrated confidence', { exact: true })).toBeVisible();
+  await expect(page.getByText('Strong · Reflectance moved by 18.2%', { exact: true })).toBeVisible();
   expect(requests).toHaveLength(1);
   expect(requests[0].zones).toHaveLength(1);
   const pins = page.locator('.analysis-overlay [role="button"]');
@@ -219,8 +244,10 @@ test('analyzer areas run explicitly, and candidates are reviewed one at a time',
   await page.getByRole('button', { name: 'Detect', exact: true }).click();
   await page.getByRole('button', { name: 'Saved', exact: true }).click();
   await page.locator('.cmp-dock .link').filter({ hasText: 'Harbour sweep' }).first().click();
-  await expect(page.getByText('Signal score 80% · not a calibrated confidence', { exact: true })).toBeVisible();
+  await expect(page.getByText('Strong · Reflectance moved by 18.2%', { exact: true })).toBeVisible();
   expect(requests).toHaveLength(1);
+  expect(requests[0].a).toMatchObject({ provider: 'sentinel2', date: '2026-05-04' });
+  expect(requests[0].b).toMatchObject({ provider: 'sentinel2', date: '2026-05-11' });
   await page.screenshot({ path: test.info().outputPath('analyzers.png') });
   expect(errors).toEqual([]);
 });

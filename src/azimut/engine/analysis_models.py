@@ -1,56 +1,50 @@
-"""Portable recipes and geographic inputs for Compare analyzers.
+"""Portable recipes and geographic inputs for Compare's Detect mode.
 
-Models describe capabilities by stable ids. A later model adapter can join the
-method registry without changing saved runs or accepting executable recipes.
+Detect reads Copernicus Sentinel-2 only. Every method measures reflectance,
+which a rendered picture has already stretched away, so a source that serves
+pictures has nothing to offer it. Models describe capabilities by stable ids,
+and a saved run keeps meaning what it meant when it ran.
 """
 
 from __future__ import annotations
 
 import math
 from datetime import date
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
-Provider = Literal["esri-wayback", "sentinel2"]
-Method = Literal["colour", "structure", "brightness", "index", "water_objects", "smoke",
-                 "vessels", "hotspots"]
+Method = Literal["vessels", "hotspots", "structure", "spots", "surface", "index"]
+Index = Literal["ndvi", "ndwi", "mndwi", "nbr", "ndbi", "bsi"]
 ShortId = Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]{1,48}$")]
 Colour = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]
 
 # Methods that read one image instead of a pair. A vessel or a fire is a thing
-# present on a date, not a difference between two of them, so asking for a
-# reference image would be asking for something the method cannot use.
-SINGLE_METHODS = frozenset({"water_objects", "vessels", "hotspots"})
+# present on a date, not a difference between two of them.
+SINGLE_METHODS = frozenset({"vessels", "hotspots"})
 
-# Methods that measure reflectance, which a rendered picture has already
-# stretched away. Each needs the band product named here, fetched beside the
-# picture the analyst reviews. `index` picks its product from the recipe's
-# parameters instead, so it is not in this table.
-PRODUCT_METHODS: dict[str, str] = {"vessels": "vessel", "hotspots": "fire"}
-
-# Reflectance is Copernicus only: Wayback serves pictures, not bands.
-SENTINEL_ONLY = frozenset({"index", *PRODUCT_METHODS})
-
-# How each method can exclude cloud and the shadow it casts.
-#
-# ``classes`` reads Sentinel-2's own per-pixel scene classification, which is
-# the real answer. ``picture`` has only the rendered image, so it goes on what
-# cloud looks like — bright and colourless, its shadow near-black — which is a
-# guess, and the UI says so rather than dressing it up.
-#
-# Three methods are absent on purpose. The fire test rejects cloud by its band
-# ratios and spends its fourth channel on the data mask instead. Smoke and
-# bright shapes on water *are* bright and colourless: there, the picture test
-# would mask the very thing the method looks for.
-CLOUD_FILTERS: dict[str, str] = {
-    "index": "classes", "vessels": "classes",
-    "colour": "picture", "structure": "picture", "brightness": "picture",
+# The band product each method measures, fetched beside the picture the analyst
+# reviews. `index` reads the one its parameters name.
+PRODUCT_METHODS: dict[str, str] = {
+    "vessels": "vessel", "hotspots": "fire",
+    "structure": "surface", "spots": "surface", "surface": "surface",
 }
 
+# Where the cloud and shadow switches mean something. The fire test rejects
+# cloud through its own band ratios, and a mask would also take the smoke a
+# fire burns under.
+CLOUD_METHODS = frozenset({"vessels", "structure", "spots", "surface", "index"})
 
-def both_providers() -> list[Provider]:
-    return ["esri-wayback", "sentinel2"]
+# What a recipe saved before Detect went Copernicus-only asked for. The picture
+# methods measured colour on a rendered image; reflectance change is what they
+# were reaching for.
+LEGACY_METHODS = {"colour": "surface", "brightness": "surface", "smoke": "surface",
+                  "water_objects": "vessels"}
+LEGACY_PARAMETERS = ("min_score", "normalize", "guess_clouds")
+
+
+def product_for(method: str, index: str) -> str:
+    return f"index-{index}" if method == "index" else PRODUCT_METHODS[method]
 
 
 class Model(BaseModel):
@@ -58,30 +52,58 @@ class Model(BaseModel):
 
 
 class Parameters(Model):
-    sensitivity: int = Field(default=55, ge=0, le=100)
-    min_area: FiniteFloat = Field(default=20, ge=0, le=100_000_000)
-    min_score: FiniteFloat = Field(default=0, ge=0, le=1)
-    cleanup: int = Field(default=1, ge=0, le=3)
+    # Moves each method's threshold inside the range it was calibrated over
+    # (engine/analyzers.py), so the same number means "about as picky" everywhere.
+    sensitivity: int = Field(default=60, ge=0, le=100)
+    min_area: FiniteFloat = Field(default=0, ge=0, le=100_000_000)
+    # 0 is no ceiling. A cloud bank or an island is far bigger than any hull,
+    # and a ceiling is what stops it being offered as one.
+    max_area: FiniteFloat = Field(default=0, ge=0, le=100_000_000)
+    cleanup: int = Field(default=0, ge=0, le=3)
     smoothing: int = Field(default=0, ge=0, le=3)
-    normalize: bool = False
-    index: Literal["ndvi", "ndwi", "nbr", "ndbi"] = "ndvi"
+    index: Index = "ndvi"
     direction: Literal["both", "gain", "loss"] = "both"
-    # Sentinel-2's own scene classification: the sensor says which pixels are
-    # cloud, so this is on by default.
     ignore_clouds: bool = True
     ignore_shadows: bool = True
-    # The same exclusion where there is no classification to ask, read off the
-    # rendered picture instead. Off by default, and it stays off by default:
-    # bright and colourless is what a white roof, a gravel pad and fresh snow
-    # look like too, and those are things analysts come here to find. A guess
-    # this broad is the analyst's to make, never one made for them.
-    guess_clouds: bool = False
-    # A cloud fades out at its edges and its shadow has no edge at all, so both
-    # masks stop short of what a reader would call the cloud. Growing them by a
-    # couple of pixels takes the fringe that otherwise survives as a ring of
-    # candidates around every mask.
-    cloud_margin: int = Field(default=2, ge=0, le=10)
+    # Metres are what a reader thinks in, but the mask is grown on the grid, and
+    # a pixel there is 9.55 m at the equator: 5 takes the soft rim a scene
+    # classification calls ground.
+    cloud_margin: int = Field(default=5, ge=0, le=10)
     merge_metres: FiniteFloat = Field(default=0, ge=0, le=500)
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            return {key: value for key, value in data.items() if key not in LEGACY_PARAMETERS}
+        return data
+
+
+# What Small, Medium, Large and All set, per method. A size is a coherent set of
+# numbers rather than one: a smaller target needs a smaller floor *and* no
+# morphological cleanup, which would erase it, and a larger one wants nearby
+# pieces grouped. The panel applies these; nothing stores which size was picked.
+_SIZE_KEYS = ("min_area", "max_area", "cleanup", "smoothing", "merge_metres")
+#: No floor and no ceiling, so nothing is dropped for its size. A mark that
+#: falls between two sizes is the one an analyst hunts for and never sees.
+_ALL = dict(zip(_SIZE_KEYS, (0.0, 0.0, 0, 0, 0.0)))
+
+
+def _sizes(*rows: tuple[float, float, int, int, float]) -> dict[str, dict[str, float]]:
+    named = {name: dict(zip(_SIZE_KEYS, row))
+             for name, row in zip(("small", "medium", "large"), rows)}
+    return {**named, "all": dict(_ALL)}
+
+
+_CHANGE_SIZES = _sizes((300, 0, 0, 0, 0), (2000, 0, 1, 0, 30), (20000, 0, 1, 1, 100))
+SIZES: dict[str, dict[str, dict[str, float]]] = {
+    "vessels": _sizes((0, 150_000, 0, 0, 30), (250, 150_000, 0, 0, 50), (2500, 400_000, 0, 0, 100)),
+    "hotspots": _sizes((0, 0, 0, 0, 30), (250, 0, 0, 0, 60), (3000, 0, 0, 0, 200)),
+    "structure": _sizes((100, 3000, 0, 0, 0), (600, 200_000, 0, 0, 20), (8000, 0, 1, 1, 60)),
+    "spots": _sizes((0, 800, 0, 0, 0), (100, 2500, 0, 0, 0), (400, 8000, 0, 0, 20)),
+    "surface": _CHANGE_SIZES,
+    "index": _CHANGE_SIZES,
+}
 
 
 class Zone(Model):
@@ -127,33 +149,41 @@ class Recipe(Model):
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=500)
     phenomenon: str = Field(default="Surface change", min_length=1, max_length=120)
-    method: Method = "colour"
-    providers: list[Provider] = Field(
-        default_factory=both_providers, min_length=1, max_length=2
-    )
+    method: Method = "surface"
     parameters: Parameters = Field(default_factory=Parameters)
     colour: Colour = "#f6a81a"
     style: Literal["pins", "outlines", "both"] = "both"
     zones: list[Zone] = Field(default_factory=list, max_length=32)
 
-    @model_validator(mode="after")
-    def compatible(self) -> Recipe:
-        if self.method in SENTINEL_ONLY and self.providers != ["sentinel2"]:
-            raise ValueError("this method reads Copernicus Sentinel-2 bands, so it is "
-                             "compatible with that source only")
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def legacy(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        data = {key: value for key, value in data.items() if key != "providers"}
+        if data.get("method") in LEGACY_METHODS:
+            data["method"] = LEGACY_METHODS[data["method"]]
+        return data
 
 
 class Source(Model):
-    provider: Provider = "esri-wayback"
+    provider: Literal["sentinel2"] = "sentinel2"
     date: str = Field(default="", max_length=10)
-    release: int | None = Field(default=None, ge=1, le=999999999)
     layer: str = Field(default="TRUE_COLOR", pattern=r"^[A-Z0-9_]{1,40}$")
     maxcc: int = Field(default=30, ge=0, le=100)
 
+    @model_validator(mode="before")
+    @classmethod
+    def legacy(cls, data: Any) -> Any:
+        # A Wayback release names no Sentinel-2 day, so a watch saved against
+        # one comes back undated and asks for a date rather than failing to load.
+        if isinstance(data, dict) and data.get("provider") == "esri-wayback":
+            data = {key: value for key, value in data.items() if key not in ("provider", "release")}
+        return data
+
     @model_validator(mode="after")
     def dated(self) -> Source:
-        if self.provider == "sentinel2" and self.date:
+        if self.date:
             try:
                 date.fromisoformat(self.date)
             except ValueError as exc:
@@ -176,69 +206,86 @@ class RunInput(ZoneSet):
 
     @model_validator(mode="after")
     def pair(self) -> RunInput:
-        if self.a.provider != self.b.provider or self.b.provider not in self.recipe.providers:
-            raise ValueError("use one compatible provider for both images")
-        if self.recipe.method != "index" and self.a.layer != self.b.layer:
-            raise ValueError("use the same rendering layer for both images")
         if len({zone.id for zone in self.zones}) != len(self.zones):
             raise ValueError("area ids must be unique")
-        single = self.recipe.method in SINGLE_METHODS
         required = []
         if self.date_rule == "manual":
             required.append(self.b)
-        if not single and (self.date_rule != "latest_previous" or not self.followup_id):
+        if self.recipe.method not in SINGLE_METHODS and (
+            self.date_rule != "latest_previous" or not self.followup_id
+        ):
             required.append(self.a)
-        for source in required:
-            if source.provider == "sentinel2" and not source.date:
-                raise ValueError("choose a dated Sentinel-2 acquisition")
-            if source.provider == "esri-wayback" and source.release is None:
-                raise ValueError("choose a named Wayback release")
+        if any(not source.date for source in required):
+            raise ValueError("choose a dated Sentinel-2 acquisition")
         return self
 
 
-# The names say what is measured, never what it means. "Vessels on water" is a
-# claim about infrared contrast over sea, and the description is where the
-# limits of that claim live — a preset called "Boats" would promise recognition
-# no method here performs.
+def _recipe(size: str = "medium", **fields: Any) -> Recipe:
+    parameters = {**SIZES[fields["method"]][size], **fields.pop("parameters", {})}
+    return Recipe(parameters=Parameters(**parameters), **fields)
+
+
+# Names say what an analyst is looking for; descriptions say what is measured
+# and where that stops. None of these recognise an object: each one flags a
+# reading, and the review is where it becomes a finding.
 BUILTINS = [
-    Recipe(id="large-change", name="Large surface change",
-           description="Broad changes in colour between two dated images. New construction, "
-           "clearing, earthworks and flooding all read as change; so does a different season.",
-           parameters=Parameters(min_area=500)),
-    Recipe(id="boats", name="Vessels on water (Sentinel-2)", method="vessels",
-           phenomenon="Vessel candidate",
-           providers=["sentinel2"],
-           description="Targets brighter than the sea around them in the near-infrared, which "
-           "water absorbs almost completely. Ships, rigs, buoys and breaking waves all qualify; "
-           "at 10 m a pixel, anything under about 20 m is unlikely to appear at all.",
-           parameters=Parameters(min_area=200, min_score=0.2, cleanup=0), colour="#38bdf8"),
-    Recipe(id="structures", name="New structures or ground disturbance", method="structure",
-           phenomenon="Possible structure or disturbed ground",
-           description="New or lost edges; buildings, roads and bare ground need visual review.",
-           parameters=Parameters(min_area=80), colour="#a78bfa"),
-    Recipe(id="anomaly", name="Active fire or hotspot (Sentinel-2)", method="hotspots",
-           phenomenon="Hotspot candidate",
-           providers=["sentinel2"],
-           description="Short-wave infrared high in absolute terms and high against the bands "
-           "either side of it, which is the published active-fire test. It sees flame through "
-           "smoke, and says nothing about what is burning or why.",
-           parameters=Parameters(min_area=100, cleanup=0), colour="#fb7185"),
+    _recipe(id="boats", name="Vessels", method="vessels", phenomenon="Vessel candidate",
+            description="Brighter than the water around it in near and short-wave infrared, "
+            "which breaking waves and glint are not. Boats under about 20 m rarely show.",
+            parameters={"sensitivity": 70}, colour="#38bdf8"),
+    _recipe(id="anomaly", name="Fires and gas flares", method="hotspots",
+            phenomenon="Hotspot candidate",
+            description="Short-wave infrared well above the bands beside it, the published "
+            "active-fire test. It sees flame through smoke, not what is burning.",
+            parameters={"sensitivity": 60}, colour="#fb7185"),
+    _recipe(id="structures", name="Construction and earthworks", method="structure",
+            phenomenon="Possible structure or disturbed ground",
+            description="Ground that turned brighter or darker in every band while its "
+            "vegetation held. Crops are left out; wet soil and new shadows are not.",
+            parameters={"sensitivity": 78}, colour="#a78bfa"),
+    _recipe(id="impacts", name="Small spots: impacts, burns, vehicles", method="spots",
+            phenomenon="Small change",
+            description="A few pixels that changed while everything around them held still. "
+            "A vehicle is smaller than a pixel, so look for the mark it left.",
+            parameters={"sensitivity": 67}, colour="#f97316"),
+    _recipe(id="large-change", name="Any surface change", method="surface",
+            phenomenon="Surface change",
+            description="Reflectance that moved in red, near or short-wave infrared, "
+            "whatever moved it. Harvests and seasons show too.",
+            parameters={"sensitivity": 67}),
+    _recipe(id="burn-scars", name="Burn scars", method="index", phenomenon="Burn scar",
+            description="The burn ratio dropped on ground that had vegetation. The default "
+            "sits at 0.27, the published mark for moderate severity.",
+            parameters={"sensitivity": 51, "index": "nbr", "direction": "loss"},
+            colour="#ef4444"),
+    _recipe(id="vegetation-loss", name="Vegetation loss", method="index",
+            phenomenon="Vegetation loss",
+            description="NDVI dropped by a quarter or more from green cover: clearing, "
+            "harvest, fire or drought.",
+            parameters={"sensitivity": 56, "index": "ndvi", "direction": "loss"},
+            colour="#84cc16"),
+    _recipe(id="new-water", name="Flooding and new water", method="index",
+            phenomenon="New water",
+            description="Ground that now reads as open water in the modified water index.",
+            parameters={"sensitivity": 56, "index": "mndwi", "direction": "gain"},
+            colour="#0ea5e9"),
 ]
 
 # What the panel reads so it never has to know a method by name: `single` stops
-# it asking for a reference image, `sentinel_only` stops it offering Wayback,
-# and `classes` decides whether the cloud and shadow switches mean anything.
+# it asking for a reference image, `clouds` says whether the cloud switch means
+# anything, `sizes` fills Small/Medium/Large and `measure` words a candidate's
+# reading ({value}, {signed}, {before}, {after} and {index} are filled in).
 METHODS = [
     {"id": method, "label": label, "single": method in SINGLE_METHODS,
-     "sentinel_only": method in SENTINEL_ONLY, "cloud_filter": CLOUD_FILTERS.get(method, "")}
-    for method, label in [
-        ("colour", "Colour change"),
-        ("structure", "Edge change"),
-        ("brightness", "Brightness change"),
-        ("index", "Spectral index change (Sentinel-2)"),
-        ("vessels", "Infrared contrast over water (Sentinel-2)"),
-        ("hotspots", "Short-wave infrared hotspot (Sentinel-2)"),
-        ("water_objects", "Bright shapes on water (picture only)"),
-        ("smoke", "Smoke-like visual change (picture only)"),
+     "clouds": method in CLOUD_METHODS, "sizes": SIZES[method], "measure": measure}
+    for method, label, measure in [
+        ("vessels", "Vessels: infrared contrast over water",
+         "{value}× brighter than the water around it"),
+        ("hotspots", "Hotspots: short-wave infrared ratios",
+         "Short-wave infrared {value}× the bands beside it"),
+        ("structure", "Ground change in every band", "Reflectance {signed}% in every band"),
+        ("spots", "Isolated small change", "Reflectance {signed}% against its surroundings"),
+        ("surface", "Any reflectance change", "Reflectance moved by {value}%"),
+        ("index", "Spectral index change", "{index} {before} → {after}"),
     ]
 ]

@@ -1266,7 +1266,7 @@ pan, a zoom or a turn.
 Step 2 and the stage share one imagery between them, so what is on screen is what
 a run would sweep. On arrival the maps lead, because what is above the stage is
 usually what you came to analyze. From the first change made here — or straight
-away when the maps show something this cannot read — the direction reverses and
+away when the maps show anything but Sentinel-2 — the direction reverses and
 the maps follow this step; the A/B source cards step aside while Detect is on, so
 there is one place to choose imagery rather than two. An analyzer that reads one
 date shows one map, because there is no pair to compare. The run is blocked, with
@@ -1283,20 +1283,35 @@ than after it. A finished run reports the share it really read, so "nothing
 found" and "never looked" stay different answers. The lookup is billed as one
 Copernicus request and never runs on its own.
 
-Step 3 picks the analyzer. Four ship built in: large surface change, vessels on
-water, new structures or ground disturbance, and active fire or hotspot. The last
-two of those read Copernicus bands rather than the rendered picture — vessels from
-near-infrared contrast against the water around them, hotspots from the published
-short-wave infrared ratios — so they are Sentinel-2 only and fetch band frames
-beside the picture, all of them metered. The same **Clouds & shadows** switch sits
-under the analyzer, on for the methods that read Sentinel-2's classification and
-off for the ones that can only guess from the picture — a guess that cannot tell
-cloud from a white roof is never made on anyone's behalf. Methods whose subject
-is itself bright and colourless (smoke, bright shapes on water) or that already
-reject cloud by their band ratios (hotspots) offer no switch at all. Thresholds
-and the analyzer itself open from links rather than sitting in the way; any
-analyzer can be duplicated under a name of its own and is then shared by every
-case.
+Step 3 picks the analyzer. Eight ship built in, for big things and small ones:
+vessels, fires and gas flares, construction and earthworks, small spots (impacts,
+burn marks, vehicles), any surface change, burn scars, vegetation loss, and
+flooding or new water. Each reads its own band product, and each was tuned on real
+scenes rather than synthetic ones: rough sea under glint, a dense anchorage under
+cumulus, oil fires and wildfires, bright roofs, a construction site across seven
+months, dry-season pastures. Vessels stand out from their own patch of sea in near
+*and* short-wave infrared, which a breaking wave does not, and a candidate joined to
+bulk land is a coast. Fires take the published short-wave ratios on B8A, which
+shares B12's grid. Construction is ground that moved the same way in every band
+while its vegetation held; a small spot changed while the ring of ground around it
+did not, that ring read with a hole in its middle so the spot cannot sit in its own
+background; a burn has to end dark, which a dried pasture does not.
+
+**Small**, **Medium**, **Large** and **All** under the analyzer set the target
+size as a whole: floor and ceiling area, cleanup and grouping together, since a
+small target needs no cleanup that would erase it. What the chosen one accepts is
+written under the buttons in ground terms — a mark outside that band is found and
+then dropped, which reads as "nothing found" unless it is said. **All** sets no
+floor and no ceiling, for the mark that falls between two bands. Tuning any of
+those by hand leaves no size selected. The **Clouds & shadows** switch reads Sentinel-2's classification, grows a
+real cloud into the unsure pixels touching it, ignores classified "clouds" too small
+to be one (white hulls and roofs), and casts each cloud away from the sun to find the
+shadows the classification missed. The fire detector offers no switch: its band
+ratios reject cloud already. Thresholds and the analyzer itself open from links
+rather than sitting in the way. The **+** beside the analyzer starts one of your
+own, either as a copy of the one in hand or from scratch; a built-in can be read
+and copied but never written over, and an analyzer of your own can be saved,
+renamed or removed from there. The library is shared by every case.
 
 A **watch** keeps an analyzer, its areas and a date rule together, and
 **Run again** in Saved launches a fresh pass — a weekly harbour review is that
@@ -1312,8 +1327,12 @@ candidate evidence and review state. A finished run keeps the frames of the tile
 that produced a candidate and drops the rest, so a case grows with what was found
 rather than with how much was swept.
 
-What a sweep produces is a list of candidates, and nothing else reaches the case
-on its own. Review them one at a time: **Keep as a pin** files that one candidate,
+What a sweep produces is a list of candidates, strongest first, and nothing else
+reaches the case on its own. Each says how strong it is in a word (weak, clear or
+strong: how far past its threshold it got) and what was measured in units a reader
+can check, such as "6.2× brighter than the water around it" or "NBR 0.61 → −0.28".
+A candidate that crosses a tile edge is one candidate with one picture, stitched
+from the tiles it touches. Review them one at a time: **Keep as a pin** files that one candidate,
 with its own copy of the evidence and its provenance, and is the single act that
 writes to the case; **Dismiss** takes it off the map. Either verdict moves to the
 next candidate still waiting, and a running tally says how many are left. Keeping

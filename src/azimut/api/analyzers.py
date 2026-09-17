@@ -30,7 +30,7 @@ def recipes() -> dict[str, Any]:
             continue
     return {"builtins": [r.model_dump() for r in BUILTINS], "custom": custom, "methods": METHODS,
             "max_tiles": engine.MAX_TILES, "max_results": engine.MAX_RESULTS,
-            "grids": {name: list(pair) for name, pair in engine.GRIDS.items()}}
+            "grid": list(engine.GRID)}
 
 
 @router.post("/compare/analyzers")
@@ -180,12 +180,15 @@ def review_result(case_id: str, ident: str, result_id: str, body: Review) -> dic
 # invents nothing, so what is on screen is still the sensor's own reading.
 PREVIEW_EDGE = 320
 PREVIEW_MARGIN = 20
+# The most of the sweep one preview shows, in source pixels. A burn scar can be
+# kilometres across; past this the crop is centred on the candidate.
+PREVIEW_SPAN = 1024
 
 
 def source_label(source: dict[str, Any]) -> str:
-    if source.get("provider") == "sentinel2":
-        return str(source.get("date") or "Sentinel-2")
-    return f"Release {source.get('release')}"
+    if source.get("provider") == "esri-wayback":
+        return f"Release {source.get('release')}"
+    return str(source.get("date") or "Sentinel-2")
 
 
 def kept_entity(case: Any, result: dict[str, Any]) -> dict[str, Any] | None:
@@ -194,22 +197,65 @@ def kept_entity(case: Any, result: dict[str, Any]) -> dict[str, Any] | None:
     return case.get_entity(ident) if ident else None
 
 
-def preview_bytes(case: Any, saved: dict[str, Any], result: dict[str, Any], part: int = 0) -> bytes:
-    if part >= len(result["parts"]):
-        raise HTTPException(404, "candidate evidence part not found")
-    evidence = result["parts"][part]
-    x, y, width, height = evidence["box"]
+def _tile_image(case: Any, saved: dict[str, Any], source: dict[str, Any],
+                tile: tuple[int, int, int]) -> Image.Image | None:
+    for record in saved["frames"].values():
+        if record.get("index") is None and tuple(record["tile"]) == tile and \
+                record["source"] == source:
+            path = case.resolve_inside(record["path"])
+            if path.is_file():
+                with Image.open(path) as image:
+                    if max(image.size) > 512:
+                        raise HTTPException(422, "evidence frame has an unexpected size")
+                    return image.convert("RGB")
+    return None
+
+
+def preview_bytes(case: Any, saved: dict[str, Any], result: dict[str, Any]) -> bytes:
+    """One picture per date, stitched across every tile the candidate touches.
+
+    A candidate that crosses a tile edge is still one thing, so it is shown as
+    one: the tiles its parts came from are laid side by side on the sweep's own
+    grid, and a neighbour the sweep kept no copy of is left dark rather than
+    guessed at.
+    """
+    first = saved["frames"].get(result["parts"][0]["frames"][0])
+    if first is None:
+        raise HTTPException(404, "candidate evidence is missing")
+    z = first["tile"][0]
+    with Image.open(case.resolve_inside(first["path"])) as image:
+        size = image.width
+    sources = [saved["frames"][key]["source"] for key in result["parts"][0]["frames"]]
+    boxes = []
+    for part in result["parts"]:
+        record = saved["frames"].get(part["frames"][0])
+        if record is None:
+            continue
+        _, tx, ty = record["tile"]
+        x, y, width, height = part["box"]
+        boxes.append((tx * size + x, ty * size + y, tx * size + x + width, ty * size + y + height))
+    if not boxes:
+        raise HTTPException(404, "candidate evidence is missing")
+    left = min(b[0] for b in boxes) - PREVIEW_MARGIN
+    top = min(b[1] for b in boxes) - PREVIEW_MARGIN
+    right = max(b[2] for b in boxes) + PREVIEW_MARGIN
+    bottom = max(b[3] for b in boxes) + PREVIEW_MARGIN
+    if right - left > PREVIEW_SPAN:
+        centre = (left + right) // 2
+        left, right = centre - PREVIEW_SPAN // 2, centre + PREVIEW_SPAN // 2
+    if bottom - top > PREVIEW_SPAN:
+        centre = (top + bottom) // 2
+        top, bottom = centre - PREVIEW_SPAN // 2, centre + PREVIEW_SPAN // 2
+
     crops = []
-    for key in evidence["frames"]:
-        record = saved["frames"][key]
-        path = case.resolve_inside(record["path"])
-        with Image.open(path) as image:
-            if max(image.size) > 512:
-                raise HTTPException(422, "evidence frame has an unexpected size")
-            crops.append(image.convert("RGB").crop((
-                max(0, x - PREVIEW_MARGIN), max(0, y - PREVIEW_MARGIN),
-                min(image.width, x + width + PREVIEW_MARGIN),
-                min(image.height, y + height + PREVIEW_MARGIN))))
+    for source in sources:
+        canvas = Image.new("RGB", (right - left, bottom - top), (20, 24, 32))
+        for ty in range(top // size, (bottom - 1) // size + 1):
+            for tx in range(left // size, (right - 1) // size + 1):
+                tile = _tile_image(case, saved, source, (z, tx, ty))
+                if tile is not None:
+                    canvas.paste(tile, (tx * size - left, ty * size - top))
+        crops.append(canvas)
     edge = max(max(crop.size) for crop in crops)
     zoom = max(1, min(12, round(PREVIEW_EDGE / edge))) if edge else 1
     if zoom > 1:
@@ -230,13 +276,13 @@ def preview_bytes(case: Any, saved: dict[str, Any], result: dict[str, Any], part
     preview = Image.new("RGB", (sum(c.width for c in crops) + gap * (len(crops) - 1),
                                 body + band * 2), (20, 24, 32))
     drawing = ImageDraw.Draw(preview)
-    left = 0
+    offset = 0
     for label, crop in zip(labels, crops):
-        preview.paste(crop, (left, band))
-        drawing.text((left + 4, 4), label, fill="white", font=font)
-        left += crop.width + gap
-    attribution = ("Copernicus Sentinel data / Sentinel Hub" if
-                   saved["input"]["b"]["provider"] == "sentinel2" else "Esri World Imagery Wayback")
+        preview.paste(crop, (offset, band))
+        drawing.text((offset + 4, 4), label, fill="white", font=font)
+        offset += crop.width + gap
+    attribution = ("Esri World Imagery Wayback" if saved["input"]["b"].get("provider") ==
+                   "esri-wayback" else "Copernicus Sentinel data / Sentinel Hub")
     drawing.text((4, band + body + 5), attribution, fill="#c8ced6", font=small)
     output = io.BytesIO()
     preview.save(output, "PNG")
@@ -244,13 +290,11 @@ def preview_bytes(case: Any, saved: dict[str, Any], result: dict[str, Any], part
 
 
 @router.get("/cases/{case_id}/analysis/runs/{ident}/results/{result_id}/preview")
-def preview(case_id: str, ident: str, result_id: str, part: int = 0) -> Response:
-    if part < 0:
-        raise HTTPException(422, "invalid evidence part")
+def preview(case_id: str, ident: str, result_id: str) -> Response:
     case = get_case(case_id)
     saved = read(case, "runs", ident)
     result = result_of(saved, result_id)
-    return Response(preview_bytes(case, saved, result, part), media_type="image/png")
+    return Response(preview_bytes(case, saved, result), media_type="image/png")
 
 
 class Promotion(Model):
