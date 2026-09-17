@@ -30,7 +30,7 @@
     caseId,
     coords,
     fullscreen = false,
-    kind = $bindable('all'),
+    kind = $bindable('media'),
     query = $bindable(''),
     group = $bindable('geo'), // 'geo' | 'folders'
     hoveredId = $bindable(null),
@@ -56,8 +56,9 @@
       ? { levels: [], nodes: folderTree.nodes, trailing: folderTree.unfiled }
       : { levels: geoTree.levels, nodes: geoTree.nodes, trailing: geoTree.unlocated }
   );
-  // Locate resolves saved entities. A proof states its own point or borrows one,
-  // so the pass has nothing to look up there and the errand must not be offered.
+  // Locate resolves saved entities. A file borrows the point of whatever places
+  // it, so the pass has nothing to look up there and the errand must not be
+  // offered.
   const pending = $derived(isMode(kind) ? 0 : pendingLocate(rows));
   const searching = $derived(!!query.trim());
   const shown = $derived(
@@ -150,7 +151,6 @@
     {#each KINDS as k (k.id)}
       <button
         class="kind"
-        class:mode={k.mode}
         class:on={kind === k.id}
         onclick={() => (kind = k.id)}
       >{k.label}</button>
@@ -349,14 +349,6 @@
   }
   .kind:hover {
     color: var(--text-1);
-  }
-  /* Proofs and Media are modes, not refinements of the three to their left: one
-     rule before the first of them says so without spending a word on it */
-  .kind:not(.mode) + .kind.mode {
-    margin-left: 5px;
-    border-left: 1px solid var(--border);
-    padding-left: 5px;
-    border-radius: 0 2px 2px 0;
   }
   .kind.on {
     background: var(--bg-3);

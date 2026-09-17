@@ -260,127 +260,151 @@ class CoverageError(RuntimeError):
     """Sentinel Hub did not return a usable dataMask image."""
 
 
-# Spectral indices Compare's change reading can ask for. Each is a normalised
-# difference of two L2A bands, so it lands in -1…1 whatever the light that day,
-# which is what makes two dates comparable where two true-colour renders are not.
-# Only these expressions ever reach an evalscript: the request names a key.
-INDEX_BANDS: dict[str, tuple[str, str]] = {
-    "ndvi": ("B08", "B04"),  # vegetation vigour
-    "ndwi": ("B03", "B08"),  # open water
-    "nbr": ("B08", "B12"),  # burn scars
-    "ndbi": ("B11", "B08"),  # built-up and bare surfaces
-}
 PRODUCT_MAX_EDGE = 2048
 _PRODUCT_MAX_BYTES = 24_000_000
 _WEB_MERCATOR_LIMIT = 20_037_508.342789244
 
 
-def _index_evalscript(index: str) -> str:
-    high, low = INDEX_BANDS[index]
-    # R carries the index scaled to a byte, G the scene classification (cloud,
-    # shadow, snow…), A the data mask. The browser decodes all three.
+# Detect's band products. Each one is what a single detector measures, rounded
+# into the four bytes of a PNG so one metered request carries all of it.
+#
+# The first channel is never zero where the sensor saw something, which is how
+# the engine tells a dark reading from no reading. The fourth carries
+# Sentinel-2's own view of the sky: the scene class in the low four bits, and a
+# flag for pixels dark enough in the near-infrared to be in a cloud's shadow.
+# The engine turns those into a mask, with the sun's direction for the shadows
+# the classification misses (engine/analyzers.py).
+#
+# Reflectance is stretched by a gain before rounding. Sea under sun glint sits
+# near 9% in the near-infrared, so a gain that spends the byte on the bottom few
+# percent saturates hulls and wave crests alike; at 2 the byte spans 0-50% in
+# steps of 0.2%, which still resolves calm water and leaves a hull its contrast.
+# Short-wave infrared over desert reaches 50%, so the change product gives it
+# a little more room.
+BAND_GAIN = 2.0
+SWIR_GAIN = 1.6
+# Band ratios are stretched the same way, and 64 puts the useful 1-4 range
+# across the byte.
+RATIO_GAIN = 64.0
+DARK_FLAG = 16
+DARK_REFLECTANCE = 0.15
+
+# The spectral indices both modes read, as sums of bands over sums of bands so
+# the bare soil index fits beside the normalised differences. Each lands in -1…1
+# whatever the light that day, which is what makes two dates comparable where
+# two true-colour renders are not. Only these expressions reach an evalscript:
+# a request names a key.
+SPECTRAL_INDEX: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "ndvi": (("B08",), ("B04",)),          # green vegetation
+    "ndwi": (("B03",), ("B08",)),          # open water
+    "mndwi": (("B03",), ("B11",)),         # open water, fewer false hits on built-up land
+    "nbr": (("B08",), ("B12",)),           # burn scars
+    "ndbi": (("B11",), ("B08",)),          # built-up surfaces
+    "bsi": (("B11", "B04"), ("B08", "B02")),  # bare soil
+}
+
+
+def _byte(expression: str, gain: float, floor: int = 0) -> str:
+    return f"Math.max({floor}, Math.min(255, Math.round(({expression}) * {255 * gain:g})))"
+
+
+def _detect_script(bands: list[str], values: list[str], dark: str = "B08") -> str:
+    wanted = list(dict.fromkeys([*bands, dark, "SCL", "dataMask"]))
+    listed = ", ".join(f'"{band}"' for band in wanted)
     script = f"""//VERSION=3
 function setup() {{
-  return {{
-    input: [{{ bands: ["{high}", "{low}", "SCL", "dataMask"] }}],
-    output: {{ bands: 4, sampleType: "UINT8" }}
-  }};
+  return {{ input: [{{ bands: [{listed}] }}], output: {{ bands: 4, sampleType: "UINT8" }} }};
 }}
 function evaluatePixel(p) {{
-  const sum = p.{high} + p.{low};
-  const value = sum === 0 ? 0 : (p.{high} - p.{low}) / sum;
-  const clamped = Math.max(-1, Math.min(1, value));
-  return [Math.round((clamped + 1) * 127.5), p.SCL, 0, p.dataMask * 255];
+  if (!p.dataMask) return [0, 0, 0, 0];
+  return [{", ".join(values)}, p.SCL + (p.{dark} < {DARK_REFLECTANCE} ? {DARK_FLAG} : 0)];
 }}
 """
     return base64.b64encode(script.encode("ascii")).decode("ascii")
 
 
-# How much a reflectance is stretched before it is rounded into a byte. A
-# detector that thresholds against its own local background needs resolution
-# where the signal lives, not a scale that reaches 100% reflectance: open water
-# in the near-infrared sits under 3%, so at this gain it spans the bottom fifth
-# of the byte instead of two or three values. Anything above 1/gain saturates,
-# which costs nothing — these are detections, not measurements.
-NIR_GAIN = 8.0
-SWIR_GAIN = 4.0
-# Band ratios are stretched the same way, and 64 puts the useful 1…4 range
-# across the byte.
-RATIO_GAIN = 64.0
+def _ratio(high: str, low: str) -> str:
+    return f"Math.min(255, Math.round((p.{low} <= 0 ? 0 : p.{high} / p.{low}) * {RATIO_GAIN:g}))"
 
 
-def _vessel_evalscript() -> str:
-    """Bands for finding something floating: infrared, water, and the classes.
+def _detect_evalscript(product: str) -> str:
+    if product == "vessel":
+        # Water absorbs near-infrared, so a hull is an outlier against a dark
+        # sea; short-wave infrared is what tells it from a breaking wave, which
+        # is bright in the one and not the other. NDWI says which pixels are sea.
+        ndwi = "(p.B03 + p.B08 === 0 ? 0 : (p.B03 - p.B08) / (p.B03 + p.B08))"
+        return _detect_script(["B03", "B08", "B11"], [
+            _byte("p.B08", BAND_GAIN, 1), _byte("p.B11", BAND_GAIN),
+            f"Math.round((Math.max(-1, Math.min(1, {ndwi})) + 1) * 127.5)",
+        ])
+    if product == "fire":
+        # The published active-fire test: B12 high in absolute terms and against
+        # both B11 and B8A. B8A rather than B08 because it shares B12's 20 m
+        # grid, so a sharp roof edge cannot fake a ratio.
+        return _detect_script(["B8A", "B11", "B12"], [
+            _byte("p.B12", BAND_GAIN, 1), _ratio("B12", "B11"), _ratio("B12", "B8A"),
+        ], dark="B8A")
+    if product == "surface":
+        # Red, near and short-wave infrared: enough to see soil, vegetation and
+        # water move, and to tell a field that greened from ground that was dug.
+        return _detect_script(["B04", "B08", "B11"], [
+            _byte("p.B04", BAND_GAIN, 1), _byte("p.B08", BAND_GAIN), _byte("p.B11", SWIR_GAIN),
+        ])
+    high, low = SPECTRAL_INDEX[product.removeprefix("index-")]
+    return _detect_script([*high, *low], [
+        f"Math.max(1, Math.round((Math.max(-1, Math.min(1, {_index(high, low)})) + 1) * 127.5))", "0", "0",
+    ])
 
-    Water absorbs near-infrared almost completely, so a hull, a wake or a rig
-    is an outlier against a near-black background — which is why this reads
-    B08 rather than the rendered picture, where the stretch has already thrown
-    the difference away. NDWI rides along in B so the detector can tell which
-    pixels are sea without a second request.
-    """
-    script = """//VERSION=3
-function setup() {
-  return {
-    input: [{ bands: ["B03", "B08", "SCL", "dataMask"] }],
-    output: { bands: 4, sampleType: "UINT8" }
-  };
-}
-function evaluatePixel(p) {
-  const sum = p.B03 + p.B08;
-  const ndwi = sum === 0 ? 0 : (p.B03 - p.B08) / sum;
-  return [
-    Math.min(255, Math.round(p.B08 * 255 * %(nir)s)),
-    p.SCL,
-    Math.round((Math.max(-1, Math.min(1, ndwi)) + 1) * 127.5),
-    p.dataMask * 255
-  ];
-}
-""" % {"nir": NIR_GAIN}
+
+def _index(high: tuple[str, ...], low: tuple[str, ...]) -> str:
+    top = " + ".join(f"p.{band}" for band in high)
+    bottom = " + ".join(f"p.{band}" for band in low)
+    return f"(({top}) + ({bottom}) === 0 ? 0 : (({top}) - ({bottom})) / (({top}) + ({bottom})))"
+
+
+def _change_evalscript(product: str) -> str:
+    # Difference mode draws its frames into a canvas and decodes them there
+    # (lib/map/changeDetect.js). A canvas premultiplies alpha, so alpha stays
+    # the data mask and the sky byte rides in green: the same byte Detect's
+    # products carry fourth, so the two modes read one sky. `change-sky` is that
+    # byte alone, for a cloud filter over the picture methods.
+    name = product.removeprefix("change-")
+    if name == "sky":
+        bands: list[str] = []
+        value = "0"
+    else:
+        high, low = SPECTRAL_INDEX[name]
+        bands = [*high, *low]
+        value = f"Math.round((Math.max(-1, Math.min(1, {_index(high, low)})) + 1) * 127.5)"
+    wanted = list(dict.fromkeys([*bands, "B08", "SCL", "dataMask"]))
+    listed = ", ".join(f'"{band}"' for band in wanted)
+    script = f"""//VERSION=3
+function setup() {{
+  return {{ input: [{{ bands: [{listed}] }}], output: {{ bands: 4, sampleType: "UINT8" }} }};
+}}
+function evaluatePixel(p) {{
+  if (!p.dataMask) return [0, 0, 0, 0];
+  return [{value}, p.SCL + (p.B08 < {DARK_REFLECTANCE} ? {DARK_FLAG} : 0), 0, 255];
+}}
+"""
     return base64.b64encode(script.encode("ascii")).decode("ascii")
 
 
-def _fire_evalscript() -> str:
-    """Bands for the published Sentinel-2 active-fire test.
-
-    Flame radiates in the short-wave infrared, so B12 rises first and hardest
-    and does it through smoke. Absolute brightness alone would call every
-    cloud a fire; the two ratios are what separate them, because cloud is
-    bright in all three bands at once and sits near a ratio of one.
-
-    No scene classification here: the ratios already reject cloud, and the
-    fourth channel is worth more as the data mask.
-    """
-    script = """//VERSION=3
-function setup() {
-  return {
-    input: [{ bands: ["B08", "B11", "B12", "dataMask"] }],
-    output: { bands: 4, sampleType: "UINT8" }
-  };
-}
-function evaluatePixel(p) {
-  const over11 = p.B11 <= 0 ? 0 : p.B12 / p.B11;
-  const over08 = p.B08 <= 0 ? 0 : p.B12 / p.B08;
-  return [
-    Math.min(255, Math.round(p.B12 * 255 * %(swir)s)),
-    Math.min(255, Math.round(over11 * %(ratio)s)),
-    Math.min(255, Math.round(over08 * %(ratio)s)),
-    p.dataMask * 255
-  ];
-}
-""" % {"swir": SWIR_GAIN, "ratio": RATIO_GAIN}
-    return base64.b64encode(script.encode("ascii")).decode("ascii")
-
-
-# Everything a caller may ask `band_frame` for. Indices are normalised
-# differences the change reading compares between two dates; the other two are
-# detector inputs, read from one date.
-PRODUCTS: frozenset[str] = frozenset({*INDEX_BANDS, "vessel", "fire"})
+# Everything a caller may ask `band_frame` for: Detect's products, measured on
+# the server, and Difference's frames, decoded in the browser.
+DETECT_PRODUCTS: frozenset[str] = frozenset(
+    {"vessel", "fire", "surface", *(f"index-{name}" for name in SPECTRAL_INDEX)}
+)
+CHANGE_PRODUCTS: frozenset[str] = frozenset(
+    {"change-sky", *(f"change-{name}" for name in SPECTRAL_INDEX)}
+)
+PRODUCTS: frozenset[str] = frozenset({*CHANGE_PRODUCTS, *DETECT_PRODUCTS})
 
 
 def _evalscript(product: str) -> str:
-    if product in INDEX_BANDS:
-        return _index_evalscript(product)
-    return _vessel_evalscript() if product == "vessel" else _fire_evalscript()
+    if product in CHANGE_PRODUCTS:
+        return _change_evalscript(product)
+    return _detect_evalscript(product)
 
 
 def band_frame(
@@ -436,13 +460,13 @@ def band_frame(
     response.raise_for_status()
     body = response.content
     if len(body) > _PRODUCT_MAX_BYTES:
-        raise CoverageError("the index frame is too large")
+        raise CoverageError("the band frame is too large")
     try:
         with Image.open(io.BytesIO(body)) as frame:
             if frame.format != "PNG" or frame.size != (width, height):
-                raise CoverageError("Sentinel Hub returned an unexpected index frame")
+                raise CoverageError("Sentinel Hub returned an unexpected band frame")
     except (OSError, UnidentifiedImageError) as exc:
-        raise CoverageError("Sentinel Hub returned no readable index frame") from exc
+        raise CoverageError("Sentinel Hub returned no readable band frame") from exc
     return body
 
 

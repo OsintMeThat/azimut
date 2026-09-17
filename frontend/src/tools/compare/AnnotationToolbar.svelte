@@ -30,9 +30,16 @@
     : (selected?.stroke_width ?? strokeWidth));
   let open = $state('');
   let flyout = $state({});
+  // The panel floats free of the rail, so closing it on an outside press needs
+  // both halves: the panel itself, and the button that opened it. Leaving the
+  // button out would close the panel on the way down and let its own click
+  // reopen it, which reads as a button that does nothing.
+  let flyoutEl = $state();
+  let opener = $state(null);
 
   function toggle(name, event) {
     open = open === name ? '' : name;
+    opener = open ? event.currentTarget : null;
     if (!open) return;
     const box = event.currentTarget.getBoundingClientRect();
     flyout = box.top > window.innerHeight / 2
@@ -40,13 +47,28 @@
       : { left: `${box.right + 6}px`, top: `${box.top}px` };
   }
 
+  // The colour and size buttons vanish when the analyst goes back to Select with
+  // nothing selected, or deletes what was selected. Drop the panel with them
+  // rather than leaving it floating over the maps with nothing behind it.
+  $effect(() => {
+    if (!contextual || (open === 'fill' && !fillable)) open = '';
+  });
+
   $effect(() => {
     if (!open) return;
-    const close = (event) => {
+    const key = (event) => {
       if (event.key === 'Escape') open = '';
     };
-    document.addEventListener('keydown', close);
-    return () => document.removeEventListener('keydown', close);
+    const outside = (event) => {
+      if (flyoutEl?.contains(event.target) || opener?.contains(event.target)) return;
+      open = '';
+    };
+    document.addEventListener('keydown', key);
+    document.addEventListener('mousedown', outside, true);
+    return () => {
+      document.removeEventListener('keydown', key);
+      document.removeEventListener('mousedown', outside, true);
+    };
   });
 </script>
 
@@ -93,7 +115,7 @@
 </aside>
 
 {#if open === 'colour'}
-  <div class="flyout colours" style:left={flyout.left} style:top={flyout.top} style:bottom={flyout.bottom}>
+  <div class="flyout colours" bind:this={flyoutEl} style:left={flyout.left} style:top={flyout.top} style:bottom={flyout.bottom}>
     {#each palette as entry (entry)}
       <button
         class="colour-button"
@@ -109,7 +131,7 @@
     </label>
   </div>
 {:else if open === 'size'}
-  <div class="flyout slider" style:left={flyout.left} style:top={flyout.top} style:bottom={flyout.bottom}>
+  <div class="flyout slider" bind:this={flyoutEl} style:left={flyout.left} style:top={flyout.top} style:bottom={flyout.bottom}>
     <input
       type="range"
       min="1"
@@ -120,7 +142,7 @@
     />
   </div>
 {:else if open === 'fill'}
-  <div class="flyout slider" style:left={flyout.left} style:top={flyout.top} style:bottom={flyout.bottom}>
+  <div class="flyout slider" bind:this={flyoutEl} style:left={flyout.left} style:top={flyout.top} style:bottom={flyout.bottom}>
     <input
       type="range"
       min="0"
@@ -134,24 +156,33 @@
 {/if}
 
 <style>
+  /* Two columns, like the Proof Maker rail this follows. In one column the nine
+     tools plus the contextual controls ran past the bottom of a laptop window
+     once the mode dock and the source cards had taken their share, and the
+     colour and width buttons sat under a scrollbar nobody looks for. The second
+     column is paid for out of the buttons rather than the stage: a 32px box
+     still holds an 18px icon with room around it, so the rail ends up 24px
+     wider and roughly half as tall. A separator spans both columns, so the
+     groups it marks are kept by the grid itself. */
   .annotation-toolbar {
     position: relative;
     z-index: 610;
-    width: 52px;
-    flex: 0 0 52px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 3px;
-    padding: 7px 6px;
+    width: 76px;
+    flex: 0 0 76px;
+    display: grid;
+    grid-template-columns: repeat(2, 32px);
+    justify-content: center;
+    align-content: start;
+    gap: 4px;
+    padding: 8px 0;
     overflow-y: auto;
+    overflow-x: hidden;
     border-right: 1px solid var(--border);
     background: var(--bg-1);
   }
   .tool-button {
-    width: 38px;
-    height: 38px;
-    flex: 0 0 38px;
+    width: 32px;
+    height: 32px;
     display: grid;
     place-items: center;
     border-radius: var(--r-sm);
@@ -170,7 +201,13 @@
     font-size: 8px;
     line-height: 1;
   }
-  .separator { width: 28px; height: 1px; flex: 0 0 1px; margin: 3px 0; background: var(--border); }
+  .separator {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    height: 1px;
+    margin: 3px 4px;
+    background: var(--border);
+  }
   .swatch { width: 19px; height: 19px; border: 2px solid rgba(255,255,255,.68); border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,.5); }
   .fill-sample { width: 20px; height: 17px; border: 2px solid currentColor; border-radius: 2px; background: currentColor; }
   .flyout {
@@ -189,5 +226,14 @@
   .colour-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
   .slider { width: 180px; }
   .slider input { width: 100%; accent-color: var(--accent); }
-  select { width: 42px; color: var(--text-1); background: var(--bg-2); font-size: 10px; }
+  /* Which picture a mark belongs to is a word, not an icon, so it takes the
+     whole width rather than being squeezed into one 32px cell. */
+  select {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    height: 24px;
+    color: var(--text-1);
+    background: var(--bg-2);
+    font-size: 10px;
+  }
 </style>

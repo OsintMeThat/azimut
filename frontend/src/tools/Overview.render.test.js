@@ -34,9 +34,9 @@ const RECENT = [
   { id: 'e2', type: 'place', label: 'Quai sud', attrs: {}, provenance: { at: '2026-09-09T09:00:00Z' } },
 ];
 
-const SAVED = [
-  { id: 'p1', key: 'p1', kind: 'place', title: 'Quai sud', lat: 49.98, lon: 36.25 },
-  { id: 'p2', key: 'p2', kind: 'capture', title: 'Depot', lat: 49.99, lon: 36.3 },
+const LOCATED = [
+  { id: 'm1', key: 'm1@49.98,36.25', kind: 'media', title: 'Quai sud', lat: 49.98, lon: 36.25 },
+  { id: 'm2', key: 'm2@49.99,36.3', kind: 'media', title: 'Depot', lat: 49.99, lon: 36.3 },
 ];
 
 const PROVIDERS = [
@@ -63,7 +63,7 @@ const answers = async (url) => {
   if (url === '/api/satellite/providers') return PROVIDERS;
   if (url.includes('/catalog/summary')) return SUMMARY;
   if (url.includes('/timeline')) return { items: [], undated: 3, unplaced: 0, total: 9 };
-  if (url.includes('/satellite/index')) return SAVED;
+  if (url.includes('/satellite/media')) return LOCATED;
   if (url.includes('since=')) return { items: [], total: 5, next_cursor: null };
   if (url.includes('/catalog/entities')) return { items: RECENT, total: 30, next_cursor: null };
   return {};
@@ -182,8 +182,8 @@ describe('with a case open', () => {
     const paths = asked.filter((url) => url.startsWith('/api/cases/'));
     expect(paths).toHaveLength(6);
     expect(paths).toContain('/api/cases/case-a/todos');
-    // every one of them capped, counting, or the compact index the map panel already
-    // opens on — never a whole-graph read
+    // every one of them capped, counting, or the located-media index the map panel
+    // opens its own first position on — never a whole-graph read
     expect(paths.filter((url) => url.includes('limit=')).length).toBe(3);
     expect(paths.every((url) => url.startsWith('/api/cases/case-a/'))).toBe(true);
     // and the one read that is not the case's own: which basemap the map of the
@@ -214,7 +214,7 @@ describe('with a case open', () => {
         return { ...SUMMARY, total: 18, by_status: {}, by_folder: { work: 18 }, unlinked: 0 };
       }
       if (url.includes('/timeline')) return { undated: 0 };
-      if (url.includes('/satellite/index')) return [];
+      if (url.includes('/satellite/media')) return [];
       return { items: [], total: 0, next_cursor: null };
     });
     await open();
@@ -228,7 +228,7 @@ describe('with a case open', () => {
     get.mockImplementation(async (url) => {
       if (url.includes('/catalog/summary')) return { ...SUMMARY, total: 0, by_type: {}, by_status: {}, by_folder: {}, unlinked: 0 };
       if (url.includes('/timeline')) return { undated: 0 };
-      if (url.includes('/satellite/index')) return [];
+      if (url.includes('/satellite/media')) return [];
       return { items: [], total: 0, next_cursor: null };
     });
     await open();
@@ -261,7 +261,7 @@ describe('with a case open', () => {
 
   it('leaves the map out, and the shoulder filled, when nothing is placed', async () => {
     get.mockImplementation(async (url) => {
-      if (url.includes('/satellite/index')) return [];
+      if (url.includes('/satellite/media')) return [];
       return answers(url);
     });
     await open();

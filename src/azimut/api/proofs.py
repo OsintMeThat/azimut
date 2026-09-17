@@ -37,7 +37,6 @@ from ..engine import thumbnails as thumbnail_engine
 from ..workspace import Case, CaseError, ensure_dir
 from .cases import delete_by_path, get_case
 from .cases.common import delete_entity_deep
-from .drafts import list_drafts
 from .naming import read_created_at, slugify
 from .satellite import locate_on_save
 from .. import layout
@@ -235,18 +234,6 @@ def _write_assets(folder: Path, incoming: dict[str, bytes], keep: set[str]) -> N
             path.unlink(missing_ok=True)
     if not any(folder.iterdir()):
         folder.rmdir()
-
-
-@router.get("/cases/{case_id}/proofs/index")
-def proof_index(case_id: str) -> list[dict[str, Any]]:
-    """Proofs as map rows, for the Saved panel's Proofs position.
-
-    Declared above ``/proofs/{name}`` so ``index`` is read as this route and not
-    as a proof called "index". Lazy by design: the Saved panel loads it the
-    first time that position is opened, never on case open.
-    """
-    case = get_case(case_id)
-    return satellite_engine.proof_index(case, list_proofs(case_id), list_drafts(case_id))
 
 
 @router.get("/cases/{case_id}/proofs")

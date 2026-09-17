@@ -13,23 +13,31 @@
 import { matchesTerms } from './folderBrowse.js';
 import { haversine } from './measure.js';
 
-/** The switch's five positions. The first three filter the saved rows — a
+/** The switch's three positions, in the order a case is read: the footage
+ *  first, then the points dropped on it, then the imagery captured of it.
+ *
+ *  **Media** is a mode, not a filter — a file carries no point of its own and
+ *  stands where the graph puts it, so it has an index of its own and swaps the
+ *  rows the panel reads. Places and captures filter the one saved index; a
  *  screenshot is a capture with a different origin, not a thing to choose
- *  between. The last two are *modes*: a proof and a photo carry no point of
- *  their own and stand where the graph puts them, so drawing them with the
- *  places they borrow from would stack two marks on one spot. Each swaps the
- *  rows the panel reads instead. */
+ *  between. */
 export const KINDS = [
+  { id: 'media', label: 'Media' },
+  { id: 'places', label: 'Places' },
+  { id: 'captures', label: 'Captures' },
+];
+
+/** The kinds a list reading the saved index alone can offer, where `all` is
+ *  honestly all of it — media is not in that index (`PointPicker.svelte`). */
+export const SAVED_KINDS = [
   { id: 'all', label: 'All' },
   { id: 'places', label: 'Places' },
   { id: 'captures', label: 'Captures' },
-  { id: 'proofs', label: 'Proofs', mode: true },
-  { id: 'media', label: 'Media', mode: true },
 ];
 
 /** True when this position swaps the row source rather than filtering it. */
 export function isMode(kind) {
-  return KINDS.some((k) => k.id === kind && k.mode);
+  return kind === 'media';
 }
 
 /** Where an item with no country goes, and what that bucket is called. */
@@ -89,8 +97,6 @@ function savedText(row) {
       : `${row.lat}, ${row.lon}\n${Number(row.lat).toFixed(4)}, ${Number(row.lon).toFixed(4)}`;
   return [
     row.title,
-    // what the analyst called this point, when a proof states several
-    row.label,
     row.notes,
     row.provider,
     row.site,
@@ -106,9 +112,9 @@ function savedText(row) {
     .join('\n');
 }
 
-/** One row per entity, keeping the first. A proof that composes captures in two
- *  cities is two marks on the map — the map is about places — but one line in a
- *  flat list, which is about things. */
+/** One row per entity, keeping the first. A file recorded in one city and
+ *  showing another is two marks on the map — the map is about places — but one
+ *  line in a flat list, which is about things. */
 export function oneEach(rows) {
   const seen = new Set();
   return (rows ?? []).filter((row) => !seen.has(row.id) && seen.add(row.id));

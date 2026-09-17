@@ -13,7 +13,6 @@
   import RelationList from '../../components/RelationList.svelte';
   import { api } from '../../lib/api.js';
   import { toast } from '../../lib/state.svelte.js';
-  import { postTarget } from '../../lib/post.js';
   import { loadRelationTypes, relationAction } from '../../lib/relations.svelte.js';
   import { stackOrder } from '../../lib/savedMarkers.js';
 
@@ -24,33 +23,17 @@
     fullscreen = false,
     onopen,
     onedit,
-    onproof,
     ontrace,
-    onpost,
-    onshowproofs,
     onentity, // a related entity was picked: leave for its own tool
     onrefresh, // a relation was settled: sync the other surfaces
   } = $props();
 
-  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', proof: 'proof' };
-  const KIND = { place: 'Place', capture: 'Capture', screenshot: 'Screenshot', proof: 'Proof' };
+  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen' };
+  const KIND = { place: 'Place', capture: 'Capture', screenshot: 'Screenshot' };
 
-  const linkedPosts = (row) => Array.isArray(row.linked_posts) ? row.linked_posts : [];
-  let expandedPostRows = $state([]);
   const rowKey = (row) => row.key ?? row.id;
-  const postsExpanded = (row) => expandedPostRows.includes(rowKey(row));
-  const visiblePosts = (row) =>
-    postsExpanded(row) ? linkedPosts(row) : linkedPosts(row).slice(0, 2);
-  const hiddenPostCount = (row) => Math.max(0, linkedPosts(row).length - 2);
 
-  function expandPosts(event, row) {
-    // A click that reaches the map closes the card. This control changes only
-    // the card's own contents, so the event stays inside it.
-    event.stopPropagation();
-    if (!postsExpanded(row)) expandedPostRows = [...expandedPostRows, rowKey(row)];
-  }
-
-  /** What the dot on the mark meant. A proof borrows this capture's point, so
+  /** What the dot on the mark meant. A proof stands on the point it argues, so
    *  it is named here rather than drawn as a second mark. */
   const worked = (row) =>
     row.proofs > 0 ? `${row.proofs} proof${row.proofs > 1 ? 's' : ''} here` : null;
@@ -141,7 +124,6 @@
   <div class="stack" class:scrolls={ordered.length > 2}>
     {#each ordered as row (row.key ?? row.id)}
       {@const flyable = row.lat != null && row.lon != null}
-      {@const rowPosts = linkedPosts(row)}
       <div class="entry">
         <button
           type="button"
@@ -158,9 +140,7 @@
         </button>
         <div class="body">
           <button type="button" class="title" onclick={() => onopen(row)}>
-            <!-- one proof, several points: the name is what tells this mark from
-                 the others under the same title -->
-            {row.label ? `${row.title || 'Untitled'} · ${row.label}` : (row.title || 'Untitled')}
+            {row.title || 'Untitled'}
           </button>
           <p class="meta">
             <span class="kind"><Icon name={GLYPH[row.kind] ?? 'pin'} size={10} /> {KIND[row.kind]}</span>
@@ -181,9 +161,6 @@
             <p class="worked">
               <span class="worked-dot"></span>
               <span>{worked(row)}</span>
-              <button type="button" class="link" onclick={() => onshowproofs?.()}>
-                Show proofs
-              </button>
             </p>
           {/if}
           {#if row.notes}<p class="note">{row.notes}</p>{/if}
@@ -211,41 +188,8 @@
               {/if}
             </section>
           {/if}
-          {#if rowPosts.length}
-            <section class="linked-posts">
-              <p class="post-heading">
-                <Icon name="post" size={11} />
-                {rowPosts.length === 1 ? 'Linked post' : `Linked posts · ${rowPosts.length}`}
-              </p>
-              <div class="post-list" class:expanded={postsExpanded(row)}>
-                {#each visiblePosts(row) as post (post.id)}
-                  <button
-                    type="button"
-                    class="post-row"
-                    title={`Open "${post.title}" in Geo Report`}
-                    onclick={() => onpost?.(post)}
-                  >
-                    <span class="post-target">{postTarget(post.target).label}</span>
-                    <span class="post-title">{post.title}</span>
-                    <Icon name="chevronRight" size={11} />
-                  </button>
-                {/each}
-                {#if !postsExpanded(row) && hiddenPostCount(row)}
-                  <button type="button" class="more-posts" onclick={(event) => expandPosts(event, row)}>
-                    + {hiddenPostCount(row)} more
-                  </button>
-                {/if}
-              </div>
-            </section>
-          {/if}
           <p class="acts">
-            {#if row.kind === 'proof'}
-              <button type="button" class="link" onclick={() => onproof?.(row)}>
-                Open in Geo Proof
-              </button>
-            {:else}
-              <button type="button" class="link" onclick={() => onedit(row)}>Edit</button>
-            {/if}
+            <button type="button" class="link" onclick={() => onedit(row)}>Edit</button>
             {#if row.kind === 'place' && ontrace}
               <button
                 type="button"
@@ -393,8 +337,7 @@
     align-items: center;
     gap: 3px;
   }
-  /* the mark's dot, named: the card is where "already worked" becomes a number
-     and a way into the proofs view */
+  /* the mark's dot, named: the card is where "already worked" becomes a number */
   .worked {
     display: flex;
     align-items: center;
@@ -430,14 +373,12 @@
   .meta > .proposed::before {
     content: none;
   }
-  .linked-posts,
   .relations {
     margin-top: 4px;
     padding-top: 5px;
     border-top: 1px solid var(--border);
   }
-  .rel-heading,
-  .post-heading {
+  .rel-heading {
     display: flex;
     align-items: center;
     gap: 4px;
@@ -447,61 +388,6 @@
     font-weight: 650;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-  }
-  .post-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .post-list.expanded {
-    max-height: 132px;
-    overflow-y: auto;
-  }
-  .post-row {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 5px;
-    width: 100%;
-    padding: 3px 4px;
-    border: 0;
-    border-radius: var(--r-sm);
-    background: var(--bg-2);
-    color: var(--text-2);
-    text-align: left;
-    cursor: pointer;
-  }
-  .post-row:hover {
-    background: var(--bg-3);
-    color: var(--text-1);
-  }
-  .post-target {
-    min-width: 14px;
-    padding: 0 3px;
-    border: 1px solid var(--border-strong);
-    border-radius: 3px;
-    color: var(--text-3);
-    font-size: 9px;
-    line-height: 14px;
-    text-align: center;
-  }
-  .post-title {
-    overflow: hidden;
-    font-size: var(--fs-xs);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .more-posts {
-    align-self: flex-start;
-    padding: 1px 4px;
-    border: 0;
-    background: none;
-    color: var(--accent);
-    font-size: var(--fs-xs);
-    cursor: pointer;
-  }
-  .more-posts:hover {
-    text-decoration: underline;
   }
   .acts {
     display: flex;

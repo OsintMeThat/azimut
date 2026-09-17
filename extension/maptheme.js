@@ -106,7 +106,7 @@
 
   /** Which glyph a saved row is drawn with — `SavedOverlay.svelte`'s own map.
    *  A stack holding more than one kind falls back to the place glyph. */
-  const SAVED_GLYPH = { place: "pin", capture: "satellite", screenshot: "screen", proof: "proof" };
+  const SAVED_GLYPH = { place: "pin", capture: "satellite", screenshot: "screen" };
 
   window.AzimutMapTheme = {
     TOKENS,

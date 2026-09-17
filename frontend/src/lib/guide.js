@@ -216,7 +216,7 @@ export const GUIDE = [
       },
       {
         label: 'Compare keeps the ground fixed',
-        text: 'Read two locked views side by side, by swipe, opacity or blink. Matched products also get Change assist; notes and shapes stay editable in the saved comparison and appear in its outputs.',
+        text: 'Read two locked views side by side, by swipe, opacity or blink. Matched products also get Difference and Detect; notes and shapes stay editable in the saved comparison and appear in its outputs.',
       },
       {
         label: 'Coords & Sky keeps calculations separate',

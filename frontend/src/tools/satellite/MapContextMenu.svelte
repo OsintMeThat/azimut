@@ -23,6 +23,8 @@
     fullscreen = false,
     /** `{ busy, text, error }` once "What is here?" was asked. */
     lookup = null,
+    /** The acts offered, in `ACTIONS` order; a tool passes the subset it has. */
+    actions = ACTIONS,
     /** `(id, value)`: `copy` with the text, or an action id from `ACTIONS`. */
     onpick,
     onclose,
@@ -103,7 +105,7 @@
 
   <div class="rule" role="separator"></div>
 
-  {#each ACTIONS as action (action.id)}
+  {#each actions as action (action.id)}
     <button class="item" role="menuitem" onclick={() => onpick(action.id)}>
       <Icon name={action.icon} size={13} />
       <span>{action.label}</span>

@@ -1,4 +1,4 @@
-"""Compare sessions, their media working file, animated exports and index frames."""
+"""Compare sessions, their media working file, animated exports and band frames."""
 
 import io
 from pathlib import Path
@@ -101,6 +101,7 @@ def test_compare_session_roundtrip_rename_and_sidebar_delete(client):
         "min_area": 250,
         "ignore_clouds": False,
         "ignore_shadows": True,
+        "cloud_margin": 80,
         "classes": ["loss", "gain", "loss"],
         "display": "outline",
         "palette": "colourblind",
@@ -108,6 +109,7 @@ def test_compare_session_roundtrip_rename_and_sidebar_delete(client):
         "opacity": 71,
         "base": "side",
         "visible": True,
+        "blink": True,
     }
     spec["blink"] = {"interval": 1200}
     spec["annotations"] = [
@@ -140,6 +142,9 @@ def test_compare_session_roundtrip_rename_and_sidebar_delete(client):
     assert {key: assist[key] for key in ("method", "min_area", "display")} == {
         "method": "structure", "min_area": 250, "display": "outline",
     }
+    # The overlay's own blink, and a mask margin in ground metres because the
+    # reading follows the camera.
+    assert (assist["blink"], assist["cloud_margin"]) == (True, 80)
     assert loaded["spec"]["blink"] == {"interval": 1200}
     assert loaded["spec"]["annotations"][0]["side"] == "a"
     assert loaded["spec"]["annotations"][1]["points"][2] == [2.30, 48.86]
@@ -269,7 +274,7 @@ def test_change_assist_refuses_misleading_pairs(client, a, b, method, reason):
 
 
 def test_change_refusal_needs_both_sides():
-    assert change_refusal(_side(present=False), _side()) == "Change assist needs imagery A and B"
+    assert change_refusal(_side(present=False), _side()) == "Difference needs imagery A and B"
 
 
 # -- the rendered image is a media working file ----------------------------------
@@ -455,23 +460,23 @@ def test_compare_gif_scales_large_frames_before_building_the_animation():
     assert frames[0].size == (MAX_GIF_EDGE, 150)
 
 
-# -- Sentinel-2 index frames ------------------------------------------------------
+# -- Sentinel-2 band frames ------------------------------------------------------
 
 
-INDEX_BODY = {
+FRAME_BODY = {
     "west": 250_000, "south": 6_250_000, "east": 251_000, "north": 6_250_600,
-    "width": 320, "height": 192, "day": "2026-05-11", "index": "ndvi", "maxcc": 40,
+    "width": 320, "height": 192, "day": "2026-05-11", "product": "ndvi", "maxcc": 40,
 }
 
 
 def test_band_frame_needs_a_key_and_refuses_when_the_tier_is_spent(client, monkeypatch):
     sent = []
     monkeypatch.setattr(compare_api.sentinel, "band_frame", lambda *a, **k: sent.append(a) or b"")
-    assert client.post("/api/compare/sentinel-index", json=INDEX_BODY).status_code == 404
+    assert client.post("/api/compare/sentinel-frame", json=FRAME_BODY).status_code == 404
 
     client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
     monkeypatch.setattr(compare_api.config, "usage_blocked", lambda meter: True)
-    assert client.post("/api/compare/sentinel-index", json=INDEX_BODY).status_code == 429
+    assert client.post("/api/compare/sentinel-frame", json=FRAME_BODY).status_code == 429
     assert sent == []
 
 
@@ -479,21 +484,21 @@ def test_band_frame_is_metered_and_answered_as_a_png(client, monkeypatch):
     client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
     asked = {}
 
-    def frame(instance, bbox, width, height, day, index, maxcc, *, layer):
+    def frame(instance, bbox, width, height, day, product, maxcc, *, layer):
         asked.update(instance=instance, bbox=bbox, size=(width, height), day=day,
-                     index=index, maxcc=maxcc, layer=layer)
+                     product=product, maxcc=maxcc, layer=layer)
         return _png((1, 2, 3), (width, height))
 
     monkeypatch.setattr(compare_api.sentinel, "band_frame", frame)
     before = config.month_usage("sentinelhub")
 
-    response = client.post("/api/compare/sentinel-index", json=INDEX_BODY)
+    response = client.post("/api/compare/sentinel-frame", json=FRAME_BODY)
 
     assert response.status_code == 200, response.text
     assert response.headers["content-type"] == "image/png"
     assert asked == {
         "instance": "inst-uuid", "bbox": (250_000, 6_250_000, 251_000, 6_250_600),
-        "size": (320, 192), "day": "2026-05-11", "index": "ndvi", "maxcc": 40,
+        "size": (320, 192), "day": "2026-05-11", "product": "change-ndvi", "maxcc": 40,
         "layer": "TRUE_COLOR",
     }
     assert config.month_usage("sentinelhub") == before + 1
@@ -506,7 +511,7 @@ def test_band_frame_validates_before_asking(client, monkeypatch):
         lambda *a, **k: (_ for _ in ()).throw(ValueError("the frame is empty")),
     )
     before = config.month_usage("sentinelhub")
-    assert client.post("/api/compare/sentinel-index", json={**INDEX_BODY, "index": "evi"}).status_code == 422
-    assert client.post("/api/compare/sentinel-index", json={**INDEX_BODY, "width": 5000}).status_code == 422
-    assert client.post("/api/compare/sentinel-index", json=INDEX_BODY).status_code == 422
+    assert client.post("/api/compare/sentinel-frame", json={**FRAME_BODY, "product": "evi"}).status_code == 422
+    assert client.post("/api/compare/sentinel-frame", json={**FRAME_BODY, "width": 5000}).status_code == 422
+    assert client.post("/api/compare/sentinel-frame", json=FRAME_BODY).status_code == 422
     assert config.month_usage("sentinelhub") == before

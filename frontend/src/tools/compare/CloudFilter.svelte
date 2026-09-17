@@ -2,53 +2,41 @@
   /**
    * Cloud and the shadow it casts, as one thing to click.
    *
-   * It sits at the top of both computing panels rather than inside a settings
-   * tab, because cloud is the first thing that goes wrong in a reading and
-   * hunting for the switch that fixes it is the wrong first minute. The split
-   * between cloud and shadow, and the margin, stay in the panel's own detail
-   * area: this is the one decision, and the rest is tuning.
+   * It sits at the top of Detect's third step and of Difference's column rather
+   * than inside the thresholds, because cloud is the first thing that goes
+   * wrong in a reading and hunting for the switch that fixes it is the wrong
+   * first minute. The split between cloud and shadow, and the margin, stay with
+   * the thresholds: this is the one decision, and the rest is tuning.
    *
-   * `kind` comes from the method catalogue, never from a list kept here — a
-   * method that cannot separate cloud from what it looks for offers nothing.
+   * Both modes read one sky, from Sentinel-2's own classification, so a caller
+   * only shows this where that classification exists: the fire test rejects
+   * cloud by its own band ratios, and a Wayback picture carries no classes.
    */
   import Icon from '../../components/Icon.svelte';
 
-  let { kind = '', clouds = false, shadows = false, split = true, ontoggle } = $props();
+  let { clouds = false, shadows = false, ontoggle } = $props();
 
-  const on = $derived(split ? clouds || shadows : clouds);
+  const on = $derived(clouds || shadows);
   const name = $derived(
-    !split || !on || (clouds && shadows)
-      ? 'Clouds & shadows'
-      : clouds
-        ? 'Clouds only'
-        : 'Shadows only'
-  );
-  // Said every time it is on, because the two answers are not equally good and
-  // the panel must not let a guess pass for a measurement.
-  const how = $derived(
-    kind === 'classes'
-      ? "Sentinel-2's own scene classification."
-      : 'A guess from the picture: bright and colourless, or near-black.'
+    !on || (clouds && shadows) ? 'Clouds & shadows' : clouds ? 'Clouds only' : 'Shadows only'
   );
 </script>
 
-{#if kind}
-  <div class="cloud-filter">
-    <button
-      type="button"
-      class="chip"
-      class:on
-      aria-pressed={on}
-      onclick={() => ontoggle(!on)}
-      title={on ? 'Stop excluding cloud and shadow' : 'Exclude cloud and the shadow it casts'}
-    >
-      <Icon name={on ? 'eyeOff' : 'eye'} size={13} />
-      {name}
-      <span class="state">{on ? 'on' : 'off'}</span>
-    </button>
-    <p class="how" class:dim={!on}>{how}</p>
-  </div>
-{/if}
+<div class="cloud-filter">
+  <button
+    type="button"
+    class="chip"
+    class:on
+    aria-pressed={on}
+    onclick={() => ontoggle(!on)}
+    title={on ? 'Stop excluding cloud and shadow' : 'Exclude cloud and the shadow it casts'}
+  >
+    <Icon name={on ? 'eyeOff' : 'eye'} size={13} />
+    {name}
+    <span class="state">{on ? 'on' : 'off'}</span>
+  </button>
+  <p class="how" class:dim={!on}>Sentinel-2's scene classification, with shadows traced from the sun.</p>
+</div>
 
 <style>
   .cloud-filter {

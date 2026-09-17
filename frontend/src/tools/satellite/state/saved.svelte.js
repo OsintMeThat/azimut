@@ -1,12 +1,11 @@
 /**
  * The case's saved work, as the Map's panel reads it.
  *
- * Three indexes, not one: places, captures and filed screenshots come back in
- * one compact index when a case opens, while proofs and located media are each
- * read only once their position is opened — a case must not pay for a view it
- * may never show. Both lazy ones are keyed on the case *and its revision*,
- * because filing a proof reloads the case and a stale list would still show the
- * folder the proof just left.
+ * Two indexes, not one: places, captures and filed screenshots come back in one
+ * compact index when a case opens, while located media is read only once its
+ * position is opened — a case must not pay for a view it may never show. The
+ * lazy one is keyed on the case *and its revision*, because placing a file
+ * reloads the case and a stale list would still show the folder it just left.
  *
  * `runLocate` is the one long act here: filling in the country of everything
  * that still has none, one batch at a time because Nominatim allows one lookup
@@ -32,16 +31,13 @@ function loadGroup() {
   }
 }
 
-/** Where each mode's rows come from. */
-const MODE_INDEX = {
-  proofs: (caseId) => `/api/cases/${caseId}/proofs/index`,
-  media: (caseId) => `/api/cases/${caseId}/satellite/media`,
-};
+/** Where the Media position's rows come from. */
+const MEDIA_INDEX = (caseId) => `/api/cases/${caseId}/satellite/media`;
 
 export function createSavedState({ api, notify, assignFolder, reloadCase }) {
   let rows = $state([]);
-  // one list per mode, read the first time that position is opened
-  let modeRows = $state({ proofs: [], media: [] });
+  // the located files, read the first time that position is opened
+  let mediaRows = $state([]);
   // Media first: a map opened on a case answers "what footage do I have, and
   // where" before it lists every pin the analyst has dropped.
   let kind = $state('media');
@@ -59,15 +55,15 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
   let acceptingId = $state(null);
 
   let rowsFor = null; // the case id every index was loaded for
-  let modeFor = { proofs: null, media: null }; // the case id *and revision* each was read for
+  let mediaFor = null; // the case id *and revision* the media index was read for
   let locateStopped = false;
   let locateGeneration = 0;
 
   /** Everything a different case must not inherit. */
   function reset() {
     rows = [];
-    modeRows = { proofs: [], media: [] };
-    modeFor = { proofs: null, media: null };
+    mediaRows = [];
+    mediaFor = null;
     locateStopped = true;
     locateGeneration += 1;
     locating = null;
@@ -98,26 +94,25 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
   }
 
   /**
-   * The index behind the open mode, the first time that position is opened.
+   * The media index, the first time that position is opened.
    *
    * An answer lands only while its case and revision are still the ones asked
    * about. Leaving the position before it arrives keeps it rather than throwing
    * it away: that stamp is already spent, and coming back would find nothing.
    */
   function loadMode(caseId, rev) {
-    const mode = kind;
     const stamp = `${caseId}:${rev}`;
-    if (!caseId || !isMode(mode) || modeFor[mode] === stamp) return;
-    modeFor = { ...modeFor, [mode]: stamp };
+    if (!caseId || !isMode(kind) || mediaFor === stamp) return;
+    mediaFor = stamp;
     api
-      .get(MODE_INDEX[mode](caseId))
+      .get(MEDIA_INDEX(caseId))
       .then((answer) => {
-        if (modeFor[mode] === stamp) modeRows = { ...modeRows, [mode]: answer };
+        if (mediaFor === stamp) mediaRows = answer;
       })
       .catch(() => {
-        if (modeFor[mode] !== stamp) return;
-        modeRows = { ...modeRows, [mode]: [] };
-        modeFor = { ...modeFor, [mode]: null };
+        if (mediaFor !== stamp) return;
+        mediaRows = [];
+        mediaFor = null;
       });
   }
 
@@ -198,11 +193,11 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
    */
   async function move(caseId, row, folder) {
     // the row's kind *is* its entity type, bar the screenshot that rides the
-    // capture type. Filing a proof as a capture would route it to PATCH /media,
+    // capture type. Filing a place as a capture would route it to PATCH /media,
     // the sidecar of an image it is not.
     const entity = {
       id: row.id,
-      type: ['place', 'proof', 'media'].includes(row.kind) ? row.kind : 'capture',
+      type: ['place', 'media'].includes(row.kind) ? row.kind : 'capture',
       attrs: { path: row.path },
     };
     try {
@@ -228,11 +223,8 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
     set rows(value) {
       rows = value;
     },
-    get proofs() {
-      return modeRows.proofs;
-    },
     get media() {
-      return modeRows.media;
+      return mediaRows;
     },
     get kind() {
       return kind;
@@ -274,9 +266,9 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
       return acceptingId;
     },
 
-    /** Proofs and media are positions of their own, and read their own index. */
+    /** Media is a position of its own, and reads its own index. */
     get shownRows() {
-      return isMode(kind) ? modeRows[kind] : rows;
+      return isMode(kind) ? mediaRows : rows;
     },
     /** What the panel is showing, which is also what the map layer draws. */
     get shown() {

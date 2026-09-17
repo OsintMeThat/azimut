@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHANGE_DEFAULTS, changeCompatibility, changeSettings } from './changeAssist.js';
+import { CHANGE_DEFAULTS, changeCompatibility, changeNeedsFrames, changeSettings } from './changeAssist.js';
 
 const side = (patch = {}) => ({
   present: true,
@@ -17,11 +17,15 @@ const sentinel = (date, patch = {}) =>
     sentinel: { layer: 'TRUE_COLOR', effectiveDate: date, maxcc: 40, ...patch },
   });
 
-describe('which pairs Change assist reads', () => {
+describe('which pairs Difference reads', () => {
   it('reads two Wayback releases as matched when unrelated layers agree', () => {
     expect(changeCompatibility(side(), side({ waybackRelease: 2 }))).toMatchObject({
       ok: true,
       grade: 'matched',
+      family: 'esri',
+      // A picture carries no scene classification, so there is no honest cloud
+      // filter over it and the switch is not offered.
+      clouds: false,
       methods: ['colour', 'structure', 'brightness'],
     });
     expect(
@@ -40,6 +44,8 @@ describe('which pairs Change assist reads', () => {
     expect(changeCompatibility(sentinel('2026-08-01'), sentinel('2026-09-01'))).toMatchObject({
       ok: true,
       grade: 'matched',
+      family: 'sentinel2',
+      clouds: true,
       methods: ['colour', 'structure', 'brightness', 'index'],
     });
     const acrossLayers = changeCompatibility(
@@ -77,10 +83,27 @@ describe('which pairs Change assist reads', () => {
   });
 });
 
-describe('Change assist settings', () => {
+describe('what a reading has to fetch', () => {
+  const status = (clouds) => ({ ok: true, clouds, methods: [] });
+
+  it('asks for bands for an index, and for the sky when the cloud filter is on', () => {
+    expect(changeNeedsFrames(changeSettings({ method: 'index' }), status(true))).toBe('index');
+    expect(changeNeedsFrames(changeSettings({ ignore_clouds: true }), status(true))).toBe('sky');
+    expect(changeNeedsFrames(changeSettings({ ignore_shadows: true }), status(true))).toBe('sky');
+  });
+
+  it('asks for nothing where a picture is all there is, so the reading stays live', () => {
+    expect(changeNeedsFrames(changeSettings({}), status(true))).toBe('');
+    expect(changeNeedsFrames(changeSettings({ ignore_clouds: true }), status(false))).toBe('');
+  });
+});
+
+describe('Difference settings', () => {
   it('fills a missing or older session with the defaults', () => {
     expect(changeSettings({})).toEqual({ ...CHANGE_DEFAULTS, classes: ['gain', 'loss', 'changed'] });
-    expect(changeSettings({ normalize: true, noise: 3 })).toMatchObject({ normalize: 'histogram' });
+    expect(changeSettings({ normalize: true, noise: 3 })).toMatchObject({ normalize: 'auto' });
+    // a session that chose histogram keeps it; only the default moved
+    expect(changeSettings({ normalize: 'histogram' })).toMatchObject({ normalize: 'histogram' });
   });
 
   it('keeps every value inside its range', () => {

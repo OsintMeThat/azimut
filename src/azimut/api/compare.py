@@ -2,7 +2,7 @@
 
 A session stores the reading, not its pixels: the two providers and their
 variants, independent reference layers, the shared camera, the comparison mode,
-Change assist settings and ground-anchored annotations. It lives under
+Difference settings and ground-anchored annotations. It lives under
 ``.compare/``.
 
 Its rendered image is a media working file, filed through the media pipeline
@@ -98,18 +98,22 @@ def _change_classes() -> list[ChangeClass]:
 
 class CompareChangeAssist(BaseModel):
     method: Literal["colour", "structure", "brightness", "index"] = "colour"
-    index: Literal["ndvi", "ndwi", "nbr", "ndbi"] = "ndvi"
+    index: Literal["ndvi", "ndwi", "mndwi", "nbr", "ndbi", "bsi"] = "ndvi"
     threshold: Literal["auto", "manual"] = "auto"
     sensitivity: int = Field(default=55, ge=0, le=100)
-    normalize: Literal["none", "mean", "histogram"] = "histogram"
+    # "auto" is nothing on Sentinel-2, whose passes are already corrected, and a
+    # histogram on Esri releases, which carry two renderings.
+    normalize: Literal["auto", "none", "mean", "histogram"] = "auto"
     smoothing: int = Field(default=1, ge=0, le=4)
     alignment: int = Field(default=4, ge=0, le=8)
     cleanup: int = Field(default=1, ge=0, le=3)
     min_area: float = Field(default=0, ge=0, le=1_000_000)
     ignore_clouds: bool = False
     ignore_shadows: bool = False
-    # How far to grow the cloud and shadow mask, in working pixels.
-    cloud_margin: int = Field(default=2, ge=0, le=10)
+    # How far to grow the cloud and shadow mask, in ground metres: the reading
+    # follows the camera, so a count of pixels would mean a different distance
+    # at every zoom.
+    cloud_margin: int = Field(default=50, ge=0, le=200)
     classes: list[ChangeClass] = Field(
         default_factory=_change_classes, max_length=3
     )
@@ -120,7 +124,8 @@ class CompareChangeAssist(BaseModel):
     # "side" lays the same reading over both images instead of one of them.
     base: Literal["a", "b", "side"] = "b"
     visible: bool = True
-    live: bool = True
+    # Flashing the overlay on and off, which is easier to catch than a still one.
+    blink: bool = False
 
 
 AnnotationKind = Literal[
@@ -247,7 +252,7 @@ def change_refusal(a: dict[str, Any], b: dict[str, Any], method: str = "colour")
     grade is explanation, and the browser shows it.
     """
     if not a["present"] or not b["present"]:
-        return "Change assist needs imagery A and B"
+        return "Difference needs imagery A and B"
     if method == "index":
         if a["provider"] != "sentinel2" or b["provider"] != "sentinel2":
             return "Spectral indices need Sentinel-2 on both sides"
@@ -296,7 +301,7 @@ def change_refusal(a: dict[str, Any], b: dict[str, Any], method: str = "colour")
         if not _same_layers(a, b, skip="nightlights"):
             return "Match every other layer on A and B"
         return None
-    return "Change assist reads Sentinel-2, Esri imagery releases or VIIRS night-light pairs"
+    return "Difference reads Sentinel-2, Esri imagery releases or VIIRS night-light pairs"
 
 
 def _read_session(case: Case, name: str) -> dict[str, Any] | None:
@@ -596,8 +601,8 @@ async def export_gif(
     return {"file": path.name, "path": str(export_destination), "animation": animation}
 
 
-class IndexFrameIn(BaseModel):
-    """A Web Mercator box, its pixel size, and the pass to read an index from."""
+class BandFrameIn(BaseModel):
+    """A Web Mercator box, its pixel size, and the pass to read a band frame from."""
 
     west: float
     south: float
@@ -606,18 +611,19 @@ class IndexFrameIn(BaseModel):
     width: int = Field(ge=1, le=sentinel.PRODUCT_MAX_EDGE)
     height: int = Field(ge=1, le=sentinel.PRODUCT_MAX_EDGE)
     day: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
-    index: Literal["ndvi", "ndwi", "nbr", "ndbi"]
+    # A spectral index, or `sky` alone for a cloud filter over the picture methods.
+    product: Literal["ndvi", "ndwi", "mndwi", "nbr", "ndbi", "bsi", "sky"]
     maxcc: int = Field(default=100, ge=0, le=100)
     layer: str = Field(default="TRUE_COLOR", min_length=1, max_length=40)
 
 
-@router.post("/compare/sentinel-index")
-def sentinel_index(body: IndexFrameIn) -> Response:
-    """Render one Sentinel-2 spectral index over the compared frame.
+@router.post("/compare/sentinel-frame")
+def sentinel_frame(body: BandFrameIn) -> Response:
+    """Render one Sentinel-2 band frame over the compared view.
 
-    Asked only when the analyst runs Change assist in index mode. One metered
-    Sentinel Hub request per side, refused like the tiles once the monthly
-    free tier is nearly spent.
+    Asked only when the analyst runs Difference with a spectral index or with the
+    cloud filter over Sentinel-2. One metered Sentinel Hub request per side,
+    refused like the tiles once the monthly free tier is nearly spent.
     """
     instance = (config.load_settings().get("api_keys") or {}).get("sentinelhub")
     if not instance:
@@ -635,7 +641,7 @@ def sentinel_index(body: IndexFrameIn) -> Response:
             body.width,
             body.height,
             body.day,
-            body.index,
+            f"change-{body.product}",
             body.maxcc,
             layer=body.layer,
         )
@@ -644,6 +650,6 @@ def sentinel_index(body: IndexFrameIn) -> Response:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         config.record_usage("sentinelhub", 1)
-        raise HTTPException(status_code=502, detail=f"index request failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"band request failed: {exc}") from exc
     config.record_usage("sentinelhub", 1)
     return Response(content=data, media_type="image/png", headers={"Cache-Control": "no-store"})

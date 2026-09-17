@@ -43,7 +43,7 @@ export const COMPARE_LAYERS = Object.freeze([
   { id: 'gpstraces', label: 'GPS traces', hint: 'Raw GPS tracks from OpenStreetMap', group: 'reference' },
   { id: 'firms', label: 'Active fires', hint: 'Thermal detections from NASA FIRMS', group: 'events' },
   { id: 'nightlights', label: 'Night lights', hint: 'The ground at night from NASA VIIRS', group: 'events' },
-  { id: 'saved', label: 'Saved work', hint: 'Places, captures and proofs in this case', group: 'case' },
+  { id: 'saved', label: 'Saved work', hint: 'Places and captures in this case', group: 'case' },
 ]);
 
 export const LAYER_GROUPS = Object.freeze([

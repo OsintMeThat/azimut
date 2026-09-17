@@ -15,7 +15,6 @@ const ROWS = [
   { id: 'e2', kind: 'capture', path: 'media/a.png', title: 'a' },
   { id: 'e3', kind: 'screenshot', path: 'media/b.png', title: 'b' },
 ];
-const PROOFS = [{ id: 'p1', kind: 'proof', path: 'proofs/x.png', name: 'x', title: 'x' }];
 const MEDIA = [
   { id: 'm1', key: 'm1@1,2', kind: 'media', media_kind: 'video', path: 'media/clip.mp4', title: 'clip', lat: 1, lon: 2 },
   { id: 'm1', key: 'm1@3,4', kind: 'media', media_kind: 'video', path: 'media/clip.mp4', title: 'clip', lat: 3, lon: 4 },
@@ -40,7 +39,6 @@ beforeEach(() => {
   api = {
     get: vi.fn(async (path) => {
       calls.push(path);
-      if (path.includes('/proofs/index')) return PROOFS;
       if (path.includes('/satellite/media')) return MEDIA;
       return ROWS;
     }),
@@ -62,19 +60,15 @@ describe('opening a case', () => {
     expect(store().kind).toBe('media');
   });
 
-  it('pays nothing for the proofs index until that position is opened', async () => {
+  it('pays nothing for the media index while another position is open', async () => {
     const saved = store();
-    saved.kind = 'all';
+    saved.kind = 'places';
     saved.load('case-1');
     saved.loadMode('case-1', 3);
     await vi.waitFor(() => expect(saved.rows).toHaveLength(3));
     expect(calls).toEqual(['/api/cases/case-1/satellite/index']);
-
-    saved.kind = 'proofs';
-    saved.loadMode('case-1', 3);
-    await vi.waitFor(() => expect(saved.proofs).toHaveLength(1));
-    // …and the proofs position reads its own rows, not the compact index
-    expect(saved.shownRows).toEqual(PROOFS);
+    // the two that filter read the compact index and nothing else
+    expect(saved.shownRows).toEqual(ROWS);
     expect(calls.some((path) => path.includes('/satellite/media'))).toBe(false);
   });
 
@@ -87,13 +81,12 @@ describe('opening a case', () => {
     expect(saved.shown.map((row) => row.key)).toEqual(['m1@1,2', 'm1@3,4']);
   });
 
-  it('re-reads a mode index when the case is reloaded, not only when it changes', async () => {
-    // filing a proof reloads the case; keying only on the id would leave the
-    // panel showing the folder the proof just left
+  it('re-reads the media index when the case is reloaded, not only when it changes', async () => {
+    // filing a file reloads the case; keying only on the id would leave the
+    // panel showing the folder it just left
     const saved = store();
-    saved.kind = 'proofs';
     saved.loadMode('case-1', 3);
-    await vi.waitFor(() => expect(saved.proofs).toHaveLength(1));
+    await vi.waitFor(() => expect(saved.media).toHaveLength(2));
     const before = api.get.mock.calls.length;
     saved.loadMode('case-1', 3);
     expect(api.get).toHaveBeenCalledTimes(before); // same revision: nothing to re-read
@@ -108,7 +101,7 @@ describe('opening a case', () => {
     api.get = vi.fn(() => new Promise((resolve) => (release = () => resolve(MEDIA))));
     const saved = store();
     saved.loadMode('case-1', 1);
-    saved.kind = 'all';
+    saved.kind = 'places';
     release();
     await vi.waitFor(() => expect(saved.media).toHaveLength(2));
   });
@@ -117,13 +110,10 @@ describe('opening a case', () => {
     const saved = store();
     saved.load('case-1');
     saved.loadMode('case-1', 1);
-    saved.kind = 'proofs';
-    saved.loadMode('case-1', 1);
-    await vi.waitFor(() => expect(saved.proofs).toHaveLength(1));
+    await vi.waitFor(() => expect(saved.rows).toHaveLength(3));
     await vi.waitFor(() => expect(saved.media).toHaveLength(2));
     saved.load('case-2');
     expect(saved.rows).toEqual([]);
-    expect(saved.proofs).toEqual([]);
     expect(saved.media).toEqual([]);
   });
 
@@ -291,13 +281,13 @@ describe('acting on a row', () => {
   });
 
   it('files a dragged row through its own entity type', async () => {
-    // a proof filed as a capture would be routed to PATCH /media, the sidecar
-    // of an image the proof is not
+    // a place filed as a capture would be routed to PATCH /media, the sidecar
+    // of an image the place is not
     const saved = store();
-    await saved.move('case-1', { id: 'p1', kind: 'proof', path: 'proofs/x.png' }, 'Quays');
+    await saved.move('case-1', { id: 'e1', kind: 'place', path: null }, 'Quays');
     expect(assignFolder).toHaveBeenCalledWith(
       'case-1',
-      { id: 'p1', type: 'proof', attrs: { path: 'proofs/x.png' } },
+      { id: 'e1', type: 'place', attrs: { path: null } },
       'Quays'
     );
     await saved.move('case-1', { id: 'e3', kind: 'screenshot', path: 'media/b.png' }, '');

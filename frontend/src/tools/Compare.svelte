@@ -12,12 +12,15 @@
   import {
     caseState,
     ensureCase,
+    fmtCoords,
     prefs,
     prefsReady,
     reloadCase,
     toast,
     uiState,
   } from '../lib/state.svelte.js';
+  import { saveRelation } from '../lib/relations.svelte.js';
+  import { actionsFor } from '../lib/map/contextMenu.js';
   import {
     COMPARE_LAYERS,
     COMPARE_MODES,
@@ -38,6 +41,7 @@
   } from '../lib/map/compareExport.js';
   import {
     changeCompatibility,
+    changeNeedsFrames,
     changeSettings,
   } from '../lib/map/changeAssist.js';
   import {
@@ -83,6 +87,8 @@
   import { detectCaptures } from '../lib/map/changeCapture.js';
   import { apply, cssMatrix, frameToFrame, fromMercator, screenToMercator } from '../lib/map/groundFrame.js';
   import MapSurface from './satellite/MapSurface.svelte';
+  import MapContextMenu from './satellite/MapContextMenu.svelte';
+  import PlaceDialog from './satellite/PlaceDialog.svelte';
   import SavedOverlay from './satellite/SavedOverlay.svelte';
   import LayerPane from './compare/LayerPane.svelte';
   import AnnotationCanvas from './compare/AnnotationCanvas.svelte';
@@ -176,28 +182,27 @@
    * The source cards step aside while it is on, and this is how what is drawn
    * on stays what is measured.
    */
+  /** Said once per absence: every date picked pushes sources again. */
+  let sentinelMissingSaid = false;
   function applyAnalysisSources(next) {
-    let missing = null;
-    for (const [letter, target, sentinel, wayback] of [['a', a, s2a, wba], ['b', b, s2b, wbb]]) {
+    let missing = false;
+    for (const [letter, target, sentinel] of [['a', a, s2a], ['b', b, s2b]]) {
       const source = next?.[letter];
       if (!source) continue;
       if (!imagery.find(source.provider)) {
-        missing = source.provider;
+        missing = true;
         continue;
       }
       target.providerId = source.provider;
       target.present = true;
-      if (source.provider === 'sentinel2') {
-        sentinel.layer = source.layer || sentinel.layer;
-        sentinel.date = source.date || '';
-        sentinel.setMaxcc(source.maxcc ?? 100);
-      } else {
-        wayback.pick(source.release ?? null);
-      }
+      sentinel.layer = source.layer || sentinel.layer;
+      sentinel.date = source.date || '';
+      sentinel.setMaxcc(source.maxcc ?? 100);
     }
-    if (missing) {
-      toast(`${missing === 'sentinel2' ? 'Copernicus Sentinel-2' : missing} is not configured, so the maps still show the previous imagery`, 'warn', 6000);
+    if (missing && !sentinelMissingSaid) {
+      toast('Copernicus Sentinel-2 is not configured, so the maps still show the previous imagery', 'warn', 6000);
     }
+    sentinelMissingSaid = missing;
     invalidateChangeAssist();
   }
 
@@ -236,7 +241,8 @@
   let changeUrl = $state('');
   /** One transform per surface: the mask is ground, and each map frames it. */
   let changeTransform = $state({ a: '', b: '' });
-  const changeVisible = $derived(changeOptions.visible);
+  let changeBlinkOn = $state(true);
+  const changeVisible = $derived(changeOptions.visible && (!changeOptions.blink || changeBlinkOn));
   const changeBase = $derived(changeOptions.base);
   const changeOpacity = $derived(changeOptions.opacity);
   const changePalette = $derived(changeOptions.palette);
@@ -440,6 +446,21 @@
   }
 
   /** Where the computed mask lands on each surface as it is framed right now. */
+  // Highlights over busy imagery are easier to catch when they come and go, so
+  // the overlay can blink in place rather than the analyst toggling the eye.
+  const CHANGE_BLINK_MS = 620;
+  $effect(() => {
+    if (!(mode === 'change' && changeOptions.blink && changeOptions.visible && changeUrl)) {
+      changeBlinkOn = true;
+      return;
+    }
+    const timer = setInterval(() => (changeBlinkOn = !changeBlinkOn), CHANGE_BLINK_MS);
+    return () => {
+      clearInterval(timer);
+      changeBlinkOn = true;
+    };
+  });
+
   function placeChangeMap() {
     if (!changeResult) return;
     changeTransform = {
@@ -718,7 +739,7 @@
     if (next === 'change') {
       changeOptions.visible = true;
       if (!changeStatus.methods.includes(changeOptions.method)) changeOptions.method = changeStatus.methods[0];
-      if (changeOptions.method !== 'index' && changeOptions.live) void refreshChangeAssist();
+      void refreshChangeAssist({ fetch: false });
     }
   }
 
@@ -761,7 +782,7 @@
       nightlights: { ...target.night },
       sentinel: {
         layer: sentinel.layer,
-        // Change assist is only honest over named acquisitions. Freeze a live
+        // A difference is only honest over named acquisitions. Freeze a live
         // "latest" pass to the date it meant when this workspace is saved.
         date: mode === 'change' ? sentinel.date || sentinel.latest : sentinel.date,
         maxcc: sentinel.maxcc,
@@ -911,7 +932,7 @@
       a.engine?.resize();
       b.engine?.resize();
       savedSignature = sessionSignature();
-      if (mode === 'change' && changeOptions.method !== 'index' && changeOptions.live) void refreshChangeAssist();
+      if (mode === 'change') void refreshChangeAssist({ fetch: false });
       toast(`Opened ${sessionName}`, 'ok');
     } catch (error) {
       toast(`Could not open the comparison: ${error.message}`, 'danger');
@@ -1048,8 +1069,10 @@
   let changeRenderedKey = $state('');
   const detectionKey = $derived(changeKey());
 
+  const changeFrames = $derived(changeNeedsFrames(changeSettings(changeOptions), changeStatus));
+
   function changeKey() {
-    const { opacity, base, visible, zones, live, ...analysis } = changeSettings(changeOptions);
+    const { opacity, base, visible, blink, zones, ...analysis } = changeSettings(changeOptions);
     return JSON.stringify([
       changeSide(a, s2a, wba, shownA),
       changeSide(b, s2b, wbb, shownB),
@@ -1061,12 +1084,14 @@
 
   function invalidateChangeAssist() {
     changeRenderedKey = '';
-    if (mode !== 'change' || changeOptions.method === 'index' || !changeOptions.live) return;
+    if (mode !== 'change') return;
+    // A reading that follows the camera never spends a request: it runs on the
+    // band frames already held, and waits for Run when they no longer reach.
     clearTimeout(changeTimer);
-    changeTimer = setTimeout(() => void refreshChangeAssist(), 180);
+    changeTimer = setTimeout(() => void refreshChangeAssist({ fetch: false }), 180);
   }
 
-  async function refreshChangeAssist() {
+  async function refreshChangeAssist({ fetch = true } = {}) {
     if (mode !== 'change' || !changeStatus.ok) return;
     if (!changeStatus.methods.includes(changeOptions.method)) { changeError = 'Choose a compatible method'; return; }
     const key = changeKey();
@@ -1082,8 +1107,11 @@
       if (request !== changeRequest || key !== changeKey()) return;
       const sources = await sourceCanvases();
       if (request !== changeRequest || key !== changeKey()) return;
-      const result = await detectCaptures(sources, settings, sides);
+      const result = await detectCaptures(sources, settings, sides, changeStatus, fetch);
       if (request !== changeRequest || mode !== 'change' || key !== changeKey()) return;
+      // Nothing held reaches this view: the last reading stays up, marked out
+      // of date, until the analyst asks for the frames.
+      if (result.needsFetch) return;
       changeResult = result;
       placeChangeMap();
       changeUrl = result.canvas.toDataURL('image/png');
@@ -1111,9 +1139,8 @@
     detectionKey;
     changeRequest++;
     changeBusy = false;
-    if (changeOptions.method === 'index' || !changeOptions.live) return;
     clearTimeout(changeTimer);
-    changeTimer = setTimeout(() => void refreshChangeAssist(), 180);
+    changeTimer = setTimeout(() => void refreshChangeAssist({ fetch: false }), 180);
     return () => clearTimeout(changeTimer);
   });
 
@@ -1229,6 +1256,135 @@
     return () => document.removeEventListener('keydown', onKey);
   });
 
+  // --- the right-click menu: acts on the point under the cursor -------------
+  //
+  // Satellite's menu, cut down to what Compare can honour. There is no measure
+  // rail and no sun panel here, so those acts are left out rather than shown
+  // dead; the measure is the annotation of the same name, started on the point
+  // instead of on a drag that would have to begin somewhere else. The camera is
+  // shared, so the menu belongs to the side it was opened on and nothing else.
+  let pointMenu = $state(null); // { side, lat, lon, x, y, frame, lookup }
+  let pointLookupSeq = 0;
+  let canvasA = $state(null);
+  let canvasB = $state(null);
+  const pointActions = $derived(
+    actionsFor(both && !detecting ? ['lookup', 'place', 'measure'] : ['lookup', 'place'])
+  );
+
+  function onMapContextMenu(side, at) {
+    pointLookupSeq += 1;
+    const element = (side === 'a' ? a : b).element;
+    pointMenu = {
+      ...at,
+      side,
+      frame: { width: element?.clientWidth ?? 0, height: element?.clientHeight ?? 0 },
+      lookup: null,
+    };
+  }
+
+  function closePointMenu() {
+    pointLookupSeq += 1;
+    pointMenu = null;
+  }
+
+  async function onPointMenu(id, value) {
+    if (!pointMenu) return;
+    const point = { lat: pointMenu.lat, lon: pointMenu.lon };
+    if (id === 'lookup') return lookUpPoint(point);
+    const { side } = pointMenu;
+    closePointMenu();
+    if (id === 'copy') {
+      try {
+        await navigator.clipboard.writeText(value);
+        toast('Coordinates copied', 'ok', 1600);
+      } catch {
+        toast('The browser refused the clipboard', 'warn');
+      }
+    } else if (id === 'place') {
+      openNewPlaceAt(point);
+    } else if (id === 'measure') {
+      annotationTool = 'measure';
+      await tick();
+      (side === 'a' ? canvasA : canvasB)?.startFrom([point.lon, point.lat]);
+      toast('Click the far end of the measure', 'info', 4000);
+    }
+  }
+
+  /** "What is here?": the geocoder's name for the point, shown in the menu itself. */
+  async function lookUpPoint(point) {
+    const mine = ++pointLookupSeq;
+    pointMenu = { ...pointMenu, lookup: { busy: true } };
+    try {
+      const answer = await api.get(`/api/geo/reverse?lat=${point.lat}&lon=${point.lon}`);
+      if (mine !== pointLookupSeq || !pointMenu) return;
+      pointMenu = {
+        ...pointMenu,
+        lookup: { text: answer.display_name || 'No name for this point' },
+      };
+    } catch (error) {
+      if (mine !== pointLookupSeq || !pointMenu) return;
+      pointMenu = { ...pointMenu, lookup: { error: `Lookup failed: ${error.message}` } };
+    }
+  }
+
+  // The menu is pinned to a screen point, so a zoom or a pan leaves it pointing
+  // at somewhere else. A drag already closes it by pressing outside; the wheel
+  // does not, so the settled view does.
+  $effect(() => {
+    if (!pointMenu) return;
+    return (pointMenu.side === 'a' ? a.engine : b.engine)?.on('view-settled', closePointMenu);
+  });
+
+  // --- saving a place from the menu ----------------------------------------
+  let placeModal = $state(null);
+  let placeSaving = $state(false);
+
+  /** The same dialog Satellite opens, on the point that was right-clicked. */
+  function openNewPlaceAt({ lat, lon }) {
+    placeModal = {
+      id: null,
+      title: '',
+      notes: '',
+      folder: '',
+      lat,
+      lon,
+      zoom: Math.round(view.zoom),
+      bearing,
+      relation: null, // collected by the dialog, filed once the place exists
+    };
+  }
+
+  const placeCoordsLabel = (mark) => fmtCoords(mark.lat, mark.lon);
+
+  async function savePlaceModal() {
+    if (!placeModal || placeSaving) return;
+    placeSaving = true;
+    try {
+      const draft = placeModal;
+      const owner = await ensureCase();
+      const entity = await api.post(`/api/cases/${owner.id}/satellite/place`, {
+        lat: draft.lat,
+        lon: draft.lon,
+        zoom: draft.zoom,
+        bearing: draft.bearing,
+        title: draft.title,
+        notes: draft.notes,
+        folder: draft.folder,
+      });
+      // The relation is filed last: it needs a place that exists, and saving the
+      // point is worth keeping even if the edge is refused.
+      if (draft.relation && entity?.id) await saveRelation(owner.id, entity.id, draft.relation);
+      placeModal = null;
+      await reloadCase();
+      await savedWork.load(owner.id);
+      toast('Place saved', 'ok', 1600);
+    } catch (error) {
+      toast(`Could not save place: ${error.message}`, 'danger', 6000);
+    } finally {
+      placeSaving = false;
+    }
+  }
+
   function changeShare(counts) {
     if (!counts) return 0;
     const changed = counts.gained + counts.lost + counts.changed;
@@ -1340,13 +1496,13 @@
 
   async function comparisonBlob() {
     if (mode === 'change' && !changeStatus.ok) throw new Error(changeStatus.reason);
-    if (mode === 'change' && changeOptions.method !== 'index' && changeOptions.live && (changeRenderedKey !== changeKey() || !changeResult)) {
+    if (mode === 'change' && (changeRenderedKey !== changeKey() || !changeResult)) {
       clearTimeout(changeTimer);
-      await refreshChangeAssist();
+      await refreshChangeAssist({ fetch: changeFrames !== '' });
     }
     const sources = await sourceCanvases();
     if (mode === 'change' && (changeRenderedKey !== changeKey() || !changeResult)) {
-      throw new Error('Run Change assist for this view before exporting');
+      throw new Error('Run Difference for this view before exporting');
     }
     const renderChangeMap = mode === 'change' ? changeResult : null;
     return canvasBlob(compose(sources, { renderChangeMap }));
@@ -1629,16 +1785,28 @@
           onwidgetfailed={(provider, error) => onWidgetFailed('a', provider, error)}
           onviewsettled={(next) => onSurfaceSettled('a', next)}
           onbearingchange={(next) => onSurfaceBearing('a', next)}
+          oncontextmenu={(at) => onMapContextMenu('a', at)}
         >
+          {#if pointMenu?.side === 'a'}
+            <MapContextMenu
+              at={pointMenu}
+              frame={pointMenu.frame}
+              zoom={view.zoom}
+              format={prefs.coordFormat}
+              actions={pointActions}
+              lookup={pointMenu.lookup}
+              onpick={onPointMenu}
+              onclose={closePointMenu}
+            />
+          {/if}
           {#if a.overlays.includes('saved')}
             <SavedOverlay
               engine={a.engine}
-              items={savedWork.shown}
+              items={savedWork.rows}
               caseId={caseState.current?.id}
               coords={savedCoords}
               onopen={openSaved}
               onedit={openSaved}
-              onshowproofs={() => toast('Open Satellite to browse proofs', 'info')}
               onrefresh={reloadCase}
             />
           {/if}
@@ -1651,10 +1819,10 @@
             style:transform={changeTransform.a} />
         {/if}
         {#if both && !grabbing && !detecting}
-          <AnnotationCanvas {annotations} engine={a.engine} letter="a" units={prefs.units}
+          <AnnotationCanvas bind:this={canvasA} {annotations} engine={a.engine} letter="a" units={prefs.units}
             active={uiState.tool === 'compare'} bind:tool={annotationTool} bind:selectedId={selectedAnnotationId}
             colour={annotationColour} strokeWidth={annotationStroke} fillOpacity={annotationFill}
-            {annotationSide} onchange={setAnnotations} />
+            editVertices={true} {annotationSide} onchange={setAnnotations} />
         {/if}
         <!-- Detect's own drawing stays in Detect: areas and candidates belong
              to the column that explains them, and the reading modes stay clean
@@ -1664,7 +1832,7 @@
             onpick={(run, result) => analyzerPanel?.pick(run, result)} />
         {/if}
         {#if detecting && !grabbing && analyzerAreasVisible}
-          <AnnotationCanvas annotations={analyzerMarks} engine={a.engine} letter="a" editVertices={true}
+          <AnnotationCanvas annotations={analyzerMarks} engine={a.engine} letter="a" editVertices={true} edgeOnly={true}
             bind:tool={analyzerDrawing} bind:selectedId={analyzerSelectedZone} colour="#38bdf8"
             fillOpacity={0.08} onchange={setAnalyzerMarks} />
         {/if}
@@ -1714,16 +1882,28 @@
           onwidgetfailed={(provider, error) => onWidgetFailed('b', provider, error)}
           onviewsettled={(next) => onSurfaceSettled('b', next)}
           onbearingchange={(next) => onSurfaceBearing('b', next)}
+          oncontextmenu={(at) => onMapContextMenu('b', at)}
         >
+          {#if pointMenu?.side === 'b'}
+            <MapContextMenu
+              at={pointMenu}
+              frame={pointMenu.frame}
+              zoom={view.zoom}
+              format={prefs.coordFormat}
+              actions={pointActions}
+              lookup={pointMenu.lookup}
+              onpick={onPointMenu}
+              onclose={closePointMenu}
+            />
+          {/if}
           {#if b.overlays.includes('saved')}
             <SavedOverlay
               engine={b.engine}
-              items={savedWork.shown}
+              items={savedWork.rows}
               caseId={caseState.current?.id}
               coords={savedCoords}
               onopen={openSaved}
               onedit={openSaved}
-              onshowproofs={() => toast('Open Satellite to browse proofs', 'info')}
               onrefresh={reloadCase}
             />
           {/if}
@@ -1734,17 +1914,17 @@
             style:transform={changeTransform.b} />
         {/if}
         {#if both && !grabbing && !detecting}
-          <AnnotationCanvas {annotations} engine={b.engine} letter="b" units={prefs.units}
+          <AnnotationCanvas bind:this={canvasB} {annotations} engine={b.engine} letter="b" units={prefs.units}
             active={uiState.tool === 'compare'} bind:tool={annotationTool} bind:selectedId={selectedAnnotationId}
             colour={annotationColour} strokeWidth={annotationStroke} fillOpacity={annotationFill}
-            {annotationSide} onchange={setAnnotations} />
+            editVertices={true} {annotationSide} onchange={setAnnotations} />
         {/if}
         {#if detecting && !grabbing && analyzerLayers.some((layer) => layer.visible)}
           <AnalysisOverlay engine={b.engine} layers={analyzerLayers} selected={analyzerResult}
             onpick={(run, result) => analyzerPanel?.pick(run, result)} />
         {/if}
         {#if detecting && !grabbing && analyzerAreasVisible}
-          <AnnotationCanvas annotations={analyzerMarks} engine={b.engine} letter="b" editVertices={true}
+          <AnnotationCanvas annotations={analyzerMarks} engine={b.engine} letter="b" editVertices={true} edgeOnly={true}
             bind:tool={analyzerDrawing} bind:selectedId={analyzerSelectedZone} colour="#38bdf8"
             fillOpacity={0.08} onchange={setAnalyzerMarks} />
         {/if}
@@ -1780,7 +1960,7 @@
     {/if}
 
     {#if both && mode === 'change'}
-      <div class="change-legend" class:colourblind={changePalette === 'colourblind'} class:hidden={!changeVisible}>
+      <div class="change-legend" class:colourblind={changePalette === 'colourblind'} class:hidden={!changeOptions.visible}>
         <span><i class="gain"></i> Appeared / stronger in B</span>
         <span><i class="loss"></i> Disappeared / weaker from A</span>
         <span><i class="changed"></i> Other evolution</span>
@@ -1797,13 +1977,11 @@
     <ChangePanel bind:settings={changeOptions} status={changeStatus} result={changeResult}
       busy={changeBusy} error={changeError}
       stale={!!changeResult && changeRenderedKey !== detectionKey}
-      onrun={refreshChangeAssist} onzone={visitZone} onclose={() => setMode('side')} />
+      onrun={() => refreshChangeAssist()} onzone={visitZone} onclose={() => setMode('side')} />
   {/if}
   {#if both && detecting}
     <AnalyzerPanel bind:this={analyzerPanel} caseId={caseState.current?.id}
-      sources={{ a: { ...sideSpec(a, s2a, wba), wayback_release: wba.release ?? wba.releases[0]?.release },
-        b: { ...sideSpec(b, s2b, wbb), wayback_release: wbb.release ?? wbb.releases[0]?.release } }}
-      releases={wba.releases.length ? wba.releases : wbb.releases}
+      sources={{ a: sideSpec(a, s2a, wba), b: sideSpec(b, s2b, wbb) }}
       bind:zones={analyzerZones} bind:drawing={analyzerDrawing} bind:selectedZone={analyzerSelectedZone}
       bind:layers={analyzerLayers} bind:showZones={analyzerAreasVisible}
       bind:singleImage={analyzerSingle} bind:selectedResult={analyzerResult}
@@ -2005,6 +2183,18 @@
     confirmLabel="Export here"
     onclose={() => (exportPicker = false)}
     onchosen={(path) => (exportDestination = path)}
+  />
+{/if}
+
+{#if placeModal}
+  <PlaceDialog
+    bind:draft={placeModal}
+    caseId={caseState.current?.id}
+    folders={caseState.current?.folders ?? []}
+    saving={placeSaving}
+    coords={placeCoordsLabel}
+    onsave={savePlaceModal}
+    onclose={() => (placeModal = null)}
   />
 {/if}
 

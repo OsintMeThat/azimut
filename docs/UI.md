@@ -82,22 +82,23 @@ before; **Guide** is for somebody who has not.
 - **The recent rows carry the case's own pictures.** The catalog already attaches a
   thumbnail to the rows that have one (`thumb`), so six frames of an afternoon's work
   are shown rather than six filenames.
-- **The points are on a real map, and it is only a reading.** The saved index is drawn
+- **The points are on a real map, and it is only a reading.** The case's located
+  footage (`GET /satellite/media`, the Map panel's own first position) is drawn
   as dots on the same engine the Map tool uses (`overview/PlaceMap.svelte`), framed on
   the case, capped at 200 points, and the wheel and the drag are all it answers: no
   capture, no basemap picker, nothing that writes. Hovering a dot names it. The
   basemap is the keyless, unmetered imagery and nothing else, so opening the page
   cannot spend a quota. Coming back to the tab re-reads the case, and points that
   did not change leave the camera where it was put. The foot says how many points the
-  case holds, how many are drawn when that is fewer, and opens the Map tool. With
-  nothing placed there is no map, and the figures take the shoulder instead of leaving
-  a hole.
+  case holds, how many are drawn when that is fewer, and opens the Map tool. A place
+  nobody filmed is a pin, and pins are read in the Map tool: with no footage placed
+  there is no map here, and the figures take the shoulder instead of leaving a hole.
 - **The case by family is drawn in the Graph's own eight hues** (`--graph-<family>`),
   each bar measured against the biggest family rather than against the total. One
   reading of one case cannot be two palettes.
 - **The dashboard reads only the open case.** Five bounded summary reads supply the
   catalog summary, one timeline page, the newest rows, a count of the last seven days,
-  and the compact saved index the Satellite panel already opens on. A separate read
+  and the located media the Map panel opens on. A separate read
   loads the case checklists. Nothing opens a
   second case to count it, and the only thing that reaches the network is the map of
   the case, fetching the imagery under its points.
@@ -1206,37 +1207,56 @@ the mode closes the column.
 
 **Difference** checks that the sources can be compared before it runs.
 Colour, structure and brightness methods read captured pixels in a worker.
-Sentinel-2 also offers NDVI, NDWI, NBR and NDBI from the actual spectral bands.
-Index frames are fetched only by **Read this view**, one metered request per
-side; reopening a session or moving the camera does not fetch them. A changed
-view must be run again before export. Pixel methods refresh after movement when
-live updates are enabled; disabling them keeps the last mask anchored to the ground.
+Sentinel-2 also offers six spectral indices — NDVI, NDWI, MNDWI, NBR, NDBI and
+BSI, the ones Detect measures — from the actual bands. Band frames are fetched by
+an explicit act only — **Read this view**, or switching the cloud filter on —
+one metered request per side; reopening a session or moving the camera never
+fetches. Each frame is kept with a margin of ground around the view, so the
+reading keeps its bands while the camera stays inside that margin, and past it
+the last reading stays up, marked in the footer as an earlier read, until Run. A changed view must be run again before
+export. A reading recomputes by itself after every move, on the
+frames it holds; what it never does on a pan is spend a request.
 These viewport captures depend on display resolution and zoom. Use **Detect**
 for a fixed analysis grid across camera changes.
 **Highlights over** sits above the tabs and says what the reading is laid on: A
 alone, B alone, or both images side by side with the same mask on each — the one
-arrangement that shows what a change went *from* and *to* at the same time.
+arrangement that shows what a change went *from* and *to* at the same time. The
+eye beside the title hides the overlay, and **Blink** flashes it on and off,
+because a thin highlight over busy imagery is easier to catch moving than still.
 **Clouds & shadows** sits beside it, one click, because cloud is the first thing
-that goes wrong in a reading and hunting for the switch that fixes it is the
-wrong first minute. It says which answer it is giving: Sentinel-2's own scene
-classification under a spectral index, and a guess from the picture — bright and
-colourless, or near-black — under the pixel methods. The Filters tab splits cloud
-from shadow and sets the mask margin, which grows the mask past the soft edge
-both tests leave behind.
+that goes wrong in a reading. It gives Detect's answer, not a guess: Sentinel-2's
+scene classification, grown into the unsure pixels around a real cloud, with
+classified "clouds" too small to be one ignored and each cloud cast away from the
+sun to find the shadows the classification missed — including the ones it read as
+water, which the other date settles. It is offered on a Sentinel-2 pair only,
+because that is where a classification exists; over a picture method it reads one
+small frame a side, fetched by the switch itself so that the highlights on screen
+are always the ones the switch describes.
+The Filters tab splits cloud from shadow and sets the mask margin in ground
+metres, which grows the mask past the soft edge the classification leaves.
 Detection, Display and Filters tabs separate the rest of the settings, with hover descriptions.
 The settings panel offers automatic/manual thresholds, tone matching, alignment,
 smoothing, cleanup, minimum area, class filters, palettes and heat/class/outline
-displays. Coverage, highlighted
-area and selectable change zones describe the result. These are candidate pixel
+displays. A spectral index skips the automatic threshold: it is highlighted past
+a stated index change, the line Detect draws, so panning cannot move it. Tone
+matching defaults to automatic, which means none on Sentinel-2 — two passes
+already corrected to surface reflectance have no exposure left to match, and
+matching them would erase a burn that covers most of the view — and a histogram
+on Esri releases, which carry two renderings. Coverage, highlighted
+area and selectable change zones describe the result, each zone carrying the same
+strength word a Detect candidate does: how far past the line it got. These are candidate pixel
 changes for inspection, not confirmed changes to objects.
 
-**Detect** sweeps a drawn area at native resolution and keeps what it found, for
-Wayback and Copernicus Sentinel-2. Setup reads as three numbered steps, in the
-order the work happens: an area, the imagery, then what to look for.
+**Detect** sweeps a drawn area of Copernicus Sentinel-2 at native resolution and
+keeps what it found. Every detector measures reflectance bands, which a rendered
+picture has already stretched away, so Wayback has nothing to give it. Setup reads
+as three numbered steps, in the order the work happens: an area, the imagery, then
+what to look for.
 
 Step 1 draws rectangles, polygons or circles, or takes the current view as a
-rectangle in one click, and prices the result before anything is fetched — ground
-area, native tiles, frames to fetch and roughly how long. A named area set can be
+rectangle in one click, and prices the result before anything is fetched: ground
+area, native tiles, Copernicus requests and roughly how long. Each date costs two
+requests a tile, the picture reviewed and the bands measured. A named area set can be
 saved for this case and reused. An area is grabbed by its edge: dragging inside
 one pans the map as it would anywhere else, a click on the edge shows its corner
 handles, and a press that does not travel selects without nudging the geometry.
@@ -1246,7 +1266,7 @@ pan, a zoom or a turn.
 Step 2 and the stage share one imagery between them, so what is on screen is what
 a run would sweep. On arrival the maps lead, because what is above the stage is
 usually what you came to analyze. From the first change made here — or straight
-away when the maps show something this cannot read — the direction reverses and
+away when the maps show anything but Sentinel-2 — the direction reverses and
 the maps follow this step; the A/B source cards step aside while Detect is on, so
 there is one place to choose imagery rather than two. An analyzer that reads one
 date shows one map, because there is no pair to compare. The run is blocked, with
@@ -1263,20 +1283,35 @@ than after it. A finished run reports the share it really read, so "nothing
 found" and "never looked" stay different answers. The lookup is billed as one
 Copernicus request and never runs on its own.
 
-Step 3 picks the analyzer. Four ship built in: large surface change, vessels on
-water, new structures or ground disturbance, and active fire or hotspot. The last
-two of those read Copernicus bands rather than the rendered picture — vessels from
-near-infrared contrast against the water around them, hotspots from the published
-short-wave infrared ratios — so they are Sentinel-2 only and fetch band frames
-beside the picture, all of them metered. The same **Clouds & shadows** switch sits
-under the analyzer, on for the methods that read Sentinel-2's classification and
-off for the ones that can only guess from the picture — a guess that cannot tell
-cloud from a white roof is never made on anyone's behalf. Methods whose subject
-is itself bright and colourless (smoke, bright shapes on water) or that already
-reject cloud by their band ratios (hotspots) offer no switch at all. Thresholds
-and the analyzer itself open from links rather than sitting in the way; any
-analyzer can be duplicated under a name of its own and is then shared by every
-case.
+Step 3 picks the analyzer. Eight ship built in, for big things and small ones:
+vessels, fires and gas flares, construction and earthworks, small spots (impacts,
+burn marks, vehicles), any surface change, burn scars, vegetation loss, and
+flooding or new water. Each reads its own band product, and each was tuned on real
+scenes rather than synthetic ones: rough sea under glint, a dense anchorage under
+cumulus, oil fires and wildfires, bright roofs, a construction site across seven
+months, dry-season pastures. Vessels stand out from their own patch of sea in near
+*and* short-wave infrared, which a breaking wave does not, and a candidate joined to
+bulk land is a coast. Fires take the published short-wave ratios on B8A, which
+shares B12's grid. Construction is ground that moved the same way in every band
+while its vegetation held; a small spot changed while the ring of ground around it
+did not, that ring read with a hole in its middle so the spot cannot sit in its own
+background; a burn has to end dark, which a dried pasture does not.
+
+**Small**, **Medium**, **Large** and **All** under the analyzer set the target
+size as a whole: floor and ceiling area, cleanup and grouping together, since a
+small target needs no cleanup that would erase it. What the chosen one accepts is
+written under the buttons in ground terms — a mark outside that band is found and
+then dropped, which reads as "nothing found" unless it is said. **All** sets no
+floor and no ceiling, for the mark that falls between two bands. Tuning any of
+those by hand leaves no size selected. The **Clouds & shadows** switch reads Sentinel-2's classification, grows a
+real cloud into the unsure pixels touching it, ignores classified "clouds" too small
+to be one (white hulls and roofs), and casts each cloud away from the sun to find the
+shadows the classification missed. The fire detector offers no switch: its band
+ratios reject cloud already. Thresholds and the analyzer itself open from links
+rather than sitting in the way. The **+** beside the analyzer starts one of your
+own, either as a copy of the one in hand or from scratch; a built-in can be read
+and copied but never written over, and an analyzer of your own can be saved,
+renamed or removed from there. The library is shared by every case.
 
 A **watch** keeps an analyzer, its areas and a date rule together, and
 **Run again** in Saved launches a fresh pass — a weekly harbour review is that
@@ -1292,8 +1327,12 @@ candidate evidence and review state. A finished run keeps the frames of the tile
 that produced a candidate and drops the rest, so a case grows with what was found
 rather than with how much was swept.
 
-What a sweep produces is a list of candidates, and nothing else reaches the case
-on its own. Review them one at a time: **Keep as a pin** files that one candidate,
+What a sweep produces is a list of candidates, strongest first, and nothing else
+reaches the case on its own. Each says how strong it is in a word (weak, clear or
+strong: how far past its threshold it got) and what was measured in units a reader
+can check, such as "6.2× brighter than the water around it" or "NBR 0.61 → −0.28".
+A candidate that crosses a tile edge is one candidate with one picture, stitched
+from the tiles it touches. Review them one at a time: **Keep as a pin** files that one candidate,
 with its own copy of the evidence and its provenance, and is the single act that
 writes to the case; **Dismiss** takes it off the map. Either verdict moves to the
 next candidate still waiting, and a running tally says how many are left. Keeping
@@ -1308,7 +1347,21 @@ Annotations store longitude/latitude points and stay on their ground through pan
 zoom and rotation. Notes, arrows, boxes, ellipses, lines, freehand strokes, distance
 measures and polygons can belong to A, B or both. Polygon drawing ends with a
 double-click or Enter; Escape cancels. Select a mark to move it or edit its style,
-double-click a note to edit its text, and use Undo/Redo for annotation changes.
+double-click a note to edit its text, and use Undo/Redo for annotation changes. A
+selected mark shows its corner handles, so its geometry is corrected where it was
+drawn rather than deleted and redrawn; a note is dragged whole and has none.
+Every mark carries a wide invisible band along its outline, because a four-pixel
+arrow is a target nobody hits twice. Clicking the ground beside a mark lets it go;
+dragging the map is a pan and keeps it. The tool rail packs into two columns, like
+Proof Maker's, so it stays short enough to fit a laptop window. Its colour, width
+and fill panels close on Escape, on their own button, on a press anywhere else,
+and with the button behind them when the selection is dropped.
+
+**Right-click the ground** here too, on either map, for the acts Compare can
+honour: copy the point in every coordinate format, ask what is there, save a
+place there, or start a distance measure from it — the annotation of the same
+name, anchored on the point and closed by the next click. The rows Satellite
+offers for its own rails are left out rather than shown dead.
 
 **Save comparison** writes the editable version-2 session under `.compare/` and
 updates its rendered media preview in My work (PNG, or GIF for blink). A preview
@@ -1335,22 +1388,15 @@ bearing. Picks are remembered locally and offered back when the bar is empty.
 Saved work — places, captures and screenshots filed by the extension — lives in
 one right-hand **Saved** panel, grouped by geography rather than by date. The
 tree's depth follows the case: one country opens straight on its regions, a
-worldwide case opens on continents. A filter and an
-`All / Places / Captures | Proofs · Media` switch stay pinned above it; a screenshot
-counts as a capture. The first three positions filter, and `All` shows
-everything: a proof usually stands on the capture it composes, so that capture
-wears a dot rather than carrying a second mark. The two past the rule are
-**modes** — each swaps the panel to its own index and hides the rest, so nothing
-stacks two marks on one spot. **Proofs** reads `GET /proofs/index`, and **Media**
-`GET /satellite/media`; both are read the first time that position is opened,
-never on case open. The panel opens on **Media**, which is what a map is read
-for: where the case's footage stands.
-A proof is placed by the coordinates written in its own spec — the composer's
-coordinate field first, then the point its panels gave it — and only failing
-that by every capture it composes, which is why deleting a capture does not
-unpin the proofs built on it. A proof is filed in My work like any other
-artifact, so the folder grouping works there too; **Locate** does not appear,
-since a proof states or borrows its point and the pass has nothing to look up.
+worldwide case opens on continents. A filter and a `Media / Places / Captures`
+switch stay pinned above it; a screenshot counts as a capture. The panel opens on
+**Media**, which is what a map is read for: where the case's footage stands. That
+position is a **mode** — it reads its own index (`GET /satellite/media`, the first
+time it is opened, never on case open) — while Places and Captures filter the one
+compact index the case opens with. One position is drawn at a time, so nothing
+stacks two marks on one spot. Proofs are not a position of their own: a proof
+stands on the point it argues, which is a place the switch already draws, and
+that place wears a dot and a count instead.
 
 **Media** lists the case's located images and videos, one row per point. A file
 carries no coordinates of its own, so the position is read off the graph, by

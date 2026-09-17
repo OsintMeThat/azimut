@@ -23,10 +23,11 @@ const summary = {
   countable: 0,
 };
 
-// Two points a few hundred metres apart, one north-west of the other.
-const savedIndex = [
-  { id: 'p1', key: 'p1', kind: 'place', title: 'North gate', lat: 49.9951, lon: 36.2304 },
-  { id: 'p2', key: 'p2', kind: 'capture', title: 'Depot roof', lat: 49.9889, lon: 36.2401 },
+// Two located files a few hundred metres apart, one north-west of the other:
+// the home map draws the case's footage, which is what it is built on.
+const mediaIndex = [
+  { id: 'm1', key: 'm1@49.9951,36.2304', kind: 'media', media_kind: 'image', title: 'North gate', lat: 49.9951, lon: 36.2304 },
+  { id: 'm2', key: 'm2@49.9889,36.2401', kind: 'media', media_kind: 'video', title: 'Depot roof', lat: 49.9889, lon: 36.2401 },
 ];
 
 test('draws the case on the free imagery, and presses through to the map', async ({ page }) => {
@@ -35,7 +36,7 @@ test('draws the case on the free imagery, and presses through to the map', async
     const { pathname } = new URL(request.url());
     if (pathname.startsWith('/api/tiles/')) tiles.push(pathname);
   });
-  await installAppFixture(page, { savedIndex, summary });
+  await installAppFixture(page, { mediaIndex, summary });
   await page.goto('/#overview');
 
   await awaitMapReady(page);
@@ -51,7 +52,7 @@ test('draws the case on the free imagery, and presses through to the map', async
 });
 
 test('the ? reaches the section written about the tab it was pressed from', async ({ page }) => {
-  await installAppFixture(page, { savedIndex, summary });
+  await installAppFixture(page, { mediaIndex, summary });
   await page.goto('/#satellite');
 
   await page.locator('.topbar button[title="Guide: Satellite"]').click();
@@ -62,7 +63,7 @@ test('the ? reaches the section written about the tab it was pressed from', asyn
 });
 
 test('a recipe step opens the tab it names', async ({ page }) => {
-  await installAppFixture(page, { savedIndex, summary });
+  await installAppFixture(page, { mediaIndex, summary });
   await page.goto('/#guide');
 
   await page.locator('.contents .jump', { hasText: 'Worked examples' }).click();

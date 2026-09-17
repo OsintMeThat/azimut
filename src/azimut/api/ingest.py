@@ -33,7 +33,7 @@ import warnings
 import zipfile
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from fastapi import (
@@ -517,18 +517,33 @@ class GridMarksIn(BaseModel):
 
 
 @router.get("/saved", dependencies=[Depends(require_token)])
-def saved_points(case_id: str) -> list[dict[str, Any]]:
-    """The case's saved points, for drawing over another map.
+def saved_points(
+    case_id: str, kind: Literal["media", "places", "captures"] = "media"
+) -> list[dict[str, Any]]:
+    """The case's points, for drawing over another map.
 
-    Trimmed to what a pin needs. The app's own index carries thumbnails, folder
+    One position at a time, the same three the app's own panel offers and in the
+    same order: the located footage, the points dropped by hand, the imagery
+    captured. Media reads its own index — a file carries no coordinates and
+    stands where the graph puts it — and the other two filter the saved one.
+
+    Trimmed to what a pin needs. The app's own indexes carry thumbnails, folder
     counts, continents and link tallies, all of which would cross into the
     extension for no use: it draws a dot with a name on it.
     """
-    rows = satellite_engine.saved_index(get_case(case_id))
+    case = get_case(case_id)
+    if kind == "media":
+        rows = satellite_engine.media_index(case)
+    else:
+        wanted = ("place",) if kind == "places" else ("capture", "screenshot")
+        rows = [row for row in satellite_engine.saved_index(case) if row["kind"] in wanted]
     return [
         {
             "id": row["id"],
             "kind": row["kind"],
+            # a photograph and a video are drawn with their own glyph, as the app
+            # draws them; absent on everything else
+            **({"media_kind": row["media_kind"]} if row.get("media_kind") else {}),
             "title": row["title"],
             "lat": row["lat"],
             "lon": row["lon"],

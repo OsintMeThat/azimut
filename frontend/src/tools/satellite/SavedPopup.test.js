@@ -86,63 +86,16 @@ describe('SavedPopup', () => {
     );
   });
 
-  it('opens a proof in its composer and previews its linked posts', () => {
-    const proof = {
-      id: 'pr1',
-      key: 'pr1@48.0159,37.8029',
-      kind: 'proof',
-      name: 'kyiv-bridge',
-      title: 'Kyiv bridge',
-      lat: 48.0159,
-      lon: 37.8029,
-      path: 'proofs/kyiv-bridge.png',
-      thumbnail: 'media/.thumbs/pr.jpg',
-      fetched_at: '2026-07-21T09:12:04Z',
-      posts: 3,
-      linked_posts: [
-        { id: 'post-1', name: 'panorama-publication', title: 'Panorama publication', target: 'x' },
-        { id: 'post-2', name: 'source-follow-up', title: 'Follow-up with sources', target: 'bluesky' },
-        { id: 'post-3', name: 'later-note', title: 'Later note', target: 'mastodon' },
-      ],
-    };
-
-    const body = at([proof]);
-    expect(body).toContain('Kyiv bridge');
-    expect(body).toContain('Proof');
-    expect(body).toContain('Open in Geo Proof');
-    expect(body).toContain('Linked posts · 3');
-    expect(body).toContain('Panorama publication');
-    expect(body).toContain('Follow-up with sources');
-    expect(body).not.toContain('Later note');
-    expect(body).toContain('+ 1 more');
-
-    // a post is two hops from a point: it is a chip here, never its own mark
-    expect(at([{ ...proof, posts: 0, linked_posts: [] }])).not.toContain('Linked post');
-  });
-
-  it('names one linked post directly', () => {
-    const body = at([{
-      ...capture,
-      kind: 'proof',
-      linked_posts: [
-        { id: 'post-1', name: 'panorama-publication', title: 'Panorama publication', target: 'x' },
-      ],
-    }]);
-
-    expect(body).toContain('Linked post');
-    expect(body).not.toContain('Linked posts ·');
-    expect(body).toContain('Panorama publication');
-  });
-
-  it('says a capture is already worked, and offers the proofs view from there', () => {
+  it('says a capture is already worked', () => {
+    // a proof stands on this very point, so it is named here rather than drawn
+    // as a second mark on top of the capture
     const body = at([{ ...capture, proofs: 2 }]);
 
     expect(body).toContain('2 proofs here');
-    expect(body).toContain('Show proofs');
     // the same dot the mark wears, so the card explains the mark
     expect(body).toContain('worked-dot');
 
-    expect(at([capture])).not.toContain('Show proofs');
+    expect(at([capture])).not.toContain('proofs here');
   });
 
   it('holds back the links that would leave a fullscreen map', () => {
@@ -158,7 +111,7 @@ describe('SavedOverlay popup wiring', () => {
     expect(overlay).toContain("import { mount, unmount } from 'svelte'");
     expect(overlay).toContain('mount(SavedPopup');
     expect(overlay).toContain('unmount(mounted)');
-    expect(overlay).toContain('onpost: close(onpost)');
+    expect(overlay).toContain('onedit: close(onedit)');
   });
 
   it('opens a card for every mark of saved work, one item or a stack', () => {

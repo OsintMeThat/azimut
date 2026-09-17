@@ -17,6 +17,8 @@ import io
 import pytest
 from PIL import Image
 
+import graph_read
+
 
 def _token(client):
     return client.post("/api/settings/ingest-token").json()["ingest_token"]
@@ -66,25 +68,95 @@ def test_writing_a_grid_needs_the_token(client):
     assert client.post("/api/ingest/grid/marks", json=marks).status_code == 401
 
 
-def test_saved_points_are_trimmed_to_what_a_pin_draws(client):
-    headers = _headers(client)
-    cid = _case(client, "Pins")
+def _drop_pin(client, headers, cid, title="Gate"):
     client.post(
         "/api/ingest/place",
         headers=headers,
         data={
             "url": "https://www.google.com/maps/@48.8584,2.2945,17z",
             "case_id": cid,
-            "title": "Gate",
+            "title": title,
         },
     )
-    rows = client.get("/api/ingest/saved", params={"case_id": cid}, headers=headers).json()
+
+
+def _saved(client, headers, cid, kind=None):
+    params = {"case_id": cid, **({"kind": kind} if kind else {})}
+    res = client.get("/api/ingest/saved", params=params, headers=headers)
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+def test_saved_points_are_trimmed_to_what_a_pin_draws(client):
+    headers = _headers(client)
+    cid = _case(client, "Pins")
+    _drop_pin(client, headers, cid)
+    rows = _saved(client, headers, cid, "places")
     assert len(rows) == 1
     # the app's own index carries thumbnails, folders, continents and link
     # tallies; none of that crosses into a browser extension
     assert set(rows[0]) == {"id", "kind", "title", "lat", "lon"}
     assert rows[0]["title"] == "Gate"
     assert rows[0]["lat"] == pytest.approx(48.8584)
+
+
+def test_saved_points_answer_one_position_at_a_time(client):
+    # the panel draws the position it is on, as the app's own switch does: a
+    # capture listed under Places would be a filter that filters nothing
+    headers = _headers(client)
+    cid = _case(client, "Positions")
+    _drop_pin(client, headers, cid)
+    buf = io.BytesIO()
+    Image.new("RGB", (48, 32), (30, 90, 30)).save(buf, format="PNG")
+    shot = client.post(
+        "/api/ingest/screenshot",
+        files={"image": ("shot.png", buf.getvalue(), "image/png")},
+        data={
+            "url": "https://yandex.com/maps/?ll=2.2945,48.8584&z=17",
+            "case_id": cid,
+            "lat": "48.8584",
+            "lon": "2.2945",
+            "zoom": "17",
+        },
+        headers=headers,
+    )
+    assert shot.status_code == 200, shot.text
+
+    assert [row["kind"] for row in _saved(client, headers, cid, "places")] == ["place"]
+    assert [row["kind"] for row in _saved(client, headers, cid, "captures")] == ["screenshot"]
+    # and the footage, which the saved index never held, is what it opens on
+    assert _saved(client, headers, cid) == []
+
+
+def test_saved_points_offer_the_footage_by_default(client):
+    headers = _headers(client)
+    cid = _case(client, "Footage")
+    photo = _upload(client, cid, "quay.png")["path"]
+    photo_id = graph_read.entity(cid, path=photo)["id"]
+    place = client.post(
+        f"/api/cases/{cid}/satellite/place", json={"lat": 48.0159, "lon": 37.8029}
+    ).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/links",
+        json={"from_id": photo_id, "to_id": place, "type": "located-at"},
+    )
+
+    [row] = _saved(client, headers, cid)
+    assert row["kind"] == "media"
+    # the one field a pin needs beyond the others: a video is drawn as a video
+    assert row["media_kind"] == "image"
+    assert (row["lat"], row["lon"]) == pytest.approx((48.0159, 37.8029))
+    # and the point the file borrows is still its own row under Places
+    assert [r["kind"] for r in _saved(client, headers, cid, "places")] == ["place"]
+
+
+def test_saved_points_refuse_a_position_that_does_not_exist(client):
+    headers = _headers(client)
+    cid = _case(client, "Unknown")
+    res = client.get(
+        "/api/ingest/saved", params={"case_id": cid, "kind": "proofs"}, headers=headers
+    )
+    assert res.status_code == 422
 
 
 def test_saved_points_drop_rows_with_no_position(client):
@@ -96,7 +168,7 @@ def test_saved_points_drop_rows_with_no_position(client):
         data={"url": "https://example.com/article", "case_id": cid, "title": "Article"},
     )
     # a bookmark has no coordinates, so there is nowhere to draw it
-    assert client.get("/api/ingest/saved", params={"case_id": cid}, headers=headers).json() == []
+    assert _saved(client, headers, cid, "places") == []
 
 
 def _upload(client, cid, name, colour=(30, 90, 30)):

@@ -137,14 +137,14 @@ describe('the bars the figures are drawn as', () => {
 });
 
 describe('the case as points on the map', () => {
-  const row = (over) => ({ key: 'k', kind: 'place', title: 'Quai sud', ...over });
+  const row = (over) => ({ key: 'k', kind: 'media', title: 'Quai sud', ...over });
 
-  it('hands the map the position, the kind and the title it draws them with', () => {
+  it('hands the map the position and the title it draws them with', () => {
     const { pins, total } = mapPins([row({ lat: 49.98, lon: 36.25 })]);
     expect(total).toBe(1);
+    // one colour for every point, so what a row is never crosses over
     expect(pins[0]).toEqual({
       id: 'k',
-      kind: 'place',
       title: 'Quai sud',
       lat: 49.98,
       lon: 36.25,
@@ -159,8 +159,6 @@ describe('the case as points on the map', () => {
   it('names a row that carries no key of its own, since a dot is drawn by id', () => {
     const { pins } = mapPins([{ id: 'e7', lat: 50, lon: 4 }, { lat: 12, lon: 77 }]);
     expect(pins.map((pin) => pin.id)).toEqual(['e7', '12,77']);
-    // and a row that says nothing about what it is is still a place
-    expect(pins[1].kind).toBe('place');
   });
 
   it('leaves out what has nowhere to be drawn', () => {
@@ -182,7 +180,7 @@ describe('the case as points on the map', () => {
     expect(total).toBe(MAP_PINS + 20);
   });
 
-  it('is empty on a case that saved nothing', () => {
+  it('is empty on a case that has nothing placed', () => {
     expect(mapPins([])).toEqual({ pins: [], total: 0 });
     expect(mapPins(null)).toEqual({ pins: [], total: 0 });
   });

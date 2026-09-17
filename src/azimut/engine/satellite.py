@@ -30,7 +30,6 @@ from . import countries
 from . import geo as geo_engine
 from . import links
 from . import media as media_engine
-from .. import layout
 
 # Saved work is places plus captures; a screenshot filed by the capture
 # extension is a capture with a different origin, not a third entity type.
@@ -878,65 +877,6 @@ def state_points(spec: dict[str, Any], entries: list[dict[str, Any]]) -> dict[st
     return spec
 
 
-def _source_points(
-    case: Case, proof_id: str, incident: list[dict[str, Any]] | None = None
-) -> list[dict[str, Any]]:
-    """The distinct points a proof's panels were composed from.
-
-    Read one hop back along ``derived-from``: a proof carries no coordinates of
-    its own, only the sources it composes. Two panels cropped from one capture,
-    or two captures of one roof, are one point and come back once — the point is
-    what they share. Panels with no point (a photo, a frame) contribute nothing.
-    """
-    seen: dict[tuple[Any, Any], dict[str, Any]] = {}
-    for link in incident if incident is not None else case.links_of(proof_id):
-        if link["type"] != links.DERIVED_FROM or link["from"] != proof_id:
-            continue
-        source = case.get_entity(link["to"])
-        attrs = (source or {}).get("attrs") or {}
-        lat, lon = attrs.get("lat"), attrs.get("lon")
-        if lat is None or lon is None:
-            continue
-        seen.setdefault((lat, lon), attrs)
-    return [{"lat": lat, "lon": lon, "attrs": attrs} for (lat, lon), attrs in seen.items()]
-
-
-def _linked_posts(
-    proof_id: str,
-    incident: list[dict[str, Any]],
-    post_entities: dict[str, dict[str, Any]],
-    drafts: dict[str, dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Saved post drafts directly derived from this proof, newest first."""
-    linked: list[dict[str, Any]] = []
-    for link in incident:
-        if link["type"] != links.DERIVED_FROM or link["to"] != proof_id:
-            continue
-        entity = post_entities.get(link["from"])
-        if entity is None:
-            continue
-        draft_path = (entity.get("attrs") or {}).get("draft")
-        draft = drafts.get(draft_path) if isinstance(draft_path, str) else None
-        draft = draft or {}
-        draft_name = draft.get("name")
-        if not draft_name and isinstance(draft_path, str):
-            draft_name = draft_path.removeprefix(layout.DRAFTS_DIR + "/").removesuffix(".json")
-        linked.append(
-            {
-                "id": entity["id"],
-                "name": draft_name,
-                "title": draft.get("title") or entity.get("label") or "Untitled post",
-                "target": draft.get("target"),
-                "updated_at": draft.get("updated_at"),
-            }
-        )
-    linked.sort(
-        key=lambda post: (post.get("updated_at") or "", post["title"].casefold()),
-        reverse=True,
-    )
-    return linked
-
-
 def _at(lat: Any, lon: Any) -> tuple[float, float] | None:
     """One point rounded to about a metre — the precision the map groups marks at."""
     try:
@@ -951,27 +891,6 @@ def _located(attrs: dict[str, Any]) -> bool:
     return isinstance(geo, dict) and geo.get("state") == "ok"
 
 
-def _place_geo(case: Case) -> dict[tuple[float, float], dict[str, Any]]:
-    """The geography of the case's places, by the point each one stands on.
-
-    A proof carries no geography of its own and no Locate pass ever gives it one
-    (``saved_entities`` is places and captures). But the point it states in the
-    composer is filed as a ``place``, whose country is resolved right there
-    (``api/proofs._state_points``) — so the answer is already in the case, one
-    node away, for exactly the proofs whose panels place nothing: a frame and a
-    photo carry no point, and their proof would otherwise file under Unlocated
-    while the place it just wrote knows the country.
-
-    Read once per index rather than once per row, since a case holds far fewer
-    places than the proofs index has rows.
-
-    A located place wins a point two of them share: a pin dropped before the
-    Locate pass ran and the place a proof filed on the same metre are one spot,
-    and only the one that knows its country answers anything.
-    """
-    return _geo_by_point(_page_all(case, ["place"]))
-
-
 def _geo_by_point(
     entities: list[dict[str, Any]],
 ) -> dict[tuple[float, float], dict[str, Any]]:
@@ -983,117 +902,6 @@ def _geo_by_point(
         if key is not None and not _located(found.get(key) or {}):
             found[key] = attrs
     return found
-
-
-def _geo_at(
-    sources: list[dict[str, Any]],
-    point: dict[str, float],
-    places: dict[tuple[float, float], dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """The attrs of whatever stands on this exact point, or nothing.
-
-    A source the proof composes answers first — it is what the proof was built
-    from. Failing that, the place standing there does, which is how a proof made
-    of photos still files under its country.
-    """
-    here = _at(point["lat"], point["lon"])
-    if here is None:
-        return {}
-    for source in sources:
-        if _at(source["lat"], source["lon"]) == here:
-            return dict(source["attrs"])
-    return dict((places or {}).get(here) or {})
-
-
-def _proof_row(
-    proof: dict[str, Any], entity: dict[str, Any], point: dict[str, Any] | None
-) -> dict[str, Any]:
-    entity_id = entity["id"]
-    attrs = (point or {}).get("attrs") or {}
-    geo = attrs.get("geo") if isinstance(attrs.get("geo"), dict) else None
-    lat, lon = (point or {}).get("lat"), (point or {}).get("lon")
-    return {
-        "id": entity_id,
-        # one proof can hold two points, and the two rows must not collide as
-        # render keys or as marker identities
-        "key": f"{entity_id}@{lat},{lon}",
-        "kind": "proof",
-        "name": proof["name"],
-        "title": proof.get("title") or proof["name"],
-        # a proof is filed like any other artifact, so the panel groups it by
-        # folder as well as by place
-        "folder": (entity.get("attrs") or {}).get("folder") or "",
-        "notes": "",
-        # what the analyst called this point, when they called it anything. It is
-        # what tells three rows of one proof apart: same title, same thumbnail,
-        # three places.
-        "label": (point or {}).get("label") or "",
-        "lat": lat,
-        "lon": lon,
-        "geo": geo,
-        "continent": continents.continent_for((geo or {}).get("country_code"), lat, lon),
-        "country_en": countries.name_for((geo or {}).get("country_code")),
-        "path": proof.get("png"),
-        "thumbnail": proof.get("thumb"),
-        "fetched_at": _utc_stamp(proof.get("updated_at")),
-        "posts": proof.get("posts", 0),
-        "linked_posts": proof.get("linked_posts", []),
-    }
-
-
-def proof_index(
-    case: Case,
-    listing: list[dict[str, Any]],
-    draft_listing: list[dict[str, Any]] | None = None,
-) -> list[dict[str, Any]]:
-    """Proofs as map rows, newest first — one row per distinct point.
-
-    ``listing`` is the proofs listing (title, export, thumbnail, the points its
-    spec states), which the proofs API owns; everything geographic is read here so
-    the Saved panel gets the row shape it already knows. A proof stating three
-    points is three rows: the map is about places, and a proof arguing three of
-    them draws three marks. A proof whose panels are all unlocated still comes
-    back, without a point, and files under ``Unlocated`` in the tree.
-
-    Kept out of ``saved_index`` on purpose: that one is read on every case open,
-    this one only when the Proofs position of the switch is first opened.
-    """
-    by_spec = {
-        (entity.get("attrs") or {}).get("spec"): entity
-        for entity in _page_all(case, ["proof"])
-    }
-    post_entities = {entity["id"]: entity for entity in _page_all(case, ["post"])}
-    drafts = {
-        layout.draft_rel(draft["name"]): draft for draft in (draft_listing or [])
-    }
-    places = _place_geo(case)
-    rows: list[dict[str, Any]] = []
-    for proof in listing:
-        entity = by_spec.get(proof.get("spec_path"))
-        if entity is None:
-            continue  # a spec file with no entity is not in the graph to place
-        incident = case.links_of(entity["id"])
-        linked_posts = _linked_posts(entity["id"], incident, post_entities, drafts)
-        proof = {**proof, "posts": len(linked_posts), "linked_posts": linked_posts}
-        sources = _source_points(case, entity["id"], incident)
-        stated = proof_points(case, entity["id"], proof.get("points") or [], incident)
-        if stated:
-            # the proof says where it is, so what it composes stops answering for
-            # it. Each point's geography is borrowed only from what stands on that
-            # same point: a source it composes, or the place the save filed there.
-            # A neighbouring capture's country would be a guess, and a place the
-            # analyst linked by hand from somewhere else is about somewhere else —
-            # a wrong country files the proof under the wrong branch.
-            points: list[dict[str, Any] | None] = [
-                {**point, "attrs": _geo_at(sources, point, places)} for point in stated
-            ]
-        else:
-            # a proof none of whose panels carry a point still lists, without
-            # one: it files under Unlocated rather than leaving its own tool
-            points = list(sources) or [None]
-        rows.extend(_proof_row(proof, entity, point) for point in points)
-    rows.sort(key=lambda r: r["fetched_at"], reverse=True)
-    return rows
 
 
 #: What the Media position draws: photographs and footage. Audio has a place it was
@@ -1280,8 +1088,8 @@ def _media_row(
 # -- placement: where the chain puts an entity (ONTOLOGY §3) ----------------------
 #
 # The chain is read backwards as geography: a proof with no point of its own stands
-# at the point of every capture it composes. `proof_index` does that one hop back
-# for the map. This walks the same edges in both directions and further, because
+# at the point of every capture it composes, one hop back. This walks the same edges
+# in both directions and further, because
 # the artifact holding the point is rarely the one being read: a video reaches its
 # capture through a proof that composed a frame of it, three hops away through a
 # shared descendant. That V is what the geolocation gesture actually looks like —
@@ -1351,12 +1159,11 @@ def placements(
     point comes back with the entity it was read off — the *via* the panel names —
     and the entity's own point comes back with none, because nothing placed it.
 
-    **An artifact that carries a point is where the walk stops.** ``proof_index``
-    already settles this for the map — a proof that states where it is answers with
-    its own points, rather than also drawing at the panels it overrode — and a panel
-    that listed both would contradict the map about the same proof. Stopping there is also what keeps
-    a video to its own argument: the capture behind its proof is reached, the second
-    proof that happens to reuse that capture is not.
+    **An artifact that carries a point is where the walk stops.** A proof that states
+    where it is answers with its own points, rather than also reporting the panels it
+    overrode, and a panel that listed both would contradict itself about one proof.
+    Stopping there is also what keeps a video to its own argument: the capture behind
+    its proof is reached, the second proof that happens to reuse that capture is not.
 
     Points are deduplicated on the exact pair, never on a rounded one: two captures
     of the same roof are metres apart, and merging them would assert they are one

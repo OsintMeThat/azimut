@@ -9,6 +9,7 @@ import {
   KINDS,
   oneEach,
   pendingLocate,
+  SAVED_KINDS,
   savedFolders,
 } from './geoTree.js';
 
@@ -144,34 +145,34 @@ describe('buildGeoTree filtering', () => {
     expect(filterSaved(rows, { kind: 'all' })).toHaveLength(3);
   });
 
-  it('switches to proofs rather than mixing them into the saved rows', () => {
-    // A proof sits on the capture it composes, so drawing both at once would
-    // stack two marks on one point. The fourth position swaps the source
-    // instead: `isMode` tells the panel to fetch, not to filter.
-    expect(KINDS.map((k) => k.id)).toEqual(['all', 'places', 'captures', 'proofs', 'media']);
-    expect(isMode('proofs')).toBe(true);
-    expect(isMode('all')).toBe(false);
-
-    // and the filter itself never has to know about proofs
-    expect(filterSaved(rows, { kind: 'proofs' })).toHaveLength(3);
+  it('offers three positions, the footage first', () => {
+    // what a case is built on comes before the pins dropped on it, and a proof
+    // is not a position at all: it stands on a place this list already draws
+    expect(KINDS.map((k) => k.id)).toEqual(['media', 'places', 'captures']);
+    // the picker, which reads the saved index alone, is where `all` is honest
+    expect(SAVED_KINDS.map((k) => k.id)).toEqual(['all', 'places', 'captures']);
   });
 
-  it('switches to located media the same way', () => {
-    // a photo stands where a place, a proof or a capture puts it, so it is a
-    // source of its own rather than a filter over the places it borrows from
+  it('switches to located media rather than filtering for it', () => {
+    // a file stands where a place or a capture puts it, so it is a source of
+    // its own rather than a filter over the points it borrows from: `isMode`
+    // tells the panel to fetch, not to filter
     expect(isMode('media')).toBe(true);
+    expect(isMode('places')).toBe(false);
+    expect(isMode('captures')).toBe(false);
+    // and the filter itself never has to know about media
     expect(filterSaved(rows, { kind: 'media' })).toHaveLength(3);
   });
 
-  it('lists a two-place proof once, however many marks it draws', () => {
+  it('lists a file standing twice once, however many marks it draws', () => {
     // the map is about places, a flat list is about things
     const twice = [
-      { ...rows[0], id: 'pr1', key: 'pr1@50,30', kind: 'proof', title: 'Two cities' },
-      { ...rows[0], id: 'pr1', key: 'pr1@48,2', kind: 'proof', title: 'Two cities' },
+      { ...rows[0], id: 'm1', key: 'm1@50,30', kind: 'media', title: 'Two cities' },
+      { ...rows[0], id: 'm1', key: 'm1@48,2', kind: 'media', title: 'Two cities' },
       { ...rows[1] },
     ];
 
-    expect(oneEach(twice).map((r) => r.key ?? r.id)).toEqual(['pr1@50,30', 'bb']);
+    expect(oneEach(twice).map((r) => r.key ?? r.id)).toEqual(['m1@50,30', 'bb']);
   });
 
   it('searches title, notes, provider, site and geography', () => {
@@ -307,18 +308,6 @@ describe('addressing a row in the tree', () => {
       'Europe/Ukraine',
       'Europe/Ukraine/Donetsk Oblast',
     ]);
-  });
-});
-
-describe('a proof of several points', () => {
-  it('finds a row by the name its point was given', () => {
-    // three rows under one title: the label is what tells them apart
-    const rows = [
-      { id: 'p', kind: 'proof', title: 'Harbour strike', label: 'impact 2', geo: {} },
-      { id: 'p', kind: 'proof', title: 'Harbour strike', label: 'caméra', geo: {} },
-    ];
-    expect(filterSaved(rows, { query: 'caméra' })).toHaveLength(1);
-    expect(filterSaved(rows, { query: 'harbour' })).toHaveLength(2);
   });
 });
 

@@ -215,6 +215,7 @@
   font-size: var(--fs-xs);
   text-align: center;
 }
+.cmp-dock-foot .reason.warn { color: var(--warn); }
 
 /* One numbered step. The number is the whole instruction about order. */
 .cmp-step { display: grid; gap: 8px; }
@@ -242,8 +243,10 @@
   font: 700 10px/1 var(--font-sans);
 }
 .cmp-step.done .cmp-step-n { color: var(--bg-0); background: var(--accent); }
-.cmp-step .hint { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; margin: 0; }
-.cmp-step .warn { color: var(--warn); font-size: var(--fs-xs); line-height: 1.45; margin: 0; }
+/* Notes are small wherever they sit in a dock, not only inside a step: a
+   paragraph that escapes this rule renders at body size and shouts. */
+.cmp-dock .hint { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; margin: 0; }
+.cmp-dock .warn { color: var(--warn); font-size: var(--fs-xs); line-height: 1.45; margin: 0; }
 
 /* Inputs inside a dock: label above, control below, never side by side —
    the column is too narrow for a two-column form to stay readable. */

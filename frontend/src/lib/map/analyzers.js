@@ -13,11 +13,11 @@ export function marksToZones(marks, previous = []) {
   }));
 }
 
+/** Detect reads Sentinel-2 bands, so a map showing anything else has nothing to give it. */
 export function mapSource(side) {
-  if (!side || !['esri-wayback', 'sentinel2'].includes(side.provider)) return null;
-  return { provider: side.provider, date: side.sentinel?.date || '',
-    release: side.wayback_release ?? null, layer: side.sentinel?.layer || 'TRUE_COLOR',
-    maxcc: side.sentinel?.maxcc ?? 30 };
+  if (side?.provider !== 'sentinel2') return null;
+  return { provider: 'sentinel2', date: side.sentinel?.date || '',
+    layer: side.sentinel?.layer || 'TRUE_COLOR', maxcc: side.sentinel?.maxcc ?? 30 };
 }
 
 /** Display clustering changes only marker layout; persisted candidates stay intact. */
@@ -33,10 +33,62 @@ export function displayGroups(rows, project, radius = 24) {
   return groups;
 }
 
+/** A source as a date; runs saved before Detect went Copernicus-only name their release. */
 export function sourceLabel(source) {
-  return source.provider === 'sentinel2'
-    ? `Sentinel-2 · ${source.date} · ${source.layer}`
-    : `Wayback · release ${source.release}`;
+  if (source.provider === 'esri-wayback') return `Wayback release ${source.release}`;
+  return source.date || 'no date yet';
+}
+
+/**
+ * A candidate's reading in words. The catalogue words each method's reading
+ * (`METHODS[].measure`), so this only fills the blanks and never needs to know
+ * which method it is looking at.
+ */
+export function describeMeasure(template, measure, index = '') {
+  if (!template || !measure) return '';
+  const signed = (value) => `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(Math.round(value))}`;
+  const blanks = {
+    value: () => Number(measure.value).toFixed(1),
+    signed: () => signed(measure.signed),
+    before: () => Number(measure.before).toFixed(2),
+    after: () => Number(measure.after).toFixed(2),
+    index: () => index.toUpperCase(),
+  };
+  let missing = false;
+  const text = template.replace(/\{(\w+)\}/g, (_, name) => {
+    const value = name === 'index' ? index : measure[name];
+    if (!blanks[name] || value === undefined || value === null) { missing = true; return ''; }
+    return blanks[name]();
+  });
+  return missing ? '' : text;
+}
+
+export const STRENGTHS = { weak: 'Weak', clear: 'Clear', strong: 'Strong' };
+
+/** Which of Small, Medium and Large the parameters are, or '' once tuned by hand. */
+export function sizeOf(parameters, sizes) {
+  for (const [name, values] of Object.entries(sizes ?? {})) {
+    if (Object.entries(values).every(([key, value]) => Number(parameters?.[key]) === value)) return name;
+  }
+  return '';
+}
+
+/**
+ * What a size preset actually accepts, in ground terms.
+ *
+ * The buttons read as "how sensitive", which is not what they set: they set the
+ * floor and ceiling on a candidate's area. A mark that falls outside the band is
+ * dropped after being found, so the band is worth stating rather than implying.
+ */
+export function sizeBand(values) {
+  const min = Number(values?.min_area) || 0;
+  const max = Number(values?.max_area) || 0;
+  const across = (area) => `${Math.round(Math.sqrt(area))} m`;
+  const area = (value) => (value >= 10_000 ? `${Math.round(value / 10_000)} ha` : `${Math.round(value)} m²`);
+  if (!min && !max) return 'Any size: nothing is dropped for being too big or too small.';
+  if (!min) return `Up to ${area(max)}, about ${across(max)} across.`;
+  if (!max) return `From ${area(min)} up, about ${across(min)} across.`;
+  return `${area(min)} to ${area(max)}, about ${across(min)} to ${across(max)} across.`;
 }
 
 /** A zone's outline, the way the engine reads it: `Zone.ring()` in JavaScript. */
@@ -109,10 +161,9 @@ export function coverage(zones, grid) {
  */
 export const SECONDS_PER_FRAME = 0.35;
 
-/** Frames fetched per tile: the picture reviewed, plus any bands measured. */
-export function framesPerTile({ single = false, bands = false } = {}) {
-  const pictures = single ? 1 : 2;
-  return bands ? pictures * 2 : pictures;
+/** Frames fetched per tile: for each date, the picture reviewed and the bands measured. */
+export function framesPerTile({ single = false } = {}) {
+  return single ? 2 : 4;
 }
 
 export function readableDuration(seconds) {

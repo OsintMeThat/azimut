@@ -168,15 +168,15 @@ proof for publication.
 | ✅ **Point menu** | Right-clicking the ground copies that point in every format, looks it up, saves, measures, reads the sky or opens its imagery history from it, and links it out. |
 | ✅ **Map windows** | Opens the map in several tabs with the view in the URL, links map tabs and extension panels on other sites to one camera, and syncs saved points, grids and sweeps live to every tab and extension panel. |
 | ✅ **Map layers** | Stacks key-less overlays (borders, roads, railways, power lines, sea marks, GPS traces), NASA FIRMS fires and VIIRS night lights for a chosen day, and filters drawn pins by kind and folder. |
-| ✅ **Media on the map** | Draws the case's located photos and videos where a relation, a GPS reading or a proof puts them, and plays the stack in the panel beside the imagery. |
+| ✅ **Media on the map** | Draws the case's located photos and videos where a relation, a GPS reading or a proof puts them, opens the Map panel, the home map and the extension on them, and plays the stack in the panel beside the imagery. |
 | ✅ **Imagery Wayback** | Browses every Esri World Imagery release, narrowed to the ones that changed the point, and dates the pixels apart from the release. |
 | ✅ **Satellite Compare** | Aligns and annotates two dated views, assists matched-product change reading, saves editable sessions and files or exports attributed PNG/GIF outputs. |
-| ✅ **Compare Detect** | Sweeps drawn areas at native resolution for changes, vessels on water and short-wave hotspots; candidates are reviewed one at a time and only a kept one becomes a case pin, and a saved watch reruns on demand. |
+| ✅ **Compare Detect** | Sweeps drawn areas of Copernicus Sentinel-2 at native resolution for vessels, fires and flares, construction, small spots, burn scars, vegetation loss and new water, at a small, medium or large target size; candidates come strongest first, one at a time, and only a kept one becomes a case pin. |
 | ✅ **Passes over an area** | Picks Detect's Copernicus dates from the passes the drawn areas really have, each with the share of them its swath reached, and reports what a finished run actually swept. |
-| ✅ **Cloud & shadow filter** | One click in Difference and Detect, on Sentinel-2's scene classification where there is one and a stated guess from the picture where there is not, with a margin that takes the fringe both masks leave. |
+| ✅ **Cloud & shadow filter** | One click in Difference and Detect, both on Sentinel-2's scene classification: unsure edges taken, classified "clouds" too small to be one dropped, and shadows cast away from the sun, including the ones the classification read as water. |
 | ✅ **Capture scale & north** | Adds a scale bar and true-north needle to app and extension captures when resolution and heading are known. |
 | ✅ **Footprint tracing** | Traces a place's uncertainty as a polygon around its pin, in place of the radius. |
-| ✅ **Extension map tools** | Draws measure, media pins, sun and moon, search grids and case media over third-party maps, calibrated per site by a replayable command. |
+| ✅ **Extension map tools** | Draws measure, the case's points one position at a time, sun and moon, search grids and case media over third-party maps, calibrated per site by a replayable command. |
 | ✅ **Extension updates** | Updates the unpacked extension in one click, installs a signed self-updating Firefox add-on, and flags a copy out of step with the app. |
 | ✅ **Site hand-offs** | Fills the X or Bluesky composer with a prepared thread and uploads a case picture straight into Lens, Yandex, Bing or TinEye. |
 | ✅ **Home & Guide** | Opens on a case dashboard or a front door when no case is open, and `?` opens the Guide on the current tab. |
@@ -371,8 +371,9 @@ stops making sense.
   restarts the extension is only reachable from the app's own localhost page,
   names the install it means, and its worst outcome is an extension that
   restarts. The map tools widen that island by five read routes and two writes,
-  each trimmed to what a panel draws — saved points without their thumbnails or
-  link tallies, a sweep's own spec, a case's images and videos by name — and the panel
+  each trimmed to what a panel draws — one position's points without their
+  thumbnails or link tallies, a sweep's own spec, a case's images and videos by
+  name — and the panel
   itself reaches them only through the worker's own allowlist, since a content
   script's fetch would carry the map site's origin and be refused. Keeping those
   panels in step adds one more, and it is the narrowest of them: a read-only

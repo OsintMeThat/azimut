@@ -99,19 +99,19 @@ describe('Satellite saved work', () => {
     expect((source.match(/bind:hoveredId=\{hoveredSavedId\}/g) ?? []).length).toBe(3);
   });
 
-  it('opens a proof rather than queueing it as a panel of a new one', () => {
-    expect(source).toContain("if (item.kind === 'proof') {");
-    expect(source).toContain('uiState.openProof = item.name');
+  it('queues a saved row as a panel of a new proof', () => {
+    expect(source).toContain('function sendToComposer(item)');
+    expect(source).toContain('uiState.composeQueue.push(item.path)');
   });
 
-  it('opens a linked post in the existing Post Composer draft flow', () => {
-    expect(source).toContain('function openLinkedPost(post)');
-    expect(source).toContain('uiState.openDraft = post.name');
-    expect(source).toContain('onpost={openLinkedPost}');
+  it('opens a proof already built on the file being played', () => {
+    expect(source).toContain('function openProofByName(proof)');
+    expect(source).toContain('uiState.openProof = proof.name');
+    expect(source).toContain('onproof={openProofByName}');
   });
 
-  it('reveals a capture the case sidebar points at, whatever the filter was', () => {
-    expect(source).toContain("savedWork.kind = 'all'");
+  it('reveals a capture the case sidebar points at, on the position that lists it', () => {
+    expect(source).toContain("savedWork.kind = 'captures'");
     expect(source).toContain("savedWork.query = ''");
     expect(source).toContain('revealSavedId = row.id');
   });
@@ -402,7 +402,7 @@ describe('choosing which saved work is drawn', () => {
   it('asks the layer\'s own two questions where the layer is listed', () => {
     // the same state the Saved panel binds, so a map read here and a panel read
     // beside it cannot disagree about what the case holds
-    expect(source).toContain('controls: savedOverlay && savedWork.rows.length ? savedFilters : null');
+    expect(source).toContain('controls: savedOverlay && savedAnything ? savedFilters : null');
     expect(source).toContain('pick: (id) => (savedWork.kind = id)');
     expect(source).toContain("pick: (id) => (savedWork.folder = id === 'all' ? null : id)");
   });
@@ -426,6 +426,15 @@ describe('choosing which saved work is drawn', () => {
 
   it('counts what is drawn rather than what the case holds', () => {
     expect(source).toContain('detail: savedWork.shown.length ? String(savedWork.shown.length)');
+  });
+
+  it('offers the layer on either index, since media is not in the saved one', () => {
+    // a case whose footage is placed and whose pins nobody dropped is exactly
+    // the case the panel opens on Media for
+    expect(source).toContain(
+      'const savedAnything = $derived(savedWork.rows.length > 0 || savedWork.media.length > 0)'
+    );
+    expect(source).toContain('disabled: !savedAnything');
   });
 });
 

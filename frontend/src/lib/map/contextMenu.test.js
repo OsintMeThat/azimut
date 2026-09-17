@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACTIONS, copyRows, nextFocus, openRows, placeMenu } from './contextMenu.js';
+import { ACTIONS, actionsFor, copyRows, nextFocus, openRows, placeMenu } from './contextMenu.js';
 
 describe('copying the point', () => {
   it('offers every format the app writes, the analyst’s own first', () => {
@@ -33,6 +33,13 @@ describe('what the menu offers', () => {
     for (const action of ACTIONS.filter((entry) => entry.id !== 'lookup')) {
       expect(action.label).toMatch(/here/);
     }
+  });
+
+  it('gives a tool the subset it can honour, in the menu’s own order', () => {
+    expect(actionsFor(['measure', 'lookup', 'place']).map((action) => action.id))
+      .toEqual(['lookup', 'place', 'measure']);
+    expect(actionsFor([])).toEqual([]);
+    expect(actionsFor(['nothing-here'])).toEqual([]);
   });
 
   it('opens the external maps on the clicked point, at the current zoom', () => {

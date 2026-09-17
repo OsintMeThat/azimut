@@ -1300,8 +1300,15 @@
 
   async function loadPins() {
     if (!state.caseId) return;
+    const wanted = tools.pins.kind;
     try {
-      tools.pins.load(await call("GET", "/api/ingest/saved", { query: { case_id: state.caseId } }));
+      const rows = await call("GET", "/api/ingest/saved", {
+        query: { case_id: state.caseId, kind: wanted },
+      });
+      // the switch moved again while this was in flight: those rows belong to a
+      // position nobody is looking at
+      if (tools.pins.kind !== wanted) return;
+      tools.pins.load(rows);
       tools.pins.atZoom(state.view?.zoom);
       render();
     } catch (e) {
@@ -1331,6 +1338,9 @@
       tools.pins.clearDraft();
       state.pinTitle = "";
       state.note = "";
+      // a point filed while the footage is drawn would land on a position that
+      // cannot show it: go to the one it belongs to rather than swallowing it
+      tools.pins.setKind("places");
       await loadPins();
     } catch (e) {
       state.note = e.message;
@@ -2051,6 +2061,13 @@
       const draft = tool.draft;
       return `
         ${button("pin-drop", "pin", tool.dropping ? "Click the map" : "Place a point", tool.dropping)}
+        <div class="row wrap">
+          ${tool.kinds
+            .map((entry) =>
+              button("pin-kind", "", entry.label, tool.kind === entry.id, ` data-kind="${esc(entry.id)}"`)
+            )
+            .join("")}
+        </div>
         <div class="readout small">${esc(readout)}</div>
         ${draft ? `
           <input data-act="pin-title" placeholder="Name this point" value="${esc(state.pinTitle)}">
@@ -2299,6 +2316,12 @@
       tools.pins.toggleDrop();
       syncArmed();
       return render();
+    }
+    if (act === "pin-kind") {
+      if (!tools.pins.setKind(target.dataset.kind)) return;
+      redraw();
+      render();
+      return loadPins();
     }
     if (act === "pin-save") return placePin();
     if (act === "pin-cancel") {

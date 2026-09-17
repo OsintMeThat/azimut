@@ -105,7 +105,7 @@ on. Press it again to close it. Six tools share it:
 | Tool | What it does |
 |---|---|
 | Measure | Distance along a clicked path, or the area it encloses. Same formulas and same wording as the app. |
-| Points | Draws the case's saved work on the map, and files a new point. |
+| Points | Draws one of the case's three positions — its located media, its places, its captures — on the map, and files a new point. |
 | Sun & moon | Plants a point and draws the day's sun and moon arcs around it, with a date and an hour slider. |
 | Grid | Drags a box or clicks out a shape, cuts it into metric cells, and marks each cleared or flagged. The grid is saved into the case and opens in the app's own Grid Search. |
 | Refs | Floats an image or a video from the case over the map, to compare against the imagery while you pan. |
@@ -224,6 +224,13 @@ which is the honest thing for a tool whose output ends up in a case file.
 to keep it open. Points at the same spot merge into one counted mark, the way the
 app's own Saved layer merges them.
 
+**One position is drawn at a time**, the same three the app's Saved panel offers
+and in the same order: the located media the case collected, the places dropped
+by hand, the captures taken of them. The panel opens on the media, and switching
+position reads that position — a file carries no coordinates of its own and is
+not in the index the other two come from. Filing a point goes to Places, so the
+point just filed is drawn rather than swallowed.
+
 **The case stays in step, in every window onto it.** Save a point in the app and
 it appears here; mark a cell here and it appears in the app's own Grid Search and
 in any other map you have the panel open on. Nothing needs reloading and nothing
@@ -276,7 +283,7 @@ measured places the drawing again without asking.
 
 The token allows this extension to file captures through the local Azimut
 server, to read back the media and proofs a thread attaches, and — for the map
-tools — the saved points, search grids, images and videos of the case you pick. Rotate it in
+tools — the points, search grids, images and videos of the case you pick. Rotate it in
 Settings to revoke existing pairings.
 
 ## Fill the composer

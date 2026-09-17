@@ -10,7 +10,7 @@
   import SearchInput from '../../components/SearchInput.svelte';
   import FolderBrowser from '../../components/FolderBrowser.svelte';
   import Icon from '../../components/Icon.svelte';
-  import { KINDS, filterSaved, isLocated, oneEach, sortSaved } from '../../lib/geoTree.js';
+  import { SAVED_KINDS, filterSaved, isLocated, oneEach, sortSaved } from '../../lib/geoTree.js';
 
   let { rows = [], onpick, onclose } = $props();
 
@@ -25,8 +25,9 @@
   // Only what carries a position: this picker exists to fill a coordinate, and a
   // row without one has nothing to give.
   const placed = $derived(oneEach(rows).filter(isLocated));
-  // Proofs are a mode of the map's own panel, not a kind of point.
-  const kinds = KINDS.filter((k) => !k.mode);
+  // The saved index and nothing else, so "All" here is all of it: located media
+  // is a position of the map's own panel, and has no row in this list.
+  const kinds = SAVED_KINDS;
   const found = $derived(sortSaved(filterSaved(placed, { kind, query }), 'newest'));
   const shown = $derived(found.slice(0, CAP));
   const entries = $derived(
