@@ -16,10 +16,11 @@ import time
 from typing import Any
 
 #: Long enough for the slowest box we run on. Windows spends around twenty seconds on a
-#: three-row proofs press, against under one here, and a job that is genuinely stuck
-#: fails the shard either way — so the cost of being generous is paid only when something
+#: three-row proofs press, against under one here, and a loaded runner has taken past a
+#: minute on that same press while still filing its rows. A job that is genuinely stuck
+#: fails the shard either way, so the cost of being generous is paid only when something
 #: is already broken.
-WAIT = 60.0
+WAIT = 180.0
 
 
 def wait_for_job(client, job_id: str, *, timeout: float = WAIT) -> dict[str, Any]:
