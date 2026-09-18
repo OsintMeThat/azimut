@@ -36,19 +36,22 @@ test('a panel rotates from its round handle and crops in place on double-click',
   );
   await page.mouse.up();
 
-  // the turn has to land before the double-click, or a slow runner aims at a
-  // panel that is still being redrawn
-  await expect.poll(() => page.evaluate(() => {
-    const stage = window.Konva.stages[0];
-    const transformer = stage.find((node) => node.getClassName() === 'Transformer')[0];
-    return Math.abs(transformer.nodes()[0]?.rotation() ?? 0);
-  })).toBeGreaterThan(5);
-
-  const panelCentre = await page.evaluate(() => {
-    const stage = window.Konva.stages[0];
-    const transformer = stage.find((node) => node.getClassName() === 'Transformer')[0];
-    return transformer.nodes()[0].getAbsolutePosition();
-  });
+  // A turn re-flows the layout around the bigger box, so the panel moves after
+  // the release. Aim once it has stopped, or a fast runner clicks where it was.
+  let lastCentre = null;
+  await expect.poll(async () => {
+    const centre = await page.evaluate(() => {
+      const stage = window.Konva.stages[0];
+      const transformer = stage.find((node) => node.getClassName() === 'Transformer')[0];
+      const node = transformer.nodes()[0];
+      return node && Math.abs(node.rotation()) > 5 ? node.getAbsolutePosition() : null;
+    });
+    const settled = centre && lastCentre
+      && Math.abs(centre.x - lastCentre.x) < 0.5 && Math.abs(centre.y - lastCentre.y) < 0.5;
+    lastCentre = centre;
+    return settled;
+  }, { intervals: [100] }).toBe(true);
+  const panelCentre = lastCentre;
   await page.mouse.dblclick(canvasBox.x + panelCentre.x, canvasBox.y + panelCentre.y);
   await expect.poll(() => page.evaluate(() => (
     window.Konva.stages[0].findOne('#proof-crop-handles').find('.crop-anchor').length
