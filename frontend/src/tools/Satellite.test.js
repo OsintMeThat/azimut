@@ -52,7 +52,13 @@ describe('Satellite saved work', () => {
   });
 
   it('loads and drops every index with the case, through the store', () => {
-    expect(source).toContain('return savedWork.load(id);');
+    // Two stores read the case now — its saved work and the layers the analyst
+    // added — and both hand back a teardown, so a response arriving after the
+    // case changed lands nowhere.
+    expect(source).toContain('const stopSaved = savedWork.load(id);');
+    expect(source).toContain('const stopLayers = addedLayers.load(id);');
+    expect(source).toContain('stopSaved?.();');
+    expect(source).toContain('stopLayers?.();');
     expect(source).toContain('savedWork.loadMode(caseState.current?.id, caseState.rev)');
   });
 
@@ -118,8 +124,13 @@ describe('Satellite saved work', () => {
 });
 
 describe('Capture extension settings handoff', () => {
-  it('opens the extension section from both Satellite entry points', () => {
-    expect(source.match(/uiState\.settingsTab = 'extension'/g)).toHaveLength(2);
+  it('opens the extension section from the gate that needs it', () => {
+    // There were two: this one, and a line under the panel's list of external
+    // maps. That list is gone — the right-click menu already offers those, on
+    // the point that was clicked rather than on the map's centre — and the
+    // advert went with it rather than being refiled somewhere it reads as an ad.
+    expect(source.match(/uiState\.settingsTab = 'extension'/g)).toHaveLength(1);
+    expect(source).toContain('<ExtensionGate');
   });
 });
 
@@ -731,9 +742,10 @@ describe('Esri Wayback', () => {
     expect(source).toContain('if (mapReady && shown.provider?.id === WAYBACK_ID) wb.loadReleases();');
   });
 
-  it('reads a point’s history only while its picker is open', () => {
-    const effect = source.slice(source.indexOf('if (!wb.menuOpen || shown.provider?.id !== WAYBACK_ID) return;'));
-    expect(effect.slice(0, 300)).toContain('wb.loadChanges()');
+  it('reads no history until the picker has been opened, and follows the map after', () => {
+    const effect = source.slice(source.indexOf('if (!wb.watching || shown.provider?.id !== WAYBACK_ID) return;'));
+    expect(effect.slice(0, 300)).toContain('wb.here;');
+    expect(effect.slice(0, 300)).toContain('wb.follow()');
   });
 
   it('puts the release on the id every tile and capture keys on', () => {

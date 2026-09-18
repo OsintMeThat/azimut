@@ -99,6 +99,10 @@ def _tool_relative(slug: int, media: int) -> dict[str, int]:
         "session": len(layout.session_rel(longest_name)),
         "compare session": len(layout.compare_session_rel(longest_name)),
         "grid": len(layout.grid_rel(longest_name)),
+        "map layer spec": len(layout.layer_spec_rel(longest_name)),
+        "map layer snapshot": len(layout.layer_snapshot_rel(longest_name)),
+        "map layer icons": len(layout.layer_icons_rel(longest_name)),
+        "map layer cache": len(layout.layer_cache_rel(longest_name)),
         "trash slot": len(f"{layout.TRASH_DIR}/") + TRASH_GROUP_ID + 1 + TRASH_SLOT,
     }
 
@@ -228,11 +232,14 @@ def test_content_dirs_covers_every_subdir_and_its_meta(tmp_path: Path) -> None:
     root = tmp_path / "a-case"
     born = layout.content_dirs(root)
     assert [d.name for d in born[: len(CASE_SUBDIRS)]] == list(CASE_SUBDIRS)
-    # the `.meta/` directories are born too, so an emptied case matches a new one
+    # The `.meta/` directories are born too, and so is the one derived cache a
+    # tool keeps inside its own folder — an emptied case has to match a new one,
+    # and a directory created on first use would be one path apart.
     assert set(born[len(CASE_SUBDIRS) :]) == {
         layout.media(root) / layout.META_DIR,
         layout.subdir(root, "proofs") / layout.META_DIR,
         layout.subdir(root, "sheets") / layout.META_DIR,
+        layout.subdir(root, layout.LAYERS_DIR) / layout.LAYER_CACHE_DIR,
     }
     assert layout.trash(root).name not in CASE_SUBDIRS
 

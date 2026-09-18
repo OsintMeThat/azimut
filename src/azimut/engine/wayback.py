@@ -9,9 +9,10 @@ picks the basemap or opens its picker (local-first):
 - **The release list** (`CONFIG_URL`), one JSON document naming every release,
   its publication date and its metadata service.
 - **The tilemap**, which answers for one tile and one release which release
-  that tile's pixels were actually published in. Walking it backwards is how
-  the releases that changed a point are found without downloading a tile per
-  release, the same walk Esri's own Wayback app makes.
+  that tile's pixels were actually published in. Walking it backwards shortlists
+  the releases that touched a point without reading every release, the same walk
+  Esri's own Wayback app makes. It answers in bytes, not in ground, so the
+  shortlist is then settled on the pixels: one tile per candidate, compared.
 - **The metadata service** of each release, which says when the pixels under a
   point were acquired and by which sensor. A release date is when Esri
   published the mosaic, which can be years after the picture was taken.
@@ -25,6 +26,7 @@ Release tiles never change once published, which is why caching them is safe.
 from __future__ import annotations
 
 import hashlib
+import io
 import re
 import threading
 import time
@@ -34,6 +36,8 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 import httpx
+import numpy as np
+from PIL import Image
 
 BASE_ID = "esri-wayback"
 VARIANT_SEP = "~"
@@ -67,8 +71,28 @@ _METADATA_MAX_ZOOM = 23
 _METADATA_LAST_LAYER = 13
 # How many metadata questions go out side by side during a walk.
 METADATA_WORKERS = 12
+# …and how many tiles, which the walk reads one per candidate release.
+TILE_WORKERS = 8
 # Tiles are asked for at the view zoom, and World Imagery is offered to z19.
 MAX_ZOOM = 19
+
+# A tile is compared as a 32x32 grey thumbnail: eight pixels of the tile to a
+# cell, which is past JPEG's own noise and still fine enough to see a building.
+_THUMB_SIDE = 32
+# The cells are standardised — mean nought, spread one — before they are
+# compared, so a release that only re-toned one acquisition compares equal to
+# it. What is left is structure, and these two say how much of it may differ
+# and still be the same picture: a cell counts as unchanged within this much of
+# the tile's own spread…
+_CELL_TOLERANCE = 0.7
+# …and this much of the thumbnail may exceed it. Five cells of 1024 is a patch
+# some 7% of the tile across — at the zoom a walk runs at, a roof. Measured
+# against re-encoding, sharpening and a hard gamma over one acquisition, none
+# of which reaches half of it, and a new roof, which passes it twice over.
+_CHANGED_CELLS = 0.005
+# Below this spread a tile carries no structure — open sea, cloud, no data —
+# and standardising it would stretch sensor noise into structure.
+_FLAT_SPREAD = 4.0
 
 
 @dataclass(frozen=True)
@@ -171,6 +195,40 @@ class Change:
     source: str | None
 
 
+@dataclass(frozen=True)
+class _Picture:
+    """One release's tile at the walked point, in the forms it is compared in."""
+
+    digest: str
+    cells: np.ndarray | None  # the standardised thumbnail, None when it will not decode
+
+
+def _thumbnail(content: bytes) -> np.ndarray | None:
+    """A tile as a standardised grey thumbnail, or None when it will not decode."""
+    try:
+        with Image.open(io.BytesIO(content)) as image:
+            grey = image.convert("L").resize(
+                (_THUMB_SIDE, _THUMB_SIDE), Image.Resampling.BILINEAR
+            )
+        cells = np.asarray(grey, dtype=np.float32)
+    except Exception:
+        return None
+    spread = max(float(cells.std()), _FLAT_SPREAD)
+    return (cells - float(cells.mean())) / spread
+
+
+def _same_picture(one: _Picture | None, other: _Picture | None) -> bool:
+    """Whether two releases published the same picture of this point."""
+    if one is None or other is None:
+        return False  # a tile that could not be read is never a twin
+    if one.digest == other.digest:
+        return True
+    if one.cells is None or other.cells is None:
+        return False
+    apart = np.abs(one.cells - other.cells) > _CELL_TOLERANCE
+    return float(apart.mean()) <= _CHANGED_CELLS
+
+
 def local_changes(
     lat: float,
     lon: float,
@@ -183,11 +241,12 @@ def local_changes(
     Starts from the newest release and asks the tilemap which release that
     tile really comes from, then continues from the release before that one,
     until a release has no tile there. What the tilemap calls a change is a
-    change of bytes, and Esri republishes the same picture often: re-encoded
-    (neighbours of equal size, compared by content) or re-processed (a new
-    colour balance over the same acquisition, compared by the date and sensor
-    each release's metadata states). Either way the release that first
-    published the picture is the one kept.
+    change of bytes, and Esri republishes the same picture far more often than
+    the ground under it moves: re-encoded, or re-processed under a new colour
+    balance. So the pixels themselves settle it — every candidate's tile is
+    read and compared with the one kept before it — and the metadata each
+    release states (the acquisition date and the sensor) merges what is left.
+    Either way the release that first published the picture is the one kept.
 
     One pooled connection carries the whole walk: a fresh TLS handshake per
     step made a ten-change point take most of a minute.
@@ -220,7 +279,7 @@ def _walk_changes(lat: float, lon: float, zoom: int, fetch: Callable[..., Any]) 
         if key in _changes:
             return _changes[key]
 
-    found: list[tuple[int, int]] = []
+    found: list[int] = []
     current = listed[0].number
     for _ in range(MAX_STEPS):
         response = fetch(TILEMAP_URL.format(release=current, z=z, row=row, col=col))
@@ -233,49 +292,36 @@ def _walk_changes(lat: float, lon: float, zoom: int, fetch: Callable[..., Any]) 
         chosen = int(select[0]) if select and str(select[0]).isdigit() else current
         if chosen not in order:
             break  # a release the list does not know: stop rather than guess its date
-        size = answer.get("size") or [0]
-        if not found or found[-1][0] != chosen:
-            found.append((chosen, int(size[0] or 0)))
+        if not found or found[-1] != chosen:
+            found.append(chosen)
         following = order[chosen] + 1
         if following >= len(listed):
             break
         current = listed[following].number
 
-    def read_digest(number: int) -> str | None:
-        """The tile's hash, or None when it cannot be read: an unknown is never
-        a twin, so a dropped connection keeps a change rather than losing it."""
+    def read_picture(number: int) -> _Picture | None:
+        """The release's tile here, or None when it cannot be read: an unknown is
+        never a twin, so a dropped connection keeps a change rather than losing it."""
         for _attempt in (1, 2):
             try:
                 reply = fetch(tiles.tile_url(tile_url(number), z, col, row))
                 reply.raise_for_status()
-                return hashlib.sha256(reply.content).hexdigest()
+                return _Picture(hashlib.sha256(reply.content).hexdigest(), _thumbnail(reply.content))
             except Exception:
                 continue
         return None
 
-    # Only a run of neighbours sharing one size is ever compared, so those
-    # tiles are read up front and side by side rather than one per comparison.
-    twins = {
-        found[i][0]
-        for i in range(len(found))
-        for j in (i - 1, i + 1)
-        if 0 <= j < len(found) and found[i][1] and found[i][1] == found[j][1]
-    }
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        digests = dict(zip(twins, pool.map(read_digest, twins)))
+    # Every candidate is compared by its pixels, so all of them are read up
+    # front and side by side rather than one per comparison.
+    with ThreadPoolExecutor(max_workers=TILE_WORKERS) as pool:
+        pictures = dict(zip(found, pool.map(read_picture, found)))
 
-    def twin(one: int, other: int) -> bool:
-        for number in (one, other):
-            if number not in digests:
-                digests[number] = read_digest(number)
-        return digests[one] is not None and digests[one] == digests[other]
-
-    distinct: list[tuple[int, int]] = []
-    for number, size in reversed(found):  # oldest first, so the older twin stays
+    distinct: list[int] = []
+    for number in reversed(found):  # oldest first, so the older twin stays
         previous = distinct[-1] if distinct else None
-        if previous and size and previous[1] == size and twin(previous[0], number):
+        if previous is not None and _same_picture(pictures[previous], pictures[number]):
             continue
-        distinct.append((number, size))
+        distinct.append(number)
 
     # What each picture is, asked at the middle of the tile the walk read, so
     # every point of that tile gets the same answer the cache will give it.
@@ -292,14 +338,13 @@ def _walk_changes(lat: float, lon: float, zoom: int, fetch: Callable[..., Any]) 
                 continue
         return {}  # unknown, which never merges two pictures
 
-    numbers = [number for number, _ in distinct]
     # The metadata service is the slow one, a couple of seconds a question, so
     # a whole history is asked at once rather than six at a time.
     with ThreadPoolExecutor(max_workers=METADATA_WORKERS) as pool:
-        described = list(pool.map(describe, numbers))
+        described = list(pool.map(describe, distinct))
 
     kept: list[tuple[Change, tuple[str, str] | None]] = []
-    for number, attrs in zip(numbers, described):  # still oldest first
+    for number, attrs in zip(distinct, described):  # still oldest first
         acquired = _day(attrs.get("SRC_DATE2"))
         sensor = str(attrs.get("SRC_DESC") or "")
         picture = (acquired, sensor) if acquired else None

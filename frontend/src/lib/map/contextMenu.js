@@ -66,6 +66,15 @@ export function openRows(lat, lon, zoom) {
  * It opens down and to the right of the cursor, and flips to the other side of
  * the cursor on whichever axis would run past the map's edge, then clamps, so a
  * right-click in a corner still shows every row.
+ *
+ * **Asked once, from the measured size, and then left alone.** This used to be
+ * recomputed as the menu's own content changed, which meant opening the list of
+ * external maps — or simply getting an answer back from "What is here?" — made
+ * the whole menu jump out from under the cursor to stay inside the frame. A menu
+ * that moves while it is being read is a menu whose next row lands somewhere
+ * other than where the eye left it. The component freezes this after the first
+ * real measurement, and the two things that could still grow it are handled
+ * where they are: the submenu flies out to the side, and the menu scrolls.
  */
 export function placeMenu(point, menu, frame, margin = 8) {
   let left = point.x;
@@ -74,6 +83,34 @@ export function placeMenu(point, menu, frame, margin = 8) {
   if (top + menu.height + margin > frame.height) top = point.y - menu.height;
   left = Math.max(margin, Math.min(left, frame.width - menu.width - margin));
   top = Math.max(margin, Math.min(top, frame.height - menu.height - margin));
+  return { left: Math.round(left), top: Math.round(top) };
+}
+
+/**
+ * Where a submenu opens, in the same frame coordinates as its parent.
+ *
+ * Beside the parent, not under the row — which is the whole point: a list that
+ * unfolds inside the menu changes the menu's height, and a menu that has already
+ * been placed against the frame's edge then has to move to stay inside it. To
+ * the side, the parent's box never changes, so nothing under the cursor shifts.
+ *
+ * It opens to the right, flips to the left when that would run past the frame,
+ * and is pushed up rather than clipped when the row it hangs from is near the
+ * bottom — so the last item of a long submenu is always reachable.
+ *
+ * @param {{left: number, top: number, width: number, rowTop: number}} anchor
+ *   the parent menu's box and the top of the row this hangs from, both in frame
+ *   coordinates
+ */
+export function placeSubmenu(anchor, submenu, frame, margin = 8, gap = 2) {
+  let left = anchor.left + anchor.width + gap;
+  if (left + submenu.width + margin > frame.width) {
+    left = anchor.left - submenu.width - gap;
+  }
+  left = Math.max(margin, Math.min(left, Math.max(margin, frame.width - submenu.width - margin)));
+  let top = anchor.rowTop;
+  top = Math.min(top, frame.height - submenu.height - margin);
+  top = Math.max(margin, top);
   return { left: Math.round(left), top: Math.round(top) };
 }
 

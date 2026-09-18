@@ -637,10 +637,27 @@ describe('filling a thread', () => {
     expect(report.pastes).toEqual([]);
   });
 
-  it('builds each file from base64, because a fetch here answers to the site', async () => {
+  it('builds one file from the byte-array slices the worker streamed in', async () => {
+    const streamed = {
+      name: 'clip.mp4',
+      type: 'video/mp4',
+      parts: [new Uint8Array([1, 2]), new Uint8Array([3, 4])],
+    };
+    const report = await run({
+      posts: [{ text: '', files: [streamed] }],
+      html: `${BOX(0)}${FILE_INPUT(0)}`,
+    });
+
+    const file = report.attached[0].files[0];
+    expect(file).toEqual(expect.objectContaining({ name: 'clip.mp4', type: 'video/mp4' }));
+    expect(file.parts.map((part) => [...part])).toEqual([[1, 2], [3, 4]]);
+    expect(streamed.parts).toEqual([]); // the descriptor no longer pins a second copy
+  });
+
+  it('keeps the base64 path for an older worker without fetching through the site', async () => {
     // It runs in the page's world, so `fetch('data:…')` is a connection the site
-    // decides on — and X allows none to `data:`. Every attachment came back
-    // "Failed to fetch", which took the whole thread down with it.
+    // decides on — and X allows none to `data:`. The compatibility path decodes
+    // the old payload directly instead.
     expect(source).not.toMatch(/\bfetch\s*\(/);
 
     const report = await run({

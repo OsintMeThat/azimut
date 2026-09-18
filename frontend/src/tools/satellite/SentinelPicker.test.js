@@ -13,6 +13,7 @@ function props({ s2 = {}, ...overrides } = {}) {
       layerHint: '',
       layersSource: 'instance',
       date: '',
+      latest: '',
       maxcc: 100,
       month: '2026-05',
       passes: { '2026-05-11': { cloud: 4, granules: 1 } },
@@ -88,5 +89,36 @@ describe('SentinelPicker date safety', () => {
     });
     expect(body).toMatch(/class="cal-day clear [^"]*has verifying"/);
     expect(body).toContain('Checking imagery for 2026-05-11');
+  });
+});
+
+describe('SentinelPicker trigger', () => {
+  it('is a layers icon on a map surface, which has no layers button of its own', () => {
+    const { body } = render(SentinelPicker, { props: props({ s2: { menuOpen: false } }) });
+    expect(body).toMatch(/<button[^>]*class="btn btn-icon[^"]*"/);
+    expect(body).not.toContain('Most recent');
+  });
+
+  it('carries the pinned pass as a dated chip when Compare asks for one', () => {
+    const { body } = render(SentinelPicker, {
+      props: props({ s2: { menuOpen: false, date: '2025-04-11' }, dateChip: true }),
+    });
+    expect(body).toMatch(/<button[^>]*class="chip[^"]*"/);
+    expect(body).toContain('2025-04-11');
+    expect(body).toContain('Sentinel-2 pass of 2025-04-11');
+  });
+
+  it('dates the chip by the pass "most recent" resolved to', () => {
+    const { body } = render(SentinelPicker, {
+      props: props({ s2: { menuOpen: false, date: '', latest: '2025-03-28' }, dateChip: true }),
+    });
+    expect(body).toContain('2025-03-28');
+  });
+
+  it('says "Most recent" while no pass has come back', () => {
+    const { body } = render(SentinelPicker, {
+      props: props({ s2: { menuOpen: false }, dateChip: true }),
+    });
+    expect(body).toContain('Most recent');
   });
 });

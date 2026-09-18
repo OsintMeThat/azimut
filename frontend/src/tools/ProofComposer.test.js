@@ -526,14 +526,96 @@ describe('Proof Composer frames', () => {
     // the legend is built from shape colours; frames are not shapes
     expect(source).toContain('orderedFeatureColors(proof.shapes');
     expect(source).not.toContain('orderedFeatureColors([...proof.shapes');
-    expect(source).toContain('if (panel.frame) group.add(frameNode(panel.frame, panel.natural))');
-    expect(source).toContain('if (paste.frame) group.add(frameNode(paste.frame, paste.natural))');
+    // …and it frames the image, not the upright box a turned image sits in
+    expect(source).toContain('if (panel.frame) group.add(frameNode(panel.frame, image))');
+    expect(source).toContain('if (paste.frame) group.add(frameNode(paste.frame, image))');
   });
 
   it('draws the border inset so it cannot move the layout', () => {
     const fn = source.slice(source.indexOf('function frameNode('), source.indexOf('// ---- rebuild canvas'));
     expect(fn).toContain('x: w / 2, y: w / 2');
     expect(fn).toContain('natural[0] - w');
+  });
+});
+
+describe('Proof Composer panel and overlay transforms', () => {
+  it('hydrates a spec surface into its crop, its turn and its upright box', () => {
+    const body = bodyOfFn('hydratedSurface');
+    expect(body).toContain('crop: normalizeSourceCrop(surface.crop, sourceNatural)');
+    expect(body).toContain('rotation: normalizeSurfaceAngle(surface.rotation)');
+    expect(bodyOfFn('refreshSurface'))
+      .toContain('surfaceBoxSize(surface.sourceNatural, surface.crop, surface.rotation)');
+    expect(source).toContain("proof.panels.push(hydratedSurface({");
+    expect(source).toContain("proof.pastes.push(hydratedSurface({ ...p, id: p.id ?? newId('x') }, img))");
+  });
+
+  it('turns nothing but the group, so no pixel and no annotation is rewritten', () => {
+    // The image, its border, its marks and its notes are one group that turns.
+    // Baking the angle into pixels is what put the selection frame and the crop
+    // marks on a transparent box bigger than the picture.
+    const body = bodyOfFn('applySurfaceRotation');
+    expect(body).toContain('item.rotation = turned');
+    expect(body).not.toContain('mapSurfaceShapes');
+    expect(source).toContain('rotation: panel.rotation ?? 0');
+    expect(source).toContain('rotation: paste.rotation ?? 0');
+    expect(source).not.toContain('renderSurfaceImage');
+  });
+
+  it('crops in source pixels and walks annotations by the corner they moved', () => {
+    const body = bodyOfFn('applySurfaceCrop');
+    expect(body).toContain('normalizeSourceCrop(selection, item.sourceNatural)');
+    expect(body).toContain('shiftProofShape(s, dx, dy)');
+    expect(body).toContain('item.crop = kept');
+  });
+
+  it('shows the whole source under the marks, so a crop can be taken back', () => {
+    const body = bodyOfFn('surfaceImageNode');
+    expect(body).toContain("name: 'crop-ghost'");
+    expect(body).toContain('width: sw, height: sh'); // the source, not the crop
+    expect(bodyOfFn('beginSurfaceCrop')).toContain('cropDraft = item.crop');
+    // …and the marks clamp to the source, which is what lets them pull back out
+    expect(bodyOfFn('updateCropFromHandle')).toContain('frame.item.sourceNatural');
+  });
+
+  it('enters crop mode on the canvas by double-click and draws eight marks', () => {
+    expect(source).toContain('openCrop={beginSurfaceCrop}');
+    expect(source.match(/beginSurfaceCrop\((panel|paste)\)/g)).toHaveLength(2);
+    expect(source).toContain("cropHandles = new Konva.Group({ id: 'proof-crop-handles' })");
+    expect(source).toContain("group.on('dblclick dbltap'");
+    expect(source).toContain('for (const [key, mark] of Object.entries(points))');
+    expect(source).not.toContain('ProofCropDialog');
+  });
+
+  it('holds the crop box as a draft until crop mode is left', () => {
+    // Committing on each handle released would bury the pixels the next pull
+    // needs, and would write one operation per nudge into the saved spec.
+    expect(bodyOfFn('endSurfaceCrop')).toContain('applySurfaceCrop(item, selection)');
+    expect(bodyOfFn('applySurfaceCrop')).not.toContain('cropDraft =');
+    expect(bodyOfFn('discardSurfaceCrop')).not.toContain('applySurfaceCrop');
+    // saving or copying the picture keeps a box still under its marks…
+    expect(bodyOfFn('exportPng')).toContain('endSurfaceCrop();');
+    // …and Escape drops it, like every other draft in this tool
+    expect(source).toMatch(/Escape' && cropSurfaceId\) \{\s*\n\s*discardSurfaceCrop\(\);/);
+    // a surface on its way out of the proof takes its draft with it
+    expect(bodyOfFn('removePanel')).toContain('discardSurfaceCrop()');
+    expect(bodyOfFn('removePaste')).toContain('discardSurfaceCrop()');
+  });
+
+  it('dresses the turn knob the way Collage dresses its own', () => {
+    expect(source).toContain('rotateAnchorOffset: 28');
+    expect(source).toContain('!!panelNode || !!pasteNode');
+    // A disc on a stem, and nothing inside it: a glyph at anchor size is a
+    // smudge rather than a symbol.
+    const knob = bodyOfFn('drawRotateKnob');
+    expect(knob).toContain('stroke: ACCENT');
+    expect(knob).not.toContain('Konva.Path');
+    expect(source).toContain("anchor.fill('rgba(22, 22, 22, 0.92)')");
+    expect(source).toContain('anchor.stroke(ACCENT)');
+    expect(source).not.toContain("anchor.fill('#1473e6')");
+  });
+
+  it('puts the selection frame away while the crop marks are up', () => {
+    expect(source).toContain('!handles || cropSurfaceId');
   });
 });
 

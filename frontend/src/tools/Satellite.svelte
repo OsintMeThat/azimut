@@ -8,6 +8,7 @@
   import MapSurface from './satellite/MapSurface.svelte';
   import { createSentinelState } from './satellite/state/sentinel.svelte.js';
   import { createWaybackState } from './satellite/state/wayback.svelte.js';
+  import { createAddedLayersState } from './satellite/state/addedLayers.svelte.js';
   import { createSavedState } from './satellite/state/saved.svelte.js';
   import { createImageryState, FALLBACK_PROVIDER } from './satellite/state/imagery.svelte.js';
   import { createMeasureState, HINTS as MEASURE_HINT } from './satellite/state/measure.svelte.js';
@@ -29,7 +30,6 @@
   import {
     caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords, prefsReady,
   } from '../lib/state.svelte.js';
-  import { mapLinks } from '../lib/maplinks.js';
   import { markerGeometry, markerSvg } from '../lib/mapMarkers.js';
   import { startRectDrag, startRotateDrag } from '../lib/map/gestures.js';
   import { panelWidth } from '../lib/panelWidth.js';
@@ -81,6 +81,9 @@
   import EntityDetails from '../components/EntityDetails.svelte';
   import RefViewer from './RefViewer.svelte';
   import MapRail from './satellite/MapRail.svelte';
+  import AddedLayers from './satellite/AddedLayers.svelte';
+  import AddedLayersOverlay from './satellite/AddedLayersOverlay.svelte';
+  import AddLayerDialog from './satellite/AddLayerDialog.svelte';
   import MapLayers from './satellite/MapLayers.svelte';
   import MapContextMenu from './satellite/MapContextMenu.svelte';
   import MapStatusBar from './satellite/MapStatusBar.svelte';
@@ -145,6 +148,15 @@
   // The case's saved work — both indexes, the panel's filter and the Locate
   // pass — is its own store (state/saved.svelte.js).
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
+  // The layers the analyst added themselves: a file they opened, a map they
+  // follow. Its own store, because it owns the one network rule this feature
+  // has — a feed is read on case open, on Refresh, and never otherwise.
+  const addedLayers = createAddedLayersState({
+    api,
+    notify: toast,
+    ensureCase,
+    reloadCase,
+  });
   let savedSearchOpen = $state(false);
   // Map layer: on from the start, on the Media position, so a case opens on its
   // footage already placed. Session-only: the tool stays mounted across tabs, so a
@@ -384,11 +396,29 @@
     units: () => prefs.units,
   });
 
-  // External-maps quick links, in the SAVED panel (item 6).
-  let linksOpen = $state(false);
-  // …and the layers list above them, open by default: it is what the panel
-  // says about the map itself.
+  /**
+   * Which half of the panel is showing.
+   *
+   * The panel used to stack three unrelated things in one scroll — what is drawn
+   * over the imagery, a list of external maps, and the case's own work — under a
+   * header that named only the last of them and counted only its rows. Two tabs
+   * because there are two questions: *what am I looking at* and *what have I
+   * got*. The external maps went entirely: the right-click menu already offers
+   * them, and it offers them on the point that was clicked rather than on the
+   * map's centre.
+   *
+   * Opens on Layers, because that is what the panel is *for* on the surface it
+   * is docked to: the map is read first and browsed second, and the case's own
+   * work is also reachable from the sidebar and the Board while what is drawn
+   * over the imagery is reachable from nowhere else.
+   */
+  let panelTab = $state('layers');
+  const PANEL_TABS = { layers: 'Layers', saved: 'Saved' };
+  // The layers list, open by default: it is what the tab says about the map.
   let layersOpen = $state(true);
+  // The added layer a Remove is asking about. Its snapshot goes with it, and for
+  // a subscription that is the only copy of what was last served.
+  let removingLayer = $state(null);
 
   // --- Grid Search (spec §5): overlay a metric grid on an area of interest and
   // sweep it cell by cell, marking each cleared or flagged. The grids a case
@@ -598,13 +628,14 @@
     if (mapReady && shown.provider?.id === WAYBACK_ID) wb.loadReleases();
   });
 
-  // While its picker is open, a pan that settles in another tile reads that
-  // tile's history. Debounced, and answered from memory for a tile already read.
+  // Once the picker has been opened, the history follows the map: a view that
+  // settles over another tile reads that tile's history, picker open or not.
+  // Debounced, and answered from memory for a tile already read.
   $effect(() => {
-    if (!wb.menuOpen || shown.provider?.id !== WAYBACK_ID) return;
-    if (!wb.stale) return;
+    if (!wb.watching || shown.provider?.id !== WAYBACK_ID) return;
+    wb.here; // the tile under the map: a new one is a new history
     clearTimeout(wbChangesTimer);
-    wbChangesTimer = setTimeout(() => wb.loadChanges(), 900);
+    wbChangesTimer = setTimeout(() => wb.follow(), 900);
     return () => clearTimeout(wbChangesTimer);
   });
   let wbChangesTimer;
@@ -1160,6 +1191,18 @@
       : []),
   ]);
 
+  /**
+   * The number beside the active tab's name, which is that tab's own.
+   *
+   * Everything switched on for Layers — the curated stack and the analyst's own
+   * together, since the tab is one question — and the rows on screen for Saved.
+   */
+  const panelCount = $derived(
+    panelTab === 'layers'
+      ? layerRows.filter((row) => row.on && !row.disabled).length + addedLayers.drawn.length
+      : savedWork.shownRows.length
+  );
+
   /** A rail seat was pressed: a mode is armed (and every other closed), an
    *  action just runs. */
   function pickTool(id) {
@@ -1172,9 +1215,6 @@
     if (measure.setMode(mode)) capture.disarm();
   }
 
-  // --- external map links (item 6) ---
-  const externalLinks = $derived(mapLinks(displayCoords.lat, displayCoords.lon, center.zoom));
-
   // fly the map to a capture's recorded point (item 7)
   /** Open one saved item: fly the map to it, or — for a screenshot of a site we
    *  cannot embed, filed without coordinates — reopen the page it came from. */
@@ -1182,6 +1222,8 @@
   async function openMedia(items, index = 0) {
     if (!items?.length) return;
     mediaView = { items, index };
+    // a file plays in the case's own half of the panel, whichever half was up
+    panelTab = 'saved';
     if (capturesCollapsed) {
       capturesCollapsed = false;
       await tick();
@@ -1266,7 +1308,14 @@
       mediaView = null;
       footprint.cancel();
     }
-    return savedWork.load(id);
+    const stopSaved = savedWork.load(id);
+    // Reads what is on disk. The only thing that then reaches out is a
+    // subscription that is enabled and asked to be re-read on open.
+    const stopLayers = addedLayers.load(id);
+    return () => {
+      stopSaved?.();
+      stopLayers?.();
+    };
   });
 
   // The media index, read the first time that position is opened.
@@ -1297,6 +1346,7 @@
     if (!row) return;
     uiState.focusCapture = null;
     capturesCollapsed = false;
+    panelTab = 'saved';
     savedWork.kind = 'captures';
     savedWork.query = '';
     revealSavedId = row.id;
@@ -2051,6 +2101,18 @@
       <!-- Both handoff layers can be on at once. Neither carries a card of its
            own any more: what they are and what to do with them is a row in the
            Layers list, with every other layer. -->
+      <!-- Somebody else's map over this one. GL sources rather than the DOM
+           markers the case's own pins use: a foreign layer can hold tens of
+           thousands of features, which is an order of magnitude past what a
+           `div` each can carry. -->
+      <AddedLayersOverlay
+        engine={mapReady ? engine : null}
+        caseId={caseState.current?.id ?? ''}
+        layers={addedLayers.drawn}
+        drawing={addedLayers.drawing}
+        picked={addedLayers.picked}
+      />
+
       {#if sheetPoints && sheetShown}
         <SheetPointsOverlay engine={mapReady ? engine : null} points={sheetPoints.points} />
       {/if}
@@ -2320,23 +2382,75 @@
           onkeydown={onSavedResizeKey}
         ></button>
       {/if}
-      <button
-        type="button"
-        class="cap-head"
-        onclick={toggleCaptures}
-        title={capturesCollapsed ? 'Show saved work' : 'Hide saved work'}
-      >
-        <Icon name={capturesCollapsed ? 'chevronLeft' : 'chevronRight'} size={15} />
-        <span class="label" style="margin:0">Saved</span>
-        <!-- what the panel is listing, which is what its position says: the
-             count on a header that reads Media must not be the places index -->
-        <span class="count">{savedWork.shownRows.length}</span>
-      </button>
       {#if capturesCollapsed}
-        <!-- collapsed: header acts as the toggle back to the list -->
+        <!-- collapsed: the header is the way back, and names what it will open on -->
+        <button
+          type="button"
+          class="cap-head"
+          onclick={toggleCaptures}
+          title="Show the panel"
+        >
+          <Icon name="chevronLeft" size={15} />
+          <span class="label" style="margin:0">{PANEL_TABS[panelTab]}</span>
+          <span class="count">{panelCount}</span>
+        </button>
       {:else}
+        <!-- Two tabs, because the panel answers two questions: what is drawn
+             over the imagery, and what this case holds. They used to be one
+             scroll under a header that named only the second of them. -->
+        <div class="cap-head">
+          <button
+            type="button"
+            class="cap-collapse"
+            onclick={toggleCaptures}
+            title="Hide the panel"
+            aria-label="Hide the panel"
+          >
+            <Icon name="chevronRight" size={15} />
+          </button>
+          <!-- The two halves share the width evenly, and carry no count: each
+               section under them states its own, and a header repeating
+               "LAYERS 2" thirty pixels above "LAYERS 2" says nothing twice. -->
+          <div class="tabs" role="tablist" aria-label="Map panel">
+            {#each Object.entries(PANEL_TABS) as [id, label] (id)}
+              <button
+                type="button"
+                class="tab"
+                class:on={panelTab === id}
+                role="tab"
+                aria-selected={panelTab === id}
+                onclick={() => (panelTab = id)}
+              >{label}</button>
+            {/each}
+          </div>
+        </div>
+
         <div class="panel-scroll">
-          {#if mediaView}
+          {#if panelTab === 'layers'}
+          <!-- What is drawn over the imagery. One list: the labels and the saved
+               pins used to be buttons in the toolbox, and the handoffs floating
+               cards over the map. -->
+          <MapLayers rows={layerRows} bind:open={layersOpen} />
+
+          <!-- …and under it, what the analyst put there themselves. Two
+               sections rather than one list: the line is who chose the layer,
+               and an added one carries a source, a freshness and a Remove that
+               a curated one has no use for. -->
+          <AddedLayers
+            rows={addedLayers.rows}
+            busy={addedLayers.busy}
+            bind:open={addedLayers.open}
+            search={addedLayers.search}
+            ontoggle={(row) => addedLayers.toggle(caseState.current?.id, row)}
+            oncategory={(row, name) =>
+              addedLayers.toggleCategory(caseState.current?.id, row, name)}
+            onrefresh={(row) => addedLayers.refresh(caseState.current?.id, row)}
+            onremove={(row) => (removingLayer = row)}
+            onreveal={(row) => addedLayers.reveal(caseState.current?.id, row)}
+            onpick={(row, hit) => addedLayers.pick(caseState.current?.id, row, hit)}
+            onadd={() => (addedLayers.adding = true)}
+          />
+          {:else if mediaView}
           <!-- A located file, played in place of the list rather than over the
                map it is being compared with. Closing it brings the list back as
                it was left. -->
@@ -2351,53 +2465,6 @@
             onproof={openProofByName}
           />
           {:else}
-          <!-- What is drawn over the imagery. One list, above the case's own
-               work: the labels and the saved pins used to be buttons in the
-               toolbox, and the handoffs floating cards over the map. -->
-          <MapLayers rows={layerRows} bind:open={layersOpen} />
-
-          <!-- External maps: quick jumps to maps we can't embed in-tool, at the
-               current target coordinates (item 6) -->
-          <button type="button" class="sub-head" onclick={() => (linksOpen = !linksOpen)}>
-            <Icon name={linksOpen ? 'chevronDown' : 'chevronRight'} size={12} />
-            <Icon name="external" size={13} />
-            <span>Open in…</span>
-            <span class="count">{externalLinks.length}</span>
-          </button>
-          {#if linksOpen}
-            <div class="links-grid">
-              {#each externalLinks as l (l.id)}
-                <a
-                  class="ext-link"
-                  class:disabled={fullscreen}
-                  href={fullscreen ? undefined : l.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-disabled={fullscreen}
-                  title={leavesFullscreen ?? l.url}
-                >
-                  <Icon name="globe" size={13} />
-                  <span>{l.label}</span>
-                  <Icon name="external" size={12} />
-                </a>
-              {/each}
-            </div>
-            <div class="links-note mono">{readout}</div>
-            <!-- the way back: the capture extension files what you find over
-                 there straight into the case, coordinates parsed from the URL -->
-            <button type="button" class="links-advert" onclick={() => {
-              uiState.settingsTab = 'extension';
-              uiState.tool = 'settings';
-            }}>
-              <Icon name="crop" size={12} />
-              <span>
-                {extensionVersion()
-                  ? 'Capture these sites into the case with the browser extension'
-                  : 'Get the capture extension to file these sites into the case'}
-              </span>
-            </button>
-          {/if}
-
           <SavedTree
             rows={savedWork.shownRows}
             folders={caseState.current?.folders ?? []}
@@ -2426,6 +2493,34 @@
     </aside>
   </div>
 </div>
+
+{#if addedLayers.adding}
+  <AddLayerDialog
+    busy={addedLayers.saving}
+    onclose={() => (addedLayers.adding = false)}
+    onfile={(file, icons) => addedLayers.addFile(file, icons)}
+    onurl={(url, icons) => addedLayers.subscribe(url, icons)}
+  />
+{/if}
+
+<!-- Removing a layer takes the snapshot with it, which for a subscription is
+     the only copy of what was last served. -->
+{#if removingLayer}
+  <ConfirmDialog
+    title="Remove this layer?"
+    message={`“${removingLayer.title}” will be taken off the map and out of the case.`}
+    detail="Moves the layer and the copy it was drawn from to the case trash."
+    restorable={RESTORABLE}
+    confirmLabel="Remove"
+    tone="default"
+    busy={addedLayers.busy === removingLayer.name}
+    onconfirm={async () => {
+      await addedLayers.remove(caseState.current?.id, removingLayer);
+      removingLayer = null;
+    }}
+    oncancel={() => (removingLayer = null)}
+  />
+{/if}
 
 <!-- delete confirm: a capture drops its image file, a place its entity -->
 {#if deleteTarget}
@@ -2809,69 +2904,62 @@
     display: flex;
     flex-direction: column;
   }
-  /* `.sub-head` is in app.css: the Layers list writes its own heading, and the
-     two have to read as one panel. */
-  .links-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 4px;
-    padding: 4px 2px 6px;
-  }
-  .ext-link {
+  /* `.sub-head` is in app.css: each section writes its own heading, and they
+     have to read as one panel. */
+
+  /* The two halves of the panel, in its header: one track split evenly, so the
+     pair reads as one control rather than as two buttons that happen to be
+     adjacent. Full width because there are exactly two and they are the whole
+     of what this panel can be showing. */
+  .tabs {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-1);
-    background: var(--bg-2);
-    color: var(--text-2);
-    font-size: var(--fs-xs);
-    text-decoration: none;
-    overflow: hidden;
-  }
-  .ext-link span {
     flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    gap: 3px;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-0);
   }
-  .ext-link:hover:not(.disabled) {
-    color: var(--accent);
-    border-color: var(--accent);
-  }
-  /* fullscreen: leaving for another tab would drop the map anyway (see
-     leavesFullscreen) */
-  .ext-link.disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-  .ext-link :global(svg:last-child) {
-    color: var(--text-3);
-    flex-shrink: 0;
-  }
-  .links-note {
-    padding: 0 4px 6px;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-  /* the capture-extension pointer under the external links — quiet, one line */
-  .links-advert {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-    padding: 4px;
-    margin: 0 0 6px;
+  .tab {
+    flex: 1;
+    padding: 5px 10px;
     border: none;
+    border-radius: var(--r-md);
     background: none;
-    font-size: var(--fs-xs);
     color: var(--text-3);
-    text-align: left;
+    font: inherit;
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: background 0.12s var(--ease), color 0.12s var(--ease);
+  }
+  .tab:hover:not(.on) {
+    color: var(--text-1);
+    background: var(--bg-3);
+  }
+  .tab.on {
+    background: var(--bg-3);
+    color: var(--text-1);
+    box-shadow: var(--shadow-1);
+  }
+  /* The collapse is a window control, not a third tab: sized down and kept in
+     the gutter the section chevrons below it already occupy. */
+  .cap-collapse {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: var(--r-md);
+    background: none;
+    color: var(--text-3);
     cursor: pointer;
   }
-  .links-advert:hover {
-    color: var(--accent);
+  .cap-collapse:hover {
+    color: var(--text-1);
+    background: var(--bg-3);
   }
 
 

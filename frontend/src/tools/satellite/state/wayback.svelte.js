@@ -5,9 +5,13 @@
  *
  * - **The release list is read once**, the first time the basemap is shown or
  *   its picker opened, never on mount.
- * - **The change list is read while the picker is open**, for the tile under
- *   the crosshair. A pan inside that tile has the same history and asks
- *   nothing; a pan out of it marks the list stale until it is read again.
+ * - **The change list follows the map from the first time the picker is
+ *   opened**, and not before: opening it is the analyst saying they are reading
+ *   this place through time, and from then on a view that settles over another
+ *   tile reads that tile's history, picker open or not. Gating it on the picker
+ *   *staying* open was the bug: the map moved, the picker was shut, and it
+ *   re-opened on the history of wherever the analyst had been before. A pan
+ *   inside the same tile has the same history and asks nothing.
  * - **A failed read is said, not hidden.** An empty change list means the point
  *   never changed; a failed one means we do not know, and the picker falls back
  *   to every release rather than claiming there is nothing to see.
@@ -32,6 +36,7 @@ export function createWaybackState({ api, place }) {
   let listing = null; // the one in-flight read of the list
   let release = $state(null); // null = the newest
   let menuOpen = $state(false);
+  let watching = $state(false); // the picker has been opened: the history follows the map
   let changesOnly = $state(true);
   let changes = $state(null); // [release] for `changesFor`, null when unknown
   let pictures = $state({}); // release → { acquired, source } for those changes
@@ -39,6 +44,7 @@ export function createWaybackState({ api, place }) {
   let changesBusy = $state(false);
   let changesNote = $state('');
   let changesRequest = 0;
+  let asked = ''; // the tile whose history was last read, answered or refused
   const changesCache = new Map();
 
   const hereKey = () => {
@@ -71,6 +77,7 @@ export function createWaybackState({ api, place }) {
 
   async function loadChanges() {
     const key = hereKey();
+    asked = key;
     if (changesCache.has(key)) {
       keep(changesCache.get(key));
       changesFor = key;
@@ -129,9 +136,27 @@ export function createWaybackState({ api, place }) {
     get changesNote() {
       return changesNote;
     },
+    /** The analyst opened the history once, so it follows the map from here. */
+    get watching() {
+      return watching;
+    },
+    /** The tile the map is over. What a tool watches to keep the history here. */
+    get here() {
+      return hereKey();
+    },
     /** The point moved out of the tile the change list describes. */
     get stale() {
       return Boolean(changesFor) && changesFor !== hereKey();
+    },
+    /**
+     * Narrowed to changes, with this tile's history still coming.
+     *
+     * The picker offers nothing rather than the whole release list: a list
+     * about to be replaced by a quarter of itself is one the analyst reads and
+     * acts on, and it is not what they asked for.
+     */
+    get reading() {
+      return changesOnly && changes === null && changesBusy;
     },
     /** What the provider id carries (`lib/wayback.js` `waybackId`). */
     get variant() {
@@ -145,7 +170,7 @@ export function createWaybackState({ api, place }) {
      * the picker highlights, rather than by a date no row carries.
      */
     get date() {
-      if (release == null && changesOnly && changes?.length && !this.stale) {
+      if (release == null && changesOnly && changes?.length) {
         return releaseDate(releases, changes[0]);
       }
       return releaseDate(releases, release);
@@ -154,9 +179,16 @@ export function createWaybackState({ api, place }) {
     picture(number) {
       return pictures[number] ?? null;
     },
-    /** The releases the picker offers. Every release until the changes are known. */
+    /**
+     * The releases the picker offers. Every release until the changes are known.
+     *
+     * A map that left the tile keeps the list it had while the next one is
+     * read: the walk takes seconds, and swapping four rows for two hundred
+     * under the cursor and back is worse than a list the hint already calls
+     * stale.
+     */
     get visible() {
-      return visibleReleases(releases, changes, changesOnly && !this.stale);
+      return visibleReleases(releases, changes, changesOnly);
     },
     get position() {
       return positionOf(this.visible, releases, release);
@@ -165,16 +197,31 @@ export function createWaybackState({ api, place }) {
     loadReleases,
     loadChanges,
 
+    /**
+     * The map settled: read this tile's history unless it is the one we hold.
+     *
+     * A tile already answered costs nothing — the answer is kept for the
+     * session — and a tile Esri refused is not asked again until the analyst
+     * presses Refresh, so a service that is down is not hammered by panning.
+     */
+    follow() {
+      if (!watching || hereKey() === asked) return undefined;
+      return loadChanges();
+    },
+
     toggleMenu() {
       menuOpen = !menuOpen;
       if (!menuOpen) return;
+      watching = true;
       loadReleases();
       loadChanges();
     },
 
     setChangesOnly(value) {
       changesOnly = Boolean(value);
-      if (changesOnly && !changes) loadChanges();
+      // …and a history of the tile the map has left is read again, not kept:
+      // asking for changes here is asking about here.
+      if (changesOnly && (!changes || this.stale)) loadChanges();
     },
 
     /** Show one release. The newest is stored as null so the id stays plain. */

@@ -785,6 +785,50 @@ def test_clearing_the_coordinates_withdraws_the_point(client):
     assert saved["orphans"] == [{"id": filed["id"], "label": filed["label"]}]
 
 
+def test_swapping_the_footage_takes_the_point_off_the_clip_it_dropped(client):
+    """The point stays, the material under it does not: a proof re-composed on another
+    clip must stop saying the old one was filmed there.
+
+    Read off the chain alone, nothing reached the dropped clip — the point was kept,
+    so it was never withdrawn, and the walk that restates it only ever visits the
+    material the proof rests on *now*. The video stayed on the map under a proof that
+    no longer rested on it, and the mark counted two.
+    """
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    old = _video(cid)
+    new = _video(cid, "angle.mp4")
+    _save(client, cid, "Roof match", _with_coords("50.4501, 30.5234", None, "media/clip.mp4"))
+    place = _places(cid)[0]
+    assert old["id"] in {lk["from"] for lk in _depicts(cid) if lk["to"] == place["id"]}
+
+    _save(client, cid, "Roof match", _with_coords("50.4501, 30.5234", None, "media/angle.mp4"))
+
+    posed = {lk["from"] for lk in _depicts(cid) if lk["to"] == place["id"]}
+    assert new["id"] in posed
+    assert old["id"] not in posed
+    assert len(_places(cid)) == 1  # the point itself was kept, not re-filed
+
+
+def test_footage_dropped_as_the_point_moves_is_left_on_neither(client):
+    """The same save corrects the coordinates and swaps the clip. The withdrawal walked
+    the material the proof rests on now, so the clip it had just dropped kept its edge —
+    and held the abandoned point alive, which is worse than a stale mark: nothing owned
+    it any more, and it was never offered for deletion."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    old = _video(cid)
+    new = _video(cid, "angle.mp4")
+    _save(client, cid, "Roof match", _with_coords("50.4501, 30.5234", None, "media/clip.mp4"))
+    left = _places(cid)[0]
+
+    saved = _save(client, cid, "Roof match", _with_coords("48.8584, 2.2945", None, "media/angle.mp4"))
+
+    assert [lk["from"] for lk in _depicts(cid) if lk["to"] == left["id"]] == []
+    assert saved["orphans"] == [{"id": left["id"], "label": left["label"]}]
+    moved = _place_by_lat(cid, 48.8584)
+    assert new["id"] in {lk["from"] for lk in _depicts(cid) if lk["to"] == moved["id"]}
+    assert old["id"] not in {lk["from"] for lk in _depicts(cid)}
+
+
 def test_a_point_another_proof_still_concludes_on_keeps_its_material(client):
     cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
     video = _video(cid)

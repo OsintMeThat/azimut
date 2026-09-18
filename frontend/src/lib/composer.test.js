@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   PAD, PANEL_H, GAP, ROW_GAP, FOOTER_H, LEGEND_LINE_H,
   layoutPanels, layoutPanelsFree, freeNormalizeDelta, panelsBottom,
-  panelsBlockHeight, panelHeight, captionBand, legendLineHeight, footerBand,
+  panelsBlockHeight, panelHeight, panelScale, captionBand, legendLineHeight, footerBand,
   docSize, legendColumns, legendRowCount, toSpec, offsetShape, copyShapeSpec, autoLayoutRows, TWEET_GUIDES,
   autoCoords, formatCoords, resolveSourceUrls, autoSource, autoSourceUrls,
   normalizeSources, statedSources,
@@ -80,6 +80,17 @@ describe('layoutPanels — stacked rows', () => {
 });
 
 describe('layoutPanels — per-panel scale', () => {
+  it('turning a panel does not shrink it: the size is the image\'s, not the box\'s', () => {
+    // The box a turned photo needs is bigger than the photo. Reading the panel's
+    // height off that box is what made every turn shrink the picture inside it.
+    const upright = { natural: [400, 200], sourceNatural: [400, 200] };
+    const turned = { natural: [200, 400], sourceNatural: [400, 200], rotation: 90 };
+    expect(panelScale(turned)).toBe(panelScale(upright));
+
+    const [a, b] = layoutPanels([upright, turned], 0, 'grid');
+    expect([a.w, a.h]).toEqual([b.h, b.w]); // the room swapped, the image did not
+  });
+
   it('panelHeight is PANEL_H times the panel scale (default 1)', () => {
     expect(panelHeight({ natural: [1, 1] })).toBe(PANEL_H);
     expect(panelHeight({ natural: [1, 1], scale: 0.5 })).toBe(PANEL_H * 0.5);
@@ -408,6 +419,35 @@ describe('toSpec — persistence of layout', () => {
       shapes: [],
     };
     expect(toSpec(proof).panels.map((p) => p.scale)).toEqual([1.5, 1]);
+  });
+
+  it('persists a panel crop and turn against the untouched source size', () => {
+    const proof = {
+      title: 'T',
+      panels: [{
+        id: 'p1', src: 'a.png',
+        natural: [500, 300], // the upright box the turned crop occupies
+        sourceNatural: [1200, 800],
+        crop: { x: 100, y: 200, w: 500, h: 300 },
+        rotation: 37.5,
+      }],
+      shapes: [],
+    };
+    expect(toSpec(proof).panels[0]).toMatchObject({
+      natural: [1200, 800],
+      crop: { x: 100, y: 200, w: 500, h: 300 },
+      rotation: 37.5,
+    });
+  });
+
+  it('leaves both out of a panel that was neither cropped nor turned', () => {
+    const spec = toSpec({
+      title: 'T',
+      panels: [{ id: 'p1', src: 'a.png', natural: [640, 360] }],
+      shapes: [],
+    });
+    expect(spec.panels[0]).not.toHaveProperty('crop');
+    expect(spec.panels[0]).not.toHaveProperty('rotation');
   });
 });
 
@@ -1771,6 +1811,31 @@ describe('pasted images', () => {
     ]);
     // a shape bound to a paste survives, exactly like one bound to a panel
     expect(spec.shapes[0].panel).toBe('x1');
+  });
+
+  it('persists an overlay crop and turn without replacing its source dimensions', () => {
+    const spec = toSpec({
+      title: 'x', panels: [], shapes: [], notes: {},
+      pastes: [paste({
+        natural: [300, 200],
+        sourceNatural: [800, 400],
+        crop: { x: 50, y: 25, w: 300, h: 200 },
+        rotation: -32,
+      })],
+    });
+    expect(spec.pastes[0]).toMatchObject({
+      natural: [800, 400],
+      crop: { x: 50, y: 25, w: 300, h: 200 },
+      rotation: -32,
+    });
+  });
+
+  it('drops a crop that covers the whole overlay: that is no crop at all', () => {
+    const spec = toSpec({
+      title: 'x', panels: [], shapes: [], notes: {},
+      pastes: [paste({ natural: [400, 300], crop: { x: 0, y: 0, w: 400, h: 300 } })],
+    });
+    expect(spec.pastes[0]).not.toHaveProperty('crop');
   });
 
   it('a proof with no pastes still writes an empty list, so reloads are uniform', () => {

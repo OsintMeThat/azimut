@@ -7,8 +7,12 @@ is how the app reads them.
 
 from __future__ import annotations
 
+import io
+
 import httpx
+import numpy as np
 import pytest
+from PIL import Image
 
 from azimut.engine import tiles, wayback
 
@@ -169,12 +173,11 @@ def test_listing_the_basemaps_asks_esri_nothing(client, monkeypatch):
 # -- the walk ----------------------------------------------------------------------
 
 
-def _walk(select_by_release, sizes=None, tiles_by_release=None, seen=None, pictures=None):
+def _walk(select_by_release, tiles_by_release=None, seen=None, pictures=None):
     """A stub for the tilemap, the tiles and the metadata. `select_by_release[r]`
     is the release the tilemap names when asked at `r`; None means no tile
     there. `pictures[r]` is `(epoch ms, sensor)` or None for no metadata; by
     default every release was taken on a different day."""
-    sizes = sizes or {}
     tiles_by_release = tiles_by_release or {}
     pictures = pictures if pictures is not None else {}
 
@@ -188,7 +191,7 @@ def _walk(select_by_release, sizes=None, tiles_by_release=None, seen=None, pictu
             chosen = select_by_release.get(release)
             if chosen is None:
                 return Reply({"data": [0], "valid": True})
-            return Reply({"data": [1], "select": [chosen], "size": [sizes.get(chosen, 100)]})
+            return Reply({"data": [1], "select": [chosen]})
         if url.split("?")[0].endswith("/query"):
             suffix = url.split("World_Imagery_Metadata_")[1].split("/")[0]
             release = next(int(k) for k, v in CONFIG.items() if v["metadataLayerUrl"].endswith(f"_{suffix}/MapServer"))
@@ -208,7 +211,7 @@ def _releases(changes):
 
 
 def test_the_walk_names_each_release_that_changed_the_point_newest_first():
-    get = _walk({26334: 64776, 25982: 10, 10: 10}, sizes={64776: 300, 10: 200})
+    get = _walk({26334: 64776, 25982: 10, 10: 10})
     assert _releases(wayback.local_changes(50.45, 30.52, 15, get=get)) == [64776, 10]
 
 
@@ -222,23 +225,10 @@ def test_a_release_the_list_does_not_know_ends_the_walk_rather_than_guessing():
     assert wayback.local_changes(50.45, 30.52, 15, get=get) == []
 
 
-def test_two_neighbours_with_the_same_pixels_are_one_change_and_the_older_stays():
+def test_two_neighbours_with_the_same_bytes_are_one_change_and_the_older_stays():
     same = b"identical jpeg"
-    get = _walk(
-        {26334: 64776, 25982: 10, 10: 10},
-        sizes={64776: 14, 10: 14},
-        tiles_by_release={64776: same, 10: same},
-    )
+    get = _walk({26334: 64776, 25982: 10, 10: 10}, tiles_by_release={64776: same, 10: same})
     assert _releases(wayback.local_changes(50.45, 30.52, 15, get=get)) == [10]
-
-
-def test_equal_sizes_with_different_pixels_are_still_two_changes():
-    get = _walk(
-        {26334: 64776, 25982: 10, 10: 10},
-        sizes={64776: 5, 10: 5},
-        tiles_by_release={64776: b"aaaaa", 10: b"bbbbb"},
-    )
-    assert _releases(wayback.local_changes(50.45, 30.52, 15, get=get)) == [64776, 10]
 
 
 def test_a_picture_published_again_is_one_change_dated_by_its_first_release():
@@ -247,7 +237,6 @@ def test_a_picture_published_again_is_one_change_dated_by_its_first_release():
     taken = (1_696_377_600_000, "GE01")  # 2023-10-04
     get = _walk(
         {26334: 26334, 64776: 25982, 10: 10},
-        sizes={26334: 300, 25982: 200, 10: 100},
         pictures={26334: taken, 25982: taken, 10: (1_648_512_000_000, "WV03")},
     )
     changes = wayback.local_changes(50.45, 30.52, 15, get=get)
@@ -259,18 +248,13 @@ def test_a_picture_published_again_is_one_change_dated_by_its_first_release():
 def test_the_same_day_from_another_satellite_is_another_picture():
     get = _walk(
         {26334: 64776, 25982: 10, 10: 10},
-        sizes={64776: 300, 10: 200},
         pictures={64776: (1_696_377_600_000, "GE01"), 10: (1_696_377_600_000, "WV02")},
     )
     assert _releases(wayback.local_changes(50.45, 30.52, 15, get=get)) == [64776, 10]
 
 
 def test_a_release_without_metadata_is_never_merged_into_its_neighbour():
-    get = _walk(
-        {26334: 64776, 25982: 10, 10: 10},
-        sizes={64776: 300, 10: 200},
-        pictures={64776: None, 10: None},
-    )
+    get = _walk({26334: 64776, 25982: 10, 10: 10}, pictures={64776: None, 10: None})
     changes = wayback.local_changes(50.45, 30.52, 15, get=get)
     assert _releases(changes) == [64776, 10]
     assert changes[0].acquired is None
@@ -279,7 +263,6 @@ def test_a_release_without_metadata_is_never_merged_into_its_neighbour():
 def test_a_tile_that_cannot_be_read_keeps_its_change_rather_than_failing_the_walk():
     flaky = _walk(
         {26334: 64776, 25982: 10, 10: 10},
-        sizes={64776: 5, 10: 5},
         tiles_by_release={64776: b"same!", 10: b"same!"},
     )
 
@@ -304,6 +287,87 @@ def test_the_walk_asks_at_the_view_zoom_but_never_past_the_basemap():
     seen = []
     wayback.local_changes(50.45, 30.52, 22, get=_walk({26334: 26334}, seen=seen))
     assert "/tilemap/26334/19/" in seen[0]
+
+
+# -- the same picture, published again ---------------------------------------------
+#
+# The tilemap answers in bytes: Esri re-encodes and re-tones a tile far more
+# often than the ground under it moves, and every one of those used to reach the
+# picker as a change the analyst stepped through for nothing.
+
+
+def _ground(seed: int):
+    """A 256 px tile with structure in it: a coarse random field, blown up smoothly."""
+    field = np.random.default_rng(seed).integers(20, 235, size=(16, 16), dtype=np.uint8)
+    return np.asarray(Image.fromarray(field).resize((256, 256), Image.Resampling.BICUBIC))
+
+
+def _jpeg(pixels, quality: int = 85) -> bytes:
+    buffer = io.BytesIO()
+    Image.fromarray(pixels).save(buffer, format="JPEG", quality=quality)
+    return buffer.getvalue()
+
+
+def test_the_same_picture_re_encoded_is_one_change_however_its_bytes_differ():
+    ground = _ground(7)
+    get = _walk(
+        {26334: 64776, 25982: 10, 10: 10},
+        tiles_by_release={64776: _jpeg(ground, 92), 10: _jpeg(ground, 55)},
+    )
+    assert _releases(wayback.local_changes(50.45, 30.52, 15, get=get)) == [10]
+
+
+def test_the_same_picture_under_a_new_colour_balance_is_one_change():
+    ground = _ground(11)
+    toned = np.clip(ground * 0.7 + 50, 0, 255).astype(np.uint8)
+    get = _walk(
+        {26334: 64776, 25982: 10, 10: 10},
+        tiles_by_release={64776: _jpeg(toned), 10: _jpeg(ground)},
+    )
+    assert _releases(wayback.local_changes(50.45, 30.52, 15, get=get)) == [10]
+
+
+def test_the_same_picture_re_processed_under_a_hard_gamma_is_one_change():
+    ground = _ground(11)
+    lifted = (255 * ((ground / 255) ** 0.55)).astype(np.uint8)
+    get = _walk(
+        {26334: 64776, 25982: 10, 10: 10},
+        tiles_by_release={64776: _jpeg(lifted), 10: _jpeg(ground)},
+    )
+    assert _releases(wayback.local_changes(50.45, 30.52, 15, get=get)) == [10]
+
+
+def test_something_built_on_the_ground_is_still_a_change():
+    ground = _ground(3)
+    built = ground.copy()
+    built[100:132, 100:132] = 250  # a roof over an eighth of the tile across
+    get = _walk(
+        {26334: 64776, 25982: 10, 10: 10},
+        tiles_by_release={64776: _jpeg(built), 10: _jpeg(ground)},
+    )
+    assert _releases(wayback.local_changes(50.45, 30.52, 15, get=get)) == [64776, 10]
+
+
+def test_another_picture_of_the_same_place_is_still_a_change():
+    get = _walk(
+        {26334: 64776, 25982: 10, 10: 10},
+        tiles_by_release={64776: _jpeg(_ground(1)), 10: _jpeg(_ground(2))},
+    )
+    assert _releases(wayback.local_changes(50.45, 30.52, 15, get=get)) == [64776, 10]
+
+
+def test_a_run_of_republications_collapses_onto_the_release_that_first_showed_it():
+    ground = _ground(5)
+    get = _walk(
+        {26334: 26334, 64776: 64776, 25982: 25982, 10: 10},
+        tiles_by_release={
+            26334: _jpeg(ground, 90),
+            64776: _jpeg(np.clip(ground * 1.1, 0, 255).astype(np.uint8)),
+            25982: _jpeg(ground, 60),
+            10: _jpeg(_ground(6)),
+        },
+    )
+    assert _releases(wayback.local_changes(50.45, 30.52, 15, get=get)) == [25982, 10]
 
 
 # -- when the pixels were taken ----------------------------------------------------

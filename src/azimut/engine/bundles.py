@@ -81,9 +81,14 @@ BUNDLED_ROOTS = frozenset(
 #: exported. Format 2 never uses these, so this set dies with format 1.
 IMPORTABLE_ROOTS = BUNDLED_ROOTS | {"case.db", "exports", "inspect", "search"}
 NOT_BUNDLED = {
-    ".trash": "deleted artifacts do not travel",
+    layout.TRASH_DIR: "deleted artifacts do not travel",
     "media/.thumbs": "content-addressed thumbnails are rebuilt",
     "media/.dl": "in-progress downloads belong to this machine",
+    # The snapshot beside it is what the case holds; this is one parse away from
+    # it, and an import rebuilds it the first time the layer is drawn.
+    f"{layout.LAYERS_DIR}/{layout.LAYER_CACHE_DIR}": (
+        "a map layer's parsed copy is rebuilt from its snapshot"
+    ),
 }
 
 #: Extensions whose bytes are already compressed. Deflating them burns CPU on
@@ -299,11 +304,9 @@ def _require_export_space(target: Path, total_size: int) -> None:
 
 
 def _included(rel: str) -> bool:
-    if rel == ".trash" or rel.startswith(".trash/"):
+    if rel == layout.TRASH_DIR or rel.startswith(layout.TRASH_DIR + "/"):
         return False
-    if rel in {"media/.thumbs", "media/.dl"}:
-        return False
-    if rel.startswith("media/.thumbs/") or rel.startswith("media/.dl/"):
+    if any(rel == left or rel.startswith(left + "/") for left in NOT_BUNDLED):
         return False
     return PurePosixPath(rel).parts[0] in BUNDLED_ROOTS
 

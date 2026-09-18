@@ -36,6 +36,9 @@
     wayback = null,
     /** What it is actually showing — a billed base steps aside when paused. */
     shown,
+    /** Open the Sentinel-2 picker from a dated chip, as Wayback's already is.
+     *  Compare asks for it: its card has a layers button of its own. */
+    dateChip = false,
   } = $props();
 
   let menuOpen = $state(false);
@@ -103,6 +106,7 @@
     <SentinelPicker
       bind:menuEl={s2MenuEl}
       {s2}
+      {dateChip}
       {maxccLabel}
       {monthLabel}
       {monthGrid}
@@ -195,7 +199,9 @@
     position: absolute;
     top: calc(100% + 6px);
     right: 0;
-    z-index: 20;
+    /* the same layer as the date pickers beside it: lower, and Compare's
+       annotation rail drew straight over the open list */
+    z-index: 700;
     /* wide enough for the longest basemap name on one line: the list is read
        by shape as much as by word, and a wrapped row breaks the column */
     min-width: 244px;

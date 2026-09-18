@@ -1061,6 +1061,9 @@ export async function installAppFixture(page, options = {}) {
       return json(route, overview);
     }
     const caseId = fixtureCases.find((item) => path.startsWith(`/api/cases/${item.id}/`))?.id;
+    if (caseId && path === `/api/cases/${caseId}/map-layers` && request.method() === 'GET') {
+      return json(route, []);
+    }
     if (caseId && path === `/api/cases/${caseId}/analysis-views`) {
       if (request.method() === 'GET') {
         return json(route, {
@@ -1997,10 +2000,11 @@ export async function installAppFixture(page, options = {}) {
 /**
  * Put the Saved panel, and the layer drawing from it, on one position.
  *
- * The panel opens on **Media**, so a spec about places or captures asks for its
- * own position rather than assuming the one it used to open on.
+ * The map panel opens on its Layers tab and Saved opens on **Media**, so a spec
+ * about the case's own work asks for both rather than assuming either.
  */
 export async function showSaved(page, kind) {
+  await page.getByRole('tablist', { name: 'Map panel' }).getByRole('tab', { name: 'Saved' }).click();
   await page
     .getByRole('group', { name: 'What this panel lists' })
     .getByRole('button', { name: kind, exact: true })

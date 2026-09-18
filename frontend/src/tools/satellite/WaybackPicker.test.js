@@ -22,6 +22,7 @@ function props(wb = {}) {
       changesBusy: false,
       changesNote: '',
       stale: false,
+      reading: false,
       visible: [RELEASES[1], RELEASES[2]],
       position: 0,
       toggleMenu: vi.fn(),
@@ -60,6 +61,20 @@ describe('the picker', () => {
     const { body } = render(WaybackPicker, { props: props() });
     expect(body).toMatch(/<button[^>]*disabled[^>]*aria-label="Newer release"/);
     expect(body).not.toMatch(/<button[^>]*disabled[^>]*aria-label="Older release"/);
+  });
+
+  it('offers nothing while this point’s first history is coming', () => {
+    // every release is not what "Changes here" was asked for, and a list about
+    // to shrink to a quarter of itself is one the analyst reads and acts on
+    const { body } = render(
+      WaybackPicker,
+      { props: props({ reading: true, changesBusy: true, changes: null, visible: RELEASES }) }
+    );
+    expect(body).toContain("Reading this point's history");
+    expect(body).not.toContain('type="range"');
+    expect(body).not.toContain('2014-02-20');
+    // …and the way out of the wait stays on offer
+    expect(body).toContain('Every release');
   });
 
   it('says a history is being read, has failed, or belongs to somewhere else', () => {

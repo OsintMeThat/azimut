@@ -384,25 +384,42 @@ describe('handOff: filling a composer the app prepared', () => {
     // paths become one token-bearing read each, against the app, not the page
     expect(fetchImpl).toHaveBeenCalledWith(
       'http://127.0.0.1:8477/api/ingest/file?case_id=case-1&path=proofs%2Fstrike.png',
-      { headers: { 'X-Azimut-Token': 'tok-123' } }
+      {
+        headers: {
+          'X-Azimut-Token': 'tok-123',
+          Range: `bytes=0-${4 * 1024 * 1024 - 1}`,
+        },
+      }
     );
     expect(chrome.tabs.create).toHaveBeenCalledWith({ url: payload.url, active: true });
     // Both injections in the page's own world: an editor ignores what an
     // extension's world makes, and there is no extension API on that side — so
     // the thread goes in on a global and the report comes back as a return value.
-    const [setter, filler] = chrome.scripting.executeScript.mock.calls
+    const injected = chrome.scripting.executeScript.mock.calls
       .map(([one]) => one)
       .filter((call) => call.world === 'MAIN');
+    const setter = injected.find((call) => call.args?.[0]?.posts);
+    const chunk = injected.find((call) => call.args?.[0] === '0:0');
+    const filler = injected.find((call) => call.files?.includes('handoff.js'));
     expect(setter.world).toBe('MAIN');
-    // The file crosses as plain base64, never as a `data:` URL: the page rebuilds
-    // it with atob, because a fetch on that side answers to the site's own CSP —
-    // and X allows no connection to `data:`, so every attachment came back
-    // "Failed to fetch" and took the rest of the thread with it.
+    // The thread starts with an empty byte-parts list. Each bounded slice then
+    // crosses as plain base64 and is decoded into that list in the page, never
+    // fetched there through a URL that would answer to the site's CSP.
     const [{ posts }] = setter.args;
     expect(posts).toHaveLength(2);
     expect(posts[0].files).toEqual([
-      { name: 'strike.png', type: 'image/png', data: btoa('\x01\x02\x03') },
+      {
+        id: '0:0',
+        name: 'strike.png',
+        type: 'application/octet-stream',
+        parts: [],
+      },
     ]);
+    expect(chunk.args).toEqual(['0:0', 'image/png', btoa('\x01\x02\x03')]);
+    globalThis.window = { __AZIMUT_HANDOFF__: { posts } };
+    chunk.func(...chunk.args);
+    expect([...posts[0].files[0].parts[0]]).toEqual([1, 2, 3]);
+    delete globalThis.window;
     expect(filler).toEqual({ target: { tabId: 7 }, world: 'MAIN', files: ['handoff.js'] });
   });
 
@@ -431,35 +448,53 @@ describe('handOff: filling a composer the app prepared', () => {
     // and it says so, because a picture missing from a published thread is not
     // something to discover after posting
     await settle(() => expect(chrome.notifications.create).toHaveBeenCalled());
+    const injected = chrome.scripting.executeScript.mock.calls.map(([one]) => one);
+    const setter = injected.find((call) => call.args?.[0]?.posts);
+    const discard = injected.find((call) => call.args?.length === 1 && call.args[0] === '0:0');
+    globalThis.window = { __AZIMUT_HANDOFF__: setter.args[0] };
+    discard.func(...discard.args);
+    expect(setter.args[0].posts[0].files).toEqual([]);
+    delete globalThis.window;
   });
 
-  it('skips an attachment too heavy to push into the page, where a window would take it', async () => {
-    // The app's ceiling is the one a reference window answers to, and that one
-    // pulls its file a chunk at a time. A thread's files go the other way — the
-    // whole payload is injected at once — so this side keeps a lower number.
+  it('streams a composer attachment in slices instead of keeping the old 48 MB ceiling', async () => {
+    // The real slices are 4 MB. Tiny stand-ins make the boundary visible without
+    // allocating a large video in the unit suite.
     const chrome = fillingChrome();
-    const fetchImpl = vi.fn(async () => ({
-      ok: true,
-      blob: async () => ({
-        type: 'video/mp4',
-        size: 64 * 1024 * 1024,
-        arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
-      }),
-    }));
+    let offset = 0;
+    const fetchImpl = vi.fn(async () => {
+      const start = offset;
+      offset += 3;
+      const response = {
+        ok: true,
+        status: 206,
+        headers: { get: () => `bytes ${start}-${start + 2}/6` },
+        blob: async () => ({
+          type: 'video/mp4',
+          arrayBuffer: async () => new Uint8Array(start ? [4, 5, 6] : [1, 2, 3]).buffer,
+        }),
+      };
+      return response;
+    });
     const { handOff } = load({ chrome, fetchImpl });
     chrome.scripting.executeScript = vi.fn(async () => [{ result: { filled: 2 } }]);
 
     await handOff(payload);
 
-    await settle(() =>
-      expect(chrome.notifications.create).toHaveBeenCalledWith(
-        expect.objectContaining({ message: expect.stringContaining('could not be handed over') })
-      )
-    );
-    const [setter] = chrome.scripting.executeScript.mock.calls
+    await settle(() => expect(fetchImpl).toHaveBeenCalledTimes(2));
+    expect(source).not.toContain('MAX_COMPOSER_BYTES');
+    expect(fetchImpl.mock.calls.map(([, init]) => init.headers.Range)).toEqual([
+      `bytes=0-${4 * 1024 * 1024 - 1}`,
+      `bytes=3-${3 + 4 * 1024 * 1024 - 1}`,
+    ]);
+    const chunks = chrome.scripting.executeScript.mock.calls
       .map(([one]) => one)
-      .filter((call) => call.world === 'MAIN');
-    expect(setter.args[0].posts[0].files).toEqual([]);
+      .filter((call) => call.args?.[0] === '0:0');
+    expect(chunks.map((call) => call.args[2])).toEqual([
+      btoa('\x01\x02\x03'),
+      btoa('\x04\x05\x06'),
+    ]);
+    expect(chrome.notifications.create).not.toHaveBeenCalled();
   });
 
   it('says what the fill could not do, since the app was answered long before', async () => {

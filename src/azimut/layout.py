@@ -58,6 +58,13 @@ COMPARE_DIR = ".compare"
 ANALYSIS_DIR = ".analysis"
 #: Saved Grid Search state.
 SEARCH_DIR = ".search"
+#: Map layers the analyst added themselves: a file they opened, or a URL they
+#: subscribed to. Hidden because they did not author the data — the row in the
+#: Layers panel is where it is worked with, and it offers to reveal the file.
+LAYERS_DIR = ".layers"
+#: The parsed GeoJSON a layer is drawn from. Derived from the snapshot beside
+#: it, so it is dropped on delete and rebuilt on demand rather than carried.
+LAYER_CACHE_DIR = ".cache"
 #: Machinery that belongs to a visible sibling: `media/.meta/` holds sidecars,
 #: `proofs/.meta/` holds the editable specs and pasted assets.
 META_DIR = ".meta"
@@ -82,6 +89,7 @@ CASE_SUBDIRS = (
     COMPARE_DIR,
     ANALYSIS_DIR,
     SEARCH_DIR,
+    LAYERS_DIR,
 )
 
 #: Deleted artifacts wait here, hidden at the case root. Outside `CASE_SUBDIRS`
@@ -473,6 +481,38 @@ def grid_rel(name: str) -> str:
     return f"{SEARCH_DIR}/{name}.json"
 
 
+def layer_spec_rel(name: str) -> str:
+    """What a map layer is: where it came from, how it refreshes, how it draws."""
+    return f"{LAYERS_DIR}/{name}.json"
+
+
+def layer_snapshot_rel(name: str) -> str:
+    """The bytes as they arrived, under one extension whatever the format.
+
+    The original filename and media type are recorded in the spec instead. A
+    snapshot named after its source would collide with the spec the moment a
+    GeoJSON arrived as `.json`, and the suffix is the one thing about the file
+    that nothing reads: the format is sniffed from the bytes.
+    """
+    return f"{LAYERS_DIR}/{name}.src"
+
+
+def layer_icons_rel(name: str) -> str:
+    """The source's own pictograms, composed once and stored beside the snapshot.
+
+    A zip rather than a directory: a layer owns one more path whatever the number
+    of icons in it, so the Trash moves one thing, the bundle carries one thing,
+    and a My Maps with forty styles costs the path budget the same as one with
+    two.
+    """
+    return f"{LAYERS_DIR}/{name}.icons"
+
+
+def layer_cache_rel(name: str) -> str:
+    """The parsed GeoJSON the browser consumes, rebuilt from the snapshot."""
+    return f"{LAYERS_DIR}/{LAYER_CACHE_DIR}/{name}.geojson"
+
+
 def content_dirs(root: Path) -> tuple[Path, ...]:
     """Every directory a case is born with.
 
@@ -486,6 +526,9 @@ def content_dirs(root: Path) -> tuple[Path, ...]:
         media(root) / META_DIR,
         subdir(root, "proofs") / META_DIR,
         subdir(root, "sheets") / META_DIR,
+        # Born for the same reason: a derived cache created on first use would
+        # otherwise be one path an emptied case holds and a new one does not.
+        subdir(root, LAYERS_DIR) / LAYER_CACHE_DIR,
     ]
     return tuple(dirs)
 

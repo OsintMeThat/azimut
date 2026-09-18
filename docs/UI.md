@@ -1188,8 +1188,11 @@ remote ids in provenance instead of appending them to the visible name.
 slots and loads tiles only after a source or a starting pair is chosen. Each
 side keeps its provider, Wayback release, Sentinel-2 day and reference layers.
 The source cards and mode controls use the application's shared theme, buttons
-and spacing. Both Layers buttons open the same A/B sheet, including each side's
-FIRMS period, VIIRS night and saved case work.
+and spacing. On a card the date is a chip beside the provider, reading the same
+for Wayback and for Sentinel-2, so the card's layers icon means one thing. The
+cards are as wide as the maps under them, so the split between A and B is one
+line down the tool. Both Layers buttons open the same A/B sheet, including each
+side's FIRMS period, VIIRS night and saved case work.
 
 The mode dock holds two kinds of choice, separated by a rule. Left of it, how the
 pair is *read*: side by side, through a swipe, with B faded over A, or as
@@ -1291,11 +1294,13 @@ scenes rather than synthetic ones: rough sea under glint, a dense anchorage unde
 cumulus, oil fires and wildfires, bright roofs, a construction site across seven
 months, dry-season pastures. Vessels stand out from their own patch of sea in near
 *and* short-wave infrared, which a breaking wave does not, and a candidate joined to
-bulk land is a coast. Fires take the published short-wave ratios on B8A, which
+bulk land is a coast. What counts as sea comes from the water index or from the
+classification, either one is enough: under sun glint the index alone read a whole
+strait as dry. Fires take the published short-wave ratios on B8A, which
 shares B12's grid. Construction is ground that moved the same way in every band
 while its vegetation held; a small spot changed while the ring of ground around it
 did not, that ring read with a hole in its middle so the spot cannot sit in its own
-background; a burn has to end dark, which a dried pasture does not.
+background and over measured ground only, so a granule edge raises nothing; a burn has to end dark, which a dried pasture does not.
 
 **Small**, **Medium**, **Large** and **All** under the analyzer set the target
 size as a whole: floor and ceiling area, cleanup and grouping together, since a
@@ -1367,10 +1372,12 @@ offers for its own rails are left out rather than shown dead.
 updates its rendered media preview in My work (PNG, or GIF for blink). A preview
 used by a derived proof is preserved when a later save creates new pixels.
 **Open** restores the sources, layers, camera, reading mode, blink speed, detection
-settings and annotations; Detect is a place to work rather than a way to read the
-pair, so a session saved from it reopens side by side and its runs stay in the case. Export writes an attributed PNG, blink GIF or divider-sweep GIF
-to the shared Views destination; Copy current PNG uses the clipboard. Exports
-include projected annotations, a scale bar and north arrow. Tile captures wait
+settings, annotations and the optional export frame; Detect is a place to work rather
+than a way to read the pair, so a session saved from it reopens side by side and its runs
+stay in the case. Export writes an attributed PNG, blink GIF or divider-sweep GIF to the
+shared Views destination; an optional ground-anchored frame cuts any of the three to the
+chosen area, while Full view remains the default. Copy current PNG uses the clipboard.
+Exports include projected annotations, a scale bar and north arrow. Tile captures wait
 for loaded frames and reject incomplete tiles. Google Maps JS uses the
 user-triggered Azimut Capture extension and retains its on-map credits.
 
@@ -1385,8 +1392,18 @@ nothing parses or geocodes the raw text the way the plain box always did. A city
 lands at zoom 12 and a street at 15; a saved item reopens at its own view and
 bearing. Picks are remembered locally and offered back when the bar is empty.
 
+**The right-hand panel has two halves, and one tab strip across its top.**
+**Layers** is what is drawn over the imagery; **Saved** is what the case holds.
+They used to be one scroll, with a list of external maps wedged between them and
+a header that named only the third of the three. It opens on **Layers**, because
+that is what this panel is for on the surface it is docked to: the case's own
+work is also reachable from the sidebar and the Board, while what is switched on
+over the imagery is reachable from nowhere else. Each section states its own
+count, so the strip carries none — folded shut, the panel shows the active half's
+name and its number.
+
 Saved work — places, captures and screenshots filed by the extension — lives in
-one right-hand **Saved** panel, grouped by geography rather than by date. The
+the **Saved** half, grouped by geography rather than by date. The
 tree's depth follows the case: one country opens straight on its regions, a
 worldwide case opens on continents. A filter and a `Media / Places / Captures`
 switch stay pinned above it; a screenshot counts as a capture. The panel opens on
@@ -1402,7 +1419,8 @@ that place wears a dot and a count instead.
 carries no coordinates of its own, so the position is read off the graph, by
 every road that states it: a `located-at` or `depicts` edge to a place, the point
 enrichment proposed from the file's own GPS, and the derivation chain, which puts
-a video where the proof that composed a frame of it stands. A file recorded on a
+a video where the proof that composed a frame of it stands. That chain runs
+through material only: two clips published in one post keep their own points. A file recorded on a
 roof and showing the street below is a row at each, and roads that agree on a
 point are one row that names them all (`Recorded here · Shows this place · Via
 Roofline`). A file nothing places is not listed, and neither is anything the case
@@ -1481,13 +1499,19 @@ which it is (`lib/map/tools.js`) rather than adding a button somewhere.
   railways, power lines, sea marks, GPS traces, active fires, night lights, the
   case's saved work, and the points another tool handed over (a sheet's
   coordinate column, a Timeline window). None of them changes what the
-  pointer does, so none takes a rail seat: they are a list in the Saved panel,
-  each with its own switch. A handoff appears in the list when it arrives and
-  leaves when it is closed, and keeps a Close beside its switch, since hiding a
-  layer and being done with it are two different things. A layer that is a
-  question answers it under its own switch rather than in a card floating over
-  the map: a fixed handful of answers as a row of chips under its own label, an
-  open-ended one — the folders the analyst named — as a list.
+  pointer does, so none takes a rail seat: they are a list in the panel beside
+  the map, each with its own switch. A handoff appears in the list when it
+  arrives and leaves when it is closed, and keeps a Close beside its switch,
+  since hiding a layer and being done with it are two different things. A layer
+  that is a question answers it under its own switch rather than in a card
+  floating over the map: a fixed handful of answers as a row of chips under its
+  own label, an open-ended one — the folders the analyst named — as a list.
+- **Added layers** — a second section under that list, with its own `+ Add a
+  layer`. The line between the two is *who chose it*: the stack above is the
+  app's, this one is the analyst's. A row here carries four things a curated row
+  has no use for — where it came from, how fresh what is drawn actually is, a
+  legend that filters, and Refresh, Reveal file and Remove. See
+  **Added map layers** below.
 - **The picture** — the provider, the Sentinel-2 layer and date, when the pixels
   were taken, the eco and usage pills, and the compass — belongs to the
   *surface*, in its own top-right corner. Which imagery is on screen is a
@@ -1542,6 +1566,77 @@ night, from a calendar that stops at each record's first night and at
 yesterday, since today's pass is still being processed. It sits lowest in the
 stack, slightly see-through so the lit street can be named, and the row says
 that cloud hides lights too.
+
+**Added map layers** are somebody else's map over this one: a KML, KMZ, GeoJSON
+or GPX file opened from the computer, or a public My Maps or map URL followed.
+Both land in the same section, because the question the row answers is who put
+this on my map. **A layer is drawn and never adopted** — clicking a feature opens
+what the source says about it, its name, its group and its description, with
+nothing to confirm and no way from there into the case. A description written as
+columns is drawn as columns, one label and its value per row, because a My Maps
+keeps its fields in a table and a table flattened into a paragraph is unreadable.
+Addresses in it are links, and they open in a new tab: a feature sourced from a
+post is read by opening the post.
+
+The row states five things:
+
+- **Where it came from** — the filename, the host, or Google My Maps. A followed
+  map is a page somebody publishes, so this is a link to it: the one thing on the
+  row that leaves the app, and it leaves on a click.
+- **How fresh what is drawn is.** A file says when it was opened and nothing
+  more: it is exactly what was dropped in. A followed map says when it was last
+  read, and says *stale* when that was long enough ago to matter — before the
+  marks are read, not after.
+- **Both counts.** `3 200 features · 412 shown` whenever a group is switched
+  off. The number drawn never passes for the number loaded.
+- **Its legend, which is the filter.** One row per group with its colour and its
+  count; clicking one hides exactly those features and keeps them loaded. A KML's
+  groups are its folders, which is how a My Maps is built; a GPX's are waypoints,
+  tracks and routes; a GeoJSON states none, so the file is one group named after
+  itself rather than a grouping guessed out of whichever property looked like one.
+- **A search, in the legend's own slot.** Typing puts the matches where the
+  groups were, and the two are never on screen at once: the legend is the filter
+  the case keeps, the search is a way of looking that leaves nothing behind. The
+  counts above it do not move while somebody types. Names and groups are read,
+  never descriptions, which on a layer of a hundred thousand features would be
+  the most expensive thing in the app for a gain nobody asked for. Picking a
+  match takes the map to that feature and opens the card a click on it opens. A
+  match from a group that is switched off is listed all the same, marked, and
+  going there switches it back on. The box is offered while the layer is drawn;
+  one that is switched off has nowhere to send anybody.
+
+**The source's own colours are always honoured; its icons are, if asked.** The
+add dialog carries one tick per half, *Use the map's own icons* — off for a file,
+on for a followed address, which is the same line the rest of the app draws:
+following a pasted link already reaches the network, opening a file off this
+machine does not. It is asked there and not on the row because there is the
+moment the request would be made.
+
+Ticked, each distinct icon is read once — out of the KMZ, or off the web by the
+backend — tinted the colour its style asked for, held to one size **measured on
+what is painted rather than on the image around it**, and stored in the case.
+What the map loads is a picture from this machine; **the browser never asks the
+source's host for anything.** A My Maps draws in its creator's own pictograms,
+and it draws offline, and it draws the same after a bundle import; a followed My
+Maps carries its icons inside the file it is fetched as, so most of them cost no
+request at all.
+
+Unticked, or when an icon cannot be read, the pictogram is the app's own: a pin,
+a line or an area, each with a **white edge**, since a colour picked against
+somebody else's basemap has no reason to read against this case's imagery. That
+is also the fallback, per icon rather than per layer — one image that will not
+load costs its own marks their picture and nothing else, so there is no switch to
+find when something looks wrong. Nothing in the
+layer is labelled on the map; a feature's name is in the hover and in the card.
+Far out, where the marks would be a solid mat, the map keeps only those that fit
+and draws the rest as dots, so a dense layer never looks emptier than it is.
+
+**Refresh, Reveal file and Remove** sit under the row. A followed map is re-read
+when it is added, when Refresh is pressed, and when a case opens holding it
+enabled — never on a timer, and never while it is switched off. A read that finds
+nothing new rewrites nothing, a read that fails leaves the last copy on the map,
+and the copy the layer was drawn from is kept in the case, so it draws offline and
+travels in the bundle. Removing a layer takes that copy with it, to the trash.
 
 A date is picked from a calendar the app draws, in the panel rather than over
 it. The browser's own opens at its own size, in its own locale, and half
@@ -1614,20 +1709,30 @@ holds something Save has not taken, since the panel opens on what the case holds
 **Esri Wayback is a basemap of every World Imagery release.** Picking it puts a
 chip beside the provider naming the release on screen, and the chip opens a
 slider through time, oldest left, with a step either way and the list under it.
-The list opens on **Changes here**: only the releases that brought a new picture
-of the tile under the crosshair. Esri's tilemap says which release a tile really
-comes from, and walking it backwards finds each change; a picture Esri published
-again, re-encoded or re-coloured, is folded into its first publication by
-comparing the tile's bytes and the acquisition date and satellite its metadata
-states. Each row carries its release date and, beside it, when the picture was
-taken; the pill under the chip dates the pixels on screen the same way. Narrowed
-to changes, the newest release is named by the change it shows rather than by a
-date no row carries. **Every release** lists all of them, where neighbours
-often look identical because nothing changed there. The history is read when the
-picker opens, takes some seconds (Esri's metadata service is slow), and is read
-again once the map settles in another tile; until it arrives, and when it
-fails, every release stays on offer. The release rides on the provider id
-(`esri-wayback~64776`), so tiles are cached and captures credited under it.
+The list opens on **Changes here**, and so does the slider: only the releases
+that brought a new picture of the tile under the crosshair. Esri's tilemap says
+which release a tile really comes from, and walking it backwards shortlists the
+candidates; a picture Esri published again, re-encoded or re-coloured, is folded
+into its first publication by comparing the tiles themselves, then the
+acquisition date and satellite their metadata states. Each row carries its
+release date and, beside it, when the picture was taken; the pill under the chip
+dates the pixels on screen the same way. Narrowed to changes, the newest release
+is named by the change it shows rather than by a date no row carries. **Every
+release** lists all of them, where neighbours often look identical because
+nothing changed there.
+
+**Opening the picker once makes the history follow the map.** Every view that
+settles over another tile reads that tile's history from then on, picker open or
+shut — gating that on the picker *staying* open was the bug behind a picker that
+re-opened on wherever the analyst had been before. A tile already read costs
+nothing, and a tile Esri refused is left alone until **Refresh** is pressed, so
+panning never hammers a service that is down. A first history takes some seconds
+(Esri's metadata service is slow) and the picker offers nothing while it comes,
+since every release is not what *Changes here* was asked for; the changes it
+already has stay on the slider while the next tile's are read. A history that
+fails falls back to every release, which is the honest answer to not knowing.
+The release rides on the provider id (`esri-wayback~64776`), so tiles are cached
+and captures credited under it.
 
 **Right-click the ground** and a menu acts on that point rather than on the
 centre: copy it in every coordinate format, the analyst's own first; ask what
@@ -1637,6 +1742,20 @@ on it; or open it in another map site. A right-click on a shape that answers
 its own (a search-grid cell) stays that shape's. The menu flips away from the
 map's edges, walks with the arrow keys, and closes on Escape, a press outside,
 or a zoom that moves the ground from under it.
+
+**Open in…** is the one row that opens a list, and it opens it *beside* the
+menu. A list unfolding inside would make the menu taller, and a menu already
+placed against the frame's edge answers that by moving — which slides the next
+row out from under the cursor that was about to press it. So the menu is placed
+once, from its measured size, and never again: the submenu flies out to the
+right (to the left where that would leave the map), pushed up rather than clipped
+when the row it hangs from is near the bottom, and anything else arriving late —
+the answer to *What is here?* — scrolls inside a menu that stays put. `→` opens
+it, `←` closes it, Escape leaves the submenu before it leaves the menu.
+
+Those external maps are **only** here. They used to be listed in the panel as
+well, at the map's centre; the same list on the point you actually clicked is
+strictly better, and two of them was the same thing said twice.
 
 **The map opens in as many tabs as there are screens.** `⧉` beside the title
 opens this map again in a tab of its own, on the view it is showing — a tab
@@ -1783,6 +1902,24 @@ shape never reshuffles the buttons above them.
 **Frames.** Any panel or overlay takes a coloured border, its own colour and
 thickness, drawn inset so the layout does not shift. A frame is decoration: it
 stays out of the legend, which is still built from annotation colours alone.
+
+**Panel and overlay transforms.** Selecting either image shows a round knob on a
+short stem above it — the one Collage turns its pieces by — for a free turn, with
+quarter turns as gentle snap points. The turn is carried by the image rather than
+burnt into its pixels, so the selection frame, the crop marks, the border and the
+annotations all stay on the picture's own edges however far it comes round, and
+turning one never resizes it: the page reserves the upright room the turned
+picture needs.
+
+A double-click enters crop mode on the canvas itself: eight black edge and corner
+marks frame the kept pixels, as in a slide editor, over the whole source shown
+shaded outside them — so an earlier crop is there to be taken back, not only
+undone. The crop button in the image row opens the same mode, and closes it. The
+marks pull both ways until you leave crop mode, so a corner taken too far comes
+back in the same pass; clicking off the image, that button again, or saving keeps
+the box, and Escape drops it. The source file stays untouched: the proof stores
+the crop rectangle and the angle, and the export draws through them. Reset crop
+restores the full source while preserving the turn.
 
 **Drawing.** A tool in hand holds the canvas alone. Nothing already drawn answers
 the pointer, so a stroke started inside a box draws a new element instead of

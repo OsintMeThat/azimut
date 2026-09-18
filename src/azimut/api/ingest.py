@@ -749,15 +749,11 @@ def mark_grid(body: GridMarksIn) -> dict[str, Any]:
 HANDOFF_DIRS = ("media", "proofs")
 
 #: Ceiling for one handed-over file. The extension reads it back a chunk at a
-#: time (``Range``, which ``FileResponse`` answers), so what either side holds is
-#: one chunk and never the file — the number is about what is worth carrying into
-#: someone else's page at all, not about the message. A reference window on a
-#: foreign map is meant to reach the same clip the Satellite tab opens, and that
-#: tab streams from disk with no ceiling of its own.
-#:
-#: The composer keeps a smaller one of its own (``MAX_COMPOSER_BYTES`` in
-#: ``extension/background.js``): a thread's attachments are pushed into the page
-#: whole, in one injected payload, so there the string really is the limit.
+#: time (``Range``, which ``FileResponse`` answers), so the base64 message is one
+#: chunk and never the file. The composer rebuilds those chunks as one browser
+#: ``File``; a reference window rebuilds them as a ``Blob``. The number is about
+#: what is worth carrying into someone else's page at all, not message size. The
+#: Satellite tab itself streams from disk and has no ceiling of its own.
 MAX_HANDOFF_BYTES = 512 * 1024 * 1024
 
 

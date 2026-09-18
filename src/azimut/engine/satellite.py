@@ -310,6 +310,34 @@ def _drop_stated(
             case.remove_link(link["id"])
 
 
+def _sweep_point(
+    case: Case, proof_id: str, place_id: str, keep: list[dict[str, Any]]
+) -> None:
+    """Take the point off everything a save posed on it, bar the material named.
+
+    **Read from the point, not from the chain.** The material is what the proof
+    rests on *now*, so walking it reaches nothing a previous save posed and this
+    one dropped: swapping the footage for another clip left the old one standing
+    on the place, and the map went on showing a video the proof no longer rests
+    on. What a re-save has to undo is read off the place, where the edges are.
+
+    Scoped the way :func:`_drop_stated` is — only the roads a proof files by, so a
+    camera's EXIF and the analyst's own hand keep their answer — and only ever
+    called for a point no other proof concludes on, since the composition speaks
+    for itself alone. The proof's own edge is not this sweep's to take: withdrawing
+    it is the caller's decision, restating it is unconditional.
+    """
+    held = {entity["id"] for entity in keep} | {proof_id}
+    stale: list[str] = []
+    for link in case.links_of(place_id):
+        if link["to"] != place_id or link["type"] not in PLACE_VERBS:
+            continue
+        if link["from"] not in held and link["from"] not in stale:
+            stale.append(link["from"])
+    for entity_id in stale:
+        _drop_stated(case, entity_id, place_id, PLACE_VERBS, POINT_ROADS)
+
+
 def _withdraw_point(
     case: Case, proof_id: str, place_id: str, material: list[dict[str, Any]]
 ) -> None:
@@ -318,8 +346,7 @@ def _withdraw_point(
     _drop_stated(case, proof_id, place_id, PLACE_VERBS, None)
     if shared:
         return
-    for entity in material:
-        _drop_stated(case, entity["id"], place_id, PLACE_VERBS, POINT_ROADS)
+    _sweep_point(case, proof_id, place_id, [])
 
 
 def _state_point(
@@ -374,11 +401,19 @@ def _state_point(
     and an audio file drops the edge ``shows`` would refuse. A point another proof
     still concludes on is left alone (:func:`_other_proof_states`) — the answer
     being restated is this proof's, and it does not speak for that one.
+
+    **And the material is restated too, not only its verb** (:func:`_sweep_point`).
+    Swapping the footage for another clip keeps the point, so nothing here withdraws
+    it — and the chain this walks no longer holds the old video, so nothing here
+    reached it either. It stayed on the map, under a proof that had stopped resting
+    on it.
     """
     verb = links.LOCATED_AT if pov else links.DEPICTS
     kinds = ("image", "video", "audio") if pov else ("image", "video")
     shared = _other_proof_states(case, place_id, proof_id)
     case.add_link(proof_id, place_id, links.DEPICTS, by=by, unique=True)
+    if not shared:
+        _sweep_point(case, proof_id, place_id, material)
     for entity in material:
         wanted: str | None = None
         if entity["type"] == "capture":
@@ -1106,6 +1141,16 @@ PLACEMENT_NODES = 200
 #: Points one entity reports. Fifteen distinct placements is a case already
 #: contradicting itself; past that the panel is a wall rather than a reading.
 PLACEMENT_LIMIT = 15
+#: The types a point travels *through*: the material itself, and the proof composed
+#: from it. Everything else in the chain is a document that **collects** files rather
+#: than one the pixels pass through — a post publishing two clips, a note citing
+#: three, an Inspect session holding a morning's work. Two videos in one post were
+#: published together, which says nothing about where either was filmed, so walking
+#: through it put each on the other's geolocation and the map counted two.
+#:
+#: Nothing is lost by stopping there: the two types that carry a point inside a chain
+#: are the capture and the proof (:func:`_entity_points`), and both are on this list.
+PLACEMENT_THROUGH = ("media", "capture", "proof")
 
 
 def _point(lat: Any, lon: Any) -> dict[str, float] | None:
@@ -1165,6 +1210,12 @@ def placements(
     Stopping there is also what keeps a video to its own argument: the capture behind
     its proof is reached, the second proof that happens to reuse that capture is not.
 
+    **And the walk only crosses material** (:data:`PLACEMENT_THROUGH`). A post that
+    published two clips, a note citing three, an Inspect session holding a morning's
+    work: the chain runs through them, but being collected together says nothing
+    about where either file was filmed. Crossed anyway, each clip landed on the
+    other's geolocation and the map drew two.
+
     Points are deduplicated on the exact pair, never on a rounded one: two captures
     of the same roof are metres apart, and merging them would assert they are one
     place, which is the analyst's call and not a rounding. The nearest hop wins a
@@ -1220,6 +1271,8 @@ def placements(
                 continue  # this artifact is the placement; what it was made from is not
             if depth == PLACEMENT_DEPTH:
                 continue
+            if node["id"] != entity_id and node.get("type") not in PLACEMENT_THROUGH:
+                continue  # a document collects files; it does not carry a point across them
             for link in case.links_of(node["id"]):
                 if link["type"] not in links.CHAIN_TYPES:
                     continue

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACTIONS, actionsFor, copyRows, nextFocus, openRows, placeMenu } from './contextMenu.js';
+import { ACTIONS, actionsFor, copyRows, nextFocus, openRows, placeMenu, placeSubmenu } from './contextMenu.js';
 
 describe('copying the point', () => {
   it('offers every format the app writes, the analyst’s own first', () => {
@@ -64,6 +64,38 @@ describe('where the menu opens', () => {
   it('stays inside a map too small to flip in', () => {
     const small = { width: 260, height: 200 };
     const at = placeMenu({ x: 20, y: 190 }, menu, small);
+    expect(at.left).toBe(8);
+    expect(at.top).toBe(8);
+  });
+});
+
+describe('where the submenu opens', () => {
+  const frame = { width: 1000, height: 600 };
+  const parent = { left: 100, top: 80, width: 240, rowTop: 300 };
+  const submenu = { width: 160, height: 260 };
+
+  it('opens beside the row, so the menu it hangs from never moves', () => {
+    // the bug this shape exists for: a list unfolding inside the menu changed
+    // its height, and a menu already placed against an edge then had to move
+    expect(placeSubmenu(parent, submenu, frame)).toEqual({ left: 342, top: 300 });
+  });
+
+  it('flips to the other side when it would run past the right edge', () => {
+    const right = { ...parent, left: 760 };
+
+    expect(placeSubmenu(right, submenu, frame).left).toBe(598);
+  });
+
+  it('is pushed up rather than clipped when the row is near the bottom', () => {
+    // a submenu whose last entry is off the map is a submenu with nine of ten
+    expect(placeSubmenu({ ...parent, rowTop: 560 }, submenu, frame).top).toBe(332);
+  });
+
+  it('overlaps its parent rather than leaving the map it cannot fit beside it', () => {
+    // 240 of menu and 160 of submenu do not both fit in 300: there is no
+    // placement that avoids the overlap, and off the map is the worse answer
+    const at = placeSubmenu(parent, submenu, { width: 300, height: 200 });
+
     expect(at.left).toBe(8);
     expect(at.top).toBe(8);
   });

@@ -118,6 +118,12 @@ VESSEL_EXCESS = 0.01
 # Non-water this big is land, and a candidate touching it is a coastline or an
 # island. The largest ship in the calibration scenes was 1.3 ha of non-water.
 LAND_M2 = 50_000
+# How far below zero the water index may sit and the classification still be
+# believed when it says water, as the byte the product carries. Glint drags the
+# index onto zero without crossing this: over the Bab-el-Mandeb 99% of the sea
+# stayed above it. Dry ground is well under — bare sand reads about -0.2 and
+# vegetation -0.8 — so ground the classification mistakes for water stays land.
+WATER_INDEX_FLOOR = 108   # NDWI -0.15
 
 # --- Hotspots ----------------------------------------------------------------
 # Below this short-wave reflectance there is no fire to discuss, whatever the
@@ -606,7 +612,18 @@ def _vessels(product: Any, inside: Any, blocked: Any, metres: float,
     nir = product[:, :, 0].astype(np.float64)
     swir = product[:, :, 1].astype(np.float64)
     data = product[:, :, 0] > 0
-    wet = product[:, :, 2] > 127
+    # NDWI alone cannot be asked what is sea. Sun glint adds the same
+    # reflectance to every band, so over the Bab-el-Mandeb in September it put
+    # near-infrared at 0.075 and left the index sitting on zero: two thirds of
+    # open water read as dry, the sea became one component of "land", and the
+    # sweep returned nothing. The classification is the second opinion, and it
+    # called that whole strait water. It is believed where the index is merely
+    # weak, never where the index plainly says dry ground: Sen2Cor calls deep
+    # shadow and dark ground water, and taking its word there would put vessel
+    # candidates on land.
+    index = product[:, :, 2]
+    wet = (index > 127) | (((product[:, :, 3] & 15) == SCL_WATER)
+                           & (index > WATER_INDEX_FLOOR))
     water = wet & data & ~blocked
     # Land is non-water in bulk. A hull is non-water too, but a small one.
     land = components_over(data & ~wet, metres * metres, LAND_M2)
@@ -665,7 +682,7 @@ def _changes(before: Any, after: Any, valid: Any) -> tuple[Any, Any]:
     return stacked, stacked.mean(-1)
 
 
-def _spots(before: Any, after: Any, metres: float, threshold: float,
+def _spots(before: Any, after: Any, valid: Any, metres: float, threshold: float,
            options: Parameters) -> tuple[Any, Any, Any]:
     """Change against the change around it, and whether the surroundings held.
 
@@ -673,6 +690,11 @@ def _spots(before: Any, after: Any, metres: float, threshold: float,
     hole wide enough to hold the target: a median box the size of the target
     takes the target itself for background, and a 90 m mark in the Yemeni desert
     then measured 3.5% where it had really moved 7%.
+
+    Only pixels the sweep can measure feed that ring. Where a granule ends or a
+    cloud sits, one date has ground and the other has nothing, and letting that
+    difference into the background raised every neighbour it reached: a quiet
+    tile cut in half by a granule edge produced a candidate the size of the cut.
     """
     import cv2
     import numpy as np
@@ -682,17 +704,17 @@ def _spots(before: Any, after: Any, metres: float, threshold: float,
     guard = odd(SPOT_GUARD * largest, 5, 41)
     ring = odd(SPOT_RING * largest, guard + 4, 81)
     wide = odd(4 * largest, 15, 61)
-    everywhere = np.ones(before.shape[:2], bool)
     residual, moved = [], []
     for old, new in zip(_reflectance(before), _reflectance(after)):
         delta = (new - old).astype(np.float64)
-        mean, _, share = ring_statistics(delta, everywhere, ring, guard)
+        mean, _, share = ring_statistics(delta, valid, ring, guard)
         residual.append(np.where(share > 0, delta - mean, 0.0))
         # The passes' overall shift in light is not the neighbourhood changing.
-        shift = float(np.median(delta))
+        shift = float(np.median(delta[valid])) if valid.any() else 0.0
         moved.append(delta - max(-MAX_SHIFT, min(MAX_SHIFT, shift)))
     spot = np.stack(residual, -1)
-    changed = (np.sqrt((np.stack(moved, -1) ** 2).mean(-1)) >= threshold * GROW).astype(np.float32)
+    changed = ((np.sqrt((np.stack(moved, -1) ** 2).mean(-1)) >= threshold * GROW)
+               & valid).astype(np.float32)
     share = cv2.blur(changed, (wide, wide))
     return np.sqrt((spot ** 2).mean(-1)), spot.mean(-1), share < SPOT_SHARE
 
@@ -752,7 +774,7 @@ def detect(pictures: tuple[Any, Any], products: tuple[Any, Any], mask: Any, body
             # a new roof on sand.
             threshold = _scale(options.sensitivity, 0.02, 0.2)
             if method == "spots":
-                stat, signed, state = _spots(before, after, metres, threshold, options)
+                stat, signed, state = _spots(before, after, valid, metres, threshold, options)
                 measures = {"signed": (signed * 100, "mean")}
             else:
                 deltas, signed = _changes(before, after, valid)

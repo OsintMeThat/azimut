@@ -104,33 +104,56 @@ async function ingest(blob, meta) {
 // would be two answers to one question, and the pair that disagrees is the one
 // nobody can find.
 
-/** What a thread's attachment may weigh.
+/**
+ * Put one case attachment into the composer page a slice at a time.
  *
- *  Lower than the app's own ceiling, and the one place in this file that keeps a
- *  size of its own rather than repeating the app's. It is a different limit, not
- *  a second copy: a composer's files are *pushed* into the page whole, as one
- *  injected payload, so the base64 is held on both sides at once. A reference
- *  window pulls its file a chunk at a time and answers to the app's number
- *  alone. */
-const MAX_COMPOSER_BYTES = 48 * 1024 * 1024;
+ * `executeScript` still needs a serializable string, but the string is now one
+ * 4 MB slice rather than the whole video. The page decodes each slice at once
+ * and keeps only byte arrays for the final `File`, so a long clip answers to the
+ * app's 512 MB hand-off ceiling rather than an extension-only 48 MB ceiling.
+ * The page itself never fetches the local URL, which keeps this path independent
+ * of X's and Bluesky's content-security policies.
+ */
+async function streamAttachment(target, backendUrl, token, caseId, path, id) {
+  let offset = 0;
+  while (true) {
+    const part = await fileChunk(backendUrl, token, caseId, path, offset);
+    await api.scripting.executeScript({
+      target,
+      world: "MAIN",
+      func: (fileId, type, data) => {
+        const thread = window.__AZIMUT_HANDOFF__;
+        const file = thread?.posts
+          ?.flatMap((post) => post.files ?? [])
+          .find((candidate) => candidate.id === fileId);
+        if (!file) throw new Error("handed-over file disappeared");
+        const binary = atob(data);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+        file.type = type || file.type;
+        file.parts.push(bytes);
+      },
+      args: [id, part.type, part.data],
+    });
+    if (part.next === null) return;
+    if (part.next <= offset) throw new Error("Azimut returned an empty file slice");
+    offset = part.next;
+  }
+}
 
-/** One handed-over file, fetched from the app and carried as base64: what
- *  crosses into the page is a string, and the page turns it back into a file.
- *  Base64 rather than a `data:` URL because the page rebuilds it with `atob` —
- *  a fetch over there answers to the site's CSP, and X refuses that one. */
-async function fetchAttachment(backendUrl, token, caseId, path) {
-  const url = fileUrl(backendUrl, caseId, path);
-  const r = await fetch(url, { headers: { "X-Azimut-Token": token } });
-  // Gone, too big, refused: the file is skipped and counted, never fatal. It is
-  // in the case, and attaching it by hand is what the analyst did before.
-  if (!r.ok) return null;
-  const blob = await r.blob();
-  if (blob.size > MAX_COMPOSER_BYTES) return null;
-  return {
-    name: path.split("/").pop(),
-    type: blob.type || "application/octet-stream",
-    data: await base64(blob),
-  };
+/** Leave no partial file in the page when one of its slices was refused. */
+async function discardAttachment(target, id) {
+  await api.scripting.executeScript({
+    target,
+    world: "MAIN",
+    func: (fileId) => {
+      const thread = window.__AZIMUT_HANDOFF__;
+      for (const post of thread?.posts ?? []) {
+        post.files = (post.files ?? []).filter((file) => file.id !== fileId);
+      }
+    },
+    args: [id],
+  });
 }
 
 /** One case attachment, addressed. */
@@ -141,13 +164,7 @@ function fileUrl(backendUrl, caseId, path) {
   );
 }
 
-/** A blob as base64. What crosses into a page is a string: a message carries no
- *  blob, and both sides rebuild the file from this. */
-async function base64(blob) {
-  return encode(new Uint8Array(await blob.arrayBuffer()));
-}
-
-/** The same, for bytes already in hand. */
+/** Bytes as base64, in bounded pieces that can cross an injection boundary. */
 function encode(bytes) {
   let binary = "";
   const CHUNK = 0x8000; // fromCharCode takes an argument list: chunk it or blow the stack
@@ -155,6 +172,11 @@ function encode(bytes) {
     binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
   }
   return btoa(binary);
+}
+
+/** A small blob as base64. Large files go through `fileChunk` instead. */
+async function base64(blob) {
+  return encode(new Uint8Array(await blob.arrayBuffer()));
 }
 
 /** Resolve once the tab has finished loading, so the injection lands on a page. */
@@ -197,31 +219,27 @@ async function handOff(payload) {
 }
 
 async function fillComposer(payload, backendUrl, token) {
-  let skipped = 0;
-  const posts = [];
-  for (const post of payload.posts ?? []) {
-    const files = [];
-    for (const path of post.files ?? []) {
-      const file = await fetchAttachment(backendUrl, token, payload.caseId, path);
-      if (file) files.push(file);
-      else skipped += 1;
-    }
-    posts.push({ text: post.text ?? "", files });
-  }
-  if (skipped) {
-    notify(
-      "Azimut hand-off",
-      `${skipped} file${skipped > 1 ? "s" : ""} could not be handed over. Attach ${skipped > 1 ? "them" : "it"} from the case.`
-    );
-  }
-
   const tab = await api.tabs.create({ url: payload.url, active: true });
   await tabLoaded(tab.id);
   // Both injections run in the page's own world, which is the only place a
   // composer accepts what we make (see handoff.js). Nothing over there can call
-  // an extension API, so the thread goes in on a global and the report comes back
-  // as the script's return value.
+  // an extension API, so the thread goes in on a global, its file parts follow,
+  // and the report comes back as the script's return value.
   const target = { tabId: tab.id };
+  const plans = [];
+  const posts = (payload.posts ?? []).map((post, postIndex) => ({
+    text: post.text ?? "",
+    files: (post.files ?? []).map((path, fileIndex) => {
+      const id = `${postIndex}:${fileIndex}`;
+      plans.push({ id, path });
+      return {
+        id,
+        name: path.split("/").pop(),
+        type: "application/octet-stream",
+        parts: [],
+      };
+    }),
+  }));
   await api.scripting.executeScript({
     target,
     world: "MAIN",
@@ -230,6 +248,23 @@ async function fillComposer(payload, backendUrl, token) {
     },
     args: [{ posts }],
   });
+
+  let skipped = 0;
+  for (const plan of plans) {
+    try {
+      await streamAttachment(target, backendUrl, token, payload.caseId, plan.path, plan.id);
+    } catch {
+      skipped += 1;
+      await discardAttachment(target, plan.id).catch(() => {});
+    }
+  }
+  if (skipped) {
+    notify(
+      "Azimut hand-off",
+      `${skipped} file${skipped > 1 ? "s" : ""} could not be handed over. Attach ${skipped > 1 ? "them" : "it"} from the case.`
+    );
+  }
+
   const [done] = await api.scripting.executeScript({
     target,
     world: "MAIN",
@@ -536,8 +571,8 @@ async function mapImage(msg) {
  *
  *  The whole point of the number: base64 of *this* is the biggest string either
  *  side ever holds, whatever the file weighs. A phone's clip of a street is
- *  hundreds of megabytes and the window that holds it up against the imagery is
- *  the reason the panel is open, so the file cannot be the unit. */
+ *  hundreds of megabytes; both the composer and a map reference need the file
+ *  without making the file itself the unit. */
 const FILE_CHUNK_BYTES = 4 * 1024 * 1024;
 
 /** The end and the total of a `Content-Range`, or null when the app answered with
@@ -548,24 +583,20 @@ function ranged(header) {
 }
 
 /**
- * One slice of one of the case's files, for a reference window (`mapref.js`).
+ * One slice of one of the case's files, for a composer or reference window.
  *
  * Not `mapApi`: that one parses what comes back as JSON, and this is bytes. The
  * route is written in rather than allowlisted — the panel may ask for a file
  * from the case it has open and for nothing else, and the app's own fence
  * (`api/ingest.py`, ``handoff_file``) is what says which files those are.
  *
- * It answers a slice rather than a file because the panel is often holding a
- * video up, and a video is not 48 MB. `Range` is what `FileResponse` already
- * serves, so nothing over there had to be built for this: the page asks again
- * from `next` until `next` is null and glues the pieces into one blob. A slice
- * short of the chunk size is not the signal — a file whose length divides evenly
- * would end on a 416 — so the total in `Content-Range` is.
+ * `Range` is what `FileResponse` already serves, so nothing over there had to be
+ * built for this: the consumer asks again from `next` until `next` is null and
+ * glues the pieces into one file. A slice short of the chunk size is not the
+ * signal — a file whose length divides evenly would end on a 416 — so the total
+ * in `Content-Range` is.
  */
-async function mapFile(caseId, path, offset = 0) {
-  const { backendUrl, token } = await settings();
-  if (!token) throw new Error("not paired. Open the extension options and paste the token from Azimut Settings");
-  if (!caseId) throw new Error("no case open");
+async function fileChunk(backendUrl, token, caseId, path, offset = 0) {
   const start = Number(offset) || 0;
   let r;
   try {
@@ -591,6 +622,13 @@ async function mapFile(caseId, path, offset = 0) {
     next: read < total ? read : null,
     total,
   };
+}
+
+async function mapFile(caseId, path, offset = 0) {
+  const { backendUrl, token } = await settings();
+  if (!token) throw new Error("not paired. Open the extension options and paste the token from Azimut Settings");
+  if (!caseId) throw new Error("no case open");
+  return fileChunk(backendUrl, token, caseId, path, offset);
 }
 
 /** Why the app would not hand a file over, in its own words where it gave any —

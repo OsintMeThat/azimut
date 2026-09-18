@@ -428,13 +428,17 @@
   /**
    * Rebuild a handed-over file on this side.
    *
-   * It crosses as base64 rather than as a `data:` URL for one reason: this runs
-   * in the page's world, so a read over the network answers to the page's own
-   * CSP — and X allows no connection to `data:`. Every attachment came back
-   * "Failed to fetch" and took the rest of the thread down with it. `atob` asks
-   * the network for nothing, so there is nothing left to refuse.
-   */
+   * A large file arrives as decoded byte-array parts, one bounded injection at
+   * a time. `data` remains as the compatibility path for an older worker and
+   * small test fixtures. Neither road fetches from the page: that would answer
+   * to the site's own CSP, which is exactly what X refuses.
+  */
   function toFile(file) {
+    if (Array.isArray(file.parts)) {
+      const parts = file.parts;
+      file.parts = []; // the File owns the bytes now; do not retain a second reference
+      return new File(parts, file.name, { type: file.type });
+    }
     const binary = atob(file.data ?? "");
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);

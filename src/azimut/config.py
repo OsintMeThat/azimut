@@ -33,6 +33,7 @@ import re
 import sys
 import tempfile
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -259,7 +260,7 @@ def write_pointer(root: Path) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         _restrict(tmp_path, 0o600)
-        os.replace(tmp_path, path)
+        _replace(tmp_path, path)
         _restrict(path, 0o600)
     finally:
         tmp_path.unlink(missing_ok=True)
@@ -470,6 +471,23 @@ def ensure_workspace() -> None:
         return
     if _settings_schema(raw) < SETTINGS_SCHEMA:
         save_settings(migrate_settings(raw))
+
+
+def _replace(src: Path, dst: Path) -> None:
+    """``os.replace`` that waits out a scanner holding the fresh file.
+
+    On Windows a virus scanner or the search indexer can open a file the moment
+    it is written, and a rename onto it fails with access denied until they let
+    go, a few milliseconds later. POSIX never refuses, so the loop is a no-op there.
+    """
+    for attempt in range(20):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.01)
 
 
 def _restrict(path: Path, mode: int) -> None:
@@ -700,7 +718,7 @@ def save_settings(settings: dict[str, Any]) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         _restrict(tmp_path, 0o600)
-        os.replace(tmp_path, path)
+        _replace(tmp_path, path)
         # Holds the user's API keys and pairing token — owner-read/write only.
         _restrict(path, 0o600)
     finally:
@@ -812,7 +830,7 @@ def save_templates(templates: dict[str, Any]) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         _restrict(tmp_path, 0o600)
-        os.replace(tmp_path, path)
+        _replace(tmp_path, path)
         _restrict(path, 0o600)
     finally:
         tmp_path.unlink(missing_ok=True)

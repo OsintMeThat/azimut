@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -28,6 +29,39 @@ from azimut import layout
 def _png(size: tuple[int, int] = (80, 60), color: tuple[int, int, int] = (120, 60, 30)) -> bytes:
     buf = io.BytesIO()
     Image.new("RGB", size, color).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _kml() -> bytes:
+    """A small KML with one folder, which is one legend category and two marks.
+
+    Its mark points at an icon beside it, so the KMZ below has pictograms of its
+    own to compose — which is what puts a `.icons` companion in the full case
+    without any gate needing the network.
+    """
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Checkpoints</name>'
+        '<Style id="red"><IconStyle><color>ff0000ff</color>'
+        "<Icon><href>images/gate.png</href></Icon>"
+        '<hotSpot x="0.5" xunits="fraction" y="0" yunits="fraction"/>'
+        "</IconStyle></Style>"
+        "<Folder><name>Roadblocks</name>"
+        "<Placemark><name>North gate</name><styleUrl>#red</styleUrl>"
+        "<Point><coordinates>2.3522,48.8566,0</coordinates></Point></Placemark>"
+        "<Placemark><name>Riverside</name>"
+        "<LineString><coordinates>2.30,48.85 2.32,48.86</coordinates></LineString>"
+        "</Placemark></Folder></Document></kml>"
+    ).encode()
+
+
+def _kmz() -> bytes:
+    """The same map, zipped with the icon it names. The whole of a layer's
+    pictograms without a byte leaving the machine."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("doc.kml", _kml())
+        archive.writestr("images/gate.png", _png((24, 24), (255, 255, 255)))
     return buf.getvalue()
 
 
@@ -56,6 +90,11 @@ class FullCase:
     sheet_meta: str = ""  # the sidecar beside it
     place_id: str = ""
     grid: str = ""
+    layer_id: str = ""
+    layer: str = ""  # the spec, which is what the entity points at
+    layer_snapshot: str = ""  # the bytes as received, which travel with it
+    layer_icons: str = ""  # the source's own pictograms, which travel too
+    layer_cache: str = ""  # the parsed copy, which does not
     person_id: str = ""
     org_id: str = ""
     entity_photo_id: str = ""
@@ -418,6 +457,27 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     )
     assert grid.status_code == 200, grid.text
     full.grid = f".search/{grid.json()['name']}.json"
+
+    # -- a map layer: somebody else's file, drawn over the case's own map ------
+    # Four files with two different answers to "does this travel?", which is why
+    # it is here: the spec, the snapshot and the composed icons are the case's,
+    # the parsed copy is a cache the gates must see dropped rather than carried.
+    # A KMZ rather than a KML so the icons are real without a fetch.
+    layer = client.post(
+        f"/api/cases/{case_id}/map-layers/upload",
+        files={"file": ("checkpoints.kmz", io.BytesIO(_kmz()), "application/vnd.google-earth.kmz")},
+        data={"title": "Checkpoints", "icons": "true"},
+    )
+    assert layer.status_code == 200, layer.text
+    assert layer.json()["icons"] == 1, "the KMZ's own pictogram was composed"
+    layer_name = layer.json()["name"]
+    full.layer = layout.layer_spec_rel(layer_name)
+    full.layer_snapshot = layout.layer_snapshot_rel(layer_name)
+    full.layer_icons = layout.layer_icons_rel(layer_name)
+    full.layer_cache = layout.layer_cache_rel(layer_name)
+    full.layer_id = client.get(
+        f"/api/cases/{case_id}/entities/lookup", params={"attr": "spec", "value": full.layer}
+    ).json()["entity"]["id"]
 
     # -- the graph as the analyst arranged it ---------------------------------
     # Not an artifact and not an assertion: where a node was dragged to, in one

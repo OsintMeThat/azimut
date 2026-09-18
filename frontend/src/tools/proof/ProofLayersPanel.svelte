@@ -28,6 +28,8 @@
     openPicker,
     movePanelZ,
     scalePanel,
+    openCrop,
+    resetCrop,
     removePanel,
     movePasteZ,
     removePaste,
@@ -91,6 +93,28 @@
   </div>
 {/snippet}
 
+<!-- The crop button is the keyboard-accessible counterpart to double-clicking
+     an image. Rotation lives on the canvas as the round selection handle. -->
+{#snippet transformControl(item, label)}
+  <div class="transform-ctl">
+    <button
+      class="btn btn-ghost btn-sm"
+      class:active={!!item.crop}
+      title={`Crop ${label}`}
+      aria-label={`Crop ${label}`}
+      onclick={() => openCrop(item)}
+    ><Icon name="crop" size={13} /></button>
+    {#if item.crop}
+      <button
+        class="btn btn-ghost btn-sm"
+        title={`Reset ${label} crop`}
+        aria-label={`Reset ${label} crop`}
+        onclick={() => resetCrop(item)}
+      ><Icon name="reset" size={12} /></button>
+    {/if}
+  </div>
+{/snippet}
+
 <div class="side-title-row" style="margin-top: 14px">
   <button class="side-title collapsible" onclick={() => (collapsed.panels = !collapsed.panels)}>
     <span>
@@ -137,6 +161,7 @@
         onchange={markDirty}
       />
       <div class="panel-actions">
+        {@render transformControl(panel, 'panel')}
         {#if proof.layout === 'free'}
           <button
             class="btn btn-ghost btn-sm"
@@ -205,6 +230,7 @@
         <span class="row-badge" title="Z1 is the foreground">Z{index + 1}</span>
       </button>
       <div class="panel-actions">
+        {@render transformControl(paste, 'overlay')}
         <button
           class="btn btn-ghost btn-sm"
           disabled={index === 0}
@@ -458,6 +484,14 @@
   .panel-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; row-gap: 4px; }
   .remove-panel { margin-left: auto; }
   .frame-ctl { display: flex; align-items: center; gap: 3px; }
+  .transform-ctl {
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    padding-right: 3px;
+    border-right: 1px solid var(--border);
+  }
+  .transform-ctl .active { color: var(--accent); background: var(--accent-soft); }
   .frame-width {
     width: 44px;
     padding: 2px 4px;

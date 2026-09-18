@@ -202,9 +202,22 @@ export function composeComparison({
 
   const top = header;
   const paneB = side ? a.canvas.width : 0;
+  // A framed export cuts the imagery, not the marks pinned to it, so what
+  // falls outside the pane has to be held there: unclipped, a note anchored
+  // off-frame would be painted over the header band.
+  const clipped = (offsetX, width, height, draw) => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(offsetX, top, width, height);
+    ctx.clip();
+    draw();
+    ctx.restore();
+  };
   const markAnnotations = (capture, letter, offsetX) => {
     const marks = annotations.filter((mark) => onSide(mark, letter));
-    drawAnnotations(ctx, marks, captureProjection(capture, offsetX, top), { scale: s, units });
+    clipped(offsetX, capture.canvas.width, capture.canvas.height, () =>
+      drawAnnotations(ctx, marks, captureProjection(capture, offsetX, top), { scale: s, units })
+    );
   };
 
   if (side) {
@@ -253,7 +266,9 @@ export function composeComparison({
     ctx.restore();
     markAnnotations(a, 'a', 0);
     const onlyB = annotations.filter((mark) => mark.side === 'b');
-    drawAnnotations(ctx, onlyB, captureProjection(b, 0, top), { scale: s, units });
+    clipped(0, b.canvas.width, b.canvas.height, () =>
+      drawAnnotations(ctx, onlyB, captureProjection(b, 0, top), { scale: s, units })
+    );
     drawTag(ctx, `B ${Math.round(opacity)}%`, mapWidth - 12 * s, top + 12 * s, { scale: s, accent: true, align: 'right' });
   } else if (mode === 'change') {
     if (!change?.canvas?.width || !change?.frame) {
@@ -280,10 +295,13 @@ export function composeComparison({
   // Header: what is being compared, then where.
   const left = 16 * s;
   let line = 0;
+  // Where the written header ends on the row the camera reading would share.
+  let taken = left;
   if (title) {
     ctx.fillStyle = INK;
     ctx.font = `700 ${Math.round(17 * s)}px ${FONT}`;
     ctx.fillText(title, left, 25 * s, mapWidth * 0.6);
+    taken = left + Math.min(ctx.measureText(title).width, mapWidth * 0.6);
     line = 20 * s;
   }
   ctx.font = `600 ${Math.round(12 * s)}px ${FONT}`;
@@ -297,6 +315,9 @@ export function composeComparison({
   ctx.fillText('B', bx, 24 * s + line);
   ctx.fillStyle = INK;
   ctx.fillText(labelB, bx + 14 * s, 24 * s + line, mapWidth * 0.3);
+  if (!title) {
+    taken = bx + 14 * s + Math.min(ctx.measureText(labelB).width, mapWidth * 0.3);
+  }
 
   const lat = Number(view?.lat);
   const lon = Number(view?.lon);
@@ -304,9 +325,15 @@ export function composeComparison({
   if (Number.isFinite(lat) && Number.isFinite(lon)) {
     const camera = `${lat.toFixed(5)}, ${lon.toFixed(5)}  ·  z${Math.round(zoom)}  ·  ${Math.round(bearing)}°`;
     ctx.font = `${Math.round(11 * s)}px ${MONO}`;
-    ctx.fillStyle = MUTED;
     const width = ctx.measureText(camera).width;
-    ctx.fillText(camera, Math.max(left, mapWidth - width - 16 * s), (title ? 25 : 24) * s);
+    const x = mapWidth - width - 16 * s;
+    // The header keeps its height whatever the export is framed to, so on a
+    // narrow one the camera reading is what goes: the picture can be read
+    // without it, and not without knowing which side is which.
+    if (x > taken + 12 * s) {
+      ctx.fillStyle = MUTED;
+      ctx.fillText(camera, x, (title ? 25 : 24) * s);
+    }
   }
 
   // Legend for a change reading, stated as what it is: an assist.
@@ -321,18 +348,24 @@ export function composeComparison({
     let x = left;
     const y = bottom + 20 * s;
     ctx.font = `${Math.round(11 * s)}px ${FONT}`;
+    // On a framed export the legend can outrun the picture: an entry that
+    // would run off the edge is dropped rather than half-written.
     for (const [key, text] of entries) {
+      const width = ctx.measureText(text).width;
+      if (x + 15 * s + width > mapWidth - 16 * s) break;
       const [r, g, bl] = palette[key];
       ctx.fillStyle = `rgb(${r},${g},${bl})`;
       ctx.fillRect(x, y - 9 * s, 10 * s, 10 * s);
       ctx.fillStyle = INK;
       ctx.fillText(text, x + 15 * s, y);
-      x += ctx.measureText(text).width + 34 * s;
+      x += width + 34 * s;
     }
     if (change.summary) {
-      ctx.fillStyle = MUTED;
       const width = ctx.measureText(change.summary).width;
-      ctx.fillText(change.summary, Math.max(x, mapWidth - width - 16 * s), y);
+      if (x + width <= mapWidth - 16 * s) {
+        ctx.fillStyle = MUTED;
+        ctx.fillText(change.summary, mapWidth - width - 16 * s, y);
+      }
     }
   }
 
