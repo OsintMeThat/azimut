@@ -6,6 +6,9 @@
  */
 
 import { formatCoords as renderCoords } from './coords.js';
+import {
+  normalizeSourceCrop, normalizeSurfaceAngle, surfaceImageSize,
+} from './proofSurface.js';
 
 export const PANEL_H = 720;
 export const PAD = 20;
@@ -211,6 +214,24 @@ export function panelHeight(p) {
   return PANEL_H * (p.scale ?? 1);
 }
 
+/** The pixels a panel draws — its crop when it has one, else its whole source. */
+const panelImage = (p) => surfaceImageSize(p.sourceNatural ?? p.natural, p.crop);
+
+/**
+ * How a panel's own pixels map to doc pixels. Its height is applied to the
+ * image and never to the upright box a turned image sits in, or turning a photo
+ * would shrink it to keep that growing box the same height.
+ */
+export function panelScale(p) {
+  return panelHeight(p) / panelImage(p)[1];
+}
+
+/** The upright room a panel occupies, scaled: its own box, turn included. */
+function panelBox(p) {
+  const scale = panelScale(p);
+  return { scale, w: p.natural[0] * scale, h: p.natural[1] * scale };
+}
+
 /**
  * Panel layout boxes in doc space: [{x, y, w, h, scale, baseScale, row}] aligned
  * with the input `panels`. In the default `grid` layout panels are grouped by
@@ -249,9 +270,9 @@ function layoutPanelsGrid(panels, captionSize = CAPTION_SIZE, space) {
     let h = 0;
     const inRow = panels.filter((p) => (p.row ?? 0) === r);
     inRow.forEach((p, k) => {
-      const ph = panelHeight(p);
-      h = Math.max(h, ph);
-      w += p.natural[0] * (ph / p.natural[1]) + (k ? gap : 0);
+      const box = panelBox(p);
+      h = Math.max(h, box.h);
+      w += box.w + (k ? gap : 0);
     });
     rowWidth.set(r, w);
     rowHeight.set(r, h);
@@ -268,12 +289,10 @@ function layoutPanelsGrid(panels, captionSize = CAPTION_SIZE, space) {
   const cursor = new Map(rows.map((r) => [r, pad + (contentW - rowWidth.get(r)) / 2]));
   return panels.map((p) => {
     const r = p.row ?? 0;
-    const ph = panelHeight(p);
-    const scale = ph / p.natural[1];
-    const baseScale = PANEL_H / p.natural[1];
-    const w = p.natural[0] * scale;
-    const y = rowTop.get(r) + (rowHeight.get(r) - ph); // bottom-align within row
-    const box = { x: cursor.get(r), y, w, h: ph, scale, baseScale, row: r };
+    const { scale, w, h } = panelBox(p);
+    const baseScale = PANEL_H / panelImage(p)[1];
+    const y = rowTop.get(r) + (rowHeight.get(r) - h); // bottom-align within row
+    const box = { x: cursor.get(r), y, w, h, scale, baseScale, row: r };
     cursor.set(r, cursor.get(r) + w + gap);
     return box;
   });
@@ -298,15 +317,14 @@ export function layoutPanelsFree(panels, captionSize = CAPTION_SIZE, space) {
   const dx = pad - Math.min(...pos.map((q) => q.x));
   const dy = pad - Math.min(...pos.map((q) => q.y));
   return panels.map((p, i) => {
-    const ph = panelHeight(p);
-    const scale = ph / p.natural[1];
+    const { scale, w, h } = panelBox(p);
     return {
       x: pos[i].x + dx,
       y: pos[i].y + dy,
-      w: p.natural[0] * scale,
-      h: ph,
+      w,
+      h,
       scale,
-      baseScale: PANEL_H / p.natural[1],
+      baseScale: PANEL_H / panelImage(p)[1],
       row: p.row ?? 0,
     };
   });
@@ -336,7 +354,7 @@ export function panelsBlockHeight(panels, captionSize = CAPTION_SIZE, space) {
   for (const r of rows) {
     const inRow = panels.filter((p) => (p.row ?? 0) === r);
     const band = rowHasCaption(panels, r) ? captionBand(captionSize) : 0;
-    total += Math.max(...inRow.map(panelHeight)) + band;
+    total += Math.max(...inRow.map((p) => panelBox(p).h)) + band;
   }
   return total + (rows.length - 1) * rowGap;
 }
@@ -1071,6 +1089,17 @@ export function clampPaste(paste, docW, docH) {
   };
 }
 
+/**
+ * An image's crop and turn, left out of the spec when it has neither. Both are
+ * read against the source size, which is what the spec's `natural` holds.
+ */
+function surfaceGeometry(surface) {
+  const source = surface.sourceNatural ?? surface.natural;
+  const crop = normalizeSourceCrop(surface.crop, source);
+  const rotation = normalizeSurfaceAngle(surface.rotation);
+  return { ...(crop ? { crop } : {}), ...(rotation ? { rotation } : {}) };
+}
+
 /** Serializable spec from runtime state (drops live image objects). */
 export function toSpec(proof) {
   return {
@@ -1148,20 +1177,24 @@ export function toSpec(proof) {
       scale: p.scale ?? 1, // per-panel size multiplier (1 = default PANEL_H)
       x: p.x ?? null, // free-layout doc position; null → grid fallback
       y: p.y ?? null,
-      natural: p.natural,
+      // Runtime `natural` is the upright box the turned image occupies. The
+      // spec keeps the source size, which the crop and turn are read against.
+      natural: p.sourceNatural ?? p.natural,
       meta: p.meta ?? {},
       frame: normalizeFrame(p.frame), // decorative border; null → none
+      ...surfaceGeometry(p), // crop and turn, absent when there are neither
     })),
     // Pasted images, front→back. They have no `src`: the case holds nothing for
     // them beyond the file in the proof's own assets folder.
     pastes: (proof.pastes ?? []).map((p) => ({
       id: p.id, // kept so shapes stay bound to their paste on reload
       asset: p.asset,
-      natural: p.natural,
+      natural: p.sourceNatural ?? p.natural,
       x: p.x ?? 0,
       y: p.y ?? 0,
       scale: clampPasteScale(p.scale),
       frame: normalizeFrame(p.frame),
+      ...surfaceGeometry(p),
     })),
     shapes: proof.shapes.map((s) => ({ ...s })),
   };

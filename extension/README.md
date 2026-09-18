@@ -299,6 +299,9 @@ The filling runs in the page's own world, which is the only place a composer
 accepts what it is given. That needs Firefox 128 or later; on an older Firefox
 this one flow reports that it could not run, and everything else works as before.
 
+Attachments cross from the local case in small pieces. Videos can therefore
+reach the app's 512 MB hand-off ceiling without one oversized browser message.
+
 If the site has changed its markup, or a file is too large to hand over, it
 fills what it can and says so. Each post is read back after it is typed, and one
 the composer will not take cleanly is left empty rather than half-written. The

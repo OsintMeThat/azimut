@@ -168,7 +168,7 @@ def _rewind_hidden_layout(case: Case) -> None:
 #: Content directories the layout gained after the `azimut/` wrapper shipped. They
 #: postdate every unwrapped checkpoint, so a rewind removes them rather than putting
 #: them at the case root where they never were.
-POST_WRAPPER_DIRS = frozenset({"sheets", ".compare", ".analysis"})
+POST_WRAPPER_DIRS = frozenset({"sheets", ".compare", ".analysis", ".layers"})
 
 
 def rewind_case(case: Case, schema: int) -> None:

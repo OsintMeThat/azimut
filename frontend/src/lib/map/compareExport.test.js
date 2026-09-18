@@ -64,6 +64,12 @@ const BASE = {
   makeCanvas: fakeCanvas,
 };
 
+/** A framed export: the capture and its frame are both cut down. */
+const FRAMED = {
+  canvas: { width: 300, height: 300 },
+  frame: { ...FRAME, width: 300, height: 300 },
+};
+
 const draws = (out) => out.context.calls.filter(([name]) => name === 'drawImage');
 
 describe('comparison export', () => {
@@ -122,6 +128,36 @@ describe('comparison export', () => {
   it('shows only the frame blink is on', () => {
     const out = composeComparison({ ...BASE, mode: 'blink', blinkB: true });
     expect(draws(out).map((call) => call[1])).toEqual([BASE.b.canvas]);
+  });
+
+  it('writes the camera reading beside the labels when the width allows', () => {
+    const out = composeComparison({ ...BASE, mode: 'side' });
+    const camera = out.context.calls.find(([name, text]) => name === 'fillText' && String(text).includes('z17'));
+    expect(camera).toBeTruthy();
+  });
+
+  it('drops the camera reading rather than write it over the labels', () => {
+    const out = composeComparison({ ...BASE, a: FRAMED, b: FRAMED, mode: 'blink' });
+    const written = out.context.calls.filter(([name]) => name === 'fillText').map(([, text]) => text);
+    expect(written).toContain('Old');
+    expect(written).toContain('New');
+    expect(written.some((text) => String(text).includes('z17'))).toBe(false);
+  });
+
+  it('holds annotations inside the pane they belong to', () => {
+    const marks = [{ id: 'far', kind: 'text', side: 'a', colour: '#f6a81a',
+      points: [[2.5, 48.9]], text: 'Off frame', font_size: 16, stroke_width: 3, fill_opacity: 0 }];
+    const out = composeComparison({ ...BASE, mode: 'side', annotations: marks });
+    expect(out.context.calls).toContainEqual(['rect', 0, 48, 500, 300]);
+    expect(out.context.calls).toContainEqual(['rect', 500, 48, 500, 300]);
+  });
+
+  it('drops a change legend entry that would run off a framed export', () => {
+    const mask = { canvas: { width: 250, height: 150 }, frame: FRAME, base: 'a', opacity: 55, visible: true };
+    const out = composeComparison({ ...BASE, a: FRAMED, b: FRAMED, mode: 'change', change: mask });
+    const written = out.context.calls.filter(([name]) => name === 'fillText').map(([, text]) => text);
+    expect(written).toContain('Appeared or brighter in B');
+    expect(written).not.toContain('Other change');
   });
 
   it('projects the ground into a high-density capture', () => {

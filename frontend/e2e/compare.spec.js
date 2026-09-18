@@ -70,6 +70,39 @@ test('linked maps keep annotations on the ground through pan, modes and save', a
   expect(errors).toEqual([]);
 });
 
+test('an export frame can be drawn across every overlaid reading mode', async ({ page }) => {
+  const { errors, saved } = await openCompare(page);
+
+  for (const mode of ['Fade', 'Swipe', 'Blink']) {
+    await page.getByRole('button', { name: mode, exact: true }).click();
+    await page.getByRole('button', { name: 'Export', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Export a copy' });
+    await dialog.getByRole('button', { name: /^(Draw|Redraw)…$/ }).click();
+
+    const stage = await page.locator('.compare-stage').boundingBox();
+    const overlay = page.locator('.compare-stage > .export-frame.drawing');
+    await expect(overlay).toBeVisible();
+    const frame = await overlay.boundingBox();
+    expect(frame.x).toBeCloseTo(stage.x, 0);
+    expect(frame.width).toBeCloseTo(stage.width, 0);
+    await page.mouse.move(stage.x + stage.width * 0.2, stage.y + stage.height * 0.2);
+    await page.mouse.down();
+    await page.mouse.move(stage.x + stage.width * 0.8, stage.y + stage.height * 0.75, { steps: 5 });
+    await page.mouse.up();
+
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('.destination-actions').getByRole('button')).toHaveText(['Redraw…', 'Clear']);
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  }
+
+  await page.getByRole('button', { name: 'Save comparison', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Save comparison' })
+    .getByRole('button', { name: 'Save comparison', exact: true }).click();
+  await expect.poll(() => saved.length).toBe(1);
+  expect(saved[0].spec.frame.points).toHaveLength(2);
+  expect(errors).toEqual([]);
+});
+
 test('spectral frames are requested only by Run, including after reopening and moving', async ({ page }) => {
   await installAppFixture(page);
   const errors = [];

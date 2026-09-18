@@ -35,7 +35,7 @@
     ANNO_COLORS, PAD, GAP, ROW_GAP, PANEL_H, TWEET_GUIDES,
     CAPTION_SIZE, LEGEND_SIZE, FOOTER_SIZE,
     BG, TEXT_MAIN, normSpace, textColors,
-    layoutPanels, panelsBottom, freeNormalizeDelta, legendLineHeight, footerBand,
+    layoutPanels, panelsBottom, panelScale, freeNormalizeDelta, legendLineHeight, footerBand,
     attributionLine, docSize, offsetShape, autoLayoutRows,
     autoCoords, formatCoords, autoSourceUrls, proofSource, statedSources,
     specPoints, statePanelPoint, footerLines, coordsPostLines, proofCoordsLines, MAX_POINTS,
@@ -68,6 +68,15 @@
     viewCentrePoint,
   } from '../lib/proofEdits.js';
   import {
+    mapSurfaceShapes,
+    normalizeSourceCrop,
+    normalizeSurfaceAngle,
+    shiftProofShape,
+    sourceSize,
+    surfaceBoxSize,
+    surfaceImageSize,
+  } from '../lib/proofSurface.js';
+  import {
     ICON_BOX, ICON_SIZE_MIN, PROOF_ICONS,
     glyphInk, iconByName, iconOrigin, iconSizeFor, isSolidIcon,
   } from '../lib/proofIcons.js';
@@ -81,6 +90,9 @@
   import { pollWhile } from '../lib/poll.js';
 
   const SCALE_STEP = 0.05;
+  // Canvas handles are drawn, not styled, so the one accent has to be spelled
+  // out here. Keep it equal to --accent in app.css.
+  const ACCENT = '#e8a33d';
 
   const DRAW_TOOLS = [
     { id: 'select', icon: 'cursor', label: 'Select / move', shortcut: 'v' },
@@ -141,6 +153,8 @@
   }
   let advancedOpen = $state(false);
   let collapsed = $state({ panels: false, overlays: false, annotations: false, elements: false });
+  let cropSurfaceId = $state(null);
+  let cropDraft = $state(null); // crop rectangle in the selected surface's pixels
   // Saved proof slug, or null before the first save.
   let savedName = $state(null);
   let dirty = $state(false);
@@ -294,6 +308,32 @@
   let histBusy = false; // plain (untracked): suppresses capture while restoring
   let histTimer = null;
 
+  /**
+   * Attach a source image to a spec surface. `natural` becomes the upright box
+   * the turned image occupies, because that is what the page lays out; the
+   * source size it was read from is kept beside it.
+   */
+  function hydratedSurface(surface, img) {
+    const sourceNatural = sourceSize(surface.sourceNatural ?? surface.natural);
+    const hydrated = {
+      ...surface,
+      sourceNatural,
+      crop: normalizeSourceCrop(surface.crop, sourceNatural),
+      rotation: normalizeSurfaceAngle(surface.rotation),
+      img,
+    };
+    refreshSurface(hydrated);
+    return hydrated;
+  }
+
+  /** Re-measure one hydrated surface after its crop or turn changes. */
+  function refreshSurface(surface) {
+    surface.natural = surfaceBoxSize(surface.sourceNatural, surface.crop, surface.rotation);
+  }
+
+  /** The pixels a surface draws: its crop, or the whole source. */
+  const imageSizeOf = (surface) => surfaceImageSize(surface.sourceNatural, surface.crop);
+
   const docSnapshot = () => JSON.stringify(toSpec(proof));
 
   function syncHist() {
@@ -353,18 +393,20 @@
     proof.notes = spec.notes ?? {};
     proof.legendOrder = spec.legendOrder ?? [];
     proof.templateId = typeof spec.templateId === 'string' ? spec.templateId : null;
-    proof.panels = spec.panels.map((p) => ({ ...p, img: imgCache.get(p.src) ?? null }));
-    proof.pastes = (spec.pastes ?? []).map((p) => ({
-      ...p,
-      img: pasteAssets.get(p.asset)?.img ?? null,
-    }));
+    proof.panels = spec.panels.map((p) => {
+      const img = imgCache.get(p.src);
+      return img ? hydratedSurface(p, img) : hydratedSurface(p, null);
+    });
+    proof.pastes = (spec.pastes ?? []).map((p) => {
+      return hydratedSurface(p, pasteAssets.get(p.asset)?.img ?? null);
+    });
     proof.shapes = spec.shapes ?? [];
     // a panel image missing from the cache (shouldn't happen) reloads async
     for (const p of proof.panels.filter((x) => !x.img)) {
       loadImage(fileUrl(caseState.current?.id, p.src))
         .then((img) => {
           imgCache.set(p.src, img);
-          p.img = img;
+          Object.assign(p, hydratedSurface(p, img));
         })
         .catch(() => {});
     }
@@ -399,7 +441,8 @@
 
   // ---- konva ------------------------------------------------------------------
   let containerEl = $state();
-  let stage, docLayer, uiLayer, transformer, endHandles, guideGroup, panelCtrls;
+  let stage, docLayer, uiLayer, transformer, cropHandles, endHandles, guideGroup, panelCtrls;
+  let rotateKnob;
   let canvasRenderGate;
   let drawing = null; // {panel, node, start, box, kind}
   let pathDraft = null; // {panel, box, node, points:[]} — multi-click curve in progress
@@ -427,6 +470,9 @@
     stage.add(docLayer, uiLayer);
     transformer = new Konva.Transformer({
       rotateEnabled: false,
+      rotateAnchorOffset: 28,
+      rotationSnaps: [0, 90, 180, 270],
+      rotationSnapTolerance: 5,
       flipEnabled: false,
       anchorSize: 11,
       anchorCornerRadius: 3,
@@ -435,10 +481,23 @@
       borderStroke: '#e8a33d',
       borderDash: [4, 3],
       ignoreStroke: true,
+      // The turn knob reads like Collage's: a dark disc ringed in the accent,
+      // on a short accent stem, rather than the square corner anchors.
+      anchorStyleFunc: (anchor) => {
+        if (!anchor.hasName('rotater')) return;
+        anchor.cornerRadius(anchor.width() / 2);
+        anchor.fill('rgba(22, 22, 22, 0.92)');
+        anchor.stroke(ACCENT);
+        anchor.strokeWidth(1.5);
+      },
     });
     guideGroup = new Konva.Group({ listening: false });
     uiLayer.add(guideGroup);
     uiLayer.add(transformer);
+    rotateKnob = new Konva.Group({ name: 'rotate-knob', listening: false });
+    uiLayer.add(rotateKnob);
+    cropHandles = new Konva.Group({ id: 'proof-crop-handles' });
+    uiLayer.add(cropHandles);
     endHandles = new Konva.Group();
     uiLayer.add(endHandles);
     panelCtrls = new Konva.Group();
@@ -549,6 +608,7 @@
     tool; // the tool alone: the document has its own rebuild below
     untrack(() => {
       if (!stage) return;
+      if (tool !== 'select' && cropSurfaceId) endSurfaceCrop();
       syncCanvasListening();
       if (proofHasContent) refreshCanvasUi();
     });
@@ -558,8 +618,14 @@
   // and gets a lightweight refresh below, without recreating every image node.
   $effect(() => {
     JSON.stringify([
-      proof.panels.map((p) => [p.src, p.caption, p.row, p.scale, p.x, p.y, p.frame]),
-      proof.pastes.map((p) => [p.asset, p.x, p.y, p.scale, p.frame, !!p.img]),
+      proof.panels.map((p) => [
+        p.src, p.caption, p.row, p.scale, p.x, p.y, p.frame,
+        p.crop, p.rotation, p.natural, !!p.img,
+      ]),
+      proof.pastes.map((p) => [
+        p.asset, p.x, p.y, p.scale, p.frame,
+        p.crop, p.rotation, p.natural, !!p.img,
+      ]),
       proof.shapes,
       proof.notes,
       proof.legendOrder,
@@ -611,6 +677,7 @@
     proof.title = freshTitle();
     proof.panels = [];
     proof.pastes = [];
+    discardSurfaceCrop();
     proof.shapes = [];
     proof.notes = {};
     proof.legendOrder = [];
@@ -748,6 +815,7 @@
   }
 
   function selectSig(which) {
+    endSurfaceCrop();
     selectedSig = which;
     selectedIds = [];
     selectedPanelId = null;
@@ -756,6 +824,7 @@
 
   function selectPaste(id) {
     if (tool !== 'select') return;
+    if (cropSurfaceId && cropSurfaceId !== id) endSurfaceCrop();
     selectedPasteId = id;
     selectedIds = [];
     selectedPanelId = null;
@@ -764,6 +833,7 @@
 
   function selectPanel(id) {
     if (tool !== 'select' || marqueeEnded) return;
+    if (cropSurfaceId && cropSurfaceId !== id) endSurfaceCrop();
     selectedPanelId = id;
     selectedPasteId = null;
     selectedIds = [];
@@ -781,6 +851,7 @@
    */
   function pickShapeRow(id, additive = false) {
     tool = 'select';
+    endSurfaceCrop();
     pickShape(id, additive);
   }
 
@@ -788,6 +859,7 @@
   function pickPanelRow(id) {
     tool = 'select';
     marqueeEnded = false;
+    if (cropSurfaceId !== id || selectedPanelId === id) endSurfaceCrop();
     selectedPanelId = selectedPanelId === id ? null : id;
     selectedPasteId = null;
     selectedIds = [];
@@ -796,6 +868,7 @@
 
   function pickPasteRow(id) {
     tool = 'select';
+    if (cropSurfaceId !== id || selectedPasteId === id) endSurfaceCrop();
     selectedPasteId = selectedPasteId === id ? null : id;
     selectedPanelId = null;
     selectedIds = [];
@@ -981,7 +1054,7 @@
         : proof.panels.length
           ? Math.max(...proof.panels.map((p) => p.row ?? 0))
           : 0;
-      const panel = {
+      const panel = hydratedSurface({
         id: newId('p'),
         src: item.src,
         // captionsEnabled off → new panels start caption-less (you can still add
@@ -991,8 +1064,7 @@
         scale: 1,
         natural: [img.naturalWidth, img.naturalHeight],
         meta: item.meta ?? {},
-        img,
-      };
+      }, img);
       // what the proof answers with today, read before the panel can change it
       const answered = displayedCoords;
       // grid: append (rightmost / bottom row); free: a new panel lands in front
@@ -1092,16 +1164,29 @@
     stage.position({ x: stage.x() - dx * stage.scaleX(), y: stage.y() - dy * stage.scaleY() });
   }
 
-  // Fold a finished panel drag / corner-resize back into the document.
+  // Fold a finished panel move/resize/rotation back into the document. Image
+  // groups are centred so the round rotation handle turns around their centre.
   function commitPanelNode(panel, node, { resized = false } = {}) {
-    materializeFreePositions();
-    if (resized) {
-      panel.scale = scaleFromNode(node.scaleX(), panel.natural[1]);
+    const free = proof.layout === 'free';
+    if (free) materializeFreePositions();
+    // The group sits on the image's middle, so this is where the picture is —
+    // the one point that has to survive a turn, which changes the box around it.
+    const centre = node.position();
+    // The node's scale is the image's, so the panel's own height reads off the
+    // image too — the box around a turned one is bigger and is not what was sized.
+    if (resized) panel.scale = scaleFromNode(node.scaleX(), imageSizeOf(panel)[1]);
+    const turned = applySurfaceRotation(panel, node.rotation());
+    if (free) {
+      const k = panelScale(panel);
+      panel.x = centre.x - panel.natural[0] * k / 2;
+      panel.y = centre.y - panel.natural[1] * k / 2;
+      normalizeFree();
     }
-    panel.x = node.x();
-    panel.y = node.y();
-    normalizeFree();
     dirty = true;
+    // The grid re-flows around the new bounds, so a resize refits the page. A
+    // turn does not: the page it needs grows as the picture comes round, and
+    // rescaling the view under the hand mid-gesture reads as the photo shrinking.
+    if (!free && !turned) requestAnimationFrame(fit);
   }
 
   function setLayoutMode(mode) {
@@ -1142,6 +1227,7 @@
 
   function removePanel(index) {
     const panel = proof.panels[index];
+    if (cropSurfaceId === panel?.id) discardSurfaceCrop(); // it is leaving anyway
     proof.shapes = proof.shapes.filter((s) => s.panel !== panel.id);
     proof.panels.splice(index, 1);
     normalizeRows();
@@ -1200,13 +1286,12 @@
       const natural = [img.naturalWidth, img.naturalHeight];
       const scale = pasteInsertScale(natural, width);
       const centre = viewCentre();
-      const paste = newPaste(name, natural, {
+      const paste = hydratedSurface(newPaste(name, natural, {
         x: centre.x - (natural[0] * scale) / 2,
         y: centre.y - (natural[1] * scale) / 2,
         scale,
-      });
+      }), img);
       Object.assign(paste, clampPaste(paste, width, height));
-      paste.img = img;
       proof.pastes.unshift(paste); // newest lands in front
       tool = 'select';
       selectPaste(paste.id);
@@ -1276,6 +1361,7 @@
   function removePaste(index) {
     const paste = proof.pastes[index];
     if (!paste) return;
+    if (cropSurfaceId === paste.id) discardSurfaceCrop(); // it is leaving anyway
     proof.shapes = proof.shapes.filter((s) => s.panel !== paste.id);
     proof.pastes.splice(index, 1);
     selectedIds = [];
@@ -1288,6 +1374,144 @@
     if (target < 0 || target >= proof.pastes.length) return;
     const [paste] = proof.pastes.splice(index, 1);
     proof.pastes.splice(target, 0, paste);
+    dirty = true;
+  }
+
+  /**
+   * Change a surface's pixel geometry without making it jump in free layout.
+   * Grid panels deliberately reflow; free panels and overlays keep their visual
+   * centre, then return inside the document if their new bounds cross an edge.
+   */
+  function withSurfaceCentrePreserved(item, edit) {
+    const panelIndex = proof.panels.findIndex((panel) => panel.id === item.id);
+    const pasteIndex = proof.pastes.findIndex((paste) => paste.id === item.id);
+    let before = null;
+
+    if (panelIndex >= 0 && proof.layout === 'free') {
+      materializeFreePositions();
+      before = boxesOf()[panelIndex];
+    } else if (pasteIndex >= 0) {
+      before = pasteBoxes([item])[0];
+    }
+
+    edit();
+
+    if (panelIndex >= 0) {
+      if (proof.layout === 'free' && before) {
+        const after = boxesOf()[panelIndex];
+        item.x += (before.w - after.w) / 2;
+        item.y += (before.h - after.h) / 2;
+        normalizeFree();
+        return; // the centre held: refitting here would throw the zoom away
+      }
+      requestAnimationFrame(fit);
+      return;
+    }
+
+    if (pasteIndex >= 0 && before) {
+      const after = pasteBoxes([item])[0];
+      item.x += (before.w - after.w) / 2;
+      item.y += (before.h - after.h) / 2;
+      const { width, height } = measureDoc();
+      Object.assign(item, clampPaste(item, width, height));
+    }
+  }
+
+  /**
+   * Turn a surface. The angle rides on the group that holds the image and its
+   * annotations, so nothing is redrawn into new pixels and no coordinate moves:
+   * the image, its border, its marks and its notes all turn as one.
+   */
+  function applySurfaceRotation(item, angle) {
+    const turned = normalizeSurfaceAngle(angle);
+    if (turned === (item.rotation ?? 0)) return false;
+    item.rotation = turned;
+    refreshSurface(item);
+    return true;
+  }
+
+  const surfaceById = (id) => (id
+    ? proof.panels.find((panel) => panel.id === id)
+      ?? proof.pastes.find((paste) => paste.id === id)
+      ?? null
+    : null);
+
+  /**
+   * The on-canvas crop mode, opened by a double-click or the side control. Both
+   * toggle: asking again for the image already under the marks is how you say
+   * you are done with it, without reaching for the canvas.
+   */
+  function beginSurfaceCrop(item) {
+    if (!item?.img) return;
+    if (cropSurfaceId) {
+      const same = cropSurfaceId === item.id;
+      endSurfaceCrop();
+      if (same) return;
+    }
+    tool = 'select';
+    cropSurfaceId = item.id;
+    // The whole source comes back into view, shaded outside the box it already
+    // keeps, so what an earlier crop cut off can be taken back in this pass.
+    cropDraft = item.crop
+      ? { ...item.crop }
+      : { x: 0, y: 0, w: item.sourceNatural[0], h: item.sourceNatural[1] };
+    if (proof.panels.includes(item)) selectPanel(item.id);
+    else selectPaste(item.id);
+    requestAnimationFrame(() => { if (stage) { rebuild(); refreshCanvasUi(); } });
+  }
+
+  /**
+   * Leave crop mode, keeping what the marks frame. They move freely until then,
+   * in both directions, so a corner pulled too far comes back in the same pass
+   * and the whole session lands as one box.
+   */
+  function endSurfaceCrop() {
+    const item = surfaceById(cropSurfaceId);
+    const selection = cropDraft;
+    discardSurfaceCrop();
+    if (item && selection) applySurfaceCrop(item, selection);
+  }
+
+  /** Leave crop mode and drop the draft: the image keeps the pixels it had. */
+  function discardSurfaceCrop() {
+    const hadMarks = !!cropSurfaceId;
+    cropSurfaceId = null;
+    cropDraft = null;
+    cropHandles?.destroyChildren();
+    cropHandles?.getLayer()?.batchDraw();
+    if (hadMarks) requestAnimationFrame(() => { if (stage) { rebuild(); refreshCanvasUi(); } });
+  }
+
+  /** Commit the box the marks frame, in source pixels. */
+  function applySurfaceCrop(item, selection) {
+    const kept = normalizeSourceCrop(selection, item.sourceNatural);
+    const before = item.crop;
+    if (JSON.stringify(kept) === JSON.stringify(before ?? null)) return;
+    // Annotations are measured from the crop's own corner, so they travel by
+    // whatever that corner moved. Their own angles never change: the turn is on
+    // the group they are drawn in.
+    const dx = (before?.x ?? 0) - (kept?.x ?? 0);
+    const dy = (before?.y ?? 0) - (kept?.y ?? 0);
+    withSurfaceCentrePreserved(item, () => {
+      proof.shapes = mapSurfaceShapes(proof.shapes, item.id, (s) => shiftProofShape(s, dx, dy));
+      item.crop = kept;
+      refreshSurface(item);
+    });
+    dirty = true;
+  }
+
+  /** Expand the source back to full size and restore annotation coordinates. */
+  function resetSurfaceCrop(item) {
+    if (!item?.crop) return;
+    const { x: dx, y: dy } = item.crop;
+    withSurfaceCentrePreserved(item, () => {
+      proof.shapes = mapSurfaceShapes(proof.shapes, item.id, (s) => shiftProofShape(s, dx, dy));
+      item.crop = null;
+      refreshSurface(item);
+    });
+    if (cropSurfaceId === item.id) {
+      cropDraft = { x: 0, y: 0, w: item.sourceNatural[0], h: item.sourceNatural[1] };
+    }
     dirty = true;
   }
 
@@ -1316,6 +1540,7 @@
       x: (containerEl.clientWidth - width * k) / 2,
       y: (containerEl.clientHeight - height * k) / 2,
     });
+    if (cropSurfaceId) drawCropHandles();
     stage.batchDraw();
   }
 
@@ -1335,6 +1560,7 @@
       drawGuide(width, height);
     }
     drawPanelMoveControls(boxesOf()); // keep the arrow bar screen-sized
+    if (cropSurfaceId) drawCropHandles();
     stage.batchDraw();
   }
 
@@ -1420,6 +1646,13 @@
     // Select it cleared the selection and opened a marquee.
     if ((e.evt.button ?? 0) > 0) return;
     if (tool === 'select') {
+      if (cropSurfaceId) {
+        const group = docLayer.findOne(`#pg-${cropSurfaceId}`);
+        const insideSurface = e.target === group || group?.isAncestorOf(e.target);
+        const insideCrop = e.target === cropHandles || cropHandles?.isAncestorOf(e.target);
+        const insideTransformer = e.target === transformer || transformer?.isAncestorOf(e.target);
+        if (!insideSurface && !insideCrop && !insideTransformer) endSurfaceCrop();
+      }
       dragMoved = false;
       marqueeEnded = false;
       const add = e.evt.shiftKey;
@@ -1757,9 +1990,11 @@
   // Fold a drag or a corner-resize of a pasted image back into its stored
   // position and scale, then hold it inside the document.
   function commitPasteNode(paste, node, { resized = false } = {}) {
+    const centre = node.position();
     if (resized) paste.scale = clampPasteScale(node.scaleX());
-    paste.x = node.x();
-    paste.y = node.y();
+    applySurfaceRotation(paste, node.rotation());
+    paste.x = centre.x - paste.natural[0] * paste.scale / 2;
+    paste.y = centre.y - paste.natural[1] * paste.scale / 2;
     const { width, height } = measureDoc();
     Object.assign(paste, clampPaste(paste, width, height));
     node.scale({ x: paste.scale, y: paste.scale });
@@ -1784,12 +2019,68 @@
 
   // ---- rebuild canvas from state ------------------------------------------------------
 
+  /**
+   * What a surface draws. Ordinarily its crop, straight out of the source with
+   * no intermediate canvas. Under the crop marks it is the whole source instead,
+   * shifted so the kept box does not move and shaded outside it — the pixels an
+   * earlier crop cut off are there to be taken back.
+   */
+  function surfaceImageNode(item, image) {
+    if (cropSurfaceId !== item.id) {
+      const group = new Konva.Group({
+        clip: { x: 0, y: 0, width: image[0], height: image[1] },
+        listening: false,
+      });
+      group.add(new Konva.Image({
+        image: item.img, width: image[0], height: image[1], listening: false,
+        ...(item.crop
+          ? { crop: { x: item.crop.x, y: item.crop.y, width: item.crop.w, height: item.crop.h } }
+          : {}),
+      }));
+      return group;
+    }
+    const [sw, sh] = item.sourceNatural;
+    const originX = -(item.crop?.x ?? 0);
+    const originY = -(item.crop?.y ?? 0);
+    const ghost = new Konva.Group({ name: 'crop-ghost', listening: false });
+    ghost.add(new Konva.Image({
+      image: item.img, x: originX, y: originY, width: sw, height: sh, listening: false,
+    }));
+    for (let index = 0; index < 4; index++) {
+      ghost.add(new Konva.Rect({ name: 'crop-shade', fill: 'rgba(0, 0, 0, 0.55)', listening: false }));
+    }
+    shadeCropGhost(ghost, item);
+    return ghost;
+  }
+
+  /** Lay the four shaded bands over everything the crop box leaves out. */
+  function shadeCropGhost(ghost, item) {
+    if (!ghost || !cropDraft) return;
+    const [sw, sh] = item.sourceNatural;
+    const left = -(item.crop?.x ?? 0);
+    const top = -(item.crop?.y ?? 0);
+    const boxLeft = left + cropDraft.x;
+    const boxTop = top + cropDraft.y;
+    const boxRight = boxLeft + cropDraft.w;
+    const boxBottom = boxTop + cropDraft.h;
+    const bands = ghost.find('.crop-shade');
+    bands[0]?.setAttrs({ x: left, y: top, width: sw, height: Math.max(0, boxTop - top) });
+    bands[1]?.setAttrs({ x: left, y: boxBottom, width: sw, height: Math.max(0, top + sh - boxBottom) });
+    bands[2]?.setAttrs({
+      x: left, y: boxTop, width: Math.max(0, boxLeft - left), height: cropDraft.h,
+    });
+    bands[3]?.setAttrs({
+      x: boxRight, y: boxTop, width: Math.max(0, left + sw - boxRight), height: cropDraft.h,
+    });
+  }
+
   function rebuild() {
     docLayer.destroyChildren();
     // A template can be selected before any panels are chosen. Keep its style
     // in state, but do not render a background, footer, logo, or handle yet.
     if (!hasProofCanvasContent(proof)) {
       transformer.nodes([]);
+      cropHandles.destroyChildren();
       endHandles.destroyChildren();
       panelCtrls.destroyChildren();
       guideGroup.destroyChildren();
@@ -1817,9 +2108,17 @@
       const box = boxes[i];
       // Outer group is NOT clipped so an element can be dragged across panels;
       // only the image itself is clipped to the panel box (inner group).
+      const image = imageSizeOf(panel);
+      // The group's own space is the image's pixels and it carries the turn, so
+      // the frame, the marks and the annotations all sit on the image's edges.
+      // The box around it is the upright room the page reserved for it.
       const group = new Konva.Group({
         id: `pg-${panel.id}`,
-        x: box.x, y: box.y,
+        x: box.x + box.w / 2,
+        y: box.y + box.h / 2,
+        offsetX: image[0] / 2,
+        offsetY: image[1] / 2,
+        rotation: panel.rotation ?? 0,
         scaleX: box.scale, scaleY: box.scale,
         draggable: free,
       });
@@ -1828,7 +2127,7 @@
       // select-clicks — and, in free mode, drags. Added first so shapes stay
       // on top for hit-testing.
       group.add(new Konva.Rect({
-        x: 0, y: 0, width: panel.natural[0], height: panel.natural[1],
+        x: 0, y: 0, width: image[0], height: image[1],
         fill: 'transparent', listening: true, name: 'panel-hit',
       }));
       bindPanelPointerLifecycle(group, {
@@ -1838,28 +2137,14 @@
         onSelect: () => selectPanel(panel.id),
         onDragEnd: free ? () => commitPanelNode(panel, group) : null,
       });
-      if (free) {
-        group.on('transformend', () => commitPanelNode(panel, group, { resized: true }));
-      } else {
-        // grid: corner-drag only changes the panel's scale — the grid decides
-        // where it sits, so the row re-flows around the new size
-        group.on('transformend', () => {
-          panel.scale = scaleFromNode(group.scaleX(), panel.natural[1]);
-          dirty = true;
-          requestAnimationFrame(fit);
-        });
-      }
-      if (panel.img) {
-        const imgClip = new Konva.Group({
-          clip: { x: 0, y: 0, width: panel.natural[0], height: panel.natural[1] },
-          listening: false,
-        });
-        imgClip.add(new Konva.Image({
-          image: panel.img, width: panel.natural[0], height: panel.natural[1], listening: false,
-        }));
-        group.add(imgClip);
-      }
-      if (panel.frame) group.add(frameNode(panel.frame, panel.natural));
+      group.on('transformend', () => commitPanelNode(panel, group, { resized: true }));
+      group.on('dblclick dbltap', (event) => {
+        if (tool !== 'select') return;
+        event.cancelBubble = true;
+        beginSurfaceCrop(panel);
+      });
+      if (panel.img) group.add(surfaceImageNode(panel, image));
+      if (panel.frame) group.add(frameNode(panel.frame, image));
       for (const s of proof.shapes.filter((x) => x.panel === panel.id)) {
         group.add(makeShapeNode(s, box));
       }
@@ -1922,16 +2207,21 @@
     for (let i = proof.pastes.length - 1; i >= 0; i--) {
       const paste = proof.pastes[i];
       const box = pasteBox[i];
+      const image = imageSizeOf(paste);
       const group = new Konva.Group({
         id: `pg-${paste.id}`,
-        x: box.x, y: box.y,
+        x: box.x + box.w / 2,
+        y: box.y + box.h / 2,
+        offsetX: image[0] / 2,
+        offsetY: image[1] / 2,
+        rotation: paste.rotation ?? 0,
         scaleX: box.scale, scaleY: box.scale,
         draggable: false,
       });
       // same invisible hit target as a panel: the image never listens, so a
       // drawing tool passes through to the stage, but a click still selects.
       group.add(new Konva.Rect({
-        x: 0, y: 0, width: paste.natural[0], height: paste.natural[1],
+        x: 0, y: 0, width: image[0], height: image[1],
         fill: 'transparent', listening: true, name: 'panel-hit',
       }));
       bindPanelPointerLifecycle(group, {
@@ -1940,12 +2230,13 @@
         onDragEnd: () => commitPasteNode(paste, group),
       });
       group.on('transformend', () => commitPasteNode(paste, group, { resized: true }));
-      if (paste.img) {
-        group.add(new Konva.Image({
-          image: paste.img, width: paste.natural[0], height: paste.natural[1], listening: false,
-        }));
-      }
-      if (paste.frame) group.add(frameNode(paste.frame, paste.natural));
+      group.on('dblclick dbltap', (event) => {
+        if (tool !== 'select') return;
+        event.cancelBubble = true;
+        beginSurfaceCrop(paste);
+      });
+      if (paste.img) group.add(surfaceImageNode(paste, image));
+      if (paste.frame) group.add(frameNode(paste.frame, image));
       for (const s of proof.shapes.filter((x) => x.panel === paste.id)) {
         group.add(makeShapeNode(s, box));
       }
@@ -2054,9 +2345,9 @@
     }
     // Selection is keyed on the shape's kind, not the Konva node's class name,
     // since a framed/backgrounded text renders as a Group rather than a Text.
-    // A whole panel can be selected instead (both modes): corner anchors only
-    // (aspect locked, elements scale along), never rotated. In grid mode the
-    // resize keeps only the scale — the grid re-flows the position.
+    // A whole panel can be selected instead (both modes): corner anchors keep
+    // its aspect, and the round handle rotates its pixels and annotations. In
+    // grid mode the grid re-flows the resulting bounds.
     const selectedNodes = selectedIds
       .map((id) => docLayer.findOne(`#${id}`))
       .filter(Boolean);
@@ -2096,17 +2387,20 @@
     // Several annotations at once get the border and nothing else: dragging any
     // one of them drags the rest (Konva moves every node the transformer holds),
     // while resizing and rotating a family stays out of this first pass.
+    // Crop mode owns the image: two sets of handles over one picture is a pair
+    // of frames to aim at, so the selection frame steps aside until it is over.
     transformer.nodes(
-      !handles
+      !handles || cropSurfaceId
         ? []
         : selectedNodes.length
           ? selectedNodes
           : panelNode ? [panelNode] : pasteNode ? [pasteNode] : sigNode ? [sigNode] : []
     );
     const selKind = selectedShape?.kind;
-    transformer.keepRatio(!!sigNode || !!pasteNode || selKind === 'icon');
+    transformer.keepRatio(!!sigNode || !!panelNode || !!pasteNode || selKind === 'icon');
     transformer.rotateEnabled(
-      selKind === 'text' || selKind === 'rect' || selKind === 'ellipse' || selKind === 'icon'
+      !!panelNode || !!pasteNode
+        || selKind === 'text' || selKind === 'rect' || selKind === 'ellipse' || selKind === 'icon'
         || selKind === 'freehand'
     );
     // A symbol gets corners only: the side handles are what would let it be
@@ -2125,12 +2419,182 @@
     if (handles) {
       drawEndHandles(surfacesOf());
       drawPanelMoveControls(boxes);
+      drawCropHandles();
     } else {
       endHandles.destroyChildren();
       panelCtrls.destroyChildren();
+      cropHandles.destroyChildren();
     }
+    drawRotateKnob();
     drawGuide(width, height); // the tweet crop is a view, not a handle: it stays
     uiLayer.batchDraw();
+  }
+
+  /**
+   * The stem Collage hangs its turn knob off, drawn from the middle of the top
+   * edge out to the anchor. Decoration only: the anchor is what the pointer
+   * grabs, and it is styled into the same dark disc by `anchorStyleFunc`.
+   */
+  function drawRotateKnob() {
+    rotateKnob.destroyChildren();
+    const anchor = transformer.nodes().length && transformer.rotateEnabled()
+      ? transformer.findOne('.rotater')
+      : null;
+    if (!anchor) return;
+    const screenScale = stage.scaleX();
+    const toLocal = rotateKnob.getAbsoluteTransform().copy().invert();
+    const knob = toLocal.point(anchor.getAbsolutePosition());
+    // The stem runs from the middle of the frame's top edge, which is where the
+    // anchor hangs off however the selection is turned.
+    const edge = toLocal.point(
+      transformer.getAbsoluteTransform().point({ x: transformer.width() / 2, y: 0 }),
+    );
+    rotateKnob.add(new Konva.Line({
+      points: [edge.x, edge.y, knob.x, knob.y],
+      stroke: ACCENT, strokeWidth: 1.5 / screenScale, listening: false,
+    }));
+  }
+
+  /**
+   * The selected surface's group, and the two ways between source pixels and the
+   * screen. The group carries the turn, so a box drawn through this stays on the
+   * image's own edges however far it is turned.
+   */
+  function cropFrameOf() {
+    const item = surfaceById(cropSurfaceId);
+    const group = item && docLayer.findOne(`#pg-${item.id}`);
+    if (!group) return null;
+    const originX = item.crop?.x ?? 0;
+    const originY = item.crop?.y ?? 0;
+    return {
+      item,
+      group,
+      angle: group.getAbsoluteRotation(),
+      scale: group.getAbsoluteScale().x,
+      toScreen: (x, y) => group.getAbsoluteTransform().point({ x: x - originX, y: y - originY }),
+      toSource: (point) => {
+        const local = group.getAbsoluteTransform().copy().invert().point(point);
+        return { x: local.x + originX, y: local.y + originY };
+      },
+    };
+  }
+
+  /**
+   * PowerPoint-style crop marks: eight black edge and corner marks turned onto
+   * the image's own edges. They are drawn on the ui layer so they keep their
+   * screen size at any zoom; the shading behind them rides with the image.
+   */
+  function drawCropHandles() {
+    cropHandles.destroyChildren();
+    if (!cropSurfaceId || !cropDraft || tool !== 'select') return;
+    const frame = cropFrameOf();
+    if (!frame) return;
+
+    const screenScale = stage.scaleX();
+    const lineWidth = 3 / screenScale;
+    const haloWidth = 5 / screenScale;
+    const arm = 16 / screenScale;
+    const hit = 24 / screenScale;
+
+    cropHandles.add(new Konva.Line({
+      name: 'crop-border', closed: true,
+      stroke: '#111111', strokeWidth: 1 / screenScale, listening: false,
+    }));
+
+    const points = {
+      nw: [0, arm, 0, 0, arm, 0],
+      n: [-arm / 2, 0, arm / 2, 0],
+      ne: [-arm, 0, 0, 0, 0, arm],
+      e: [0, -arm / 2, 0, arm / 2],
+      se: [0, -arm, 0, 0, -arm, 0],
+      s: [-arm / 2, 0, arm / 2, 0],
+      sw: [arm, 0, 0, 0, 0, -arm],
+      w: [0, -arm / 2, 0, arm / 2],
+    };
+
+    for (const [key, mark] of Object.entries(points)) {
+      const handle = new Konva.Group({
+        name: 'crop-anchor',
+        draggable: true,
+        rotation: frame.angle, // the mark sits square on the turned image
+        cropKey: key,
+      });
+      handle.add(new Konva.Rect({
+        x: -hit / 2, y: -hit / 2, width: hit, height: hit,
+        fill: 'transparent', name: 'crop-hit',
+      }));
+      handle.add(new Konva.Line({
+        points: mark, stroke: '#ffffff', strokeWidth: haloWidth,
+        lineCap: 'square', lineJoin: 'miter', listening: false,
+      }));
+      handle.add(new Konva.Line({
+        points: mark, stroke: '#111111', strokeWidth: lineWidth,
+        lineCap: 'square', lineJoin: 'miter', listening: false,
+      }));
+      let start = null;
+      handle.on('dragstart', (event) => {
+        event.cancelBubble = true;
+        start = { ...cropDraft };
+      });
+      handle.on('dragmove', (event) => {
+        event.cancelBubble = true;
+        updateCropFromHandle(frame, key, handle.getAbsolutePosition(), start);
+        positionCropHandles(frame);
+      });
+      // The mark follows the pointer past where the box stopped, so put it back
+      // on the corner it actually framed. The crop itself waits for the exit.
+      handle.on('dragend', (event) => {
+        event.cancelBubble = true;
+        positionCropHandles(frame);
+      });
+      cropHandles.add(handle);
+    }
+    positionCropHandles(frame);
+  }
+
+  /** Move one edge or corner of the draft, in the source's own pixels. */
+  function updateCropFromHandle(frame, key, screenPoint, start) {
+    if (!start) return;
+    const [width, height] = frame.item.sourceNatural;
+    const min = Math.min(width, height, Math.max(1, 16 / frame.scale));
+    const point = frame.toSource(screenPoint);
+    const px = Math.max(0, Math.min(width, point.x));
+    const py = Math.max(0, Math.min(height, point.y));
+    let left = start.x;
+    let top = start.y;
+    let right = start.x + start.w;
+    let bottom = start.y + start.h;
+    if (key.includes('w')) left = Math.min(px, right - min);
+    if (key.includes('e')) right = Math.max(px, left + min);
+    if (key.includes('n')) top = Math.min(py, bottom - min);
+    if (key.includes('s')) bottom = Math.max(py, top + min);
+    cropDraft = { x: left, y: top, w: right - left, h: bottom - top };
+  }
+
+  function positionCropHandles(frame) {
+    if (!cropDraft) return;
+    const { x, y, w, h } = cropDraft;
+    const corners = {
+      nw: [x, y], n: [x + w / 2, y], ne: [x + w, y],
+      e: [x + w, y + h / 2], se: [x + w, y + h], s: [x + w / 2, y + h],
+      sw: [x, y + h], w: [x, y + h / 2],
+    };
+    for (const handle of cropHandles.find('.crop-anchor')) {
+      const [sx, sy] = corners[handle.getAttr('cropKey')];
+      handle.rotation(frame.angle);
+      handle.setAbsolutePosition(frame.toScreen(sx, sy));
+    }
+    const border = cropHandles.findOne('.crop-border');
+    if (border) {
+      const toLocal = cropHandles.getAbsoluteTransform().copy().invert();
+      border.points(['nw', 'ne', 'se', 'sw'].flatMap((key) => {
+        const point = toLocal.point(frame.toScreen(...corners[key]));
+        return [point.x, point.y];
+      }));
+    }
+    shadeCropGhost(frame.group.findOne('.crop-ghost'), frame.item);
+    frame.group.getLayer()?.batchDraw();
+    cropHandles.getLayer()?.batchDraw();
   }
 
   // Tweet centre-crop preview: X displays a single image with object-fit: cover
@@ -2725,6 +3189,13 @@
       docLayer.batchDraw();
       return;
     }
+    // Escape unwinds here as everywhere else: the marks go and the image keeps
+    // its pixels. Clicking away or saving is what keeps the box instead.
+    if (e.key === 'Escape' && cropSurfaceId) {
+      discardSurfaceCrop();
+      refreshCanvasUi();
+      return;
+    }
     // clipboard / undo / save chords
     if (e.ctrlKey || e.metaKey) {
       const k = e.key.toLowerCase();
@@ -2802,6 +3273,12 @@
   // ---- persistence -------------------------------------------------------------------------
 
   function exportPng() {
+    // A box still under its crop marks belongs to the document, not to the view:
+    // saving or copying from inside crop mode keeps it, like clicking away does.
+    if (cropSurfaceId) {
+      endSurfaceCrop();
+      rebuild();
+    }
     const { width, height } = measureDoc();
     const { pixelRatio } = proofExportOptions(width, height);
     const prevScale = stage.scale();
@@ -3203,7 +3680,11 @@
         const img = await loadImage(fileUrl(caseState.current.id, p.src));
         if (run !== openRun) return;
         imgCache.set(p.src, img);
-        proof.panels.push({ ...p, id: p.id ?? newId('p'), row: p.row ?? 0, img });
+        proof.panels.push(hydratedSurface({
+          ...p,
+          id: p.id ?? newId('p'),
+          row: p.row ?? 0,
+        }, img));
       } catch {
         if (run !== openRun) return;
         toast(`Missing panel image: ${p.src}`, 'warn');
@@ -3222,7 +3703,7 @@
         );
         if (run !== openRun) return;
         pasteAssets.set(p.asset, { img, data: null, pending: false });
-        proof.pastes.push({ ...p, id: p.id ?? newId('x'), img });
+        proof.pastes.push(hydratedSurface({ ...p, id: p.id ?? newId('x') }, img));
       } catch {
         if (run !== openRun) return;
         toast('An overlay of this proof is missing', 'warn');
@@ -3944,6 +4425,8 @@
           {openPicker}
           {movePanelZ}
           {scalePanel}
+          openCrop={beginSurfaceCrop}
+          resetCrop={resetSurfaceCrop}
           {removePanel}
           {movePasteZ}
           {removePaste}

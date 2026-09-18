@@ -7,9 +7,16 @@
    * screen grab. The list and the placement are `lib/map/contextMenu.js`; the
    * acts are the tool's, reported through `onpick`.
    */
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import Icon from '../../components/Icon.svelte';
-  import { ACTIONS, copyRows, nextFocus, openRows, placeMenu } from '../../lib/map/contextMenu.js';
+  import {
+    ACTIONS,
+    copyRows,
+    nextFocus,
+    openRows,
+    placeMenu,
+    placeSubmenu,
+  } from '../../lib/map/contextMenu.js';
 
   let {
     /** `{ lat, lon, x, y }`: the point, and where it was clicked in the map. */
@@ -31,22 +38,93 @@
   } = $props();
 
   let menuEl = $state();
+  let subEl = $state();
+  let openRowEl = $state();
   let width = $state(0);
   let height = $state(0);
+  let subWidth = $state(0);
+  let subHeight = $state(0);
   let linksOpen = $state(false);
 
   const copies = $derived(copyRows(at.lat, at.lon, format));
   const links = $derived(openRows(at.lat, at.lon, zoom));
-  // Measured once drawn; until then a typical size keeps the first frame inside.
+
+  /**
+   * Placed once, from the real measurement, and then never again.
+   *
+   * Until it is measured a typical size keeps the first frame inside the map.
+   * After that the answer is frozen: this used to be recomputed from the menu's
+   * live height, so anything that made the menu taller — an answer coming back
+   * from "What is here?", the external maps unfolding — slid the whole thing out
+   * from under the cursor.
+   */
+  let fixed = $state(null);
   const place = $derived(
-    placeMenu(at, { width: width || 236, height: height || 320 }, frame)
+    fixed ?? placeMenu(at, { width: width || 236, height: height || 320 }, frame)
+  );
+  $effect(() => {
+    if (!fixed && width && height) fixed = placeMenu(at, { width, height }, frame);
+  });
+
+  /**
+   * The submenu's own box, in the same frame coordinates as the parent's.
+   *
+   * A sibling rather than a child: the parent scrolls when its content outgrows
+   * the map, and an overflow that scrolls also clips, so a flyout drawn inside
+   * it would be cut off at its edge. The two elements answer as one menu instead
+   * — one outside-click, one arrow walk, one keyboard handler across both.
+   */
+  const sub = $derived(
+    linksOpen
+      ? placeSubmenu(
+          {
+            left: place.left,
+            top: place.top,
+            width: width || 236,
+            rowTop: place.top + (openRowEl?.offsetTop ?? 0),
+          },
+          { width: subWidth || 168, height: subHeight || 300 },
+          frame
+        )
+      : null
   );
 
   function items() {
-    return [...(menuEl?.querySelectorAll('[role="menuitem"]') ?? [])];
+    const rows = (element) => [...(element?.querySelectorAll('[role="menuitem"]') ?? [])];
+    return [...rows(menuEl), ...rows(subEl)];
+  }
+
+  /** Open the external maps and step into them, as a submenu does. */
+  async function openLinks() {
+    linksOpen = true;
+    await tick();
+    subEl?.querySelector('[role="menuitem"]')?.focus();
+  }
+
+  function closeLinks() {
+    linksOpen = false;
+    openRowEl?.focus();
   }
 
   function onkeydown(event) {
+    const inSub = Boolean(subEl?.contains(document.activeElement));
+    if (event.key === 'ArrowRight' && document.activeElement === openRowEl) {
+      event.preventDefault();
+      openLinks();
+      return;
+    }
+    if (event.key === 'ArrowLeft' && inSub) {
+      event.preventDefault();
+      closeLinks();
+      return;
+    }
+    if (event.key === 'Escape' && linksOpen) {
+      // the submenu is what Escape leaves first, as it is everywhere else
+      event.preventDefault();
+      event.stopPropagation();
+      closeLinks();
+      return;
+    }
     const rows = items();
     const current = rows.indexOf(document.activeElement);
     const move = { ArrowDown: 1, ArrowUp: -1 }[event.key];
@@ -70,7 +148,9 @@
   onMount(() => {
     items()[0]?.focus();
     const outside = (event) => {
-      if (menuEl && !menuEl.contains(event.target)) onclose();
+      const inside =
+        menuEl?.contains(event.target) || subEl?.contains(event.target);
+      if (menuEl && !inside) onclose();
     };
     document.addEventListener('mousedown', outside, true);
     return () => document.removeEventListener('mousedown', outside, true);
@@ -119,33 +199,51 @@
 
   <div class="rule" role="separator"></div>
 
+  <!-- A submenu, not a fold: the list opens beside the menu so the menu itself
+       never changes size, and nothing the cursor is resting on moves. -->
   <button
+    bind:this={openRowEl}
     class="item"
+    class:open={linksOpen}
     role="menuitem"
+    aria-haspopup="menu"
     aria-expanded={linksOpen}
-    onclick={() => (linksOpen = !linksOpen)}
+    onclick={() => (linksOpen ? closeLinks() : openLinks())}
   >
     <Icon name="external" size={13} />
     <span>Open in…</span>
-    <Icon name={linksOpen ? 'chevronDown' : 'chevronRight'} size={12} />
+    <Icon name="chevronRight" size={12} />
   </button>
-  {#if linksOpen}
-    <div class="links">
-      {#each links as link (link.id)}
-        <a
-          class="item link"
-          role="menuitem"
-          href={fullscreen ? undefined : link.url}
-          target="_blank"
-          rel="noreferrer"
-          aria-disabled={fullscreen}
-          title={fullscreen ? 'Exit fullscreen first. This leaves the map' : link.url}
-          onclick={() => !fullscreen && onclose()}
-        >{link.label}</a>
-      {/each}
-    </div>
-  {/if}
 </div>
+
+{#if sub}
+  <div
+    bind:this={subEl}
+    bind:offsetWidth={subWidth}
+    bind:offsetHeight={subHeight}
+    class="ctx card sub"
+    role="menu"
+    tabindex="-1"
+    aria-label="Open this point in"
+    style:left={`${sub.left}px`}
+    style:top={`${sub.top}px`}
+    {onkeydown}
+    oncontextmenu={(event) => event.preventDefault()}
+  >
+    {#each links as link (link.id)}
+      <a
+        class="item link"
+        role="menuitem"
+        href={fullscreen ? undefined : link.url}
+        target="_blank"
+        rel="noreferrer"
+        aria-disabled={fullscreen}
+        title={fullscreen ? 'Exit fullscreen first. This leaves the map' : link.url}
+        onclick={() => !fullscreen && onclose()}
+      >{link.label}</a>
+    {/each}
+  </div>
+{/if}
 
 <style>
   .ctx {
@@ -153,6 +251,11 @@
     z-index: 800;
     min-width: 220px;
     max-width: 300px;
+    /* Bounded by the map it opens in, so content arriving late — the answer to
+       "What is here?" — scrolls inside a menu that stays where it was put,
+       rather than growing past the frame and having to be moved. */
+    max-height: calc(100% - 16px);
+    overflow-y: auto;
     padding: 4px;
     display: flex;
     flex-direction: column;
@@ -160,6 +263,19 @@
     backdrop-filter: blur(6px);
     box-shadow: var(--shadow-2);
     outline: none;
+  }
+  /* A sibling of the menu, placed against the same frame. One notch above it,
+     and therefore above the status bar the menu already outranks — a submenu
+     hanging off a low row would otherwise have its last entries covered by the
+     bar floating at the bottom of the map. */
+  .sub {
+    z-index: 801;
+    min-width: 150px;
+    max-height: none;
+  }
+  .item.open {
+    background: var(--bg-3);
+    color: var(--text-1);
   }
   .item {
     display: flex;
@@ -211,11 +327,6 @@
   }
   .answer.warn {
     color: var(--warn, #e2a03f);
-  }
-  .links {
-    display: flex;
-    flex-direction: column;
-    padding-left: 21px;
   }
   .link {
     font-size: var(--fs-xs);

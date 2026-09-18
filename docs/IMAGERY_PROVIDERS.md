@@ -413,20 +413,32 @@ That is also one request where tiles would be a dozen.
 Every published release of World Imagery stays online under its own number
 (`engine/wayback.py`). Same imagery, same terms and same attribution as the
 default basemap, and no key. Three services, all asked only after the analyst
-picks the basemap or opens its picker:
+picks the basemap or opens its picker — and the walk follows the map from that
+first open, so an analyst reading a place through time never reads the history
+of where they were before:
 
 | Service | What it answers | Notes |
 |---|---|---|
 | `waybackconfig.json` (S3) | every release: number, title with its date, metadata service | read once per 6 h; numbers are not in date order, so the date sorts. Only metadata services on `metadata.maptiles.arcgis.com` are followed |
-| `MapServer/tilemap/{release}/{z}/{row}/{col}` | `select`: the release that tile was really published in | walking it backwards from the newest lists a point's changes, one small request per change |
+| `MapServer/tilemap/{release}/{z}/{row}/{col}` | `select`: the release that tile was really published in | walking it backwards from the newest shortlists a point's changes, one small request per candidate |
+| `WMTS/.../tile/{release}/{z}/{y}/{x}` | the pixels themselves | one tile per candidate, read 8 at a time, to settle the shortlist |
 | `World_Imagery_Metadata_*/MapServer/{layer}/query` | `SRC_DATE2` (epoch ms), provider, satellite | layer = 23 − zoom, capped at 13. Slow, a couple of seconds each, so a walk asks up to 12 at once |
 
-What the tilemap calls a change is a change of bytes. Esri republishes pictures
-often, so two filters run over the walk, both keeping the older release: equal
-tile sizes are compared by hash, and neighbours stating the same acquisition day
-and satellite are one picture (observed 2026-09 in Mariupol: three releases over
-one GE01 acquisition of 2023-10-04, re-coloured). A tile or a metadata answer
-that cannot be read is an unknown and never merges anything.
+What the tilemap calls a change is a change of bytes, and Esri republishes a
+picture far more often than the ground under it moves. So the pixels settle it:
+each candidate's tile is reduced to a 32×32 grey thumbnail and standardised, so
+a re-encoding or a new colour balance over one acquisition compares equal to it,
+and two releases are one picture when under 0.5% of the thumbnail differs by
+more than 0.7 of the tile's own spread. Measured against re-encoding, sharpening
+and a hard gamma, none of which reaches half of that, and a roof an eighth of
+the tile across, which passes it three times over. The metadata then merges what
+is left: neighbours stating the same acquisition day and satellite are one
+picture (observed 2026-09 in Mariupol: three releases over one GE01 acquisition
+of 2023-10-04, re-coloured). Both filters keep the older release, and a tile or
+a metadata answer that cannot be read is an unknown that never merges anything.
+
+The walk runs at the view zoom, so what counts as a change scales with it: at
+z19 a tile is some 75 m across and the smallest change seen is a few metres.
 
 A tile asked of a release it did not change answers `301` to the release that
 did; the proxy follows it and caches under the release asked for. The variant id

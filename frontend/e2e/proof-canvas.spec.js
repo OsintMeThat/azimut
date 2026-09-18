@@ -1,6 +1,214 @@
 import { test, expect } from '@playwright/test';
 import { installAppFixture, openProofWithPanel } from './app.fixture.js';
 
+test('a panel rotates from its round handle and crops in place on double-click', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await openProofWithPanel(page);
+
+  await page.locator('.panel-thumb').click();
+  await expect(page.getByRole('button', { name: /Rotate panel/ })).toHaveCount(0);
+
+  const canvas = page.locator('.konva canvas').first();
+  const canvasBox = await canvas.boundingBox();
+  expect(canvasBox).not.toBeNull();
+  const rotation = await page.evaluate(() => {
+    const stage = window.Konva.stages[0];
+    const transformer = stage.find((node) => node.getClassName() === 'Transformer')[0];
+    const node = transformer.nodes()[0];
+    const handle = transformer.findOne('.rotater');
+    return {
+      centre: node.getAbsolutePosition(),
+      handle: handle.getAbsolutePosition(),
+      round: handle.cornerRadius() >= handle.width() / 2,
+    };
+  });
+  expect(rotation.round).toBe(true);
+  const radius = Math.hypot(
+    rotation.handle.x - rotation.centre.x,
+    rotation.handle.y - rotation.centre.y,
+  );
+  await page.mouse.move(canvasBox.x + rotation.handle.x, canvasBox.y + rotation.handle.y);
+  await page.mouse.down();
+  await page.mouse.move(
+    canvasBox.x + rotation.centre.x + radius * 0.5,
+    canvasBox.y + rotation.centre.y - radius * 0.866,
+    { steps: 8 },
+  );
+  await page.mouse.up();
+
+  const panelCentre = await page.evaluate(() => {
+    const stage = window.Konva.stages[0];
+    const transformer = stage.find((node) => node.getClassName() === 'Transformer')[0];
+    return transformer.nodes()[0].getAbsolutePosition();
+  });
+  await page.mouse.dblclick(canvasBox.x + panelCentre.x, canvasBox.y + panelCentre.y);
+  await expect.poll(() => page.evaluate(() => (
+    window.Konva.stages[0].findOne('#proof-crop-handles').find('.crop-anchor').length
+  ))).toBe(8);
+
+  const northWest = await page.evaluate(() => {
+    const group = window.Konva.stages[0].findOne('#proof-crop-handles');
+    return group.find('.crop-anchor').find((node) => node.getAttr('cropKey') === 'nw').getAbsolutePosition();
+  });
+  await page.mouse.move(canvasBox.x + northWest.x, canvasBox.y + northWest.y);
+  await page.mouse.down();
+  await page.mouse.move(canvasBox.x + northWest.x + 45, canvasBox.y + northWest.y + 35, { steps: 8 });
+  await page.mouse.up();
+
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
+  await expect.poll(() => fixture.proofSaves.length).toBe(1);
+  const transformed = fixture.proofSaves[0].spec.panels[0];
+  expect(transformed.natural).toEqual([640, 360]); // source pixels stay intact
+  expect(Math.abs(transformed.rotation)).toBeGreaterThan(5);
+  expect(transformed.crop.w).toBeGreaterThan(0);
+  expect(transformed.crop.h).toBeGreaterThan(0);
+  expect(transformed.crop.w).toBeLessThan(640);
+
+  // The reset takes the crop and leaves the turn: they are two statements.
+  await page.getByRole('button', { name: 'Reset panel crop' }).click();
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
+  await expect.poll(() => fixture.proofSaves.length).toBe(2);
+  expect(fixture.proofSaves[1].spec.panels[0]).not.toHaveProperty('crop');
+  expect(Math.abs(fixture.proofSaves[1].spec.panels[0].rotation)).toBeGreaterThan(5);
+  fixture.expectNoUnexpectedRequests();
+});
+
+/** Where the one panel sits on the canvas, selected or not. */
+const panelRect = (page) => page.evaluate(() => (
+  window.Konva.stages[0].findOne((node) => node.id()?.startsWith('pg-')).getClientRect()
+));
+
+/** Put the crop marks up on the one panel, the way an analyst does. */
+async function openCropMode(page, canvasBox) {
+  const rect = await panelRect(page);
+  await page.mouse.dblclick(
+    canvasBox.x + rect.x + rect.width / 2,
+    canvasBox.y + rect.y + rect.height / 2,
+  );
+  await expect.poll(() => cropAnchorCount(page)).toBe(8);
+}
+
+const cropAnchorCount = (page) => page.evaluate(() => (
+  window.Konva.stages[0].findOne('#proof-crop-handles').find('.crop-anchor').length
+));
+
+/** The box the black marks currently frame, in stage pixels. */
+const cropFrame = (page) => page.evaluate(() => {
+  const border = window.Konva.stages[0].findOne('.crop-border');
+  return { w: Math.round(border.width()), h: Math.round(border.height()) };
+});
+
+const cropAnchorAt = (page, key) => page.evaluate((wanted) => (
+  window.Konva.stages[0]
+    .findOne('#proof-crop-handles')
+    .find('.crop-anchor')
+    .find((node) => node.getAttr('cropKey') === wanted)
+    .getAbsolutePosition()
+), key);
+
+async function dragCropAnchor(page, canvasBox, key, dx, dy) {
+  const from = await cropAnchorAt(page, key);
+  await page.mouse.move(canvasBox.x + from.x, canvasBox.y + from.y);
+  await page.mouse.down();
+  await page.mouse.move(canvasBox.x + from.x + dx, canvasBox.y + from.y + dy, { steps: 8 });
+  await page.mouse.up();
+}
+
+// The marks are a draft until crop mode is left: pulling a corner too far is
+// undone by pulling it back, and the whole session lands as one crop. Committing
+// on each release instead would bury the pixels the next pull needs.
+test('crop marks pull both ways, land once on the way out, and Escape drops them', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await openProofWithPanel(page);
+
+  const canvasBox = await page.locator('.konva canvas').first().boundingBox();
+  expect(canvasBox).not.toBeNull();
+  await openCropMode(page, canvasBox);
+
+  const full = await cropFrame(page);
+  await dragCropAnchor(page, canvasBox, 'nw', 70, 45);
+  const pulledIn = await cropFrame(page);
+  expect(pulledIn.w).toBeLessThan(full.w);
+  expect(pulledIn.h).toBeLessThan(full.h);
+
+  // Back out: the pixels are still there, because nothing was cut yet.
+  await dragCropAnchor(page, canvasBox, 'nw', -40, -25);
+  const pulledBack = await cropFrame(page);
+  expect(pulledBack.w).toBeGreaterThan(pulledIn.w);
+  expect(pulledBack.h).toBeGreaterThan(pulledIn.h);
+
+  // Escape unwinds the draft, like every other draft in this tool.
+  await page.keyboard.press('Escape');
+  await expect.poll(() => cropAnchorCount(page)).toBe(0);
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
+  await expect.poll(() => fixture.proofSaves.length).toBe(1);
+  expect(fixture.proofSaves[0].spec.panels[0]).not.toHaveProperty('crop');
+
+  // A press off the image is what keeps it, and three pulls land as one crop.
+  await openCropMode(page, canvasBox);
+  await dragCropAnchor(page, canvasBox, 'nw', 60, 40);
+  await dragCropAnchor(page, canvasBox, 'se', -50, -30);
+  await dragCropAnchor(page, canvasBox, 'e', -20, 0);
+  const rect = await panelRect(page);
+  await page.mouse.click(
+    canvasBox.x + Math.max(3, rect.x - 10),
+    canvasBox.y + Math.max(3, rect.y - 10),
+  );
+  await expect.poll(() => cropAnchorCount(page)).toBe(0);
+
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
+  await expect.poll(() => fixture.proofSaves.length).toBe(2);
+  const saved = fixture.proofSaves[1].spec.panels[0];
+  expect(saved.natural).toEqual([640, 360]); // the source file is untouched
+  expect(saved).not.toHaveProperty('rotation');
+  expect(saved.crop.w).toBeLessThan(640);
+  expect(saved.crop.h).toBeLessThan(360);
+  fixture.expectNoUnexpectedRequests();
+});
+
+// The row button is the way in and out that needs no aim, so it toggles.
+test('the row crop button opens the marks and a second press keeps the box', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await openProofWithPanel(page);
+
+  const canvasBox = await page.locator('.konva canvas').first().boundingBox();
+  const cropButton = page.getByRole('button', { name: 'Crop panel' });
+  await cropButton.click();
+  await expect.poll(() => cropAnchorCount(page)).toBe(8);
+
+  await dragCropAnchor(page, canvasBox, 'se', -55, -35);
+  await cropButton.click();
+  await expect.poll(() => cropAnchorCount(page)).toBe(0);
+
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
+  await expect.poll(() => fixture.proofSaves.length).toBe(1);
+  const saved = fixture.proofSaves[0].spec.panels[0];
+  expect(saved.crop.w).toBeLessThan(640);
+  fixture.expectNoUnexpectedRequests();
+});
+
+// Reaching for a pen is the other way out of crop mode, and it runs from inside
+// the effect that watches the tool, where the commit writes to the document.
+test('a tool picked up mid-crop keeps the box the marks framed', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await openProofWithPanel(page);
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+
+  const canvasBox = await page.locator('.konva canvas').first().boundingBox();
+  await openCropMode(page, canvasBox);
+  await dragCropAnchor(page, canvasBox, 'nw', 60, 40);
+
+  await page.getByTitle('Box (r)').click();
+  await expect.poll(() => cropAnchorCount(page)).toBe(0);
+  expect(errors).toEqual([]);
+
+  await page.getByRole('button', { name: 'Save proof', exact: true }).click();
+  await expect.poll(() => fixture.proofSaves.length).toBe(1);
+  expect(fixture.proofSaves[0].spec.panels[0].crop.w).toBeLessThan(640);
+  fixture.expectNoUnexpectedRequests();
+});
+
 test('a real Konva panel remains interactive after click and drag', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await openProofWithPanel(page);

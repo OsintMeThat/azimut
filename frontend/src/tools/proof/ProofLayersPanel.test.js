@@ -42,3 +42,25 @@ describe('the rows and the canvas agree about what is picked', () => {
     expect(source).not.toContain('$bindable');
   });
 });
+
+describe('panel and overlay transforms', () => {
+  it('offers the same crop control on both image kinds without arrow buttons', () => {
+    expect(source).toContain('{#snippet transformControl(item, label)}');
+    expect(source.match(/\{@render transformControl\(/g)).toHaveLength(2);
+    expect(source).toContain('onclick={() => openCrop(item)}');
+    expect(source).not.toContain('rotateSurface');
+    expect(source).not.toContain('rotateLeft');
+    expect(source).not.toContain('rotateRight');
+  });
+
+  it('shows a separate reset only after a crop exists', () => {
+    expect(source).toContain('{#if item.crop}');
+    expect(source).toContain('onclick={() => resetCrop(item)}');
+    expect(source).toContain('class:active={!!item.crop}');
+  });
+
+  it('thumbs the overlay from its own image, which is now the untouched source', () => {
+    expect(source).toContain('<img src={paste.img?.src} alt="" />');
+    expect(source).not.toContain('sourceImg');
+  });
+});

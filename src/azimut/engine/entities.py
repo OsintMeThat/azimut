@@ -565,6 +565,14 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
                hint="an analyzer, its areas and a date rule, rerun on demand"),
     EntityType("analysis-run", "Analysis run", DOCUMENT, "changes", ANNEX,
                hint="candidate detections with frozen inputs and review decisions"),
+    # Somebody else's map, drawn over this one. `ANNEX` for the reason a sheet is
+    # one: it is consulted, and no path through the case runs across it. It is
+    # deliberately not an attestation — an attestation folds into the edge that
+    # carries its provenance, and a layer nothing links to would fold into
+    # nothing. Nothing in it enters the graph: a feature drawn here is the
+    # source's claim, not the case's.
+    EntityType("map-layer", "Map layer", DOCUMENT, "compass", ANNEX,
+               hint="a map file or feed the analyst added, drawn but never adopted"),
     # The page a claim rests on. `url` and `fetched_at` are written by whatever
     # filed it — the extension is on the page, so the server stamps the moment it
     # was seen — and are not declared here: a declared attr is a field an analyst

@@ -31,6 +31,7 @@ export const FILE_BACKED = new Set([
   'analysis-run',
   'note',
   'sheet',
+  'map-layer',
 ]);
 
 /**

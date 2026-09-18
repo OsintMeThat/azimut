@@ -175,6 +175,26 @@ class CompareBlink(BaseModel):
     interval: int = Field(default=800, ge=200, le=4000)
 
 
+class CompareFrame(BaseModel):
+    """What an export is cut to: two opposite corners of a ground rectangle.
+
+    Held on the ground like an annotation, so a comparison reopened on another
+    screen still exports the same roofs rather than the same pixels.
+    """
+
+    #: ``[lon, lat]`` pairs, in the order they were drawn.
+    points: list[tuple[float, float]] = Field(min_length=2, max_length=2)
+
+    @model_validator(mode="after")
+    def _ground(self) -> "CompareFrame":
+        for lon, lat in self.points:
+            if not (-180 <= lon <= 180 and -90 <= lat <= 90):
+                raise ValueError("frame corners must be WGS84 longitude and latitude")
+        if self.points[0] == self.points[1]:
+            raise ValueError("an export frame needs two distinct corners")
+        return self
+
+
 class CompareSpec(BaseModel):
     version: Literal[2] = 2
     camera: CompareCamera
@@ -184,6 +204,8 @@ class CompareSpec(BaseModel):
     blink: CompareBlink = Field(default_factory=CompareBlink)
     change_assist: CompareChangeAssist = Field(default_factory=CompareChangeAssist)
     annotations: list[CompareAnnotation] = Field(default_factory=list, max_length=200)
+    #: Absent or null when the export takes the whole view.
+    frame: CompareFrame | None = None
     a: CompareSide
     b: CompareSide
 
@@ -219,6 +241,8 @@ def _validated_spec(spec: CompareSpec) -> dict[str, Any]:
     assist["classes"] = list(dict.fromkeys(assist["classes"]))
     for mark in cleaned["annotations"]:
         mark["points"] = [list(point) for point in mark["points"]]
+    if cleaned["frame"]:
+        cleaned["frame"]["points"] = [list(point) for point in cleaned["frame"]["points"]]
     if cleaned["mode"] == "change":
         reason = change_refusal(cleaned["a"], cleaned["b"], assist["method"])
         if reason:

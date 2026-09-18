@@ -202,6 +202,37 @@ def test_a_video_stands_where_the_proof_using_its_frame_concludes(client, sat_ti
     assert video_row["linked_proofs"][0]["title"] == "Roofline"
 
 
+def test_two_clips_one_post_collected_stay_on_their_own_geolocation(client, sat_tiles):
+    """A post publishing two clips is not a claim that they were filmed together.
+
+    The walk crosses the chain in both directions, so a document holding several
+    files joined them end to end: each clip reached the other's proof and stood on
+    its point. Two geolocations became four rows, and the map drew a 2 on each.
+    """
+    cid = _new_case(client)
+    north = _upload(client, cid, "north.png")
+    south = _upload(client, cid, "south.png", color=(30, 30, 200))
+    _save_proof(
+        client, cid, "North",
+        [_frame_of(cid, north, "n.png"), _sat(client, cid, 50.4501, 30.5234)],
+        coords={"lat": 50.4501, "lon": 30.5234},
+    )
+    _save_proof(
+        client, cid, "South",
+        [_frame_of(cid, south, "s.png"), _sat(client, cid, 48.8584, 2.2945)],
+        coords={"lat": 48.8584, "lon": 2.2945},
+    )
+
+    case = Case.open(cid)
+    post = case.add_entity("post", "The thread", {}, by="user")
+    for path in (north, south):
+        case.add_link(post["id"], _id(cid, path=path), "derived-from", by="user")
+
+    rows = _index(client, cid)
+    assert _points(rows, north) == [(50.4501, 30.5234)]
+    assert _points(rows, south) == [(48.8584, 2.2945)]
+
+
 def test_roads_that_agree_on_a_point_are_one_row(client, sat_tiles):
     """The composer poses the proof's point on its material as `depicts`, and the
     same file reaches that proof along the chain. One file on one metre is one mark,

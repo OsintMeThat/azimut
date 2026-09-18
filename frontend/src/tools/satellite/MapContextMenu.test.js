@@ -49,6 +49,15 @@ describe('the right-click menu', () => {
     expect(body).not.toContain('Google Earth');
   });
 
+  it('says the links are a submenu, not a fold, so the menu cannot change size', () => {
+    // opening them used to grow the menu, which a menu already placed against
+    // the frame's edge answered by moving out from under the cursor
+    const { body } = render(MapContextMenu, { props: props() });
+
+    expect(body).toContain('aria-haspopup="menu"');
+    expect(body).not.toContain('chevronDown');
+  });
+
   it('states the lookup where it was asked, while it runs and once it answered', () => {
     expect(
       render(MapContextMenu, { props: props({ lookup: { busy: true } }) }).body

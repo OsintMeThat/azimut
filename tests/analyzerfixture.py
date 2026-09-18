@@ -136,6 +136,24 @@ def sea(rng_seed=3):
     return bands
 
 
+def glinted_sea(rng_seed=3):
+    """Sea under sun glint, as the Bab-el-Mandeb read on 2026-09-16.
+
+    Glint adds the same reflectance to every band, so near and short-wave
+    infrared sit near 0.08 and NDWI collapses onto zero. The classification
+    still calls all of it water.
+    """
+    rng = np.random.default_rng(rng_seed)
+    bands = np.zeros((EDGE, EDGE, 4), np.uint8)
+    bands[:, :, 0] = np.clip(np.round((0.075 + rng.normal(0, 0.004, (EDGE, EDGE)))
+                                      * 255 * sentinel.BAND_GAIN), 1, 255)
+    bands[:, :, 1] = np.clip(np.round((0.086 + rng.normal(0, 0.004, (EDGE, EDGE)))
+                                      * 255 * sentinel.BAND_GAIN), 0, 255)
+    bands[:, :, 2] = rng.integers(118, 134, (EDGE, EDGE), dtype=np.uint8)   # NDWI ≈ 0
+    bands[:, :, 3] = WATER
+    return bands
+
+
 def hull(bands, px, py, width, height, swir=True):
     """A target on the sea. Without short-wave infrared it is a breaking wave."""
     region = bands[at(px, py, width, height)]

@@ -49,6 +49,8 @@
     canFill,
     comparisonAnnotations,
   } from '../lib/map/compareAnnotations.js';
+  import { cropSources, exportFrameSpec, frameSpan } from '../lib/map/exportFrame.js';
+  import { formatDistance } from '../lib/measure.js';
   import { captureTab, extensionVersion } from '../lib/extBridge.js';
   import {
     CASE_FOLDER_LABEL,
@@ -93,6 +95,7 @@
   import LayerPane from './compare/LayerPane.svelte';
   import AnnotationCanvas from './compare/AnnotationCanvas.svelte';
   import AnnotationToolbar from './compare/AnnotationToolbar.svelte';
+  import ExportFrame from './compare/ExportFrame.svelte';
   import { createSavedState } from './satellite/state/saved.svelte.js';
   import PlaceSearch from './satellite/PlaceSearch.svelte';
   import { createImageryState, FALLBACK_PROVIDER } from './satellite/state/imagery.svelte.js';
@@ -121,6 +124,11 @@
   let grabbing = $state(false);
   let captureSide = $state(null); // surface visible during an extension frame
   let exportKind = $state('png'); // 'png' | 'blink' | 'slide'
+  // What an export is cut to, as two ground corners, and whether one is being
+  // drawn right now. No frame means the whole view, which is the default.
+  let exportFrame = $state(null);
+  let framing = $state(false);
+  let blinkPausedBeforeFraming = null;
   let exportDestination = $state(null);
   let exportPicker = $state(false);
   let sessionName = $state('Comparison');
@@ -663,16 +671,20 @@
   $effect(() => {
     if (b.ready && shownB.provider?.id === WAYBACK_ID) wbb.loadReleases();
   });
+  // Once a side's picker has been opened, its history follows the map, picker
+  // open or not: both surfaces share one view, so both walk the same tile.
   $effect(() => {
-    if (!wba.menuOpen || shownA.provider?.id !== WAYBACK_ID || !wba.stale) return;
+    if (!wba.watching || shownA.provider?.id !== WAYBACK_ID) return;
+    wba.here;
     clearTimeout(wbaChangesTimer);
-    wbaChangesTimer = setTimeout(() => wba.loadChanges(), 900);
+    wbaChangesTimer = setTimeout(() => wba.follow(), 900);
     return () => clearTimeout(wbaChangesTimer);
   });
   $effect(() => {
-    if (!wbb.menuOpen || shownB.provider?.id !== WAYBACK_ID || !wbb.stale) return;
+    if (!wbb.watching || shownB.provider?.id !== WAYBACK_ID) return;
+    wbb.here;
     clearTimeout(wbbChangesTimer);
-    wbbChangesTimer = setTimeout(() => wbb.loadChanges(), 900);
+    wbbChangesTimer = setTimeout(() => wbb.follow(), 900);
     return () => clearTimeout(wbbChangesTimer);
   });
 
@@ -803,6 +815,7 @@
       blink: { interval: blinkInterval },
       change_assist: changeSettings(changeOptions),
       annotations: comparisonAnnotations(annotations),
+      frame: exportFrame,
       a: sideSpec(a, s2a, wba),
       b: sideSpec(b, s2b, wbb),
     };
@@ -916,6 +929,7 @@
       changeOptions = changeSettings(spec.change_assist);
       blinkInterval = spec.blink?.interval ?? 800;
       annotations = comparisonAnnotations(spec.annotations);
+      exportFrame = exportFrameSpec(spec.frame);
       resetAnnotationHistory();
       applySide(a, s2a, wba, spec.a);
       applySide(b, s2b, wbb, spec.b);
@@ -996,6 +1010,9 @@
     annotations = [];
     annotationTool = 'select';
     resetAnnotationHistory();
+    exportFrame = null;
+    framing = false;
+    blinkPausedBeforeFraming = null;
     sessionName = 'Comparison';
     openedSession = null;
     savedSignature = null;
@@ -1467,6 +1484,40 @@
     }
   }
 
+  /** The captured surfaces as the export shows them: whole, or cut to the frame. */
+  async function exportSources() {
+    return cropSources(await sourceCanvases(), exportFrame);
+  }
+
+  /** The frame stated as the ground it covers, which no camera can change. */
+  function frameLabel(value) {
+    const span = frameSpan(value.points, bearing);
+    return `${formatDistance(span.width, prefs.units)} × ${formatDistance(span.height, prefs.units)}`;
+  }
+
+  function startFraming() {
+    rightPanel = null;
+    framing = true;
+    if (mode === 'blink') {
+      blinkPausedBeforeFraming = blinkPaused;
+      blinkPaused = true;
+    }
+  }
+
+  function finishFraming() {
+    framing = false;
+    if (blinkPausedBeforeFraming !== null) {
+      blinkPaused = blinkPausedBeforeFraming;
+      blinkPausedBeforeFraming = null;
+    }
+    rightPanel = 'export';
+  }
+
+  function setExportFrame(next) {
+    exportFrame = next;
+    finishFraming();
+  }
+
   function compose(
     sources,
     { renderMode = captureMode, renderBlinkB = blinkB, renderChangeMap = changeResult } = {}
@@ -1500,7 +1551,7 @@
       clearTimeout(changeTimer);
       await refreshChangeAssist({ fetch: changeFrames !== '' });
     }
-    const sources = await sourceCanvases();
+    const sources = await exportSources();
     if (mode === 'change' && (changeRenderedKey !== changeKey() || !changeResult)) {
       throw new Error('Run Difference for this view before exporting');
     }
@@ -1511,7 +1562,7 @@
   async function saveWorkingPreview(caseId, name) {
     const form = new FormData();
     if (mode === 'blink') {
-      const sources = await sourceCanvases();
+      const sources = await exportSources();
       const frameA = await canvasBlob(compose(sources, { renderMode: 'blink', renderBlinkB: false }));
       const frameB = await canvasBlob(compose(sources, { renderMode: 'blink', renderBlinkB: true }));
       form.append('image_a', frameA, 'comparison-a.png');
@@ -1568,7 +1619,7 @@
     outputBusy = 'gif';
     try {
       const owner = await ensureCase();
-      const sources = await sourceCanvases();
+      const sources = await exportSources();
       const frameA = await canvasBlob(compose(sources, { renderMode: 'blink', renderBlinkB: false }));
       const frameB = await canvasBlob(compose(sources, { renderMode: 'blink', renderBlinkB: true }));
       const form = new FormData();
@@ -1695,23 +1746,6 @@
       {/each}
     </div>
   {/if}
-  <!-- Detect owns the imagery while it is on, so the cards would be a second
-       place to choose the same thing. One choice, one place. -->
-  {#if (a.present || b.present) && !detecting}
-    <div class="source-bar" aria-label="Compared imagery">
-      {#if a.present}
-        <SourceCard letter="A" {imagery} bind:providerId={a.providerId} s2={s2a} wayback={wba}
-          shown={shownA} dated={a.dated} layerCount={a.overlays.length} layersOpen={rightPanel === 'layers'}
-          onlayers={() => toggleRightPanel('layers')} onremove={() => remove('a')} />
-      {:else}<button class="source-add" onclick={() => (picking = 'a')}>A · Add imagery</button>{/if}
-      {#if b.present}
-        <SourceCard letter="B" {imagery} bind:providerId={b.providerId} s2={s2b} wayback={wbb}
-          shown={shownB} dated={b.dated} align="right" layerCount={b.overlays.length} layersOpen={rightPanel === 'layers'}
-          onlayers={() => toggleRightPanel('layers')} onremove={() => remove('b')} />
-      {:else}<button class="source-add" onclick={() => (picking = 'b')}>B · Add imagery</button>{/if}
-    </div>
-  {/if}
-
   <div class="compare-workspace">
   {#if both && !detecting}
     <AnnotationToolbar
@@ -1737,6 +1771,28 @@
       clear={() => { setAnnotations([]); selectedAnnotationId = null; }}
       count={annotations.length}
     />
+  {/if}
+
+  <!-- The cards ride over the stage, not over the tool: the annotation rail on
+       the left and a computing panel on the right both narrow the stage, and a
+       full-width bar put the seam between the cards tens of pixels away from
+       the seam between the maps.
+       Detect owns the imagery while it is on, so the cards would be a second
+       place to choose the same thing. One choice, one place. -->
+  <div class="stage-column">
+  {#if (a.present || b.present) && !detecting}
+    <div class="source-bar" aria-label="Compared imagery">
+      {#if a.present}
+        <SourceCard letter="A" {imagery} bind:providerId={a.providerId} s2={s2a} wayback={wba}
+          shown={shownA} dated={a.dated} layerCount={a.overlays.length} layersOpen={rightPanel === 'layers'}
+          onlayers={() => toggleRightPanel('layers')} onremove={() => remove('a')} />
+      {:else}<button class="source-add" onclick={() => (picking = 'a')}>A · Add imagery</button>{/if}
+      {#if b.present}
+        <SourceCard letter="B" {imagery} bind:providerId={b.providerId} s2={s2b} wayback={wbb}
+          shown={shownB} dated={b.dated} align="right" layerCount={b.overlays.length} layersOpen={rightPanel === 'layers'}
+          onlayers={() => toggleRightPanel('layers')} onremove={() => remove('b')} />
+      {:else}<button class="source-add" onclick={() => (picking = 'b')}>B · Add imagery</button>{/if}
+    </div>
   {/if}
   <div
     class="compare-stage"
@@ -1817,6 +1873,12 @@
           <img class="change-map" src={changeUrl} alt="Pixel-change heatmap over imagery A"
             style:width={`${changeResult.frame.width}px`} style:height={`${changeResult.frame.height}px`}
             style:transform={changeTransform.a} />
+        {/if}
+        <!-- Side by side has two coordinate spaces, so A owns the editable
+             frame and B shows the matching ground read-only. -->
+        {#if both && !grabbing && !detecting && stageMode === 'side' && (framing || exportFrame)}
+          <ExportFrame engine={a.engine} frame={exportFrame} drawing={framing} units={prefs.units} {bearing}
+            onframe={setExportFrame} oncancel={finishFraming} />
         {/if}
         {#if both && !grabbing && !detecting}
           <AnnotationCanvas bind:this={canvasA} {annotations} engine={a.engine} letter="a" units={prefs.units}
@@ -1913,6 +1975,9 @@
             style:width={`${changeResult.frame.width}px`} style:height={`${changeResult.frame.height}px`}
             style:transform={changeTransform.b} />
         {/if}
+        {#if both && !grabbing && !detecting && stageMode === 'side' && exportFrame}
+          <ExportFrame engine={b.engine} frame={exportFrame} readonly={true} units={prefs.units} {bearing} />
+        {/if}
         {#if both && !grabbing && !detecting}
           <AnnotationCanvas bind:this={canvasB} {annotations} engine={b.engine} letter="b" units={prefs.units}
             active={uiState.tool === 'compare'} bind:tool={annotationTool} bind:selectedId={selectedAnnotationId}
@@ -1956,7 +2021,21 @@
         onpointerup={stopSwipe}
         onpointercancel={stopSwipe}
         onkeydown={keySwipe}
-      ><span>↔</span></button>
+      >
+        <span class="swipe-handle" aria-hidden="true">
+          <Icon name="chevronLeft" size={12} stroke={2.4} />
+          <i></i>
+          <Icon name="chevronRight" size={12} stroke={2.4} />
+        </span>
+      </button>
+    {/if}
+
+    <!-- Fade, Swipe, Blink and the single-image Difference layouts stack both
+         maps in one coordinate space. Their frame therefore sits above the
+         complete stage, where neither B nor the swipe clip can block it. -->
+    {#if both && !grabbing && !detecting && stageMode !== 'side' && (framing || exportFrame)}
+      <ExportFrame engine={a.engine} frame={exportFrame} drawing={framing} units={prefs.units} {bearing}
+        onframe={setExportFrame} oncancel={finishFraming} />
     {/if}
 
     {#if both && mode === 'change'}
@@ -1969,6 +2048,7 @@
     {/if}
 
  </div>
+  </div>
 
   <!-- The two computing modes share this column, so where their settings live
        never depends on which one is on: the stage narrows, the maps stay whole
@@ -2014,6 +2094,17 @@
             <Icon name="panelRight" size={17} />
             <span><strong>GIF · Slide</strong><small>Sweeps the divider across the image.</small></span>
           </label>
+        </div>
+
+        <div class="destination">
+          <span class="field-label">Frame</span>
+          <strong>{exportFrame ? frameLabel(exportFrame) : 'Full view'}</strong>
+          <span class="destination-actions">
+            <button type="button" class="link" onclick={startFraming}>{exportFrame ? 'Redraw…' : 'Draw…'}</button>
+            {#if exportFrame}
+              <button type="button" class="link muted" onclick={() => (exportFrame = null)}>Clear</button>
+            {/if}
+          </span>
         </div>
 
         <div class="destination">
@@ -2232,6 +2323,9 @@
   .mode-footer { display: flex; justify-content: center; padding: 6px; background: var(--bg-1); }
   .presets { display: flex; justify-content: center; gap: 8px; padding: 8px; }
   .compare-workspace { display: flex; min-height: 0; flex: 1; }
+  /* The cards and the maps they describe share one width, so the split between
+     A and B is one line down the whole tool. */
+  .stage-column { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
   .compare-stage {
     position: relative;
     flex: 1;
@@ -2360,6 +2454,8 @@
     bottom: 0;
     left: var(--divider);
     width: 2px;
+    padding: 0;
+    border: 0;
     transform: translateX(-1px);
     background: rgba(255,255,255,.92);
     cursor: ew-resize;
@@ -2371,20 +2467,42 @@
     position: absolute;
     inset: 0 -12px;
   }
-  .swipe-line:focus-visible span { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .swipe-line span {
+  .swipe-line:focus-visible { outline: none; }
+  .swipe-line:focus-visible .swipe-handle {
+    box-shadow: 0 0 0 2px var(--accent), 0 4px 14px rgba(0,0,0,.45);
+  }
+  .swipe-handle {
     position: absolute;
     top: 50%;
     left: 50%;
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    width: 40px;
+    height: 30px;
     transform: translate(-50%, -50%);
-    border-radius: 50%;
-    color: #181818;
-    background: #f2f2f2;
-    box-shadow: var(--shadow-2);
+    border: 1px solid rgba(255,255,255,.38);
+    border-radius: 9px;
+    color: #f8fafc;
+    background: rgba(24,24,24,.88);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 4px 14px rgba(0,0,0,.45);
+    pointer-events: none;
+    transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  }
+  .swipe-handle i {
+    width: 1px;
+    height: 14px;
+    background: rgba(255,255,255,.28);
+  }
+  .swipe-line:hover .swipe-handle {
+    border-color: rgba(255,255,255,.62);
+    background: rgba(12,12,12,.94);
+    transform: translate(-50%, -50%) scale(1.04);
+  }
+  .swipe-line:active .swipe-handle {
+    transform: translate(-50%, -50%) scale(.98);
   }
   .rotate-pivot {
     position: absolute;
@@ -2460,7 +2578,10 @@
   .destination { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; align-items: center; padding-top: 13px; border-top: 1px solid var(--border); }
   .destination .field-label { grid-column: 1 / -1; }
   .destination strong { overflow: hidden; color: var(--text-2); font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
+  .destination-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
   .link { color: var(--accent); font-size: var(--fs-xs); }
+  .link.muted { color: var(--text-3); }
+  .link.muted:hover { color: var(--text-1); }
   .panel-note,
   .panel-intro { margin: 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; }
   .panel-intro { padding: 0 0 12px; }

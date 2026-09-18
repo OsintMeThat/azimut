@@ -46,46 +46,48 @@
       {:else if !wb.releases.length}
         <div class="menu-hint dim">Reading the release list…</div>
       {:else}
-        <div class="step-row">
-          <button
-            class="nav"
-            onclick={() => wb.step(1)}
-            disabled={wb.position >= list.length - 1}
-            aria-label="Older release"
-            title="Older release"
-          ><Icon name="chevronLeft" size={13} /></button>
-          <span class="current mono">{sliderDate}</span>
-          <button
-            class="nav"
-            onclick={() => wb.step(-1)}
-            disabled={wb.position <= 0}
-            aria-label="Newer release"
-            title="Newer release"
-          ><Icon name="chevronRight" size={13} /></button>
-        </div>
-        <input
-          class="slider"
-          type="range"
-          min="0"
-          max={last}
-          step="1"
-          value={sliderValue}
-          disabled={list.length < 2}
-          oninput={(event) => (dragging = Number(event.currentTarget.value))}
-          onchange={(event) => {
-            const picked = list[last - Number(event.currentTarget.value)];
-            dragging = null;
-            if (picked) wb.pick(picked.release);
-          }}
-          aria-label="Release"
-        />
+        {#if !wb.reading}
+          <div class="step-row">
+            <button
+              class="nav"
+              onclick={() => wb.step(1)}
+              disabled={wb.position >= list.length - 1}
+              aria-label="Older release"
+              title="Older release"
+            ><Icon name="chevronLeft" size={13} /></button>
+            <span class="current mono">{sliderDate}</span>
+            <button
+              class="nav"
+              onclick={() => wb.step(-1)}
+              disabled={wb.position <= 0}
+              aria-label="Newer release"
+              title="Newer release"
+            ><Icon name="chevronRight" size={13} /></button>
+          </div>
+          <input
+            class="slider"
+            type="range"
+            min="0"
+            max={last}
+            step="1"
+            value={sliderValue}
+            disabled={list.length < 2}
+            oninput={(event) => (dragging = Number(event.currentTarget.value))}
+            onchange={(event) => {
+              const picked = list[last - Number(event.currentTarget.value)];
+              dragging = null;
+              if (picked) wb.pick(picked.release);
+            }}
+            aria-label={wb.changesOnly ? 'Change' : 'Release'}
+          />
+        {/if}
 
         <div class="chips">
           <button
             class="chip-opt"
             class:on={wb.changesOnly}
             onclick={() => wb.setChangesOnly(true)}
-            title="Only releases whose pixels differ at the crosshair"
+            title="Only releases showing a different picture at the crosshair"
           >Changes here</button>
           <button
             class="chip-opt"
@@ -111,26 +113,28 @@
           {/if}
         {/if}
 
-        <ul class="releases" aria-label="Releases">
-          {#each list as entry, index (entry.release)}
-            {@const shot = wb.picture(entry.release)}
-            <li>
-              <button
-                class="row mono"
-                class:on={index === onScreen}
-                onclick={() => wb.pick(entry.release)}
-                title={shot?.source ? `Taken by ${shot.source}` : undefined}
-              >
-                <span>{entry.date}</span>
-                {#if shot?.acquired}<span class="taken">taken {shot.acquired}</span>{/if}
-              </button>
-            </li>
-          {/each}
-        </ul>
+        {#if !wb.reading}
+          <ul class="releases" aria-label="Releases">
+            {#each list as entry, index (entry.release)}
+              {@const shot = wb.picture(entry.release)}
+              <li>
+                <button
+                  class="row mono"
+                  class:on={index === onScreen}
+                  onclick={() => wb.pick(entry.release)}
+                  title={shot?.source ? `Taken by ${shot.source}` : undefined}
+                >
+                  <span>{entry.date}</span>
+                  {#if shot?.acquired}<span class="taken">taken {shot.acquired}</span>{/if}
+                </button>
+              </li>
+            {/each}
+          </ul>
 
-        <div class="menu-hint dim">
-          Release dates are Esri's; “taken” and the pill under the chip date the pixels.
-        </div>
+          <div class="menu-hint dim">
+            Release dates are Esri's; “taken” and the pill under the chip date the pixels.
+          </div>
+        {/if}
       {/if}
     </div>
   {/if}

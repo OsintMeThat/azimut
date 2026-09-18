@@ -31,6 +31,7 @@ const SESSION = {
     divider: 61,
     opacity: 44,
     change_assist: { sensitivity: 60, opacity: 75 },
+    frame: { points: [[5.35, 43.25], [5.45, 43.35]] },
     annotations: [
       { id: 'before', kind: 'text', colour: '#f6a81a', points: [[5.4, 43.3]], text: 'Before' },
     ],
@@ -245,9 +246,19 @@ describe('Compare', () => {
       target.querySelector('.compare-bar').compareDocumentPosition(target.querySelector('.source-bar')) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
+    // The cards are as wide as the maps they describe, so the seam between A and
+    // B is one line: the annotation rail beside the stage narrows both together.
+    const column = target.querySelector('.stage-column');
+    expect(target.querySelector('.source-bar').parentElement).toBe(column);
+    expect(target.querySelector('.compare-stage').parentElement).toBe(column);
+    expect(target.querySelector('.annotation-toolbar').parentElement).toBe(column.parentElement);
     // One camera, so one compass in the bar and none on either surface.
     expect(target.querySelectorAll('button[aria-label="Reset to north"]')).toHaveLength(1);
     expect(target.querySelector('.surface-shell button[aria-label="Reset to north"]')).toBeNull();
+    // local-first: Wayback names its releases once it is on screen, but nothing
+    // walks this point's history until the analyst opens the picker
+    expect(get).toHaveBeenCalledWith('/api/satellite/wayback/releases');
+    expect(get.mock.calls.some(([path]) => path.includes('/wayback/changes'))).toBe(false);
   });
 
   it('keeps the cameras together and exposes the swipe and opacity controls', async () => {
@@ -271,6 +282,8 @@ describe('Compare', () => {
     expect(target.querySelector('.compare-stage').classList.contains('swipe')).toBe(true);
     expect(target.querySelector('input[aria-label="Swipe divider"]')).toBeNull();
     const divider = target.querySelector('button[aria-label="Swipe divider on imagery"]');
+    expect(divider.querySelectorAll('.swipe-handle svg')).toHaveLength(2);
+    expect(divider.textContent).not.toContain('↔');
     divider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     flushSync();
     expect(target.querySelector('.compare-stage').style.getPropertyValue('--divider')).toBe('52%');
@@ -458,6 +471,73 @@ describe('Compare', () => {
     expect(output.textContent).toContain('Export copy');
   });
 
+  it('frames an export on the ground and keeps the frame with the comparison', async () => {
+    await open();
+    await add('A');
+    await add('B');
+
+    button('Export', target).click();
+    await settle();
+    expect(document.querySelector('[role="dialog"]').textContent).toContain('Full view');
+
+    button('Draw', document.querySelector('[role="dialog"]')).click();
+    flushSync();
+    // The stage has to be reachable while the frame is drawn, so the modal goes.
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    const overlay = target.querySelector('.export-frame.drawing');
+    overlay.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 600 });
+    for (const [type, x, y] of [['pointerdown', 10, 5], ['pointermove', 410, 365], ['pointerup', 410, 365]]) {
+      overlay.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: x, clientY: y }));
+      flushSync();
+    }
+
+    // Back in the export, stated as ground rather than pixels.
+    const output = document.querySelector('[role="dialog"]');
+    expect(output.getAttribute('aria-label')).toBe('Export a copy');
+    expect(output.textContent).not.toContain('Full view');
+    expect([...output.querySelectorAll('.destination-actions button')].map((entry) => entry.textContent.trim()))
+      .toEqual(['Redraw…', 'Clear']);
+    expect(target.querySelectorAll('.export-frame')).toHaveLength(2);
+    expect(target.querySelectorAll('.export-frame.readonly')).toHaveLength(1);
+
+    output.querySelector('button[aria-label="Close"]').click();
+    button('Save comparison', target).click();
+    flushSync();
+    button('Save comparison', document.querySelector('[role="dialog"]')).click();
+    await settle();
+    expect(post).toHaveBeenCalledWith(
+      '/api/cases/case-a/compare/sessions',
+      expect.objectContaining({
+        spec: expect.objectContaining({ frame: { points: [[10, 5], [410, 365]] } }),
+      })
+    );
+    button('New', target).click();
+    flushSync();
+    expect(target.querySelector('.export-frame')).toBeNull();
+  });
+
+  it.each(['Swipe', 'Fade', 'Blink'])(
+    'draws one export frame across the complete %s stage',
+    async (label) => {
+      await open();
+      await add('A');
+      await add('B');
+      button(label, target).click();
+      flushSync();
+
+      button('Export', target).click();
+      await settle();
+      button('Draw', document.querySelector('[role="dialog"]')).click();
+      flushSync();
+
+      const overlay = target.querySelector('.export-frame.drawing');
+      expect(overlay.parentElement).toBe(target.querySelector('.compare-stage'));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      flushSync();
+      expect(document.querySelector('[role="dialog"]').getAttribute('aria-label')).toBe('Export a copy');
+    }
+  );
+
   it('adds a note over the comparison and keeps it in the editable state', async () => {
     await open();
     await add('A');
@@ -575,6 +655,7 @@ describe('Compare', () => {
     expect(target.querySelector('input[aria-label="Comparison name"]').value).toBe('Harbour change');
     expect(target.querySelector('.compare-stage').classList.contains('swipe')).toBe(true);
     expect(target.querySelector('.compare-stage').style.getPropertyValue('--divider')).toBe('61%');
+    expect(target.querySelector('.compare-stage > .export-frame')).not.toBeNull();
     expect(target.querySelectorAll('.surface-shell')).toHaveLength(2);
     expect(engines.at(-1).camera()).toEqual(expect.objectContaining({ lat: 43.3, lon: 5.4, zoom: 18 }));
   });

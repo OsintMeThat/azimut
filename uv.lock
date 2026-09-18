@@ -97,6 +97,7 @@ source = { editable = "." }
 dependencies = [
     { name = "cryptography", version = "48.0.1", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'" },
     { name = "cryptography", version = "50.0.0", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'" },
+    { name = "defusedxml" },
     { name = "fastapi" },
     { name = "fpdf2" },
     { name = "gallery-dl" },
@@ -141,6 +142,7 @@ release = [
 requires-dist = [
     { name = "cryptography", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'", specifier = ">=45,<51" },
     { name = "cryptography", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'", specifier = ">=45,<49" },
+    { name = "defusedxml", specifier = ">=0.7,<1" },
     { name = "fastapi", specifier = ">=0.111,<1.0" },
     { name = "fpdf2", specifier = ">=2.8,<3" },
     { name = "gallery-dl", specifier = ">=1.27" },

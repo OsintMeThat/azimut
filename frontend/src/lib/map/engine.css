@@ -8,10 +8,10 @@
  * in a tool's stylesheet.
  *
  * The popup is here for the same reason and one more: MapLibre draws the card's
- * pointer as a border triangle whose colour depends on which of eight sides the
- * card opened towards. That is eight rules of engine trivia, and no tool should
- * have to know it. A tool names its own card class and sets what is genuinely
- * its own — the width it needs — through `--popup-min-width`.
+ * pointer as a border triangle, built differently for each of the eight sides a
+ * card can open towards. That is eight rules of engine trivia, and no tool
+ * should have to know it. A tool names its own card class and sets what is
+ * genuinely its own — the width it needs — through `--popup-min-width`.
  *
  * Loaded by `engine.js`, so it arrives with the engine and leaves with it.
  */
@@ -97,8 +97,12 @@
 
 /* The card a mark opens, over imagery: one of the app's surfaces, not the
    engine's white bubble. A tool sets `--popup-min-width` for the width its own
-   content needs. */
-.maplibregl-popup-content {
+   content needs.
+
+   The selector carries the container so it outweighs the engine's own
+   `.maplibregl-popup-anchor-* .maplibregl-popup-content`, which flattens one
+   corner of the card to seat the wedge replaced below. */
+.maplibregl-popup .maplibregl-popup-content {
   min-width: var(--popup-min-width, 0);
   padding: 12px 14px;
   border: 1px solid var(--border-strong);
@@ -108,33 +112,82 @@
   color: var(--text-1);
   line-height: 1.4;
 }
+
+/* Closing the card, as a chip on its corner rather than a cross inside it: the
+   engine hangs the button over the top-right of the content, which lands it on
+   the first line of whatever the card says — a title, a stack's tally. Out on
+   the corner it has nothing to overlap, whatever a card puts on that line. */
 .maplibregl-popup-close-button {
-  padding: 4px 7px 0 0;
-  color: var(--text-3);
-  font-size: 15px;
+  top: -10px;
+  right: -10px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--bg-2);
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1;
 }
 .maplibregl-popup-close-button:hover {
-  background: none;
+  background: var(--bg-3);
   color: var(--text-1);
 }
-/* The pointer is the card's own surface, not its edge: the engine draws it as a
-   border triangle, so a border colour is the only thing that reaches it — and
-   the edge colour is translucent, which left the pointer all but invisible. */
+
+/* The pointer, as a notch of the card rather than a triangle parked against it.
+   The engine draws a border triangle: unoutlined, filled by whichever of eight
+   border colours matches the side the card opened on, and squared off into a
+   wedge on the four corners. This is one 13 px square turned 45°, wearing the
+   card's own surface and edge and pushed halfway into it — the two sides facing
+   the card are simply not drawn, the two facing the point carry the card's
+   outline on, and the same shape serves all eight sides. */
+.maplibregl-popup .maplibregl-popup-tip {
+  width: 13px;
+  height: 13px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-1);
+  transform: rotate(45deg);
+}
+/* Which two sides face the point, per side the card opened on. A square turned
+   45° clockwise points its original bottom-right pair downwards. */
 .maplibregl-popup-anchor-top .maplibregl-popup-tip,
 .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
 .maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
-  border-bottom-color: var(--bg-1);
+  margin-bottom: -7px;
+  border-right: none;
+  border-bottom: none;
 }
 .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
 .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
 .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
-  border-top-color: var(--bg-1);
+  margin-top: -7px;
+  border-top: none;
+  border-left: none;
 }
 .maplibregl-popup-anchor-left .maplibregl-popup-tip {
-  border-right-color: var(--bg-1);
+  margin-right: -7px;
+  border-top: none;
+  border-right: none;
 }
 .maplibregl-popup-anchor-right .maplibregl-popup-tip {
-  border-left-color: var(--bg-1);
+  margin-left: -7px;
+  border-bottom: none;
+  border-left: none;
+}
+/* A card opened on a corner is pinned by that corner, so the engine seats the
+   notch right on it, half off the card. Held in far enough to sit on a straight
+   edge instead — the point is a dozen pixels away, and the notch still reads as
+   pointing at it. */
+.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip {
+  margin-left: 12px;
+}
+.maplibregl-popup-anchor-top-right .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+  margin-right: 12px;
 }
 
 /* The Google widget basemap (lib/map/gmaps.js) renders in its own map, under

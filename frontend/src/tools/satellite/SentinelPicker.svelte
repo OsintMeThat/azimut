@@ -4,8 +4,26 @@
   /** `s2` is the store from `state/sentinel.svelte.js`: what has been asked,
    *  what came back, and what is still in flight. The label helpers are pure
    *  (`lib/sentinel.js`) and are handed over so this stays a view. */
-  let { menuEl = $bindable(), s2, maxccLabel, monthLabel, monthGrid, cloudClass, cloudLabel } =
-    $props();
+  let {
+    menuEl = $bindable(),
+    s2,
+    maxccLabel,
+    monthLabel,
+    monthGrid,
+    cloudClass,
+    cloudLabel,
+    /**
+     * Open from a dated chip rather than a layers icon, the way the Wayback
+     * picker beside it does. Compare's source card carries its own layers
+     * button, and two identical icons in one card said nothing about which of
+     * them held the date.
+     */
+    dateChip = false,
+  } = $props();
+
+  // What the tiles are dated: the pinned pass, or the one "most recent" resolved
+  // to. Blank only while that lookup is out, or where no pass came back at all.
+  const chipDate = $derived(s2.date || s2.latest || '');
 
   // The readout tracks the drag; the ceiling only moves on release. Every step
   // in between would be a provider id of its own, and Sentinel-2 tiles are
@@ -15,13 +33,27 @@
 </script>
 
 <div class="s2-wrap" bind:this={menuEl}>
-  <button
-    class="btn btn-icon"
-    class:on={s2.menuOpen}
-    onclick={s2.toggleMenu}
-    title="Sentinel-2 layer and date"
-    aria-label="Sentinel-2 layer and date"
-  ><Icon name="layers" size={14} /></button>
+  {#if dateChip}
+    <button
+      class="chip"
+      class:on={s2.menuOpen}
+      onclick={s2.toggleMenu}
+      title={s2.date ? `Sentinel-2 pass of ${s2.date}` : 'Sentinel-2 layer and date'}
+      aria-label="Sentinel-2 layer and date"
+      aria-expanded={s2.menuOpen}
+    >
+      <Icon name="clock" size={13} />
+      <span class="mono">{chipDate || 'Most recent'}</span>
+    </button>
+  {:else}
+    <button
+      class="btn btn-icon"
+      class:on={s2.menuOpen}
+      onclick={s2.toggleMenu}
+      title="Sentinel-2 layer and date"
+      aria-label="Sentinel-2 layer and date"
+    ><Icon name="layers" size={14} /></button>
+  {/if}
   {#if s2.menuOpen}
     <div class="s2-menu card">
       <div class="menu-row">
@@ -70,7 +102,7 @@
       <div class="menu-row">
         <span class="menu-label">Date</span>
         <div class="chips">
-          <button class="chip" class:on={!s2.date} onclick={s2.clearDate}>Most recent</button>
+          <button class="chip-opt" class:on={!s2.date} onclick={s2.clearDate}>Most recent</button>
         </div>
       </div>
 
@@ -141,6 +173,23 @@
 
 <style>
   .s2-wrap { position: relative; display: flex; }
+  /* the same trigger as the Wayback picker, so one date reads like the other */
+  .chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 8px;
+    border-radius: var(--radius-1);
+    font-size: var(--fs-xs);
+    color: var(--text-1);
+    background: rgba(24, 24, 24, 0.88);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 0 0 1px var(--border);
+    cursor: pointer;
+  }
+  .chip:hover,
+  .chip.on { color: var(--accent); }
   /* Down and to the left of its button, because the picker now rides in the
      surface's own top-right corner: opening upwards put a calendar off the top
      of the map, where the surface clips it. The height is capped for the same
@@ -168,7 +217,7 @@
   .menu-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
   .menu-label { font-size: var(--fs-xs); color: var(--text-3); font-weight: 600; }
   .chips { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
-  .chip {
+  .chip-opt {
     padding: 4px 9px;
     border-radius: var(--r-sm);
     border: 1px solid var(--border);
@@ -179,8 +228,8 @@
     cursor: pointer;
     transition: border-color 0.12s, color 0.12s, background 0.12s;
   }
-  .chip:hover { color: var(--text-1); border-color: var(--border-strong); }
-  .chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .chip-opt:hover { color: var(--text-1); border-color: var(--border-strong); }
+  .chip-opt.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
   .cc { display: flex; align-items: center; gap: 6px; }
   .cc input[type='range'] { width: 96px; accent-color: var(--accent); cursor: pointer; }
   .cc-value { font-size: 10px; color: var(--text-2); min-width: 52px; text-align: right; }

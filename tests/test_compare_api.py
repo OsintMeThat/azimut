@@ -177,6 +177,9 @@ def test_compare_session_roundtrip_rename_and_sidebar_delete(client):
         lambda spec: spec.update(annotations=[{
             "id": "x", "kind": "text", "colour": "#ffffff", "points": [[2, 48]], "text": "  ",
         }]),
+        lambda spec: spec.update(frame={"points": [[2, 48]]}),
+        lambda spec: spec.update(frame={"points": [[2, 48], [2, 48]]}),
+        lambda spec: spec.update(frame={"points": [[2, 48], [200, 48]]}),
         lambda spec: spec.update(change_assist={"method": "ratio"}),
     ],
 )
@@ -196,6 +199,16 @@ def test_compare_session_keeps_google_maps_js_as_a_reopenable_source(client):
     assert _save(client, cid, "Google reading", spec).status_code == 200
     loaded = client.get(f"/api/cases/{cid}/compare/sessions/Google reading").json()
     assert loaded["spec"]["b"]["provider"] == "google-js"
+
+
+def test_compare_session_keeps_an_optional_export_frame_on_the_ground(client):
+    cid = _case(client, "Compare frame")
+    spec = _spec()
+    spec["frame"] = {"points": [[2.2945, 48.8584], [2.2961, 48.8572]]}
+
+    assert _save(client, cid, "Framed reading", spec).status_code == 200
+    loaded = client.get(f"/api/cases/{cid}/compare/sessions/Framed reading").json()
+    assert loaded["spec"]["frame"] == spec["frame"]
 
 
 # -- which pairs a pixel reading is fair on --------------------------------------

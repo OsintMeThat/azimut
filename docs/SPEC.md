@@ -61,6 +61,7 @@ azimut/        # everything Azimut owns; the rest of the folder is yours
   .compare/    # saved Compare session specs
   .analysis/   # Detect areas, watches, runs and the frames behind their results
   .search/     # saved Grid Search state
+  .layers/     # added map layers: spec + source as received + its icons; .cache/ is derived
   .trash/      # recoverable artifact payloads, in numbered slots
 ```
 
@@ -155,6 +156,7 @@ proof for publication.
 | ✅ **Imported proofs** | Turns a published post into a composed proof: every picture a panel, its text read for a position, the addresses it points at fetched as material, and nothing filed before the preview is approved. |
 | ✅ **Import origin** | States one origin for a whole import, offers it to a batch that landed without one, and corrects any file later from Details. |
 | ✅ **Drawing on a proof** | Stamps a fixed set of marks, fills boxes and ellipses at a chosen opacity, keeps every shape tool in hand, and recolours, restyles, nudges, drags or deletes a picked family at once. |
+| ✅ **Proof image transforms** | Turns or crops a panel or proof-owned overlay without changing its source, while keeping attached annotations on the same pixels. |
 | ✅ **A proof of several points** | States every place a proof argues — each panel's own included, none of them overwritten — optionally named, one of them the camera's, any of them moved on a map rather than typed; files them as places under one title and carries them into the tweet and onto the exported picture. |
 | ✅ **What a proof says about itself** | Carries an optional sentence, which is its notes and what a post is written from, and an optional date for when its material was taken — never pre-filled, cleared in one press, and shown on the Timeline. |
 | ✅ **A date that reaches the footage** | A dated proof states that date for the sources it rests on — the original, never the frame cut from it or a capture — as one cited statement per proof, restated on every save and never written over the file's own clock. |
@@ -168,6 +170,7 @@ proof for publication.
 | ✅ **Point menu** | Right-clicking the ground copies that point in every format, looks it up, saves, measures, reads the sky or opens its imagery history from it, and links it out. |
 | ✅ **Map windows** | Opens the map in several tabs with the view in the URL, links map tabs and extension panels on other sites to one camera, and syncs saved points, grids and sweeps live to every tab and extension panel. |
 | ✅ **Map layers** | Stacks key-less overlays (borders, roads, railways, power lines, sea marks, GPS traces), NASA FIRMS fires and VIIRS night lights for a chosen day, and filters drawn pins by kind and folder. |
+| ✅ **Added map layers** | Opens a KML, KMZ, GeoJSON or GPX file, or follows a public My Maps or map URL refreshed only while enabled, and draws it with its own colours, optionally its own icons composed once at import, a legend that filters and a search that goes to one feature — read, cited and never adopted into the case. |
 | ✅ **Media on the map** | Draws the case's located photos and videos where a relation, a GPS reading or a proof puts them, opens the Map panel, the home map and the extension on them, and plays the stack in the panel beside the imagery. |
 | ✅ **Imagery Wayback** | Browses every Esri World Imagery release, narrowed to the ones that changed the point, and dates the pixels apart from the release. |
 | ✅ **Satellite Compare** | Aligns and annotates two dated views, assists matched-product change reading, saves editable sessions and files or exports attributed PNG/GIF outputs. |
@@ -199,7 +202,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Capture graticule** | The rest of what a plate states about itself: a latitude/longitude grid over app and extension captures, beside the scale bar and north arrow that already ship. |
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
 | **Georeferenced overlay** | Pins an image to the ground by three or four matching points: a commercial satellite shot from a post, a drone frame, an old plan. It draws under the map's own marks with an opacity slider, reprojects as the map pans, and is saved in the case with its control points so the fit can be checked. |
-| **Subscribed map layers** | Follows a public My Maps, KML/KMZ or GeoJSON URL and refreshes it automatically only while enabled, while keeping the last snapshot available offline and never rewriting evidence already saved from it. Local KML/KMZ, GeoJSON and GPX files open as fixed case layers. |
+| **Adopt a feature** | Turns a feature of an added layer into a `place` of the case, carrying the layer and the feature it came from as provenance. |
 | **GeoConfirmed layer** | Queries GeoConfirmed for a chosen conflict, date or viewport only when enabled, opens each event's original sources and lets selected events enter the case. |
 | **Source directory** | Keeps the accounts, channels and pages worth following for this case, searchable by platform, area and topic, with notes and source reliability; monitoring remains a later opt-in workflow. |
 | **Metadata follow-up** | Explains which common image/video fields were stripped and proposes events from capture times. |
@@ -402,7 +405,33 @@ stops making sense.
   link-local address on the first hop and on every redirect; a hostname that
   resolves to one is not looked up to find out, and what such a hop could learn is
   "this port answered" and never a body. An imported workbook is bounded on its
-  compressed bytes and on the size its own directory declares once unzipped. The map's search bar answers from
+  compressed bytes and on the size its own directory declares once unzipped. An
+  added map layer is the second untrusted archive and the first untrusted XML: a
+  KML is parsed by `defusedxml`, which refuses an external entity and an expansion
+  bomb, under bounds on size, feature count and nesting depth, and a KMZ is a zip
+  checked for an escaping member name, its uncompressed total and its compression
+  ratio before a byte of it is read. The browser never sees any of it — it is
+  handed the parsed GeoJSON, with every description stripped of markup at the
+  boundary rather than rendered. A layer's own icons are the one thing it can ask
+  a third-party host for, on an explicit tick at import and never afterwards, and
+  the accepted risk is bounded on both ends: what goes out is a per-image GET
+  under a count, a size and a total cap, and what comes back is decoded, tinted,
+  resized and **re-encoded here**, so an SVG carrying a script, a file pretending
+  to be a PNG and a thumbnail that unpacks into a gigabyte are one refusal rather
+  than three checks. The browser only ever loads PNGs this process produced, from
+  localhost, keyed by content hash. Following a public Google My Maps uses
+  `google.com/maps/d/kml?mid=…`, the KMZ rather than the `forcekml=1` conversion
+  beside it: both carry the same placemarks, but the archive bundles the
+  creator's actual icons as members of itself, while the conversion throws the
+  pictograms away and points every style at one of three blank Google
+  containers. It is undocumented, and is an
+  accepted risk recorded here rather than one taken silently: SPEC §2 refuses the
+  unofficial key-less endpoints of keyed services (the `mt1.google.com` case), and
+  the distinction drawn is that this is the sharing mechanism the map's own
+  creator switched on, not a way around a quota. It is fetched only when the
+  analyst subscribes, presses Refresh, or opens a case holding an enabled layer
+  that asked to be re-read; a shape it stops answering in fails with a sentence
+  rather than drawing nothing. The map's search bar answers from
   a bundled gazetteer and never reaches out on a keystroke; its geocoder layer
   waits for a pause, and a request the one-per-second pace cannot take is dropped
   rather than queued. Two things reach out on mount and no

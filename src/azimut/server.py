@@ -287,9 +287,9 @@ def create_app() -> FastAPI:
     )
 
     from .api import (
-        analysis_views, analyzers, cases, compare, drafts, events, files, folders, ingest, inspect, media,
-        notes, plates, proofimports, proofs, satellite, settings, sheetproofs, sheets,
-        templates,
+        analysis_views, analyzers, cases, compare, drafts, events, files, folders, ingest, inspect,
+        maplayers, media, notes, plates, proofimports, proofs, satellite, settings, sheetproofs,
+        sheets, templates,
     )
     from .engine import sheets as sheet_engine
 
@@ -306,6 +306,7 @@ def create_app() -> FastAPI:
     app.include_router(compare.router)
     app.include_router(analyzers.router)
     app.include_router(satellite.router)
+    app.include_router(maplayers.router)
     app.include_router(proofs.router)
     app.include_router(proofimports.router)
     app.include_router(drafts.router)

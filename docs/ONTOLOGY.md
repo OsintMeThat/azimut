@@ -184,6 +184,7 @@ answer by omission (`tests/test_entities.py`).
 | `post` | document | deliverable | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | document | annex | ✅ | inspect | `spec` (json) | yes |
 | `compare-session` | document | annex | ✅ | compare | `spec` (json) | yes |
+| `map-layer` | document | annex | ✅ | map layers | `spec` (json), `format`, `source_url?` | yes (spec + snapshot + icons) |
 | `note` | document | annex | ✅ | notebook | `path`, `folder?` | yes (Markdown) |
 | `sheet` | document | annex | ✅ | sheet | `path` (csv) | yes (CSV + sidecar) |
 | `bookmark` | document | attestation | ✅ | capture extension | `url`, `fetched_at?`, `archive_url?`, `reliability?` | no (a URL) |
@@ -213,6 +214,14 @@ Three modelling calls the table alone does not show:
   minting the day a value turns up without its object.
 - **`registration` and `icao24` belong to an airframe; a callsign belongs to a
   flight**, which is a dated statement rather than an attribute.
+- **A `map-layer` is a source the case consults, not a source it quotes.** It is
+  `annex` beside `note` and `sheet` rather than `attestation`, because an
+  attestation folds into the edge carrying its provenance and a layer that nothing
+  links to would fold into nothing. Its `source` is a path *or* a URL, which is
+  what makes a dropped KMZ and a followed My Maps one type instead of two. Its
+  features never enter the graph: they are what somebody else claims, and the day
+  one of them becomes a `place` of this case (SPEC §6) the layer is what that
+  place cites — which is the reason it is an entity at all.
 
 Retired: `event` (replaced by the claim node), `alias` (see above), and `panorama`
 (Inspect's auto-stitch export is a derived `media`). Still coming from the roadmap,
@@ -786,7 +795,10 @@ subject removes it transitively.
   (`satellite.placements`, `GET /entities/{id}/placement`): a video reaches its
   capture three hops away, through the proof that composed a frame of it. Only
   `capture` and `proof` carry a point, and **the artifact carrying one ends the
-  walk**. Points deduplicate on the exact pair, never a rounded one, and the nearest
+  walk**. It **only crosses material** — media, capture, proof
+  (`satellite.PLACEMENT_THROUGH`). A document that collects files is reached and
+  goes no further: a post publishing two clips joined them end to end, and each
+  landed on the other's geolocation. Points deduplicate on the exact pair, never a rounded one, and the nearest
   hop wins a repeat. A proof reports every point it states, so the footage behind a
   three-point proof answers for all three. Bounded at four hops, 200 entities read
   and 15 points reported, each with the entity it was read off; a `capture` reports
@@ -889,8 +901,11 @@ the moment somebody commits to it. That moment is the proof.
   can delete. Its **material** is the narrower question — a media reaching a place is
   one claim among several about that file — so only the two roads that pose a proof's
   point are restated there (`satellite.POINT_ROADS`), and an edge stated by hand in
-  Details or proposed by import enrichment stays. A point another proof still
-  concludes on keeps its material. A place the proof let go of that nothing else
+  Details or proposed by import enrichment stays. The material is reconciled by
+  difference too, **read off the place rather than off the chain**
+  (`satellite._sweep_point`): a proof re-composed on another clip keeps its point, so
+  nothing withdraws it, and walking what the proof rests on now never reaches the clip
+  it dropped. A point another proof still concludes on keeps its material. A place the proof let go of that nothing else
   holds is **offered for deletion, never swept**: it is on the map, and dropping it
   is the analyst's call.
 - **The material the proof composes states the same point**, over the derivation

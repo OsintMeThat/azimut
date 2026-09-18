@@ -30,6 +30,11 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from .. import layout
 from ..workspace import CaseError
 from . import media as media_engine
+from .thumbnails import THUMB_DIR
+
+#: Where the one shared cache lives, so `_drop_cache` can tell it from a cache
+#: derived from a single artifact.
+_THUMBS = f"media/{THUMB_DIR}/"
 
 if TYPE_CHECKING:
     from ..workspace import Case
@@ -68,6 +73,20 @@ class Named(Companion):
 
     def resolve(self, case: "Case", main: str) -> str | None:
         return self.build(PurePosixPath(main).stem)
+
+
+@dataclass(frozen=True)
+class Derived(Named):
+    """A companion the tool rebuilds from one that travels.
+
+    A map layer's parsed GeoJSON is the case: the snapshot beside it is the
+    bytes as received, and parsing them again is the whole of what it takes to
+    get this file back. So it is dropped on delete and left out of the bundle,
+    and every reader has to be able to rebuild it — which is what keeps the
+    snapshot, not this, the thing the case actually holds.
+    """
+
+    travels: ClassVar[bool] = False
 
 
 @dataclass(frozen=True)
@@ -119,6 +138,18 @@ KINDS: dict[str, Kind] = {
     "analysis-run": Kind(path_attr="spec", companions=(Named(layout.analysis_assets_rel),)),
     "note": Kind(path_attr="path"),
     "sheet": Kind(path_attr="path", companions=(Named(layout.sheet_meta_rel),)),
+    # A layer the analyst added: its settings, the bytes it was built from, the
+    # source's own pictograms, and the parsed copy the map draws. The icons
+    # travel where the parsed copy does not — a My Maps' came off Google's
+    # servers, so a case restored offline could not rebuild them.
+    "map-layer": Kind(
+        path_attr="spec",
+        companions=(
+            Named(layout.layer_snapshot_rel),
+            Named(layout.layer_icons_rel),
+            Derived(layout.layer_cache_rel),
+        ),
+    ),
 }
 
 #: Types with no intrinsic main artifact, and why. Supported entities can still
@@ -259,7 +290,13 @@ def caches(case: "Case", entity: dict[str, Any]) -> list[str]:
 
 
 def _drop_cache(case: "Case", rel: str) -> None:
-    if any(item.get("thumbnail") == rel for item in case.list_media_items()):
+    # Only a thumbnail can belong to more than one entity, because only a
+    # thumbnail is content-addressed. A cache derived from one artifact — a map
+    # layer's parsed GeoJSON — goes with it, and asking the media index about it
+    # would be a listing walked for a question it cannot answer.
+    if rel.startswith(_THUMBS) and any(
+        item.get("thumbnail") == rel for item in case.list_media_items()
+    ):
         return  # another media still shows this thumbnail
     path = _resolve(case, rel)
     if path is not None:

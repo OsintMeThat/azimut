@@ -33,6 +33,7 @@ from analyzerfixture import (
     code,
     fire_frame,
     flame,
+    glinted_sea,
     hull,
     index_byte,
     index_frame,
@@ -427,6 +428,46 @@ def test_a_coastline_is_not_a_vessel(client, copernicus):
     assert run(client, copernicus, body)["count"] == 0
 
 
+def test_glint_does_not_turn_the_sea_into_land(client, copernicus):
+    """Glint puts every band near 0.08 and leaves NDWI on zero, so an index read
+    alone called two thirds of the Bab-el-Mandeb dry and the strait became one
+    component of land. The classification is asked too, and either saying water
+    is enough."""
+    body = sentinel_input("boats")
+    water = glinted_sea()
+    hull(water, 200, 200, 8, 4)
+    seed(body, after=water)
+    saved = run(client, copernicus, body)
+    assert saved["status"] == "ready", saved
+    assert saved["count"] == 1, [r["coordinates"] for r in saved["results"]]
+
+
+def test_sediment_flattens_the_index_and_the_classification_carries_it(client, copernicus):
+    """Suspended matter does to the index what glint does: pushes it onto zero.
+
+    The rule is not "this one scene", it is that a weak index is not a dry one.
+    """
+    body = sentinel_input("boats")
+    water = sea()
+    water[:, :, 2] = 120                                # NDWI ≈ -0.06, still water
+    hull(water, 250, 250, 8, 4)
+    seed(body, after=water)
+    assert run(client, copernicus, body)["count"] == 1
+
+
+def test_ground_the_classification_calls_water_is_still_ground(client, copernicus):
+    """Sen2Cor calls deep shadow and dark ground water, and taking its word
+    there would put vessel candidates on land. It is believed where the index is
+    weak, never where the index plainly says dry."""
+    body = sentinel_input("boats")
+    desert = surface(0.30, 0.35, 0.30, WATER)           # the classification is wrong
+    desert[:, :, 2] = 40                                # the index is not: NDWI ≈ -0.7
+    roof = desert[at(250, 250, 8, 4)]
+    roof[:, :, 0], roof[:, :, 1] = 255, 255             # something bright out there
+    seed(body, after=desert)
+    assert run(client, copernicus, body)["count"] == 0
+
+
 def test_vessel_sweep_asks_for_one_date_and_never_for_a_reference(client, copernicus):
     body = sentinel_input("boats")
     water = sea()
@@ -533,6 +574,37 @@ def test_small_spots_are_found_where_everything_around_them_held_still(client, c
     row = saved["results"][0]
     assert row["measure"]["signed"] < 0
     assert row["area"] < 500
+
+
+def test_a_granule_edge_is_not_a_spot(client, copernicus):
+    """One date ends mid-tile, and that is not a change in the ground.
+
+    The spot test measures a change against the change around it, so the ring
+    it reads has to hold only pixels the sweep can measure. With nodata in it,
+    a quiet tile cut by a granule edge produced a candidate the size of the cut.
+    """
+    before, after = surface(0.20, 0.30, 0.30), surface(0.20, 0.30, 0.30)
+    after[:, 300:] = 0                                          # the granule stops here
+    after[at(100, 100, 3, 3)] = code(0.05, 0.08, 0.08)           # a real mark beside it
+    # Size All, so nothing is dropped for being too big to be a spot: the point
+    # is that the seam raises no candidate at all, not that one is filtered out.
+    body = sentinel_input("impacts", **SIZES["spots"]["all"])
+    seed(body, before, after)
+    saved = run(client, copernicus, body)
+    assert saved["status"] == "ready", saved
+    assert saved["count"] == 1, [(r["coordinates"], r["area"]) for r in saved["results"]]
+    assert saved["results"][0]["area"] < 500
+
+
+def test_a_cloud_edge_is_not_a_spot(client, copernicus):
+    """A masked cloud is missing ground, exactly as nodata is."""
+    before, after = surface(0.20, 0.30, 0.30), surface(0.20, 0.30, 0.30)
+    after[:, 300:] = code(0.75, 0.80, 0.70, CLOUD)
+    body = sentinel_input("impacts", **SIZES["spots"]["all"])
+    seed(body, before, after)
+    saved = run(client, copernicus, body)
+    assert saved["status"] == "ready", saved
+    assert saved["count"] == 0, [(r["coordinates"], r["area"]) for r in saved["results"]]
 
 
 def test_a_mark_wider_than_its_window_still_reads_its_own_contrast(client, copernicus):

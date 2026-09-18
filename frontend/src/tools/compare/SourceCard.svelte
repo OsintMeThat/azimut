@@ -31,7 +31,7 @@
 <div class="source-card cmp-glass" class:right={align === 'right'} aria-label={`Imagery ${letter}`}>
   <span class="cmp-letter {lower}">{letter}</span>
   <div class="chips">
-    <ImageryChip {imagery} bind:providerId s2={s2} {wayback} {shown} />
+    <ImageryChip {imagery} bind:providerId s2={s2} {wayback} {shown} dateChip />
   </div>
   {#if showsDate}
     <span class="dated cmp-mono" title={dated.source ? `Acquired around this date (${dated.source})` : 'Acquired around this date'}>
