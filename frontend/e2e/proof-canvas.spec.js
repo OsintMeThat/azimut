@@ -36,6 +36,14 @@ test('a panel rotates from its round handle and crops in place on double-click',
   );
   await page.mouse.up();
 
+  // the turn has to land before the double-click, or a slow runner aims at a
+  // panel that is still being redrawn
+  await expect.poll(() => page.evaluate(() => {
+    const stage = window.Konva.stages[0];
+    const transformer = stage.find((node) => node.getClassName() === 'Transformer')[0];
+    return Math.abs(transformer.nodes()[0]?.rotation() ?? 0);
+  })).toBeGreaterThan(5);
+
   const panelCentre = await page.evaluate(() => {
     const stage = window.Konva.stages[0];
     const transformer = stage.find((node) => node.getClassName() === 'Transformer')[0];

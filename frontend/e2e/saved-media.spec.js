@@ -57,7 +57,9 @@ test('opens on the case’s located files, with the layer already drawing them',
   await page.goto('/#satellite');
   await awaitMapReady(page);
 
-  // no switch was pressed: the panel opens on Media and the layer is on
+  // the layer is on before the panel is looked at, and Saved opens on Media
+  await expect(page.locator('.saved-mark')).toHaveCount(1);
+  await page.getByRole('tablist', { name: 'Map panel' }).getByRole('tab', { name: 'Saved' }).click();
   await expect(panel(page).getByText('roadside photo')).toBeVisible();
   await expect(panel(page).getByText('Recorded here')).toBeVisible();
   await expect(page.locator('.saved-mark')).toHaveCount(1);
