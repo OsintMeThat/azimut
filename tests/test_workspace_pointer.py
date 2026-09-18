@@ -103,6 +103,39 @@ def test_writing_the_pointer_replaces_it_atomically(tmp_path):
     assert leftovers == []
 
 
+def test_a_scanner_holding_the_fresh_pointer_is_waited_out(monkeypatch, tmp_path):
+    """Windows refuses a rename onto a file a virus scanner or the indexer has
+    just opened. That lasts milliseconds, and failed a workspace move at the
+    switch in CI, so the write waits it out instead of giving up."""
+    real_replace = config.os.replace
+    refusals = []
+
+    def held_twice(src, dst):
+        if len(refusals) < 2:
+            refusals.append(dst)
+            raise PermissionError(5, "Access is denied")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(config.os, "replace", held_twice)
+    monkeypatch.setattr(config.time, "sleep", lambda _: None)
+    config.write_pointer(tmp_path / "moved")
+
+    assert len(refusals) == 2
+    assert config.read_pointer() == tmp_path / "moved"
+
+
+def test_a_pointer_that_stays_held_still_fails_loudly(monkeypatch, tmp_path):
+    def always_held(src, dst):
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(config.os, "replace", always_held)
+    monkeypatch.setattr(config.time, "sleep", lambda _: None)
+    with pytest.raises(PermissionError):
+        config.write_pointer(tmp_path / "moved")
+    leftovers = [p.name for p in config.pointer_path().parent.iterdir() if p.name.endswith(".tmp")]
+    assert leftovers == []
+
+
 def test_a_home_relative_pointer_is_expanded(tmp_path):
     config.pointer_path().parent.mkdir(parents=True, exist_ok=True)
     config.pointer_path().write_text("~/Somewhere\n", encoding="utf-8")
