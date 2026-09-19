@@ -718,7 +718,6 @@ def parse_coordinates(body: ParseIn) -> dict[str, Any]:
         "plus_code": geo.plus_code(lat, lon),
         # the Coordinates tool renders this ordered list wholesale
         "formats": geo.all_formats(lat, lon),
-        "links": geo.map_links(lat, lon),
     }
 
 

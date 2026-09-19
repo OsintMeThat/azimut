@@ -107,7 +107,7 @@ def test_geocode_network_failure_is_404(client, monkeypatch):
 # -- /api/geo/parse: pure offline conversion, no network -------------------------------
 
 
-def test_parse_returns_every_format_and_the_map_links(client):
+def test_parse_returns_every_format(client):
     result = client.post("/api/geo/parse", json={"text": "48.8583701, 2.2944813"}).json()
     assert result["lat"] == pytest.approx(48.8583701)
     assert result["lon"] == pytest.approx(2.2944813)
@@ -118,8 +118,8 @@ def test_parse_returns_every_format_and_the_map_links(client):
     assert [f["id"] for f in result["formats"]] == [
         "dd", "ddm", "dms", "utm", "mgrs", "plus_code", "geohash",
     ]
-    # all nine external maps, keyed by site
-    assert set(result["links"]) >= {"google", "yandex", "bing", "sentinel"}
+    # map links are built in the browser (lib/maplinks.js), from one verified table
+    assert "links" not in result
 
 
 def test_parse_accepts_the_formats_it_emits(client):

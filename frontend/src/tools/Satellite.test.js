@@ -389,6 +389,15 @@ describe('what is laid over the imagery', () => {
     const rows = source.slice(source.indexOf('const layerRows = $derived(['));
     expect(rows).toContain('disabled: !fires.keyed');
     expect(rows).toContain('Add a NASA FIRMS key in Settings → Imagery');
+    // said on the row, where it can be read without hovering a greyed switch
+    expect(rows).toContain("detail: fires.keyed ? firmsSummary : 'needs a free key'");
+    expect(rows).toContain("actions: fires.keyed ? null : [{ label: 'Add a FIRMS key', quiet: true, run: openImagerySettings }]");
+    expect(source).toContain("uiState.settingsTab = 'imagery';");
+  });
+
+  it('says a layer is for imagery only when the basemap is not imagery', () => {
+    const rows = source.slice(source.indexOf('const layerRows = $derived(['));
+    expect(rows.match(/detail: baseIsImagery \? '' : 'imagery only'/g)).toHaveLength(2);
   });
 
   it('asks for no tile until the choice is one the service can answer', () => {

@@ -48,6 +48,9 @@
     onusecurrentview = () => {},
     onsources = () => {},
     onclose = () => {},
+    /** What a run still lacks, said above everything else; empty when nothing. */
+    needs = '',
+    onsettings = () => {},
   } = $props();
 
   const EMPTY_SOURCE = { provider: 'sentinel2', date: '', layer: 'TRUE_COLOR', maxcc: 30 };
@@ -533,6 +536,12 @@
   </div>
 
   <div class="cmp-dock-body">
+    {#if needs}
+      <p class="warn needs">
+        {needs}
+        <button class="btn btn-sm" onclick={onsettings}>Open Settings</button>
+      </p>
+    {/if}
     {#if error}<p class="warn" role="alert">{error}</p>{/if}
     {#if !catalogue}<p class="hint">Reading the local analyzer library…</p>{/if}
 
@@ -559,12 +568,12 @@
         {#if zones.length}
           {#each zones as zone (zone.id)}
             <div class="row area-row">
-              <button class="cmp-icon" aria-label={`Show ${zone.name}`}
+              <button class="cmp-icon" aria-label={`Show ${zone.name}`} title={`Show ${zone.name}`}
                 onclick={() => { selectedZone = zone.id; drawing = 'select'; focus(zone.points[0]); }}>
                 <Icon name="pin" size={13} />
               </button>
               <input class="grow" aria-label="Area name" bind:value={zone.name} maxlength="120" />
-              <button class="cmp-icon" aria-label={`Remove ${zone.name}`} onclick={() => removeZone(zone.id)}>
+              <button class="cmp-icon" aria-label={`Remove ${zone.name}`} title={`Remove ${zone.name}`} onclick={() => removeZone(zone.id)}>
                 <Icon name="x" size={12} />
               </button>
             </div>
@@ -818,9 +827,9 @@
       {#if candidate}
         <section class="candidate">
           <div class="row nav">
-            <button class="cmp-icon" aria-label="Previous candidate" onclick={() => step(-1)}><Icon name="chevronLeft" size={14} /></button>
+            <button class="cmp-icon" aria-label="Previous candidate" title="Previous candidate" onclick={() => step(-1)}><Icon name="chevronLeft" size={14} /></button>
             <span class="grow centre position">{candidates.findIndex((r) => r.id === candidateId) + 1} of {candidates.length}</span>
-            <button class="cmp-icon" aria-label="Next candidate" onclick={() => step(1)}><Icon name="chevronRight" size={14} /></button>
+            <button class="cmp-icon" aria-label="Next candidate" title="Next candidate" onclick={() => step(1)}><Icon name="chevronRight" size={14} /></button>
           </div>
           <strong>{candidate.phenomenon}</strong>
           <img class="preview" src={`${base()}/runs/${current.id}/results/${candidate.id}/preview`}
@@ -858,7 +867,7 @@
           <strong>Result layers</strong>
           {#each layers as layer (layer.id)}
             <div class="row">
-              <button class="cmp-icon" aria-label={`Toggle ${layer.title}`} aria-pressed={layer.visible}
+              <button class="cmp-icon" aria-label={`Toggle ${layer.title}`} title={`Toggle ${layer.title}`} aria-pressed={layer.visible}
                 onclick={() => { layer.visible = !layer.visible; }}>
                 <Icon name={layer.visible ? 'eye' : 'eyeOff'} size={15} />
               </button>
@@ -882,7 +891,7 @@
               {row.title}<small>{row.created_at}</small>
             </button>
             <button class="btn btn-sm" disabled={busy || pending} onclick={() => act(() => runWatch(row.id))}>Run again</button>
-            <button class="cmp-icon" disabled={busy} aria-label={`Delete ${row.title}`} onclick={() => act(() => removeItem('followups', row.id))}>
+            <button class="cmp-icon" disabled={busy} aria-label={`Delete ${row.title}`} title={`Delete ${row.title}`} onclick={() => act(() => removeItem('followups', row.id))}>
               <Icon name="trash" size={13} />
             </button>
           </div>
@@ -898,7 +907,7 @@
                 {row.title}<small>{row.created_at}{row.status ? ` · ${statusLabel(row.status)}` : ''}</small>
               </button>
               <button class="cmp-icon" disabled={busy || ['queued', 'running'].includes(row.status)}
-                aria-label={`Delete ${row.title}`} onclick={() => act(() => removeItem(kind, row.id))}>
+                aria-label={`Delete ${row.title}`} title={`Delete ${row.title}`} onclick={() => act(() => removeItem(kind, row.id))}>
                 <Icon name="trash" size={13} />
               </button>
             </div>
@@ -927,6 +936,11 @@
 </aside>
 
 <style>
+  .needs {
+    display: grid;
+    gap: 6px;
+    justify-items: start;
+  }
   .views { margin: 10px 12px 0; }
   /* The two ways to start one of your own, said in full rather than implied by
      a "duplicate" button next to a save. */

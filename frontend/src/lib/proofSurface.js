@@ -96,3 +96,95 @@ export function shiftProofShape(shape, dx, dy) {
 export function mapSurfaceShapes(shapes, surfaceId, edit) {
   return (shapes ?? []).map((shape) => (shape.panel === surfaceId ? edit(shape) : shape));
 }
+
+/**
+ * The upright rectangle that contains a `w`×`h` box placed at (x, y) and turned
+ * by `deg` about that corner.
+ */
+function uprightCover(x, y, w, h, deg) {
+  const radians = (Number(deg) || 0) * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const xs = [];
+  const ys = [];
+  for (const [cx, cy] of [[0, 0], [w, 0], [w, h], [0, h]]) {
+    xs.push(x + cx * cos - cy * sin);
+    ys.push(y + cx * sin + cy * cos);
+  }
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  return { x: left, y: top, w: Math.max(...xs) - left, h: Math.max(...ys) - top };
+}
+
+/**
+ * The patch of a surface a blur box covers, in that surface's own drawn pixels
+ * and in the source's.
+ *
+ * A blur is not paint: it redraws the picture under the box through a filter, so
+ * the box has to name the source pixels it stands over. The surface's drawn space
+ * starts at the crop's top-left, so a box at (x, y) there is at (crop.x + x,
+ * crop.y + y) in the file.
+ *
+ * Clamped to the picture, because a box dragged half off the panel would
+ * otherwise ask for pixels the file does not have — and a crop past the edge is
+ * drawn as whatever happens to be in memory. What comes back is the part that
+ * overlaps, positioned relative to the box itself, or null when none of it does.
+ *
+ * `margin` widens the patch that is *read* without widening what is drawn: a
+ * blur mixes in what surrounds each pixel, so a patch cut exactly to the box
+ * mixes in the transparency past its own edge and comes out washed out at the
+ * border — the one place a redaction has to hold. The caller clips the box back
+ * to size, so the margin is context for the filter and nothing else.
+ *
+ * A turned box (`rect.rotation`) reads the upright rectangle that contains it and
+ * hands back the `turn` that puts the patch level with the picture again: the
+ * pixels have to come from the ground the box stands on, and the ground does not
+ * turn with it. `dx`/`dy` are always in the box's own space, so the caller seats
+ * the patch inside the box and lets the clip do the rest.
+ */
+export function blurPatch(rect, natural, crop, margin = 0) {
+  const [width, height] = surfaceImageSize(natural, crop);
+  const kept = normalizeSourceCrop(crop, sourceSize(natural));
+  const turn = normalizeSurfaceAngle(rect?.rotation);
+  const left = Number(rect?.x) || 0;
+  const top = Number(rect?.y) || 0;
+  const cover = uprightCover(left, top, Number(rect?.w) || 0, Number(rect?.h) || 0, turn);
+  const x = clamp(cover.x, 0, width);
+  const y = clamp(cover.y, 0, height);
+  const right = clamp(cover.x + cover.w, 0, width);
+  const bottom = clamp(cover.y + cover.h, 0, height);
+  if (right - x < 1 || bottom - y < 1) return null;
+  const pad = Math.max(0, Math.round(Number(margin) || 0));
+  const ex = clamp(x - pad, 0, width);
+  const ey = clamp(y - pad, 0, height);
+  const ew = clamp(right + pad, 0, width) - ex;
+  const eh = clamp(bottom + pad, 0, height) - ey;
+  // where the patch sits inside the box, so the node can be a child of it
+  const radians = turn * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const offX = ex - left;
+  const offY = ey - top;
+  return {
+    dx: offX * cos + offY * sin,
+    dy: offY * cos - offX * sin,
+    turn: -turn || 0,
+    w: ew,
+    h: eh,
+    crop: { x: (kept?.x ?? 0) + ex, y: (kept?.y ?? 0) + ey, width: ew, height: eh },
+  };
+}
+
+/**
+ * How hard a blur box blurs, in the surface's own pixels.
+ *
+ * Proportional to the box, so a licence plate and a whole street get a blur of
+ * the same strength *relative to what they hide*; a fixed radius either leaves a
+ * small box legible or costs a fortune on a large one. The floor is what makes
+ * a thumbnail-sized box unreadable; the ceiling is where Konva's own blur stops
+ * improving.
+ */
+export function blurRadiusFor(rect) {
+  const side = Math.min(Math.abs(Number(rect?.w) || 0), Math.abs(Number(rect?.h) || 0));
+  return clamp(Math.round(side / 5), 6, 80);
+}

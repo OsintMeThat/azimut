@@ -69,7 +69,7 @@
           <Icon name="search" size={13} />
           <input placeholder="Search panels…" bind:value={query} />
           {#if query}
-            <button type="button" onclick={() => (query = '')} aria-label="Clear search">
+            <button type="button" onclick={() => (query = '')} aria-label="Clear search" title="Clear search">
               <Icon name="x" size={12} />
             </button>
           {/if}

@@ -15,6 +15,7 @@
   } from '../lib/naming.js';
   import { createHistory } from '../lib/history.js';
   import { deletedToast } from '../lib/trash.js';
+  import { openInReverseSearch } from '../lib/navigate.js';
   import { IDENTITY, matrixCss, rotateAbout, isIdentity, matrixAngleDeg, pointerAngleDeg } from '../lib/frameRotate.js';
   import Icon from '../components/Icon.svelte';
   import SearchInput from '../components/SearchInput.svelte';
@@ -614,8 +615,8 @@
     };
   }
 
-  // Render a recipe (video frame / image + ops) to a blob URL, no filing.
-  async function renderUrl(path, time, ops = []) {
+  // Render a recipe (video frame / image + ops) to a PNG, no filing.
+  async function renderBlob(path, time, ops = []) {
     const res = await fetch(`/api/cases/${caseState.current.id}/inspect/render-preview`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -630,7 +631,26 @@
       }
       throw new Error(detail);
     }
-    return URL.createObjectURL(await res.blob());
+    return res.blob();
+  }
+
+  async function renderUrl(path, time, ops = []) {
+    return URL.createObjectURL(await renderBlob(path, time, ops));
+  }
+
+  /**
+   * Hand a tray frame to Reverse Search as it reads here — turned, adjusted and
+   * cropped — without filing it. The crop is usually the subject, and an engine
+   * matches a subject better than the whole picture it sits in.
+   */
+  async function reverseFrame(frame) {
+    try {
+      const blob = await renderBlob(frame.path, frame.time, buildFrameOps(filters, frame));
+      const name = session.source?.title || session.source?.filename || frame.path.split('/').pop();
+      openInReverseSearch({ blob, label: frame.time != null ? `${name} · t=${frame.time.toFixed(2)}s` : name });
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
   }
 
   function imageSize(url) {
@@ -1447,6 +1467,7 @@
             bind:cropAspect={frameAspect} bind:cropEditing {beginCrop} {commitCrop}
             setRotation={setFrameRotation} rotationBusy={frameOrientationBusy}
             setActive={(id) => (session.activeFrameId = id)}
+            reverse={reverseFrame}
           />
         {:else if activeTab === 'collage'}
           <CollageMenu
@@ -1504,7 +1525,7 @@
       <div class="modal source-modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="new-session-title" tabindex="-1">
         <div class="modal-head">
           <h3 id="new-session-title">New session</h3>
-          <button class="btn btn-ghost btn-xs" onclick={() => (sourceModalOpen = false)} aria-label="Close">
+          <button class="btn btn-ghost btn-xs" onclick={() => (sourceModalOpen = false)} aria-label="Close" title="Close">
             <Icon name="x" size={15} />
           </button>
         </div>
@@ -1592,7 +1613,7 @@
       <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
         <div class="modal-head">
           <h3>Open session</h3>
-          <button class="btn btn-ghost btn-xs" onclick={() => (sessionModal.open = false)} aria-label="Close">
+          <button class="btn btn-ghost btn-xs" onclick={() => (sessionModal.open = false)} aria-label="Close" title="Close">
             <Icon name="x" size={15} />
           </button>
         </div>
@@ -1640,7 +1661,7 @@
                       <span class="session-title">{s.title}</span>
                       <span class="session-meta">{s.frames} frame{s.frames === 1 ? '' : 's'} · {s.collage} collage piece{s.collage === 1 ? '' : 's'}</span>
                     </button>
-                    <button class="btn btn-ghost btn-xs" disabled={sessionLoading} onclick={() => deleteSession(s.name)} aria-label="Delete session">
+                    <button class="btn btn-ghost btn-xs" disabled={sessionLoading} onclick={() => deleteSession(s.name)} aria-label="Delete session" title="Delete session">
                       <Icon name="trash" size={14} />
                     </button>
                   </div>

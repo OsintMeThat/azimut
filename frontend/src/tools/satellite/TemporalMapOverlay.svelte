@@ -90,7 +90,7 @@
           title:
             mark.items.length === 1
               ? mark.items[0].label
-              : `${mark.items.length} statements at ${mark.label}`,
+              : `${mark.items.length} claims at ${mark.label}`,
           popup: {
             content: () => card(mark),
             className: 'temporal-popup',

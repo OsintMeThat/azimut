@@ -28,7 +28,7 @@
   import { isMode, KINDS } from '../lib/geoTree.js';
   import { stackOf } from '../lib/mediaViewer.js';
   import {
-    caseState, uiState, ensureCase, reloadCase, toast, prefs, fmtCoords, prefsReady,
+    caseState, uiState, ensureCase, reloadCase, toast, dismissToast, prefs, fmtCoords, prefsReady,
   } from '../lib/state.svelte.js';
   import { markerGeometry, markerSvg } from '../lib/mapMarkers.js';
   import { startRectDrag, startRotateDrag } from '../lib/map/gestures.js';
@@ -41,6 +41,7 @@
   import { extensionVersion, mapLinkRelay, onActivated } from '../lib/extBridge.js';
   import { SENTINEL_ID } from '../lib/sentinel.js';
   import { WAYBACK_ID } from '../lib/wayback.js';
+  import { COMPARE_SOURCES, comparePair } from '../lib/map/comparePair.js';
   import { buildHash, readSolo, splitHash } from '../lib/hash.js';
   import { readView, readWindowLabel, viewParams } from '../lib/map/view.js';
   import { createViewLink } from '../lib/map/link.js';
@@ -84,6 +85,7 @@
   import AddedLayers from './satellite/AddedLayers.svelte';
   import AddedLayersOverlay from './satellite/AddedLayersOverlay.svelte';
   import AddLayerDialog from './satellite/AddLayerDialog.svelte';
+  import GeoConfirmedDialog from './satellite/GeoConfirmedDialog.svelte';
   import MapLayers from './satellite/MapLayers.svelte';
   import MapContextMenu from './satellite/MapContextMenu.svelte';
   import MapStatusBar from './satellite/MapStatusBar.svelte';
@@ -150,7 +152,8 @@
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
   // The layers the analyst added themselves: a file they opened, a map they
   // follow. Its own store, because it owns the one network rule this feature
-  // has — a feed is read on case open, on Refresh, and never otherwise.
+  // has — a feed is read when first switched on in a session, on Refresh, and
+  // never otherwise — and the switch itself, which every reload turns off.
   const addedLayers = createAddedLayersState({
     api,
     notify: toast,
@@ -241,6 +244,18 @@
   });
   const firmsAskable = $derived(askable(fires));
   const firmsSummary = $derived(summary(fires, fires.sensors));
+
+  /** The archives a right-click can build a pair from. A keyed provider that is
+   *  not configured is left out rather than offered and refused. */
+  const compareSources = $derived(
+    COMPARE_SOURCES.filter((source) => !source.provider || imagery.find(source.provider))
+  );
+
+  /** Where a FIRMS key is entered, reached from the layer that needs it. */
+  function openImagerySettings() {
+    uiState.settingsTab = 'imagery';
+    uiState.tool = 'settings';
+  }
 
   /**
    * Which instruments are on offer, and whether the key for them is saved.
@@ -883,6 +898,33 @@
       engine.setView(point, Math.max(center.zoom, 15));
       await tick();
       if (!wb.menuOpen) wb.toggleMenu();
+    } else if (id === 'compare') {
+      await comparePoint(point, value);
+    }
+  }
+
+  /**
+   * Open Compare on the last two pictures of this point.
+   *
+   * The lookup happens here, before the tab changes: a Compare that opened and
+   * *then* said the archive holds nothing would have thrown away the map view
+   * for an error message. The dates travel with the pair, so the tool applies
+   * them the way it applies a saved comparison.
+   */
+  async function comparePoint(point, source) {
+    const name = COMPARE_SOURCES.find((entry) => entry.id === source)?.label ?? 'the archive';
+    // Held up until the answer lands rather than for a guessed few seconds: the
+    // walk through Esri's releases takes as long as it takes, and a message that
+    // went out halfway through left the map looking like nothing was happening.
+    const waiting = toast(`Asking ${name} for the last two pictures…`, 'info', 0);
+    try {
+      const pair = await comparePair(api, source, { ...point, zoom: center.zoom });
+      uiState.compareAt = { ...point, zoom: center.zoom, ...pair };
+      uiState.tool = 'compare';
+    } catch (error) {
+      toast(error.message, 'warn', 6000);
+    } finally {
+      dismissToast(waiting);
     }
   }
 
@@ -1058,6 +1100,7 @@
       label: 'OSM labels',
       on: osmOverlay,
       disabled: !baseIsImagery,
+      detail: baseIsImagery ? '' : 'imagery only',
       title: baseIsImagery
         ? 'Roads and place names over the imagery'
         : 'Only useful over satellite imagery',
@@ -1082,6 +1125,7 @@
       label: 'Roads',
       on: refLayers.roads,
       disabled: !baseIsImagery,
+      detail: baseIsImagery ? '' : 'imagery only',
       title: baseIsImagery ? 'Road network over the imagery, from Esri' : 'Only useful over satellite imagery',
       toggle: () => (refLayers.roads = !refLayers.roads),
     },
@@ -1112,11 +1156,14 @@
       label: 'Active fires',
       on: fires.on,
       disabled: !fires.keyed,
-      detail: fires.keyed ? firmsSummary : '',
+      detail: fires.keyed ? firmsSummary : 'needs a free key',
       title: fires.keyed
         ? 'Thermal detections from NASA FIRMS, live or from the archive'
         : 'Add a NASA FIRMS key in Settings → Imagery',
       toggle: () => (fires.on = !fires.on),
+      // A switch that cannot be pressed says why and where the key goes, on the
+      // row itself rather than only on a greyed-out eye nobody hovers.
+      actions: fires.keyed ? null : [{ label: 'Add a FIRMS key', quiet: true, run: openImagerySettings }],
       // its two questions — which instrument, and over what — are asked in the
       // row rather than in a card of its own floating somewhere
       controls: fires.on && fires.keyed ? firmsControls : null,
@@ -1567,6 +1614,17 @@
   const displayCoords = $derived(
     moveMode && markerLatLng ? markerLatLng : { lat: center.lat, lon: center.lon }
   );
+
+  /** Hand that same point to the tools that open on a coordinate. Held back
+   *  only while the map still sits on the saved home view nobody has moved: that
+   *  is a setting, not a point somebody is looking at. A view the address named
+   *  is a point — it came from a link, or from case work opening the map. */
+  $effect(() => {
+    const home = openingHome;
+    const asked = openingView?.lat != null;
+    if (!asked && center.lat === home.lat && center.lon === home.lon && center.zoom === home.zoom) return;
+    uiState.mapPoint = { lat: displayCoords.lat, lon: displayCoords.lon, zoom: center.zoom };
+  });
 
   // --- capture: what shape the crop is, and filing what is inside it ---
   // The output size, the marquee's ratio lock, the resolution, which mode the
@@ -2347,6 +2405,7 @@
           format={prefs.coordFormat}
           {fullscreen}
           lookup={pointMenu.lookup}
+          {compareSources}
           onpick={onPointMenu}
           onclose={closePointMenu}
         />
@@ -2446,8 +2505,10 @@
               addedLayers.toggleCategory(caseState.current?.id, row, name)}
             onrefresh={(row) => addedLayers.refresh(caseState.current?.id, row)}
             onremove={(row) => (removingLayer = row)}
-            onreveal={(row) => addedLayers.reveal(caseState.current?.id, row)}
             onpick={(row, hit) => addedLayers.pick(caseState.current?.id, row, hit)}
+            dates={addedLayers.dates}
+            onperiod={(row, period, commit) =>
+              addedLayers.setPeriod(caseState.current?.id, row, period, commit)}
             onadd={() => (addedLayers.adding = true)}
           />
           {:else if mediaView}
@@ -2500,6 +2561,20 @@
     onclose={() => (addedLayers.adding = false)}
     onfile={(file, icons) => addedLayers.addFile(file, icons)}
     onurl={(url, icons) => addedLayers.subscribe(url, icons)}
+    ongeoconfirmed={() => {
+      addedLayers.adding = false;
+      addedLayers.geoconfirmed = true;
+    }}
+  />
+{/if}
+
+{#if addedLayers.geoconfirmed}
+  <GeoConfirmedDialog
+    busy={addedLayers.saving}
+    load={addedLayers.conflicts}
+    view={() => engine?.viewBounds?.() ?? null}
+    onclose={() => (addedLayers.geoconfirmed = false)}
+    onadd={(body) => addedLayers.addGeoConfirmed(body)}
   />
 {/if}
 

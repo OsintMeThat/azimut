@@ -206,3 +206,20 @@ describe('Inspect — work that outlived what it was started against', () => {
     expect(source).toContain('cropBefore = activeFrame.crop ? { ...activeFrame.crop } : null;');
   });
 });
+
+describe('Inspect → Reverse Search', () => {
+  it('hands the frame over as it reads here, rendered without filing it', () => {
+    // The same recipe Save and the collage use, so what is searched is what is
+    // on screen: turned, adjusted and cropped.
+    expect(source).toContain(
+      'const blob = await renderBlob(frame.path, frame.time, buildFrameOps(filters, frame));'
+    );
+    expect(source).toContain('openInReverseSearch({ blob, label:');
+    expect(source).toContain('reverse={reverseFrame}');
+  });
+
+  it('keeps one render route for the tray, the collage and the handoff', () => {
+    expect(source).toContain('return URL.createObjectURL(await renderBlob(path, time, ops));');
+    expect(source.match(/inspect\/render-preview/g)).toHaveLength(1);
+  });
+});

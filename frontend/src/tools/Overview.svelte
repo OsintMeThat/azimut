@@ -258,46 +258,8 @@
             </ul>
           </section>
         {:else}
-            <section class="area-waiting">
-              <h2 class="label">What is waiting</h2>
-              {#if !summary}
-                <p class="quiet-line">Reading the case…</p>
-              {:else if clear}
-                <p class="quiet-line">Nothing waiting on these four right now.</p>
-              {:else}
-                <ul class="tiles">
-                  {#each rows as row (row.id)}
-                    <li>
-                      <button
-                        class="tile"
-                        class:none={row.count === 0}
-                        disabled={row.count === 0}
-                        title={row.count === 0 ? 'Nothing here' : row.hint}
-                        onclick={() => ask(row)}
-                      >
-                        <span class="tile-mark"><Icon name={row.icon} size={15} /></span>
-                        <span class="n">{row.count}</span>
-                        <span class="say-label">{row.label}</span>
-                        <span class="say-hint">{row.hint}</span>
-                      </button>
-                    </li>
-                  {/each}
-                </ul>
-              {/if}
-            </section>
-
-            {#if plate.pins.length}
-              <section class="area-places">
-                <h2 class="label">On the ground</h2>
-                <PlaceMap
-                  pins={plate.pins}
-                  total={plate.total}
-                  imperial={prefs.units === 'imperial'}
-                  onopen={() => (uiState.tool = 'satellite')}
-                />
-              </section>
-            {/if}
-
+            <!-- What was just filed comes first: it is what somebody coming back
+                 reaches for. The counts below it are upkeep, read second. -->
             {#if recent.length}
               <section class="area-recent">
                 <h2 class="label">
@@ -333,6 +295,46 @@
                 </ul>
               </section>
             {/if}
+
+            <section class="area-waiting">
+              <h2 class="label">What is waiting</h2>
+              {#if !summary}
+                <p class="quiet-line">Reading the case…</p>
+              {:else if clear}
+                <p class="quiet-line">Nothing waiting on these four right now.</p>
+              {:else}
+                <ul class="tiles">
+                  {#each rows as row (row.id)}
+                    <li>
+                      <button
+                        class="tile"
+                        class:none={row.count === 0}
+                        disabled={row.count === 0}
+                        title={row.hint}
+                        onclick={() => ask(row)}
+                      >
+                        <span class="tile-mark"><Icon name={row.icon} size={15} /></span>
+                        <span class="n">{row.count}</span>
+                        <span class="say-label">{row.label}</span>
+                      </button>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            </section>
+
+            {#if plate.pins.length}
+              <section class="area-places">
+                <h2 class="label">On the ground</h2>
+                <PlaceMap
+                  pins={plate.pins}
+                  total={plate.total}
+                  imperial={prefs.units === 'imperial'}
+                  onopen={() => (uiState.tool = 'satellite')}
+                />
+              </section>
+            {/if}
+
 
             {#if bars.length}
               <section class="area-figures">
@@ -571,9 +573,9 @@
     display: grid;
     grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
     grid-template-areas:
-      'waiting places'
-      'todos figures'
-      'recent recent';
+      'recent places'
+      'todos waiting'
+      'todos figures';
     gap: 30px 40px;
     align-items: start;
     padding-top: 4px;
@@ -582,9 +584,8 @@
      than leaving a hole where the map would have been. */
   .grid.flat {
     grid-template-areas:
-      'waiting figures'
-      'todos .'
-      'recent recent';
+      'recent waiting'
+      'todos figures';
   }
   .grid.empty-case {
     grid-template-areas: 'todos start';
@@ -614,7 +615,7 @@
     .grid.flat,
     .grid.empty-case {
       grid-template-columns: minmax(0, 1fr);
-      grid-template-areas: 'waiting' 'todos' 'places' 'recent' 'figures';
+      grid-template-areas: 'recent' 'todos' 'places' 'waiting' 'figures';
       gap: 30px;
     }
     .grid.empty-case {
@@ -630,24 +631,25 @@
     margin-bottom: 10px;
   }
 
-  /* Four counts as tiles rather than four lines: this is the band somebody opens the
-     app to read, and a number is read at a glance or it is not read. */
+  /* Four counts, read after the work itself: one line each, number first, and the
+     sentence saying what the count means kept for the pointer. They are upkeep
+     somebody glances at, not the band the page is opened for. */
   .tiles {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px;
+    gap: 6px;
     list-style: none;
     margin: 0;
     padding: 0;
   }
   .tile {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: start;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
     gap: 0 8px;
     width: 100%;
     height: 100%;
-    padding: 13px 14px 14px;
+    padding: 7px 10px;
     border: 1px solid var(--border);
     border-radius: var(--r-md);
     background: var(--bg-1);
@@ -661,7 +663,7 @@
     outline: none;
   }
   .tile-mark {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: 1;
     display: flex;
     color: var(--text-3);
@@ -669,30 +671,19 @@
   .tile .n {
     grid-column: 1;
     grid-row: 1;
-    font-size: 1.75rem;
+    font-size: 1.1rem;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
-    letter-spacing: -0.03em;
-    line-height: 1.1;
+    line-height: 1.2;
     color: var(--text-1);
   }
   .tile .say-label {
-    grid-column: 1 / -1;
-    margin-top: 6px;
+    grid-column: 2;
+    grid-row: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  /* A tile is not a row: the hint has the width to be read, so it wraps to a second
-     line rather than being cut off mid-clause. */
-  .tile .say-hint {
-    grid-column: 1 / -1;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    white-space: normal;
-    line-height: 1.45;
-  }
-  /* A count of nothing is the answer, so the tile states it and stops being a control
-     rather than offering a press that lands on an empty table. */
   .tile.none {
     cursor: default;
     background: transparent;
@@ -701,9 +692,6 @@
   .tile.none .say-label {
     color: var(--text-3);
     font-weight: 500;
-  }
-  .tile.none .say-hint {
-    opacity: 0.65;
   }
 
   .rows {

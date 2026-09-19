@@ -68,10 +68,21 @@ describe('import enrichment details', () => {
     // a relation says something about the world; the chain says how a file was
     // made and decides what a delete destroys
     expect(source).toContain(
-      '{#if canRelate || canMention || hasRelations || lineageCount || placedPoints.length}'
+      '{#if canRelate || canMention || claimSeatHere || hasRelations || lineageCount || placedPoints.length}'
     );
     expect(source).toContain('{#if lineageCount}');
     expect(source).toContain('<details class="lineage-card">');
+  });
+
+  it('files a claim from the Claims group of anything that can sit on one', () => {
+    // The group is there before the first claim exists, since that is when it is
+    // needed; the seat comes from the verb registry, not from a list of types.
+    expect(source).toContain('const claimSeatHere = $derived(claimSeat(entity));');
+    expect(source).toContain('{:else if claimSeatHere || claimRelations.length}');
+    expect(source).toContain('title={claimActionTitle(claimSeatHere.slot)}');
+    expect(source).toContain(">Add claim</button>");
+    expect(source).toContain("{#if connectionComposer === 'claim'}");
+    expect(source).toContain('onsaved={() => (connectionComposer = null)}');
   });
 
   it('files a connection from its own Add action rather than the panel Save', () => {

@@ -172,7 +172,7 @@ NO_FILES: dict[str, str] = {
     "structure": "an identity in the graph",
     "equipment-type": "a model in the graph, which owns no object of its own",
     "bookmark": "a URL in the graph",
-    "claim": "a statement in the graph, and the edges that carry it",
+    "claim": "a claim in the graph, and the edges that carry it",
 }
 
 

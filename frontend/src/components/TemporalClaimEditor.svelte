@@ -87,7 +87,7 @@
       const saved = item
         ? await api.patch(`/api/cases/${caseId}/timeline/claims/${item.owner_id}`, body)
         : await api.post(`/api/cases/${caseId}/timeline/claims`, body);
-      toast(item ? 'Time assessment updated' : 'Time assessment added', 'ok', 1800);
+      toast(item ? 'Claim updated' : 'Claim added', 'ok', 1800);
       onsaved?.(saved);
     } catch (error) {
       toast(error.message, 'danger');
@@ -99,10 +99,10 @@
 
 <div class="claim-editor">
   {#if loading}
-    <div class="loading">Loading assessment…</div>
+    <div class="loading">Loading claim…</div>
   {/if}
 
-  <label class="modal-label" for="temporal-statement">Statement</label>
+  <label class="modal-label" for="temporal-statement">Claim</label>
   <textarea
     id="temporal-statement"
     class="textarea"
@@ -147,7 +147,7 @@
       {caseId}
       relationType="about"
       label="About"
-      hint="Who or what this statement concerns"
+      hint="Who or what this claim concerns"
       bind:selected={about}
       locked={lockedAbout}
     />
@@ -162,7 +162,7 @@
       {caseId}
       relationType="cites"
       label="Evidence"
-      hint="Files, notes or statements supporting this date"
+      hint="Files, notes or claims supporting this date"
       bind:selected={cites}
     />
   </section>
@@ -178,7 +178,7 @@
   <div class="actions">
     <button class="btn btn-ghost" onclick={oncancel}>Cancel</button>
     <button class="btn btn-primary" disabled={!statement.trim() || !whenValid || saving || loading} onclick={save}>
-      {saving ? 'Saving…' : item ? 'Update assessment' : 'Add assessment'}
+      {saving ? 'Saving…' : item ? 'Update claim' : 'Add claim'}
     </button>
   </div>
 </div>

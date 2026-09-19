@@ -16,8 +16,8 @@
    *   worst thing this could do;
    * - **its legend, which is the filter**, one row per category with its colour
    *   and its count, clicking one hides exactly those features;
-   * - **Remove, Refresh and Reveal**, because the analyst owns this layer in a
-   *   way they do not own the borders overlay.
+   * - **Refresh and Remove**, because the analyst owns this layer in a way
+   *   they do not own the borders overlay.
    *
    * Everything a row states is computed in `lib/map/addedLayers.js`, so the
    * rules are read off a test rather than off a screen.
@@ -31,8 +31,10 @@
    */
   import Icon from '../../components/Icon.svelte';
   import SearchInput from '../../components/SearchInput.svelte';
+  import LayerTimeStrip from './LayerTimeStrip.svelte';
   import {
     countLabel,
+    followed,
     freshness,
     grouped,
     legend,
@@ -52,9 +54,12 @@
     oncategory,
     onrefresh,
     onremove,
-    onreveal,
     onpick,
     onadd,
+    /** `(layer) => index | null`, the days its features carry (`layerDates.js`). */
+    dates,
+    /** `(layer, period, commit)`: the time strip moved, or was let go. */
+    onperiod,
   } = $props();
 
   const live = $derived(rows.filter((row) => row.enabled).length);
@@ -108,7 +113,7 @@
                from is a way of getting there: this is the one thing on the row
                that leaves the app, and it leaves on a click rather than on a
                render. A file has no such address and stays plain text. -->
-          {#if row.source?.kind === 'url' && row.source.url}
+          {#if followed(row) && row.source.url}
             <a
               class="from"
               href={row.source.url}
@@ -126,6 +131,23 @@
         <!-- Both numbers, always: what is loaded and what is drawn, never the
              one passing for the other. -->
         <p class="meta counts">{countLabel(row)}</p>
+
+        <!-- Only on a layer being drawn, and only once its features are in hand
+             and turn out to be dated: a filter over marks nobody can see would
+             be a control with nothing to show for it. -->
+        {#if row.enabled}
+          {@const index = dates?.(row)}
+          {#if index}
+            <LayerTimeStrip
+              {index}
+              hidden={row.hidden}
+              period={row.period}
+              label={row.title}
+              oninput={(period) => onperiod?.(row, period, false)}
+              onchange={(period) => onperiod?.(row, period, true)}
+            />
+          {/if}
+        {/if}
 
         {#if row.categories.length}
           <button
@@ -172,7 +194,11 @@
                         type="button"
                         class="cat"
                         class:off={hit.hidden}
-                        title={hit.hidden ? 'Show this group and go there' : 'Go to this pin'}
+                        title={hit.outside
+                          ? 'Show every date and go there'
+                          : hit.hidden
+                            ? 'Show this group and go there'
+                            : 'Go to this pin'}
                         onclick={() => onpick?.(row, hit)}
                       >
                         <span class="swatch" style="--swatch: {hit.colour}"></span>
@@ -210,14 +236,13 @@
         {/if}
 
         <nav class="acts" aria-label={row.title}>
-          {#if row.source?.kind === 'url'}
+          {#if followed(row)}
             <button
               class="btn btn-sm"
               disabled={busy === row.name}
               onclick={() => onrefresh?.(row)}
             >{busy === row.name ? 'Reading…' : 'Refresh'}</button>
           {/if}
-          <button class="btn btn-sm quiet" onclick={() => onreveal?.(row)}>Reveal file</button>
           <button class="btn btn-sm quiet" onclick={() => onremove?.(row)}>Remove</button>
         </nav>
       </li>

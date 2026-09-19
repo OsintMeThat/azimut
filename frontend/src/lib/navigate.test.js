@@ -4,9 +4,8 @@ const post = vi.fn().mockResolvedValue({ path: '/cases/c1/azimut/media' });
 vi.mock('./api.js', () => ({ api: { post: (...a) => post(...a), get: vi.fn() } }));
 
 const { caseState, uiState } = await import('./state.svelte.js');
-const { gotoCapture, gotoPoint, openEntity, openGuide, opensInFileManager } = await import(
-  './navigate.js'
-);
+const { gotoCapture, gotoPoint, openEntity, openGuide, openInReverseSearch, opensInFileManager } =
+  await import('./navigate.js');
 
 beforeEach(() => {
   uiState.tool = 'media';
@@ -14,6 +13,7 @@ beforeEach(() => {
   uiState.focusCapture = null;
   uiState.openBoardEntity = null;
   uiState.openCompare = null;
+  uiState.reverseTarget = null;
   post.mockClear();
   caseState.current = { id: 'c1', name: 'Case', entities: [], links: [], folders: [] };
   vi.stubGlobal('window', { open: vi.fn() });
@@ -31,6 +31,26 @@ describe('openGuide', () => {
     // somebody pressing there has a general question
     openGuide('settings');
     expect(uiState.guideSection).toBe('start');
+  });
+});
+
+describe('openInReverseSearch', () => {
+  it('opens Reverse Search on the picture it was pressed from', () => {
+    expect(openInReverseSearch({ path: 'media/clip.mp4', kind: 'video', label: 'Clip', time: 3 })).toBe(true);
+    expect(uiState.tool).toBe('reverse');
+    expect(uiState.reverseTarget).toEqual({
+      path: 'media/clip.mp4',
+      blob: null,
+      kind: 'video',
+      label: 'Clip',
+      time: 3,
+    });
+  });
+
+  it('stays put, and queues nothing, for a picture it cannot hand over', () => {
+    expect(openInReverseSearch({ path: 'media/report.pdf', kind: 'file' })).toBe(false);
+    expect(uiState.tool).toBe('media');
+    expect(uiState.reverseTarget).toBeNull();
   });
 });
 

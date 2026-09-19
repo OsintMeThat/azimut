@@ -281,7 +281,7 @@
             </button>
           {/if}
           {#if session.collages.length > 1}
-            <button class="ctab-x" onclick={() => removeCollage(cl.id)} aria-label="Delete collage"><Icon name="x" size={11} /></button>
+            <button class="ctab-x" onclick={() => removeCollage(cl.id)} aria-label="Delete collage" title="Delete collage"><Icon name="x" size={11} /></button>
           {/if}
         </div>
       {/each}

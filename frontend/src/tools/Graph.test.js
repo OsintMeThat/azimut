@@ -2132,3 +2132,17 @@ describe('exporting the drawing', () => {
     expect(source).toContain('<PlateExport surface="graph" plate={capturePlate}');
   });
 });
+
+describe('filing a claim from a node', () => {
+  it('names it in the node menu wherever the verb registry gives the node a seat', () => {
+    expect(source).toContain('{@const seat = claimSeat(at)}');
+    expect(source).toContain('chose((id) => (claimFor = byId.get(id) ?? null))');
+    expect(source).toContain('title={claimActionTitle(seat.slot)}');
+    expect(source).toContain('Add claim…');
+  });
+
+  it('opens the same form as Details and the Board, never over a snapshot', () => {
+    expect(source).toContain("import QuickClaim, { claimSeat } from '../components/QuickClaim.svelte';");
+    expect(source).toContain('{#if claimFor && !snapshotReading}');
+  });
+});

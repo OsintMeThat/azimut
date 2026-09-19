@@ -51,10 +51,10 @@ import json
 import re
 import zipfile
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterator
 from urllib.parse import unquote
 
 import httpx
@@ -109,9 +109,16 @@ MAX_HREF = 2_000
 
 #: How many distinct pictograms one layer stores. A source declares one style per
 #: (icon, colour) pair its creator used, which is a couple of dozen for a busy My
-#: Maps. Past this the rest fall back to the app's own shapes rather than the
-#: layer being refused: the marks are the map, the icons are how it was dressed.
-MAX_ICONS = 64
+#: Maps and a few hundred for GeoConfirmed's Ukraine map, one per faction and
+#: event type. Past this the rest fall back to the app's own shapes rather than
+#: the layer being refused: the marks are the map, the icons are how it was
+#: dressed.
+MAX_ICONS = 512
+
+#: …and how many of them may be read off the web, one request each. An icon inside
+#: a KMZ costs a zip lookup; one at an address is a request to somebody else's
+#: server, and that is what this bounds.
+MAX_FETCHED_ICONS = 64
 
 #: What one icon may weigh on the wire, and what a layer's icons may weigh
 #: together. Both are checked as the bytes arrive, because a server is free to
@@ -219,7 +226,15 @@ def _suffix(filename: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def parse(data: bytes, *, filename: str = "", title: str = "") -> dict[str, Any]:
+#: A publisher's own reading of its file, run over the features before the legend
+#: is counted: it may rename, regroup and recolour them in place, and returns the
+#: icon descriptions to keep. GeoConfirmed's is `engine/geoconfirmed.reading`.
+Reading = Callable[[list[dict[str, Any]], dict[str, dict[str, Any]]], dict[str, dict[str, Any]]]
+
+
+def parse(
+    data: bytes, *, filename: str = "", title: str = "", reading: Reading | None = None
+) -> dict[str, Any]:
     """Bytes as received → `{geojson, summary, icons}`, or `LayerError` with a reason.
 
     Pure: it reads no file, reaches no network and writes nothing. A caller
@@ -261,6 +276,8 @@ def parse(data: bytes, *, filename: str = "", title: str = "") -> dict[str, Any]
 
     if not features:
         raise LayerError("the file holds no points, lines or areas")
+    if reading is not None:
+        icons = reading(features, icons)
     return _collection(
         features, title=title or name or _stem(filename), fmt=source_format, icons=icons
     )
@@ -401,19 +418,45 @@ def _properties(
     category: str = "",
     colour: str = "",
     icon: str = "",
+    date: str = "",
 ) -> dict[str, Any]:
-    """The five fields every feature carries, whatever it was read from.
+    """The five fields every feature carries, whatever it was read from, and a
+    sixth when the source dated it.
 
     `icon` names a stored pictogram rather than holding an address: the browser
-    is told which image to draw, never where the source kept it.
+    is told which image to draw, never where the source kept it. `date` is a day,
+    `YYYY-MM-DD`, which is what the row's time filter compares; absent rather
+    than empty, since most layers state none and a map may hold 100,000 features.
     """
-    return {
+    properties = {
         "name": _text(name, MAX_NAME),
         "description": _rich_text(description, MAX_DESCRIPTION),
         "category": _text(category, MAX_NAME) or UNGROUPED,
         "colour": colour or "",
         "icon": icon or "",
     }
+    day = iso_day(date)
+    if day:
+        properties["date"] = day
+    return properties
+
+
+_ISO_DAY = re.compile(r"^\s*(\d{4}-\d{2}-\d{2})")
+
+
+def iso_day(value: Any) -> str:
+    """The day a timestamp falls on, `YYYY-MM-DD`, or "" for anything else.
+
+    Read off the front of the string, so `2024-05-10T14:03:00Z` is that day as
+    written: a source's own clock is not second-guessed into another timezone.
+    """
+    match = _ISO_DAY.match(str(value or ""))
+    if not match:
+        return ""
+    try:
+        return date.fromisoformat(match.group(1)).isoformat()
+    except ValueError:
+        return ""
 
 
 _HEX = re.compile(r"^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
@@ -792,6 +835,7 @@ def _placemark(
         description = _kml_extended_data(element)
     style = _kml_style(element, styles)
     colour = str(style.get("colour") or "")
+    day = _kml_day(element)
     icon = _icon_of(style)
     key = ""
     if icon is not None:
@@ -812,9 +856,21 @@ def _placemark(
                     # only a point draws a pictogram; a line and an area are
                     # drawn by their own stroke and fill
                     icon=key if _kind(geometry) == "point" else "",
+                    date=day,
                 ),
             }
         )
+
+
+def _kml_day(element: Element) -> str:
+    """When a placemark says it happened: a TimeStamp, else where a TimeSpan starts."""
+    stamp = _child(element, "TimeStamp")
+    if stamp is not None:
+        return iso_day(_child_text(stamp, "when"))
+    span = _child(element, "TimeSpan")
+    if span is not None:
+        return iso_day(_child_text(span, "begin"))
+    return ""
 
 
 def _kml_extended_data(element: Element) -> str:
@@ -949,8 +1005,13 @@ def _icon_of(style: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
         "scale": float(style.get("scale") or 1.0),
         "hotspot": list(style["hotspot"]) if style.get("hotspot") else None,
     }
+    return icon_key(descriptor), descriptor
+
+
+def icon_key(descriptor: dict[str, Any]) -> str:
+    """The name a pictogram is stored under: the hash of what decides its pixels."""
     seed = json.dumps(descriptor, sort_keys=True).encode("utf-8")
-    return hashlib.sha256(seed).hexdigest()[:ICON_KEY_LENGTH], descriptor
+    return hashlib.sha256(seed).hexdigest()[:ICON_KEY_LENGTH]
 
 
 def _kml_abgr(value: str) -> str:
@@ -1090,7 +1151,10 @@ def _from_gpx(data: bytes) -> tuple[list[dict[str, Any]], str]:
                     "type": "Feature",
                     "geometry": {"type": "Point", "coordinates": point},
                     "properties": _properties(
-                        name=name, description=description, category=category
+                        name=name,
+                        description=description,
+                        category=category,
+                        date=_child_text(child, "time"),
                     ),
                 }
             )
@@ -1168,9 +1232,14 @@ def icon_images(
     archive = _icon_archive(source)
     out: dict[str, bytes] = {}
     total = 0
+    fetched = 0
     try:
         for key in list(descriptors)[:MAX_ICONS]:
             descriptor = descriptors[key]
+            if _on_the_web(descriptor):
+                if fetched >= MAX_FETCHED_ICONS:
+                    continue
+                fetched += 1
             raw = _icon_bytes(descriptor, archive)
             if not raw:
                 continue
@@ -1197,12 +1266,16 @@ def _icon_archive(source: bytes) -> zipfile.ZipFile | None:
         return None
 
 
+def _on_the_web(descriptor: dict[str, Any]) -> bool:
+    return str(descriptor.get("href") or "").lower().startswith(("http://", "https://"))
+
+
 def _icon_bytes(
     descriptor: dict[str, Any], archive: zipfile.ZipFile | None
 ) -> bytes:
     """The image a descriptor points at: out of the archive, or off the web."""
     href = str(descriptor.get("href") or "")
-    if href.lower().startswith(("http://", "https://")):
+    if _on_the_web(descriptor):
         return _fetch_icon(href)
     return _zipped_icon(archive, href) if archive is not None else b""
 
@@ -1445,7 +1518,7 @@ SPEC_VERSION = 1
 #: the day it was dropped in, for as long as the case lives. Bumped whenever a
 #: change here would give the same bytes a different reading; the next request
 #: for that layer reparses the snapshot already on disk.
-PARSE_VERSION = 2
+PARSE_VERSION = 3
 
 #: Where that stamp is written. A GeoJSON object may carry members it does not
 #: define, and this one is written first so the check reads the head of the file
@@ -1493,6 +1566,24 @@ _MY_MAPS = re.compile(
 class LayerFetchError(LayerError):
     """A source that could not be read this time, which is not the same as one
     that will never be readable: the last snapshot stays on the map."""
+
+
+#: A layer asked of GeoConfirmed by conflict, dates and area rather than by
+#: address (`engine/geoconfirmed.py`).
+GEOCONFIRMED = "geoconfirmed"
+
+#: The sources a layer follows rather than holds: re-read on Refresh and on case
+#: open, and stale when that was too long ago. A file is never either.
+FOLLOWED = ("url", GEOCONFIRMED)
+
+
+def _reading(source: dict[str, Any]) -> Reading | None:
+    """The publisher's own reading of this source's bytes, where it has one."""
+    if source.get("kind") != GEOCONFIRMED:
+        return None
+    from . import geoconfirmed  # it imports this module, so not at the top
+
+    return geoconfirmed.reading(source)
 
 
 def my_maps_mid(url: str) -> str:
@@ -1646,7 +1737,12 @@ def drawing(case: "Case", name: str) -> Path:
         data = snapshot.read_bytes()
     except OSError as exc:
         raise LayerError("this layer's saved copy is missing") from exc
-    parsed = parse(data, filename=_source_name(spec), title=spec.get("title", ""))
+    parsed = parse(
+        data,
+        filename=_source_name(spec),
+        title=spec.get("title", ""),
+        reading=_reading(spec.get("source") or {}),
+    )
     return _write_cache(case, name, parsed["geojson"])
 
 
@@ -1671,25 +1767,8 @@ def add_file(
     need the network, and following a link does.
     """
     parsed = parse(data, filename=filename, title=title or "")
-    summary = parsed["summary"]
-    name = _free_name(case, title or summary["title"])
-    spec = {
-        "azimut_layer": SPEC_VERSION,
-        "title": summary["title"],
-        "source": {"kind": "file", "name": filename, "format": summary["format"]},
-        "enabled": True,
-        "hidden": [],
-        # What the analyst asked for at import, kept so a refresh composes the
-        # same layer again rather than a differently dressed one.
-        "source_icons": bool(icons),
-        "created_at": _now(),
-        "updated_at": _now(),
-        "summary": summary,
-        "snapshot": _store(case, name, data, parsed, icons=bool(icons)),
-    }
-    _write_spec(case, name, spec)
-    _file_entity(case, name, spec)
-    return row(name, spec)
+    source = {"kind": "file", "name": filename, "format": parsed["summary"]["format"]}
+    return add_source(case, data, parsed, source=source, title=title, icons=icons)
 
 
 def subscribe(
@@ -1706,30 +1785,56 @@ def subscribe(
         raise LayerError("a subscribed layer needs an http or https address")
     data, filename = fetch(address)
     parsed = parse(data, filename=filename, title=title or "")
+    source = {
+        "kind": "url",
+        "url": address,
+        "feed": feed_url(address),
+        "name": filename,
+        "format": parsed["summary"]["format"],
+        "my_maps": bool(my_maps_mid(address)),
+    }
+    return add_source(
+        case, data, parsed, source=source, title=title, icons=icons, on_open=on_open
+    )
+
+
+def add_source(
+    case: "Case",
+    data: bytes,
+    parsed: dict[str, Any],
+    *,
+    source: dict[str, Any],
+    title: str | None,
+    icons: bool,
+    on_open: bool | None = None,
+    hidden: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """File a parsed source as a layer of this case: its spec, its files, its node.
+
+    `on_open` is for a followed source only, and `hidden` names the groups that
+    start switched off — only those the source actually holds.
+    """
     summary = parsed["summary"]
     name = _free_name(case, title or summary["title"])
-    spec = {
+    live = {entry["name"] for entry in summary["categories"]}
+    spec: dict[str, Any] = {
         "azimut_layer": SPEC_VERSION,
         "title": summary["title"],
-        "source": {
-            "kind": "url",
-            "url": address,
-            "feed": feed_url(address),
-            "name": filename,
-            "format": summary["format"],
-            "my_maps": bool(my_maps_mid(address)),
-        },
-        # Refreshing on case open is what "subscribed" means; turning it off
-        # leaves a layer that only moves when the analyst presses Refresh.
-        "refresh": {"on_open": bool(on_open)},
-        "enabled": True,
-        "hidden": [],
+        "source": source,
+        "hidden": sorted(set(hidden) & live),
+        # What the analyst asked for at import, kept so a refresh composes the
+        # same layer again rather than a differently dressed one.
         "source_icons": bool(icons),
         "created_at": _now(),
         "updated_at": _now(),
         "summary": summary,
         "snapshot": _store(case, name, data, parsed, icons=bool(icons)),
     }
+    if on_open is not None:
+        # Re-read the first time it is switched on in a session, which is what
+        # "subscribed" means; off leaves a layer that only moves on Refresh.
+        # Named for when it began as "on case open", kept so no case migrates.
+        spec["refresh"] = {"on_open": bool(on_open)}
     _write_spec(case, name, spec)
     _file_entity(case, name, spec)
     return row(name, spec)
@@ -1741,19 +1846,35 @@ def refresh(case: "Case", name: str) -> dict[str, Any]:
     An unchanged feed rewrites nothing: same bytes, same sha256, and the row
     only learns that it was checked. A fetch that fails leaves the last snapshot
     exactly where it was — the layer stays on the map, saying how old it is.
+
+    For GeoConfirmed the bytes are half of it: the factions that name the
+    legend are read beside the export, and a faction added since is a reason
+    to read the same bytes again.
     """
     spec = _read_spec(case, name)
-    source = spec.get("source") or {}
-    if source.get("kind") != "url":
+    before = spec.get("source") or {}
+    if before.get("kind") not in FOLLOWED:
         raise LayerError("this layer came from a file, so there is nothing to refresh")
 
-    data, _ = fetch(str(source.get("url") or ""))
+    source = before
+    if before.get("kind") == GEOCONFIRMED:
+        from . import geoconfirmed
+
+        data, source = geoconfirmed.read_again(before)
+        spec["source"] = source
+    else:
+        data, _ = fetch(str(before.get("url") or ""))
     snapshot = spec.get("snapshot") or {}
     now = _now()
-    if digest(data) == snapshot.get("sha256"):
+    if digest(data) == snapshot.get("sha256") and source == before:
         spec["snapshot"] = {**snapshot, "checked_at": now}
     else:
-        parsed = parse(data, filename=_source_name(spec), title=spec.get("title", ""))
+        parsed = parse(
+            data,
+            filename=_source_name(spec),
+            title=spec.get("title", ""),
+            reading=_reading(source),
+        )
         spec["summary"] = parsed["summary"]
         spec["snapshot"] = {
             **_store(case, name, data, parsed, icons=bool(spec.get("source_icons"))),
@@ -1771,19 +1892,35 @@ def update(
     case: "Case",
     name: str,
     *,
-    enabled: bool | None = None,
     hidden: list[str] | None = None,
+    period: tuple[str, str] | None = None,
     on_open: bool | None = None,
     title: str | None = None,
 ) -> dict[str, Any]:
-    """What the analyst set on the row: the switch, the legend, the policy."""
+    """What the analyst set on the row that outlives the session: the legend,
+    the time filter, the refresh policy and the title.
+
+    `period` is a first and a last day, either of them "" for no bound, and both
+    "" to clear it. It is kept whatever the layer's own dates: a refresh can move
+    those, and the filter is the analyst's question rather than a fact about the
+    data.
+
+    Not the switch. Whether a layer is drawn lives in the page and starts off on
+    every load, so a layer that crashed the tab is not drawn again by the reload.
+    """
     spec = _read_spec(case, name)
-    if enabled is not None:
-        spec["enabled"] = bool(enabled)
     if hidden is not None:
         live = {entry["name"] for entry in (spec.get("summary") or {}).get("categories", [])}
         spec["hidden"] = sorted({str(entry) for entry in hidden} & live)
-    if on_open is not None and (spec.get("source") or {}).get("kind") == "url":
+    if period is not None:
+        start, end = iso_day(period[0]), iso_day(period[1])
+        if start and end and end < start:
+            start, end = end, start
+        if start or end:
+            spec["period"] = {"start": start, "end": end}
+        else:
+            spec.pop("period", None)
+    if on_open is not None and (spec.get("source") or {}).get("kind") in FOLLOWED:
         spec["refresh"] = {**(spec.get("refresh") or {}), "on_open": bool(on_open)}
     if title:
         spec["title"] = _text(title, MAX_NAME) or spec["title"]
@@ -1826,8 +1963,9 @@ def row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         "name": name,
         "title": spec.get("title") or name,
         "source": source,
-        "enabled": bool(spec.get("enabled", True)),
         "hidden": list(spec.get("hidden") or []),
+        # the time filter, `{start, end}`, either bound "" when open
+        "period": spec.get("period") or None,
         "refresh": spec.get("refresh") or {},
         "features": int(summary.get("features") or 0),
         "categories": summary.get("categories") or [],
@@ -1840,7 +1978,7 @@ def row(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         "bytes": int(snapshot.get("bytes") or 0),
         "fetched_at": snapshot.get("at") or "",
         "checked_at": at,
-        "stale": source.get("kind") == "url" and _stale(at),
+        "stale": source.get("kind") in FOLLOWED and _stale(at),
         "created_at": spec.get("created_at") or "",
         "updated_at": spec.get("updated_at") or "",
         "spec": layout.layer_spec_rel(name),
@@ -1876,7 +2014,7 @@ def _file_entity(case: "Case", name: str, spec: dict[str, Any]) -> str:
         return str(existing["id"])
     source = spec.get("source") or {}
     attrs = {"spec": rel, "format": spec.get("summary", {}).get("format", "")}
-    if source.get("kind") == "url":
+    if source.get("kind") in FOLLOWED:
         attrs["source_url"] = source.get("url", "")
     return str(case.add_entity(ENTITY_TYPE, spec["title"], attrs=attrs, by="map-layers")["id"])
 
@@ -1890,35 +2028,50 @@ def fetch(url: str) -> tuple[bytes, str]:
     """Read a remote source, bounded, and say what it was called.
 
     Nothing here runs on a timer. This is reached from adding a subscription,
-    from pressing Refresh, and from opening a case that holds an enabled layer
-    set to refresh on open — three acts, all of them the analyst's.
+    from pressing Refresh, and from switching a layer on for the first time in a
+    session when it asked to be re-read then — three acts, all of them the
+    analyst's.
     """
     address = feed_url(url)
     if not address.lower().startswith(("http://", "https://")):
         raise LayerFetchError("a subscribed layer needs an http or https address")
+    return download(address)
+
+
+def download(
+    address: str,
+    *,
+    body: dict[str, Any] | None = None,
+    limit: int = MAX_FETCH_BYTES,
+    user_agent: str = USER_AGENT,
+) -> tuple[bytes, str]:
+    """One bounded request: a GET, or a POST of `body` as JSON.
+
+    The size is checked against the declared length before a byte is read and
+    again as the bytes arrive, since a server is free to lie about either.
+    """
     try:
         with httpx.stream(
-            "GET",
+            "GET" if body is None else "POST",
             address,
+            json=body,
             timeout=FETCH_TIMEOUT,
             follow_redirects=True,
-            headers={"User-Agent": USER_AGENT},
+            headers={"User-Agent": user_agent},
         ) as response:
             response.raise_for_status()
             declared = response.headers.get("content-length")
-            if declared and declared.isdigit() and int(declared) > MAX_FETCH_BYTES:
+            if declared and declared.isdigit() and int(declared) > limit:
                 raise LayerFetchError(
                     f"that source is {_megabytes(int(declared))} — the limit is "
-                    f"{_megabytes(MAX_FETCH_BYTES)}"
+                    f"{_megabytes(limit)}"
                 )
             chunks: list[bytes] = []
             total = 0
             for chunk in response.iter_bytes():
                 total += len(chunk)
-                if total > MAX_FETCH_BYTES:
-                    raise LayerFetchError(
-                        f"that source is over {_megabytes(MAX_FETCH_BYTES)}"
-                    )
+                if total > limit:
+                    raise LayerFetchError(f"that source is over {_megabytes(limit)}")
                 chunks.append(chunk)
             name = _filename(response.headers.get("content-disposition"), address)
             return b"".join(chunks), name

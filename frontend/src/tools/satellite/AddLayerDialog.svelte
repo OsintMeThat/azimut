@@ -15,7 +15,7 @@
   import Modal from '../../components/Modal.svelte';
   import { ACCEPTS, looksLikeUrl } from '../../lib/map/addedLayers.js';
 
-  let { busy = false, onclose, onfile, onurl } = $props();
+  let { busy = false, onclose, onfile, onurl, ongeoconfirmed } = $props();
 
   let url = $state('');
   let picker = $state(null);
@@ -93,9 +93,17 @@
          for, when, and what it will not do on its own. -->
     <p class="note">
       A My Maps share link, or any KML or GeoJSON address. It is read now, when
-      you press Refresh, and when this case opens — never on a timer, and never
-      while the layer is off.
+      you press Refresh, and the first time you switch it on after opening
+      Azimut — never on a timer, and never while the layer is off.
     </p>
+  </section>
+
+  <section>
+    <h4>GeoConfirmed</h4>
+    <button class="btn" disabled={busy} onclick={() => ongeoconfirmed?.()}>
+      Choose a conflict
+    </button>
+    <p class="note">Geolocated conflict events, by dates and area, in GeoConfirmed's icons.</p>
   </section>
 </Modal>
 

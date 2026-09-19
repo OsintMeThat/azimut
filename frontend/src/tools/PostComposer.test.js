@@ -45,6 +45,22 @@ describe('Geo Report actions', () => {
     expect(source).toContain("...(draftName ? [specPath('draft', draftName)] : []),");
   });
 
+  it('says what each save produces', () => {
+    caseState.current = { id: 'case-1', folders: [], entities: [] };
+    const { body } = render(PostComposer);
+    expect(body).toContain('title="Keep this thread to reopen and edit here"');
+    expect(body).toContain('title="Write the finding up as a Notebook note"');
+  });
+
+  it('labels the map links from the verified table rather than printing site ids', () => {
+    expect(source).toContain("import { mapLinks } from '../lib/maplinks.js';");
+    expect(source).toContain('const geoLinks = $derived(geo ? mapLinks(geo.lat, geo.lon) : []);');
+    expect(source).toContain('>{link.label}</a>');
+    // the saved report writes the same labels
+    expect(source).toContain('mapLinks: Object.fromEntries(geoLinks.map((link) => [link.label, link.url])),');
+    expect(source).not.toContain('geo.links');
+  });
+
   it('checks the current hidden draft path before claiming a saved draft was deleted', () => {
     expect(source).toContain("lookupEntity(id, specAttr('draft'), specPath('draft', draft))");
   });

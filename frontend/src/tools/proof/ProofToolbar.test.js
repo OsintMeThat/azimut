@@ -205,8 +205,10 @@ describe('the symbol button', () => {
   it('takes the tool as well as opening the grid, like the `s` it promises', () => {
     // It was the one button on the rail that only opened a flyout, so coming
     // back to the stamp meant re-picking a glyph already chosen.
-    expect(src).toContain("onclick={() => { tool = 'icon'; toggle('icon'); }}");
-    expect(src).toContain('onclick={() => (tool = entry.id)}'); // as the rest of the rail does
+    expect(src).toContain("tool = 'icon';\n        toggle('icon');");
+    // …and pressing it again puts the stamp down, as the rest of the rail does
+    expect(src).toContain("if (tool === 'icon' && iconOpen) { tool = 'select'; toggle(''); return; }");
+    expect(src).toContain("onclick={() => (tool = tool === entry.id ? 'select' : entry.id)}");
   });
 
   it('is lit by the tool in hand, not by the grid being open', () => {

@@ -857,8 +857,9 @@ describe('stamping a symbol', () => {
 
     expect(node).toContain('const origin = iconOrigin(s.name, size)');
     expect(node).toContain('id: s.id, x: s.x, y: s.y');
-    // and it rebinds by that same point when dropped onto another surface
-    expect(source).toContain("s.kind === 'ellipse' || s.kind === 'text' || s.kind === 'icon'");
+    // and it rebinds by that same point when dropped onto another surface:
+    // everything that is not a box and not a polyline answers for its origin
+    expect(bodyOfFn('rebindOnDrop')).toContain('} else if (!Array.isArray(s.points)) {');
   });
 
   it('turns the fill into a badge disc behind the glyph', () => {
@@ -1199,9 +1200,10 @@ describe('Proof Composer — what the proof says about itself', () => {
     expect(side.match(/class="meta-optional">optional</g)).toHaveLength(2);
   });
 
-  it('edits the date with the one temporal editor the app has, compact', () => {
-    expect(side).toContain('<TemporalInput');
-    expect(side).toContain('compact');
+  it('edits the date in one field that writes the case\'s temporal profile', () => {
+    expect(side).toContain('<DateField');
+    expect(side).not.toContain('<TemporalInput');
+    expect(side).toContain('placeholder="dd/mm/yyyy · Oct 2025 · ~2025"');
     expect(side).toContain('onchange={(value) => { proof.when = value; dirty = true; }}');
   });
 
@@ -1246,5 +1248,104 @@ describe('Proof Composer — dating the material', () => {
     const body = bodyOfFn('datedLabel');
     expect(body).toContain('`Dated the material: ${dated[0]}`');
     expect(body).toContain('`Dated ${dated.length} files this proof rests on`');
+  });
+});
+
+describe('Proof Composer — numbered markers and blur boxes', () => {
+  it('offers both on the rail, with a key each', () => {
+    expect(source).toContain("{ id: 'number', icon: 'numbered', label: 'Numbered marker', shortcut: 'n' },");
+    expect(source).toContain("{ id: 'blur', icon: 'blurBox', label: 'Blur box', shortcut: 'b' },");
+    expect(source).toContain("else if (e.key === 'n') tool = 'number';");
+    expect(source).toContain("else if (e.key === 'b') tool = 'blur';");
+  });
+
+  it('stamps a marker and keeps the tool, the way the symbol stamp does', () => {
+    const body = bodyOfFn('onPointerDown');
+    expect(body).toContain("if (tool === 'number') {");
+    expect(body).toContain('n: nextMarkerNumber(color)');
+    // no `tool = 'select'` in that branch: numbering four things is one act
+    const branch = body.slice(body.indexOf("if (tool === 'number') {"));
+    expect(branch.slice(0, branch.indexOf('return;'))).not.toContain("tool = 'select'");
+  });
+
+  it('counts each colour as its own series, starting back at 1', () => {
+    const body = bodyOfFn('nextMarkerNumber');
+    // colour is what this composer says "same feature" with, so a second colour
+    // is a second series rather than a continuation of the first
+    expect(body).toContain("x.kind === 'number' && x.color === ink");
+    expect(body).toContain('while (taken.has(n)) n += 1;');
+  });
+
+  it('renumbers a marker recoloured into another series', () => {
+    const body = bodyOfFn('setColor');
+    expect(body).toContain("if (s.kind === 'number' && s.color !== c) s.n = nextMarkerNumber(c);");
+  });
+
+  it('gives both a marker and a blur box handles to resize and turn', () => {
+    const ui = source.slice(source.indexOf('transformer.keepRatio('), source.indexOf('if (handles) {'));
+    // a disc stays a disc
+    expect(ui).toMatch(/keepRatio\([\s\S]*?selKind === 'number'/);
+    expect(ui).toMatch(/rotateEnabled\([\s\S]*?selKind === 'number' \|\| selKind === 'blur'/);
+    // a box takes the full set, a marker the corners
+    expect(ui).toMatch(/enabledAnchors\([\s\S]*?selKind === 'blur'[\s\S]*?'middle-left'/);
+    expect(ui).toMatch(/selKind === 'text' \|\| selKind === 'icon' \|\| selKind === 'number'/);
+  });
+
+  it('writes down where either one was dropped, panel and all', () => {
+    // both used to fall through to the polyline branch, where reading the points
+    // they have none of threw inside dragend: the drop was never written and the
+    // mark sprang back to where it had been picked up
+    const body = bodyOfFn('rebindOnDrop');
+    expect(body).toContain("if (s.kind === 'rect' || s.kind === 'blur') {");
+    expect(body).toContain('} else if (!Array.isArray(s.points)) {');
+  });
+
+  it('keeps a colour away from the one mark drawn in no ink', () => {
+    expect(source).toContain("? editableShapes.every((s) => s.kind === 'blur')");
+    expect(source).toContain('showColor={!colorless}');
+    // and never writes one on it either, at the draw or from the palette
+    expect(source).toContain("...(kind === 'blur' ? {} : { color, strokeWidth: strokeW }),");
+    expect(bodyOfFn('setColor')).toContain(
+      "const inked = editableShapes.filter((s) => s.kind !== 'blur');"
+    );
+  });
+
+  it('draws a blur box by dragging, and files it as a rectangle', () => {
+    expect(source).toContain("} else if (tool === 'blur') {");
+    expect(source).toContain("if ((kind === 'rect' || kind === 'blur') && node.width() > minSize");
+    // the draft is resized as a box, not as a polyline: a Rect has no points()
+    expect(source).toContain("} else if (kind === 'rect' || kind === 'blur') {");
+  });
+
+  it('blurs the picture itself, through the surface the box sits on', () => {
+    const body = bodyOfFn('makeBlurNode');
+    expect(body).toContain('filters: [Konva.Filters.Blur]');
+    expect(body).toContain('const radius = blurRadiusFor(s);');
+    expect(body).toContain('blurRadius: radius');
+    expect(body).toContain('surface.sourceNatural');
+    expect(body).toContain('surface.crop');
+    // a filter only draws once the node is cached
+    expect(body).toContain('if (patch) node.cache();');
+    // the margin is read, not drawn: the clip keeps the box the size it was drawn
+    expect(body).toContain('clip: { x: 0, y: 0, width: s.w, height: s.h }');
+    // and it follows the box as it is dragged and as it is turned
+    expect(body).toContain("group.on('dragmove', paint);");
+    expect(body).toContain("group.on('transform', paint);");
+    // a turned box hides the ground under it, so the patch is turned back level
+    expect(body).toContain('w: s.w, h: s.h, rotation: group.rotation()');
+    expect(body).toContain('rotation: patch.turn');
+    // Konva measures a group by its children and ignores the clip, so the frame
+    // stood a blur radius off the box until this answered with the box itself
+    expect(body).toContain('group.getClientRect = ({ skipTransform, relativeTo } = {}) => {');
+  });
+
+  it('hands each shape the surface it stands on, panel or pasted image', () => {
+    expect(source).toContain('group.add(makeShapeNode(s, box, panel));');
+    expect(source).toContain('group.add(makeShapeNode(s, box, paste));');
+  });
+
+  it('keeps a line width away from the two marks that have no line', () => {
+    expect(source).toContain("editableShapes.every((s) => s.kind === 'number' || s.kind === 'blur')");
+    expect(source).toContain('showStroke={!solidIconOnly && !strokeless}');
   });
 });

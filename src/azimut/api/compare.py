@@ -129,7 +129,10 @@ class CompareChangeAssist(BaseModel):
 
 
 AnnotationKind = Literal[
-    "text", "arrow", "line", "rect", "ellipse", "freehand", "measure", "polygon"
+    "text", "arrow", "line", "rect", "ellipse", "freehand", "measure", "polygon",
+    # Stamped whole on one point: a numbered disc, and a symbol from the drawing
+    # set the Proof Maker stamps onto a panel.
+    "number", "icon",
 ]
 #: How many ground points each kind holds: an exact count, or (minimum, maximum).
 _POINT_COUNTS: dict[str, tuple[int, int]] = {
@@ -141,6 +144,8 @@ _POINT_COUNTS: dict[str, tuple[int, int]] = {
     "ellipse": (2, 2),
     "freehand": (2, 400),
     "polygon": (3, 200),
+    "number": (1, 1),
+    "icon": (1, 1),
 }
 
 
@@ -155,8 +160,16 @@ class CompareAnnotation(BaseModel):
     points: list[tuple[float, float]] = Field(min_length=1, max_length=400)
     stroke_width: int = Field(default=3, ge=1, le=24)
     fill_opacity: float = Field(default=0, ge=0, le=1)
+    #: Also the side of a stamp, which has no letters to size and no line to widen.
     font_size: int = Field(default=16, ge=8, le=72)
     text: str = Field(default="", max_length=240)
+    #: What a numbered marker counts to. Its series is its colour's, and the
+    #: browser assigns it; the ceiling is what one picture can carry legibly.
+    number: int = Field(default=1, ge=1, le=999)
+    #: Which symbol a stamp draws, by name. Not checked against the drawing set:
+    #: that set lives in the browser and grows there, and a name this build does
+    #: not know is drawn as the first symbol rather than refused on the way in.
+    glyph: str = Field(default="", max_length=40)
 
     @model_validator(mode="after")
     def _shape(self) -> "CompareAnnotation":
@@ -301,7 +314,10 @@ def change_refusal(a: dict[str, Any], b: dict[str, Any], method: str = "colour")
             and a["wayback_release"] == b["wayback_release"]
         )
         if same_picture:
-            return "Choose two different Esri releases"
+            return (
+                "Both sides show the same picture. Pick another Esri release, "
+                "or two dated Sentinel-2 passes"
+            )
         if not _same_layers(a, b):
             return "Match the reference layers on A and B"
         return None

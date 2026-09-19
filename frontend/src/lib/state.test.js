@@ -38,6 +38,7 @@ describe('closeCase', () => {
     uiState.openProof = 'proof-a';
     uiState.openDraft = 'draft-a';
     uiState.inspectPath = 'media/a.jpg';
+    uiState.reverseTarget = { path: 'media/a.jpg', kind: 'image', label: 'a.jpg' };
     uiState.focusMedia = 'media/a.jpg';
     uiState.openInspect = 'session-a';
     uiState.openAnalyzer = 'runs-123456789abc';
@@ -62,6 +63,7 @@ describe('closeCase', () => {
     expect(uiState.openProof).toBeNull();
     expect(uiState.openDraft).toBeNull();
     expect(uiState.inspectPath).toBeNull();
+    expect(uiState.reverseTarget).toBeNull();
     expect(uiState.focusMedia).toBeNull();
     expect(uiState.openInspect).toBeNull();
     expect(uiState.openAnalyzer).toBeNull();
@@ -334,6 +336,7 @@ describe('case request ownership', () => {
       openDraft: 'draft-a',
       openNotebook: { noteId: 'note-a' },
       inspectPath: 'media/a.jpg',
+      reverseTarget: { path: 'media/a.jpg', kind: 'image', label: 'a.jpg' },
       focusMedia: 'media/a.jpg',
       focusCapture: 'media/crop.png',
       openInspect: 'session-a',

@@ -16,6 +16,7 @@
  */
 import { timeAgo } from '../analysisViews.js';
 import { matchesTerms } from '../folderBrowse.js';
+import { inPeriod } from './layerDates.js';
 
 /**
  * Colours for a category whose source painted it nothing.
@@ -40,6 +41,16 @@ export const PALETTE = [
 export const FRESH_FOR_HOURS = 24;
 
 /**
+ * Whether a layer follows its source rather than holding a file: a pasted
+ * address, or a GeoConfirmed conflict. Those are re-read on Refresh and on case
+ * open, and go stale; a file does neither.
+ */
+export function followed(layer) {
+  const kind = layer?.source?.kind;
+  return kind === 'url' || kind === 'geoconfirmed';
+}
+
+/**
  * The colour a category is drawn in: what the source said, else the palette.
  *
  * Keyed by position rather than by name so two layers holding a "Checkpoints"
@@ -53,9 +64,11 @@ export function categoryColour(category, index) {
  *  own order of weight. `on` is what the eye beside it shows. */
 export function legend(layer) {
   const hidden = new Set(layer?.hidden ?? []);
+  // while a period is set, each group counts what the period leaves of it
+  const inPeriod = layer?.shownBy;
   return (layer?.categories ?? []).map((category, index) => ({
     name: category.name,
-    count: category.count ?? 0,
+    count: inPeriod ? (inPeriod[category.name] ?? 0) : (category.count ?? 0),
     kinds: category.kinds ?? [],
     colour: categoryColour(category, index),
     on: !hidden.has(category.name),
@@ -73,6 +86,8 @@ export function legend(layer) {
  */
 export function counts(layer) {
   const loaded = layer?.features ?? 0;
+  // a period set on the row, counted by the store from the features in hand
+  if (typeof layer?.shown === 'number') return { loaded, visible: layer.shown };
   const hidden = new Set(layer?.hidden ?? []);
   const dropped = (layer?.categories ?? [])
     .filter((category) => hidden.has(category.name))
@@ -113,7 +128,7 @@ export function countLabel(layer) {
  */
 export function freshness(layer, now = Date.now()) {
   if (!layer) return '';
-  if (layer.source?.kind !== 'url') {
+  if (!followed(layer)) {
     const at = timeAgo(layer.fetched_at, now);
     return at ? `opened ${at}` : '';
   }
@@ -126,6 +141,9 @@ export function freshness(layer, now = Date.now()) {
 /** Where a row came from, in the width a row has. */
 export function sourceLabel(layer) {
   const source = layer?.source ?? {};
+  if (source.kind === 'geoconfirmed') {
+    return source.area ? 'GeoConfirmed · limited area' : 'GeoConfirmed';
+  }
   if (source.kind !== 'url') return source.name || 'a file on this computer';
   if (source.my_maps) return 'Google My Maps';
   try {
@@ -145,17 +163,19 @@ export function sourceLabel(layer) {
 export function attribution(layer) {
   const title = layer?.title || 'Added layer';
   const source = layer?.source ?? {};
+  if (source.kind === 'geoconfirmed') return `${title} — geoconfirmed.org`;
   if (source.my_maps) return `${title} — Google My Maps`;
   if (source.kind === 'url') return `${title} — ${sourceLabel(layer)}`;
   return `${title} — added by the analyst`;
 }
 
-/** Which layers a case open should re-read: enabled, subscribed, and asked to. */
-export function refreshable(layers = []) {
-  return layers.filter(
-    (layer) =>
-      layer.enabled && layer.source?.kind === 'url' && layer.refresh?.on_open !== false
-  );
+/**
+ * Whether switching this layer on for the first time in a session re-reads it:
+ * a followed layer that did not ask to move only on Refresh. The spec still
+ * calls that `on_open`, from when it happened on case open.
+ */
+export function renewsOnShow(layer) {
+  return followed(layer) && layer?.refresh?.on_open !== false;
 }
 
 /** Which layers the map should actually be drawing. */
@@ -202,7 +222,7 @@ export const SEARCH_LIMIT = 25;
  * search rather than scroll it.
  */
 export function searchFeatures(collection, query, options = {}) {
-  const { categories = [], hidden = [], limit = SEARCH_LIMIT } = options;
+  const { categories = [], hidden = [], period = null, limit = SEARCH_LIMIT } = options;
   const terms = String(query ?? '').trim();
   if (!terms) return { total: 0, results: [] };
 
@@ -228,9 +248,10 @@ export function searchFeatures(collection, query, options = {}) {
       // The source's own colour where it painted one, its group's where it did
       // not — the same rule the marks are drawn by (`addedLayer.js`).
       colour: properties.colour || colours.get(category) || categoryColour(null, 0),
-      // A match in a group the legend switched off: it is a real feature, it is
-      // simply not on the map until that group comes back.
-      hidden: off.has(category),
+      // A match in a group the legend switched off, or outside the period: it
+      // is a real feature, it is simply not on the map until that comes back.
+      hidden: off.has(category) || !inPeriod(properties.date, period),
+      outside: !inPeriod(properties.date, period),
     });
   });
   return { total, results };

@@ -56,16 +56,19 @@ before; **Guide** is for somebody who has not.
   lists before saving again.
 
 - **With a case open, the page is a reading, laid out as a dashboard.** The case name
-  and when it was last touched, then a two-column grid: *what is waiting* and the
-  recent work on the left, the case's points and the case by family on the right. It
+  and when it was last touched, then a two-column grid: the recent work and the to-do
+  lists on the left, the case's points, *what is waiting* and the case by family on the
+  right. **What was just filed comes first**, because that is what somebody coming back
+  reaches for; the counts under it are upkeep, read second. It
   runs to 1180px rather than a 760px reading column, because this page is scanned
   rather than read and four counts hanging in a ribbon on a wide screen is the emptiest
   an app can look. Below ~980px the grid stacks in that same order.
 - **What is waiting is the Board's own standing questions, priced.** *To review*,
   *Nothing linked yet* and *Unfiled* are the same three terms the `+ Filter` menu
   offers, worded once in `lib/entityFilter.js`; the fourth is the Timeline's undated
-  count. They are drawn as four tiles, two by two, because a number is read at a glance
-  or it is not read. Pressing one hands the **question** to the surface that answers it,
+  count. They are drawn as four tiles, two by two, each one line — number, then what it
+  counts — with the sentence saying what that means on the pointer. Pressing one hands
+  the **question** to the surface that answers it,
   through the slot Board and Graph already share, so the table lands on exactly the rows
   the number counted and the two can never disagree.
 - **A count of nothing stops being a control.** It is dimmed and says zero rather than
@@ -321,7 +324,7 @@ a subject before it is a set of statements — a conflict followed over months h
 single root to expand from. Expansion is the drill-down.
 
 - **Lenses** are the readings, and each one chooses both which verbs are drawn and
-  which nodes: **Everything · Subjects · Ground · Statements** read the case, and **My
+  which nodes: **Everything · Subjects · Ground · Claims** read the case, and **My
   work** reads the filing — what you wrote, what it was made from, and what it points
   at. They are resolved from the verb registry and the type roles, never listed here,
   so a relation or a type added to the engine joins its lens with no edit.
@@ -945,6 +948,23 @@ is a fact about the row rather than about anyone's filter. A place reached by `a
 source reached by `cites` is listed without being counted: neither says how many of
 anything.
 
+**Add claim files the common observation from where it is read.** The Claims group
+offers it on any entity a Claim can point at — before the first claim exists, since
+that is when it is wanted — and so do a Board row, beside its way into the graph, and
+a node's menu in the Graph. All three open one small form. The entity takes its own
+seat, read off the verb registry rather than a list of types: the first of `at`,
+`cites` and `about` that takes it, so a place is where the thing was seen, a file or a
+proof is the evidence, and a model, an object, a person or a handle is what the claim
+is about. A post or a saved session has no seat and no button. The family decides what
+else is asked: **How many** for a model, which is what a count is of, and
+**Condition** for a model or an object; nothing more for anyone else. The sentence
+writes itself from those fields and the connectors picked — `2 × T-72B3 destroyed at
+Crossroads`, `Seen at Crossroads` — until the analyst types their own, which then
+stays put whatever changes under it, with **Rewrite from the fields** to go back. A
+date is optional and is stated as *observed*, since the sentence says *seen*.
+Reworking a claim afterwards is the full editor's job, on the Time tab and the
+Timeline.
+
 **A Claim's fields use three sections**: statement, time and reasoning. The Time
 section uses a guided editor for a year, month, day, date and time, bounded date
 range or zoned time range. Precision, certainty and timezone are chosen separately, so the analyst does
@@ -1056,7 +1076,7 @@ temporal rows with their exact track assignments and opens read-only. It does no
 the current case when reopened. Timeline views can be renamed, duplicated, deleted
 through Trash, restored and carried in a complete case bundle.
 
-A track that includes Statements can create Claims; Media-only and Case activity
+A track that includes Claims can create them; Media-only and Case activity
 tracks cannot. Clicking empty space creates a point; dragging creates a bounded range.
 At day scale and below these are zoned timestamps and time ranges, so hours can be
 created, moved and resized directly. Date-only Claims support the same confirmed move,
@@ -1068,7 +1088,7 @@ It shows the readable and raw date, precision, timezone, authority, role, status
 confidence, reasoning and named subjects, places and evidence. Statements can be
 edited there. **Right-clicking an entry** — on the axis, in the list or in either
 holding queue — names the same four acts where the pointer is: pin, hide, Details and
-Edit assessment. It changes no selection, so a pair being measured survives it, and the
+Edit claim. It changes no selection, so a pair being measured survives it, and the
 two lane acts follow the inspector's rule of appearing only for an entry that has a
 lane. A media date offers **Add correction**, prefilled from the intrinsic
 date; saving creates a sourced Claim about the media and does not rewrite its sidecar.
@@ -1176,6 +1196,21 @@ The row action for an image, a video or an audio file opens it; for anything the
 app cannot display it opens the folder the file sits in, so the original is opened
 in whatever program owns it rather than copied into Downloads.
 
+**Open in…** is one button per picture or video, and the tools it can go on to
+sit behind it: Inspect, Reverse Search, and Geo Proof for a picture. Side by side
+they made the widest row seven buttons and a small card more buttons than card, so
+only what acts on the file itself stays out — the map pin, Details, opening the
+file, Delete. The menu is placed against the window rather than inside the row,
+because a card clips what overflows it and the last row of a scrolled list would
+cut the menu off.
+
+**Reverse Search opens on the picture it was sent.** From a Media Library row it
+is the case file; from Inspect's Frame tab it is the frame as it reads there —
+turned, adjusted and cropped — rendered by the tray's own route and filed nowhere,
+and the tool says so under the preview. The crop is the point: an engine matches a
+subject better than the picture it sits in. The handoff is spent once, on the tab
+it was meant for, and a case change drops it with every other handoff.
+
 Every media row and card shows the file's human-readable stem, without its
 extension and without a second title line. Editing that name in Details renames
 the file; the backend returns the portable stem after replacing forbidden
@@ -1194,11 +1229,14 @@ cards are as wide as the maps under them, so the split between A and B is one
 line down the tool. Both Layers buttons open the same A/B sheet, including each
 side's FIRMS period, VIIRS night and saved case work.
 
-The mode dock holds two kinds of choice, separated by a rule. Left of it, how the
-pair is *read*: side by side, through a swipe, with B faded over A, or as
-alternating whole frames. Blink has three speeds and can pause on either side.
-Right of it, what gets *computed* over the pair: **Difference** and **Detect**.
-Keys 1–6 switch modes; Space pauses blink. Dragging, zooming or rotating either
+The mode dock holds two kinds of choice, in two named groups. **View**: side by
+side, through a swipe, with B faded over A, or as alternating whole frames. Blink
+has three speeds and can pause on either side. **Analysis**: **Difference** and
+**Detect**, each marked when it cannot run yet — Difference when the two sides are
+not a matched pair, Detect when Copernicus credentials are missing — with the
+reason as its tooltip and, for Detect, at the head of its own panel beside a way
+into Settings. Detect still opens, because the areas and runs already saved are
+read there. Keys 1–6 switch modes; Space pauses blink. Dragging, zooming or rotating either
 map moves the other in the same frame. Both stop at the lower provider zoom
 ceiling. **Swap A and B** exchanges the complete source stacks and annotation
 sides. One compass in the bar reads the shared turn, resets it to north and takes
@@ -1350,17 +1388,26 @@ candidate is a pin, and pins show wherever case work shows.
 
 Annotations store longitude/latitude points and stay on their ground through pan,
 zoom and rotation. Notes, arrows, boxes, ellipses, lines, freehand strokes, distance
-measures and polygons can belong to A, B or both. Polygon drawing ends with a
-double-click or Enter; Escape cancels. Select a mark to move it or edit its style,
+measures, polygons, **numbered markers and symbols** can belong to A, B or both.
+The last two are the Proof Maker's stamps, put down on the ground with one press
+and keeping the tool in hand: a marker counts a series per colour and starts back
+at 1 for the next one, and the symbol button opens the same grid of glyphs. Both
+are sized by their own number rather than by a line width, and a symbol drawn in
+outline takes a second control for how heavy that line is. Polygon drawing ends
+with a double-click or Enter; Escape cancels. Select a mark to move it or edit its style,
 double-click a note to edit its text, and use Undo/Redo for annotation changes. A
 selected mark shows its corner handles, so its geometry is corrected where it was
 drawn rather than deleted and redrawn; a note is dragged whole and has none.
 Every mark carries a wide invisible band along its outline, because a four-pixel
-arrow is a target nobody hits twice. Clicking the ground beside a mark lets it go;
+arrow is a target nobody hits twice. The wheel still belongs to the map wherever
+the pointer is: the marks are drawn over it rather than in it, and a zoom that
+stopped on whatever had been drawn read as a map that had frozen. Clicking the ground beside a mark lets it go;
 dragging the map is a pan and keeps it. The tool rail packs into two columns, like
 Proof Maker's, so it stays short enough to fit a laptop window. Its colour, width
 and fill panels close on Escape, on their own button, on a press anywhere else,
-and with the button behind them when the selection is dropped.
+and with the button behind them when the selection is dropped. **Pressing the tool
+already in hand puts it down** and gives the cursor back, on this rail and on Proof
+Maker's: the way out of a drawing tool is the button you are already on.
 
 **Right-click the ground** here too, on either map, for the acts Compare can
 honour: copy the point in every coordinate format, ask what is there, save a
@@ -1510,7 +1557,7 @@ which it is (`lib/map/tools.js`) rather than adding a button somewhere.
   layer`. The line between the two is *who chose it*: the stack above is the
   app's, this one is the analyst's. A row here carries four things a curated row
   has no use for — where it came from, how fresh what is drawn actually is, a
-  legend that filters, and Refresh, Reveal file and Remove. See
+  legend that filters, and Refresh and Remove. See
   **Added map layers** below.
 - **The picture** — the provider, the Sentinel-2 layer and date, when the pixels
   were taken, the eco and usage pills, and the compass — belongs to the
@@ -1568,8 +1615,8 @@ stack, slightly see-through so the lit street can be named, and the row says
 that cloud hides lights too.
 
 **Added map layers** are somebody else's map over this one: a KML, KMZ, GeoJSON
-or GPX file opened from the computer, or a public My Maps or map URL followed.
-Both land in the same section, because the question the row answers is who put
+or GPX file opened from the computer, a public My Maps or map URL followed, or a
+GeoConfirmed conflict. All of them land in the same section, because the question the row answers is who put
 this on my map. **A layer is drawn and never adopted** — clicking a feature opens
 what the source says about it, its name, its group and its description, with
 nothing to confirm and no way from there into the case. A description written as
@@ -1594,6 +1641,21 @@ The row states five things:
   groups are its folders, which is how a My Maps is built; a GPX's are waypoints,
   tracks and routes; a GeoJSON states none, so the file is one group named after
   itself rather than a grouping guessed out of whichever property looked like one.
+- **Its dates, when it has any.** A layer that is on and whose features are
+  dated (GeoConfirmed's events, a KML's TimeStamp or TimeSpan, a GPX waypoint's
+  time) draws its events over time as a strip of bars under the counts: a bar a
+  day for up to three months, a week for up to two years, a month past that.
+  The period is set on the strip itself. Drag across the bars to draw one, drag
+  either handle to move a bound, slide the band between them, or click a bar to
+  keep its day, week or month. Clicking one of the two dates under the strip
+  opens a calendar; the arrow keys move a focused handle by a day, Page Up and
+  Page Down by a week. The map, the counter and each group's count follow while
+  the strip moves, and the period is kept with the legend when it is let go. A
+  bound left on the layer's own first or last day stays open, so a followed
+  layer's new events are not filtered out by a period nobody narrowed. An
+  undated feature is outside any period. A double click on the strip, or the
+  cross beside the dates, lets every date back in, and so does picking a search
+  match outside the period.
 - **A search, in the legend's own slot.** Typing puts the matches where the
   groups were, and the two are never on screen at once: the legend is the filter
   the case keeps, the search is a way of looking that leaves nothing behind. The
@@ -1631,12 +1693,31 @@ layer is labelled on the map; a feature's name is in the hover and in the card.
 Far out, where the marks would be a solid mat, the map keeps only those that fit
 and draws the rest as dots, so a dense layer never looks emptier than it is.
 
-**Refresh, Reveal file and Remove** sit under the row. A followed map is re-read
-when it is added, when Refresh is pressed, and when a case opens holding it
-enabled — never on a timer, and never while it is switched off. A read that finds
+**Refresh and Remove** sit under the row. A followed map is re-read
+when it is added, when Refresh is pressed, and the first time it is switched on
+after the app or the page opens — never on a timer, and never while it is
+switched off. **Every added layer starts off** when the app or the page opens
+again, whatever it was before: the switch is not saved with the case, so a layer
+heavy enough to take the tab down does not take it down again on reload. A read that finds
 nothing new rewrites nothing, a read that fails leaves the last copy on the map,
 and the copy the layer was drawn from is kept in the case, so it draws offline and
 travels in the bundle. Removing a layer takes that copy with it, to the trash.
+
+**GeoConfirmed** is the third way in, behind *Choose a conflict* in the add
+dialog. Its own dialog reads GeoConfirmed's conflict list when it opens, then
+asks for one conflict, a window (7, 30 or 90 days, a year, the whole history, or
+a range of dates), and whether to keep to the area in view. A number of days
+counts back from each read, so a layer of the last 30 days stays that; a range
+stays put. The whole history (60,000 events for Ukraine) is read again only on
+Refresh, never just because it was switched on. The layer
+wears GeoConfirmed's own icons, which come inside its export, with no tick to
+ask for them. Its groups are the conflict's factions, read off each icon's
+colour, and factions GeoConfirmed paints alike share one row. An event is named
+by its date and its first line, and its card keeps the sources and the
+geolocation as links. The reference sites GeoConfirmed sends whatever the dates
+(bases, plants) are grouped as *Undated sites* and start switched off. The row
+says *GeoConfirmed*, or *GeoConfirmed · limited area*, and links to the
+conflict's map on geoconfirmed.org.
 
 A date is picked from a calendar the app draws, in the panel rather than over
 it. The browser's own opens at its own size, in its own locale, and half
@@ -1655,6 +1736,18 @@ names its altitude on hover, carries the moon's phase, and is absent while the
 body is under the horizon. The anchor is a point and not the map centre, so panning
 leaves the path alone. Coords & Sky opens the same mode with its own point, date
 and time, and hands over no computed value.
+
+**Coords & Sky opens on the point the map is on.** The map publishes the point it
+records — its moved pin, else its centre — once it has been moved off the view it
+opened at, and the tab converts that point rather than opening on an empty field.
+A view nobody has moved yet is a setting rather than a finding, so it offers
+nothing. The conversion is local and that is all that happens: naming the place is
+a geocoder call, so the row offers **Name this place** instead of making it.
+
+The tab **follows the map** rather than filling once: the map moving is you looking
+somewhere else, and a tab still reading the point before it answers about the wrong
+ground. Between two moves the field is yours — what you typed, or the point you
+picked out of the case, stands.
 
 The saved-work layer answers two questions under its own switch: **what kind**
 (all, places, captures, proofs, media) and **which folder**, offered only where the
@@ -1729,7 +1822,10 @@ nothing, and a tile Esri refused is left alone until **Refresh** is pressed, so
 panning never hammers a service that is down. A first history takes some seconds
 (Esri's metadata service is slow) and the picker offers nothing while it comes,
 since every release is not what *Changes here* was asked for; the changes it
-already has stay on the slider while the next tile's are read. A history that
+already has stay on the slider while the next tile's are read. **The chip itself
+says it is waiting**, spinner and all, because both reads run with the picker shut
+and a basemap that answers nothing for ten seconds without saying so reads as a
+broken one. A history that
 fails falls back to every release, which is the honest answer to not knowing.
 The release rides on the provider id (`esri-wayback~64776`), so tiles are cached
 and captures credited under it.
@@ -1738,13 +1834,23 @@ and captures credited under it.
 centre: copy it in every coordinate format, the analyst's own first; ask what
 is there, answered inside the menu; save a place there; start a distance from
 it; anchor the sun and moon on it; open its Wayback history; centre the map
-on it; or open it in another map site. A right-click on a shape that answers
+on it; compare it across time; or open it in another map site. A right-click on a shape that answers
 its own (a search-grid cell) stays that shape's. The menu flips away from the
 map's edges, walks with the arrow keys, and closes on Escape, a press outside,
 or a zoom that moves the ground from under it.
 
-**Open in…** is the one row that opens a list, and it opens it *beside* the
-menu. A list unfolding inside would make the menu taller, and a menu already
+**Compare here…** asks an archive which two pictures of *this point* are the
+last two, and opens Compare on the pair: Esri Wayback for the two releases that
+changed it, Copernicus for the two most recent passes over it, the second only
+where a key for it is in Settings. The lookup happens before the tab changes, so
+an archive that holds nothing to compare says so on the map instead of costing
+the view. It says it is working for as long as it takes rather than for a guessed
+few seconds: the walk through Esri's releases is slow, and a message that went out
+halfway through left the map looking like nothing was happening. Compare receives it the way it receives a saved comparison — older on
+A, newer on B — unsaved and unnamed, because nothing has been filed.
+
+**Compare here…** and **Open in…** are the two rows that open a list, and they
+open it *beside* the menu. A list unfolding inside would make the menu taller, and a menu already
 placed against the frame's edge answers that by moving — which slides the next
 row out from under the cursor that was about to press it. So the menu is placed
 once, from its measured size, and never again: the submenu flies out to the
@@ -1834,9 +1940,12 @@ marker never reorders anything, or ticking it would take a coordinate out of a
 tweet without saying so. A single-point proof is the field it has always been.
 **A panel that carries a place adds it**, under the point already on screen rather
 than in place of it — two captures of one point stay one point, and the answer the
-panels gave is written down before the new one joins it. **The pin beside a row
+panels gave is written down before the new one joins it. **The pin at the end of a row
 opens it on the map**: the basemaps and the reference layers of the Map tool, the
-mark on what the row says, and a click to move it. A row added with `+` opens on
+mark on what the row says, and a click to move it. It sits inside the row's own box,
+behind a hairline and on a panel of its own, which is how every field here offers
+the one act that belongs to it — the map on a coordinate, the eye that says the
+camera stood there, the tab a source opens in, the calendar that builds a date. A row added with `+` opens on
 the point above it, which is the only thing that says which ground it belongs on.
 The exported picture prints them only when asked (Advanced → Show coordinates):
 unnamed points share one line, a named one takes its own, and the plate grows by
@@ -1846,7 +1955,8 @@ all. A saved house style carries both, and one saved before they existed leaves 
 proof's own answer alone. Posting from the proof carries every point into the tweet, one
 per line, while the place, the plus code and the map links stay the conclusion's.
 
-**Source is a list**, one box per address, with a
+**Source is a list**, one box per address, each with a press that **opens it in a
+new tab** — a source is read far more often than it is typed — and a
 `+` to add one — a proof read from a thread rests on the post that published it, the
 photos beside it and the clip under those. Editing a traced box turns the whole list
 into the proof's own and the traced ones come along, so stating a fourth address never
@@ -1877,7 +1987,20 @@ and reopening the proof shows the edit, not the copy the file was written with.
 
 The **date** is when the material was taken, in the same profile a Claim's *When*
 uses — a day, a month, a year, a timestamp or a range, with `~` for approximate and
-`?` for uncertain — edited in the same editor, folded to fit the column.
+`?` for uncertain — typed into **one field** rather than assembled from a format, a
+precision and a certainty. It reads `24/10/2025`, `Oct 2025`, `2025`, `~2025`,
+`24/10/2025 14:30 UTC` and two of those joined by *to*, keeps anything already
+written in the stored syntax exactly as it is, and says underneath what it
+understood. What it cannot read is handed on as typed, so the save refuses it with
+a reason rather than filing a date nobody meant. The browser's own date field is
+not used anywhere a date is stated: it writes its placeholder in the browser's
+language, which is how an English interface came to ask for `jj/mm/aaaa`.
+
+The calendar beside the field **builds the common answer** for anyone who would
+rather point at a day than spell one. It is the app's own month grid, drawn under
+the field rather than over it, and it opens on the day the field holds — else on the
+month a looser answer named. A month, a range or a mark of doubt is still typed:
+those are not days, and a calendar has no way to offer them.
 
 **Nothing ever fills it in**, unlike the coordinates and the sources beside it. The
 date a file carries is when it was uploaded, or what a camera clock said; neither is
@@ -1955,6 +2078,39 @@ marks carry no outline and the width control stays away for them. Fill on a
 symbol is a disc behind the glyph rather than paint inside it — a thin stroke
 over aerial imagery needs something to sit on — and how opaque that disc goes
 stays your call, because it covers the picture.
+
+**Numbered markers.** A filled disc carrying a number, stamped like a symbol and
+keeping the tool in hand for the same reason. **Each colour counts its own series**
+and starts back at 1, because colour is what this composer says "same feature" with
+everywhere else. The number is the **first one free** in that series, so deleting #2
+and stamping again fills that hole rather than leaving a proof that counts 1, 3, 4;
+recolouring a marker moves it into the series it joins. The numeral takes a
+contrasting ink off the disc's own colour, since it has to be read over whatever it
+is standing on. It resizes from its corners and turns like a symbol; there is no
+line in it, so the width control stays away.
+
+**Blur boxes.** A box dragged over a face, a plate or a name, which **redraws the
+picture under it through a blur** rather than covering it: what comes out of the
+export is the picture's own pixels made unreadable, at full resolution, not a
+rectangle laid over evidence. It lives in the panel's space like every other mark,
+so it follows the panel's turn, crop and scale. The blur is as strong as the box is
+big, and the filter reads a margin of ground around the box that the box then clips
+away — cut exactly to its own edge, a blur mixes in the transparency past it and
+comes out washed out at the border, which is the one place a redaction has to hold.
+It keys no legend row and **carries no colour at all**: it hides something rather
+than pointing at it, so the swatch stays away while one is drawn or picked. It
+resizes from every handle and turns like a box, and a turned one still reads the
+ground it stands on — the patch is taken upright and turned back level inside the
+box. Over a surface whose picture has not loaded it draws solid, because a blur box
+that shows nothing hides nothing.
+
+**The order they stack in.** The side column's **Elements** list runs front-first,
+the way the Panels list above it does: the row on top is the mark on top of the
+picture. A row is **dragged to reorder it**, and the two arrows bring it forward or
+send it back one place. The order is one order for the whole proof, while what an
+element is drawn *over* is decided inside its own picture — two marks on two panels
+are stacked by the panels — so once more than one picture holds elements each row
+carries the picture it belongs to, and the list says so underneath.
 
 **Picking several.** Shift adds an element to the ones already picked, on the
 canvas and on the rows in the side column alike. A rectangle dragged over the

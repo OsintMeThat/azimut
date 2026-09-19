@@ -9,6 +9,8 @@ import {
   parseDay,
   shiftMonth,
   today,
+  yearMonths,
+  yearPage,
 } from './calendar.js';
 
 describe('reading a day', () => {
@@ -91,5 +93,25 @@ describe('what the field will not accept', () => {
     // the bounds fall inside the month: it is reachable, and only some of its
     // days are not
     expect(monthOutOfRange('2026-09', '2026-09-20', '2026-09-30')).toBe(false);
+  });
+});
+
+describe('the other two depths a date can be built at', () => {
+  it('lays a year out as its twelve months, each named and stored', () => {
+    const months = yearMonths(2025);
+    expect(months).toHaveLength(12);
+    expect(months[0]).toEqual({ iso: '2025-01', label: 'Jan' });
+    expect(months[9]).toEqual({ iso: '2025-10', label: 'Oct' });
+  });
+
+  it('reads the year off a stored token of any depth', () => {
+    expect(yearMonths('2019-07-14')[0].iso).toBe('2019-01');
+  });
+
+  it('pages years around the one being shown, in the months grid’s own shape', () => {
+    const years = yearPage('2025');
+    expect(years).toHaveLength(12);
+    expect(years[0]).toBe('2019');
+    expect(years).toContain('2025');
   });
 });

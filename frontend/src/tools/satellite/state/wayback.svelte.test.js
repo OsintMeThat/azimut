@@ -51,6 +51,21 @@ describe('asking Esri', () => {
     expect(wb.date).toBe('2026-08-05');
   });
 
+  it('says it is busy for either read, so a chip can carry the wait', async () => {
+    const wb = store();
+    expect(wb.busy).toBe(false);
+
+    const list = wb.loadReleases();
+    expect(wb.busy).toBe(true);
+    await list;
+    expect(wb.busy).toBe(false);
+
+    const history = wb.loadChanges();
+    expect(wb.busy).toBe(true);
+    await history;
+    expect(wb.busy).toBe(false);
+  });
+
   it('opening the picker reads the list and this point’s history', async () => {
     const wb = store();
     wb.toggleMenu();

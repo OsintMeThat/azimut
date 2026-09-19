@@ -256,6 +256,25 @@ def test_names_one_child_is_judged_on_both_path_flavours():
         assert not layout.names_one_child(hostile), hostile
 
 
+@pytest.fixture()
+def built_frontend(monkeypatch, tmp_path):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text('<div id="app"></div>', encoding="utf-8")
+    (tmp_path / "favicon.svg").write_text("<svg/>", encoding="utf-8")
+    monkeypatch.setattr("azimut.server.STATIC_DIR", tmp_path)
+
+
+def test_the_page_is_asked_for_again_on_every_visit(built_frontend, client):
+    """It names this build's hashed bundles. Kept on a guess from Last-Modified,
+    it outlives an update and names bundles that are no longer there."""
+    for route in ("/", "/satellite"):
+        page = client.get(route)
+        assert page.status_code == 200
+        assert page.headers["cache-control"] == "no-cache", route
+    # a file of its own is left to the usual rules
+    assert "cache-control" not in client.get("/favicon.svg").headers
+
+
 def test_workspace_module_exposes_the_guard_it_documents():
     # `Case.locate` is the only door to a case; keep the guard wired to it.
     assert workspace.layout.names_one_child is layout.names_one_child

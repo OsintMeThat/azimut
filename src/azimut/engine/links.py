@@ -393,7 +393,7 @@ RELATION_TYPES: tuple[RelationType, ...] = (
     RelationType(
         ABOUT, "is about",
         inverse_label="has claim",
-        hint="what the statement concerns",
+        hint="what the claim concerns",
         from_families=frozenset({entities.CLAIM}),
         # `class` is here because a counted statement has nowhere else to point: "two
         # of these were destroyed" is about the model, not about two objects nobody
@@ -408,7 +408,7 @@ RELATION_TYPES: tuple[RelationType, ...] = (
     RelationType(
         AT, "places it at",
         inverse_label="is a claim location",
-        hint="where the statement places its subject or event",
+        hint="where the claim places its subject or event",
         from_families=frozenset({entities.CLAIM}),
         to_families=frozenset({entities.PLACE}),
         action="claim",
@@ -417,7 +417,7 @@ RELATION_TYPES: tuple[RelationType, ...] = (
     RelationType(
         CITES, "cites",
         inverse_label="supports claim",
-        hint="the evidence the statement relies on",
+        hint="the evidence the claim relies on",
         from_families=frozenset({entities.CLAIM}),
         # A statement rests on material, and it may rest on **another statement**: an
         # intermediate conclusion is what the next one is built out of. Without it a
@@ -452,7 +452,7 @@ RELATION_TYPES: tuple[RelationType, ...] = (
     RelationType(
         CONTRADICTS, "contradicts",
         inverse_label="is contradicted by",
-        hint="the two statements cannot both hold",
+        hint="the two claims cannot both hold",
         from_families=frozenset({entities.CLAIM}),
         to_families=frozenset({entities.CLAIM}),
         action="claim",

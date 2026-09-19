@@ -34,6 +34,7 @@ export function createWaybackState({ api, place }) {
   let releases = $state([]); // [{ release, date }], newest first
   let listNote = $state('');
   let listing = null; // the one in-flight read of the list
+  let listBusy = $state(false); // …as the chip shows it
   let release = $state(null); // null = the newest
   let menuOpen = $state(false);
   let watching = $state(false); // the picker has been opened: the history follows the map
@@ -55,6 +56,7 @@ export function createWaybackState({ api, place }) {
   async function loadReleases() {
     if (releases.length) return releases;
     listing ??= (async () => {
+      listBusy = true;
       try {
         const answer = await api.get('/api/satellite/wayback/releases');
         releases = answer.releases ?? [];
@@ -63,6 +65,7 @@ export function createWaybackState({ api, place }) {
         listNote = `Could not read the release list: ${error.message}`;
       } finally {
         listing = null;
+        listBusy = false;
       }
       return releases;
     })();
@@ -132,6 +135,18 @@ export function createWaybackState({ api, place }) {
     },
     get changesBusy() {
       return changesBusy;
+    },
+    /**
+     * Esri is being asked something, list or history.
+     *
+     * Both walks take their time — the history reads a tile per release and
+     * compares the pixels — and both can be running with the picker shut, since
+     * the history follows the map once it has been opened. So the chip carries
+     * the wait: a basemap that answers nothing for ten seconds and says nothing
+     * about it reads as one that is broken.
+     */
+    get busy() {
+      return listBusy || changesBusy;
     },
     get changesNote() {
       return changesNote;

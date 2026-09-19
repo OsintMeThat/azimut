@@ -26,7 +26,7 @@
   />
   {#if count != null}<span class="search-count">{count}</span>{/if}
   {#if value}
-    <button class="search-clear" onclick={clear} aria-label="Clear search">
+    <button class="search-clear" onclick={clear} aria-label="Clear search" title="Clear search">
       <Icon name="x" size={12} />
     </button>
   {/if}

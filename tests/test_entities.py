@@ -621,6 +621,27 @@ def test_mentions_are_a_separate_action_from_relations(client):
     assert rows["owns"]["ratable"] is True
 
 
+def test_a_quick_claim_seats_each_type_the_way_its_form_expects(client):
+    """The quick claim form seats the entity it is filed from on the first of
+    `at`, `cites`, `about` that takes it (`frontend/src/lib/quickClaim.js`, whose
+    test copies these answers). Pinned here so a verb table change that would move
+    a place off `at` or a video off `cites` fails where the table lives."""
+    rows = {row["type"]: row for row in client.get("/api/cases/relation-types").json()}
+
+    def seats(type_):
+        return {verb for verb in ("about", "at", "cites") if type_ in rows[verb]["to_types"]}
+
+    assert seats("equipment-type") == {"about"}
+    assert seats("vehicle") == {"about"}
+    assert seats("person") == {"about"}
+    assert seats("account") == {"about"}
+    assert seats("place") == {"about", "at"}
+    assert seats("media") == {"about", "cites"}
+    assert seats("proof") == {"cites"}
+    assert seats("claim") == {"cites"}
+    assert seats("post") == set()
+
+
 def test_an_order_of_battle_is_part_of_edges_between_organizations(client):
     """The tree an OSINT conflict case is built on: a battalion inside a brigade
     inside a corps. `owns` would read wrong — a brigade commands its battalions

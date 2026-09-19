@@ -311,6 +311,18 @@ describe('orderedFeatureColors + legendLines — manual legend order', () => {
     expect(orderedFeatureColors(shapes)).toEqual(['#ff5252', '#40c4ff', '#ffd740']);
   });
 
+  it('keeps what hides or labels out of the legend, and what marks in it', () => {
+    // a blur box hides a face; it points at no feature, and its colour is never
+    // drawn. A numbered marker does mark one, so it keys a row like any shape.
+    const mixed = [
+      ...shapes,
+      { kind: 'blur', color: '#00e676', panel: 'p1' },
+      { kind: 'text', color: '#7c4dff', panel: 'p1' },
+      { kind: 'number', color: '#b388ff', panel: 'p1', n: 1 },
+    ];
+    expect(orderedFeatureColors(mixed)).toEqual(['#ff5252', '#40c4ff', '#ffd740', '#b388ff']);
+  });
+
   it('respects an explicit legendOrder', () => {
     const order = ['#ffd740', '#ff5252', '#40c4ff'];
     expect(orderedFeatureColors(shapes, order)).toEqual(order);

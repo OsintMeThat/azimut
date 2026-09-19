@@ -445,24 +445,6 @@ def all_formats(lat: float, lon: float) -> list[dict[str, str]]:
     return [{"id": i, "label": lb, "value": v} for i, lb, v in rows if v]
 
 
-# -- map links (quick-open, spec Coordinates tool preview) --------------------------
-
-
-def map_links(lat: float, lon: float, zoom: int = 17) -> dict[str, str]:
-    return {
-        "google": f"https://www.google.com/maps/@{lat},{lon},{zoom}z",
-        "google_sat": f"https://www.google.com/maps/@{lat},{lon},2000m/data=!3m1!1e3",
-        "google_earth": f"https://earth.google.com/web/@{lat},{lon},0a,1000d,35y,0h,0t,0r",
-        "apple": f"https://maps.apple.com/?ll={lat},{lon}&z={zoom}&t=k",
-        "osm": f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map={zoom}/{lat}/{lon}",
-        "bing": f"https://www.bing.com/maps?cp={lat}~{lon}&lvl={zoom}&style=h",
-        "yandex": f"https://yandex.com/maps/?ll={lon},{lat}&z={zoom}&l=sat",
-        "sentinel": f"https://browser.dataspace.copernicus.eu/?zoom={zoom}&lat={lat}&lng={lon}",
-        "zoom_earth": f"https://zoom.earth/#view={lat},{lon},{zoom}z",
-        "satellites_pro": f"https://satellites.pro/#{lat},{lon},{zoom}",
-    }
-
-
 # -- reverse geocoding (Nominatim, polite) ------------------------------------------
 
 

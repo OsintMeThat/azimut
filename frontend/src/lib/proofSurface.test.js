@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  blurPatch,
+  blurRadiusFor,
   mapSurfaceShapes,
   normalizeSourceCrop,
   normalizeSurfaceAngle,
@@ -72,5 +74,61 @@ describe('annotations follow their surface', () => {
     );
     expect(result[0]).toMatchObject({ x: 15, y: 16 });
     expect(result[1]).toBe(other);
+  });
+});
+
+describe('a blur box over a surface', () => {
+  it('names the source pixels under it, through the surface\'s own crop', () => {
+    expect(blurPatch({ x: 10, y: 20, w: 50, h: 40 }, [800, 600], null)).toEqual({
+      dx: 0, dy: 0, turn: 0, w: 50, h: 40, crop: { x: 10, y: 20, width: 50, height: 40 },
+    });
+    // the drawn space starts at the crop, so the file's pixels are offset by it
+    expect(blurPatch({ x: 10, y: 20, w: 50, h: 40 }, [800, 600], { x: 100, y: 60, w: 400, h: 300 })).toEqual({
+      dx: 0, dy: 0, turn: 0, w: 50, h: 40, crop: { x: 110, y: 80, width: 50, height: 40 },
+    });
+  });
+
+  it('keeps only the part that overlaps the picture', () => {
+    // half off the left edge: the box still draws, the patch starts at 0
+    expect(blurPatch({ x: -20, y: 10, w: 50, h: 40 }, [800, 600], null)).toEqual({
+      dx: 20, dy: 0, turn: 0, w: 30, h: 40, crop: { x: 0, y: 10, width: 30, height: 40 },
+    });
+    // past the bottom-right: clipped to the picture
+    expect(blurPatch({ x: 780, y: 580, w: 60, h: 60 }, [800, 600], null)).toMatchObject({
+      w: 20, h: 20, crop: { x: 780, y: 580, width: 20, height: 20 },
+    });
+    // wholly outside: nothing to blur
+    expect(blurPatch({ x: 900, y: 10, w: 50, h: 40 }, [800, 600], null)).toBeNull();
+  });
+
+  it('reads a margin of ground around the box without drawing one', () => {
+    // the filter needs real pixels past the edge, or the border comes out washed
+    // out — the one place a redaction has to hold
+    expect(blurPatch({ x: 100, y: 100, w: 50, h: 40 }, [800, 600], null, 10)).toEqual({
+      dx: -10, dy: -10, turn: 0, w: 70, h: 60, crop: { x: 90, y: 90, width: 70, height: 60 },
+    });
+    // at the picture's edge there is no margin to take, and the patch stops there
+    expect(blurPatch({ x: 0, y: 0, w: 50, h: 40 }, [800, 600], null, 10)).toEqual({
+      dx: 0, dy: 0, turn: 0, w: 60, h: 50, crop: { x: 0, y: 0, width: 60, height: 50 },
+    });
+  });
+
+  it('reads a turned box off the ground it stands on, not off a turned picture', () => {
+    // 40×20 turned a quarter turn: it covers 20×40 of upright picture, reaching
+    // left of its own origin, and the patch is turned back level inside the box
+    const patch = blurPatch({ x: 100, y: 100, w: 40, h: 20, rotation: 90 }, [800, 600], null);
+
+    expect(patch).toMatchObject({
+      w: 20, h: 40, turn: -90, crop: { x: 80, y: 100, width: 20, height: 40 },
+    });
+    // where it sits inside the box, in the box's own turned space
+    expect(patch.dx).toBeCloseTo(0, 6);
+    expect(patch.dy).toBeCloseTo(20, 6);
+  });
+
+  it('blurs in proportion to what it hides, between a floor and a ceiling', () => {
+    expect(blurRadiusFor({ w: 200, h: 100 })).toBe(20);
+    expect(blurRadiusFor({ w: 10, h: 10 })).toBe(6);
+    expect(blurRadiusFor({ w: 4000, h: 3000 })).toBe(80);
   });
 });

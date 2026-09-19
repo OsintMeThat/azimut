@@ -218,7 +218,8 @@ Three modelling calls the table alone does not show:
   `annex` beside `note` and `sheet` rather than `attestation`, because an
   attestation folds into the edge carrying its provenance and a layer that nothing
   links to would fold into nothing. Its `source` is a path *or* a URL, which is
-  what makes a dropped KMZ and a followed My Maps one type instead of two. Its
+  what makes a dropped KMZ, a followed My Maps and a GeoConfirmed query one type
+  instead of three. Its
   features never enter the graph: they are what somebody else claims, and the day
   one of them becomes a `place` of this case (SPEC §6) the layer is what that
   place cites — which is the reason it is an entity at all.

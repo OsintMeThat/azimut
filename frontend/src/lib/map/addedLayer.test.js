@@ -7,6 +7,7 @@ import {
   featureExtent,
   iconName,
   kindOf,
+  periodFilter,
   registerIcons,
   visibilityFilter,
 } from './addedLayer.js';
@@ -385,6 +386,43 @@ describe('an added layer on the map', () => {
     }
     const [source] = [...engine.map.sources.values()];
     expect(source.data.features).toHaveLength(2);
+  });
+
+  it('keeps to a period by comparing days, and leaves the undated out of it', async () => {
+    expect(periodFilter(null)).toBeNull();
+    expect(periodFilter({ start: '', end: '' })).toBeNull();
+    expect(periodFilter({ start: '2026-09-01', end: '' })).toEqual([
+      'all',
+      ['has', 'date'],
+      ['>=', ['get', 'date'], '2026-09-01'],
+    ]);
+
+    const engine = stubEngine();
+    const layer = createAddedLayer(engine);
+    await layer.set(COLLECTION, { categories: CATEGORIES });
+    layer.filter(['Damage'], { start: '2026-09-01', end: '2026-09-18' });
+
+    for (const drawn of engine.map.layers.values()) {
+      const rule = JSON.stringify(drawn.filter);
+      expect(rule).toContain('Damage');
+      expect(rule).toContain('2026-09-18');
+    }
+  });
+
+  it('applies the same filter once, however often a dragged strip asks', async () => {
+    // a card opened on the map closes on every new filter, so an unchanged one
+    // must not count as new
+    const engine = stubEngine();
+    const layer = createAddedLayer(engine);
+    await layer.set(COLLECTION, { categories: CATEGORIES });
+    const setFilter = vi.spyOn(engine.map, 'setFilter');
+
+    layer.filter([], { start: '2026-09-01', end: '' });
+    const once = setFilter.mock.calls.length;
+    layer.filter([], { start: '2026-09-01', end: '' });
+
+    expect(once).toBeGreaterThan(0);
+    expect(setFilter.mock.calls.length).toBe(once);
   });
 
   it('puts the filter back when the category is switched on again', async () => {

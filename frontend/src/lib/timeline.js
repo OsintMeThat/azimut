@@ -7,7 +7,7 @@ const MIN_WINDOW = 2 * SECOND;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export const TIMELINE_CATEGORIES = [
-  { id: 'statement', label: 'Statements', short: 'Statements' },
+  { id: 'statement', label: 'Claims', short: 'Claims' },
   { id: 'media', label: 'Media dates', short: 'Media' },
   { id: 'case_activity', label: 'Case activity', short: 'Activity' },
 ];

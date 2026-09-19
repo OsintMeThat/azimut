@@ -3,9 +3,13 @@ import {
   comparisonAnnotations,
   drawAnnotations,
   ellipseRing,
+  glyphBox,
+  markGlyph,
   markLabel,
   markMetric,
+  markSize,
   movedMark,
+  nextMarkNumber,
   onSide,
   projectMark,
 } from './compareAnnotations.js';
@@ -25,6 +29,7 @@ describe('ground annotations', () => {
     ])).toEqual([{
       id: 'm', kind: 'rect', side: 'both', colour: '#ff0000',
       points: [[2, 48], [2.1, 48.1]], stroke_width: 3, fill_opacity: 1, font_size: 16, text: '',
+      number: 1, glyph: 'point',
     }]);
   });
 
@@ -80,5 +85,52 @@ describe('ground annotations', () => {
     expect(ctx.lineTo).toHaveBeenCalledWith(10, 490);
     expect(ctx.setLineDash).toHaveBeenCalledWith([16, 12]);
     expect(ctx.fillText.mock.calls.map((call) => call[0])).toEqual(['1.11 km', 'Before']);
+  });
+});
+
+describe('the two marks stamped on one point', () => {
+  const stamp = (extra) => mark({ kind: 'number', points: [[2, 48]], ...extra });
+
+  it('counts a series per colour, refilling the gaps a deletion leaves', () => {
+    const marks = [
+      stamp({ id: 'a', colour: '#ef4444', number: 1 }),
+      stamp({ id: 'b', colour: '#ef4444', number: 3 }),
+      stamp({ id: 'c', colour: '#22c55e', number: 1 }),
+      mark({ kind: 'rect', colour: '#ef4444', points: [[0, 0], [1, 1]] }),
+    ];
+    expect(nextMarkNumber(marks, '#ef4444')).toBe(2);
+    // a second colour is a second feature, so it starts over
+    expect(nextMarkNumber(marks, '#38bdf8')).toBe(1);
+    expect(nextMarkNumber([], '#ef4444')).toBe(1);
+  });
+
+  it('is sized by its own number, having no line to widen', () => {
+    expect(markSize({ font_size: 16 })).toBe(29);
+    expect(markSize({ font_size: 8 })).toBe(14);
+  });
+
+  it('hangs a symbol on the point it names rather than on a corner', () => {
+    const pin = { ...stamp({ kind: 'icon', glyph: 'point' }), font_size: 20 };
+    const box = glyphBox(pin, [100, 200]);
+    // the point glyph hangs from its tip, so the box sits above the ground point
+    expect(box.x).toBe(100 - box.size / 2);
+    expect(box.y).toBeLessThan(200);
+    expect(box.scale).toBeCloseTo(box.size / 24, 6);
+    // and a glyph this build does not know is still drawn as something
+    expect(markGlyph({ glyph: 'not-a-symbol' }).name).toBe('point');
+  });
+
+  it('burns a numbered disc into an export at the point it was stamped on', () => {
+    const ctx = {
+      save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(),
+      closePath: vi.fn(), fill: vi.fn(), stroke: vi.fn(), arc: vi.fn(), arcTo: vi.fn(),
+      fillText: vi.fn(), translate: vi.fn(), scale: vi.fn(), setLineDash: vi.fn(),
+      measureText: (text) => ({ width: text.length * 7 }),
+    };
+    drawAnnotations(ctx, [stamp({ number: 4, font_size: 16 })],
+      ([lon, lat]) => [lon * 10, lat * 10], { scale: 2 });
+
+    expect(ctx.arc).toHaveBeenCalledWith(20, 480, 29, 0, Math.PI * 2);
+    expect(ctx.fillText).toHaveBeenCalledWith('4', 20, 480);
   });
 });

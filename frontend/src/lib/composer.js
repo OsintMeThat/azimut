@@ -377,12 +377,15 @@ export function panelsBottom(panels, captionSize = CAPTION_SIZE, layout = 'grid'
 
 /**
  * Distinct colors in order of first use → feature numbering (same color = same
- * feature). Text labels are excluded — they annotate, they aren't features.
+ * feature). Text labels are excluded — they annotate, they aren't features. So
+ * is a blur box: it hides something rather than pointing at it, and its colour
+ * is never drawn, so a legend row for it would key a feature on a colour the
+ * plate does not show.
  */
 export function featureColors(shapes) {
   const seen = [];
   for (const s of shapes) {
-    if (s.kind === 'text') continue;
+    if (s.kind === 'text' || s.kind === 'blur') continue;
     if (!seen.includes(s.color)) seen.push(s.color);
   }
   return seen;
@@ -743,6 +746,25 @@ export function footerLines(proof, format = 'dd') {
     ? []
     : [proof?.footer?.trim() || attributionLine(proof?.panels ?? [])];
   return [...printed, ...credit];
+}
+
+/**
+ * A source row as a link the browser may open, or '' when it is not one.
+ *
+ * The field takes whatever says where the material came from — an address, a
+ * case number, a sentence — so the press that opens a tab is offered only for
+ * the rows that are web addresses. Anything else, `javascript:` included, is not
+ * a link here.
+ */
+export function openableSource(text) {
+  const value = String(text ?? '').trim();
+  if (!value) return '';
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+  } catch {
+    return '';
+  }
 }
 
 /** Effective source line for a proof/spec: the stated addresses, else the traced ones.

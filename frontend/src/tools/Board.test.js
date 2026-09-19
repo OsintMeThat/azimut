@@ -64,7 +64,9 @@ describe('the vocabulary explains itself', () => {
   });
 
   it('takes every reading from the registry rather than writing one here', () => {
-    const markup = source.slice(source.indexOf('</script>'));
+    // A dialog's heading names the form it holds ("New claim") and reads no type,
+    // so it is left out; every tooltip is still held to the rule.
+    const markup = source.slice(source.indexOf('</script>')).replace(/<Modal title="[^"]*"/g, '');
     // the only titles in the markup are either registry readings or the fallback
     // that names the control itself
     expect(markup).not.toMatch(/title="[a-z ]*(claim|bookmark|capture|actor|material)/i);
@@ -442,7 +444,7 @@ describe('adding the statements up', () => {
     // a control you can see and cannot use teaches something; one that is not there
     // teaches nothing — the rule the filter menu already follows
     expect(source).toContain('disabled: nothingToDraw || empty || snapshotReading,');
-    expect(source).toContain("'No statement counts anything about a subject yet'");
+    expect(source).toContain("'No claim counts anything about a subject yet'");
     expect(source).toContain("'Nothing in the table to add up'");
   });
 
@@ -542,5 +544,13 @@ describe('several rows at once', () => {
     const markup = source.slice(source.indexOf('</script>'));
     expect(markup).toMatch(/\{#if !snapshotReading\}[\s\S]{0,500}<th class="pick">/);
     expect(source).toContain('if (snapshotReading || confirmState || !caseState.current');
+  });
+});
+
+describe('filing a claim from a row', () => {
+  it('offers it only where the verb registry gives the row a seat', () => {
+    expect(source).toContain('{@const seat = claimSeat(entity)}');
+    expect(source).toContain('title={claimActionTitle(seat.slot)}');
+    expect(source).toContain('loadRelationTypes();');
   });
 });

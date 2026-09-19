@@ -162,6 +162,10 @@ export const GUIDE = [
         label: 'Reverse Search picks no engine for you',
         text: 'It prepares an image or a frame, and nothing moves until you press an engine. With the capture extension that press opens the engine with the picture already in its uploader.',
       },
+      {
+        label: 'Send a picture from where you are looking at it',
+        text: 'Open in… on a Media Library row sends the file, and the Frame tab in Inspect sends the frame as you cropped it, saved or not.',
+      },
     ],
   },
   {
@@ -171,8 +175,8 @@ export const GUIDE = [
     tools: ['inspect'],
     points: [
       {
-        label: 'Four modes on one file',
-        text: 'Selection crops and adjusts, Frame pulls stills out of a video, Collage stitches, and Analyze runs the error-level view.',
+        label: 'Four tabs for a video, two for a picture',
+        text: 'Selection pulls stills out of a clip, Frame adjusts and crops one picture with the error-level view folded inside, Collage stitches, and Save files what you made. A still image opens on Frame and Save.',
       },
       {
         label: 'What you make is case material',
@@ -200,7 +204,11 @@ export const GUIDE = [
       },
       {
         label: 'Layers cost nothing until they are on',
-        text: 'Roads, railways, power lines, sea marks, GPS traces, fires and night lights are listed in the Saved panel, and none of them is fetched before its switch is pressed. Borders are the one layer the map opens with.',
+        text: 'Roads, railways, power lines, sea marks, GPS traces, fires and night lights are listed in the Layers tab of the side panel, and none of them is fetched before its switch is pressed. Borders are the one layer the map opens with.',
+      },
+      {
+        label: 'Somebody else’s map over yours',
+        text: 'Add a layer opens a KML, KMZ, GeoJSON or GPX file, follows a public My Maps, or brings in a GeoConfirmed conflict by dates and area. Its legend and its time strip filter it, and nothing in it joins the case.',
       },
       {
         label: 'The search bar answers before it asks',
@@ -216,7 +224,7 @@ export const GUIDE = [
       },
       {
         label: 'Compare keeps the ground fixed',
-        text: 'Read two locked views side by side, by swipe, opacity or blink. Matched products also get Difference and Detect; notes and shapes stay editable in the saved comparison and appear in its outputs.',
+        text: 'Read two locked views side by side, by swipe, opacity or blink. Matched products also get Difference and Detect; notes, shapes and stamped markers stay editable in the saved comparison and appear in its outputs.',
       },
       {
         label: 'Coords & Sky keeps calculations separate',
@@ -237,6 +245,10 @@ export const GUIDE = [
       {
         label: 'Geo Proof stays editable',
         text: 'Panels, marks and boxes are saved as a spec beside the exported PNG, so a proof exported last week can be reopened and changed.',
+      },
+      {
+        label: 'Marks that number and marks that hide',
+        text: 'A numbered marker ties a spot to a line in your text, and each colour counts its own series from 1. A blur box redraws the picture under it through a blur, so what is hidden is hidden in the exported file, not covered by a rectangle.',
       },
       {
         label: 'A proof can argue several points',
@@ -275,12 +287,16 @@ export const GUIDE = [
         text: 'Expanding, hiding, folding and dragging are your picture. Undo reaches all of them and reaches nothing the case holds.',
       },
       {
+        label: 'Add claim starts from what you are looking at',
+        text: 'On a Board row, a Graph node or the Claims group in Details, the entity is already in its place: a model asks how many, and a place becomes where it was seen.',
+      },
+      {
         label: 'Timeline reads in a clock you choose',
         text: 'UTC, this computer, any zone in the world, or local time at a place the case saved. Undated work is counted apart rather than hidden.',
       },
       {
         label: 'Sheet works on real CSV files',
-        text: 'The sheets the case holds, in a grid. A declared sheet can be promoted into entities, places and dated statements, read as a plan first.',
+        text: 'The sheets the case holds, in a grid. A declared sheet can be promoted into entities, places and dated claims, read as a plan first.',
       },
     ],
   },
@@ -296,6 +312,7 @@ export const GUIDE = [
         keys: [
           { combo: 'Ctrl+V', does: 'files a screenshot or a copied address, on Media, Files, Board and Graph' },
           { combo: 'Escape', does: 'closes whatever is open, shallowest first' },
+          { combo: 'Ctrl+Enter', does: 'files an Add claim form' },
         ],
       },
       {
@@ -335,7 +352,7 @@ export const GUIDE = [
       {
         where: 'Geo Proof',
         keys: [
-          { combo: 'V R E A L C D T S', does: 'picks select, rectangle, ellipse, arrow, line, curve, freehand, text and icon' },
+          { combo: 'V R E A L C D T S N B', does: 'picks select, rectangle, ellipse, arrow, line, curve, freehand, text, icon, numbered marker and blur box' },
           { combo: 'F', does: 'fits the document' },
           { combo: 'Space (held)', does: 'pans, whatever tool is in hand' },
           { combo: 'Delete', does: 'removes what is selected' },

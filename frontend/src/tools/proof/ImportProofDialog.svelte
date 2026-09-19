@@ -521,7 +521,7 @@
           {/if}
           <div class="import-view-bar">
             {#if held.length > 1}
-              <button class="btn btn-sm" onclick={() => step(-1)} aria-label="Previous file">
+              <button class="btn btn-sm" onclick={() => step(-1)} aria-label="Previous file" title="Previous file">
                 <Icon name="chevronLeft" size={14} />
               </button>
             {/if}
@@ -533,7 +533,7 @@
                 </span>{/if}
             </p>
             {#if held.length > 1}
-              <button class="btn btn-sm" onclick={() => step(1)} aria-label="Next file">
+              <button class="btn btn-sm" onclick={() => step(1)} aria-label="Next file" title="Next file">
                 <Icon name="chevronRight" size={14} />
               </button>
             {/if}

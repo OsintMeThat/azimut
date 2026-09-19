@@ -32,8 +32,19 @@ const SUMMARY = {
   unlinked: 0,
 };
 
+// A Claim's three connectors, as the verb registry serves them: what the row's
+// claim press reads to decide where the row's entity sits.
+const claimVerb = (type, to) => ({ type, label: type, action: 'claim', manual: true, from_types: ['claim'], to_types: to });
+const RELATIONS = [
+  claimVerb('about', ['place', 'media', 'person']),
+  claimVerb('at', ['place']),
+  claimVerb('cites', ['media']),
+];
+
 const get = vi.fn(async (url) => {
   if (url.includes('/entity-types')) return TYPES;
+  if (url.includes('/relation-types')) return RELATIONS;
+  if (url.includes('/confidence-levels')) return [];
   if (url.includes('/catalog/summary')) return SUMMARY;
   if (url.includes('/catalog/entities')) {
     return { items: ROWS, total: ROWS.length, next_cursor: null };
@@ -276,5 +287,35 @@ describe('deleting what is ticked', () => {
     expect(post).not.toHaveBeenCalled();
     expect(del).not.toHaveBeenCalled();
     expect(bar().textContent).toContain('1 selected');
+  });
+});
+
+describe('filing a claim from a row', () => {
+  const claimPress = (label) =>
+    [...target.querySelectorAll('.table tbody tr')]
+      .find((row) => row.textContent.includes(label))
+      ?.querySelector('td.go button[aria-label^="File a claim"]');
+
+  it('says, per row, where the entity would sit on the claim', async () => {
+    await open();
+    expect(claimPress('Quai sud').title).toBe('File a claim placed here');
+    expect(claimPress('Clip').title).toBe('File a claim that rests on this');
+    expect(claimPress('Witness').title).toBe('File a claim about this');
+  });
+
+  it('opens the form on that row without opening the row', async () => {
+    await open();
+    claimPress('Quai sud').click();
+    flushSync();
+    await settle();
+
+    const form = document.querySelector('.quick-claim');
+    expect(form).not.toBeNull();
+    expect(form.querySelector('textarea').value).toBe('Seen at Quai sud');
+    // The row's Details stay shut: the press is the claim's, not the row's.
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+
+    await press('Cancel', form);
+    expect(document.querySelector('.quick-claim')).toBeNull();
   });
 });

@@ -1,9 +1,14 @@
 <script>
   import Icon from '../../components/Icon.svelte';
-  import { canFill, ANNOTATION_TOOLS } from '../../lib/map/compareAnnotations.js';
+  import ProofGlyph from '../../components/ProofGlyph.svelte';
+  import { PROOF_ICONS, isSolidIcon } from '../../lib/proofIcons.js';
+  import { STAMPED, canFill, ANNOTATION_TOOLS } from '../../lib/map/compareAnnotations.js';
 
   let {
     tool = $bindable(),
+    glyph = PROOF_ICONS[0].name,
+    setGlyph = () => {},
+    stampSize = 16,
     selected = null,
     canUndo = false,
     canRedo = false,
@@ -15,6 +20,7 @@
     fillOpacity,
     setColour = () => {},
     setStroke = () => {},
+    setOutline = () => {},
     setFill = () => {},
     removeSelected = () => {},
     clear = () => {},
@@ -25,9 +31,22 @@
 
   const contextual = $derived(tool !== 'select' || Boolean(selected));
   const fillable = $derived(canFill(selected?.kind ?? tool));
-  const sizeValue = $derived(selected?.kind === 'text'
-    ? (selected.font_size ?? 20)
+  // A note and a stamp are sized by their own number: neither has a line to
+  // widen, so the one slider sets that instead of a stroke width.
+  const sizedByFont = $derived(
+    selected ? (selected.kind === 'text' || STAMPED.has(selected.kind))
+      : (tool === 'text' || STAMPED.has(tool))
+  );
+  const sizeValue = $derived(sizedByFont
+    ? (selected?.font_size ?? stampSize)
     : (selected?.stroke_width ?? strokeWidth));
+  // A symbol has both: how big it is drawn, and how heavy the line it is drawn
+  // with. A silhouette is a shape with no line, so it takes the size alone.
+  const outlined = $derived(
+    (selected ? selected.kind === 'icon' : tool === 'icon')
+      && !isSolidIcon(selected?.glyph ?? glyph)
+  );
+  const outlineValue = $derived(selected?.stroke_width ?? strokeWidth);
   let open = $state('');
   let flyout = $state({});
   // The panel floats free of the rail, so closing it on an outside press needs
@@ -51,7 +70,7 @@
   // nothing selected, or deletes what was selected. Drop the panel with them
   // rather than leaving it floating over the maps with nothing behind it.
   $effect(() => {
-    if (!contextual || (open === 'fill' && !fillable)) open = '';
+    if (!contextual || (open === 'fill' && !fillable) || (open === 'outline' && !outlined)) open = '';
   });
 
   $effect(() => {
@@ -76,14 +95,37 @@
   <button class="tool-button" title="Undo (Ctrl+Z)" disabled={!canUndo} onclick={undo}><Icon name="undo" size={18} /></button>
   <button class="tool-button" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onclick={redo}><Icon name="redo" size={18} /></button>
   <div class="separator"></div>
+  <!-- Pressing the tool in hand puts it down: the way out of a drawing tool was
+       aiming at the cursor button, and the button you are already on is the
+       easier target of the two. -->
   {#each ANNOTATION_TOOLS as entry (entry.id)}
-    <button
-      class="tool-button"
-      class:active={tool === entry.id}
-      aria-pressed={tool === entry.id}
-      title={`${entry.label} (${entry.shortcut})`}
-      onclick={() => (tool = entry.id)}
-    ><Icon name={entry.icon} size={18} /></button>
+    {#if entry.id === 'icon'}
+      <!-- The symbol button takes the tool like every other button on the rail,
+           and opens the grid with it: coming back to the stamp never costs
+           re-picking a glyph already chosen. -->
+      <button
+        class="tool-button"
+        class:active={tool === 'icon'}
+        aria-pressed={tool === 'icon'}
+        title={`${entry.label} (${entry.shortcut})`}
+        onclick={(event) => {
+          // With the stamp in hand and the grid shut, the press opens the grid
+          // again: changing a glyph never costs the tool. The press with the grid
+          // open is the one that puts the stamp down.
+          if (tool === 'icon' && open === 'glyph') { tool = 'select'; open = ''; return; }
+          tool = 'icon';
+          toggle('glyph', event);
+        }}
+      ><ProofGlyph name={glyph} size={18} /></button>
+    {:else}
+      <button
+        class="tool-button"
+        class:active={tool === entry.id}
+        aria-pressed={tool === entry.id}
+        title={`${entry.label} (${entry.shortcut})`}
+        onclick={() => (tool = tool === entry.id ? 'select' : entry.id)}
+      ><Icon name={entry.icon} size={18} /></button>
+    {/if}
   {/each}
 
   {#if contextual}
@@ -94,9 +136,14 @@
     <button class="tool-button" title="Annotation colour" onclick={(event) => toggle('colour', event)}>
       <span class="swatch" style:background={selected?.colour ?? colour}></span>
     </button>
-    <button class="tool-button sized" title={selected?.kind === 'text' ? 'Font size' : 'Stroke width'} onclick={(event) => toggle('size', event)}>
+    <button class="tool-button sized" title={sizedByFont ? 'Size' : 'Stroke width'} onclick={(event) => toggle('size', event)}>
       <Icon name="sliders" size={17} /><small>{sizeValue}</small>
     </button>
+    {#if outlined}
+      <button class="tool-button sized" title="Outline width" onclick={(event) => toggle('outline', event)}>
+        <Icon name="line" size={17} /><small>{outlineValue}</small>
+      </button>
+    {/if}
     {#if fillable}
       <button class="tool-button sized" title="Fill opacity" onclick={(event) => toggle('fill', event)}>
         <span class="fill-sample" style:opacity={selected?.fill_opacity ?? fillOpacity}></span>
@@ -114,7 +161,19 @@
   {/if}
 </aside>
 
-{#if open === 'colour'}
+{#if open === 'glyph'}
+  <div class="flyout glyphs" bind:this={flyoutEl} style:left={flyout.left} style:top={flyout.top} style:bottom={flyout.bottom}>
+    {#each PROOF_ICONS as entry (entry.name)}
+      <button
+        class="glyph-button"
+        class:active={glyph === entry.name}
+        title={entry.label}
+        aria-label={entry.label}
+        onclick={() => { setGlyph(entry.name); open = ''; }}
+      ><ProofGlyph name={entry.name} size={20} /></button>
+    {/each}
+  </div>
+{:else if open === 'colour'}
   <div class="flyout colours" bind:this={flyoutEl} style:left={flyout.left} style:top={flyout.top} style:bottom={flyout.bottom}>
     {#each palette as entry (entry)}
       <button
@@ -135,10 +194,21 @@
     <input
       type="range"
       min="1"
-      max={selected?.kind === 'text' ? 72 : 24}
+      max={sizedByFont ? 72 : 24}
       value={sizeValue}
-      aria-label={selected?.kind === 'text' ? 'Font size' : 'Stroke width'}
+      aria-label={sizedByFont ? 'Size' : 'Stroke width'}
       oninput={(event) => setStroke(Number(event.currentTarget.value))}
+    />
+  </div>
+{:else if open === 'outline'}
+  <div class="flyout slider" bind:this={flyoutEl} style:left={flyout.left} style:top={flyout.top} style:bottom={flyout.bottom}>
+    <input
+      type="range"
+      min="1"
+      max="24"
+      value={outlineValue}
+      aria-label="Outline width"
+      oninput={(event) => setOutline(Number(event.currentTarget.value))}
     />
   </div>
 {:else if open === 'fill'}
@@ -220,6 +290,19 @@
     box-shadow: var(--shadow-2);
   }
   .colours { display: grid; grid-template-columns: repeat(3, 28px); gap: 7px; }
+  .glyphs { display: grid; grid-template-columns: repeat(5, 30px); gap: 4px; }
+  .glyph-button {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .glyph-button:hover { border-color: var(--border); color: var(--text-1); }
+  .glyph-button.active { border-color: var(--accent); color: var(--text-1); background: var(--bg-3); }
   .colour-button { width: 28px; height: 28px; border: 2px solid transparent; border-radius: 50%; }
   .colour-button.active { border-color: #fff; box-shadow: 0 0 0 1px var(--accent); }
   .colour-button.custom { position: relative; display: grid; place-items: center; color: white; cursor: pointer; }

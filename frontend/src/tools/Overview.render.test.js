@@ -241,6 +241,19 @@ describe('with a case open', () => {
     expect(uiState.tool).toBe('media');
   });
 
+  it('reads the recent work first and the counts after it', async () => {
+    await open();
+    const recent = target.querySelector('.area-recent');
+    const waiting = target.querySelector('.area-waiting');
+    expect(recent).not.toBeNull();
+    // DOCUMENT_POSITION_FOLLOWING: the counts come after the work, for a reader too
+    expect(recent.compareDocumentPosition(waiting) & 4).toBe(4);
+    // a count keeps the sentence saying what it means, on the pointer
+    const tile = target.querySelector('.tiles .tile');
+    expect(tile.getAttribute('title')).toBeTruthy();
+    expect(tile.querySelector('.say-hint')).toBeNull();
+  });
+
   it('draws the case by family in the hues the Graph gives those families', async () => {
     await open();
     const bars = [...target.querySelectorAll('.bars li')];

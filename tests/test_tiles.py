@@ -663,17 +663,6 @@ def test_dms_format():
     assert "N" in geo.to_dms(48.8584, 2.2945)
 
 
-def test_map_links_cover_external_maps():
-    links = geo.map_links(48.8584, 2.2945, 16)
-    for key in (
-        "google", "google_earth", "apple", "bing", "yandex",
-        "sentinel", "zoom_earth", "satellites_pro",
-    ):
-        assert key in links and links[key].startswith("https://")
-    # Yandex takes lon,lat order
-    assert "ll=2.2945,48.8584" in links["yandex"]
-
-
 class _FakeResp:
     def __init__(self, payload):
         self._payload = payload

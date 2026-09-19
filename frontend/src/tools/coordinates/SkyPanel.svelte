@@ -8,6 +8,7 @@
   import { api } from '../../lib/api.js';
   import { toast, uiState } from '../../lib/state.svelte.js';
   import Icon from '../../components/Icon.svelte';
+  import DateField from '../../components/DateField.svelte';
   import MoonGlyph from '../../components/MoonGlyph.svelte';
   import DayChart from './DayChart.svelte';
   import SkyRose from './SkyRose.svelte';
@@ -112,14 +113,16 @@
 <div class="sky" class:loading>
   <div class="sky-head">
     <h3>Sun &amp; moon</h3>
-    <input
-      class="input input-sm"
-      type="date"
-      value={shownDay}
-      disabled={!point}
-      onchange={(e) => (day = e.currentTarget.value)}
-      title="Local date at this point"
-    />
+    <div class="day-field">
+      <DateField
+        day
+        reading={false}
+        label="Local date at this point"
+        value={shownDay}
+        disabled={!point}
+        onchange={(value) => (day = value)}
+      />
+    </div>
     <input
       class="input input-sm"
       type="time"
@@ -300,6 +303,9 @@
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
+  }
+  .day-field {
+    width: 9.5rem;
   }
   h3 {
     margin: 0;

@@ -102,15 +102,15 @@ describe('confidenceLine', () => {
 describe('readingNotes', () => {
   it('states the cut before anything else, because it changes every number under it', () => {
     const notes = readingNotes({ read: 2000, matched: 3400, truncated: true, unattributed: 0 });
-    expect(notes).toEqual(['Added up 2000 of 3400 statements']);
+    expect(notes).toEqual(['Added up 2000 of 3400 claims']);
   });
 
   it('reports the statements that name no subject', () => {
     expect(readingNotes({ truncated: false, unattributed: 1 })).toEqual([
-      '1 statement says nothing about what it concerns',
+      '1 claim says nothing about what it concerns',
     ]);
     expect(readingNotes({ truncated: false, unattributed: 3 })).toEqual([
-      '3 statements say nothing about what it concerns',
+      '3 claims say nothing about what it concerns',
     ]);
   });
 

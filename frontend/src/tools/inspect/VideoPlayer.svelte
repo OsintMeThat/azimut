@@ -87,7 +87,7 @@
     ></video>
   </div>
   <div class="player-bar">
-    <button class="player-btn" onclick={togglePlayback} aria-label={paused ? 'Play' : 'Pause'}>
+    <button class="player-btn" onclick={togglePlayback} aria-label={paused ? 'Play' : 'Pause'} title={paused ? 'Play' : 'Pause'}>
       <Icon name={paused ? 'play' : 'pause'} size={16} />
     </button>
     <input
@@ -101,10 +101,10 @@
       aria-label="Video position"
     />
     <span class="player-time mono">{fmt(currentTime)} / {fmt(totalDuration)}</span>
-    <button class="player-btn" onclick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>
+    <button class="player-btn" onclick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'} title={muted ? 'Unmute' : 'Mute'}>
       <Icon name={muted ? 'volumeOff' : 'volume'} size={16} />
     </button>
-    <button class="player-btn" onclick={toggleFullscreen} aria-label="Full screen">
+    <button class="player-btn" onclick={toggleFullscreen} aria-label="Full screen" title="Full screen">
       <Icon name="maximize" size={16} />
     </button>
   </div>
