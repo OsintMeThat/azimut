@@ -20,6 +20,9 @@
     // A silhouette has no outline, so the width control is hidden for it. Any
     // caller that says nothing gets the control.
     showStroke = true,
+    // A blur box is drawn from the picture rather than in ink, so the swatch is
+    // hidden for it — same rule, and same default.
+    showColor = true,
     iconName = PROOF_ICONS[0].name,
     setIconName = () => {},
     strokeW,
@@ -153,12 +156,16 @@
     <Icon name="redo" size={18} />
   </button>
   <div class="tb-sep"></div>
+  <!-- Pressing the tool in hand puts it down: the way out of a drawing tool was
+       aiming at the cursor button, and the button you are already on is the
+       easier target of the two. -->
   {#each drawTools as entry (entry.id)}
     <button
       class="tb-btn"
       class:active={tool === entry.id}
+      aria-pressed={tool === entry.id}
       title="{entry.label} ({entry.shortcut})"
-      onclick={() => (tool = entry.id)}
+      onclick={() => (tool = tool === entry.id ? 'select' : entry.id)}
     >
       <Icon name={entry.icon} size={18} />
     </button>
@@ -171,8 +178,17 @@
     <button
       class="tb-btn"
       class:active={tool === 'icon'}
+      aria-pressed={tool === 'icon'}
       title="Symbol (s)"
-      onclick={() => { tool = 'icon'; toggle('icon'); }}
+      onclick={() => {
+        // The grid is a picker: with the stamp in hand and the grid shut, the
+        // press opens it again, so changing a glyph never costs the tool. It is
+        // the press *with the grid open* that puts the stamp down, which is what
+        // pressing the tool you are already on means everywhere else on the rail.
+        if (tool === 'icon' && iconOpen) { tool = 'select'; toggle(''); return; }
+        tool = 'icon';
+        toggle('icon');
+      }}
       bind:this={iconBtn}
     >
       <ProofGlyph name={iconName} size={18} />
@@ -258,10 +274,13 @@
     </div>
   </div>
 
-  {#if showContextTools}
+  <!-- A blur box answers to none of these, so the group is empty for it and the
+       rule that marks it would be a line under nothing. -->
+  {#if showContextTools && (showColor || showStroke || showFill)}
     <div class="tb-sep"></div>
 
     <!-- Colour: a swatch that opens the palette + custom picker. -->
+    {#if showColor}
     <div class="tb-group" bind:this={colorEl}>
       <button
         class="tb-btn"
@@ -305,6 +324,7 @@
         </label>
       </div>
     </div>
+    {/if}
 
     <!-- Size: a horizontal slider for stroke width / font size. -->
     {#if showStroke}

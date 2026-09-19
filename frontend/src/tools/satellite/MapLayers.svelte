@@ -54,7 +54,8 @@
           >
             <Icon name="eye" size={13} />
           </button>
-          <span class="name" class:off={!row.on || row.disabled}>{row.label}</span>
+          <!-- the name repeats the tooltip, so the reason a switch is greyed is on a word, not only on its icon -->
+          <span class="name" class:off={!row.on || row.disabled} title={row.title ?? row.label}>{row.label}</span>
           {#if row.detail}<span class="detail">{row.detail}</span>{/if}
         </div>
         <!-- A layer that is a question answers it here, under its own switch:

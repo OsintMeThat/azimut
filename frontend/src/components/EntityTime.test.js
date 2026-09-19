@@ -15,11 +15,11 @@ describe('entity Time tab', () => {
   it('does not attribute a cited statement date to its evidence', () => {
     expect(source).toContain("item.sources.includes(entity.id)");
     expect(source).toContain('Evidence for <span>{evidence.length}</span>');
-    expect(source).toContain('These dates belong to statements this item supports.');
+    expect(source).toContain('These dates belong to claims this item supports.');
   });
 
   it('prefills a media capture assessment without changing file metadata', () => {
-    expect(source).toContain("entity.type === 'media' ? 'Add capture assessment'");
+    expect(source).toContain("entity.type === 'media' ? 'Claim a capture date'");
     expect(source).toContain("initialStatement={entity.type === 'media' ? 'This media was captured' : ''}");
     expect(source).toContain("initialRole={entity.type === 'media' ? 'observed' : ''}");
   });
@@ -32,7 +32,7 @@ describe('entity Time tab', () => {
   it('opens an existing assessment in an explicit inline editor', () => {
     expect(source).toContain('aria-label={`Edit ${item.label}`}');
     expect(source).toContain('class="time-editor"');
-    expect(source).toContain("'Edit time assessment'");
+    expect(source).toContain("'Edit claim'");
     expect(source).not.toContain('<Modal');
   });
 
@@ -45,10 +45,10 @@ describe('entity Time tab', () => {
   });
 
   it('edits the Claim date instead of creating an impossible nested assessment', () => {
-    expect(source).toContain("ownStatement?.raw ? 'Edit statement date' : 'Set statement date'");
+    expect(source).toContain("ownStatement?.raw ? 'Edit claim date' : 'Set claim date'");
     expect(source).toContain("editor = entity.type === 'claim'");
-    expect(source).toContain('This statement has no date yet.');
-    expect(source).toContain('A statement has one date or range. Use another statement for a separate assessment.');
+    expect(source).toContain('This claim has no date yet.');
+    expect(source).toContain('A claim has one date or range. File another claim for a separate date.');
     expect(source).toContain('visibleUndated = $derived(undated.filter');
   });
 });
@@ -58,7 +58,7 @@ describe('entity Time tab — which date reads first', () => {
     // A proof that dates its footage states it here, and a stated date is the
     // answer: the file's own clock is what the analyst was correcting or filling
     // in. Pinned, because the order is the whole of the priority.
-    const about = source.indexOf('Statements about this');
+    const about = source.indexOf('Claims about this');
     const media = source.indexOf('Media dates');
     expect(about).toBeGreaterThan(-1);
     expect(media).toBeGreaterThan(about);

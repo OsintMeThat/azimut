@@ -678,7 +678,7 @@
             <button class="tab-main" onclick={() => selectTab(tab)} title={tabTitle}>
               <Icon name="note" size={13} /><span>{tabTitle}</span>
             </button>
-            {#if tab.id !== 'case'}<button class="tab-close" aria-label={`Close ${tabTitle}`} onclick={(event) => closeTab(event, tab)}><Icon name="x" size={12} /></button>{/if}
+            {#if tab.id !== 'case'}<button class="tab-close" aria-label={`Close ${tabTitle}`} title={`Close ${tabTitle}`} onclick={(event) => closeTab(event, tab)}><Icon name="x" size={12} /></button>{/if}
           </div>
         {/each}
       </div>
@@ -712,7 +712,7 @@
                 aria-expanded={!markdownHelpCollapsed}
                 onclick={toggleMarkdownHelpCollapsed}
               ><Icon name={markdownHelpCollapsed ? 'chevronDown' : 'chevronUp'} size={14} /></button>
-              <button class="btn btn-ghost btn-sm" aria-label="Close Markdown help" onclick={() => (markdownHelpOpen = false)}><Icon name="x" size={14} /></button>
+              <button class="btn btn-ghost btn-sm" aria-label="Close Markdown help" title="Close Markdown help" onclick={() => (markdownHelpOpen = false)}><Icon name="x" size={14} /></button>
             </div>
             {#if !markdownHelpCollapsed}
             <div class="help-body">

@@ -17,7 +17,7 @@ describe('Claim connections', () => {
     // this statement resting on that one is a different fact from that one resting on
     // this, so the two readings are two groups
     expect(editor).toContain("label: 'Supports'");
-    expect(editor).toContain("hint: 'statements that rest on this one'");
+    expect(editor).toContain("hint: 'claims that rest on this one'");
     expect(editor).toContain('row.direction === group.way');
   });
 

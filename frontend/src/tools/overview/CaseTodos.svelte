@@ -146,13 +146,13 @@
             <li>
               <input type="checkbox" aria-label={`Complete ${task.text}`} checked={task.done} onchange={(e) => updateTask(task.id, { done: e.currentTarget.checked }, e.currentTarget)} />
               <input class="task" class:done={task.done} aria-label="Task text" value={task.text} maxlength="2000" onchange={(e) => updateTask(task.id, { text: e.currentTarget.value.trim() }, e.currentTarget)} onkeydown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
-              <button class="btn btn-ghost btn-sm" aria-label={`Delete ${task.text}`} onclick={() => deleteTask(task.id)}><Icon name="trash" size={14} /></button>
+              <button class="btn btn-ghost btn-sm" aria-label={`Delete ${task.text}`} title={`Delete ${task.text}`} onclick={() => deleteTask(task.id)}><Icon name="trash" size={14} /></button>
             </li>
           {/each}
         </ul>
         <form class="entry" onsubmit={addTask}>
           <input class="input" aria-label="New task" placeholder="Add a task…" maxlength="2000" bind:value={taskText} bind:this={taskInput} disabled={selected.tasks.length >= 200} />
-          <button class="btn btn-sm" aria-label="Add task" disabled={!taskText.trim() || selected.tasks.length >= 200}><Icon name="plus" size={15} /></button>
+          <button class="btn btn-sm" aria-label="Add task" title="Add task" disabled={!taskText.trim() || selected.tasks.length >= 200}><Icon name="plus" size={15} /></button>
         </form>
       {:else}
         <p class="quiet">Add a list to start.</p>

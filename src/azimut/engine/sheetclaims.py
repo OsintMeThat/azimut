@@ -274,7 +274,7 @@ def plan(
         if column and column not in columns:
             raise SheetError(f"this sheet has no column '{column}'")
     if subject_column not in columns:
-        raise SheetError("a statement needs the column naming what it is about")
+        raise SheetError("a claim needs the column naming what it is about")
 
     roles = (meta.get("roles") or {}) if isinstance(meta, dict) else {}
     links = (meta.get("links") or {}) if isinstance(meta, dict) else {}
@@ -329,7 +329,7 @@ def plan(
             decision["reason"] = f"'{said or identity}' is not in the case yet"
             continue
         if not _about_takes(str(held.get("type"))):
-            decision["reason"] = f"a statement cannot be about a {held.get('type')}"
+            decision["reason"] = f"a claim cannot be about a {held.get('type')}"
             continue
         decision["subject_label"] = str(held.get("label") or said)
 

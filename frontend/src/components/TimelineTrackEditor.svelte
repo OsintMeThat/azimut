@@ -157,7 +157,7 @@
   <fieldset>
     <legend>Timeline entries</legend>
     <div class="checks">
-      {#each [['statement', 'Statements'], ['media', 'Media'], ['case_activity', 'Case activity']] as option}
+      {#each [['statement', 'Claims'], ['media', 'Media'], ['case_activity', 'Case activity']] as option}
         <label><input type="checkbox" checked={categories.has(option[0])} onchange={() => toggleCategory(option[0])} />{option[1]}</label>
       {/each}
     </div>

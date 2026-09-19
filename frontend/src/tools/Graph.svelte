@@ -151,6 +151,8 @@
   import AnalysisPeriodBar from '../components/AnalysisPeriodBar.svelte';
   import FilterBar from '../components/FilterBar.svelte';
   import Modal from '../components/Modal.svelte';
+  import QuickClaim, { claimSeat } from '../components/QuickClaim.svelte';
+  import { claimActionTitle } from '../lib/quickClaim.js';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import EntityCreate from '../components/EntityCreate.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
@@ -463,6 +465,8 @@
   let hovered = $state(null);
   let hoveredLink = $state(null);
   let openId = $state(null);
+  /** The node a claim is being filed from, while its form is open. */
+  let claimFor = $state(null);
   let snapshotOpen = $state(null);
   let dirty = $state(false);
   /** The edge under the panel. An edge is a statement, and often the finding. */
@@ -4934,7 +4938,7 @@
           onclick={showResting}
           title={singling
             ? 'Click again to bring the rest of the case back.'
-            : 'These cite several sources, but one account published every one of them. Click to light just those statements.'}
+            : 'These cite several sources, but one account published every one of them. Click to light just those claims.'}
         >
           {payload.single_account} on one account
         </button>
@@ -5731,6 +5735,7 @@
       {#if at}
         {@const away = offScreen(at.id)}
         {@const takes = root ? 0 : foldableCount(at.id, nodes, links, new Set(pinnedIds))}
+        {@const seat = claimSeat(at)}
         <!-- Where a node says what can be done with it, and the one place all three
              acts on the drawing are named at once: a canvas teaches no gesture on its
              own, and the switch on the node only ever offers one of them at a time. -->
@@ -5783,6 +5788,13 @@
             <li><button onclick={() => chose(askWayFrom)}>Path to…</button></li>
             <li><button onclick={() => chose(traceFrom)}>Walk by hand</button></li>
             <li><button onclick={() => chose((id) => (openId = id))}>Details</button></li>
+            {#if seat}
+              <li>
+                <button onclick={() => chose((id) => (claimFor = byId.get(id) ?? null))} title={claimActionTitle(seat.slot)}>
+                  Add claim…
+                </button>
+              </li>
+            {/if}
             {#if pinnedIds.includes(at.id)}
               <li><button onclick={() => chose(unpinNode)}>Let it go</button></li>
             {/if}
@@ -5912,6 +5924,17 @@
     onconfirm={confirmPaste}
     onclose={() => (pasted = null)}
   />
+{/if}
+
+{#if claimFor && !snapshotReading}
+  <Modal title="New claim" onclose={() => (claimFor = null)} width="560px">
+    <QuickClaim
+      caseId={caseState.current.id}
+      entity={claimFor}
+      onsaved={() => (claimFor = null)}
+      oncancel={() => (claimFor = null)}
+    />
+  </Modal>
 {/if}
 
 {#if openId && !snapshotReading}

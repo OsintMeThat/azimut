@@ -972,7 +972,7 @@
       <div class="tpl-modal-head">
         <input class="tpl-title" type="text" placeholder="Template name"
           maxlength="120" bind:value={editing.name} />
-        <button class="btn btn-ghost btn-sm" onclick={cancelEdit} aria-label="Close">
+        <button class="btn btn-ghost btn-sm" onclick={cancelEdit} aria-label="Close" title="Close">
           <Icon name="x" size={16} />
         </button>
       </div>

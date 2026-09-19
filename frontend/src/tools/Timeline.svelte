@@ -1300,7 +1300,7 @@
       );
       pendingEdit = null;
       await reloadCase();
-      toast('Time assessment updated', 'ok', 1600);
+      toast('Claim updated', 'ok', 1600);
     } catch (error) {
       toast(error.message, 'danger');
     } finally {
@@ -1410,7 +1410,7 @@
       />
       <PlateExport surface="timeline" plate={capturePlate} disabled={!caseState.current} />
       <button class="btn btn-ghost fullscreen-btn" aria-pressed={fullscreen} onclick={toggleFullscreen}>{fullscreen ? 'Exit full screen' : 'Full screen'}</button>
-      <button class="btn btn-primary add-event" disabled={snapshotReading} onclick={() => openEditor()}><Icon name="plus" size={13} />Add assessment</button>
+      <button class="btn btn-primary add-event" disabled={snapshotReading} onclick={() => openEditor()}><Icon name="plus" size={13} />Add claim</button>
     </div>
   </header>
 
@@ -1441,7 +1441,7 @@
         <strong>Date quality</strong>
         <span><i class="sample approximate"></i>Approximate date</span>
         <span><i class="sample uncertain"></i>Uncertain date</span>
-        <strong>Assessment</strong>
+        <strong>Status</strong>
         <span><i class="sample suggested"></i>Suggested status</span>
         <span><i class="sample refuted"></i>Refuted confidence</span>
         <p>Confidence and date quality are independent.</p>
@@ -1501,8 +1501,8 @@
         <div class="blank-state">
           <Icon name="clock" size={24} />
           <h2>No dated entries yet</h2>
-          <p>Add a time assessment here or from an entity's Time tab.</p>
-          <button class="btn btn-primary" disabled={snapshotReading} onclick={() => openEditor()}>Add first assessment</button>
+          <p>Add a dated claim here or from an entity's Time tab.</p>
+          <button class="btn btn-primary" disabled={snapshotReading} onclick={() => openEditor()}>Add first claim</button>
         </div>
       {:else}
         <section class="overview-card" aria-label="Timeline overview">
@@ -1658,7 +1658,7 @@
                       }}
                     ><Icon name="grip" size={11} /></button>
                   {/if}
-                  <button class="fold-track" aria-label={`${track.collapsed ? 'Expand' : 'Fold'} ${track.label}`} disabled={snapshotReading} onclick={() => setTrackCollapsed(baseId, !track.collapsed)}>
+                  <button class="fold-track" aria-label={`${track.collapsed ? 'Expand' : 'Fold'} ${track.label}`} title={`${track.collapsed ? 'Expand' : 'Fold'} ${track.label}`} disabled={snapshotReading} onclick={() => setTrackCollapsed(baseId, !track.collapsed)}>
                     <Icon name={track.collapsed ? 'chevronRight' : 'chevronDown'} size={11} />
                   </button>
                   <span class={`category-dot ${track.categories[0]}`}></span>
@@ -1770,7 +1770,7 @@
                       onclick={() => expandTrack(baseId)}
                     >+{cluster.count}</button>
                   {/each}
-                  {#if canCreate}<span class="track-hint">Click or drag to add an assessment</span>{/if}
+                  {#if canCreate}<span class="track-hint">Click or drag to add a claim</span>{/if}
                   {#if !track.layout.items.length && !track.layout.clusters.length && !canCreate}<span class="track-empty">No entries in this window</span>{/if}
                   {:else}<span class="folded-note">Track folded</span>{/if}
                 </div>
@@ -1933,7 +1933,7 @@
         </div>
         <footer>
           <button class="btn btn-ghost" disabled={snapshotReading} onclick={() => (detailsId = selected.owner_id)}>Details</button>
-          {#if selected.category === 'statement'}<button class="btn btn-primary" disabled={snapshotReading} onclick={() => openEditor(selected)}>Edit assessment</button>{/if}
+          {#if selected.category === 'statement'}<button class="btn btn-primary" disabled={snapshotReading} onclick={() => openEditor(selected)}>Edit claim</button>{/if}
           {#if selected.category === 'media'}<button class="btn btn-primary" disabled={snapshotReading || !inspectorChain?.entity} onclick={addMediaCorrection}>Add correction</button>{/if}
         </footer>
       {:else}
@@ -1974,7 +1974,7 @@
         {#if item.category === 'statement'}
           <li>
             <button disabled={snapshotReading} onclick={() => fromItemMenu((entry) => openEditor(entry))}>
-              <Icon name="edit" size={12} />Edit assessment
+              <Icon name="edit" size={12} />Edit claim
             </button>
           </li>
         {/if}
@@ -1990,7 +1990,7 @@
 {/if}
 
 {#if editor}
-  <Modal title={editor.item ? 'Edit time assessment' : 'Add assessment'} onclose={() => (editor = null)} width="660px">
+  <Modal title={editor.item ? 'Edit claim' : 'Add claim'} onclose={() => (editor = null)} width="660px">
     <TemporalClaimEditor
       caseId={caseState.current.id}
       item={editor.item}

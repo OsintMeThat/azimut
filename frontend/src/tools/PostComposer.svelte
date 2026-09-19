@@ -23,6 +23,7 @@
   } from '../lib/post.js';
   import { extensionOutdated, extensionVersion, handOffPost } from '../lib/extBridge.js';
   import { bidiSafe } from '../lib/bidi.js';
+  import { mapLinks } from '../lib/maplinks.js';
   import { matchesQuery } from '../lib/mediaFilter.js';
   import Icon from '../components/Icon.svelte';
   import SearchInput from '../components/SearchInput.svelte';
@@ -31,7 +32,9 @@
   import FolderSelect from '../components/FolderSelect.svelte';
 
   let coordsText = $state('');
-  let geo = $state(null); // {lat, lon, dms, plus_code, links}
+  let geo = $state(null); // {lat, lon, dms, plus_code}
+  // The same verified table Coords & Sky and the point menu open, labelled for a reader.
+  const geoLinks = $derived(geo ? mapLinks(geo.lat, geo.lon) : []);
   let place = $state('');
   let placeLoading = $state(false);
   let description = $state('');
@@ -933,7 +936,7 @@
       coordinates,
       points,
       dms: geo?.dms,
-      mapLinks: geo?.links,
+      mapLinks: Object.fromEntries(geoLinks.map((link) => [link.label, link.url])),
       description,
       source,
       attachments: reportAttachmentPaths(),
@@ -1085,10 +1088,10 @@
           <Icon name="reset" size={14} /> Discard
         </button>
       {/if}
-      <button class="btn btn-ghost btn-sm" onclick={saveDraft} disabled={saving || !postName.trim()}>
+      <button class="btn btn-ghost btn-sm" onclick={saveDraft} disabled={saving || !postName.trim()} title="Keep this thread to reopen and edit here">
         <Icon name="save" size={14} /> {draftName ? 'Save draft' : 'Save as draft'}
       </button>
-      <button class="btn btn-ghost btn-sm" onclick={openSaveReport} disabled={!hasContent || reportSaving}>
+      <button class="btn btn-ghost btn-sm" onclick={openSaveReport} disabled={!hasContent || reportSaving} title="Write the finding up as a Notebook note">
         <Icon name="file" size={14} /> Save report
       </button>
       <button class="btn btn-primary btn-sm" onclick={publish} disabled={!tweet1.trim()} title={`Copy posts and open ${targetInfo.label}`}>
@@ -1208,8 +1211,8 @@
                 <Icon name="hash" size={12} /> {geo.plus_code}
               </button>
               <div class="links">
-                {#each Object.entries(geo.links) as [name, url] (name)}
-                  <a href={url} target="_blank" rel="noreferrer" class="badge info">{name}</a>
+                {#each geoLinks as link (link.id)}
+                  <a href={link.url} target="_blank" rel="noreferrer" class="badge info">{link.label}</a>
                 {/each}
               </div>
             </div>

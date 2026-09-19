@@ -262,7 +262,7 @@ def lenses() -> tuple[Lens, ...]:
             CASE_ROLES,
         ),
         Lens(
-            "claims", "Statements",
+            "claims", "Claims",
             "what is asserted, and what it rests on",
             _relation_verbs(lambda e: e.action == "claim"),
             CASE_ROLES,

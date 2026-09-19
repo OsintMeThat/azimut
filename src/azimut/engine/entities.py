@@ -446,7 +446,7 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
     # things to keep in step for no answer the field does not already give.
     EntityType(
         "equipment-type", "Equipment type", CLASS, "stack", SUBJECT, manual=True,
-        hint="a model or class, counted in statements rather than owned",
+        hint="a model or class, counted in claims rather than owned",
         image_gallery=True,
         identity_label="Model or class",
         identity_placeholder="T-72B3, ZU-23-2, Mi-8",
@@ -634,33 +634,33 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
     EntityType(
         "claim", "Claim", CLAIM, "quote", SUBJECT, manual=True,
         hint="something you are saying about the case, with its reasoning and its sources",
-        identity_label="Statement",
+        identity_label="Claim",
         identity_placeholder="What are you asserting?",
         attrs=(
             Attr(
                 "count", "How many", kind="number",
-                hint="how many of the one thing this statement counts",
+                hint="how many of the one thing this claim counts",
                 minimum=1, maximum=MAX_COUNT, whole=True,
                 group="What it states",
             ),
             Attr(
                 "condition", "Condition",
-                hint="the state at the moment this statement describes",
+                hint="the state at the moment this claim describes",
                 kind="choice", options=ASSET_CONDITIONS,
             ),
             Attr(
                 "when", "When", kind="temporal",
-                hint="when this statement applies",
+                hint="when this claim applies",
                 group="When",
             ),
             Attr(
                 "time_role", "Time role", kind="choice",
-                hint="what this value means for the statement",
+                hint="what this value means for the claim",
                 options=CLAIM_TIME_ROLES,
             ),
             Attr(
                 "confidence", "Confidence",
-                hint="how strongly the statement is supported",
+                hint="how strongly the claim is supported",
                 kind="choice", options=CLAIM_CONFIDENCE,
                 group="Reasoning",
             ),

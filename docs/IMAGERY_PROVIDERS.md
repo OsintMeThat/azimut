@@ -466,6 +466,40 @@ Checked 2026-09-13.
 | Night lights | NASA GIBS WMTS, `VIIRS_NOAA20_DayNightBand_At_Sensor_Radiance` (from 2024-03-25), `VIIRS_SNPP_…` (from 2020-11-18, with gaps), `VIIRS_Black_Marble` 2016 | public domain | Level 8 (750 m); opaque, drawn lowest at 85% |
 | Active fires | NASA FIRMS, keyed, through the app | see above | |
 
+## GeoConfirmed is a query, not a feed
+
+An added layer (`engine/geoconfirmed.py`), not an overlay: the backend reads it
+and the case keeps the copy. GeoConfirmed's public read-only API needs no key,
+calls itself free to use, and asks for a User-Agent that names the integration
+and for its cache headers to be respected. It states no licence, so every
+layer is credited to geoconfirmed.org on the map and on each card. Checked
+2026-09-19.
+
+| Call | When | What it gives |
+|---|---|---|
+| `GET /api/Conflict` | the GeoConfirmed dialog opens | the public conflicts; the export is addressed by `shortName` |
+| `GET /api/Conflict/{shortName}` | add, Refresh, first switch-on of a session | factions and their colours; `204` for a name it does not know |
+| `POST /api/Map/export/{shortName}` | add, Refresh, first switch-on of a session | a KMZ of approved placemarks, filtered by `start`, `end` and GeoJSON `polygons`; both null for the whole history, which skips the switch-on read |
+
+- **The KMZ over the site's own JSON.** `/api/Placemark/{c}/geojson` is 16 MB
+  for Ukraine and holds no descriptions; the export is filtered server-side,
+  and bundles every icon it uses (`api/icons/<colour>/<invert>/template/<n>.png`,
+  56 px discs), so one request dresses the layer.
+- **What the export leaves out.** No faction field: the icon path's colour is
+  matched against the conflict's factions, and factions sharing a colour (Israel
+  and the US on the Iran map) are one legend row. No date field: the placemark
+  name is `13 SEP 2026`. Placemarks with no name are reference sites (bases,
+  plants) sent whatever the dates asked for: 512 of 530 on the Iran map for
+  six weeks of August and September 2026.
+- **Folders are relative ages** ("B. Last 7 days"), true only on the day of the
+  export, so they are dropped for the factions.
+- **The hotspot is 16,16 px**, the middle of a 32 px icon, on 56 px discs. It is
+  dropped and the disc centred on its point.
+- **Sizes seen.** A month of Ukraine is ~800 placemarks, 83 icons and 330 kB.
+  The whole Ukraine map is 60,000 placemarks and 333 icons, under both
+  `MAX_FEATURES` and `MAX_ICONS`: 6.4 MB on the wire, about 4 s to read, 1.6 s
+  to compose the icons and 38 MB of GeoJSON handed to the browser.
+
 ## Deliberately not basemaps
 
 Street View and Google Photorealistic 3D Tiles are not basemap providers. They

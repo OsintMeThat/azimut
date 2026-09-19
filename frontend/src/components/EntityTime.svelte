@@ -38,8 +38,8 @@
   );
   const assessmentLabel = $derived(
     entity.type === 'claim'
-      ? ownStatement?.raw ? 'Edit statement date' : 'Set statement date'
-      : entity.type === 'media' ? 'Add capture assessment' : 'Add time assessment'
+      ? ownStatement?.raw ? 'Edit claim date' : 'Set claim date'
+      : entity.type === 'media' ? 'Claim a capture date' : 'Add dated claim'
   );
 
   async function load({ more = false } = {}) {
@@ -96,7 +96,7 @@
   function kindLabel(item) {
     return {
       captured: 'Captured', published: 'Published', imagery: 'Imagery',
-      collected: 'Collected', added: 'Added to case', filed: 'Filed in case', claim: 'Assessment',
+      collected: 'Collected', added: 'Added to case', filed: 'Filed in case', claim: 'Claim',
     }[item.kind] ?? item.kind;
   }
 
@@ -116,7 +116,7 @@
       <span class="time-value" class:undated={!item.raw} title={item.raw || undefined}>{timeLabel(item)}</span>
     </button>
     {#if editable}
-      <button class="time-row-action" aria-label={`Edit ${item.label}`} title="Edit assessment" onclick={() => (editor = item)}><Icon name="edit" size={12} /></button>
+      <button class="time-row-action" aria-label={`Edit ${item.label}`} title="Edit claim" onclick={() => (editor = item)}><Icon name="edit" size={12} /></button>
     {/if}
   </div>
 {/snippet}
@@ -127,17 +127,17 @@
     <button class="btn btn-ghost btn-sm" onclick={() => openTimeline()}><Icon name="clock" size={12} />Open in Timeline</button>
   </div>
   {#if entity.type === 'claim'}
-    <p class="claim-time-rule">A statement has one date or range. Use another statement for a separate assessment.</p>
+    <p class="claim-time-rule">A claim has one date or range. File another claim for a separate date.</p>
   {/if}
 
   {#if editor}
     <section
       class="time-editor"
-      aria-label={entity.type === 'claim' ? assessmentLabel : editor === 'new' ? assessmentLabel : 'Edit time assessment'}
+      aria-label={entity.type === 'claim' ? assessmentLabel : editor === 'new' ? assessmentLabel : 'Edit claim'}
     >
       <header>
-        <h3>{entity.type === 'claim' ? assessmentLabel : editor === 'new' ? assessmentLabel : 'Edit time assessment'}</h3>
-        <button class="btn btn-ghost btn-sm" aria-label="Close editor" onclick={() => (editor = null)}>
+        <h3>{entity.type === 'claim' ? assessmentLabel : editor === 'new' ? assessmentLabel : 'Edit claim'}</h3>
+        <button class="btn btn-ghost btn-sm" aria-label="Close editor" title="Close editor" onclick={() => (editor = null)}>
           <Icon name="x" size={13} />
         </button>
       </header>
@@ -162,20 +162,20 @@
     <div class="time-empty">Loading time history…</div>
   {:else}
     {#if ownStatement?.raw}
-      <section><h3>Statement date <span>1</span></h3>{@render row(ownStatement, true)}</section>
+      <section><h3>Claim date <span>1</span></h3>{@render row(ownStatement, true)}</section>
     {:else if entity.type === 'claim'}
-      <div class="time-empty compact"><Icon name="clock" size={18} /><p>This statement has no date yet.</p></div>
+      <div class="time-empty compact"><Icon name="clock" size={18} /><p>This claim has no date yet.</p></div>
     {/if}
     {#if about.length}
-      <section><h3>Statements about this <span>{about.length}</span></h3>{#each about as item (item.id)}{@render row(item, true)}{/each}</section>
+      <section><h3>Claims about this <span>{about.length}</span></h3>{#each about as item (item.id)}{@render row(item, true)}{/each}</section>
     {/if}
     {#if placed.length}
-      <section><h3>Statements placed here <span>{placed.length}</span></h3>{#each placed as item (item.id)}{@render row(item, true)}{/each}</section>
+      <section><h3>Claims placed here <span>{placed.length}</span></h3>{#each placed as item (item.id)}{@render row(item, true)}{/each}</section>
     {/if}
     {#if evidence.length}
       <section>
         <h3>Evidence for <span>{evidence.length}</span></h3>
-        <p class="section-note">These dates belong to statements this item supports.</p>
+        <p class="section-note">These dates belong to claims this item supports.</p>
         {#each evidence as item (item.id)}{@render row(item, true)}{/each}
       </section>
     {/if}
@@ -192,7 +192,7 @@
       <section class="undated"><h3>Undated <span>{visibleUndated.length}</span></h3>{#each visibleUndated as item (item.id)}{@render row(item, item.category === 'statement')}{/each}</section>
     {/if}
     {#if !visibleCount && entity.type !== 'claim'}
-      <div class="time-empty"><Icon name="clock" size={18} /><p>No dates or time assessments yet.</p></div>
+      <div class="time-empty"><Icon name="clock" size={18} /><p>No dates or dated claims yet.</p></div>
     {/if}
     {#if cursor}<button class="btn btn-ghost btn-sm more" disabled={loading} onclick={() => load({ more: true })}>{loading ? 'Loading…' : 'Show more'}</button>{/if}
   {/if}

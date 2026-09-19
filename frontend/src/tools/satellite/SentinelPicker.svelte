@@ -108,11 +108,11 @@
 
       <div class="cal">
         <div class="cal-head">
-          <button class="cal-nav" onclick={() => s2.stepMonth(-1)} aria-label="Previous month">
+          <button class="cal-nav" onclick={() => s2.stepMonth(-1)} aria-label="Previous month" title="Previous month">
             <Icon name="chevronLeft" size={13} />
           </button>
           <span class="cal-month">{monthLabel(s2.month)}</span>
-          <button class="cal-nav" onclick={() => s2.stepMonth(1)} aria-label="Next month">
+          <button class="cal-nav" onclick={() => s2.stepMonth(1)} aria-label="Next month" title="Next month">
             <Icon name="chevronRight" size={13} />
           </button>
         </div>

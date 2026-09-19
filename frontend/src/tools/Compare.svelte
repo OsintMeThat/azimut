@@ -46,9 +46,13 @@
   } from '../lib/map/changeAssist.js';
   import {
     ANNOTATION_COLOURS,
+    ANNOTATION_TOOLS,
+    STAMPED,
     canFill,
+    nextMarkNumber,
     comparisonAnnotations,
   } from '../lib/map/compareAnnotations.js';
+  import { PROOF_ICONS } from '../lib/proofIcons.js';
   import { cropSources, exportFrameSpec, frameSpan } from '../lib/map/exportFrame.js';
   import { formatDistance } from '../lib/measure.js';
   import { captureTab, extensionVersion } from '../lib/extBridge.js';
@@ -138,13 +142,19 @@
   let sessionDialog = $state(false);
   let sessionBusy = $state(false);
   let sessionList = $state([]);
-  let discardTarget = $state(null); // { kind: 'new' | 'open' | 'revert', name? } | null
+  let discardTarget = $state(null); // { kind: 'new' | 'open' | 'revert' | 'pair', name?, pair? } | null
   let annotations = $state([]);
   let annotationTool = $state('select');
   let selectedAnnotationId = $state(null);
   let annotationColour = $state(ANNOTATION_COLOURS[0]);
   let annotationStroke = $state(4);
   let annotationFill = $state(0);
+  // Which symbol the stamp puts down, kept between two of them: marking six
+  // vehicles is one act, and re-picking the glyph each time would make it six.
+  let annotationGlyph = $state(PROOF_ICONS[0].name);
+  // How big the next note or stamp is drawn. One number for all three: they are
+  // the marks with no line to widen, and the rail has one slider.
+  let annotationStampSize = $state(12);
   let annotationUndo = $state([]);
   let annotationRedo = $state([]);
   let annotationPreviewBase = null;
@@ -375,6 +385,22 @@
   const changeStatus = $derived(
     changeCompatibility(changeSide(a, s2a, wba, shownA), changeSide(b, s2b, wbb, shownB))
   );
+
+  /**
+   * What Detect needs before a run can fetch anything: Sentinel-2, which only
+   * lists once Copernicus credentials are in Settings. Not a lock — the panel
+   * still opens on the areas and runs already saved — only said up front.
+   */
+  const detectStatus = $derived(
+    imagery.providers.length && !imagery.find('sentinel2')
+      ? { ok: false, reason: 'Detect reads Copernicus Sentinel-2: add your credentials in Settings → Imagery.' }
+      : { ok: true, reason: '' }
+  );
+
+  function openImagerySettings() {
+    uiState.settingsTab = 'imagery';
+    uiState.tool = 'settings';
+  }
 
   function surfaceOverlays(target) {
     return target.overlays
@@ -955,6 +981,44 @@
     }
   }
 
+  /**
+   * Open on a pair the map already chose: two dated views of one point.
+   *
+   * The same road a saved comparison takes — `applySide` for each side, then the
+   * camera — because a handoff and a session say the same thing. It arrives
+   * unsaved and unnamed: nothing was filed, the analyst is being shown a pair.
+   */
+  async function openPair(pair) {
+    view = { lat: pair.lat, lon: pair.lon, zoom: pair.zoom ?? view.zoom };
+    bearing = 0;
+    mode = 'side';
+    annotations = comparisonAnnotations(null);
+    resetAnnotationHistory();
+    applySide(a, s2a, wba, pair.a);
+    applySide(b, s2b, wbb, pair.b);
+    sessionName = pair.title ?? 'Comparison';
+    openedSession = null;
+    savedSignature = null;
+    await tick();
+    for (const target of [a, b]) {
+      target.engine?.setView(view, view.zoom);
+      target.engine?.setBearing(0);
+    }
+    a.engine?.resize();
+    b.engine?.resize();
+  }
+
+  $effect(() => {
+    if (uiState.tool !== 'compare' || !uiState.compareAt || !imagery.providers.length) return;
+    const pair = uiState.compareAt;
+    uiState.compareAt = null;
+    if (sessionDirty) {
+      discardTarget = { kind: 'pair', pair };
+      return;
+    }
+    void openPair(pair);
+  });
+
   function requestOpenSession(name) {
     if (sessionDirty) {
       discardTarget = { kind: 'open', name };
@@ -1043,6 +1107,7 @@
     const target = discardTarget;
     discardTarget = null;
     if (target?.kind === 'new') newComparison();
+    else if (target?.kind === 'pair') void openPair(target.pair);
     else if (target) void openSession(target.name);
   }
 
@@ -1164,6 +1229,17 @@
   const selectedAnnotation = $derived(
     annotations.find((mark) => mark.id === selectedAnnotationId) ?? null
   );
+  /**
+   * The selection as the rail edits it: only Select edits what is already drawn.
+   *
+   * A stamp keeps the tool in hand and leaves the mark it put down selected, so
+   * without this a colour picked for the *next* marker recoloured the last one —
+   * and its series never started back at 1. The Proof Maker's rail follows the
+   * same rule.
+   */
+  const editableAnnotation = $derived(
+    annotationTool === 'select' ? selectedAnnotation : null
+  );
 
   function setAnnotations(next, commit = true) {
     if (next.length > 200) { toast('A comparison can hold up to 200 annotations', 'warn'); return; }
@@ -1202,22 +1278,42 @@
   }
 
   function patchSelectedAnnotation(patch) {
-    if (!selectedAnnotation) return;
+    if (!editableAnnotation) return;
     setAnnotations(annotations.map((mark) =>
-      mark.id === selectedAnnotation.id ? { ...mark, ...patch } : mark
+      mark.id === editableAnnotation.id ? { ...mark, ...patch } : mark
     ));
   }
 
   function setAnnotationColour(value) {
     annotationColour = value;
-    if (selectedAnnotation) patchSelectedAnnotation({ colour: value });
+    if (!editableAnnotation) return;
+    // A marker belongs to its colour's series, so one recoloured takes the first
+    // number free in the series it joins (`nextMarkNumber`, and the same rule the
+    // Proof Maker's rail follows).
+    patchSelectedAnnotation(
+      editableAnnotation.kind === 'number' && editableAnnotation.colour !== value
+        ? { colour: value, number: nextMarkNumber(annotations, value) }
+        : { colour: value }
+    );
   }
 
+  /** How heavy a symbol's own line is. Its size is the slider beside it. */
+  function setAnnotationOutline(value) {
+    if (editableAnnotation) patchSelectedAnnotation({ stroke_width: value });
+    else annotationStroke = value;
+  }
+
+  // A note and a stamp are sized by their own number: neither has a line to
+  // widen, so the one slider on the rail sets that instead.
+  const sizedByFont = (kind) => kind === 'text' || STAMPED.has(kind);
+
   function setAnnotationStroke(value) {
-    if (selectedAnnotation?.kind === 'text') {
-      patchSelectedAnnotation({ font_size: value });
-    } else if (selectedAnnotation) {
-      patchSelectedAnnotation({ stroke_width: value });
+    if (editableAnnotation) {
+      patchSelectedAnnotation(
+        sizedByFont(editableAnnotation.kind) ? { font_size: value } : { stroke_width: value }
+      );
+    } else if (sizedByFont(annotationTool)) {
+      annotationStampSize = value;
     } else {
       annotationStroke = value;
     }
@@ -1225,7 +1321,7 @@
 
   function setAnnotationFill(value) {
     annotationFill = value;
-    if (selectedAnnotation && canFill(selectedAnnotation.kind)) {
+    if (editableAnnotation && canFill(editableAnnotation.kind)) {
       patchSelectedAnnotation({ fill_opacity: value });
     }
   }
@@ -1239,7 +1335,11 @@
 
   $effect(() => {
     if (!both || uiState.tool !== 'compare') return;
-    const shortcuts = { v: 'select', r: 'rect', e: 'ellipse', a: 'arrow', l: 'line', d: 'freehand', t: 'text', p: 'polygon', m: 'measure' };
+    // Read off the rail itself, so a tool added there answers to its own letter
+    // without a second list to keep in step.
+    const shortcuts = Object.fromEntries(
+      ANNOTATION_TOOLS.map((entry) => [entry.shortcut.toLowerCase(), entry.id])
+    );
     const onKey = (event) => {
       if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
       const key = event.key.toLowerCase();
@@ -1729,7 +1829,7 @@
 
   {#if both}
     <div class="compare-bar">
-      <ModeDock {mode} change={changeStatus} onmode={setMode} onswap={swapSides} />
+      <ModeDock {mode} change={changeStatus} detect={detectStatus} onmode={setMode} onswap={swapSides} />
       <div class="spacer"></div>
       <span class="camera-readout mono">z{Number(view.zoom).toFixed(1)}</span>
       <!-- One camera, so one compass: it turns both maps and resets them. -->
@@ -1750,20 +1850,24 @@
   {#if both && !detecting}
     <AnnotationToolbar
       bind:tool={annotationTool}
-      selected={selectedAnnotation}
+      selected={editableAnnotation}
       canUndo={annotationUndo.length > 0}
       canRedo={annotationRedo.length > 0}
       undo={undoAnnotation}
       redo={redoAnnotation}
       palette={ANNOTATION_COLOURS}
       colour={annotationColour}
+      glyph={annotationGlyph}
+      stampSize={annotationStampSize}
+      setGlyph={(name) => { annotationGlyph = name; if (editableAnnotation?.kind === 'icon') patchSelectedAnnotation({ glyph: name }); }}
       strokeWidth={annotationStroke}
       fillOpacity={annotationFill}
       setColour={setAnnotationColour}
       setStroke={setAnnotationStroke}
+      setOutline={setAnnotationOutline}
       setFill={setAnnotationFill}
       bind:side={annotationSide}
-      setSide={(value) => { annotationSide = value; if (selectedAnnotation) patchSelectedAnnotation({ side: value }); }}
+      setSide={(value) => { annotationSide = value; if (editableAnnotation) patchSelectedAnnotation({ side: value }); }}
       removeSelected={() => {
         if (selectedAnnotationId) setAnnotations(annotations.filter((mark) => mark.id !== selectedAnnotationId));
         selectedAnnotationId = null;
@@ -1884,6 +1988,7 @@
           <AnnotationCanvas bind:this={canvasA} {annotations} engine={a.engine} letter="a" units={prefs.units}
             active={uiState.tool === 'compare'} bind:tool={annotationTool} bind:selectedId={selectedAnnotationId}
             colour={annotationColour} strokeWidth={annotationStroke} fillOpacity={annotationFill}
+            glyph={annotationGlyph} stampSize={annotationStampSize}
             editVertices={true} {annotationSide} onchange={setAnnotations} />
         {/if}
         <!-- Detect's own drawing stays in Detect: areas and candidates belong
@@ -1982,6 +2087,7 @@
           <AnnotationCanvas bind:this={canvasB} {annotations} engine={b.engine} letter="b" units={prefs.units}
             active={uiState.tool === 'compare'} bind:tool={annotationTool} bind:selectedId={selectedAnnotationId}
             colour={annotationColour} strokeWidth={annotationStroke} fillOpacity={annotationFill}
+            glyph={annotationGlyph} stampSize={annotationStampSize}
             editVertices={true} {annotationSide} onchange={setAnnotations} />
         {/if}
         {#if detecting && !grabbing && analyzerLayers.some((layer) => layer.visible)}
@@ -2066,6 +2172,7 @@
       bind:layers={analyzerLayers} bind:showZones={analyzerAreasVisible}
       bind:singleImage={analyzerSingle} bind:selectedResult={analyzerResult}
       opening={analyzerOpening} onfocus={focusAnalysis} onusecurrentview={useCurrentView}
+      needs={detectStatus.reason} onsettings={openImagerySettings}
       onsources={applyAnalysisSources} onclose={() => setMode('side')} />
   {/if}
   </div>
@@ -2245,7 +2352,7 @@
               <span>{imagery.find(saved.provider_a)?.label ?? saved.provider_a} / {imagery.find(saved.provider_b)?.label ?? saved.provider_b}</span>
               <small>{COMPARE_MODES.find((entry) => entry.id === saved.mode)?.label ?? saved.mode}{saved.updated_at ? ` · ${saved.updated_at.replace('T', ' ').replace('Z', '')}` : ''}</small>
             </button>
-            <button class="btn btn-ghost btn-xs" onclick={() => deleteSession(saved.name)} aria-label={`Delete ${saved.title}`}><Icon name="trash" size={14} /></button>
+            <button class="btn btn-ghost btn-xs" onclick={() => deleteSession(saved.name)} aria-label={`Delete ${saved.title}`} title={`Delete ${saved.title}`}><Icon name="trash" size={14} /></button>
           </div>
         {/each}
       </div>

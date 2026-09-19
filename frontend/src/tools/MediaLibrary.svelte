@@ -18,7 +18,8 @@
     SORTS,
   } from '../lib/mediaFilter.js';
   import { listenForPaste, pasteImage, resolvePaste } from '../lib/clipboardPaste.js';
-  import { gotoPoint } from '../lib/navigate.js';
+  import { gotoPoint, openInReverseSearch } from '../lib/navigate.js';
+  import { TOOL_LABELS } from '../lib/workspaces.js';
   import { revealMediaFolder } from '../lib/reveal.js';
   import { thisBrowser } from '../lib/thisBrowser.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
@@ -307,13 +308,14 @@
     lightboxItem = lightboxImages[next];
   }
 
-  // One handler for the tool's two overlays: the lightbox owns the arrows, the
-  // upkeep menu only needs the Escape, and it reads first because it is the one
+  // One handler for the tool's overlays: the lightbox owns the arrows, the two
+  // menus only need the Escape, and they read first because they are the ones
   // that can be open while the lightbox is not.
   function onMediaKey(e) {
     if (uiState.tool !== 'media') return;
-    if (e.key === 'Escape' && upkeepOpen) {
+    if (e.key === 'Escape' && (upkeepOpen || openIn)) {
       upkeepOpen = false;
+      openIn = null;
       return;
     }
     if (!lightboxItem) return;
@@ -713,6 +715,53 @@
     uiState.tool = 'inspect';
   }
 
+  function reverseSearch(item) {
+    openInReverseSearch({ path: item.path, kind: item.kind, label: item.title ?? item.filename });
+  }
+
+  // --- open in… ---
+  // The tools a picture can be taken on to, behind one door per row. Three of them
+  // side by side made the widest row seven buttons, and a small card more buttons
+  // than card; the ones that stay out are about the file itself.
+  const OPEN_IN_HEIGHT = 130; // room the menu needs under its button before it opens upward
+  let openIn = $state(null); // { item, left, right, top, bottom } while a row's menu is up
+
+  const openInOptions = (item) => [
+    { id: 'inspect', icon: 'inspect', run: inspect },
+    { id: 'reverse', icon: 'search', run: reverseSearch },
+    ...(item.kind === 'image' ? [{ id: 'proof', icon: 'proof', run: sendToComposer }] : []),
+  ];
+
+  /**
+   * Open a row's menu beside its button. Placed against the window rather than
+   * inside the row: a card clips what overflows it and the list scrolls, and a menu
+   * cut off at the bottom row is one whose last choice cannot be pressed.
+   */
+  function toggleOpenIn(event, item) {
+    if (openIn?.item.path === item.path) {
+      openIn = null;
+      return;
+    }
+    const at = event.currentTarget.getBoundingClientRect();
+    const below = window.innerHeight - at.bottom > OPEN_IN_HEIGHT;
+    // Toward whichever side has more room: a list row's button sits at the far right
+    // and hangs its menu leftward, a card by the rail opens away from the rail.
+    const leftward = at.left > window.innerWidth - at.right;
+    openIn = {
+      item,
+      left: leftward ? null : at.left,
+      right: leftward ? window.innerWidth - at.right : null,
+      top: below ? at.bottom + 4 : null,
+      bottom: below ? null : window.innerHeight - at.top + 4,
+    };
+  }
+
+  function runOpenIn(option) {
+    const { item } = openIn;
+    openIn = null;
+    option.run(item);
+  }
+
   function fmtSize(bytes) {
     if (bytes == null) return '—';
     if (bytes >= 1 << 30) return (bytes / (1 << 30)).toFixed(1) + ' GB';
@@ -825,6 +874,23 @@
   }
 </script>
 
+<!-- A picture or a video goes on to other tools from here; any other file has no
+     tool to go to, so it gets no door. -->
+{#snippet openInToggle(item)}
+  {#if item.kind === 'image' || item.kind === 'video'}
+    <button
+      class="btn btn-ghost btn-sm"
+      class:active={openIn?.item.path === item.path}
+      title="Open in…"
+      aria-haspopup="menu"
+      aria-expanded={openIn?.item.path === item.path}
+      onclick={(event) => toggleOpenIn(event, item)}
+    >
+      <Icon name="arrowRight" size={14} />
+    </button>
+  {/if}
+{/snippet}
+
 <div
   class="tool"
   role="region"
@@ -867,7 +933,7 @@
       <button
         class="btn upkeep-toggle"
         onclick={() => (upkeepOpen = !upkeepOpen)}
-        aria-label="Media upkeep"
+        aria-label="Media upkeep" title="Media upkeep"
         aria-haspopup="menu"
         aria-expanded={upkeepOpen}
       >
@@ -1152,16 +1218,7 @@
                     <Icon name="external" size={14} />
                   </a>
                 {/if}
-                {#if item.kind === 'image' || item.kind === 'video'}
-                  <button class="btn btn-ghost btn-sm" title="Open in Inspect" onclick={() => inspect(item)}>
-                    <Icon name="inspect" size={14} />
-                  </button>
-                {/if}
-                {#if item.kind === 'image'}
-                  <button class="btn btn-ghost btn-sm" title="Send to Geo Proof" onclick={() => sendToComposer(item)}>
-                    <Icon name="proof" size={14} />
-                  </button>
-                {/if}
+                {@render openInToggle(item)}
                 <button class="btn btn-ghost btn-sm del" title="Delete" onclick={() => (deleteTarget = item)}>
                   <Icon name="trash" size={14} />
                 </button>
@@ -1277,24 +1334,7 @@
                   <Icon name="external" size={14} />
                 </a>
               {/if}
-              {#if item.kind === 'image' || item.kind === 'video'}
-                <button
-                  class="btn btn-ghost btn-sm"
-                  title="Open in Inspect"
-                  onclick={() => inspect(item)}
-                >
-                  <Icon name="inspect" size={14} />
-                </button>
-              {/if}
-              {#if item.kind === 'image'}
-                <button
-                  class="btn btn-ghost btn-sm"
-                  title="Send to Geo Proof"
-                  onclick={() => sendToComposer(item)}
-                >
-                  <Icon name="proof" size={14} />
-                </button>
-              {/if}
+              {@render openInToggle(item)}
               <button class="btn btn-ghost btn-sm del" title="Delete" onclick={() => (deleteTarget = item)}>
                 <Icon name="trash" size={14} />
               </button>
@@ -1322,6 +1362,26 @@
     </div>
   {/if}
 </div>
+
+{#if openIn}
+  <button class="open-in-backdrop" onclick={() => (openIn = null)} aria-label="Close the Open in menu"></button>
+  <div
+    class="open-in-menu card"
+    role="menu"
+    aria-label={`Open ${openIn.item.title ?? openIn.item.filename} in`}
+    style:left={openIn.left == null ? null : `${openIn.left}px`}
+    style:right={openIn.right == null ? null : `${openIn.right}px`}
+    style:top={openIn.top == null ? null : `${openIn.top}px`}
+    style:bottom={openIn.bottom == null ? null : `${openIn.bottom}px`}
+  >
+    {#each openInOptions(openIn.item) as option (option.id)}
+      <button class="upkeep-option" role="menuitem" onclick={() => runOpenIn(option)}>
+        <Icon name={option.icon} size={14} />
+        <span>{TOOL_LABELS[option.id]}</span>
+      </button>
+    {/each}
+  </div>
+{/if}
 
 <!-- multi-item picker: shown when a URL has several attachments (e.g. a tweet
      with several photos) — pick which ones to download, before anything is fetched -->
@@ -1495,7 +1555,7 @@
     aria-label="Image preview"
     tabindex="-1"
   >
-    <button class="lb-close btn btn-ghost" onclick={() => (lightboxItem = null)} aria-label="Close">
+    <button class="lb-close btn btn-ghost" onclick={() => (lightboxItem = null)} aria-label="Close" title="Close">
       <Icon name="x" size={20} />
     </button>
     {#if lightboxImages.length > 1}
@@ -1588,6 +1648,21 @@
     display: flex;
     gap: 8px;
     width: min(480px, 40vw);
+  }
+
+  /* open in… — fixed to the window, so neither a card nor the scrolling list clips it */
+  .open-in-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    cursor: default;
+  }
+  .open-in-menu {
+    position: fixed;
+    z-index: 100;
+    min-width: 180px;
+    padding: 5px;
+    box-shadow: var(--shadow-2);
   }
 
   /* upkeep menu */
@@ -1940,18 +2015,18 @@
 
        So the actions cell is a fixed width, and it is computed rather than typed:
        one ghost icon button is a 14px glyph plus 8px of padding and a 1px border
-       on each side, and the widest row holds six of them — GPS pin, info,
-       open, inspect, proof, delete. A literal here goes stale the next time a tool earns
+       on each side, and the widest row holds five of them — GPS pin, info,
+       open, open in, delete. A literal here goes stale the next time a tool earns
        a row action, and the symptom is the delete button quietly clipped off the
        end of the row. */
     --media-action: 32px;
     --media-action-gap: 2px;
-    /* the seven buttons plus slack. Sized to the exact sum, the cell fits only
+    /* the buttons plus slack. Sized to the exact sum, the cell fits only
        until a sub-pixel of rounding says otherwise, and then Delete — which
        `margin-left: auto` holds at the right edge — is the one that goes. The
        slack is also where that auto margin lives, so the row still reads as
        "actions, then delete". */
-    --media-actions: calc(6 * var(--media-action) + 5 * var(--media-action-gap) + 10px);
+    --media-actions: calc(5 * var(--media-action) + 4 * var(--media-action-gap) + 10px);
     --media-columns: 54px minmax(180px, 1fr) 90px 82px minmax(100px, 0.45fr) 132px
       var(--media-actions);
     padding: 6px 20px 18px;

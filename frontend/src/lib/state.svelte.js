@@ -235,6 +235,13 @@ export const uiState = $state({
   openDraft: null, // draft name to load in the Post Composer
   openNotebook: null, // { noteId: string|null }; null noteId opens case notes.md
   inspectPath: null, // media path to open in the Inspect tool
+  /**
+   * A picture handed to Reverse Search from wherever it is being looked at, in the
+   * shape `normalizeReverseTarget` (lib/reverseSearch.js) returns: a case file by
+   * its path, or a picture that exists nowhere on disk — an Inspect frame not yet
+   * saved, a proof panel as cropped — as a Blob. Consumed once, session-only.
+   */
+  reverseTarget: null,
   focusMedia: null, // media path to highlight & scroll to in the Media Library
   openInspect: null, // inspect-session name to reopen in the Inspect tool
   openCompare: null, // compare-session name to reopen in the Compare tool
@@ -278,6 +285,23 @@ export const uiState = $state({
   // opens its Sun & moon mode there. Session-only, and never part of a capture
   // or a proof.
   skyAt: null, // { lat, lon, date, time }
+  /**
+   * Where the map is, for the tools that would otherwise open on nothing.
+   *
+   * The point the map records — its moved pin, else its centre — published once
+   * the analyst has moved off the view the map opened at, so a fresh window
+   * never offers the home view as if it were a finding. Session-only, read by
+   * Coords & Sky, and never part of a capture, a proof or a case.
+   */
+  mapPoint: null, // { lat, lon, zoom }
+  /**
+   * A pair of dated views of one point, handed to Compare from the map's own
+   * right-click menu: `{ lat, lon, zoom, a, b, title }`, where each side is the
+   * shape `applySide` already reads off a saved comparison. The dates are
+   * looked up where the menu is pressed, so Compare opens on two pictures
+   * rather than on two empty panes. Consumed once, session-only.
+   */
+  compareAt: null,
   focusCapture: null, // case-relative capture path selected from another workspace
   // Satellite reference viewers: floating scratch windows holding a media image
   // over the map to eyeball against the imagery. Session-only — never captured
@@ -313,13 +337,24 @@ export function persistSidebarWidth() {
 
 let toastSeq = 0;
 
+/**
+ * Say something at the foot of the window, for `timeout` milliseconds.
+ *
+ * A timeout of 0 holds it up until `dismissToast` takes it down, which is how a
+ * wait of unknown length is said: the message has to outlast the work rather
+ * than a guess at how long the work takes. Returns the id either way.
+ */
 export function toast(message, kind = 'info', timeout = 3800, action = null) {
   const id = ++toastSeq;
   uiState.toasts.push({ id, message, kind, action });
-  setTimeout(() => {
-    const i = uiState.toasts.findIndex((t) => t.id === id);
-    if (i !== -1) uiState.toasts.splice(i, 1);
-  }, timeout);
+  if (timeout > 0) setTimeout(() => dismissToast(id), timeout);
+  return id;
+}
+
+/** Take one down early, or take down one that was never given a timeout. */
+export function dismissToast(id) {
+  const i = uiState.toasts.findIndex((t) => t.id === id);
+  if (i !== -1) uiState.toasts.splice(i, 1);
 }
 
 export async function refreshCaseList({ q } = {}) {
@@ -519,6 +554,7 @@ function clearCaseHandoffs() {
   uiState.openDraft = null;
   uiState.openNotebook = null;
   uiState.inspectPath = null;
+  uiState.reverseTarget = null;
   uiState.focusMedia = null;
   uiState.focusCapture = null;
   uiState.openInspect = null;

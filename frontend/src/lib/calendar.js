@@ -24,6 +24,8 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH = /^\d{4}-\d{2}$/;
 
+const pad = (value) => String(value).padStart(2, '0');
+
 /** A `YYYY-MM-DD` as a UTC date, or null — the same strictness as the service
  *  routes, so a half-typed field never becomes a request. */
 export function parseDay(iso) {
@@ -84,6 +86,23 @@ export function monthDays(cursor) {
     cells.push({ iso: dayOf(at), day: at.getUTCDate(), inMonth: at.getUTCMonth() === month - 1 });
   }
   return cells;
+}
+
+/** The twelve months of a year, as the cells a month is picked from. */
+export function yearMonths(year) {
+  const number = Number(String(year).slice(0, 4)) || Number(today().slice(0, 4));
+  return MONTHS.map((label, index) => ({
+    iso: `${number}-${pad(index + 1)}`,
+    label,
+  }));
+}
+
+/** A page of years around `cursor`, in rows the same width as the months grid,
+ *  so the three precisions are three drawings of one box. */
+export function yearPage(cursor, size = 12) {
+  const year = Number(String(cursor ?? '').slice(0, 4)) || Number(today().slice(0, 4));
+  const first = year - Math.floor(size / 2);
+  return Array.from({ length: size }, (_, index) => String(first + index));
 }
 
 /** Whether a day is outside what the field accepts — an empty bound is no

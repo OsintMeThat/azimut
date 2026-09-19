@@ -56,8 +56,8 @@
     for (const row of layers) {
       const existing = live.get(row.name);
       if (existing && existing.sha === row.sha256) {
-        // already drawn from these bytes: only the legend can have moved
-        existing.layer.filter(row.hidden);
+        // already drawn from these bytes: only the legend or the period can have moved
+        existing.layer.filter(row.hidden, row.period);
         continue;
       }
       if (existing) drop(row.name);
@@ -73,6 +73,7 @@
           layer.set(collection, {
             categories: row.categories,
             hidden: row.hidden,
+            period: row.period,
             attribution: attribution(row),
           });
         })

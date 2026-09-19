@@ -27,16 +27,22 @@
 </script>
 
 <div class="wb-wrap" bind:this={menuEl}>
+  <!-- The wait is on the chip, not only inside the menu: reading a point's
+       history is a walk through Esri's tiles that takes seconds, it runs with
+       the picker shut once it is following the map, and a basemap that answers
+       nothing for that long without saying so reads as a broken one. -->
   <button
     class="chip"
     class:on={wb.menuOpen}
     onclick={() => wb.toggleMenu()}
-    title="Wayback release"
+    title={wb.busy ? 'Reading Esri’s releases for this point…' : 'Wayback release'}
     aria-label="Wayback release"
     aria-expanded={wb.menuOpen}
+    aria-busy={wb.busy}
   >
     <Icon name="clock" size={13} />
-    <span class="mono">{wb.date || 'Newest'}</span>
+    <span class="mono">{wb.date || (wb.busy ? 'Reading…' : 'Newest')}</span>
+    {#if wb.busy}<span class="spinner" aria-hidden="true"></span>{/if}
   </button>
 
   {#if wb.menuOpen}
@@ -44,7 +50,9 @@
       {#if wb.listNote}
         <div class="menu-hint warn">{wb.listNote}</div>
       {:else if !wb.releases.length}
-        <div class="menu-hint dim">Reading the release list…</div>
+        <div class="menu-hint dim waiting">
+          <span class="spinner" aria-hidden="true"></span> Reading the release list…
+        </div>
       {:else}
         {#if !wb.reading}
           <div class="step-row">
@@ -98,7 +106,10 @@
 
         {#if wb.changesOnly}
           {#if wb.changesBusy}
-            <div class="menu-hint dim">Reading this point's history…</div>
+            <div class="menu-hint dim waiting">
+              <span class="spinner" aria-hidden="true"></span>
+              Reading this point's history…
+            </div>
           {:else if wb.changesNote}
             <div class="menu-hint warn">{wb.changesNote}</div>
           {:else if wb.stale}
@@ -162,6 +173,17 @@
   .chip:hover,
   .chip.on {
     color: var(--accent);
+  }
+  .spinner {
+    width: 11px;
+    height: 11px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
   /* down and left of the chip, like the Sentinel-2 picker beside it: the
      surface's own corner clips anything opening upwards */
@@ -271,6 +293,11 @@
   }
   .menu-hint.dim {
     opacity: 0.8;
+  }
+  .menu-hint.waiting {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
   .menu-hint .warn,
   .menu-hint.warn {

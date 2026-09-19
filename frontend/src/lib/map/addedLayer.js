@@ -268,6 +268,21 @@ export function visibilityFilter(hidden = []) {
 }
 
 /**
+ * The row's time filter as a MapLibre filter, or null for every date.
+ *
+ * Days are `YYYY-MM-DD`, which sort as strings the way they sort as dates, so the
+ * comparison needs no parsing on the engine's side. A feature with no date is
+ * outside any period.
+ */
+export function periodFilter(period = null) {
+  if (!period?.start && !period?.end) return null;
+  const rule = ['all', ['has', 'date']];
+  if (period.start) rule.push(['>=', ['get', 'date'], period.start]);
+  if (period.end) rule.push(['<=', ['get', 'date'], period.end]);
+  return rule;
+}
+
+/**
  * @param {object} engine the façade from `engine.js`
  * @param {object} [opts]
  * @param {(feature: object) => HTMLElement} [opts.card] the read-only popup's body
@@ -294,6 +309,7 @@ export function createAddedLayer(
 
   let built = false;
   let shown = true;
+  let filtered = ''; // the filter last applied, so the same one is not re-applied
   let categories = [];
   let collection = null; // what was last drawn, so a feature can be found by number
   let open = null; // the read-only card, so it can be closed by name
@@ -512,7 +528,7 @@ export function createAddedLayer(
      * Put a parsed collection on the map. Every feature, every time: the source
      * is the whole layer and the engine culls what is off screen.
      */
-    async set(data, { categories: groups = [], hidden = [], attribution } = {}) {
+    async set(data, { categories: groups = [], hidden = [], period = null, attribution } = {}) {
       build(attribution);
       categories = groups;
       collection = data;
@@ -543,18 +559,26 @@ export function createAddedLayer(
         const property = layer === MARK ? 'icon-color' : layer === FILL ? 'fill-color' : layer === DOT ? 'circle-color' : 'line-color';
         map.setPaintProperty(layer, property, featureColour(colour));
       }
-      this.filter(hidden);
+      filtered = '';
+      this.filter(hidden, period);
     },
 
     /**
-     * Hide exactly the categories named, and nothing else.
+     * Hide exactly the categories named and the days outside the period, and
+     * nothing else.
      *
      * A filter rather than a second source: the features stay loaded, so the row
-     * can keep saying how many there are while saying how many are drawn.
+     * can keep saying how many there are while saying how many are drawn. The
+     * same filter twice is applied once, since a dragged time strip asks on every
+     * frame and a card opened on the map would otherwise close under it.
      */
-    filter(hidden = []) {
+    filter(hidden = [], period = null) {
       if (!built) return;
-      const rule = visibilityFilter(hidden);
+      const key = JSON.stringify([hidden, period?.start ?? '', period?.end ?? '']);
+      if (key === filtered) return;
+      filtered = key;
+      const rules = [visibilityFilter(hidden), periodFilter(period)].filter(Boolean);
+      const rule = rules.length > 1 ? ['all', ...rules] : rules[0];
       const base = {
         [FILL]: ['==', ['geometry-type'], 'Polygon'],
         [LINE]: ['!=', ['geometry-type'], 'Point'],

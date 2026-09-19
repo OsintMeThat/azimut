@@ -4066,7 +4066,7 @@
           {/if}
         {/if}
         <div class="spacer"></div>
-        <button class="btn btn-ghost btn-sm" aria-label="Close"
+        <button class="btn btn-ghost btn-sm" aria-label="Close" title="Close"
                 onclick={() => (reading = null)}>
           <Icon name="x" size={13} />
         </button>

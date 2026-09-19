@@ -115,3 +115,43 @@ describe('the flyout a rail button opens', () => {
     expect(panel()).toBeNull();
   });
 });
+
+describe('the two stamps the rail gained', () => {
+  const trigger = (title) => target.querySelector(`button[title="${title}"]`);
+
+  it('offers them beside the shapes, each with its own letter', () => {
+    const rail = stage().innerHTML;
+    expect(rail).toContain('Numbered marker (N)');
+    expect(rail).toContain('Symbol (S)');
+  });
+
+  it('opens the symbol grid with the tool, and picks a glyph from it', () => {
+    const setGlyph = vi.fn();
+    stage({ setGlyph });
+    trigger('Symbol (S)').click();
+    flushSync();
+
+    const grid = document.querySelector('.flyout.glyphs');
+    expect(grid).not.toBeNull();
+    grid.querySelectorAll('.glyph-button')[1].click();
+    flushSync();
+    expect(setGlyph).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('.flyout.glyphs')).toBeNull();
+  });
+
+  it('puts the tool down when the button it is on is pressed again', () => {
+    const rail = stage({ tool: 'number' });
+    expect(rail.querySelector('button[title="Numbered marker (N)"]').getAttribute('aria-pressed'))
+      .toBe('true');
+    // the rail binds `tool`, so the press is read back off the button's own state
+    expect(source).toContain("onclick={() => (tool = tool === entry.id ? 'select' : entry.id)}");
+    expect(source).toContain("if (tool === 'icon' && open === 'glyph') { tool = 'select'; open = ''; return; }");
+  });
+
+  it('sizes a stamp rather than widening a line it has not got', () => {
+    expect(stage({ tool: 'number' }).innerHTML).toContain('Size');
+    unmount(live);
+    live = null;
+    expect(stage({ tool: 'rect' }).innerHTML).toContain('Stroke width');
+  });
+});

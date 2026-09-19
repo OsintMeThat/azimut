@@ -9,10 +9,12 @@
   // engine searches. That is a press of the same button, and the clipboard road
   // is still what every refusal falls back to.
   //
-  // Pick a case photo, or scrub a case video to a frame. Adjustments
+  // Pick a case photo, or scrub a case video to a frame — or arrive from the Media
+  // Library or Inspect already holding one (`uiState.reverseTarget`). Adjustments
   // (brightness, contrast, …) preview live and are baked into the exported
   // image via a same-origin canvas — nothing leaves the machine until an
   // engine tab is opened by the analyst.
+  import { untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { matchesTerms } from '../lib/folderBrowse.js';
@@ -78,7 +80,9 @@
   );
   const resetAdjust = () => (adjust = { ...NEUTRAL });
 
-  const srcOf = (item) => fileUrl(caseState.current.id, item.path);
+  // A picture that exists nowhere on disk is shown from an address made for it here,
+  // and revoked once it is replaced or discarded.
+  const srcOf = (item) => item.src ?? fileUrl(caseState.current.id, item.path);
   const nameOf = (item) => (item.label || item.path).replace(/^media\//, '');
   const frameLabel = $derived(selected?.kind === 'video' ? 'frame' : 'image');
   const downloadName = () =>
@@ -110,10 +114,35 @@
     }
   }
 
-  function pickMedia(item) {
-    selected = item;
+  /** Put a picture in front of the engines, dropping the address of the one before. */
+  function show(item) {
+    if (selected?.src) URL.revokeObjectURL(selected.src);
+    selected = item.blob ? { ...item, src: URL.createObjectURL(item.blob) } : item;
     resetAdjust();
+  }
+
+  function pickMedia(item) {
+    show(item);
     pickerOpen = false;
+  }
+
+  // Arriving from another tool with the picture it was pressed on. Consumed once,
+  // and only on this tab: the tool stays mounted after its first visit, so a
+  // handoff written while it is hidden waits for the visit it was meant for.
+  $effect(() => {
+    const target = uiState.reverseTarget;
+    if (uiState.tool !== 'reverse' || !target || !caseState.current) return;
+    uiState.reverseTarget = null;
+    untrack(() => {
+      pickerOpen = false;
+      show(target);
+    });
+  });
+
+  /** A video handed over at a moment opens there, ready to be copied or nudged. */
+  function seekToTarget() {
+    if (!videoEl || selected?.time == null) return;
+    videoEl.currentTime = Math.min(selected.time, videoEl.duration || selected.time);
   }
 
   function matchesMediaName(item, query) {
@@ -165,6 +194,7 @@
   }
 
   function discard() {
+    if (selected?.src) URL.revokeObjectURL(selected.src);
     selected = null;
     resetAdjust();
     adjustOpen = false;
@@ -381,6 +411,7 @@
                   controls
                   preload="metadata"
                   style="filter: {filterCss}"
+                  onloadedmetadata={seekToTarget}
                 ></video>
               {:else}
                 <img src={srcOf(selected)} alt={nameOf(selected)} style="filter: {filterCss}" />
@@ -389,6 +420,8 @@
           </div>
           {#if selected.kind === 'video'}
             <p class="hint">Scrub to the moment, then copy or save the frame.</p>
+          {:else if selected.blob}
+            <p class="hint">This {frameLabel} is not saved in the case.</p>
           {/if}
         </div>
 

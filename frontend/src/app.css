@@ -354,6 +354,65 @@ a:hover {
   font-size: var(--fs-xs);
 }
 
+/* A field and the one act that belongs to it, in a single box: the calendar that
+   builds a date, the map that moves a point, the tab a source opens in, the
+   mark that says a point is where the camera stood.
+
+   One box rather than two, split by a hairline: the act is a property of what is
+   typed beside it, and a separate square read as a second field. The darker
+   panel behind the icon is what says it can be pressed at all. */
+.field-with-act {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+.field-with-act:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.field-with-act.warn {
+  border-color: color-mix(in srgb, var(--warn, #e8a33d) 55%, transparent);
+}
+/* The input inside gives up its own box to the one around it. */
+.field-with-act > .input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.field-with-act > .input:focus {
+  box-shadow: none;
+}
+.field-act {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 26px;
+  border-left: 1px solid var(--border);
+  border-radius: 0 3px 3px 0;
+  background: var(--bg-3);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.field-act:hover:not(:disabled, .disabled) {
+  color: var(--text-1);
+  background: var(--bg-2);
+}
+.field-act.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.field-act:disabled,
+.field-act.disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .input,
 .textarea,
 .select {

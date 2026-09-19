@@ -59,6 +59,10 @@
     audio: 'M9 18V6l10-2v11.5M9 18a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Zm10-2.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z',
     file: 'M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm8 0v6h6',
     hash: 'M9 4 7 20M17 4l-2 16M4 9h17M3 15h17',
+    // a numeral in a ring, and a box of blurred dots: the two marks a proof
+    // makes that are neither a line nor a word
+    numbered: 'M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18ZM10.4 9.6 12.4 8.2V16M10.6 16h3.6',
+    blurBox: 'M4.5 4.5h15v15h-15zM9 9h.01M15 9h.01M9 15h.01M15 15h.01M12 12h.01',
     globe: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-9 9h18M12 3c2.5 2.5 3.8 5.7 3.8 9S14.5 18.5 12 21c-2.5-2.5-3.8-5.7-3.8-9S9.5 5.5 12 3Z',
     // a page the case points at, not a hostname: `domain` keeps the globe, and the
     // two stopped being the same row at a glance
@@ -96,6 +100,9 @@
     ghost: 'M12 3a8 8 0 0 0-8 8v10l4-2 4 2 4-2 4 2V11a8 8 0 0 0-8-8Zm-3 8h.01m5.99 0H15',
     info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm0-11v6m0-10h.01',
     clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4v5l3.5 2',
+    // a month with its head rule: what a field opens when a date is built rather
+    // than typed
+    calendar: 'M4 6.5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13Zm4-3v4m8-4v4M4 10h16',
     play: 'm8 5 11 7-11 7V5Z',
     pause: 'M8 5v14m8-14v14',
     volume: 'M5 10v4h3l4 4V6L8 10H5Zm11-2a6 6 0 0 1 0 8m2.5-10.5a9 9 0 0 1 0 13',

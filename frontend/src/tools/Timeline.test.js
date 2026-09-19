@@ -45,8 +45,8 @@ describe('Timeline workspace', () => {
     expect(source).toContain("!track?.categories.includes('statement')");
     expect(source).toContain("event.target.closest('button')");
     expect(source).toContain('class:createable={canCreate}');
-    expect(source).toContain('Click or drag to add an assessment');
-    expect(source).toContain('Add assessment');
+    expect(source).toContain('Click or drag to add a claim');
+    expect(source).toContain('Add claim');
   });
 
   it('shows uncertainty through patterns and a visible legend', () => {

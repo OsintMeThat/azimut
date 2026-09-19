@@ -75,6 +75,16 @@ describe('the add-a-layer dialog', () => {
     expect(onurl).toHaveBeenCalledWith('https://www.google.com/maps/d/viewer?mid=XyZ', true);
   });
 
+  it('offers GeoConfirmed without a tick: its icons arrive inside the export', () => {
+    const ongeoconfirmed = vi.fn();
+    show({ ongeoconfirmed });
+
+    button('Choose a conflict').click();
+
+    expect(ongeoconfirmed).toHaveBeenCalledOnce();
+    expect(ticks()).toHaveLength(2);
+  });
+
   it('hands it over untouched when the box was cleared', () => {
     const onurl = vi.fn();
     show({ onurl });

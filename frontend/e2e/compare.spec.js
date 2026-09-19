@@ -70,6 +70,57 @@ test('linked maps keep annotations on the ground through pan, modes and save', a
   expect(errors).toEqual([]);
 });
 
+test('stamps a numbered marker and a symbol on the ground, and saves both', async ({ page }) => {
+  const { errors, saved } = await openCompare(page);
+  const canvas = page.getByLabel('Annotations on imagery A', { exact: true });
+  const box = await canvas.boundingBox();
+  const at = (dx, dy) => [box.x + box.width / 2 + dx, box.y + box.height / 2 + dy];
+
+  // Two markers: one press each, the tool staying in hand between them.
+  await page.getByTitle('Numbered marker (N)', { exact: true }).click();
+  await page.mouse.click(...at(-40, 0));
+  await page.mouse.click(...at(40, 0));
+  await expect(canvas.locator('.numeral')).toHaveCount(2);
+  expect(await canvas.locator('.numeral').allTextContents()).toEqual(['1', '2']);
+
+  // A colour picked with the stamp still in hand is for the *next* marker, so
+  // its series starts at 1 and the two already down keep the colour they have.
+  await page.getByTitle('Annotation colour', { exact: true }).click();
+  await page.getByLabel('Colour #22c55e').click();
+  await page.mouse.click(...at(0, -40));
+  expect(await canvas.locator('.numeral').allTextContents()).toEqual(['1', '2', '1']);
+
+  // The symbol button opens its grid with the tool; a glyph picked, then stamped.
+  await page.getByTitle('Symbol (S)', { exact: true }).click();
+  await page.locator('.flyout.glyphs .glyph-button').nth(2).click();
+  await page.mouse.click(...at(0, 50));
+  await expect(canvas.locator('.mark')).toHaveCount(4);
+
+  // The symbol button is also its picker: with the stamp in hand it opens the
+  // grid again, and the press with the grid open is the one that puts it down.
+  await page.getByTitle('Symbol (S)', { exact: true }).click();
+  await expect(page.locator('.flyout.glyphs')).toBeVisible();
+  await page.getByTitle('Symbol (S)', { exact: true }).click();
+  await expect(page.getByTitle('Select and move (V)', { exact: true })).toHaveAttribute('aria-pressed', 'true');
+  // …and every other tool puts itself down on the second press
+  await page.getByTitle('Numbered marker (N)', { exact: true }).click();
+  await page.getByTitle('Numbered marker (N)', { exact: true }).click();
+  await expect(page.getByTitle('Select and move (V)', { exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+  await page.getByRole('button', { name: 'Save comparison', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Save comparison', exact: true }).click();
+  await expect.poll(() => saved.length).toBe(1);
+  const marks = saved[0].spec.annotations;
+  expect(marks.map((mark) => mark.kind)).toEqual(['number', 'number', 'number', 'icon']);
+  expect(marks.map((mark) => mark.number)).toEqual([1, 2, 1, 1]);
+  expect(marks.map((mark) => mark.colour)).toEqual(
+    ['#f6a81a', '#f6a81a', '#22c55e', '#22c55e']
+  );
+  expect(marks[2].glyph).toBeTruthy();
+  expect(marks[0].points).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
 test('an export frame can be drawn across every overlaid reading mode', async ({ page }) => {
   const { errors, saved } = await openCompare(page);
 

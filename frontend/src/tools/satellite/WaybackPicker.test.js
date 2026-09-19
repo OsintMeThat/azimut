@@ -20,6 +20,7 @@ function props(wb = {}) {
       changesOnly: true,
       changes: [64776, 10],
       changesBusy: false,
+      busy: false,
       changesNote: '',
       stale: false,
       reading: false,
@@ -44,6 +45,24 @@ describe('the Wayback chip', () => {
       props: props({ menuOpen: false, releases: [], date: '' }),
     });
     expect(early.body).toContain('Newest');
+  });
+
+  it('says it is waiting while Esri is being read, picker open or shut', () => {
+    // the walk takes seconds and runs with the menu closed once the history
+    // follows the map, so the chip is where the wait has to show
+    const { body } = render(WaybackPicker, {
+      props: props({ menuOpen: false, releases: [], date: '', busy: true }),
+    });
+    expect(body).toContain('Reading…');
+    expect(body).toMatch(/class="spinner\b/);
+    expect(body).toContain('aria-busy="true"');
+    expect(body).not.toContain('Newest');
+  });
+
+  it('keeps the release it already names while the next answer is read', () => {
+    const { body } = render(WaybackPicker, { props: props({ menuOpen: false, busy: true }) });
+    expect(body).toContain('2023-08-31');
+    expect(body).toMatch(/class="spinner\b/);
   });
 });
 

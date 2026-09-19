@@ -129,7 +129,7 @@ export const graphLenses = {
     { id: 'all', label: 'Everything', hint: 'every connection between the things the case is about', types: ['derived-from', 'depends-on', 'located-at', 'depicts', 'owns', 'part-of', 'member-of', 'posted', 'appears-in', 'sited-at', 'instance-of', 'in-network', 'same-image-as', 'mentions', 'about', 'at', 'cites'], hides: GRAPH_FILED },
     { id: 'subjects', label: 'Subjects', hint: 'who owns, belongs to, posted or appears in what', types: ['owns', 'part-of', 'member-of', 'posted', 'appears-in', 'instance-of', 'in-network', 'same-image-as'], hides: GRAPH_FILED },
     { id: 'ground', label: 'Ground', hint: 'what is tied to a place on the map', types: ['located-at', 'depicts', 'sited-at'], hides: GRAPH_FILED },
-    { id: 'claims', label: 'Statements', hint: 'what is asserted, and what it rests on', types: ['about', 'at', 'cites'], hides: GRAPH_FILED },
+    { id: 'claims', label: 'Claims', hint: 'what is asserted, and what it rests on', types: ['about', 'at', 'cites'], hides: GRAPH_FILED },
     { id: 'work', label: 'My work', hint: 'what you wrote, what it was made from, and what it points at', types: ['derived-from', 'depends-on', 'mentions'], hides: [] },
   ],
   orders: [
@@ -401,7 +401,7 @@ export const relationTypes = [
   { type: 'in-network', label: 'is in network', inverse_label: 'contains', hint: 'the address or subnet belongs inside this network', group: '', action: 'relation', from_types: ['ip', 'network'], to_types: ['network'], from_media_kinds: [], to_media_kinds: [], manual: true, ratable: true },
   { type: 'same-image-as', label: 'is the same image as', inverse_label: 'is the same image as', hint: 'enrichment matched the perceptual hashes', group: '', action: 'relation', from_types: ['media'], to_types: ['media'], from_media_kinds: ['image'], to_media_kinds: ['image'], manual: false, ratable: false },
   { type: 'mentions', label: 'mentions', inverse_label: 'is mentioned by', hint: 'the document refers to the entity', group: 'Mentions', action: 'mention', from_types: ['bookmark', 'note', 'post', 'proof'], to_types: ['account', 'aircraft', 'bookmark', 'capture', 'claim', 'domain', 'email', 'inspect-session', 'ip', 'media', 'network', 'note', 'organization', 'person', 'phone', 'place', 'post', 'proof', 'structure', 'vehicle', 'vessel'], from_media_kinds: [], to_media_kinds: [], manual: true, ratable: false },
-  { type: 'about', label: 'is about', inverse_label: 'has claim', hint: 'what the statement concerns', group: '', action: 'claim', from_types: ['claim'], to_types: ['account', 'aircraft', 'capture', 'domain', 'email', 'ip', 'media', 'network', 'organization', 'person', 'phone', 'place', 'structure', 'vehicle', 'vessel'], from_media_kinds: [], to_media_kinds: [], manual: true, ratable: false },
+  { type: 'about', label: 'is about', inverse_label: 'has claim', hint: 'what the statement concerns', group: '', action: 'claim', from_types: ['claim'], to_types: ['account', 'aircraft', 'capture', 'domain', 'email', 'equipment-type', 'ip', 'media', 'network', 'organization', 'person', 'phone', 'place', 'structure', 'vehicle', 'vessel'], from_media_kinds: [], to_media_kinds: [], manual: true, ratable: false },
   { type: 'at', label: 'places it at', inverse_label: 'is a claim location', hint: 'where the statement places its subject or event', group: '', action: 'claim', from_types: ['claim'], to_types: ['place'], from_media_kinds: [], to_media_kinds: [], manual: true, ratable: false },
   { type: 'cites', label: 'cites', inverse_label: 'supports claim', hint: 'the evidence the statement relies on', group: '', action: 'claim', from_types: ['claim'], to_types: ['bookmark', 'capture', 'media', 'note', 'proof'], from_media_kinds: [], to_media_kinds: [], manual: true, ratable: false },
   { type: 'contradicts', label: 'contradicts', inverse_label: 'is contradicted by', hint: 'the two statements cannot both hold', group: '', action: 'claim', from_types: ['claim'], to_types: ['claim'], from_media_kinds: [], to_media_kinds: [], manual: true, ratable: false },
@@ -448,6 +448,12 @@ const entityTypes = [
     ],
   },
   {
+    type: 'equipment-type', label: 'Equipment type', family: 'class', icon: 'stack', manual: true, group: '',
+    identity_label: 'Model', identity_placeholder: 'T-72B3',
+    hint: 'a model the case counts with, never one particular object', family_reads: 'a model the case counts with, never one particular object',
+    attrs: [],
+  },
+  {
     type: 'account', label: 'Account', family: 'identifier', icon: 'at', manual: true, group: '',
     identity_label: 'Handle', identity_placeholder: '@handle',
     hint: 'a handle on one platform', family_reads: 'a handle on a system, where the value is the identity',
@@ -487,9 +493,11 @@ const entityTypes = [
   {
     type: 'claim', label: 'Claim', family: 'claim', icon: 'note', manual: true, group: 'Reasoning',
     hint: 'something you are saying about the case',
-    identity_label: 'Statement', identity_placeholder: 'What are you asserting?',
+    identity_label: 'Claim', identity_placeholder: 'What are you asserting?',
     family_reads: 'a statement about the rest of the case, carrying its own reasoning',
     attrs: [
+      { key: 'count', label: 'How many', hint: 'how many of the one thing this claim counts', kind: 'number', rungs: [], options: [], minimum: 1, maximum: 100000, whole: true, group: 'What it states' },
+      { key: 'condition', label: 'Condition', hint: 'the state at the moment this claim describes', kind: 'choice', rungs: [], options: [{ value: 'intact', label: 'Intact' }, { value: 'damaged', label: 'Damaged' }, { value: 'destroyed', label: 'Destroyed' }, { value: 'abandoned', label: 'Abandoned' }], minimum: null, maximum: null },
       { key: 'confidence', label: 'Confidence', hint: 'how strongly the statement is supported', kind: 'choice', rungs: [], options: [{ value: 'certain', label: 'Certain' }, { value: 'probable', label: 'Probable' }, { value: 'possible', label: 'Possible' }, { value: 'refuted', label: 'Ruled out' }], minimum: null, maximum: null },
       { key: 'method', label: 'How this was worked out', hint: 'the reasoning a reader would need to check this', kind: 'text', rungs: [], options: [], minimum: null, maximum: null },
       { key: 'verbatim', label: 'As the source put it', hint: 'the original wording, quoted rather than paraphrased', kind: 'text', rungs: [], options: [], minimum: null, maximum: null },

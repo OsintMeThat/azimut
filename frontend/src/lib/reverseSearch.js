@@ -56,3 +56,37 @@ export const UPLOAD_PAGES = ENGINES.map((e) => ({
   paste: e.paste,
   fill: e.fill,
 }));
+
+/**
+ * A picture handed to Reverse Search from another tool, or null when it cannot be
+ * one.
+ *
+ * Two shapes, because two kinds of picture are worth searching. A **case file** is
+ * named by its case-relative path and is an image or a video — a video may say
+ * which moment to open on. A **picture that exists nowhere on disk** — an Inspect
+ * frame not yet saved, a proof panel as it is cropped and turned — travels as the
+ * PNG itself, since there is no path to read it back from.
+ *
+ * Everything is checked here rather than where it is consumed: the handoff is
+ * written by three tools and read by one, and a path that climbs out of the case or
+ * a blob that is not an image would otherwise reach the preview as it was sent.
+ */
+export function normalizeReverseTarget(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const label = typeof raw.label === 'string' ? raw.label.trim() : '';
+  if (typeof Blob !== 'undefined' && raw.blob instanceof Blob) {
+    if (!raw.blob.size || !raw.blob.type.startsWith('image/')) return null;
+    return { path: null, blob: raw.blob, kind: 'image', label: label || 'Picture', time: null };
+  }
+  const path = typeof raw.path === 'string' ? raw.path.trim() : '';
+  if (!path || /^[/\\]|^[a-z]:/i.test(path) || path.split(/[/\\]/).includes('..')) return null;
+  if (raw.kind !== 'image' && raw.kind !== 'video') return null;
+  const time = raw.kind === 'video' && raw.time != null && Number(raw.time) >= 0 ? Number(raw.time) : null;
+  return {
+    path,
+    blob: null,
+    kind: raw.kind,
+    label: label || path.split('/').pop(),
+    time: Number.isFinite(time) ? time : null,
+  };
+}

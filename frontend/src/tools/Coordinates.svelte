@@ -36,14 +36,14 @@
   // Link labels don't depend on lat/lon, so this also drives the empty-state preview.
   const links = $derived(mapLinks(point?.lat ?? 0, point?.lon ?? 0));
 
-  async function parse() {
+  async function parse({ name = true } = {}) {
     const value = text.trim();
     if (!value || parsing) return;
     parsing = true;
     place = null;
     try {
       point = await api.post('/api/geo/parse', { text: value });
-      lookupPlace();
+      if (name) lookupPlace();
     } catch {
       point = null;
       toast('Could not read a coordinate from that', 'danger');
@@ -92,6 +92,38 @@
     parse();
   }
 
+  // The map point this tab last opened on. A tab is never unmounted once
+  // visited, so without it the prefill below could only ever fire once.
+  let openedOn = null;
+
+  /**
+   * Open on the point the map is on, rather than on an empty field: the tab is
+   * reached from the map more often than it is typed into.
+   *
+   * It follows the map rather than filling once: the map moving is the analyst
+   * looking somewhere else, and a tab still reading the point before it is a
+   * tab answering about the wrong ground. Between two moves the field is
+   * theirs — what they typed, or the row they picked, stands.
+   *
+   * The conversion is local, and that is the whole of what happens here. Naming
+   * the place is a Nominatim call, which the local-first rule keeps behind an
+   * action — so the row offers it instead of making it.
+   */
+  $effect(() => {
+    if (uiState.tool !== 'coordinates') return;
+    const last = uiState.mapPoint;
+    if (!last || parsing) return;
+    const asked = `${last.lat.toFixed(6)}, ${last.lon.toFixed(6)}`;
+    if (asked === openedOn) return;
+    // Arriving on a tab that already holds an answer leaves it standing: the
+    // map has not moved since, so there is nothing newer to show.
+    const held = openedOn === null && (point || text.trim());
+    openedOn = asked;
+    if (held) return;
+    text = asked;
+    void parse({ name: false });
+  });
+
   // Hand the point to the Satellite map and switch tabs; it consumes
   // uiState.gotoCoords on the next tick and flies there (lib/navigate.js).
   function openInSatellite() {
@@ -139,8 +171,10 @@
             in every notation.
           {:else if placeLoading}
             Resolving place…
-          {:else}
+          {:else if place}
             {place}
+          {:else}
+            <button class="name-place" onclick={lookupPlace}>Name this place</button>
           {/if}
         </span>
         <button
@@ -232,6 +266,16 @@
   }
   .head-row .place.muted {
     color: var(--text-3);
+  }
+  /* The place name is a network call, so it is offered as one rather than made
+     on arrival. Reads as the line it will become, not as a button. */
+  .name-place {
+    color: var(--accent);
+    font-size: var(--fs-md);
+    cursor: pointer;
+  }
+  .name-place:hover {
+    text-decoration: underline;
   }
   .head-row .btn {
     flex-shrink: 0;

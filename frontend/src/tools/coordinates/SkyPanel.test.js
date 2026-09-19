@@ -35,7 +35,10 @@ describe('Sun & moon panel', () => {
   });
 
   it('treats the date and time as local wall-clock readings', () => {
-    expect(panel).toContain('type="date"');
+    // a day typed dd/mm/yyyy in any browser language, not the browser's own picker
+    expect(panel).toContain('<DateField');
+    expect(panel).toContain('day\n');
+    expect(panel).not.toContain('type="date"');
     expect(panel).toContain('type="time"');
     expect(panel).toContain('Local date at this point');
     // empty means "let the backend pick", so the point's own today is used

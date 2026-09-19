@@ -35,7 +35,7 @@
       type: 'cites',
       way: 'in',
       label: 'Supports',
-      hint: 'statements that rest on this one',
+      hint: 'claims that rest on this one',
     },
     { type: 'contradicts', label: 'Contradictions', add: 'Add contradiction' },
   ];

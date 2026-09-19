@@ -285,13 +285,13 @@ test('asks an entry what can be done with it, without choosing it', async ({ pag
   await page.getByRole('button', { name: /Witness arrived/ }).click({ button: 'right' });
   await menu.getByRole('button', { name: 'Details' }).click();
   const details = page.getByRole('dialog', { name: 'Details' });
-  await expect(details.getByLabel('Statement')).toHaveValue(timelineItem('claim-1').label);
+  await expect(details.getByLabel('Claim', { exact: true })).toHaveValue(timelineItem('claim-1').label);
   await details.getByRole('button', { name: 'Close' }).click();
 
   await page.getByRole('button', { name: /Witness arrived/ }).click({ button: 'right' });
-  await menu.getByRole('button', { name: 'Edit assessment' }).click();
-  const editor = page.getByRole('dialog', { name: 'Edit time assessment' });
-  await expect(editor.getByLabel('Statement')).toHaveValue(timelineItem('claim-1').label);
+  await menu.getByRole('button', { name: 'Edit claim' }).click();
+  const editor = page.getByRole('dialog', { name: 'Edit claim' });
+  await expect(editor.getByLabel('Claim', { exact: true })).toHaveValue(timelineItem('claim-1').label);
   await editor.getByRole('button', { name: 'Cancel' }).click();
 
   await page.getByRole('button', { name: /Witness arrived/ }).click({ button: 'right' });
@@ -383,11 +383,11 @@ test('creates a dated statement from a point on the axis', async ({ page }) => {
   const box = await canvas.boundingBox();
 
   await page.mouse.click(box.x + box.width * 0.72, box.y + box.height - 8);
-  const dialog = page.getByRole('dialog', { name: 'Add assessment' });
+  const dialog = page.getByRole('dialog', { name: 'Add claim' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByLabel('When')).not.toHaveValue('');
-  await dialog.getByLabel('Statement').fill('A second witness reached the checkpoint');
-  await dialog.getByRole('button', { name: 'Add assessment' }).click();
+  await dialog.getByLabel('Claim', { exact: true }).fill('A second witness reached the checkpoint');
+  await dialog.getByRole('button', { name: 'Add claim' }).click();
 
   await expect.poll(() => fixture.timelineWrites.length).toBe(1);
   expect(fixture.timelineWrites[0]).toMatchObject({
@@ -462,13 +462,13 @@ test('creates and resizes an hourly period on a day view', async ({ page }) => {
   await page.mouse.move(box.x + box.width * .5, y, { steps: 5 });
   await page.mouse.up();
 
-  const dialog = page.getByRole('dialog', { name: 'Add assessment' });
+  const dialog = page.getByRole('dialog', { name: 'Add claim' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByLabel('Date format')).toHaveValue('time-range');
   await expect(dialog.getByLabel('Start time')).toHaveValue(/2026-06-23T\d{2}:\d{2}(?::\d{2})?/);
   await expect(dialog.getByLabel('End time')).toHaveValue(/2026-06-23T\d{2}:\d{2}(?::\d{2})?/);
-  await dialog.getByLabel('Statement').fill('Traffic peaked around the checkpoint');
-  await dialog.getByRole('button', { name: 'Add assessment' }).click();
+  await dialog.getByLabel('Claim', { exact: true }).fill('Traffic peaked around the checkpoint');
+  await dialog.getByRole('button', { name: 'Add claim' }).click();
 
   await expect.poll(() => fixture.timelineWrites.length).toBe(1);
   expect(fixture.timelineWrites[0].body.when).toMatch(
@@ -492,12 +492,12 @@ test('creates and resizes an hourly period on a day view', async ({ page }) => {
   expect(fixture.timelineWrites[1].body.when).toContain('T');
 });
 
-test('keeps creation on Statements and offers the list view', async ({ page }) => {
+test('keeps creation on the Claims track and offers the list view', async ({ page }) => {
   await openTimeline(page);
   const mediaCanvas = page.locator('.track-canvas').nth(1);
   const box = await mediaCanvas.boundingBox();
   await page.mouse.click(box.x + box.width * .7, box.y + box.height - 8);
-  await expect(page.getByRole('dialog', { name: 'Add assessment' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Add claim' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'List' }).click();
   await expect(page.getByRole('region', { name: 'Timeline list' })).toBeVisible();
@@ -512,11 +512,11 @@ test('starts a media correction from the captured date', async ({ page }) => {
   await expect(correction).toBeEnabled();
   await correction.click();
 
-  const dialog = page.getByRole('dialog', { name: 'Add assessment' });
+  const dialog = page.getByRole('dialog', { name: 'Add claim' });
   await expect(dialog.getByLabel('Date format')).toHaveValue('timestamp');
   await expect(dialog.getByLabel('Date and time')).toHaveValue('2026-06-23T18:42:11');
   await expect(dialog.getByLabel('Timezone')).toHaveValue('utc');
-  await dialog.getByRole('button', { name: 'Add assessment' }).click();
+  await dialog.getByRole('button', { name: 'Add claim' }).click();
 
   await expect.poll(() => fixture.timelineWrites.length).toBe(1);
   expect(fixture.timelineWrites[0]).toMatchObject({
@@ -564,7 +564,7 @@ test('moves and resizes the overview window', async ({ page }) => {
   await expect.poll(() => axisWindowText(page)).not.toBe(narrowed);
 });
 
-test('moves and shortens a selected assessment on the axis', async ({ page }) => {
+test('moves and shortens a selected claim on the axis', async ({ page }) => {
   const fixture = await openTimeline(page);
   const period = page.getByRole('button', { name: /Vehicle remained/ });
   await period.click();
@@ -596,13 +596,13 @@ test('moves and shortens a selected assessment on the axis', async ({ page }) =>
 
 test('validates advanced syntax before saving', async ({ page }) => {
   await openTimeline(page);
-  await page.getByRole('button', { name: 'Add assessment' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Add assessment' });
-  await dialog.getByLabel('Statement').fill('A dated observation');
+  await page.getByRole('button', { name: 'Add claim' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add claim' });
+  await dialog.getByLabel('Claim', { exact: true }).fill('A dated observation');
   await dialog.getByLabel('Date format').selectOption('advanced');
   await dialog.getByLabel('When').fill('late summer');
   await expect(dialog.getByText('Use a supported date or timestamp.')).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Add assessment' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Add claim' })).toBeDisabled();
   await dialog.getByText('Syntax guide').click();
   await expect(dialog.getByRole('region', { name: 'Supported date syntax' })).toBeVisible();
 });
@@ -625,10 +625,10 @@ test('keeps entity history in the same three-tab Details model', async ({ page }
   await expect(details.getByRole('tab')).toHaveText(['Info', 'Connections', 'Time']);
   await details.getByRole('tab', { name: 'Time' }).click();
 
-  await expect(details.getByRole('heading', { name: 'Statements about this' })).toBeVisible();
+  await expect(details.getByRole('heading', { name: 'Claims about this' })).toBeVisible();
   await expect(details.getByText(timelineItem('claim-1').label, { exact: true })).toBeVisible();
   await expect(details.getByText(timelineItem('claim-3').label, { exact: true })).toBeVisible();
-  await expect(details.getByRole('button', { name: 'Add time assessment' })).toBeVisible();
+  await expect(details.getByRole('button', { name: 'Add dated claim' })).toBeVisible();
   fixture.expectNoUnexpectedRequests();
 });
 
@@ -654,7 +654,7 @@ test('opens the row handed over from the Time tab', async ({ page }) => {
   await expect(inspector.getByText('2026-06-23T18:42:11Z')).toBeVisible();
 });
 
-test('edits an existing assessment from the Time tab', async ({ page }) => {
+test('edits an existing claim from the Time tab', async ({ page }) => {
   const fixture = await installAppFixture(page, {
     catalog: [person, source],
     timelineItems,
@@ -672,10 +672,10 @@ test('edits an existing assessment from the Time tab', async ({ page }) => {
   await details.getByRole('tab', { name: 'Time' }).click();
 
   await details.getByRole('button', { name: `Edit ${timelineItem('claim-1').label}` }).click();
-  const editor = details.getByRole('region', { name: 'Edit time assessment' });
-  await expect(editor.getByLabel('Statement')).toHaveValue(timelineItem('claim-1').label);
-  await editor.getByLabel('Statement').fill('Witness reached the north checkpoint');
-  await editor.getByRole('button', { name: 'Update assessment' }).click();
+  const editor = details.getByRole('region', { name: 'Edit claim' });
+  await expect(editor.getByLabel('Claim', { exact: true })).toHaveValue(timelineItem('claim-1').label);
+  await editor.getByLabel('Claim', { exact: true }).fill('Witness reached the north checkpoint');
+  await editor.getByRole('button', { name: 'Update claim' }).click();
 
   await expect.poll(() => fixture.timelineWrites.length).toBe(1);
   expect(fixture.timelineWrites[0]).toMatchObject({
@@ -685,7 +685,7 @@ test('edits an existing assessment from the Time tab', async ({ page }) => {
   });
 });
 
-test('starts a new assessment from an empty form after editing one', async ({ page }) => {
+test('starts a new claim from an empty form after editing one', async ({ page }) => {
   await installAppFixture(page, {
     catalog: [person, source],
     timelineItems,
@@ -703,16 +703,16 @@ test('starts a new assessment from an empty form after editing one', async ({ pa
   await details.getByRole('tab', { name: 'Time' }).click();
 
   await details.getByRole('button', { name: `Edit ${timelineItem('claim-1').label}` }).click();
-  const editing = details.getByRole('region', { name: 'Edit time assessment' });
-  await expect(editing.getByLabel('Statement')).toHaveValue(timelineItem('claim-1').label);
+  const editing = details.getByRole('region', { name: 'Edit claim' });
+  await expect(editing.getByLabel('Claim', { exact: true })).toHaveValue(timelineItem('claim-1').label);
 
-  await details.getByRole('button', { name: 'Add time assessment' }).click();
-  const adding = details.getByRole('region', { name: 'Add time assessment' });
-  await expect(adding.getByLabel('Statement')).toHaveValue('');
+  await details.getByRole('button', { name: 'Add dated claim' }).click();
+  const adding = details.getByRole('region', { name: 'Add dated claim' });
+  await expect(adding.getByLabel('Claim', { exact: true })).toHaveValue('');
   await expect(adding.getByLabel('When')).toHaveValue('');
 });
 
-test('shows an undated Claim as a missing statement date, not an existing assessment', async ({ page }) => {
+test('shows an undated Claim as a missing claim date, not an existing one', async ({ page }) => {
   const fixture = await installAppFixture(page, {
     catalog: [undatedClaim],
     timelineItems,
@@ -725,15 +725,15 @@ test('shows an undated Claim as a missing statement date, not an existing assess
   const details = page.getByRole('dialog', { name: 'Details' });
   await details.getByRole('tab', { name: 'Time' }).click();
 
-  await expect(details.getByText('This statement has no date yet.')).toBeVisible();
-  await expect(details.getByText('A statement has one date or range.')).toBeVisible();
+  await expect(details.getByText('This claim has no date yet.')).toBeVisible();
+  await expect(details.getByText('A claim has one date or range.')).toBeVisible();
   await expect(details.getByText('Undated', { exact: true })).toHaveCount(0);
-  await details.getByRole('button', { name: 'Set statement date' }).click();
+  await details.getByRole('button', { name: 'Set claim date' }).click();
 
-  const editor = details.getByRole('region', { name: 'Set statement date' });
-  await expect(editor.getByLabel('Statement')).toHaveValue(undatedClaim.label);
+  const editor = details.getByRole('region', { name: 'Set claim date' });
+  await expect(editor.getByLabel('Claim', { exact: true })).toHaveValue(undatedClaim.label);
   await editor.getByLabel('When').fill('2026-08-12');
-  await editor.getByRole('button', { name: 'Update assessment' }).click();
+  await editor.getByRole('button', { name: 'Update claim' }).click();
 
   await expect.poll(() => fixture.timelineWrites.length).toBe(1);
   expect(fixture.timelineWrites[0]).toMatchObject({

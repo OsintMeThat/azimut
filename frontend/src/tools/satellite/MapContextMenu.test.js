@@ -58,6 +58,19 @@ describe('the right-click menu', () => {
     expect(body).not.toContain('chevronDown');
   });
 
+  it('offers a pair only where an archive can build one', () => {
+    const sources = [
+      { id: 'wayback', label: 'Esri Wayback', detail: 'the last two pictures of this point' },
+      { id: 'sentinel', label: 'Copernicus', detail: 'the last two passes over this point', provider: 'sentinel2' },
+    ];
+    expect(render(MapContextMenu, { props: props() }).body).not.toContain('Compare here…');
+    const { body } = render(MapContextMenu, { props: props({ compareSources: sources }) });
+    expect(body).toContain('Compare here…');
+    // folded like the links, for the same reason: the menu cannot change size
+    expect(body).not.toContain('Esri Wayback');
+    expect(body.match(/aria-haspopup="menu"/g)).toHaveLength(2);
+  });
+
   it('states the lookup where it was asked, while it runs and once it answered', () => {
     expect(
       render(MapContextMenu, { props: props({ lookup: { busy: true } }) }).body

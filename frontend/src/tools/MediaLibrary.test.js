@@ -384,12 +384,12 @@ describe('row and card actions fit', () => {
   const source = readFileSync(new URL('./MediaLibrary.svelte', import.meta.url), 'utf8');
 
   it('sizes the list actions cell from the widest row, not from a literal', () => {
-    // six at its widest: GPS pin, info, open, inspect, proof, delete. A typed
-    // width goes stale the next time a tool earns a row action, and the symptom
-    // is Delete clipped off the end of the row.
+    // five at its widest: GPS pin, info, open, open in, delete. A typed width
+    // goes stale the next time a tool earns a row action, and the symptom is
+    // Delete clipped off the end of the row.
     expect(source).toContain('--media-action: 32px');
     expect(source).toContain(
-      '--media-actions: calc(6 * var(--media-action) + 5 * var(--media-action-gap) + 10px)'
+      '--media-actions: calc(5 * var(--media-action) + 4 * var(--media-action-gap) + 10px)'
     );
     // sized to the exact sum, the cell fits only until a sub-pixel of rounding
     // says otherwise, and then Delete wraps to a line of its own

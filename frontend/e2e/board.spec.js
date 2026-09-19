@@ -192,7 +192,7 @@ test('creates a claim, which nothing else in the app can do', async ({ page }) =
   await page.getByRole('button', { name: 'New entity' }).click();
   await expect(page.getByRole('heading', { name: 'New entity' })).toBeVisible();
   await page.getByLabel('Type').selectOption('claim');
-  await page.getByLabel('Statement').fill('Where was this shot?');
+  await page.getByLabel('Claim', { exact: true }).fill('Where was this shot?');
   // the fields come from the registry, not from a form written per type
   await page.getByLabel('How this was worked out').fill('spans counted against imagery');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
@@ -205,7 +205,66 @@ test('creates a claim, which nothing else in the app can do', async ({ page }) =
   });
   // and it lands on its own Details, because a claim exists to be pointed at things
   await expect(page.getByRole('heading', { name: 'Details' })).toBeVisible();
-  await expect(page.getByRole('dialog').getByLabel('Statement')).toHaveValue('Where was this shot?');
+  await expect(page.getByRole('dialog').getByLabel('Claim', { exact: true })).toHaveValue('Where was this shot?');
+});
+
+test('files a counted observation from a model’s row in one form', async ({ page }) => {
+  const model = {
+    id: 'model-1',
+    type: 'equipment-type',
+    label: 'T-72B3',
+    attrs: {},
+    provenance: { by: 'user', at: '2026-08-04T09:00:00Z', status: 'confirmed' },
+  };
+  const fixture = await openBoard(page, { catalog: [...catalog, model] });
+
+  const row = page.locator('tbody tr').filter({ has: page.locator('.name', { hasText: 'T-72B3' }) });
+  await row.hover();
+  await row.getByRole('button', { name: 'File a claim from T-72B3' }).click();
+
+  const form = page.getByRole('dialog').locator('.quick-claim');
+  await expect(form.getByLabel('Claim', { exact: true })).toHaveValue('T-72B3 seen');
+  await form.getByLabel('How many').fill('2');
+  await form.getByLabel('Condition').selectOption('destroyed');
+  await expect(form.getByLabel('Claim', { exact: true })).toHaveValue('2 × T-72B3 destroyed');
+  await form.getByRole('button', { name: 'Add claim' }).click();
+
+  await expect.poll(() => fixture.timelineWrites.length).toBe(1);
+  expect(fixture.timelineWrites[0].body).toMatchObject({
+    statement: '2 × T-72B3 destroyed',
+    count: 2,
+    condition: 'destroyed',
+    about: ['model-1'],
+    at: [],
+    cites: [],
+  });
+  await expect(page.locator('.quick-claim')).toHaveCount(0);
+});
+
+test('files a claim from a place as where it was seen', async ({ page }) => {
+  const fixture = await openBoard(page);
+
+  const row = page.locator('tbody tr').filter({ has: page.locator('.name', { hasText: 'checkpoint north' }) });
+  await row.hover();
+  const press = row.getByRole('button', { name: 'File a claim from checkpoint north' });
+  await expect(press).toHaveAttribute('title', 'File a claim placed here');
+  await press.click();
+
+  const form = page.getByRole('dialog').locator('.quick-claim');
+  await expect(form.getByLabel('Claim', { exact: true })).toHaveValue('Seen at checkpoint north');
+  // a place is never counted and has no condition of its own to state
+  await expect(form.getByLabel('How many')).toHaveCount(0);
+  await form.getByLabel('Claim', { exact: true }).fill('Convoy seen at checkpoint north');
+  await form.getByRole('button', { name: 'Add claim' }).click();
+
+  await expect.poll(() => fixture.timelineWrites.length).toBe(1);
+  expect(fixture.timelineWrites[0].body).toMatchObject({
+    statement: 'Convoy seen at checkpoint north',
+    about: [],
+    at: ['place-1'],
+    count: null,
+    condition: null,
+  });
 });
 
 test('shows an entity’s typed fields directly in Details', async ({ page }) => {

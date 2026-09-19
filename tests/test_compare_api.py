@@ -117,6 +117,10 @@ def test_compare_session_roundtrip_rename_and_sidebar_delete(client):
          "points": [[2.2945, 48.8584]], "text": "Before"},
         {"id": "yard", "kind": "polygon", "colour": "#22c55e",
          "points": [[2.29, 48.85], [2.30, 48.85], [2.30, 48.86]], "fill_opacity": 0.2},
+        {"id": "one", "kind": "number", "colour": "#ef4444",
+         "points": [[2.2946, 48.8585]], "number": 2, "font_size": 20},
+        {"id": "truck", "kind": "icon", "colour": "#38bdf8",
+         "points": [[2.2947, 48.8586]], "glyph": "vehicle"},
     ]
     saved = _save(client, cid, "Harbour change", spec)
     assert saved.status_code == 200, saved.text
@@ -148,6 +152,9 @@ def test_compare_session_roundtrip_rename_and_sidebar_delete(client):
     assert loaded["spec"]["blink"] == {"interval": 1200}
     assert loaded["spec"]["annotations"][0]["side"] == "a"
     assert loaded["spec"]["annotations"][1]["points"][2] == [2.30, 48.86]
+    # the two stamps: one press, one point, and what each one carries
+    assert loaded["spec"]["annotations"][2]["number"] == 2
+    assert loaded["spec"]["annotations"][3]["glyph"] == "vehicle"
 
     entity = _entities(cid, "compare-session")[0]
     renamed = _save(client, cid, "Harbour after", rename_from="Harbour change")
@@ -181,6 +188,13 @@ def test_compare_session_roundtrip_rename_and_sidebar_delete(client):
         lambda spec: spec.update(frame={"points": [[2, 48], [2, 48]]}),
         lambda spec: spec.update(frame={"points": [[2, 48], [200, 48]]}),
         lambda spec: spec.update(change_assist={"method": "ratio"}),
+        # a stamp is one point, and its number is a count rather than a label
+        lambda spec: spec.update(annotations=[{
+            "id": "x", "kind": "number", "colour": "#ffffff", "points": [[2, 48], [3, 48]],
+        }]),
+        lambda spec: spec.update(annotations=[{
+            "id": "x", "kind": "icon", "colour": "#ffffff", "points": [[2, 48]], "number": 0,
+        }]),
     ],
 )
 def test_compare_session_refuses_what_it_cannot_reopen(client, mutate):
@@ -254,7 +268,7 @@ def test_change_assist_accepts_comparable_pairs(client, a, b, method):
     ("a", "b", "method", "reason"),
     [
         (_side("esri-world-imagery"), _side("osm"), "colour", "reads Sentinel-2"),
-        (_side("esri-wayback", wayback_release=146), _side("esri-wayback", wayback_release=146), "colour", "different Esri"),
+        (_side("esri-wayback", wayback_release=146), _side("esri-wayback", wayback_release=146), "colour", "same picture"),
         (
             _side("esri-wayback", wayback_release=145, overlays=["roads"]),
             _side("esri-wayback", wayback_release=146),

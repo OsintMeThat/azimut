@@ -74,11 +74,11 @@ export function confidenceLine(row, label = (value) => value) {
 export function readingNotes(body) {
   const notes = [];
   if (body?.truncated) {
-    notes.push(`Added up ${body.read} of ${body.matched} statements`);
+    notes.push(`Added up ${body.read} of ${body.matched} claims`);
   }
   const loose = body?.unattributed ?? 0;
   if (loose > 0) {
-    notes.push(`${loose} ${loose === 1 ? 'statement says' : 'statements say'} nothing about what it concerns`);
+    notes.push(`${loose} ${loose === 1 ? 'claim says' : 'claims say'} nothing about what it concerns`);
   }
   return notes;
 }

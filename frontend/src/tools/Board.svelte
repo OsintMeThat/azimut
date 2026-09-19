@@ -85,10 +85,18 @@
   import PasteDialog from '../components/PasteDialog.svelte';
   import SnapshotDetails from '../components/SnapshotDetails.svelte';
   import ViewSwitch from '../components/ViewSwitch.svelte';
+  import QuickClaim, { claimSeat } from '../components/QuickClaim.svelte';
+  import { claimActionTitle } from '../lib/quickClaim.js';
+  import { loadRelationTypes } from '../lib/relations.svelte.js';
 
   const PAGE = 100;
 
   loadEntityTypes();
+  // The row's claim press is offered where the verb registry gives the entity a seat.
+  loadRelationTypes();
+
+  /** The row a claim is being filed from, while its form is open. */
+  let claimFor = $state(null);
 
   /**
    * The question being asked of the case, as one value (`lib/entityFilter.js`).
@@ -261,10 +269,10 @@
         hint: snapshotReading
           ? 'A frozen snapshot holds rows rather than a question to add up'
           : nothingToDraw
-            ? 'No statement counts anything about a subject yet'
+            ? 'No claim counts anything about a subject yet'
             : empty
               ? 'Nothing in the table to add up'
-              : 'What the statements about these come to, per subject',
+              : 'What the claims about these come to, per subject',
       },
     ];
   });
@@ -1088,7 +1096,7 @@
            statements would be arithmetically right and read as more than it is. -->
       {#if nothingTotalled(tally)}
         {#if !tallying}
-          <p class="empty">No statement in this narrowing.</p>
+          <p class="empty">No claim in this narrowing.</p>
         {/if}
       {:else}
         {#each readingNotes(tally) as note (note)}
@@ -1098,10 +1106,10 @@
           <thead>
             <tr>
               <th>Subject</th>
-              <th title="added over the statements that carried a number">
-                What the statements come to
+              <th title="added over the ones that carried a number">
+                What the claims come to
               </th>
-              <th title="how many statements point at this subject">Statements</th>
+              <th title="how many of them point at this subject">Claims</th>
             </tr>
           </thead>
           <tbody>
@@ -1289,6 +1297,20 @@
                    row is under the pointer, like the review clicks beside it. -->
               <td class="go">
                 {#if !snapshotReading}
+                {@const seat = claimSeat(entity)}
+                {#if seat}
+                  <button
+                    class="btn btn-ghost btn-sm act"
+                    aria-label="File a claim from {entity.label}"
+                    title={claimActionTitle(seat.slot)}
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      claimFor = entity;
+                    }}
+                  >
+                    <Icon name="quote" size={13} />
+                  </button>
+                {/if}
                 <button
                   class="btn btn-ghost btn-sm act"
                   aria-label="Show {entity.label} in the graph"
@@ -1358,6 +1380,17 @@
     onconfirm={confirmPaste}
     onclose={() => (pasted = null)}
   />
+{/if}
+
+{#if claimFor}
+  <Modal title="New claim" onclose={() => (claimFor = null)} width="560px">
+    <QuickClaim
+      caseId={caseState.current.id}
+      entity={claimFor}
+      onsaved={() => (claimFor = null)}
+      oncancel={() => (claimFor = null)}
+    />
+  </Modal>
 {/if}
 
 {#if openId && !snapshotReading}

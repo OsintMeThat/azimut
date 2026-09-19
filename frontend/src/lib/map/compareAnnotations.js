@@ -13,6 +13,9 @@
  */
 
 import { formatArea, formatDistance, haversine, polygonArea } from '../measure.js';
+import {
+  ICON_BOX, PROOF_ICONS, glyphInk, iconByName, iconOrigin, isSolidIcon,
+} from '../proofIcons.js';
 
 export const ANNOTATION_COLOURS = Object.freeze([
   '#f6a81a', '#22c55e', '#ef4444', '#38bdf8', '#e879f9', '#f4f5f6', '#111827',
@@ -29,12 +32,20 @@ export const ANNOTATION_TOOLS = Object.freeze([
   { id: 'line', icon: 'line', label: 'Line', shortcut: 'L', points: 2 },
   { id: 'freehand', icon: 'freehand', label: 'Freehand', shortcut: 'D', points: 'drag' },
   { id: 'text', icon: 'text', label: 'Note', shortcut: 'T', points: 1 },
+  // The two the Proof Maker stamps, on the ground instead of on a panel: one
+  // press each, and the tool stays in hand because numbering four things or
+  // marking six vehicles is one act rather than four or six.
+  { id: 'number', icon: 'numbered', label: 'Numbered marker', shortcut: 'N', points: 1, stamp: true },
+  { id: 'icon', icon: 'pin', label: 'Symbol', shortcut: 'S', points: 1, stamp: true },
 ]);
+
+/** The kinds stamped whole with one press, rather than dragged out. */
+export const STAMPED = new Set(ANNOTATION_TOOLS.filter((tool) => tool.stamp).map((tool) => tool.id));
 
 const KINDS = new Set(ANNOTATION_TOOLS.filter((tool) => tool.points).map((tool) => tool.id));
 const LIMITS = {
   text: [1, 1], arrow: [2, 2], line: [2, 2], measure: [2, 2], rect: [2, 2], ellipse: [2, 2],
-  freehand: [2, 400], polygon: [3, 200],
+  freehand: [2, 400], polygon: [3, 200], number: [1, 1], icon: [1, 1],
 };
 
 export const canFill = (kind) => kind === 'rect' || kind === 'ellipse' || kind === 'polygon';
@@ -75,12 +86,64 @@ export function comparisonAnnotations(value) {
       fill_opacity: canFill(raw.kind) ? bounded(raw.fill_opacity, 0, 0, 1) : 0,
       font_size: Math.round(bounded(raw.font_size, 16, 8, 72)),
       text,
+      // What a stamp carries: its number, or the glyph it draws. A glyph this
+      // build does not know is drawn as the first one rather than as nothing,
+      // so a comparison made on a newer version still shows a mark there.
+      number: Math.round(bounded(raw.number, 1, 1, 999)),
+      glyph: iconByName(raw.glyph) ? String(raw.glyph) : PROOF_ICONS[0].name,
     }];
   });
 }
 
 /** Whether a mark is drawn on the picture of one side. */
 export const onSide = (mark, letter) => mark.side === 'both' || mark.side === letter;
+
+/**
+ * How wide a stamped mark is drawn, in screen pixels.
+ *
+ * Its own size number, which is the one the rail's slider sets — a stamp has no
+ * stroke to widen and no ground extent to read, so the control that sizes a
+ * note's letters sizes these.
+ */
+export const markSize = (mark) => Math.max(12, Math.round((mark.font_size ?? 16) * 1.8));
+
+/** The ink a numeral takes over a disc of the mark's own colour: it has to be
+ *  read over whatever the disc is standing on. */
+export const stampInk = (mark) => glyphInk(mark.colour, 1);
+
+/**
+ * Where a symbol's 24-unit box lands on screen, given the point it is pinned to.
+ *
+ * The glyph keeps the point it names rather than the corner it occupies, the way
+ * the Proof Maker's does, so a pin's tip is on the ground it was put on.
+ */
+export function glyphBox(mark, [x, y], scale = 1) {
+  const size = markSize(mark) * scale;
+  const origin = iconOrigin(markGlyph(mark).name, size);
+  return { x: x + origin.x, y: y + origin.y, size, scale: size / ICON_BOX };
+}
+
+/** The glyph a symbol draws, always one this build knows. */
+export const markGlyph = (mark) => iconByName(mark.glyph) ?? PROOF_ICONS[0];
+
+/**
+ * The first number no marker of this colour holds.
+ *
+ * Counted per colour, as the Proof Maker counts them: colour is what says "same
+ * feature" on both surfaces, so a second colour is a second series and starts
+ * back at 1. A gap left by a deleted marker is refilled.
+ */
+export function nextMarkNumber(marks, colour) {
+  const taken = new Set(
+    (marks ?? [])
+      .filter((mark) => mark.kind === 'number' && mark.colour === colour)
+      .map((mark) => Number(mark.number))
+      .filter(Number.isFinite)
+  );
+  let n = 1;
+  while (taken.has(n)) n += 1;
+  return n;
+}
 
 const asLatLon = ([lon, lat]) => ({ lat, lon });
 
@@ -225,6 +288,52 @@ function drawPlate(ctx, text, x, y, { colour, fontSize, scale, centred }) {
 }
 
 /**
+ * A stamped mark on a 2D context: a numbered disc, or a symbol in its box.
+ *
+ * Drawn from the same numbers the map's own SVG draws from, so what the export
+ * holds is what was on screen.
+ */
+function drawStamp(ctx, mark, [x, y], scale) {
+  const size = markSize(mark) * scale;
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,.55)';
+  ctx.shadowBlur = 3 * scale;
+  if (mark.kind === 'number') {
+    const ink = stampInk(mark);
+    ctx.beginPath();
+    ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+    ctx.fillStyle = mark.colour;
+    ctx.fill();
+    ctx.lineWidth = Math.max(1, size * 0.05);
+    ctx.strokeStyle = ink;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = ink;
+    ctx.font = `700 ${Math.round(size * 0.58)}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(mark.number), x, y);
+  } else {
+    const entry = markGlyph(mark);
+    const box = glyphBox(mark, [x, y], scale);
+    ctx.translate(box.x, box.y);
+    ctx.scale(box.scale, box.scale);
+    const path = new Path2D(entry.path);
+    if (isSolidIcon(entry.name)) {
+      ctx.fillStyle = mark.colour;
+      ctx.fill(path, 'evenodd');
+    } else {
+      ctx.strokeStyle = mark.colour;
+      // the glyph is drawn scaled, so the width is divided back out: a bigger
+      // symbol is a bigger drawing, not a fatter outline
+      ctx.lineWidth = Math.max(1.5, mark.stroke_width * scale) / box.scale;
+      ctx.stroke(path);
+    }
+  }
+  ctx.restore();
+}
+
+/**
  * Burn marks into an exported picture. `project` maps `[lon, lat]` to that
  * picture's pixels; `scale` is its pixels per CSS pixel, so strokes and labels
  * keep the weight they had on screen.
@@ -239,7 +348,9 @@ export function drawAnnotations(ctx, marks, project, { scale = 1, units = 'metri
     const shape = projectMark(mark, project);
     ctx.lineWidth = Math.max(1, mark.stroke_width * scale);
     ctx.strokeStyle = mark.colour;
-    if (mark.kind !== 'text') {
+    if (STAMPED.has(mark.kind)) {
+      drawStamp(ctx, mark, shape.anchor, scale);
+    } else if (mark.kind !== 'text') {
       // a thin dark casing keeps a light stroke readable on bright ground
       ctx.save();
       ctx.shadowColor = 'rgba(0,0,0,.55)';

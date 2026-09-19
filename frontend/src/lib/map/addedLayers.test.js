@@ -6,12 +6,13 @@ import {
   countLabel,
   counts,
   drawable,
+  followed,
   GROUP_SPACE,
   freshness,
   legend,
   looksLikeUrl,
   PALETTE,
-  refreshable,
+  renewsOnShow,
   searchFeatures,
   SEARCH_LIMIT,
   sourceLabel,
@@ -68,6 +69,36 @@ describe('the counter states both numbers', () => {
 
   it('never goes negative on a hidden group the summary no longer holds', () => {
     expect(counts(layer({ hidden: ['Gone'] })).visible).toBe(3200);
+  });
+});
+
+describe('a period set on the row', () => {
+  it('is what the counter states, as the store counted it', () => {
+    expect(countLabel(layer({ shown: 212 }))).toBe(`3${GROUP_SPACE}200 features · 212 shown`);
+  });
+
+  it('is what each legend group counts', () => {
+    const rows = legend(layer({ shownBy: { Checkpoints: 40 } }));
+
+    expect(rows.map((row) => row.count)).toEqual([40, 0]);
+  });
+
+  it('marks a match outside it, which going to lets every date back in', () => {
+    const found = searchFeatures(
+      {
+        features: [
+          { properties: { name: 'Early gate', category: 'Checkpoints', date: '2026-08-01', index: 0 } },
+          { properties: { name: 'Late gate', category: 'Checkpoints', date: '2026-09-10', index: 1 } },
+        ],
+      },
+      'gate',
+      { period: { start: '2026-09-01', end: '' } }
+    );
+
+    expect(found.results.map((hit) => [hit.name, hit.outside, hit.hidden])).toEqual([
+      ['Early gate', true, true],
+      ['Late gate', false, false],
+    ]);
   });
 });
 
@@ -151,28 +182,62 @@ describe('where a row says it came from', () => {
   });
 });
 
-describe('what the map draws and what a case open re-reads', () => {
+describe('a GeoConfirmed layer', () => {
+  const geoconfirmed = (source = {}) =>
+    layer({
+      title: 'GeoConfirmed · Ukraine · last 30 days',
+      source: { kind: 'geoconfirmed', url: 'https://geoconfirmed.org/map/ukraine', ...source },
+    });
+
+  it('is followed, like an address, and a file is not', () => {
+    expect(followed(geoconfirmed())).toBe(true);
+    expect(followed(layer({ source: { kind: 'url', url: 'https://x.test/a.kml' } }))).toBe(true);
+    expect(followed(layer())).toBe(false);
+  });
+
+  it('says when it was last read rather than when it was opened', () => {
+    expect(freshness(geoconfirmed(), NOW)).toBe('read 2 h ago');
+  });
+
+  it('names GeoConfirmed, and says when it keeps to one area', () => {
+    expect(sourceLabel(geoconfirmed())).toBe('GeoConfirmed');
+    expect(sourceLabel(geoconfirmed({ area: [30, 44, 40, 52] }))).toBe(
+      'GeoConfirmed · limited area'
+    );
+  });
+
+  it('credits geoconfirmed.org on the map', () => {
+    expect(attribution(geoconfirmed())).toBe(
+      'GeoConfirmed · Ukraine · last 30 days — geoconfirmed.org'
+    );
+  });
+
+  it('is re-read when first switched on, like any followed map', () => {
+    expect(renewsOnShow(geoconfirmed())).toBe(true);
+  });
+
+  it('is not when it holds the whole history, which asked to move only on Refresh', () => {
+    expect(renewsOnShow({ ...geoconfirmed(), refresh: { on_open: false } })).toBe(false);
+  });
+});
+
+describe('what the map draws and what switching on re-reads', () => {
   it('draws the enabled layers and nothing else', () => {
     const rows = [layer(), layer({ name: 'Off', enabled: false })];
 
     expect(drawable(rows).map((row) => row.name)).toEqual(['Sightings']);
   });
 
-  it('re-reads only a subscription that is enabled and asked to be', () => {
-    // the network boundary, stated as data: a file has nothing to read, a
-    // disabled layer costs nothing, and a subscription can opt out
-    const rows = [
-      layer({ name: 'File' }),
-      layer({ name: 'Off', enabled: false, source: { kind: 'url', url: 'https://x.test/1' } }),
-      layer({
-        name: 'Manual',
-        source: { kind: 'url', url: 'https://x.test/2' },
-        refresh: { on_open: false },
-      }),
-      layer({ name: 'Followed', source: { kind: 'url', url: 'https://x.test/3' } }),
-    ];
-
-    expect(refreshable(rows).map((row) => row.name)).toEqual(['Followed']);
+  it('re-reads only a subscription that did not opt out', () => {
+    // the network boundary, stated as data: a file has nothing to read, and a
+    // subscription can ask to move only when Refresh is pressed
+    expect(renewsOnShow(layer({ name: 'File' }))).toBe(false);
+    expect(
+      renewsOnShow(
+        layer({ source: { kind: 'url', url: 'https://x.test/2' }, refresh: { on_open: false } })
+      )
+    ).toBe(false);
+    expect(renewsOnShow(layer({ source: { kind: 'url', url: 'https://x.test/3' } }))).toBe(true);
   });
 });
 

@@ -13,13 +13,24 @@
   let {
     session, filters, analyses, activeFrame, shared, removeFrame, setActive,
     cropAspect = $bindable(null), cropEditing = $bindable(false), beginCrop, commitCrop,
-    setRotation, rotationBusy = false,
+    setRotation, rotationBusy = false, reverse,
   } = $props();
 
   let showAnalyze = $state(false);
   let analyzing = $state(null);
   let analysis = $state(null);
   let canvasEl = $state();
+  let reversing = $state(false);
+
+  async function reverseActive() {
+    if (!activeFrame || reversing) return;
+    reversing = true;
+    try {
+      await reverse(activeFrame);
+    } finally {
+      reversing = false;
+    }
+  }
 
   async function reset() {
     if (!activeFrame) return;
@@ -96,7 +107,7 @@
           <span class="num">{i + 1}</span>
           {#if session.saved[`frame:${fr.id}`]}<span class="saved" title="Saved"><Icon name="check" size={11} /></span>{/if}
         </button>
-        <button class="del" onclick={() => removeFrame(fr.id)} aria-label="Remove frame"><Icon name="x" size={12} /></button>
+        <button class="del" onclick={() => removeFrame(fr.id)} aria-label="Remove frame" title="Remove frame"><Icon name="x" size={12} /></button>
       </div>
     {/each}
     {#if session.frames.length === 0}
@@ -137,6 +148,14 @@
         {/if}
       </div>
       <button class="btn btn-ghost btn-sm reset" onclick={reset}><Icon name="reset" size={14} /> Reset frame</button>
+      <button
+        class="btn btn-sm reverse"
+        disabled={reversing}
+        onclick={reverseActive}
+        title="Search the web for this image as it is adjusted and cropped here"
+      >
+        <Icon name="search" size={14} /> {reversing ? 'Preparing…' : 'Reverse image search'}
+      </button>
     </div>
 
     <div class="section">
@@ -274,7 +293,8 @@
     color: var(--accent);
     border-color: var(--accent);
   }
-  .reset {
+  .reset,
+  .reverse {
     align-self: flex-start;
   }
   .section-head {

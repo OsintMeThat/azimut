@@ -3,32 +3,41 @@
   import Icon from '../../components/Icon.svelte';
   import { COMPARE_MODES } from '../../lib/map/compare.js';
 
-  let { mode, change, onmode = () => {}, onswap = () => {} } = $props();
+  let { mode, change, detect = { ok: true }, onmode = () => {}, onswap = () => {} } = $props();
+
+  // Two kinds of choice, named: how the pair is shown, and what gets computed
+  // over it. A computing mode says what it needs before it is pressed.
+  const GROUPS = [
+    { id: 'read', label: 'View' },
+    { id: 'find', label: 'Analysis' },
+  ];
+  const needs = $derived({ change, analysis: detect });
 </script>
 
 <div class="mode-dock cmp-glass" role="toolbar" aria-label="Comparison view">
-  <div class="cmp-seg">
-    {#each COMPARE_MODES as entry, index (entry.id)}
-      {@const blocked = entry.id === 'change' && !change.ok}
-      {#if index > 0 && entry.group !== COMPARE_MODES[index - 1].group}
-        <!-- Left of the rule: how the pair is shown. Right of it: what gets
-             computed over the pair, which is a different kind of choice. -->
-        <span class="group-rule" aria-hidden="true"></span>
-      {/if}
-      <button
-        class="mode-btn"
-        class:on={mode === entry.id}
-        class:blocked
-        class:find={entry.group === 'find'}
-        aria-pressed={mode === entry.id}
-        title={blocked ? change.reason : `${entry.label} (${entry.key})`}
-        onclick={() => onmode(entry.id)}
-      >
-        <Icon name={entry.icon} size={14} />
-        <span>{entry.label}</span>
-      </button>
-    {/each}
-  </div>
+  {#each GROUPS as group (group.id)}
+    <div class="group" role="group" aria-label={group.label}>
+      <span class="group-name">{group.label}</span>
+      <div class="cmp-seg">
+        {#each COMPARE_MODES.filter((entry) => entry.group === group.id) as entry (entry.id)}
+          {@const missing = needs[entry.id] && !needs[entry.id].ok ? needs[entry.id].reason : ''}
+          <button
+            class="mode-btn"
+            class:on={mode === entry.id}
+            class:blocked={Boolean(missing)}
+            class:find={entry.group === 'find'}
+            aria-pressed={mode === entry.id}
+            title={missing || `${entry.label} (${entry.key})`}
+            onclick={() => onmode(entry.id)}
+          >
+            <Icon name={entry.icon} size={14} />
+            <span>{entry.label}</span>
+            {#if missing}<Icon name="alert" size={11} />{/if}
+          </button>
+        {/each}
+      </div>
+    </div>
+  {/each}
   <button class="cmp-icon" onclick={onswap} title="Swap A and B" aria-label="Swap A and B">
     <Icon name="swap" size={15} />
   </button>
@@ -38,18 +47,25 @@
   .mode-dock {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px;
+    gap: 10px;
+    padding: 4px 6px;
+  }
+  .group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .group-name {
+    font-size: var(--fs-xs);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--glass-dim);
   }
   .mode-btn.blocked:not(.on) {
     color: var(--glass-dim);
   }
-  .group-rule {
-    align-self: center;
-    width: 1px;
-    height: 18px;
-    margin: 0 4px;
-    background: var(--glass-line);
+  .mode-btn.blocked :global(svg:last-child) {
+    color: var(--warn);
   }
   /* A computing mode stays legible as one when it is on: the pair is unchanged
      underneath and something is being laid over it. */
@@ -57,7 +73,8 @@
     color: var(--accent);
   }
   @media (max-width: 1100px) {
-    .mode-btn:not(.find) span {
+    .mode-btn:not(.find) span,
+    .group-name {
       display: none;
     }
   }

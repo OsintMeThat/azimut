@@ -38,9 +38,11 @@
     featureList,
     moveLegendColor,
     setColor,
-    canMoveShapeUp,
-    canMoveShapeDown,
-    moveShape,
+    canBringForward,
+    canSendBackward,
+    bringForward,
+    sendBackward,
+    moveShapeTo,
     kindIcon,
     kindLabel,
     duplicateShape,
@@ -49,9 +51,89 @@
   } = $props();
 
   // A row says which symbol it is, not merely that it is one: eleven rows all
-  // reading "Symbol" would be a list nobody can navigate.
-  const rowLabel = (shape) =>
-    (shape.kind === 'icon' ? iconByName(shape.name)?.label : null) ?? kindLabel[shape.kind];
+  // reading "Symbol" would be a list nobody can navigate. A marker says its
+  // number for the same reason — that number is the whole of what it states.
+  const rowLabel = (shape) => {
+    if (shape.kind === 'icon') return iconByName(shape.name)?.label ?? kindLabel.icon;
+    if (shape.kind === 'number') return `${kindLabel.number} ${shape.n ?? ''}`.trim();
+    return kindLabel[shape.kind];
+  };
+
+  /**
+   * The elements front-first, which is how the Panels list above already reads
+   * and how every layer list anywhere reads: the row on top is the mark on top
+   * of the picture.
+   *
+   * The array runs the other way — a panel's shapes are drawn in array order, so
+   * the last one is the one in front — and that is the spec's order, not a
+   * reading order. So it is turned round here and nowhere else, and each row
+   * carries the index it came from.
+   */
+  const rows = $derived(proof.shapes.map((shape, index) => ({ shape, index })).reverse());
+
+  /**
+   * Which picture each row is drawn on, named the way the lists above number
+   * them — but shown only once more than one picture holds elements.
+   *
+   * The order is one order for the whole proof, while what an element is drawn
+   * *over* is decided inside its own picture: two marks on two panels are
+   * stacked by the panels. So a row moved past a row of another picture changes
+   * nothing on screen, and this is the reason, on the row, rather than an arrow
+   * greyed out with none.
+   */
+  const surfaceNames = $derived.by(() => {
+    const names = new Map();
+    proof.panels.forEach((panel, at) => names.set(panel.id, `P${at + 1}`));
+    proof.pastes.forEach((paste, at) => names.set(paste.id, `I${at + 1}`));
+    return names;
+  });
+  const manySurfaces = $derived(new Set(proof.shapes.map((shape) => shape.panel)).size > 1);
+
+  // Dragging a row to reorder it. A press is armed first and becomes a drag a
+  // few pixels later, so a plain click still picks the element it lands on, and
+  // a press that starts on a field or a button belongs to that control.
+  let armed = null;
+  let dragging = $state(-1); // the seat being dragged, in list order
+  let over = $state(-1); // the seat it would land on
+
+  function rowPointerDown(event, seat) {
+    if (event.button !== 0 || event.target.closest('input, button, label')) return;
+    armed = { seat, x: event.clientX, y: event.clientY };
+  }
+
+  function rowPointerMove(event) {
+    if (!armed) return;
+    if (Math.hypot(event.clientX - armed.x, event.clientY - armed.y) < 4) return;
+    dragging = armed.seat;
+    over = armed.seat;
+    armed = null;
+  }
+
+  function rowPointerEnter(seat) {
+    if (dragging >= 0) over = seat;
+  }
+
+  function endDrag() {
+    if (dragging >= 0 && over >= 0 && over !== dragging) {
+      moveShapeTo(rows[dragging].index, rows[over].index);
+    }
+    armed = null;
+    dragging = -1;
+    over = -1;
+  }
+
+  // The release can land anywhere — outside the list, outside the window — so it
+  // is heard at the window for as long as the panel is up. A press that never
+  // became a drag is disarmed by the same handler, or it would turn into one the
+  // next time the pointer crossed that row with no button held.
+  $effect(() => {
+    window.addEventListener('pointerup', endDrag, true);
+    window.addEventListener('pointercancel', endDrag, true);
+    return () => {
+      window.removeEventListener('pointerup', endDrag, true);
+      window.removeEventListener('pointercancel', endDrag, true);
+    };
+  });
 </script>
 
 <!-- Coloured border for a panel or a pasted image. Picking a colour adds one,
@@ -300,30 +382,48 @@
   </span>
 </button>
 {#if !collapsed.elements}
-  {#each proof.shapes as shape, index (shape.id)}
+  <!-- Front-first: the row on top is the mark on top of the picture, and it is
+       dragged up to bring it further forward. -->
+  {#each rows as { shape, index }, seat (shape.id)}
     <div
       class="shape-row"
       class:selected={selectionLive && selectedIds.includes(shape.id)}
+      class:dragging={dragging === seat}
+      class:landing={dragging >= 0 && over === seat && dragging !== seat}
+      class:from-below={dragging > seat}
       onclick={(event) => selectShape(shape.id, event.shiftKey)}
+      onpointerdown={(event) => rowPointerDown(event, seat)}
+      onpointermove={rowPointerMove}
+      onpointerenter={() => rowPointerEnter(seat)}
       role="button"
       tabindex="0"
+      title="Drag to reorder"
       onkeydown={(event) => event.key === 'Enter' && selectShape(shape.id, event.shiftKey)}
     >
       <div class="reorder">
         <button
           class="btn btn-ghost reorder-btn"
-          disabled={!canMoveShapeUp(index)}
-          title="Move up (z-order within its panel)"
-          onclick={(event) => { event.stopPropagation(); moveShape(index, -1); }}
+          disabled={!canBringForward(index)}
+          title="Bring forward (over the others on its picture)"
+          onclick={(event) => { event.stopPropagation(); bringForward(index); }}
         ><Icon name="chevronUp" size={11} /></button>
         <button
           class="btn btn-ghost reorder-btn"
-          disabled={!canMoveShapeDown(index)}
-          title="Move down (z-order within its panel)"
-          onclick={(event) => { event.stopPropagation(); moveShape(index, 1); }}
+          disabled={!canSendBackward(index)}
+          title="Send backward"
+          onclick={(event) => { event.stopPropagation(); sendBackward(index); }}
         ><Icon name="chevronDown" size={11} /></button>
       </div>
-      <span class="chip" style:background={shape.color}></span>
+      <!-- A blur box has no colour to show: it is the one mark drawn from the
+           picture's own pixels rather than in ink. -->
+      {#if shape.kind !== 'blur'}
+        <span class="chip" style:background={shape.color}></span>
+      {/if}
+      {#if manySurfaces}
+        <span class="on-what" title="Drawn on {surfaceNames.get(shape.panel) ?? 'a picture'}">
+          {surfaceNames.get(shape.panel) ?? '–'}
+        </span>
+      {/if}
       {#if shape.kind === 'icon'}
         <ProofGlyph name={shape.name} size={13} />
       {:else}
@@ -370,7 +470,9 @@
           ><Icon name="x" size={11} /></button>
         {/if}
       {:else}
-        <span class="el-label">{rowLabel(shape)} <span class="el-id">#{index + 1}</span></span>
+        <!-- Numbered by where the row sits, so the count follows the eye down
+             the list rather than the array underneath it. -->
+        <span class="el-label">{rowLabel(shape)} <span class="el-id">#{seat + 1}</span></span>
       {/if}
       <button
         class="btn btn-ghost btn-sm"
@@ -384,6 +486,9 @@
       ><Icon name="trash" size={13} /></button>
     </div>
   {/each}
+  {#if manySurfaces}
+    <div class="list-hint">Elements stack inside the picture they are drawn on.</div>
+  {/if}
 {/if}
 
 <style>
@@ -579,9 +684,36 @@
     color: var(--text-3);
     cursor: pointer;
   }
+  /* A row is dragged by its middle, and a drag over words selects them unless it
+     is said not to. The label a text element carries is still a field, so it
+     keeps its own selection. */
+  .shape-row {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .shape-row input {
+    -webkit-user-select: text;
+    user-select: text;
+  }
   .shape-row:hover { background: var(--bg-2); }
   .shape-row.selected { border-color: var(--accent); background: var(--accent-soft); }
+  /* Dragging: the row being carried fades, and a rule marks the gap it would
+     drop into — on the side it is coming from, so the line is between the two
+     rows it would end up between. */
+  .shape-row.dragging { opacity: 0.45; }
+  .shape-row.landing { box-shadow: inset 0 -2px 0 var(--accent); }
+  .shape-row.landing.from-below { box-shadow: inset 0 2px 0 var(--accent); }
   .chip { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .on-what {
+    flex-shrink: 0;
+    padding: 0 4px;
+    border-radius: var(--r-sm);
+    background: var(--bg-3);
+    color: var(--text-3);
+    font-size: 9px;
+    font-weight: 700;
+  }
+  .list-hint { margin: 4px 0 2px; font-size: var(--fs-xs); color: var(--text-3); }
   .comment-input {
     flex: 1;
     font-size: var(--fs-xs);

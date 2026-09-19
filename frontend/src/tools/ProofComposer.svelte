@@ -14,7 +14,7 @@
   import { templatesState } from '../lib/state.svelte.js';
   import Icon from '../components/Icon.svelte';
   import Modal from '../components/Modal.svelte';
-  import TemporalInput from '../components/TemporalInput.svelte';
+  import DateField from '../components/DateField.svelte';
   import SearchInput from '../components/SearchInput.svelte';
   import FolderBrowser from '../components/FolderBrowser.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
@@ -37,7 +37,7 @@
     BG, TEXT_MAIN, normSpace, textColors,
     layoutPanels, panelsBottom, panelScale, freeNormalizeDelta, legendLineHeight, footerBand,
     attributionLine, docSize, offsetShape, autoLayoutRows,
-    autoCoords, formatCoords, autoSourceUrls, proofSource, statedSources,
+    autoCoords, formatCoords, autoSourceUrls, proofSource, statedSources, openableSource,
     specPoints, statePanelPoint, footerLines, coordsPostLines, proofCoordsLines, MAX_POINTS,
     normalizeMaterial, resolveSourceUrls,
     toSpec, newId, loadImage, orderedFeatureColors, notesFromShapes,
@@ -68,6 +68,8 @@
     viewCentrePoint,
   } from '../lib/proofEdits.js';
   import {
+    blurPatch,
+    blurRadiusFor,
     mapSurfaceShapes,
     normalizeSourceCrop,
     normalizeSurfaceAngle,
@@ -103,6 +105,8 @@
     { id: 'curve', icon: 'curve', label: 'Curve (click points, double-click to finish)', shortcut: 'c' },
     { id: 'freehand', icon: 'freehand', label: 'Freehand', shortcut: 'd' },
     { id: 'text', icon: 'text', label: 'Text', shortcut: 't' },
+    { id: 'number', icon: 'numbered', label: 'Numbered marker', shortcut: 'n' },
+    { id: 'blur', icon: 'blurBox', label: 'Blur box', shortcut: 'b' },
   ];
 
   // Document state. Notes are keyed by color, shapes bind to surfaces and pasted
@@ -1732,6 +1736,20 @@
       dirty = true;
       return;
     }
+    // A numbered marker is stamped like a symbol, and keeps the tool: numbering
+    // four things in a picture is one act. The number is the first one free in
+    // its own colour, so deleting #2 and stamping again fills the hole rather
+    // than leaving a proof that counts 1, 3, 4.
+    if (tool === 'number') {
+      const s = {
+        id: newId('s'), panel: panel.id, kind: 'number', color,
+        x: hit.nx, y: hit.ny, size: iconSizeFor(hit.box.baseScale), n: nextMarkerNumber(color),
+      };
+      proof.shapes.push(s);
+      selectedIds = [s.id];
+      dirty = true;
+      return;
+    }
     // curve: each click drops a vertex; double-click / Enter finishes
     if (tool === 'curve') {
       // A vertex dropped on another surface ends the curve where it was and
@@ -1771,6 +1789,16 @@
     if (tool === 'rect') {
       node = new Konva.Rect({
         x: hit.nx, y: hit.ny, width: 1, height: 1, cornerRadius: 2, fill: paint, ...common,
+      });
+    } else if (tool === 'blur') {
+      // The draft is a dashed box over a darkened patch: the blur itself is
+      // built from the picture once the box is a box, and a filter re-applied
+      // on every pointer move would blur the whole drag.
+      node = new Konva.Rect({
+        x: hit.nx, y: hit.ny, width: 1, height: 1,
+        fill: 'rgba(20, 22, 26, 0.45)',
+        dash: [7 / hit.box.baseScale, 5 / hit.box.baseScale],
+        ...common,
       });
     } else if (tool === 'ellipse') {
       node = new Konva.Ellipse({ x: hit.nx, y: hit.ny, radiusX: 1, radiusY: 1, fill: paint, ...common });
@@ -1830,7 +1858,7 @@
       const lx = points[points.length - 2];
       const ly = points[points.length - 1];
       if (nx !== lx || ny !== ly) node.points([...points, nx, ny]);
-    } else if (kind === 'rect') {
+    } else if (kind === 'rect' || kind === 'blur') {
       node.setAttrs({
         x: Math.min(start.x, nx), y: Math.min(start.y, ny),
         width: Math.abs(nx - start.x), height: Math.abs(ny - start.y),
@@ -1883,7 +1911,7 @@
     drawing = null;
     const minSize = 5 / box.scale;
     let shape = null;
-    if (kind === 'rect' && node.width() > minSize && node.height() > minSize) {
+    if ((kind === 'rect' || kind === 'blur') && node.width() > minSize && node.height() > minSize) {
       shape = { kind, x: node.x(), y: node.y(), w: node.width(), h: node.height() };
     } else if (kind === 'ellipse' && node.radiusX() * 2 > minSize && node.radiusY() * 2 > minSize) {
       shape = { kind, x: node.x(), y: node.y(), w: node.radiusX() * 2, h: node.radiusY() * 2 };
@@ -1901,8 +1929,11 @@
     node.destroy();
     if (shape) {
       const s = {
-        id: newId('s'), panel: panel.id, color,
-        strokeWidth: strokeW,
+        id: newId('s'), panel: panel.id,
+        // A blur box carries neither: it hides what is under it rather than
+        // pointing at it, so it is drawn from the picture's own pixels and
+        // nothing ever reads a colour or a line width off it.
+        ...(kind === 'blur' ? {} : { color, strokeWidth: strokeW }),
         // only the kinds that can hold one carry the field, and only once asked
         ...(canFill(kind) && fillOpacity > 0 ? { fillOpacity } : {}),
         ...shape,
@@ -2146,7 +2177,7 @@
       if (panel.img) group.add(surfaceImageNode(panel, image));
       if (panel.frame) group.add(frameNode(panel.frame, image));
       for (const s of proof.shapes.filter((x) => x.panel === panel.id)) {
-        group.add(makeShapeNode(s, box));
+        group.add(makeShapeNode(s, box, panel));
       }
       docLayer.add(group);
       if (panel.caption?.trim()) {
@@ -2238,7 +2269,7 @@
       if (paste.img) group.add(surfaceImageNode(paste, image));
       if (paste.frame) group.add(frameNode(paste.frame, image));
       for (const s of proof.shapes.filter((x) => x.panel === paste.id)) {
-        group.add(makeShapeNode(s, box));
+        group.add(makeShapeNode(s, box, paste));
       }
       docLayer.add(group);
     }
@@ -2397,11 +2428,15 @@
           : panelNode ? [panelNode] : pasteNode ? [pasteNode] : sigNode ? [sigNode] : []
     );
     const selKind = selectedShape?.kind;
-    transformer.keepRatio(!!sigNode || !!panelNode || !!pasteNode || selKind === 'icon');
+    // A marker is a disc and a symbol is a glyph: both keep their ratio, because
+    // an oval number and a squashed symbol are not the same mark drawn bigger.
+    transformer.keepRatio(
+      !!sigNode || !!panelNode || !!pasteNode || selKind === 'icon' || selKind === 'number'
+    );
     transformer.rotateEnabled(
       !!panelNode || !!pasteNode
         || selKind === 'text' || selKind === 'rect' || selKind === 'ellipse' || selKind === 'icon'
-        || selKind === 'freehand'
+        || selKind === 'freehand' || selKind === 'number' || selKind === 'blur'
     );
     // A symbol gets corners only: the side handles are what would let it be
     // stretched, and a squashed symbol is a different symbol. A freehand stroke
@@ -2410,9 +2445,10 @@
     // stroke showed a dashed frame and nothing to pull, which reads as a broken
     // selection rather than a stroke that can only be moved.
     transformer.enabledAnchors(
-      selKind === 'rect' || selKind === 'ellipse' || selKind === 'freehand'
+      selKind === 'rect' || selKind === 'ellipse' || selKind === 'freehand' || selKind === 'blur'
         ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
-        : selKind === 'text' || selKind === 'icon' || panelNode || pasteNode || sigNode
+        : selKind === 'text' || selKind === 'icon' || selKind === 'number'
+            || panelNode || pasteNode || sigNode
           ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
           : []
     );
@@ -2736,9 +2772,15 @@
     if (!from) return { fromBox: null, toBox: null };
     const fromBox = from.box;
     let anchor;
-    if (s.kind === 'rect') {
+    // Boxed kinds answer for their middle, a polyline for the mean of its
+    // vertices, and everything else for the origin it is drawn from. Sorted by
+    // what the shape holds rather than by a list of kinds: a numbered marker and
+    // a blur box both used to fall through to the polyline branch, where reading
+    // the points they have none of threw inside `dragend` — so the drop was
+    // never written down and the mark sprang back to where it had been picked up.
+    if (s.kind === 'rect' || s.kind === 'blur') {
       anchor = { x: node.x() + (s.w ?? 0) / 2, y: node.y() + (s.h ?? 0) / 2 };
-    } else if (s.kind === 'ellipse' || s.kind === 'text' || s.kind === 'icon') {
+    } else if (!Array.isArray(s.points)) {
       anchor = { x: node.x(), y: node.y() };
     } else {
       const pts = s.points.map((v, i) => v + (i % 2 === 0 ? node.x() : node.y()));
@@ -2759,7 +2801,7 @@
   // (that mapping at scale 1). Stroke width and arrow heads are normalised by
   // baseScale so they read the same across image resolutions yet still grow
   // proportionally when the panel is scaled up.
-  function makeShapeNode(s, box) {
+  function makeShapeNode(s, box, surface) {
     const panelScale = box.baseScale;
     if (s.kind === 'text') {
       // The glyph itself: always built first so its measured size drives the
@@ -2827,6 +2869,8 @@
       return node;
     }
     if (s.kind === 'icon') return makeIconNode(s, panelScale);
+    if (s.kind === 'number') return makeNumberNode(s, panelScale);
+    if (s.kind === 'blur') return makeBlurNode(s, surface);
     const sw = (s.strokeWidth ?? 4) / panelScale;
     const common = {
       id: s.id, stroke: s.color, strokeWidth: sw, rotation: s.rotation ?? 0,
@@ -2915,6 +2959,179 @@
    * anchor point the shape stores — the pin's tip, everything else's centre —
    * which is what keeps a pin on its pixel while it is resized or turned.
    */
+  /**
+   * The first number no marker of this colour holds.
+   *
+   * Counted per colour, because colour is what this composer says "same feature"
+   * with everywhere else — the legend is a list of colours. So a second colour
+   * is a second series and starts at 1, rather than carrying on from wherever
+   * the first one stopped and numbering two different things 1 through 9.
+   *
+   * A gap is refilled rather than left: deleting #2 and stamping again gives 2
+   * back, instead of a proof that counts 1, 3, 4.
+   */
+  function nextMarkerNumber(ink) {
+    const taken = new Set(
+      proof.shapes
+        .filter((x) => x.kind === 'number' && x.color === ink)
+        .map((x) => Number(x.n))
+        .filter(Number.isFinite)
+    );
+    let n = 1;
+    while (taken.has(n)) n += 1;
+    return n;
+  }
+
+  /**
+   * A numbered marker: a filled disc carrying its number.
+   *
+   * Filled rather than outlined, and the ink read off the colour, because this
+   * one has to survive being printed over anything — a numeral in a thin line
+   * over a bright roof is a numeral nobody can read.
+   */
+  function makeNumberNode(s, panelScale) {
+    const size = s.size ?? iconSizeFor(panelScale);
+    const ink = glyphInk(s.color, 1);
+    const group = new Konva.Group({
+      id: s.id, x: s.x, y: s.y, rotation: s.rotation ?? 0, draggable: true,
+    });
+    group.add(new Konva.Circle({
+      x: 0, y: 0, radius: size / 2, fill: s.color,
+      stroke: ink, strokeWidth: Math.max(size * 0.04, 0.5),
+    }));
+    const label = new Konva.Text({
+      text: String(s.n ?? 1), fontSize: size * 0.58, fontStyle: 'bold',
+      fontFamily: 'system-ui, sans-serif', fill: ink, listening: false,
+    });
+    label.position({ x: -label.width() / 2, y: -label.height() / 2 });
+    group.add(label);
+    bindShapePick(group, s);
+    group.on('dragstart', () => {
+      dragMoved = true;
+      group.getParent()?.moveToTop();
+    });
+    group.on('dragend', () => {
+      const { fromBox, toBox } = rebindOnDrop(s, group);
+      const p = toBox ? remapPanelXY(group.x(), group.y(), fromBox, toBox) : { x: group.x(), y: group.y() };
+      s.x = p.x;
+      s.y = p.y;
+      dirty = true;
+    });
+    group.on('transformend', () => {
+      s.size = Math.max(ICON_SIZE_MIN / panelScale, Math.abs(size * group.scaleX()));
+      s.x = group.x();
+      s.y = group.y();
+      s.rotation = group.rotation();
+      group.scale({ x: 1, y: 1 });
+      dirty = true;
+    });
+    return group;
+  }
+
+  /**
+   * A box that hides what is under it, by redrawing the picture through a blur.
+   *
+   * Not paint: the same source image is drawn again, cropped to the box and
+   * filtered, so what comes out is the picture's own pixels made unreadable
+   * rather than a rectangle laid over evidence. It follows the panel's turn and
+   * crop because it lives in the panel's own space, and it is rebuilt as it is
+   * dragged so the patch always shows the ground it is standing on.
+   *
+   * A blur is only ever as strong as the box is big (`blurRadiusFor`). Where the
+   * surface has no picture — an image still loading — the box is drawn solid
+   * instead, because a blur box that shows nothing is a blur box that hides
+   * nothing.
+   */
+  function makeBlurNode(s, surface) {
+    const radius = blurRadiusFor(s);
+    const turn = s.rotation ?? 0;
+    const group = new Konva.Group({
+      id: s.id, x: s.x, y: s.y, rotation: turn, draggable: true,
+      // The filter reads a margin of ground around the box; the clip is what
+      // keeps the box the size it was drawn.
+      clip: { x: 0, y: 0, width: s.w, height: s.h },
+    });
+    // The transformer and the marquee both measure a node by what it draws, and
+    // Konva measures a group by its children without looking at the clip — so
+    // this one measured a blur's margin past its own edges, and the frame stood
+    // that far off the box it was framing. It is the box.
+    group.getClientRect = ({ skipTransform, relativeTo } = {}) => {
+      const rect = { x: 0, y: 0, width: s.w, height: s.h };
+      if (skipTransform) return rect;
+      const at = group.getAbsoluteTransform(relativeTo);
+      const corners = [[0, 0], [s.w, 0], [s.w, s.h], [0, s.h]]
+        .map(([x, y]) => at.point({ x, y }));
+      const xs = corners.map((p) => p.x);
+      const ys = corners.map((p) => p.y);
+      const left = Math.min(...xs);
+      const top = Math.min(...ys);
+      return { x: left, y: top, width: Math.max(...xs) - left, height: Math.max(...ys) - top };
+    };
+    // The whole box catches the pointer, including the part hanging off the
+    // picture: what is selected has to be what is drawn.
+    group.add(new Konva.Rect({
+      name: 'blur-hit', x: 0, y: 0, width: s.w, height: s.h, fill: 'transparent', listening: true,
+    }));
+
+    const paint = () => {
+      for (const node of group.find('.blur-fill')) node.destroy();
+      // A turned box still hides the ground it stands on: the patch is read
+      // upright and turned back the other way inside the box (`blurPatch`).
+      const patch = surface?.img
+        ? blurPatch(
+            { x: group.x(), y: group.y(), w: s.w, h: s.h, rotation: group.rotation() },
+            surface.sourceNatural,
+            surface.crop,
+            radius
+          )
+        : null;
+      const node = patch
+        ? new Konva.Image({
+            name: 'blur-fill', image: surface.img,
+            x: patch.dx, y: patch.dy, rotation: patch.turn,
+            width: patch.w, height: patch.h, crop: patch.crop,
+            filters: [Konva.Filters.Blur], blurRadius: radius, listening: false,
+          })
+        : new Konva.Rect({
+            name: 'blur-fill', x: 0, y: 0, width: s.w, height: s.h,
+            fill: 'rgba(20, 22, 26, 0.92)', listening: false,
+          });
+      group.add(node);
+      if (patch) node.cache();
+      node.moveToTop();
+    };
+    paint();
+
+    bindShapePick(group, s);
+    group.on('dragstart', () => {
+      dragMoved = true;
+      group.getParent()?.moveToTop();
+    });
+    // The patch is rebuilt as the box is moved and as it is turned, so what it
+    // shows is always the ground it is standing on rather than a picture of
+    // where it started. A resize waits for the release: the box's own size only
+    // changes there, and until then the scale is doing the work.
+    group.on('dragmove', paint);
+    group.on('transform', paint);
+    group.on('dragend', () => {
+      const { fromBox, toBox } = rebindOnDrop(s, group);
+      const p = toBox ? remapPanelXY(group.x(), group.y(), fromBox, toBox) : { x: group.x(), y: group.y() };
+      s.x = p.x;
+      s.y = p.y;
+      dirty = true;
+    });
+    group.on('transformend', () => {
+      s.w = Math.max(4, Math.abs(s.w * group.scaleX()));
+      s.h = Math.max(4, Math.abs(s.h * group.scaleY()));
+      s.x = group.x();
+      s.y = group.y();
+      s.rotation = group.rotation();
+      group.scale({ x: 1, y: 1 });
+      dirty = true;
+    });
+    return group;
+  }
+
   function makeIconNode(s, panelScale) {
     const entry = iconByName(s.name);
     const size = s.size ?? iconSizeFor(panelScale);
@@ -3088,21 +3305,37 @@
     dirty = true;
   }
 
-  // Reorder a shape among same-panel siblings only — order doubles as z-order
-  // (rebuild() adds shapes to their panel group in array order), so moving
-  // past a shape bound to a different panel would silently no-op visually.
-  function moveShape(index, delta) {
-    const target = groupNeighborIndex(proof.shapes, index, delta, (s) => s.panel);
-    if (target < 0) return;
-    const [s] = proof.shapes.splice(index, 1);
-    proof.shapes.splice(target, 0, s);
+  /**
+   * Move an element to a place in the order: `to` is the index it ends at.
+   *
+   * Forward is *later* in the array, since a panel's shapes are added in array
+   * order and the last one drawn sits on top. The side list shows them
+   * front-first, the way the Panels list above it does, so it speaks of forward
+   * and backward rather than of the array's up and down.
+   *
+   * One order for the whole proof, crossing pictures: the list is one list, and
+   * an arrow greyed out at a picture's edge read as a broken button rather than
+   * as the rule it was enforcing. What an element is actually drawn over is
+   * still decided inside its own picture — two marks on two panels are stacked
+   * by the panels, not by this — and the row says which picture it is on so the
+   * press that changes nothing is a press whose reason is on screen.
+   */
+  function moveShapeTo(from, to) {
+    const last = proof.shapes.length - 1;
+    if (from === to || from < 0 || to < 0 || from > last) return;
+    const next = [...proof.shapes];
+    const [s] = next.splice(from, 1);
+    next.splice(Math.min(to, next.length), 0, s);
+    proof.shapes = next;
     dirty = true;
   }
-  const canMoveShapeUp = (i) => hasGroupNeighbor(proof.shapes, i, -1, (s) => s.panel);
-  const canMoveShapeDown = (i) => hasGroupNeighbor(proof.shapes, i, 1, (s) => s.panel);
+  const bringForward = (i) => moveShapeTo(i, i + 1);
+  const sendBackward = (i) => moveShapeTo(i, i - 1);
+  const canBringForward = (i) => i < proof.shapes.length - 1;
+  const canSendBackward = (i) => i > 0;
 
-  const KIND_ICON = { rect: 'square', ellipse: 'circle', arrow: 'arrow', line: 'line', curve: 'curve', freehand: 'freehand', text: 'text', icon: 'pin' };
-  const KIND_LABEL = { rect: 'Box', ellipse: 'Ellipse', arrow: 'Arrow', line: 'Line', curve: 'Curve', freehand: 'Freehand', text: 'Text', icon: 'Symbol' };
+  const KIND_ICON = { rect: 'square', ellipse: 'circle', arrow: 'arrow', line: 'line', curve: 'curve', freehand: 'freehand', text: 'text', icon: 'pin', number: 'numbered', blur: 'blurBox' };
+  const KIND_LABEL = { rect: 'Box', ellipse: 'Ellipse', arrow: 'Arrow', line: 'Line', curve: 'Curve', freehand: 'Freehand', text: 'Text', icon: 'Symbol', number: 'Marker', blur: 'Blur box' };
 
   // Colour / stroke / fill live-edit everything in hand and always remember the
   // pick as the default for the next drawn one — the last value you touched
@@ -3110,9 +3343,19 @@
   // controls set defaults only, so picking a new colour between two strokes no
   // longer repaints the stroke that came before it (`editableShapes`).
   function setColor(c) {
-    if (editableShapes.length) {
-      const before = [...new Set(editableShapes.map((s) => s.color))];
-      for (const s of editableShapes) s.color = c;
+    // A blur box hides what is under it rather than pointing at it, so it has no
+    // colour to set — and it stays out of the legend for the same reason.
+    const inked = editableShapes.filter((s) => s.kind !== 'blur');
+    if (inked.length) {
+      const before = [...new Set(inked.map((s) => s.color))];
+      for (const s of inked) {
+        // A marker belongs to its colour's series (see nextMarkerNumber), so one
+        // moved to another colour takes the first number free in the series it
+        // joins. Assigned before the colour, so a family recoloured at once
+        // numbers itself in order rather than all landing on the same number.
+        if (s.kind === 'number' && s.color !== c) s.n = nextMarkerNumber(c);
+        s.color = c;
+      }
       // A legend note is written against a colour. Carry it over for each colour
       // the recolouring has just emptied, once no shape wears it any more.
       for (const old of before) {
@@ -3258,6 +3501,8 @@
     else if (e.key === 'd') tool = 'freehand';
     else if (e.key === 't') tool = 'text';
     else if (e.key === 's') tool = 'icon';
+    else if (e.key === 'n') tool = 'number';
+    else if (e.key === 'b') tool = 'blur';
     else if (e.key === 'f') fit();
   }
 
@@ -3766,6 +4011,21 @@
       ? editableShapes.every((s) => s.kind === 'icon' && isSolidIcon(s.name))
       : tool === 'icon' && isSolidIcon(iconName),
   );
+  // Neither a numbered marker nor a blur box is drawn with a line: one is sized
+  // by its corner handles, the other by the box itself. Same rule as a solid
+  // symbol — a control that would write nothing stays away.
+  const strokeless = $derived(
+    editableShapes.length
+      ? editableShapes.every((s) => s.kind === 'number' || s.kind === 'blur')
+      : tool === 'number' || tool === 'blur',
+  );
+  // A blur box is drawn from the picture's own pixels, so there is no ink in it
+  // to choose. The swatch used to sit there taking a colour nothing read back.
+  const colorless = $derived(
+    editableShapes.length
+      ? editableShapes.every((s) => s.kind === 'blur')
+      : tool === 'blur',
+  );
   const activeColor = $derived(editableShape?.color ?? color);
   const activeFill = $derived(
     canFill(editableShape?.kind) ? (editableShape.fillOpacity ?? 0) : fillOpacity
@@ -4077,7 +4337,7 @@
       <button
         class="btn btn-sm export-toggle"
         onclick={toggleExportMenu}
-        aria-label="More export options"
+        aria-label="More export options" title="More export options"
         aria-haspopup="menu"
         aria-expanded={exportMenuOpen}
       >
@@ -4129,7 +4389,8 @@
       selectedShape={editableShape}
       selectedCount={editableShapes.length}
       {fillableSelection}
-      showStroke={!solidIconOnly}
+      showStroke={!solidIconOnly && !strokeless}
+      showColor={!colorless}
       {iconName}
       setIconName={(name) => { iconName = name; tool = 'icon'; }}
       {strokeW}
@@ -4247,39 +4508,45 @@
                conclusion. A single-point proof shows the field it always did. -->
           {#each proof.points as point, i (i)}
             <div class="point-row">
-              <input
-                class="input meta-input"
-                class:warn={i === 0 && !displayedCoords}
-                placeholder="lat, lon"
-                value={i === 0 ? displayedCoords : point.coords}
-                oninput={(e) => { proof.points[i].coords = e.target.value; dirty = true; }}
-              />
               <!-- Six decimals is a tenth of a metre, and nobody moves a corner
-                   of a building by editing digits. -->
-              <button
-                class="point-map"
-                title="Move this point on the map"
-                onclick={() => (pointMap = { row: i, view: pointMapView(i) })}
-              >
-                <Icon name="pin" size={13} />
-              </button>
-              <input
-                class="input point-label"
-                placeholder="label"
-                value={point.label}
-                oninput={(e) => namePoint(i, e.target.value)}
-              />
-              <!-- What the point means. Nothing in the composition can answer it:
-                   a rooftop shot is recorded somewhere it never shows, and a
-                   distant skyline is shown from kilometres away. -->
-              <button
-                class="point-pov"
-                class:on={point.pov}
-                title="Point of view"
-                onclick={() => togglePov(i)}
-              >
-                <Icon name="eye" size={13} />
-              </button>
+                   of a building by editing digits — so the map is one press from
+                   the field, inside the same box, the way the date beside it
+                   opens its calendar. -->
+              <div class="field-with-act coords-field" class:warn={i === 0 && !displayedCoords}>
+                <input
+                  class="input meta-input"
+                  placeholder="lat, lon"
+                  value={i === 0 ? displayedCoords : point.coords}
+                  oninput={(e) => { proof.points[i].coords = e.target.value; dirty = true; }}
+                />
+                <button
+                  class="field-act"
+                  title="Move this point on the map"
+                  onclick={() => (pointMap = { row: i, view: pointMapView(i) })}
+                >
+                  <Icon name="pin" size={13} />
+                </button>
+              </div>
+              <!-- The name and what the point means, in one box: nothing in the
+                   composition can answer the second — a rooftop shot is recorded
+                   somewhere it never shows, and a distant skyline is shown from
+                   kilometres away. -->
+              <div class="field-with-act label-field">
+                <input
+                  class="input point-label"
+                  placeholder="label"
+                  value={point.label}
+                  oninput={(e) => namePoint(i, e.target.value)}
+                />
+                <button
+                  class="field-act"
+                  class:on={point.pov}
+                  title="Point of view"
+                  onclick={() => togglePov(i)}
+                >
+                  <Icon name="eye" size={13} />
+                </button>
+              </div>
               {#if i > 0}
                 <button class="point-move" title="Make this the proof's conclusion" onclick={() => raisePoint(i)}>
                   <Icon name="chevronUp" size={13} />
@@ -4322,13 +4589,30 @@
                them is a link of its own. -->
           {#each sourceRows as row, at (at)}
             <div class="meta-row">
-              <input
-                class="input meta-input"
-                class:warn={!displayedSource}
-                placeholder="https://…"
-                value={row}
-                oninput={(e) => editSource(at, e.target.value)}
-              />
+              <!-- The address itself, one press away in a tab of its own: a
+                   source is read far more often than it is typed, and copying a
+                   link into the browser to see what it points at is the long way
+                   round. -->
+              <div class="field-with-act source-field" class:warn={!displayedSource}>
+                <input
+                  class="input meta-input"
+                  placeholder="https://…"
+                  value={row}
+                  oninput={(e) => editSource(at, e.target.value)}
+                />
+                <a
+                  class="field-act"
+                  class:disabled={!openableSource(row)}
+                  href={openableSource(row) || undefined}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={openableSource(row) ? 'Open this source in a new tab' : 'Not a web address'}
+                  aria-disabled={!openableSource(row)}
+                  onclick={(e) => { if (!openableSource(row)) e.preventDefault(); }}
+                >
+                  <Icon name="external" size={13} />
+                </a>
+              </div>
               {#if missingSource(row)}
                 <!-- The case holds nothing from this address. Offering to fetch it here
                      is the difference between a proof that names its material and one
@@ -4396,9 +4680,15 @@
               </button>
             {/if}
           </div>
-          <TemporalInput
+          <!-- The calendar builds the common answer, a whole day, for the
+               analyst who would rather point at one than spell it; a month, a
+               range or a mark of doubt is still typed, which is what the
+               placeholder shows. -->
+          <DateField
             id="proof-when"
-            compact
+            label="Date the material was taken"
+            placeholder="dd/mm/yyyy · Oct 2025 · ~2025"
+            calendar
             value={proof.when}
             onchange={(value) => { proof.when = value; dirty = true; }}
           />
@@ -4435,9 +4725,11 @@
           {featureList}
           {moveLegendColor}
           {setColor}
-          {canMoveShapeUp}
-          {canMoveShapeDown}
-          {moveShape}
+          {canBringForward}
+          {canSendBackward}
+          {bringForward}
+          {sendBackward}
+          {moveShapeTo}
           kindIcon={KIND_ICON}
           kindLabel={KIND_LABEL}
           {duplicateShape}
@@ -5066,6 +5358,7 @@
   .meta-row { display: flex; align-items: center; gap: 4px; }
   .meta-row + .meta-row { margin-top: 4px; }
   .meta-row .meta-input { flex: 1; min-width: 0; }
+  .meta-row .source-field { flex: 1; min-width: 0; }
   .meta-drop {
     display: inline-flex;
     color: var(--text-3);
@@ -5116,21 +5409,22 @@
   }
   .tpl-inline-link:hover { color: var(--text-2); }
   .meta-input { width: 100%; font-size: var(--fs-xs); padding: 5px 8px; }
-  .meta-input.warn { border-color: color-mix(in srgb, var(--warn, #e8a33d) 55%, transparent); }
   /* One point per row. A proof with a single point shows a coordinate field, a
      label and the marker — no cross, no arrow, nothing to move. */
   .point-row { display: flex; align-items: center; gap: 4px; }
   .point-row + .point-row { margin-top: 4px; }
   .point-row .meta-input { flex: 1; min-width: 0; }
-  .point-label { width: 84px; flex: none; font-size: var(--fs-xs); padding: 5px 8px; }
-  .point-map, .point-pov, .point-move, .point-drop {
+  .point-row .coords-field { flex: 1; min-width: 0; }
+  /* The name is as wide as a name needs to be; the coordinate takes the rest. */
+  .point-row .label-field { width: 110px; flex: none; }
+  .point-label { width: 100%; min-width: 0; font-size: var(--fs-xs); padding: 5px 8px; }
+  .point-move, .point-drop {
     display: inline-flex;
     color: var(--text-3);
     padding: 2px;
     border-radius: var(--r-sm);
   }
-  .point-map:hover, .point-pov:hover, .point-move:hover { color: var(--text-1); background: var(--bg-2); }
-  .point-pov.on { color: var(--accent, #6ea8fe); background: var(--bg-2); }
+  .point-move:hover { color: var(--text-1); background: var(--bg-2); }
   .point-drop:hover { color: var(--danger, #e05c5c); background: var(--bg-2); }
   .point-hint { margin-top: 5px; font-size: var(--fs-xs); color: var(--text-3); }
   .desc-input { resize: vertical; min-height: 44px; line-height: 1.35; }

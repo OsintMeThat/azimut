@@ -171,6 +171,8 @@ proof for publication.
 | ✅ **Map windows** | Opens the map in several tabs with the view in the URL, links map tabs and extension panels on other sites to one camera, and syncs saved points, grids and sweeps live to every tab and extension panel. |
 | ✅ **Map layers** | Stacks key-less overlays (borders, roads, railways, power lines, sea marks, GPS traces), NASA FIRMS fires and VIIRS night lights for a chosen day, and filters drawn pins by kind and folder. |
 | ✅ **Added map layers** | Opens a KML, KMZ, GeoJSON or GPX file, or follows a public My Maps or map URL refreshed only while enabled, and draws it with its own colours, optionally its own icons composed once at import, a legend that filters and a search that goes to one feature — read, cited and never adopted into the case. |
+| ✅ **Dates on a layer** | Narrows a dated added layer (GeoConfirmed, KML timestamps, GPX waypoints) to a period dragged on a strip of its events over time or picked on a calendar, kept with the legend. |
+| ✅ **GeoConfirmed layer** | Adds one GeoConfirmed conflict over a window of days or dates or its whole history, optionally only the view, in GeoConfirmed's own icons, grouped by faction with each event's sources and geolocation one click away. |
 | ✅ **Media on the map** | Draws the case's located photos and videos where a relation, a GPS reading or a proof puts them, opens the Map panel, the home map and the extension on them, and plays the stack in the panel beside the imagery. |
 | ✅ **Imagery Wayback** | Browses every Esri World Imagery release, narrowed to the ones that changed the point, and dates the pixels apart from the release. |
 | ✅ **Satellite Compare** | Aligns and annotates two dated views, assists matched-product change reading, saves editable sessions and files or exports attributed PNG/GIF outputs. |
@@ -184,6 +186,12 @@ proof for publication.
 | ✅ **Site hand-offs** | Fills the X or Bluesky composer with a prepared thread and uploads a case picture straight into Lens, Yandex, Bing or TinEye. |
 | ✅ **Home & Guide** | Opens on a case dashboard or a front door when no case is open, and `?` opens the Guide on the current tab. |
 | ✅ **Case to-do lists** | Named lists on Home with editable tasks, checkboxes, progress counts and case-bundle persistence. |
+| ✅ **Compare from the ground** | Right-clicking a point opens Compare on the last two Esri Wayback pictures of it, or on its last two Copernicus passes. |
+| ✅ **Marks that number and hide** | Stamps numbered markers counting a series per colour, and blur boxes that redraw the picture under them, on a proof's panels and on a comparison's ground alike. |
+| ✅ **A date in one field** | Reads a day, a month, a year, a time or a range from one line of text, or builds one from a calendar with its marks of doubt, and says what it understood. |
+| ✅ **Words that hold still** | One name for a Claim on every surface, a tooltip on every icon, a stated reason on a layer that cannot be switched on, the recent work first on Home, and Coords & Sky opening on the point the map is on. |
+| ✅ **A picture sent to Reverse Search** | Opens Reverse Search on a Media Library file, from a row's Open in… menu, or on an Inspect frame as it is cropped, saved or not. |
+| ✅ **A claim from where you are** | Files a claim from Details, a Board row or a Graph node with the entity already seated, asking a count and a condition where its family calls for them and writing the sentence from the fields. |
 
 ---
 
@@ -203,7 +211,6 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Image Compare** | Overlay two images with opacity, swipe and pixel diff. Assist satellite-to-screen alignment without presenting a verdict. |
 | **Georeferenced overlay** | Pins an image to the ground by three or four matching points: a commercial satellite shot from a post, a drone frame, an old plan. It draws under the map's own marks with an opacity slider, reprojects as the map pans, and is saved in the case with its control points so the fit can be checked. |
 | **Adopt a feature** | Turns a feature of an added layer into a `place` of the case, carrying the layer and the feature it came from as provenance. |
-| **GeoConfirmed layer** | Queries GeoConfirmed for a chosen conflict, date or viewport only when enabled, opens each event's original sources and lets selected events enter the case. |
 | **Source directory** | Keeps the accounts, channels and pages worth following for this case, searchable by platform, area and topic, with notes and source reliability; monitoring remains a later opt-in workflow. |
 | **Metadata follow-up** | Explains which common image/video fields were stripped and proposes events from capture times. |
 | **Edit Provenance** | Reads a rendered video's own edit history: which source clips it was cut from, in what order, and the GPS, dates and cameras those clips still carry. |
@@ -217,7 +224,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **Audio Transcript** | Transcribe and translate speech offline; flag acoustic context such as bells, adhan, aircraft or language. |
 | **Ground Imagery** | Ground-level photos: Panoramax/Mapillary/KartaView key-less first; Street View easy link, optional keyed in-app view. |
 | **Panorama** | Stitch a video window / frame set. Auto-stitch already in Inspect; still to do: sample a video window directly, seam blending. |
-| **Proof annotation** | Grow the Geo Proof toolbox: dashed strokes, numbered markers, a redaction/blur box; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
+| **Proof annotation** | Grow the Geo Proof toolbox: dashed strokes; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
 | **Detached tool windows** | The rule the map already follows, applied to the rest: a read-and-work surface (Board, Graph, Timeline) opens as many tabs as wanted and the tab it left stays live; a document editor opens one window per document and is greyed out where it was. Cross-tool handoffs route to wherever the tool now lives. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
 
@@ -429,10 +436,19 @@ stops making sense.
   unofficial key-less endpoints of keyed services (the `mt1.google.com` case), and
   the distinction drawn is that this is the sharing mechanism the map's own
   creator switched on, not a way around a quota. It is fetched only when the
-  analyst subscribes, presses Refresh, or opens a case holding an enabled layer
-  that asked to be re-read; a shape it stops answering in fails with a sentence
-  rather than drawing nothing. The map's search bar answers from
-  a bundled gazetteer and never reaches out on a keystroke; its geocoder layer
+  analyst subscribes, presses Refresh, or switches the layer on for the first
+  time in a session, when it asked to be re-read then. Every added layer starts
+  off when the app or the page opens again, so a layer heavy enough to take the
+  tab down does not take it down again on reload; a shape it stops answering in
+  fails with a sentence
+  rather than drawing nothing. A GeoConfirmed layer rides on those same three
+  acts, plus one: its dialog reads the conflict list when the analyst opens it.
+  Each read is GeoConfirmed's documented, key-less public API, through the
+  backend and under a User-Agent naming the app, as it asks integrations to do;
+  its `robots.txt` disallows `/api/` for crawlers, which a read the analyst asked
+  for is not. The icons arrive inside the export, so they cost no request. The
+  map's search bar answers from a bundled gazetteer and never reaches out on a
+  keystroke; its geocoder layer
   waits for a pause, and a request the one-per-second pace cannot take is dropped
   rather than queued. Two things reach out on mount and no
   others. The startup update check: opt-out, and read-only against GitHub's

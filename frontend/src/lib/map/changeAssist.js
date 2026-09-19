@@ -207,7 +207,10 @@ export function changeCompatibility(a, b) {
     const releaseA = a.provider === 'esri-wayback' ? a.waybackRelease : 'current';
     const releaseB = b.provider === 'esri-wayback' ? b.waybackRelease : 'current';
     if (a.provider === b.provider && releaseA === releaseB) {
-      return refuse('Choose two different Esri releases.');
+      // Not "Difference needs two Esri releases": it reads Sentinel-2 passes and
+      // VIIRS nights too, and a refusal that named one road sent analysts looking
+      // for a second Wayback release they did not need.
+      return refuse('Both sides show the same picture. Pick another Esri release, or two dated Sentinel-2 passes.');
     }
     if (!same(layerReading(a), layerReading(b))) {
       return refuse('Match the reference layers on A and B before comparing pixels.');

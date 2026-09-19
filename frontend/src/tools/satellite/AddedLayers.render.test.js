@@ -126,11 +126,13 @@ describe('a row', () => {
     expect(byText('button', 'Refresh')).toBeTruthy();
   });
 
-  it('owns its layer the way a curated row does not: Remove and Reveal', () => {
+  it('owns its layer the way a curated row does not: it can be removed', () => {
     show({ rows: [LAYER] });
 
     expect(byText('button', 'Remove')).toBeTruthy();
-    expect(byText('button', 'Reveal file')).toBeTruthy();
+    // no way to reach the saved copy on disk: it is stored under an extension
+    // no other program opens, in a folder the analyst never sees
+    expect(byText('button', 'Reveal file')).toBeFalsy();
   });
 
   it('counts only what is being drawn in the section head', () => {
@@ -290,11 +292,10 @@ describe('finding a pin', () => {
 });
 
 describe('the acts', () => {
-  it('reports the switch, the refresh, the reveal and the remove', () => {
+  it('reports the switch, the refresh and the remove', () => {
     const handlers = {
       ontoggle: vi.fn(),
       onrefresh: vi.fn(),
-      onreveal: vi.fn(),
       onremove: vi.fn(),
       onadd: vi.fn(),
     };
@@ -302,7 +303,6 @@ describe('the acts', () => {
 
     document.querySelector('.eye').click();
     byText('button', 'Refresh').click();
-    byText('button', 'Reveal file').click();
     byText('button', 'Remove').click();
     byText('button', 'Add a layer').click();
 

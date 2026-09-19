@@ -32,19 +32,23 @@
     lookup = null,
     /** The acts offered, in `ACTIONS` order; a tool passes the subset it has. */
     actions = ACTIONS,
-    /** `(id, value)`: `copy` with the text, or an action id from `ACTIONS`. */
+    /** Archives this point can be compared across; none hides the row. */
+    compareSources = [],
+    /** `(id, value)`: `copy` with the text, `compare` with a source id, or an
+     *  action id from `ACTIONS`. */
     onpick,
     onclose,
   } = $props();
 
   let menuEl = $state();
   let subEl = $state();
-  let openRowEl = $state();
+  /** The row each submenu hangs from, by submenu id. */
+  let subRowEl = $state({});
   let width = $state(0);
   let height = $state(0);
   let subWidth = $state(0);
   let subHeight = $state(0);
-  let linksOpen = $state(false);
+  let openSub = $state(null); // 'compare' | 'links' | null
 
   const copies = $derived(copyRows(at.lat, at.lon, format));
   const links = $derived(openRows(at.lat, at.lon, zoom));
@@ -75,13 +79,13 @@
    * — one outside-click, one arrow walk, one keyboard handler across both.
    */
   const sub = $derived(
-    linksOpen
+    openSub
       ? placeSubmenu(
           {
             left: place.left,
             top: place.top,
             width: width || 236,
-            rowTop: place.top + (openRowEl?.offsetTop ?? 0),
+            rowTop: place.top + (subRowEl[openSub]?.offsetTop ?? 0),
           },
           { width: subWidth || 168, height: subHeight || 300 },
           frame
@@ -94,35 +98,37 @@
     return [...rows(menuEl), ...rows(subEl)];
   }
 
-  /** Open the external maps and step into them, as a submenu does. */
-  async function openLinks() {
-    linksOpen = true;
+  /** Open one submenu and step into it. */
+  async function openFlyout(id) {
+    openSub = id;
     await tick();
     subEl?.querySelector('[role="menuitem"]')?.focus();
   }
 
-  function closeLinks() {
-    linksOpen = false;
-    openRowEl?.focus();
+  function closeFlyout() {
+    const row = subRowEl[openSub];
+    openSub = null;
+    row?.focus();
   }
 
   function onkeydown(event) {
     const inSub = Boolean(subEl?.contains(document.activeElement));
-    if (event.key === 'ArrowRight' && document.activeElement === openRowEl) {
+    const onRow = Object.entries(subRowEl).find(([, element]) => element === document.activeElement);
+    if (event.key === 'ArrowRight' && onRow) {
       event.preventDefault();
-      openLinks();
+      openFlyout(onRow[0]);
       return;
     }
     if (event.key === 'ArrowLeft' && inSub) {
       event.preventDefault();
-      closeLinks();
+      closeFlyout();
       return;
     }
-    if (event.key === 'Escape' && linksOpen) {
+    if (event.key === 'Escape' && openSub) {
       // the submenu is what Escape leaves first, as it is everywhere else
       event.preventDefault();
       event.stopPropagation();
-      closeLinks();
+      closeFlyout();
       return;
     }
     const rows = items();
@@ -201,14 +207,30 @@
 
   <!-- A submenu, not a fold: the list opens beside the menu so the menu itself
        never changes size, and nothing the cursor is resting on moves. -->
+  {#if compareSources.length}
+    <button
+      bind:this={subRowEl.compare}
+      class="item"
+      class:open={openSub === 'compare'}
+      role="menuitem"
+      aria-haspopup="menu"
+      aria-expanded={openSub === 'compare'}
+      onclick={() => (openSub === 'compare' ? closeFlyout() : openFlyout('compare'))}
+    >
+      <Icon name="compare" size={13} />
+      <span>Compare here…</span>
+      <Icon name="chevronRight" size={12} />
+    </button>
+  {/if}
+
   <button
-    bind:this={openRowEl}
+    bind:this={subRowEl.links}
     class="item"
-    class:open={linksOpen}
+    class:open={openSub === 'links'}
     role="menuitem"
     aria-haspopup="menu"
-    aria-expanded={linksOpen}
-    onclick={() => (linksOpen ? closeLinks() : openLinks())}
+    aria-expanded={openSub === 'links'}
+    onclick={() => (openSub === 'links' ? closeFlyout() : openFlyout('links'))}
   >
     <Icon name="external" size={13} />
     <span>Open in…</span>
@@ -224,28 +246,49 @@
     class="ctx card sub"
     role="menu"
     tabindex="-1"
-    aria-label="Open this point in"
+    aria-label={openSub === 'compare' ? 'Compare this point across' : 'Open this point in'}
     style:left={`${sub.left}px`}
     style:top={`${sub.top}px`}
     {onkeydown}
     oncontextmenu={(event) => event.preventDefault()}
   >
-    {#each links as link (link.id)}
-      <a
-        class="item link"
-        role="menuitem"
-        href={fullscreen ? undefined : link.url}
-        target="_blank"
-        rel="noreferrer"
-        aria-disabled={fullscreen}
-        title={fullscreen ? 'Exit fullscreen first. This leaves the map' : link.url}
-        onclick={() => !fullscreen && onclose()}
-      >{link.label}</a>
-    {/each}
+    {#if openSub === 'compare'}
+      <!-- Each row is a request: the archive is asked which two pictures of
+           this point are the last two, and only then does Compare open. -->
+      {#each compareSources as source (source.id)}
+        <button class="item pair" role="menuitem" onclick={() => onpick('compare', source.id)}>
+          <span>{source.label}</span>
+          <small>{source.detail}</small>
+        </button>
+      {/each}
+    {:else}
+      {#each links as link (link.id)}
+        <a
+          class="item link"
+          role="menuitem"
+          href={fullscreen ? undefined : link.url}
+          target="_blank"
+          rel="noreferrer"
+          aria-disabled={fullscreen}
+          title={fullscreen ? 'Exit fullscreen first. This leaves the map' : link.url}
+          onclick={() => !fullscreen && onclose()}
+        >{link.label}</a>
+      {/each}
+    {/if}
   </div>
 {/if}
 
 <style>
+  /* Two lines: what the archive is, and what it will be asked for. */
+  .item.pair {
+    display: grid;
+    gap: 1px;
+    text-align: left;
+  }
+  .item.pair small {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
   .ctx {
     position: absolute;
     z-index: 800;

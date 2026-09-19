@@ -69,7 +69,7 @@ export const WAITING = [
   {
     id: 'undated',
     label: 'No date yet',
-    hint: 'a statement the timeline has nowhere to put',
+    hint: 'a claim the timeline has nowhere to put',
     icon: 'clock',
     surface: 'timeline',
     read: ({ timeline }) => timeline?.undated ?? 0,

@@ -348,7 +348,7 @@
   const LAYERS = {
     row: 'Rows',
     value: 'Words',
-    statement: 'Statements',
+    statement: 'Claims',
     'row-edges': 'Row edges',
   };
 

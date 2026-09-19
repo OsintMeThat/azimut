@@ -99,6 +99,10 @@ async function key(name) {
 
 beforeEach(() => {
   page = { items: ITEMS, total: ITEMS.length, next_cursor: null, facets: {} };
+  uiState.tool = 'media';
+  uiState.reverseTarget = null;
+  uiState.inspectPath = null;
+  uiState.composeQueue = [];
   vi.clearAllMocks();
 });
 
@@ -172,5 +176,103 @@ describe('the upkeep menu', () => {
 
     expect(toggle().disabled).toBe(false);
     expect(rows().map((r) => r.disabled)).toEqual([true, true]);
+  });
+});
+
+describe('open in… from a row', () => {
+  const doors = () => [...target.querySelectorAll('[title="Open in…"]')];
+  const doorOf = (path) => doors().find((b) => b.closest('[data-path]')?.dataset.path === path);
+  const choices = () =>
+    [...document.querySelectorAll('.open-in-menu [role="menuitem"]')].map((b) => b.textContent.trim());
+  const choice = (label) =>
+    [...document.querySelectorAll('.open-in-menu [role="menuitem"]')].find((b) => b.textContent.trim() === label);
+
+  it('keeps the tools behind one door per row instead of a button each', async () => {
+    await open();
+    expect(doors()).toHaveLength(2);
+    expect(target.querySelector('[title="Open in Inspect"]')).toBeNull();
+    expect(target.querySelector('[title="Send to Geo Proof"]')).toBeNull();
+  });
+
+  it('offers Geo Proof for a picture and not for a video', async () => {
+    await open();
+    await press(doorOf('media/quai.jpg'));
+    expect(choices()).toEqual(['Inspect', 'Reverse Search', 'Geo Proof']);
+
+    await press(doorOf('media/clip.mp4'));
+    expect(choices()).toEqual(['Inspect', 'Reverse Search']);
+  });
+
+  it('hands Reverse Search the row it was opened on, and closes', async () => {
+    // By the row rather than by position: the list is sorted, and the failure
+    // worth catching is a menu that sends the other row's file.
+    await open();
+    await press(doorOf('media/clip.mp4'));
+    await press(choice('Reverse Search'));
+
+    expect(uiState.tool).toBe('reverse');
+    expect(uiState.reverseTarget).toEqual({
+      path: 'media/clip.mp4',
+      blob: null,
+      kind: 'video',
+      label: 'clip.mp4',
+      time: null,
+    });
+    expect(document.querySelector('.open-in-menu')).toBeNull();
+  });
+
+  it('still reaches Inspect and Geo Proof', async () => {
+    await open();
+    await press(doorOf('media/quai.jpg'));
+    await press(choice('Inspect'));
+    expect(uiState.tool).toBe('inspect');
+    expect(uiState.inspectPath).toBe('media/quai.jpg');
+
+    await press(doorOf('media/quai.jpg'));
+    await press(choice('Geo Proof'));
+    expect(uiState.tool).toBe('proof');
+    expect(uiState.composeQueue).toContain('media/quai.jpg');
+  });
+
+  it('closes on the backdrop and on Escape without going anywhere', async () => {
+    await open();
+    await press(doorOf('media/quai.jpg'));
+    await press(document.querySelector('.open-in-backdrop'));
+    expect(document.querySelector('.open-in-menu')).toBeNull();
+
+    await press(doorOf('media/quai.jpg'));
+    await key('Escape');
+    expect(document.querySelector('.open-in-menu')).toBeNull();
+    expect(uiState.tool).toBe('media');
+  });
+
+  it('opens toward the side with room, so a card by the rail does not hang over it', async () => {
+    const rect = (left, right) => () => ({ left, right, top: 300, bottom: 330, width: right - left, height: 30 });
+    await open();
+
+    const door = doorOf('media/quai.jpg');
+    door.getBoundingClientRect = rect(160, 190);
+    await press(door);
+    let menu = document.querySelector('.open-in-menu');
+    expect(menu.style.left).toBe('160px');
+    expect(menu.style.right).toBe('');
+
+    await press(door); // closes
+    door.getBoundingClientRect = rect(window.innerWidth - 60, window.innerWidth - 30);
+    await press(door);
+    menu = document.querySelector('.open-in-menu');
+    expect(menu.style.right).toBe('30px');
+    expect(menu.style.left).toBe('');
+  });
+
+  it('gives a document no door', async () => {
+    page = {
+      items: [{ ...ITEMS[0], path: 'media/plan.pdf', filename: 'plan.pdf', kind: 'file', thumbnail: null }],
+      total: 1,
+      next_cursor: null,
+      facets: {},
+    };
+    await open();
+    expect(doors()).toHaveLength(0);
   });
 });

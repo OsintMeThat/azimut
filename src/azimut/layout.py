@@ -58,9 +58,9 @@ COMPARE_DIR = ".compare"
 ANALYSIS_DIR = ".analysis"
 #: Saved Grid Search state.
 SEARCH_DIR = ".search"
-#: Map layers the analyst added themselves: a file they opened, or a URL they
-#: subscribed to. Hidden because they did not author the data — the row in the
-#: Layers panel is where it is worked with, and it offers to reveal the file.
+#: Map layers the analyst added themselves: a file they opened, a URL they
+#: subscribed to, or a GeoConfirmed query. Hidden because they did not author the
+#: data — the row in the Layers panel is where it is worked with.
 LAYERS_DIR = ".layers"
 #: The parsed GeoJSON a layer is drawn from. Derived from the snapshot beside
 #: it, so it is dropped on delete and rebuilt on demand rather than carried.

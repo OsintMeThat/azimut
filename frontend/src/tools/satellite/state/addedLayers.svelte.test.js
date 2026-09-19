@@ -14,7 +14,6 @@ const FILE_LAYER = {
   name: 'Sightings',
   title: 'Sightings',
   source: { kind: 'file', name: 'sightings.kml' },
-  enabled: true,
   hidden: [],
   features: 3,
   categories: [{ name: 'Checkpoints', count: 3, colour: '#f00' }],
@@ -75,47 +74,88 @@ beforeEach(() => {
 });
 
 describe('opening a case', () => {
-  it('reads what is on disk and nothing else when every layer is a file', async () => {
+  it('reads what is on disk and nothing else', async () => {
+    rows = [FILE_LAYER, followed()];
     const layers = store();
     layers.load('c1');
     await settle();
 
     expect(calls).toEqual([['GET', '/api/cases/c1/map-layers']]);
-    expect(layers.rows).toEqual([FILE_LAYER]);
+    expect(layers.rows.map((row) => row.name)).toEqual(['Sightings', 'Roadblocks']);
   });
 
-  it('re-reads a followed map that is enabled and asked to be', async () => {
+  it('draws nothing: every layer starts off, whatever it was before the reload', async () => {
+    // a layer heavy enough to take the tab down would take it down again on
+    // every reload if the switch were remembered
+    rows = [FILE_LAYER, followed()];
+    const layers = store();
+    layers.load('c1');
+    await settle();
+
+    expect(layers.rows.every((row) => row.enabled === false)).toBe(true);
+    expect(layers.drawn).toEqual([]);
+  });
+
+  it('forgets what was on in the previous store, as a reload does', async () => {
+    const before = store();
+    before.load('c1');
+    await settle();
+    await before.toggle('c1', before.rows[0]);
+    expect(before.drawn).toHaveLength(1);
+
+    const after = store();
+    after.load('c1');
+    await settle();
+
+    expect(after.drawn).toEqual([]);
+  });
+});
+
+describe('switching a layer on', () => {
+  it('re-reads a followed map the first time, and never again in the session', async () => {
     rows = [followed()];
     const layers = store();
     layers.load('c1');
     await settle();
+    calls.length = 0;
 
-    expect(calls).toEqual([
-      ['GET', '/api/cases/c1/map-layers'],
-      ['POST', '/api/cases/c1/map-layers/Roadblocks/refresh'],
-    ]);
+    await layers.toggle('c1', layers.rows[0]); // on
+    await layers.toggle('c1', layers.rows[0]); // off
+    await layers.toggle('c1', layers.rows[0]); // on again
+
+    expect(calls).toEqual([['POST', '/api/cases/c1/map-layers/Roadblocks/refresh']]);
+    expect(layers.drawn.map((row) => row.name)).toEqual(['Roadblocks']);
   });
 
-  it('leaves a disabled subscription alone — an off layer costs nothing', async () => {
-    rows = [followed({ enabled: false })];
+  it('asks nothing of a file, or of a subscription that asked not to be', async () => {
+    rows = [FILE_LAYER, followed({ refresh: { on_open: false } })];
     const layers = store();
     layers.load('c1');
     await settle();
+    calls.length = 0;
 
-    expect(calls).toEqual([['GET', '/api/cases/c1/map-layers']]);
+    await layers.toggle('c1', layers.rows[0]);
+    await layers.toggle('c1', layers.rows[1]);
+
+    expect(calls).toEqual([]);
+    expect(layers.drawn).toHaveLength(2);
   });
 
-  it('leaves one alone that asked not to be read on open', async () => {
-    rows = [followed({ refresh: { on_open: false } })];
+  it('stores nothing: the switch is never sent to the backend', async () => {
     const layers = store();
     layers.load('c1');
     await settle();
+    calls.length = 0;
 
-    expect(calls).toEqual([['GET', '/api/cases/c1/map-layers']]);
+    await layers.toggle('c1', layers.rows[0]);
+    await layers.toggle('c1', layers.rows[0]);
+
+    expect(calls).toEqual([]);
+    expect(layers.drawn).toEqual([]);
   });
 
   it('draws the last snapshot when the feed cannot be reached', async () => {
-    // a case opened offline is a case that still works
+    // switched on offline, a layer still draws what it holds
     rows = [followed()];
     api.post = vi.fn(async () => {
       throw new Error('network down');
@@ -123,6 +163,8 @@ describe('opening a case', () => {
     const layers = store();
     layers.load('c1');
     await settle();
+
+    await layers.toggle('c1', layers.rows[0]);
 
     expect(layers.drawn.map((row) => row.name)).toEqual(['Roadblocks']);
     expect(notify).not.toHaveBeenCalled();
@@ -139,6 +181,20 @@ describe('drawing', () => {
     await layers.drawing('c1', 'Sightings');
 
     expect(calls.filter(([, path]) => path.endsWith('/data'))).toHaveLength(1);
+  });
+
+  it('asks the server for the features, past whatever the browser kept', async () => {
+    // the address is the same through every refresh, and Chrome had kept one
+    // it filled before the backend said no-cache
+    const layers = store();
+    layers.load('c1');
+    await settle();
+
+    await layers.drawing('c1', 'Sightings');
+
+    expect(api.get).toHaveBeenCalledWith('/api/cases/c1/map-layers/Sightings/data', {
+      cache: 'no-cache',
+    });
   });
 
   it('re-reads it only when a refresh actually moved the bytes', async () => {
@@ -162,30 +218,19 @@ describe('drawing', () => {
     expect(reads()).toBe(2);
   });
 
-  it('draws only what is enabled', async () => {
-    rows = [FILE_LAYER, followed({ enabled: false, refresh: { on_open: false } })];
+  it('draws only what is switched on', async () => {
+    rows = [FILE_LAYER, followed({ refresh: { on_open: false } })];
     const layers = store();
     layers.load('c1');
     await settle();
+
+    await layers.toggle('c1', layers.rows[0]);
 
     expect(layers.drawn.map((row) => row.name)).toEqual(['Sightings']);
   });
 });
 
 describe('the acts on a row', () => {
-  it('switches a layer off without asking anyone for anything', async () => {
-    const layers = store();
-    layers.load('c1');
-    await settle();
-    calls.length = 0;
-
-    await layers.toggle('c1', layers.rows[0]);
-
-    expect(calls).toEqual([
-      ['PATCH', '/api/cases/c1/map-layers/Sightings', { enabled: false }],
-    ]);
-  });
-
   it('hides one category by sending the whole list back', async () => {
     const layers = store();
     layers.load('c1');
@@ -255,6 +300,18 @@ describe('adding', () => {
     expect(layers.rows).toHaveLength(1);
   });
 
+  it('draws what was just added, without reading its source a second time', async () => {
+    const layers = store();
+
+    await layers.subscribe('https://example.test/roadblocks.kml');
+    calls.length = 0;
+    await layers.toggle('c1', layers.rows[0]); // off
+    await layers.toggle('c1', layers.rows[0]); // on again
+
+    expect(layers.drawn.map((row) => row.name)).toEqual(['Roadblocks']);
+    expect(calls).toEqual([]);
+  });
+
   it('leaves the dialog open when the source was refused, with the reason', async () => {
     // the backend's sentence is something to act on, and closing the dialog
     // would take the input away with it
@@ -299,6 +356,146 @@ describe('adding', () => {
     const [, sent] = api.post.mock.calls[0];
 
     expect(sent.get('icons')).toBe('true');
+  });
+});
+
+describe('the time filter', () => {
+  const DATED = {
+    type: 'FeatureCollection',
+    features: [
+      { properties: { name: 'a', category: 'Checkpoints', date: '2026-09-01', index: 0 } },
+      { properties: { name: 'b', category: 'Checkpoints', date: '2026-09-10', index: 1 } },
+      { properties: { name: 'c', category: 'Checkpoints', date: '2026-09-18', index: 2 } },
+    ],
+  };
+
+  async function drawn() {
+    collection = DATED;
+    const layers = store();
+    layers.load('c1');
+    await settle();
+    await layers.toggle('c1', layers.rows[0]);
+    await layers.drawing('c1', 'Sightings');
+    return layers;
+  }
+
+  it('has nothing to index until the features are in hand, nor for an undated layer', async () => {
+    const layers = store();
+    layers.load('c1');
+    await settle();
+    expect(layers.dates(layers.rows[0])).toBeNull();
+
+    collection = { type: 'FeatureCollection', features: [{ properties: { name: 'x' } }] };
+    await layers.drawing('c1', 'Sightings');
+    expect(layers.dates(layers.rows[0])).toBeNull();
+  });
+
+  it('follows a dragged strip in the page and tells the backend nothing yet', async () => {
+    const layers = await drawn();
+    calls.length = 0;
+
+    await layers.setPeriod('c1', layers.rows[0], { start: '2026-09-05', end: '' }, false);
+
+    expect(calls).toEqual([]);
+    expect(layers.rows[0].period).toEqual({ start: '2026-09-05', end: '' });
+    expect(layers.rows[0].shown).toBe(2);
+    expect(layers.drawn[0].period).toEqual({ start: '2026-09-05', end: '' });
+  });
+
+  it('keeps the period on the layer when the strip is let go', async () => {
+    const layers = await drawn();
+    calls.length = 0;
+    const period = { start: '2026-09-05', end: '2026-09-12' };
+
+    await layers.setPeriod('c1', layers.rows[0], period, true);
+
+    expect(calls).toEqual([['PATCH', '/api/cases/c1/map-layers/Sightings', { period }]]);
+    expect(layers.rows[0].period).toEqual(period);
+    expect(layers.rows[0].shown).toBe(1);
+  });
+
+  it('clears it with two blanks, which is what the backend reads as none', async () => {
+    const layers = await drawn();
+    calls.length = 0;
+
+    await layers.setPeriod('c1', layers.rows[0], null, true);
+
+    expect(calls).toEqual([
+      ['PATCH', '/api/cases/c1/map-layers/Sightings', { period: { start: '', end: '' } }],
+    ]);
+  });
+
+  it('puts back the stored period when it could not be kept', async () => {
+    const layers = await drawn();
+    api.patch = vi.fn(async () => {
+      throw new Error('offline');
+    });
+
+    await layers.setPeriod('c1', layers.rows[0], { start: '2026-09-05', end: '' }, true);
+
+    expect(layers.rows[0].period).toBeNull();
+    expect(layers.rows[0].shown).toBeUndefined();
+  });
+
+  it('lets every date back in before going to a match outside the period', async () => {
+    const layers = await drawn();
+    calls.length = 0;
+
+    await layers.pick('c1', layers.rows[0], { index: 0, category: 'Checkpoints', hidden: true, outside: true });
+
+    expect(calls).toContainEqual([
+      'PATCH',
+      '/api/cases/c1/map-layers/Sightings',
+      { period: { start: '', end: '' } },
+    ]);
+    // the group was never off, so it is not switched
+    expect(calls.some(([, , body]) => body?.hidden)).toBe(false);
+    expect(layers.picked.index).toBe(0);
+  });
+});
+
+describe('adding from GeoConfirmed', () => {
+  it('posts the query and closes both dialogs on success', async () => {
+    const layers = store();
+    layers.geoconfirmed = true;
+    const body = { conflict: 'Ukraine', days: 30 };
+
+    await layers.addGeoConfirmed(body);
+
+    expect(api.post).toHaveBeenCalledWith('/api/cases/c1/map-layers/geoconfirmed', body);
+    expect(layers.geoconfirmed).toBe(false);
+    expect(layers.adding).toBe(false);
+  });
+
+  it('keeps the dialog open with the reason when GeoConfirmed refused', async () => {
+    api.post = vi.fn(async () => {
+      throw new Error('GeoConfirmed maps no conflict called Atlantis');
+    });
+    const layers = store();
+    layers.geoconfirmed = true;
+
+    await layers.addGeoConfirmed({ conflict: 'Atlantis', days: 7 });
+
+    expect(notify).toHaveBeenCalledWith('GeoConfirmed maps no conflict called Atlantis', 'error');
+    expect(layers.geoconfirmed).toBe(true);
+  });
+
+  it('reads the conflict list once per session, however often the dialog opens', async () => {
+    rows = [{ conflict: 'Ukraine', name: 'Ukraine' }];
+    const layers = store();
+
+    await layers.conflicts();
+    await layers.conflicts();
+
+    expect(calls.filter(([, path]) => path === '/api/geoconfirmed/conflicts')).toHaveLength(1);
+  });
+
+  it('asks nothing of GeoConfirmed until its dialog does', async () => {
+    const layers = store();
+    layers.load('c1');
+    await settle();
+
+    expect(calls.some(([, path]) => path.includes('geoconfirmed'))).toBe(false);
   });
 });
 
@@ -377,6 +574,7 @@ describe('finding a pin', () => {
     await layers.drawing('c1', 'Roadblocks');
 
     // a feed that had not moved: the features in hand are still the right ones
+    api.post = vi.fn(async () => followed());
     await layers.refresh('c1', layers.rows[0]);
     expect(layers.search(layers.rows[0], 'gate').ready).toBe(true);
 

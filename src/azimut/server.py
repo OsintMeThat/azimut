@@ -307,6 +307,7 @@ def create_app() -> FastAPI:
     app.include_router(analyzers.router)
     app.include_router(satellite.router)
     app.include_router(maplayers.router)
+    app.include_router(maplayers.geoconfirmed_router)
     app.include_router(proofs.router)
     app.include_router(proofimports.router)
     app.include_router(drafts.router)
@@ -348,7 +349,9 @@ def create_app() -> FastAPI:
             candidate = (STATIC_DIR / path).resolve()
             if path and candidate.is_file() and candidate.is_relative_to(STATIC_DIR.resolve()):
                 return FileResponse(candidate)
-            return FileResponse(STATIC_DIR / "index.html")
+            # Asked for again on every visit: it names this build's hashed
+            # bundles, and a copy kept past an update names ones that are gone.
+            return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
     else:  # dev without a built frontend: make it obvious, not broken
 

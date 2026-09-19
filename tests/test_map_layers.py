@@ -138,6 +138,9 @@ def add(
 @pytest.mark.parametrize(
     "data, filename",
     [(KML, "s.kml"), (kmz(), "s.kmz"), (GEOJSON, "h.geojson"), (GPX, "p.gpx")],
+    # Named, because a zip carries the second it was built in: ids made of the bytes
+    # differ between xdist workers that collect a second apart, and the run refuses.
+    ids=["kml", "kmz", "geojson", "gpx"],
 )
 def test_every_format_parses_to_the_same_normalised_shape(data, filename):
     """Whatever it arrived as, a feature carries the same four fields and the
@@ -413,6 +416,18 @@ def test_the_drawn_copy_is_rebuilt_when_the_cache_is_gone(client, case_id):
     assert len(drawn.json()["features"]) == 3
 
 
+def test_the_drawn_copy_is_never_reused_by_the_browser_unasked(client, case_id):
+    """A refresh changes what this one address holds. Without a rule of its own,
+    Chrome guessed a lifetime from Last-Modified and went on drawing a GeoConfirmed
+    layer's old features, a day of events short, under a row saying it was read
+    just now."""
+    row = add(client, case_id, KML, "sightings.kml")
+
+    drawn = client.get(f"/api/cases/{case_id}/map-layers/{row['name']}/data")
+
+    assert drawn.headers["cache-control"] == "no-cache"
+
+
 def test_a_category_toggle_is_stored_and_bounded_to_the_categories_there_are(
     client, case_id
 ):
@@ -427,17 +442,23 @@ def test_a_category_toggle_is_stored_and_bounded_to_the_categories_there_are(
     assert updated["features"] == 3, "hiding a category never changes what is loaded"
 
 
-def test_the_switch_and_the_legend_survive_a_reload(client, case_id):
+def test_the_legend_survives_a_reload_and_the_switch_is_not_stored(client, case_id):
+    """Whether a layer is drawn lives in the page and starts off on every load: a
+    layer that crashed the tab must not be drawn again by the reload."""
     row = add(client, case_id, KML, "sightings.kml")
     client.patch(
         f"/api/cases/{case_id}/map-layers/{row['name']}",
-        json={"enabled": False, "hidden": ["Damage"]},
+        json={"enabled": True, "hidden": ["Damage"]},
     )
 
     reopened = client.get(f"/api/cases/{case_id}/map-layers").json()[0]
+    spec = json.loads(
+        Case.open(case_id).resolve_inside(layout.layer_spec_rel(row["name"])).read_text()
+    )
 
-    assert reopened["enabled"] is False
     assert reopened["hidden"] == ["Damage"]
+    assert "enabled" not in reopened
+    assert "enabled" not in spec
 
 
 def test_a_local_file_is_never_stale(client, case_id):
@@ -535,7 +556,7 @@ def test_adding_and_drawing_a_local_file_never_reaches_the_network(
     row = add(client, case_id, KML, "sightings.kml")
     client.get(f"/api/cases/{case_id}/map-layers")
     client.get(f"/api/cases/{case_id}/map-layers/{row['name']}/data")
-    client.patch(f"/api/cases/{case_id}/map-layers/{row['name']}", json={"enabled": True})
+    client.patch(f"/api/cases/{case_id}/map-layers/{row['name']}", json={"hidden": ["Damage"]})
 
 
 def test_listing_a_subscribed_layer_reads_the_snapshot_rather_than_the_feed(
@@ -552,7 +573,7 @@ def test_listing_a_subscribed_layer_reads_the_snapshot_rather_than_the_feed(
 
     client.get(f"/api/cases/{case_id}/map-layers")
     client.get(f"/api/cases/{case_id}/map-layers/{row['name']}/data")
-    client.patch(f"/api/cases/{case_id}/map-layers/{row['name']}", json={"enabled": False})
+    client.patch(f"/api/cases/{case_id}/map-layers/{row['name']}", json={"hidden": ["Damage"]})
 
     assert len(calls) == 1, "only the subscription itself fetched"
 
@@ -965,6 +986,41 @@ def test_more_icons_than_the_cap_leaves_the_rest_on_the_pictogram(monkeypatch):
     assert len(maplayers.icon_images(parsed["icons"], source=source)) == 1
 
 
+def _many_icons(count: int, href: str) -> bytes:
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Many</name>'
+        + "".join(
+            f'<Style id="s{index}"><IconStyle><color>ff0000{index:02x}</color>'
+            f"<Icon><href>{href}</href></Icon></IconStyle></Style>"
+            f'<Placemark><styleUrl>#s{index}</styleUrl>'
+            f"<Point><coordinates>{index},48</coordinates></Point></Placemark>"
+            for index in range(count)
+        )
+        + "</Document></kml>"
+    ).encode()
+
+
+def test_icons_at_addresses_are_held_to_their_own_smaller_cap(monkeypatch):
+    """Each one is a request to somebody else's server, which an icon inside the
+    archive is not."""
+    monkeypatch.setattr(maplayers, "MAX_FETCHED_ICONS", 2)
+    calls = []
+    monkeypatch.setattr(maplayers, "_fetch_icon", lambda href: (calls.append(href), png())[1])
+    parsed = maplayers.parse(_many_icons(4, "https://icons.test/p.png"), filename="s.kml")
+
+    assert len(maplayers.icon_images(parsed["icons"])) == 2
+    assert len(calls) == 2
+
+
+def test_icons_inside_the_archive_are_not_held_to_the_cap_on_fetched_ones(monkeypatch):
+    monkeypatch.setattr(maplayers, "MAX_FETCHED_ICONS", 1)
+    source = kmz(_many_icons(4, "images/pin.png"), extra={"images/pin.png": png()})
+    parsed = maplayers.parse(source, filename="s.kmz")
+
+    assert len(maplayers.icon_images(parsed["icons"], source=source)) == 4
+
+
 def test_an_icon_is_asked_for_by_key_rather_than_by_path(client, case_id, no_network):
     """The key is a content hash, so there is nothing in the URL to traverse
     with — and anything that is not one is refused before a file is opened."""
@@ -996,3 +1052,79 @@ def _status_error(url: str, code: int) -> "maplayers.httpx.HTTPStatusError":
     request = maplayers.httpx.Request("GET", maplayers.feed_url(url))
     response = maplayers.httpx.Response(code, request=request)
     return maplayers.httpx.HTTPStatusError("refused", request=request, response=response)
+
+
+# ---------------------------------------------------------------------------
+# Dates, which the row's time filter compares
+# ---------------------------------------------------------------------------
+
+
+def test_a_kml_timestamp_or_the_start_of_a_timespan_dates_its_placemark():
+    dated = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Dated</name>'
+        "<Placemark><name>Stamped</name><TimeStamp><when>2024-05-10T14:03:00Z</when>"
+        "</TimeStamp><Point><coordinates>2,48</coordinates></Point></Placemark>"
+        "<Placemark><name>Spanned</name><TimeSpan><begin>2024-05-01</begin>"
+        "<end>2024-05-09</end></TimeSpan><Point><coordinates>3,48</coordinates></Point>"
+        "</Placemark>"
+        "<Placemark><name>Undated</name><Point><coordinates>4,48</coordinates></Point>"
+        "</Placemark></Document></kml>"
+    ).encode()
+    properties = {
+        f["properties"]["name"]: f["properties"]
+        for f in maplayers.parse(dated, filename="d.kml")["geojson"]["features"]
+    }
+
+    # the day as the source wrote it, not moved into another timezone
+    assert properties["Stamped"]["date"] == "2024-05-10"
+    assert properties["Spanned"]["date"] == "2024-05-01"
+    assert "date" not in properties["Undated"]
+
+
+def test_a_gpx_waypoint_is_dated_by_its_time():
+    gpx = (
+        '<gpx version="1.1"><wpt lat="48.10" lon="2.10"><name>Start</name>'
+        "<time>2023-11-02T06:40:00Z</time></wpt></gpx>"
+    ).encode()
+
+    feature = maplayers.parse(gpx, filename="p.gpx")["geojson"]["features"][0]
+
+    assert feature["properties"]["date"] == "2023-11-02"
+
+
+@pytest.mark.parametrize("value", ["", "yesterday", "2024-02-30", "10/05/2024", None])
+def test_anything_that_is_not_a_day_dates_nothing(value):
+    assert maplayers.iso_day(value) == ""
+
+
+def test_the_time_filter_is_stored_with_the_legend_and_cleared_by_two_blanks(client, case_id):
+    row = add(client, case_id, KML, "sightings.kml")
+    url = f"/api/cases/{case_id}/map-layers/{row['name']}"
+
+    kept = client.patch(url, json={"period": {"start": "2024-05-01", "end": "2024-05-31"}})
+    assert kept.json()["period"] == {"start": "2024-05-01", "end": "2024-05-31"}
+    assert client.get(url).json()["period"] == {"start": "2024-05-01", "end": "2024-05-31"}
+
+    open_ended = client.patch(url, json={"period": {"start": "2024-05-01", "end": ""}})
+    assert open_ended.json()["period"] == {"start": "2024-05-01", "end": ""}
+
+    cleared = client.patch(url, json={"period": {"start": "", "end": ""}})
+    assert cleared.json()["period"] is None
+
+
+def test_a_period_given_backwards_is_put_the_right_way_round(client, case_id):
+    row = add(client, case_id, KML, "sightings.kml")
+    url = f"/api/cases/{case_id}/map-layers/{row['name']}"
+
+    turned = client.patch(url, json={"period": {"start": "2024-05-31", "end": "2024-05-01"}})
+
+    assert turned.json()["period"] == {"start": "2024-05-01", "end": "2024-05-31"}
+
+
+def test_a_period_that_is_not_made_of_days_is_refused(client, case_id):
+    row = add(client, case_id, KML, "sightings.kml")
+    url = f"/api/cases/{case_id}/map-layers/{row['name']}"
+
+    assert client.patch(url, json={"period": {"start": "May", "end": ""}}).status_code == 422
+    assert client.get(url).json()["period"] is None

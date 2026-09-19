@@ -8,6 +8,7 @@ import { caseState, toast, uiState } from './state.svelte.js';
 import { mediaKindOf } from './entityIcon.js';
 import { GUIDE, guideFor } from './guide.js';
 import { revealMediaFolder } from './reveal.js';
+import { normalizeReverseTarget } from './reverseSearch.js';
 
 /**
  * A number an entity actually recorded, or NaN when it recorded nothing.
@@ -199,6 +200,25 @@ export function gotoPoint(lat, lon) {
 export function openGuide(tool) {
   uiState.guideSection = guideFor(tool)?.id ?? GUIDE[0].id;
   uiState.tool = 'guide';
+}
+
+/**
+ * Hand a picture to Reverse Search and go there.
+ *
+ * The press is made where the picture is being looked at, so the tab opens on it
+ * rather than on an empty picker. `target` is a case file (`{ path, kind, label,
+ * time? }`) or a picture held only in memory (`{ blob, label }`); see
+ * `normalizeReverseTarget`. Returns whether the tab was changed.
+ */
+export function openInReverseSearch(target) {
+  const picture = normalizeReverseTarget(target);
+  if (!picture) {
+    toast('This picture cannot be searched', 'warn');
+    return false;
+  }
+  uiState.reverseTarget = picture;
+  uiState.tool = 'reverse';
+  return true;
 }
 
 /** Fly the Satellite map to a capture's recorded coordinates (its marker). */

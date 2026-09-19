@@ -24,7 +24,7 @@
   <div class="modal" style:width role="dialog" aria-label={title}>
     <header>
       <h3>{title}</h3>
-      <button class="btn btn-ghost btn-sm" onclick={onclose} aria-label="Close">
+      <button class="btn btn-ghost btn-sm" onclick={onclose} aria-label="Close" title="Close">
         <Icon name="x" size={15} />
       </button>
     </header>
