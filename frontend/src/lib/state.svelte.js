@@ -23,6 +23,7 @@ export const prefs = $state({
   coordFormat: 'dd', // 'dd' | 'dms' | 'mgrs'
   units: 'metric', // 'metric' | 'imperial'
   homeView: { lat: 43, lon: 25, zoom: 3 }, // where Satellite opens
+  detectView: { collapsed: false, basemap: 'esri-world-imagery', overlays: ['boundaries'], saved: true },
   captureScaleNorth: false, // burn a scale bar and a north arrow into captures
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
   postTarget: 'x', // social composer a fresh post draft starts with
@@ -92,6 +93,7 @@ export function applyPrefs(s) {
   if (s.coord_format) prefs.coordFormat = s.coord_format;
   if (s.units) prefs.units = s.units;
   if (s.home_view) prefs.homeView = s.home_view;
+  if (s.detect_view) prefs.detectView = s.detect_view;
   if (s.capture_scale_north !== undefined) prefs.captureScaleNorth = s.capture_scale_north;
   if (s.post_mention !== undefined) prefs.postMention = s.post_mention; // '' = none
   if (s.post_target !== undefined) prefs.postTarget = s.post_target;
@@ -245,7 +247,7 @@ export const uiState = $state({
   focusMedia: null, // media path to highlight & scroll to in the Media Library
   openInspect: null, // inspect-session name to reopen in the Inspect tool
   openCompare: null, // compare-session name to reopen in the Compare tool
-  openAnalyzer: null, // saved analysis item stem to reopen without loading imagery
+  openAnalyzer: null, // saved Detect item stem to reopen without loading imagery
   // Entity id the Board should open Details on. The graph-only types — a person,
   // an account, a claim — have no tool of their own to be reopened in, so the
   // board is where following a relation to one of them lands.

@@ -5,14 +5,19 @@ import {
   ellipseRing,
   glyphBox,
   markGlyph,
+  markCentre,
   markLabel,
   markMetric,
+  markRing,
+  markTop,
   markSize,
   movedMark,
   nextMarkNumber,
   onSide,
   projectMark,
+  turnedMark,
 } from './compareAnnotations.js';
+import { toMercator } from './groundFrame.js';
 
 const mark = (patch) => ({ id: 'm', colour: '#f6a81a', side: 'both', ...patch });
 
@@ -29,8 +34,17 @@ describe('ground annotations', () => {
     ])).toEqual([{
       id: 'm', kind: 'rect', side: 'both', colour: '#ff0000',
       points: [[2, 48], [2.1, 48.1]], stroke_width: 3, fill_opacity: 1, font_size: 16, text: '',
-      number: 1, glyph: 'point',
+      number: 1, glyph: 'point', angle: 0,
     }]);
+  });
+
+  it('keeps the angle a box was drawn at, and only on the kinds that have sides', () => {
+    const [box, line] = comparisonAnnotations([
+      mark({ kind: 'rect', points: [[2, 48], [2.1, 48.1]], angle: -30 }),
+      mark({ kind: 'line', points: [[2, 48], [2.1, 48.1]], angle: 40 }),
+    ]);
+    expect(box.angle).toBeCloseTo(330);
+    expect(line.angle).toBe(0);
   });
 
   it('belongs to one side or both', () => {
@@ -58,6 +72,52 @@ describe('ground annotations', () => {
     expect(ring[0]).toEqual([2, 0.5]);
     expect(ring[1][0]).toBeCloseTo(1);
     expect(ring[1][1]).toBeCloseTo(1);
+  });
+
+  it('draws a box along the screen it was drawn on, not along north', () => {
+    // Drawn on an east-up screen, top-left to bottom-right: its first side runs
+    // south from the first corner, and its second runs west.
+    const points = [[0, 0.001], [-0.002, -0.001]];
+    const ring = markRing(mark({ kind: 'rect', points, angle: 90 }));
+    expect(ring).toHaveLength(4);
+    expect(ring[1][0]).toBeCloseTo(0, 9);
+    expect(ring[1][1]).toBeCloseTo(-0.001, 9);
+    expect(ring[3][0]).toBeCloseTo(-0.002, 9);
+    expect(ring[3][1]).toBeCloseTo(0.001, 9);
+    expect(markRing(mark({ kind: 'ellipse', points, angle: 90 }))).toHaveLength(48);
+    const centre = markCentre(mark({ kind: 'ellipse', points, angle: 90 }));
+    expect(centre[0]).toBeCloseTo(-0.001, 9);
+    expect(centre[1]).toBeCloseTo(0, 9);
+  });
+
+  it("turns a mark about its centre, and a box's sides with it", () => {
+    const box = mark({ kind: 'rect', points: [[0, 0], [0.002, -0.001]], angle: 0 });
+    const turned = turnedMark(box, markCentre(box), 90);
+    expect(turned.angle).toBe(90);
+    // The same box, stood on end: its ring holds the same four corners turned.
+    const metres = (ring) => ring.map((point) => toMercator(...point));
+    const [a, b] = metres(markRing(turned));
+    const [c, d] = metres(markRing(box));
+    expect(Math.hypot(b[0] - a[0], b[1] - a[1])).toBeCloseTo(Math.hypot(d[0] - c[0], d[1] - c[1]), 3);
+    expect(Math.abs(b[1] - a[1])).toBeGreaterThan(Math.abs(b[0] - a[0]));
+    const polygon = mark({ kind: 'polygon', points: [[0, 0], [0.002, 0], [0.001, 0.001]] });
+    const spun = turnedMark(polygon, markCentre(polygon), 180);
+    expect(spun.points[0][0]).toBeCloseTo(0.002, 9);
+    expect(spun.angle).toBeUndefined();
+    // One point turns about itself, which is no turn at all.
+    const stamp = mark({ kind: 'number', points: [[1, 1]] });
+    expect(turnedMark(stamp, [0, 0], 90)).toBe(stamp);
+  });
+
+  it("stands the turn grip on a box's own top edge", () => {
+    const box = mark({ kind: 'rect', points: [[0, 0.002], [0.002, 0]], angle: 0 });
+    const top = markTop(box);
+    expect(top[0]).toBeCloseTo(0.001, 9);
+    expect(top[1]).toBeCloseTo(0.002, 9);
+    // Drawn from the bottom corner up, the top is still the top.
+    const upward = markTop(mark({ kind: 'rect', points: [[0, 0], [0.002, 0.002]], angle: 0 }));
+    expect(upward[1]).toBeCloseTo(0.002, 9);
+    expect(markTop(mark({ kind: 'polygon', points: [[0, 0], [1, 0], [1, 1]] }))).toBeNull();
   });
 
   it('projects a box as a closed ring and an arrow with a head', () => {

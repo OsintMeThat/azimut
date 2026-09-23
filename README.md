@@ -60,10 +60,11 @@ to fix a point on the map.*
 | **Files** | Every saved artifact in one Finder-style view of your folders, not just media: select several, drag them into a folder, search across the lot. |
 | **Reverse Search** | Prepare an image or a video frame for keyless reverse-image services. With the capture extension, pressing an engine opens it with the picture already in it. Nothing leaves the machine until you press one. |
 | **Inspect** | A scratch workspace over any photo or video: frame adjustments, editable crop, sharpest-frame capture, hand-made collage with per-piece warp/scale/rotate, auto-stitch to solve a panorama's layout, and ELA hints. Nothing enters the case until you save. |
-| **Satellite** | Coordinates or a place name become an imagery crop. The search bar proposes matches as you type: saved work, coordinates and a bundled city list answer offline, and the geocoder fills in the rest once you pause. Select-area capture with an optional scale bar and north arrow, map rotation, measurement tools, a right-click menu on any point, stacked overlays (borders, roads, railways, power lines, fires, night lights) and editable AOI grids for area review. Esri/OSM by default, plus the Esri Wayback archive and Sentinel-2 with a date calendar and a cloud-ceiling slider; add a Mapbox or Google key for more basemaps. Open it in several tabs and they stay in sync. |
-| **Compare** | Links two dated map views for side-by-side, swipe, fade, blink or assisted change reading. Ground-anchored notes, shapes and measurements follow both maps. Editable sessions and rendered previews stay in the case; attributed PNG/GIF copies go to exports. |
+| **Satellite** | Coordinates or a place name become an imagery crop. The search bar proposes matches as you type: saved work, coordinates and a bundled city list answer offline, and the geocoder fills in the rest once you pause. Select-area capture with an optional scale bar and north arrow, map rotation, measurement tools, a right-click menu on any point, stacked overlays (borders, roads, railways, power lines, fires, night lights), your own KML, KMZ, GeoJSON, GPX or My Maps layers, GeoConfirmed conflicts narrowed to a period, and editable AOI grids for area review. Esri/OSM by default, plus the Esri Wayback archive, Sentinel-2 with a date calendar and a cloud-ceiling slider, and Sentinel-1 radar passes; add a Mapbox or Google key for more basemaps. Open it in several tabs and they stay in sync. |
+| **Compare** | Links two dated map views for side-by-side, swipe, fade or blink, with Difference highlights laid over any of them. All dates lists every picture of a point and narrows down when a change appeared. Ground-anchored notes, shapes, numbered markers and measurements follow both maps. Editable sessions and rendered previews stay in the case; attributed PNG/GIF copies go to exports. |
+| **Detect** | Sweeps drawn areas of Sentinel-2 for vessels, fires, construction, burn scars and other changes, and of Sentinel-1 radar for vessels, razed buildings, new structures and floods through cloud, once or as a saved routine. Only a candidate you keep becomes a case pin. |
 | **Coords & Sky** | Convert common coordinate formats, copy the result, open map or geocoding links, and read the sun and moon at that point on a date: rise, set, azimuth, altitude, twilights, moon phase and bright-limb angle, in local time and UTC, computed offline. |
-| **Geo Proof** | Start a named proof from a reusable house style, or from a published post whose pictures become its panels. Compose case panels in a grid or free layout, annotate with colored shapes, fills, symbols, freehand and text, state every place and every source the proof argues, and export `proof.png` plus a re-editable spec. |
+| **Geo Proof** | Start a named proof from a reusable house style, or from a published post whose pictures become its panels. Compose case panels in a grid or free layout, turn or crop them, annotate with colored shapes, fills, symbols, numbered markers, blur boxes, freehand and text, state every place and every source the proof argues, and export `proof.png` plus a re-editable spec. |
 | **Geo Report** | Turn a proof into a prepared thread for X or Bluesky: coordinates, plus code, attribution, target-specific character counts, media, and a structured Markdown case note with linked evidence. |
 | **Notebook** | Tabbed Markdown notes with local media, Mermaid diagrams, linked case evidence, broken-reference markers, and PDF export of one note or a whole selection. |
 
@@ -74,27 +75,26 @@ extension, and cross-platform binaries with a bundled ffmpeg.
 Every tool works one-shot (a scratch session, no setup) or inside a case, a
 plain directory holding the whole investigation.
 
-## New in v0.3.0
+## New in v0.3.1
 
-A new map with much more on it, and Azimut's tools drawn over other map sites.
+Detect sweeps an area for what appeared, and the map takes layers made elsewhere.
 
-- The map runs on MapLibre, with modes in one rail, layers in a side panel and a
-  status line. Right-click the ground to copy, save, measure, read the sky or open
-  the point's imagery history.
-- **Esri Wayback** as a basemap, narrowed to the releases that changed the point
-  and dated by when the picture was taken.
-- Key-less overlays (borders, roads, railways, power lines, sea marks, GPS
-  traces), NASA FIRMS fires and VIIRS night lights for a chosen day.
-- Several map tabs sharing one camera, with saved points and grid sweeps synced
-  live between them.
-- Captures can carry a scale bar and a north arrow, and a place's uncertainty can
-  be traced as a shape.
-- The capture extension draws measure, saved points, sun and moon, search grids,
-  fires and case media over third-party map sites, and updates from Settings.
-  Firefox gets a signed, self-updating add-on.
-- Geo Report fills the X or Bluesky composer with the whole thread, and Reverse
-  Search drops the picture straight into the engine's uploader.
-- The app opens on a case Home, and `?` opens a Guide on the current tool.
+- **Detect**, a tab of its own, sweeps drawn areas of Sentinel-2 for vessels, fires and
+  flares, construction, small spots, surface change, burn scars, vegetation loss
+  or new water. Candidates come strongest first, and only one you keep becomes a
+  case pin.
+- Difference and Detect share one Sentinel-2 cloud and shadow mask.
+- Radar: five Sentinel-1 analyzers (vessels, any change, razed buildings, new
+  structures, floods) see through cloud and at night, and Sentinel-1 passes are a
+  basemap in Satellite, Compare and Detect.
+- A candidate opens in Compare with one press, and All dates in Compare narrows
+  down between which two pictures a change appeared.
+- Open KML, KMZ, GeoJSON and GPX files or a public My Maps as map layers, and add
+  a GeoConfirmed conflict. A dated layer narrows to a period.
+- Proofs turn and crop their images, stamp numbered markers and blur boxes, and
+  carry a sentence and the date their material was taken.
+- To-do lists on Home, one date field across the app, a claim filed from where
+  you are, and Reverse Search from a Media Library row or an Inspect frame.
 - Existing cases open unchanged, and older bundles still import.
 
 ## Cases on disk
@@ -298,7 +298,7 @@ tag, with credentials from the AMO developer hub:
 ```bash
 export AMO_JWT_ISSUER=... AMO_JWT_SECRET=...
 python3 scripts/sign_extension.py                    # signs, writes packaging/updates.json
-gh release upload v0.3.0 dist-xpi/azimut-capture-0.3.0.xpi
+gh release upload v0.3.1 dist-xpi/azimut-capture-0.3.1.xpi
 ```
 
 Then commit `packaging/updates.json`. That file is what
@@ -365,7 +365,7 @@ wheel + Windows/Linux/macOS binaries, attaches them to a GitHub release, and
 publishes to PyPI. **Don't publish by hand.**
 
 ```bash
-git tag v0.3.0 && git push origin v0.3.0
+git tag v0.3.1 && git push origin v0.3.1
 ```
 
 One-time setup: register the repo as a

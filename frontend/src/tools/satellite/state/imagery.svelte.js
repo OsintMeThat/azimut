@@ -33,6 +33,7 @@ import {
 } from '../../../lib/usage.js';
 import { variantId } from '../../../lib/sentinel.js';
 import { WAYBACK_ID, waybackId } from '../../../lib/wayback.js';
+import { RADAR_ID, radarId } from '../../../lib/radar.js';
 
 export const FALLBACK_PROVIDER = FREE_IMAGERY;
 
@@ -142,8 +143,8 @@ export function createImageryState({ api }) {
      *
      * @param {string} chosenId the provider the surface's selector is on
      * @param {number} zoom that surface's view zoom
-     * @param {object} [variant] Sentinel-2's layer/window/ceiling, or the
-     *   Wayback `release`, whichever the shown basemap reads
+     * @param {object} [variant] Sentinel-2's layer/window/ceiling, the Wayback
+     *   `release` or the Sentinel-1 `pass`, whichever the shown basemap reads
      */
     displayed(chosenId, zoom, variant) {
       const chosen = this.find(chosenId);
@@ -160,7 +161,9 @@ export function createImageryState({ api }) {
         // what every downstream consumer asks for: the tile URL, the capture,
         // the disk cache — never the bare provider id
         id:
-          baseId === WAYBACK_ID ? waybackId(baseId, variant?.release) : variantId(baseId, variant),
+          baseId === WAYBACK_ID ? waybackId(baseId, variant?.release)
+          : baseId === RADAR_ID ? radarId(baseId, variant?.pass)
+          : variantId(baseId, variant),
         // memoized by the caller so the layer is only rebuilt when the cell
         // actually changes, i.e. crossing the z17 boost bracket
         cell: provider ? layerCell(provider, zoom) : 256,

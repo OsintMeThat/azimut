@@ -48,8 +48,8 @@ describe('the Wayback chip', () => {
   });
 
   it('says it is waiting while Esri is being read, picker open or shut', () => {
-    // the walk takes seconds and runs with the menu closed once the history
-    // follows the map, so the chip is where the wait has to show
+    // the walk takes seconds and the menu can be shut while it runs, so the
+    // chip is where the wait has to show
     const { body } = render(WaybackPicker, {
       props: props({ menuOpen: false, releases: [], date: '', busy: true }),
     });
@@ -103,16 +103,27 @@ describe('the picker', () => {
     expect(
       render(WaybackPicker, { props: props({ changesNote: 'Could not read it' }) }).body
     ).toContain('Could not read it');
-    expect(render(WaybackPicker, { props: props({ stale: true }) }).body).toContain(
-      'The map moved off this history.'
-    );
+    const stale = render(WaybackPicker, { props: props({ stale: true }) }).body;
+    expect(stale).toContain('The map moved off this history.');
+    // …and reading the new place is the analyst's call, not the map's
+    expect(stale).toContain('>Read here</button>');
+  });
+
+  it('offers every release first, and the history as a choice after it', () => {
+    const { body } = render(WaybackPicker, {
+      props: props({ changesOnly: false, changes: null, visible: RELEASES, position: 1 }),
+    });
+    expect(body.indexOf('Every release')).toBeLessThan(body.indexOf('Changes here'));
+    expect(body).toMatch(/class="chip-opt[^"]* on"[^>]*>Every release</);
+    expect(body).toContain('>2026-08-05<');
+    expect(body).not.toMatch(/changes? at the crosshair/);
   });
 
   it('keeps release dates apart from when the pixels were taken', () => {
     const { body } = render(WaybackPicker, { props: props() });
     expect(body).toContain('taken 2022-03-31');
     expect(body).toContain('Taken by Maxar WV03');
-    expect(body).toContain('the pill under the chip date the pixels');
+    expect(body).toContain('the pill under the chip dates the pixels on screen');
   });
 
   it('says so when the release list cannot be read', () => {

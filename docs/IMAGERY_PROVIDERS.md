@@ -31,6 +31,7 @@
 | **Google Satellite** | yes | **session token** | yes (flattened+attributed only) | **NO** | dynamic copyright from viewport endpoint |
 | **Google Satellite (Maps JS)** | yes | key in script URL⁴ | screen crops only (user-initiated grab, attribution burned) | n/a (widget) | `Map data © Google` + the widget's own credits |
 | **Sentinel-2 (Sentinel Hub)** | yes | instance ID in URL³ | yes | yes | `© Copernicus Sentinel data {year}` |
+| **Sentinel-1 radar (Sentinel Hub)** | yes, plus a radar layer | instance ID in URL³ | yes | yes | `© Copernicus Sentinel data {year}` |
 
 ¹ Display + static-image capture with attribution is permitted; plan-level
 caching/redistribution limits vary, so the cache stays modest (30-day TTL) and
@@ -340,6 +341,67 @@ gauge and 90% soft block can match the user's account rather than a global
 assumption.
 [Quotas](https://documentation.dataspace.copernicus.eu/Quotas.html) ·
 [PU definition](https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Overview/ProcessingUnit.html)
+
+## Sentinel-1 comes through a layer the user adds
+
+Radar is the same account, the same quota and the same configuration instance, but
+an instance serves no Sentinel-1 until one of its layers reads it: the WFS answers
+`TYPENAME=DSS3 not found!` for an instance built from the Sentinel-2 template
+(verified 2026-09). The user adds a layer in the Configuration Utility with
+Sentinel-1 GRD as its source, IW mode, VV+VH polarisation, High resolution, any
+orbit direction, orthorectification on, gamma0 and no speckle filter; the form
+refuses to save until Data processing names a predefined product or a script,
+which Azimut replaces anyway. The app shows that form field by field
+(`lib/copernicusSetup.js`). Orthorectification doubles a request's processing
+units and a speckle filter doubles them again; terrain gamma0 multiplies them by
+2.5 (Copernicus PU rules, 2026-09). The processing a layer sets (backscatter coefficient, orthorectification, DEM)
+cannot be overridden from an OGC request; only the evalscript can, and ours
+replaces the layer's.
+
+Nothing in GetCapabilities says which layer reads which collection. WFS
+GetCapabilities does list one feature type per collection the layers use, free,
+which says whether any radar layer exists. **Find** (`POST
+/api/satellite/sentinel1/layer`) then asks each layer the Sentinel-2 templates do
+not ship, at most six, with an 8 × 8 render that reads `VV` and `VH` over the North
+Sea off Rotterdam: a Sentinel-2 layer answers 400 and the service's sentence says
+why. One request per probe, on the meter. The first layer that answers is kept as
+`sentinel1_layer` in settings.json, carried by the backup, and forgotten when the
+instance id changes. It can also be named and checked by hand.
+
+- **A pass is a day and a time.** Sentinel-1 passes a place at dawn flying south
+  and at dusk flying north, so one day can hold two looks from opposite sides.
+  Radar lookups (`collection=sentinel1`) group granules by pass rather than by
+  day, name a pass by the UTC time of its first slice (the WFS `time` field, or
+  the sensing start in the product name), and derive the direction from the
+  local solar hour. Requests carry `TIME` as twenty minutes either side of that
+  time (`sentinel.pass_window`), which holds one pass and nothing else.
+- **One track compares with itself.** A relative orbit repeats to the second every
+  twelve days, whichever satellite flies it; the neighbouring track that also sees
+  a place passes about eight minutes off (Dover 2025: orbits 132 and 59 at 17:49
+  and 17:41). Two passes within four minutes of each other in the day are one
+  track (`sentinel.same_track`), and Detect, Difference and the pickers hold a
+  pair to it.
+- **The basemap** is `sentinel1`, offered once `sentinel1_layer` is set. A pass
+  rides on the id as `sentinel1~2026-05-14~054210` (no colons: the id is a cache
+  folder), a day alone as `sentinel1~2026-05-14`, and the plain id is the most
+  recent pass. It is drawn in the review composite: VV red from -22 to 2 dB, VH
+  green from -30 to -6 dB, their difference blue from 0 to 15 dB.
+- **Detect's radar product** (`sar`) carries VV and VH in decibels, a fifth of one
+  per step from -35 dB, the first byte never zero where the radar saw something.
+  The review picture (`sar-picture`) is rendered by WMS like a product, since
+  there is no true colour to borrow.
+- **The water mask** (`water`) is a Sentinel-2 product read beside a radar vessel
+  sweep: the scene class of the least cloudy pass of the year before the pass's
+  month (`PRIORITY=leastCC`), water, land, or unknown where that pass saw cloud,
+  shadow or snow. Dry desert is as radar-dark as calm sea in both polarisations,
+  and without it the radar alone put 72 candidates on Port Sudan's town and sand.
+
+Calibration used no quota: the scenes were read key-less from Microsoft Planetary
+Computer's `sentinel-1-rtc` and `sentinel-2-l2a` collections and encoded in the
+products' byte layout. Those are terrain-flattened gamma0; a layer left at the
+Sentinel Hub default reads ellipsoid gamma0, which differs little over sea and
+flat ground and more on slopes, which is one more reason to ask for
+orthorectification.
 
 ## Google is not a static `{key}` URL
 

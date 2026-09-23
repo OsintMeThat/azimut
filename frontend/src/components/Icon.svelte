@@ -138,6 +138,7 @@
     minimize: 'M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3m8 0v-3a2 2 0 0 1 2-2h3',
     ruler: 'M4 15.5 15.5 4l4.5 4.5L8.5 20 4 15.5Zm3.5-.5 1.5 1.5m1-4.5 1.5 1.5m1-4.5L14 11',
     polygon: 'M12 3.5 20 9.5l-3 9.5H7L4 9.5l8-6Z',
+    mapArea: 'M3 5l7-2 4 4 7-2v14l-7 2-4-4-7 2V5Zm7-2v14m4-10v14',
     // Compare's reading modes: two panes, a divider, a blend, alternation, a change
     columns: 'M4 5h6.5v14H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm9.5 0H20a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-6.5V5Z',
     swipe: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm8-2v18m-3-9-1.5 0M16.5 12H15',

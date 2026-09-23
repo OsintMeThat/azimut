@@ -59,7 +59,7 @@ azimut/        # everything Azimut owns; the rest of the folder is yours
   .drafts/     # post drafts
   .inspect/    # saved Inspect session specs
   .compare/    # saved Compare session specs
-  .analysis/   # Detect areas, watches, runs and the frames behind their results
+  .analysis/   # Detect areas, saved detections, runs and the frames behind their results
   .search/     # saved Grid Search state
   .layers/     # added map layers: spec + source as received + its icons; .cache/ is derived
   .trash/      # recoverable artifact payloads, in numbered slots
@@ -174,11 +174,13 @@ proof for publication.
 | ✅ **Dates on a layer** | Narrows a dated added layer (GeoConfirmed, KML timestamps, GPX waypoints) to a period dragged on a strip of its events over time or picked on a calendar, kept with the legend. |
 | ✅ **GeoConfirmed layer** | Adds one GeoConfirmed conflict over a window of days or dates or its whole history, optionally only the view, in GeoConfirmed's own icons, grouped by faction with each event's sources and geolocation one click away. |
 | ✅ **Media on the map** | Draws the case's located photos and videos where a relation, a GPS reading or a proof puts them, opens the Map panel, the home map and the extension on them, and plays the stack in the panel beside the imagery. |
-| ✅ **Imagery Wayback** | Browses every Esri World Imagery release, narrowed to the ones that changed the point, and dates the pixels apart from the release. |
+| ✅ **Imagery Wayback** | Browses every Esri World Imagery release, narrowed on request to the ones that changed the point, and dates the pixels apart from the release. |
 | ✅ **Satellite Compare** | Aligns and annotates two dated views, assists matched-product change reading, saves editable sessions and files or exports attributed PNG/GIF outputs. |
-| ✅ **Compare Detect** | Sweeps drawn areas of Copernicus Sentinel-2 at native resolution for vessels, fires and flares, construction, small spots, burn scars, vegetation loss and new water, at a small, medium or large target size; candidates come strongest first, one at a time, and only a kept one becomes a case pin. |
+| ✅ **Detect sweep** | Native Sentinel-2 detectors, mask footprints, manual candidates and Keep / Dismiss / Pin review with PNG evidence stamped with its dates and point. |
 | ✅ **Passes over an area** | Picks Detect's Copernicus dates from the passes the drawn areas really have, each with the share of them its swath reached, and reports what a finished run actually swept. |
 | ✅ **Cloud & shadow filter** | One click in Difference and Detect, both on Sentinel-2's scene classification: unsure edges taken, classified "clouds" too small to be one dropped, and shadows cast away from the sun, including the ones the classification read as water. |
+| ✅ **Difference over any view** | A switch beside Compare's four views, offered on a matched pair only, laying its highlights on A, B or both (the default). |
+| ✅ **Detect** | Map-first tab, collapsible dock, shared case areas reshaped in place, an A/B When step with per-area dates, one-off and routine runs grouped in Saved, repeat notices and explicit SAT layer snapshots. |
 | ✅ **Capture scale & north** | Adds a scale bar and true-north needle to app and extension captures when resolution and heading are known. |
 | ✅ **Footprint tracing** | Traces a place's uncertainty as a polygon around its pin, in place of the radius. |
 | ✅ **Extension map tools** | Draws measure, the case's points one position at a time, sun and moon, search grids and case media over third-party maps, calibrated per site by a replayable command. |
@@ -186,12 +188,17 @@ proof for publication.
 | ✅ **Site hand-offs** | Fills the X or Bluesky composer with a prepared thread and uploads a case picture straight into Lens, Yandex, Bing or TinEye. |
 | ✅ **Home & Guide** | Opens on a case dashboard or a front door when no case is open, and `?` opens the Guide on the current tab. |
 | ✅ **Case to-do lists** | Named lists on Home with editable tasks, checkboxes, progress counts and case-bundle persistence. |
-| ✅ **Compare from the ground** | Right-clicking a point opens Compare on the last two Esri Wayback pictures of it, or on its last two Copernicus passes. |
+| ✅ **Compare from the ground** | Right-clicking a point opens Compare on the last two Esri Wayback pictures of it, its last two Copernicus passes, or its last two radar passes of one track. |
 | ✅ **Marks that number and hide** | Stamps numbered markers counting a series per colour, and blur boxes that redraw the picture under them, on a proof's panels and on a comparison's ground alike. |
 | ✅ **A date in one field** | Reads a day, a month, a year, a time or a range from one line of text, or builds one from a calendar with its marks of doubt, and says what it understood. |
 | ✅ **Words that hold still** | One name for a Claim on every surface, a tooltip on every icon, a stated reason on a layer that cannot be switched on, the recent work first on Home, and Coords & Sky opening on the point the map is on. |
 | ✅ **A picture sent to Reverse Search** | Opens Reverse Search on a Media Library file, from a row's Open in… menu, or on an Inspect frame as it is cropped, saved or not. |
 | ✅ **A claim from where you are** | Files a claim from Details, a Board row or a Graph node with the entity already seated, asking a count and a condition where its family calls for them and writing the sentence from the fields. |
+| ✅ **Radar Detect** | Five Sentinel-1 analyzers (vessels, any change, razed buildings, new structures, floods) through the user's own radar layer, calibrated on real scenes, held to one track. |
+| ✅ **Sentinel-1 basemap** | Radar passes as a dated basemap in Satellite, Compare and Detect, named by day, UTC time and direction. |
+| ✅ **All dates** | Lists every dated picture of the point in Compare and narrows down, a question at a time, between which two a change appeared. |
+| ✅ **Copernicus where it is needed** | Detect and Compare say in the middle of the tool what Copernicus still lacks, with the free account, the Sentinel-2 configuration and the Sentinel-1 layer form field by field. |
+| ✅ **A candidate in Compare** | Opens a Detect candidate in Compare on the passes that found it, or against high-resolution imagery for a thing present on one pass. |
 
 ---
 
@@ -312,6 +319,8 @@ stops making sense.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
 - **More on the home page:** the case's own notes beside the tiles, and panels the analyst arranges rather than a fixed grid. Each has to earn its place there rather than beside Board, Graph and Timeline, which already read the case.
+- **Radar damage from a stack of passes:** the pixel-wise t-test (PWTT) over a year of passes before and weeks after, which two passes cannot match.
+- **Oil slicks by radar:** dark patches on the sea near anchorages and lanes, which Sentinel-1 shows through cloud.
 - **A deleted case waits before it is gone:** artifacts, entities and bulk deletes are all recoverable, while removing a case is the one act with no way back and only a typed DELETE in front of it. Move the folder aside instead, and empty it later.
 
 ## 8. Explicit non-goals

@@ -2,7 +2,7 @@
   /**
    * Cloud and the shadow it casts, as one thing to click.
    *
-   * It sits at the top of Detect's third step and of Difference's column rather
+   * It sits in Detect's What step and at the top of Difference's column rather
    * than inside the thresholds, because cloud is the first thing that goes
    * wrong in a reading and hunting for the switch that fixes it is the wrong
    * first minute. The split between cloud and shadow, and the margin, stay with

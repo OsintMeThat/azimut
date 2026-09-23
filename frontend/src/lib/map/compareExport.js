@@ -145,7 +145,7 @@ function drawChangeMask(ctx, mask, target, x, y, pixelScale, opacity) {
   ctx.beginPath();
   ctx.rect(x, y, target.width * pixelScale, target.height * pixelScale);
   ctx.clip();
-  ctx.globalAlpha = clamp(opacity, 0, 100) / 100;
+  ctx.globalAlpha *= clamp(opacity, 0, 100) / 100;
   ctx.imageSmoothingEnabled = false;
   ctx.setTransform?.(1, 0, 0, 1, 0, 0);
   ctx.transform(toTarget.a, toTarget.b, toTarget.c, toTarget.d, toTarget.e + x, toTarget.f + y);
@@ -157,7 +157,8 @@ function drawChangeMask(ctx, mask, target, x, y, pixelScale, opacity) {
  * @param {object} input
  * @param {{canvas: HTMLCanvasElement, frame: object}} input.a  A as captured, with its camera frame
  * @param {{canvas: HTMLCanvasElement, frame: object}} input.b
- * @param {'side'|'swipe'|'opacity'|'blink'|'change'} input.mode
+ * @param {'side'|'swipe'|'opacity'|'blink'} input.mode
+ * @param {object|null} input.change  a finished difference to lay over the view, or null
  */
 export function composeComparison({
   a,
@@ -182,16 +183,16 @@ export function composeComparison({
     throw new Error('both maps must be ready before they can be exported');
   }
 
+  if (change && !(change.canvas?.width && change.frame)) {
+    throw new Error('the difference must finish before it can be exported');
+  }
   const pixelScale = a.canvas.width / a.frame.width;
   const s = pixelScale;
-  // A difference laid over both images is two panes, like side by side, with
-  // the same mask drawn on each through that pane's own frame.
-  const pairedChange = mode === 'change' && change?.base === 'side';
-  const side = mode === 'side' || pairedChange;
+  const side = mode === 'side';
   const mapWidth = side ? a.canvas.width + b.canvas.width : Math.max(a.canvas.width, b.canvas.width);
   const mapHeight = Math.max(a.canvas.height, b.canvas.height);
   const header = Math.round((title ? 64 : 48) * s);
-  const legend = mode === 'change' && change ? Math.round(30 * s) : 0;
+  const legend = change ? Math.round(30 * s) : 0;
   const footer = Math.round(26 * s) + legend;
   const output = canvasOf(mapWidth, header + mapHeight + footer, makeCanvas);
   const ctx = output.getContext('2d');
@@ -213,6 +214,12 @@ export function composeComparison({
     draw();
     ctx.restore();
   };
+  // The highlights ride on the image they were asked over, in whatever view.
+  const maskOn = (capture, letter, offsetX) => {
+    if (!change || change.opacity <= 0) return;
+    if (change.base !== 'both' && change.base !== letter) return;
+    drawChangeMask(ctx, change, capture.frame, offsetX, top, s, change.opacity);
+  };
   const markAnnotations = (capture, letter, offsetX) => {
     const marks = annotations.filter((mark) => onSide(mark, letter));
     clipped(offsetX, capture.canvas.width, capture.canvas.height, () =>
@@ -221,15 +228,10 @@ export function composeComparison({
   };
 
   if (side) {
-    if (pairedChange && !(change?.canvas?.width && change?.frame)) {
-      throw new Error('change assist must finish before it can be exported');
-    }
     ctx.drawImage(a.canvas, 0, top);
     ctx.drawImage(b.canvas, paneB, top);
-    if (pairedChange && change.visible !== false && change.opacity > 0) {
-      drawChangeMask(ctx, change, a.frame, 0, top, s, change.opacity);
-      drawChangeMask(ctx, change, b.frame, paneB, top, s, change.opacity);
-    }
+    maskOn(a, 'a', 0);
+    maskOn(b, 'b', paneB);
     markAnnotations(a, 'a', 0);
     markAnnotations(b, 'b', paneB);
     ctx.fillStyle = 'rgba(255,255,255,.92)';
@@ -243,6 +245,7 @@ export function composeComparison({
     ctx.rect(0, top, split, mapHeight);
     ctx.clip();
     ctx.drawImage(a.canvas, 0, top);
+    maskOn(a, 'a', 0);
     markAnnotations(a, 'a', 0);
     ctx.restore();
     ctx.save();
@@ -250,6 +253,7 @@ export function composeComparison({
     ctx.rect(split, top, mapWidth - split, mapHeight);
     ctx.clip();
     ctx.drawImage(b.canvas, 0, top);
+    maskOn(b, 'b', 0);
     markAnnotations(b, 'b', 0);
     ctx.restore();
     ctx.fillStyle = 'rgba(255,255,255,.95)';
@@ -260,9 +264,12 @@ export function composeComparison({
     }
   } else if (mode === 'opacity') {
     ctx.drawImage(a.canvas, 0, top);
+    maskOn(a, 'a', 0);
+    // B's highlights fade with B, as they do on screen.
     ctx.save();
     ctx.globalAlpha = clamp(Number(opacity), 0, 100) / 100;
     ctx.drawImage(b.canvas, 0, top);
+    maskOn(b, 'b', 0);
     ctx.restore();
     markAnnotations(a, 'a', 0);
     const onlyB = annotations.filter((mark) => mark.side === 'b');
@@ -270,22 +277,11 @@ export function composeComparison({
       drawAnnotations(ctx, onlyB, captureProjection(b, 0, top), { scale: s, units })
     );
     drawTag(ctx, `B ${Math.round(opacity)}%`, mapWidth - 12 * s, top + 12 * s, { scale: s, accent: true, align: 'right' });
-  } else if (mode === 'change') {
-    if (!change?.canvas?.width || !change?.frame) {
-      throw new Error('change assist must finish before it can be exported');
-    }
-    const base = change.base === 'a' ? a : b;
-    const letter = change.base === 'a' ? 'a' : 'b';
-    ctx.drawImage(base.canvas, 0, top);
-    if (change.visible !== false && change.opacity > 0) {
-      drawChangeMask(ctx, change, base.frame, 0, top, s, change.opacity);
-    }
-    markAnnotations(base, letter, 0);
-    drawTag(ctx, `Base ${letter.toUpperCase()}`, mapWidth - 12 * s, top + 12 * s, { scale: s, accent: true, align: 'right' });
   } else {
     const shown = mode === 'blink' && blinkB ? b : a;
     const letter = shown === b ? 'b' : 'a';
     ctx.drawImage(shown.canvas, 0, top);
+    maskOn(shown, letter, 0);
     markAnnotations(shown, letter, 0);
     drawTag(ctx, letter.toUpperCase(), 12 * s, top + 12 * s, { scale: s, accent: true });
   }

@@ -95,4 +95,20 @@ describe('the acquisition picker', () => {
     expect(target.textContent).toContain('No pass reaches these areas');
     done();
   });
+
+  it('lists radar passes by time and direction, and holds a pair to one track', () => {
+    const radar = [
+      { date: '2026-05-14', time: '17:33:02', orbit: 'ascending', cloud: null, coverage: 1 },
+      { date: '2026-05-14', time: '05:42:10', orbit: 'descending', cloud: null, coverage: 1 },
+    ];
+    const { target, done } = render({ list: radar, radar: true, a: { date: '2026-05-02', time: '05:42:40' } });
+    expect(rows(target)).toHaveLength(2);
+    expect(rows(target)[1].textContent).toContain('05:42 UTC ↓');
+    expect(target.textContent).not.toContain('cloud');
+    // the evening pass is another track than A's: it cannot be its pair
+    const [evening, morning] = rows(target).map((row) => [...row.querySelectorAll('button')].at(-1));
+    expect(evening.disabled).toBe(true);
+    expect(morning.disabled).toBe(false);
+    done();
+  });
 });

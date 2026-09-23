@@ -15,7 +15,9 @@
   import Icon from '../../components/Icon.svelte';
   import SentinelPicker from './SentinelPicker.svelte';
   import WaybackPicker from './WaybackPicker.svelte';
+  import RadarPicker from './RadarPicker.svelte';
   import { WAYBACK_ID } from '../../lib/wayback.js';
+  import { RADAR_ID } from '../../lib/radar.js';
   import {
     SENTINEL_ID,
     cloudClass,
@@ -34,6 +36,8 @@
     s2 = null,
     /** This surface's Wayback release, when that basemap is on it. */
     wayback = null,
+    /** This surface's Sentinel-1 pass, when that basemap is on it. */
+    s1 = null,
     /** What it is actually showing — a billed base steps aside when paused. */
     shown,
     /** Open the Sentinel-2 picker from a dated chip, as Wayback's already is.
@@ -45,10 +49,12 @@
   let menuEl = $state();
   let s2MenuEl = $state();
   let wbMenuEl = $state();
+  let s1MenuEl = $state();
 
   const asked = $derived(imagery.find(providerId));
   const isSentinel = $derived(asked?.id === SENTINEL_ID);
   const isWayback = $derived(asked?.id === WAYBACK_ID);
+  const isRadar = $derived(asked?.id === RADAR_ID);
   const usagePill = $derived(imagery.pill(asked));
 
   function pick(provider) {
@@ -71,6 +77,15 @@
     if (!s2?.menuOpen) return;
     const outside = (e) => {
       if (s2MenuEl && !s2MenuEl.contains(e.target)) s2.menuOpen = false;
+    };
+    document.addEventListener('mousedown', outside, true);
+    return () => document.removeEventListener('mousedown', outside, true);
+  });
+
+  $effect(() => {
+    if (!s1?.menuOpen) return;
+    const outside = (e) => {
+      if (s1MenuEl && !s1MenuEl.contains(e.target)) s1.menuOpen = false;
     };
     document.addEventListener('mousedown', outside, true);
     return () => document.removeEventListener('mousedown', outside, true);
@@ -116,6 +131,9 @@
   {/if}
   {#if isWayback && wayback}
     <WaybackPicker bind:menuEl={wbMenuEl} wb={wayback} />
+  {/if}
+  {#if isRadar && s1}
+    <RadarPicker bind:menuEl={s1MenuEl} {s1} />
   {/if}
   <div class="chip-wrap" bind:this={menuEl}>
     <button

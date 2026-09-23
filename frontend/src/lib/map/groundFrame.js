@@ -118,6 +118,63 @@ export function frameToFrame(from, to) {
 }
 
 /**
+ * A box on the ground drawn on a turned screen: two opposite corners, and the
+ * bearing that was up while it was drawn. Its sides run along that screen, so
+ * the box keeps its shape when the camera turns on, and turns with the ground.
+ *
+ * Returned in Web Mercator metres: the centre, the unit vectors the screen's
+ * right and down pointed along, and the signed extent along each.
+ */
+export function turnedBox([first, second], bearing = 0) {
+  const p = toMercator(...first);
+  const q = toMercator(...second);
+  const turn = (bearing * Math.PI) / 180;
+  const right = [Math.cos(turn), -Math.sin(turn)];
+  const down = [-Math.sin(turn), -Math.cos(turn)];
+  const dx = q[0] - p[0];
+  const dy = q[1] - p[1];
+  return {
+    centre: [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2],
+    right,
+    down,
+    width: dx * right[0] + dy * right[1],
+    height: dx * down[0] + dy * down[1],
+  };
+}
+
+/** The `[lon, lat]` of a box at fractions `s` across and `t` down, from -0.5 to 0.5. */
+export function boxPoint(box, s, t) {
+  return fromMercator(
+    box.centre[0] + s * box.width * box.right[0] + t * box.height * box.down[0],
+    box.centre[1] + s * box.width * box.right[1] + t * box.height * box.down[1]
+  );
+}
+
+/** The four `[lon, lat]` corners, from the first one drawn, round to the far one and back. */
+export const boxCorners = (box) =>
+  [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]].map(([s, t]) => boxPoint(box, s, t));
+
+/** A ground point turned clockwise about another by `degrees`, as the screen shows a turn. */
+export function turnAbout(point, pivot, degrees) {
+  const [x, y] = toMercator(...point);
+  const [px, py] = toMercator(...pivot);
+  const turn = (degrees * Math.PI) / 180;
+  const cos = Math.cos(turn);
+  const sin = Math.sin(turn);
+  const dx = x - px;
+  const dy = y - py;
+  return fromMercator(px + dx * cos + dy * sin, py - dx * sin + dy * cos);
+}
+
+/** An angle folded into [0, 360), or 0 for anything that is not a number. */
+export function compassAngle(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  const folded = ((number % 360) + 360) % 360;
+  return folded >= 360 - 1e-9 ? 0 : folded;
+}
+
+/**
  * The ground corners of a view, as `[lon, lat]`, clockwise from top-left.
  * What a computed overlay remembers about where it lies.
  */

@@ -13,6 +13,7 @@
     providerId = $bindable(),
     s2,
     wayback,
+    s1 = null,
     shown,
     dated = null,
     layerCount = 0,
@@ -23,15 +24,17 @@
   } = $props();
 
   const lower = $derived(letter.toLowerCase());
+  // A Sentinel chip already names the day it was taken. A Wayback chip names
+  // when Esri published the mosaic, so the day under it still needs saying.
   const showsDate = $derived(
-    dated?.date && shown.provider?.id !== 'sentinel2' && shown.provider?.id !== 'esri-wayback'
+    dated?.date && !['sentinel2', 'sentinel1'].includes(shown.provider?.id)
   );
 </script>
 
 <div class="source-card cmp-glass" class:right={align === 'right'} aria-label={`Imagery ${letter}`}>
   <span class="cmp-letter {lower}">{letter}</span>
   <div class="chips">
-    <ImageryChip {imagery} bind:providerId s2={s2} {wayback} {shown} dateChip />
+    <ImageryChip {imagery} bind:providerId s2={s2} {wayback} {s1} {shown} dateChip />
   </div>
   {#if showsDate}
     <span class="dated cmp-mono" title={dated.source ? `Acquired around this date (${dated.source})` : 'Acquired around this date'}>

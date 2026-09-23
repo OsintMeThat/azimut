@@ -751,15 +751,17 @@ describe('Esri Wayback', () => {
     expect(source).toContain('if (mapReady && shown.provider?.id === WAYBACK_ID) wb.loadReleases();');
   });
 
-  it('reads no history until the picker has been opened, and follows the map after', () => {
-    const effect = source.slice(source.indexOf('if (!wb.watching || shown.provider?.id !== WAYBACK_ID) return;'));
-    expect(effect.slice(0, 300)).toContain('wb.here;');
-    expect(effect.slice(0, 300)).toContain('wb.follow()');
+  it('reads a history only when asked, at the point the menu names', () => {
+    // a moving map never starts the walk: it is dozens of requests to Esri
+    expect(source).not.toMatch(/wb\.(follow|watching|here)\b/);
+    expect(source).toContain('wb.historyAt({ lat: point.lat, lon: point.lon, zoom });');
   });
 
   it('puts the release on the id every tile and capture keys on', () => {
-    expect(source).toContain('imagery.displayed(providerId, center.zoom, { ...s2.variant, release: wb.release })');
+    expect(source).toContain('imagery.displayed(providerId, center.zoom, { ...s2.variant, release: wb.release, pass: s1.pass })');
     expect(source).toContain('wayback={wb}');
+    // …and the radar pass beside it
+    expect(source).toContain('{s1}');
   });
 });
 

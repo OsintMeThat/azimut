@@ -24,8 +24,9 @@ import math
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any, Callable
+from urllib.parse import quote
 
 import httpx
 from PIL import Image, UnidentifiedImageError
@@ -37,6 +38,11 @@ USER_AGENT = "Azimut/0.1 (+local OSINT workbench; single-user)"
 # The basemap renders L2A, so date discovery must ask about L2A: L1C passes the
 # same orbit but a date list from the wrong collection would be a plausible lie.
 WFS_TYPENAME = "DSS2"
+# Sentinel-1 GRD, which Detect's radar methods read. An instance only answers
+# for the collections its own layers use, so this type exists once the user has
+# added a Sentinel-1 layer to the configuration (docs/IMAGERY_PROVIDERS.md).
+S1_TYPENAME = "DSS3"
+COLLECTIONS = {"sentinel2": WFS_TYPENAME, "sentinel1": S1_TYPENAME}
 
 
 @dataclass(frozen=True)
@@ -390,6 +396,69 @@ function evaluatePixel(p) {{
     return base64.b64encode(script.encode("ascii")).decode("ascii")
 
 
+# Sentinel-1 backscatter, as Detect's radar methods measure it. The layer the
+# user added decides the processing (orthorectification, backscatter
+# coefficient); ours only decides how the power is rounded into bytes.
+#
+# Power is carried in decibels, a fifth of one per step from -35 dB: calm sea
+# sits near -25 dB in VV and -32 dB in VH, a ship or a roof above 0 dB, and a
+# byte that spans -35 to +16 dB keeps both ends. As with the optical products
+# the first channel is never zero where the radar saw something.
+SAR_DB_FLOOR = -35.0
+SAR_DB_STEP = 0.2
+# The review picture is the usual dual-polarisation composite: co-pol red,
+# cross-pol green, their difference blue. Water goes dark blue, vegetation
+# grey-green, built-up land and hulls white.
+_SAR_COMPOSITE = ((-22.0, 2.0), (-30.0, -6.0), (0.0, 15.0))
+
+
+def _sar_script(values: str) -> str:
+    script = f"""//VERSION=3
+function setup() {{
+  return {{ input: [{{ bands: ["VV", "VH", "dataMask"] }}], output: {{ bands: 4, sampleType: "UINT8" }} }};
+}}
+function db(v) {{ return v > 0 ? 10 * Math.log(v) / Math.LN10 : -99; }}
+function level(v) {{ return Math.max(1, Math.min(255, Math.round((db(v) - ({SAR_DB_FLOOR:g})) / {SAR_DB_STEP:g}))); }}
+function stretch(v, low, high) {{ return Math.max(0, Math.min(255, Math.round((v - low) / (high - low) * 255))); }}
+function evaluatePixel(p) {{
+  if (!p.dataMask) return [0, 0, 0, 0];
+  return {values};
+}}
+"""
+    return base64.b64encode(script.encode("ascii")).decode("ascii")
+
+
+def _sar_evalscript(product: str) -> str:
+    if product == "sar":
+        return _sar_script("[level(p.VV), level(p.VH), 0, 255]")
+    (r_low, r_high), (g_low, g_high), (b_low, b_high) = _SAR_COMPOSITE
+    return _sar_script(
+        f"[stretch(db(p.VV), {r_low:g}, {r_high:g}), stretch(db(p.VH), {g_low:g}, {g_high:g}), "
+        f"stretch(db(p.VV) - db(p.VH), {b_low:g}, {b_high:g}), 255]"
+    )
+
+
+# Where the water is, for the radar vessel method: Sentinel-2's own scene
+# classification, one byte a pixel, read from the clearest pass of the year
+# before (`band_frame` sets that window). Cloud, shadow, snow and defective
+# pixels say nothing either way, and the radar decides there.
+WATER_LAND, WATER_WATER, WATER_UNKNOWN = 1, 2, 3
+WATER_LOOKBACK_DAYS = 365
+_WATER_SCRIPT = base64.b64encode(
+    f"""//VERSION=3
+function setup() {{
+  return {{ input: [{{ bands: ["SCL", "dataMask"] }}], output: {{ bands: 4, sampleType: "UINT8" }} }};
+}}
+function evaluatePixel(p) {{
+  if (!p.dataMask) return [0, 0, 0, 0];
+  if (p.SCL === 6) return [{WATER_WATER}, 0, 0, 255];
+  if ([0, 1, 3, 8, 9, 10, 11].indexOf(p.SCL) >= 0) return [{WATER_UNKNOWN}, 0, 0, 255];
+  return [{WATER_LAND}, 0, 0, 255];
+}}
+""".encode("ascii")
+).decode("ascii")
+
+
 # Everything a caller may ask `band_frame` for: Detect's products, measured on
 # the server, and Difference's frames, decoded in the browser.
 DETECT_PRODUCTS: frozenset[str] = frozenset(
@@ -398,13 +467,115 @@ DETECT_PRODUCTS: frozenset[str] = frozenset(
 CHANGE_PRODUCTS: frozenset[str] = frozenset(
     {"change-sky", *(f"change-{name}" for name in SPECTRAL_INDEX)}
 )
-PRODUCTS: frozenset[str] = frozenset({*CHANGE_PRODUCTS, *DETECT_PRODUCTS})
+# Radar: the measured product, and the picture a candidate is reviewed on,
+# which for Sentinel-1 is rendered by us rather than by a layer's own style.
+SAR_PRODUCTS: frozenset[str] = frozenset({"sar", "sar-picture"})
+PRODUCTS: frozenset[str] = frozenset({*CHANGE_PRODUCTS, *DETECT_PRODUCTS, *SAR_PRODUCTS, "water"})
 
 
 def _evalscript(product: str) -> str:
+    if product == "water":
+        return _WATER_SCRIPT
     if product in CHANGE_PRODUCTS:
         return _change_evalscript(product)
+    if product in SAR_PRODUCTS:
+        return _sar_evalscript(product)
     return _detect_evalscript(product)
+
+
+# -- the Sentinel-1 basemap -------------------------------------------------------
+
+RADAR_ID = "sentinel1"
+_PASS_TIME_RE = re.compile(r"^([01]\d|2[0-3])([0-5]\d)([0-5]\d)$")
+
+
+def radar_variant_id(day: str | None = None, time: str = "") -> str:
+    """The radar basemap's id for one pass: ``sentinel1~2026-05-14~054210``.
+
+    A day alone mosaics every pass of that day, and no day at all is the most
+    recent pass, which is the layer's own default. The time rides without its
+    colons, because the id is also a folder name in the tile cache.
+    """
+    if not day:
+        return RADAR_ID
+    parts = [RADAR_ID, day]
+    if time:
+        parts.append(time.replace(":", ""))
+    return VARIANT_SEP.join(parts)
+
+
+def parse_radar_variant(spec: str) -> tuple[str, str]:
+    """``"2026-05-14~054210"`` → ``("2026-05-14", "05:42:10")``; the time may be absent."""
+    parts = spec.split(VARIANT_SEP)
+    if not 1 <= len(parts) <= 2:
+        raise ValueError(f"malformed Sentinel-1 variant '{spec}'")
+    day = parts[0]
+    _window(day, day)
+    if len(parts) == 1:
+        return day, ""
+    found = _PASS_TIME_RE.match(parts[1])
+    if not found:
+        raise ValueError(f"malformed pass time '{parts[1]}' (expected HHMMSS)")
+    return day, ":".join(found.groups())
+
+
+def radar_wmts_url(layer: str, day: str = "", time: str = "") -> str:
+    """The WMTS GetTile template for the radar basemap, drawn in our composite.
+
+    The layer is the user's Sentinel-1 layer; its own style is replaced by the
+    picture Detect reviews radar candidates on, so the map and the evidence
+    read alike. JPEG like the optical basemap: speckle costs PNG a fortune.
+    """
+    if not _LAYER_RE.match(layer or ""):
+        raise ValueError(f"malformed layer '{layer}'")
+    url = (
+        f"{BASE}/wmts/{{key}}"
+        "?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0"
+        f"&LAYER={layer}&TILEMATRIXSET=PopularWebMercator512"
+        "&TILEMATRIX={z}&TILECOL={x}&TILEROW={y}&FORMAT=image/jpeg"
+        f"&EVALSCRIPT={quote(_sar_evalscript('sar-picture'), safe='')}"
+    )
+    if day:
+        url += f"&TIME={pass_window(day, time)}"
+    return url
+
+
+def radar_label(day: str, time: str) -> str:
+    """How a radar variant reads: "2026-05-14 05:42 UTC", a day, or the latest."""
+    if not day:
+        return "most recent pass"
+    return f"{day} {time[:5]} UTC" if time else day
+
+
+def sar_decibels(level: Any) -> Any:
+    """The byte a radar product carries, back in decibels."""
+    return level * SAR_DB_STEP + SAR_DB_FLOOR
+
+
+# How far either side of a Sentinel-1 pass the request window reaches. A pass
+# crosses an area in seconds; the other direction comes twelve hours later and
+# the next orbit a hundred minutes later over ground 2,700 km away, so twenty
+# minutes holds one pass and nothing else.
+PASS_WINDOW_MINUTES = 20
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$")
+
+
+def pass_window(day: str, time: str = "") -> str:
+    """The ``TIME`` value for one pass: a day, or minutes around a known time.
+
+    A day is enough for Sentinel-2, which passes once. Sentinel-1 can pass the
+    same day twice, morning and evening in opposite directions, and a window of
+    the whole day would mosaic the two looks into one frame.
+    """
+    if not time:
+        return _window(day, day)
+    if not _TIME_RE.match(time):
+        raise ValueError(f"malformed pass time '{time}' (expected HH:MM:SS)")
+    _window(day, day)
+    moment = datetime.fromisoformat(f"{day}T{time}+00:00")
+    reach = timedelta(minutes=PASS_WINDOW_MINUTES)
+    stamp = "%Y-%m-%dT%H:%M:%SZ"
+    return f"{(moment - reach).strftime(stamp)}/{(moment + reach).strftime(stamp)}"
 
 
 def band_frame(
@@ -417,14 +588,17 @@ def band_frame(
     maxcc: int = DEFAULT_MAXCC,
     *,
     layer: str = DEFAULT_LAYER,
+    time: str = "",
     get: Callable[..., Any] | None = None,
 ) -> bytes:
     """One band product over a Web Mercator box, rendered for one day.
 
     ``layer`` only chooses the data collection the instance reads (its
     evalscript is replaced by ours), so the true-colour layer every standard
-    configuration has is the default. The image is validated before it is
-    handed on: a PNG, the size asked for, within the byte budget.
+    configuration has is the default, and a radar product names the user's
+    Sentinel-1 layer. ``time`` narrows the day to one pass (``pass_window``).
+    The image is validated before it is handed on: a PNG, the size asked for,
+    within the byte budget.
     """
     if product not in PRODUCTS:
         raise ValueError(f"unknown band product '{product}'")
@@ -448,10 +622,15 @@ def band_frame(
         "WIDTH": str(width),
         "HEIGHT": str(height),
         "FORMAT": "image/png",
-        "TIME": f"{checked_day}/{checked_day}",
+        "TIME": pass_window(str(checked_day), time),
         "MAXCC": str(checked_maxcc),
         "EVALSCRIPT": _evalscript(product),
     }
+    if product == "water":
+        # The year before the day, the least cloudy pass first wherever it has
+        # pixels: where the shore is does not change with the weather.
+        start = date.fromisoformat(str(checked_day)) - timedelta(days=WATER_LOOKBACK_DAYS)
+        params.update(TIME=f"{start.isoformat()}/{checked_day}", PRIORITY="leastCC")
     fetch = get or httpx.get
     response = fetch(
         f"{BASE}/wms/{instance}", params=params,
@@ -583,6 +762,70 @@ def _window(start: str, end: str) -> str:
     return f"{start}/{end}"
 
 
+# A product name carries its sensing start: ``S1A_IW_GRDH_1SDV_20260105T051824_…``.
+_SENSED_RE = re.compile(r"_(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})_")
+# Two looks at one place are the same track when they pass at the same time of
+# day. A track repeats to the second every twelve days, whichever Sentinel-1
+# flies it, while the neighbouring track that also sees the place passes about
+# eight minutes earlier or later, so four minutes tells them apart.
+SAME_TRACK_MINUTES = 4
+
+
+def _sensed(props: dict[str, Any]) -> str:
+    """The pass's UTC time of day, ``HH:MM:SS``, or '' when nothing says."""
+    value = str(props.get("time") or "")[:8]
+    if _TIME_RE.match(value):
+        return value
+    for name in ("id", "path"):
+        found = _SENSED_RE.search(str(props.get(name) or ""))
+        if found:
+            hour, minute, second = found.groups()[3:]
+            candidate = f"{hour}:{minute}:{second}"
+            if _TIME_RE.match(candidate):
+                return candidate
+    return ""
+
+
+def _minutes(time: str) -> int:
+    hour, minute, second = (int(part) for part in time.split(":"))
+    return hour * 60 + minute + (1 if second >= 30 else 0)
+
+
+def same_track(one: str, other: str) -> bool:
+    """Whether two pass times are one track: the same look, so comparable."""
+    if not (_TIME_RE.match(one or "") and _TIME_RE.match(other or "")):
+        return False
+    gap = abs(_minutes(one) - _minutes(other)) % 1440
+    return min(gap, 1440 - gap) <= SAME_TRACK_MINUTES
+
+
+def orbit_direction(time: str, lon: float) -> str:
+    """Which way Sentinel-1 was flying: descending at dawn, ascending at dusk.
+
+    Its orbit keeps the sun where it is, crossing every latitude near 06:00
+    local solar time southbound and 18:00 northbound, so the local hour of the
+    pass is enough to say which way it went.
+    """
+    if not _TIME_RE.match(time or ""):
+        return ""
+    local = (_minutes(time) / 60 + lon / 15) % 24
+    return "descending" if local < 12 else "ascending"
+
+
+def _pass_key(entries: dict[str, dict[str, Any]], day: str, time: str) -> str:
+    """The entry a granule belongs to: its day, and for radar its pass.
+
+    Slices of one pass are sensed seconds apart; a second pass the same day is
+    the other direction, hours away, and a separate image.
+    """
+    if not time:
+        return day
+    for key, entry in entries.items():
+        if entry["date"] == day and same_track(entry["time"], time):
+            return key
+    return f"{day}T{time}"
+
+
 def _passes(
     instance: str,
     box: Box,
@@ -590,9 +833,13 @@ def _passes(
     start: str,
     end: str,
     *,
+    collection: str = "sentinel2",
     get: Callable[..., Any] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], int]:
-    """One WFS query, collapsed to per-day entries and the samples each covers.
+    """One WFS query, collapsed to per-pass entries and the samples each covers.
+
+    A Sentinel-2 entry is a day. A Sentinel-1 entry is one pass, so a morning
+    and an evening look on the same day stay two, and each carries its time.
 
     A WFS query is billed as one request (~0.01 PU, versus a tile's 1 PU), so
     the caller counts it on the meter — cheap, but not free, and the meter never
@@ -601,13 +848,16 @@ def _passes(
     Raises httpx.HTTPError / ValueError upward: a date list that failed must not
     read as "no imagery here".
     """
+    if collection not in COLLECTIONS:
+        raise ValueError(f"unknown collection '{collection}'")
+    radar = collection == "sentinel1"
     fetch = get or httpx.get
     left, bottom, right, top = box
     params = {
         "SERVICE": "WFS",
         "REQUEST": "GetFeature",
         "VERSION": "2.0.0",
-        "TYPENAMES": WFS_TYPENAME,
+        "TYPENAMES": COLLECTIONS[collection],
         "OUTPUTFORMAT": "application/json",
         # EPSG:4326 puts latitude first — the axis order the CRS declares, not
         # the lon/lat habit. Swapped, the box lands in the ocean off Somalia.
@@ -624,10 +874,14 @@ def _passes(
         f"{BASE}/wfs/{instance}", params=params,
         headers={"User-Agent": USER_AGENT}, timeout=15,
     )
+    if response.status_code == 400 and radar and "not found" in response.text.lower():
+        raise ValueError(
+            "this Copernicus instance has no Sentinel-1 layer; add one in its configuration"
+        )
     response.raise_for_status()
     features = (response.json() or {}).get("features") or []
 
-    by_date: dict[str, dict[str, Any]] = {}
+    by_pass: dict[str, dict[str, Any]] = {}
     for feature in features:
         props = feature.get("properties") or {}
         day = str(props.get("date") or "")[:10]
@@ -637,16 +891,28 @@ def _passes(
         hit = _covered(feature, samples, box)
         if not hit:
             continue
-        cloud = _cloud(props)
-        entry = by_date.setdefault(
-            day, {"date": day, "cloud": cloud, "granules": 0, "covered": set()}
+        cloud = None if radar else _cloud(props)
+        time = _sensed(props) if radar else ""
+        key = _pass_key(by_pass, day, time)
+        entry = by_pass.setdefault(
+            key, {"date": day, "time": time, "cloud": cloud, "granules": 0, "covered": set()}
         )
         entry["granules"] += 1
         entry["covered"] |= hit
+        # a pass is named by the first of its slices to cross the area
+        if time and time < entry["time"] and same_track(time, entry["time"]):
+            entry["time"] = time
         # the granule that actually covers the area may be the clearer of two
         if cloud is not None and (entry["cloud"] is None or cloud < entry["cloud"]):
             entry["cloud"] = cloud
-    return by_date, len(features)
+    return by_pass, len(features)
+
+
+def _listed(entry: dict[str, Any], lon: float, collection: str) -> dict[str, Any]:
+    row = {"date": entry["date"], "cloud": entry["cloud"], "granules": entry["granules"]}
+    if collection == "sentinel1":
+        row.update(time=entry["time"], orbit=orbit_direction(entry["time"], lon))
+    return row
 
 
 def dates(
@@ -656,13 +922,15 @@ def dates(
     start: str,
     end: str,
     *,
+    collection: str = "sentinel2",
     get: Callable[..., Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Sentinel-2 acquisition dates over a point, newest first.
+    """Acquisition dates over a point, newest first.
 
     Each entry: ``{"date", "cloud", "granules"}`` — ``cloud`` is the least
     cloudy granule covering the point that day (None when the service didn't
-    say), ``granules`` how many covered it.
+    say), ``granules`` how many covered it. A Sentinel-1 entry is one pass and
+    adds its ``time`` and ``orbit`` direction.
 
     This is what makes a date picker honest: without it the user guesses a date,
     pays a tile, and finds out it was cloud or a gap. For a drawn area rather
@@ -670,11 +938,10 @@ def dates(
     share attached.
     """
     box = (lon - _BBOX_PAD, lat - _BBOX_PAD, lon + _BBOX_PAD, lat + _BBOX_PAD)
-    found, _ = _passes(instance, box, [(lon, lat)], start, end, get=get)
+    found, _ = _passes(instance, box, [(lon, lat)], start, end, collection=collection, get=get)
     return sorted(
-        ({"date": e["date"], "cloud": e["cloud"], "granules": e["granules"]}
-         for e in found.values()),
-        key=lambda entry: entry["date"], reverse=True,
+        (_listed(e, lon, collection) for e in found.values()),
+        key=lambda entry: (entry["date"], entry.get("time", "")), reverse=True,
     )
 
 
@@ -727,9 +994,10 @@ def acquisitions(
     start: str,
     end: str,
     *,
+    collection: str = "sentinel2",
     get: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
-    """Sentinel-2 acquisitions over drawn areas, newest first.
+    """Acquisitions over drawn areas, newest first.
 
     Each entry adds ``coverage`` to what ``dates`` reports: the share of the
     areas that day's granules actually reach, 0…1. It is the number a point
@@ -750,12 +1018,13 @@ def acquisitions(
         min(180.0, max(b[2] for b in boxes) + _BBOX_PAD),
         min(90.0, max(b[3] for b in boxes) + _BBOX_PAD),
     )
-    found, features = _passes(instance, box, samples, start, end, get=get)
+    found, features = _passes(instance, box, samples, start, end, collection=collection, get=get)
+    middle = (box[0] + box[2]) / 2
     listed = sorted(
-        ({"date": entry["date"], "cloud": entry["cloud"], "granules": entry["granules"],
+        ({**_listed(entry, middle, collection),
           "coverage": round(len(entry["covered"]) / len(samples), 3)}
          for entry in found.values()),
-        key=lambda entry: entry["date"], reverse=True,
+        key=lambda entry: (entry["date"], entry.get("time", "")), reverse=True,
     )
     return {"dates": listed, "truncated": features >= _MAX_FEATURES}
 
@@ -875,3 +1144,96 @@ def capabilities_layers(
             }
         )
     return found
+
+
+# -- the Sentinel-1 layer --------------------------------------------------------
+
+# Layers the Sentinel-2 templates ship, which are therefore never the Sentinel-1
+# layer a user added: looking for theirs need not spend a request on these.
+TEMPLATE_LAYERS = frozenset({
+    *(entry.id for entry in LAYERS), *KNOWN_HINTS, "AGRICULTURE", "ATMOSPHERIC_PENETRATION",
+    "BATHYMETRIC", "COLOR_INFRARED", "COLOR_INFRARED__URBAN_", "GEOLOGY", "VEGETATION_INDEX",
+})
+# Where a probe looks: the North Sea off Rotterdam, which Sentinel-1 sees from
+# several tracks every few days, so a month back always holds a pass.
+_PROBE_POINT = (51.95, 4.05)
+_PROBE_DAYS = 30
+_PROBE_SCRIPT = base64.b64encode(
+    b"""//VERSION=3
+function setup() {
+  return { input: [{ bands: ["VV", "VH", "dataMask"] }], output: { bands: 1, sampleType: "UINT8" } };
+}
+function evaluatePixel(p) {
+  return [p.dataMask && (p.VV > 0 || p.VH > 0) ? 255 : 0];
+}
+"""
+).decode("ascii")
+_WFS_NS = {"wfs": "http://www.opengis.net/wfs/2.0"}
+
+
+def ogc_error(body: str) -> str:
+    """The human half of an OGC exception report, or the body itself."""
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        return body.strip()[:300]
+    texts = [node.text.strip() for node in root.iter() if node.text and node.text.strip()]
+    return " ".join(texts)[:300] or body.strip()[:300]
+
+
+def serves_sentinel1(instance: str, *, get: Callable[..., Any] | None = None) -> bool:
+    """Whether any layer of the instance reads Sentinel-1.
+
+    WFS lists a feature type per collection the instance's layers use, which
+    is the one place the configuration says what its layers read. Asking costs
+    no processing units.
+    """
+    fetch = get or httpx.get
+    response = fetch(
+        f"{BASE}/wfs/{instance}",
+        params={"SERVICE": "WFS", "REQUEST": "GetCapabilities", "VERSION": "2.0.0"},
+        headers={"User-Agent": USER_AGENT}, timeout=15,
+    )
+    response.raise_for_status()
+    root = ET.fromstring(response.text)
+    names = {(node.text or "").strip() for node in root.iterfind(".//wfs:FeatureType/wfs:Name", _WFS_NS)}
+    return S1_TYPENAME in names
+
+
+def probe_sar_layer(
+    instance: str, layer: str, today: date | None = None, *, get: Callable[..., Any] | None = None
+) -> dict[str, Any]:
+    """Whether ``layer`` reads Sentinel-1 VV and VH: one tiny render.
+
+    A Sentinel-2 layer refuses the script outright, as does a Sentinel-1 layer
+    set to the polar HH/HV polarisations, so a 400 is the answer "not this one"
+    and the service's own sentence says why. Billed as one request.
+    """
+    if not _LAYER_RE.match(layer or ""):
+        raise ValueError(f"malformed layer '{layer}'")
+    today = today or date.today()
+    lat, lon = _PROBE_POINT
+    earth_radius = 6_378_137.0
+    x = earth_radius * math.radians(lon)
+    y = earth_radius * math.log(math.tan(math.pi / 4 + math.radians(lat) / 2))
+    half = 2_000.0
+    params = {
+        "SERVICE": "WMS", "REQUEST": "GetMap", "VERSION": "1.3.0", "LAYERS": layer,
+        "CRS": "EPSG:3857", "BBOX": f"{x - half},{y - half},{x + half},{y + half}",
+        "WIDTH": str(_COVERAGE_SIZE), "HEIGHT": str(_COVERAGE_SIZE), "FORMAT": "image/png",
+        "TIME": f"{(today - timedelta(days=_PROBE_DAYS)).isoformat()}/{today.isoformat()}",
+        "EVALSCRIPT": _PROBE_SCRIPT,
+    }
+    fetch = get or httpx.get
+    response = fetch(f"{BASE}/wms/{instance}", params=params,
+                     headers={"User-Agent": USER_AGENT}, timeout=20)
+    if response.status_code == 400:
+        return {"ok": False, "layer": layer, "detail": ogc_error(response.text)}
+    response.raise_for_status()
+    try:
+        with Image.open(io.BytesIO(response.content)) as source:
+            seen = any(source.convert("L").tobytes())
+    except (OSError, UnidentifiedImageError) as exc:
+        raise CoverageError("the probe returned no readable image") from exc
+    return {"ok": True, "layer": layer, "detail": "reads Sentinel-1 VV and VH" if seen else
+            "reads Sentinel-1, though it saw nothing at the probe point this month"}

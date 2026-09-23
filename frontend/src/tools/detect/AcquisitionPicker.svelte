@@ -11,8 +11,9 @@
    * and how much of it was cloud.
    */
   import Icon from '../../components/Icon.svelte';
-  import { LOOKBACK_WINDOWS, coverClass, coverLabel } from '../../lib/map/acquisitions.js';
+  import { LOOKBACK_WINDOWS, coverClass, coverLabel, passKey } from '../../lib/map/acquisitions.js';
   import { cloudClass, cloudLabel } from '../../lib/sentinel.js';
+  import { orbitMark, sameTrack } from '../../lib/radar.js';
 
   let {
     list = [],
@@ -25,15 +26,24 @@
     single = false,
     wantsReference = true,
     wantsCompare = true,
-    a = '',
-    b = '',
+    /** Sentinel-1 passes: a time and a direction instead of a cloud figure. */
+    radar = false,
+    /** The chosen sources, `{ date, time }` each, or null. */
+    a = null,
+    b = null,
     ondays,
     onlook,
     onpick,
   } = $props();
+
+  /** Whether a row is the pass a side names: a typed radar day matches its day. */
+  function names(source, entry) {
+    if (!source?.date || source.date !== entry.date) return false;
+    return !source.time || !entry.time || source.time === entry.time;
+  }
 </script>
 
-<div class="passes" aria-label="Sentinel-2 passes over the areas">
+<div class="passes" aria-label={radar ? 'Sentinel-1 passes over the areas' : 'Sentinel-2 passes over the areas'}>
   <div class="head">
     <div class="cmp-seg" aria-label="How far back to look">
       {#each LOOKBACK_WINDOWS as option (option.id)}
@@ -65,29 +75,40 @@
       <p class="warn">The catalogue stopped at 100 passes, so older ones are missing. Shorten the window for a complete list.</p>
     {/if}
     <ul class="list">
-      {#each list as entry (entry.date)}
-        <li class:chosen={entry.date === a || entry.date === b}>
+      {#each list as entry (passKey(entry))}
+        {@const pairedA = !single && radar && a?.time && !sameTrack(entry.time, a.time)}
+        {@const pairedB = !single && radar && b?.time && !sameTrack(entry.time, b.time)}
+        <li class:chosen={names(a, entry) || names(b, entry)}>
           <div class="facts">
             <strong class="cmp-mono">{entry.date}</strong>
+            {#if radar}
+              <span class="cmp-mono time" title={entry.orbit ? `Flying ${entry.orbit === 'descending' ? 'south' : 'north'}` : undefined}>
+                {entry.time?.slice(0, 5)} UTC {orbitMark(entry.orbit)}</span>
+            {/if}
             <span class="badge {coverClass(entry.coverage)}">{coverLabel(entry.coverage)}</span>
-            <span class="badge {cloudClass(entry.cloud)}">{cloudLabel(entry.cloud) || 'cloud unknown'}</span>
+            {#if !radar}
+              <span class="badge {cloudClass(entry.cloud)}">{cloudLabel(entry.cloud) || 'cloud unknown'}</span>
+            {/if}
           </div>
           <div class="cmp-seg" aria-label={`Use ${entry.date}`}>
             {#if wantsReference && !single}
               <button
                 type="button"
-                class:on={a === entry.date}
-                aria-pressed={a === entry.date}
-                title="Use as the reference image"
+                class:on={names(a, entry)}
+                aria-pressed={names(a, entry)}
+                disabled={pairedB}
+                title={pairedB ? 'Another track than B: it sees the ground from another angle' : 'Use as A, the picture before'}
                 onclick={() => onpick('a', entry)}
               >A</button>
             {/if}
             {#if wantsCompare}
               <button
                 type="button"
-                class:on={b === entry.date}
-                aria-pressed={b === entry.date}
-                title={single ? 'Use as the image to inspect' : 'Use as the image to compare'}
+                class:on={names(b, entry)}
+                aria-pressed={names(b, entry)}
+                disabled={pairedA}
+                title={pairedA ? 'Another track than A: it sees the ground from another angle'
+                  : single ? 'Use this pass' : 'Use as B, the picture to look in'}
                 onclick={() => onpick('b', entry)}
               >{single ? 'Use' : 'B'}</button>
             {/if}
@@ -97,7 +118,8 @@
     </ul>
     <p class="hint">
       <Icon name="info" size={11} />
-      A pass covers what its swath reached that day, not the whole map.
+      {radar ? 'A and B must share a track: the same time of day.'
+        : 'A pass covers what its swath reached that day, not the whole map.'}
     </p>
   {/if}
 </div>
@@ -164,6 +186,10 @@
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
+  }
+  .time {
+    color: var(--text-2);
+    font-size: 10.5px;
   }
   .facts strong {
     color: var(--text-1);

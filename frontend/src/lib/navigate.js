@@ -43,9 +43,10 @@ export const ENTITY_TOOL = {
   post: 'post',
   'inspect-session': 'inspect',
   'compare-session': 'compare',
-  'analysis-zones': 'compare',
-  'analysis-follow-up': 'compare',
-  'analysis-run': 'compare',
+  'analysis-zones': 'detect',
+  'analysis-area': 'detect',
+  'analysis-follow-up': 'detect',
+  'analysis-run': 'detect',
 };
 
 /**
@@ -107,9 +108,9 @@ export function openEntity(entity) {
     uiState.tool = 'compare';
     return;
   }
-  if (['analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {
+  if (['analysis-area', 'analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {
     uiState.openAnalyzer = specName(entity.attrs?.spec);
-    uiState.tool = 'compare';
+    uiState.tool = 'detect';
     return;
   }
   if (entity.type === 'place') {
@@ -233,4 +234,15 @@ export function gotoCapture(entity) {
     bearing: recorded(entity.attrs?.bearing),
   };
   uiState.tool = 'satellite';
+}
+
+/**
+ * Open Settings on the Copernicus card, open.
+ *
+ * Detect and Compare send the analyst here when Copernicus is missing, and a
+ * tab of eight cards with the right one shut would make them look for it.
+ */
+export function openCopernicusSettings() {
+  uiState.settingsTab = 'imagery:sentinelhub';
+  uiState.tool = 'settings';
 }

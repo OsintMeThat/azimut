@@ -169,7 +169,7 @@ def test_a_reading_of_the_case_leaves_out_what_the_analyst_wrote():
     readings with no edit here."""
     filing = entity_engine.types_with_role(entity_engine.ANNEX, entity_engine.DELIVERABLE)
     assert filing == {"note", "sheet", "inspect-session", "compare-session", "post",
-                      "analysis-zones", "analysis-follow-up", "analysis-run", "map-layer"}
+                      "analysis-zones", "analysis-area", "analysis-follow-up", "analysis-run", "map-layer"}
 
     for lens_id in ("all", "subjects", "ground", "claims"):
         assert set(graph_engine.lens(lens_id).hides) == filing, lens_id

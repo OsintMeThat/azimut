@@ -6,22 +6,33 @@ import {
   cropSources,
   exportFrameSpec,
   frameSpan,
-  groundRect,
-  screenRect,
 } from './exportFrame.js';
-import { mercatorPerPixel } from './groundFrame.js';
+import { apply, frameToFrame, fromMercator, mercatorPerPixel, screenToMercator } from './groundFrame.js';
+
+/** The two ground corners a pixel box covers, which is what a drawn frame keeps.
+ *  The projection itself is `groundFrame`'s, and tested there. */
+const groundRect = (rect, frame) => {
+  const toGround = screenToMercator(frame);
+  return [
+    fromMercator(...apply(toGround, rect.x, rect.y)),
+    fromMercator(...apply(toGround, rect.x + rect.w, rect.y + rect.h)),
+  ];
+};
 
 const FRAME = { lng: 2.3, lat: 48.8, zoom: 17, bearing: 0, width: 1200, height: 800 };
 
 function fakeCanvas() {
   const drawn = [];
+  const turns = [];
   return {
     width: 0,
     height: 0,
     drawn,
+    turns,
     getContext: () => ({
       imageSmoothingQuality: '',
       drawImage: (...args) => drawn.push(args),
+      setTransform: (...args) => turns.push(args),
     }),
   };
 }
@@ -29,33 +40,6 @@ function fakeCanvas() {
 const capture = (frame = FRAME, pixelScale = 1) => ({
   canvas: { width: frame.width * pixelScale, height: frame.height * pixelScale },
   frame,
-});
-
-describe('screenRect / groundRect', () => {
-  it('round-trips a drawn box through the ground', () => {
-    const rect = { x: 320, y: 180, w: 400, h: 260 };
-    const back = screenRect(groundRect(rect, FRAME), FRAME);
-    expect(back.x).toBeCloseTo(rect.x, 6);
-    expect(back.y).toBeCloseTo(rect.y, 6);
-    expect(back.w).toBeCloseTo(rect.w, 6);
-    expect(back.h).toBeCloseTo(rect.h, 6);
-  });
-
-  it('follows the ground when the camera moves', () => {
-    const points = groundRect({ x: 400, y: 300, w: 300, h: 200 }, FRAME);
-    const panned = { ...FRAME, lng: FRAME.lng + 0.001 };
-    const moved = screenRect(points, panned);
-    expect(moved.x).toBeLessThan(400);
-    expect(moved.w).toBeCloseTo(300, 6);
-  });
-
-  it('keeps the same ground box under two frames of the same camera', () => {
-    const points = groundRect({ x: 100, y: 120, w: 500, h: 300 }, FRAME);
-    const wider = { ...FRAME, width: 1600 };
-    const rect = screenRect(points, wider);
-    expect(rect.w).toBeCloseTo(500, 6);
-    expect(rect.x).toBeCloseTo(100 + 200, 6);
-  });
 });
 
 describe('boundedRect', () => {
@@ -157,12 +141,51 @@ describe('cropSources', () => {
     const frame = { points: groundRect({ x: -40, y: 200, w: 480, h: 320 }, FRAME) };
     expect(() => cropSources(sources(), frame, fakeCanvas)).toThrow('must be fully visible');
   });
+
+  it('cuts a frame drawn at the camera bearing on whole pixels, turned or not', () => {
+    const turned = { ...FRAME, bearing: 40 };
+    const frame = { points: groundRect({ x: 300, y: 200, w: 480, h: 320 }, turned), angle: 40 };
+    const cut = cropSources({ a: capture(turned), b: capture(turned) }, frame, fakeCanvas);
+    expect(cut.a.canvas.turns).toHaveLength(0);
+    expect(cut.a.canvas.drawn[0].slice(1, 5)).toEqual([300, 200, 480, 320]);
+    expect(cut.a.frame.bearing).toBe(40);
+  });
+
+  it('keeps its shape when the camera turns after, and comes out upright as drawn', () => {
+    // Drawn with the camera at 30°, exported with it back at north.
+    const drawnOn = { ...FRAME, bearing: 30 };
+    const frame = { points: groundRect({ x: 400, y: 250, w: 400, h: 300 }, drawnOn), angle: 30 };
+    const cut = cropSources(sources(), frame, fakeCanvas);
+    expect(cut.a.frame.width).toBe(400);
+    expect(cut.a.frame.height).toBe(300);
+    expect(cut.a.frame.bearing).toBe(30);
+    expect(cut.b.frame.bearing).toBe(30);
+    expect(cut.a.canvas.turns).toHaveLength(1);
+    // The cut's top-left is the corner first drawn, so the ground is the frame's.
+    const topLeft = fromMercator(...apply(screenToMercator(cut.a.frame), 0, 0));
+    expect(topLeft[0]).toBeCloseTo(frame.points[0][0], 7);
+    expect(topLeft[1]).toBeCloseTo(frame.points[0][1], 7);
+    // And the pixels are laid through the same turn the frame takes.
+    const m = frameToFrame(FRAME, cut.a.frame);
+    expect(cut.a.canvas.turns[0].slice(0, 4)).toEqual([m.a, m.b, m.c, m.d]);
+  });
+
+  it('refuses a turned frame one of whose corners has left the view', () => {
+    // It fits the screen it was drawn on, not one turned 30° from it.
+    const drawnOn = { ...FRAME, bearing: 30 };
+    const frame = { points: groundRect({ x: 60, y: 60, w: 1080, h: 680 }, drawnOn), angle: 30 };
+    expect(() => cropSources({ a: capture(drawnOn), b: capture(drawnOn) }, frame, fakeCanvas)).not.toThrow();
+    expect(() => cropSources(sources(), frame, fakeCanvas)).toThrow('must be fully visible');
+  });
 });
 
 describe('exportFrameSpec', () => {
   it('keeps two ground corners', () => {
     expect(exportFrameSpec({ points: [[2.3, 48.8], [2.31, 48.79]] }))
-      .toEqual({ points: [[2.3, 48.8], [2.31, 48.79]] });
+      .toEqual({ points: [[2.3, 48.8], [2.31, 48.79]], angle: 0 });
+    // The bearing the box was drawn at travels with it, so it comes back upright.
+    expect(exportFrameSpec({ points: [[2.3, 48.8], [2.31, 48.79]], angle: 431 }))
+      .toEqual({ points: [[2.3, 48.8], [2.31, 48.79]], angle: 71 });
   });
 
   it('drops anything that is not a pair of ground points', () => {

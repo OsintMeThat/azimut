@@ -19,6 +19,12 @@ async function openCompare(page, providerB = 'Esri World Imagery') {
   });
   await page.route('**/compare/sessions/*/preview', (route) => route.fulfill({ json: { path: 'media/Comparison.png' } }));
   await page.goto('/#compare');
+  // Compare opens on its default pair; these tests build their own.
+  await expect(page.locator('.surface-shell').first()).toBeVisible();
+  for (const letter of ['A', 'B']) {
+    const remove = page.getByRole('button', { name: `Remove imagery ${letter}`, exact: true });
+    if (await remove.count()) await remove.click();
+  }
   await expect(page.locator('.empty-slot')).toHaveCount(2);
   for (const letter of ['A', 'B']) {
     await page.locator('.empty-slot').filter({ has: page.locator('.slot-letter', { hasText: letter }) }).click();
@@ -27,6 +33,23 @@ async function openCompare(page, providerB = 'Esri World Imagery') {
   await awaitMapReady(page, 2);
   return { fixture, errors, saved };
 }
+
+test('opens on a Wayback release a year back against today’s World Imagery', async ({ page }) => {
+  await installAppFixture(page);
+  await page.route('**/api/satellite/providers', (route) => route.fulfill({ json: [
+    { id: 'esri-world-imagery', label: 'Esri World Imagery', url: 'https://tiles.invalid/{z}/{x}/{y}.png', imagery: true, max_zoom: 19, tile_size: 256, oversample: 1, attribution: 'Browser fixture' },
+    { id: 'esri-wayback', label: 'Esri Wayback', url: 'https://tiles.invalid/{z}/{x}/{y}.png', imagery: true, max_zoom: 19, tile_size: 256, oversample: 1, attribution: 'Browser fixture' },
+  ] }));
+  // a newest release no clock reaches, and one far older than a year
+  await page.route('**/api/satellite/wayback/releases', (route) => route.fulfill({ json: { releases: [{ release: 2, date: '2099-01-01' }, { release: 1, date: '2020-01-01' }] } }));
+  const history = [];
+  page.on('request', (request) => request.url().includes('/wayback/changes') && history.push(request.url()));
+  await page.goto('/#compare');
+  await awaitMapReady(page, 2);
+  await expect(page.locator('.empty-slot')).toHaveCount(0);
+  await expect(page.locator('.wb-wrap .chip')).toContainText('2020-01-01');
+  expect(history).toEqual([]);
+});
 
 test('linked maps keep annotations on the ground through pan, modes and save', async ({ page }) => {
   const { errors, saved } = await openCompare(page);
@@ -190,26 +213,31 @@ test('spectral frames are requested only by Run, including after reopening and m
   await page.getByRole('button', { name: 'Open', exact: true }).click();
   await page.locator('.session-open').click();
   await awaitMapReady(page, 2);
-  // Reopening in Difference mode brings its column with it; nothing to click.
+  // Reopening a Difference session brings its strip with it; nothing to click.
   await expect(page.getByLabel('Difference', { exact: true })).toBeVisible();
   await expect(page.locator('button[aria-label="Reset to north"] + button')).toHaveText('35°');
+  await page.getByRole('button', { name: 'Difference settings', exact: true }).click();
   await expect(page.getByLabel('Method', { exact: true })).toHaveValue('index');
   expect(requests).toHaveLength(0);
-  await page.getByRole('button', { name: 'Read this view', exact: true }).click();
+  // Read sits on the strip, so pressing it leaves the settings open.
+  await page.getByRole('button', { name: 'Read', exact: true }).click();
   await expect(page.locator('.secondary .change-map')).toBeVisible({ timeout: 20000 });
+  await expect(page.locator('aside.settings')).toBeVisible();
   expect(requests.map((request) => request.day)).toEqual(['2026-08-01', '2026-09-01']);
   const box = await page.locator('.compare-stage').boundingBox();
   await page.mouse.move(box.x + 100, box.y + 100);
   await page.mouse.down();
   await page.mouse.move(box.x + 180, box.y + 130, { steps: 8 });
   await page.mouse.up();
+  // The press on the map put the settings away, and the pan spent nothing.
+  await expect(page.locator('aside.settings')).toBeHidden();
   await expect(page.locator('.secondary .change-map')).not.toHaveCSS('transform', 'none');
-  await expect(page.getByLabel('Difference', { exact: true })).toContainText('Run again to match this view');
-  await expect(page.getByRole('button', { name: 'Read this view', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Read', exact: true })).toBeEnabled();
   expect(requests).toHaveLength(2);
   // The cloud filter reads Sentinel-2's own classification, so switching it on
   // over a picture method asks for the sky then and there, rather than leaving
   // an unfiltered reading up behind an "on" switch.
+  await page.getByRole('button', { name: 'Difference settings', exact: true }).click();
   await page.getByLabel('Method', { exact: true }).selectOption('colour');
   await page.getByRole('button', { name: /Clouds & shadows/ }).click();
   await expect.poll(() => requests.length).toBe(4);
@@ -226,15 +254,17 @@ test('changes run in the worker and export a composed PNG', async ({ page }) => 
   });
   await page.getByRole('button', { name: 'Difference', exact: true }).click();
   await expect(page.locator('.secondary .change-map')).toBeVisible({ timeout: 20000 });
-  await expect(page.getByLabel('Difference', { exact: true })).toContainText('highlighted');
+  await expect(page.locator('.change-legend')).toContainText('highlighted');
   // Highlights that come and go are easier to catch over busy imagery.
   await page.getByRole('button', { name: 'Blink the highlights', exact: true }).click();
   await expect(page.locator('.secondary .change-map')).toBeHidden();
   await expect(page.locator('.secondary .change-map')).toBeVisible();
   await page.getByRole('button', { name: 'Stop blinking the highlights', exact: true }).click();
   await expect(page.locator('.secondary .change-map')).toBeVisible();
+  await page.getByRole('button', { name: 'Difference settings', exact: true }).click();
   await page.getByLabel('Method', { exact: true }).selectOption('structure');
-  await expect(page.getByLabel('Difference', { exact: true })).toContainText('coverage');
+  await expect(page.locator('aside.settings .readout')).toContainText('coverage');
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   await page.getByRole('button', { name: 'Export copy', exact: true }).click();
   await expect.poll(() => exports.length).toBe(1);
@@ -242,99 +272,131 @@ test('changes run in the worker and export a composed PNG', async ({ page }) => 
   expect(errors).toEqual([]);
 });
 
-test('analyzer areas run explicitly, and candidates are reviewed one at a time', async ({ page }) => {
-  const { errors } = await openCompare(page, 'Esri Wayback');
-  const requests = [];
-  const sizes = {
-    small: { min_area: 300, max_area: 0, cleanup: 0, smoothing: 0, merge_metres: 0 },
-    medium: { min_area: 2000, max_area: 0, cleanup: 1, smoothing: 0, merge_metres: 30 },
-    large: { min_area: 20000, max_area: 0, cleanup: 1, smoothing: 1, merge_metres: 100 },
-  };
-  const recipe = { id: 'large-change', name: 'Any surface change', description: 'Reflectance that moved',
-    phenomenon: 'Surface change', method: 'surface', zones: [], colour: '#f6a81a', style: 'both',
-    parameters: { sensitivity: 67, ...sizes.medium, index: 'ndvi', direction: 'both',
-      ignore_clouds: true, ignore_shadows: true, cloud_margin: 5 } };
-  await page.route('**/api/compare/analyzers', (route) => route.fulfill({ json: {
-    builtins: [recipe], custom: [], max_tiles: 4096, max_results: 2000, grid: [13, 512],
-    methods: [{ id: 'surface', label: 'Any reflectance change', single: false, clouds: true, sizes,
-      measure: 'Reflectance moved by {value}%' }],
-  } }));
-  await page.route('**/api/satellite/sentinel/acquisitions', (route) => route.fulfill({ json: {
-    dates: [{ date: '2026-05-11', cloud: 2, granules: 1, coverage: 1 },
-      { date: '2026-05-04', cloud: 4, granules: 1, coverage: 1 }], truncated: false } }));
-  let saved;
-  await page.route('**/api/cases/*/analysis/**', async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    if (route.request().method() === 'POST' && path.endsWith('/runs')) {
-      const input = route.request().postDataJSON(); requests.push(input);
-      const [[w, n], [e, s]] = input.zones[0].points;
-      const row = { id: '0-1', coordinates: [(w + e) / 2, (n + s) / 2],
-        bbox: [Math.min(w, e), Math.min(n, s), Math.max(w, e), Math.max(n, s)],
-        area: 90, width: 15, height: 6, margin: 3.4, strength: 'strong', measure: { value: 18.2 },
-        phenomenon: 'Surface change', review: 'new', parts: [{ frames: ['a', 'b'], box: [0, 0, 1, 1] }] };
-      saved = { id: '123456789abc', title: input.title, input, status: 'ready', progress: 1, total: 1,
-        count: 1, results: [row], engine_version: 2, created_at: '2026-09-16T00:00:00Z' };
-      await route.fulfill({ json: { ...saved, status: 'queued', results: [], count: 0 } });
-    } else if (route.request().method() === 'PATCH' && path.includes('/results/')) {
-      saved.results[0].review = route.request().postDataJSON().review;
-      await route.fulfill({ json: saved.results[0] });
-    } else if (path.endsWith('/runs/123456789abc')) await route.fulfill({ json: saved });
-    else if (path.endsWith('/preview')) await route.fulfill({ contentType: 'image/png', body: Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') });
-    else await route.fulfill({ json: path.endsWith('/runs') && saved ? [saved] : [] });
-  });
-  await page.getByRole('button', { name: 'Detect', exact: true }).click();
-  // One column, one place: Difference's settings were in the same slot.
-  await expect(page.getByLabel('Detect', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Analyzer', { exact: true })).toHaveValue('large-change');
-  await expect(page.getByRole('button', { name: /^Run on/ })).toBeDisabled();
-  expect(requests).toHaveLength(0);
-  await page.getByRole('button', { name: 'Rectangle', exact: true }).click();
+/** Turn the shared camera to an exact bearing from the compass. */
+async function turnTo(page, degrees) {
+  await page.getByTitle('Click to type an exact angle', { exact: true }).first().click();
+  const input = page.getByLabel('Set bearing in degrees', { exact: true });
+  await input.fill(String(degrees));
+  await input.press('Enter');
+  await expect(page.getByTitle('Click to type an exact angle', { exact: true }).first())
+    .toContainText(`${degrees}`);
+}
+
+/** The corners of an outline path, as [x, y] pairs. */
+const cornersOf = (d) => [...d.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+const length = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+
+test('on a turned map a box runs along the screen, and turns from its grip', async ({ page }) => {
+  const { errors, saved } = await openCompare(page);
+  await turnTo(page, 30);
   const canvas = page.getByLabel('Annotations on imagery A', { exact: true });
   const box = await canvas.boundingBox();
-  await page.mouse.move(box.x + 80, box.y + 100);
-  await page.mouse.down(); await page.mouse.move(box.x + 190, box.y + 190, { steps: 6 }); await page.mouse.up();
-  await expect(page.getByLabel('Area name', { exact: true })).toHaveCount(1);
-  await expect(page.getByLabel('Detect', { exact: true })).toContainText('1 tile');
-  // Wayback on the maps is nothing Detect can read, so it asks for Sentinel-2 dates.
-  await expect(page.getByLabel('Detect', { exact: true })).toContainText('Detect reads Sentinel-2');
-  await page.getByRole('button', { name: 'Change dates or the rule…' }).click();
-  await page.getByRole('button', { name: 'Find passes', exact: true }).click();
-  await page.getByLabel('Use 2026-05-04').getByRole('button', { name: 'A', exact: true }).click();
-  await page.getByLabel('Use 2026-05-11').getByRole('button', { name: 'B', exact: true }).click();
-  await page.getByLabel('Analysis name', { exact: true }).fill('Harbour sweep');
-  await page.getByRole('group', { name: 'Target size' }).scrollIntoViewIfNeeded();
-  await page.screenshot({ path: test.info().outputPath('analyzers-setup.png') });
-  expect(requests).toHaveLength(0);
-  await page.getByRole('button', { name: 'Run on 1 area', exact: true }).click();
-  await expect(page.getByText('Strong · Reflectance moved by 18.2%', { exact: true })).toBeVisible();
-  expect(requests).toHaveLength(1);
-  expect(requests[0].zones).toHaveLength(1);
-  const pins = page.locator('.analysis-overlay [role="button"]');
-  await expect(pins).toHaveCount(2);              // the same candidate on both maps
-  await page.getByRole('button', { name: 'Toggle Harbour sweep', exact: true }).click();
-  await expect(pins).toHaveCount(0);
-  await page.getByRole('button', { name: 'Toggle Harbour sweep', exact: true }).click();
-  await expect(pins).toHaveCount(2);
-  await page.mouse.move(box.x + 80, box.y + 250); await page.mouse.wheel(0, -300);
-  await expect(pins).toHaveCount(2);
-  expect(requests).toHaveLength(1);
-  // Dismissing is a verdict on one candidate, and it takes it off the map.
-  await expect(page.getByText('1 still to review · 0 kept, 0 dismissed')).toBeVisible();
-  await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
-  await expect(page.getByText('All 1 reviewed · 0 kept, 1 dismissed')).toBeVisible();
-  await expect(pins).toHaveCount(0);
-  // Detect's own drawing belongs to Detect; the reading modes stay clean.
-  await page.getByRole('button', { name: 'Side by side', exact: true }).click();
-  await expect(page.getByLabel('Detect', { exact: true })).toHaveCount(0);
-  await expect(page.locator('.analysis-overlay')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Detect', exact: true }).click();
-  await page.getByRole('button', { name: 'Saved', exact: true }).click();
-  await page.locator('.cmp-dock .link').filter({ hasText: 'Harbour sweep' }).first().click();
-  await expect(page.getByText('Strong · Reflectance moved by 18.2%', { exact: true })).toBeVisible();
-  expect(requests).toHaveLength(1);
-  expect(requests[0].a).toMatchObject({ provider: 'sentinel2', date: '2026-05-04' });
-  expect(requests[0].b).toMatchObject({ provider: 'sentinel2', date: '2026-05-11' });
-  await page.screenshot({ path: test.info().outputPath('analyzers.png') });
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.getByTitle('Box (R)', { exact: true }).click();
+  await page.mouse.move(cx - 80, cy - 40);
+  await page.mouse.down();
+  await page.mouse.move(cx + 80, cy + 40, { steps: 6 });
+  await page.mouse.up();
+
+  const outline = canvas.locator('.mark > path:not(.edge)');
+  const drawn = cornersOf(await outline.getAttribute('d'));
+  // Along the screen it was drawn on: level sides, the size the drag covered.
+  expect(drawn).toHaveLength(4);
+  expect(Math.abs(drawn[1][1] - drawn[0][1])).toBeLessThan(1);
+  expect(length(drawn[0], drawn[1])).toBeCloseTo(160, -1);
+  expect(length(drawn[1], drawn[2])).toBeCloseTo(80, -1);
+
+  // A quarter turn from the grip stands it on end about its centre.
+  const grip = canvas.locator('.turn circle').last();
+  const at = await grip.boundingBox();
+  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(cx + 90, cy, { steps: 8 });
+  await page.mouse.up();
+  const turned = cornersOf(await outline.getAttribute('d'));
+  const xs = turned.map((point) => point[0] - box.x);
+  const ys = turned.map((point) => point[1] - box.y);
+  expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(80, -1);
+  expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(160, -1);
+
+  await page.getByRole('button', { name: 'Save comparison', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Save comparison', exact: true }).click();
+  await expect.poll(() => saved.length).toBe(1);
+  // Drawn with the map turned 30° clockwise (compass 330° up), then a quarter turn.
+  expect(saved[0].spec.annotations[0].angle).toBeCloseTo(60, 0);
+  expect(errors).toEqual([]);
+});
+
+test('the export frame keeps its shape when the camera turns, and still exports', async ({ page }) => {
+  // Tall enough for the frame's four corners to stay in view once it is turned.
+  await page.setViewportSize({ width: 1600, height: 1100 });
+  const { errors } = await openCompare(page);
+  const exports = [];
+  await page.route('**/api/cases/*/plates', async (route) => {
+    exports.push(route.request().postDataJSON());
+    await route.fulfill({ json: { file: 'comparison.png', path: '' } });
+  });
+  await page.getByRole('button', { name: 'Fade', exact: true }).click();
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export a copy' });
+  await dialog.getByRole('button', { name: 'Draw…', exact: true }).click();
+  const stage = await page.locator('.compare-stage').boundingBox();
+  const cx = stage.x + stage.width / 2;
+  const cy = stage.y + stage.height / 2;
+  await page.mouse.move(cx - 170, cy - 110);
+  await page.mouse.down();
+  await page.mouse.move(cx + 170, cy + 110, { steps: 5 });
+  await page.mouse.up();
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+
+  const edge = page.locator('.compare-stage > .export-frame .edge');
+  const [a, b, c, d] = cornersOf(await edge.getAttribute('d'));
+  await turnTo(page, 40);
+  await expect.poll(async () => cornersOf(await edge.getAttribute('d'))[0][1]).not.toBeCloseTo(a[1], 0);
+  const [e, f, g, h] = cornersOf(await edge.getAttribute('d'));
+  // Same sides and diagonals: turned with the ground, not stretched to the screen.
+  expect(length(e, f)).toBeCloseTo(length(a, b), 0);
+  expect(length(f, g)).toBeCloseTo(length(b, c), 0);
+  expect(length(e, g)).toBeCloseTo(length(f, h), 0);
+  expect(length(e, g)).toBeCloseTo(length(a, c), 0);
+  expect(d).toBeTruthy();
+
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.getByRole('button', { name: 'Export copy', exact: true }).click();
+  await expect.poll(() => exports.length).toBe(1);
+  const png = Buffer.from(exports[0].png, 'base64');
+  // Upright as drawn: the picture is the frame's own width, not the turned box around it.
+  expect(png.readUInt32BE(16)).toBe(Math.round(length(a, b)));
+  expect(errors).toEqual([]);
+});
+
+test("Difference's settings stay put through a read, lie over the highlights, and close outside", async ({ page }) => {
+  const { errors } = await openCompare(page, 'Esri Wayback');
+  await page.getByRole('button', { name: 'Difference', exact: true }).click();
+  await expect(page.locator('.secondary .change-map')).toBeVisible({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Difference settings', exact: true }).click();
+  const panel = page.locator('aside.settings');
+  await expect(panel).toBeVisible();
+  const before = await panel.boundingBox();
+
+  // A read in flight used to widen the strip, and the panel hanging off it moved.
+  await page.getByLabel('Method', { exact: true }).selectOption('structure');
+  await expect(panel.locator('.readout')).toContainText('coverage', { timeout: 20000 });
+  const after = await panel.boundingBox();
+  expect(after.x).toBeCloseTo(before.x, 0);
+  expect(after.y).toBeCloseTo(before.y, 0);
+  expect(after.height).toBeCloseTo(before.height, 0);
+
+  // Over the highlights, not under them.
+  const inside = await page.evaluate(({ x, y }) =>
+    !!document.elementFromPoint(x, y)?.closest('aside.settings'),
+  { x: after.x + 20, y: after.y + 20 });
+  expect(inside).toBe(true);
+
+  // A press on the map beside it closes it.
+  const stage = await page.locator('.compare-stage').boundingBox();
+  await page.mouse.click(stage.x + 80, stage.y + 80);
+  await expect(panel).toBeHidden();
   expect(errors).toEqual([]);
 });

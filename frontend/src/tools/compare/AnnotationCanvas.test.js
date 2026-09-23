@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 const { default: Canvas } = await import('./AnnotationCanvas.svelte');
+const { markRing } = await import('../../lib/map/compareAnnotations.js');
+const { fromMercator, toMercator } = await import('../../lib/map/groundFrame.js');
 
 globalThis.ResizeObserver = class { observe() {} disconnect() {} };
 
@@ -22,10 +24,42 @@ function fakeEngine() {
 const area = () => ({ id: 'z1', kind: 'rect', side: 'both', colour: '#38bdf8',
   points: [[1, 1], [3, 3]], stroke_width: 2, fill_opacity: 0.08, font_size: 12, text: 'Area 1' });
 
-function press(node, type, x, y) {
-  node.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: x, clientY: y }));
+/**
+ * A camera at one pixel to the metre, turned by the app's bearing: the map's
+ * clockwise turn, so the compass direction up is its negative. Its matrix is
+ * its own inverse, so the same one maps both ways.
+ */
+function turningEngine(bearing = 0) {
+  handlers = {};
+  const engine = { bearing };
+  const turn = (a, b) => {
+    const t = (-engine.bearing * Math.PI) / 180;
+    return [a * Math.cos(t) - b * Math.sin(t), -a * Math.sin(t) - b * Math.cos(t)];
+  };
+  Object.assign(engine, {
+    on: (name, handler) => { handlers[name] = handler; return () => delete handlers[name]; },
+    latLngToContainerPoint: ({ lon, lat }) => {
+      const [x, y] = turn(...toMercator(lon, lat));
+      return { x: 200 + x, y: 150 + y };
+    },
+    containerPointToLatLng: ({ x, y }) => {
+      const [lon, lat] = fromMercator(...turn(x - 200, y - 150));
+      return { lon, lat };
+    },
+  });
+  return engine;
+}
+
+function press(node, type, x, y, init = {}) {
+  node.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, ...init }));
   flushSync();
 }
+
+/** A mark's ring as the screen shows it, rounded to a hundredth of a pixel. */
+const onScreen = (engine, mark) => markRing(mark).map((point) => {
+  const at = engine.latLngToContainerPoint({ lon: point[0], lat: point[1] });
+  return [Math.round(at.x * 100) / 100, Math.round(at.y * 100) / 100];
+});
 
 function stage(props) {
   live = mount(Canvas, { target, props: { engine: fakeEngine(), ...props } });
@@ -125,4 +159,102 @@ it('anchors a measure on a point handed to it, and closes it on the next click',
   expect(saved[0].kind).toBe('measure');
   expect(saved[0].points[0]).toEqual([1, 1]);
   expect(saved[0].points[1][0]).toBeCloseTo(6);
+});
+
+it('draws a box along a turned camera, not along north', () => {
+  const onchange = vi.fn();
+  const engine = turningEngine(30);
+  const svg = stage({ engine, annotations: [], tool: 'rect', bearing: 30, turnable: true, onchange });
+  press(svg, 'pointerdown', 100, 80);
+  press(svg, 'pointermove', 300, 200);
+  press(svg, 'pointerup', 300, 200);
+  const [box] = onchange.mock.calls.at(-1)[0];
+  // The map turned 30° clockwise puts compass 330° up.
+  expect(box.angle).toBe(330);
+  expect(onScreen(engine, box)).toEqual([[100, 80], [300, 80], [300, 200], [100, 200]]);
+});
+
+it('keeps a Detect area north-up, since its zones are north-up boxes', () => {
+  const onchange = vi.fn();
+  const svg = stage({ engine: turningEngine(30), annotations: [], tool: 'rect', bearing: 30, onchange });
+  press(svg, 'pointerdown', 100, 80);
+  press(svg, 'pointermove', 300, 200);
+  press(svg, 'pointerup', 300, 200);
+  expect(onchange.mock.calls.at(-1)[0][0].angle).toBe(0);
+});
+
+describe('turning a mark', () => {
+  const box = (engine) => {
+    const [first, second] = [{ x: 100, y: 100 }, { x: 300, y: 200 }]
+      .map((at) => engine.containerPointToLatLng(at)).map(({ lon, lat }) => [lon, lat]);
+    return { ...area(), points: [first, second], angle: 0 };
+  };
+  const grip = () => target.querySelector('.turn circle:last-of-type');
+  // The marks as the drag last left them; the release commits the parent's copy.
+  const lastDrag = (onchange) => onchange.mock.calls.filter(([, commit]) => !commit).at(-1)[0];
+
+  it('stands a grip past the top of the selected mark, only where turning is on', () => {
+    const engine = turningEngine();
+    stage({ engine, annotations: [box(engine)], editVertices: true, selectedId: 'z1', tool: 'select', turnable: true });
+    expect(Number(grip().getAttribute('cx'))).toBeCloseTo(200, 4);
+    expect(Number(grip().getAttribute('cy'))).toBeCloseTo(100 - 26, 4);
+    unmount(live);
+
+    stage({ engine, annotations: [box(engine)], editVertices: true, selectedId: 'z1', tool: 'select' });
+    expect(target.querySelector('.turn')).toBeNull();
+    unmount(live);
+
+    const note = { ...area(), kind: 'text', points: [[1, 1]], text: 'Here' };
+    stage({ annotations: [note], editVertices: true, selectedId: 'z1', tool: 'select', turnable: true });
+    expect(target.querySelector('.turn')).toBeNull();
+  });
+
+  it('turns a box about its centre as the grip is dragged round it', () => {
+    const onchange = vi.fn();
+    const engine = turningEngine();
+    const svg = stage({ engine, annotations: [box(engine)], editVertices: true, selectedId: 'z1',
+      tool: 'select', turnable: true, onchange });
+    // From straight above the centre to straight right of it: a quarter turn clockwise.
+    press(grip().parentNode, 'pointerdown', 200, 74);
+    press(svg, 'pointermove', 276, 150);
+    press(svg, 'pointerup', 276, 150);
+    const [turned] = lastDrag(onchange);
+    expect(onchange.mock.calls.at(-1)[1]).toBe(true);     // one entry to undo, at the end
+    expect(turned.angle).toBeCloseTo(90, 6);
+    const ring = onScreen(engine, turned);
+    const xs = ring.map((point) => point[0]);
+    const ys = ring.map((point) => point[1]);
+    expect([Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]).toEqual([150, 250, 50, 250]);
+  });
+
+  it('snaps the turn to 15° with Shift held', () => {
+    const onchange = vi.fn();
+    const engine = turningEngine();
+    const svg = stage({ engine, annotations: [box(engine)], editVertices: true, selectedId: 'z1',
+      tool: 'select', turnable: true, onchange });
+    press(grip().parentNode, 'pointerdown', 200, 74);
+    // 37° clockwise from straight up.
+    const turn = (37 * Math.PI) / 180;
+    const at = [200 + 76 * Math.sin(turn), 150 - 76 * Math.cos(turn)];
+    press(svg, 'pointermove', ...at, { shiftKey: true });
+    press(svg, 'pointerup', ...at, { shiftKey: true });
+    expect(lastDrag(onchange)[0].angle).toBeCloseTo(30, 6);
+  });
+
+  it('turns a polygon by its points, having no sides of its own', () => {
+    const onchange = vi.fn();
+    const engine = turningEngine();
+    const points = [[100, 100], [300, 100], [200, 200]]
+      .map(([x, y]) => engine.containerPointToLatLng({ x, y })).map(({ lon, lat }) => [lon, lat]);
+    const svg = stage({ engine, annotations: [{ ...area(), kind: 'polygon', points }], editVertices: true,
+      selectedId: 'z1', tool: 'select', turnable: true, onchange });
+    press(grip().parentNode, 'pointerdown', 200, 74);
+    press(svg, 'pointermove', 200, 226);
+    press(svg, 'pointerup', 200, 226);
+    const [turned] = lastDrag(onchange);
+    const apex = engine.latLngToContainerPoint({ lon: turned.points[2][0], lat: turned.points[2][1] });
+    // Half a turn about the middle of what it spans: the apex points up now.
+    expect(apex.x).toBeCloseTo(200, 4);
+    expect(apex.y).toBeCloseTo(100, 4);
+  });
 });

@@ -1072,6 +1072,12 @@ export async function installAppFixture(page, options = {}) {
     if (caseId && path === `/api/cases/${caseId}/map-layers` && request.method() === 'GET') {
       return json(route, []);
     }
+    // Detect's top-bar activity reads the case's runs whenever a case opens,
+    // whichever tool is showing, so this is part of opening a case rather than
+    // something a spec asked for. A spec about Detect routes it itself.
+    if (caseId && path === `/api/cases/${caseId}/analysis/runs` && request.method() === 'GET') {
+      return json(route, []);
+    }
     if (caseId && path === `/api/cases/${caseId}/analysis-views`) {
       if (request.method() === 'GET') {
         return json(route, {

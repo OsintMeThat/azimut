@@ -23,7 +23,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | **Case** (topbar) | Board, Graph, Timeline, Sheet | v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect (Selection / Frame / Collage / Analyze) | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
-| **Map** | Satellite, Compare, Coords & Sky | Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
+| **Map** | Satellite, Compare, Detect, Coords & Sky | Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
 | **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
 
 **Case is not on the rail.** The rail reads as a sequence of stages, and the case is
@@ -1219,52 +1219,88 @@ remote ids in provenance instead of appending them to the visible name.
 
 ## Map
 
-**Compare assembles two imagery views on one camera.** It starts with empty A/B
-slots and loads tiles only after a source or a starting pair is chosen. Each
+**Compare assembles two imagery views on one camera.** It opens on the home view
+with a key-less pair: an Esri Wayback release published a year or more back on A,
+today's World Imagery on B. That costs the release list and tiles, never a
+Copernicus request or a point's history, and A stays empty when no release list
+comes back rather than showing B twice. Panning that untouched pair leaves
+nothing to discard, and Save still takes it. **New** starts over from a menu of
+starting pairs, the same ones a removed pair offers above its empty slots. Each
 side keeps its provider, Wayback release, Sentinel-2 day and reference layers.
 The source cards and mode controls use the application's shared theme, buttons
 and spacing. On a card the date is a chip beside the provider, reading the same
-for Wayback and for Sentinel-2, so the card's layers icon means one thing. The
+for Wayback and for Sentinel-2, so the card's layers icon means one thing. A
+Wayback chip names the release, so the day its pixels were taken sits beside it,
+as it does under the chip on Satellite. The
 cards are as wide as the maps under them, so the split between A and B is one
 line down the tool. Both Layers buttons open the same A/B sheet, including each
 side's FIRMS period, VIIRS night and saved case work.
 
-The mode dock holds two kinds of choice, in two named groups. **View**: side by
-side, through a swipe, with B faded over A, or as alternating whole frames. Blink
-has three speeds and can pause on either side. **Analysis**: **Difference** and
-**Detect**, each marked when it cannot run yet — Difference when the two sides are
-not a matched pair, Detect when Copernicus credentials are missing — with the
-reason as its tooltip and, for Detect, at the head of its own panel beside a way
-into Settings. Detect still opens, because the areas and runs already saved are
-read there. Keys 1–6 switch modes; Space pauses blink. Dragging, zooming or rotating either
+The mode dock holds the four views: side by side, through a swipe, with B faded
+over A, or as alternating whole frames. Blink has three speeds and can pause on
+either side. **Difference** sits beside them as a switch, offered only when the
+two sides are a matched pair, and lays its highlights over whichever view is on.
+Sweeping an area over time is the Detect tab's job, not Compare's. Keys 1–4
+switch views, 5 toggles Difference, and Space pauses blink. Dragging, zooming or rotating either
 map moves the other in the same frame. Both stop at the lower provider zoom
 ceiling. **Swap A and B** exchanges the complete source stacks and annotation
 sides. One compass in the bar reads the shared turn, resets it to north and takes
 an exact angle.
 
-Each computing mode owns the same column beside the stage: the maps narrow rather
-than being covered, and the dock above is the only switch between the two. Leaving
-the mode closes the column.
+A radar side knows the other side's pass: its picker marks the passes on the same
+track, the only ones that compare like with like. **Two radar passes** joins
+the starting pairs once the radar layer is set. Compare works without
+Copernicus, so nothing is said until a Copernicus road is asked for: the
+satellite and radar pairs stay in the New menu marked *set up*, and the two
+archives stay in the imagery picker marked *Needs a free key* or *Needs its
+layer*. Pressing one lays the same setup card as Detect's over the stage.
+
+**All dates** in the bar opens a strip under the maps whenever A and B show the
+same dated archive: Sentinel-2, Sentinel-1 or Esri Wayback. It lists every picture
+that archive holds of the point under the crosshair, oldest on the left: the
+Copernicus days and passes of a window around A and B, one request, or the
+Wayback releases that changed the point, free. A press shows a picture on B,
+Alt-press or its own A button shows it on A. A Sentinel-2 day over the cloud
+ceiling and a radar pass off the pair's track are greyed. **Show pictures** draws
+each one small from the tile proxy, priced before it is pressed and cached once
+read, and a view that moved says so rather than refreshing on its own.
+
+**Date it** answers "between which two pictures did this appear". With a picture
+without the thing on A and one with it on B, A the older, it shows the middle
+picture between them on B and asks: *It is there*, *Not yet*, or *Can't tell* for
+cloud or a look that settles nothing. Each answer halves what is left, so a year
+of passes takes a handful of looks, and Undo takes one back. It ends on a
+sentence to copy — absent on one date, present on the next, and how many
+pictures between them could not tell.
+
+Difference opens no column: its strip joins the view's own controls in the footer
+under the stage, and its full settings open above that strip only from the gear.
+The strip keeps one width through a read, so the panel hanging from it stays put;
+what the read is doing shows in the panel's readout and the map legend. The panel
+lies over the highlights and closes on Escape or a press anywhere outside it.
 
 **Difference** checks that the sources can be compared before it runs.
 Colour, structure and brightness methods read captured pixels in a worker.
+Two Sentinel-1 passes of one track are a pair too: the rendered radar picture is
+read with no tone matching, and passes from two tracks are refused, because they
+see the ground from two angles.
 Sentinel-2 also offers six spectral indices — NDVI, NDWI, MNDWI, NBR, NDBI and
 BSI, the ones Detect measures — from the actual bands. Band frames are fetched by
 an explicit act only — **Read this view**, or switching the cloud filter on —
 one metered request per side; reopening a session or moving the camera never
 fetches. Each frame is kept with a margin of ground around the view, so the
 reading keeps its bands while the camera stays inside that margin, and past it
-the last reading stays up, marked in the footer as an earlier read, until Run. A changed view must be run again before
+the last reading stays up, marked in the strip as an earlier read, until **Read**. A changed view must be run again before
 export. A reading recomputes by itself after every move, on the
 frames it holds; what it never does on a pan is spend a request.
-These viewport captures depend on display resolution and zoom. Use **Detect**
-for a fixed analysis grid across camera changes.
-**Highlights over** sits above the tabs and says what the reading is laid on: A
-alone, B alone, or both images side by side with the same mask on each — the one
-arrangement that shows what a change went *from* and *to* at the same time. The
-eye beside the title hides the overlay, and **Blink** flashes it on and off,
-because a thin highlight over busy imagery is easier to catch moving than still.
-**Clouds & shadows** sits beside it, one click, because cloud is the first thing
+These viewport captures depend on display resolution and zoom. Use the Detect
+tab for a fixed analysis grid across camera changes.
+The strip's **A / B / Both** says which images carry the highlights, in any view;
+Both is the default, because it shows what a change went *from* and *to* at the
+same time. **Blink** flashes the highlights on and off, because a thin highlight
+over busy imagery is easier to catch moving than still. Turning Difference off
+in the dock takes the highlights away.
+**Clouds & shadows** opens first in the settings, one click, because cloud is the first thing
 that goes wrong in a reading. It gives Detect's answer, not a guess: Sentinel-2's
 scene classification, grown into the unsure pixels around a real cloud, with
 classified "clouds" too small to be one ignored and each cloud cast away from the
@@ -1288,104 +1324,6 @@ area and selectable change zones describe the result, each zone carrying the sam
 strength word a Detect candidate does: how far past the line it got. These are candidate pixel
 changes for inspection, not confirmed changes to objects.
 
-**Detect** sweeps a drawn area of Copernicus Sentinel-2 at native resolution and
-keeps what it found. Every detector measures reflectance bands, which a rendered
-picture has already stretched away, so Wayback has nothing to give it. Setup reads
-as three numbered steps, in the order the work happens: an area, the imagery, then
-what to look for.
-
-Step 1 draws rectangles, polygons or circles, or takes the current view as a
-rectangle in one click, and prices the result before anything is fetched: ground
-area, native tiles, Copernicus requests and roughly how long. Each date costs two
-requests a tile, the picture reviewed and the bands measured. A named area set can be
-saved for this case and reused. An area is grabbed by its edge: dragging inside
-one pans the map as it would anywhere else, a click on the edge shows its corner
-handles, and a press that does not travel selects without nudging the geometry.
-Handles and outlines are projected from the ground, so they stay on it through a
-pan, a zoom or a turn.
-
-Step 2 and the stage share one imagery between them, so what is on screen is what
-a run would sweep. On arrival the maps lead, because what is above the stage is
-usually what you came to analyze. From the first change made here — or straight
-away when the maps show anything but Sentinel-2 — the direction reverses and
-the maps follow this step; the A/B source cards step aside while Detect is on, so
-there is one place to choose imagery rather than two. An analyzer that reads one
-date shows one map, because there is no pair to compare. The run is blocked, with
-the reason, until each image it needs is named.
-
-On Copernicus, dates are picked from the passes the drawn areas actually have,
-not from a calendar. **Find passes** asks the catalogue once, over the whole set
-of areas at once, and lists what came back newest first with the two facts that
-decide between them: how much of the areas that day's swath reached, and how much
-of it was cloud. Sentinel-2 flies 290 km swaths on a five-day revisit, so a wide
-area can have no single day covering all of it; a partial date can still be
-chosen, and the panel says what share will be left unswept before the run rather
-than after it. A finished run reports the share it really read, so "nothing
-found" and "never looked" stay different answers. The lookup is billed as one
-Copernicus request and never runs on its own.
-
-Step 3 picks the analyzer. Eight ship built in, for big things and small ones:
-vessels, fires and gas flares, construction and earthworks, small spots (impacts,
-burn marks, vehicles), any surface change, burn scars, vegetation loss, and
-flooding or new water. Each reads its own band product, and each was tuned on real
-scenes rather than synthetic ones: rough sea under glint, a dense anchorage under
-cumulus, oil fires and wildfires, bright roofs, a construction site across seven
-months, dry-season pastures. Vessels stand out from their own patch of sea in near
-*and* short-wave infrared, which a breaking wave does not, and a candidate joined to
-bulk land is a coast. What counts as sea comes from the water index or from the
-classification, either one is enough: under sun glint the index alone read a whole
-strait as dry. Fires take the published short-wave ratios on B8A, which
-shares B12's grid. Construction is ground that moved the same way in every band
-while its vegetation held; a small spot changed while the ring of ground around it
-did not, that ring read with a hole in its middle so the spot cannot sit in its own
-background and over measured ground only, so a granule edge raises nothing; a burn has to end dark, which a dried pasture does not.
-
-**Small**, **Medium**, **Large** and **All** under the analyzer set the target
-size as a whole: floor and ceiling area, cleanup and grouping together, since a
-small target needs no cleanup that would erase it. What the chosen one accepts is
-written under the buttons in ground terms — a mark outside that band is found and
-then dropped, which reads as "nothing found" unless it is said. **All** sets no
-floor and no ceiling, for the mark that falls between two bands. Tuning any of
-those by hand leaves no size selected. The **Clouds & shadows** switch reads Sentinel-2's classification, grows a
-real cloud into the unsure pixels touching it, ignores classified "clouds" too small
-to be one (white hulls and roofs), and casts each cloud away from the sun to find the
-shadows the classification missed. The fire detector offers no switch: its band
-ratios reject cloud already. Thresholds and the analyzer itself open from links
-rather than sitting in the way. The **+** beside the analyzer starts one of your
-own, either as a copy of the one in hand or from scratch; a built-in can be read
-and copied but never written over, and an analyzer of your own can be saved,
-renamed or removed from there. The library is shared by every case.
-
-A **watch** keeps an analyzer, its areas and a date rule together, and
-**Run again** in Saved launches a fresh pass — a weekly harbour review is that
-button, not a background schedule.
-
-**Run** explicitly starts a bounded, cancellable job, up to 4096 native tiles.
-The native analysis grid is independent of map zoom. Opening the panel or
-reopening a saved run reads local state only. Offline runs read only the tile cache and the frames earlier runs
-kept, and a finished run keeps only the tiles that found something — so an
-offline rerun covers what the cache still holds, not the whole of a past sweep.
-Resolving the latest date requires a provider request at run time. Runs preserve their own input snapshots,
-candidate evidence and review state. A finished run keeps the frames of the tiles
-that produced a candidate and drops the rest, so a case grows with what was found
-rather than with how much was swept.
-
-What a sweep produces is a list of candidates, strongest first, and nothing else
-reaches the case on its own. Each says how strong it is in a word (weak, clear or
-strong: how far past its threshold it got) and what was measured in units a reader
-can check, such as "6.2× brighter than the water around it" or "NBR 0.61 → −0.28".
-A candidate that crosses a tile edge is one candidate with one picture, stitched
-from the tiles it touches. Review them one at a time: **Keep as a pin** files that one candidate,
-with its own copy of the evidence and its provenance, and is the single act that
-writes to the case; **Dismiss** takes it off the map. Either verdict moves to the
-next candidate still waiting, and a running tally says how many are left. Keeping
-can be undone, which sends the pin and its evidence to Trash. Evidence is enlarged
-by a whole-number factor with no interpolation, so a candidate a dozen pixels
-across can be read without pretending to detail the sensor never recorded. Each
-result layer has its own eye control, and the one under review wears a ring on the
-map. Areas and candidates belong to Detect and are drawn only there; a kept
-candidate is a pin, and pins show wherever case work shows.
-
 Annotations store longitude/latitude points and stay on their ground through pan,
 zoom and rotation. Notes, arrows, boxes, ellipses, lines, freehand strokes, distance
 measures, polygons, **numbered markers and symbols** can belong to A, B or both.
@@ -1398,6 +1336,10 @@ with a double-click or Enter; Escape cancels. Select a mark to move it or edit i
 double-click a note to edit its text, and use Undo/Redo for annotation changes. A
 selected mark shows its corner handles, so its geometry is corrected where it was
 drawn rather than deleted and redrawn; a note is dragged whole and has none.
+A box or an ellipse drawn on a turned map runs along that screen, not along north,
+and keeps the bearing it was drawn at. Any selected shape but a note or a stamp
+also shows a round grip above it: drag it to turn the shape about its centre,
+with Shift snapping to 15°.
 Every mark carries a wide invisible band along its outline, because a four-pixel
 arrow is a target nobody hits twice. The wheel still belongs to the map wherever
 the pointer is: the marks are drawn over it rather than in it, and a zoom that
@@ -1418,12 +1360,13 @@ offers for its own rails are left out rather than shown dead.
 **Save comparison** writes the editable version-2 session under `.compare/` and
 updates its rendered media preview in My work (PNG, or GIF for blink). A preview
 used by a derived proof is preserved when a later save creates new pixels.
-**Open** restores the sources, layers, camera, reading mode, blink speed, detection
-settings, annotations and the optional export frame; Detect is a place to work rather
-than a way to read the pair, so a session saved from it reopens side by side and its runs
-stay in the case. Export writes an attributed PNG, blink GIF or divider-sweep GIF to the
+**Open** restores the sources, layers, camera, view, the Difference switch, blink speed,
+detection settings, annotations and the optional export frame; a session saved while
+Difference was a view of its own reopens side by side with Difference on. Export writes an attributed PNG, blink GIF or divider-sweep GIF to the
 shared Views destination; an optional ground-anchored frame cuts any of the three to the
-chosen area, while Full view remains the default. Copy current PNG uses the clipboard.
+chosen area, while Full view remains the default. The frame keeps the bearing it was
+drawn at: turning the camera turns it with the ground rather than reshaping it, and
+the export comes out upright as it was drawn, once all four corners are in view. Copy current PNG uses the clipboard.
 Exports include projected annotations, a scale bar and north arrow. Tile captures wait
 for loaded frames and reject incomplete tiles. Google Maps JS uses the
 user-triggered Azimut Capture extension and retains its on-map credits.
@@ -1564,6 +1507,14 @@ which it is (`lib/map/tools.js`) rather than adding a button somewhere.
   *surface*, in its own top-right corner. Which imagery is on screen is a
   property of that map and not of the tool, which is what lets two surfaces sit
   side by side each saying its own.
+
+**Sentinel-1 radar** is a basemap once Settings → Imagery has found the radar
+layer of the analyst's Copernicus configuration. Its chip names a pass by its day
+and its UTC time, with an arrow for the way the satellite flew: dawn passes fly
+south, dusk passes north, and the two see a place from opposite sides. The picker
+reads a month of passes at the crosshair when it opens, one request a month, and
+keeps what it read. The picture is the dual-polarisation composite Detect reviews
+radar candidates on: water dark blue, vegetation grey-green, walls and hulls white.
 
 A capture can carry a **scale bar and a north arrow**, ticked in the capture
 menu: the bar bottom-left in the analyst's own units, the needle top-right,
@@ -1802,31 +1753,29 @@ holds something Save has not taken, since the panel opens on what the case holds
 **Esri Wayback is a basemap of every World Imagery release.** Picking it puts a
 chip beside the provider naming the release on screen, and the chip opens a
 slider through time, oldest left, with a step either way and the list under it.
-The list opens on **Changes here**, and so does the slider: only the releases
-that brought a new picture of the tile under the crosshair. Esri's tilemap says
-which release a tile really comes from, and walking it backwards shortlists the
-candidates; a picture Esri published again, re-encoded or re-coloured, is folded
-into its first publication by comparing the tiles themselves, then the
-acquisition date and satellite their metadata states. Each row carries its
-release date and, beside it, when the picture was taken; the pill under the chip
-dates the pixels on screen the same way. Narrowed to changes, the newest release
-is named by the change it shows rather than by a date no row carries. **Every
-release** lists all of them, where neighbours often look identical because
-nothing changed there.
+The list opens on **Every release**, dated by publication from the one release
+list Esri serves; the pill under the chip dates the pixels on screen, one
+metadata request for the release showing. Neighbours often look identical,
+because Esri republishes a mosaic where nothing changed.
 
-**Opening the picker once makes the history follow the map.** Every view that
-settles over another tile reads that tile's history from then on, picker open or
-shut — gating that on the picker *staying* open was the bug behind a picker that
-re-opened on wherever the analyst had been before. A tile already read costs
-nothing, and a tile Esri refused is left alone until **Refresh** is pressed, so
-panning never hammers a service that is down. A first history takes some seconds
-(Esri's metadata service is slow) and the picker offers nothing while it comes,
-since every release is not what *Changes here* was asked for; the changes it
-already has stay on the slider while the next tile's are read. **The chip itself
-says it is waiting**, spinner and all, because both reads run with the picker shut
-and a basemap that answers nothing for ten seconds without saying so reads as a
-broken one. A history that
-fails falls back to every release, which is the honest answer to not knowing.
+**Changes here narrows the list to the releases that brought a new picture of
+the tile under the crosshair.** Esri's tilemap says which release a tile really
+comes from, and walking it backwards shortlists the candidates; a picture Esri
+published again, re-encoded or re-coloured, is folded into its first publication
+by comparing the tiles themselves, then the acquisition date and satellite their
+metadata states. Each row then carries, beside its release date, when the
+picture was taken. Narrowed to changes, the newest release is named by the
+change it shows rather than by a date no row carries. **Imagery history here**
+on the point menu reads the same history at the point right-clicked.
+
+**A history is read only when asked for.** The walk is dozens of requests and
+takes some seconds, so a moving map never starts one: a history that no longer
+describes the tile under the crosshair says so, keeps its changes on the slider,
+and offers **Read here**. A tile already read costs nothing for the session.
+The picker offers nothing while a first history comes, since every release is not
+what *Changes here* asked for, and **the chip itself says it is waiting**,
+spinner and all, because the picker can be shut meanwhile. A history that fails
+falls back to every release, which is the honest answer to not knowing.
 The release rides on the provider id (`esri-wayback~64776`), so tiles are cached
 and captures credited under it.
 
@@ -1841,8 +1790,9 @@ or a zoom that moves the ground from under it.
 
 **Compare here…** asks an archive which two pictures of *this point* are the
 last two, and opens Compare on the pair: Esri Wayback for the two releases that
-changed it, Copernicus for the two most recent passes over it, the second only
-where a key for it is in Settings. The lookup happens before the tab changes, so
+changed it, Copernicus for the two most recent passes over it, and Copernicus
+radar for the newest pass and the one before it on the same track. The last two
+are offered only where Settings has what they need. The lookup happens before the tab changes, so
 an archive that holds nothing to compare says so on the map instead of costing
 the view. It says it is working for as long as it takes rather than for a guessed
 few seconds: the walk through Esri's releases is slow, and a message that went out
@@ -1909,6 +1859,267 @@ drawn or a cell swept from the extension's panel over another map lands here
 without a reload, and the same the other way round. A sweep worked from both
 keeps both hands' marks: what is written is the cells that were marked, never the
 grid around them. A grid discarded elsewhere closes here and says so.
+
+## Detect
+
+**Detect sweeps ground and comes back to it.** It is its own tab rather than a
+mode of Compare, because it is a different job: Compare reads two pictures side
+by side, while Detect watches an area of Copernicus Sentinel-2 or Sentinel-1 over time. One map
+is enough for that — a candidate's evidence is the before/after picture the column
+shows, not a second surface — so the map is the ground you draw on and the pass you
+are about to read, and the column beside it holds the work. Every detector measures
+reflectance or backscatter, which a rendered picture has already stretched away, so
+only Copernicus feeds it: Sentinel-2 for the optical analyzers, Sentinel-1 for the
+radar ones.
+
+Without a Copernicus key, Detect says so in the middle of its map: the account is
+free, the recipe is there in two parts — the Sentinel-2 configuration whose ID is
+the key, which brings its layers with it, and the Sentinel-1 layer added to it by
+hand for the radar analyzers, field by field — and one press opens the Copernicus
+card in Settings. The panel still opens on what the case already holds.
+
+Detect opens on Esri World Imagery, with Borders and saved results visible, framed
+on the areas this case watches — once, after which the camera is yours. A case
+with no area opens on the home view. The search, the compass and SAT's
+imagery/layer controls float over the map. There is no Detect header or
+full-width bottom strip. Attribution stays in the map's corner and the scale stays
+at bottom left; provider usage is a small chip beside the imagery selector. A pass
+date appears only while reading that pass, and run status stays in the panel.
+Leaving a pass restores the chosen basemap.
+
+The right dock has Routines, Saved and Areas tabs, with New detection always at
+the top. The tabs name their own list, so nothing is titled twice, and a second
+row appears only inside a routine, a review, the wizard or the library, where it
+carries Back. **Analyzers** sits at the end of the tab row. Its toggle or the `]`
+key collapses the dock to an icon rail; pressing a tab reopens it and resizes the
+map. Detect's basemap, overlays, saved-work visibility and collapsed state are
+viewer preferences carried by Settings → Backup. **Watched areas** is a row of the
+map's own layer list, beside Saved work.
+
+Areas belong to the case. Each has a name, colour and polygon; its map label
+appears when there is room, in the area's own colour. An area is grabbed by its
+outline, like a drawn mark in Compare: inside it the map is still the map, so the
+wheel zooms, a drag pans, and a middle- or shift-drag turns it about the point
+grabbed, as on every other map in the app. Pressing an outline opens Areas, where
+a row reads as the map draws it: colour, name, ground area and how many routines
+use it. Pressing the row frames it, the eye hides it, and renaming, recolouring
+or reshaping opens from the row's pencil rather than sitting in it. **Reshape on
+the map** frames the area and puts its corners under the pointer; the panel says
+how many routines watch it, since a routine reads its areas when it runs and its
+next run sweeps the new shape, while a finished run froze its own copy and keeps
+the ground it swept. **Save as a new area** leaves the old one, and the routines
+on it, as they were. The tab also draws or takes the current view, shows every
+area at once, and deletes. Deleting an area used by a routine lists the routines
+that must release it first. A routine and a one-off run can share an area.
+Older routines migrate their embedded zones to shared areas on first read.
+
+The list holds two kinds, and **New detection** asks which before asking anything
+else, because the answer changes every question after it:
+
+- a **one pass** sweeps each area's chosen or latest pass, once. It appears in
+  **Saved**, under **One passes**, below the runs of each routine gathered under
+  its name. Every finished run is drawn on the map from the start; the eye beside
+  its trash hides or shows it, the one on a group's heading does the whole group,
+  and showing frames the ground it covers. The layers button beside them snapshots
+  what was kept or pinned into a SAT layer, a routine's heading into its one layer;
+  a run with nothing kept says so and stays greyed. A group folds shut from its heading.
+- a **routine** is a place you come back to. It keeps its areas, its analyzer and
+  what each pass compares against; it is run again whenever there is a new pass,
+  and it remembers what it found.
+
+A routine's card carries what it is for, its analyzer, its areas, its rule and
+where its last run stands: the day of the pass it swept and how many candidates
+are still to review, or how far a working one got. The play button opens the launch
+table, **Run all** queues idle routines with their saved rules, and the title
+opens the routine's own page. **Analyzers** is where the things a detection looks
+for are made.
+
+An open routine or run is drawn once, in each area's own colour, by the same
+read-only overlay the list uses; the editable canvas belongs to the wizard and the
+Areas tab. Hovering a routine draws its areas heavier.
+
+A routine's page leads with **Findings**: every candidate it has kept, as a pin or
+just here, newest run first, each marked **Pinned** or **Kept here** and a press
+away from the evidence it came from. **Runs** beside it lists its passes, each
+opening its own review. **Run routine** opens a floating table with a row for each
+area, its A and its B (the newest pass by default), each read and written as the
+app's own day-first date field. One button queues the run, naming what it covers.
+The page also offers **Export as layer**, editing and deletion.
+
+Either kind is built one step at a time: **Where**, **What**, **When**, then
+**Start**. Only the current step shows, the next one opens once this one has what
+it needs, and the reason it is not ready yet is written under the Next button.
+Editing a routine opens on the last step, which reads the whole thing back with
+each line a way into its step. Both kinds carry a name and a line saying what they
+are for, and that line travels with every run they make.
+
+**Where** offers the case's own areas first, as chips in their colours that toggle
+in and out of the detection; drawing rectangles, polygons or circles, or taking the
+current view as a rectangle, is for ground the case does not watch yet. It prices
+the result before anything is fetched: ground area, native tiles, Copernicus
+requests and roughly how long. Each date costs two requests a tile, the picture
+reviewed and the bands measured. A radar vessel sweep adds one for the Sentinel-2 water
+classification it is judged against. One-off drawings stay temporary unless **Save as area** is pressed;
+saving a routine promotes its drawings. Legacy area sets remain readable. An area is grabbed by its edge: dragging inside
+one pans the map as it would anywhere else, a click on the edge shows its corner
+handles, and a press that does not travel selects without nudging the geometry.
+Handles and outlines are projected from the ground, so they stay on it through a
+pan, a zoom or a turn.
+
+**When** asks its questions in the order they are decided, in the step itself. A
+change names **A**, the picture before, and **B**, the one to look in; B is the
+**Newest pass**, looked up when the run starts under the cloud ceiling, until
+**A day I choose** asks for one. Vessels and hotspots read one image and ask only
+that. A routine names no B: it asks what each run compares the newest pass with,
+**The pass before** (what changed since the last run; A serves the first run only)
+or **A fixed picture** (everything changed since that day), and a one-image routine
+asks nothing but its picture and cloud ceiling. The slot still missing is tinted,
+and the reason is written under the Next button. **Passes over the area** lists
+what exists right under the question, each row with its A and B buttons, and a
+typed day works too. One choice stands for every area; **Set them per area…**
+opens the per-area table for areas far enough apart to sit under different swaths,
+and the step then lists each area's days. The last step reads the choice back in
+one line. A radar pass is a day and a UTC time,
+since Sentinel-1 can see a place twice in a day from opposite directions: the list
+shows each pass with its time and direction, and A and B must share
+a track, so the rows on the other track are closed to the pair. A day typed by
+hand is pinned to the pass on the other side's track at launch, and an automatic
+pass is looked for on the reference's track.
+
+**Find passes** explicitly asks Copernicus about the areas and counts one request
+against its quota. The picker shows cloud and coverage over all of them. At launch, each area independently resolves its latest usable pass
+under the cloud ceiling. Different tracks can therefore use different days.
+An unresolved area fails by name without stopping the rest. Opening Detect reads
+local state only; pass lookups happen only on request or during an explicit run.
+
+**What** picks the analyzer from a list grouped by what it looks for — vessels,
+fires and burns, water and floods, buildings and earthworks, vegetation and small
+marks, any change — with radar first where it reads the same thing better, and
+your own after them. Each built-in says in brackets how far its reading can be
+trusted, from what calibration showed: *reliable* (the published test, or a
+contrast few false hits survive), *approximate* (right more often than not, with
+known look-alikes) or *rough* (a lead to check). Radar vessels are reliable and
+optical ones approximate, since a hull answers the radar through cloud and glint
+alike; two radar passes read damage roughly. An analyzer that cannot run yet
+carries a key and *set up*: all of them without a Copernicus key, the radar ones
+until Settings has found their layer. It can still be picked and read about, and
+the step says what is missing with a way to Settings. Eight ship built in, for big things and small ones:
+vessels, fires and gas flares, construction and earthworks, small spots (impacts,
+burn marks, vehicles), any surface change, burn scars, vegetation loss, and
+flooding or new water. Each reads its own band product, and each was tuned on real
+scenes rather than synthetic ones: rough sea under glint, a dense anchorage under
+cumulus, oil fires and wildfires, bright roofs, a construction site across seven
+months, dry-season pastures. Vessels stand out from their own patch of sea in near
+*and* short-wave infrared, which a breaking wave does not, and a candidate joined to
+bulk land is a coast. What counts as sea comes from the water index or from the
+classification, either one is enough: under sun glint the index alone read a whole
+strait as dry. Fires take the published short-wave ratios on B8A, which
+shares B12's grid. Construction is ground that moved the same way in every band
+while its vegetation held; a small spot changed while the ring of ground around it
+did not, that ring read with a hole in its middle so the spot cannot sit in its own
+background and over measured ground only, so a granule edge raises nothing; a burn has to end dark, which a dried pasture does not.
+
+Five radar analyzers read Sentinel-1 through the layer Settings → Imagery found,
+and see through cloud and at night: vessels, any radar change, damaged or razed
+buildings, new structures and vehicles, and flooding. They were calibrated on real
+scenes: the Singapore anchorage, the Dover Strait, the North Sea in the October
+2023 storms, the Belgian wind farms, the Bosphorus, Port Sudan's desert coast, the
+May 2023 Emilia-Romagna floods and Gaza City before and after late 2023. A hull
+has to stand out of the sea around it in both polarisations, which a strong
+target's ghosts and sea spikes do not, and a weak return beside a much stronger one
+is taken for its sidelobe. What counts as sea is Sentinel-2's own water class on
+the clearest pass of the year before, because dry desert is as radar-dark as calm
+water; the radar decides only where that pass saw cloud. A radar change is the
+power of both polarisations averaged over the size's window and compared between
+two passes of one track; *bright* ground is ground that answered like walls on the
+side that had them, and *water* is ground that went as dark as calm water. Two
+passes only flag where to look: the razed-buildings analyzer says so, and the
+flood one starts at Large, since a flood is fields wide. Without the radar layer
+the wizard says where to find it and stops before its dates.
+
+**Small**, **Medium**, **Large** and **All** under the analyzer set the target
+size as a whole: floor and ceiling area, cleanup and grouping together, since a
+small target needs no cleanup that would erase it. What the chosen one accepts is
+written under the buttons in ground terms — a mark outside that band is found and
+then dropped, which reads as "nothing found" unless it is said. **All** sets no
+floor and no ceiling, for the mark that falls between two bands. Tuning any of
+those by hand leaves no size selected. The **Clouds & shadows** switch reads Sentinel-2's classification, grows a
+real cloud into the unsure pixels touching it, ignores classified "clouds" too small
+to be one (white hulls and roofs), and casts each cloud away from the sun to find the
+shadows the classification missed. The fire detector offers no switch: its band
+ratios reject cloud already. Thresholds open from a link rather than sitting in
+the way, and tuning them there changes this detection only.
+
+**Analyzers** lists the built-ins and your own, shared by every case. An analyzer
+is one calibrated method and how picky it is, so one of your own starts as a copy
+of the closest built-in: **New analyzer** asks what to start from, and the copy
+keeps that method while its name, sizes, thresholds, candidate label and colour
+become yours. A built-in opens read-only with **Copy to tune**; your own can be
+edited or removed from the list. A detection being built keeps its place while the
+library is open, and an analyzer saved from there comes back picked.
+
+**Start** names it, says what it is for, and runs it: **Run this pass** for a one
+pass, **Save and run the first pass** for a routine, which can also be saved
+without running. Every run explicitly starts a bounded,
+cancellable job, up to 4096 native tiles, and joins the case's queue: runs go one
+after another, and only the same detection twice at once is refused. A run keeps
+going whichever tool is open. While one is queued or running, the top bar carries
+**Detect** with its progress, and one press returns to it; when it settles a toast
+says what it found, with **Review** to open the results. Between tiles the sweep
+lets the case's other queued work through, so a thumbnail never waits out a sweep.
+Nothing runs on its own: a weekly harbour review is a press on its card, not a
+background schedule.
+
+Before queueing, exact repeats of the same area, recipe, parameters and resolved
+dates offer **Open** and **Run anyway**. Overlapping dates do not trigger this
+notice. Dismissals are not remembered across runs and candidates are not deduplicated.
+
+The native analysis grid is independent of map zoom. Opening the panel or
+reopening its results reads local state. Offline runs use cached and retained
+frames and require explicit dates. Runs preserve their input snapshots and review
+state. Review pictures are retained over the whole swept area so a missed candidate
+can be added later; measured band frames are retained only for tiles with results.
+
+What a sweep produces is a list of candidates, strongest first, and nothing else
+reaches the case on its own. Each says how strong it is in a word (weak, clear or
+strong: how far past its threshold it got) and what was measured in units a reader
+can check, such as "6.2× brighter than the water around it" or "NBR 0.61 → −0.28".
+A candidate that crosses a tile edge is one candidate with one picture, stitched
+from the tiles it touches. New candidates use the detector mask's simplified
+outline; merged components retain their parts as a MultiPolygon. The bounding
+box still drives crops, sizing and merge tests. Existing results keep their
+stored rectangle geometry.
+
+Opening a run puts the map on the candidate the panel is about, close enough to
+read it, and every step through the queue moves it again. Review has a fixed-height
+preview and a fixed footer: Keep, Dismiss and Pin remain under the pointer as
+candidates change or details scroll. **K**, **D** and **P** are those three
+verdicts from the keyboard and the arrows walk the queue. **Compare** under the
+facts opens the candidate in Compare, framed close: a change on the two passes that
+found it, and a thing present on one pass — a hull, a fire — against today's
+high-resolution picture, where a platform or a flare stack is still standing and a
+ship is not. Nothing is fetched to decide it; the candidate names its passes. Chips above the candidate
+narrow that queue to what is still to review, what was kept, or what was pinned. **Keep** marks the
+candidate in its run without creating a place or image. **Dismiss** removes it
+from the run. **Pin** opens the standard dialog for a name, optional description,
+after-only image and Point/Area geometry. Single-image methods default to after-only
+and Point; change methods default to paired images and Area. Pinning creates a
+place and a PNG in Files. The picture says on its face when and where: each image
+carries its letter and its date (a radar pass its UTC time), and the foot holds the
+point's coordinates and the imagery's attribution, so the file still reads after
+the run is gone. Undo sends those copies to Trash. Evidence is enlarged
+by a whole-number factor with no interpolation, so a candidate a dozen pixels
+across can be read without pretending to detail the sensor never recorded. The
+candidate under review wears a ring on the map. **Add candidate** records a point or polygon on a successfully read area,
+with `origin: manual`, the same pass pair, preview and verdicts. Manual candidates
+have dashed map outlines and a Manual label.
+
+**Export as layer** is an explicit snapshot of kept and pinned candidates only.
+A routine updates one SAT layer, with a category per effective pass date; a one-off
+run has its own layer. Re-exporting a date replaces its category. Older dates are
+lighter and newer dates darker on a blue ramp. Features carry the name, description,
+pass date, detector, area and run id. Exported layers survive deletion of their runs.
+
 
 ## Geo Proof
 

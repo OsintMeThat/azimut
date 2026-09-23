@@ -66,12 +66,13 @@ describe('asking Esri', () => {
     expect(wb.busy).toBe(false);
   });
 
-  it('opening the picker reads the list and this point’s history', async () => {
+  it('opening the picker reads the list alone, and offers every release', async () => {
     const wb = store();
     wb.toggleMenu();
-    await vi.waitFor(() => expect(wb.changes).toEqual([64776, 10]));
-    expect(get).toHaveBeenCalledWith('/api/satellite/wayback/changes?lat=50.45&lon=30.51&zoom=15');
-    expect(wb.visible.map((entry) => entry.release)).toEqual([64776, 10]);
+    await vi.waitFor(() => expect(wb.releases).toHaveLength(4));
+    expect(get.mock.calls.some(([path]) => path.includes('/changes'))).toBe(false);
+    expect(wb.changesOnly).toBe(false);
+    expect(wb.visible).toHaveLength(4);
   });
 
   it('answers a nudge inside the same tile from memory', async () => {
@@ -86,7 +87,7 @@ describe('asking Esri', () => {
   it('marks the history stale once the map leaves its tile, and keeps the changes meanwhile', async () => {
     const wb = store();
     await wb.loadReleases();
-    await wb.loadChanges();
+    await wb.historyAt(at);
     at = { lat: 48.85, lon: 2.29, zoom: 15 };
     expect(wb.stale).toBe(true);
     // the walk takes seconds: the bar stays a bar of changes rather than
@@ -105,51 +106,50 @@ describe('asking Esri', () => {
   });
 });
 
-describe('following the map', () => {
-  it('asks nothing until the picker has been opened once', async () => {
-    const wb = store();
-    at = { lat: 48.85, lon: 2.29, zoom: 15 };
-    expect(wb.follow()).toBeUndefined();
-    expect(get).not.toHaveBeenCalled();
-  });
-
-  it('reads the new tile’s history once the picker has been opened, shut or not', async () => {
+describe('reading a history on request', () => {
+  it('never reads one because the map moved', async () => {
+    // the walk is dozens of requests to Esri: panning with the picker open
+    // or shut must not start one
     const wb = store();
     wb.toggleMenu();
-    await vi.waitFor(() => expect(wb.changes).toEqual([64776, 10]));
-    wb.toggleMenu(); // shut again: the history still follows the map
-    expect(wb.menuOpen).toBe(false);
+    await wb.loadReleases();
     at = { lat: 48.85, lon: 2.29, zoom: 15 };
-    await wb.follow();
-    expect(get).toHaveBeenLastCalledWith(
-      '/api/satellite/wayback/changes?lat=48.85&lon=2.29&zoom=15'
-    );
+    wb.toggleMenu();
+    wb.toggleMenu();
+    await wb.loadReleases();
+    expect(get.mock.calls.some(([path]) => path.includes('/changes'))).toBe(false);
+  });
+
+  it('reads where the map is when Changes here is pressed', async () => {
+    const wb = store();
+    wb.toggleMenu();
+    wb.setChangesOnly(true);
+    await vi.waitFor(() => expect(wb.changes).toEqual([64776, 10]));
+    expect(get).toHaveBeenCalledWith('/api/satellite/wayback/changes?lat=50.45&lon=30.51&zoom=15');
+    expect(wb.visible.map((entry) => entry.release)).toEqual([64776, 10]);
+  });
+
+  it('reads a named point, not the map it is sending there', async () => {
+    // the map has not settled on the point yet when the menu asks
+    const wb = store();
+    await wb.historyAt({ lat: 48.85, lon: 2.29, zoom: 16 });
+    expect(get).toHaveBeenCalledWith('/api/satellite/wayback/changes?lat=48.85&lon=2.29&zoom=16');
+    expect(wb.menuOpen).toBe(true);
+    expect(wb.changesOnly).toBe(true);
+    at = { lat: 48.85, lon: 2.29, zoom: 16 }; // …and once it has, the history is this place's
     expect(wb.stale).toBe(false);
   });
 
-  it('asks once per tile, however often the map settles over it', async () => {
-    const wb = store();
-    wb.toggleMenu();
-    await vi.waitFor(() => expect(wb.changes).toEqual([64776, 10]));
-    const asked = get.mock.calls.filter(([path]) => path.includes('/changes')).length;
-    at = { lat: 50.4501, lon: 30.5101, zoom: 15 }; // a nudge inside the same tile
-    await wb.follow();
-    await wb.follow();
-    expect(get.mock.calls.filter(([path]) => path.includes('/changes'))).toHaveLength(asked);
-  });
-
-  it('leaves a tile Esri refused alone until Refresh is pressed', async () => {
+  it('asks again for a tile Esri refused only when the analyst does', async () => {
     get = vi.fn(async (path) => {
       if (path.includes('/releases')) return { releases: RELEASES };
       throw new Error('offline');
     });
     const wb = store();
-    wb.toggleMenu();
+    wb.setChangesOnly(true);
     await vi.waitFor(() => expect(wb.changesNote).toContain('offline'));
     const refused = get.mock.calls.filter(([path]) => path.includes('/changes')).length;
-    await wb.follow(); // panning must not hammer a service that is down
-    expect(get.mock.calls.filter(([path]) => path.includes('/changes'))).toHaveLength(refused);
-    await wb.loadChanges(); // …but the analyst can ask again
+    await wb.loadChanges();
     expect(get.mock.calls.filter(([path]) => path.includes('/changes'))).toHaveLength(refused + 1);
   });
 
@@ -157,7 +157,7 @@ describe('following the map', () => {
     const wb = store();
     await wb.loadReleases();
     expect(wb.reading).toBe(false);
-    const coming = wb.loadChanges();
+    const coming = wb.historyAt(at);
     expect(wb.reading).toBe(true);
     await coming;
     expect(wb.reading).toBe(false);
@@ -204,7 +204,7 @@ describe('naming what is on screen', () => {
     const wb = store();
     await wb.loadReleases();
     expect(wb.date).toBe('2026-08-05');
-    await wb.loadChanges();
+    await wb.historyAt(at);
     expect(wb.date).toBe('2023-08-31');
     wb.setChangesOnly(false);
     expect(wb.date).toBe('2026-08-05');
@@ -225,7 +225,7 @@ describe('choosing a release', () => {
   it('steps through what the picker offers', async () => {
     const wb = store();
     await wb.loadReleases();
-    await wb.loadChanges();
+    await wb.historyAt(at);
     // the newest release shows the latest change's pixels here, so one step
     // older is the change before it
     expect(wb.step(1)).toBe(10);

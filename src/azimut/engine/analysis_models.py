@@ -1,6 +1,7 @@
 """Portable recipes and geographic inputs for Compare's Detect mode.
 
-Detect reads Copernicus Sentinel-2 only. Every method measures reflectance,
+Detect reads Copernicus only: Sentinel-2's reflectance for the optical methods
+and Sentinel-1's radar backscatter for the radar ones. Both are measurements,
 which a rendered picture has already stretched away, so a source that serves
 pictures has nothing to offer it. Models describe capabilities by stable ids,
 and a saved run keeps meaning what it meant when it ran.
@@ -12,22 +13,36 @@ import math
 from datetime import date
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
-Method = Literal["vessels", "hotspots", "structure", "spots", "surface", "index"]
+Method = Literal["vessels", "hotspots", "structure", "spots", "surface", "index",
+                 "sar-vessels", "sar-change"]
 Index = Literal["ndvi", "ndwi", "mndwi", "nbr", "ndbi", "bsi"]
 ShortId = Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]{1,48}$")]
 Colour = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]
 
 # Methods that read one image instead of a pair. A vessel or a fire is a thing
 # present on a date, not a difference between two of them.
-SINGLE_METHODS = frozenset({"vessels", "hotspots"})
+SINGLE_METHODS = frozenset({"vessels", "hotspots", "sar-vessels"})
+
+# Methods that read Sentinel-1's radar rather than Sentinel-2. Radar sees
+# through cloud and at night, which is why they exist beside the optical ones.
+RADAR_METHODS = frozenset({"sar-vessels", "sar-change"})
 
 # The band product each method measures, fetched beside the picture the analyst
 # reviews. `index` reads the one its parameters name.
 PRODUCT_METHODS: dict[str, str] = {
     "vessels": "vessel", "hotspots": "fire",
     "structure": "surface", "spots": "surface", "surface": "surface",
+    "sar-vessels": "sar", "sar-change": "sar",
 }
 
 # Where the cloud and shadow switches mean something. The fire test rejects
@@ -47,8 +62,21 @@ def product_for(method: str, index: str) -> str:
     return f"index-{index}" if method == "index" else PRODUCT_METHODS[method]
 
 
+def sensor_for(method: str) -> str:
+    """The Copernicus collection a method reads."""
+    return "sentinel1" if method in RADAR_METHODS else "sentinel2"
+
+
 class Model(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+
+class DetectPrefs(Model):
+    collapsed: bool = False
+    basemap: str = Field(default="esri-world-imagery", max_length=120, pattern=r"^[a-zA-Z0-9_-]+$")
+    overlays: list[Literal["boundaries", "labels", "roads", "railway", "power", "seamarks", "gpstraces"]] = Field(
+        default=["boundaries"], max_length=7)
+    saved: bool = True
 
 
 class Parameters(Model):
@@ -63,6 +91,9 @@ class Parameters(Model):
     smoothing: int = Field(default=0, ge=0, le=3)
     index: Index = "ndvi"
     direction: Literal["both", "gain", "loss"] = "both"
+    # Where a radar change counts: anywhere, on ground bright enough to be
+    # built-up or metal on the side that has it, or where open water came or went.
+    sar_ground: Literal["any", "bright", "water"] = "any"
     ignore_clouds: bool = True
     ignore_shadows: bool = True
     # Metres are what a reader thinks in, but the mask is grown on the grid, and
@@ -103,6 +134,10 @@ SIZES: dict[str, dict[str, dict[str, float]]] = {
     "spots": _sizes((0, 800, 0, 0, 0), (100, 2500, 0, 0, 0), (400, 8000, 0, 0, 20)),
     "surface": _CHANGE_SIZES,
     "index": _CHANGE_SIZES,
+    # Radar pixels are 10 m like Sentinel-2's, and speckle is what smoothing
+    # works against: a small target keeps the finest window.
+    "sar-vessels": _sizes((0, 150_000, 0, 0, 30), (250, 150_000, 0, 0, 50), (2500, 400_000, 0, 0, 100)),
+    "sar-change": _sizes((300, 0, 0, 1, 0), (2000, 0, 1, 2, 30), (20000, 0, 1, 3, 100)),
 }
 
 
@@ -153,24 +188,28 @@ class Recipe(Model):
     parameters: Parameters = Field(default_factory=Parameters)
     colour: Colour = "#f6a81a"
     style: Literal["pins", "outlines", "both"] = "both"
-    zones: list[Zone] = Field(default_factory=list, max_length=32)
 
     @model_validator(mode="before")
     @classmethod
     def legacy(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
-        data = {key: value for key, value in data.items() if key != "providers"}
+        # Areas belong to a saved detection, not to what it looks for. An
+        # analyzer saved with areas of its own still loads, without them.
+        data = {key: value for key, value in data.items() if key not in ("providers", "zones")}
         if data.get("method") in LEGACY_METHODS:
             data["method"] = LEGACY_METHODS[data["method"]]
         return data
 
 
 class Source(Model):
-    provider: Literal["sentinel2"] = "sentinel2"
+    provider: Literal["sentinel2", "sentinel1"] = "sentinel2"
     date: str = Field(default="", max_length=10)
     layer: str = Field(default="TRUE_COLOR", pattern=r"^[A-Z0-9_]{1,40}$")
     maxcc: int = Field(default=30, ge=0, le=100)
+    #: A Sentinel-1 pass's UTC time of day. The radar can see a place twice on
+    #: one day, from opposite directions, and only the time says which look.
+    time: str = Field(default="", pattern=r"^$|^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$")
 
     @model_validator(mode="before")
     @classmethod
@@ -187,8 +226,17 @@ class Source(Model):
             try:
                 date.fromisoformat(self.date)
             except ValueError as exc:
-                raise ValueError("choose a dated Sentinel-2 acquisition") from exc
+                raise ValueError("choose a dated Copernicus acquisition") from exc
         return self
+
+    @model_serializer(mode="wrap")
+    def compact(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        # An optical source says what it always said, so the frame keys, the
+        # repeat check and every run saved before radar keep matching.
+        data: dict[str, Any] = handler(self)
+        if not data.get("time"):
+            data.pop("time", None)
+        return data
 
 
 class ZoneSet(Model):
@@ -196,11 +244,44 @@ class ZoneSet(Model):
     zones: list[Zone] = Field(min_length=1, max_length=32)
 
 
-class RunInput(ZoneSet):
+class AreaGeometry(Model):
+    type: Literal["Polygon"] = "Polygon"
+    coordinates: list[list[tuple[FiniteFloat, FiniteFloat]]] = Field(min_length=1, max_length=1)
+
+    @model_validator(mode="after")
+    def polygon(self) -> AreaGeometry:
+        ring = self.coordinates[0]
+        if len(ring) < 4 or ring[0] != ring[-1]:
+            raise ValueError("a polygon must have a closed ring")
+        Zone(id="area", kind="polygon", points=ring[:-1])
+        return self
+
+
+class Area(Model):
+    name: str = Field(min_length=1, max_length=120)
+    colour: Colour = "#38bdf8"
+    geometry: AreaGeometry
+
+
+class AreaDates(Model):
+    area_id: ShortId
+    a: Source = Field(default_factory=Source)
+    b: Source = Field(default_factory=Source)
+    date_rule: Literal["manual", "latest_reference", "latest_previous"] = "latest_reference"
+
+
+class RunInput(Model):
+    title: str = Field(min_length=1, max_length=120)
+    zones: list[Zone] = Field(default_factory=list, max_length=32)
+    area_dates: list[AreaDates] = Field(default_factory=list, max_length=32)
+    #: What this detection is for, in the analyst's own words. It travels with
+    #: the run, so a sweep opened months later still says why it was made.
+    note: str = Field(default="", max_length=500)
     recipe: Recipe
-    a: Source
-    b: Source
+    a: Source = Field(default_factory=Source)
+    b: Source = Field(default_factory=Source)
     offline: bool = False
+    run_anyway: bool = False
     followup_id: ShortId | None = None
     date_rule: Literal["manual", "latest_reference", "latest_previous"] = "manual"
 
@@ -208,6 +289,22 @@ class RunInput(ZoneSet):
     def pair(self) -> RunInput:
         if len({zone.id for zone in self.zones}) != len(self.zones):
             raise ValueError("area ids must be unique")
+        if self.area_dates:
+            ids = [pair.area_id for pair in self.area_dates]
+            if len(set(ids)) != len(ids):
+                raise ValueError("area ids must be unique")
+            if self.zones and set(ids) != {zone.id for zone in self.zones}:
+                raise ValueError("each area needs its own dates")
+            for pair in self.area_dates:
+                if pair.date_rule == "manual" and not pair.b.date:
+                    raise ValueError("choose a pass date for each area")
+                if self.recipe.method not in SINGLE_METHODS and not pair.a.date and not (
+                    pair.date_rule == "latest_previous" and self.followup_id
+                ):
+                    raise ValueError("choose a reference date for each area")
+            return self
+        if not self.zones:
+            raise ValueError("choose at least one area")
         required = []
         if self.date_rule == "manual":
             required.append(self.b)
@@ -216,7 +313,7 @@ class RunInput(ZoneSet):
         ):
             required.append(self.a)
         if any(not source.date for source in required):
-            raise ValueError("choose a dated Sentinel-2 acquisition")
+            raise ValueError("choose a dated Copernicus acquisition")
         return self
 
 
@@ -269,15 +366,80 @@ BUILTINS = [
             description="Ground that now reads as open water in the modified water index.",
             parameters={"sensitivity": 56, "index": "mndwi", "direction": "gain"},
             colour="#0ea5e9"),
+    # Sentinel-1. The radar sees through cloud and at night, and a metal hull
+    # or a standing wall answers it far louder than water or open ground.
+    _recipe(id="radar-vessels", name="Vessels by radar", method="sar-vessels",
+            phenomenon="Vessel candidate (radar)",
+            description="A strong radar return from open water, through cloud and at night. "
+            "Platforms, turbines, bridges and harbour walls answer too.",
+            parameters={"sensitivity": 60}, colour="#22d3ee"),
+    _recipe(id="radar-change", name="Radar change", method="sar-change",
+            phenomenon="Radar change",
+            description="Backscatter that moved between two passes of the same track, whatever "
+            "moved it. Fields change weekly in the growing season, so expect them.",
+            parameters={"sensitivity": 50}, colour="#c084fc"),
+    _recipe(id="radar-razed", name="Damaged or razed buildings (radar)", method="sar-change",
+            phenomenon="Loss of built-up return",
+            description="Ground that answered the radar like standing walls and went quiet. "
+            "Two passes only flag where to look; confirm on imagery before calling it damage.",
+            parameters={"sensitivity": 60, "direction": "loss", "sar_ground": "bright"},
+            colour="#f43f5e"),
+    _recipe(id="radar-new-objects", name="New structures and vehicles (radar)",
+            method="sar-change", phenomenon="New strong return",
+            description="Ground that now answers like metal or walls: new buildings, parked "
+            "vehicles, containers, moored ships.",
+            parameters={"sensitivity": 60, "direction": "gain", "sar_ground": "bright"},
+            colour="#eab308"),
+    _recipe("large", id="radar-flood", name="Flooding by radar", method="sar-change",
+            phenomenon="New open water (radar)",
+            description="Ground that went as radar-dark as calm water, under the cloud a flood "
+            "usually comes with. Wind on the water and flooded streets can hide it.",
+            parameters={"sensitivity": 60, "direction": "loss", "sar_ground": "water"},
+            colour="#3b82f6"),
 ]
+
+# How the built-ins are offered: by what an analyst is looking for, radar
+# first where it reads the same thing better. Every built-in is in one group.
+GROUPS: list[tuple[str, str, list[str]]] = [
+    ("vessels", "Vessels", ["radar-vessels", "boats"]),
+    ("fire", "Fires and burns", ["anomaly", "burn-scars"]),
+    ("water", "Water and floods", ["radar-flood", "new-water"]),
+    ("built", "Buildings and earthworks", ["structures", "radar-new-objects", "radar-razed"]),
+    ("ground", "Vegetation and small marks", ["vegetation-loss", "impacts"]),
+    ("any", "Any change", ["radar-change", "large-change"]),
+]
+
+# How far a built-in's reading can be trusted, from what calibration showed.
+# Reliable: the published test or a contrast few false hits survive. Approximate:
+# right more often than not, with known look-alikes. Rough: a lead to check.
+# Radar vessels beat optical ones because a hull answers the radar through cloud
+# and glint alike; two radar passes read damage roughly, where a year of them
+# would not (docs/SPEC.md §7).
+RELIABILITY: dict[str, Literal["reliable", "approximate", "rough"]] = {
+    "radar-vessels": "reliable", "boats": "approximate",
+    "anomaly": "reliable", "burn-scars": "reliable",
+    "radar-flood": "reliable", "new-water": "approximate",
+    "structures": "approximate", "radar-new-objects": "approximate", "radar-razed": "rough",
+    "vegetation-loss": "reliable", "impacts": "rough",
+    "radar-change": "rough", "large-change": "rough",
+}
+
+
+def frames_per_tile(method: str) -> int:
+    """Requests one tile costs: the picture and the product for each date, and
+    for radar vessels the Sentinel-2 water classification beside them."""
+    return (2 if method in SINGLE_METHODS else 4) + (1 if method == "sar-vessels" else 0)
+
 
 # What the panel reads so it never has to know a method by name: `single` stops
 # it asking for a reference image, `clouds` says whether the cloud switch means
-# anything, `sizes` fills Small/Medium/Large and `measure` words a candidate's
+# anything, `sensor` which collection its passes come from, `frames` what a
+# tile costs, `sizes` fills Small/Medium/Large and `measure` words a candidate's
 # reading ({value}, {signed}, {before}, {after} and {index} are filled in).
 METHODS = [
     {"id": method, "label": label, "single": method in SINGLE_METHODS,
-     "clouds": method in CLOUD_METHODS, "sizes": SIZES[method], "measure": measure}
+     "clouds": method in CLOUD_METHODS, "sensor": sensor_for(method),
+     "frames": frames_per_tile(method), "sizes": SIZES[method], "measure": measure}
     for method, label, measure in [
         ("vessels", "Vessels: infrared contrast over water",
          "{value}× brighter than the water around it"),
@@ -287,5 +449,8 @@ METHODS = [
         ("spots", "Isolated small change", "Reflectance {signed}% against its surroundings"),
         ("surface", "Any reflectance change", "Reflectance moved by {value}%"),
         ("index", "Spectral index change", "{index} {before} → {after}"),
+        ("sar-vessels", "Radar: strong return over water",
+         "{value} dB brighter than the sea around it"),
+        ("sar-change", "Radar: backscatter change", "Backscatter {signed} dB, {before} → {after} dB"),
     ]
 ]

@@ -27,6 +27,7 @@
   import { createMapEngine } from '../../lib/map/engine.js';
   import { createBasemaps, OVERLAY_IDS } from '../../lib/map/basemap.js';
   import { DEFAULT_LAYER, DEFAULT_MAXCC, SENTINEL_ID } from '../../lib/sentinel.js';
+  import { RADAR_ID, orbitMark } from '../../lib/radar.js';
   import Icon from '../../components/Icon.svelte';
   import Compass from '../../components/Compass.svelte';
   import ImageryChip from './ImageryChip.svelte';
@@ -41,6 +42,8 @@
     s2 = null,
     /** This surface's Wayback release (state/wayback.svelte.js), likewise. */
     wayback = null,
+    /** This surface's Sentinel-1 pass (state/radar.svelte.js), likewise. */
+    s1 = null,
     /** What is laid over the imagery: an id (`OVERLAY_IDS`), or `{ id, params }`
      *  for one whose address is a question — FIRMS's sensor and window. The
      *  tool decides which are offered; the surface only puts them on. */
@@ -110,8 +113,10 @@
     imagery.displayed(providerId, view.zoom, {
       ...(s2?.variant ?? {}),
       release: wayback?.release ?? null,
+      pass: s1?.pass ?? null,
     })
   );
+  const radarPass = $derived(shown.provider?.id === RADAR_ID ? s1?.pass ?? null : null);
 
   /** A pinned Sentinel-2 day *is* the acquisition date — the one provider that
    *  can answer "when was this taken?" without being asked. */
@@ -120,7 +125,9 @@
   );
 
   $effect(() => {
-    dated = pinnedDay
+    dated = radarPass
+      ? { date: radarPass.date, exact: true, source: 'Sentinel-1' }
+      : pinnedDay
       ? { date: pinnedDay, exact: true, source: 'Sentinel-2' }
       : shown.provider?.id === SENTINEL_ID
         ? s2?.latest ? { date: s2.latest, exact: false, source: 'Sentinel-2' } : null
@@ -135,7 +142,7 @@
 
   /** What a capture of this surface must record: the pixels' own provenance. */
   export function provenance() {
-    return { provider: shown.id, imageryDate: pinnedDay ?? imageryDate?.date ?? null };
+    return { provider: shown.id, imageryDate: radarPass?.date ?? pinnedDay ?? imageryDate?.date ?? null };
   }
 
   // Svelte only honours a cleanup returned from a *synchronous* onMount, and the
@@ -296,7 +303,7 @@
        which is what lets two surfaces sit side by side each saying its own. -->
   {#if chrome}
   <div class="surface-ctl">
-    <ImageryChip {imagery} bind:providerId {s2} {wayback} {shown} />
+    <ImageryChip {imagery} bind:providerId {s2} {wayback} {s1} {shown} />
 
   <!-- …and when the pixels under the crosshair were taken. Under the provider
        rather than in the opposite corner: it describes that same picture, and
@@ -328,6 +335,16 @@
           >≤{s2.maxcc}% cloud</span
         >
       {/if}
+    </span>
+  {:else if s1 && shown.provider?.id === RADAR_ID}
+    <!-- The pass is the picker's own chip; this says what it means. -->
+    <span class="date-pill mono" class:exact={!!radarPass}
+      title={radarPass ? `Sentinel-1 pass flying ${radarPass.orbit === 'descending' ? 'south' : 'north'}`
+        : 'Sentinel-1: most recent pass (open the picker to date it)'}>
+      <Icon name="clock" size={11} />
+      {radarPass ? `${radarPass.date} ${radarPass.time.slice(0, 5)} UTC ${orbitMark(radarPass.orbit)}` : ''}
+      {#if !radarPass}<span class="tag">most recent</span>{/if}
+      <span class="tag layer">radar</span>
     </span>
   {:else if imageryDate?.supported}
     <span

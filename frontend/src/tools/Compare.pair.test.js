@@ -24,8 +24,8 @@ describe('Compare here', () => {
   it('travels as a pair of sides, the shape a saved comparison stores', () => {
     expect(state).toContain('compareAt: null,');
     expect(map).toContain('uiState.compareAt = { ...point, zoom: center.zoom, ...pair };');
-    expect(compare).toContain('applySide(a, s2a, wba, pair.a);');
-    expect(compare).toContain('applySide(b, s2b, wbb, pair.b);');
+    expect(compare).toContain('applySide(a, s2a, wba, pair.a, s1a);');
+    expect(compare).toContain('applySide(b, s2b, wbb, pair.b, s1b);');
   });
 
   it('opens unsaved and unnamed, because nothing was filed', () => {

@@ -7,6 +7,7 @@
   import { createSurface } from '../lib/map/surface.js';
   import MapSurface from './satellite/MapSurface.svelte';
   import { createSentinelState } from './satellite/state/sentinel.svelte.js';
+  import { createRadarState } from './satellite/state/radar.svelte.js';
   import { createWaybackState } from './satellite/state/wayback.svelte.js';
   import { createAddedLayersState } from './satellite/state/addedLayers.svelte.js';
   import { createSavedState } from './satellite/state/saved.svelte.js';
@@ -387,11 +388,20 @@
 
   // --- Esri Wayback: which release of World Imagery ---
   // The release rides on the provider id like a Sentinel-2 window, and both
-  // questions it asks (the release list, a point's history) reach Esri, so
-  // neither is asked until the basemap is on screen or its picker is open.
+  // questions it asks reach Esri: the release list once the basemap is on
+  // screen, a point's history only when the analyst asks for it.
   const wb = createWaybackState({
     api,
     place: () => ({ lat: center.lat, lon: center.lon, zoom: center.zoom }),
+  });
+
+  // --- Sentinel-1: which radar pass ---
+  // Passes are read by the month while its picker is open; the pass rides on
+  // the provider id like the others.
+  const s1 = createRadarState({
+    api,
+    place: () => ({ lat: center.lat, lon: center.lon }),
+    onBilled: () => imagery.refreshUsage(),
   });
 
   // --- what the map is actually showing (state/imagery.svelte.js) ---
@@ -399,7 +409,7 @@
   // or zoomed out (eco). The capture follows the display, so provenance always
   // matches the pixels.
   const shown = $derived(
-    imagery.displayed(providerId, center.zoom, { ...s2.variant, release: wb.release })
+    imagery.displayed(providerId, center.zoom, { ...s2.variant, release: wb.release, pass: s1.pass })
   );
 
   // Fullscreen: the tool covers the whole viewport; SAVED stays collapsible (item 4).
@@ -643,18 +653,6 @@
     if (mapReady && shown.provider?.id === WAYBACK_ID) wb.loadReleases();
   });
 
-  // Once the picker has been opened, the history follows the map: a view that
-  // settles over another tile reads that tile's history, picker open or not.
-  // Debounced, and answered from memory for a tile already read.
-  $effect(() => {
-    if (!wb.watching || shown.provider?.id !== WAYBACK_ID) return;
-    wb.here; // the tile under the map: a new one is a new history
-    clearTimeout(wbChangesTimer);
-    wbChangesTimer = setTimeout(() => wb.follow(), 900);
-    return () => clearTimeout(wbChangesTimer);
-  });
-  let wbChangesTimer;
-
   // --- middle-drag rotate (item 3), Google-Earth style ---
   // Grab a point → the map turns around *that* point (not the centre) as the
   // cursor sweeps, with a sober target marking the pivot. A map only rotates
@@ -894,10 +892,11 @@
       if (!sky.on) arm(modes, 'sky');
       sky.handOff({ ...point, date: sky.day || undefined });
     } else if (id === 'history') {
+      const zoom = Math.max(center.zoom, 15);
       providerId = WAYBACK_ID;
-      engine.setView(point, Math.max(center.zoom, 15));
+      engine.setView(point, zoom);
       await tick();
-      if (!wb.menuOpen) wb.toggleMenu();
+      wb.historyAt({ lat: point.lat, lon: point.lon, zoom });
     } else if (id === 'compare') {
       await comparePoint(point, value);
     }
@@ -2124,6 +2123,7 @@
         {imagery}
         {s2}
         wayback={wb}
+        {s1}
         home={openingHome}
         {overlays}
         imperial={prefs.units === 'imperial'}

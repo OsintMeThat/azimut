@@ -109,7 +109,7 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
     .drafts/      # post drafts
     .inspect/     # saved Inspect session specs
     .compare/     # saved Compare session specs
-    .analysis/    # saved areas, watches, runs and the frames behind their results
+    .analysis/    # saved areas, saved detections, runs and the frames behind their results
     .search/      # saved Grid Search state
     .trash/       # deleted artifacts grouped by delete action, in numbered slots
 ```

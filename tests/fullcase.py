@@ -78,6 +78,7 @@ class FullCase:
     compare_session: str = ""
     compare_image: str = ""  # the session's render, a media working file
     analyzer_zones: str = ""
+    analyzer_area: str = ""
     analyzer_followup: str = ""
     analyzer_run: str = ""
     proof: str = ""
@@ -537,7 +538,11 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     from analyzerfixture import sample_input, seed_images
     analysis = sample_input()
     seed_images(analysis)
+    from azimut.engine.analysis_models import Zone
+    ring = Zone.model_validate(analysis["zones"][0]).ring()
     for kind, body, attr in (
+        ("areas", {"name": "Port", "colour": "#38bdf8", "geometry": {
+            "type": "Polygon", "coordinates": [ring + [ring[0]]]}}, "analyzer_area"),
         ("zones", {"title": "Port areas", "zones": analysis["zones"]}, "analyzer_zones"),
         ("followups", analysis, "analyzer_followup"),
         ("runs", analysis, "analyzer_run"),

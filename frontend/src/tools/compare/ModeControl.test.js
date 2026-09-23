@@ -23,11 +23,9 @@ describe('Compare mode footer', () => {
     done();
   });
 
-  it('stays out of the computing modes, which own a panel instead', () => {
-    for (const mode of ['side', 'change', 'analysis']) {
-      const { target, done } = render({ mode });
-      expect(target.textContent.trim()).toBe('');
-      done();
-    }
+  it('has nothing to offer side by side', () => {
+    const { target, done } = render({ mode: 'side' });
+    expect(target.textContent.trim()).toBe('');
+    done();
   });
 });

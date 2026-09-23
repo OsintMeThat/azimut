@@ -192,11 +192,11 @@ export const GUIDE = [
     id: 'map',
     title: 'Map',
     lead: 'Where a finding gets a coordinate, and where a coordinate gets a picture.',
-    tools: ['satellite', 'compare', 'coordinates'],
+    tools: ['satellite', 'compare', 'detect', 'coordinates'],
     points: [
       {
         label: 'Four providers need no key',
-        text: 'Esri, its Wayback archive of past releases, OSM and OpenTopoMap are built in. Sentinel-2 and the other keyed providers use your own key, and a custom XYZ template is accepted.',
+        text: 'Esri, its Wayback archive of past releases, OSM and OpenTopoMap are built in. Sentinel-2, Sentinel-1 radar and the other keyed providers use your own key, and a custom XYZ template is accepted.',
       },
       {
         label: 'Right-click the ground',
@@ -224,7 +224,19 @@ export const GUIDE = [
       },
       {
         label: 'Compare keeps the ground fixed',
-        text: 'Read two locked views side by side, by swipe, opacity or blink. Matched products also get Difference and Detect; notes, shapes and stamped markers stay editable in the saved comparison and appear in its outputs.',
+        text: 'Read two locked views side by side, by swipe, opacity or blink. On a matched pair, Difference highlights what changed over any of them; notes, shapes and stamped markers stay editable in the saved comparison and appear in its outputs.',
+      },
+      {
+        label: 'All dates, and when it appeared',
+        text: 'With the same dated archive on both sides, All dates lists every picture of the point under the crosshair. Put one without the thing on A and one with it on B, and Date it halves the gap until they are neighbours.',
+      },
+      {
+        label: 'Detect sweeps ground, once or again and again',
+        text: 'Name the ground the case watches once, say what to look for there, and read the pass. A one-off pass is reviewed and done; a routine keeps its areas, runs again on each new pass and gathers what you kept. Runs queue in the case and carry on while you work elsewhere.',
+      },
+      {
+        label: 'Radar sees through cloud',
+        text: 'The radar analyzers read Sentinel-1 through a layer you add to your Copernicus configuration, found from Settings → Imagery. A and B have to share a track, which the pass list marks.',
       },
       {
         label: 'Coords & Sky keeps calculations separate',

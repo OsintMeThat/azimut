@@ -48,6 +48,10 @@ SETTINGS_SCHEMA = 1
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "analyzers": [],  # portable custom recipes shared by all cases
+    # The Copernicus layer Detect's radar methods read: one the user added to
+    # their configuration with Sentinel-1 as its source. Empty until found.
+    "sentinel1_layer": "",
+    "detect_view": {"collapsed": False, "basemap": "esri-world-imagery", "overlays": ["boundaries"], "saved": True},
     # Schema version this build writes. Read back through _settings_schema() so
     # a future breaking rename is migrated rather than silently dropped.
     "schema": SETTINGS_SCHEMA,

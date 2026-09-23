@@ -26,7 +26,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from PIL import Image
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .. import config, layout
 from ..engine import artifacts as artifact_engine
@@ -67,6 +67,13 @@ class CompareSentinel(BaseModel):
     maxcc: int = Field(default=100, ge=0, le=100)
 
 
+class CompareRadar(BaseModel):
+    """A Sentinel-1 pass: its day and its UTC time, which says which look."""
+
+    date: str = Field(default="", pattern=_DAY)
+    time: str = Field(default="", pattern=r"^$|^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$")
+
+
 class CompareFirms(BaseModel):
     sensor: str = Field(default="viirs", min_length=1, max_length=50)
     window: str = Field(default="24h", min_length=1, max_length=20)
@@ -85,6 +92,7 @@ class CompareSide(BaseModel):
     overlays: list[str] = Field(default_factory=list, max_length=len(OVERLAYS))
     sentinel: CompareSentinel = Field(default_factory=CompareSentinel)
     wayback_release: int | None = Field(default=None, ge=1)
+    radar: CompareRadar = Field(default_factory=CompareRadar)
     firms: CompareFirms = Field(default_factory=CompareFirms)
     nightlights: CompareNightlights = Field(default_factory=CompareNightlights)
 
@@ -121,9 +129,8 @@ class CompareChangeAssist(BaseModel):
     palette: Literal["directional", "colourblind", "thermal"] = "directional"
     zones: bool = True
     opacity: int = Field(default=70, ge=0, le=100)
-    # "side" lays the same reading over both images instead of one of them.
-    base: Literal["a", "b", "side"] = "b"
-    visible: bool = True
+    # Which images carry the highlights, in whatever view mode the pair is read.
+    base: Literal["a", "b", "both"] = "both"
     # Flashing the overlay on and off, which is easier to catch than a still one.
     blink: bool = False
 
@@ -170,6 +177,14 @@ class CompareAnnotation(BaseModel):
     #: that set lives in the browser and grows there, and a name this build does
     #: not know is drawn as the first symbol rather than refused on the way in.
     glyph: str = Field(default="", max_length=40)
+    #: The compass direction that was up on the screen a box or an ellipse was
+    #: drawn on, in degrees: its sides run along that screen, not along north.
+    angle: float = Field(default=0, allow_inf_nan=False)
+
+    @field_validator("angle")
+    @classmethod
+    def _fold(cls, value: float) -> float:
+        return value % 360
 
     @model_validator(mode="after")
     def _shape(self) -> "CompareAnnotation":
@@ -197,6 +212,14 @@ class CompareFrame(BaseModel):
 
     #: ``[lon, lat]`` pairs, in the order they were drawn.
     points: list[tuple[float, float]] = Field(min_length=2, max_length=2)
+    #: The compass direction that was up when the frame was drawn, which is
+    #: the way up it is exported at.
+    angle: float = Field(default=0, allow_inf_nan=False)
+
+    @field_validator("angle")
+    @classmethod
+    def _fold(cls, value: float) -> float:
+        return value % 360
 
     @model_validator(mode="after")
     def _ground(self) -> "CompareFrame":
@@ -211,7 +234,9 @@ class CompareFrame(BaseModel):
 class CompareSpec(BaseModel):
     version: Literal[2] = 2
     camera: CompareCamera
-    mode: Literal["side", "swipe", "opacity", "blink", "change"] = "side"
+    mode: Literal["side", "swipe", "opacity", "blink"] = "side"
+    #: Highlights laid over the view mode, not a mode of their own.
+    difference: bool = False
     divider: int = Field(default=50, ge=0, le=100)
     opacity: int = Field(default=50, ge=0, le=100)
     blink: CompareBlink = Field(default_factory=CompareBlink)
@@ -256,7 +281,7 @@ def _validated_spec(spec: CompareSpec) -> dict[str, Any]:
         mark["points"] = [list(point) for point in mark["points"]]
     if cleaned["frame"]:
         cleaned["frame"]["points"] = [list(point) for point in cleaned["frame"]["points"]]
-    if cleaned["mode"] == "change":
+    if cleaned["difference"]:
         reason = change_refusal(cleaned["a"], cleaned["b"], assist["method"])
         if reason:
             raise HTTPException(status_code=422, detail=reason)
@@ -308,6 +333,17 @@ def change_refusal(a: dict[str, Any], b: dict[str, Any], method: str = "colour")
         if not _same_layers(a, b):
             return "Match the reference layers on A and B"
         return None
+    if a["provider"] == b["provider"] == sentinel.RADAR_ID:
+        radar_a, radar_b = a.get("radar") or {}, b.get("radar") or {}
+        if not radar_a.get("date") or not radar_b.get("date"):
+            return "Choose a dated Sentinel-1 pass on both sides"
+        if (radar_a["date"], radar_a.get("time")) == (radar_b["date"], radar_b.get("time")):
+            return "Choose two different Sentinel-1 passes"
+        if not sentinel.same_track(radar_a.get("time", ""), radar_b.get("time", "")):
+            return "Radar compares two passes of one track, at the same time of day"
+        if not _same_layers(a, b):
+            return "Match the reference layers on A and B"
+        return None
     if {a["provider"], b["provider"]} <= _ESRI_CHAIN:
         same_picture = (
             a["provider"] == b["provider"]
@@ -341,7 +377,8 @@ def change_refusal(a: dict[str, Any], b: dict[str, Any], method: str = "colour")
         if not _same_layers(a, b, skip="nightlights"):
             return "Match every other layer on A and B"
         return None
-    return "Difference reads Sentinel-2, Esri imagery releases or VIIRS night-light pairs"
+    return ("Difference reads Sentinel-2, Sentinel-1 on one track, Esri imagery releases or "
+            "VIIRS night-light pairs")
 
 
 def _read_session(case: Case, name: str) -> dict[str, Any] | None:

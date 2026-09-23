@@ -2,9 +2,9 @@
   /**
    * Two maps, one piece of ground.
    *
-   * Satellite explores one imagery view. Compare starts empty and lets the
-   * analyst choose two views deliberately, then changes only how that pair is
-   * read. The provider, Wayback release and Sentinel-2 day belong to each
+   * Satellite explores one imagery view. Compare opens on a key-less pair, a
+   * Wayback release a year back against today's World Imagery, and lets the
+   * analyst swap either side, then changes only how that pair is read. The provider, Wayback release and Sentinel-2 day belong to each
    * MapSurface; the camera is the one shared fact.
    */
   import { onMount, tick, untrack } from 'svelte';
@@ -24,12 +24,15 @@
   import {
     COMPARE_LAYERS,
     COMPARE_MODES,
-    FIND_MODES,
+    DIFFERENCE_KEY,
     DEFAULT_DIVIDER,
     DEFAULT_OPACITY,
     comparisonLayers,
+    compareMode,
     percentage,
+    DEFAULT_PRESET,
     availablePresets,
+    COMPARE_PRESETS,
     PROVIDER_KINDS,
     providerKind,
   } from '../lib/map/compare.js';
@@ -74,8 +77,9 @@
   import { isRegistered, sourceRect } from '../lib/screenCrop.js';
   import { deletedToast } from '../lib/trash.js';
   import { assignFolder } from '../lib/filing.js';
-  import { SENTINEL_ID } from '../lib/sentinel.js';
-  import { WAYBACK_ID } from '../lib/wayback.js';
+  import { SENTINEL_ID, variantId } from '../lib/sentinel.js';
+  import { WAYBACK_ID, releaseYearBefore, waybackId } from '../lib/wayback.js';
+  import { RADAR_ID, radarId } from '../lib/radar.js';
   import Icon from '../components/Icon.svelte';
   import Compass from '../components/Compass.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
@@ -84,14 +88,15 @@
   import ModeDock from './compare/ModeDock.svelte';
   import ModeControl from './compare/ModeControl.svelte';
   import SourceCard from './compare/SourceCard.svelte';
-  import ChangePanel from './compare/ChangePanel.svelte';
-  import AnalyzerPanel from './compare/AnalyzerPanel.svelte';
-  import AnalysisOverlay from './compare/AnalysisOverlay.svelte';
-  import { zoneMarks, marksToZones, viewZone } from '../lib/map/analyzers.js';
-  import './compare/compare.css';
+  import DifferenceBar from './compare/DifferenceBar.svelte';
+  import PassStrip from './compare/PassStrip.svelte';
+  import CopernicusNeeded from '../components/CopernicusNeeded.svelte';
+  import { copernicusNeed } from '../lib/copernicusSetup.js';
+  import { stripArchive } from '../lib/map/passStrip.js';
+  import './mapdock.css';
   import { linkCameras } from '../lib/map/cameraLink.js';
   import { detectCaptures } from '../lib/map/changeCapture.js';
-  import { apply, cssMatrix, frameToFrame, fromMercator, screenToMercator } from '../lib/map/groundFrame.js';
+  import { apply, compassAngle, cssMatrix, frameToFrame, fromMercator, screenToMercator } from '../lib/map/groundFrame.js';
   import MapSurface from './satellite/MapSurface.svelte';
   import MapContextMenu from './satellite/MapContextMenu.svelte';
   import PlaceDialog from './satellite/PlaceDialog.svelte';
@@ -105,6 +110,7 @@
   import { createImageryState, FALLBACK_PROVIDER } from './satellite/state/imagery.svelte.js';
   import { createSentinelState } from './satellite/state/sentinel.svelte.js';
   import { createWaybackState } from './satellite/state/wayback.svelte.js';
+  import { createRadarState } from './satellite/state/radar.svelte.js';
 
   const imagery = createImageryState({ api });
   let home = $state(null);
@@ -142,7 +148,17 @@
   let sessionDialog = $state(false);
   let sessionBusy = $state(false);
   let sessionList = $state([]);
-  let discardTarget = $state(null); // { kind: 'new' | 'open' | 'revert' | 'pair', name?, pair? } | null
+  let discardTarget = $state(null); // { kind: 'new' | 'open' | 'revert' | 'pair', name?, pair?, preset? } | null
+  let newMenu = $state(false);
+  let newMenuEl = $state(null);
+  $effect(() => {
+    if (!newMenu) return;
+    const outside = (event) => {
+      if (newMenuEl && !newMenuEl.contains(event.target)) newMenu = false;
+    };
+    document.addEventListener('mousedown', outside, true);
+    return () => document.removeEventListener('mousedown', outside, true);
+  });
   let annotations = $state([]);
   let annotationTool = $state('select');
   let selectedAnnotationId = $state(null);
@@ -159,100 +175,15 @@
   let annotationRedo = $state([]);
   let annotationPreviewBase = null;
   let changeOptions = $state(changeSettings());
-  let analyzerPanel = $state(null);
-  let analyzerZones = $state([]);
-  let analyzerDrawing = $state('select');
-  let analyzerSelectedZone = $state(null);
-  let analyzerLayers = $state([]);
-  let analyzerAreasVisible = $state(true);
-  let analyzerSingle = $state(false);
-  let analyzerResult = $state(null);
-  let analyzerOpening = $state(null);
-  const analyzerMarks = $derived(zoneMarks(analyzerZones));
-  const detecting = $derived(mode === 'analysis');
-  /**
-   * Detect draws over an undivided pair, whatever reading mode preceded it.
-   * Difference over both images is the side-by-side layout with the same mask
-   * laid on each: one question, two answers, rather than a hidden background.
-   */
-  const stageMode = $derived(
-    mode === 'analysis' || (mode === 'change' && changeOptions.base === 'side') ? 'side' : mode
-  );
-  /** What an export composes. A difference is a difference however it is laid
-   *  out, so only Detect's borrowed layout is translated here. */
-  const captureMode = $derived(mode === 'analysis' ? 'side' : mode);
-  /**
-   * A vessel or a hotspot is present on one date, so that analyzer reads one
-   * image and the stage shows one map. Two identical maps would say the run
-   * compares them, which is the kind of quiet untruth this tool cannot afford.
-   */
-  const soloStage = $derived(detecting && analyzerSingle);
-  /** The surface actually on screen, which is what "the current view" means. */
-  const primeEngine = $derived(soloStage ? (b.engine ?? a.engine) : (a.engine ?? b.engine));
+  // Every dated picture of the point, when A and B show the same archive.
+  let stripOpen = $state(false);
+  // What Copernicus still lacks for a road the analyst asked for: `{ need, tool }`.
+  let copernicus = $state(null);
+  // Highlights laid over whichever view mode is on, never a layout of their own.
+  let difference = $state(false);
+  /** The surface the shared controls act on. */
+  const primeEngine = $derived(a.engine ?? b.engine);
 
-  /**
-   * Show, on the maps, the imagery a run would sweep.
-   *
-   * Outside Detect the source cards lead and the maps follow them. Inside it
-   * that direction is wrong: a detection fetches its own tiles at a fixed grid,
-   * so the pair on screen can quietly be imagery the run never reads, which is
-   * what made the panel feel unmoored from the map under it. So Detect leads.
-   * The source cards step aside while it is on, and this is how what is drawn
-   * on stays what is measured.
-   */
-  /** Said once per absence: every date picked pushes sources again. */
-  let sentinelMissingSaid = false;
-  function applyAnalysisSources(next) {
-    let missing = false;
-    for (const [letter, target, sentinel] of [['a', a, s2a], ['b', b, s2b]]) {
-      const source = next?.[letter];
-      if (!source) continue;
-      if (!imagery.find(source.provider)) {
-        missing = true;
-        continue;
-      }
-      target.providerId = source.provider;
-      target.present = true;
-      sentinel.layer = source.layer || sentinel.layer;
-      sentinel.date = source.date || '';
-      sentinel.setMaxcc(source.maxcc ?? 100);
-    }
-    if (missing && !sentinelMissingSaid) {
-      toast('Copernicus Sentinel-2 is not configured, so the maps still show the previous imagery', 'warn', 6000);
-    }
-    sentinelMissingSaid = missing;
-    invalidateChangeAssist();
-  }
-
-  /** The camera as a rectangle to sweep: the one place the map decides what a
-   *  run covers, after which the area is fixed and the camera is free again. */
-  function useCurrentView() {
-    const bounds = primeEngine?.viewBounds?.();
-    if (!bounds) return;
-    analyzerZones = [...analyzerZones, viewZone(bounds, `Area ${analyzerZones.length + 1}`)];
-    analyzerAreasVisible = true;
-    analyzerDrawing = 'select';
-  }
-  function focusAnalysis([lon, lat], source) {
-    const engine = primeEngine;
-    if (engine) engine.setView({ lon, lat }, engine.getZoom());
-    else if (source && imagery.find(source.provider)) {
-      view = { lat, lon, zoom: 16 };
-      applySide(a, s2a, wba, { present: true, provider: source.provider,
-        sentinel: { date: source.date, layer: source.layer, maxcc: source.maxcc },
-        wayback_release: source.release });
-    } else toast('Choose an imagery source to show this area on the map', 'info');
-  }
-  function setAnalyzerMarks(marks) {
-    analyzerZones = marksToZones(marks, analyzerZones);
-  }
-  $effect(() => {
-    const requested = uiState.openAnalyzer;
-    if (!requested) return;
-    analyzerOpening = requested;
-    uiState.openAnalyzer = null;
-    mode = 'analysis';
-  });
   let changeBusy = $state(false);
   let changeError = $state('');
   let changeResult = $state(null);
@@ -260,8 +191,8 @@
   /** One transform per surface: the mask is ground, and each map frames it. */
   let changeTransform = $state({ a: '', b: '' });
   let changeBlinkOn = $state(true);
-  const changeVisible = $derived(changeOptions.visible && (!changeOptions.blink || changeBlinkOn));
-  const changeBase = $derived(changeOptions.base);
+  const changeVisible = $derived(!changeOptions.blink || changeBlinkOn);
+  const changeOver = (letter) => changeOptions.base === 'both' || changeOptions.base === letter;
   const changeOpacity = $derived(changeOptions.opacity);
   const changePalette = $derived(changeOptions.palette);
   const changeCounts = $derived(changeResult?.counts);
@@ -341,6 +272,20 @@
     api,
     place: () => ({ lat: view.lat, lon: view.lon, zoom: view.zoom }),
   });
+  // Each radar side knows the other's pass, so its picker can mark the passes
+  // on the same track: only those compare like with like.
+  const s1a = createRadarState({
+    api,
+    place: () => ({ lat: view.lat, lon: view.lon }),
+    onBilled: () => imagery.refreshUsage(),
+    peer: () => (b.present && b.providerId === RADAR_ID ? s1b.pass : null),
+  });
+  const s1b = createRadarState({
+    api,
+    place: () => ({ lat: view.lat, lon: view.lon }),
+    onBilled: () => imagery.refreshUsage(),
+    peer: () => (a.present && a.providerId === RADAR_ID ? s1a.pass : null),
+  });
 
   $effect(() => {
     const caseId = caseState.current?.id;
@@ -351,10 +296,10 @@
   const both = $derived(a.present && b.present);
   const activeView = $derived(view);
   const shownA = $derived(
-    imagery.displayed(a.providerId, view.zoom, { ...s2a.variant, release: wba.release })
+    imagery.displayed(a.providerId, view.zoom, { ...s2a.variant, release: wba.release, pass: s1a.pass })
   );
   const shownB = $derived(
-    imagery.displayed(b.providerId, view.zoom, { ...s2b.variant, release: wbb.release })
+    imagery.displayed(b.providerId, view.zoom, { ...s2b.variant, release: wbb.release, pass: s1b.pass })
   );
   const labelA = $derived(imagery.find(a.providerId)?.label ?? 'Imagery A');
   const labelB = $derived(imagery.find(b.providerId)?.label ?? 'Imagery B');
@@ -362,9 +307,13 @@
   const sessionDirty = $derived(
     (a.present || b.present) && sessionSignature() !== savedSignature
   );
+  // A preset as it opened, camera aside. Panning an untouched pair is looking,
+  // not work, so leaving it asks nothing; Save still takes it.
+  let pristineSignature = $state(null);
+  const discardable = $derived(sessionDirty && pairSignature() !== pristineSignature);
   let firmsSensors = $state([]);
 
-  function changeSide(target, sentinel, wayback, shown) {
+  function changeSide(target, sentinel, wayback, shown, radar) {
     return {
       present: target.present,
       provider: shown.provider?.id ?? target.providerId,
@@ -379,22 +328,39 @@
         maxcc: sentinel.maxcc,
       },
       waybackRelease: wayback.release,
+      radar: radarSpec(radar),
     };
   }
 
-  const changeStatus = $derived(
-    changeCompatibility(changeSide(a, s2a, wba, shownA), changeSide(b, s2b, wbb, shownB))
-  );
+  /** A side's radar pass as a session keeps it. */
+  function radarSpec(radar) {
+    return { date: radar.pass?.date ?? '', time: radar.pass?.time ?? '' };
+  }
 
-  /**
-   * What Detect needs before a run can fetch anything: Sentinel-2, which only
-   * lists once Copernicus credentials are in Settings. Not a lock — the panel
-   * still opens on the areas and runs already saved — only said up front.
-   */
-  const detectStatus = $derived(
-    imagery.providers.length && !imagery.find('sentinel2')
-      ? { ok: false, reason: 'Detect reads Copernicus Sentinel-2: add your credentials in Settings → Imagery.' }
-      : { ok: true, reason: '' }
+  const archive = $derived(stripArchive(sideSpec(a, s2a, wba, s1a), sideSpec(b, s2b, wbb, s1b)));
+  $effect(() => {
+    if (!archive) stripOpen = false;
+  });
+
+  /** Show one of the strip's pictures on a side. */
+  function assignFromStrip(letter, entry) {
+    const [target, sentinel, wayback, radar] = letter === 'a' ? [a, s2a, wba, s1a] : [b, s2b, wbb, s1b];
+    if (!target.present) return;
+    if (archive === RADAR_ID) radar.pick(entry);
+    else if (archive === WAYBACK_ID) wayback.pick(entry.release);
+    else sentinel.date = entry.date;
+    invalidateChangeAssist();
+  }
+
+  /** The provider id a strip picture is drawn from: B's layer, on that row's date. */
+  function stripVariant(entry) {
+    if (archive === RADAR_ID) return radarId(RADAR_ID, entry);
+    if (archive === WAYBACK_ID) return waybackId(WAYBACK_ID, entry.release);
+    return variantId(SENTINEL_ID, { layer: s2b.layer, from: entry.date, to: entry.date });
+  }
+
+  const changeStatus = $derived(
+    changeCompatibility(changeSide(a, s2a, wba, shownA, s1a), changeSide(b, s2b, wbb, shownB, s1b))
   );
 
   function openImagerySettings() {
@@ -428,6 +394,9 @@
       home = { ...prefs.homeView };
       view = { ...home };
       await loadProviders();
+      if (gone) return;
+      // A handoff from the map brings its own pair.
+      if (!a.present && !b.present && !uiState.compareAt) void newComparison();
       await loadFireCatalogue();
     })();
     return () => {
@@ -484,7 +453,7 @@
   // the overlay can blink in place rather than the analyst toggling the eye.
   const CHANGE_BLINK_MS = 620;
   $effect(() => {
-    if (!(mode === 'change' && changeOptions.blink && changeOptions.visible && changeUrl)) {
+    if (!(difference && changeOptions.blink && changeUrl)) {
       changeBlinkOn = true;
       return;
     }
@@ -528,19 +497,38 @@
   }
 
   function swapSides() {
-    const left = sideSpec(a, s2a, wba);
-    const right = sideSpec(b, s2b, wbb);
-    applySide(a, s2a, wba, right);
-    applySide(b, s2b, wbb, left);
+    const left = sideSpec(a, s2a, wba, s1a);
+    const right = sideSpec(b, s2b, wbb, s1b);
+    applySide(a, s2a, wba, right, s1a);
+    applySide(b, s2b, wbb, left, s1b);
     annotations = annotations.map((mark) => ({ ...mark, side: mark.side === 'a' ? 'b' : mark.side === 'b' ? 'a' : 'both' }));
     invalidateChangeAssist();
   }
 
-  function startPreset(preset) {
-    a.providerId = preset.a;
-    b.providerId = preset.b;
-    a.present = true;
-    b.present = true;
+  let presetRequest = 0;
+
+  /**
+   * Put a preset's two views on the sides.
+   *
+   * A Wayback side opens a year back, so "then" is not today's mosaic twice.
+   * Without a release list it stays empty rather than showing B again.
+   */
+  async function applyPreset(preset) {
+    const request = ++presetRequest;
+    const sides = [[a, wba, preset.a], [b, wbb, preset.b]];
+    for (const [target, , id] of sides) {
+      target.providerId = id;
+      if (id !== WAYBACK_ID) target.present = true;
+    }
+    for (const [target, wayback, id] of sides) {
+      if (id !== WAYBACK_ID) continue;
+      const past = releaseYearBefore(await wayback.loadReleases());
+      if (request !== presetRequest) return;
+      if (past == null) continue;
+      wayback.pick(past);
+      target.present = true;
+    }
+    pristineSignature = pairSignature();
   }
 
   function visitZone(zone) {
@@ -549,6 +537,28 @@
     const [lon, lat] = fromMercator(...apply(screenToMercator(frame),
       zone.centre.x * frame.width, zone.centre.y * frame.height));
     activeEngine()?.setView({ lat, lon }, view.zoom);
+  }
+
+  /**
+   * The Copernicus roads a missing key or layer closes, offered anyway.
+   *
+   * Compare works without Copernicus, so nothing is said until one of them is
+   * asked for; then what it needs is said in the middle of the stage rather
+   * than the road quietly missing from the list.
+   */
+  const lockedPresets = $derived(imagery.providers.length
+    ? COMPARE_PRESETS.filter((preset) => ['sentinel2', 'sentinel1'].includes(preset.a)
+      && !availablePresets(imagery.providers).includes(preset))
+    : []);
+  const lockedArchives = $derived(imagery.providers.length
+    ? [['sentinel2', 'Sentinel-2 (Copernicus)'], ['sentinel1', 'Sentinel-1 radar (Copernicus)']]
+      .filter(([id]) => !imagery.find(id))
+    : []);
+
+  function askCopernicus(id, tool) {
+    picking = null;
+    newMenu = false;
+    copernicus = { need: copernicusNeed(imagery.providers, { radar: id === 'sentinel1' }), tool };
   }
 
   function chooseProvider(provider) {
@@ -572,6 +582,7 @@
     target.firms = freshFirms();
     target.night = freshNight();
     mode = 'side';
+    difference = false;
   }
 
   // Compare owns the same Google-Earth style gesture as Satellite. Either map
@@ -600,8 +611,6 @@
   // the browser has laid the new rectangles out, or tiles keep the old size.
   $effect(() => {
     mode;
-    soloStage;
-    stageMode;
     a.present;
     b.present;
     void tick().then(() => {
@@ -654,8 +663,6 @@
   let s2bPassTimer;
   let s2aLatestTimer;
   let s2bLatestTimer;
-  let wbaChangesTimer;
-  let wbbChangesTimer;
 
   $effect(() => {
     if (!a.present || !s2a.menuOpen || shownA.provider?.id !== SENTINEL_ID) return;
@@ -696,22 +703,6 @@
   });
   $effect(() => {
     if (b.ready && shownB.provider?.id === WAYBACK_ID) wbb.loadReleases();
-  });
-  // Once a side's picker has been opened, its history follows the map, picker
-  // open or not: both surfaces share one view, so both walk the same tile.
-  $effect(() => {
-    if (!wba.watching || shownA.provider?.id !== WAYBACK_ID) return;
-    wba.here;
-    clearTimeout(wbaChangesTimer);
-    wbaChangesTimer = setTimeout(() => wba.follow(), 900);
-    return () => clearTimeout(wbaChangesTimer);
-  });
-  $effect(() => {
-    if (!wbb.watching || shownB.provider?.id !== WAYBACK_ID) return;
-    wbb.here;
-    clearTimeout(wbbChangesTimer);
-    wbbChangesTimer = setTimeout(() => wbb.follow(), 900);
-    return () => clearTimeout(wbbChangesTimer);
   });
 
   function activeEngine() {
@@ -766,19 +757,19 @@
   }
 
   function setMode(next) {
-    if (next === 'change' && !changeStatus.ok) {
+    mode = next;
+    blinkPaused = false;
+  }
+
+  function setDifference(on) {
+    if (on && !changeStatus.ok) {
       toast(changeStatus.reason, 'warn', 6000);
       return;
     }
-    mode = next;
-    blinkPaused = false;
-    // Leaving Detect must not leave the map armed to draw an area.
-    if (next !== 'analysis') analyzerDrawing = 'select';
-    if (next === 'change') {
-      changeOptions.visible = true;
-      if (!changeStatus.methods.includes(changeOptions.method)) changeOptions.method = changeStatus.methods[0];
-      void refreshChangeAssist({ fetch: false });
-    }
+    difference = on;
+    if (!on) return;
+    if (!changeStatus.methods.includes(changeOptions.method)) changeOptions.method = changeStatus.methods[0];
+    void refreshChangeAssist({ fetch: false });
   }
 
   function setDividerAt(clientX) {
@@ -811,7 +802,7 @@
     event.preventDefault();
   }
 
-  function sideSpec(target, sentinel, wayback) {
+  function sideSpec(target, sentinel, wayback, radar) {
     return {
       present: target.present,
       provider: target.providerId,
@@ -822,10 +813,11 @@
         layer: sentinel.layer,
         // A difference is only honest over named acquisitions. Freeze a live
         // "latest" pass to the date it meant when this workspace is saved.
-        date: mode === 'change' ? sentinel.date || sentinel.latest : sentinel.date,
+        date: difference ? sentinel.date || sentinel.latest : sentinel.date,
         maxcc: sentinel.maxcc,
       },
       wayback_release: wayback.release,
+      radar: radarSpec(radar),
     };
   }
 
@@ -833,22 +825,26 @@
     return {
       version: 2,
       camera: { lat: view.lat, lon: view.lon, zoom: view.zoom, bearing },
-      // Detect is a place to work, not a way to read the pair: a comparison
-      // reopened from My work shows the imagery, and its runs live in the case.
-      mode: mode === 'analysis' ? 'side' : mode,
+      mode,
+      difference,
       divider,
       opacity,
       blink: { interval: blinkInterval },
       change_assist: changeSettings(changeOptions),
       annotations: comparisonAnnotations(annotations),
       frame: exportFrame,
-      a: sideSpec(a, s2a, wba),
-      b: sideSpec(b, s2b, wbb),
+      a: sideSpec(a, s2a, wba, s1a),
+      b: sideSpec(b, s2b, wbb, s1b),
     };
   }
 
   function sessionSignature() {
     return JSON.stringify([sessionName.trim(), sessionSpec()]);
+  }
+
+  function pairSignature() {
+    const { camera, ...pair } = sessionSpec();
+    return JSON.stringify([sessionName.trim(), pair]);
   }
 
   function requestSaveSession() {
@@ -872,6 +868,7 @@
       if (caseState.current?.id !== owner.id) return;
       sessionName = result.title;
       openedSession = { name: result.name, title: result.title };
+      pristineSignature = null;
       savedSignature = JSON.stringify([result.title, savedSpec]);
       saveDialog = false;
       let previewError = null;
@@ -909,7 +906,7 @@
     }
   }
 
-  function applySide(target, sentinel, wayback, saved) {
+  function applySide(target, sentinel, wayback, saved, radar) {
     const provider = imagery.find(saved?.provider) ? saved.provider : FALLBACK_PROVIDER;
     if (saved?.provider && provider !== saved.provider) {
       toast(`${saved.provider} is unavailable. Using ${imagery.find(provider)?.label ?? provider}`, 'warn');
@@ -928,6 +925,7 @@
     sentinel.date = saved?.sentinel?.date || '';
     sentinel.setMaxcc(saved?.sentinel?.maxcc ?? 100);
     wayback.pick(saved?.wayback_release ?? null);
+    radar.pick(saved?.radar?.date ? saved.radar : null);
     target.present = Boolean(saved?.present);
     target.refused = false;
   }
@@ -937,6 +935,8 @@
     const caseId = caseState.current.id;
     sessionBusy = true;
     sessionDialog = false;
+    presetRequest++;
+    pristineSignature = null;
     try {
       const saved = await api.get(
         `/api/cases/${caseId}/compare/sessions/${encodeURIComponent(name)}`
@@ -949,7 +949,9 @@
         zoom: spec.camera.zoom,
       };
       bearing = spec.camera?.bearing ?? 0;
-      mode = COMPARE_MODES.some((entry) => entry.id === spec.mode) ? spec.mode : 'side';
+      mode = compareMode(spec.mode);
+      // Difference used to be a mode of its own, laid over the pair side by side.
+      difference = spec.difference === true || spec.mode === 'change';
       divider = percentage(spec.divider, DEFAULT_DIVIDER);
       opacity = percentage(spec.opacity, DEFAULT_OPACITY);
       changeOptions = changeSettings(spec.change_assist);
@@ -957,8 +959,8 @@
       annotations = comparisonAnnotations(spec.annotations);
       exportFrame = exportFrameSpec(spec.frame);
       resetAnnotationHistory();
-      applySide(a, s2a, wba, spec.a);
-      applySide(b, s2b, wbb, spec.b);
+      applySide(a, s2a, wba, spec.a, s1a);
+      applySide(b, s2b, wbb, spec.b, s1b);
       sessionName = saved.title || name;
       openedSession = { name, title: sessionName };
       await tick();
@@ -972,7 +974,7 @@
       a.engine?.resize();
       b.engine?.resize();
       savedSignature = sessionSignature();
-      if (mode === 'change') void refreshChangeAssist({ fetch: false });
+      if (difference) void refreshChangeAssist({ fetch: false });
       toast(`Opened ${sessionName}`, 'ok');
     } catch (error) {
       toast(`Could not open the comparison: ${error.message}`, 'danger');
@@ -989,13 +991,16 @@
    * unsaved and unnamed: nothing was filed, the analyst is being shown a pair.
    */
   async function openPair(pair) {
+    presetRequest++;
+    pristineSignature = null;
     view = { lat: pair.lat, lon: pair.lon, zoom: pair.zoom ?? view.zoom };
     bearing = 0;
     mode = 'side';
+    difference = false;
     annotations = comparisonAnnotations(null);
     resetAnnotationHistory();
-    applySide(a, s2a, wba, pair.a);
-    applySide(b, s2b, wbb, pair.b);
+    applySide(a, s2a, wba, pair.a, s1a);
+    applySide(b, s2b, wbb, pair.b, s1b);
     sessionName = pair.title ?? 'Comparison';
     openedSession = null;
     savedSignature = null;
@@ -1012,7 +1017,7 @@
     if (uiState.tool !== 'compare' || !uiState.compareAt || !imagery.providers.length) return;
     const pair = uiState.compareAt;
     uiState.compareAt = null;
-    if (sessionDirty) {
+    if (discardable) {
       discardTarget = { kind: 'pair', pair };
       return;
     }
@@ -1020,7 +1025,7 @@
   });
 
   function requestOpenSession(name) {
-    if (sessionDirty) {
+    if (discardable) {
       discardTarget = { kind: 'open', name };
       return;
     }
@@ -1048,7 +1053,10 @@
     }
   }
 
-  function newComparison() {
+  /** Start over on a preset, the default one unless another is named. */
+  function newComparison(preset = availablePresets(imagery.providers).find((entry) => entry.id === DEFAULT_PRESET)) {
+    presetRequest++;
+    pristineSignature = null;
     a.present = false;
     b.present = false;
     a.overlays = [];
@@ -1058,6 +1066,7 @@
     a.night = freshNight();
     b.night = freshNight();
     mode = 'side';
+    difference = false;
     divider = DEFAULT_DIVIDER;
     opacity = DEFAULT_OPACITY;
     changeOptions = changeSettings();
@@ -1065,12 +1074,6 @@
     changeResult = null;
     changeUrl = '';
     changeRequest++;
-    // Detect's areas and result layers belong to the comparison that drew them.
-    analyzerZones = [];
-    analyzerLayers = [];
-    analyzerSelectedZone = null;
-    analyzerDrawing = 'select';
-    analyzerOpening = null;
     annotations = [];
     annotationTool = 'select';
     resetAnnotationHistory();
@@ -1081,23 +1084,26 @@
     openedSession = null;
     savedSignature = null;
     rightPanel = null;
+    if (preset) return applyPreset(preset);
   }
 
-  function requestNewComparison() {
-    if (sessionDirty) {
-      discardTarget = { kind: 'new' };
+  function requestNewComparison(preset) {
+    newMenu = false;
+    if (discardable) {
+      discardTarget = { kind: 'new', preset };
       return;
     }
-    newComparison();
+    newComparison(preset);
   }
 
   /**
    * Throw the edits away and keep the work: a comparison that was saved goes
-   * back to the version on disk, one that never was goes back to empty. New
-   * always wipes, which is why it is not an answer to "undo what I just did".
+   * back to the version on disk, one that never was goes back to the default
+   * pair. New always starts over, which is why it is not an answer to "undo
+   * what I just did".
    */
   function requestDiscardChanges() {
-    if (!sessionDirty || sessionBusy) return;
+    if (!discardable || sessionBusy) return;
     discardTarget = openedSession
       ? { kind: 'revert', name: openedSession.name }
       : { kind: 'new' };
@@ -1106,7 +1112,7 @@
   function confirmDiscard() {
     const target = discardTarget;
     discardTarget = null;
-    if (target?.kind === 'new') newComparison();
+    if (target?.kind === 'new') newComparison(target.preset);
     else if (target?.kind === 'pair') void openPair(target.pair);
     else if (target) void openSession(target.name);
   }
@@ -1154,10 +1160,10 @@
   const changeFrames = $derived(changeNeedsFrames(changeSettings(changeOptions), changeStatus));
 
   function changeKey() {
-    const { opacity, base, visible, blink, zones, ...analysis } = changeSettings(changeOptions);
+    const { opacity, base, blink, zones, ...analysis } = changeSettings(changeOptions);
     return JSON.stringify([
-      changeSide(a, s2a, wba, shownA),
-      changeSide(b, s2b, wbb, shownB),
+      changeSide(a, s2a, wba, shownA, s1a),
+      changeSide(b, s2b, wbb, shownB, s1b),
       view,
       bearing,
       analysis,
@@ -1166,7 +1172,7 @@
 
   function invalidateChangeAssist() {
     changeRenderedKey = '';
-    if (mode !== 'change') return;
+    if (!difference) return;
     // A reading that follows the camera never spends a request: it runs on the
     // band frames already held, and waits for Run when they no longer reach.
     clearTimeout(changeTimer);
@@ -1174,12 +1180,12 @@
   }
 
   async function refreshChangeAssist({ fetch = true } = {}) {
-    if (mode !== 'change' || !changeStatus.ok) return;
+    if (!difference || !changeStatus.ok) return;
     if (!changeStatus.methods.includes(changeOptions.method)) { changeError = 'Choose a compatible method'; return; }
     const key = changeKey();
     if (key === changeRenderedKey && changeResult) return;
     const settings = changeSettings(changeOptions);
-    const sides = [changeSide(a, s2a, wba, shownA), changeSide(b, s2b, wbb, shownB)];
+    const sides = [changeSide(a, s2a, wba, shownA, s1a), changeSide(b, s2b, wbb, shownB, s1b)];
     const request = ++changeRequest;
     changeBusy = true;
     changeError = '';
@@ -1190,7 +1196,7 @@
       const sources = await sourceCanvases();
       if (request !== changeRequest || key !== changeKey()) return;
       const result = await detectCaptures(sources, settings, sides, changeStatus, fetch);
-      if (request !== changeRequest || mode !== 'change' || key !== changeKey()) return;
+      if (request !== changeRequest || !difference || key !== changeKey()) return;
       // Nothing held reaches this view: the last reading stays up, marked out
       // of date, until the analyst asks for the frames.
       if (result.needsFetch) return;
@@ -1209,7 +1215,7 @@
   }
 
   $effect(() => {
-    if (mode !== 'change' || uiState.tool !== 'compare') { changeRequest++; return; }
+    if (!difference || uiState.tool !== 'compare') { changeRequest++; return; }
     if (!changeStatus.ok) {
       changeRequest += 1;
       changeResult = null;
@@ -1346,6 +1352,7 @@
       if (!event.ctrlKey && !event.metaKey && !event.altKey) {
         const reading = COMPARE_MODES.find((entry) => entry.key === key);
         if (reading) { setMode(reading.id); return; }
+        if (key === DIFFERENCE_KEY && (difference || changeStatus.ok)) { setDifference(!difference); return; }
         if (key === ' ' && mode === 'blink') { event.preventDefault(); blinkPaused = !blinkPaused; return; }
       }
       if ((event.ctrlKey || event.metaKey) && key === 'z') {
@@ -1385,7 +1392,7 @@
   let canvasA = $state(null);
   let canvasB = $state(null);
   const pointActions = $derived(
-    actionsFor(both && !detecting ? ['lookup', 'place', 'measure'] : ['lookup', 'place'])
+    actionsFor(both ? ['lookup', 'place', 'measure'] : ['lookup', 'place'])
   );
 
   function onMapContextMenu(side, at) {
@@ -1591,7 +1598,7 @@
 
   /** The frame stated as the ground it covers, which no camera can change. */
   function frameLabel(value) {
-    const span = frameSpan(value.points, bearing);
+    const span = frameSpan(value.points, value.angle ?? 0);
     return `${formatDistance(span.width, prefs.units)} × ${formatDistance(span.height, prefs.units)}`;
   }
 
@@ -1620,7 +1627,7 @@
 
   function compose(
     sources,
-    { renderMode = captureMode, renderBlinkB = blinkB, renderChangeMap = changeResult } = {}
+    { renderMode = mode, renderBlinkB = blinkB, renderChangeMap = null } = {}
   ) {
     const provenanceA = a.surface?.provenance?.() ?? {};
     const provenanceB = b.surface?.provenance?.() ?? {};
@@ -1641,30 +1648,40 @@
       attributionA: shownA.provider?.attribution,
       attributionB: shownB.provider?.attribution,
       view,
-      bearing,
+      // A framed export comes out upright at the bearing its frame was drawn at.
+      // A frame counts the compass direction that is up; the app counts the
+      // map's clockwise turn, the same angle the other way.
+      bearing: compassAngle(-sources.a.frame.bearing),
     });
   }
 
-  async function comparisonBlob() {
-    if (mode === 'change' && !changeStatus.ok) throw new Error(changeStatus.reason);
-    if (mode === 'change' && (changeRenderedKey !== changeKey() || !changeResult)) {
+  /** The difference an export carries: none when it is off, this view's when on. */
+  async function exportedChange() {
+    if (!difference) return null;
+    if (!changeStatus.ok) throw new Error(changeStatus.reason);
+    if (changeRenderedKey !== changeKey() || !changeResult) {
       clearTimeout(changeTimer);
       await refreshChangeAssist({ fetch: changeFrames !== '' });
     }
-    const sources = await exportSources();
-    if (mode === 'change' && (changeRenderedKey !== changeKey() || !changeResult)) {
-      throw new Error('Run Difference for this view before exporting');
+    if (changeRenderedKey !== changeKey() || !changeResult) {
+      throw new Error('Read the difference for this view before exporting');
     }
-    const renderChangeMap = mode === 'change' ? changeResult : null;
+    return changeResult;
+  }
+
+  async function comparisonBlob() {
+    const renderChangeMap = await exportedChange();
+    const sources = await exportSources();
     return canvasBlob(compose(sources, { renderChangeMap }));
   }
 
   async function saveWorkingPreview(caseId, name) {
     const form = new FormData();
     if (mode === 'blink') {
+      const renderChangeMap = await exportedChange();
       const sources = await exportSources();
-      const frameA = await canvasBlob(compose(sources, { renderMode: 'blink', renderBlinkB: false }));
-      const frameB = await canvasBlob(compose(sources, { renderMode: 'blink', renderBlinkB: true }));
+      const frameA = await canvasBlob(compose(sources, { renderMode: 'blink', renderBlinkB: false, renderChangeMap }));
+      const frameB = await canvasBlob(compose(sources, { renderMode: 'blink', renderBlinkB: true, renderChangeMap }));
       form.append('image_a', frameA, 'comparison-a.png');
       form.append('image_b', frameB, 'comparison-b.png');
       form.append('format', 'blink');
@@ -1719,9 +1736,10 @@
     outputBusy = 'gif';
     try {
       const owner = await ensureCase();
+      const renderChangeMap = await exportedChange();
       const sources = await exportSources();
-      const frameA = await canvasBlob(compose(sources, { renderMode: 'blink', renderBlinkB: false }));
-      const frameB = await canvasBlob(compose(sources, { renderMode: 'blink', renderBlinkB: true }));
+      const frameA = await canvasBlob(compose(sources, { renderMode: 'blink', renderBlinkB: false, renderChangeMap }));
+      const frameB = await canvasBlob(compose(sources, { renderMode: 'blink', renderBlinkB: true, renderChangeMap }));
       const form = new FormData();
       form.append('image_a', frameA, 'comparison-a.png');
       form.append('image_b', frameB, 'comparison-b.png');
@@ -1784,7 +1802,7 @@
         aria-label="Comparison name"
         onkeydown={(event) => event.key === 'Enter' && requestSaveSession()}
       />
-      {#if sessionDirty}<span class="badge">unsaved</span>{/if}
+      {#if discardable}<span class="badge">unsaved</span>{/if}
     {:else}
       <span class="sub">Two imagery views, one shared camera</span>
     {/if}
@@ -1808,14 +1826,31 @@
       <button
         class="btn btn-sm"
         onclick={requestDiscardChanges}
-        disabled={!sessionDirty || sessionBusy}
+        disabled={!discardable || sessionBusy}
         title={openedSession ? 'Go back to the saved version' : 'Throw this comparison away'}
       >
         <Icon name="undo" size={13} /> Discard
       </button>
-      <button class="btn btn-sm" onclick={requestNewComparison} title="Start a new comparison">
-        <Icon name="plus" size={13} /> New
-      </button>
+      <div class="new-wrap" bind:this={newMenuEl}>
+        <button class="btn btn-sm" onclick={() => (newMenu = !newMenu)} title="Start a new comparison"
+          aria-expanded={newMenu} aria-haspopup="menu">
+          <Icon name="plus" size={13} /> New <Icon name="chevronDown" size={11} />
+        </button>
+        {#if newMenu}
+          <div class="new-menu card" role="menu">
+            {#each availablePresets(imagery.providers) as preset}
+              <button class="new-row" role="menuitem" onclick={() => requestNewComparison(preset)}>
+                <strong>{preset.label}</strong><span>{preset.hint}</span>
+              </button>
+            {/each}
+            {#each lockedPresets as preset (preset.id)}
+              <button class="new-row locked" role="menuitem" onclick={() => askCopernicus(preset.a, preset.label)}>
+                <strong>{preset.label} <small>set up</small></strong><span>Needs a free Copernicus setup</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
     {/if}
     <button
       class="btn btn-primary btn-sm"
@@ -1829,7 +1864,14 @@
 
   {#if both}
     <div class="compare-bar">
-      <ModeDock {mode} change={changeStatus} detect={detectStatus} onmode={setMode} onswap={swapSides} />
+      <ModeDock {mode} {difference} differenceable={difference || changeStatus.ok}
+        onmode={setMode} ondifference={setDifference} onswap={swapSides} />
+      <button class="btn btn-sm" class:active={stripOpen} disabled={!archive} aria-pressed={stripOpen}
+        onclick={() => (stripOpen = !stripOpen)}
+        title={archive ? 'Every dated picture of this point, and when a change appeared'
+          : 'Show the same dated archive on A and B to list its pictures'}>
+        <Icon name="clock" size={13} /> All dates
+      </button>
       <div class="spacer"></div>
       <span class="camera-readout mono">z{Number(view.zoom).toFixed(1)}</span>
       <!-- One camera, so one compass: it turns both maps and resets them. -->
@@ -1842,12 +1884,16 @@
   {#if !a.present && !b.present}
     <div class="presets">
       {#each availablePresets(imagery.providers) as preset}
-        <button class="btn btn-sm" title={preset.hint} onclick={() => startPreset(preset)}>{preset.label}</button>
+        <button class="btn btn-sm" title={preset.hint} onclick={() => applyPreset(preset)}>{preset.label}</button>
+      {/each}
+      {#each lockedPresets as preset (preset.id)}
+        <button class="btn btn-sm locked" title={`${preset.hint}. Needs a free Copernicus setup`}
+          onclick={() => askCopernicus(preset.a, preset.label)}>{preset.label} <small>set up</small></button>
       {/each}
     </div>
   {/if}
   <div class="compare-workspace">
-  {#if both && !detecting}
+  {#if both}
     <AnnotationToolbar
       bind:tool={annotationTool}
       selected={editableAnnotation}
@@ -1878,21 +1924,18 @@
   {/if}
 
   <!-- The cards ride over the stage, not over the tool: the annotation rail on
-       the left and a computing panel on the right both narrow the stage, and a
-       full-width bar put the seam between the cards tens of pixels away from
-       the seam between the maps.
-       Detect owns the imagery while it is on, so the cards would be a second
-       place to choose the same thing. One choice, one place. -->
+       the left narrows the stage, and a full-width bar put the seam between
+       the cards tens of pixels away from the seam between the maps. -->
   <div class="stage-column">
-  {#if (a.present || b.present) && !detecting}
+  {#if a.present || b.present}
     <div class="source-bar" aria-label="Compared imagery">
       {#if a.present}
-        <SourceCard letter="A" {imagery} bind:providerId={a.providerId} s2={s2a} wayback={wba}
+        <SourceCard letter="A" {imagery} bind:providerId={a.providerId} s2={s2a} wayback={wba} s1={s1a}
           shown={shownA} dated={a.dated} layerCount={a.overlays.length} layersOpen={rightPanel === 'layers'}
           onlayers={() => toggleRightPanel('layers')} onremove={() => remove('a')} />
       {:else}<button class="source-add" onclick={() => (picking = 'a')}>A · Add imagery</button>{/if}
       {#if b.present}
-        <SourceCard letter="B" {imagery} bind:providerId={b.providerId} s2={s2b} wayback={wbb}
+        <SourceCard letter="B" {imagery} bind:providerId={b.providerId} s2={s2b} wayback={wbb} s1={s1b}
           shown={shownB} dated={b.dated} align="right" layerCount={b.overlays.length} layersOpen={rightPanel === 'layers'}
           onlayers={() => toggleRightPanel('layers')} onremove={() => remove('b')} />
       {:else}<button class="source-add" onclick={() => (picking = 'b')}>B · Add imagery</button>{/if}
@@ -1900,13 +1943,9 @@
   {/if}
   <div
     class="compare-stage"
-    class:overlay={both && stageMode !== 'side'}
-    class:swipe={both && stageMode === 'swipe'}
-    class:blended={both && stageMode === 'opacity'}
-    class:change={both && stageMode === 'change'}
-    class:base-a={both && stageMode === 'change' && changeBase === 'a'}
-    class:base-b={both && stageMode === 'change' && changeBase === 'b'}
-    class:solo={soloStage}
+    class:overlay={both && mode !== 'side'}
+    class:swipe={both && mode === 'swipe'}
+    class:blended={both && mode === 'opacity'}
     class:capturing={grabbing}
     class:capture-a={captureSide === 'a'}
     class:capture-b={captureSide === 'b'}
@@ -1931,6 +1970,7 @@
           {imagery}
           s2={s2a}
           wayback={wba}
+          s1={s1a}
           {home}
           resetToHome={false}
           imperial={prefs.units === 'imperial'}
@@ -1973,35 +2013,23 @@
         </MapSurface>
         <!-- The mask is ground, not screen: it is laid on each map through that
              map's own frame, so "Both" shows one reading over two pictures. -->
-        {#if both && mode === 'change' && changeUrl && changeVisible}
+        {#if both && difference && changeOver('a') && changeUrl && changeVisible}
           <img class="change-map" src={changeUrl} alt="Pixel-change heatmap over imagery A"
             style:width={`${changeResult.frame.width}px`} style:height={`${changeResult.frame.height}px`}
             style:transform={changeTransform.a} />
         {/if}
         <!-- Side by side has two coordinate spaces, so A owns the editable
              frame and B shows the matching ground read-only. -->
-        {#if both && !grabbing && !detecting && stageMode === 'side' && (framing || exportFrame)}
+        {#if both && !grabbing && mode === 'side' && (framing || exportFrame)}
           <ExportFrame engine={a.engine} frame={exportFrame} drawing={framing} units={prefs.units} {bearing}
             onframe={setExportFrame} oncancel={finishFraming} />
         {/if}
-        {#if both && !grabbing && !detecting}
+        {#if both && !grabbing}
           <AnnotationCanvas bind:this={canvasA} {annotations} engine={a.engine} letter="a" units={prefs.units}
             active={uiState.tool === 'compare'} bind:tool={annotationTool} bind:selectedId={selectedAnnotationId}
             colour={annotationColour} strokeWidth={annotationStroke} fillOpacity={annotationFill}
             glyph={annotationGlyph} stampSize={annotationStampSize}
-            editVertices={true} {annotationSide} onchange={setAnnotations} />
-        {/if}
-        <!-- Detect's own drawing stays in Detect: areas and candidates belong
-             to the column that explains them, and the reading modes stay clean
-             pictures. A kept candidate is a pin, and pins are shown by Saved. -->
-        {#if detecting && !grabbing && analyzerLayers.some((layer) => layer.visible)}
-          <AnalysisOverlay engine={a.engine} layers={analyzerLayers} selected={analyzerResult}
-            onpick={(run, result) => analyzerPanel?.pick(run, result)} />
-        {/if}
-        {#if detecting && !grabbing && analyzerAreasVisible}
-          <AnnotationCanvas annotations={analyzerMarks} engine={a.engine} letter="a" editVertices={true} edgeOnly={true}
-            bind:tool={analyzerDrawing} bind:selectedId={analyzerSelectedZone} colour="#38bdf8"
-            fillOpacity={0.08} onchange={setAnalyzerMarks} />
+            editVertices={true} {annotationSide} {bearing} turnable={true} onchange={setAnnotations} />
         {/if}
         {#if rotating?.which === 'a'}
           <div class="rotate-pivot" style:left={`${rotating.x}px`} style:top={`${rotating.y}px`} aria-hidden="true"></div>
@@ -2035,6 +2063,7 @@
           {imagery}
           s2={s2b}
           wayback={wbb}
+          s1={s1b}
           {home}
           resetToHome={false}
           imperial={prefs.units === 'imperial'}
@@ -2075,29 +2104,20 @@
             />
           {/if}
         </MapSurface>
-        {#if both && mode === 'change' && changeUrl && changeVisible}
+        {#if both && difference && changeOver('b') && changeUrl && changeVisible}
           <img class="change-map" src={changeUrl} alt="Pixel-change heatmap over imagery B"
             style:width={`${changeResult.frame.width}px`} style:height={`${changeResult.frame.height}px`}
             style:transform={changeTransform.b} />
         {/if}
-        {#if both && !grabbing && !detecting && stageMode === 'side' && exportFrame}
+        {#if both && !grabbing && mode === 'side' && exportFrame}
           <ExportFrame engine={b.engine} frame={exportFrame} readonly={true} units={prefs.units} {bearing} />
         {/if}
-        {#if both && !grabbing && !detecting}
+        {#if both && !grabbing}
           <AnnotationCanvas bind:this={canvasB} {annotations} engine={b.engine} letter="b" units={prefs.units}
             active={uiState.tool === 'compare'} bind:tool={annotationTool} bind:selectedId={selectedAnnotationId}
             colour={annotationColour} strokeWidth={annotationStroke} fillOpacity={annotationFill}
             glyph={annotationGlyph} stampSize={annotationStampSize}
-            editVertices={true} {annotationSide} onchange={setAnnotations} />
-        {/if}
-        {#if detecting && !grabbing && analyzerLayers.some((layer) => layer.visible)}
-          <AnalysisOverlay engine={b.engine} layers={analyzerLayers} selected={analyzerResult}
-            onpick={(run, result) => analyzerPanel?.pick(run, result)} />
-        {/if}
-        {#if detecting && !grabbing && analyzerAreasVisible}
-          <AnnotationCanvas annotations={analyzerMarks} engine={b.engine} letter="b" editVertices={true} edgeOnly={true}
-            bind:tool={analyzerDrawing} bind:selectedId={analyzerSelectedZone} colour="#38bdf8"
-            fillOpacity={0.08} onchange={setAnalyzerMarks} />
+            editVertices={true} {annotationSide} {bearing} turnable={true} onchange={setAnnotations} />
         {/if}
         {#if rotating?.which === 'b'}
           <div class="rotate-pivot" style:left={`${rotating.x}px`} style:top={`${rotating.y}px`} aria-hidden="true"></div>
@@ -2136,50 +2156,49 @@
       </button>
     {/if}
 
-    <!-- Fade, Swipe, Blink and the single-image Difference layouts stack both
-         maps in one coordinate space. Their frame therefore sits above the
+    <!-- Fade, Swipe and Blink stack both maps in one coordinate space. Their frame therefore sits above the
          complete stage, where neither B nor the swipe clip can block it. -->
-    {#if both && !grabbing && !detecting && stageMode !== 'side' && (framing || exportFrame)}
+    {#if both && !grabbing && mode !== 'side' && (framing || exportFrame)}
       <ExportFrame engine={a.engine} frame={exportFrame} drawing={framing} units={prefs.units} {bearing}
         onframe={setExportFrame} oncancel={finishFraming} />
     {/if}
 
-    {#if both && mode === 'change'}
-      <div class="change-legend" class:colourblind={changePalette === 'colourblind'} class:hidden={!changeOptions.visible}>
+    {#if copernicus}
+      <div class="need-over">
+        <CopernicusNeeded need={copernicus.need || 'account'} tool={copernicus.tool}
+          onclose={() => (copernicus = null)} />
+      </div>
+    {/if}
+
+    {#if both && difference}
+      <div class="change-legend" class:colourblind={changePalette === 'colourblind'}>
         <span><i class="gain"></i> Appeared / stronger in B</span>
         <span><i class="loss"></i> Disappeared / weaker from A</span>
         <span><i class="changed"></i> Other evolution</span>
-        {#if changeBusy}<em>Analysing…</em>{:else if changeError}<em>{changeError}</em>{:else if changeCounts}<em>{changeShare(changeCounts)}% highlighted</em>{/if}
+        {#if changeBusy}<em>Reading…</em>{:else if changeError}<em class="warn">{changeError}</em>{:else if changeCounts}<em class:warn={changeRenderedKey !== detectionKey}>{changeShare(changeCounts)}% highlighted{changeRenderedKey !== detectionKey ? ' · from an earlier read' : ''}</em>{/if}
       </div>
     {/if}
 
  </div>
-  </div>
-
-  <!-- The two computing modes share this column, so where their settings live
-       never depends on which one is on: the stage narrows, the maps stay whole
-       and clickable, and the mode dock above is the only switch between them. -->
-  {#if both && mode === 'change'}
-    <ChangePanel bind:settings={changeOptions} status={changeStatus} result={changeResult}
-      busy={changeBusy} error={changeError}
-      stale={!!changeResult && changeRenderedKey !== detectionKey}
-      onrun={() => refreshChangeAssist()} onzone={visitZone} onclose={() => setMode('side')} />
-  {/if}
-  {#if both && detecting}
-    <AnalyzerPanel bind:this={analyzerPanel} caseId={caseState.current?.id}
-      sources={{ a: sideSpec(a, s2a, wba), b: sideSpec(b, s2b, wbb) }}
-      bind:zones={analyzerZones} bind:drawing={analyzerDrawing} bind:selectedZone={analyzerSelectedZone}
-      bind:layers={analyzerLayers} bind:showZones={analyzerAreasVisible}
-      bind:singleImage={analyzerSingle} bind:selectedResult={analyzerResult}
-      opening={analyzerOpening} onfocus={focusAnalysis} onusecurrentview={useCurrentView}
-      needs={detectStatus.reason} onsettings={openImagerySettings}
-      onsources={applyAnalysisSources} onclose={() => setMode('side')} />
+  {#if both && stripOpen && archive}
+    <PassStrip {archive} a={sideSpec(a, s2a, wba, s1a)} b={sideSpec(b, s2b, wbb, s1b)} {view}
+      viewWidth={a.element?.clientWidth ?? 1000} provider={imagery.find(archive)} maxcc={s2b.maxcc}
+      variantFor={stripVariant} onassign={assignFromStrip} onbilled={() => imagery.refreshUsage()}
+      onclose={() => (stripOpen = false)} />
   {/if}
   </div>
 
-  {#if both && !FIND_MODES.includes(mode) && mode !== 'side'}
+  </div>
+
+  {#if both && (mode !== 'side' || difference)}
     <div class="mode-footer">
       <ModeControl {mode} bind:divider bind:opacity bind:blinkB bind:blinkPaused bind:blinkInterval />
+      {#if difference}
+        <DifferenceBar bind:settings={changeOptions} status={changeStatus} result={changeResult}
+          busy={changeBusy} error={changeError}
+          stale={!!changeResult && changeRenderedKey !== detectionKey}
+          onrun={() => refreshChangeAssist()} onzone={visitZone} />
+      {/if}
     </div>
   {/if}
   {#if rightPanel === 'export'}
@@ -2312,6 +2331,18 @@
             </span>
           </button>
         {/each}
+        {#if kind.id === 'archive'}
+          {#each lockedArchives as [id, label] (id)}
+            <button class="provider-card locked" onclick={() => askCopernicus(id, label)}
+              title="Free, from a Copernicus account">
+              <Icon name="satellite" size={18} />
+              <span class="provider-copy">
+                <strong>{label}</strong>
+                <small>{id === 'sentinel1' && imagery.find('sentinel2') ? 'Needs its layer' : 'Needs a free key'}</small>
+              </span>
+            </button>
+          {/each}
+        {/if}
       </div>
         {/if}
       {/each}
@@ -2427,8 +2458,46 @@
   .source-add { color: var(--text-3); background: var(--bg-1); }
   .compare-bar { display: flex; align-items: center; gap: 12px; padding: 6px 12px; background: var(--bg-1); }
   .camera-readout { color: var(--text-3); font-size: var(--fs-xs); }
-  .mode-footer { display: flex; justify-content: center; padding: 6px; background: var(--bg-1); }
+  /* Above the stage, which keeps its map layers to itself (see .compare-stage),
+     so the Difference panel opening upward lies over the highlights. */
+  .mode-footer { position: relative; z-index: 1; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; padding: 6px; background: var(--bg-1); }
   .presets { display: flex; justify-content: center; gap: 8px; padding: 8px; }
+  .locked small { color: var(--accent); }
+  .provider-card.locked { opacity: 0.8; }
+  .need-over {
+    position: absolute;
+    inset: 0;
+    z-index: 700;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    background: rgb(0 0 0 / 0.4);
+  }
+  .new-wrap { position: relative; display: flex; }
+  .new-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 800;
+    display: flex;
+    flex-direction: column;
+    width: 260px;
+    padding: 4px;
+    background: var(--bg-1);
+    box-shadow: var(--shadow-2);
+  }
+  .new-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 8px;
+    border-radius: var(--r-sm);
+    text-align: left;
+    cursor: pointer;
+  }
+  .new-row:hover { background: var(--bg-3); }
+  .new-row strong { font-size: var(--fs-sm); color: var(--text-1); font-weight: 600; }
+  .new-row span { font-size: var(--fs-xs); color: var(--text-3); }
   .compare-workspace { display: flex; min-height: 0; flex: 1; }
   /* The cards and the maps they describe share one width, so the split between
      A and B is one line down the whole tool. */
@@ -2442,6 +2511,9 @@
     padding: 1px;
     background: var(--border-strong);
     overflow: hidden;
+    /* The map panes, highlights and legend climb to z-index 800 among
+       themselves; isolating them keeps that ladder from reaching the footer. */
+    isolation: isolate;
   }
   .surface-shell, .empty-slot {
     position: relative;
@@ -2497,17 +2569,11 @@
   .compare-stage.overlay .primary { z-index: 1; }
   .compare-stage.overlay .secondary { z-index: 2; }
   .compare-stage.overlay .surface-label { display: none; }
-  /* Detect with a one-date analyzer: one map, and no letter to disambiguate. */
-  .compare-stage.solo .primary { display: none; }
-  .compare-stage.solo .secondary { flex: 1 1 100%; }
-  .compare-stage.solo .surface-label { display: none; }
   .compare-stage.swipe .secondary { clip-path: inset(0 0 0 var(--divider)); }
   /* Blend the pixels, not the provider/date controls that explain them. */
   .compare-stage.blended .secondary :global(.map),
   .compare-stage.blended .secondary :global(.map-glass) { opacity: var(--opacity); }
   .compare-stage.overlay .secondary.blink-hidden { opacity: 0; pointer-events: none; }
-  .compare-stage.change.base-a .secondary { opacity: 0; pointer-events: none; }
-  .compare-stage.change.base-b .secondary { opacity: 1; }
   .change-map {
     position: absolute;
     z-index: 545;
@@ -2536,7 +2602,6 @@
     font-size: 10px;
     backdrop-filter: blur(6px);
   }
-  .change-legend.hidden { opacity: .58; }
   .change-legend span { display: flex; align-items: center; gap: 4px; }
   .change-legend i { width: 9px; height: 9px; border-radius: 2px; }
   .change-legend .gain { background: rgb(34,197,94); }
@@ -2545,6 +2610,7 @@
   .change-legend.colourblind .gain { background: rgb(0,114,178); }
   .change-legend.colourblind .loss { background: rgb(230,159,0); }
   .change-legend.colourblind .changed { background: rgb(204,121,167); }
+  .change-legend em.warn { color: var(--warn); }
   .change-legend em { max-width: 260px; overflow: hidden; color: #c4c9cf; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
   .compare-stage.capturing .surface-label,
   .compare-stage.capturing .swipe-line { visibility: hidden; }

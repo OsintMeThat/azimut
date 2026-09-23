@@ -803,10 +803,11 @@ export function detectChange({
   // Two Sentinel-2 passes are already corrected to surface reflectance and
   // rendered by one formula, so there is no exposure left to match — only real
   // change, which a match would eat: a burn over most of a view moves the
-  // histogram, and matching it puts the view back the way it was.
+  // histogram, and matching it puts the view back the way it was. Two radar
+  // passes of one track are calibrated backscatter drawn by one formula too.
   const tone = settings.normalize !== 'auto'
     ? settings.normalize
-    : (family === 'sentinel2' ? 'none' : 'histogram');
+    : (family === 'sentinel2' || family === 'sentinel1' ? 'none' : 'histogram');
   const keep = blocked ? blocked.map((flag) => (flag ? 0 : 1)) : null;
   const toned = usesPixels ? matchTone(a, registered, tone, keep) : registered;
   const measured = measure(a, toned, width, height, settings, decoded, blocked);

@@ -34,6 +34,7 @@
   import CaseSidebar from './components/CaseSidebar.svelte';
   import Toasts from './components/Toasts.svelte';
   import UpdateModal from './components/UpdateModal.svelte';
+  import DetectActivity from './components/DetectActivity.svelte';
   import WorkspaceStopped from './components/WorkspaceStopped.svelte';
   import { readStatus, stoppedBecause } from './lib/workspace.js';
   import { analysisSearch, leaveAnalysisView } from './lib/analysisSearch.svelte.js';
@@ -56,6 +57,7 @@
     { id: 'inspect', label: TOOL_LABELS.inspect, load: () => import('./tools/Inspector.svelte') },
     { id: 'satellite', label: TOOL_LABELS.satellite, load: () => import('./tools/Satellite.svelte') },
     { id: 'compare', label: TOOL_LABELS.compare, load: () => import('./tools/Compare.svelte') },
+    { id: 'detect', label: TOOL_LABELS.detect, load: () => import('./tools/Detect.svelte') },
     { id: 'coordinates', label: TOOL_LABELS.coordinates, load: () => import('./tools/Coordinates.svelte') },
     { id: 'proof', label: TOOL_LABELS.proof, load: () => import('./tools/ProofComposer.svelte') },
     { id: 'post', label: TOOL_LABELS.post, load: () => import('./tools/PostComposer.svelte') },
@@ -254,6 +256,7 @@
       </button>
     </div>
     <div class="spacer"></div>
+    <DetectActivity />
     <!-- The one mark that answers "what is this tab I am standing in". It sits beside
          the gear rather than in each toolbar so there is one of it, and it opens the
          Guide on the section written about the current tool. Silent on the Guide

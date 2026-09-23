@@ -1,5 +1,7 @@
-/* Compare uses the same theme tokens as the other tools. */
-.compare-tool {
+/* The dock two map tools share: Compare's reading modes and Detect's column.
+   Both take the app's theme tokens and name them once here. */
+.compare-tool,
+.detect-tool {
   --cmp-a: var(--info);
   --cmp-b: var(--accent);
   --glass: var(--bg-1);
