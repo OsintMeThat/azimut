@@ -47,7 +47,7 @@ const SIZES = {
 };
 const RECIPE = {
   id: 'pair', name: 'Any surface change', description: 'Reflectance that moved',
-  phenomenon: 'Change', method: 'surface', zones: [], colour: '#f6a81a', style: 'both',
+  phenomenon: 'Change', method: 'surface', colour: '#f6a81a', style: 'both',
   parameters: { sensitivity: 67, ...SIZES.medium, index: 'ndvi', direction: 'both',
     ignore_clouds: true, ignore_shadows: true, cloud_margin: 5 },
 };
@@ -63,6 +63,8 @@ const ANALYZERS = {
   max_tiles: 4096, max_results: 2000, grid: [13, 512],
 };
 
+// Newest first. Empty by default, so the opening pair has no "then" to show.
+let releases = [];
 const get = vi.fn(async (path) => {
   if (path === '/api/compare/analyzers') return structuredClone(ANALYZERS);
   if (path.startsWith('/api/cases/case-a/analysis/')) return [];
@@ -79,11 +81,22 @@ const get = vi.fn(async (path) => {
   if (path === '/api/settings') return { usage: {}, month: '2026-09' };
   if (path.includes('/satellite/index')) return [];
   if (path.includes('/imagery-date')) return { supported: true, date: '2024-01-02' };
-  if (path === '/api/satellite/wayback/releases') return { releases: [] };
+  if (path === '/api/satellite/wayback/releases') return { releases: structuredClone(releases) };
   if (path === '/api/cases/case-a/compare/sessions') {
-    return [{ name: 'Harbour change', title: 'Harbour change', provider_a: 'esri-world-imagery', provider_b: 'esri-wayback', mode: 'swipe' }];
+    return [
+      { name: 'Harbour change', title: 'Harbour change', provider_a: 'esri-world-imagery', provider_b: 'esri-wayback', mode: 'swipe' },
+      { name: 'Old difference', title: 'Old difference', provider_a: 'esri-world-imagery', provider_b: 'esri-wayback', mode: 'change' },
+    ];
   }
   if (path === '/api/cases/case-a/compare/sessions/Harbour%20change') return SESSION;
+  // Saved while Difference was a mode of its own, over one image.
+  if (path === '/api/cases/case-a/compare/sessions/Old%20difference') {
+    return {
+      ...SESSION,
+      title: 'Old difference',
+      spec: { ...SESSION.spec, mode: 'change', frame: null, change_assist: { base: 'side' } },
+    };
+  }
   return {};
 });
 const post = vi.fn(async (path) => {
@@ -100,6 +113,7 @@ const toast = vi.fn();
 const ensureCase = vi.fn(async () => ({ id: 'case-a' }));
 const reloadCase = vi.fn(async () => {});
 const caseState = { current: { id: 'case-a' } };
+const uiState = { tool: 'compare', openCompare: null };
 vi.mock('../lib/state.svelte.js', () => ({
   caseState,
   ensureCase,
@@ -108,7 +122,7 @@ vi.mock('../lib/state.svelte.js', () => ({
   prefsReady: Promise.resolve(),
   reloadCase,
   toast,
-  uiState: { tool: 'compare', openCompare: null },
+  uiState,
 }));
 
 const engines = [];
@@ -123,6 +137,8 @@ function fakeEngine(opening, container) {
     following: () => false,
     camera: vi.fn(() => ({ ...camera })),
     getZoom: vi.fn(() => camera.zoom),
+    viewBounds: vi.fn(() => ({ west: camera.lon - 0.001, south: camera.lat - 0.001,
+      east: camera.lon + 0.001, north: camera.lat + 0.001 })),
     container,
     setBearing: vi.fn((bearing) => (camera.bearing = bearing)),
     setView: vi.fn((view, zoom) => (camera = { ...camera, ...view, zoom })),
@@ -173,7 +189,8 @@ async function settle() {
   flushSync();
 }
 
-async function open() {
+/** Mount Compare on its opening pair. */
+async function openFresh() {
   target = document.createElement('div');
   document.body.append(target);
   live = mount(Compare, { target });
@@ -181,8 +198,28 @@ async function open() {
   await settle();
 }
 
+/** …then clear both sides, for a test that builds its own pair. */
+async function open() {
+  await openFresh();
+  for (const letter of ['A', 'B']) {
+    target.querySelector(`button[aria-label="Remove imagery ${letter}"]`)?.click();
+    flushSync();
+  }
+  await settle();
+  engines.length = 0;
+}
+
 function button(label, root = document) {
   return [...root.querySelectorAll('button')].find((entry) => entry.textContent.trim().includes(label));
+}
+
+/** Start over from the New menu, on one of its presets. */
+async function startNew(label = 'Then and now') {
+  button('New', target).click();
+  flushSync();
+  button(label, target.querySelector('.new-menu')).click();
+  flushSync();
+  await settle();
 }
 
 async function add(slot, provider = 'Esri World Imagery') {
@@ -201,6 +238,7 @@ async function add(slot, provider = 'Esri World Imagery') {
 beforeEach(() => {
   vi.clearAllMocks();
   engines.length = 0;
+  releases = [];
 });
 
 afterEach(() => {
@@ -212,13 +250,53 @@ afterEach(() => {
 });
 
 describe('Compare', () => {
-  it('opens empty and asks before any imagery is loaded', async () => {
-    await open();
+  it('opens on a Wayback release a year back against today’s World Imagery', async () => {
+    releases = [
+      { release: 30, date: '2026-09-01' },
+      { release: 20, date: '2025-06-01' },
+      { release: 10, date: '2014-02-20' },
+    ];
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-23T12:00:00Z'));
+    try {
+      await openFresh();
+    } finally {
+      vi.useRealTimers();
+    }
     expect(target.querySelector('h2').textContent).toBe('Compare');
-    expect(target.querySelectorAll('.empty-slot')).toHaveLength(2);
-    expect(target.querySelectorAll('.surface-shell')).toHaveLength(0);
-    expect(engines).toHaveLength(0);
-    expect(get).toHaveBeenCalledWith('/api/satellite/providers');
+    expect(target.querySelectorAll('.empty-slot')).toHaveLength(0);
+    expect(target.querySelectorAll('.surface-shell')).toHaveLength(2);
+    expect(target.querySelectorAll('.presets')).toHaveLength(0);
+    const saved = () => post.mock.calls.find(([path]) => path === '/api/cases/case-a/compare/sessions')?.[1];
+    button('Save comparison', target).click();
+    flushSync();
+    button('Save comparison', document.querySelector('[role="dialog"]')).click();
+    await settle();
+    expect(saved().spec.a).toMatchObject({ present: true, provider: 'esri-wayback', wayback_release: 20 });
+    expect(saved().spec.b).toMatchObject({ present: true, provider: 'esri-world-imagery' });
+    // local-first: the pair costs the release list, never a point's history
+    expect(get.mock.calls.some(([path]) => path.includes('/wayback/changes'))).toBe(false);
+  });
+
+  it('leaves the then side empty rather than showing today twice', async () => {
+    // no release list: a Wayback A would be World Imagery again
+    await openFresh();
+    expect(target.querySelectorAll('.surface-shell')).toHaveLength(1);
+    expect(target.querySelector('.surface-label strong').textContent).toBe('B');
+    expect(target.querySelectorAll('.empty-slot')).toHaveLength(1);
+  });
+
+  it('asks nothing when an untouched pair is left, however it was panned', async () => {
+    releases = [{ release: 30, date: '2026-09-01' }, { release: 10, date: '2014-02-20' }];
+    await openFresh();
+    engines[0].handlers['view-settled']?.({ lat: 40, lon: 3, zoom: 12 });
+    flushSync();
+    expect(target.querySelector('.badge')).toBeNull();
+    expect(button('Discard', target).disabled).toBe(true);
+    // …while Save still takes it, a pair at a place being worth keeping
+    expect(button('Save comparison', target).disabled).toBe(false);
+    await startNew();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
   });
 
   it('adds two independent surfaces and then offers every comparison mode', async () => {
@@ -236,7 +314,6 @@ describe('Compare', () => {
       'Fade',
       'Blink',
       'Difference',
-      'Detect',
     ]);
     // The second surface opens on the first camera without needing a corrective move.
     expect(engines[1].camera()).toEqual(engines[0].camera());
@@ -256,7 +333,7 @@ describe('Compare', () => {
     expect(target.querySelectorAll('button[aria-label="Reset to north"]')).toHaveLength(1);
     expect(target.querySelector('.surface-shell button[aria-label="Reset to north"]')).toBeNull();
     // local-first: Wayback names its releases once it is on screen, but nothing
-    // walks this point's history until the analyst opens the picker
+    // walks this point's history until the analyst asks for the changes
     expect(get).toHaveBeenCalledWith('/api/satellite/wayback/releases');
     expect(get.mock.calls.some(([path]) => path.includes('/wayback/changes'))).toBe(false);
   });
@@ -298,77 +375,64 @@ describe('Compare', () => {
     expect(target.querySelector('.compare-stage').style.getPropertyValue('--opacity')).toBe('0.25');
   });
 
-  it('toggles only the difference overlay from its eye button', async () => {
+  it('offers Difference only on a pair it can read', async () => {
     await open();
     await add('A');
-    await add('B', 'Esri Wayback');
-    button('Difference', target).click();
-    flushSync();
-    await settle();
-
-    const eye = () => target.querySelector('button[aria-label*="difference overlay"]');
-    expect(eye().getAttribute('aria-label')).toBe('Hide the difference overlay');
-    eye().click();
-    flushSync();
-    expect(eye().getAttribute('aria-label')).toBe('Show the difference overlay');
-    expect(eye().getAttribute('aria-pressed')).toBe('false');
-    eye().click();
-    flushSync();
-    expect(eye().getAttribute('aria-label')).toBe('Hide the difference overlay');
-    expect(eye().getAttribute('aria-pressed')).toBe('true');
+    await add('B');
+    // The same picture twice: nothing a pixel reading could say about it.
+    expect(button('Difference', target)).toBeUndefined();
+    expect(target.querySelector('.difference-bar')).toBeNull();
   });
 
-  it('lays the difference over one image or over both, from the same switch', async () => {
+  it('lays the difference over the view that is on, without a panel of its own', async () => {
     await open();
     await add('A');
     await add('B', 'Esri Wayback');
+    button('Swipe', target).click();
+    flushSync();
     button('Difference', target).click();
     flushSync();
     await settle();
 
     const stage = () => target.querySelector('.compare-stage');
+    // The view stays what it was, and the maps keep the whole width.
+    expect(stage().classList.contains('swipe')).toBe(true);
+    expect(button('Swipe', target).getAttribute('aria-pressed')).toBe('true');
+    expect(button('Difference', target).getAttribute('aria-pressed')).toBe('true');
+    expect(target.querySelector('.cmp-dock')).toBeNull();
+    // Its controls sit in the footer beside the view's own.
+    const footer = target.querySelector('.mode-footer');
+    expect(footer.querySelector('input[aria-label="Swipe position"]')).not.toBeNull();
+    expect(footer.querySelector('.difference-bar')).not.toBeNull();
+    expect(target.querySelector('.change-legend')).not.toBeNull();
+    // Over both images unless asked otherwise.
     const base = (label) => [...target.querySelectorAll('[aria-label="Image under the highlights"] button')]
       .find((entry) => entry.textContent.trim() === label);
-    // B alone: the two maps are stacked, and only one of them is read.
-    expect(base('B').getAttribute('aria-pressed')).toBe('true');
-    expect(stage().classList.contains('base-b')).toBe(true);
+    expect(base('Both').getAttribute('aria-pressed')).toBe('true');
 
-    base('Both').click();
+    // Another view keeps the difference on over it.
+    button('Blink', target).click();
     flushSync();
-    await settle();
-    // Both: the pair is side by side again, with the same reading on each.
-    expect(stage().classList.contains('overlay')).toBe(false);
-    expect(stage().classList.contains('base-b')).toBe(false);
-    expect(target.textContent).toContain('Both images, the same highlights on each.');
-
-    base('A').click();
-    flushSync();
-    expect(stage().classList.contains('base-a')).toBe(true);
-  });
-
-  it('gives each computing mode the same column, and only one at a time', async () => {
-    await open();
-    await add('A');
-    await add('B', 'Esri Wayback');
-    expect(target.querySelector('.cmp-dock')).toBeNull();
+    expect(stage().classList.contains('overlay')).toBe(true);
+    expect(target.querySelector('.difference-bar')).not.toBeNull();
 
     button('Difference', target).click();
     flushSync();
-    await settle();
-    expect([...target.querySelectorAll('.cmp-dock')].map((dock) => dock.getAttribute('aria-label')))
-      .toEqual(['Difference']);
+    expect(target.querySelector('.difference-bar')).toBeNull();
+    expect(target.querySelector('.change-legend')).toBeNull();
+    expect(button('Blink', target).getAttribute('aria-pressed')).toBe('true');
+  });
 
-    button('Detect', target).click();
+  it('shows the difference side by side with no footer of the view to share', async () => {
+    await open();
+    await add('A');
+    await add('B', 'Esri Wayback');
+    expect(target.querySelector('.mode-footer')).toBeNull();
+    button('Difference', target).click();
     flushSync();
     await settle();
-    expect([...target.querySelectorAll('.cmp-dock')].map((dock) => dock.getAttribute('aria-label')))
-      .toEqual(['Detect']);
-    // Detect works over an undivided pair, whatever reading mode preceded it.
     expect(target.querySelector('.compare-stage').classList.contains('overlay')).toBe(false);
-
-    button('Side by side', target).click();
-    flushSync();
-    expect(target.querySelector('.cmp-dock')).toBeNull();
+    expect(target.querySelector('.mode-footer .difference-bar')).not.toBeNull();
   });
 
   it('pauses blink on the side that is currently shown', async () => {
@@ -410,8 +474,7 @@ describe('Compare', () => {
   it('warns before discarding an unsaved comparison', async () => {
     await open();
     await add('A');
-    button('New', target).click();
-    flushSync();
+    await startNew();
 
     const warning = document.querySelector('[role="alertdialog"]');
     expect(warning.textContent).toContain('Discard unsaved changes?');
@@ -419,11 +482,12 @@ describe('Compare', () => {
     flushSync();
     expect(target.querySelectorAll('.surface-shell')).toHaveLength(1);
 
-    button('New', target).click();
-    flushSync();
+    await startNew();
     button('Discard changes', document.querySelector('[role="alertdialog"]')).click();
-    flushSync();
-    expect(target.querySelectorAll('.empty-slot')).toHaveLength(2);
+    await settle();
+    // back on the opening pair, which without a release list is B alone
+    expect(target.querySelectorAll('.surface-shell')).toHaveLength(1);
+    expect(target.querySelector('.surface-label strong').textContent).toBe('B');
   });
 
   it('gives each source its own layers and keeps export choices in one modal', async () => {
@@ -508,11 +572,10 @@ describe('Compare', () => {
     expect(post).toHaveBeenCalledWith(
       '/api/cases/case-a/compare/sessions',
       expect.objectContaining({
-        spec: expect.objectContaining({ frame: { points: [[10, 5], [410, 365]] } }),
+        spec: expect.objectContaining({ frame: { points: [[10, 5], [410, 365]], angle: 0 } }),
       })
     );
-    button('New', target).click();
-    flushSync();
+    await startNew();
     expect(target.querySelector('.export-frame')).toBeNull();
   });
 
@@ -645,9 +708,8 @@ describe('Compare', () => {
       })
     );
 
-    button('New', target).click();
-    flushSync();
-    expect(target.querySelectorAll('.empty-slot')).toHaveLength(2);
+    await startNew();
+    expect(target.querySelector('input[aria-label="Comparison name"]').value).toBe('Comparison');
     button('Open', target).click();
     await settle();
     button('Harbour change', document.querySelector('[role="dialog"]')).click();
@@ -660,36 +722,32 @@ describe('Compare', () => {
     expect(engines.at(-1).camera()).toEqual(expect.objectContaining({ lat: 43.3, lon: 5.4, zoom: 18 }));
   });
 
-  it('puts the imagery a run would sweep on the maps, and shows one for one date', async () => {
+  it('saves Difference as a switch beside the view', async () => {
     await open();
     await add('A');
     await add('B', 'Esri Wayback');
-    // Outside Detect the source cards lead.
-    expect(target.querySelector('.source-bar')).not.toBeNull();
-
-    button('Detect', target).click();
-    await settle();
-    const dock = () => target.querySelector('.cmp-dock');
-    const stage = () => target.querySelector('.compare-stage');
-    expect(stage().classList.contains('solo')).toBe(false);
-    // Inside it, one place to choose imagery, and the maps follow it: Detect
-    // reads Sentinel-2 bands, so world imagery and Wayback hand over the wheel.
-    expect(target.querySelector('.source-bar')).toBeNull();
-    expect(dock().textContent).toContain('Detect reads Sentinel-2, so the maps now show it.');
-    expect(target.querySelectorAll('.surface-shell .map')).toHaveLength(2);
-
-    const picker = target.querySelector('select[aria-label="Analyzer"]');
-    picker.value = 'solo';
-    picker.dispatchEvent(new Event('change', { bubbles: true }));
-    await settle();
-    // One date to read, so one map, and no reference image asked for.
-    expect(stage().classList.contains('solo')).toBe(true);
-    expect(dock().textContent).not.toContain('Reference A');
-
-    button('Side by side', target).click();
+    button('Fade', target).click();
+    button('Difference', target).click();
     flushSync();
-    expect(stage().classList.contains('solo')).toBe(false);
-    expect(target.querySelector('.source-bar')).not.toBeNull();
+    await settle();
+    button('Save comparison', target).click();
+    flushSync();
+    button('Save comparison', document.querySelector('[role="dialog"]')).click();
+    await settle();
+    const saved = post.mock.calls.find(([path]) => path === '/api/cases/case-a/compare/sessions')[1].spec;
+    expect(saved).toMatchObject({ mode: 'opacity', difference: true, change_assist: { base: 'both' } });
+
+  });
+
+  it('reads a comparison saved with the old Difference mode as side by side with Difference on', async () => {
+    await open();
+    button('Open', target).click();
+    await settle();
+    button('Old difference', document.querySelector('[role="dialog"]')).click();
+    await settle();
+    expect(target.querySelector('.compare-stage').classList.contains('overlay')).toBe(false);
+    expect(button('Side by side', target).getAttribute('aria-pressed')).toBe('true');
+    expect(button('Difference', target).getAttribute('aria-pressed')).toBe('true');
   });
 
   it('discards edits back to the saved version, where New would start over', async () => {

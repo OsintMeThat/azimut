@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { comparePair, sentinelPair, sentinelWindow, waybackPair } from './comparePair.js';
+import { comparePair, radarPair, sentinelPair, sentinelWindow, waybackPair } from './comparePair.js';
 
 const api = (answers) => ({
   get: vi.fn(async (url) => {
@@ -75,5 +75,29 @@ describe('the Copernicus window', () => {
       start: '2025-07-14',
       end: '2026-01-10',
     });
+  });
+});
+
+describe('two radar passes of one point', () => {
+  it('pairs the newest pass with the one before it on the same track', async () => {
+    const client = api({
+      '/sentinel/dates': { dates: [
+        { date: '2026-09-20', time: '17:33:02', orbit: 'ascending' },
+        { date: '2026-09-18', time: '05:42:40', orbit: 'descending' },
+        { date: '2026-09-08', time: '17:32:50', orbit: 'ascending' },
+      ] },
+    });
+    const pair = await radarPair(client, { lat: 51.9, lon: 4.0 }, new Date('2026-09-23T00:00:00Z'));
+    expect(client.get.mock.calls[0][0]).toContain('collection=sentinel1');
+    expect(pair.a.radar).toEqual({ date: '2026-09-08', time: '17:32:50' });
+    expect(pair.b.radar).toEqual({ date: '2026-09-20', time: '17:33:02' });
+    expect(await comparePair(client, 'radar', { lat: 51.9, lon: 4.0 }, new Date('2026-09-23T00:00:00Z')))
+      .toMatchObject({ title: 'Radar · this point' });
+  });
+
+  it('says so when the track has one pass only', async () => {
+    const client = api({ '/sentinel/dates': { dates: [
+      { date: '2026-09-20', time: '17:33:02' }, { date: '2026-09-18', time: '05:42:40' }] } });
+    await expect(radarPair(client, { lat: 1, lon: 2 })).rejects.toThrow(/one pass of this track/);
   });
 });

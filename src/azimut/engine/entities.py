@@ -559,6 +559,8 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
                hint="two map sources, their layers and the shared camera"),
     EntityType("analysis-zones", "Analysis areas", DOCUMENT, "polygon", ANNEX,
                hint="saved geographic areas reusable by any Compare analyzer"),
+    EntityType("analysis-area", "Area", DOCUMENT, "mapArea", ANNEX,
+               hint="a named area shared by detections in this case"),
     # Named "watch" everywhere a user reads it: the type id is storage, and
     # renaming that would migrate files for a word nobody sees.
     EntityType("analysis-follow-up", "Analysis watch", DOCUMENT, "clock", ANNEX,

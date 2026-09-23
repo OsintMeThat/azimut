@@ -609,7 +609,8 @@ def _from_geojson(data: bytes, filename: str) -> tuple[list[dict[str, Any]], str
                 "properties": _properties(
                     name=_first(source, _NAME_KEYS),
                     description=_first(source, _DESCRIPTION_KEYS),
-                    category=category,
+                    category=_text(source.get("category"), MAX_NAME) if document.get("azimut_detect_layer") == 1 else category,
+                    date=source.get("pass_date", "") if document.get("azimut_detect_layer") == 1 else "",
                     # simplestyle-spec, which is what every tool that writes a
                     # styled GeoJSON — geojson.io included — puts the colour in
                     colour=_hex(source.get("marker-color") or source.get("stroke")
@@ -617,6 +618,9 @@ def _from_geojson(data: bytes, filename: str) -> tuple[list[dict[str, Any]], str
                 ),
             }
         )
+        if document.get("azimut_detect_layer") == 1:
+            features[-1]["properties"].update({key: _text(source.get(key), MAX_NAME)
+                for key in ("pass_date", "detector", "area_name", "run_id")})
     return features, _text(document.get("name"), MAX_NAME)
 
 
@@ -1769,6 +1773,26 @@ def add_file(
     parsed = parse(data, filename=filename, title=title or "")
     source = {"kind": "file", "name": filename, "format": parsed["summary"]["format"]}
     return add_source(case, data, parsed, source=source, title=title, icons=icons)
+
+
+def save_detection_snapshot(case: "Case", key: str, title: str,
+                            document: dict[str, Any]) -> dict[str, Any]:
+    """An explicit Detect export, kept independently of its working runs."""
+    data = json.dumps(document, ensure_ascii=False).encode()
+    parsed = parse(data, filename="detect.geojson", title=title)
+    existing = next((r for r in listing(case) if r["source"].get("detection_key") == key), None)
+    if existing is None:
+        return add_source(case, data, parsed, title=title, icons=False,
+                          source={"kind": "file", "name": "detect.geojson", "format": "geojson", "detection_key": key})
+    name = existing["name"]
+    spec = _read_spec(case, name)
+    spec["snapshot"] = _store(case, name, data, parsed, icons=False)
+    spec["summary"] = parsed["summary"]
+    spec["updated_at"] = _now()
+    live = {row["name"] for row in parsed["summary"]["categories"]}
+    spec["hidden"] = [entry for entry in spec.get("hidden", []) if entry in live]
+    _write_spec(case, name, spec)
+    return row(name, spec)
 
 
 def subscribe(

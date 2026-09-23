@@ -620,7 +620,7 @@
       openNotebook(entity.id);
       return;
     }
-    if (['compare-session', 'analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {
+    if (['compare-session', 'analysis-area', 'analysis-zones', 'analysis-follow-up', 'analysis-run'].includes(entity.type)) {
       openEntity(entity);
       return;
     }

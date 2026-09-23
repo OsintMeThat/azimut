@@ -1,78 +1,112 @@
-# Azimut v0.3.0
+# Azimut v0.3.1
 
 Azimut is a local OSINT workspace: media, geolocation work, proofs and notes in
 one portable case folder, on your own machine.
 
-This release rebuilds the map and gives it much more to show, and lets the
-capture extension draw Azimut's own tools over other map sites.
+This release sweeps an area for what appeared, and puts maps made
+elsewhere on yours.
 
-## A new map
+## Detect
 
-The Satellite map now runs on MapLibre. Your providers, captures and map rotation
-work as before, including the Google basemap.
+- **Detect** is a new tab under Map. Draw one or more areas on
+  Sentinel-2 and it sweeps them at full resolution for vessels, fires and gas
+  flares, construction, small spots, any surface change, burn scars, vegetation
+  loss or new water. You can also copy an analyzer and tune your own.
+- Ask for a small, medium or large target instead of setting thresholds. The
+  areas are priced in Copernicus requests before anything is fetched.
+- **Find passes** lists the dates your areas really have, with how much of them
+  each pass covered and how cloudy it was. A finished run says how much it read,
+  so "nothing found" and "never looked" stay apart.
+- Candidates come strongest first, one at a time. **Keep as a pin** files one
+  with its own evidence crop; nothing else reaches the case.
+- Areas can be saved with the case. A watch keeps an analyzer, its areas and a
+  date rule together, and **Run again** repeats the sweep.
+- Detect needs Copernicus credentials in Settings.
 
-- The screen is laid out again: modes in one rail, layers in the right panel,
-  imagery in the map corner, and your position in a status line underneath.
-- Right-click the ground to copy that point in every format, look it up, save it,
-  measure from it, read the sun and moon there, open its imagery history, or open
-  it on another map site.
-- **Esri Wayback** is a basemap now. Pick any World Imagery release, or list only
-  the releases that brought a new picture of the point you are looking at. The
-  chip gives the date the picture was taken, which is often long before the
-  release.
-- Stack overlays that need no key: borders, roads, railways, power lines, sea
-  marks and GPS traces. Add NASA FIRMS fire detections (with a free FIRMS key in
-  Settings) and VIIRS night lights for a day you pick. FIRMS detections remain
-  visible as enlarged squares when you zoom past their native detail.
-- Filter the pins drawn on the map by kind and by folder.
-- Open the map in several tabs. The view is in the address, two tabs can share one
-  camera, and a point saved or a grid swept in one appears at once in the others.
-- A capture can carry a scale bar and a north arrow.
-- Trace a place's uncertainty as a shape around its pin, for a quay or a treeline
-  that a circle describes badly.
+## Compare
 
-## Capture extension
+- Compare opens on a Wayback release from a year ago against today's World
+  Imagery, with no key needed. **New** offers the other starting pairs.
+- "Change assist" is now **Difference**. Its cloud switch uses the same
+  Sentinel-2 cloud and shadow mask as Detect instead of guessing from the
+  picture, so a white roof is no longer taken for a cloud.
+- MNDWI and BSI join the spectral indices. An index draws its line at a stated
+  change, so panning no longer moves it.
+- Tone matching is off by default on a Sentinel-2 pair.
+- Difference is a switch beside the four views rather than a view of its own:
+  its highlights lie over side by side, swipe, fade or blink, on A, B or both.
+  They can blink.
+- Right-click the ground for the point menu.
+- Right-click a point on the Satellite map to open Compare on its last two
+  Wayback pictures or its last two Copernicus passes.
+- An export frame sets what an export shows. Numbered markers and blur boxes can
+  be stamped on the ground.
+- On a turned map, boxes and ellipses are drawn along the screen, and any shape
+  turns from the grip above it. The export frame keeps its shape when the
+  camera turns, and exports upright as drawn.
+- Difference's settings stay put through a read, lie over the highlights, and
+  close on a click outside them.
 
-- On a 2D map site, the extension can now draw Azimut's tools over the page:
-  measure, the case's saved points, sun and moon, a search grid that opens in the
-  app afterwards, NASA FIRMS fires, and floating windows holding the case's own
-  pictures and videos.
-- The scale is read from what each site writes in its address bar, checked site by
-  site in a real browser. On a view the tools cannot work with, such as Street View
-  or a tilted 3D camera, they switch off and say which view they need.
-- Geo Report fills the X or Bluesky composer with the whole thread, one box per
-  post with its pictures attached. Posting stays your click.
-- Reverse Search puts the picture straight into the Lens, Yandex, Bing or TinEye
-  uploader, so one press runs the search.
-- On Chrome, Edge and Brave, updating the extension is a button in Settings.
-  Firefox gets a signed add-on that updates itself, and Settings tells you when
-  your copy is out of step with the app.
-- Mastodon is no longer a Geo Report target. A draft saved for it opens on X.
+## Layers from elsewhere
+
+- Open a KML, KMZ, GeoJSON or GPX file as a map layer, or follow a public Google
+  My Maps or map URL. It keeps its own colours and, if you ask, its own icons,
+  with a legend that filters and a search that jumps to a feature. A layer lives
+  in the case and travels in bundles; its features never become case entities.
+- Add a **GeoConfirmed** conflict over a span of days or dates, or its whole
+  history, optionally only the current view. Events carry GeoConfirmed's own
+  icons, are grouped by faction, and link to their sources and geolocation.
+- Narrow a dated layer (GeoConfirmed, timestamped KML, GPX waypoints) to a period
+  dragged on a strip of its events or picked on a calendar.
+- Added layers start switched off after a reload, so a layer heavy enough to
+  crash the tab cannot do it twice.
+- The map panel opens on its Layers tab. Its Saved tab shows one position at a
+  time: Media, then Places, then Captures. Media draws the case's photos and
+  videos where a relation, a GPS reading or a proof places them, and plays them
+  beside the imagery.
+
+## Proofs
+
+- Turn or crop a panel or an overlay without touching its source. Annotations
+  stay on the same pixels.
+- Stamp numbered markers, counted per colour, and blur boxes that hide what is
+  under them.
+- A proof can carry one sentence, used as its notes and to write the post, and
+  the date its material was taken. That date shows on the Timeline and is stated
+  for the original footage, never for a frame cut from it.
+- Place any point of a proof on a map instead of typing it. Each panel keeps its
+  own point.
 
 ## Elsewhere
 
-- The app opens on **Home**: what is left to do in the case, what was filed
-  recently, and the case's points on a small map. With no case open, it explains
-  what Azimut is and helps you start one.
-- A **Guide** with one section per tool and a few worked examples. The `?` in the
-  top bar opens it on the tool you are using.
-- New case folders keep the name you typed, spaces, accents and non-Latin scripts
-  included, instead of a lowercase ASCII version of it.
-- The Media Library no longer lists satellite captures and extension screenshots by
-  default. Satellite's Saved panel is where they live, and the library's switch
-  still shows them.
-- Auto-stitch sizes the collage canvas to the panorama instead of shrinking it to
-  fit, and you can set the canvas size by hand.
-- In Geo Proof, a shape you just drew stays selected so you can restyle it straight
-  away. The stamp tool stays in hand for marking several things in a row.
-- Sheets are listed newest first.
+- **To-do lists** on Home: named lists of tasks with a progress count, saved with
+  the case and carried in bundles.
+- One date field across the app. Type a day, a month, a year, a time or a range,
+  or build it from a calendar with how sure you are. It says what it understood.
+- File a claim straight from Details, a Board row or a Graph node, with that
+  entity already filled in.
+- Send a picture to Reverse Search from a Media Library row (**Open in…**), or an
+  Inspect frame as cropped, saved or not.
+- A claim is called a claim everywhere. Every icon button has a tooltip, a layer
+  that cannot be switched on says why, Home lists recent work first, and Coords &
+  Sky opens on the point the map is showing.
+- Over another map site, the extension's points tool draws one position at a
+  time, like the app. Its media windows take files up to 512 MB.
 
 ## Fixes
 
-- Thumbnails and metadata enrichment no longer stop for the rest of the session
-  when the background worker dies unexpectedly.
-- Naming a proof's first point, or marking it as the camera position, is now saved
-  when its coordinate field was left empty.
+- Geo Report's map links read as site names, in the app and in the saved
+  Markdown note, instead of internal ids.
+- A tab left open across an update no longer asks for interface files that are
+  gone.
+- A video's thumbnail no longer goes missing when the background worker reaches
+  it before the file's details are written.
+- The Guide describes Inspect's actual tabs, and sends you to the Layers tab for
+  overlays.
+- On Windows, moving the workspace or saving settings no longer fails when an
+  antivirus or the search indexer briefly holds the file.
+- The Wayback map no longer slows down while you pan. Its picker lists every
+  release, and **Changes here** reads a point's history only when you press it.
 
 ## Install or upgrade
 
@@ -86,11 +120,10 @@ On Intel Macs (macOS 14 or newer), install the Python package instead:
 The downloads are unsigned, so your system will warn you the first time. The
 README explains the prompt for each platform.
 
-Firefox users download the signed `azimut-capture-0.3.0.xpi` attached to this
-release, then open `about:addons` and choose the gear menu → **Install Add-on
-From File**. Pair it with the token shown in Settings → Capture extension.
-Chrome, Edge and Brave users install or update the extension from that same
-Settings page.
+The capture extension changed in this release. Chrome, Edge and Brave users
+update it from Settings → Capture extension. Firefox updates the signed add-on by
+itself; a new install uses `azimut-capture-0.3.1.xpi` attached to this release,
+opened from `about:addons` → gear menu → **Install Add-on From File**.
 
 Your existing cases open as they are. No export, migration or manual step is
 needed, and older case bundles still import.

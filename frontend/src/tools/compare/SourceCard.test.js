@@ -93,6 +93,20 @@ describe('SourceCard', () => {
     expect(layerIcons(body)).toBe(1);
   });
 
+  it('dates a Wayback picture apart from the release that published it', () => {
+    const { body } = render(SourceCard, {
+      props: props({
+        providerId: 'esri-wayback',
+        wayback: release({ date: '2026-08-05' }),
+        shown: { fallenBack: false, blocked: false, provider: imagery.find('esri-wayback') },
+        dated: { date: '2015-05-10', source: 'Maxar' },
+      }),
+    });
+    expect(body).toContain('2026-08-05');
+    expect(body).toContain('2015-05-10');
+    expect(body).toContain('Acquired around this date (Maxar)');
+  });
+
   it('shows the acquisition date beside a provider that has no picker', () => {
     const { body } = render(SourceCard, {
       props: props({

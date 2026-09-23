@@ -12,6 +12,7 @@ re-derived per surface.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import HTTPException
@@ -64,6 +65,29 @@ def delete_entities_deep(case: Case, entity_ids: list[str]) -> dict[str, Any]:
                 going_by_id[entity["id"]] = entity
             tombstoned.update(entity["id"] for entity in plan["tombstone"])
         going = list(going_by_id.values())
+
+        # Shared Detect areas must not leave surviving routines with broken references.
+        # Read their stored references under the case lock, without taking the
+        # analyzer worker lock in the opposite order.
+        area_ids = {str(e.get("attrs", {}).get("spec", "")).removesuffix(".json").rsplit("-", 1)[-1]
+                    for e in going if e.get("type") == "analysis-area"}
+        if area_ids:
+            removed_specs = {e.get("attrs", {}).get("spec") for e in going}
+            users = []
+            for routine in case.list_entities():
+                if routine.get("type") != "analysis-follow-up":
+                    continue
+                spec = routine.get("attrs", {}).get("spec")
+                if not spec or spec in removed_specs:
+                    continue
+                try:
+                    saved = json.loads(case.resolve_inside(spec).read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if any(pair.get("area_id") in area_ids for pair in saved.get("area_dates", [])):
+                    users.append(routine["label"])
+            if users:
+                raise HTTPException(409, "Remove this area from these routines first: " + ", ".join(users))
 
         scars: list[dict[str, str]] = []
         losses = link_engine.losses(case, {e["id"] for e in going})

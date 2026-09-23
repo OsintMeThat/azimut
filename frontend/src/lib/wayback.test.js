@@ -5,6 +5,7 @@ import {
   positionOf,
   releaseDate,
   releaseOf,
+  releaseYearBefore,
   stepRelease,
   validRelease,
   visibleReleases,
@@ -107,5 +108,24 @@ describe('the question a point history answers', () => {
     // engine/tiles.py project(50.45, 30.51, 15) → (19161.09, 11049.07)
     expect(changesKey(50.45, 30.51, 15)).toBe('15/19161/11049');
     expect(changesKey(50.45, 30.51, 22).startsWith('19/')).toBe(true);
+  });
+});
+
+describe('the release a "then" side opens on', () => {
+  const today = new Date('2026-09-23T12:00:00Z');
+
+  it('is the newest published a year or more before today', () => {
+    expect(releaseYearBefore(RELEASES, today)).toBe(64776);
+    expect(releaseYearBefore(RELEASES, new Date('2024-06-13T00:00:00Z'))).toBe(25982);
+  });
+
+  it('falls back to the oldest when every release is younger', () => {
+    expect(releaseYearBefore(RELEASES.slice(0, 2), new Date('2024-01-01T00:00:00Z'))).toBe(64776);
+  });
+
+  it('refuses to name the newest, which is today’s imagery again', () => {
+    expect(releaseYearBefore(RELEASES.slice(0, 1), today)).toBeNull();
+    expect(releaseYearBefore([], today)).toBeNull();
+    expect(releaseYearBefore(undefined, today)).toBeNull();
   });
 });

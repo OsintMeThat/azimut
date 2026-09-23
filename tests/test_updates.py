@@ -138,7 +138,7 @@ def test_update_endpoint_with_check_queries_github(client, monkeypatch):
 # The pair below is the contract, and it moves in one direction only: when a
 # shipped file really changes, set the manifest to the current __version__ and
 # record the new digest here (the failing test prints it).
-EXTENSION_VERSION = "0.3.0"
+EXTENSION_VERSION = "0.3.1"
 EXTENSION_PAYLOAD = "207f769e50979032a6052386396ece5972de7ce0f267c60e39e25e78806d5dca"
 
 # The digest itself lives in engine/extinstall.py, because the update button

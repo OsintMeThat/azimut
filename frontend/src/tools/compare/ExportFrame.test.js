@@ -7,6 +7,7 @@
  */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { fromMercator, toMercator } from '../../lib/map/groundFrame.js';
 
 const { default: ExportFrame } = await import('./ExportFrame.svelte');
 
@@ -25,6 +26,37 @@ function fakeEngine() {
   };
 }
 
+/**
+ * A camera at one pixel to the metre, turned by the app's bearing: the map's
+ * clockwise turn, so the compass direction up is its negative. Its matrix is
+ * its own inverse, so the same one maps both ways.
+ */
+function turningEngine() {
+  handlers = {};
+  const engine = { bearing: 0 };
+  const turn = (a, b) => {
+    const t = (-engine.bearing * Math.PI) / 180;
+    return [a * Math.cos(t) - b * Math.sin(t), -a * Math.sin(t) - b * Math.cos(t)];
+  };
+  Object.assign(engine, {
+    on: (name, handler) => { handlers[name] = handler; return () => delete handlers[name]; },
+    latLngToContainerPoint: ({ lon, lat }) => {
+      const [x, y] = turn(...toMercator(lon, lat));
+      return { x: 200 + x, y: 150 + y };
+    },
+    containerPointToLatLng: ({ x, y }) => {
+      const [lon, lat] = fromMercator(...turn(x - 200, y - 150));
+      return { lon, lat };
+    },
+  });
+  return engine;
+}
+
+/** The frame's four corners on screen, read off its outline. */
+const corners = () => [...edge().getAttribute('d').matchAll(/(-?[\d.e-]+),(-?[\d.e-]+)/g)]
+  .map((match) => [Number(match[1]), Number(match[2])]);
+const side = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+
 function press(node, type, x, y) {
   node.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: x, clientY: y }));
   flushSync();
@@ -39,6 +71,9 @@ function stage(props) {
 }
 
 const edge = () => target.querySelector('.edge');
+/** The corner xs of the drawn outline, which is a path now that it can turn. */
+const edgeXs = () => [...edge().getAttribute('d').matchAll(/(-?[\d.]+),(-?[\d.]+)/g)]
+  .map((match) => Number(match[1]));
 
 beforeEach(() => { target = document.createElement('div'); document.body.append(target); });
 afterEach(() => { if (live) unmount(live); target.remove(); });
@@ -51,18 +86,20 @@ it('hands back the ground the drag covered', () => {
   press(root, 'pointermove', 380, 300);
   press(root, 'pointerup', 380, 300);
 
-  expect(onframe).toHaveBeenCalledWith({ points: [[2, 0], [38, 30]] });
+  // The bearing the box was drawn at travels with it, so it can be turned back upright.
+  expect(onframe).toHaveBeenCalledWith({ points: [[2, 0], [38, 30]], angle: 0 });
 });
 
 it('keeps the frame on its ground when the camera moves', () => {
   stage({ frame: { points: [[5, 4], [25, 19]] } });
-  expect(edge().getAttribute('x')).toBe('50.5');
+  expect(Math.min(...edgeXs())).toBeCloseTo(50, 6);
+  expect(Math.max(...edgeXs())).toBeCloseTo(250, 6);
 
   origin.x = 120;
   handlers['view-move']();
   flushSync();
-  expect(edge().getAttribute('x')).toBe('-69.5');
-  expect(edge().getAttribute('width')).toBe('199');
+  expect(Math.min(...edgeXs())).toBeCloseTo(-70, 6);
+  expect(Math.max(...edgeXs()) - Math.min(...edgeXs())).toBeCloseTo(200, 6);
 });
 
 it('treats a press that barely travels as a click, not a frame', () => {
@@ -101,4 +138,41 @@ it('shows B the same box without letting it be drawn on', () => {
   press(root, 'pointerdown', 50, 40);
   press(root, 'pointerup', 250, 190);
   expect(onframe).not.toHaveBeenCalled();
+});
+
+it('records the bearing it was drawn at', () => {
+  const onframe = vi.fn();
+  const engine = turningEngine();
+  engine.bearing = 35;
+  const root = stage({ engine, drawing: true, bearing: 35, onframe });
+  press(root, 'pointerdown', 40, 30);
+  press(root, 'pointermove', 380, 280);
+  press(root, 'pointerup', 380, 280);
+  // The map turned 35° clockwise puts compass 325° up.
+  expect(onframe.mock.calls[0][0].angle).toBe(325);
+});
+
+it('keeps its shape when the camera turns, turning with the ground', () => {
+  // The frame used to be the screen box around its two corners, which stretched
+  // and squashed as the camera turned.
+  const engine = turningEngine();
+  engine.bearing = 20;
+  const drawn = [{ x: 100, y: 80 }, { x: 300, y: 200 }]
+    .map((at) => engine.containerPointToLatLng(at)).map(({ lon, lat }) => [lon, lat]);
+  stage({ engine, frame: { points: drawn, angle: 340 } });
+  const [a, b, c] = corners();
+  expect(a[0]).toBeCloseTo(100, 4);
+  expect(c[1]).toBeCloseTo(200, 4);
+  expect(side(a, b)).toBeCloseTo(200, 4);
+  expect(side(b, c)).toBeCloseTo(120, 4);
+
+  engine.bearing = 65;
+  handlers['view-move']();
+  flushSync();
+  const [e, f, g, h] = corners();
+  expect(side(e, f)).toBeCloseTo(200, 4);
+  expect(side(f, g)).toBeCloseTo(120, 4);
+  expect(side(e, g)).toBeCloseTo(side(f, h), 4);
+  // The map turned 45° further clockwise, and the frame with the ground.
+  expect((Math.atan2(f[1] - e[1], f[0] - e[0]) * 180) / Math.PI).toBeCloseTo(45, 4);
 });

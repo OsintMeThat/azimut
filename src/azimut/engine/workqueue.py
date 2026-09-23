@@ -95,6 +95,23 @@ def _settle(case: "CaseType", job: dict[str, Any]) -> bool:
     return False
 
 
+def let_others_through(case: "CaseType", kind: str) -> None:
+    """Settle the case's queued jobs of every *other* kind, from inside a long
+    ``kind`` job, on the calling thread.
+
+    A handler that works in steps calls this between them, holding no lock. It
+    keeps the one-worker rule, because nothing runs beside anything else: the
+    long job simply pauses while the short ones go through. Jobs of ``kind``
+    itself keep their place in the queue.
+    """
+    others = [name for name in HANDLERS if name != kind]
+    if not others:
+        return
+    while (job := case.claim_job(kinds=others)) is not None:
+        if _settle(case, job):
+            raise JobRemoved()
+
+
 def drain(case: "CaseType") -> int:
     """Process every queued job for one case, one at a time, in the calling
     thread. Returns how many jobs were handled. Synchronous and deterministic —

@@ -36,6 +36,9 @@ export function displayGroups(rows, project, radius = 24) {
 /** A source as a date; runs saved before Detect went Copernicus-only name their release. */
 export function sourceLabel(source) {
   if (source.provider === 'esri-wayback') return `Wayback release ${source.release}`;
+  if (source.provider === 'sentinel1' && source.date && source.time) {
+    return `${source.date} ${source.time.slice(0, 5)} UTC`;
+  }
   return source.date || 'no date yet';
 }
 
@@ -161,7 +164,8 @@ export function coverage(zones, grid) {
  */
 export const SECONDS_PER_FRAME = 0.35;
 
-/** Frames fetched per tile: for each date, the picture reviewed and the bands measured. */
+/** Frames fetched per tile: for each date, the picture reviewed and the bands measured.
+ *  The catalogue states its own figure per method (`frames`), which wins. */
 export function framesPerTile({ single = false } = {}) {
   return single ? 2 : 4;
 }
@@ -186,4 +190,36 @@ export function viewZone(bounds, name = 'Current view') {
     kind: 'rect',
     points: [[west, north], [east, south]],
   };
+}
+
+/**
+ * The built-ins as the catalogue groups them, by what an analyst looks for,
+ * and the analyst's own after them. A built-in no group names still shows,
+ * under Other, so a catalogue ahead of this list never hides one.
+ */
+export function analyzerGroups(catalogue) {
+  const builtins = catalogue?.builtins ?? [];
+  const groups = catalogue?.groups?.length
+    ? catalogue.groups.map((group) => ({
+        label: group.label,
+        list: group.recipes.map((id) => builtins.find((entry) => entry.id === id)).filter(Boolean),
+      }))
+    : [{ label: 'Built in', list: builtins }];
+  const grouped = new Set(groups.flatMap((group) => group.list.map((entry) => entry.id)));
+  const rest = builtins.filter((entry) => !grouped.has(entry.id));
+  if (rest.length) groups.push({ label: 'Other', list: rest });
+  if (catalogue?.custom?.length) groups.push({ label: 'Mine', list: catalogue.custom });
+  return groups.filter((group) => group.list.length);
+}
+
+/**
+ * Why an analyzer cannot run yet, or '' when it can: every one without a
+ * Copernicus key, the radar ones until Settings has found their layer.
+ */
+export function analyzerLock(entry, catalogue) {
+  if (!entry || !catalogue) return '';
+  if (catalogue.copernicus_key === false) return 'Needs a free Copernicus key';
+  const method = catalogue.methods?.find((candidate) => candidate.id === entry.method);
+  if (method?.sensor === 'sentinel1' && !catalogue.radar_layer) return 'Needs the Sentinel-1 layer';
+  return '';
 }

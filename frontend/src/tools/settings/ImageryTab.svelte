@@ -12,7 +12,9 @@
    * before it matters, and past `BLOCK_SHARE` the app falls back to free imagery
    * unless the analyst says otherwise.
    */
+  import { tick } from 'svelte';
   import Icon from '../../components/Icon.svelte';
+  import RadarLayer from './RadarLayer.svelte';
   import {
     monthCount,
     tilesOfFree,
@@ -43,6 +45,10 @@
     saveFreeTier,
     eco = $bindable(),
     ecoMaxZoom = $bindable(),
+    /** The Sentinel-1 layer radar reads, inside the Copernicus card. */
+    radarLayer = $bindable(''),
+    /** A card asked for from another tool, opened once and scrolled to. */
+    focusCard = $bindable(''),
   } = $props();
 
   const perProvider = (value) => Object.fromEntries(KEYED.map((k) => [k.id, value(k)]));
@@ -52,6 +58,14 @@
   let open = $state(perProvider(() => false));
   let shown = $state(perProvider(() => false));
   let termsOpen = $state(false);
+
+  $effect(() => {
+    const id = focusCard;
+    if (!id || !(id in open)) return;
+    open[id] = true;
+    focusCard = '';
+    void tick().then(() => document.getElementById(`card-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+  });
 </script>
 
 <section class="group">
@@ -74,7 +88,7 @@
         overrides,
         tiers,
       })}
-      <div class="card" class:open={open[k.id]}>
+      <div class="card" class:open={open[k.id]} id="card-{k.id}">
         <div class="card-head">
           <button
             class="card-toggle"
@@ -173,6 +187,10 @@
                 <Icon name="alert" size={12} />
                 {testResult[k.id].detail}
               </p>
+            {/if}
+
+            {#if k.id === 'sentinelhub' && keys[k.id]}
+              <RadarLayer bind:layer={radarLayer} onchanged={load} />
             {/if}
 
             <p class="overage">{k.cost}. {k.overage}</p>

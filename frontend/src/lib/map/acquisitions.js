@@ -30,12 +30,18 @@ export const LOOKBACK_WINDOWS = Object.freeze([
 export const FULL_COVER = 0.98;
 
 /** The request body for a lookup over the areas currently drawn. */
-export function acquisitionQuery(zones, days, now = new Date()) {
+export function acquisitionQuery(zones, days, now = new Date(), collection = 'sentinel2') {
   return {
     zones: zones.map(({ id, name, kind, points }) => ({ id, name, kind, points })),
     start: daysBefore(days, now),
     end: isoDay(now),
+    collection,
   };
+}
+
+/** One pass as a key: a radar day can hold two passes, morning and evening. */
+export function passKey(entry) {
+  return entry?.time ? `${entry.date}T${entry.time}` : entry?.date ?? '';
 }
 
 /**

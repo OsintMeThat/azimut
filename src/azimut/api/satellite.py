@@ -11,7 +11,7 @@ import tempfile
 # the sky routes need the datetime classes of the same names.
 from datetime import date as calendar_date, datetime, time as wall_clock, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, Form, HTTPException, Query, UploadFile
@@ -44,6 +44,9 @@ from .media import with_thumb_state
 from .. import layout
 
 router = APIRouter(prefix="/api", tags=["satellite"])
+
+# How many layers a search for the Sentinel-1 one may ask about, each a request.
+MAX_RADAR_PROBES = 6
 
 
 # A live map pans through dozens of tiles at once, all proxied through here. A
@@ -257,8 +260,11 @@ def sentinel_layers(check: bool = False) -> dict[str, Any]:
 
 
 @router.get("/satellite/sentinel/dates")
-def sentinel_dates(lat: float, lon: float, start: str, end: str) -> dict[str, Any]:
-    """Sentinel-2 acquisition dates over a point, newest first.
+def sentinel_dates(
+    lat: float, lon: float, start: str, end: str,
+    collection: Literal["sentinel2", "sentinel1"] = "sentinel2",
+) -> dict[str, Any]:
+    """Sentinel-2 acquisition dates over a point, newest first, or Sentinel-1 passes.
 
     User-triggered only (a date picker being opened/moved) — never on mount.
     Billed as one request on the sentinelhub meter: a WFS query is ~0.01 PU
@@ -273,7 +279,10 @@ def sentinel_dates(lat: float, lon: float, start: str, end: str) -> dict[str, An
             "free tier is used; enable the override in Settings to keep going",
         )
     try:
-        found = sentinel.dates(instance, lat, lon, start, end)
+        found = sentinel.dates(instance, lat, lon, start, end, collection=collection)
+    except ValueError as exc:
+        config.record_usage("sentinelhub", 1)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"date lookup failed: {exc}") from exc
     config.record_usage("sentinelhub", 1)
@@ -286,6 +295,8 @@ class AcquisitionQuery(BaseModel):
     zones: list[Zone] = Field(min_length=1, max_length=32)
     start: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     end: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    # Radar methods sweep Sentinel-1 passes, which come with a time and a direction.
+    collection: Literal["sentinel2", "sentinel1"] = "sentinel2"
 
 
 @router.post("/satellite/sentinel/acquisitions")
@@ -309,7 +320,8 @@ def sentinel_acquisitions(body: AcquisitionQuery) -> dict[str, Any]:
         )
     try:
         found = sentinel.acquisitions(
-            instance, [list(zone.ring()) for zone in body.zones], body.start, body.end
+            instance, [list(zone.ring()) for zone in body.zones], body.start, body.end,
+            collection=body.collection,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -317,6 +329,58 @@ def sentinel_acquisitions(body: AcquisitionQuery) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"pass lookup failed: {exc}") from exc
     config.record_usage("sentinelhub", 1)
     return {**found, "start": body.start, "end": body.end}
+
+
+class RadarLayerQuery(BaseModel):
+    """A layer to check, or none to look for one."""
+
+    layer: str = Field(default="", pattern=r"^$|^[A-Z0-9_]{1,40}$")
+
+
+@router.post("/satellite/sentinel1/layer")
+def sentinel1_layer(body: RadarLayerQuery) -> dict[str, Any]:
+    """Find or check the Sentinel-1 layer Detect's radar methods read, and keep it.
+
+    Copernicus says which collections an instance's layers read (WFS, free) but
+    not which layer reads which, so each candidate is asked with one tiny render
+    that only a Sentinel-1 layer with VV and VH can answer. Looking skips the
+    layers the Sentinel-2 templates ship and stops at the first that answers.
+    User-triggered only; every probe is one request on the meter.
+    """
+    instance = _sentinel_instance()
+    if config.usage_blocked("sentinelhub"):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Sentinel Hub is paused: {int(config.BLOCK_SHARE * 100)}% of the monthly "
+            "free tier is used; enable the override in Settings to keep going",
+        )
+    try:
+        if body.layer:
+            candidates = [body.layer]
+        else:
+            if not sentinel.serves_sentinel1(instance):
+                return {"ok": False, "layer": "", "serves": False, "tried": [],
+                        "detail": "this instance has no Sentinel-1 layer yet"}
+            candidates = [entry["id"] for entry in sentinel.capabilities_layers(instance)
+                          if entry["id"] not in sentinel.TEMPLATE_LAYERS][:MAX_RADAR_PROBES]
+        tried: list[dict[str, Any]] = []
+        for layer in candidates:
+            try:
+                answer = sentinel.probe_sar_layer(instance, layer)
+            finally:
+                config.record_usage("sentinelhub", 1)
+            tried.append(answer)
+            if answer["ok"]:
+                config.update_settings(lambda settings: settings.update(sentinel1_layer=layer))
+                return {**answer, "serves": True, "tried": tried}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"layer check failed: {exc}") from exc
+    detail = (tried[-1]["detail"] if body.layer and tried else
+              "no layer of this instance reads Sentinel-1 VV and VH")
+    return {"ok": False, "layer": body.layer, "serves": None if body.layer else True,
+            "tried": tried, "detail": detail}
 
 
 @router.get("/satellite/sentinel/coverage")
@@ -369,8 +433,9 @@ def wayback_changes(
     """The distinct pictures of a point, newest first, each with the release
     that first published it and when it was taken.
 
-    A few small requests per picture found, so it is asked while the picker is
-    open and answered from memory for the same tile afterwards.
+    A few small requests per picture found, so it is asked only when the
+    analyst asks for the changes, and answered from memory for the same tile
+    afterwards.
     """
     try:
         found = wayback.local_changes(lat, lon, zoom)

@@ -18,8 +18,12 @@
  * Nothing is fetched until a row is pressed: both lookups are requests.
  */
 import { WAYBACK_ID } from '../wayback.js';
+import { RADAR_ID, onTrack } from '../radar.js';
 
 export const SENTINEL_ID = 'sentinel2';
+
+/** How far back a radar lookup asks: a track repeats every six to twelve days. */
+export const RADAR_WINDOW_DAYS = 60;
 
 /** How far back a Copernicus lookup asks. A pass every few days, so half a
  *  year is generous even where cloud hides most of them. */
@@ -38,6 +42,13 @@ export const COMPARE_SOURCES = [
     detail: 'the last two passes over this point',
     /** Only offered when Sentinel-2 is configured. */
     provider: SENTINEL_ID,
+  },
+  {
+    id: 'radar',
+    label: 'Copernicus radar',
+    detail: 'the last two passes of one track, through cloud',
+    /** Only offered once a Sentinel-1 layer is set up. */
+    provider: RADAR_ID,
   },
 ];
 
@@ -108,9 +119,44 @@ export async function sentinelPair(api, { lat, lon }, today = new Date()) {
   };
 }
 
+/**
+ * The two most recent Sentinel-1 passes of one track over a point.
+ *
+ * The newest pass sets the track, and the one before it on that track is its
+ * pair: another track sees the ground from another angle, and that difference
+ * would read as change.
+ */
+export async function radarPair(api, { lat, lon }, today = new Date()) {
+  const start = new Date(today);
+  start.setUTCDate(start.getUTCDate() - RADAR_WINDOW_DAYS);
+  const answer = await api.get(
+    `/api/satellite/sentinel/dates?collection=sentinel1&lat=${lat}&lon=${lon}&start=${day(start)}&end=${day(today)}`
+  );
+  const passes = (answer?.dates ?? []).filter((entry) => entry.time);
+  const [newer] = passes;
+  const older = newer ? onTrack(passes.slice(1), newer.time)[0] : null;
+  if (!newer || !older) {
+    throw new Error(
+      `Copernicus radar has ${newer ? 'one pass of this track' : 'no pass'} over this point in the last two months.`
+    );
+  }
+  const side = (entry) => ({
+    provider: RADAR_ID,
+    radar: { date: entry.date, time: entry.time },
+    present: true,
+  });
+  return {
+    title: 'Radar · this point',
+    a: side(older),
+    b: side(newer),
+    dates: [older.date, newer.date],
+  };
+}
+
 /** The pair for one source id, at one point. */
 export function comparePair(api, source, at, today = new Date()) {
   if (source === 'wayback') return waybackPair(api, at);
   if (source === 'sentinel') return sentinelPair(api, at, today);
+  if (source === 'radar') return radarPair(api, at, today);
   return Promise.reject(new Error(`unknown comparison source: ${source}`));
 }

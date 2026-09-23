@@ -28,9 +28,9 @@
 
 <div class="wb-wrap" bind:this={menuEl}>
   <!-- The wait is on the chip, not only inside the menu: reading a point's
-       history is a walk through Esri's tiles that takes seconds, it runs with
-       the picker shut once it is following the map, and a basemap that answers
-       nothing for that long without saying so reads as a broken one. -->
+       history is a walk through Esri's tiles that takes seconds, the picker
+       can be shut while it runs, and a basemap that answers nothing for that
+       long without saying so reads as a broken one. -->
   <button
     class="chip"
     class:on={wb.menuOpen}
@@ -93,15 +93,15 @@
         <div class="chips">
           <button
             class="chip-opt"
-            class:on={wb.changesOnly}
-            onclick={() => wb.setChangesOnly(true)}
-            title="Only releases showing a different picture at the crosshair"
-          >Changes here</button>
-          <button
-            class="chip-opt"
             class:on={!wb.changesOnly}
             onclick={() => wb.setChangesOnly(false)}
           >Every release</button>
+          <button
+            class="chip-opt"
+            class:on={wb.changesOnly}
+            onclick={() => wb.setChangesOnly(true)}
+            title="Read which releases show a different picture at the crosshair"
+          >Changes here</button>
         </div>
 
         {#if wb.changesOnly}
@@ -115,7 +115,7 @@
           {:else if wb.stale}
             <div class="menu-hint">
               <span class="warn">The map moved off this history.</span>
-              <button class="linkish" onclick={() => wb.loadChanges()}>Refresh</button>
+              <button class="linkish" onclick={() => wb.loadChanges()}>Read here</button>
             </div>
           {:else if wb.changes}
             <div class="menu-hint dim">
@@ -143,7 +143,7 @@
           </ul>
 
           <div class="menu-hint dim">
-            Release dates are Esri's; “taken” and the pill under the chip date the pixels.
+            Release dates are Esri's; the pill under the chip dates the pixels on screen.
           </div>
         {/if}
       {/if}

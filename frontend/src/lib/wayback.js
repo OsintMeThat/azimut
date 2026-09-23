@@ -93,3 +93,17 @@ export function changesKey(lat, lon, zoom) {
   const y = Math.floor((0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale);
   return `${z}/${x}/${y}`;
 }
+
+/**
+ * The release a "then" side opens on: the newest published a year or more
+ * before `today`, else the oldest. Null when that would be the newest release,
+ * which is today's World Imagery again.
+ */
+export function releaseYearBefore(releases, today = new Date()) {
+  if (!releases?.length) return null;
+  const cutoff = new Date(today);
+  cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 1);
+  const day = cutoff.toISOString().slice(0, 10);
+  const found = releases.find((entry) => entry.date <= day) ?? releases.at(-1);
+  return found === releases[0] ? null : found.release;
+}

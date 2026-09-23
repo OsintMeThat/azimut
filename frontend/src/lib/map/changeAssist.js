@@ -13,6 +13,8 @@
  * The detection itself lives in `changeDetect.js` and runs in a worker.
  */
 
+import { RADAR_ID, sameTrack } from '../radar.js';
+
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 
 export const CHANGE_METHODS = Object.freeze([
@@ -71,15 +73,13 @@ export const CHANGE_PALETTES = Object.freeze({
 export const CHANGE_CLASSES = Object.freeze(['gain', 'loss', 'changed']);
 
 /**
- * What the highlighted pixels are laid over. One image answers "where did it
- * change"; the pair answers "change from what into what", which is the question
- * a single base cannot show at all — so it is offered beside the other two
- * rather than buried as a background setting.
+ * Which images carry the highlights, whatever view mode the pair is read in.
+ * Both is the default: "change from what into what" needs the two pictures.
  */
 export const CHANGE_BASES = Object.freeze([
   { id: 'a', label: 'A' },
   { id: 'b', label: 'B' },
-  { id: 'side', label: 'Both' },
+  { id: 'both', label: 'Both' },
 ]);
 
 export const CHANGE_DEFAULTS = Object.freeze({
@@ -104,8 +104,7 @@ export const CHANGE_DEFAULTS = Object.freeze({
   palette: 'directional',
   zones: true,
   opacity: 70,
-  base: 'b',
-  visible: true,
+  base: 'both',
   blink: false,
 });
 
@@ -141,7 +140,6 @@ export function changeSettings(raw = {}) {
     zones: value.zones ?? CHANGE_DEFAULTS.zones,
     opacity: whole(value.opacity, 0, 100, CHANGE_DEFAULTS.opacity),
     base: pick(value.base, CHANGE_BASES.map((entry) => entry.id), CHANGE_DEFAULTS.base),
-    visible: value.visible !== false,
     blink: value.blink === true,
   };
 }
@@ -200,6 +198,34 @@ export function changeCompatibility(a, b) {
       to: dateB,
       notes,
       methods,
+    };
+  }
+
+  if (a.provider === RADAR_ID && b.provider === RADAR_ID) {
+    const passA = a.radar ?? {};
+    const passB = b.radar ?? {};
+    if (!passA.date || !passB.date) return refuse('Choose a dated Sentinel-1 pass on both sides.');
+    if (passA.date === passB.date && passA.time === passB.time) {
+      return refuse('Choose two different Sentinel-1 passes.');
+    }
+    // Another track sees the ground from another angle, and that difference is
+    // not change. The picker marks the passes on the other side's track.
+    if (!sameTrack(passA.time, passB.time)) {
+      return refuse('Radar compares two passes of one track. Pick passes at the same time of day.');
+    }
+    if (!same(layerReading(a), layerReading(b))) {
+      return refuse('Match the reference layers on A and B before comparing pixels.');
+    }
+    return {
+      ok: true,
+      family: 'sentinel1',
+      clouds: false,
+      grade: 'indicative',
+      label: 'Sentinel-1 radar',
+      from: passA.date,
+      to: passB.date,
+      notes: ['Reads the rendered radar picture. Detect measures the backscatter itself.'],
+      methods: PIXEL_METHODS,
     };
   }
 

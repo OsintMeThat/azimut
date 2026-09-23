@@ -7,12 +7,19 @@
  * an arrow at a spot on both. Screen positions are derived on demand through a
  * projection the caller supplies (the live map, or an export frame).
  *
- * Rectangles and ellipses are shapes on the ground: two opposite corners, drawn
- * turned when the map is turned. Measures and polygons read their length and
- * area off the ground, not the screen.
+ * Rectangles and ellipses are shapes on the ground: two opposite corners, and
+ * as `angle` the compass direction that was up on the screen they were drawn
+ * on (`groundFrame`'s bearing, not the app's clockwise turn), so a box drawn on a
+ * turned map runs along that screen and turns with the ground after. Turning a
+ * mark turns its points about its centre, and a box's angle with them.
+ * Measures and polygons read their length and area off the ground, not the
+ * screen.
  */
 
 import { formatArea, formatDistance, haversine, polygonArea } from '../measure.js';
+import {
+  boxCorners, boxPoint, compassAngle, fromMercator, toMercator, turnAbout, turnedBox,
+} from './groundFrame.js';
 import {
   ICON_BOX, PROOF_ICONS, glyphInk, iconByName, iconOrigin, isSolidIcon,
 } from '../proofIcons.js';
@@ -49,6 +56,12 @@ const LIMITS = {
 };
 
 export const canFill = (kind) => kind === 'rect' || kind === 'ellipse' || kind === 'polygon';
+
+/** The kinds whose sides follow an angle rather than the points alone. */
+export const ANGLED = new Set(['rect', 'ellipse']);
+
+/** The kinds a turn means anything to: one point turns about itself. */
+export const TURNABLE = new Set(['arrow', 'line', 'measure', 'rect', 'ellipse', 'polygon', 'freehand']);
 
 const bounded = (value, fallback, min, max) => {
   const number = Number(value);
@@ -91,6 +104,7 @@ export function comparisonAnnotations(value) {
       // so a comparison made on a newer version still shows a mark there.
       number: Math.round(bounded(raw.number, 1, 1, 999)),
       glyph: iconByName(raw.glyph) ? String(raw.glyph) : PROOF_ICONS[0].name,
+      angle: ANGLED.has(raw.kind) ? compassAngle(raw.angle) : 0,
     }];
   });
 }
@@ -148,7 +162,14 @@ export function nextMarkNumber(marks, colour) {
 const asLatLon = ([lon, lat]) => ({ lat, lon });
 
 /** An ellipse inscribed in the ground box of two corners, as a ring of ground points. */
-export function ellipseRing([first, second], steps = 48) {
+export function ellipseRing([first, second], steps = 48, angle = 0) {
+  if (angle) {
+    const box = turnedBox([first, second], angle);
+    return Array.from({ length: steps }, (_, step) => {
+      const turn = (step / steps) * Math.PI * 2;
+      return boxPoint(box, Math.cos(turn) / 2, Math.sin(turn) / 2);
+    });
+  }
   const centreLon = (first[0] + second[0]) / 2;
   const centreLat = (first[1] + second[1]) / 2;
   const radiusLon = Math.abs(second[0] - first[0]) / 2;
@@ -159,15 +180,15 @@ export function ellipseRing([first, second], steps = 48) {
   });
 }
 
-/** A ground box of two corners as its four ground corners. */
-export const boxRing = ([first, second]) => [
-  first, [second[0], first[1]], second, [first[0], second[1]],
-];
+/** A ground box of two corners as its four ground corners, its sides along `angle`. */
+export const boxRing = ([first, second], angle = 0) => (angle
+  ? boxCorners(turnedBox([first, second], angle))
+  : [first, [second[0], first[1]], second, [first[0], second[1]]]);
 
 /** The ground ring a filled mark encloses, or null for a mark with no inside. */
 export function markRing(mark) {
-  if (mark.kind === 'rect') return boxRing(mark.points);
-  if (mark.kind === 'ellipse') return ellipseRing(mark.points);
+  if (mark.kind === 'rect') return boxRing(mark.points, mark.angle ?? 0);
+  if (mark.kind === 'ellipse') return ellipseRing(mark.points, 48, mark.angle ?? 0);
   if (mark.kind === 'polygon') return mark.points;
   return null;
 }
@@ -197,6 +218,42 @@ export function movedMark(mark, dLon, dLat) {
       Math.min(180, Math.max(-180, lon + dLon)),
       Math.min(90, Math.max(-90, lat + dLat)),
     ]),
+  };
+}
+
+/**
+ * The ground point a mark turns about: a box's own centre, or the middle of
+ * whatever the points span.
+ */
+export function markCentre(mark) {
+  if (ANGLED.has(mark.kind)) return fromMercator(...turnedBox(mark.points, mark.angle ?? 0).centre);
+  const metres = mark.points.map((point) => toMercator(...point));
+  const xs = metres.map((point) => point[0]);
+  const ys = metres.map((point) => point[1]);
+  return fromMercator((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2);
+}
+
+/**
+ * Where a box's top edge crosses its own up axis, which is where the grip that
+ * turns it sits: it turns with the box rather than hanging off the screen.
+ * Null for a mark with no sides of its own.
+ */
+export function markTop(mark) {
+  if (!ANGLED.has(mark.kind)) return null;
+  const box = turnedBox(mark.points, mark.angle ?? 0);
+  return boxPoint(box, 0, -Math.sign(box.height || 1) / 2);
+}
+
+/** A mark turned clockwise by `degrees` about `pivot`, its points clamped to the map. */
+export function turnedMark(mark, pivot, degrees) {
+  if (!TURNABLE.has(mark.kind) || !degrees) return mark;
+  return {
+    ...mark,
+    points: mark.points.map((point) => {
+      const [lon, lat] = turnAbout(point, pivot, degrees);
+      return [Math.min(180, Math.max(-180, lon)), Math.min(85, Math.max(-85, lat))];
+    }),
+    ...(ANGLED.has(mark.kind) ? { angle: compassAngle((mark.angle ?? 0) + degrees) } : {}),
   };
 }
 

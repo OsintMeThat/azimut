@@ -107,8 +107,7 @@ def test_compare_session_roundtrip_rename_and_sidebar_delete(client):
         "palette": "colourblind",
         "zones": False,
         "opacity": 71,
-        "base": "side",
-        "visible": True,
+        "base": "a",
         "blink": True,
     }
     spec["blink"] = {"interval": 1200}
@@ -121,6 +120,9 @@ def test_compare_session_roundtrip_rename_and_sidebar_delete(client):
          "points": [[2.2946, 48.8585]], "number": 2, "font_size": 20},
         {"id": "truck", "kind": "icon", "colour": "#38bdf8",
          "points": [[2.2947, 48.8586]], "glyph": "vehicle"},
+        # drawn on a camera turned 30° anticlockwise, so its sides run along that screen
+        {"id": "roof", "kind": "rect", "colour": "#f6a81a",
+         "points": [[2.2945, 48.8584], [2.2950, 48.8580]], "angle": -30},
     ]
     saved = _save(client, cid, "Harbour change", spec)
     assert saved.status_code == 200, saved.text
@@ -149,12 +151,16 @@ def test_compare_session_roundtrip_rename_and_sidebar_delete(client):
     # The overlay's own blink, and a mask margin in ground metres because the
     # reading follows the camera.
     assert (assist["blink"], assist["cloud_margin"]) == (True, 80)
+    assert assist["base"] == "a"
+    assert loaded["spec"]["difference"] is False
     assert loaded["spec"]["blink"] == {"interval": 1200}
     assert loaded["spec"]["annotations"][0]["side"] == "a"
     assert loaded["spec"]["annotations"][1]["points"][2] == [2.30, 48.86]
     # the two stamps: one press, one point, and what each one carries
     assert loaded["spec"]["annotations"][2]["number"] == 2
     assert loaded["spec"]["annotations"][3]["glyph"] == "vehicle"
+    assert loaded["spec"]["annotations"][4]["angle"] == 330
+    assert loaded["spec"]["annotations"][0]["angle"] == 0
 
     entity = _entities(cid, "compare-session")[0]
     renamed = _save(client, cid, "Harbour after", rename_from="Harbour change")
@@ -187,7 +193,11 @@ def test_compare_session_roundtrip_rename_and_sidebar_delete(client):
         lambda spec: spec.update(frame={"points": [[2, 48]]}),
         lambda spec: spec.update(frame={"points": [[2, 48], [2, 48]]}),
         lambda spec: spec.update(frame={"points": [[2, 48], [200, 48]]}),
+        lambda spec: spec.update(frame={"points": [[2, 48], [3, 47]], "angle": "north"}),
         lambda spec: spec.update(change_assist={"method": "ratio"}),
+        # Difference is a switch over the view now, not a mode
+        lambda spec: spec.update(mode="change"),
+        lambda spec: spec.update(change_assist={"base": "side"}),
         # a stamp is one point, and its number is a count rather than a label
         lambda spec: spec.update(annotations=[{
             "id": "x", "kind": "number", "colour": "#ffffff", "points": [[2, 48], [3, 48]],
@@ -218,19 +228,20 @@ def test_compare_session_keeps_google_maps_js_as_a_reopenable_source(client):
 def test_compare_session_keeps_an_optional_export_frame_on_the_ground(client):
     cid = _case(client, "Compare frame")
     spec = _spec()
-    spec["frame"] = {"points": [[2.2945, 48.8584], [2.2961, 48.8572]]}
+    spec["frame"] = {"points": [[2.2945, 48.8584], [2.2961, 48.8572]], "angle": 405}
 
     assert _save(client, cid, "Framed reading", spec).status_code == 200
     loaded = client.get(f"/api/cases/{cid}/compare/sessions/Framed reading").json()
-    assert loaded["spec"]["frame"] == spec["frame"]
+    # The bearing it was drawn at comes back with it, folded into one turn.
+    assert loaded["spec"]["frame"] == {**spec["frame"], "angle": 45}
 
 
 # -- which pairs a pixel reading is fair on --------------------------------------
 
 
-def _pair(a: dict, b: dict, mode: str = "change", method: str = "colour") -> dict:
+def _pair(a: dict, b: dict, difference: bool = True, method: str = "colour") -> dict:
     spec = _spec()
-    spec.update(mode=mode, a=a, b=b, change_assist={"method": method})
+    spec.update(difference=difference, a=a, b=b, change_assist={"method": method})
     return spec
 
 
@@ -296,8 +307,8 @@ def test_change_assist_refuses_misleading_pairs(client, a, b, method, reason):
     refused = _save(client, cid, "Unfair pair", _pair(a, b, method=method))
     assert refused.status_code == 422
     assert reason in refused.json()["detail"]
-    # the same pair is still a perfectly good side-by-side reading
-    assert _save(client, cid, "Plain pair", _pair(a, b, mode="side", method=method)).status_code == 200
+    # the same pair is still a perfectly good reading without the highlights
+    assert _save(client, cid, "Plain pair", _pair(a, b, difference=False, method=method)).status_code == 200
 
 
 def test_change_refusal_needs_both_sides():

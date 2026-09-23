@@ -669,7 +669,7 @@ def test_band_frame_refuses_a_product_it_has_no_evalscript_for():
     with pytest.raises(ValueError):
         sentinel.band_frame("inst-uuid", BOX, 64, 64, "2026-05-11", "thermal", get=get)
     assert sentinel.PRODUCTS == {
-        "vessel", "fire", "surface", "change-sky",
+        "vessel", "fire", "surface", "change-sky", "sar", "sar-picture", "water",
         *(f"index-{name}" for name in ("ndvi", "ndwi", "mndwi", "nbr", "ndbi", "bsi")),
         *(f"change-{name}" for name in ("ndvi", "ndwi", "mndwi", "nbr", "ndbi", "bsi")),
     }

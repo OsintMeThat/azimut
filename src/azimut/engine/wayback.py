@@ -3,16 +3,17 @@
 Esri republishes World Imagery a few times a month and keeps each release
 online under its own number. That archive is what answers "what did this place
 look like before", key-less, from the same imagery the default basemap already
-shows. Three services make it up, and all three are asked only once the analyst
-picks the basemap or opens its picker (local-first):
+shows. Three services make it up, and none is asked before the analyst picks
+the basemap (local-first):
 
 - **The release list** (`CONFIG_URL`), one JSON document naming every release,
-  its publication date and its metadata service.
+  its publication date and its metadata service. Read once the basemap shows.
 - **The tilemap**, which answers for one tile and one release which release
   that tile's pixels were actually published in. Walking it backwards shortlists
   the releases that touched a point without reading every release, the same walk
   Esri's own Wayback app makes. It answers in bytes, not in ground, so the
   shortlist is then settled on the pixels: one tile per candidate, compared.
+  Walked only when the analyst asks for a point's changes.
 - **The metadata service** of each release, which says when the pixels under a
   point were acquired and by which sensor. A release date is when Esri
   published the mosaic, which can be years after the picture was taken.

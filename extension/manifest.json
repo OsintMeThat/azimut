@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Azimut Capture",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "File into Azimut: screenshot the map you are looking at (coordinates from the URL), save any other page as a bookmark, fill a social composer with a thread the app prepared, or open a reverse-image engine with a picture from the case.",
   "permissions": ["activeTab", "scripting", "storage", "notifications"],
   "host_permissions": [

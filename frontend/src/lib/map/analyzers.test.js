@@ -1,19 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  coverage,
-  describeMeasure,
-  displayGroups,
-  framesPerTile,
-  mapSource,
-  readableDuration,
-  marksToZones,
-  sizeBand,
-  sizeOf,
-  sourceLabel,
-  viewZone,
-  zoneMarks,
-  zoneRing,
-} from './analyzers.js';
+import { analyzerGroups, analyzerLock, coverage, describeMeasure, displayGroups, framesPerTile, mapSource, marksToZones, readableDuration, sizeBand, sizeOf, sourceLabel, viewZone, zoneMarks, zoneRing } from './analyzers.js';
 
 describe('saved analysis geometry', () => {
   it('keeps geographic points and names when drawings are edited', () => {
@@ -120,5 +106,29 @@ describe('what a candidate says about itself', () => {
     expect(sizeBand({ min_area: 20_000, max_area: 0 })).toContain('From 2 ha up');
     expect(sizeBand({ min_area: 400, max_area: 8000 })).toContain('400 m² to 8000 m²');
     expect(sizeBand({ min_area: 0, max_area: 0 })).toContain('Any size');
+  });
+});
+
+describe('the analyzer list', () => {
+  const catalogue = {
+    builtins: [{ id: 'boats', method: 'vessels' }, { id: 'radar-vessels', method: 'sar-vessels' }, { id: 'new', method: 'surface' }],
+    custom: [{ id: 'custom-1', method: 'vessels' }],
+    methods: [{ id: 'vessels', sensor: 'sentinel2' }, { id: 'sar-vessels', sensor: 'sentinel1' }, { id: 'surface', sensor: 'sentinel2' }],
+    groups: [{ id: 'vessels', label: 'Vessels', recipes: ['radar-vessels', 'boats'] }],
+    copernicus_key: true,
+    radar_layer: '',
+  };
+
+  it('groups the built-ins by what they look for, and shows one no group names', () => {
+    expect(analyzerGroups(catalogue).map((group) => [group.label, group.list.map((entry) => entry.id)])).toEqual([
+      ['Vessels', ['radar-vessels', 'boats']], ['Other', ['new']], ['Mine', ['custom-1']]]);
+    expect(analyzerGroups({ builtins: [{ id: 'a' }] })).toEqual([{ label: 'Built in', list: [{ id: 'a' }] }]);
+  });
+
+  it('locks every analyzer without a key, and radar ones without their layer', () => {
+    expect(analyzerLock(catalogue.builtins[0], catalogue)).toBe('');
+    expect(analyzerLock(catalogue.builtins[1], catalogue)).toBe('Needs the Sentinel-1 layer');
+    expect(analyzerLock(catalogue.builtins[1], { ...catalogue, radar_layer: 'RADAR' })).toBe('');
+    expect(analyzerLock(catalogue.builtins[0], { ...catalogue, copernicus_key: false })).toBe('Needs a free Copernicus key');
   });
 });

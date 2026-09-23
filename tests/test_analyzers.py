@@ -8,6 +8,7 @@ import pytest
 from PIL import Image
 
 from azimut import config, layout
+from azimut.api import analyzers as analyzers_api
 from azimut.engine import analyzers, tilecache, workqueue
 from azimut.engine.analysis_models import (
     BUILTINS,
@@ -67,6 +68,9 @@ def scenario(client, monkeypatch):
 def run(client, case, body):
     result = client.post(f"/api/cases/{case.id}/analysis/runs", json=body)
     assert result.status_code == 200, result.text
+    if result.json().get("duplicates"):
+        result = client.post(f"/api/cases/{case.id}/analysis/runs", json={**result.json()["input"], "run_anyway": True})
+        assert result.status_code == 200, result.text
     workqueue.drain(case)
     return client.get(f"/api/cases/{case.id}/analysis/runs/{result.json()['id']}").json()
 
@@ -120,8 +124,8 @@ def test_keeping_a_candidate_is_the_only_thing_that_reaches_the_case(client, sce
     assert places == []          # candidates are not places until one is kept
     endpoint = f"/api/cases/{case.id}/analysis/runs/{saved['id']}/results/{row['id']}"
 
-    # Dismissing says so and leaves nothing behind.
-    assert client.patch(endpoint, json={"review": "dismissed"}).json()["review"] == "dismissed"
+    # Keeping within a run leaves the case's entities alone.
+    assert client.patch(endpoint, json={"review": "noted"}).json()["review"] == "noted"
     assert [e for e in case.list_entities() if e["type"] == "place"] == []
 
     # Keeping is one act: it records the verdict and files the pin together.
@@ -136,6 +140,7 @@ def test_keeping_a_candidate_is_the_only_thing_that_reaches_the_case(client, sce
     assert client.delete(endpoint + "/promote").json()["result"]["review"] == "new"
     assert case.get_entity(kept["entity"]["id"]) is None
     assert client.patch(endpoint, json={"review": "dismissed"}).status_code == 200
+    assert client.get(endpoint + "/preview").status_code == 404
 
 
 def test_a_candidate_preview_is_enlarged_so_its_pixels_can_be_read(client, scenario):
@@ -150,7 +155,46 @@ def test_a_candidate_preview_is_enlarged_so_its_pixels_can_be_read(client, scena
         zoom = round(320 / crop)
         assert zoom > 1
         assert preview.width == 2 * (box[2] + 2 * 20) * zoom + 8
-        assert preview.height == (box[3] + 2 * 20) * zoom + 48
+        # a band of labels above, and two lines of point and attribution below
+        assert preview.height == (box[3] + 2 * 20) * zoom + 24 + 40
+
+
+def test_a_candidate_picture_says_when_and_where_it_was_taken(client, scenario):
+    """A pinned crop outlives the run that made it, so its face carries the
+    date of each image and the point, not only the letters."""
+    case, body = scenario
+    saved = run(client, case, body)
+    row = saved["results"][0]
+    sources = [saved["frames"][key]["source"] for key in row["parts"][0]["frames"]]
+    labels, foot = analyzers_api.preview_captions(saved, row, sources)
+    lon, lat = row["coordinates"]
+    assert labels == [f"A · {saved['input']['a']['date']}", f"B · {saved['input']['b']['date']}"]
+    assert foot == [f"{lat:.5f}, {lon:.5f}", "Copernicus Sentinel data / Sentinel Hub"]
+    assert analyzers_api.preview_captions(saved, row, sources[-1:])[0] == [saved["input"]["b"]["date"]]
+    endpoint = f"/api/cases/{case.id}/analysis/runs/{saved['id']}/results/{row['id']}"
+    pinned = client.post(endpoint + "/promote", json={"title": "Checked"}).json()
+    with Image.open(case.resolve_inside(pinned["image"])) as image:
+        # the lines are drawn, not only composed: the foot holds ink
+        foot_band = image.convert("RGB").crop((0, image.height - 40, image.width, image.height))
+        assert (np.asarray(foot_band) != (20, 24, 32)).any()
+
+
+def test_a_narrow_candidate_picture_still_has_room_for_its_label(client, scenario):
+    """A radar pass names its time too, which is wider than a thin crop."""
+    case, body = scenario
+    saved = run(client, case, body)
+    row = saved["results"][0]
+    for key in row["parts"][0]["frames"]:
+        saved["frames"][key]["source"] = {**saved["frames"][key]["source"], "provider": "sentinel1",
+                                          "time": "16:32:10"}
+    labels, _ = analyzers_api.preview_captions(saved, row, [saved["frames"][key]["source"]
+                                                            for key in row["parts"][0]["frames"]])
+    assert labels[0].endswith("16:32 UTC · radar")
+    row["parts"][0]["box"] = [0, 0, 2, 40]
+    with Image.open(io.BytesIO(analyzers_api.preview_bytes(case, saved, row))) as preview:
+        crop = 2 + 2 * 20
+        zoom = round(320 / (40 + 2 * 20))
+        assert preview.width > 2 * crop * zoom + 8
 
 
 def test_a_candidate_across_a_tile_edge_is_one_candidate_with_one_picture(client, scenario):
@@ -216,7 +260,6 @@ def test_recipe_backup_and_duplicate_preserve_builtin(client):
 def test_cancelled_run_never_fetches_and_does_not_reappear(client, scenario):
     case, body = scenario
     saved = client.post(f"/api/cases/{case.id}/analysis/runs", json=body).json()
-    assert client.post(f"/api/cases/{case.id}/analysis/runs", json=body).status_code == 409
     url = f"/api/cases/{case.id}/analysis/runs/{saved['id']}"
     assert client.delete(url).status_code == 409
     assert client.post(url + "/cancel").json()["status"] == "cancelled"
@@ -224,6 +267,147 @@ def test_cancelled_run_never_fetches_and_does_not_reappear(client, scenario):
     assert client.get(url).json()["frames"] == {}
     assert client.delete(url).status_code == 200
     assert client.get(url).status_code == 404
+
+
+def test_runs_wait_their_turn_and_one_detection_is_never_swept_twice_at_once(client, scenario):
+    case, body = scenario
+    base = f"/api/cases/{case.id}/analysis"
+    first = client.post(f"{base}/runs", json=body).json()
+    second = client.post(f"{base}/runs", json={**body, "title": "Another pass"}).json()
+    assert [first["status"], second["status"]] == ["queued", "queued"]
+    watch = client.post(f"{base}/followups", json={**body, "title": "Harbour"}).json()
+    queued = client.post(f"{base}/followups/{watch['id']}/run")
+    assert queued.status_code == 200, queued.text
+    again = client.post(f"{base}/followups/{watch['id']}/run")
+    assert again.status_code == 409
+    assert "already queued or running" in again.json()["detail"]
+    workqueue.drain(case)
+    statuses = {row["id"]: row["status"] for row in client.get(f"{base}/runs").json()}
+    assert statuses == {first["id"]: "ready", second["id"]: "ready", queued.json()["id"]: "ready"}
+    # finished, the same detection can go again
+    assert client.post(f"{base}/followups/{watch['id']}/run").status_code == 200
+
+
+def test_a_saved_detection_runs_as_it_was_saved(client, scenario):
+    case, body = scenario
+    base = f"/api/cases/{case.id}/analysis"
+    watch = client.post(f"{base}/followups", json={**body, "title": "Harbour weekly"}).json()
+    started = client.post(f"{base}/followups/{watch['id']}/run").json()
+    assert started["title"] == "Harbour weekly"
+    assert started["input"]["followup_id"] == watch["id"]
+    assert Zone.model_validate(started["input"]["zones"][0]).ring() == Zone.model_validate(body["zones"][0]).ring()
+    assert started["input"]["zones"][0]["id"] == watch["area_dates"][0]["area_id"]
+    assert client.post(f"{base}/followups/abcdefabcdef/run").status_code == 404
+    # A watch saved against Wayback reopens undated, and says so rather than failing later.
+    analyzers.save(case, "followups", {**deepcopy(body), "title": "Old", "followup_id": None,
+                                       "a": {"provider": "esri-wayback", "release": 3}})
+    old = next(row for row in client.get(f"{base}/followups").json() if row["title"] == "Old")
+    refused = client.post(f"{base}/followups/{old['id']}/run")
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == "choose a reference date for each area"
+
+
+def test_lists_say_what_each_item_looks_for_and_what_is_left_to_review(client, scenario):
+    case, body = scenario
+    base = f"/api/cases/{case.id}/analysis"
+    watch = client.post(f"{base}/followups", json={**body, "title": "Harbour"}).json()
+    client.post(f"{base}/followups/{watch['id']}/run")
+    workqueue.drain(case)
+    [listed] = client.get(f"{base}/followups").json()
+    assert listed["analyzer"] == body["recipe"]["name"] and listed["areas"] == 1
+    # the shapes travel with the row, so the map can draw every watched area
+    assert Zone.model_validate(listed["zones"][0]).ring() == Zone.model_validate(body["zones"][0]).ring()
+    assert listed["date_rule"] == "manual" and listed["colour"] == body["recipe"]["colour"]
+    [ran] = client.get(f"{base}/runs").json()
+    assert ran["followup_id"] == watch["id"]
+    assert ran["dates"] == [body["a"]["date"], body["b"]["date"]]
+    assert ran["count"] == 1 and ran["to_review"] == 1 and ran["total"] == 1
+    result = client.get(f"{base}/runs/{ran['id']}").json()["results"][0]
+    client.patch(f"{base}/runs/{ran['id']}/results/{result['id']}", json={"review": "dismissed"})
+    assert client.get(f"{base}/runs").json()[0]["to_review"] == 0
+
+
+def test_a_sweep_lets_other_queued_work_through_between_its_tiles(client, scenario, monkeypatch):
+    case, body = scenario
+    monkeypatch.setattr(workqueue, "HANDLERS", dict(workqueue.HANDLERS))
+    seen = []
+    workqueue.register("probe", lambda c, job: seen.append(
+        [row["status"] for row in analyzers.listing(c, "runs")]))
+    client.post(f"/api/cases/{case.id}/analysis/runs", json=body)
+    workqueue.enqueue(case, "probe", payload={})
+    workqueue.drain(case)
+    # queued after the sweep, settled while it was still running
+    assert seen == [["running"]]
+    assert analyzers.listing(case, "runs")[0]["status"] == "ready"
+
+
+def test_a_candidate_can_be_kept_in_the_detections_view_without_touching_the_case(client, scenario):
+    case, body = scenario
+    base = f"/api/cases/{case.id}/analysis"
+    watch = client.post(f"{base}/followups", json={**body, "title": "Harbour", "note": "Weekly look"}).json()
+    saved = run(client, case, {**body, "followup_id": watch["id"]})
+    row = saved["results"][0]
+    endpoint = f"{base}/runs/{saved['id']}/results/{row['id']}"
+    before = len(case.list_entities())
+    noted = client.patch(endpoint, json={"review": "noted"}).json()
+    assert noted["review"] == "noted" and noted["entity_id"] is None
+    # nothing reaches the case: no pin, no evidence file
+    assert len(case.list_entities()) == before
+    [found] = client.get(f"{base}/followups/{watch['id']}/findings").json()
+    assert found["id"] == row["id"] and found["run_id"] == saved["id"]
+    assert found["date"] == body["b"]["date"] and found["run_title"] == saved["title"]
+    # a dismissal takes it back out of the findings
+    client.patch(endpoint, json={"review": "dismissed"})
+    assert client.get(f"{base}/followups/{watch['id']}/findings").json() == []
+    assert client.post(endpoint + "/promote", json={"title": "Gone"}).status_code == 404
+    # A later sweep can find the dismissed candidate again.
+    saved = run(client, case, {**body, "followup_id": watch["id"]})
+    endpoint = f"{base}/runs/{saved['id']}/results/{saved['results'][0]['id']}"
+    client.post(endpoint + "/promote", json={"title": "Kept change"})
+    [pinned] = client.get(f"{base}/followups/{watch['id']}/findings").json()
+    assert pinned["review"] == "kept" and pinned["entity_id"]
+    assert next(r for r in client.get(f"{base}/runs").json() if r["id"] == saved["id"])["marked"] == 1
+
+
+def test_a_routine_relaunched_on_a_chosen_pass_asks_the_catalogue_nothing(client, scenario):
+    case, body = scenario
+    base = f"/api/cases/{case.id}/analysis"
+    routine = {**deepcopy(body), "title": "Harbour", "date_rule": "latest_previous"}
+    watch = client.post(f"{base}/followups", json=routine).json()
+    # `scenario` makes any network call an error, so a lookup here would fail the run
+    started = client.post(f"{base}/followups/{watch['id']}/run", json={"date": body["b"]["date"]}).json()
+    workqueue.drain(case)
+    saved = client.get(f"{base}/runs/{started['id']}").json()
+    assert saved["status"] == "ready", saved["message"]
+    assert saved["input"]["b"]["date"] == body["b"]["date"]
+    # the first run of a routine compares against the reference it was saved with
+    assert saved["input"]["a"]["date"] == body["a"]["date"]
+
+
+def test_a_second_pass_of_a_routine_compares_against_the_pass_before_it(client, scenario, monkeypatch):
+    case, body = scenario
+    base = f"/api/cases/{case.id}/analysis"
+    routine = {**deepcopy(body), "title": "Harbour", "date_rule": "latest_previous"}
+    watch = client.post(f"{base}/followups", json=routine).json()
+    client.post(f"{base}/followups/{watch['id']}/run", json={"date": body["b"]["date"]})
+    workqueue.drain(case)
+    later = "2026-05-18"
+    seed_images({**body, "a": body["b"], "b": {**body["b"], "date": later}})
+    second = client.post(f"{base}/followups/{watch['id']}/run", json={"date": later}).json()
+    workqueue.drain(case)
+    saved = client.get(f"{base}/runs/{second['id']}").json()
+    assert saved["status"] == "ready", saved["message"]
+    assert [saved["input"]["a"]["date"], saved["input"]["b"]["date"]] == [body["b"]["date"], later]
+
+
+def test_a_detection_carries_what_it_is_for(client, scenario):
+    case, body = scenario
+    base = f"/api/cases/{case.id}/analysis"
+    watch = client.post(f"{base}/followups", json={**body, "title": "Harbour", "note": "Vessels weekly"}).json()
+    assert client.get(f"{base}/followups").json()[0]["note"] == "Vessels weekly"
+    started = client.post(f"{base}/followups/{watch['id']}/run").json()
+    assert started["input"]["note"] == "Vessels weekly"
+    assert client.get(f"{base}/runs").json()[0]["note"] == "Vessels weekly"
 
 
 def test_reexecution_uses_preserved_frames_after_tile_cache_loss(client, scenario, monkeypatch):
@@ -269,21 +453,22 @@ def test_detect_reads_copernicus_only_and_a_wayback_watch_asks_for_a_date(client
     old["b"] = {"provider": "esri-wayback", "release": 2}
     response = client.post(f"/api/cases/{case.id}/analysis/runs", json=old)
     assert response.status_code == 422
-    assert "dated Sentinel-2" in response.text
+    assert "dated Copernicus" in response.text
     assert case.list_jobs() == []
 
 
-def test_zone_union_does_not_duplicate_detections(client, scenario):
+def test_overlapping_areas_keep_their_own_candidates(client, scenario):
     case, body = scenario
     first = run(client, case, body)
     body["zones"].append({**body["zones"][0], "id": "overlap"})
     second = run(client, case, body)
-    assert second["results"] == first["results"]
-    assert second["total"] == first["total"]
+    assert second["count"] == 2 * first["count"]
+    assert {r["area_id"] for r in second["results"]} == {"patch", "overlap"}
+    assert second["total"] == 2 * first["total"]
 
 
-def test_a_sweep_keeps_only_the_tiles_that_found_something(client, scenario):
-    """What a case stores follows what was found, not how much was swept."""
+def test_a_sweep_keeps_review_images_for_manual_candidates_and_prunes_unused_bands(client, scenario):
+    """A missed detection can still be marked and cropped without fetching again."""
     case, body = scenario
     z, x, y = SENTINEL_TILE
     body["zones"] = [zone(0.1, 0.1, 1.9, 0.9)]
@@ -292,8 +477,8 @@ def test_a_sweep_keeps_only_the_tiles_that_found_something(client, scenario):
     assert saved["status"] == "ready", saved
     assert saved["total"] == 2
     assert saved["count"] == 1
-    assert len(saved["frames"]) == 4
-    assert {tuple(record["tile"]) for record in saved["frames"].values()} == {(z, x, y)}
+    assert len(saved["frames"]) == 6
+    assert {tuple(record["tile"]) for record in saved["frames"].values() if record["index"] is not None} == {(z, x, y)}
     folder = case.resolve_inside(layout.analysis_assets_rel(f"runs-{saved['id']}"))
     assert {path.name for path in folder.iterdir()} == {
         record["path"].rsplit("/", 1)[1] for record in saved["frames"].values()
@@ -337,11 +522,15 @@ def test_a_recipe_saved_before_detect_went_copernicus_only_still_loads():
     assert recipe.parameters.sensitivity == 40 and recipe.parameters.cloud_margin == 2
     assert Recipe.model_validate({**old, "method": "water_objects"}).method == "vessels"
     assert "providers" not in recipe.model_dump()
+    # areas once kept with an analyzer belong to a saved detection now
+    kept = Recipe.model_validate({**old, "zones": [zone()]})
+    assert "zones" not in kept.model_dump()
 
 
 def test_every_method_publishes_sizes_and_words_for_its_reading():
     methods = {entry["id"]: entry for entry in METHODS}
-    assert set(methods) == {"vessels", "hotspots", "structure", "spots", "surface", "index"}
+    assert set(methods) == {"vessels", "hotspots", "structure", "spots", "surface", "index",
+                            "sar-vessels", "sar-change"}
     for entry in METHODS:
         assert set(entry["sizes"]) == {"small", "medium", "large", "all"}
         for size in entry["sizes"].values():
@@ -353,9 +542,14 @@ def test_every_method_publishes_sizes_and_words_for_its_reading():
         assert entry["sizes"]["all"]["min_area"] == 0
         assert entry["sizes"]["all"]["max_area"] == 0
         assert "{" in entry["measure"]
-    # the fire test rejects cloud itself; everything else can use the mask
-    assert [m for m, entry in methods.items() if not entry["clouds"]] == ["hotspots"]
+    # the fire test rejects cloud itself and radar sees through it; every other
+    # method can use the mask
+    assert [m for m, entry in methods.items() if not entry["clouds"]] == [
+        "hotspots", "sar-vessels", "sar-change"]
     assert methods["vessels"]["single"] and methods["hotspots"]["single"]
+    assert methods["sar-vessels"]["single"] and not methods["sar-change"]["single"]
+    assert {m for m, entry in methods.items() if entry["sensor"] == "sentinel1"} == {
+        "sar-vessels", "sar-change"}
     # a small target is never morphologically cleaned away
     assert all(entry["sizes"]["small"]["cleanup"] == 0 for entry in METHODS)
 
@@ -364,9 +558,12 @@ def test_builtins_cover_big_and_small_things_and_start_at_medium():
     ids = {recipe.id for recipe in BUILTINS}
     assert {"boats", "anomaly", "structures", "impacts", "large-change", "burn-scars",
             "vegetation-loss", "new-water"} <= ids
+    # A flood is fields wide: at Medium the May 2023 Emilia-Romagna floods came
+    # out in some 280 pieces, so the radar flood detector starts at Large.
+    starts = {"radar-flood": "large"}
     for recipe in BUILTINS:
-        medium = SIZES[recipe.method]["medium"]
-        assert {key: getattr(recipe.parameters, key) for key in medium} == medium, recipe.id
+        size = SIZES[recipe.method][starts.get(recipe.id, "medium")]
+        assert {key: getattr(recipe.parameters, key) for key in size} == size, recipe.id
         assert len(recipe.description) < 200, recipe.id
 
 
@@ -826,7 +1023,7 @@ def test_an_automatic_date_rule_takes_the_newest_pass_that_covers_the_whole_area
     client.put("/api/settings/keys", json={"sentinelhub": "inst-uuid"})
     asked = {}
 
-    def acquisitions(instance, rings, start, end):
+    def acquisitions(instance, rings, start, end, collection="sentinel2"):
         asked.update(instance=instance, rings=rings, start=start, end=end)
         return {"dates": [
             {"date": "2026-05-20", "cloud": 5.0, "granules": 1, "coverage": 0.61},

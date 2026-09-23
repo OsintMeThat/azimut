@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   apply,
+  boxCorners,
+  compassAngle,
   compose,
   frameBox,
   frameToFrame,
@@ -10,6 +12,8 @@ import {
   invert,
   screenToMercator,
   toMercator,
+  turnAbout,
+  turnedBox,
 } from './groundFrame.js';
 
 const frame = (patch = {}) => ({ lng: 2.2945, lat: 48.8584, zoom: 15, bearing: 0, width: 800, height: 600, ...patch });
@@ -75,5 +79,53 @@ describe('affine maps between frames', () => {
     const toView = compose(invert(screenToMercator(view)), imageToMercator(box, 1000, 900));
     const ground = [box.west, box.north];
     close(apply(toView, 0, 0), apply(invert(screenToMercator(view)), ...ground), 4);
+  });
+});
+
+describe('a box drawn on a turned screen', () => {
+  const metres = (a, b) => Math.hypot(...toMercator(...a).map((v, i) => v - toMercator(...b)[i]));
+
+  it('is the plain ground box of its two corners on a north-up screen', () => {
+    const corners = boxCorners(turnedBox([[2, 48], [2.01, 47.99]], 0));
+    close(corners[0], [2, 48], 9);
+    close(corners[1], [2.01, 48], 9);
+    close(corners[2], [2.01, 47.99], 9);
+    close(corners[3], [2, 47.99], 9);
+  });
+
+  it('runs its sides along the screen it was drawn on', () => {
+    // Drawn with east up: the screen's right points south, its down points west.
+    const view = frame({ bearing: 90 });
+    const toGround = screenToMercator(view);
+    const drawn = [[100, 100], [300, 200]].map(([x, y]) => fromMercator(...apply(toGround, x, y)));
+    const box = turnedBox(drawn, 90);
+    close(box.right, [0, -1], 9);
+    close(box.down, [-1, 0], 9);
+    const onScreen = boxCorners(box).map((point) => apply(invert(toGround), ...toMercator(...point)));
+    close(onScreen[0], [100, 100], 4);
+    close(onScreen[1], [300, 100], 4);
+    close(onScreen[2], [300, 200], 4);
+    close(onScreen[3], [100, 200], 4);
+  });
+
+  it('keeps its sides and its right angles whatever the camera does after', () => {
+    const corners = boxCorners(turnedBox([[2, 48], [2.004, 47.998]], 33));
+    const [a, b, c, d] = corners;
+    expect(metres(a, b)).toBeCloseTo(metres(d, c), 3);
+    expect(metres(a, d)).toBeCloseTo(metres(b, c), 3);
+    expect(metres(a, c)).toBeCloseTo(metres(b, d), 3);
+  });
+
+  it('turns a point clockwise, as the screen shows a turn', () => {
+    const turned = turnAbout([0.01, 0], [0, 0], 90);
+    close(turned, [0, -0.01], 9);
+  });
+
+  it('folds an angle into one turn', () => {
+    expect(compassAngle(-30)).toBeCloseTo(330);
+    expect(compassAngle(725)).toBeCloseTo(5);
+    expect(compassAngle(360)).toBe(0);
+    expect(compassAngle('x')).toBe(0);
+    expect(compassAngle(undefined)).toBe(0);
   });
 });

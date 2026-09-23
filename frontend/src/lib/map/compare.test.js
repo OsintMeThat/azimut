@@ -2,22 +2,26 @@ import { describe, expect, it } from 'vitest';
 import {
   COMPARE_LAYERS,
   COMPARE_MODES,
-  FIND_MODES,
+  DIFFERENCE_KEY,
   availablePresets,
+  compareMode,
   comparisonLayers,
   percentage,
   providerKind,
 } from './compare.js';
 
 describe('compare helpers', () => {
-  it('offers six modes with a key each, split into reading and computing', () => {
-    expect(COMPARE_MODES.map((mode) => mode.id)).toEqual(['side', 'swipe', 'opacity', 'blink', 'change', 'analysis']);
-    expect(COMPARE_MODES.map((mode) => mode.key)).toEqual(['1', '2', '3', '4', '5', '6']);
-    // The dock rules the two groups apart, so they have to stay contiguous.
-    expect(COMPARE_MODES.map((mode) => mode.group)).toEqual(
-      ['read', 'read', 'read', 'read', 'find', 'find']
-    );
-    expect(FIND_MODES).toEqual(['change', 'analysis']);
+  it('offers four view modes with a key each, and Difference on the next key', () => {
+    expect(COMPARE_MODES.map((mode) => mode.id)).toEqual(['side', 'swipe', 'opacity', 'blink']);
+    expect(COMPARE_MODES.map((mode) => mode.key)).toEqual(['1', '2', '3', '4']);
+    expect(DIFFERENCE_KEY).toBe('5');
+  });
+
+  it('reads a saved mode back, the old Difference mode as side by side', () => {
+    expect(compareMode('swipe')).toBe('swipe');
+    expect(compareMode('change')).toBe('side');
+    expect(compareMode('analysis')).toBe('side');
+    expect(compareMode(undefined)).toBe('side');
   });
 
   it('keeps layers ordered, unique and supported', () => {
@@ -52,5 +56,8 @@ describe('compare helpers', () => {
     expect(ids(free)).toEqual(['archive', 'map']);
     expect(ids([...free, { id: 'sentinel2', needs_key: true }])).toEqual(['archive', 'map']);
     expect(ids([...free, { id: 'sentinel2' }])).toEqual(['archive', 'sentinel', 'map']);
+    // radar arrives once Settings has found its layer
+    expect(ids([...free, { id: 'sentinel2' }, { id: 'sentinel1' }])).toEqual(['archive', 'sentinel', 'radar', 'map']);
+    expect(providerKind({ id: 'sentinel1' })).toBe('archive');
   });
 });

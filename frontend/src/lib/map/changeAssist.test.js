@@ -126,7 +126,32 @@ describe('Difference settings', () => {
       min_area: 0,
       classes: ['loss'],
       opacity: 35,
-      base: 'b',
+      base: 'both',
     });
+  });
+
+  it('lays the highlights over both images unless told otherwise', () => {
+    expect(changeSettings().base).toBe('both');
+    // "side" was the name Both had when it was a layout of its own
+    expect(changeSettings({ base: 'side' }).base).toBe('both');
+    expect(changeSettings({ base: 'a' }).base).toBe('a');
+  });
+});
+
+describe('a radar pair', () => {
+  const radar = (date, time) => side({ provider: 'sentinel1', radar: { date, time } });
+
+  it('reads two passes of one track, as a picture and without tone matching', () => {
+    const status = changeCompatibility(radar('2026-05-02', '05:42:10'), radar('2026-05-14', '05:42:40'));
+    expect(status).toMatchObject({ ok: true, family: 'sentinel1', grade: 'indicative', clouds: false });
+    expect(status.methods).toEqual(['colour', 'structure', 'brightness']);
+  });
+
+  it('refuses another track, the same pass, or an undated side', () => {
+    expect(changeCompatibility(radar('2026-05-02', '05:42:10'), radar('2026-05-14', '17:33:02')).reason)
+      .toMatch(/one track/);
+    expect(changeCompatibility(radar('2026-05-14', '05:42:10'), radar('2026-05-14', '05:42:10')).reason)
+      .toMatch(/two different/);
+    expect(changeCompatibility(radar('', ''), radar('2026-05-14', '05:42:10')).ok).toBe(false);
   });
 });

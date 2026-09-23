@@ -99,30 +99,70 @@ describe('comparison export', () => {
     expect(draws(out)[1][1]).toBe(BASE.b.canvas);
   });
 
-  it('draws the chosen base once and lays the change mask on its ground', () => {
-    const mask = { canvas: { width: 250, height: 150 }, frame: FRAME, base: 'a', opacity: 55, visible: true };
-    const out = composeComparison({ ...BASE, mode: 'change', change: mask });
-    expect(draws(out).map((call) => call[1])).toEqual([BASE.a.canvas, mask.canvas]);
+  const mask = (base) => ({ canvas: { width: 250, height: 150 }, frame: FRAME, base, opacity: 55 });
+
+  it('lays the difference on its ground, scaled back up, with a legend', () => {
+    const change = mask('a');
+    const out = composeComparison({ ...BASE, mode: 'side', change });
+    expect(draws(out).map((call) => call[1])).toEqual([BASE.a.canvas, BASE.b.canvas, change.canvas]);
     // the working mask is half the frame's size, so it is scaled back up
     const [, a, , , d] = out.context.calls.find(([name]) => name === 'transform');
     expect(a).toBeCloseTo(2);
     expect(d).toBeCloseTo(2);
+    expect(out.width).toBe(1000);
     expect(out.height).toBe(48 + 300 + 26 + 30);
   });
 
-  it('lays one reading over both images when the difference is shown on the pair', () => {
-    const mask = { canvas: { width: 250, height: 150 }, frame: FRAME, base: 'side', opacity: 55, visible: true };
-    const out = composeComparison({ ...BASE, mode: 'change', change: mask });
-    expect(out.width).toBe(1000);
+  it('lays one reading over both panes side by side', () => {
+    const change = mask('both');
+    const out = composeComparison({ ...BASE, mode: 'side', change });
     expect(draws(out).map((call) => call[1]))
-      .toEqual([BASE.a.canvas, BASE.b.canvas, mask.canvas, mask.canvas]);
+      .toEqual([BASE.a.canvas, BASE.b.canvas, change.canvas, change.canvas]);
     // The second copy is offset onto B's pane, not redrawn over A.
     const offsets = out.context.calls.filter(([name]) => name === 'transform').map((call) => call[5]);
     expect(offsets[1] - offsets[0]).toBe(500);
   });
 
-  it('refuses a change export without a finished mask', () => {
-    expect(() => composeComparison({ ...BASE, mode: 'change' })).toThrow('must finish');
+  it('keeps the view mode under the difference', () => {
+    const change = mask('b');
+    const swipe = composeComparison({ ...BASE, mode: 'swipe', divider: 40, change });
+    expect(swipe.width).toBe(500);
+    expect(draws(swipe).map((call) => call[1])).toEqual([BASE.a.canvas, BASE.b.canvas, change.canvas]);
+    // blink shows the highlights only on the side that carries them
+    const onA = composeComparison({ ...BASE, mode: 'blink', blinkB: false, change });
+    expect(draws(onA).map((call) => call[1])).toEqual([BASE.a.canvas]);
+    const onB = composeComparison({ ...BASE, mode: 'blink', blinkB: true, change });
+    expect(draws(onB).map((call) => call[1])).toEqual([BASE.b.canvas, change.canvas]);
+  });
+
+  it('fades B’s highlights with B', () => {
+    const alphas = [];
+    const makeCanvas = () => {
+      const canvas = fakeCanvas();
+      const { context } = canvas;
+      const saved = [];
+      context.save = () => saved.push(context.globalAlpha);
+      context.restore = () => { context.globalAlpha = saved.pop(); };
+      context.drawImage = (image) => alphas.push([image, context.globalAlpha]);
+      return canvas;
+    };
+    const change = mask('b');
+    composeComparison({ ...BASE, makeCanvas, mode: 'opacity', opacity: 40, change });
+    // B's highlights are drawn inside B's faded pass: B's alpha times their own.
+    expect(alphas[0]).toEqual([BASE.a.canvas, 1]);
+    expect(alphas[1]).toEqual([BASE.b.canvas, 0.4]);
+    expect(alphas[2][0]).toBe(change.canvas);
+    expect(alphas[2][1]).toBeCloseTo(0.4 * 0.55);
+  });
+
+  it('draws nothing extra and no legend without a difference', () => {
+    const out = composeComparison({ ...BASE, mode: 'swipe', divider: 50 });
+    expect(draws(out).map((call) => call[1])).toEqual([BASE.a.canvas, BASE.b.canvas]);
+    expect(out.height).toBe(48 + 300 + 26);
+  });
+
+  it('refuses a difference export without a finished mask', () => {
+    expect(() => composeComparison({ ...BASE, mode: 'side', change: { base: 'both' } })).toThrow('must finish');
   });
 
   it('shows only the frame blink is on', () => {
@@ -153,8 +193,7 @@ describe('comparison export', () => {
   });
 
   it('drops a change legend entry that would run off a framed export', () => {
-    const mask = { canvas: { width: 250, height: 150 }, frame: FRAME, base: 'a', opacity: 55, visible: true };
-    const out = composeComparison({ ...BASE, a: FRAMED, b: FRAMED, mode: 'change', change: mask });
+    const out = composeComparison({ ...BASE, a: FRAMED, b: FRAMED, mode: 'blink', change: mask('a') });
     const written = out.context.calls.filter(([name]) => name === 'fillText').map(([, text]) => text);
     expect(written).toContain('Appeared or brighter in B');
     expect(written).not.toContain('Other change');

@@ -24,6 +24,7 @@
   import ExtensionTab from './settings/ExtensionTab.svelte';
   import GeneralTab from './settings/GeneralTab.svelte';
   import ImageryTab from './settings/ImageryTab.svelte';
+  import { ACCOUNT_STEPS } from '../lib/copernicusSetup.js';
   import PublishingTab from './settings/PublishingTab.svelte';
   import StorageTab from './settings/StorageTab.svelte';
   import SystemTab from './settings/SystemTab.svelte';
@@ -108,20 +109,16 @@
     {
       id: 'sentinelhub',
       label: 'Sentinel Hub',
-      gives: 'Sentinel-2 · free · 10 m/px',
+      gives: 'Sentinel-2 and Sentinel-1 · free · 10 m/px',
       cost: 'Never billed',
       field: 'Copernicus configuration instance ID',
       placeholder: 'a1b2c3d4-0000-0000-0000-000000000000',
       help: 'https://shapps.dataspace.copernicus.eu/dashboard/#/configurations',
       usage: USAGE_LINKS.sentinelhub,
       // Not a token you're issued but a configuration you build, so the field
-      // needs the recipe, not just a "get one here" link.
-      steps: [
-        'Register (free) on dataspace.copernicus.eu, then open the Sentinel Hub Dashboard.',
-        'Configuration Utility → New configuration, based on "Simple Sentinel-2 L2A template".',
-        'Open it and turn off Show logo and Show warnings. Both are burned into every tile.',
-        'Copy the ID under "Service endpoints" and paste it here.',
-      ],
+      // needs the recipe, not just a "get one here" link (lib/copernicusSetup.js,
+      // which Detect and Compare show too).
+      steps: ACCOUNT_STEPS,
       overage:
         'A free account gets 30,000 requests a month and simply stops serving until the 1st. It never bills.',
       // the correction the free-allowance box exists for, told where it's useful
@@ -339,6 +336,9 @@
   let updateOnStart = $state(true); // pop a notice on load when a release is out
   // whether saving a proof files its point as a place, or asks first
   let proofPlaceAuto = $state(true);
+  let radarLayer = $state('');
+  // a card of the Imagery tab asked for from elsewhere, opened and scrolled to
+  let focusCard = $state('');
   // The app-wide logo lives beside settings.json and reaches cases only in proof PNGs.
   // `sigBust` refreshes the preview after replacement.
   let signature = $state(false);
@@ -552,6 +552,7 @@
     reversePrefill = s.reverse_prefill ?? true;
     updateOnStart = s.update_check_on_start ?? true;
     proofPlaceAuto = s.proof_place_auto ?? true;
+    radarLayer = s.sentinel1_layer ?? '';
     applyPrefs(s); // the rest of the app reads these live
     await loadScrapers().catch(() => {}); // local disk read; never blocks Settings
     // shells out to `ffmpeg -version`; non-blocking, System only reads it
@@ -698,9 +699,12 @@
   $effect(() => {
     if (uiState.tool !== 'settings') return;
     const aliases = { preferences: 'general', about: 'system' };
-    const target = aliases[uiState.settingsTab] ?? uiState.settingsTab;
+    // `imagery:sentinelhub` is a tab and the card to open on it
+    const [asked, card] = String(uiState.settingsTab ?? '').split(':');
+    const target = aliases[asked] ?? asked;
     if (!target) return;
     if (TABS.some((t) => t.id === target)) tab = target;
+    focusCard = card ?? '';
     uiState.settingsTab = null;
   });
 
@@ -886,6 +890,8 @@
           {saveFreeTier}
           bind:eco
           bind:ecoMaxZoom
+          bind:radarLayer
+          bind:focusCard
         />
       {/if}
 

@@ -3,14 +3,15 @@
 Source frames are owned evidence, not an expiring map cache. Completed runs
 never change when their recipe, area, camera or provider catalogue changes.
 
-Every detector here reads Copernicus Sentinel-2 band products. Their thresholds
-were set against real scenes, not synthetic ones: sea under glint and in rough
-weather (Bab-el-Mandeb), a dense anchorage under cumulus (Singapore Strait),
-wakes (Gibraltar), empty calm sea (Dover Strait), flares and an oil fire
+Every optical detector here reads Copernicus Sentinel-2 band products. Their
+thresholds were set against real scenes, not synthetic ones: sea under glint and
+in rough weather (Bab-el-Mandeb), a dense anchorage under cumulus (Singapore
+Strait), wakes (Gibraltar), empty calm sea (Dover Strait), flares and an oil fire
 (Rumaila), active wildfires (California, Cerrado), bright industrial roofs
 (Jebel Ali), a construction site across seven months (Egypt's new capital),
-dry-season clearing (Rondônia) and irrigated desert. The numbers below say what
-each of them taught.
+dry-season clearing (Rondônia) and irrigated desert. The radar detectors read
+Sentinel-1 backscatter, and the scenes behind their numbers are listed with
+them. The numbers below say what each of them taught.
 """
 
 from __future__ import annotations
@@ -30,15 +31,20 @@ from PIL import Image
 
 from .. import config, layout
 from ..workspace import Case
-from . import media, sentinel, tilecache, tiles, workqueue
+from . import analysis_geometry, media, sentinel, tilecache, tiles, workqueue
 from .analysis_models import (
     CLOUD_METHODS,
+    RADAR_METHODS,
     SINGLE_METHODS,
+    Area,
+    AreaDates,
+    AreaGeometry,
     Parameters,
     RunInput,
     Source,
     Zone,
     product_for,
+    sensor_for,
 )
 
 # What one run may sweep. The ceiling is not memory — tiles are read one at a
@@ -65,7 +71,7 @@ PAD = 32
 PRODUCT_VERSION = 2
 ENGINE_VERSION = 2
 LOCK = threading.RLock()
-KINDS = {"zones": "analysis-zones", "followups": "analysis-follow-up", "runs": "analysis-run"}
+KINDS = {"areas": "analysis-area", "zones": "analysis-zones", "followups": "analysis-follow-up", "runs": "analysis-run"}
 ACTIVE = {"queued", "running"}
 JOB = "compare-analyzer"
 WORLD = 40_075_016.68557849
@@ -160,6 +166,45 @@ GROW = 0.7
 DARK_ABSENT = frozenset({"nbr"})
 
 
+# --- Radar -------------------------------------------------------------------
+# Sentinel-1 speckle: every pixel of a single look is the sum of many random
+# echoes, so a lone pixel can read several decibels off its neighbours. Levels
+# are therefore averaged as power, never as decibels, whose mean is biased low.
+# The numbers below were read off real scenes: the Singapore Strait anchorage,
+# the Dover Strait and its harbour, the North Sea in the October 2023 storms,
+# the Belgian offshore wind farms, the Bosphorus, Port Sudan's desert coast,
+# the May 2023 Emilia-Romagna floods, and Gaza City before and after late 2023.
+#
+# What is sea. Windy sea rose to -11 dB in VV in the North Sea storm, above
+# farmland's -10, so VV alone called it land; cross-pol stayed near -24 dB on
+# every sea and between -12 and -18 on vegetated land. Dry desert is as dark as
+# calm sea in both, and at Port Sudan the radar alone put 72 candidates on the
+# town and the sand around it. So the sea is first what Sentinel-2's own scene
+# classification calls water on the clearest pass of the past year, and only
+# where that pass saw cloud is the radar asked.
+SEA_WINDOW = 31      # a median over 300 m ignores a hull and its sidelobes
+SEA_VV_DB = -9.0
+SEA_VH_DB = -21.0
+# A hull answers in both polarisations; the ghosts a strong target leaves in
+# azimuth, the streaks turning blades smear, and sea spikes answer in VV alone.
+# In the Singapore anchorage every hull cleared VH by 8 dB, those ghosts 4 to 7.
+VH_GAP = 2.0
+# A weak return within 400 m of one 6 dB stronger is that one's sidelobe or
+# ghost: it cut the Belgian wind farms from 1,043 candidates to about one a
+# turbine, and cost the anchorage no hull.
+GHOST_DB = 6.0
+GHOST_M = 400.0
+# Ground that answers like walls or metal, measured on the side that has it. At
+# -4 dB in VV a drop picked ten times more of Gaza's built-up area after late
+# 2023 than across the same fortnight before, and growing crops rarely reach it.
+BRIGHT_DB = -4.0
+# Radar-dark like calm water: the usual threshold for flood mapping in VV.
+WATER_DB = -18.0
+# The largest overall shift between two passes of one track still read as the
+# sensor rather than the ground; calibration holds a pair within a few tenths.
+MAX_SAR_SHIFT = 1.0
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -176,29 +221,140 @@ def read(case: Case, kind: str, ident: str) -> dict[str, Any]:
     path = case.resolve_inside(relpath(kind, ident))
     if path.stat().st_size > 16_000_000:
         raise ValueError("analysis record is too large")
-    return json.loads(path.read_text(encoding="utf-8"))
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    if kind == "followups":
+        with LOCK, case._lock:
+            if not saved.get("area_dates"):
+                saved = share_areas(case, saved, ident)
+                media.write_json_atomic(path, saved)
+            saved["zones"] = [area_zone(read(case, "areas", pair["area_id"])).model_dump()
+                              for pair in saved["area_dates"]]
+    return saved
+
+
+def area_zone(area: dict[str, Any]) -> Zone:
+    return Zone(id=area["id"], name=area["name"], kind="polygon",
+                points=area["geometry"]["coordinates"][0][:-1])
+
+
+def share_areas(case: Case, data: dict[str, Any], ident: str) -> dict[str, Any]:
+    """Promote routine zones once; stable ids make interrupted migration resumable."""
+    result = dict(data)
+    pairs = {pair["area_id"]: pair for pair in data.get("area_dates", [])}
+    linked = []
+    zones = data.get("zones") or data.get("recipe", {}).get("zones") or []
+    for raw in zones:
+        zone = Zone.model_validate(raw)
+        try:
+            read(case, "areas", zone.id)
+            area_id = zone.id
+        except (ValueError, FileNotFoundError):
+            area_id = hashlib.sha256(f"{ident}:{zone.id}".encode()).hexdigest()[:12]
+            ring = zone.ring()
+            area = Area(name=zone.name, colour=data.get("recipe", {}).get("colour", "#38bdf8"),
+                        geometry=AreaGeometry(coordinates=[ring + [ring[0]]]))
+            if not case.resolve_inside(relpath("areas", area_id)).exists():
+                save(case, "areas", area.model_dump(), new_id=area_id)
+        pair = pairs.get(zone.id) or {"a": data.get("a", {}),
+            "b": {**data.get("b", {}), **({"date": ""} if data.get("date_rule", "manual") != "manual" else {})},
+            "date_rule": data.get("date_rule", "manual")}
+        linked.append({**pair, "area_id": area_id})
+    result["area_dates"] = linked or list(pairs.values())
+    result.pop("zones", None)
+    if "zones" in result.get("recipe", {}):
+        result["recipe"] = {k: v for k, v in result["recipe"].items() if k != "zones"}
+    return result
+
+
+def hydrate(case: Case, body: RunInput) -> RunInput:
+    """Freeze shared geometry into a run; its dates remain owned by that run."""
+    if body.zones:
+        return body
+    return body.model_copy(update={"zones": [area_zone(read(case, "areas", p.area_id))
+                                            for p in body.area_dates]})
+
+
+def summary(kind: str, saved: dict[str, Any]) -> dict[str, Any]:
+    """What a list shows of one saved item, without the item itself.
+
+    Detect's home list is a row per saved detection with its latest run under
+    it, so a run says which detection it belongs to and how much of it is still
+    waiting for a verdict, and both say what they look for.
+    """
+    if kind == "areas":
+        return dict(saved)
+    row: dict[str, Any] = {key: saved[key] for key in
+                           ("id", "title", "created_at", "updated_at", "status", "progress",
+                            "total", "count", "message", "completed_at") if key in saved}
+    body = saved.get("input", saved)
+    row["areas"] = len(body.get("zones") or [])
+    if kind == "zones":
+        return row
+    recipe = body.get("recipe") or {}
+    row.update(analyzer=recipe.get("name", ""), colour=recipe.get("colour", ""),
+               method=recipe.get("method", ""), date_rule=body.get("date_rule", "manual"))
+    row["note"] = body.get("note", "")
+    if kind == "followups":
+        # The list draws every watched area on the map, so the shapes travel
+        # with the row rather than costing one read per routine.
+        row["zones"] = body.get("zones") or []
+    if kind == "runs":
+        results = saved.get("results") or []
+        row.update(followup_id=body.get("followup_id"),
+                   dates=[(body.get(side) or {}).get("date", "") for side in ("a", "b")],
+                   to_review=sum(1 for r in results if r.get("review") == "new"),
+                   marked=sum(1 for r in results if r.get("review") in KEPT))
+        row["area_runs"] = saved.get("area_runs", [])
+    return row
 
 
 def listing(case: Case, kind: str) -> list[dict[str, Any]]:
+    if kind == "areas":
+        listing(case, "followups")  # migrate embedded areas before exposing the shared list
     rows: list[dict[str, Any]] = []
     for path in case.subdir(layout.ANALYSIS_DIR).glob(f"{kind}-*.json"):
         try:
-            saved = read(case, kind, path.stem.split("-", 1)[1])
-            rows.append({key: saved[key] for key in
-                         ("id", "title", "created_at", "updated_at", "status", "progress", "count")
-                         if key in saved})
+            rows.append(summary(kind, read(case, kind, path.stem.split("-", 1)[1])))
         except (OSError, ValueError, KeyError):
             continue
     return sorted(rows, key=lambda row: row["created_at"], reverse=True)
 
 
-def save(case: Case, kind: str, data: dict[str, Any], ident: str | None = None) -> dict[str, Any]:
+#: Verdicts that keep a candidate. "kept" is a pin in the case, written by
+#: promotion; "noted" keeps it in the detection's own view and nowhere else.
+KEPT = ("kept", "noted")
+
+
+def findings(case: Case, followup_id: str) -> list[dict[str, Any]]:
+    """What a routine has found and nobody has dismissed, newest run first.
+
+    A routine is worth coming back to only if it remembers: its runs are
+    separate sweeps, but what they found is one growing list, and this is it.
+    """
+    rows: list[dict[str, Any]] = []
+    for summary in listing(case, "runs"):
+        if summary.get("followup_id") != followup_id or summary.get("status") != "ready":
+            continue
+        run = read(case, "runs", summary["id"])
+        day = (run["input"].get("b") or {}).get("date", "")
+        for result in run.get("results", []):
+            if result.get("review") not in KEPT:
+                continue
+            rows.append({**result, "run_id": run["id"], "run_title": run["title"],
+                         "date": result.get("sources", {}).get("b", {}).get("date", day)})
+    return rows
+
+
+def save(case: Case, kind: str, data: dict[str, Any], ident: str | None = None,
+         *, new_id: str | None = None) -> dict[str, Any]:
     with LOCK, case._lock:
         if ident:
             old = read(case, kind, ident)
         else:
-            ident = secrets.token_hex(6)
+            ident = new_id or secrets.token_hex(6)
             old = {}
+        if kind == "followups":
+            data = share_areas(case, data, ident)
         rel = relpath(kind, ident)
         saved = {**data, "id": ident, "created_at": old.get("created_at", now()),
                  "updated_at": now(), "version": 1}
@@ -206,10 +362,11 @@ def save(case: Case, kind: str, data: dict[str, Any], ident: str | None = None) 
         path.parent.mkdir(parents=True, exist_ok=True)
         media.write_json_atomic(path, saved)
         entity = case.find_entity(attr="spec", value=rel)
+        title = saved.get("title", saved.get("name", "Area"))
         if entity:
-            case.update_entity(entity["id"], {"label": saved["title"]})
+            case.update_entity(entity["id"], {"label": title})
         else:
-            case.add_entity(KINDS[kind], saved["title"], attrs={"spec": rel}, by="compare")
+            case.add_entity(KINDS[kind], title, attrs={"spec": rel}, by="compare")
         return saved
 
 
@@ -284,8 +441,24 @@ def _key(source: Source, z: int, x: int, y: int, product: str | None) -> str:
     return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()[:32]
 
 
+def picture_cache_id(source: Source) -> str:
+    """The tile-cache folder a source's review picture lives in.
+
+    Sentinel-2's is the basemap's own variant, so a picture read for a sweep is
+    a tile the map can reuse. Sentinel-1's is rendered by us for one pass, and
+    its time rides in the name without the colons Windows refuses in a folder.
+    """
+    if source.provider == "sentinel1":
+        return (f"sentinel1~{source.layer}~{source.date}~{source.time.replace(':', '') or 'day'}"
+                f"~picture~v{PRODUCT_VERSION}")
+    return sentinel.variant_id("sentinel2", source.layer, source.date, source.date, source.maxcc)
+
+
 def product_cache_id(source: Source, product: str) -> str:
     """The tile-cache folder a band product lives in, beside its picture's."""
+    if source.provider == "sentinel1":
+        return (f"sentinel1~{source.layer}~{source.date}~{source.time.replace(':', '') or 'day'}"
+                f"~{product}~v{PRODUCT_VERSION}")
     variant = sentinel.variant_id("sentinel2", source.layer, source.date, source.date, source.maxcc)
     return f"{variant}~{product}~v{PRODUCT_VERSION}"
 
@@ -308,6 +481,34 @@ def _instance() -> str:
     return str(instance)
 
 
+def radar_layer() -> str:
+    """The Sentinel-1 layer the user added to their Copernicus configuration."""
+    layer = str(config.load_settings().get("sentinel1_layer") or "")
+    if not layer:
+        raise ValueError("choose the Sentinel-1 layer in Settings → Imagery before a radar run")
+    return layer
+
+
+def water_source(source: Source) -> Source:
+    """The Sentinel-2 source a radar pass's water classification is read from.
+
+    It is named by the first day of the pass's month, so every pass of a month
+    shares one classification and one cache entry.
+    """
+    return Source(provider="sentinel2", date=f"{source.date[:7]}-01",
+                  layer=sentinel.DEFAULT_LAYER, maxcc=100)
+
+
+def _box(z: int, x: int, y: int, pad: int) -> tuple[float, float, float, float]:
+    """One grid tile in Web Mercator metres, grown by `pad` pixels on every side."""
+    _, size = GRID
+    pixel = WORLD / ((1 << z) * size)
+    return (x / (1 << z) * WORLD - WORLD / 2 - pad * pixel,
+            WORLD / 2 - (y + 1) / (1 << z) * WORLD - pad * pixel,
+            (x + 1) / (1 << z) * WORLD - WORLD / 2 + pad * pixel,
+            WORLD / 2 - y / (1 << z) * WORLD + pad * pixel)
+
+
 def frame(case: Case, run: dict[str, Any], source: Source, x: int, y: int,
           product: str | None = None) -> Any:
     """One tile's picture, or its band product with PAD pixels of context."""
@@ -324,9 +525,7 @@ def frame(case: Case, run: dict[str, Any], source: Source, x: int, y: int,
         if cached.is_file() and cached.stat().st_size <= MAX_FRAME_BYTES:
             raw = cached.read_bytes()
             break
-    cache_id = (product_cache_id(source, product) if product else
-                sentinel.variant_id("sentinel2", source.layer, source.date, source.date,
-                                    source.maxcc))
+    cache_id = product_cache_id(source, product) if product else picture_cache_id(source)
     if raw is None:
         cached_tile = tilecache.get(cache_id, z, x, y)
         if cached_tile:
@@ -338,15 +537,15 @@ def frame(case: Case, run: dict[str, Any], source: Source, x: int, y: int,
         if config.usage_blocked("sentinelhub"):
             raise ValueError("Sentinel Hub usage limit reached; review Settings")
         instance = _instance()
-        if product:
-            pixel = WORLD / ((1 << z) * size)
-            box = (x / (1 << z) * WORLD - WORLD / 2 - PAD * pixel,
-                   WORLD / 2 - (y + 1) / (1 << z) * WORLD - PAD * pixel,
-                   (x + 1) / (1 << z) * WORLD - WORLD / 2 + PAD * pixel,
-                   WORLD / 2 - y / (1 << z) * WORLD + PAD * pixel)
+        radar = source.provider == "sentinel1"
+        if product or radar:
+            # A radar picture is ours too: there is no true colour to borrow,
+            # so the review composite is rendered like a product, unpadded.
             try:
-                raw = sentinel.band_frame(instance, box, edge, edge, source.date, product,
-                                          source.maxcc, layer=source.layer)
+                raw = sentinel.band_frame(instance, _box(z, x, y, PAD if product else 0), edge, edge,
+                                          source.date, product or "sar-picture",
+                                          100 if radar else source.maxcc, layer=source.layer,
+                                          time=source.time)
             finally:
                 config.record_usage("sentinelhub", 1)
         else:
@@ -719,9 +918,130 @@ def _spots(before: Any, after: Any, valid: Any, metres: float, threshold: float,
     return np.sqrt((spot ** 2).mean(-1)), spot.mean(-1), share < SPOT_SHARE
 
 
+def _power_mean(level: Any, valid: Any, window: int) -> Any:
+    """Backscatter averaged as power over a square window, back in decibels.
+
+    Only pixels the radar measured count, so an area's edge or a swath's end
+    does not pull its neighbours down.
+    """
+    import cv2
+    import numpy as np
+
+    power = np.where(valid, 10.0 ** (sentinel.sar_decibels(level.astype(np.float64)) / 10.0), 0.0)
+    total = cv2.boxFilter(power, cv2.CV_64F, (window, window), normalize=False,
+                          borderType=cv2.BORDER_REFLECT)
+    count = cv2.boxFilter(valid.astype(np.float64), cv2.CV_64F, (window, window),
+                          normalize=False, borderType=cv2.BORDER_REFLECT)
+    return 10.0 * np.log10(np.maximum(total / np.maximum(count, 1e-9), 1e-6))
+
+
+def _sar_vessels(product: Any, water: Any, inside: Any, metres: float,
+                 options: Parameters) -> tuple[Any, Any, float, dict[str, tuple[Any, str]]]:
+    """Hulls: a strong return standing out of the sea around it.
+
+    Each pixel is measured against a ring of sea with a hole in the middle, the
+    ring the optical detector uses, in decibels above the ring's mean power. It
+    has to clear the line in VV and come close in VH, and not sit in the
+    shadow of a much stronger return. `water` is Sentinel-2's classification,
+    or None where the sweep could not read it.
+    """
+    import cv2
+    import numpy as np
+
+    data = product[:, :, 0] > 0
+    median_vv = sentinel.sar_decibels(cv2.medianBlur(product[:, :, 0], SEA_WINDOW).astype(np.float64))
+    median_vh = sentinel.sar_decibels(cv2.medianBlur(product[:, :, 1], SEA_WINDOW).astype(np.float64))
+    radar_sea = (median_vv < SEA_VV_DB) & (median_vh < SEA_VH_DB)
+    classed = (water[:, :, 0] if water is not None else
+               np.full(data.shape, sentinel.WATER_UNKNOWN, np.uint8))
+    sea = data & np.where(classed == sentinel.WATER_WATER, True,
+                          np.where(classed == sentinel.WATER_LAND, False, radar_sea))
+    land = components_over(data & ~sea, metres * metres, LAND_M2)
+    land = cv2.dilate(land.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+
+    def contrast(level: Any) -> tuple[Any, Any]:
+        decibels = sentinel.sar_decibels(level.astype(np.float64))
+        power = np.where(data, 10.0 ** (decibels / 10.0), 0.0)
+        mean, _, share = ring_statistics(power, sea, VESSEL_RING, VESSEL_GUARD)
+        return np.where(share > 0, decibels - 10.0 * np.log10(np.maximum(mean, 1e-9)), 0.0), share
+
+    vv, share = contrast(product[:, :, 0])
+    vh, _ = contrast(product[:, :, 1])
+    ok = inside & data & ~land & (share > VESSEL_WATER_SHARE)
+    threshold = _scale(options.sensitivity, 6.0, 14.0)
+    seed = ok & (vv >= threshold) & (vh >= threshold - VH_GAP)
+    binary = hysteresis(seed, ok & (vv >= threshold / 2))
+    return _without_ghosts(binary, vv, metres), vv, threshold, {"value": (vv, "max")}
+
+
+def _without_ghosts(binary: Any, strength: Any, metres: float) -> Any:
+    """Drop a return within GHOST_M of one GHOST_DB stronger."""
+    import cv2
+    import numpy as np
+
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(binary.astype(np.uint8), connectivity=8)
+    if count <= 2:
+        return binary
+    peaks = np.full(count, -np.inf)
+    np.maximum.at(peaks, labels.ravel(), strength.ravel())
+    reach = GHOST_M / metres
+    left, top = stats[:, cv2.CC_STAT_LEFT].astype(float), stats[:, cv2.CC_STAT_TOP].astype(float)
+    right = left + stats[:, cv2.CC_STAT_WIDTH]
+    bottom = top + stats[:, cv2.CC_STAT_HEIGHT]
+    keep = np.ones(count, bool)
+    keep[0] = False
+    for label in range(1, count):
+        stronger = peaks >= peaks[label] + GHOST_DB
+        stronger[0] = False
+        if not stronger.any():
+            continue
+        gap_x = np.maximum(0, np.maximum(left - right[label], left[label] - right))
+        gap_y = np.maximum(0, np.maximum(top - bottom[label], top[label] - bottom))
+        if (stronger & (np.hypot(gap_x, gap_y) <= reach)).any():
+            keep[label] = False
+    return keep[labels]
+
+
+def _sar_change(before: Any, after: Any, valid: Any,
+                options: Parameters) -> tuple[Any, Any, Any, float, dict[str, tuple[Any, str]]]:
+    """Backscatter that moved between two passes of one track, in decibels.
+
+    Both passes are averaged as power over the same window before they are
+    compared, so speckle does not read as change. What the recipe's ground
+    setting asks for then gates it: bright ground on the side that has it, or
+    water coming or going.
+    """
+    import numpy as np
+
+    window = 2 * max(1, options.smoothing) + 1
+    old = _power_mean(before[:, :, 0], valid, window)
+    new = _power_mean(after[:, :, 0], valid, window)
+    # Both polarisations vote: a building that falls or a field that floods
+    # darkens in each, while speckle in one is not speckle in the other.
+    delta = (new - old + _power_mean(after[:, :, 1], valid, window)
+             - _power_mean(before[:, :, 1], valid, window)) / 2
+    shift = float(np.median(delta[valid])) if valid.any() else 0.0
+    delta = delta - max(-MAX_SAR_SHIFT, min(MAX_SAR_SHIFT, shift))
+    ground = options.sar_ground
+    if ground == "bright":
+        state = np.where(delta < 0, old >= BRIGHT_DB, new >= BRIGHT_DB)
+    elif ground == "water":
+        state = np.where(delta < 0, (new < WATER_DB) & (old >= WATER_DB),
+                         (old < WATER_DB) & (new >= WATER_DB))
+    else:
+        state = np.ones(valid.shape, bool)
+    threshold = _scale(options.sensitivity, 1.0, 5.0)
+    measures = {"signed": (delta, "mean"), "before": (old, "mean"), "after": (new, "mean")}
+    return np.abs(delta), delta, state, threshold, measures
+
+
 def detect(pictures: tuple[Any, Any], products: tuple[Any, Any], mask: Any, body: RunInput,
-           lat: float) -> Reading:
-    """One deterministic tile. Products carry PAD pixels of context on every side."""
+           lat: float, water: Any = None) -> Reading:
+    """One deterministic tile. Products carry PAD pixels of context on every side.
+
+    `water` is Sentinel-2's water classification over the same padded tile,
+    which only the radar vessel method reads.
+    """
     import cv2
     import numpy as np
 
@@ -748,10 +1068,15 @@ def detect(pictures: tuple[Any, Any], products: tuple[Any, Any], mask: Any, body
         binary, stat, threshold, measures = _vessels(products[1], inside, blocked, metres, options)
     elif method == "hotspots":
         binary, stat, threshold, measures = _hotspots(products[1], inside, options)
+    elif method == "sar-vessels":
+        binary, stat, threshold, measures = _sar_vessels(products[1], water, inside, metres, options)
     else:
         before, after = products
         valid = inside & ~blocked
-        if method == "index":
+        if method == "sar-change":
+            valid &= (before[:, :, 0] > 0) & (after[:, :, 0] > 0)
+            stat, signed, state, threshold, measures = _sar_change(before, after, valid, options)
+        elif method == "index":
             old = before[:, :, 0].astype(np.float32) / 127.5 - 1
             new = after[:, :, 0].astype(np.float32) / 127.5 - 1
             valid &= (before[:, :, 0] > 0) & (after[:, :, 0] > 0)
@@ -793,7 +1118,8 @@ def detect(pictures: tuple[Any, Any], products: tuple[Any, Any], mask: Any, body
         if options.direction != "both":
             valid &= signed > 0 if options.direction == "gain" else signed < 0
         stat = np.clip(stat, -10, 10).astype(np.float32)
-        if options.smoothing:
+        # Radar change was already averaged as power over this window.
+        if options.smoothing and method not in RADAR_METHODS:
             stat = cv2.GaussianBlur(stat, (options.smoothing * 2 + 1,) * 2, 0)
         grow = valid & (np.abs(signed if method == "structure" else stat) >= threshold * GROW)
         binary = hysteresis(valid & state & (stat >= threshold), grow & state)
@@ -847,6 +1173,8 @@ def _candidates(reading: Reading, body: RunInput, x: int, y: int,
                                 (y + (py + height) / size) / (1 << z))
         margin = float(peaks[label]) / reading.threshold if reading.threshold else 0.0
         rows.append({"id": f"{part}-{label}", "bbox": [west, south, east, north],
+                     "geometry": analysis_geometry.footprint(
+                         labels[py:py + height, px:px + width] == label, x, y, z, size, (px, py)),
                      "coordinates": [lon, lat], "area": pixels * mpp * mpp,
                      "width": width * mpp, "height": height * mpp,
                      "margin": round(margin, 3), "strength": strength(margin),
@@ -881,6 +1209,8 @@ def merge(rows: list[dict[str, Any]], distance: float) -> list[dict[str, Any]]:
                 row["area"] += other["area"]
                 row["bbox"] = [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]
                 row["parts"].extend(other["parts"])
+                if "geometry" in row and "geometry" in other:
+                    row["geometry"] = analysis_geometry.joined(row["geometry"], other["geometry"])
                 a = row["bbox"]
                 row["coordinates"] = [(a[0] + a[2]) / 2, (a[1] + a[3]) / 2]
                 row["width"] = (a[2] - a[0]) * 111_320 * math.cos(math.radians(lat))
@@ -911,56 +1241,245 @@ def prune_frames(case: Case, run: dict[str, Any]) -> None:
     tiles = {tuple(run["frames"][key]["tile"]) for key in shown if key in run["frames"]}
     with LOCK, case._lock:
         for key, record in list(run["frames"].items()):
-            if tuple(record["tile"]) in tiles:
+            if record.get("index") is None or tuple(record["tile"]) in tiles:
                 continue
             case.resolve_inside(record["path"]).unlink(missing_ok=True)
             del run["frames"][key]
 
 
-def resolve_dates(case: Case, body: RunInput) -> RunInput:
-    if body.date_rule == "manual":
-        return body
+def previous_pass(case: Case, body: RunInput) -> Source:
+    """The pass this routine's last finished run swept, which the next one
+    compares against. Falls back to the reference the routine was saved with."""
+    if not body.followup_id:
+        return body.a
+    best: tuple[tuple[str, str], Source] | None = None
+    for summary in listing(case, "runs"):
+        if summary.get("followup_id") != body.followup_id or summary.get("status") != "ready":
+            continue
+        previous = read(case, "runs", summary["id"])
+        area_id = body.zones[0].id
+        if previous.get("area_runs"):
+            area = next((p for p in previous["area_runs"] if p["area_id"] == area_id
+                         and p["status"] == "ready"), None)
+            if not area:
+                continue
+            candidate = Source.model_validate(area["b"])
+        else:
+            if not any(z["id"] == area_id or hashlib.sha256(
+                    f"{body.followup_id}:{z['id']}".encode()).hexdigest()[:12] == area_id
+                    for z in previous["input"].get("zones", [])):
+                continue
+            candidate = Source.model_validate(previous["input"]["b"])
+        if candidate.layer != body.b.layer or not candidate.date:
+            continue
+        if body.b.date and candidate.date >= body.b.date:
+            continue
+        # Radar compares like with like: a pass from another track sees the
+        # same ground at another angle, and that difference is not change.
+        if candidate.provider == "sentinel1" and body.b.time and not sentinel.same_track(
+                candidate.time, body.b.time):
+            continue
+        # Runs of one routine can share a timestamp, which is only seconds deep,
+        # so the pass they swept settles the order between them.
+        key = (str(summary.get("created_at", "")), candidate.date)
+        if best is None or key > best[0]:
+            best = (key, candidate)
+    return best[1] if best else body.a
+
+
+def _lookup(body: RunInput, start: str, end: str) -> list[dict[str, Any]]:
+    """The passes over every area of `body` in a window, newest first.
+
+    One lookup over every area at once, answering about the areas rather than
+    about their centres: a pass can reach a centre and miss most of the shape
+    around it, and picking that date sweeps mostly nodata.
+    """
     if body.offline:
         raise ValueError("latest-date lookup needs network; select explicit dates for offline runs")
-    source = body.b.model_copy(deep=True)
     instance = (config.load_settings().get("api_keys") or {}).get("sentinelhub")
     if not instance or config.usage_blocked("sentinelhub"):
         raise ValueError("Copernicus is unavailable or its usage limit is reached")
-    # One lookup over every area at once, answering about the areas rather
-    # than about their centres: a pass can reach a centre and miss most of
-    # the shape around it, and picking that date sweeps mostly nodata.
     try:
-        found = sentinel.acquisitions(
-            instance, [list(zone.ring()) for zone in body.zones],
-            (date.today() - timedelta(days=LOOKBACK_DAYS)).isoformat(),
-            date.today().isoformat(),
-        )
+        found = sentinel.acquisitions(instance, [list(zone.ring()) for zone in body.zones],
+                                      start, end, collection=sensor_for(body.recipe.method))
     finally:
         config.record_usage("sentinelhub", 1)
-    allowed = [entry for entry in found["dates"]
-               if entry.get("cloud") is not None and entry["cloud"] <= source.maxcc]
+    return list(found["dates"])
+
+
+def _sensed_by(body: RunInput) -> RunInput:
+    """Sources that name the collection the method reads.
+
+    The panel builds Sentinel-2 sources; a radar method reads the user's
+    Sentinel-1 layer, whatever the source was saved with, and has no clouds to
+    set a ceiling on. An optical source never carries a pass time.
+    """
+    if body.recipe.method in RADAR_METHODS:
+        radar: dict[str, Any] = {"provider": "sentinel1", "layer": radar_layer(), "maxcc": 100}
+        return body.model_copy(update={"a": body.a.model_copy(update=radar),
+                                       "b": body.b.model_copy(update=radar)})
+
+    def optical(source: Source) -> Source:
+        # A pass time left over from a radar analyzer would narrow the day to
+        # forty minutes around a radar pass, and Sentinel-2 flies at another hour.
+        if source.provider == "sentinel2" and not source.time:
+            return source
+        patch: dict[str, Any] = {"provider": "sentinel2", "time": ""}
+        if source.provider != "sentinel2":
+            patch["layer"] = sentinel.DEFAULT_LAYER
+        return source.model_copy(update=patch)
+
+    return body.model_copy(update={"a": optical(body.a), "b": optical(body.b)})
+
+
+def _pass_time(body: RunInput, side: Source, track: str,
+               found: list[dict[str, Any]] | None = None) -> Source:
+    """A dated radar source pinned to one pass of its day.
+
+    A date typed by hand names a day, and Sentinel-1 can pass twice in one,
+    from opposite directions. The pass on `track` wins, then the one that
+    covers the areas best. Offline there is nothing to ask, and the day is read
+    whole from whatever the cache holds.
+    """
+    if not side.date or side.time or body.offline:
+        return side
+    passes = [entry for entry in (found if found is not None else _lookup(body, side.date, side.date))
+              if entry["date"] == side.date]
+    if not passes:
+        raise ValueError(f"no Sentinel-1 pass reaches this area on {side.date}")
+    passes.sort(key=lambda entry: (not sentinel.same_track(entry["time"], track),
+                                   -entry["coverage"], entry["time"]))
+    return side.model_copy(update={"time": passes[0]["time"]})
+
+
+def _timed(body: RunInput) -> RunInput:
+    """Radar sources pinned to their passes, and a pair held to one track.
+
+    A pass from another track sees the ground at another angle, and that
+    difference is not change. One lookup settles both sides.
+    """
+    if body.recipe.method not in RADAR_METHODS:
+        return body
+    single = body.recipe.method in SINGLE_METHODS
+    sides = [body.b] if single else [body.a, body.b]
+    missing = sorted(side.date for side in sides if side.date and not side.time)
+    found = _lookup(body, missing[0], missing[-1]) if missing and not body.offline else None
+    b = _pass_time(body, body.b, "" if single else body.a.time, found)
+    if single:
+        return body.model_copy(update={"a": b, "b": b})
+    a = _pass_time(body, body.a, b.time, found)
+    if a.time and b.time and not sentinel.same_track(a.time, b.time):
+        raise ValueError("the reference and the pass were seen from different tracks; choose "
+                         "two passes at the same time of day, which the pass list groups")
+    return body.model_copy(update={"a": a, "b": b})
+
+
+def resolve_dates(case: Case, body: RunInput, *, selected: bool = False) -> RunInput:
+    body = _sensed_by(body)
+    single = body.recipe.method in SINGLE_METHODS
+    radar = body.recipe.method in RADAR_METHODS
+    if single:
+        body = body.model_copy(update={"a": body.b})
+    if body.date_rule == "manual":
+        return _timed(body)
+    if selected and body.b.date:
+        if radar:
+            body = body.model_copy(update={"b": _pass_time(body, body.b, body.a.time)})
+        reference = (body.b if single else
+                     previous_pass(case, body) if body.date_rule == "latest_previous" else body.a)
+        if not single and not reference.date:
+            raise ValueError("choose a reference image for the first execution of this follow-up")
+        return _timed(body.model_copy(update={"a": reference}))
+    track = ""
+    if radar and not single:
+        # The newest pass is looked for on one track: the reference's, or for a
+        # routine that compares with its previous pass, the track it has run on.
+        anchor = body.a if body.date_rule != "latest_previous" else previous_pass(case, body)
+        anchor = _pass_time(body, anchor, "")
+        if body.date_rule != "latest_previous":
+            body = body.model_copy(update={"a": anchor})
+        track = anchor.time
+    source = body.b.model_copy(deep=True)
+    found = _lookup(body, (date.today() - timedelta(days=LOOKBACK_DAYS)).isoformat(),
+                    date.today().isoformat())
+    allowed = [entry for entry in found if radar or (
+        entry.get("cloud") is not None and entry["cloud"] <= source.maxcc)]
+    if track:
+        allowed = [entry for entry in allowed if sentinel.same_track(entry["time"], track)]
     whole = [entry for entry in allowed if entry["coverage"] >= FULL_COVER]
     if not whole:
         best = max((entry["coverage"] for entry in allowed), default=0)
         raise ValueError(
-            "no recent pass covers the whole area under the cloud limit"
+            (f"no recent Sentinel-1 pass{' on this track' if track else ''} covers the whole area"
+             if radar else "no recent pass covers the whole area under the cloud limit")
             + (f"; the best reaches {round(best * 100)}% of it, so choose the dates by hand"
                if best else "")
         )
     source.date = whole[0]["date"]  # newest first
-    reference = body.a
-    if body.date_rule == "latest_previous" and body.followup_id:
-        for summary in listing(case, "runs"):
-            previous = read(case, "runs", summary["id"])
-            if previous.get("status") == "ready" and \
-                    previous["input"].get("followup_id") == body.followup_id:
-                candidate = Source.model_validate(previous["input"]["b"])
-                if candidate.layer == source.layer and candidate.date:
-                    reference = candidate
-                    break
-    if body.recipe.method not in SINGLE_METHODS and not reference.date:
+    if radar:
+        source.time = whole[0]["time"]
+    reference = (source if single else
+                 body.a if body.date_rule != "latest_previous" else
+                 previous_pass(case, body.model_copy(update={"b": source})))
+    if not single and not reference.date:
         raise ValueError("choose a reference image for the first execution of this follow-up")
-    return body.model_copy(update={"a": reference, "b": source})
+    return _timed(body.model_copy(update={"a": reference, "b": source}))
+
+
+def for_area(body: RunInput, zone: Zone) -> RunInput:
+    pair = next((pair for pair in body.area_dates if pair.area_id == zone.id), None)
+    changes: dict[str, Any] = {"zones": [zone], "area_dates": []}
+    if pair:
+        changes.update(a=pair.a, b=pair.b, date_rule=pair.date_rule)
+    return body.model_copy(update=changes)
+
+
+def prepare_areas(case: Case, body: RunInput) -> tuple[RunInput, list[dict[str, Any]]]:
+    """Resolve each area independently, only as part of an explicit launch."""
+    outcomes = []
+    pairs = []
+    for zone in body.zones:
+        local = for_area(body, zone)
+        outcome: dict[str, Any] = {"area_id": zone.id, "name": zone.name}
+        try:
+            local = resolve_dates(case, local, selected=bool(body.area_dates))
+            outcome.update(status="pending", a=local.a.model_dump(), b=local.b.model_dump(), message="")
+            pairs.append(AreaDates(area_id=zone.id, a=local.a, b=local.b, date_rule="manual"))
+        except Exception as exc:
+            message = str(exc) if isinstance(exc, ValueError) else "Imagery could not be read"
+            outcome.update(status="failed", message=f"{zone.name}: {message}",
+                           a=local.a.model_dump(), b=local.b.model_dump())
+            pairs.append(AreaDates(area_id=zone.id, a=local.a, b=local.b, date_rule=local.date_rule))
+        outcomes.append(outcome)
+    return body.model_copy(update={"area_dates": pairs}), outcomes
+
+
+def duplicates(case: Case, body: RunInput, outcomes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Exact geometry, recipe and source pairs only; overlapping dates do not match."""
+    found = []
+    for summary in listing(case, "runs"):
+        if summary.get("status") != "ready":
+            continue
+        run = read(case, "runs", summary["id"])
+        old = RunInput.model_validate(run["input"])
+        if old.recipe.model_dump() != body.recipe.model_dump():
+            continue
+        for outcome in outcomes:
+            if outcome["status"] != "pending":
+                continue
+            zone = next(z for z in body.zones if z.id == outcome["area_id"])
+            old_zone = next((z for z in old.zones if z.id == zone.id), None)
+            if old_zone is None or old_zone.ring() != zone.ring():
+                continue
+            records = run.get("area_runs") or [{"area_id": zone.id, "status": "ready",
+                        "a": old.a.model_dump(), "b": old.b.model_dump()}]
+            match = next((r for r in records if r["area_id"] == zone.id and r["status"] == "ready"
+                          and r["b"] == outcome["b"] and
+                          (body.recipe.method in SINGLE_METHODS or r["a"] == outcome["a"])), None)
+            if match:
+                found.append({"run_id": run["id"], "title": run["title"], "area_id": zone.id,
+                              "area_name": zone.name, "a": outcome["a"], "b": outcome["b"]})
+    return found
 
 
 def execute(case: Case, job: dict[str, Any]) -> None:
@@ -968,73 +1487,111 @@ def execute(case: Case, job: dict[str, Any]) -> None:
     check_active(case, ident)
     run = read(case, "runs", ident)
     try:
-        body = resolve_dates(case, RunInput.model_validate(run["input"]))
-        single = body.recipe.method in SINGLE_METHODS
-        if single:
-            body = body.model_copy(update={"a": body.b})
-        run["input"] = body.model_dump()
-        if not single and body.a.model_dump() == body.b.model_dump():
-            run.update(status="no_new_imagery", message="No different dated imagery is available")
-            persist_run(case, run)
-            return
-        planned = plan(body)
+        original = hydrate(case, RunInput.model_validate(run["input"]))
+        outcomes = run.get("area_runs")
+        if outcomes is None:
+            _, outcomes = prepare_areas(case, original)
+        single = original.recipe.method in SINGLE_METHODS
         z, size = GRID
-        run.update(status="running", total=len(planned), resolution={"grid_zoom": z,
+        run.update(status="running", area_runs=outcomes, resolution={"grid_zoom": z,
                    "tile_size": size, "pad": PAD}, engine_version=ENGINE_VERSION)
         persist_run(case, run)
-
-        product = product_for(body.recipe.method, body.recipe.parameters.index)
-        results: list[dict[str, Any]] = []
-        # What the sweep actually read, against what was asked for. A date the
-        # granules only half reach comes back half nodata, and without this the
-        # run reports "nothing found" over ground it never saw.
         asked = imaged = 0
-        for part, (x, y) in enumerate(planned):
+        kept: list[dict[str, Any]] = []
+        resolved = []
+        for outcome in outcomes:
             check_active(case, ident)
-            picture_b = frame(case, run, body.b, x, y)
-            picture_a = picture_b if single else frame(case, run, body.a, x, y)
-            # Two frames for one date: the picture the analyst reviews, and the
-            # bands the detector measures. Both are metered.
-            product_b = frame(case, run, body.b, x, y, product)
-            product_a = product_b if single else frame(case, run, body.a, x, y, product)
-            mask = mask_for(body.zones, z, size, x, y)
-            inside = mask.astype(bool)
-            asked += int(inside.sum())
-            imaged += int((inside & (picture_a[:, :, 3] > 0) & (picture_b[:, :, 3] > 0)).sum())
-            _, lat = geographic((x + .5) / (1 << z), (y + .5) / (1 << z))
-            reading = detect((picture_a, picture_b), (product_a, product_b), mask, body, lat)
-            # One image analyzed, one frame of evidence: a vessel's "before" and
-            # "after" would be the same picture twice.
-            sources = [body.b] if single else [body.a, body.b]
-            keys = [_key(source, z, x, y, None) for source in sources]
-            results.extend(_candidates(reading, body, x, y, part, keys))
-            if len(results) > MAX_RESULTS * 4:
-                raise ValueError("too many fragments; lower the sensitivity or use smaller areas")
-            run["progress"] = part + 1
+            if outcome["status"] == "failed":
+                continue
+            zone = next(zone for zone in original.zones if zone.id == outcome["area_id"])
+            body = for_area(original, zone).model_copy(update={
+                "a": Source.model_validate(outcome["b"] if single else outcome["a"]),
+                "b": Source.model_validate(outcome["b"]), "date_rule": "manual"})
+            resolved.append(AreaDates(area_id=zone.id, a=body.a, b=body.b, date_rule="manual"))
+            if not single and body.a == body.b:
+                outcome.update(status="no_new_imagery", message=f"{zone.name}: No different dated imagery is available")
+                continue
+            try:
+                rows, area_asked, area_imaged = sweep_area(case, run, body)
+                kept.extend(rows)
+                asked += area_asked
+                imaged += area_imaged
+                outcome.update(status="ready", count=len(rows))
+            except (workqueue.JobCancelled, workqueue.JobRemoved):
+                raise
+            except Exception as exc:
+                message = str(exc) if isinstance(exc, ValueError) else "Imagery could not be read"
+                outcome.update(status="failed", message=f"{zone.name}: {message}")
             persist_run(case, run)
-        options = body.recipe.parameters
-        joined = merge(results, options.merge_metres)
-        kept = [r for r in joined if r["area"] >= options.min_area and
-                (not options.max_area or r["area"] <= options.max_area)]
         if len(kept) > MAX_RESULTS:
             raise ValueError("too many results; raise the minimum area or lower the sensitivity")
         kept.sort(key=lambda row: row["margin"], reverse=True)
-        for row in kept:
-            w, s, e, n = row["bbox"]
-            row["geometry"] = {"type": "Polygon", "coordinates": [[[w, s], [e, s], [e, n],
-                                                                      [w, n], [w, s]]]}
+        if resolved:
+            # Keep the original envelope readable by older clients; each actual
+            # pair is recorded beside its area's outcome and on every result.
+            original = original.model_copy(update={"a": resolved[0].a, "b": resolved[0].b})
+        run["input"] = original.model_dump()
         swept = round(imaged / asked, 3) if asked else 0.0
-        run.update(results=kept, count=len(kept), status="ready", swept=swept, message="",
+        status = ("ready" if any(o["status"] == "ready" for o in outcomes) else
+                  "failed" if any(o["status"] == "failed" for o in outcomes) else "no_new_imagery")
+        run.update(results=kept, count=len(kept), status=status, swept=swept,
+                   message=" · ".join(o["message"] for o in outcomes if o.get("message")),
                    completed_at=now())
         prune_frames(case, run)
         persist_run(case, run)
-    except workqueue.JobCancelled:
+    except (workqueue.JobCancelled, workqueue.JobRemoved):
         raise
     except Exception as exc:
         # Never persist provider URLs or credentials from network exception text.
         message = str(exc) if isinstance(exc, ValueError) else "Analysis failed; imagery could not be read"
         run.update(status="failed", message=message)
         persist_run(case, run)
+
+
+def sweep_area(case: Case, run: dict[str, Any], body: RunInput) -> tuple[list[dict[str, Any]], int, int]:
+    """Apply the unchanged detector to one area's own pair."""
+    single = body.recipe.method in SINGLE_METHODS
+    z, size = GRID
+    product = product_for(body.recipe.method, body.recipe.parameters.index)
+    results: list[dict[str, Any]] = []
+    asked = imaged = 0
+    for part, (x, y) in enumerate(plan(body)):
+        check_active(case, run["id"])
+        workqueue.let_others_through(case, JOB)
+        picture_b = frame(case, run, body.b, x, y)
+        picture_a = picture_b if single else frame(case, run, body.a, x, y)
+        product_b = frame(case, run, body.b, x, y, product)
+        product_a = product_b if single else frame(case, run, body.a, x, y, product)
+        water = None
+        if body.recipe.method == "sar-vessels":
+            # Without it the radar alone decides what is sea, which it does
+            # well enough offshore; a failed read is not a failed tile.
+            try:
+                water = frame(case, run, water_source(body.b), x, y, "water")
+            except (ValueError, sentinel.CoverageError, httpx.HTTPError):
+                water = None
+        mask = mask_for(body.zones, z, size, x, y)
+        inside = mask.astype(bool)
+        asked += int(inside.sum())
+        imaged += int((inside & (picture_a[:, :, 3] > 0) & (picture_b[:, :, 3] > 0)).sum())
+        _, lat = geographic((x + .5) / (1 << z), (y + .5) / (1 << z))
+        reading = detect((picture_a, picture_b), (product_a, product_b), mask, body, lat, water)
+        sources = [body.b] if single else [body.a, body.b]
+        keys = [_key(source, z, x, y, None) for source in sources]
+        results.extend(_candidates(reading, body, x, y, part, keys))
+        if len(results) > MAX_RESULTS * 4:
+            raise ValueError("too many fragments; lower the sensitivity or use smaller areas")
+        run["progress"] += 1
+        persist_run(case, run)
+    options = body.recipe.parameters
+    joined = merge(results, options.merge_metres)
+    kept = [r for r in joined if r["area"] >= options.min_area and
+            (not options.max_area or r["area"] <= options.max_area)]
+    for row in kept:
+        row.update(id=f"{body.zones[0].id}-{row['id']}", area_id=body.zones[0].id,
+                   area_name=body.zones[0].name, origin="detector",
+                   sources={"a": body.a.model_dump(), "b": body.b.model_dump()})
+    return kept, asked, imaged
 
 
 workqueue.register(JOB, execute)

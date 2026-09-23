@@ -33,7 +33,7 @@ from ..engine import (
     workspacemove,
 )
 from .templates import MAX_PER_KIND as MAX_TEMPLATES_PER_KIND
-from ..engine.analysis_models import Recipe
+from ..engine.analysis_models import DetectPrefs, Recipe
 
 # A backup carries the signature logo as base64: 4 characters per 3 bytes, plus
 # slack for padding and any line breaks a hand-edited file picked up.
@@ -102,6 +102,9 @@ class PrefsIn(BaseModel):
     coord_format: str | None = None  # one of config.COORD_FORMATS
     units: str | None = None  # one of config.UNIT_SYSTEMS
     home_view: HomeView | None = None  # where the Satellite tab opens
+    detect_view: DetectPrefs | None = None
+    # the Sentinel-1 layer radar detections read; "" forgets it
+    sentinel1_layer: str | None = Field(default=None, pattern=r"^$|^[A-Z0-9_]{1,40}$")
     # burn a scale bar and a north arrow into captures (the capture menu's tick)
     capture_scale_north: bool | None = None
     # whether saving a proof files its point as a place, or asks first
@@ -134,6 +137,8 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "coord_format": settings.get("coord_format", "dd"),
         "units": settings.get("units", "metric"),
         "home_view": settings.get("home_view", DEFAULT_HOME_VIEW),
+        "detect_view": settings.get("detect_view", config.DEFAULT_SETTINGS["detect_view"]),
+        "sentinel1_layer": settings.get("sentinel1_layer", ""),
         "capture_scale_north": bool(settings.get("capture_scale_north", False)),
         "proof_place_auto": bool(settings.get("proof_place_auto", True)),
         "post_mention": settings.get("post_mention", DEFAULT_POST_MENTION),
@@ -263,6 +268,10 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["units"] = body.units
     if body.home_view is not None:
         settings["home_view"] = body.home_view.model_dump()
+    if body.detect_view is not None:
+        settings["detect_view"] = body.detect_view.model_dump()
+    if body.sentinel1_layer is not None:
+        settings["sentinel1_layer"] = body.sentinel1_layer
     if body.capture_scale_north is not None:
         settings["capture_scale_north"] = bool(body.capture_scale_north)
     if body.proof_place_auto is not None:
@@ -313,6 +322,9 @@ def put_keys(body: KeysIn) -> dict[str, Any]:
                 # about the old key, and a stale failure would keep the basemap
                 # benched (tiles.key_for) with no way back but a manual re-test
                 status.pop(name, None)
+                if name == "sentinelhub":
+                    # the radar layer was one of the old instance's layers
+                    settings["sentinel1_layer"] = ""
             if value:
                 keys[name] = value
             else:
@@ -615,6 +627,8 @@ class ImportedSettings(BaseModel):
     model_config = ConfigDict(extra="ignore", strict=True, populate_by_name=True)
 
     analyzers: list[Recipe] = Field(default_factory=list, max_length=100)
+    detect_view: DetectPrefs = Field(default_factory=DetectPrefs)
+    sentinel1_layer: str = Field(default="", pattern=r"^$|^[A-Z0-9_]{1,40}$")
 
     schema_version: int = Field(
         default=config.SETTINGS_SCHEMA,

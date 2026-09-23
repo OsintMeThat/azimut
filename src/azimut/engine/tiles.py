@@ -257,6 +257,28 @@ def all_providers() -> list[Provider]:
             )
         )
 
+    # Sentinel-1: the same account and quota, through the radar layer the user
+    # added to the same configuration. Offered once that layer is known.
+    radar_layer = str(settings.get("sentinel1_layer") or "")
+    if sentinelhub_key and radar_layer:
+        providers.append(
+            Provider(
+                id=sentinel.RADAR_ID,
+                label="Sentinel-1 radar (Copernicus)",
+                url=sentinel.radar_wmts_url(radar_layer).replace("{key}", sentinelhub_key),
+                attribution="© Copernicus Sentinel data / Sentinel Hub",
+                max_zoom=18,
+                max_native_zoom=14,
+                imagery=True,
+                capturable=True,
+                cacheable=True,
+                meter="sentinelhub",
+                tile_size=512,
+                zoom_offset=1,
+                eco_max_zoom=11,
+            )
+        )
+
     for entry in settings.get("tile_providers", []):
         try:
             url = entry["url"]
@@ -302,6 +324,8 @@ def get_provider(provider_id: str) -> Provider:
         if provider.id == base_id:
             if not sep:
                 return provider
+            if provider.id == sentinel.RADAR_ID:
+                return _radar_provider(provider, provider_id, spec)
             if provider.id != "sentinel2":
                 raise KeyError(f"provider '{base_id}' has no variants")
             try:
@@ -317,6 +341,25 @@ def get_provider(provider_id: str) -> Provider:
                 ),
             )
     raise KeyError(f"unknown tile provider '{provider_id}'")
+
+
+def _radar_provider(provider: Provider, provider_id: str, spec: str) -> Provider:
+    """One Sentinel-1 pass (or day) of the radar basemap."""
+    try:
+        day, time = sentinel.parse_radar_variant(spec)
+    except ValueError as exc:
+        raise KeyError(str(exc)) from exc
+    layer = re.search(r"[?&]LAYER=([A-Z0-9_]+)", provider.url)
+    if not layer:
+        raise KeyError("Sentinel-1 provider URL carries no layer")
+    return replace(
+        provider,
+        id=provider_id,
+        label=f"{provider.label} · {sentinel.radar_label(day, time)}",
+        url=sentinel.radar_wmts_url(layer.group(1), day, time).replace(
+            "{key}", _sentinel_key_from(provider.url)
+        ),
+    )
 
 
 def _wayback_provider(spec: str | None) -> Provider:

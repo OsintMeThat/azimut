@@ -1,27 +1,22 @@
 /** Pure parts of the two-surface imagery comparison tool. */
 
 /**
- * Every mode is one row of buttons, but they answer two different questions,
- * and running them together is what made the tool unreadable. `read` modes
- * only change how the pair is shown at the camera you are on. `find` modes
- * compute something: Difference reads the pixels on screen right now, Detect
- * sweeps a drawn area at full resolution and keeps what it found. The dock
- * draws a rule between the groups, and each `find` mode owns its whole panel
- * rather than sharing one with a cross-link.
+ * How the pair is shown at the camera you are on. Difference is not one of
+ * them: it is a layer of highlights laid over whichever of these is on.
  */
 export const COMPARE_MODES = Object.freeze([
-  { id: 'side', label: 'Side by side', short: 'Side', icon: 'columns', key: '1', group: 'read' },
-  { id: 'swipe', label: 'Swipe', short: 'Swipe', icon: 'swipe', key: '2', group: 'read' },
-  { id: 'opacity', label: 'Fade', short: 'Fade', icon: 'fade', key: '3', group: 'read' },
-  { id: 'blink', label: 'Blink', short: 'Blink', icon: 'blink', key: '4', group: 'read' },
-  { id: 'change', label: 'Difference', short: 'Diff', icon: 'changes', key: '5', group: 'find' },
-  { id: 'analysis', label: 'Detect', short: 'Detect', icon: 'grid', key: '6', group: 'find' },
+  { id: 'side', label: 'Side by side', short: 'Side', icon: 'columns', key: '1' },
+  { id: 'swipe', label: 'Swipe', short: 'Swipe', icon: 'swipe', key: '2' },
+  { id: 'opacity', label: 'Fade', short: 'Fade', icon: 'fade', key: '3' },
+  { id: 'blink', label: 'Blink', short: 'Blink', icon: 'blink', key: '4' },
 ]);
 
-/** Modes that lay a computed result over the pair rather than restyling it. */
-export const FIND_MODES = Object.freeze(
-  COMPARE_MODES.filter((entry) => entry.group === 'find').map((entry) => entry.id)
-);
+export const DIFFERENCE_KEY = '5';
+
+/** A saved view mode, with the one that used to be Difference read as side by side. */
+export function compareMode(value) {
+  return COMPARE_MODES.some((entry) => entry.id === value) ? value : 'side';
+}
 
 export const DEFAULT_DIVIDER = 50;
 export const DEFAULT_OPACITY = 50;
@@ -69,7 +64,7 @@ export function percentage(value, fallback = 50) {
 
 /** How a provider is offered in the picker: imagery, a dated archive, or a map. */
 export function providerKind(provider) {
-  if (provider?.id === 'esri-wayback' || provider?.id === 'sentinel2') return 'archive';
+  if (['esri-wayback', 'sentinel2', 'sentinel1'].includes(provider?.id)) return 'archive';
   return provider?.imagery === false ? 'map' : 'imagery';
 }
 
@@ -99,6 +94,13 @@ export const COMPARE_PRESETS = Object.freeze([
     b: 'sentinel2',
   },
   {
+    id: 'radar',
+    label: 'Two radar passes',
+    hint: 'Sentinel-1 on both sides, through cloud and at night',
+    a: 'sentinel1',
+    b: 'sentinel1',
+  },
+  {
     id: 'map',
     label: 'Imagery and map',
     hint: 'World Imagery beside OpenStreetMap',
@@ -106,6 +108,9 @@ export const COMPARE_PRESETS = Object.freeze([
     b: 'osm',
   },
 ]);
+
+/** What Compare opens on: an archive against today, both key-less. */
+export const DEFAULT_PRESET = 'archive';
 
 /** The presets this catalogue can actually start. */
 export function availablePresets(providers) {

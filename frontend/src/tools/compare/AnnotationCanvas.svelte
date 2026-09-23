@@ -1,20 +1,27 @@
 <script>
   import { onMount } from 'svelte';
   import {
-    STAMPED, glyphBox, markGlyph, markLabel, markSize, movedMark, nextMarkNumber, onSide,
-    projectMark, stampInk,
+    ANGLED, STAMPED, TURNABLE, glyphBox, markCentre, markGlyph, markLabel, markSize, markTop,
+    movedMark, nextMarkNumber, onSide, projectMark, stampInk, turnedMark,
   } from '../../lib/map/compareAnnotations.js';
+  import { compassAngle } from '../../lib/map/groundFrame.js';
+  import { relayWheel } from '../../lib/map/wheelRelay.js';
   import { isSolidIcon } from '../../lib/proofIcons.js';
 
   let { annotations = [], engine, letter = 'a', units = 'metric', active = true,
     tool = $bindable('select'), selectedId = $bindable(null), colour = '#f6a81a',
     strokeWidth = 4, fillOpacity = 0, annotationSide = 'both', glyph = 'point',
-    stampSize = 16, editVertices = false, edgeOnly = false, onchange = () => {} } = $props();
+    stampSize = 16, editVertices = false, edgeOnly = false, bearing = 0, turnable = false,
+    onchange = () => {} } = $props();
   let svg = $state();
   let revision = $state(0);
   let draft = $state(null);
   let editor = $state(null);
   let gesture = null;
+  // The turn in flight, which the grip follows round: a polygon has no sides of
+  // its own to carry the grip, so without it the grip would stay put under a
+  // pointer circling away from it.
+  let turning = $state(null);
 
   /** Below this, a pointer press is a click: a shape is picked, never nudged. */
   const DRAG_SLOP = 4;
@@ -22,6 +29,10 @@
   // neither gains anything from grips: one is already dragged whole, the other
   // would be buried under its own handles.
   const GRIPPED = new Set(['arrow', 'line', 'measure', 'rect', 'ellipse', 'polygon']);
+  /** How far past a mark's top the turn grip stands, in screen pixels. */
+  const TURN_REACH = 26;
+  /** The step a turn snaps to with Shift held, in degrees. */
+  const TURN_STEP = 15;
 
   $effect(() => {
     if (!engine) return;
@@ -46,32 +57,29 @@
       .map((mark) => ({ mark, shape: projectMark(mark, project), label: markLabel(mark, units),
         vertices: editVertices && GRIPPED.has(mark.kind) ? mark.points.map(project) : [] }))
   );
-  const pathOf = (shape) => shape.path.map(([x, y], i) => `${i ? 'L' : 'M'}${x},${y}`).join(' ') + (shape.closed ? ' Z' : '');
   /**
-   * The wheel belongs to the map, wherever the pointer happens to be.
-   *
-   * This overlay is a sibling of the map rather than a child, so a wheel over a
-   * mark stopped here and the view would not zoom until the pointer was moved
-   * off whatever had been drawn. A press is the mark's; the wheel is handed down
-   * to the picture under it.
+   * Where the grip that turns a mark stands: past a box's top edge along its own
+   * up axis, so it turns with the box, or straight above anything else.
    */
-  function relayWheel(event) {
-    const container = engine?.container;
-    if (!container) return;
-    const below = document
-      .elementsFromPoint(event.clientX, event.clientY)
-      .find((element) => !svg?.contains(element) && container.contains(element));
-    if (!below) return;
-    event.preventDefault();
-    below.dispatchEvent(new WheelEvent('wheel', {
-      deltaX: event.deltaX, deltaY: event.deltaY, deltaZ: event.deltaZ,
-      deltaMode: event.deltaMode,
-      clientX: event.clientX, clientY: event.clientY,
-      ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
-      altKey: event.altKey, metaKey: event.metaKey,
-      bubbles: true, cancelable: true,
-    }));
+  function turnGrip(mark, shape) {
+    const centre = project(markCentre(mark));
+    const top = markTop(mark);
+    let dir = [0, -1];
+    let reach = centre[1] - Math.min(...shape.path.map((point) => point[1]));
+    if (top) {
+      const at = project(top);
+      const length = Math.hypot(at[0] - centre[0], at[1] - centre[1]);
+      if (length > 0.5) { dir = [(at[0] - centre[0]) / length, (at[1] - centre[1]) / length]; reach = length; }
+    } else if (turning?.id === mark.id) {
+      const turn = (turning.degrees * Math.PI) / 180;
+      dir = [Math.sin(turn), -Math.cos(turn)];
+      reach = turning.reach;
+    }
+    const edge = [centre[0] + dir[0] * reach, centre[1] + dir[1] * reach];
+    return { edge, at: [edge[0] + dir[0] * TURN_REACH, edge[1] + dir[1] * TURN_REACH], reach };
   }
+  const pathOf = (shape) => shape.path.map(([x, y], i) => `${i ? 'L' : 'M'}${x},${y}`).join(' ') + (shape.closed ? ' Z' : '');
+  const relay = (event) => relayWheel(event, { engine, root: svg });
 
   function point(event) {
     const box = svg?.getBoundingClientRect();
@@ -86,7 +94,11 @@
       // its own colour's series, so deleting #2 and stamping again fills that
       // hole, and a symbol carries the glyph in hand.
       ...(tool === 'number' ? { number: nextMarkNumber(annotations, colour) } : {}),
-      ...(tool === 'icon' ? { glyph } : {}) };
+      ...(tool === 'icon' ? { glyph } : {}),
+      // A box drawn on a turned map runs along the screen it was drawn on. Its
+      // angle is the compass direction that was up; the app's bearing turns
+      // the map clockwise, which is that direction counted the other way.
+      ...(ANGLED.has(tool) ? { angle: turnable ? compassAngle(-bearing) : 0 } : {}) };
   }
 
   /**
@@ -172,7 +184,16 @@
       return;
     }
     if (gesture && !dragging(event)) return;
-    if (gesture?.kind === 'vertex') {
+    if (gesture?.kind === 'turn') {
+      const box = svg.getBoundingClientRect();
+      const [px, py] = gesture.pivot;
+      const heading = Math.atan2(event.clientY - box.top - py, event.clientX - box.left - px) * 180 / Math.PI;
+      let degrees = heading - gesture.heading;
+      if (event.shiftKey) degrees = Math.round(degrees / TURN_STEP) * TURN_STEP;
+      turning = { ...turning, degrees };
+      const turned = turnedMark(gesture.mark, gesture.centre, degrees);
+      onchange(annotations.map((mark) => mark.id === turned.id ? turned : mark), false);
+    } else if (gesture?.kind === 'vertex') {
       const points = gesture.mark.points.map((p, i) => i === gesture.index ? at : p);
       onchange(annotations.map((m) => m.id === gesture.mark.id ? { ...m, points } : m), false);
     } else if (gesture?.kind === 'move') {
@@ -191,7 +212,8 @@
     if (!gesture || gesture.kind === 'trail') return;
     move(event);
     svg.releasePointerCapture?.(event.pointerId);
-    if (gesture.kind === 'move' || gesture.kind === 'vertex') {
+    turning = null;
+    if (gesture.kind === 'move' || gesture.kind === 'vertex' || gesture.kind === 'turn') {
       // A press that never became a drag only selected something, so it leaves
       // no entry to undo and no geometry to save.
       if (gesture.live) onchange(annotations, true);
@@ -233,6 +255,20 @@
     selectedId = mark.id;
     gesture = { kind: 'vertex', mark: JSON.parse(JSON.stringify(mark)), index,
       from: { x: event.clientX, y: event.clientY }, live: false };
+    svg.setPointerCapture?.(event.pointerId);
+  }
+  /** Take hold of a mark's turn grip: it turns about its centre as the pointer circles it. */
+  function turnStart(event, mark, grip) {
+    if (!active || event.button > 0) return;
+    event.preventDefault(); event.stopPropagation();
+    selectedId = mark.id;
+    const centre = markCentre(mark);
+    const pivot = project(centre);
+    const box = svg.getBoundingClientRect();
+    gesture = { kind: 'turn', mark: JSON.parse(JSON.stringify(mark)), centre, pivot,
+      heading: Math.atan2(event.clientY - box.top - pivot[1], event.clientX - box.left - pivot[0]) * 180 / Math.PI,
+      from: { x: event.clientX, y: event.clientY }, live: false };
+    turning = { id: mark.id, degrees: 0, reach: grip.reach };
     svg.setPointerCapture?.(event.pointerId);
   }
   function edit(event, mark) {
@@ -294,7 +330,7 @@
 <svg class="annotation-canvas" class:drawing={active && tool !== 'select'}
   bind:this={svg} aria-label={`Annotations on imagery ${letter.toUpperCase()}`}
   onpointerdown={begin} onpointermove={move} onpointerup={finish}
-  onpointercancel={finish} ondblclick={finishPolygon} onwheel={relayWheel}>
+  onpointercancel={finish} ondblclick={finishPolygon} onwheel={relay}>
   {#each marks as { mark, shape, label, vertices } (mark.id)}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <g class="mark" class:area={edgeOnly} class:selected={selectedId === mark.id} style:color={mark.colour}
@@ -337,6 +373,16 @@
       {/if}
     </g>
     {#if editVertices && active && selectedId === mark.id && tool === 'select'}
+      {#if turnable && TURNABLE.has(mark.kind)}
+        {@const grip = turnGrip(mark, shape)}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <g class="turn" class:held={turning?.id === mark.id} onpointerdown={(e) => turnStart(e, mark, grip)}>
+          <title>Drag to turn · Shift snaps to 15°</title>
+          <line x1={grip.edge[0]} y1={grip.edge[1]} x2={grip.at[0]} y2={grip.at[1]} stroke={mark.colour} stroke-width="1.5" />
+          <circle class="grip" cx={grip.at[0]} cy={grip.at[1]} r="13" fill="transparent" />
+          <circle cx={grip.at[0]} cy={grip.at[1]} r="6" fill="#fff" stroke={mark.colour} stroke-width="2" />
+        </g>
+      {/if}
       {#each vertices as at, i}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <g class="vertex" onpointerdown={(e) => vertex(e, mark, i)}>
@@ -370,6 +416,10 @@
   .drawing .mark, .drawing .mark .edge { pointer-events: none; }
   .vertex { pointer-events: auto; cursor: crosshair; }
   .vertex .grip { pointer-events: all; }
+  .turn { pointer-events: auto; cursor: grab; }
+  .turn.held { cursor: grabbing; }
+  .turn line { pointer-events: none; }
+  .turn .grip { pointer-events: all; }
   .mark path { stroke-linecap: round; stroke-linejoin: round; }
   .mark.selected { filter: drop-shadow(0 0 3px white); }
   text { fill: white; stroke: #111; stroke-width: 3px; paint-order: stroke; font-family: system-ui, sans-serif; font-weight: 600; }

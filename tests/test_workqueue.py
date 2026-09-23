@@ -159,3 +159,44 @@ def test_a_worker_that_dies_hands_the_queue_back(case, monkeypatch):
     assert workqueue._worker_running is False
     # and the case it never got to is still queued, for the worker after it
     assert workqueue.wait_until_idle(timeout=0) is True
+
+
+def test_a_long_job_lets_other_kinds_through_between_its_steps(case):
+    order: list[str] = []
+
+    def sweep(c, job):
+        for step in range(2):
+            order.append(f"sweep {job['payload']['n']}.{step}")
+            if step == 0:
+                workqueue.enqueue(c, "thumb", payload={})
+            workqueue.let_others_through(c, "sweep")
+
+    workqueue.register("sweep", sweep)
+    workqueue.register("thumb", lambda c, job: order.append("thumb"))
+    workqueue.enqueue(case, "sweep", payload={"n": "1"})
+    workqueue.enqueue(case, "sweep", payload={"n": "2"})
+
+    assert workqueue.drain(case) == 2
+    # the thumbnail never waits out a sweep, and the second sweep keeps its turn
+    assert order == ["sweep 1.0", "thumb", "sweep 1.1", "sweep 2.0", "thumb", "sweep 2.1"]
+    assert {j["state"] for j in case.list_jobs()} == {"ready"}
+
+
+def test_letting_others_through_with_nothing_else_registered_claims_nothing(case):
+    workqueue.HANDLERS.clear()
+    nested: list[bool] = []
+    busy = [False]
+
+    def sweep(c, job):
+        nested.append(busy[0])
+        busy[0] = True
+        workqueue.let_others_through(c, "sweep")
+        busy[0] = False
+
+    workqueue.register("sweep", sweep)
+    workqueue.enqueue(case, "sweep", payload={})
+    workqueue.enqueue(case, "sweep", payload={})
+    # an empty kind list must not turn into "any kind", or the second sweep
+    # would run inside the first
+    assert workqueue.drain(case) == 2
+    assert nested == [False, False]

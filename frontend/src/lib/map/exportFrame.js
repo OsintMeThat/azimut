@@ -3,8 +3,9 @@
  *
  * A comparison is read on a whole browser window, but the thing worth showing
  * is usually a building or a crater in the middle of it. The frame is drawn
- * once on imagery A and kept as two ground corners, like an annotation: the
- * camera can move, the window can be resized, the same ground comes out.
+ * once on imagery A and kept as two ground corners and the bearing that was up
+ * while it was drawn, like a box annotation: the camera can move or turn, the
+ * window can be resized, and the same ground comes out, upright as drawn.
  *
  * Cropping happens before composition, on the captured canvases: each side is
  * cut to the same ground box and handed a frame of its own, so the change
@@ -12,7 +13,10 @@
  * whole view.
  */
 
-import { apply, fromMercator, invert, screenToMercator, toMercator } from './groundFrame.js';
+import {
+  apply, compassAngle, fromMercator, frameToFrame, invert, mercatorPerPixel, screenToMercator,
+  toMercator, turnedBox,
+} from './groundFrame.js';
 
 /**
  * The narrowest frame worth exporting, in CSS pixels.
@@ -23,29 +27,6 @@ import { apply, fromMercator, invert, screenToMercator, toMercator } from './gro
 export const MIN_FRAME = 320;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-
-/** Ground pair → the pixel box of `frame` that covers it. */
-export function screenRect(points, frame) {
-  const toScreen = invert(screenToMercator(frame));
-  const corners = points.map(([lon, lat]) => apply(toScreen, ...toMercator(lon, lat)));
-  const xs = corners.map((point) => point[0]);
-  const ys = corners.map((point) => point[1]);
-  return {
-    x: Math.min(...xs),
-    y: Math.min(...ys),
-    w: Math.max(...xs) - Math.min(...xs),
-    h: Math.max(...ys) - Math.min(...ys),
-  };
-}
-
-/** Pixel box of `frame` → the two ground corners it spans. */
-export function groundRect(rect, frame) {
-  const toGround = screenToMercator(frame);
-  return [
-    fromMercator(...apply(toGround, rect.x, rect.y)),
-    fromMercator(...apply(toGround, rect.x + rect.w, rect.y + rect.h)),
-  ];
-}
 
 /**
  * A drawn box made exportable: grown to the minimum around its own centre,
@@ -63,7 +44,7 @@ export function boundedRect(rect, frame) {
   };
 }
 
-/** How much ground the frame spans along the current screen axes, in metres. */
+/** How much ground the frame spans along the axes of the screen it was drawn on, in metres. */
 export function frameSpan(points, bearing = 0) {
   const [first, second] = points.map(([lon, lat]) => toMercator(lon, lat));
   const shrink = Math.cos((((points[0][1] + points[1][1]) / 2) * Math.PI) / 180);
@@ -110,6 +91,60 @@ export function cropCapture(capture, rect, makeCanvas) {
 }
 
 /**
+ * Cut one captured surface to a frame turned against it: the pixels are
+ * resampled through the turn, so the cut comes out upright at its own bearing.
+ */
+export function turnedCapture(capture, frame, makeCanvas) {
+  const pixelScale = capture.canvas.width / capture.frame.width;
+  const canvas = canvasOf(frame.width * pixelScale, frame.height * pixelScale, makeCanvas);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('this browser cannot frame the comparison');
+  ctx.imageSmoothingQuality = 'high';
+  const m = frameToFrame(capture.frame, frame);
+  ctx.setTransform(m.a, m.b, m.c, m.d, m.e * pixelScale, m.f * pixelScale);
+  ctx.drawImage(capture.canvas, 0, 0);
+  return { canvas, frame };
+}
+
+/** Whether two bearings put the same way up, to far under a pixel across any view. */
+function sameUp(first, second) {
+  const gap = Math.abs(compassAngle(first) - compassAngle(second));
+  return Math.min(gap, 360 - gap) < 1e-6;
+}
+
+/**
+ * One capture cut to the frame's ground: centred on `centre` (Web Mercator),
+ * `size` pixels across or the box's own span at the capture's zoom.
+ *
+ * A frame drawn at the bearing the capture was taken at is cut on whole
+ * pixels, so the export holds the screen's own pixels; one drawn at another
+ * bearing is turned upright.
+ */
+function cutOne(capture, box, angle, centre, size, makeCanvas) {
+  const view = capture.frame;
+  const perPixel = mercatorPerPixel(view.zoom);
+  const w = size?.w ?? Math.max(1, Math.round(Math.abs(box.width) / perPixel));
+  const h = size?.h ?? Math.max(1, Math.round(Math.abs(box.height) / perPixel));
+  const refuse = () => {
+    throw new Error('the export frame must be fully visible; move or zoom out, then try again');
+  };
+  if (sameUp(angle, view.bearing)) {
+    const [cx, cy] = apply(invert(screenToMercator(view)), ...centre);
+    const rect = { x: Math.round(cx - w / 2), y: Math.round(cy - h / 2), w, h };
+    if (rect.x < 0 || rect.y < 0 || rect.x + w > view.width || rect.y + h > view.height) refuse();
+    return cropCapture(capture, rect, makeCanvas);
+  }
+  const [lng, lat] = fromMercator(...centre);
+  const frame = { ...view, lng, lat, width: w, height: h, bearing: angle };
+  const toView = frameToFrame(frame, view);
+  for (const [x, y] of [[0, 0], [w, 0], [w, h], [0, h]]) {
+    const [vx, vy] = apply(toView, x, y);
+    if (vx < -0.5 || vy < -0.5 || vx > view.width + 0.5 || vy > view.height + 0.5) refuse();
+  }
+  return turnedCapture(capture, frame, makeCanvas);
+}
+
+/**
  * Both captures cut to the same ground box.
  *
  * A is cut first and its box read back off the ground, so B is placed by where
@@ -118,29 +153,15 @@ export function cropCapture(capture, rect, makeCanvas) {
  */
 export function cropSources(sources, frame, makeCanvas) {
   if (!frame?.points) return sources;
-  const fitted = (rect, captureFrame, size = null) => {
-    const cut = {
-      x: Math.round(rect.x),
-      y: Math.round(rect.y),
-      w: size?.w ?? Math.max(1, Math.round(rect.w)),
-      h: size?.h ?? Math.max(1, Math.round(rect.h)),
-    };
-    if (cut.x < 0 || cut.y < 0 || cut.x + cut.w > captureFrame.width || cut.y + cut.h > captureFrame.height) {
-      throw new Error('the export frame must be fully visible; move or zoom out, then try again');
-    }
-    return cut;
-  };
-  const rectA = fitted(screenRect(frame.points, sources.a.frame), sources.a.frame);
-  const ground = groundRect(rectA, sources.a.frame);
-  const onB = screenRect(ground, sources.b.frame);
-  const rectB = fitted(onB, sources.b.frame, rectA);
-  return {
-    a: cropCapture(sources.a, rectA, makeCanvas),
-    b: cropCapture(sources.b, rectB, makeCanvas),
-  };
+  const angle = compassAngle(frame.angle);
+  const box = turnedBox(frame.points, angle);
+  const a = cutOne(sources.a, box, angle, box.centre, null, makeCanvas);
+  const landed = toMercator(a.frame.lng, a.frame.lat);
+  const b = cutOne(sources.b, box, angle, landed, { w: a.frame.width, h: a.frame.height }, makeCanvas);
+  return { a, b };
 }
 
-/** What a saved session carries: nothing, or two ground corners. */
+/** What a saved session carries: nothing, or two ground corners and the bearing they were drawn at. */
 export function exportFrameSpec(value) {
   const points = value?.points;
   if (!Array.isArray(points) || points.length !== 2) return null;
@@ -148,5 +169,5 @@ export function exportFrameSpec(value) {
   if (cleaned.some(([lon, lat]) => !Number.isFinite(lon) || !Number.isFinite(lat))) return null;
   if (cleaned.some(([lon, lat]) => Math.abs(lon) > 180 || Math.abs(lat) > 90)) return null;
   if (cleaned[0][0] === cleaned[1][0] && cleaned[0][1] === cleaned[1][1]) return null;
-  return { points: cleaned };
+  return { points: cleaned, angle: compassAngle(value.angle) };
 }

@@ -2,8 +2,7 @@
   /**
    * The one control a reading mode needs, at the foot of the stage: B's
    * opacity for a fade, speed and a manual flip for blink, the divider's
-   * position for a swipe. The computing modes are not here — they own a panel
-   * beside the stage instead, because a detection needs more than one row.
+   * position for a swipe. Difference's own strip sits beside it when on.
    */
   import Icon from '../../components/Icon.svelte';
   import { BLINK_SPEEDS, percentage } from '../../lib/map/compare.js';
