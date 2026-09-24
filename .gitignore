@@ -55,6 +55,9 @@ AGENTS.md
 .agents/
 .cheatsheet
 
+# Audit reports: working documents, deleted once their items are fixed
+docs/audit*.md
+
 # PyInstaller local output
 dist-bin/
 build-bin/
