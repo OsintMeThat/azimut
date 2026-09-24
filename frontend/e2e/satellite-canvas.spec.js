@@ -46,7 +46,12 @@ test('rotates the real map with a middle-button gesture', async ({ page }) => {
   const y = box.y + box.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down({ button: 'middle' });
-  await page.mouse.move(x + 100, y + 55, { steps: 8 });
+  // the turn is a wheel about the grabbed point: out of the guide circle, then
+  // a quarter of the way round
+  for (let deg = 0; deg <= 90; deg += 5) {
+    const a = (deg * Math.PI) / 180;
+    await page.mouse.move(x + 120 * Math.cos(a), y + 120 * Math.sin(a));
+  }
   await page.mouse.up({ button: 'middle' });
 
   await expect(page.locator('.deg')).not.toHaveText('0°');
