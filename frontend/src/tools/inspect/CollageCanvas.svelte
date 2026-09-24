@@ -6,11 +6,11 @@
   import { uiState } from '../../lib/state.svelte.js';
   import Icon from '../../components/Icon.svelte';
 
-  // Interactive collage surface. Each node is a tray frame placed as a 4-point
-  // quad (canvas pixels). Drag the body to move all four corners together; drag a
-  // corner handle to warp — a hand-made panorama. The same quads are sent to the
-  // backend, which renders the full-res warp with PIL (see compose_perspective).
-  // `collage` is the session's *active* collage (a session may hold several).
+  // Interactive collage surface. Each node is a piece (a frame or a case image)
+  // placed as a 4-point quad in canvas pixels. Drag the body to move all four
+  // corners together; drag a corner handle to warp, for a hand-made panorama. The
+  // same quads go to the backend, which renders the full-res warp with PIL (see
+  // compose_perspective).
   //
   // Selection is a *set*: shift-click adds/removes a piece. One piece gets the
   // per-piece handles (warp corners, side resize, rotate, toolbar); several get
@@ -228,11 +228,11 @@
     collage.nodes = [...nodes];
   }
 
-  // Delete / Backspace removes every selected piece. The Inspect tool stays
+  // Delete / Backspace removes every selected piece. The Collage tool stays
   // mounted when another tab is shown, so bail unless it is the visible tool —
   // and when typing in a field or when a modal (e.g. the crop editor) is open.
   function onKey(e) {
-    if (uiState.tool !== 'inspect') return;
+    if (uiState.tool !== 'collage') return;
     if (!selectedIds.length) return;
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;
     const t = e.target;
@@ -288,6 +288,29 @@
   >
     {#each collage.nodes as node (node.id)}
       {@const box = boxOf(node)}
+      {#if !box.url}
+        <!-- A piece whose file is gone keeps its place, so the layout still reads
+             and the analyst can see what to replace. One still rendering holds
+             its place the same way, without the warning. -->
+        {@const mark = Math.max(16, Math.min(box.w, box.h) / 4)}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="node placeholder"
+          class:missing={node.missing}
+          class:selected={isSel(node.id)}
+          style:width={`${box.w}px`}
+          style:height={`${box.h}px`}
+          style:transform={quadMatrix3d(box.w, box.h, node.quad)}
+          onpointerdown={(e) => (e.stopPropagation(), startMove(e, node))}
+          title={node.missing ? "This piece's file is no longer in the case" : 'Loading this piece'}
+        >
+          {#if node.missing}
+            <Icon name="alert" size={mark} />
+          {:else}
+            <span class="spinner" style:width={`${mark}px`} style:height={`${mark}px`} style:border-width={`${Math.max(2, mark / 10)}px`}></span>
+          {/if}
+        </div>
+      {:else}
       <img
         class="node"
         class:selected={isSel(node.id)}
@@ -301,6 +324,7 @@
         onpointerdown={(e) => (e.stopPropagation(), startMove(e, node))}
         ondblclick={() => { selectedIds = [node.id]; requestCrop?.(node); }}
       />
+      {/if}
       {#if node.id === soloId}
         <!-- round corner handles: free perspective warp -->
         {#each node.quad as pt, i (i)}
@@ -516,6 +540,28 @@
     cursor: move;
     user-select: none;
     outline: 1px solid transparent;
+  }
+  .node.placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-2);
+  }
+  .node.missing {
+    background: repeating-linear-gradient(45deg, var(--bg-2), var(--bg-2) 10px, var(--bg-3) 10px, var(--bg-3) 20px);
+    border: 1px dashed var(--warn);
+    color: var(--warn);
+  }
+  .spinner {
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
   .node.selected {
     outline: 1px dashed var(--accent);

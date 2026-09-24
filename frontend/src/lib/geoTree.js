@@ -19,8 +19,8 @@ import { haversine } from './measure.js';
  *  **Media** is a mode, not a filter — a file carries no point of its own and
  *  stands where the graph puts it, so it has an index of its own and swaps the
  *  rows the panel reads. Places and captures filter the one saved index; a
- *  screenshot is a capture with a different origin, not a thing to choose
- *  between. */
+ *  screenshot is a capture with a different origin, and a saved comparison is
+ *  imagery of a point at two dates, so both read as captures. */
 export const KINDS = [
   { id: 'media', label: 'Media' },
   { id: 'places', label: 'Places' },
@@ -47,9 +47,12 @@ export const UNLOCATED = 'Unlocated';
  *  country — the country is the useful part, the continent is the shelf. */
 const OTHER_CONTINENT = 'Other';
 
+/** The row kinds the Captures position holds: imagery of a point, however made. */
+export const CAPTURE_KINDS = new Set(['capture', 'screenshot', 'comparison']);
+
 function matchesKind(row, kind) {
   if (kind === 'places') return row.kind === 'place';
-  if (kind === 'captures') return row.kind === 'capture' || row.kind === 'screenshot';
+  if (kind === 'captures') return CAPTURE_KINDS.has(row.kind);
   return true;
 }
 

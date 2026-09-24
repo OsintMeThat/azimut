@@ -42,6 +42,7 @@
     resizeWindow,
     ribbonBands,
     shiftWindow,
+    temporalKindLabel,
     timeAtRatio,
     windowInputValue,
     windowMillis,
@@ -1844,7 +1845,7 @@
       {#if selected}
         <header><span class={`category-dot ${selected.category}`}></span><span>{categoryName(selected)}</span><button title="Close inspector" onclick={() => (selected = null)}><Icon name="x" size={13} /></button></header>
         <div class="inspector-body">
-          <div class="item-kind">{selected.kind}{#if selected.time_role} · {selected.time_role}{/if}</div>
+          <div class="item-kind">{temporalKindLabel(selected.kind)}{#if selected.time_role} · {selected.time_role}{/if}</div>
           <h2>{selected.label}</h2>
           {#if inspectorLoading}<div class="inspector-loading">Loading details…</div>{/if}
           <div class="date-reading">

@@ -3,13 +3,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 /**
- * The Frame tab's reverse-search press, driven the way an analyst drives it: the
+ * The frame panel's reverse-search press, driven the way an analyst drives it: the
  * frame pressed on is the one handed over, and a second press while the first is
  * still rendering does not send it twice.
  */
 
 vi.mock('../../lib/api.js', () => ({ api: { post: vi.fn(), get: vi.fn() } }));
-vi.mock('../../lib/state.svelte.js', () => ({ caseState: { current: { id: 'case-a' } }, toast: vi.fn() }));
+vi.mock('../../lib/state.svelte.js', () => ({
+  caseState: { current: { id: 'case-a', folders: [] } },
+  uiState: { tool: 'inspect' },
+  toast: vi.fn(),
+}));
 
 const { default: FrameMenu } = await import('./FrameMenu.svelte');
 
@@ -27,15 +31,14 @@ function open(reverse) {
   live = mount(FrameMenu, {
     target,
     props: {
-      session: { frames: [FRAME], activeFrameId: FRAME.id, saved: {} },
+      frame: FRAME,
       filters: [],
       analyses: [],
-      activeFrame: FRAME,
       shared: {},
-      removeFrame: vi.fn(),
-      setActive: vi.fn(),
       setRotation: vi.fn(),
       reverse,
+      onduplicate: vi.fn(),
+      frameSave: { defaultName: '00-00-12 clip', filedPath: null, busy: false, blocked: '', onsave: vi.fn() },
     },
   });
   flushSync();
@@ -49,7 +52,7 @@ afterEach(() => {
   target?.remove();
 });
 
-describe('reverse search from the Frame tab', () => {
+describe('reverse search from a frame', () => {
   it('hands over the active frame', async () => {
     const reverse = vi.fn(async () => {});
     open(reverse);

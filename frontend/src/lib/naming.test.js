@@ -6,14 +6,14 @@ import {
 
 describe('slugify — mirrors the backend api/naming.slugify', () => {
   it('preserves human text and replaces only forbidden filename characters', () => {
-    expect(slugify('Inspect 1', 'session')).toBe('Inspect 1');
+    expect(slugify('Collage 1', 'collage')).toBe('Collage 1');
     expect(slugify('  Rooftop! @ 12:30  ', 'proof')).toBe('Rooftop! @ 12_30');
     expect(slugify('Café déjà', 'proof')).toBe('Café déjà');
   });
 
   it('falls back to the caller word when nothing survives, and caps the length', () => {
     expect(slugify('', 'proof')).toBe('proof');
-    expect(slugify('!!!', 'session')).toBe('!!!');
+    expect(slugify('!!!', 'collage')).toBe('!!!');
     expect(slugify(null, 'draft')).toBe('draft');
     expect(slugify('a'.repeat(200), 'proof')).toHaveLength(MAX_SLUG);
   });
@@ -21,7 +21,7 @@ describe('slugify — mirrors the backend api/naming.slugify', () => {
 
 describe('nextName — the default name of a fresh item', () => {
   it('starts at 1 for each kind', () => {
-    expect(nextName('session', [])).toBe('Inspect 1');
+    expect(nextName('collage', [])).toBe('Collage 1');
     expect(nextName('proof', new Set())).toBe('Proof 1');
     expect(nextName('draft', [])).toBe('Post 1');
   });
@@ -32,7 +32,7 @@ describe('nextName — the default name of a fresh item', () => {
   });
 
   it('ignores names the analyst typed', () => {
-    expect(nextName('session', ['Rooftop angle', 'Bridge'])).toBe('Inspect 1');
+    expect(nextName('collage', ['Rooftop angle', 'Bridge'])).toBe('Collage 1');
   });
 
   it('numbers a name that still slugs to a distinct filename', () => {
@@ -56,7 +56,7 @@ describe('isDefaultName — an assigned name is not a description', () => {
   it('recognizes the names this app assigns', () => {
     expect(isDefaultName('Proof 1', 'proof')).toBe(true);
     expect(isDefaultName('  Proof 12  ', 'proof')).toBe(true);
-    expect(isDefaultName('Inspect 3', 'session')).toBe(true);
+    expect(isDefaultName('Collage 3', 'collage')).toBe(true);
     expect(isDefaultName('Post 2', 'draft')).toBe(true);
   });
 
@@ -64,7 +64,7 @@ describe('isDefaultName — an assigned name is not a description', () => {
     expect(isDefaultName('Rooftop angle', 'proof')).toBe(false);
     expect(isDefaultName('Proof', 'proof')).toBe(false);
     expect(isDefaultName('Proof 1 rooftop', 'proof')).toBe(false);
-    expect(isDefaultName('Inspect 1', 'proof')).toBe(false); // right shape, wrong kind
+    expect(isDefaultName('Collage 1', 'proof')).toBe(false); // right shape, wrong kind
     expect(isDefaultName(null, 'proof')).toBe(false);
   });
 });
@@ -73,7 +73,7 @@ describe('saved-item case queries', () => {
   const entities = [
     { label: 'Rooftop', attrs: { spec: 'proofs/.meta/rooftop.json' } },
     { label: 'Bridge', attrs: { spec: 'proofs/.meta/bridge.json' } },
-    { label: 'Angle', attrs: { spec: '.inspect/angle.json' } },
+    { label: 'Angle', attrs: { spec: '.collages/angle.json' } },
     { label: 'Thread', attrs: { draft: '.drafts/thread.json' } },
     { label: 'A place', attrs: { spec: 'places/x.json' } }, // filed, but not one of ours
     { label: 'No spec' },
@@ -82,32 +82,32 @@ describe('saved-item case queries', () => {
   it('builds the spec path a filed entity actually carries', () => {
     // The tools look an item up by this exact string to tell whether it is still
     // filed, so it has to name the hidden folders the case really uses — a stale
-    // `inspect/` matched nothing and warned "deleted" on every save.
-    expect(specPath('session', 'angle')).toBe('.inspect/angle.json');
+    // `exports/` matched nothing and warned "deleted" on every save.
+    expect(specPath('collage', 'angle')).toBe('.collages/angle.json');
     expect(specPath('proof', 'rooftop')).toBe('proofs/.meta/rooftop.json');
     expect(specPath('draft', 'thread')).toBe('.drafts/thread.json');
     // and the same string the filed entities carry, so a lookup by it hits
-    for (const [kind, slug] of [['session', 'angle'], ['proof', 'rooftop'], ['draft', 'thread']]) {
+    for (const [kind, slug] of [['collage', 'angle'], ['proof', 'rooftop'], ['draft', 'thread']]) {
       expect(entities.some((e) => e.attrs?.[specAttr(kind)] === specPath(kind, slug))).toBe(true);
     }
   });
 
   it('names the attribute each kind stores its spec under', () => {
-    expect(specAttr('session')).toBe('spec');
+    expect(specAttr('collage')).toBe('spec');
     expect(specAttr('proof')).toBe('spec');
     expect(specAttr('draft')).toBe('draft'); // posts are the odd one out
   });
 
   it('picks only the entities of the asked-for kind', () => {
     expect(savedEntities(entities, 'proof').map((e) => e.label)).toEqual(['Rooftop', 'Bridge']);
-    expect(savedEntities(entities, 'session').map((e) => e.label)).toEqual(['Angle']);
+    expect(savedEntities(entities, 'collage').map((e) => e.label)).toEqual(['Angle']);
     expect(savedEntities(entities, 'draft').map((e) => e.label)).toEqual(['Thread']);
     expect(savedEntities(undefined, 'proof')).toEqual([]);
   });
 
   it('lists the slugs (filename without its folder and .json)', () => {
     expect(savedSlugs(entities, 'proof')).toEqual(new Set(['rooftop', 'bridge']));
-    expect(savedSlugs(entities, 'session')).toEqual(new Set(['angle']));
+    expect(savedSlugs(entities, 'collage')).toEqual(new Set(['angle']));
     expect(savedSlugs(entities, 'draft')).toEqual(new Set(['thread']));
   });
 
@@ -133,7 +133,7 @@ describe('saved-item case queries', () => {
 describe('every kind names its work the same way', () => {
   it('has one prefix per kind and no other', () => {
     // Notes joined the convention: their file is named after the title too,
-    // so a fresh one is 'Note 1' the way a fresh session is 'Inspect 1'.
-    expect(Object.keys(NAME_PREFIX).sort()).toEqual(['draft', 'note', 'proof', 'session']);
+    // so a fresh one is 'Note 1' the way a fresh collage is 'Collage 1'.
+    expect(Object.keys(NAME_PREFIX).sort()).toEqual(['collage', 'draft', 'note', 'proof']);
   });
 });

@@ -1,7 +1,7 @@
 <script>
   /** Entity-scoped temporal history. Mounted only while the Time tab is open. */
   import { api } from '../lib/api.js';
-  import { formatTemporalValue } from '../lib/timeline.js';
+  import { changeInterval, formatTemporalValue, temporalKindLabel } from '../lib/timeline.js';
   import { reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import Icon from './Icon.svelte';
   import TemporalClaimEditor from './TemporalClaimEditor.svelte';
@@ -11,7 +11,7 @@
   let items = $state([]);
   let cursor = $state(null);
   let loading = $state(true);
-  let editor = $state(null); // null, 'new', or a statement item
+  let editor = $state(null); // null, 'new', 'change', or a statement item
   let seq = 0;
 
   const dated = $derived(items.filter((item) => item.earliest));
@@ -40,6 +40,18 @@
     entity.type === 'claim'
       ? ownStatement?.raw ? 'Edit claim date' : 'Set claim date'
       : entity.type === 'media' ? 'Claim a capture date' : 'Add dated claim'
+  );
+  /** A picture of two moments, a comparison or a Detect pair, dates a change
+   *  seen between them. It says nothing of the kind by itself, so the claim is
+   *  offered rather than filed. */
+  const changeSpan = $derived.by(() => {
+    if (entity.type !== 'media') return '';
+    const side = (kind) => media.find((item) => item.owner_id === entity.id && item.kind === kind)?.raw ?? '';
+    return changeInterval(side('imagery-a'), side('imagery-b'));
+  });
+  const editorTitle = $derived(
+    editor === 'change' ? 'Date a change'
+      : entity.type === 'claim' || editor === 'new' ? assessmentLabel : 'Edit claim'
   );
 
   async function load({ more = false } = {}) {
@@ -93,13 +105,6 @@
     onclose?.();
   }
 
-  function kindLabel(item) {
-    return {
-      captured: 'Captured', published: 'Published', imagery: 'Imagery',
-      collected: 'Collected', added: 'Added to case', filed: 'Filed in case', claim: 'Claim',
-    }[item.kind] ?? item.kind;
-  }
-
   function timeLabel(item) {
     return formatTemporalValue(item.raw ?? '').label;
   }
@@ -111,7 +116,7 @@
       <span class={`time-mark ${item.category}`}></span>
       <span class="time-copy">
         <strong>{item.label}</strong>
-        <small>{kindLabel(item)}{#if item.time_role} · {item.time_role}{/if}{#if item.confidence} · {item.confidence}{/if}</small>
+        <small>{temporalKindLabel(item.kind)}{#if item.time_role} · {item.time_role}{/if}{#if item.confidence} · {item.confidence}{/if}</small>
       </span>
       <span class="time-value" class:undated={!item.raw} title={item.raw || undefined}>{timeLabel(item)}</span>
     </button>
@@ -124,6 +129,9 @@
 <div class="entity-time">
   <div class="time-actions">
     <button class="btn btn-primary btn-sm" onclick={newAssessment}><Icon name="plus" size={12} />{assessmentLabel}</button>
+    {#if changeSpan}
+      <button class="btn btn-ghost btn-sm" title="Claim that something changed between the two pictures" onclick={() => (editor = 'change')}><Icon name="plus" size={12} />Date a change</button>
+    {/if}
     <button class="btn btn-ghost btn-sm" onclick={() => openTimeline()}><Icon name="clock" size={12} />Open in Timeline</button>
   </div>
   {#if entity.type === 'claim'}
@@ -131,12 +139,9 @@
   {/if}
 
   {#if editor}
-    <section
-      class="time-editor"
-      aria-label={entity.type === 'claim' ? assessmentLabel : editor === 'new' ? assessmentLabel : 'Edit claim'}
-    >
+    <section class="time-editor" aria-label={editorTitle}>
       <header>
-        <h3>{entity.type === 'claim' ? assessmentLabel : editor === 'new' ? assessmentLabel : 'Edit claim'}</h3>
+        <h3>{editorTitle}</h3>
         <button class="btn btn-ghost btn-sm" aria-label="Close editor" title="Close editor" onclick={() => (editor = null)}>
           <Icon name="x" size={13} />
         </button>
@@ -147,10 +152,13 @@
       {#key editor}
         <TemporalClaimEditor
           {caseId}
-          item={editor === 'new' ? null : editor}
+          item={editor === 'new' || editor === 'change' ? null : editor}
           subject={editor === 'new' ? entity : null}
-          initialStatement={entity.type === 'media' ? 'This media was captured' : ''}
-          initialRole={entity.type === 'media' ? 'observed' : ''}
+          initialWhen={editor === 'change' ? changeSpan : ''}
+          initialStatement={editor === 'change' ? 'Changed between the two pictures'
+            : entity.type === 'media' ? 'This media was captured' : ''}
+          initialRole={editor === 'change' ? 'occurred' : entity.type === 'media' ? 'observed' : ''}
+          initialCites={editor === 'change' ? [entity] : []}
           onsaved={saved}
           oncancel={() => (editor = null)}
         />

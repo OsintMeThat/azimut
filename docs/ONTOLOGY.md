@@ -132,7 +132,7 @@ to one clause — no full stop, no em-dash, under a hundred characters.
 | `class` | a model the case counts with, never one particular object | `equipment-type` |
 | `identifier` | a handle on a system | `account`, `email`, `phone`, `domain`, `ip`, `network` |
 | `collected` | bytes gathered into the case rather than written, so one may depict a place | `media`, `capture` |
-| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `compare-session`, `bookmark` |
+| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `bookmark` |
 | `place` | a point, never a thing | `place` |
 | `claim` | a statement about the graph, carrying its own reasoning | `claim` |
 
@@ -161,7 +161,7 @@ picture of the case is about it. The line that matters is between the first two 
 |---|---|---|---|
 | `subject` | the case is about it | `person`, `organization`, `vehicle`, `vessel`, `aircraft`, `structure`, `equipment-type`, `account`, `email`, `phone`, `domain`, `ip`, `network`, `media`, `place`, `claim` | a node |
 | `attestation` | a wrapper around something the case already holds | `bookmark`, `proof`, `capture` | folded into the edge that carries its provenance, drawn or not (below) |
-| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `compare-session` | out of the case readings, drawn by **My work** |
+| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `collage`, `compare-session` | out of the case readings, drawn by **My work** |
 | `deliverable` | what the case produced | `post` | out of the case readings, drawn by **My work** |
 
 A bookmark stays drawn because it is not a leaf: *this account posted it, this
@@ -182,8 +182,9 @@ answer by omission (`tests/test_entities.py`).
 | `place` | place | subject | ✅ | satellite, ingest, enrich | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?`, plus the precision fields below | no (a point) |
 | `proof` | document | attestation | ✅ | proof-composer | `spec` (json), `path` (png) | yes |
 | `post` | document | deliverable | ✅ | post-composer | `draft` (json) | yes |
-| `inspect-session` | document | annex | ✅ | inspect | `spec` (json) | yes |
-| `compare-session` | document | annex | ✅ | compare | `spec` (json) | yes |
+| `inspect-session` | document | annex | ✅ | inspect | `spec` (json), one per file | yes |
+| `collage` | document | annex | ✅ | inspect | `spec` (json) | yes |
+| `compare-session` | document | annex | ✅ | compare | `spec` (json), `preview?`, `lat`, `lon`, `zoom`, `bearing`, `footprint?`, `geo?` | yes |
 | `map-layer` | document | annex | ✅ | map layers | `spec` (json), `format`, `source_url?` | yes (spec + snapshot + icons) |
 | `note` | document | annex | ✅ | notebook | `path`, `folder?` | yes (Markdown) |
 | `sheet` | document | annex | ✅ | sheet | `path` (csv) | yes (CSV + sidecar) |
@@ -225,7 +226,7 @@ Three modelling calls the table alone does not show:
   place cites — which is the reason it is an entity at all.
 
 Retired: `event` (replaced by the claim node), `alias` (see above), and `panorama`
-(Inspect's auto-stitch export is a derived `media`). Still coming from the roadmap,
+(a collage's auto-stitch export is a derived `media`). Still coming from the roadmap,
 to declare here when built:
 
 | Type | Family | Shape | Note |
@@ -379,6 +380,14 @@ dates remain provenance. The projection labels them `statement`, `media` or
 `case_activity`, and can be deleted and rebuilt from those records. A manually assessed
 media time is therefore a sourced Claim about the media, not a rewrite of `taken_at`.
 
+**A picture of two moments carries two dates, never a range.** A saved comparison and
+a paired Detect picture record `imagery_a` and `imagery_b`, projected as `imagery-a`
+and `imagery-b`: a day, or a radar pass's UTC instant. The image shows two moments
+and argues nothing about what lies between them, so a change is a Claim the analyst
+files, citing the picture. An imagery date a provider only estimated (Esri, Wayback)
+is stored as the provider gave it with `exact: false` beside it, since a capture
+shows that date on its face, and the projection places it with a final `~`.
+
 **A dated Proof states that date for the material it rests on.** The footage was shot
 when it was shot, whichever document argues about it, so saving the proof files one
 Claim — `about` every source it composes, `cites` the proof — rather than leaving the
@@ -506,9 +515,14 @@ A grade is read wherever its source appears, including on a relation row, where 
 sits on the line carrying the entity's name while the edge's own rating sits on the
 line below (§3). Nothing needs one: most bookmarks are never graded.
 
-The file-backed pointers of `proof`, `post`, `inspect-session` and
+The file-backed pointers of `proof`, `post`, `inspect-session`, `collage` and
 `compare-session` are not stable: the file's name follows the label, so renaming
-one in its tool rewrites its `spec`, `draft` or `path` on the same entity. Look
+one in its tool rewrites its `spec`, `draft` or `path` on the same entity. A
+comparison's images follow it: its preview and every image kept from it name it in
+`compare_session`, which a rename rewrites. Each save also restates where the
+comparison stands (`engine/comparisons.py`): its frame's centre, or its view's, with
+the frame as `footprint`, which is what lists it in Saved work beside the captures. An
+`inspect-session` still named after its file is also renamed with that file. Look
 these up by id, or re-read the pointer — never cache one across a save.
 
 ## 3. Link
@@ -779,8 +793,11 @@ A tool selects one of two deletion behaviours through its link type:
 | `depends-on` | inspect-session | media, capture |
 
 A `derived-from` holder owns pixels or text and survives a deleted source with a
-tombstone. An `inspect-session` is only adjustments over its subject, so a deleted
-subject removes it transitively.
+tombstone. An `inspect-session` is the frames and edits made over one file, never
+more than one per file, so a deleted subject removes it transitively. A `collage`
+carries no chain edge: its pieces are recipes over any number of files, a lost one
+leaves a gap rather than voiding the layout, and the picture it exports is a
+`media` derived from them.
 
 - `derived-from` never cascades into an output. A post keeps its text when its
   proof is deleted; a frame keeps its pixels when its video is deleted.
@@ -866,6 +883,21 @@ Saving a proof files the points it carries as `place`s and states
 `proof --depicts--> place` for each (`satellite.place_for_proof`). They are what
 the analyst typed into the composer, or what its panels froze and they left
 standing (`spec_points`, §3 placement).
+
+Pinning a Detect candidate files its evidence picture and the place together, and
+states `media --depicts--> place`: orbital imagery shows the ground and was
+recorded nowhere on it.
+
+**A kept candidate says when it was seen, and the place never does.** A place is
+permanent ground and no verb carries a date (§3), so keeping one also files a Claim
+`at` the place that `cites` the picture (`engine/analysis_dating.py`). A change was
+read between two passes, so it `occurred` in that interval, and a thing on one pass
+was `observed` then, to the second for a radar pass. It carries no confidence:
+keeping is the review, and a grade nobody gave would read as one somebody did.
+One pin owns one statement, found by its `detection` key. Undoing the pin takes it
+to the same Trash group unless the analyst has written to it since, the proof
+composer's rule. Pins kept before this are dated once when a case opens at schema
+11, from the run and candidate their provenance kept.
 
 **A proof states as many points as it argues.** Three impacts, a building, the
 camera that filmed it: each is a point somebody concluded on, and they are peers,

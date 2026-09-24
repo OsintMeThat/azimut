@@ -304,7 +304,14 @@ describe('acting on a row', () => {
       { id: 'm1', type: 'media', attrs: { path: 'media/clip.mp4' } },
       'Quays'
     );
-    expect(reloadCase).toHaveBeenCalledTimes(3);
+    // a comparison is filed as its saved session, never as its preview image
+    await saved.move('case-1', { id: 's1', kind: 'comparison', path: 'media/Harbour.png' }, 'Quays');
+    expect(assignFolder).toHaveBeenLastCalledWith(
+      'case-1',
+      { id: 's1', type: 'compare-session', attrs: { path: 'media/Harbour.png' } },
+      'Quays'
+    );
+    expect(reloadCase).toHaveBeenCalledTimes(4);
     expect(notify).toHaveBeenLastCalledWith('Filed in Quays', 'ok', 1600);
   });
 
@@ -316,5 +323,8 @@ describe('acting on a row', () => {
     expect(api.del).toHaveBeenLastCalledWith(
       '/api/cases/case-1/satellite?path=media%2Fa%20b.png'
     );
+    // a comparison goes as its session; its images stay in Media
+    await saved.remove('case-1', { id: 's1', kind: 'comparison', path: 'media/Harbour.png' });
+    expect(api.del).toHaveBeenLastCalledWith('/api/cases/case-1/entities/s1');
   });
 });

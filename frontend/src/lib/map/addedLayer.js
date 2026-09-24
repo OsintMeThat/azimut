@@ -271,13 +271,14 @@ export function visibilityFilter(hidden = []) {
  * The row's time filter as a MapLibre filter, or null for every date.
  *
  * Days are `YYYY-MM-DD`, which sort as strings the way they sort as dates, so the
- * comparison needs no parsing on the engine's side. A feature with no date is
- * outside any period.
+ * comparison needs no parsing on the engine's side. A feature spanning several
+ * days (`date_end`) is kept when any of them is in the period. A feature with no
+ * date is outside any period.
  */
 export function periodFilter(period = null) {
   if (!period?.start && !period?.end) return null;
   const rule = ['all', ['has', 'date']];
-  if (period.start) rule.push(['>=', ['get', 'date'], period.start]);
+  if (period.start) rule.push(['>=', ['coalesce', ['get', 'date_end'], ['get', 'date']], period.start]);
   if (period.end) rule.push(['<=', ['get', 'date'], period.end]);
   return rule;
 }

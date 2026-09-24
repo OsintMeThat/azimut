@@ -4,16 +4,20 @@
    * act that creates case evidence; dismissing deletes the candidate. A
    * run still working shows how far it got and can be stopped from here.
    */
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { api } from '../../lib/api.js';
-  import { reloadCase, toast, uiState } from '../../lib/state.svelte.js';
+  import { prefs, reloadCase, toast, uiState } from '../../lib/state.svelte.js';
   import { refreshRuns } from '../../lib/detectRuns.svelte.js';
-  import { STRENGTHS, describeMeasure, sourceLabel } from '../../lib/map/analyzers.js';
+  import { STRENGTHS, readingOf, sourceLabel } from '../../lib/map/analyzers.js';
+  import { recipeCapability } from '../../lib/map/analyzerRules.js';
   import { sweptNote } from '../../lib/map/acquisitions.js';
   import { isActive, plural } from '../../lib/map/detections.js';
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
-  import { comparePairFor, pinDefaults } from '../../lib/map/detectReview.js';
+  import {
+    blinkable, candidatePair, candidateSize, comparePairFor, orderCandidates, pinDefaults,
+  } from '../../lib/map/detectReview.js';
+  import { formatArea, formatDistance } from '../../lib/measure.js';
 
   let {
     caseId,
@@ -23,31 +27,43 @@
     active = true,
     methods = [],
     candidateId = $bindable(null),
+    /** The detection's drawing taken off the map, so the imagery shows bare. */
+    bare = $bindable(false),
+    /** Pass A flipped against pass B on the map, while the pair has two dates. */
+    blinking = $bindable(false),
     onaccept = () => {},
     onfocus = () => {},
     onedit = () => {},
     onshow = () => {},
     onexport = () => {},
     onadd = () => {},
+    /** The two passes the candidate was read between, `{ a, b }`, or null once gone. */
+    onpair = () => {},
   } = $props();
 
   let busy = $state(false);
   let error = $state('');
   let filter = $state('all');
+  let order = $state('strength');
   let enlarged = $state(false);
   let pin = $state(null);
   let adding = $state(false);
   let manualArea = $state('');
 
   const base = $derived(`/api/cases/${caseId}/analysis/runs/${run.id}`);
-  const methodOf = (method) => methods.find((m) => m.id === method) ?? {};
   const pending = $derived(isActive(run));
   const all = $derived(run.results ?? []);
+  /** The queue in the order asked: strongest first, or the largest hulls first. */
+  const ordered = $derived(orderCandidates(all, order));
   /** Which candidates the arrows walk. A sweep of a hundred is worked in
    *  passes — the ones nobody has judged, then what was kept — so the queue
    *  narrows rather than being scrolled. */
-  const candidates = $derived(filter === 'all' ? all : all.filter((row) => matches(row, filter)));
+  const candidates = $derived(filter === 'all' ? ordered : ordered.filter((row) => matches(row, filter)));
   const candidate = $derived(all.find((r) => r.id === candidateId));
+  const size = $derived(candidateSize(candidate));
+  const pair = $derived(candidatePair(candidate, run));
+  const canBlink = $derived(run.status === 'ready' && blinkable(pair));
+  $effect(() => { if (!canBlink && blinking) blinking = false; });
   const matches = (row, name) => (name === 'new' ? row.review === 'new'
     : name === 'kept' ? row.review === 'noted' : row.review === 'kept');
   const position = $derived(candidates.findIndex((r) => r.id === candidateId));
@@ -65,16 +81,16 @@
     counts.new === 0 ? `All ${candidates.length} reviewed · ${verdicts}`
     : `${counts.new} still to review · ${verdicts}`
   );
-  const previewAlt = $derived(methodOf(run.input.recipe.method).single
+  const previewAlt = $derived(recipeCapability(run.input.recipe, methods).single
     ? 'Candidate evidence' : 'Candidate evidence: A on the left, B on the right');
   const statusLabel = (status) => ({ queued: 'Queued', running: 'Running', ready: 'Completed',
     failed: 'Failed', cancelled: 'Cancelled', no_new_imagery: 'No new imagery' }[status] ?? status);
-  const dates = (input) => methodOf(input.recipe.method).single || !(input.a?.date || input.a?.release)
+  const dates = (input) => recipeCapability(input.recipe, methods).single || !(input.a?.date || input.a?.release)
     ? sourceLabel(input.b) : `${sourceLabel(input.a)} → ${sourceLabel(input.b)}`;
   /** A candidate's reading, in the words its method's catalogue entry gives. */
   const reading = (row, input) => [
     STRENGTHS[row.strength],
-    describeMeasure(methodOf(input.recipe.method).measure, row.measure, input.recipe.parameters.index),
+    readingOf(input.recipe, methods, row.measure),
   ].filter(Boolean).join(' · ');
   /** Sentinel-2 reads 10 m to the pixel, so a candidate metres across is only
    *  worth judging from close in: the review asks for that zoom, not the
@@ -84,14 +100,25 @@
   // changes it. Showing it writes the map's own state, which this must not
   // read back: a radar pass is an object, so every write looked new, and the
   // effect fed itself until Svelte stopped the whole page.
+  const passKey = (source) => (source?.date ? [source.provider, source.date, source.time ?? '', source.layer ?? ''].join('|') : '');
   let shownPass = '';
   $effect(() => {
-    const source = candidate?.sources?.b ?? run.area_runs?.find((p) => p.status === 'ready')?.b ?? run.input?.b;
-    const key = source?.date ? [source.provider, source.date, source.time ?? '', source.layer ?? ''].join('|') : '';
+    const source = pair.b;
+    const key = passKey(source);
     if (!key || key === shownPass) return;
     shownPass = key;
     untrack(() => onshow(source));
   });
+  // The map blinks the pair it is told about, for the same reason by key.
+  let toldPair = '';
+  $effect(() => {
+    const told = pair;
+    const key = `${passKey(told.a)}/${passKey(told.b)}`;
+    if (key === toldPair) return;
+    toldPair = key;
+    untrack(() => onpair(told));
+  });
+  onDestroy(() => onpair(null));
   // The map goes where the panel is: judging a candidate you cannot see is
   // guesswork, and that held whenever a run was opened rather than stepped
   // through. Only a change of candidate moves the camera, so panning is free.
@@ -111,8 +138,12 @@
     if (!active || !run || run.status !== 'ready' || busy || pin || enlarged || event.ctrlKey || event.metaKey || event.altKey
       || event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
     const key = event.key.toLowerCase();
+    // Shift and an arrow turn the map, so the queue takes the bare arrows only
+    if (event.shiftKey && event.key.startsWith('Arrow')) return;
     if (event.key === 'ArrowLeft') step(-1);
     else if (event.key === 'ArrowRight') step(1);
+    else if (key === 'h') bare = !bare;
+    else if (key === 'b' && canBlink) blinking = !blinking;
     else if (!candidate) return;
     else if (key === 'k' && !['kept', 'noted'].includes(candidate.review)) void act(() => review('noted'));
     else if (key === 'd' && candidate.review !== 'kept') void act(() => review('dismissed'));
@@ -138,9 +169,9 @@
 
   /** Reviewing is a queue: a verdict moves on to the next one still waiting. */
   function advance() {
-    const index = all.findIndex((r) => r.id === candidateId);
-    for (let i = 1; i <= all.length; i++) {
-      const row = all[(index + i) % all.length];
+    const index = ordered.findIndex((r) => r.id === candidateId);
+    for (let i = 1; i <= ordered.length; i++) {
+      const row = ordered[(index + i) % ordered.length];
       if (row?.review === 'new') { candidateId = row.id; focus(row.coordinates); return; }
     }
   }
@@ -156,7 +187,7 @@
    */
   function openInCompare() {
     const pair = comparePairFor(candidate, {
-      single: !!methodOf(run.input.recipe.method).single, method: run.input.recipe.method,
+      single: !!recipeCapability(run.input.recipe, methods).single, method: run.input.recipe.method,
     });
     if (!pair) return;
     uiState.compareAt = pair;
@@ -164,7 +195,7 @@
   }
 
   /** The pin's name has to mean something in the case, long after this run. */
-  function openPin() { pin = pinDefaults(candidate, !!methodOf(run.input.recipe.method).single); }
+  function openPin() { pin = pinDefaults(candidate, !!recipeCapability(run.input.recipe, methods).single); }
 
   async function keep() {
     const answer = await api.post(`${base}/results/${candidateId}/promote`, pin);
@@ -225,7 +256,15 @@
       adding = !adding;
       manualArea = candidate?.area_id ?? run.area_runs?.find((p) => p.status === 'ready')?.area_id ?? run.input.zones[0]?.id ?? '';
     }}>Add candidate</button>
-      <button class="btn btn-sm" onclick={onexport}>Export as layer</button></div>
+      <button class="btn btn-sm" onclick={onexport}>Export as layer</button>
+      <span class="map-acts">
+        <button class="cmp-icon" class:on={bare} aria-pressed={bare} aria-label="Hide the candidates and areas"
+          title="Hide the candidates and areas (H)" onclick={() => (bare = !bare)}><Icon name={bare ? 'eyeOff' : 'eye'} size={14} /></button>
+        {#if canBlink}
+          <button class="cmp-icon" class:on={blinking} aria-pressed={blinking} aria-label="Blink A and B"
+            title="Blink A and B on the map (B)" onclick={() => (blinking = !blinking)}><Icon name="blink" size={14} /></button>
+        {/if}
+      </span></div>
     {#if adding}
       <label>Area<select aria-label="Manual candidate area" bind:value={manualArea}>
         <option value="">Choose an area</option>
@@ -250,6 +289,13 @@
             onclick={() => (filter = id)}>{label} <span class="n">{n}</span></button>
         {/if}
       {/each}
+      <!-- A new order starts from its own top: the largest is what was asked for. -->
+      <button class="chip order" class:on={order === 'size'} aria-pressed={order === 'size'}
+        title="Walk the longest first, rather than the strongest"
+        onclick={() => {
+          order = order === 'size' ? 'strength' : 'size';
+          if (candidates[0]) candidateId = candidates[0].id;
+        }}>Largest first</button>
     </div>
     <div class="row nav">
       <button class="cmp-icon" aria-label="Previous candidate" title="Previous candidate (←)" onclick={() => step(-1)}><Icon name="chevronLeft" size={14} /></button>
@@ -268,13 +314,14 @@
       <p class={`strength ${candidate.strength ?? ''}`}>{reading(candidate, run.input)}</p>
     {/if}
     <p class="facts">
-      {Math.round(candidate.area)} m² · {Math.round(candidate.width)} × {Math.round(candidate.height)} m ·
+      {formatArea(candidate.area, prefs.units)} ·
+      {#if size}<span title="Measured on the footprint’s 10 m pixels">≈ {formatDistance(size.length, prefs.units)} long, {formatDistance(size.width, prefs.units)} wide</span> ·{/if}
       <button class="link inline" onclick={() => focus(candidate.coordinates)}>
         {candidate.coordinates[1].toFixed(5)}, {candidate.coordinates[0].toFixed(5)}
       </button>
     </p>
     <button class="btn btn-sm compare" onclick={openInCompare}
-      title={methodOf(run.input.recipe.method).single
+      title={recipeCapability(run.input.recipe, methods).single
         ? 'Hold it against today’s high-resolution picture in Compare'
         : 'Read the two passes that found it in Compare'}>
       <Icon name="compare" size={13} /> Compare
@@ -351,6 +398,8 @@
   .chip.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
   .chip .n { color: var(--text-3); }
   .chip.on .n { color: inherit; }
+  .order { margin-left: auto; }
+  .map-acts { display: flex; gap: 2px; margin-left: auto; }
   .compare { justify-self: start; }
   .facts { margin: 0; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.5; }
   .strength { margin: 0; font-size: var(--fs-xs); font-weight: 600; color: var(--text-1); }

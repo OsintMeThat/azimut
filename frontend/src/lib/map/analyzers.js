@@ -1,4 +1,6 @@
 /** Geographic analyzer inputs have no dependency on a screen or camera. */
+import { describeReading, isRules, readsRadar } from './analyzerRules.js';
+
 export const clone = (value) => JSON.parse(JSON.stringify(value));
 
 export function zoneMarks(zones) {
@@ -64,6 +66,16 @@ export function describeMeasure(template, measure, index = '') {
     return blanks[name]();
   });
   return missing ? '' : text;
+}
+
+/**
+ * A candidate's reading in words, whatever made it: a built-in's catalogue
+ * template, or the first measured rule of an analyzer of your own.
+ */
+export function readingOf(recipe, methods, measure) {
+  if (isRules(recipe)) return describeReading(recipe, measure);
+  const method = (methods ?? []).find((entry) => entry.id === recipe?.method);
+  return describeMeasure(method?.measure, measure, recipe?.parameters?.index);
 }
 
 export const STRENGTHS = { weak: 'Weak', clear: 'Clear', strong: 'Strong' };
@@ -220,6 +232,7 @@ export function analyzerLock(entry, catalogue) {
   if (!entry || !catalogue) return '';
   if (catalogue.copernicus_key === false) return 'Needs a free Copernicus key';
   const method = catalogue.methods?.find((candidate) => candidate.id === entry.method);
-  if (method?.sensor === 'sentinel1' && !catalogue.radar_layer) return 'Needs the Sentinel-1 layer';
+  const radar = isRules(entry) ? readsRadar(entry) : method?.sensor === 'sentinel1';
+  if (radar && !catalogue.radar_layer) return 'Needs the Sentinel-1 layer';
   return '';
 }

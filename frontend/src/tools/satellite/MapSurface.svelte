@@ -28,6 +28,7 @@
   import { createBasemaps, OVERLAY_IDS } from '../../lib/map/basemap.js';
   import { DEFAULT_LAYER, DEFAULT_MAXCC, SENTINEL_ID } from '../../lib/sentinel.js';
   import { RADAR_ID, orbitMark } from '../../lib/radar.js';
+  import { pictureDate } from '../../lib/map/pictureDate.js';
   import Icon from '../../components/Icon.svelte';
   import Compass from '../../components/Compass.svelte';
   import ImageryChip from './ImageryChip.svelte';
@@ -77,6 +78,11 @@
     /** A view zoom this surface stops at below its provider's own ceiling, so
      *  two linked surfaces stop together. Null leaves the provider in charge. */
     zoomCeiling = null,
+    /** A second picture of the same ground, `{ provider, id, cell }` as
+     *  `imagery.displayed()` answers, laid over the first and kept loaded. */
+    alternate = null,
+    /** Whether that second picture is the one on screen. */
+    alternateOn = false,
     /** How far down the engine's zoom buttons start, so they stack under
      *  whatever the tool floats in the same corner (see `engine.css`). */
     controlsTop = 58,
@@ -140,9 +146,13 @@
     engine?.resize();
   }
 
-  /** What a capture of this surface must record: the pixels' own provenance. */
+  /**
+   * What a capture of this surface must record: the pixels' own provenance.
+   * `imageryExact` is false for a date the provider only estimated, and
+   * `imageryWhen` is the same date with a radar pass's UTC time when it has one.
+   */
   export function provenance() {
-    return { provider: shown.id, imageryDate: radarPass?.date ?? pinnedDay ?? imageryDate?.date ?? null };
+    return { provider: shown.id, ...pictureDate({ radarPass, pinnedDay, estimated: imageryDate?.date }) };
   }
 
   // Svelte only honours a cleanup returned from a *synchronous* onMount, and the
@@ -221,6 +231,19 @@
   $effect(() => {
     const value = zoomCeiling;
     if (ready) basemaps?.setZoomCeiling(value);
+  });
+
+  // Only a tool that lays a second picture pays for one: the rest never ask.
+  let laidAlternate = false;
+  $effect(() => {
+    const { provider = null, id = '', cell = 256 } = alternate ?? {};
+    if (!ready || !basemaps || (!provider && !laidAlternate)) return;
+    basemaps.setAlternate(provider, id, cell);
+    laidAlternate = Boolean(provider);
+  });
+  $effect(() => {
+    const on = alternateOn;
+    if (ready && alternate) basemaps?.showAlternate(on);
   });
 
   $effect(() => {

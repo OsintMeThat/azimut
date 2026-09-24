@@ -35,6 +35,13 @@ function specName(path) {
   return path.split('/').pop().replace(/\.json$/, '');
 }
 
+/** A saved comparison, from a Saved-panel row, reopened in Compare. */
+export function openComparison(row) {
+  if (!row?.session) return;
+  uiState.openCompare = row.session;
+  uiState.tool = 'compare';
+}
+
 /** Tool a given entity type opens in (also gates the "Open in tool" button). */
 export const ENTITY_TOOL = {
   media: 'media',
@@ -42,6 +49,7 @@ export const ENTITY_TOOL = {
   place: 'satellite',
   post: 'post',
   'inspect-session': 'inspect',
+  collage: 'collage',
   'compare-session': 'compare',
   'analysis-zones': 'detect',
   'analysis-area': 'detect',
@@ -100,6 +108,12 @@ export function openEntity(entity) {
     const name = specName(entity.attrs?.spec);
     if (name) uiState.openInspect = name;
     uiState.tool = 'inspect';
+    return;
+  }
+  if (entity.type === 'collage') {
+    const name = specName(entity.attrs?.spec);
+    if (name) uiState.openCollage = name;
+    uiState.tool = 'collage';
     return;
   }
   if (entity.type === 'compare-session') {
@@ -188,6 +202,23 @@ export function gotoPoint(lat, lon) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
   uiState.gotoCoords = { lat, lon };
   uiState.tool = 'satellite';
+}
+
+/**
+ * Open another map tab on a point, at the zoom it was looked at.
+ *
+ * The right-click menu's Open in…: Satellite flies there, Compare and Detect
+ * move their camera and keep their own pictures and work. A fullscreen map is
+ * left first, or the tab it hands over to would open behind it.
+ */
+export function openMapAt(tool, { lat, lon, zoom }) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  const at = { lat, lon, ...(Number.isFinite(zoom) ? { zoom } : {}) };
+  if (tool === 'satellite') uiState.gotoCoords = at;
+  else if (tool === 'compare' || tool === 'detect') uiState.lookAt = { tool, ...at };
+  else return;
+  if (globalThis.document?.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
+  uiState.tool = tool;
 }
 
 /**

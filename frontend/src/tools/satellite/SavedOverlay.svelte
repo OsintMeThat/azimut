@@ -6,7 +6,7 @@
   import { mount, unmount } from 'svelte';
   import { createSurface } from '../../lib/map/surface.js';
   import { paths } from '../../components/Icon.svelte';
-  import { groupSavedMarkers, markerPrecision } from '../../lib/savedMarkers.js';
+  import { groupSavedMarkers, markKind, markerPrecision } from '../../lib/savedMarkers.js';
   import { TEARDROP, TEARDROP_CARD_OFFSET } from '../../lib/mapMarkers.js';
   import { openEntity } from '../../lib/navigate.js';
   import SavedPopup from './SavedPopup.svelte';
@@ -27,7 +27,7 @@
     onmedia,
   } = $props();
 
-  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen' };
+  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare' };
 
   /** True when every item under a mark is a located file: it opens the viewer. */
   const isMedia = (mark) => mark.kinds.every((kind) => kind === 'media');
@@ -46,8 +46,8 @@
   }
 
   function icon(mark) {
-    // Mixed stacks use the shared place glyph.
-    const kind = mark.kinds.length > 1 ? 'place' : mark.kinds[0];
+    // A stack of imagery draws as a capture; one holding a place, as the place.
+    const kind = markKind(mark.kinds);
     // a stack of files draws as footage only when all of it is footage
     const name = isMedia(mark)
       ? mark.items.every((row) => row.media_kind === 'video')
@@ -155,19 +155,25 @@
    *
    * A mark with neither returns nothing and draws exactly as it always has —
    * absence is a state, never something to flag.
+   *
+   * A comparison's footprint is something else: the export frame, the ground its
+   * images show. It is outlined in dashes and left unfilled, so it never reads as
+   * a guess about where something is.
    */
   function shapesFor(mark, id) {
     const row = mark.items.find((r) => r.footprint || r.radius_m > 0);
     if (!row) return [];
-    const style = {
-      stroke: '#f5a623',
-      strokeWidth: 1.5,
-      strokeOpacity: 0.9,
-      fill: '#f5a623',
-      fillOpacity: 0.12,
-      // never steals the click from the pin it sits under
-      interactive: false,
-    };
+    const style = row.kind === 'comparison'
+      ? { stroke: '#f5a623', strokeWidth: 1.5, strokeOpacity: 0.9, dash: '5 4', interactive: false }
+      : {
+          stroke: '#f5a623',
+          strokeWidth: 1.5,
+          strokeOpacity: 0.9,
+          fill: '#f5a623',
+          fillOpacity: 0.12,
+          // never steals the click from the pin it sits under
+          interactive: false,
+        };
     return row.footprint
       ? [{ id: `${id}:shape`, kind: 'geojson', geometry: row.footprint, style }]
       : [{ id: `${id}:shape`, kind: 'circle', at: mark, radiusM: row.radius_m, style }];

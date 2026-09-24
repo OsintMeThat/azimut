@@ -121,10 +121,10 @@ describe('a period', () => {
   });
 
   it('keeps an undated feature out, and keeps everything in when there is no period', () => {
-    expect(inPeriod('', { start: '2026-09-01', end: '' })).toBe(false);
-    expect(inPeriod('', null)).toBe(true);
-    expect(inPeriod('2026-09-05', { start: '2026-09-01', end: '2026-09-05' })).toBe(true);
-    expect(inPeriod('2026-09-06', { start: '2026-09-01', end: '2026-09-05' })).toBe(false);
+    expect(inPeriod({}, { start: '2026-09-01', end: '' })).toBe(false);
+    expect(inPeriod({}, null)).toBe(true);
+    expect(inPeriod({ date: '2026-09-05' }, { start: '2026-09-01', end: '2026-09-05' })).toBe(true);
+    expect(inPeriod({ date: '2026-09-06' }, { start: '2026-09-01', end: '2026-09-05' })).toBe(false);
   });
 
   it('dragged back out to both edges is no period at all', () => {
@@ -144,5 +144,43 @@ describe('a period', () => {
       start: '2026-09-05',
       end: '2026-09-10',
     });
+  });
+});
+
+describe('a feature that spans days', () => {
+  // A change Detect read between two passes, and a KML TimeSpan: each may have
+  // happened on any day it spans, so a period meeting any of them holds it.
+  const SPANS = {
+    type: 'FeatureCollection',
+    features: [
+      { ...at('2026-09-01'), properties: { name: 'change', category: 'Detect', date: '2026-09-01', date_end: '2026-09-11' } },
+      at('2026-09-20', 'Detect'),
+    ],
+  };
+  const index = indexDates(SPANS);
+
+  it('runs the strip to the last day it spans', () => {
+    expect(isoDay(index.first)).toBe('2026-09-01');
+    expect(isoDay(index.last)).toBe('2026-09-20');
+  });
+
+  it('is in any period that meets it, and in no period past it', () => {
+    const change = SPANS.features[0].properties;
+    expect(inPeriod(change, { start: '2026-09-05', end: '2026-09-06' })).toBe(true);
+    expect(inPeriod(change, { start: '2026-09-11', end: '' })).toBe(true);
+    expect(inPeriod(change, { start: '2026-09-12', end: '' })).toBe(false);
+    expect(within(index, [], { start: '2026-09-05', end: '2026-09-06' }).total).toBe(1);
+    expect(within(index, [], { start: '2026-09-12', end: '2026-09-30' }).total).toBe(1);
+  });
+
+  it('counts in every bar it meets', () => {
+    const counts = histogram(index, [], bars(index.first, index.last));
+    expect(counts.slice(0, 11)).toEqual(Array(11).fill(1));
+    expect(counts[11]).toBe(0);
+  });
+
+  it('ignores an end that is not after its start', () => {
+    const odd = indexDates({ features: [{ ...at('2026-09-05'), properties: { category: 'x', date: '2026-09-05', date_end: '2026-09-01' } }] });
+    expect(odd.first).toBe(odd.last);
   });
 });

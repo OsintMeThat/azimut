@@ -28,7 +28,7 @@ from .. import events
 
 #: Entity types that are drawn on a map, and so whose deletion is news to a
 #: surface that is not the one that asked for it (``api/events.py``).
-MAPPED_TYPES = {"place", "capture"}
+MAPPED_TYPES = {"place", "capture", "compare-session"}
 
 
 def get_case(case_id: str) -> Case:
@@ -43,8 +43,8 @@ def delete_entities_deep(case: Case, entity_ids: list[str]) -> dict[str, Any]:
     The one door every delete goes through — sidebar, Media Library, a tool's
     own list — so the rules hold wherever the click came from:
 
-    - artifacts that ``depends-on`` the target die with it (an Inspect session
-      is only adjustments over a video), transitively;
+    - artifacts that ``depends-on`` the target die with it (a file's Inspect
+      work is only frames and edits over it), transitively;
     - artifacts ``derived-from`` it are never touched, and are scarred with a
       tombstone first, while the target can still describe itself.
 

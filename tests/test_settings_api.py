@@ -780,11 +780,11 @@ def test_per_provider_eco_thresholds(client):
     assert by_id["sentinel2"]["eco_max_zoom"] == 0  # user turned eco off for it
     assert by_id["google-js"]["eco_max_zoom"] == 0  # pinned, not settable
 
-    # None removes the override: sentinel2 falls back to its own default (11)
+    # None removes the override: sentinel2 falls back to its own default (7)
     r = client.put("/api/settings/prefs", json={"eco_max_zooms": {"sentinelhub": None}}).json()
     assert r["eco_max_zooms"] == {"mapbox": 12}
     by_id = {p["id"]: p for p in client.get("/api/satellite/providers").json()}
-    assert by_id["sentinel2"]["eco_max_zoom"] == 11
+    assert by_id["sentinel2"]["eco_max_zoom"] == 7
 
 
 def test_providers_expose_tile_size(client):
@@ -838,6 +838,17 @@ def test_extension_hand_off_switches_default_on_and_round_trip(client):
     assert saved["reverse_prefill"] is False
     assert saved["post_prefill"] is True  # one switch per question, never one for both
     assert client.get("/api/settings").json()["reverse_prefill"] is False
+
+
+def test_map_tabs_share_one_camera_by_default_and_the_switch_round_trips(client):
+    assert client.get("/api/settings").json()["map_sync"] is True
+
+    saved = client.put("/api/settings/prefs", json={"map_sync": False}).json()
+    assert saved["map_sync"] is False
+    assert client.get("/api/settings").json()["map_sync"] is False
+    # a PUT about something else leaves it as it was
+    client.put("/api/settings/prefs", json={"units": "imperial"})
+    assert client.get("/api/settings").json()["map_sync"] is False
 
 
 def test_display_prefs_reject_unknown_values(client):

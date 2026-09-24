@@ -123,6 +123,13 @@ describe('Settings sections', () => {
     expect(general).toContain('so it\n        searches straight away');
   });
 
+  it('switches the shared map view from General, checked by default', () => {
+    expect(general).toContain('map_sync: mapSync');
+    expect(shell).toContain('mapSync = s.map_sync ?? true');
+    expect(shell).toContain('bind:mapSync');
+    expect(general).toContain('Share one view');
+  });
+
   it('manages all three export folders from Storage', () => {
     expect(shell).toContain("{ id: 'notes', label: 'Note PDFs' }");
     expect(shell).toContain("{ id: 'media', label: 'Media copies' }");

@@ -36,6 +36,7 @@ from .analysis_models import (
     CLOUD_METHODS,
     RADAR_METHODS,
     SINGLE_METHODS,
+    SMOOTHING_M,
     Area,
     AreaDates,
     AreaGeometry,
@@ -43,8 +44,10 @@ from .analysis_models import (
     RunInput,
     Source,
     Zone,
-    product_for,
-    sensor_for,
+    is_radar,
+    is_single,
+    recipe_products,
+    recipe_sensor,
 )
 
 # What one run may sweep. The ceiling is not memory — tiles are read one at a
@@ -69,7 +72,7 @@ PAD = 32
 # Bumped when a product's layout changes, so a frame kept from an older run is
 # never decoded as a newer one.
 PRODUCT_VERSION = 2
-ENGINE_VERSION = 2
+ENGINE_VERSION = 3
 LOCK = threading.RLock()
 KINDS = {"areas": "analysis-area", "zones": "analysis-zones", "followups": "analysis-follow-up", "runs": "analysis-run"}
 ACTIVE = {"queued", "running"}
@@ -181,7 +184,11 @@ DARK_ABSENT = frozenset({"nbr"})
 # calm sea in both, and at Port Sudan the radar alone put 72 candidates on the
 # town and the sand around it. So the sea is first what Sentinel-2's own scene
 # classification calls water on the clearest pass of the past year, and only
-# where that pass saw cloud is the radar asked.
+# where that pass saw cloud is the radar asked. That classification takes dark
+# container stacks and coal yards for water: at Rotterdam it gave a dozen
+# candidates on terminals, and overruling it wherever the radar was bright, even
+# only over blocks a hundred metres wide, dropped as many ships at berth. It is
+# left as it is.
 SEA_WINDOW = 31      # a median over 300 m ignores a hull and its sidelobes
 SEA_VV_DB = -9.0
 SEA_VH_DB = -21.0
@@ -203,6 +210,17 @@ WATER_DB = -18.0
 # The largest overall shift between two passes of one track still read as the
 # sensor rather than the ground; calibration holds a pair within a few tenths.
 MAX_SAR_SHIFT = 1.0
+# How much ground one step of smoothing averages radar power over before two
+# passes are compared. The grid's pixel is 7 m at 45° and a radar sample about
+# 20 m, so a window counted in pixels held too few independent samples: over
+# land that did not change, 5% of pixels still moved by 2.2 to 2.5 dB between
+# passes six days apart, and a pair of Istanbul, one of farmland and a Gaza pair
+# before October 2023 each came back as one connected region of 3 to 5 km².
+# Averaged over 90 m, the medium size, Istanbul's false "razed" fell from 111
+# to 25 and Gaza's control from 82 to 38, while the area flagged across the
+# war's first weeks stayed at 1.2 km²; the May 2023 flood at Conselice was
+# still read as 6 km² of new water, with none on the control pairs.
+SAR_WINDOW_M = SMOOTHING_M["sar-change"]
 
 
 def now() -> str:
@@ -293,6 +311,12 @@ def summary(kind: str, saved: dict[str, Any]) -> dict[str, Any]:
     recipe = body.get("recipe") or {}
     row.update(analyzer=recipe.get("name", ""), colour=recipe.get("colour", ""),
                method=recipe.get("method", ""), date_rule=body.get("date_rule", "manual"))
+    # An analyzer of your own reads one date or two depending on its rules, so
+    # the row says which rather than leaving the list to guess from the method.
+    try:
+        row["single"] = is_single(recipe)
+    except ValueError:
+        row["single"] = False
     row["note"] = body.get("note", "")
     if kind == "followups":
         # The list draws every watched area on the map, so the shapes travel
@@ -474,6 +498,22 @@ def _decode(raw: bytes, size: int) -> Any:
         return np.array(image.convert("RGBA"))
 
 
+def decode_product(raw: bytes, size: int, product: str | None) -> Any:
+    """A frame as the engine reads it: 16 bits a channel for a ``bands-…``
+    product, which Pillow would cut to 8, and bytes for everything else."""
+    import cv2
+    import numpy as np
+
+    if not product or not sentinel.product_bands(product):
+        return _decode(raw, size)
+    if len(raw) > MAX_FRAME_BYTES:
+        raise ValueError("imagery frame exceeds the byte limit")
+    pixels = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_UNCHANGED)
+    if pixels is None or pixels.dtype != np.uint16 or pixels.shape != (size, size, 4):
+        raise ValueError("provider returned an unexpected band frame")
+    return np.ascontiguousarray(pixels[:, :, [2, 1, 0, 3]])  # OpenCV reads BGRA
+
+
 def _instance() -> str:
     instance = (config.load_settings().get("api_keys") or {}).get("sentinelhub")
     if not instance:
@@ -566,13 +606,18 @@ def frame(case: Case, run: dict[str, Any], source: Source, x: int, y: int,
             if tiles.is_placeholder_tile(raw):
                 raise ValueError("provider has no imagery here at native resolution")
         tilecache.put(cache_id, z, x, y, raw, "image/png")
-    pixels = _decode(raw, edge)
+    pixels = decode_product(raw, edge, product)
     # Canonical PNGs preserve the exact decoded input, independently of cache TTL.
+    # A 16-bit product is kept as it came: it is already a checked PNG, and
+    # Pillow cannot write one back.
     with LOCK, case._lock:
         check_active(case, run["id"])
         destination.parent.mkdir(parents=True, exist_ok=True)
         if not destination.exists():
-            Image.fromarray(pixels).save(destination, "PNG")
+            if pixels.dtype == "uint16":
+                destination.write_bytes(raw)
+            else:
+                Image.fromarray(pixels).save(destination, "PNG")
         run["frames"][key] = {"path": f"{assets_rel}/{name}", "source": source.model_dump(),
                               "tile": [z, x, y], "index": product,
                               "sha256": hashlib.sha256(destination.read_bytes()).hexdigest()}
@@ -1002,18 +1047,23 @@ def _without_ghosts(binary: Any, strength: Any, metres: float) -> Any:
     return keep[labels]
 
 
-def _sar_change(before: Any, after: Any, valid: Any,
+def sar_window(smoothing: int, metres: float) -> int:
+    """The radar change window in pixels for `smoothing` steps of SAR_WINDOW_M: odd, at least 3."""
+    return max(3, round(SAR_WINDOW_M * max(1, smoothing) / metres) | 1)
+
+
+def _sar_change(before: Any, after: Any, valid: Any, metres: float,
                 options: Parameters) -> tuple[Any, Any, Any, float, dict[str, tuple[Any, str]]]:
     """Backscatter that moved between two passes of one track, in decibels.
 
-    Both passes are averaged as power over the same window before they are
+    Both passes are averaged as power over the same ground before they are
     compared, so speckle does not read as change. What the recipe's ground
     setting asks for then gates it: bright ground on the side that has it, or
     water coming or going.
     """
     import numpy as np
 
-    window = 2 * max(1, options.smoothing) + 1
+    window = sar_window(options.smoothing, metres)
     old = _power_mean(before[:, :, 0], valid, window)
     new = _power_mean(after[:, :, 0], valid, window)
     # Both polarisations vote: a building that falls or a field that floods
@@ -1075,7 +1125,7 @@ def detect(pictures: tuple[Any, Any], products: tuple[Any, Any], mask: Any, body
         valid = inside & ~blocked
         if method == "sar-change":
             valid &= (before[:, :, 0] > 0) & (after[:, :, 0] > 0)
-            stat, signed, state, threshold, measures = _sar_change(before, after, valid, options)
+            stat, signed, state, threshold, measures = _sar_change(before, after, valid, metres, options)
         elif method == "index":
             old = before[:, :, 0].astype(np.float32) / 127.5 - 1
             new = after[:, :, 0].astype(np.float32) / 127.5 - 1
@@ -1139,7 +1189,7 @@ def strength(margin: float) -> str:
     return "strong" if margin >= 3 else "clear" if margin >= 1.5 else "weak"
 
 
-def _candidates(reading: Reading, body: RunInput, x: int, y: int,
+def _candidates(reading: Reading, phenomenon: str, x: int, y: int,
                 part: int, frame_keys: list[str]) -> list[dict[str, Any]]:
     import cv2
     import numpy as np
@@ -1176,13 +1226,29 @@ def _candidates(reading: Reading, body: RunInput, x: int, y: int,
                      "geometry": analysis_geometry.footprint(
                          labels[py:py + height, px:px + width] == label, x, y, z, size, (px, py)),
                      "coordinates": [lon, lat], "area": pixels * mpp * mpp,
-                     "width": width * mpp, "height": height * mpp,
                      "margin": round(margin, 3), "strength": strength(margin),
                      "measure": {name: round(float(values[label]), 3)
                                  for name, values in reduced.items()},
-                     "phenomenon": body.recipe.phenomenon, "review": "new",
+                     "phenomenon": phenomenon, "review": "new",
                      "parts": [{"frames": frame_keys, "box": [px, py, width, height]}]})
     return rows
+
+
+# How long against how wide a candidate's footprint may be and still be
+# compact, and how long it has to be to count as elongated. A roof, a crater or
+# a burnt vehicle sits near 1; a road, a track or a trench runs past 3.
+COMPACT_MAX = 2.0
+ELONGATED_MIN = 3.0
+
+
+def keeps(row: dict[str, Any], options: Parameters) -> bool:
+    """Whether a merged candidate survives the recipe's size and shape filters."""
+    if row["area"] < options.min_area or (options.max_area and row["area"] > options.max_area):
+        return False
+    if options.shape == "any" or "geometry" not in row:
+        return True
+    ratio = analysis_geometry.elongation(row["geometry"])
+    return ratio <= COMPACT_MAX if options.shape == "compact" else ratio >= ELONGATED_MIN
 
 
 def merge(rows: list[dict[str, Any]], distance: float) -> list[dict[str, Any]]:
@@ -1213,8 +1279,6 @@ def merge(rows: list[dict[str, Any]], distance: float) -> list[dict[str, Any]]:
                     row["geometry"] = analysis_geometry.joined(row["geometry"], other["geometry"])
                 a = row["bbox"]
                 row["coordinates"] = [(a[0] + a[2]) / 2, (a[1] + a[3]) / 2]
-                row["width"] = (a[2] - a[0]) * 111_320 * math.cos(math.radians(lat))
-                row["height"] = (a[3] - a[1]) * 111_320
                 i = 0
             else:
                 i += 1
@@ -1301,7 +1365,7 @@ def _lookup(body: RunInput, start: str, end: str) -> list[dict[str, Any]]:
         raise ValueError("Copernicus is unavailable or its usage limit is reached")
     try:
         found = sentinel.acquisitions(instance, [list(zone.ring()) for zone in body.zones],
-                                      start, end, collection=sensor_for(body.recipe.method))
+                                      start, end, collection=recipe_sensor(body.recipe))
     finally:
         config.record_usage("sentinelhub", 1)
     return list(found["dates"])
@@ -1314,7 +1378,7 @@ def _sensed_by(body: RunInput) -> RunInput:
     Sentinel-1 layer, whatever the source was saved with, and has no clouds to
     set a ceiling on. An optical source never carries a pass time.
     """
-    if body.recipe.method in RADAR_METHODS:
+    if is_radar(body.recipe):
         radar: dict[str, Any] = {"provider": "sentinel1", "layer": radar_layer(), "maxcc": 100}
         return body.model_copy(update={"a": body.a.model_copy(update=radar),
                                        "b": body.b.model_copy(update=radar)})
@@ -1358,9 +1422,9 @@ def _timed(body: RunInput) -> RunInput:
     A pass from another track sees the ground at another angle, and that
     difference is not change. One lookup settles both sides.
     """
-    if body.recipe.method not in RADAR_METHODS:
+    if not is_radar(body.recipe):
         return body
-    single = body.recipe.method in SINGLE_METHODS
+    single = is_single(body.recipe)
     sides = [body.b] if single else [body.a, body.b]
     missing = sorted(side.date for side in sides if side.date and not side.time)
     found = _lookup(body, missing[0], missing[-1]) if missing and not body.offline else None
@@ -1376,8 +1440,8 @@ def _timed(body: RunInput) -> RunInput:
 
 def resolve_dates(case: Case, body: RunInput, *, selected: bool = False) -> RunInput:
     body = _sensed_by(body)
-    single = body.recipe.method in SINGLE_METHODS
-    radar = body.recipe.method in RADAR_METHODS
+    single = is_single(body.recipe)
+    radar = is_radar(body.recipe)
     if single:
         body = body.model_copy(update={"a": body.b})
     if body.date_rule == "manual":
@@ -1475,7 +1539,7 @@ def duplicates(case: Case, body: RunInput, outcomes: list[dict[str, Any]]) -> li
                         "a": old.a.model_dump(), "b": old.b.model_dump()}]
             match = next((r for r in records if r["area_id"] == zone.id and r["status"] == "ready"
                           and r["b"] == outcome["b"] and
-                          (body.recipe.method in SINGLE_METHODS or r["a"] == outcome["a"])), None)
+                          (is_single(body.recipe) or r["a"] == outcome["a"])), None)
             if match:
                 found.append({"run_id": run["id"], "title": run["title"], "area_id": zone.id,
                               "area_name": zone.name, "a": outcome["a"], "b": outcome["b"]})
@@ -1491,7 +1555,7 @@ def execute(case: Case, job: dict[str, Any]) -> None:
         outcomes = run.get("area_runs")
         if outcomes is None:
             _, outcomes = prepare_areas(case, original)
-        single = original.recipe.method in SINGLE_METHODS
+        single = is_single(original.recipe)
         z, size = GRID
         run.update(status="running", area_runs=outcomes, resolution={"grid_zoom": z,
                    "tile_size": size, "pad": PAD}, engine_version=ENGINE_VERSION)
@@ -1549,10 +1613,18 @@ def execute(case: Case, job: dict[str, Any]) -> None:
 
 
 def sweep_area(case: Case, run: dict[str, Any], body: RunInput) -> tuple[list[dict[str, Any]], int, int]:
-    """Apply the unchanged detector to one area's own pair."""
-    single = body.recipe.method in SINGLE_METHODS
+    """Apply the unchanged detector to one area's own pair.
+
+    An analyzer of your own rules reads every product its rules need and is
+    judged by `detect_rules`, the same evaluation the builder's preview runs.
+    """
+    from . import detect_rules
+
+    single = is_single(body.recipe)
+    rules = body.recipe.method == "rules"
     z, size = GRID
-    product = product_for(body.recipe.method, body.recipe.parameters.index)
+    products = recipe_products(body.recipe)
+    product = products[0]
     results: list[dict[str, Any]] = []
     asked = imaged = 0
     for part, (x, y) in enumerate(plan(body)):
@@ -1560,38 +1632,58 @@ def sweep_area(case: Case, run: dict[str, Any], body: RunInput) -> tuple[list[di
         workqueue.let_others_through(case, JOB)
         picture_b = frame(case, run, body.b, x, y)
         picture_a = picture_b if single else frame(case, run, body.a, x, y)
-        product_b = frame(case, run, body.b, x, y, product)
-        product_a = product_b if single else frame(case, run, body.a, x, y, product)
-        water = None
-        if body.recipe.method == "sar-vessels":
-            # Without it the radar alone decides what is sea, which it does
-            # well enough offshore; a failed read is not a failed tile.
-            try:
-                water = frame(case, run, water_source(body.b), x, y, "water")
-            except (ValueError, sentinel.CoverageError, httpx.HTTPError):
-                water = None
         mask = mask_for(body.zones, z, size, x, y)
         inside = mask.astype(bool)
-        asked += int(inside.sum())
-        imaged += int((inside & (picture_a[:, :, 3] > 0) & (picture_b[:, :, 3] > 0)).sum())
         _, lat = geographic((x + .5) / (1 << z), (y + .5) / (1 << z))
-        reading = detect((picture_a, picture_b), (product_a, product_b), mask, body, lat, water)
+        if rules:
+            read: dict[str, tuple[Any, Any]] = {}
+            for name in products:
+                after = frame(case, run, body.b, x, y, name)
+                read[name] = (after if single else frame(case, run, body.a, x, y, name), after)
+            reading: Reading = detect_rules.evaluate(
+                read, mask, body.recipe, (body.a.date, body.b.date), lat).reading
+            # Pictures are for review only; the products say where the sensor saw.
+            first = read[products[0]]
+            seen = (first[1][:, :, 0] > 0) & (first[0][:, :, 0] > 0)
+            asked += int(inside.sum())
+            imaged += int((inside & seen[PAD:PAD + size, PAD:PAD + size]).sum())
+        else:
+            reading = _detect_tile(case, run, body, x, y, product, (picture_a, picture_b), mask, lat)
+            asked += int(inside.sum())
+            imaged += int((inside & (picture_a[:, :, 3] > 0) & (picture_b[:, :, 3] > 0)).sum())
         sources = [body.b] if single else [body.a, body.b]
         keys = [_key(source, z, x, y, None) for source in sources]
-        results.extend(_candidates(reading, body, x, y, part, keys))
+        results.extend(_candidates(reading, body.recipe.phenomenon, x, y, part, keys))
         if len(results) > MAX_RESULTS * 4:
             raise ValueError("too many fragments; lower the sensitivity or use smaller areas")
         run["progress"] += 1
         persist_run(case, run)
     options = body.recipe.parameters
     joined = merge(results, options.merge_metres)
-    kept = [r for r in joined if r["area"] >= options.min_area and
-            (not options.max_area or r["area"] <= options.max_area)]
+    kept = [r for r in joined if keeps(r, options)]
     for row in kept:
         row.update(id=f"{body.zones[0].id}-{row['id']}", area_id=body.zones[0].id,
                    area_name=body.zones[0].name, origin="detector",
                    sources={"a": body.a.model_dump(), "b": body.b.model_dump()})
     return kept, asked, imaged
+
+
+def _detect_tile(case: Case, run: dict[str, Any], body: RunInput, x: int, y: int, product: str,
+                 pictures: tuple[Any, Any], mask: Any, lat: float) -> Reading:
+    """One tile of a built-in detector: its product on each date, and the water
+    classification radar vessels read beside it."""
+    single = is_single(body.recipe)
+    product_b = frame(case, run, body.b, x, y, product)
+    product_a = product_b if single else frame(case, run, body.a, x, y, product)
+    water = None
+    if body.recipe.method == "sar-vessels":
+        # Without it the radar alone decides what is sea, which it does
+        # well enough offshore; a failed read is not a failed tile.
+        try:
+            water = frame(case, run, water_source(body.b), x, y, "water")
+        except (ValueError, sentinel.CoverageError, httpx.HTTPError):
+            water = None
+    return detect(pictures, (product_a, product_b), mask, body, lat, water)
 
 
 workqueue.register(JOB, execute)

@@ -124,7 +124,7 @@ export const GUIDE = [
         lead: 'From a URL to a dated claim the case can argue with.',
         steps: [
           { tool: 'media', text: 'Paste the post URL. The first attempt is made without cookies, and only an "unavailable" answer offers your saved browser session.' },
-          { tool: 'inspect', text: 'Step the video frame by frame and pull the stills the argument rests on. Each is filed as media made here.' },
+          { tool: 'inspect', text: 'Step the video frame by frame and capture the stills the argument rests on, then save them to the case as media made here.' },
           { tool: 'board', text: 'Confirm what the import proposed, then link the frames to the place, the account and the people.' },
           { tool: 'timeline', text: 'Date the claim, and read it in UTC, in your own clock, or in local time at the place itself.' },
         ],
@@ -164,27 +164,27 @@ export const GUIDE = [
       },
       {
         label: 'Send a picture from where you are looking at it',
-        text: 'Open in… on a Media Library row sends the file, and the Frame tab in Inspect sends the frame as you cropped it, saved or not.',
+        text: 'Open in… on a Media Library row sends the file, and a frame in Inspect goes as you cropped it, saved or not.',
       },
     ],
   },
   {
     id: 'examine',
     title: 'Examine',
-    lead: 'Inspect reads one image or one video closely, and saves the reading as a session you can reopen.',
-    tools: ['inspect'],
+    lead: 'Inspect reads one image or one video closely. Collage lays out frames and images from any number of files.',
+    tools: ['inspect', 'collage'],
     points: [
       {
-        label: 'Four tabs for a video, two for a picture',
-        text: 'Selection pulls stills out of a clip, Frame adjusts and crops one picture with the error-level view folded inside, Collage stitches, and Save files what you made. A still image opens on Frame and Save.',
+        label: 'The work stays with the file',
+        text: 'Frames and edits are kept as you make them, one set per file. Opening the file again picks up where you left off.',
       },
       {
-        label: 'What you make is case material',
-        text: 'A frame or a collage is filed as ordinary media and marked as made here, so the graph can say what it came out of.',
+        label: 'A strip instead of tabs',
+        text: 'A video leads the strip and the frames cut from it follow. Click one to adjust, crop or analyse it.',
       },
       {
-        label: 'The session is the artifact',
-        text: 'Reopening one puts every adjustment back where it was. The file on disk is never overwritten.',
+        label: 'Save to case is the one step that files media',
+        text: 'A frame, an adjusted video or a collage becomes media marked as made here, so the graph can say what it came out of. The original is never overwritten.',
       },
     ],
   },
@@ -201,6 +201,10 @@ export const GUIDE = [
       {
         label: 'Right-click the ground',
         text: 'The menu acts on the point under the cursor: copy it in any format, save it, measure or read the sun from it, see its imagery history, or open it in another map.',
+      },
+      {
+        label: 'The map tabs look at one place',
+        text: 'Satellite, Compare and Detect open where you last looked. A Detect review and a saved comparison stay put, and Settings → General turns it off.',
       },
       {
         label: 'Layers cost nothing until they are on',
@@ -237,6 +241,14 @@ export const GUIDE = [
       {
         label: 'Radar sees through cloud',
         text: 'The radar analyzers read Sentinel-1 through a layer you add to your Copernicus configuration, found from Settings → Imagery. A and B have to share a track, which the pass list marks.',
+      },
+      {
+        label: 'An analyzer of your own is a list of rules',
+        text: 'Analyzers → New analyzer → start from an example, or build your own rules. Each rule is a line a pixel has to cross on A, on B or between them. Pick two passes and every change redraws what each rule keeps on the map; a click on the map says which rule let a point go.',
+      },
+      {
+        label: 'Checks prove an analyzer, if you want them',
+        text: 'Checks → Add a check, pick its passes, then arm Should be found or Should stay empty and click the map to drop pins. Checks reread themselves as the rules change, so a line that loses the burn or catches the reef turns its check red. The examples come with theirs.',
       },
       {
         label: 'Coords & Sky keeps calculations separate',
@@ -328,6 +340,16 @@ export const GUIDE = [
         ],
       },
       {
+        where: 'Satellite, Compare, Detect',
+        keys: [
+          { combo: 'Middle-drag', does: 'turns the map like a wheel round the point grabbed, as does Shift-drag' },
+          { combo: 'Ctrl (turning)', does: 'turns in 15° steps' },
+          { combo: 'Middle-click', does: 'puts north back up' },
+          { combo: 'Shift+← / →', does: 'turns the map 15°' },
+          { combo: 'Shift+↑', does: 'puts north back up' },
+        ],
+      },
+      {
         where: 'Graph',
         keys: [
           { combo: '0', does: 'fits the whole drawing' },
@@ -374,12 +396,34 @@ export const GUIDE = [
         ],
       },
       {
+        where: 'Detect',
+        keys: [
+          { combo: ']', does: 'folds the column to a rail and back' },
+          { combo: '← / →', does: 'walks the review queue' },
+          { combo: 'K D P', does: 'keeps, dismisses or pins the candidate under review' },
+          { combo: 'H', does: 'hides the candidates and areas, or shows them again' },
+          { combo: 'B', does: 'blinks A and B on the map, when the run read two passes' },
+          { combo: 'M', does: 'picks up the ruler, or puts it down' },
+          { combo: 'Delete', does: 'removes the selected measure' },
+        ],
+      },
+      {
         where: 'Inspect',
         keys: [
           { combo: '← / →', does: 'steps one video frame, Shift for a second' },
           { combo: ', / .', does: 'the same step, on the keys mpv uses' },
           { combo: 'Space', does: 'plays and pauses' },
           { combo: 'Enter / Escape', does: 'applies the crop, or leaves it' },
+          { combo: 'Middle-drag', does: 'turns the frame, Ctrl for 15° steps' },
+          { combo: 'Middle-click', does: 'stands it upright again' },
+        ],
+      },
+      {
+        where: 'Collage',
+        keys: [
+          { combo: 'Delete', does: 'removes the selected pieces' },
+          { combo: 'Ctrl+Z', does: 'undoes the last change' },
+          { combo: 'Ctrl+Shift+Z', does: 'redoes it' },
         ],
       },
       {

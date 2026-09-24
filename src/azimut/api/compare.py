@@ -12,7 +12,19 @@ instead of adding another, unless something was already derived from it: a
 proof built on a comparison must keep the pixels it was built on, so the new
 render then becomes a new file and the session points at it.
 
+The image records the date of each picture it shows (`imagery_a`, `imagery_b`),
+the same fact a capture keeps as its imagery date: two instants, never a range,
+because a comparison does not say that anything happened between them. A date a
+provider only estimated is kept with `exact: false` beside it.
+
 Finished copies go to the configured export destination and are not case state.
+They are named by those dates, so two comparisons of one pair would share a name,
+and none ever overwrites another. An export may also be kept in the case: it is then
+a media file of its own, stamped with the reading it shows and never replaced
+(`engine/comparisons.py`).
+
+A saved comparison stands on the map as saved work, at its frame's centre or its
+view's, and is listed with the captures in the Saved panel.
 """
 
 from __future__ import annotations
@@ -30,12 +42,13 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .. import config, layout
 from ..engine import artifacts as artifact_engine
-from ..engine import exportdir, sentinel, tiles
+from ..engine import comparisons, exportdir, sentinel, tiles
 from ..engine import links as link_engine
 from ..engine import media as media_engine
 from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
 from .naming import read_created_at, slugify
+from .satellite import locate_on_save, saved_changed
 
 router = APIRouter(prefix="/api", tags=["compare"])
 
@@ -50,8 +63,13 @@ MAX_GIF_EDGE = 1280
 MAX_GIF_BODY_BYTES = MAX_FRAME_BYTES * 2 + 1_000_000
 #: What a saved comparison's media sidecar records as its producer.
 SOURCE_TYPE = "compare"
+#: The reading a kept image carries, as JSON. A session holds at most 200
+#: annotations, each a handful of points and a short text.
+MAX_SPEC_CHARS = 400_000
 
 _DAY = r"^(|\d{4}-\d{2}-\d{2})$"
+#: A picture's date as the browser states it: a day, or a radar pass's UTC instant.
+_PICTURE_DATE = r"^(|\d{4}-\d{2}-\d{2}(T([01]\d|2[0-3]):[0-5]\d:[0-5]\dZ)?)$"
 
 
 class CompareCamera(BaseModel):
@@ -458,25 +476,33 @@ def save_session(case_id: str, body: SessionIn) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail="a comparison already uses that name")
 
     previous = case.resolve_inside(layout.compare_session_rel(old or name))
+    reading = _validated_spec(body.spec)
     saved = {
         "azimut_compare": 1,
         "title": name,
         "created_at": read_created_at(previous) or _now(),
         "updated_at": _now(),
-        "spec": _validated_spec(body.spec),
+        "spec": reading,
     }
     media_engine.write_json_atomic(path, saved)
 
+    # The comparison stands where its reading is: saved work, beside the captures.
+    placed = comparisons.placement(reading)
     existing = case.find_entity(attr="spec", value=old_rel or rel)
     if existing:
-        patch: dict[str, Any] = {"label": name}
-        if old_rel:
-            patch["attrs"] = {"spec": rel}
-        case.update_entity(existing["id"], patch)
+        stale = comparisons.moved(existing.get("attrs") or {}, placed)
+        case.update_entity(existing["id"], {"label": name, "attrs": {"spec": rel, **placed}})
+        entity_id = existing["id"]
     else:
-        case.add_entity("compare-session", name, attrs={"spec": rel}, by="compare")
+        stale = True
+        entity_id = case.add_entity("compare-session", name, attrs={"spec": rel, **placed},
+                                    by="compare")["id"]
     if old_rel:
+        comparisons.follow_rename(case, old_rel, rel)
         case.resolve_inside(old_rel).unlink(missing_ok=True)
+    if stale:
+        locate_on_save(case, entity_id, placed["lat"], placed["lon"])
+    saved_changed(case)
     return {"name": name, "title": name, "spec_path": rel}
 
 
@@ -518,6 +544,10 @@ async def save_session_preview(
     image_b: UploadFile | None = File(default=None),
     format_: Literal["png", "blink"] = Form(alias="format"),
     interval: int = Form(default=800, ge=200, le=4000),
+    imagery_a: str = Form(default="", pattern=_PICTURE_DATE),
+    imagery_b: str = Form(default="", pattern=_PICTURE_DATE),
+    imagery_a_exact: bool = Form(default=True),
+    imagery_b_exact: bool = Form(default=True),
 ) -> dict[str, Any]:
     """File the rendered comparison as the session's media working file.
 
@@ -561,7 +591,13 @@ async def save_session_preview(
         # The composer writes both provider credits into the image footer.
         "attribution_burned": True,
     }
-    attrs = {"lat": camera["lat"], "lon": camera["lon"], "compare_session": spec_rel}
+    for key, value, exact in (("imagery_a", imagery_a, imagery_a_exact),
+                              ("imagery_b", imagery_b, imagery_b_exact)):
+        if value:
+            source[key] = value
+            if not exact:
+                source[f"{key}_exact"] = False
+    attrs = {"lat": camera["lat"], "lon": camera["lon"], comparisons.SESSION_ATTR: spec_rel}
 
     current = _preview_of(case, spec_rel)
     current_entity = case.find_entity(attr="path", value=current) if current else None
@@ -590,7 +626,85 @@ async def save_session_preview(
         case.update_entity(entity["id"], {"attrs": {"preview": rel}})
     except (OSError, ValueError, CaseError) as exc:
         raise HTTPException(status_code=409, detail=f"could not save the image: {exc}") from exc
+    # the preview is the comparison's picture in the Saved panel
+    saved_changed(case)
     return {"path": rel, "format": format_, "replaced": replaced}
+
+
+@router.post("/cases/{case_id}/compare/sessions/{name}/images")
+async def keep_image(
+    case_id: str,
+    name: str,
+    image_a: UploadFile = File(),
+    image_b: UploadFile | None = File(default=None),
+    format_: Literal["png", "blink", "slide"] = Form(alias="format"),
+    interval: int = Form(default=800, ge=200, le=4000),
+    filename: str = Form(min_length=1, max_length=120),
+    spec: str = Form(min_length=2, max_length=MAX_SPEC_CHARS),
+    imagery_a: str = Form(default="", pattern=_PICTURE_DATE),
+    imagery_b: str = Form(default="", pattern=_PICTURE_DATE),
+    imagery_a_exact: bool = Form(default=True),
+    imagery_b_exact: bool = Form(default=True),
+) -> dict[str, Any]:
+    """Keep one export in the case, as an image nothing replaces.
+
+    The session's preview is redrawn by every save; this is the copy somebody chose
+    to keep, so it carries the reading it was made from rather than the session's,
+    which may have moved on since. It is named like the finished copy and never
+    written over another file.
+    """
+    case = get_case(case_id)
+    canonical = slugify(name, "Comparison")
+    spec_rel = layout.compare_session_rel(canonical)
+    if _read_session(case, canonical) is None or case.find_entity(attr="spec", value=spec_rel) is None:
+        raise HTTPException(status_code=404, detail="save the comparison before keeping its images")
+    try:
+        reading = _validated_spec(CompareSpec.model_validate_json(spec))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="that is not a comparison this image could show") from exc
+
+    a = await _read_png(image_a, "A")
+    if format_ == "png":
+        out = io.BytesIO()
+        a.save(out, "PNG", optimize=True)
+        data, suffix = out.getvalue(), ".png"
+    else:
+        if image_b is None:
+            raise HTTPException(status_code=422, detail="an animated image needs image B")
+        b = await _read_png(image_b, "B")
+        data, suffix = _gif_bytes(a, b, format_, interval), ".gif"
+
+    placed = comparisons.placement(reading)
+    source: dict[str, Any] = {
+        "type": SOURCE_TYPE,
+        "session": spec_rel,
+        "kept": True,
+        "mode": reading["mode"],
+        "animation": None if format_ == "png" else format_,
+        "providers": {"a": reading["a"]["provider"], "b": reading["b"]["provider"]},
+        "lat": placed["lat"],
+        "lon": placed["lon"],
+        "zoom": placed["zoom"],
+        "bearing": placed["bearing"],
+        "frame": reading.get("frame"),
+        "rendered_at": _now(),
+        "attribution_burned": True,
+    }
+    for key, value, exact in (("imagery_a", imagery_a, imagery_a_exact),
+                              ("imagery_b", imagery_b, imagery_b_exact)):
+        if value:
+            source[key] = value
+            if not exact:
+                source[f"{key}_exact"] = False
+    attrs = {"lat": placed["lat"], "lon": placed["lon"], comparisons.SESSION_ATTR: spec_rel}
+    try:
+        filed = media_engine.import_rendered_bytes(
+            case, data, filename, suffix, source, by="compare", extra_attrs=attrs
+        )
+    except (OSError, ValueError, CaseError) as exc:
+        raise HTTPException(status_code=409, detail=f"could not keep the image: {exc}") from exc
+    saved_changed(case)
+    return {"path": filed["item"]["path"], "entity": filed["entity"]["id"]}
 
 
 @router.delete("/cases/{case_id}/compare/sessions/{name}")
@@ -667,12 +781,7 @@ async def export_gif(
     name = f"{layout.slugify(filename, 'comparison')}-{animation}.gif"
     try:
         export_destination = exportdir.destination("views", case.path)
-        in_case = export_destination == layout.subdir(case.path, "exports")
-        if in_case:
-            path = export_destination / name
-            path.write_bytes(data)
-        else:
-            path = exportdir.write_out(data, export_destination, name)
+        path = exportdir.write_out(data, export_destination, name)
     except (OSError, exportdir.ExportDirError) as exc:
         raise HTTPException(status_code=409, detail=f"could not write the GIF: {exc}") from exc
     return {"file": path.name, "path": str(export_destination), "animation": animation}

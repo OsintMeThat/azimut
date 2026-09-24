@@ -4,6 +4,7 @@ import {
   canvasBlob,
   captureProjection,
   comparisonFilename,
+  pictureDateFields,
   composeComparison,
   scaleBarLength,
 } from './compareExport.js';
@@ -211,10 +212,28 @@ describe('comparison export', () => {
     expect(scaleBarLength(3.7, 120).metres).toBe(500);
   });
 
-  it('names the file after the comparison and a stable UTC minute', () => {
+  it('names the file after the comparison and the dates of its two pictures', () => {
     const at = new Date('2026-09-14T08:09:10Z');
-    expect(comparisonFilename('', at)).toBe('compare-202609140809');
-    expect(comparisonFilename('Harbour: after/before', at)).toBe('Harbour after before 202609140809');
+    const dates = { a: '2024-05-03', b: '2026-09-02T05:42:10Z' };
+    expect(comparisonFilename('Harbour', dates, at)).toBe('Harbour 2024-05-03_2026-09-02T0542Z');
+    expect(comparisonFilename('', dates, at)).toBe('compare-2024-05-03_2026-09-02T0542Z');
+    expect(comparisonFilename('', { b: '2026-09-02' }, at)).toBe('compare-undated_2026-09-02');
+  });
+
+  it('files each dated picture, and says which date was only estimated', () => {
+    expect(pictureDateFields({
+      a: { imageryWhen: '2024-05-03', imageryExact: false },
+      b: { imageryWhen: '2026-09-02T05:42:10Z', imageryExact: true },
+    })).toEqual([
+      ['imagery_a', '2024-05-03'], ['imagery_a_exact', 'false'], ['imagery_b', '2026-09-02T05:42:10Z'],
+    ]);
+    expect(pictureDateFields({ a: { imageryWhen: null }, b: {} })).toEqual([]);
+  });
+
+  it('falls back to a stable UTC minute when neither picture is dated', () => {
+    const at = new Date('2026-09-14T08:09:10Z');
+    expect(comparisonFilename('', {}, at)).toBe('compare-202609140809');
+    expect(comparisonFilename('Harbour: after/before', {}, at)).toBe('Harbour after before 202609140809');
   });
 });
 

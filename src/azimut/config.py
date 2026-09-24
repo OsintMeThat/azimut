@@ -110,6 +110,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Where the Satellite tab opens before anything points it somewhere else
     # (a case artifact, a "go to coords" handoff). {"lat", "lon", "zoom"}.
     "home_view": {"lat": 43.0, "lon": 25.0, "zoom": 3},
+    # Whether Satellite, Compare and Detect share one camera, so a map tab that
+    # shows opens where the last one was left. On by default.
+    "map_sync": True,
     # Saving a proof files the point it carries as a `place`, joined by `depicts`
     # (engine/satellite.place_for_proof). A geolocation is concluded in the
     # composer, not while framing the map, so the point becomes a node once —

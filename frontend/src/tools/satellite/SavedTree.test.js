@@ -313,3 +313,31 @@ describe('accepting a proposed point', () => {
     expect(at({ rows: proposed, query: 'roof' })).not.toContain('Accept this point');
   });
 });
+
+describe('SavedTree, a saved comparison', () => {
+  const comparison = {
+    id: 'k1',
+    kind: 'comparison',
+    title: 'harbour reading',
+    lat: 50.45,
+    lon: 30.52,
+    zoom: 16,
+    geo: ua('Kyiv Oblast'),
+    continent: 'Europe',
+    fetched_at: '2026-09-20T09:12:04Z',
+    session: 'harbour reading',
+    path: 'media/harbour reading.png',
+    imagery_a: '2024-05-03~',
+    imagery_b: '2026-09-02',
+    kept: [{ path: 'media/k.png', title: 'k' }],
+  };
+
+  it('lists it with the captures, by its two pictures and what was kept from it', () => {
+    const body = at({ rows: [...rows, comparison], kind: 'captures', query: 'harbour' });
+
+    expect(body).toContain('harbour reading');
+    expect(body).toContain('2024-05-03~ → 2026-09-02 · 1 image kept');
+    // it is reopened where it was made, not given a note box
+    expect(body).toContain('title="Open in Compare"');
+  });
+});

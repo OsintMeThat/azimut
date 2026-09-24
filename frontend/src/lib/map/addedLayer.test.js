@@ -391,10 +391,11 @@ describe('an added layer on the map', () => {
   it('keeps to a period by comparing days, and leaves the undated out of it', async () => {
     expect(periodFilter(null)).toBeNull();
     expect(periodFilter({ start: '', end: '' })).toBeNull();
+    // a span is kept while its last day is still in the period
     expect(periodFilter({ start: '2026-09-01', end: '' })).toEqual([
       'all',
       ['has', 'date'],
-      ['>=', ['get', 'date'], '2026-09-01'],
+      ['>=', ['coalesce', ['get', 'date_end'], ['get', 'date']], '2026-09-01'],
     ]);
 
     const engine = stubEngine();

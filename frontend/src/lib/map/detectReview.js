@@ -1,8 +1,60 @@
+import { orientedExtent } from '../measure.js';
+
 export function pinDefaults(candidate, single) {
   return {
     title: `${candidate.phenomenon} · ${candidate.coordinates[1].toFixed(4)}, ${candidate.coordinates[0].toFixed(4)}`.slice(0, 120),
     description: '', after_only: single, shape: candidate.geometry?.type === 'Point' || single ? 'point' : 'area',
   };
+}
+
+/**
+ * How big a candidate is: the long and short sides of its footprint, in metres,
+ * turned to fit it. A ship on the diagonal is measured along its hull, where the
+ * box squared to north would call it wider than it is long. A result older than
+ * footprints is measured on its box; a manual point has nothing to measure.
+ */
+export function candidateSize(candidate) {
+  const [west, south, east, north] = candidate?.bbox ?? [];
+  const shape = candidate?.geometry ?? (candidate?.bbox
+    ? { type: 'Polygon', coordinates: [[[west, south], [east, south], [east, north], [west, north]]] }
+    : null);
+  if (!shape || shape.type === 'Point') return null;
+  const polygons = shape.type === 'Polygon' ? [shape.coordinates] : shape.coordinates;
+  return orientedExtent(polygons.flatMap((polygon) => polygon[0] ?? []).map(([lon, lat]) => ({ lat, lon })));
+}
+
+/**
+ * The review queue in the order asked. The run already lists it strongest
+ * first; largest first goes by length, so the big hulls come up before the
+ * skiffs, and a manual point, which has no outline, by its one pixel. Equal
+ * sizes keep the run's order.
+ */
+export function orderCandidates(rows, order = 'strength') {
+  if (order !== 'size') return rows;
+  const key = (row) => candidateSize(row)?.length ?? Math.sqrt(row.area || 0);
+  return rows.map((row) => [key(row), row]).sort((a, b) => b[0] - a[0]).map(([, row]) => row);
+}
+
+/**
+ * The two passes a candidate was read between: its own, else its area's, else
+ * the run's. A detector that reads one pass has the same picture twice.
+ */
+export function candidatePair(candidate, run) {
+  const ready = (pair) => pair.status === 'ready';
+  const area = run?.area_runs?.find((pair) => ready(pair) && pair.area_id === candidate?.area_id)
+    ?? run?.area_runs?.find(ready);
+  return {
+    a: candidate?.sources?.a ?? area?.a ?? run?.input?.a ?? null,
+    b: candidate?.sources?.b ?? area?.b ?? run?.input?.b ?? null,
+  };
+}
+
+/** Where a blink is worth having: two dated passes of one Copernicus archive, not one pass twice. */
+export function blinkable(pair) {
+  const { a, b } = pair ?? {};
+  if (!a?.date || !b?.date || a.provider !== b.provider) return false;
+  if (b.provider !== 'sentinel2' && b.provider !== 'sentinel1') return false;
+  return a.date !== b.date || (a.time ?? '') !== (b.time ?? '');
 }
 
 export function candidatePaths(geometry, project) {

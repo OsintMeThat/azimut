@@ -25,6 +25,8 @@ import { tileTemplate as nightTemplate } from './nightlights.js';
 const DEFAULT_SUBDOMAINS = ['a', 'b', 'c'];
 
 const IMAGERY = 'basemap-imagery';
+/** A second picture of the same ground, laid just over the first (`setAlternate`). */
+const ALTERNATE = 'basemap-alternate';
 
 /**
  * What can be laid over the imagery, in the order they stack — first is
@@ -179,7 +181,7 @@ export function overlaySources(overlay, params) {
 }
 
 /** Ours, so the first layer that is not is where the basemap stops. */
-const OWNED = new Set([IMAGERY, ...OVERLAYS.flatMap(overlayLayers)]);
+const OWNED = new Set([IMAGERY, ALTERNATE, ...OVERLAYS.flatMap(overlayLayers)]);
 
 /**
  * Where a provider's tiles are fetched from.
@@ -281,6 +283,9 @@ export function createBasemaps(engine, hooks = {}) {
   let metered = null; // the billed provider whose tiles we are counting
   let current = null; // the provider the zoom cap was last taken from
   let sharedCeiling = null; // a view zoom this map must not pass, whatever it shows
+  let alternate = null; // `${providerId}@${cell}` of the second picture, when there is one
+  let alternateMetered = null;
+  let alternateOn = false;
 
   // Drawn shapes are appended by `surface.js`, so the first layer this module
   // does not own is where the basemap stops and a tool's own marks begin.
@@ -309,9 +314,10 @@ export function createBasemaps(engine, hooks = {}) {
   }
 
   function onSourceData(event) {
-    if (!metered || event.sourceId !== IMAGERY || !event.isSourceLoaded) return;
+    if (!event.isSourceLoaded) return;
     // every visible tile is in, so what the proxy counted is now final
-    onMeteredTiles(metered);
+    const billed = event.sourceId === IMAGERY ? metered : event.sourceId === ALTERNATE ? alternateMetered : null;
+    if (billed) onMeteredTiles(billed);
   }
   map.on('sourcedata', onSourceData);
 
@@ -341,7 +347,8 @@ export function createBasemaps(engine, hooks = {}) {
     dropTiles();
     capZoom(provider);
     map.addSource(IMAGERY, rasterSource(provider, providerId, cell));
-    map.addLayer({ id: IMAGERY, type: 'raster', source: IMAGERY }, lowestOverlay());
+    map.addLayer({ id: IMAGERY, type: 'raster', source: IMAGERY },
+      map.getLayer(ALTERNATE) ? ALTERNATE : lowestOverlay());
     live = `${providerId}@${cell}`;
     if (provider.meter) {
       metered = provider;
@@ -464,6 +471,44 @@ export function createBasemaps(engine, hooks = {}) {
         shown.set(id, asked);
         addOverlay(overlay, params);
       }
+    },
+
+    /**
+     * Lay a second picture of the same ground just over the imagery, or take it
+     * off with a null provider. It is drawn transparent until `showAlternate`,
+     * so blinking between the two flips a paint property and never reloads a
+     * tile: both pictures stay loaded the whole time. A widget basemap has no
+     * tiles to lay, so it is refused.
+     */
+    setAlternate(provider, providerId, cell) {
+      const key = provider && !provider.widget ? `${providerId}@${cell}` : null;
+      if (key === alternate) return;
+      if (map.getLayer(ALTERNATE)) map.removeLayer(ALTERNATE);
+      if (map.getSource(ALTERNATE)) map.removeSource(ALTERNATE);
+      alternate = key;
+      alternateMetered = null;
+      if (!key) return;
+      map.addSource(ALTERNATE, rasterSource(provider, providerId, cell));
+      map.addLayer({
+        id: ALTERNATE,
+        type: 'raster',
+        source: ALTERNATE,
+        paint: {
+          'raster-opacity': alternateOn ? 1 : 0,
+          'raster-opacity-transition': { duration: 0, delay: 0 },
+          'raster-fade-duration': 0,
+        },
+      }, lowestOverlay());
+      if (provider.meter) {
+        alternateMetered = provider;
+        onMeteredTiles(provider);
+      }
+    },
+
+    /** Show the second picture over the first, or let the first through again. */
+    showAlternate(on) {
+      alternateOn = Boolean(on);
+      if (map.getLayer(ALTERNATE)) map.setPaintProperty(ALTERNATE, 'raster-opacity', alternateOn ? 1 : 0);
     },
 
     /**

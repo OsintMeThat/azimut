@@ -24,16 +24,17 @@ from typing import Any
 
 from ..repository import EntityStatus
 from ..workspace import Case, CaseError
-from . import continents
+from . import comparisons, continents
 from . import coords as coords_engine
 from . import countries
 from . import geo as geo_engine
 from . import links
 from . import media as media_engine
+from . import timeline
 
-# Saved work is places plus captures; a screenshot filed by the capture
-# extension is a capture with a different origin, not a third entity type.
-SAVED_TYPES = ["place", "capture"]
+# Saved work is places, captures and saved comparisons; a screenshot filed by the
+# capture extension is a capture with a different origin, not a type of its own.
+SAVED_TYPES = ["place", "capture", "compare-session"]
 
 # One page of the catalog per query while collecting saved entities: bounded
 # memory per round-trip, and the whole set is still tens of KB on the wire.
@@ -443,8 +444,12 @@ def list_captures(case: Case) -> list[dict[str, Any]]:
     panel keeps rendering exactly the fields it did when captures had their own
     store.
     """
+    return _captures_of(media_engine.list_media(case))
+
+
+def _captures_of(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     captures: list[dict[str, Any]] = []
-    for item in media_engine.list_media(case):
+    for item in items:
         if not is_capture(item):
             continue
         source = item.get("source") or {}
@@ -477,7 +482,7 @@ def _page_all(case: Case, types: list[str]) -> list[dict[str, Any]]:
 
 
 def saved_entities(case: Case) -> list[dict[str, Any]]:
-    """Every ``place`` and ``capture`` entity, in insertion order."""
+    """Every ``place``, ``capture`` and saved comparison, in insertion order."""
     return _page_all(case, SAVED_TYPES)
 
 
@@ -517,23 +522,29 @@ def _saved_row(
     capture: dict[str, Any] | None,
     proofs: int = 0,
     relations: int = 0,
+    comparison: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     attrs = entity.get("attrs") or {}
     source = capture or {}
     geo = attrs.get("geo") if isinstance(attrs.get("geo"), dict) else None
     lat, lon = attrs.get("lat"), attrs.get("lon")
-    if capture is None:
+    # A comparison's picture is its preview, which is a media file of its own: its
+    # title, folder and notes are the session's, and only the image is borrowed.
+    preview = (comparison or {}).get("preview") or {}
+    if comparison is not None:
+        kind = "comparison"
+    elif capture is None:
         kind = "place"
     else:
         kind = "screenshot" if source.get("method") == "screenshot" else "capture"
 
-    thumbnail = source.get("thumbnail")
+    thumbnail = preview.get("thumbnail") if comparison is not None else source.get("thumbnail")
     # a thumbnail the LRU budget has evicted must read as absent, not as a
     # broken image — the row falls back to its kind glyph
     if thumbnail and not case.resolve_inside(str(thumbnail)).exists():
         thumbnail = None
 
-    return {
+    row = {
         "id": entity["id"],
         # a saved point is one row, so its render key is its id. Proof rows
         # repeat one entity across its source points and key themselves apart.
@@ -581,19 +592,36 @@ def _saved_row(
         # those rather than letting them read as the analyst's own work.
         "status": (entity.get("provenance") or {}).get("status") or "confirmed",
     }
+    if comparison is not None:
+        pictured = preview.get("source") or {}
+        row.update({
+            "path": preview.get("path"),
+            # the name Compare reopens it by
+            "session": comparisons.session_name(str(attrs.get("spec") or "")),
+            # each picture's date, an estimate marked as the Time panel marks it
+            "imagery_a": timeline.imagery_reading(pictured, "imagery_a"),
+            "imagery_b": timeline.imagery_reading(pictured, "imagery_b"),
+            # the images kept from it, newest last: the row counts them, the card
+            # lists them, and none is a mark of its own
+            "kept": comparison.get("kept") or [],
+        })
+    return row
 
 
 def saved_index(case: Case) -> list[dict[str, Any]]:
-    """Places and captures as one flat list, newest first.
+    """Places, captures and comparisons as one flat list, newest first.
 
     Everything the Saved tree, the search modal and the map overlay read, and
     nothing else: no media rows, no derivation, no edges. Work that hangs off a
     point is a count (proofs, relations) rather than a list, so hundreds of rows
     stay in the tens of KB — which is what lets the panel load the whole set on
     case open instead of paging it. The popup loads the edges themselves from the
-    bounded chain endpoint when it opens.
+    bounded chain endpoint when it opens. A comparison lists the images kept from
+    it, which are few and are what its card is for.
     """
-    by_path = {c["path"]: c for c in list_captures(case)}
+    items = media_engine.list_media(case)
+    by_path = {c["path"]: c for c in _captures_of(items)}
+    pictures, kept = comparisons.grouped(items)
     # two grouped queries for the whole case rather than one per row: this list
     # is read on case open and must not walk the graph row by row
     worked = case.count_dependents(link_type=links.DERIVED_FROM, from_type="proof")
@@ -606,10 +634,14 @@ def saved_index(case: Case) -> list[dict[str, Any]]:
     )
     rows = []
     for entity in saved_entities(case):
+        attrs = entity.get("attrs") or {}
         is_image = entity["type"] == "capture"
-        capture = by_path.get((entity.get("attrs") or {}).get("path")) if is_image else None
+        capture = by_path.get(attrs.get("path")) if is_image else None
         if is_image and capture is None:
             continue  # the image is gone; the media listing is the authority
+        comparison = ({"preview": pictures.get(str(attrs.get("preview") or "")),
+                       "kept": kept.get(str(attrs.get("spec") or ""), [])}
+                      if entity["type"] == "compare-session" else None)
         rows.append(
             _saved_row(
                 case,
@@ -617,6 +649,7 @@ def saved_index(case: Case) -> list[dict[str, Any]]:
                 capture,
                 worked.get(entity["id"], 0),
                 related.get(entity["id"], 0),
+                comparison,
             )
         )
     # newest first, and within one second the later save wins — saving a place

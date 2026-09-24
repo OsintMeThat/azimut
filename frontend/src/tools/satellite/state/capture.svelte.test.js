@@ -162,6 +162,15 @@ describe('what a capture records', () => {
     capture.run();
     await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
     expect(api.post.mock.calls[0][1].imagery_date).toBe('2024-05-01');
+    expect(api.post.mock.calls[0][1].imagery_exact).toBe(true);
+  });
+
+  it('says when that date is only the provider estimate', async () => {
+    pixels = { provider: 'esri-world-imagery', imageryDate: '2024-05-01', imageryExact: false };
+    const capture = store();
+    capture.run();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
+    expect(api.post.mock.calls[0][1].imagery_exact).toBe(false);
   });
 
   it('records the frame centre when no pin was moved', async () => {

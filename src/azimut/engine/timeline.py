@@ -164,6 +164,30 @@ def project_entity(entity: dict[str, Any]) -> list[ProjectionRow]:
 
 
 _COMPACT_DATE = re.compile(r"(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})\Z")
+_PLAIN_DATE = re.compile(r"\d{4}(-\d{2}(-\d{2})?)?\Z")
+
+#: The two pictures a comparison or a Detect pair shows, each with its own date.
+#: A picture of two moments is two dates, never an interval: it does not say
+#: that anything happened between them.
+IMAGERY_SIDES = (("imagery-a", "imagery_a"), ("imagery-b", "imagery_b"))
+
+
+def _imagery(raw: object, exact: object) -> object:
+    """An imagery date, marked approximate when its provider only estimated it.
+
+    The sidecar keeps the date as the provider gave it, with `exact: false` beside
+    it, because captures show that date on their face. The `~` is added here, where
+    the reading is placed on the axis.
+    """
+    if exact is False and isinstance(raw, str) and _PLAIN_DATE.fullmatch(raw):
+        return f"{raw}~"
+    return raw
+
+
+def imagery_reading(source: dict[str, Any], key: str) -> str | None:
+    """One picture's date (`imagery_a`, `imagery_b`) as the Time panel reads it."""
+    raw = _imagery(source.get(key), source.get(f"{key}_exact"))
+    return raw if isinstance(raw, str) and raw else None
 
 
 def _media_date(raw: object) -> object:
@@ -202,7 +226,9 @@ def project_media(item: dict[str, Any], entity_id: str | None) -> list[Projectio
     # describe the same reading, and showing both would look like two events.
     add(MEDIA, "captured", item.get("taken_at") or source.get("captured_at"))
     add(MEDIA, "published", _media_date(source.get("upload_date")))
-    add(MEDIA, "imagery", source.get("imagery_date"))
+    add(MEDIA, "imagery", _imagery(source.get("imagery_date"), source.get("imagery_exact")))
+    for kind, key in IMAGERY_SIDES:
+        add(MEDIA, kind, imagery_reading(source, key))
     add(CASE_ACTIVITY, "collected", source.get("fetched_at"))
     add(CASE_ACTIVITY, "added", item.get("added_at"))
     return rows

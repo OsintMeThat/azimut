@@ -63,6 +63,9 @@ export const BLOCK_SHARE = 0.9;
  * billed basemap. The live value is the user's `eco_max_zoom` setting. */
 export const ECO_MAX_ZOOM = 15;
 
+/** Sentinel's own eco default, mirrored from `engine/tiles.py`. */
+export const SENTINEL_ECO_MAX_ZOOM = 7;
+
 /** Where to watch the real counters and set caps, per provider. */
 export const USAGE_LINKS = {
   mapbox: 'https://console.mapbox.com/account/statistics/',

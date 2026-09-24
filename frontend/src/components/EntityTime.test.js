@@ -20,8 +20,20 @@ describe('entity Time tab', () => {
 
   it('prefills a media capture assessment without changing file metadata', () => {
     expect(source).toContain("entity.type === 'media' ? 'Claim a capture date'");
-    expect(source).toContain("initialStatement={entity.type === 'media' ? 'This media was captured' : ''}");
-    expect(source).toContain("initialRole={entity.type === 'media' ? 'observed' : ''}");
+    expect(source).toContain(": entity.type === 'media' ? 'This media was captured' : ''}");
+    expect(source).toContain(": entity.type === 'media' ? 'observed' : ''}");
+  });
+
+  it('offers a change between two dated pictures as a claim citing them, never filed alone', () => {
+    // a comparison or a Detect pair: its two dates, as the Time panel carries them
+    expect(source).toContain("changeInterval(side('imagery-a'), side('imagery-b'))");
+    expect(source).toContain('{#if changeSpan}');
+    expect(source).toContain("onclick={() => (editor = 'change')}");
+    expect(source).toContain("initialWhen={editor === 'change' ? changeSpan : ''}");
+    expect(source).toContain("initialRole={editor === 'change' ? 'occurred'");
+    expect(source).toContain("initialCites={editor === 'change' ? [entity] : []}");
+    // cited, not the subject: the claim is about what changed, not about the picture
+    expect(source).toContain("subject={editor === 'new' ? entity : null}");
   });
 
   it('hands the visible entity scope to the global Timeline', () => {

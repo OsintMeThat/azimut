@@ -153,7 +153,9 @@ describe('the register the guide is written in', () => {
     const labels = new Set(Object.values(TOOL_LABELS));
     for (const section of GUIDE) {
       for (const group of section.keymap ?? []) {
-        expect(group.where === 'Anywhere' || labels.has(group.where), group.where).toBe(true);
+        // a group can name several tools that share the keys, comma-separated
+        const tools = group.where.split(', ');
+        expect(group.where === 'Anywhere' || tools.every((tool) => labels.has(tool)), group.where).toBe(true);
       }
     }
   });

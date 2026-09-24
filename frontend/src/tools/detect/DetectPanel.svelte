@@ -10,11 +10,13 @@
    * Opening the panel reads local state only. Starting a run is what fetches
    * imagery.
    */
-  import { onMount, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import { api } from '../../lib/api.js';
   import { ensureCase, reloadCase, toast } from '../../lib/state.svelte.js';
   import { detectRuns, refreshRuns } from '../../lib/detectRuns.svelte.js';
-  import { clone } from '../../lib/map/analyzers.js';
+  import { clone, zoneRing } from '../../lib/map/analyzers.js';
+  import { recipeCapability } from '../../lib/map/analyzerRules.js';
+  import { containsPoint } from '../../lib/measure.js';
   import { detectionsWithRuns, isActive, plural } from '../../lib/map/detections.js';
   import AnalyzerLibrary from './AnalyzerLibrary.svelte';
   import DetectDetection from './DetectDetection.svelte';
@@ -37,6 +39,11 @@
     showZones = $bindable(true),
     /** The candidate the review is on, so the map can ring the same one. */
     selectedResult = $bindable(null),
+    /** The review's eye and blink (DetectReview), which only a review holds. */
+    bare = $bindable(false),
+    blinking = $bindable(false),
+    /** Whether a run's results are open, which holds the map on them. */
+    reviewing = $bindable(false),
     /** Every watched area of the case, for the map to draw while the list is up. */
     areaGroups = $bindable([]),
     /** The areas the pointer is on, drawn heavier on the map. */
@@ -45,12 +52,26 @@
     opening = null,
     onopened = () => {},
     onfocus = () => {},
-    /** Frame a set of areas on the map, so opening a routine shows all of it. */
+    /** Frame a set of areas on the map, so opening a routine shows all of it.
+     *  `{ landing: true }` marks the once-per-case framing on arrival. */
     onframe = () => {},
     onusecurrentview = () => {},
     /** Put a Copernicus pass on the map, so the picture matches the work. */
     onshow = () => {},
     onleavepass = () => {},
+    /** The passes the candidate under review was read between, or null. */
+    onpair = () => {},
+    /** What the map draws while an analyzer of your own is built (AnalyzerBuilder). */
+    builder = $bindable(null),
+    /** Blink A and B on the map for the builder: `onblink({ a, b })`, or null to stop. */
+    onblink = () => {},
+    /** The map's view, for the builder to preview on. */
+    viewBounds = () => null,
+    /** The settled camera, the Copernicus layers on offer and a way to frame a
+     *  place, which the builder's preview and checks use. */
+    mapView = null,
+    passLayers = [],
+    onfly = () => {},
   } = $props();
 
   const TITLES = { new: 'New detection', review: 'Results', library: 'Analyzers' };
@@ -66,6 +87,16 @@
   let view = $state('home');
   let tab = $state('routines');
   let picking = $state(false);
+  let newActionEl = $state(null);
+  // Pointerdown in the capture phase, so a press on the map still closes it.
+  $effect(() => {
+    if (!picking) return;
+    const outside = (event) => {
+      if (newActionEl && !newActionEl.contains(event.target)) picking = false;
+    };
+    document.addEventListener('pointerdown', outside, true);
+    return () => document.removeEventListener('pointerdown', outside, true);
+  });
   /** The wizard's starting point while one is open; a new object mounts a fresh one. */
   let draft = $state(null);
   /** Where the library goes back to, and where the review returns to. */
@@ -89,11 +120,19 @@
   const runs = $derived(detectRuns.caseId === caseId ? detectRuns.rows : []);
   const routines = $derived(detectionsWithRuns(lists.followups, runs));
   const detection = $derived(routines.find((row) => row.id === detectionId) ?? null);
-  const methodOf = (method) => catalogue?.methods?.find((m) => m.id === method) ?? {};
+  /** What a recipe's method can do; an analyzer of your own answers from its rules. */
+  const capabilityOf = (recipe) => recipeCapability(recipe, catalogue?.methods ?? []);
   const pending = $derived(isActive(current));
+  let library = $state(null);
   const kindTitle = $derived(draft?.kind === 'routine' ? (draft.followupId ? 'Edit routine' : 'New routine') : 'New pass');
 
   $effect(() => { selectedResult = view === 'review' ? candidateId : null; });
+  $effect(() => { reviewing = view === 'review'; });
+  $effect(() => {
+    if (view === 'review') return;
+    bare = false;
+    blinking = false;
+  });
   // The map draws every watched area while the list is up, and only the open
   // detection's or run's ground once one is open: what is on screen is what is
   // in hand. One drawing either way, in the area's own colour, so the same
@@ -140,7 +179,7 @@
     // that the camera is the analyst's.
     if (!framed && areas.length) {
       framed = true;
-      onframe(areas.map(areaZone));
+      onframe(areas.map(areaZone), { landing: true });
     }
   }
 
@@ -213,11 +252,15 @@
   });
 
   $effect(() => {
-    if (!opening || !caseId) return;
+    // Analyzers belong to every case, so one opens with no case at all.
+    if (!opening || (!caseId && !opening.startsWith('analyzer:'))) return;
     const match = /^(areas|zones|followups|runs)-([a-f0-9]{12})$/.exec(opening);
+    // An analyzer kept from elsewhere (Compare's Difference) opens in the library.
+    const analyzer = /^analyzer:(custom-[a-f0-9]{12})$/.exec(opening);
     untrack(() => {
       onopened();
       if (match) void act(() => openItem(match[1], match[2]));
+      else if (analyzer) void act(() => openAnalyzer(analyzer[1]));
     });
   });
 
@@ -313,6 +356,15 @@
     if (watch && lists.followups.some((row) => row.id === watch)) return act(() => editDetection(watch));
     zones = clone(current.input.zones);
     startWizard({ kind: 'once', body: { ...clone(current.input), followup_id: null }, fromRun: true });
+  }
+
+  async function openAnalyzer(id) {
+    collapsed = false;
+    await loadCatalogue();
+    libraryFrom = 'home';
+    view = 'library';
+    await tick();
+    library?.openEntry(id);
   }
 
   function openLibrary() {
@@ -444,7 +496,13 @@
 
   export async function addManual(geometry) {
     if (!manual || !current) return;
-    const areaId = manual.areaId;
+    await addCandidate(manual.areaId, geometry);
+  }
+
+  /** Record a candidate the detector missed, on one of the open run's areas. */
+  export async function addCandidate(areaId, geometry) {
+    if (!current) return;
+    collapsed = false;
     await act(async () => {
       const row = await api.post(`${base()}/runs/${current.id}/results`, { area_id: areaId, geometry });
       acceptRun({ ...current, results: [...current.results, row], count: current.count + 1 });
@@ -452,6 +510,28 @@
       await refreshRuns(caseId);
     });
   }
+
+  /**
+   * The area of the open run a point falls in, if the run read it: where a
+   * right-click can add a candidate. Null when no finished run is under review.
+   */
+  export function candidateAreaAt({ lat, lon }) {
+    if (view !== 'review' || current?.status !== 'ready') return null;
+    const read = (zone) => !current.area_runs
+      || current.area_runs.some((pair) => pair.area_id === zone.id && pair.status === 'ready');
+    const inside = (zone) => containsPoint(zoneRing(zone).map(([x, y]) => ({ lat: y, lon: x })), { lat, lon });
+    return current.input.zones.find((zone) => read(zone) && inside(zone))?.id ?? null;
+  }
+
+  /** Read every rule of the analyzer being built at a point of the map, and
+   *  mark that point in one of its checks. */
+  export function probeAt(point) { return library?.probeAt(point); }
+  export function closeProbe() { library?.closeProbe(); }
+  export function markProbe(expect) { library?.markProbe(expect); }
+  /** The builder's pins, and its passes under the preview, from the map. */
+  export function pinAt(point) { library?.pinAt(point); }
+  export function pinMode(mode) { library?.pinMode(mode); }
+  export function showPass(which) { library?.showPass(which); }
 
   /** A candidate picked on the map opens its review. */
   export function pick(runId, resultId) {
@@ -484,7 +564,7 @@
       onclick={openLibrary}><Icon name="sliders" size={15} /></button>
   </nav>
   <div class="dock-content" hidden={collapsed}>
-  <div class="new-action">
+  <div class="new-action" bind:this={newActionEl}>
     <button class="btn btn-primary" aria-expanded={picking} onclick={() => (picking = !picking)}><Icon name="plus" size={14} /> New detection</button>
     {#if picking}
       <!-- The kind is the first question because it changes every one after
@@ -573,6 +653,7 @@
         {#if error}<p class="warn" role="alert">{error}</p>{/if}
         {#if current}
           <DetectReview {caseId} run={current} methods={catalogue.methods} active={!collapsed} bind:candidateId
+            bind:bare bind:blinking {onpair}
             onaccept={afterVerdict} {onfocus} {onshow} onedit={editRun}
             onadd={(areaId, kind) => {
               manual = { areaId, kind };
@@ -586,7 +667,8 @@
         {/if}
       </div>
     {:else if view === 'library'}
-      <AnalyzerLibrary {catalogue} onchanged={loadCatalogue}
+      <AnalyzerLibrary bind:this={library} {catalogue} onchanged={loadCatalogue} bind:builder {viewBounds} {onshow} {onleavepass}
+        {mapView} layers={passLayers} {onfly} {onblink}
         onsaved={(recipe) => { if (draft) offer = recipe.id; }} />
     {/if}
   {/if}
@@ -595,8 +677,8 @@
 
 {#if launch}
   <Modal title={`Run ${launch.title}`} width="760px" onclose={() => { launch = null; onleavepass(); }}>
-    <AreaDates zones={launch.zones} bind:pairs={launch.area_dates} single={!!methodOf(launch.recipe.method).single}
-      sensor={methodOf(launch.recipe.method).sensor} {onshow} />
+    <AreaDates zones={launch.zones} bind:pairs={launch.area_dates} single={!!capabilityOf(launch.recipe).single}
+      sensor={capabilityOf(launch.recipe).sensor} {onshow} />
     {#if error}<p class="warn" role="alert">{error}</p>{/if}
     <button class="btn btn-primary" disabled={busy} onclick={() => act(() => runDetection(launch, { area_dates: clone(launch.area_dates) }))}>
       {launch.zones.length > 1 ? `Run ${plural(launch.zones.length, 'area')}` : 'Run this area'}

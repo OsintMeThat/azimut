@@ -521,6 +521,46 @@ function qualifierLabels(raw) {
   return labels;
 }
 
+const KIND_LABELS = {
+  captured: 'Captured',
+  published: 'Published',
+  imagery: 'Imagery',
+  'imagery-a': 'Imagery A',
+  'imagery-b': 'Imagery B',
+  collected: 'Collected',
+  added: 'Added to case',
+  filed: 'Filed in case',
+  claim: 'Claim',
+  taken: 'Taken',
+};
+
+/** What a temporal row's kind is called on the Time panel and the Timeline. */
+export function temporalKindLabel(kind) {
+  return KIND_LABELS[kind] ?? kind ?? '';
+}
+
+/**
+ * The span a change seen between two pictures happened in, as a Claim's date.
+ *
+ * Two UTC instants stay an exact range. Otherwise both are read as days, since a
+ * range does not mix a day with a time, and an estimate keeps its `~` on the end
+ * it belongs to. Empty when the two do not make a range.
+ *
+ * @param {string} first a picture's date, as the Time panel carries it
+ * @param {string} second the other picture's
+ */
+export function changeInterval(first, second) {
+  if (!first || !second) return '';
+  const instant = (value) => sortableTimestamp(value) && value.endsWith('Z');
+  const [a, b] = instant(first) && instant(second)
+    ? [first, second]
+    : [first, second].map((value) => value.replace(/T.*$/, ''));
+  const key = (value) => value.replace(/[~?%]$/, '');
+  if (key(a) === key(b)) return '';
+  const raw = key(a) < key(b) ? `${a}/${b}` : `${b}/${a}`;
+  return validateTemporalValue(raw).valid ? raw : '';
+}
+
 export function formatTemporalValue(raw) {
   const check = validateTemporalValue(raw ?? '');
   if (!raw) return { ...check, label: 'Undated', qualifiers: [] };

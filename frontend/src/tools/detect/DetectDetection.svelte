@@ -10,7 +10,7 @@
    * choice costs a Copernicus request and an analyst usually knows which day
    * they are chasing.
    */
-  import { STRENGTHS, describeMeasure } from '../../lib/map/analyzers.js';
+  import { STRENGTHS, readingOf } from '../../lib/map/analyzers.js';
   import { isActive, plural, ruleLabel, runState } from '../../lib/map/detections.js';
   import Icon from '../../components/Icon.svelte';
 
@@ -32,11 +32,11 @@
 
   let tab = $state('findings');
   const methodOf = (method) => methods.find((m) => m.id === method) ?? {};
-  const single = $derived(!!methodOf(detection.method).single);
+  const single = $derived(detection.single ?? !!methodOf(detection.method).single);
   const state = $derived(runState(detection.active ?? detection.latest));
   const reading = (row) => [
     STRENGTHS[row.strength],
-    describeMeasure(methodOf(detection.method).measure, row.measure, detail?.recipe?.parameters?.index),
+    readingOf(detail?.recipe ?? { method: detection.method }, methods, row.measure),
   ].filter(Boolean).join(' · ');
 
 </script>

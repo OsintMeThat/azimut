@@ -120,6 +120,30 @@ def test_media_dates_keep_world_time_separate_from_case_activity():
     assert by_kind["added"].category == "case_activity"
 
 
+def test_a_picture_of_two_moments_projects_two_dates_and_an_estimate_stays_one():
+    rows = timeline.project_media(
+        {
+            "source": {
+                "imagery_date": "2021-06",
+                "imagery_exact": False,
+                "imagery_a": "2024-05-03",
+                "imagery_a_exact": False,
+                "imagery_b": "2026-09-02T05:42:10Z",
+            },
+        },
+        "e_media",
+    )
+    by_kind = {row.kind: row for row in rows}
+
+    assert by_kind["imagery"].raw == "2021-06~" and by_kind["imagery"].approximate
+    assert by_kind["imagery-a"].raw == "2024-05-03~"
+    assert by_kind["imagery-b"].raw == "2026-09-02T05:42:10Z"
+    assert not by_kind["imagery-b"].approximate
+    assert {row.category for row in rows} == {"media"}
+    # two instants, not a range: neither row claims the time between them
+    assert {row.shape for row in rows} == {"instant"}
+
+
 def test_old_malformed_time_stays_visible_without_blocking_a_rebuild():
     row = timeline.project_entity(
         {

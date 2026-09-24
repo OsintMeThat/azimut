@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { startRectDrag, startRotateDrag } from './gestures.js';
+import { startRectDrag, startRotateDrag, turnFromKey, turnFromPress } from './gestures.js';
 
 /** The façade, as far as the gestures reach into it. */
 function stubEngine({ bearing = 0 } = {}) {
@@ -114,24 +114,61 @@ describe('grabbing a point and turning', () => {
     expect(onPivot).toHaveBeenCalledWith({ x: 200, y: 200 });
   });
 
-  it('ignores a nudge, so a click does not spin the map', () => {
-    const engine = stubEngine();
+  it('holds inside the guide circle, so a press does not spin the map', () => {
+    const engine = stubEngine({ bearing: 40 });
     startRotateDrag(engine, press(1, 240, 220));
-    drag(244, 224); // ~5.7 px, inside the deadzone
+    drag(250, 220);
+    drag(240, 235); // a big angle about the pivot, but all inside the circle
     expect(engine.bearings).toEqual([]);
   });
 
-  it('turns once out of the deadzone, taking that direction as the reference', () => {
+  it('turns by the angle swept about the grabbed point, like a wheel', () => {
     const engine = stubEngine({ bearing: 30 });
     startRotateDrag(engine, press(1, 240, 220));
-    drag(340, 220); // leaves the deadzone: this direction is 0 of the sweep
+    drag(340, 220); // out of the circle, due east: the wheel is taken here
     expect(engine.bearings).toEqual([]);
-    drag(240, 320); // a quarter turn from the reference spoke
-    expect(engine.bearings).toHaveLength(1);
-    expect(engine.bearings[0] - 30).toBeCloseTo(90, 6);
+    drag(310.71, 290.71); // south-east
+    drag(240, 320); // due south: a quarter turn clockwise
+    expect(engine.bearings.at(-1)).toBeCloseTo(120, 1);
   });
 
-  it('pans the grabbed location back under the cursor after every turn', () => {
+  it('keeps turning the same way all round the circle, and past a full turn', () => {
+    // a whole clockwise circle, in eighths: every step adds, none takes back
+    const engine = stubEngine({ bearing: 10 });
+    startRotateDrag(engine, press(1, 240, 220));
+    const steps = 12;
+    for (let i = 0; i <= steps; i += 1) {
+      const a = (i / 8) * 2 * Math.PI;
+      drag(240 + 100 * Math.cos(a), 220 + 100 * Math.sin(a));
+    }
+    const swept = engine.bearings.map((b, i) => (i ? b - engine.bearings[i - 1] : 0));
+    expect(swept.slice(1).every((d) => d > 0 || d < -300)).toBe(true); // only the 360 → 0 wrap goes down
+    expect(engine.bearings.at(-1)).toBeCloseTo((10 + 540) % 360, 6); // a turn and a half
+  });
+
+  it('picks the turn up without a jump after passing through the circle', () => {
+    const engine = stubEngine({ bearing: 0 });
+    startRotateDrag(engine, press(1, 240, 220));
+    drag(340, 220);
+    drag(240, 320); // +90
+    const before = engine.bearings.at(-1);
+    drag(245, 225); // back in the middle: holds
+    drag(140, 220); // out again, due west: taken as the new start, no jump
+    expect(engine.bearings.at(-1)).toBe(before);
+    drag(240, 120); // west to north: another quarter clockwise
+    expect(engine.bearings.at(-1)).toBeCloseTo(180, 6);
+  });
+
+  it('lays the turn on whole steps while Ctrl is held', () => {
+    const engine = stubEngine();
+    startRotateDrag(engine, press(1, 240, 220));
+    drag(340, 220);
+    const a = (24 * Math.PI) / 180;
+    window.dispatchEvent(new window.MouseEvent('mousemove', { clientX: 240 + 100 * Math.cos(a), clientY: 220 + 100 * Math.sin(a), ctrlKey: true }));
+    expect(engine.bearings.at(-1)).toBe(30); // 24° → 30
+  });
+
+  it('pans the grabbed location back under where it was grabbed after every turn', () => {
     // the map rotates about its centre, so without this the point drifts away
     const engine = stubEngine();
     startRotateDrag(engine, press(1, 240, 220));
@@ -140,15 +177,79 @@ describe('grabbing a point and turning', () => {
     expect(engine.pans).toEqual([[6, -3]]); // what the stub projection displaced
   });
 
-  it('says when the turn is over', () => {
+  it('puts north back up on a middle click that never turned', () => {
+    const engine = stubEngine({ bearing: 75 });
+    startRotateDrag(engine, press(1, 240, 220));
+    release();
+    expect(engine.bearings).toEqual([0]);
+  });
+
+  it('leaves the bearing alone on a Shift click, or once a turn happened', () => {
+    const shift = stubEngine({ bearing: 75 });
+    startRotateDrag(shift, press(0, 240, 220));
+    release();
+    expect(shift.bearings).toEqual([]);
+    const turned = stubEngine({ bearing: 75 });
+    startRotateDrag(turned, press(1, 240, 220));
+    drag(340, 220);
+    drag(240, 320);
+    release();
+    expect(turned.bearings.at(-1)).not.toBe(0);
+  });
+
+  it('says when the turn is over, and stops listening', () => {
     const onEnd = vi.fn();
-    startRotateDrag(stubEngine(), press(1), { onEnd });
+    startRotateDrag(stubEngine(), press(0), { onEnd });
     release();
     expect(onEnd).toHaveBeenCalledTimes(1);
     const engine = stubEngine();
-    startRotateDrag(engine, press(1, 240, 220), {});
+    startRotateDrag(engine, press(0, 240, 220), {});
     release();
     drag(600, 600);
+    expect(engine.bearings).toEqual([]);
+  });
+});
+
+describe('which presses turn', () => {
+  it('takes the middle button, and Shift with the left one', () => {
+    expect(turnFromPress(stubEngine(), press(1))).toBe(true);
+    release();
+    expect(turnFromPress(stubEngine(), { ...press(0), shiftKey: true })).toBe(true);
+    release();
+  });
+
+  it('leaves a plain left press, and Shift where the tool keeps it', () => {
+    expect(turnFromPress(stubEngine(), press(0))).toBe(false);
+    expect(turnFromPress(stubEngine(), { ...press(0), shiftKey: true }, { shift: false })).toBe(false);
+    expect(turnFromPress(stubEngine(), { ...press(2), shiftKey: true })).toBe(false);
+  });
+});
+
+describe('turning from the keyboard', () => {
+  const keydown = (key, init = {}) => new window.KeyboardEvent('keydown', { key, shiftKey: true, cancelable: true, ...init });
+
+  it('steps with Shift and the side arrows, and puts north up with Shift and up', () => {
+    const engine = stubEngine({ bearing: 0 });
+    const event = keydown('ArrowRight');
+    expect(turnFromKey(engine, event)).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(engine.bearings).toEqual([15]);
+    expect(turnFromKey(stubEngine({ bearing: 200 }), keydown('ArrowUp'))).toBe(true);
+  });
+
+  it('leaves a key a control already took, or one typed into a field', () => {
+    const engine = stubEngine();
+    const taken = keydown('ArrowLeft');
+    taken.preventDefault();
+    expect(turnFromKey(engine, taken)).toBe(false);
+    const input = document.createElement('input');
+    document.body.append(input);
+    const typed = keydown('ArrowLeft');
+    input.dispatchEvent(typed);
+    expect(turnFromKey(engine, typed)).toBe(false);
+    input.remove();
+    expect(turnFromKey(engine, keydown('ArrowLeft', { shiftKey: false }))).toBe(false);
+    expect(turnFromKey(null, keydown('ArrowLeft'))).toBe(false);
     expect(engine.bearings).toEqual([]);
   });
 });

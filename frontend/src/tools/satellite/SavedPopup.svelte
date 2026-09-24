@@ -14,7 +14,7 @@
   import { api } from '../../lib/api.js';
   import { toast } from '../../lib/state.svelte.js';
   import { loadRelationTypes, relationAction } from '../../lib/relations.svelte.js';
-  import { stackOrder } from '../../lib/savedMarkers.js';
+  import { keptLabel, pairLabel, stackOrder } from '../../lib/savedMarkers.js';
 
   let {
     items = [],
@@ -28,8 +28,8 @@
     onrefresh, // a relation was settled: sync the other surfaces
   } = $props();
 
-  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen' };
-  const KIND = { place: 'Place', capture: 'Capture', screenshot: 'Screenshot' };
+  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare' };
+  const KIND = { place: 'Place', capture: 'Capture', screenshot: 'Screenshot', comparison: 'Comparison' };
 
   const rowKey = (row) => row.key ?? row.id;
 
@@ -42,6 +42,7 @@
    *  map behind this card, and editing it belongs to the details drawer. Two forms
    *  for one field is how they drift apart. */
   function spread(row) {
+    if (row.kind === 'comparison') return row.footprint ? 'framed' : null;
     if (row.footprint) return 'traced area';
     const m = Number(row.radius_m);
     if (!(m > 0)) return null;
@@ -155,8 +156,25 @@
           </p>
           <p class="meta">
             {#if row.imagery_date}<span>Imagery {row.imagery_date}</span>{/if}
+            {#if pairLabel(row)}<span title="The dates of pictures A and B">{pairLabel(row)}</span>{/if}
             {#if day(row.fetched_at)}<span>Saved {day(row.fetched_at)}</span>{/if}
           </p>
+          {#if row.kept?.length}
+            <section class="kept">
+              <p class="rel-heading"><Icon name="image" size={11} /> {keptLabel(row)}</p>
+              {#each row.kept as image (image.path)}
+                <a
+                  class="link"
+                  class:off={fullscreen}
+                  href={fullscreen ? undefined : fileUrl(caseId, image.path)}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-disabled={fullscreen}
+                  title={fullscreen ? 'Exit fullscreen first. This leaves the map' : 'Open this image'}
+                >{image.title || image.path}</a>
+              {/each}
+            </section>
+          {/if}
           {#if worked(row)}
             <p class="worked">
               <span class="worked-dot"></span>
@@ -189,7 +207,9 @@
             </section>
           {/if}
           <p class="acts">
-            <button type="button" class="link" onclick={() => onedit(row)}>Edit</button>
+            <button type="button" class="link" onclick={() => onedit(row)}>
+              {row.kind === 'comparison' ? 'Open in Compare' : 'Edit'}
+            </button>
             {#if row.kind === 'place' && ontrace}
               <button
                 type="button"
@@ -373,10 +393,17 @@
   .meta > .proposed::before {
     content: none;
   }
-  .relations {
+  .relations,
+  .kept {
     margin-top: 4px;
     padding-top: 5px;
     border-top: 1px solid var(--border);
+  }
+  .kept {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
   }
   .rel-heading {
     display: flex;

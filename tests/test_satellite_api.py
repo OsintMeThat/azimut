@@ -12,6 +12,7 @@ from PIL import Image
 from azimut import layout
 from azimut.api import satellite as satellite_api
 from azimut.engine import geo, tiles
+from azimut.workspace import Case
 
 
 def _fake_tile(client, url):  # offline: every tile is a solid green square
@@ -117,6 +118,25 @@ def test_capture_records_both_dates(client, monkeypatch):
     listed = client.get(f"/api/cases/{cid}/satellite").json()[0]
     assert listed["fetched_at"] == result["fetched_at"]
     assert listed["imagery_date"] == "2021-06-01"
+
+
+def test_an_estimated_imagery_date_is_marked_approximate_on_the_axis(client, monkeypatch):
+    """Esri's date is an estimate. The capture keeps the date it shows on its face,
+    and the Time panel places it with a `~` rather than as a known day."""
+    monkeypatch.setattr(tiles, "_default_fetch", _fake_tile)
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    estimated = client.post(
+        f"/api/cases/{cid}/satellite/capture",
+        json={"lat": 48.8584, "lon": 2.2945, "zoom": 16, "width": 512, "height": 512,
+              "imagery_date": "2021-06-01", "imagery_exact": False},
+    ).json()
+    assert estimated["imagery_date"] == "2021-06-01"
+    item = next(m for m in client.get(f"/api/cases/{cid}/media").json() if m["path"] == estimated["path"])
+    assert item["source"]["imagery_exact"] is False
+    entity = Case.open(cid).find_entity(attr="path", value=estimated["path"])
+    page = client.get(f"/api/cases/{cid}/timeline", params={"entity": entity["id"], "category": "media"}).json()
+    imagery = next(row for row in page["items"] if row["kind"] == "imagery")
+    assert imagery["raw"] == "2021-06-01~" and imagery["approximate"]
 
 
 def test_capture_imagery_date_optional(client, monkeypatch):

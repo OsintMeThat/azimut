@@ -26,6 +26,8 @@
     stale = false,
     onrun = () => {},
     onzone = () => {},
+    /** Keep this index reading as a Detect analyzer, to sweep areas with it. */
+    onanalyzer = () => {},
   } = $props();
 
   let open = $state(false);
@@ -165,6 +167,8 @@
           </label>
           {#if settings.method === 'index'}
             <p class="hint">Highlights {index?.label} moved by {indexThreshold(settings.sensitivity).toFixed(2)} or more.</p>
+            <button class="btn btn-sm" title="Sweep areas or run a routine with this reading in Detect"
+              onclick={() => onanalyzer()}>Save as a Detect analyzer</button>
           {/if}
           <button class="btn btn-sm" onclick={() => (settings = { ...settings, normalize: 'none', smoothing: 0, cleanup: 0, alignment: 0, threshold: 'manual', sensitivity: 90 })}>
             Preserve fine changes

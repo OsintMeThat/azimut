@@ -15,6 +15,7 @@
   import { tick } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import RadarLayer from './RadarLayer.svelte';
+  import { SENTINEL_ECO_MAX_ZOOM } from '../../lib/usage.js';
   import {
     monthCount,
     tilesOfFree,
@@ -255,7 +256,7 @@
                       type="number"
                       min="0"
                       max="21"
-                      placeholder={k.id === 'sentinelhub' ? '11' : String(ecoMaxZoom)}
+                      placeholder={k.id === 'sentinelhub' ? String(SENTINEL_ECO_MAX_ZOOM) : String(ecoMaxZoom)}
                       bind:value={ecoZooms[k.id]}
                       onchange={saveEcoZoom}
                       disabled={!eco}
@@ -263,7 +264,7 @@
                     />
                     <span class="ctrl-note">
                       {k.id === 'sentinelhub'
-                        ? 'blank = 11 (it caps at z14)'
+                        ? `blank = ${SENTINEL_ECO_MAX_ZOOM} (it caps at z14)`
                         : 'blank = the global threshold'}
                     </span>
                   </label>

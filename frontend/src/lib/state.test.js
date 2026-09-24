@@ -41,6 +41,7 @@ describe('closeCase', () => {
     uiState.reverseTarget = { path: 'media/a.jpg', kind: 'image', label: 'a.jpg' };
     uiState.focusMedia = 'media/a.jpg';
     uiState.openInspect = 'session-a';
+    uiState.openCollage = 'collage-a';
     uiState.openAnalyzer = 'runs-123456789abc';
     uiState.drawInGraph = { label: 'A question' };
     uiState.openBoardEntity = 'entity-a';
@@ -49,6 +50,7 @@ describe('closeCase', () => {
     uiState.timelineRange = { from: '2026-01-01', to: '2026-02-01' };
     uiState.mapTimelineRange = { from: '2026-01-01', to: '2026-02-01' };
     uiState.gotoCoords = { lat: 1, lon: 2 };
+    uiState.lookAt = { tool: 'detect', lat: 1, lon: 2, zoom: 12 };
   });
 
   it('drops the open case', () => {
@@ -66,6 +68,7 @@ describe('closeCase', () => {
     expect(uiState.reverseTarget).toBeNull();
     expect(uiState.focusMedia).toBeNull();
     expect(uiState.openInspect).toBeNull();
+    expect(uiState.openCollage).toBeNull();
     expect(uiState.openAnalyzer).toBeNull();
     expect(uiState.drawInGraph).toBeNull();
     expect(uiState.openBoardEntity).toBeNull();
@@ -74,10 +77,17 @@ describe('closeCase', () => {
     expect(uiState.timelineRange).toBeNull();
     expect(uiState.mapTimelineRange).toBeNull();
     expect(uiState.gotoCoords).toBeNull();
+    expect(uiState.lookAt).toBeNull();
     expect(uiState.openNotebook).toBeNull();
     expect(uiState.focusCapture).toBeNull();
     expect(uiState.skyAt).toBeNull();
     expect(uiState.refViewers).toEqual([]);
+  });
+
+  it('leaves the camera the map tabs share, which is not case state', () => {
+    uiState.mapView = { lat: 1, lon: 2, zoom: 12, bearing: 0, by: 'satellite' };
+    closeCase();
+    expect(uiState.mapView).toEqual({ lat: 1, lon: 2, zoom: 12, bearing: 0, by: 'satellite' });
   });
 });
 
@@ -153,6 +163,15 @@ describe('applyPrefs', () => {
 
     applyPrefs({ signature_handle: '@example' });
     expect(prefs.signatureHandle).toBe('@example');
+  });
+
+  it('shares one camera across the map tabs until Settings says otherwise', async () => {
+    const { applyPrefs, prefs } = await freshState();
+    expect(prefs.mapSync).toBe(true);
+    applyPrefs({ units: 'metric' });
+    expect(prefs.mapSync).toBe(true);
+    applyPrefs({ map_sync: false });
+    expect(prefs.mapSync).toBe(false);
   });
 });
 
@@ -340,6 +359,7 @@ describe('case request ownership', () => {
       focusMedia: 'media/a.jpg',
       focusCapture: 'media/crop.png',
       openInspect: 'session-a',
+      openCollage: 'collage-a',
       drawInGraph: { label: 'A question' },
       openBoardEntity: 'entity-a',
       openGraphEntity: 'entity-a',
@@ -347,6 +367,7 @@ describe('case request ownership', () => {
       timelineRange: { from: '2026-01-01', to: '2026-02-01' },
       mapTimelineRange: { from: '2026-01-01', to: '2026-02-01' },
       gotoCoords: { lat: 1, lon: 2 },
+      lookAt: { tool: 'compare', lat: 1, lon: 2, zoom: 12 },
       skyAt: { lat: 1, lon: 2, date: '2026-01-01', time: '12:00' },
       refViewers: [{ id: 'v1' }],
     };

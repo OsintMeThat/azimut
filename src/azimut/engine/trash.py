@@ -14,8 +14,8 @@ to break the 260-character Windows limit on its own. The journal already records
 where every file came from, so the directory holds ``0``, ``1``, ``2`` and the
 payload's ``slots`` list says which is which.
 
-One row is one **delete action**, not one entity: deleting a video that carries
-three Inspect sessions writes a single group, and restoring it brings the whole
+One row is one **delete action**, not one entity: deleting a video takes its
+Inspect work with it in a single group, and restoring it brings the whole
 cascade back at once.
 
 What travels: everything the artifact registry says an entity owns. What does
@@ -34,6 +34,7 @@ from .. import layout
 from ..workspace import Case, CaseError, _new_id, ensure_dir
 from . import artifacts as artifact_engine
 from . import entity_images as entity_image_engine
+from . import inspectwork
 from . import links as link_engine
 from . import thumbnails as thumbnail_engine
 
@@ -321,6 +322,11 @@ def _finish_restore(case: Case, group: dict[str, Any]) -> dict[str, Any]:
     result = _restore_records(case, group)
     _drop_dir(case, group["id"])
     case.remove_trash_group(group["id"])
+    # A file keeps one Inspect work. Bringing back an older one, or a session from
+    # before 0.3.1, next to the work done since merges them rather than leaving two.
+    entities = (group.get("payload") or {}).get("entities") or []
+    if any(entity.get("type") == inspectwork.WORK_TYPE for entity in entities):
+        inspectwork.normalize(case)
     return {"status": "restored", **result, "group": group["id"]}
 
 

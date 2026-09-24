@@ -24,6 +24,7 @@ import {
   toMercator,
 } from './groundFrame.js';
 import { CHANGE_PALETTES } from './changeAssist.js';
+import { fileDate } from './pictureDate.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const INK = '#f3f4f6';
@@ -33,10 +34,45 @@ const ACCENT = '#e8a33d';
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const MONO = 'ui-monospace, "SF Mono", "Cascadia Code", monospace';
 
-export function comparisonFilename(title = '', at = new Date()) {
-  const stamp = at.toISOString().replace(/[^0-9]/g, '').slice(0, 12);
+/**
+ * What an exported comparison is called: its title, then the dates of its two
+ * pictures, which say what the file shows. When neither picture is dated, the
+ * moment of the export stands in, so the name still tells two exports apart.
+ *
+ * @param {string} [title]
+ * @param {{ a?: string | null, b?: string | null }} [dates] each a day or a UTC instant
+ * @param {Date} [at]
+ */
+export function comparisonFilename(title = '', { a = null, b = null } = {}, at = new Date()) {
   const stem = String(title).trim().replace(/[\\/:*?"<>|#%]+/g, ' ').replace(/\s+/g, ' ').slice(0, 80);
+  const first = fileDate(a);
+  const second = fileDate(b);
+  if (first || second) {
+    const dates = `${first || 'undated'}_${second || 'undated'}`;
+    return stem ? `${stem} ${dates}` : `compare-${dates}`;
+  }
+  const stamp = at.toISOString().replace(/[^0-9]/g, '').slice(0, 12);
   return stem ? `${stem} ${stamp}` : `compare-${stamp || 'undated'}`;
+}
+
+/**
+ * The dates a saved comparison files for its two pictures, as form fields.
+ *
+ * Two instants rather than a range: the image does not say anything happened
+ * between them. A date its provider only estimated goes with `exact: false`.
+ *
+ * @param {{ a?: object, b?: object }} dates each side's `pictureDate()` reading
+ * @returns {Array<[string, string]>}
+ */
+export function pictureDateFields(dates) {
+  const fields = [];
+  for (const side of ['a', 'b']) {
+    const picture = dates?.[side] ?? {};
+    if (!picture.imageryWhen) continue;
+    fields.push([`imagery_${side}`, picture.imageryWhen]);
+    if (picture.imageryExact === false) fields.push([`imagery_${side}_exact`, 'false']);
+  }
+  return fields;
 }
 
 function canvasOf(width, height, makeCanvas) {

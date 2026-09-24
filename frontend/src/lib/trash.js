@@ -25,6 +25,7 @@ export const FILE_BACKED = new Set([
   'proof',
   'post',
   'inspect-session',
+  'collage',
   'compare-session',
   'analysis-zones',
   'analysis-area',

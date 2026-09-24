@@ -387,7 +387,14 @@
       },
       shapes() {
         const out = marks.map((mark) => {
-          const only = mark.kinds.length === 1 ? mark.kinds[0] : "place";
+          // one kind draws as itself, a stack of imagery as a capture, and any
+          // mix holding a place as the place (`markKind` in the app)
+          const only =
+            mark.kinds.length === 1
+              ? mark.kinds[0]
+              : mark.kinds.every((kind) => THEME.SAVED_CAPTURE_KINDS.includes(kind))
+                ? "capture"
+                : "place";
           const shown = mark.key === hovered || mark.key === held;
           // a stack of files draws as footage only when all of it is footage,
           // the way the app's own layer glyphs one (`SavedOverlay.svelte`)

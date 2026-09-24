@@ -240,7 +240,7 @@ def test_all_providers_adds_sentinelhub_when_keyed(monkeypatch, tmp_path):
     assert s2.max_zoom == 18
     # its own eco threshold: the global z15 sits above its native ceiling, so
     # sharing it would swap Sentinel-2 away at most zooms it can actually serve
-    assert s2.eco_max_zoom == 11
+    assert s2.eco_max_zoom == 7
 
 
 def test_sentinelhub_names_its_zoom_level_by_resolution(monkeypatch, tmp_path):

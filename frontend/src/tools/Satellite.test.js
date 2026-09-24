@@ -46,7 +46,7 @@ describe('Satellite saved work', () => {
     expect(body).toContain('notesItem = row');
     for (const [, name] of body.matchAll(/\b(open\w+)\(/g)) {
       expect(source, `${name} is called but never defined`).toMatch(
-        new RegExp(`function ${name}\\b|const ${name}\\b`)
+        new RegExp(`function ${name}\\b|const ${name}\\b|import \\{[^}]*\\b${name}\\b[^}]*\\}`)
       );
     }
   });
@@ -225,9 +225,7 @@ describe('the saved panel is resizable', () => {
   it('leaves the left button to whichever mode is armed for it', () => {
     // shift and the left button turn the map, but the capture marquee and the
     // grid box are both waiting on that same drag
-    expect(source).toContain(
-      "e.button === 0 && e.shiftKey && !capture.armed && grid.drawMode !== 'rect'"
-    );
+    expect(source).toContain("shift: !capture.armed && grid.drawMode !== 'rect'");
   });
 
   it('redraws the map for the new size', () => {
@@ -630,8 +628,17 @@ describe('a map in more than one window', () => {
     expect(source).toContain('zoom: openingView.zoom ?? prefs.homeView.zoom,');
     // the surface reads where it opens once, at build, so it has to be handed
     // the same answer the tool gave `center`
-    expect(source).toContain('home={openingHome}');
-    expect(source).toContain('center = { ...openingHome };');
+    expect(source).toContain('home={opensOn}');
+    expect(source).toContain('opensOn = { ...center };');
+  });
+
+  it('opens where the other map tabs left the window when the address names no view', () => {
+    // the address still wins: a detached window and a reload keep their own view
+    expect(source).toContain("const shared = openingView?.lat == null ? share.opening() : null;");
+    expect(source).toContain(
+      'center = shared ? { lat: shared.lat, lon: shared.lon, zoom: shared.zoom } : { ...openingHome };'
+    );
+    expect(source).toContain('if (shared) bearing = shared.bearing ?? 0;');
   });
 
   it('refuses a basemap the catalogue does not hold, since an address is typed', () => {
@@ -689,7 +696,15 @@ describe('a map in more than one window', () => {
   it('follows the other tabs only while the link is pressed', () => {
     expect(source).toContain('let linked = $state(false);');
     expect(source).toContain('if (!linked || !engine) return;');
-    expect(source).toContain('viewLink?.send({ lat: center.lat, lon: center.lon, zoom: center.zoom, bearing })');
+    expect(source).toContain('return { lat: center.lat, lon: center.lon, zoom: center.zoom, bearing };');
+    expect(source).toContain('viewLink?.send(linkedView());');
+  });
+
+  it('carries the window camera over the link while the map tabs share one', () => {
+    // a pan in Compare or Detect reaches the other windows and the extension…
+    expect(source).toContain('if (prefs.mapSync && uiState.mapView) return uiState.mapView;');
+    // …and what arrives moves the window, so the tab on screen follows it
+    expect(source).toContain("uiState.mapView = { ...view, by: 'link' };");
   });
 
   it('links to the extension panels on other sites as well as to its own tabs', () => {
@@ -704,6 +719,19 @@ describe('a map in more than one window', () => {
     // the numbering is a label; losing it must not cost the window
     const counter = source.slice(source.indexOf('function nextWindowNumber()'));
     expect(counter.slice(0, 400)).toContain('} catch {');
+  });
+});
+
+describe('one camera for the map tabs', () => {
+  it('writes the window camera when this map comes to rest, at its own ceiling', () => {
+    expect(source).toContain("const share = shareView('satellite', { state: uiState, enabled: () => prefs.mapSync });");
+    expect(source).toContain('onviewsettled={(camera) => share.settled(camera, engine?.maxZoom())}');
+  });
+
+  it('takes the window camera in one jump when it shows', () => {
+    const taking = source.slice(source.indexOf("if (uiState.tool !== 'satellite' || !mapReady) return;\n    untrack"));
+    expect(taking.slice(0, 200)).toContain('const next = share.pending(engine.camera());');
+    expect(taking.slice(0, 200)).toContain('if (next) engine.setCamera(next);');
   });
 });
 
@@ -789,6 +817,15 @@ describe('the right-click menu', () => {
     expect(body).toContain('sky.handOff({ ...point');
     expect(body).toContain('engine.setView(point');
     expect(body).not.toContain('displayCoords');
+  });
+
+  it('offers its own subset of acts, and opens the point in Compare or Detect', () => {
+    expect(source).toContain("actionsFor(['lookup', 'place', 'measure', 'sky', 'history', 'centre'])");
+    expect(source).toContain("otherMapTools('satellite')");
+    expect(source).toContain('tools={pointTools}');
+    const acts = source.slice(source.indexOf('async function onPointMenu(id, value)'));
+    const body = acts.slice(0, acts.indexOf('async function comparePoint'));
+    expect(body).toContain("openMapAt(value, { ...point, zoom: center.zoom })");
   });
 
   it('drops a lookup answer that arrives after the menu moved on', () => {

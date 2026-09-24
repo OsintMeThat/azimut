@@ -154,6 +154,21 @@ describe('the map façade keeps the engine on its own side', () => {
     expect(map.calls.setZoom).toEqual([[17]]);
   });
 
+  it('takes a whole camera in one jump, the turn in the engine’s sign', () => {
+    const map = stubMap();
+    const facade = mapFacade(map);
+    facade.setCamera({ lat: 1, lon: 2, zoom: 16, bearing: 37 });
+    facade.setCamera({ lat: 3, lon: 4, zoom: 12 });
+    expect(map.calls.jumpTo).toEqual([
+      [{ center: [2, 1], zoom: 15, bearing: -37 }],
+      [{ center: [4, 3], zoom: 11, bearing: -0 }],
+    ]);
+  });
+
+  it('reports the ceiling in app zoom', () => {
+    expect(mapFacade(stubMap({ getMaxZoom: () => 17 })).maxZoom()).toBe(18);
+  });
+
   it('never animates a pan: it re-pins a grabbed point mid-gesture', () => {
     const map = stubMap();
     mapFacade(map).panBy(3, -7);

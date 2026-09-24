@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   IDENTITY, matMul, rotation, translation, apply,
-  rotateAbout, matrixCss, matrixAngleDeg, isIdentity, pointerAngleDeg,
+  rotateAbout, matrixCss, matrixAngleDeg, isIdentity,
 } from './frameRotate.js';
 
 const near = (a, b, eps = 1e-9) => Math.abs(a - b) < eps;
@@ -82,14 +82,6 @@ describe('isIdentity', () => {
     expect(isIdentity(IDENTITY)).toBe(true);
     expect(isIdentity(rotation(0.0000001))).toBe(true);
     expect(isIdentity(rotation(5))).toBe(false);
-  });
-});
-
-describe('pointerAngleDeg', () => {
-  it('measures the spoke angle in screen space (Y down)', () => {
-    expect(near(pointerAngleDeg(0, 0, 1, 0), 0)).toBe(true);
-    expect(near(pointerAngleDeg(0, 0, 0, 1), 90)).toBe(true);
-    expect(near(Math.abs(pointerAngleDeg(0, 0, -1, 0)), 180)).toBe(true);
   });
 });
 

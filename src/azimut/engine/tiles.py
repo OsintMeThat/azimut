@@ -97,6 +97,8 @@ GOOGLE_JS_LOADER_URL = "https://maps.googleapis.com/maps/api/js?key={key}&v=week
 # the plain one (TRUE_COLOR, the layer's own default window = most recent, and
 # no cloud filter — the instance's own would silently drop cloudy passes).
 SENTINELHUB_WMTS_URL = sentinel.wmts_url()
+# Default eco threshold for both Sentinel layers; Settings can override it.
+SENTINEL_ECO_MAX_ZOOM = 7
 
 BUILTIN_PROVIDERS: tuple[Provider, ...] = (
     Provider(
@@ -249,11 +251,10 @@ def all_providers() -> list[Provider]:
                 meter="sentinelhub",
                 tile_size=512,
                 zoom_offset=1,  # WMTS names this level 14 where z_shift says 13
-                # Its own eco threshold, three levels under its z14 ceiling: at
-                # z11 and out a Sentinel-2 pixel is ~40 m of ground and Esri
-                # shows the same scene for free, so the quota buys nothing.
-                # z12-14 is where the dated mosaic is the reason you're here.
-                eco_max_zoom=11,
+                # Its own eco threshold: at z7 and out the view spans a whole
+                # region and Esri shows it for free, so the quota buys nothing.
+                # From z8 in, the dated mosaic is the reason you're here.
+                eco_max_zoom=SENTINEL_ECO_MAX_ZOOM,
             )
         )
 
@@ -275,7 +276,7 @@ def all_providers() -> list[Provider]:
                 meter="sentinelhub",
                 tile_size=512,
                 zoom_offset=1,
-                eco_max_zoom=11,
+                eco_max_zoom=SENTINEL_ECO_MAX_ZOOM,
             )
         )
 

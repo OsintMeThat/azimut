@@ -43,7 +43,8 @@
  * @param {() => {style: string, at: object|null}} deps.marker the pin, if one was moved
  * @param {() => object|undefined} deps.basemap the provider the analyst chose
  * @param {() => number} deps.maxZoom the deepest zoom the *shown* provider has
- * @param {() => {provider: string, imageryDate: string|null}} deps.provenance the pixels' own
+ * @param {() => {provider: string, imageryDate: string|null, imageryExact?: boolean}} deps.provenance
+ *   the pixels' own; `imageryExact` is false for a provider's estimate
  * @param {(rect: object|null) => void} deps.onRect the live marquee outline
  * @param {() => void} deps.onArm the map modes arming the marquee turns off
  */
@@ -311,6 +312,7 @@ export function createCaptureState({
         // pinned Sentinel-2 window is that date outright; every other provider's
         // is Esri's best-effort estimate, or nothing.
         imagery_date: pixels.imageryDate,
+        imagery_exact: pixels.imageryExact ?? true,
         scale_north: prefs.captureScaleNorth,
       });
       await reloadCase();

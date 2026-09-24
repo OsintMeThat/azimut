@@ -1078,7 +1078,10 @@ def test_a_kml_timestamp_or_the_start_of_a_timespan_dates_its_placemark():
 
     # the day as the source wrote it, not moved into another timezone
     assert properties["Stamped"]["date"] == "2024-05-10"
+    assert "date_end" not in properties["Stamped"]
+    # a span keeps both ends, so a period that only reaches its end still finds it
     assert properties["Spanned"]["date"] == "2024-05-01"
+    assert properties["Spanned"]["date_end"] == "2024-05-09"
     assert "date" not in properties["Undated"]
 
 

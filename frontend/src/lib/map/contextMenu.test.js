@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACTIONS, actionsFor, copyRows, nextFocus, openRows, placeMenu, placeSubmenu } from './contextMenu.js';
+import { ACTIONS, actionsFor, copyRows, nextFocus, openRows, otherMapTools, placeMenu, placeSubmenu } from './contextMenu.js';
 
 describe('copying the point', () => {
   it('offers every format the app writes, the analyst’s own first', () => {
@@ -25,6 +25,7 @@ describe('what the menu offers', () => {
     expect(ACTIONS.map((action) => action.id)).toEqual([
       'lookup',
       'place',
+      'candidate',
       'measure',
       'sky',
       'history',
@@ -40,6 +41,12 @@ describe('what the menu offers', () => {
       .toEqual(['lookup', 'place', 'measure']);
     expect(actionsFor([])).toEqual([]);
     expect(actionsFor(['nothing-here'])).toEqual([]);
+  });
+
+  it('opens the point in the other map tabs, under the names their tabs show', () => {
+    expect(otherMapTools('satellite')).toEqual([{ id: 'compare', label: 'Compare' }, { id: 'detect', label: 'Detect' }]);
+    expect(otherMapTools('detect').map((tool) => tool.id)).toEqual(['satellite', 'compare']);
+    expect(otherMapTools('compare').map((tool) => tool.label)).toEqual(['Satellite', 'Detect']);
   });
 
   it('opens the external maps on the clicked point, at the current zoom', () => {

@@ -34,8 +34,10 @@
     actions = ACTIONS,
     /** Archives this point can be compared across; none hides the row. */
     compareSources = [],
-    /** `(id, value)`: `copy` with the text, `compare` with a source id, or an
-     *  action id from `ACTIONS`. */
+    /** The other map tabs the point opens in (`otherMapTools`), first under Open in…. */
+    tools = [],
+    /** `(id, value)`: `copy` with the text, `compare` with a source id, `goto`
+     *  with a tool id, or an action id from `ACTIONS`. */
     onpick,
     onclose,
   } = $props();
@@ -262,6 +264,10 @@
         </button>
       {/each}
     {:else}
+      {#each tools as tool (tool.id)}
+        <button class="item" role="menuitem" onclick={() => onpick('goto', tool.id)}>{tool.label}</button>
+      {/each}
+      {#if tools.length}<div class="rule" role="separator"></div>{/if}
       {#each links as link (link.id)}
         <a
           class="item link"

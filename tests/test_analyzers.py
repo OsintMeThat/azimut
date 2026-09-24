@@ -97,6 +97,11 @@ def test_local_run_keeps_frames_and_review_without_network(client, scenario):
     promoted = client.post(endpoint + "/promote", json={"title": "Reviewed change"}).json()
     assert promoted["entity"]["type"] == "place"
     assert client.post(endpoint + "/promote", json={"title": "Again"}).json()["entity"]["id"] == promoted["entity"]["id"]
+    # The picture shows the place it pins, as an edge its connections read, and once.
+    picture = case.find_entity(attr="path", value=promoted["image"])
+    shows = [link for link in case.links_of(picture["id"]) if link["type"] == "depicts"]
+    assert [(link["from"], link["to"], link["provenance"]["by"]) for link in shows] == [
+        (picture["id"], promoted["entity"]["id"], "compare")]
     # Promoted evidence survives deletion of the working analysis.
     assert client.delete(f"/api/cases/{case.id}/analysis/runs/{saved['id']}").status_code == 200
     assert case.resolve_inside(promoted["image"]).is_file()
@@ -136,9 +141,12 @@ def test_keeping_a_candidate_is_the_only_thing_that_reaches_the_case(client, sce
     # A kept candidate cannot be quietly re-triaged behind the pin's back.
     assert client.patch(endpoint, json={"review": "dismissed"}).status_code == 409
 
-    # Undoing takes the pin away and gives the candidate back.
+    # Undoing takes the pin away and gives the candidate back, the edge with them.
+    picture = case.find_entity(attr="path", value=kept["image"])
+    assert any(link["type"] == "depicts" for link in case.links_of(picture["id"]))
     assert client.delete(endpoint + "/promote").json()["result"]["review"] == "new"
     assert case.get_entity(kept["entity"]["id"]) is None
+    assert not [link for link in case.list_links() if kept["entity"]["id"] in (link["from"], link["to"])]
     assert client.patch(endpoint, json={"review": "dismissed"}).status_code == 200
     assert client.get(endpoint + "/preview").status_code == 404
 
@@ -530,7 +538,9 @@ def test_a_recipe_saved_before_detect_went_copernicus_only_still_loads():
 def test_every_method_publishes_sizes_and_words_for_its_reading():
     methods = {entry["id"]: entry for entry in METHODS}
     assert set(methods) == {"vessels", "hotspots", "structure", "spots", "surface", "index",
-                            "sar-vessels", "sar-change"}
+                            "sar-vessels", "sar-change", "rules"}
+    # an analyzer of your own words its reading from its own first rule
+    assert methods["rules"]["rules"] and methods["rules"]["measure"] == ""
     for entry in METHODS:
         assert set(entry["sizes"]) == {"small", "medium", "large", "all"}
         for size in entry["sizes"].values():
@@ -541,7 +551,7 @@ def test_every_method_publishes_sizes_and_words_for_its_reading():
         # falls between two bands and is found by neither.
         assert entry["sizes"]["all"]["min_area"] == 0
         assert entry["sizes"]["all"]["max_area"] == 0
-        assert "{" in entry["measure"]
+        assert "{" in entry["measure"] or entry["rules"]
     # the fire test rejects cloud itself and radar sees through it; every other
     # method can use the mask
     assert [m for m, entry in methods.items() if not entry["clouds"]] == [

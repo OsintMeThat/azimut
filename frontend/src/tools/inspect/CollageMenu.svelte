@@ -1,84 +1,21 @@
 <script>
   import {
-    previewStyle, scaleQuad, rotateQuad, quadCentroid, cropImgStyle, styleText,
-    rotateQuads, scaleQuads, pinholeOps, newCollage, clampCollageDim, stitchCanvas,
-    COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
+    scaleQuad, rotateQuad, quadCentroid, rotateQuads, scaleQuads, pinholeOps, clampCollageDim,
+    stitchCanvas, COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
   } from '../../lib/inspect.js';
   import { api } from '../../lib/api.js';
   import { caseState, toast } from '../../lib/state.svelte.js';
   import Icon from '../../components/Icon.svelte';
 
-  // Right-panel menu for the Collage tab: switch/create collages, add tray frames
-  // to the active one, and act on the selected piece. A session holds several
-  // collages (session.collages / session.activeCollageId); each is saved as its
-  // own PNG. Each added piece is a frozen snapshot of the frame (addToCollage).
-  let {
-    session, filters, selectedIds = $bindable([]), addToCollage, requestCrop, renderPiece,
-    onRename,
-  } = $props();
+  // The panel beside the canvas: its size, the selected piece or block, and the
+  // auto panorama. Adding pieces and exporting live in the Collage tool around it.
+  let { collage: active, selectedIds = $bindable([]), requestCrop, renderPiece } = $props();
 
-  const active = $derived(
-    session.collages.find((c) => c.id === session.activeCollageId) ?? session.collages[0]
-  );
-
-  // How many pieces on this collage came from that tray frame — a tile can be
-  // added several times, and with a long tray that count is the only way to see
-  // what is already placed.
-  const usedCount = (id) => active?.nodes.filter((n) => n.frameId === id).length ?? 0;
-
-  // Same wording as the Frame tab tray, so a frame keeps one name across tabs.
-  const frameLabel = (fr, i) =>
-    fr.time != null ? `Image ${i + 1} · t=${fr.time.toFixed(2)}s` : `Image ${i + 1}`;
   // These controls act on one piece; a multi-piece block is transformed as a
   // whole on the canvas, so the section simply steps aside for it.
   const selected = $derived(
     selectedIds.length === 1 ? (active?.nodes.find((n) => n.id === selectedIds[0]) ?? null) : null
   );
-
-  function switchCollage(id) {
-    session.activeCollageId = id;
-    selectedIds = [];
-  }
-
-  // Renaming rides on the tab itself: a click switches, a click on the tab you
-  // are already in opens it for editing. The name follows the collage into the
-  // Save tab, so it is worth setting here while the layout is in front of you.
-  let renamingId = $state(null);
-  let draftName = $state('');
-
-  function tabClick(cl) {
-    if (cl.id === session.activeCollageId) {
-      renamingId = cl.id;
-      draftName = cl.name ?? '';
-    } else {
-      switchCollage(cl.id);
-    }
-  }
-
-  function commitRename(cl) {
-    const next = draftName.trim();
-    if (next && next !== cl.name) {
-      cl.name = next;
-      // The Save tab shows this same name; tell it the name is now the user's,
-      // so a base name typed there stops refilling it.
-      onRename?.(cl);
-    }
-    renamingId = null;
-  }
-
-  function renameKey(event, cl) {
-    if (event.key === 'Enter') commitRename(cl);
-    else if (event.key === 'Escape') renamingId = null;
-  }
-
-  function addCollage() {
-    const nums = session.collages.map((c) => parseInt((c.name?.match(/\d+/) ?? [])[0]) || 0);
-    const next = Math.max(0, ...nums) + 1;
-    const c = newCollage(`Collage ${next}`);
-    session.collages.push(c);
-    session.activeCollageId = c.id;
-    selectedIds = [];
-  }
 
   // The canvas is the resolution everything on it is worked and exported at, so
   // it is the analyst's to set. Held inside the bounds compose accepts, and the
@@ -87,13 +24,6 @@
     const next = clampCollageDim(event.currentTarget.value, active[axis]);
     active[axis] = next;
     event.currentTarget.value = next;
-  }
-
-  function removeCollage(id) {
-    if (session.collages.length <= 1) return; // always keep at least one
-    session.collages = session.collages.filter((c) => c.id !== id);
-    if (session.activeCollageId === id) session.activeCollageId = session.collages[0].id;
-    selectedIds = [];
   }
 
   function removeNode(id) {
@@ -255,101 +185,35 @@
 </script>
 
 <div class="module">
-  <div class="section">
-    <div class="section-head"><span>Collages</span></div>
-    <div class="collage-tabs">
-      {#each session.collages as cl (cl.id)}
-        <div class="ctab" class:active={cl.id === session.activeCollageId}>
-          {#if renamingId === cl.id}
-            <!-- svelte-ignore a11y_autofocus -->
-            <input
-              class="ctab-input"
-              bind:value={draftName}
-              onblur={() => commitRename(cl)}
-              onkeydown={(e) => renameKey(e, cl)}
-              aria-label="Collage name"
-              maxlength="200"
-              autofocus
-            />
-          {:else}
-            <button
-              class="ctab-name"
-              onclick={() => tabClick(cl)}
-              title={cl.id === session.activeCollageId ? 'Rename this collage' : 'Switch to this collage'}
-            >
-              {cl.name}{#if cl.nodes.length}<span class="count">{cl.nodes.length}</span>{/if}
-            </button>
-          {/if}
-          {#if session.collages.length > 1}
-            <button class="ctab-x" onclick={() => removeCollage(cl.id)} aria-label="Delete collage" title="Delete collage"><Icon name="x" size={11} /></button>
-          {/if}
-        </div>
-      {/each}
-      <button class="ctab add" onclick={addCollage} title="New collage"><Icon name="plus" size={13} /></button>
-    </div>
-    {#if active}
-      <div class="scale-row">
-        <span class="lbl">Canvas</span>
-        <input
-          class="input dim"
-          type="number"
-          min={COLLAGE_MIN_DIM}
-          max={COLLAGE_MAX_DIM}
-          value={active.width}
-          onchange={(e) => setDim(e, 'width')}
-          aria-label="Canvas width in pixels"
-        />
-        <span class="sub">×</span>
-        <input
-          class="input dim"
-          type="number"
-          min={COLLAGE_MIN_DIM}
-          max={COLLAGE_MAX_DIM}
-          value={active.height}
-          onchange={(e) => setDim(e, 'height')}
-          aria-label="Canvas height in pixels"
-        />
-        <span class="sub">px</span>
-      </div>
-      <p class="hint">Pieces are placed and exported at this scale, so raise it to keep a
-        high-resolution frame sharp.</p>
-    {/if}
-  </div>
-
   <p class="hint">Drag pieces to arrange them, pull corners to warp; shift-click selects several.</p>
 
   <div class="section">
-    <div class="section-head"><span>Frames</span></div>
-    <div class="tray">
-      {#each session.frames as fr, i (fr.id)}
-        {@const look = previewStyle(filters, fr.adjust)}
-        {@const used = usedCount(fr.id)}
-        <button
-          class="thumb"
-          class:used={used > 0}
-          onclick={() => addToCollage(fr)}
-          title={used ? `${frameLabel(fr, i)} · added ${used}×` : frameLabel(fr, i)}
-        >
-          <img
-            src={fr.url}
-            alt={frameLabel(fr, i)}
-            style={styleText(cropImgStyle(fr.crop))}
-            style:filter={look.filter}
-            style:transform={look.transform}
-          />
-          <span class="num">{i + 1}</span>
-          {#if used}
-            <span class="tag count">×{used}</span>
-          {:else}
-            <span class="tag"><Icon name="plus" size={11} /></span>
-          {/if}
-        </button>
-      {/each}
+    <div class="scale-row">
+      <span class="lbl">Canvas</span>
+      <input
+        class="input dim"
+        type="number"
+        min={COLLAGE_MIN_DIM}
+        max={COLLAGE_MAX_DIM}
+        value={active.width}
+        onchange={(e) => setDim(e, 'width')}
+        aria-label="Canvas width in pixels"
+      />
+      <span class="sub">×</span>
+      <input
+        class="input dim"
+        type="number"
+        min={COLLAGE_MIN_DIM}
+        max={COLLAGE_MAX_DIM}
+        value={active.height}
+        onchange={(e) => setDim(e, 'height')}
+        aria-label="Canvas height in pixels"
+      />
+      <span class="sub">px</span>
     </div>
-    {#if session.frames.length === 0}<p class="empty">No frames captured yet.</p>{/if}
+    <p class="hint">Pieces are placed and exported at this scale, so raise it to keep a
+      high-resolution frame sharp.</p>
   </div>
-
-  <p class="hint">Exports only the pieces as a <strong>transparent PNG</strong>, trimmed to their bounds.</p>
 
   {#if selected}
     <div class="section">
@@ -443,8 +307,7 @@
     flex-direction: column;
     gap: 12px;
   }
-  .hint,
-  .empty {
+  .hint {
     color: var(--text-3);
     font-size: var(--fs-xs);
     margin: 0;
@@ -461,126 +324,6 @@
   .section-head {
     font-weight: 600;
     font-size: var(--fs-sm);
-  }
-  .collage-tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .ctab {
-    display: flex;
-    align-items: center;
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    overflow: hidden;
-    background: var(--bg-1);
-  }
-  .ctab.active {
-    border-color: var(--border-strong);
-    background: var(--bg-3);
-  }
-  .ctab-name {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 8px;
-    font-size: var(--fs-xs);
-    color: var(--text-2);
-    background: transparent;
-    border: none;
-  }
-  .ctab.active .ctab-name {
-    color: var(--accent);
-  }
-  .ctab-input {
-    width: 9em;
-    font: inherit;
-    font-size: var(--fs-xs);
-    color: var(--text-1);
-    background: var(--bg-0);
-    border: none;
-    padding: 4px 8px;
-  }
-  .ctab-input:focus {
-    outline: none;
-  }
-  .ctab-name .count {
-    font-size: 9px;
-    padding: 0 4px;
-    border-radius: 8px;
-    background: var(--bg-2);
-    color: var(--text-3);
-  }
-  .ctab-x {
-    display: flex;
-    align-items: center;
-    padding: 4px 5px;
-    color: var(--text-3);
-    background: transparent;
-    border: none;
-    border-left: 1px solid var(--border);
-  }
-  .ctab-x:hover {
-    color: var(--danger, #d86a6a);
-  }
-  .ctab.add {
-    padding: 4px 8px;
-    color: var(--text-2);
-    cursor: pointer;
-  }
-  .tray {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .thumb {
-    position: relative;
-    width: 60px;
-    height: 60px;
-    border-radius: var(--r-sm);
-    overflow: hidden;
-    border: 2px solid transparent;
-    padding: 0;
-  }
-  .thumb.used {
-    border-color: var(--border-strong);
-  }
-  .thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
-  .num {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    min-width: 15px;
-    height: 15px;
-    padding: 0 3px;
-    border-radius: 4px;
-    background: rgba(10, 10, 10, 0.7);
-    color: #fff;
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 15px;
-    text-align: center;
-  }
-  .tag {
-    position: absolute;
-    bottom: 2px;
-    right: 2px;
-    background: var(--accent);
-    color: var(--accent-text);
-    border-radius: 4px;
-    display: flex;
-    padding: 1px;
-  }
-  .tag.count {
-    padding: 0 4px;
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 15px;
   }
   .modes {
     display: flex;

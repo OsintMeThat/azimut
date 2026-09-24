@@ -1,8 +1,8 @@
 <script>
   /**
-   * How every tool prints a coordinate, a distance and an area, plus the map's
-   * opening position, what saving a proof does with its point, and how Reverse
-   * Search reaches an engine.
+   * How every tool prints a coordinate, a distance and an area, plus where the
+   * maps open, what saving a proof does with its point, and how Reverse Search
+   * reaches an engine.
    *
    * Preferences save on change and the server answers with the canonical value,
    * so nothing here keeps a draft the rest of the app cannot see.
@@ -17,6 +17,7 @@
     saveHome,
     proofPlaceAuto = $bindable(),
     reversePrefill = $bindable(),
+    mapSync = $bindable(),
   } = $props();
 
   const COORD_CHOICES = [
@@ -93,6 +94,25 @@
       <span>Zoom</span>
       <input class="input mono" bind:value={home.zoom} onchange={saveHome} type="number" min="1" max="21" />
     </label>
+  </div>
+</section>
+
+<section class="group">
+  <h3>Map tabs</h3>
+  <div class="row">
+    <div class="row-label">
+      <span>Share one view</span>
+      <span class="row-hint">
+        Satellite, Compare and Detect show the same place. A Detect review and a
+        saved comparison stay where they are.
+      </span>
+    </div>
+    <input
+      type="checkbox"
+      bind:checked={mapSync}
+      onchange={() => savePrefs({ map_sync: mapSync })}
+      aria-label="Share one view across the map tabs"
+    />
   </div>
 </section>
 

@@ -303,6 +303,42 @@ def test_radar_change_gates_bright_loss_bright_gain_and_new_water():
     assert result.measures["before"][0].max() > analyzers.BRIGHT_DB
 
 
+def test_the_radar_change_window_is_ground_not_pixels():
+    """A step of smoothing is 45 m of ground, odd in pixels and never under three."""
+    assert analyzers.sar_window(2, 7.2) == 13
+    assert analyzers.sar_window(2, 9.55) == 9
+    assert analyzers.sar_window(3, 7.2) == 19
+    assert analyzers.sar_window(1, 9.55) == 5
+    assert analyzers.sar_window(0, 40.0) == 3
+
+
+def test_the_catalogue_says_radar_change_smooths_on_the_ground(client):
+    methods = {m["id"]: m for m in client.get("/api/compare/analyzers").json()["methods"]}
+    assert methods["sar-change"]["smoothing_m"] == analyzers.SAR_WINDOW_M
+    assert methods["surface"]["smoothing_m"] is None
+
+
+def test_ground_that_did_not_change_stays_quiet_between_two_passes():
+    """A radar sample is about 20 m, twice the grid's pixel, so speckle comes in
+    pairs of pixels. Averaged over five of them, two passes of fields or a town
+    that did not change gave a dozen candidates, as Istanbul, Emilia and Gaza
+    before October 2023 did; averaged over 90 m of ground, none."""
+    def correlated(mean_db, seed, step=2):
+        small = speckled(mean_db, seed, size=EDGE // step + 1)
+        return np.kron(small, np.ones((step, step)))[:EDGE, :EDGE]
+
+    def scene(seed, vv_db, vh_db):
+        product = np.zeros((EDGE, EDGE, 4), np.uint8)
+        product[..., 0], product[..., 1] = level(correlated(vv_db, seed)), level(correlated(vh_db, seed + 100))
+        product[..., 3] = 255
+        return product
+
+    for vv, vh in ((-10.0, -16.0), (-2.0, -9.0)):
+        before, after = scene(1, vv, vh), scene(2, vv, vh)
+        for rid in ("radar-change", "radar-razed", "radar-new-objects", "radar-flood"):
+            assert found(reading(rid, before, after)) == 0, rid
+
+
 def test_every_radar_built_in_names_its_method_and_the_old_ones_stay():
     ids = [r.id for r in BUILTINS]
     assert ids[:8] == ["boats", "anomaly", "structures", "impacts", "large-change",

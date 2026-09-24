@@ -26,6 +26,10 @@
   let showThresholds = $state(false);
   const open = $derived(expanded || showThresholds);
   const single = $derived(!!capability.single);
+  /** An analyzer of your own sets its lines rule by rule, so it has no
+   *  sensitivity or direction here, and it cleans and smooths on one date too. */
+  const rules = $derived(recipe.method === 'rules');
+  const SHAPES = [['any', 'Any shape'], ['compact', 'Compact: roofs, craters, vehicles'], ['elongated', 'Long and thin: roads, tracks, trenches']];
   const size = $derived(sizeOf(recipe.parameters, capability.sizes));
 
   function setSize(name) {
@@ -61,9 +65,11 @@
     </button>
   {/if}
   {#if open}
-    <label title="Higher finds fainter signals, and more noise with them.">Sensitivity · {recipe.parameters.sensitivity}
-      <input aria-label="Analyzer sensitivity" type="range" min="0" max="100" bind:value={recipe.parameters.sensitivity} />
-    </label>
+    {#if !rules}
+      <label title="Higher finds fainter signals, and more noise with them.">Sensitivity · {recipe.parameters.sensitivity}
+        <input aria-label="Analyzer sensitivity" type="range" min="0" max="100" bind:value={recipe.parameters.sensitivity} />
+      </label>
+    {/if}
     <div class="row">
       <label class="grow" title="Drop candidates smaller than this.">Min area (m²)
         <input aria-label="Minimum area" type="number" min="0" max="100000000" bind:value={recipe.parameters.min_area} />
@@ -79,7 +85,13 @@
         </select>
       </label>
     {/if}
-    {#if !single}
+    <label title="Keep only candidates of this shape, measured along their own length.">Shape
+      <select aria-label="Candidate shape" value={recipe.parameters.shape ?? 'any'}
+        onchange={(event) => (recipe.parameters = { ...recipe.parameters, shape: event.currentTarget.value })}>
+        {#each SHAPES as [id, label] (id)}<option value={id}>{label}</option>{/each}
+      </select>
+    </label>
+    {#if !single && !rules}
       <label title="Keep what brightened, what darkened, or both.">Direction
         <select bind:value={recipe.parameters.direction}><option value="both">Both</option><option value="gain">Gain</option><option value="loss">Loss</option></select>
       </label>
@@ -91,10 +103,19 @@
         <input aria-label="Cloud mask margin" type="range" min="0" max="10" bind:value={recipe.parameters.cloud_margin} />
       </label>
     {/if}
+    <!-- Cleanup and smoothing work on a difference, so a built-in that reads
+         one image has neither; rules of your own clean and smooth whatever they
+         read. Radar counts its smoothing on the ground. -->
     <details>
-      <summary>Noise and grouping</summary>
-      <label title="Remove specks narrower than this; it also removes small real objects.">Noise cleanup · {recipe.parameters.cleanup}px<input type="range" min="0" max="3" bind:value={recipe.parameters.cleanup} /></label>
-      <label title="Blur the reading first; zero keeps the finest detail.">Smoothing · {recipe.parameters.smoothing}px<input type="range" min="0" max="3" bind:value={recipe.parameters.smoothing} /></label>
+      <summary>{single && !rules ? 'Grouping' : 'Noise and grouping'}</summary>
+      {#if !single || rules}
+        <label title="Remove specks narrower than this; it also removes small real objects.">Noise cleanup · {recipe.parameters.cleanup}px<input type="range" min="0" max="3" bind:value={recipe.parameters.cleanup} /></label>
+        {#if capability.smoothing_m}
+          <label title="Average the radar over this much ground first; wider is quieter and coarser.">Averaging · {capability.smoothing_m * Math.max(1, recipe.parameters.smoothing)} m<input aria-label="Radar averaging" type="range" min="1" max="3" bind:value={recipe.parameters.smoothing} /></label>
+        {:else}
+          <label title="Blur the reading first; zero keeps the finest detail.">Smoothing · {recipe.parameters.smoothing}px<input type="range" min="0" max="3" bind:value={recipe.parameters.smoothing} /></label>
+        {/if}
+      {/if}
       <label title="Join candidates this close; zero joins only touching ones.">Group within (m)<input type="number" min="0" max="500" bind:value={recipe.parameters.merge_metres} /></label>
     </details>
   {/if}

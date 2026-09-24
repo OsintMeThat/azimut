@@ -130,6 +130,9 @@ KINDS: dict[str, Kind] = {
     ),
     "post": Kind(path_attr="draft"),
     "inspect-session": Kind(path_attr="spec"),
+    # The exported picture is media of its own, as with a comparison: a proof may
+    # already rest on it, so it outlives the layout.
+    "collage": Kind(path_attr="spec"),
     # The rendered image is a media working file of its own, not a companion:
     # a proof may already be built on it, so it outlives the session.
     "compare-session": Kind(path_attr="spec"),

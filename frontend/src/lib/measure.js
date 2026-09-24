@@ -78,6 +78,68 @@ export function containsPoint(points, point) {
   return inside;
 }
 
+/** The convex hull of flat `[x, y]` points, counter-clockwise (monotone chain). */
+function convexHull(points) {
+  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (sorted.length < 3) return sorted;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const half = (list) => {
+    const chain = [];
+    for (const point of list) {
+      while (chain.length >= 2 && cross(chain.at(-2), chain.at(-1), point) <= 0) chain.pop();
+      chain.push(point);
+    }
+    chain.pop();
+    return chain;
+  };
+  return [...half(sorted), ...half([...sorted].reverse())];
+}
+
+/**
+ * The long and short sides of the smallest rectangle around the points, in
+ * metres, turned to fit them rather than squared to north: a hull lying on the
+ * diagonal is as long as it is, not as long as the box around it.
+ *
+ * Worked flat about the points' middle, which at the size of a ship or a
+ * detection gives the answer the sphere does.
+ */
+export function orientedExtent(points) {
+  if (!points?.length) return null;
+  const lat0 = points.reduce((sum, point) => sum + point.lat, 0) / points.length;
+  const lon0 = points[0].lon;
+  const k = Math.cos(rad(lat0));
+  const flat = points.map((point) => [
+    rad(((point.lon - lon0 + 540) % 360) - 180) * k * R,
+    rad(point.lat - lat0) * R,
+  ]);
+  const hull = convexHull(flat);
+  if (hull.length < 3) {
+    const [a, b = a] = hull;
+    return { length: Math.hypot(b[0] - a[0], b[1] - a[1]), width: 0 };
+  }
+  let best = null;
+  for (let i = 0; i < hull.length; i++) {
+    const [ax, ay] = hull[i];
+    const [bx, by] = hull[(i + 1) % hull.length];
+    const edge = Math.hypot(bx - ax, by - ay);
+    if (!edge) continue;
+    const ux = (bx - ax) / edge;
+    const uy = (by - ay) / edge;
+    let [minU, maxU, minV, maxV] = [Infinity, -Infinity, Infinity, -Infinity];
+    for (const [x, y] of hull) {
+      const u = x * ux + y * uy;
+      const v = y * ux - x * uy;
+      minU = Math.min(minU, u);
+      maxU = Math.max(maxU, u);
+      minV = Math.min(minV, v);
+      maxV = Math.max(maxV, v);
+    }
+    const sides = [maxU - minU, maxV - minV];
+    if (!best || sides[0] * sides[1] < best[0] * best[1]) best = sides;
+  }
+  return { length: Math.max(...best), width: Math.min(...best) };
+}
+
 /** Interior angle at `vertex` between the rays to `a` and `b`, in degrees. */
 export function angleAt(a, vertex, b) {
   const cosLat = Math.cos(rad(vertex.lat));

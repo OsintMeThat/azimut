@@ -64,8 +64,20 @@ def _save_proof(client, cid, title, srcs):
 
 
 def _save_session(client, cid, title, source_path):
-    body = {"title": title, "spec": {"source": {"path": source_path, "kind": "image"}}}
-    return client.post(f"/api/cases/{cid}/inspect/sessions", json=body).json()
+    """File a file's Inspect work, then name it the way Details would.
+
+    A work is born under its file's name; renaming it here keeps these tests reading
+    in the names they were written in, and goes through the rename that moves the
+    spec with the label.
+    """
+    saved = client.put(
+        f"/api/cases/{cid}/inspect/work", json={"path": source_path, "spec": {"frames": []}}
+    )
+    assert saved.status_code == 200, saved.text
+    work = _entity(client, cid, spec=f".inspect/{saved.json()['name']}.json")
+    renamed = client.patch(f"/api/cases/{cid}/entities/{work['id']}", json={"label": title})
+    assert renamed.status_code == 200, renamed.text
+    return renamed.json()
 
 
 # ── emission at save time ───────────────────────────────────────────────────
@@ -347,7 +359,7 @@ def test_deleting_a_subject_deletes_its_session_but_spares_its_outputs(client):
     assert res["status"] == "deleted"
     # the session is nothing without its subject: it goes, file and all
     assert _entity(client, cid, spec=".inspect/S.json") is None
-    assert client.get(f"/api/cases/{cid}/inspect/sessions/S").status_code == 404
+    assert client.get(f"/api/cases/{cid}/inspect/works/S").status_code == 404
     # the proof stands on its own: it stays, and its export is untouched
     proof = _entity(client, cid, spec="proofs/.meta/P.json")
     assert proof is not None
@@ -495,9 +507,9 @@ def test_the_inspect_delete_honours_the_graph(client):
     a = _upload(client, cid, "a.png")["item"]["path"]
     _save_session(client, cid, "S", a)
 
-    client.delete(f"/api/cases/{cid}/inspect/sessions/S")
+    client.delete(f"/api/cases/{cid}/inspect/work", params={"path": a})
 
-    # a session deleted on its own takes nothing with it: its subject stands
+    # work cleared on its own takes nothing with it: its subject stands
     assert _entity(client, cid, spec=".inspect/S.json") is None
     assert _entity(client, cid, path=a) is not None
     assert _links(client, cid) == []

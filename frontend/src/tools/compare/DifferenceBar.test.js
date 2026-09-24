@@ -31,6 +31,18 @@ const base = (target, label) =>
     .find((entry) => entry.textContent.trim() === label);
 
 describe('Difference strip', () => {
+  it('keeps an index reading as a Detect analyzer, and offers nothing for the picture methods', () => {
+    const onanalyzer = vi.fn();
+    const index = render({ settings: changeSettings({ method: 'index', index: 'nbr' }),
+      status: { ...ready, methods: ['colour', 'index'] }, onanalyzer }, { open: true });
+    button(index.target, 'Save as a Detect analyzer').click();
+    expect(onanalyzer).toHaveBeenCalledOnce();
+    index.done();
+    const colour = render({}, { open: true });
+    expect(button(colour.target, 'Save as a Detect analyzer')).toBeUndefined();
+    colour.done();
+  });
+
   it('lays the highlights over both images by default, and over one on request', () => {
     const { target, done } = render();
     expect(base(target, 'Both').getAttribute('aria-pressed')).toBe('true');

@@ -4,7 +4,7 @@ import {
   QUAD_SIDES, quadEdgeMidpoints, moveQuadEdge, quadCentroid,
   quadsBounds, translateQuad, moveQuads, rotateQuads, scaleQuads, pinholeOps,
   buildFrameOps, hasVideoEdits, normalizeRightAngleRotation, rotationOps,
-  sourceStem, timecode, frameSaveName, frameSaveNames, autoSaveNames, saveNameOf,
+  sourceStem, timecode, frameSaveName, frameSaveNames, saveNameOf,
   newCollage, clampCollageDim, stitchCanvas, COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
   COLLAGE_DEFAULT_SIZE,
 } from './inspect.js';
@@ -432,34 +432,6 @@ describe('frameSaveNames', () => {
 
   it('holds a tray of one frame to the plain second', () => {
     expect(names([{ stem: 'roof', time: 19.4 }])).toEqual(['00-00-19 roof']);
-  });
-});
-
-describe('autoSaveNames', () => {
-  const items = [
-    { key: 'a', defaultName: '00-01-00 roof' },
-    { key: 'b', defaultName: '00-02-00 roof' },
-  ];
-
-  it('starts every field on the item default', () => {
-    expect(autoSaveNames(items)).toEqual(['00-01-00 roof', '00-02-00 roof']);
-  });
-
-  it('numbers the gallery under a base name', () => {
-    expect(autoSaveNames(items, 'Roof')).toEqual(['Roof 01', 'Roof 02']);
-  });
-
-  it('numbers over the whole gallery, so ticking a box never renumbers a field', () => {
-    const three = [...items, { key: 'c', defaultName: 'collage' }];
-    expect(autoSaveNames(three, 'Roof')).toEqual(['Roof 01', 'Roof 02', 'Roof 03']);
-  });
-
-  it('leaves a lone item unnumbered', () => {
-    expect(autoSaveNames([items[0]], 'Roof')).toEqual(['Roof']);
-  });
-
-  it('ignores a whitespace-only base name', () => {
-    expect(autoSaveNames(items, '   ')).toEqual(['00-01-00 roof', '00-02-00 roof']);
   });
 });
 

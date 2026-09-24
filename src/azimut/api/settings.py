@@ -102,6 +102,7 @@ class PrefsIn(BaseModel):
     coord_format: str | None = None  # one of config.COORD_FORMATS
     units: str | None = None  # one of config.UNIT_SYSTEMS
     home_view: HomeView | None = None  # where the Satellite tab opens
+    map_sync: bool | None = None  # Satellite, Compare and Detect share one camera
     detect_view: DetectPrefs | None = None
     # the Sentinel-1 layer radar detections read; "" forgets it
     sentinel1_layer: str | None = Field(default=None, pattern=r"^$|^[A-Z0-9_]{1,40}$")
@@ -137,6 +138,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "coord_format": settings.get("coord_format", "dd"),
         "units": settings.get("units", "metric"),
         "home_view": settings.get("home_view", DEFAULT_HOME_VIEW),
+        "map_sync": bool(settings.get("map_sync", True)),
         "detect_view": settings.get("detect_view", config.DEFAULT_SETTINGS["detect_view"]),
         "sentinel1_layer": settings.get("sentinel1_layer", ""),
         "capture_scale_north": bool(settings.get("capture_scale_north", False)),
@@ -268,6 +270,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["units"] = body.units
     if body.home_view is not None:
         settings["home_view"] = body.home_view.model_dump()
+    if body.map_sync is not None:
+        settings["map_sync"] = bool(body.map_sync)
     if body.detect_view is not None:
         settings["detect_view"] = body.detect_view.model_dump()
     if body.sentinel1_layer is not None:
@@ -653,6 +657,7 @@ class ImportedSettings(BaseModel):
     home_view: ImportedHomeView = Field(
         default_factory=lambda: ImportedHomeView.model_validate(DEFAULT_HOME_VIEW)
     )
+    map_sync: bool = True
     capture_scale_north: bool = False
     proof_place_auto: bool = True
     post_mention: str = Field(default=DEFAULT_POST_MENTION, max_length=64)

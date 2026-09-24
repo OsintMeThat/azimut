@@ -10,6 +10,7 @@
  * Three of the engine's own defaults are turned off on purpose, and each one is
  * a gesture the tool already owns: right-drag flags a grid cell, shift-drag and
  * middle-drag turn the map, and the view is flat until the 3D map earns a pitch.
+ * The keyboard turn is the tool's too, so the engine's is switched off below.
  */
 // `MapLibreMap` rather than the `Map` alias: shadowing the global here is
 // exactly the sort of thing that reads fine until someone needs a Map.
@@ -127,6 +128,10 @@ export async function createMapEngine(container, { view, imperial = false } = {}
     'bottom-left'
   );
   map.scrollZoom.setWheelZoomRate(WHEEL_ZOOM_RATE);
+  // Shift and an arrow turn the map from the window (lib/map/gestures.js), a
+  // whole step at a time; the engine's own turn would add a second one when
+  // the map has focus. The bare arrows still pan.
+  map.keyboard.disableRotation();
   // A source cannot be added before the style is up, and `basemap.js` adds one
   // as soon as this returns.
   await map.once('load');

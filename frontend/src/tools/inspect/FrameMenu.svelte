@@ -1,41 +1,47 @@
 <script>
   import { api } from '../../lib/api.js';
   import { caseState, toast } from '../../lib/state.svelte.js';
-  import { adjustDefaults, buildFrameOps, previewStyle, cropImgStyle, styleText } from '../../lib/inspect.js';
+  import { adjustDefaults, buildFrameOps } from '../../lib/inspect.js';
   import Icon from '../../components/Icon.svelte';
   import AdjustSliders from './AdjustSliders.svelte';
   import CropControls from './CropControls.svelte';
   import OrientationControls from './OrientationControls.svelte';
+  import SaveToCase from './SaveToCase.svelte';
 
-  // Right-panel menu for the Frame tab. Works on the *active* tray frame:
-  // pick it, adjust it (live-previewed), crop it, or analyse it — all without
-  // filing anything. The recipe is committed later from the Save tab.
+  // The panel beside one frame: turn it, adjust it, crop it, then save it as
+  // media or read it closer. Edits are kept with the file's work as they are
+  // made; only Save to case puts a file in the Media Library.
   let {
-    session, filters, analyses, activeFrame, shared, removeFrame, setActive,
+    frame, filters, analyses, shared,
     cropAspect = $bindable(null), cropEditing = $bindable(false), beginCrop, commitCrop,
-    setRotation, rotationBusy = false, reverse,
+    setRotation, rotationBusy = false, reverse, onduplicate,
+    frameSave, folder = $bindable(''),
   } = $props();
 
-  let showAnalyze = $state(false);
   let analyzing = $state(null);
   let analysis = $state(null);
   let canvasEl = $state();
   let reversing = $state(false);
 
+  // A reading belongs to the frame it was run on.
+  $effect(() => {
+    frame.id;
+    analysis = null;
+  });
+
   async function reverseActive() {
-    if (!activeFrame || reversing) return;
+    if (reversing) return;
     reversing = true;
     try {
-      await reverse(activeFrame);
+      await reverse(frame);
     } finally {
       reversing = false;
     }
   }
 
   async function reset() {
-    if (!activeFrame) return;
-    activeFrame.adjust = adjustDefaults(filters);
-    activeFrame.crop = null;
+    frame.adjust = adjustDefaults(filters);
+    frame.crop = null;
     shared.cropMode = false;
     cropAspect = null;
     cropEditing = false;
@@ -43,22 +49,21 @@
   }
 
   function clearCrop() {
-    if (activeFrame) activeFrame.crop = null;
+    frame.crop = null;
     shared.cropMode = false;
     cropAspect = null;
     cropEditing = false;
   }
 
   async function runAnalysis(name) {
-    if (!activeFrame) return;
     analyzing = name;
     analysis = null;
     try {
       analysis = await api.post(`/api/cases/${caseState.current.id}/inspect/analyze`, {
-        path: activeFrame.path,
+        path: frame.path,
         name,
-        time: activeFrame.time ?? null,
-        ops: buildFrameOps(filters, activeFrame),
+        time: frame.time ?? null,
+        ops: buildFrameOps(filters, frame),
       });
       if (analysis.kind === 'histogram') requestAnimationFrame(drawHistogram);
     } catch (e) {
@@ -94,100 +99,88 @@
 </script>
 
 <div class="module">
-  <div class="tray">
-    {#each session.frames as fr, i (fr.id)}
-      <div class="thumb" class:active={fr.id === session.activeFrameId}>
-        <button class="pick" onclick={() => setActive(fr.id)} title={fr.time != null ? `Image ${i + 1} · t=${fr.time.toFixed(2)}s` : `Image ${i + 1}`}>
-          <img
-            src={fr.url}
-            alt={`Image ${i + 1}`}
-            style={styleText(cropImgStyle(fr.crop))}
-            style:filter={previewStyle(filters, fr.adjust).filter}
-          />
-          <span class="num">{i + 1}</span>
-          {#if session.saved[`frame:${fr.id}`]}<span class="saved" title="Saved"><Icon name="check" size={11} /></span>{/if}
-        </button>
-        <button class="del" onclick={() => removeFrame(fr.id)} aria-label="Remove frame" title="Remove frame"><Icon name="x" size={12} /></button>
-      </div>
-    {/each}
-    {#if session.frames.length === 0}
-      <p class="empty">No frames yet. Capture some in the Selection tab.</p>
-    {/if}
-  </div>
-
-  {#if activeFrame}
-    <div class="section">
-      <div class="section-head"><span>Orientation</span></div>
-      <OrientationControls
-        value={activeFrame.rotation ?? 0}
-        disabled={rotationBusy}
-        onchange={setRotation}
-        hint="The saved image uses this orientation."
-      />
-      <AdjustSliders {filters} values={activeFrame.adjust} />
-      <div class="crop-block">
-        <div class="crop-row">
-          {#if cropEditing}
-            <button class="btn btn-sm active" onclick={() => commitCrop?.()} title="Apply the crop (Enter)">
-              <Icon name="check" size={14} /> Apply crop
-            </button>
-            <button class="btn btn-ghost btn-xs" onclick={() => (shared.cropMode = true)} title="Draw a fresh region">
-              <Icon name="crop" size={13} /> Redraw
-            </button>
-          {:else}
-            <button class="btn btn-sm" onclick={() => beginCrop?.()}>
-              <Icon name="crop" size={14} /> {activeFrame.crop ? 'Edit crop' : 'Crop region'}
-            </button>
-            {#if activeFrame.crop}
-              <span class="crop-info">or double-click the image</span>
-            {/if}
-          {/if}
-        </div>
+  <div class="section first">
+    <div class="section-head"><span>Orientation</span></div>
+    <OrientationControls
+      value={frame.rotation ?? 0}
+      disabled={rotationBusy}
+      onchange={setRotation}
+      hint="The saved image uses this orientation."
+    />
+    <AdjustSliders {filters} values={frame.adjust} />
+    <div class="crop-block">
+      <div class="crop-row">
         {#if cropEditing}
-          <CropControls bind:crop={activeFrame.crop} bind:aspect={cropAspect} natW={activeFrame.w} natH={activeFrame.h} onclear={clearCrop} />
-        {/if}
-      </div>
-      <button class="btn btn-ghost btn-sm reset" onclick={reset}><Icon name="reset" size={14} /> Reset frame</button>
-      <button
-        class="btn btn-sm reverse"
-        disabled={reversing}
-        onclick={reverseActive}
-        title="Search the web for this image as it is adjusted and cropped here"
-      >
-        <Icon name="search" size={14} /> {reversing ? 'Preparing…' : 'Reverse image search'}
-      </button>
-    </div>
-
-    <div class="section">
-      <button class="section-head as-btn" onclick={() => (showAnalyze = !showAnalyze)}>
-        <span><Icon name="eye" size={14} /> Analyze</span>
-        <Icon name={showAnalyze ? 'chevronDown' : 'chevronRight'} size={14} />
-      </button>
-      {#if showAnalyze}
-        <div class="atabs">
-          {#each analyses as a (a.id)}
-            <button class="btn btn-sm" class:active={analyzing === a.id} onclick={() => runAnalysis(a.id)}>{a.label}</button>
-          {/each}
-        </div>
-        {#if analyzing}
-          <p class="hint"><Icon name="clock" size={13} /> Analysing…</p>
-        {:else if analysis}
-          {#if analysis.kind === 'keyvalue'}
-            <table class="kv"><tbody>
-              {#each Object.entries(analysis.rows) as [k, v] (k)}<tr><th>{k}</th><td class="mono">{v}</td></tr>{/each}
-            </tbody></table>
-          {:else if analysis.kind === 'histogram'}
-            <canvas bind:this={canvasEl} class="hist"></canvas>
-          {:else if analysis.kind === 'image'}
-            <img class="ana-img" src={analysis.data_url} alt="analysis" />
-            {#if analysis.note}<p class="note"><Icon name="alert" size={13} /> {analysis.note}</p>{/if}
-          {:else if analysis.kind === 'text'}
-            <pre class="text">{analysis.text}</pre>
+          <button class="btn btn-sm active" onclick={() => commitCrop?.()} title="Apply the crop (Enter)">
+            <Icon name="check" size={14} /> Apply crop
+          </button>
+          <button class="btn btn-ghost btn-xs" onclick={() => (shared.cropMode = true)} title="Draw a fresh region">
+            <Icon name="crop" size={13} /> Redraw
+          </button>
+        {:else}
+          <button class="btn btn-sm" onclick={() => beginCrop?.()}>
+            <Icon name="crop" size={14} /> {frame.crop ? 'Edit crop' : 'Crop region'}
+          </button>
+          {#if frame.crop}
+            <span class="crop-info">or double-click the image</span>
           {/if}
         {/if}
+      </div>
+      {#if cropEditing}
+        <CropControls bind:crop={frame.crop} bind:aspect={cropAspect} natW={frame.w} natH={frame.h} onclear={clearCrop} />
       {/if}
     </div>
-  {/if}
+    <div class="row">
+      <button class="btn btn-ghost btn-sm" onclick={reset}><Icon name="reset" size={14} /> Reset frame</button>
+      <button class="btn btn-ghost btn-sm" onclick={() => onduplicate?.(frame)} title="A second copy to crop or adjust differently">
+        <Icon name="copy" size={14} /> Duplicate
+      </button>
+    </div>
+  </div>
+
+  <div class="section">
+    <SaveToCase
+      defaultName={frameSave.defaultName}
+      filedPath={frameSave.filedPath}
+      busy={frameSave.busy}
+      blocked={frameSave.blocked}
+      bind:folder
+      onsave={frameSave.onsave}
+    />
+  </div>
+
+  <div class="section">
+    <div class="section-head"><span><Icon name="eye" size={14} /> Analyze</span></div>
+    <div class="atabs">
+      {#each analyses as a (a.id)}
+        <button class="btn btn-sm" class:active={analyzing === a.id} disabled={!!analyzing} onclick={() => runAnalysis(a.id)}>{a.label}</button>
+      {/each}
+    </div>
+    {#if analyzing}
+      <p class="hint"><Icon name="clock" size={13} /> Analysing…</p>
+    {:else if analysis}
+      {#if analysis.kind === 'keyvalue'}
+        <table class="kv"><tbody>
+          {#each Object.entries(analysis.rows) as [k, v] (k)}<tr><th>{k}</th><td class="mono">{v}</td></tr>{/each}
+        </tbody></table>
+      {:else if analysis.kind === 'histogram'}
+        <canvas bind:this={canvasEl} class="hist"></canvas>
+      {:else if analysis.kind === 'image'}
+        <img class="ana-img" src={analysis.data_url} alt="analysis" />
+        {#if analysis.note}<p class="note"><Icon name="alert" size={13} /> {analysis.note}</p>{/if}
+      {:else if analysis.kind === 'text'}
+        <pre class="text">{analysis.text}</pre>
+      {/if}
+    {/if}
+    <button
+      class="btn btn-sm reverse"
+      disabled={reversing}
+      onclick={reverseActive}
+      title="Search the web for this image as it is adjusted and cropped here"
+    >
+      <Icon name="search" size={14} /> {reversing ? 'Preparing…' : 'Reverse image search'}
+    </button>
+  </div>
 </div>
 
 <style>
@@ -195,78 +188,6 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-  }
-  .tray {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-  .thumb {
-    position: relative;
-    width: 60px;
-    height: 60px;
-  }
-  .thumb .pick {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    border-radius: var(--r-sm);
-    overflow: hidden;
-    border: 2px solid transparent;
-    padding: 0;
-  }
-  .thumb.active .pick {
-    border-color: var(--accent);
-  }
-  .thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
-  .thumb .del {
-    position: absolute;
-    top: -6px;
-    right: -6px;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: var(--bg-2);
-    border: 1px solid var(--border-strong);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-2);
-  }
-  .num {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    min-width: 15px;
-    height: 15px;
-    padding: 0 3px;
-    border-radius: 4px;
-    background: rgba(10, 10, 10, 0.7);
-    color: #fff;
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 15px;
-    text-align: center;
-  }
-  .saved {
-    position: absolute;
-    bottom: 2px;
-    left: 2px;
-    background: var(--accent);
-    color: var(--accent-text);
-    border-radius: 4px;
-    display: flex;
-    padding: 1px;
-  }
-  .empty {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    margin: 4px 0;
   }
   .section {
     border-top: 1px solid var(--border);
@@ -293,9 +214,16 @@
     color: var(--accent);
     border-color: var(--accent);
   }
-  .reset,
   .reverse {
     align-self: flex-start;
+  }
+  .row {
+    display: flex;
+    gap: 6px;
+  }
+  .section.first {
+    border-top: 0;
+    padding-top: 0;
   }
   .section-head {
     display: flex;
@@ -308,12 +236,6 @@
     display: flex;
     align-items: center;
     gap: 6px;
-  }
-  .as-btn {
-    width: 100%;
-    background: none;
-    color: var(--text-1);
-    text-align: left;
   }
   .atabs {
     display: flex;

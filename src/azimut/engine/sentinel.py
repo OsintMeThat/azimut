@@ -310,6 +310,64 @@ SPECTRAL_INDEX: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 }
 
 
+# Sentinel-2 Level-2A's bands, which an analyzer of your own may read by name.
+# B10 is a cirrus band the atmospheric correction consumes; Level-2A drops it.
+L2A_BANDS: tuple[str, ...] = ("B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08",
+                              "B8A", "B09", "B11", "B12")
+# Reflectance in a 16-bit channel, as whole ten-thousandths: the scale
+# Sentinel-2's own digital numbers use. A byte could not hold a normalised
+# difference of two dark bands, where a step of 0.2% reflectance is a tenth of
+# the whole index over water.
+BANDS_SCALE = 10_000
+_BANDS_PRODUCT = re.compile(r"^bands(?:-(?:B0[1-9]|B8A|B1[12])){1,3}$")
+
+
+def band_product(bands: list[str] | tuple[str, ...]) -> str:
+    """The product that carries these bands, named in the collection's order."""
+    ordered = [band for band in L2A_BANDS if band in set(bands)]
+    if not 1 <= len(ordered) <= 3 or len(ordered) != len(set(bands)):
+        raise ValueError("a band product carries one to three known bands")
+    return "bands-" + "-".join(ordered)
+
+
+def product_bands(product: str) -> tuple[str, ...]:
+    """The bands a ``bands-…`` product carries, or () for any other product."""
+    if not _BANDS_PRODUCT.match(product):
+        return ()
+    bands = tuple(product.split("-")[1:])
+    if band_product(bands) != product:
+        return ()
+    return bands
+
+
+def is_product(product: str) -> bool:
+    return product in PRODUCTS or bool(product_bands(product))
+
+
+def _bands_evalscript(product: str) -> str:
+    # Up to three bands at 16 bits, then the sky byte every Detect product
+    # carries. Only names from L2A_BANDS reach the script: `product_bands`
+    # refuses anything else before a request is built.
+    bands = product_bands(product)
+    if not bands:
+        raise ValueError(f"unknown band product '{product}'")
+    wanted = list(dict.fromkeys([*bands, "B08", "SCL", "dataMask"]))
+    listed = ", ".join(f'"{band}"' for band in wanted)
+    values = [f"Math.max({1 if i == 0 else 0}, Math.min(65535, Math.round(p.{band} * {BANDS_SCALE})))"
+              for i, band in enumerate(bands)]
+    values += ["0"] * (3 - len(bands))
+    script = f"""//VERSION=3
+function setup() {{
+  return {{ input: [{{ bands: [{listed}] }}], output: {{ bands: 4, sampleType: "UINT16" }} }};
+}}
+function evaluatePixel(p) {{
+  if (!p.dataMask) return [0, 0, 0, 0];
+  return [{", ".join(values)}, p.SCL + (p.B08 < {DARK_REFLECTANCE} ? {DARK_FLAG} : 0)];
+}}
+"""
+    return base64.b64encode(script.encode("ascii")).decode("ascii")
+
+
 def _byte(expression: str, gain: float, floor: int = 0) -> str:
     return f"Math.max({floor}, Math.min(255, Math.round(({expression}) * {255 * gain:g})))"
 
@@ -480,6 +538,8 @@ def _evalscript(product: str) -> str:
         return _change_evalscript(product)
     if product in SAR_PRODUCTS:
         return _sar_evalscript(product)
+    if product_bands(product):
+        return _bands_evalscript(product)
     return _detect_evalscript(product)
 
 
@@ -600,7 +660,7 @@ def band_frame(
     The image is validated before it is handed on: a PNG, the size asked for,
     within the byte budget.
     """
-    if product not in PRODUCTS:
+    if not is_product(product):
         raise ValueError(f"unknown band product '{product}'")
     west, south, east, north = bbox
     if not all(abs(value) <= _WEB_MERCATOR_LIMIT for value in bbox):

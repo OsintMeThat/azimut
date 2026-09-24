@@ -20,7 +20,8 @@
     uiState,
   } from '../lib/state.svelte.js';
   import { saveRelation } from '../lib/relations.svelte.js';
-  import { actionsFor } from '../lib/map/contextMenu.js';
+  import { actionsFor, otherMapTools } from '../lib/map/contextMenu.js';
+  import { openMapAt } from '../lib/navigate.js';
   import {
     COMPARE_LAYERS,
     COMPARE_MODES,
@@ -41,6 +42,7 @@
     canvasBlob,
     comparisonFilename,
     composeComparison,
+    pictureDateFields,
   } from '../lib/map/compareExport.js';
   import {
     changeCompatibility,
@@ -64,7 +66,7 @@
     destinationLabel,
     readDestinations,
   } from '../lib/exportDest.js';
-  import { startRotateDrag } from '../lib/map/gestures.js';
+  import { turnFromKey, turnFromPress } from '../lib/map/gestures.js';
   import {
     askable as firmsAskable,
     tileParams as firmsTileParams,
@@ -82,6 +84,7 @@
   import { RADAR_ID, radarId } from '../lib/radar.js';
   import Icon from '../components/Icon.svelte';
   import Compass from '../components/Compass.svelte';
+  import TurnGuide from '../components/TurnGuide.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import Modal from '../components/Modal.svelte';
@@ -89,12 +92,14 @@
   import ModeControl from './compare/ModeControl.svelte';
   import SourceCard from './compare/SourceCard.svelte';
   import DifferenceBar from './compare/DifferenceBar.svelte';
+  import { fromDifference } from '../lib/map/analyzerRules.js';
   import PassStrip from './compare/PassStrip.svelte';
   import CopernicusNeeded from '../components/CopernicusNeeded.svelte';
   import { copernicusNeed } from '../lib/copernicusSetup.js';
   import { stripArchive } from '../lib/map/passStrip.js';
   import './mapdock.css';
   import { linkCameras } from '../lib/map/cameraLink.js';
+  import { shareView } from '../lib/map/sharedView.js';
   import { detectCaptures } from '../lib/map/changeCapture.js';
   import { apply, compassAngle, cssMatrix, frameToFrame, fromMercator, screenToMercator } from '../lib/map/groundFrame.js';
   import MapSurface from './satellite/MapSurface.svelte';
@@ -145,6 +150,10 @@
   let openedSession = $state(null); // { name, title } | null
   let savedSignature = $state(null);
   let saveDialog = $state(false);
+  // Keeping an export files it under its comparison, which needs a name first:
+  // an export asked while unsaved opens the save dialog and runs once it is saved.
+  let keepInCase = $state(false);
+  let exportAfterSave = false;
   let sessionDialog = $state(false);
   let sessionBusy = $state(false);
   let sessionList = $state([]);
@@ -392,7 +401,10 @@
       await prefsReady;
       if (gone) return;
       home = { ...prefs.homeView };
-      view = { ...home };
+      // Where the other map tabs left the window, when they share a camera.
+      const shared = share.opening();
+      view = shared ? { lat: shared.lat, lon: shared.lon, zoom: shared.zoom } : { ...home };
+      bearing = shared?.bearing ?? 0;
       await loadProviders();
       if (gone) return;
       // A handoff from the map brings its own pair.
@@ -430,6 +442,12 @@
 
   function savedCoords(at) {
     return `${Number(at.lat).toFixed(5)}, ${Number(at.lon).toFixed(5)}`;
+  }
+
+  /** A card's own action: a comparison reopens here, anything else is flown to. */
+  function editSaved(row) {
+    if (row?.kind === 'comparison' && row.session) requestOpenSession(row.session);
+    else openSaved(row);
   }
 
   function openSaved(row) {
@@ -490,6 +508,10 @@
     view = { lat: next.lat, lon: next.lon, zoom: next.zoom };
     bearing = next.bearing ?? bearing;
     invalidateChangeAssist();
+    // Where the map is, for Coordinates, and where the window looks: hidden
+    // too, when a pan's glide ends after a switch of tab.
+    uiState.mapPoint = { lat: next.lat, lon: next.lon, zoom: next.zoom };
+    share.settled(next, (which === 'a' ? a : b).engine?.maxZoom());
   }
 
   function onSurfaceBearing(which, next) {
@@ -593,18 +615,25 @@
       { which: 'b', element: b.element, engine: b.engine },
     ].filter((entry) => entry.element && entry.engine);
     const listeners = pairs.map((entry) => {
-      const down = (event) => {
-        const shiftDrag = event.button === 0 && event.shiftKey;
-        if (event.button !== 1 && !shiftDrag) return;
-        startRotateDrag(entry.engine, event, {
+      const down = (event) =>
+        turnFromPress(entry.engine, event, {
           onPivot: ({ x, y }) => (rotating = { which: entry.which, x, y }),
           onEnd: () => (rotating = null),
         });
-      };
       entry.element.addEventListener('mousedown', down, true);
       return () => entry.element.removeEventListener('mousedown', down, true);
     });
     return () => listeners.forEach((release) => release());
+  });
+
+  // Shift and an arrow turn the pair, whether one map is up or both: the
+  // camera is shared, so turning the first turns the other.
+  $effect(() => {
+    if (uiState.tool !== 'compare' || !primeEngine) return;
+    const engine = primeEngine;
+    const onKey = (event) => turnFromKey(engine, event);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
   });
 
   // A layout change changes both map containers. MapLibre must be told after
@@ -885,11 +914,23 @@
           ? 'Comparison and animated preview saved to My work'
           : 'Comparison and preview saved to My work', 'ok');
       }
+      if (exportAfterSave) {
+        exportAfterSave = false;
+        sessionBusy = false;
+        await runExport();
+      }
     } catch (error) {
       toast(`Could not save the comparison: ${error.message}`, 'danger', 6500);
     } finally {
+      // an export waiting on this save runs above or not at all
+      exportAfterSave = false;
       sessionBusy = false;
     }
+  }
+
+  function closeSaveDialog() {
+    saveDialog = false;
+    exportAfterSave = false;
   }
 
   async function openSessionList() {
@@ -1012,6 +1053,45 @@
     a.engine?.resize();
     b.engine?.resize();
   }
+
+  /**
+   * The camera this window's map tabs share (`lib/map/sharedView.js`), taken
+   * when this tab shows. One map takes it and the link brings the other along;
+   * with neither built, the camera they will open on moves.
+   *
+   * A saved comparison keeps the ground it was saved on: its camera is part of
+   * what was saved, and a pan made in another tab would leave it unsaved.
+   */
+  const share = shareView('compare', { state: uiState, enabled: () => prefs.mapSync });
+
+  $effect(() => {
+    uiState.mapView;
+    if (uiState.tool !== 'compare' || !home) return;
+    untrack(() => {
+      if (openedSession) return;
+      const engine = a.engine ?? b.engine;
+      const next = share.pending(engine ? engine.camera() : { ...view, bearing });
+      if (!next) return;
+      if (engine) engine.setCamera(next);
+      else {
+        view = { lat: next.lat, lon: next.lon, zoom: next.zoom };
+        bearing = next.bearing ?? 0;
+      }
+    });
+  });
+
+  // Another map tab asked to look here: the camera goes, the two pictures stay.
+  // A surface not built yet opens on `view`; one already up is moved.
+  $effect(() => {
+    const asked = uiState.lookAt;
+    if (uiState.tool !== 'compare' || asked?.tool !== 'compare' || !home) return;
+    untrack(() => {
+      uiState.lookAt = null;
+      const zoom = Number.isFinite(asked.zoom) ? asked.zoom : view.zoom;
+      view = { lat: asked.lat, lon: asked.lon, zoom };
+      for (const target of [a, b]) target.engine?.setView(view, zoom);
+    });
+  });
 
   $effect(() => {
     if (uiState.tool !== 'compare' || !uiState.compareAt || !imagery.providers.length) return;
@@ -1177,6 +1257,19 @@
     // band frames already held, and waits for Run when they no longer reach.
     clearTimeout(changeTimer);
     changeTimer = setTimeout(() => void refreshChangeAssist({ fetch: false }), 180);
+  }
+
+  /** Difference's index reading, kept as an analyzer of your own in Detect. */
+  async function saveAsAnalyzer() {
+    try {
+      const saved = await api.post('/api/compare/analyzers', fromDifference(changeOptions));
+      toast(`${saved.name} is in your Detect analyzers`, 'ok', 7000, {
+        label: 'Open in Detect',
+        onClick: () => { uiState.openAnalyzer = `analyzer:${saved.id}`; uiState.tool = 'detect'; },
+      });
+    } catch (error) {
+      toast(error.message, 'danger');
+    }
   }
 
   async function refreshChangeAssist({ fetch = true } = {}) {
@@ -1394,6 +1487,7 @@
   const pointActions = $derived(
     actionsFor(both ? ['lookup', 'place', 'measure'] : ['lookup', 'place'])
   );
+  const pointTools = otherMapTools('compare');
 
   function onMapContextMenu(side, at) {
     pointLookupSeq += 1;
@@ -1431,6 +1525,8 @@
       await tick();
       (side === 'a' ? canvasA : canvasB)?.startFrom([point.lon, point.lat]);
       toast('Click the far end of the measure', 'info', 4000);
+    } else if (id === 'goto') {
+      openMapAt(value, { ...point, zoom: view.zoom });
     }
   }
 
@@ -1675,8 +1771,21 @@
     return canvasBlob(compose(sources, { renderChangeMap }));
   }
 
+  /** When each picture on screen was taken, as the surfaces that drew them say. */
+  function pictureDates() {
+    return { a: a.surface?.provenance?.() ?? {}, b: b.surface?.provenance?.() ?? {} };
+  }
+
+  /** The export's name: the comparison's, then the two pictures' dates. */
+  function exportName() {
+    const { a: first, b: second } = pictureDates();
+    return comparisonFilename(sessionName, { a: first.imageryWhen, b: second.imageryWhen });
+  }
+
   async function saveWorkingPreview(caseId, name) {
     const form = new FormData();
+    // The saved image files the date of each picture it shows, as a capture does.
+    for (const [field, value] of pictureDateFields(pictureDates())) form.append(field, value);
     if (mode === 'blink') {
       const renderChangeMap = await exportedChange();
       const sources = await exportSources();
@@ -1708,6 +1817,35 @@
     toast(`${action}: ${error.message}`, 'danger', 7000);
   }
 
+  /**
+   * File the export just written as an image of this comparison in the case.
+   * It carries the reading on screen, not the saved one, since that is what it
+   * shows. Answers what the toast adds, and says so itself when it fails: the
+   * copy on disk is already written either way.
+   */
+  async function keepExport(caseId, format, imageA, imageB = null) {
+    if (!keepInCase || !openedSession) return '';
+    const form = new FormData();
+    form.append('image_a', imageA, 'comparison-a.png');
+    if (imageB) form.append('image_b', imageB, 'comparison-b.png');
+    form.append('format', format);
+    form.append('interval', String(blinkInterval));
+    form.append('filename', exportName());
+    form.append('spec', JSON.stringify(sessionSpec()));
+    for (const [field, value] of pictureDateFields(pictureDates())) form.append(field, value);
+    try {
+      await api.post(
+        `/api/cases/${caseId}/compare/sessions/${encodeURIComponent(openedSession.name)}/images`,
+        form,
+      );
+      await reloadCase();
+      return ' and kept in the case';
+    } catch (error) {
+      toast(`Exported, but not kept in the case: ${error.message}`, 'warn', 7000);
+      return '';
+    }
+  }
+
   async function exportPng() {
     if (outputBusy) return;
     outputBusy = 'png';
@@ -1715,12 +1853,15 @@
       const owner = await ensureCase();
       const blob = await comparisonBlob();
       const result = await api.post(`/api/cases/${owner.id}/plates`, {
-        filename: comparisonFilename(),
+        filename: exportName(),
         format: 'png',
         png: await blobBase64(blob),
+        // Named by its pictures' dates, which another comparison of the pair shares.
+        overwrite: false,
       });
+      const kept = await keepExport(owner.id, 'png', blob);
       rightPanel = null;
-      toast(`${result.file} written to ${destinationLabel(result.path)}`, 'ok', 5200, {
+      toast(`${result.file} written to ${destinationLabel(result.path)}${kept}`, 'ok', 5200, {
         label: 'Show',
         onClick: () => showExports(),
       });
@@ -1745,10 +1886,11 @@
       form.append('image_b', frameB, 'comparison-b.png');
       form.append('animation', animation);
       form.append('interval', String(blinkInterval));
-      form.append('filename', comparisonFilename());
+      form.append('filename', exportName());
       const result = await api.post(`/api/cases/${owner.id}/compare/gif`, form);
+      const kept = await keepExport(owner.id, animation, frameA, frameB);
       rightPanel = null;
-      toast(`${result.file} written to ${destinationLabel(result.path)}`, 'ok', 5200, {
+      toast(`${result.file} written to ${destinationLabel(result.path)}${kept}`, 'ok', 5200, {
         label: 'Show',
         onClick: () => showExports(),
       });
@@ -1760,6 +1902,11 @@
   }
 
   async function runExport() {
+    if (keepInCase && !openedSession) {
+      exportAfterSave = true;
+      saveDialog = true;
+      return;
+    }
     if (exportKind === 'png') await exportPng();
     else await exportGif(exportKind);
   }
@@ -1994,6 +2141,7 @@
               zoom={view.zoom}
               format={prefs.coordFormat}
               actions={pointActions}
+              tools={pointTools}
               lookup={pointMenu.lookup}
               onpick={onPointMenu}
               onclose={closePointMenu}
@@ -2006,7 +2154,7 @@
               caseId={caseState.current?.id}
               coords={savedCoords}
               onopen={openSaved}
-              onedit={openSaved}
+              onedit={editSaved}
               onrefresh={reloadCase}
             />
           {/if}
@@ -2032,7 +2180,7 @@
             editVertices={true} {annotationSide} {bearing} turnable={true} onchange={setAnnotations} />
         {/if}
         {#if rotating?.which === 'a'}
-          <div class="rotate-pivot" style:left={`${rotating.x}px`} style:top={`${rotating.y}px`} aria-hidden="true"></div>
+          <TurnGuide x={rotating.x} y={rotating.y} />
         {/if}
       </div>
     {:else}
@@ -2087,6 +2235,7 @@
               zoom={view.zoom}
               format={prefs.coordFormat}
               actions={pointActions}
+              tools={pointTools}
               lookup={pointMenu.lookup}
               onpick={onPointMenu}
               onclose={closePointMenu}
@@ -2099,7 +2248,7 @@
               caseId={caseState.current?.id}
               coords={savedCoords}
               onopen={openSaved}
-              onedit={openSaved}
+              onedit={editSaved}
               onrefresh={reloadCase}
             />
           {/if}
@@ -2120,7 +2269,7 @@
             editVertices={true} {annotationSide} {bearing} turnable={true} onchange={setAnnotations} />
         {/if}
         {#if rotating?.which === 'b'}
-          <div class="rotate-pivot" style:left={`${rotating.x}px`} style:top={`${rotating.y}px`} aria-hidden="true"></div>
+          <TurnGuide x={rotating.x} y={rotating.y} />
         {/if}
       </div>
     {:else}
@@ -2197,7 +2346,7 @@
         <DifferenceBar bind:settings={changeOptions} status={changeStatus} result={changeResult}
           busy={changeBusy} error={changeError}
           stale={!!changeResult && changeRenderedKey !== detectionKey}
-          onrun={() => refreshChangeAssist()} onzone={visitZone} />
+          onrun={() => refreshChangeAssist()} onzone={visitZone} onanalyzer={saveAsAnalyzer} />
       {/if}
     </div>
   {/if}
@@ -2240,6 +2389,16 @@
           </strong>
           <button class="link" onclick={() => (exportPicker = true)}>Change…</button>
         </div>
+
+        <label class="keep-choice">
+          <input type="checkbox" bind:checked={keepInCase} />
+          <span>
+            <strong>Also keep it in this case</strong>
+            <small>{openedSession
+              ? `Filed under ${openedSession.title}, with its dates and point.`
+              : 'Saves the comparison first, then files the image under it.'}</small>
+          </span>
+        </label>
 
         {#if hasWidget}
           <p class="panel-note"><Icon name="info" size={13} /> Google pixels are captured through the Azimut Capture extension.</p>
@@ -2351,7 +2510,7 @@
 {/if}
 
 {#if saveDialog}
-  <Modal title="Save comparison" onclose={() => (saveDialog = false)} width="440px">
+  <Modal title="Save comparison" onclose={closeSaveDialog} width="440px">
     <div class="save-form">
       <label>Name
         <!-- svelte-ignore a11y_autofocus -->
@@ -2359,7 +2518,7 @@
       </label>
       <p>Saves every control needed to reopen this view.</p>
       <div class="modal-actions">
-        <button class="btn" onclick={() => (saveDialog = false)}>Cancel</button>
+        <button class="btn" onclick={closeSaveDialog}>Cancel</button>
         <button class="btn btn-primary" disabled={!sessionName.trim() || sessionBusy} onclick={performSessionSave}>
           {sessionBusy ? 'Saving…' : 'Save comparison'}
         </button>
@@ -2677,25 +2836,6 @@
   .swipe-line:active .swipe-handle {
     transform: translate(-50%, -50%) scale(.98);
   }
-  .rotate-pivot {
-    position: absolute;
-    z-index: 570;
-    width: 34px;
-    height: 34px;
-    transform: translate(-50%, -50%);
-    border: 1px solid rgba(255,255,255,.92);
-    border-radius: 50%;
-    pointer-events: none;
-    box-shadow: 0 0 0 1px rgba(0,0,0,.7), inset 0 0 0 8px rgba(0,0,0,.25);
-  }
-  .rotate-pivot::before,
-  .rotate-pivot::after {
-    content: '';
-    position: absolute;
-    background: rgba(255,255,255,.92);
-  }
-  .rotate-pivot::before { left: 50%; top: 5px; bottom: 5px; width: 1px; }
-  .rotate-pivot::after { top: 50%; left: 5px; right: 5px; height: 1px; }
   .picker-lead { margin-bottom: 13px; color: var(--text-2); font-size: var(--fs-sm); }
   .provider-kind { font-size: 12px; margin: 12px 0 6px; color: var(--text-3); }
   .provider-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; min-width: 0; }
@@ -2750,6 +2890,11 @@
   .output-choice small { margin-top: 2px; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.35; }
   .destination { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; align-items: center; padding-top: 13px; border-top: 1px solid var(--border); }
   .destination .field-label { grid-column: 1 / -1; }
+  .keep-choice { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: flex-start; gap: 9px; padding-top: 13px; border-top: 1px solid var(--border); cursor: pointer; }
+  .keep-choice span,
+  .keep-choice small { display: block; }
+  .keep-choice strong { color: var(--text-1); font-size: var(--fs-sm); }
+  .keep-choice small { margin-top: 2px; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.35; }
   .destination strong { overflow: hidden; color: var(--text-2); font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
   .destination-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
   .link { color: var(--accent); font-size: var(--fs-xs); }

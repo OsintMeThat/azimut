@@ -80,6 +80,8 @@ class CaptureIn(BaseModel):
     # acquisition date of the underlying imagery (Esri best-effort), resolved
     # client-side and recorded next to the capture timestamp (fetched_at)
     imagery_date: str | None = None
+    # false when that date is a provider's estimate rather than a named pass
+    imagery_exact: bool = True
     # marker (recorded point of interest): style + optional offset from center
     marker_style: str = Field(default="crosshair", pattern="^(crosshair|pin|none)$")
     marker_x: int = Field(default=0, ge=-tiles.SIZE_MAX, le=tiles.SIZE_MAX)
@@ -1075,6 +1077,8 @@ def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
     # two dates ride with a capture: fetched_at (when it was captured, set by
     # fetch_crop) and imagery_date (when the satellite scene was shot, if known)
     provenance["imagery_date"] = (body.imagery_date or "").strip() or None
+    if provenance["imagery_date"] and not body.imagery_exact:
+        provenance["imagery_exact"] = False
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     filename = f"sat_{stamp}_z{provenance['zoom']}_{provider.id}.png"

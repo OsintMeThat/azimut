@@ -85,6 +85,7 @@
     minus: "M5 12h14",
     crosshair: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0-1v4m0 12v4M2 12h4m12 0h4",
     satellite: "M9 4.2 3.6 6.4a1 1 0 0 0-.6.9v11.2a1 1 0 0 0 1.4.9L9 17.4l6 2.4 5.4-2.2a1 1 0 0 0 .6-.9V5.5a1 1 0 0 0-1.4-.9L15 6.6 9 4.2Zm0 0v13.2M15 6.6v13.2",
+    compare: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm8 0v14M7 9h2m6 6h2",
     proof: "M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm11.5 0v7m-3.5-3.5h7",
     screen: "M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm5 15h6m-3-4v4",
     alert: "M12 3 2.5 19.5h19L12 3Zm0 7v4m0 3.5h.01",
@@ -104,9 +105,12 @@
     );
   }
 
-  /** Which glyph a saved row is drawn with — `SavedOverlay.svelte`'s own map.
-   *  A stack holding more than one kind falls back to the place glyph. */
-  const SAVED_GLYPH = { place: "pin", capture: "satellite", screenshot: "screen" };
+  /** Which glyph a saved row is drawn with — `SavedOverlay.svelte`'s own map. */
+  const SAVED_GLYPH = { place: "pin", capture: "satellite", screenshot: "screen", comparison: "compare" };
+
+  /** The kinds a stack may mix and still draw as a capture — `geoTree.js`'s
+   *  `CAPTURE_KINDS`. Any other mix draws as a place (`markKind` in the app). */
+  const SAVED_CAPTURE_KINDS = ["capture", "screenshot", "comparison"];
 
   window.AzimutMapTheme = {
     TOKENS,
@@ -118,6 +122,7 @@
     MEASURE_DOT,
     ICONS,
     SAVED_GLYPH,
+    SAVED_CAPTURE_KINDS,
     icon,
   };
 })();

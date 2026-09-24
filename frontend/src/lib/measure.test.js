@@ -9,6 +9,7 @@ import {
   formatArea,
   formatAngle,
   destination,
+  orientedExtent,
 } from './measure.js';
 
 describe('haversine', () => {
@@ -186,5 +187,40 @@ describe('containsPoint', () => {
   it('is nothing at all without an area or a point', () => {
     expect(containsPoint(quay.slice(0, 2), { lat: 53.44, lon: 14.55 })).toBe(false);
     expect(containsPoint(quay, null)).toBe(false);
+  });
+});
+
+describe('orientedExtent', () => {
+  // A 200 m hull, 30 m across, lying 30° off north off Hodeidah.
+  const centre = { lat: 14.8, lon: 42.95 };
+  const corner = (along, across) => destination(destination(centre, 30, along), 120, across);
+  const hull = [corner(100, 15), corner(100, -15), corner(-100, -15), corner(-100, 15)];
+
+  it('measures a turned shape along its own sides, not the box squared to north', () => {
+    const { length, width } = orientedExtent(hull);
+    expect(length).toBeCloseTo(200, 0);
+    expect(width).toBeCloseTo(30, 0);
+    // the north-up box around the same hull calls it four times as wide
+    const lons = hull.map((p) => p.lon);
+    const across = haversine({ lat: centre.lat, lon: Math.min(...lons) }, { lat: centre.lat, lon: Math.max(...lons) });
+    expect(across).toBeGreaterThan(4 * width);
+  });
+
+  it('reads the long side first whichever way the points run', () => {
+    const { length, width } = orientedExtent([...hull].reverse());
+    expect(length).toBeGreaterThan(width);
+  });
+
+  it('gives a line its length and nothing across, and a point nothing at all', () => {
+    const line = orientedExtent([corner(100, 0), corner(-100, 0)]);
+    expect(line.length).toBeCloseTo(200, 0);
+    expect(line.width).toBe(0);
+    expect(orientedExtent([centre])).toEqual({ length: 0, width: 0 });
+    expect(orientedExtent([])).toBe(null);
+  });
+
+  it('keeps a shape across the antimeridian its own size', () => {
+    const { length } = orientedExtent([{ lat: 0, lon: 179.9995 }, { lat: 0, lon: -179.9995 }]);
+    expect(length).toBeCloseTo(111, 0);
   });
 });

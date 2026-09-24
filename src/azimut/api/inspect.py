@@ -1,5 +1,5 @@
-"""REST API for the Inspect tool: probe media, capture frames, apply
-adjustments, build collages, run analyses.
+"""REST API for the Examine tools: probe media, capture frames, apply
+adjustments, keep each file's work, lay out collages, run analyses.
 
 Outputs are filed as ordinary case media (they appear in the Media Library and
 the Proof Composer picker with zero extra plumbing). Long scans run as jobs.
@@ -7,21 +7,19 @@ the Proof Composer picker with zero extra plumbing). Long scans run as jobs.
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from .. import jobs
+from .. import layout
 from ..engine import artifacts as artifact_engine
 from ..engine import inspect as inspect_engine
-from ..engine import links as link_engine
+from ..engine import inspectwork
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
-from .naming import read_created_at, slugify
-from .. import layout
+from .naming import slugify
 
 router = APIRouter(prefix="/api", tags=["inspect"])
 
@@ -105,12 +103,17 @@ class AnalyzeIn(BaseModel):
     ops: list[Op] = []
 
 
-class SessionIn(BaseModel):
-    # The filename always follows the title, so renaming a saved session moves
-    # its file. ``rename_from`` is the stem the workspace is currently bound to
-    # (absent on a first save); a save that lands elsewhere renames that file in
-    # place instead of leaving a copy behind under the old name.
-    rename_from: str | None = None
+class WorkIn(BaseModel):
+    # The file the work belongs to. The spec holds its frames and their edits as
+    # recipes; `engine/inspectwork` documents the shape and bounds it.
+    path: str = Field(min_length=1)
+    spec: dict[str, Any]
+
+
+class CollageIn(BaseModel):
+    # The name the tool has the collage open under, absent for one never saved.
+    # A title different from it is a rename.
+    name: str | None = Field(default=None, max_length=200)
     title: str = Field(min_length=1, max_length=200)
     spec: dict[str, Any]
 
@@ -148,8 +151,8 @@ def suggest_frames(case_id: str, body: SuggestIn) -> dict[str, str]:
 def render_preview(case_id: str, body: RenderPreviewIn) -> Response:
     """Render a recipe (frame/image + ops) to a PNG — nothing is filed.
 
-    Backs collage snapshots and rebuilding tray/collage previews when a saved
-    session is reopened.
+    Backs frame previews and collage pieces, and rebuilding both when a work or
+    a collage is reopened.
     """
     case = get_case(case_id)
     ops = [op.model_dump() for op in body.ops]
@@ -164,7 +167,7 @@ def render_preview(case_id: str, body: RenderPreviewIn) -> Response:
 
 @router.post("/cases/{case_id}/inspect/save-frames")
 def save_frames(case_id: str, body: SaveFramesIn) -> dict[str, Any]:
-    """Commit selected tray frames to the case (Save gate)."""
+    """File frames as case media (Save to case)."""
     case = get_case(case_id)
     results = []
     try:
@@ -185,7 +188,7 @@ def save_frames(case_id: str, body: SaveFramesIn) -> dict[str, Any]:
 
 @router.post("/cases/{case_id}/inspect/compose")
 def compose(case_id: str, body: ComposeIn) -> dict[str, Any]:
-    """Composite a perspective-warped collage from tray/case images (Save gate)."""
+    """Composite a perspective-warped collage from frames and case images (Save to case)."""
     case = get_case(case_id)
     nodes: list[dict[str, Any]] = []
     for n in body.nodes:
@@ -227,26 +230,6 @@ def auto_stitch(case_id: str, body: StitchIn) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/cases/{case_id}/inspect/compose-preview")
-def compose_preview(case_id: str, body: ComposeIn) -> Response:
-    """Render the composited collage to a PNG for the Save tab — nothing is filed."""
-    case = get_case(case_id)
-    nodes: list[dict[str, Any]] = []
-    for n in body.nodes:
-        src = n.src.model_dump(exclude={"ops"})
-        src["ops"] = [op.model_dump() for op in n.src.ops]
-        nodes.append({"src": src, "quad": [list(pt) for pt in n.quad]})
-    try:
-        png = inspect_engine.compose_preview_png(
-            case, width=body.width, height=body.height, nodes=nodes, background=body.background,
-        )
-    except CaseError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except (ValueError, RuntimeError, OSError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return Response(content=png, media_type="image/png")
-
-
 @router.post("/cases/{case_id}/inspect/enhance-video")
 def enhance_video(case_id: str, body: EnhanceVideoIn) -> dict[str, Any]:
     """Re-encode a video with its adjustments and orientation, then file it."""
@@ -277,122 +260,102 @@ def analyze(case_id: str, body: AnalyzeIn) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Saveable workspace sessions (persist the whole Inspect scratch, reopen later).
-# Mirrors the proofs pattern: a JSON spec on disk + an upserted entity, so a
-# session reopens from the sidebar. Only recipes are stored (no pixels).
+# Work, one per file, saved as it is made; and collages, one document each.
+# `engine/inspectwork` owns both shapes and the merge that brought older
+# sessions into them.
 # ---------------------------------------------------------------------------
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+@router.get("/cases/{case_id}/inspect/works")
+def list_works(case_id: str) -> list[dict[str, Any]]:
+    return inspectwork.list_works(get_case(case_id))
 
 
-@router.get("/cases/{case_id}/inspect/sessions")
-def list_sessions(case_id: str) -> list[dict[str, Any]]:
-    case = get_case(case_id)
-    out = []
-    for spec_path in sorted(case.subdir(layout.INSPECT_DIR).glob("*.json")):
-        try:
-            spec = json.loads(spec_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if spec.get("azimut_inspect") != 1:
-            continue
-        # Sessions hold an array of collages; older ones held a single `collage`
-        # (the loader still reads both). Count the pieces across all of them.
-        collages = spec.get("collages") or (
-            [spec["collage"]] if isinstance(spec.get("collage"), dict) else []
-        )
-        out.append({
-            "name": spec_path.stem,
-            "title": spec.get("title", spec_path.stem),
-            "updated_at": spec.get("updated_at"),
-            "frames": len(spec.get("frames", [])),
-            "collages": len(collages),
-            "collage": sum(len(c.get("nodes", [])) for c in collages),
-            "source": spec.get("source", {}).get("path"),
-        })
-    out.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
-    return out
-
-
-@router.get("/cases/{case_id}/inspect/sessions/{name}")
-def load_session(case_id: str, name: str) -> dict[str, Any]:
+@router.get("/cases/{case_id}/inspect/work")
+def get_work(case_id: str, path: str) -> dict[str, Any]:
+    """The work saved for one file. Nothing done to it yet answers `work: null`."""
     case = get_case(case_id)
     try:
-        spec_path = case.resolve_inside(layout.session_rel(name))
+        return {"work": inspectwork.find_work(case, path)}
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/cases/{case_id}/inspect/works/{name}")
+def load_work(case_id: str, name: str) -> dict[str, Any]:
+    case = get_case(case_id)
+    try:
+        work = inspectwork.load_work(case, name)
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-    if not spec_path.exists():
-        raise HTTPException(status_code=404, detail="session not found")
-    return json.loads(spec_path.read_text(encoding="utf-8"))
+    if work is None:
+        raise HTTPException(status_code=404, detail="nothing was inspected under that name")
+    return work
 
 
-@router.post("/cases/{case_id}/inspect/sessions")
-def save_session(case_id: str, body: SessionIn) -> dict[str, Any]:
+@router.put("/cases/{case_id}/inspect/work")
+def save_work(case_id: str, body: WorkIn) -> dict[str, Any]:
     case = get_case(case_id)
-    case.subdir(layout.INSPECT_DIR)  # born on first save, so the folder exists
-    name = slugify(body.title, "Inspect")
-    rel = layout.session_rel(name)
-    spec_path = case.resolve_inside(rel)
-
-    # A rename lands on a free name or not at all: taking a name another session
-    # holds would leave two entities pointing at one file, and there is no sane
-    # merge of the two. The first save of an unbound workspace still writes over
-    # a same-named session — there the analyst is updating that one.
-    old = slugify(body.rename_from, "session") if body.rename_from else None
-    old_rel = layout.session_rel(old) if old and old != name else None
-    if old_rel and spec_path.exists():
-        raise HTTPException(status_code=409, detail="another session already uses that name")
-
-    spec = dict(body.spec)
-    spec["azimut_inspect"] = 1
-    spec["title"] = name
-    previous = case.resolve_inside(layout.session_rel(old or name))
-    spec.setdefault("created_at", read_created_at(previous) or _now())
-    spec["updated_at"] = _now()
-    spec_path.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-    # Rebind the entity the old name held rather than filing a second one, so a
-    # rename keeps the session's folder, notes and links.
-    existing = case.find_entity(attr="spec", value=old_rel or rel)
-    if existing:
-        patch: dict[str, Any] = {"label": name}
-        if old_rel:
-            patch["attrs"] = {"spec": rel}
-        case.update_entity(existing["id"], patch)
-        entity_id = existing["id"]
-    else:
-        entity_id = case.add_entity(
-            "inspect-session", name, attrs={"spec": rel}, by="inspect"
-        )["id"]
-    if old_rel:
-        case.resolve_inside(layout.session_rel(str(old))).unlink(missing_ok=True)
-
-    # A session is only adjustments and crops over its subject — nothing usable
-    # is left of it once the subject is gone, so it depends on it and is deleted
-    # with it (ONTOLOGY §3). Collage pieces pulled from the case are *not*
-    # subjects: losing one leaves a placeholder, it does not void the session.
-    link_engine.sync(
-        case,
-        entity_id,
-        link_engine.DEPENDS_ON,
-        [spec.get("source", {}).get("path")],
-        by="inspect",
-    )
-    return {"name": name, "title": name, "spec_path": rel}
+    try:
+        return inspectwork.save_work(case, body.path, body.spec)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.delete("/cases/{case_id}/inspect/sessions/{name}")
-def delete_session(case_id: str, name: str) -> dict[str, Any]:
+@router.delete("/cases/{case_id}/inspect/work")
+def delete_work(case_id: str, path: str) -> dict[str, Any]:
+    """Clear one file's work. It goes to the Trash, so the reset can be taken back."""
     case = get_case(case_id)
-    # Named the way the save named it — see `api/satellite.delete_search_grid`.
-    rel = layout.session_rel(slugify(name, "session"))
+    try:
+        rel = inspectwork.work_rel(case, path)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if rel is None:
+        return {"status": "deleted", "deleted": [], "tombstoned": []}
+    result = delete_by_path(case, rel)
+    if not result["deleted"]:  # never filed as an entity: drop the file anyway
+        artifact_engine.delete(case, {"type": inspectwork.WORK_TYPE, "attrs": {"spec": rel}})
+    return result
+
+
+@router.get("/cases/{case_id}/collages")
+def list_collages(case_id: str) -> list[dict[str, Any]]:
+    return inspectwork.list_collages(get_case(case_id))
+
+
+@router.get("/cases/{case_id}/collages/{name}")
+def load_collage(case_id: str, name: str) -> dict[str, Any]:
+    case = get_case(case_id)
+    try:
+        collage = inspectwork.load_collage(case, name)
+    except CaseError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if collage is None:
+        raise HTTPException(status_code=404, detail="collage not found")
+    return collage
+
+
+@router.post("/cases/{case_id}/collages")
+def save_collage(case_id: str, body: CollageIn) -> dict[str, Any]:
+    case = get_case(case_id)
+    try:
+        return inspectwork.save_collage(case, body.name, body.title, body.spec)
+    except inspectwork.NameTaken as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/cases/{case_id}/collages/{name}")
+def delete_collage(case_id: str, name: str) -> dict[str, Any]:
+    """Delete the layout. A picture already exported from it stays in Media."""
+    case = get_case(case_id)
+    rel = layout.collage_rel(slugify(name, "Collage"))
     try:
         case.resolve_inside(rel)
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     result = delete_by_path(case, rel)
-    if not result["deleted"]:  # never filed as an entity: drop the file anyway
-        artifact_engine.delete(case, {"type": "inspect-session", "attrs": {"spec": rel}})
+    if not result["deleted"]:
+        artifact_engine.delete(case, {"type": inspectwork.COLLAGE_TYPE, "attrs": {"spec": rel}})
     return result
