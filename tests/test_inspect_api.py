@@ -776,6 +776,7 @@ def test_render_preview_applies_ops_without_filing(client):
     assert len(client.get(f"/api/cases/{cid}/media").json()) == before  # nothing filed
 
 
+@pytest.mark.skipif(not media_engine.ffmpeg_available(), reason="ffmpeg not installed")
 def test_enhance_video_rejects_neutral_params(client, tmp_path):
     import subprocess
 
