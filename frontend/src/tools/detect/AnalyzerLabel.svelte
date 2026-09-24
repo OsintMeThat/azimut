@@ -6,7 +6,7 @@
 <details class="look">
   <summary>Label and colour</summary>
   <fieldset class="fields" disabled={readonly}>
-    <label title="The label each candidate carries. It does not change what is detected.">Candidate label
+    <label title="The label each candidate carries.">Candidate label
       <input bind:value={recipe.phenomenon} maxlength="120" />
     </label>
     <div class="row">

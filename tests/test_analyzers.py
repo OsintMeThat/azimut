@@ -151,6 +151,39 @@ def test_keeping_a_candidate_is_the_only_thing_that_reaches_the_case(client, sce
     assert client.get(endpoint + "/preview").status_code == 404
 
 
+def test_undoing_a_keep_takes_its_picture_along_and_the_trash_brings_all_back(client, scenario):
+    case, body = scenario
+    saved = run(client, case, body)
+    endpoint = f"/api/cases/{case.id}/analysis/runs/{saved['id']}/results/{saved['results'][0]['id']}"
+
+    # three hesitations leave nothing behind, however often the analyst changes their mind
+    for _ in range(3):
+        kept = client.post(endpoint + "/promote", json={"title": "Kept"}).json()
+        undone = client.delete(endpoint + "/promote").json()
+        assert case.find_entity(attr="path", value=kept["image"]) is None
+        assert not case.resolve_inside(kept["image"]).exists()
+    assert [e for e in case.list_entities() if e["type"] in ("place", "media")] == []
+
+    group = undone["deleted"]["trash"]
+    assert client.post(f"/api/cases/{case.id}/trash/{group}/restore").status_code == 200
+    kinds = sorted(e["type"] for e in case.list_entities())
+    assert "place" in kinds and "media" in kinds
+
+
+def test_undoing_a_keep_leaves_a_picture_a_proof_was_made_from(client, scenario):
+    case, body = scenario
+    saved = run(client, case, body)
+    endpoint = f"/api/cases/{case.id}/analysis/runs/{saved['id']}/results/{saved['results'][0]['id']}"
+    kept = client.post(endpoint + "/promote", json={"title": "Kept"}).json()
+    picture = case.find_entity(attr="path", value=kept["image"])
+    proof = case.add_entity("proof", "Built on it", attrs={}, by="user")
+    case.add_link(proof["id"], picture["id"], "derived-from", by="user")
+
+    client.delete(endpoint + "/promote")
+
+    assert case.find_entity(attr="path", value=kept["image"]) is not None
+
+
 def test_a_candidate_preview_is_enlarged_so_its_pixels_can_be_read(client, scenario):
     """Legibility comes from whole-number nearest-neighbour zoom, not smoothing."""
     case, body = scenario
@@ -694,12 +727,12 @@ def test_local_contrast_reads_a_target_against_its_own_patch_of_sea():
     water = np.ones((200, 200), bool)
     readings = []
     for patch in (calm, calm + 120):
-        empty, share = analyzers.local_contrast(patch, water, 61, 11)
+        empty, share, _ = analyzers.local_contrast(patch, water, 61, 11)
         assert share.min() > 0.99
         assert abs(empty[100, 100]) < 4
         target = patch.copy()
         target[99:102, 99:102] += 100
-        contrast, _ = analyzers.local_contrast(target, water, 61, 11)
+        contrast, _, _ = analyzers.local_contrast(target, water, 61, 11)
         readings.append(contrast[100, 100])
     assert min(readings) > 20
     assert abs(readings[0] - readings[1]) < 5
@@ -709,7 +742,7 @@ def test_local_contrast_treats_land_in_the_ring_as_missing_background():
     values = np.full((160, 160), 20.0)
     water = np.zeros((160, 160), bool)
     water[:, :40] = True
-    _, share = analyzers.local_contrast(values, water, 61, 11)
+    _, share, _ = analyzers.local_contrast(values, water, 61, 11)
     assert share[80, 5] > 0.9      # open sea
     assert share[80, 120] == 0     # inland, no water in the ring at all
     assert share[80, 60] < 0.5     # a shoreline is not somewhere a ship can be

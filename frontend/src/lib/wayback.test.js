@@ -4,7 +4,6 @@ import {
   changesKey,
   positionOf,
   releaseDate,
-  releaseOf,
   releaseYearBefore,
   stepRelease,
   validRelease,
@@ -35,13 +34,6 @@ describe('the id a release rides on', () => {
       expect(validRelease(bad)).toBe(false);
       expect(waybackId(WAYBACK_ID, bad)).toBe(WAYBACK_ID);
     }
-  });
-
-  it('reads the release back out of an id', () => {
-    expect(releaseOf('esri-wayback~64776')).toBe(64776);
-    expect(releaseOf('esri-wayback')).toBeNull();
-    expect(releaseOf('sentinel2~SWIR')).toBeNull();
-    expect(releaseOf('esri-wayback~../x')).toBeNull();
   });
 });
 

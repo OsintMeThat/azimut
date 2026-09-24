@@ -203,6 +203,19 @@ def test_a_signer_failure_cannot_serialize_the_secret(monkeypatch, tmp_path):
     assert "synthetic-secret" not in str(error.value)
 
 
+@pytest.mark.parametrize(
+    "doc",
+    [(REPO / "README.md").read_text(encoding="utf-8"), sign_extension.__doc__ or ""],
+    ids=["README", "script docstring"],
+)
+def test_the_signing_instructions_never_put_the_secret_on_a_command_line(doc):
+    # A secret typed at the prompt stays in the shell history, so the documented
+    # road reads it from a private file instead.
+    assert "export AMO_JWT_SECRET" not in doc
+    assert "AMO_JWT_SECRET=" not in doc
+    assert "source ~/.config/azimut/amo.env" in doc
+
+
 def test_completed_delivery_cannot_pass_with_an_empty_update_list(monkeypatch, gecko):
     empty = json.dumps({"addons": {gecko["id"]: {"updates": []}}}).encode()
     monkeypatch.setattr(

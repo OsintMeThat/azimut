@@ -1131,3 +1131,244 @@ def test_a_period_that_is_not_made_of_days_is_refused(client, case_id):
 
     assert client.patch(url, json={"period": {"start": "May", "end": ""}}).status_code == 422
     assert client.get(url).json()["period"] is None
+
+
+def test_a_name_with_a_hash_addresses_its_own_layer_once_encoded(client, case_id):
+    """The browser cuts an unencoded "#" off as a fragment, which reached "Ops"."""
+    from urllib.parse import quote
+
+    add(client, case_id, KML, "a.kml", title="Ops")
+    add(client, case_id, KML, "b.kml", title="Ops #2")
+    base = f"/api/cases/{case_id}/map-layers"
+
+    assert client.get(f"{base}/{quote('Ops #2', safe='')}/data").json()["type"] == "FeatureCollection"
+    assert client.delete(f"{base}/{quote('Ops #2', safe='')}").status_code == 200
+
+    assert [row["name"] for row in client.get(base).json()] == ["Ops"]
+
+
+# ---------------------------------------------------------------------------
+# A refresh reads for seconds; the analyst keeps working meanwhile
+# ---------------------------------------------------------------------------
+
+
+def _slow_refresh(client, case_id, monkeypatch, served: bytes):
+    """Start a refresh whose read waits for `release`, and hand back its handles."""
+    import threading
+
+    monkeypatch.setattr(maplayers, "fetch", lambda url: (KML, "s.kml"))
+    row = client.post(
+        f"/api/cases/{case_id}/map-layers", json={"url": "https://example.test/s.kml"}
+    ).json()
+    reading, release = threading.Event(), threading.Event()
+
+    def slow(url):
+        reading.set()
+        release.wait(10)
+        return served, "s.kml"
+
+    monkeypatch.setattr(maplayers, "fetch", slow)
+    outcome: dict = {}
+
+    def run():
+        try:
+            outcome["row"] = maplayers.refresh(Case.open(case_id), row["name"])
+        except maplayers.LayerError as exc:
+            outcome["error"] = str(exc)
+
+    worker = threading.Thread(target=run)
+    worker.start()
+    assert reading.wait(10)
+    return row, release, worker, outcome
+
+
+def test_a_setting_changed_while_a_refresh_reads_is_kept(client, case_id, monkeypatch):
+    # new bytes, same groups: the refresh has something to write
+    row, release, worker, outcome = _slow_refresh(client, case_id, monkeypatch, KML + b"\n")
+    group = row["categories"][0]["name"]
+
+    patched = client.patch(
+        f"/api/cases/{case_id}/map-layers/{row['name']}",
+        json={"hidden": [group], "title": "Renamed feed"},
+    )
+    release.set()
+    worker.join(10)
+
+    assert patched.status_code == 200
+    assert outcome["row"]["sha256"] == maplayers.digest(KML + b"\n")
+    [after] = client.get(f"/api/cases/{case_id}/map-layers").json()
+    assert after["title"] == "Renamed feed"
+    assert after["hidden"] == [group]
+
+
+def test_a_layer_deleted_while_a_refresh_reads_stays_deleted(client, case_id, monkeypatch):
+    row, release, worker, outcome = _slow_refresh(client, case_id, monkeypatch, KML + b"\n")
+
+    deleted = client.delete(f"/api/cases/{case_id}/map-layers/{row['name']}")
+    release.set()
+    worker.join(10)
+
+    assert deleted.status_code == 200
+    assert "removed while it was being read" in outcome["error"]
+    assert client.get(f"/api/cases/{case_id}/map-layers").json() == []
+    group = deleted.json()["trash"]
+    restored = client.post(f"/api/cases/{case_id}/trash/{group}/restore")
+    assert restored.status_code == 200, restored.text
+    assert [r["name"] for r in client.get(f"/api/cases/{case_id}/map-layers").json()] == [row["name"]]
+
+
+def test_two_layers_differing_only_by_case_get_two_names_and_still_export(client, case_id):
+    from azimut.engine import bundles
+
+    first = add(client, case_id, KML, "a.kml", title="Roads")
+    second = add(client, case_id, KML, "b.kml", title="roads")
+
+    assert first["name"] == "Roads"
+    assert second["name"].casefold() != "roads"
+    bundles.export_case(Case.open(case_id))
+
+
+def test_a_new_layer_does_not_take_the_name_of_one_in_the_trash(client, case_id):
+    first = add(client, case_id, KML, "a.kml", title="Roads")
+    group = client.delete(f"/api/cases/{case_id}/map-layers/{first['name']}").json()["trash"]
+
+    second = add(client, case_id, KML, "b.kml", title="Roads")
+
+    assert second["name"] != "Roads"
+    assert client.post(f"/api/cases/{case_id}/trash/{group}/restore").status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# An icons file somebody else made (it travels in bundles)
+# ---------------------------------------------------------------------------
+
+
+def _forged_icons(client, case_id, members: dict[str, tuple[bytes, int]]) -> tuple[str, str]:
+    row = add(client, case_id, KML, "s.kml")
+    path = Case.open(case_id).resolve_inside(layout.layer_icons_rel(row["name"]))
+    with zipfile.ZipFile(path, "w") as archive:
+        for member, (data, method) in members.items():
+            archive.writestr(member, data, compress_type=method)
+    return row["name"], f"/api/cases/{case_id}/map-layers/{row['name']}/icons"
+
+
+def test_an_icon_that_inflates_past_its_bound_is_never_read(client, case_id):
+    name, base = _forged_icons(client, case_id, {"abc.png": (b"\0" * (50 * 1024 * 1024), zipfile.ZIP_DEFLATED)})
+
+    assert client.get(f"{base}/abc").status_code == 404
+
+
+def test_an_icon_that_is_not_a_png_this_app_made_is_never_served(client, case_id):
+    tall = io.BytesIO()
+    Image.new("RGBA", (4000, 10)).save(tall, "PNG")
+    name, base = _forged_icons(client, case_id, {
+        "aaa.png": (b"<svg onload=alert(1)>", zipfile.ZIP_STORED),
+        "bbb.png": (tall.getvalue(), zipfile.ZIP_STORED),
+    })
+
+    assert client.get(f"{base}/aaa").status_code == 404
+    assert client.get(f"{base}/bbb").status_code == 404
+
+
+def test_a_damaged_icons_file_is_a_missing_icon_and_not_a_crash(client, case_id):
+    row = add(client, case_id, KML, "s.kml")
+    path = Case.open(case_id).resolve_inside(layout.layer_icons_rel(row["name"]))
+    icon = io.BytesIO()
+    Image.new("RGBA", (32, 32), (255, 0, 0, 255)).save(icon, "PNG")
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("abc.png", icon.getvalue() * 4, compress_type=zipfile.ZIP_DEFLATED)
+    raw = bytearray(path.read_bytes())
+    start = raw.index(b"abc.png") + len(b"abc.png")
+    raw[start + 10 : start + 30] = b"\xff" * 20  # inside the deflate stream
+    path.write_bytes(bytes(raw))
+
+    answer = client.get(f"/api/cases/{case_id}/map-layers/{row['name']}/icons/abc")
+
+    assert answer.status_code == 404
+
+
+def test_a_refresh_asks_no_icon_host_again_and_keeps_the_icons_it_has(client, case_id, monkeypatch):
+    """SPEC §9: a layer's icons leave on the tick at import and never afterwards."""
+    asked = []
+    monkeypatch.setattr(maplayers, "_fetch_icon", lambda href: (asked.append(href), png())[1])
+    served = [_many_icons(2, "https://icons.test/p.png")]
+    monkeypatch.setattr(maplayers, "fetch", lambda url: (served[0], "s.kml"))
+    row = client.post(
+        f"/api/cases/{case_id}/map-layers", json={"url": "https://example.test/s.kml"}
+    ).json()
+    assert row["icons"] == 2 and len(asked) == 2
+
+    served[0] = _many_icons(3, "https://icons.test/p.png")  # moved, with one icon more
+    moved = client.post(f"/api/cases/{case_id}/map-layers/{row['name']}/refresh").json()
+
+    assert len(asked) == 2, "the refresh asked the icon host nothing"
+    assert moved["icons"] == 2, "the two it had are kept, the new one is drawn as a shape"
+
+
+def test_a_received_followed_layer_reads_its_source_only_when_refreshed_here(client, case_id, monkeypatch):
+    from azimut.engine import bundles
+
+    monkeypatch.setattr(maplayers, "fetch", lambda url: (KML, "s.kml"))
+    row = client.post(
+        f"/api/cases/{case_id}/map-layers", json={"url": "https://sender.test/feed.kml"}
+    ).json()
+    assert row["refresh"]["on_open"] is True
+    exported = bundles.export_case(Case.open(case_id))
+
+    received = bundles.import_into(bundles.create_import_case("Received"), exported)
+
+    [layer] = client.get(f"/api/cases/{received['case_id']}/map-layers").json()
+    assert layer["refresh"]["on_open"] is False
+    assert layer["source"]["url"] == "https://sender.test/feed.kml"
+
+
+# ---------------------------------------------------------------------------
+# A damaged file is refused with a sentence, never a server error
+# ---------------------------------------------------------------------------
+
+
+def _patched_kmz(*, method: int | None = None, flags: int | None = None, damage: bool = False,
+                 deflate: bool = False) -> bytes:
+    import struct
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED if deflate else zipfile.ZIP_STORED) as archive:
+        archive.writestr("doc.kml", KML * (20 if deflate else 1))
+    raw = bytearray(buffer.getvalue())
+    local = raw.index(b"PK\x03\x04")
+    central = raw.index(b"PK\x01\x02")
+    if method is not None:
+        struct.pack_into("<H", raw, local + 8, method)
+        struct.pack_into("<H", raw, central + 10, method)
+    if flags is not None:
+        struct.pack_into("<H", raw, local + 6, flags)
+        struct.pack_into("<H", raw, central + 8, flags)
+    if damage:
+        start = local + 30 + len("doc.kml")
+        raw[start + 8 : start + 40] = b"\xff" * 32
+    return bytes(raw)
+
+
+@pytest.mark.parametrize(
+    "data, filename",
+    [
+        (_patched_kmz(damage=True), "bad-crc.kmz"),
+        (_patched_kmz(damage=True, deflate=True), "bad-deflate.kmz"),
+        (_patched_kmz(method=9), "deflate64.kmz"),
+        (_patched_kmz(flags=1), "encrypted.kmz"),
+        # deep enough to exhaust the JSON decoder's recursion on every Python
+        (b'{"type": "FeatureCollection", "features": ' + b"[" * 100_000 + b"]" * 100_000 + b"}", "deep.geojson"),
+    ],
+    ids=["bad-crc", "bad-deflate", "deflate64", "encrypted", "nested"],
+)
+def test_a_damaged_source_is_refused_with_a_sentence(client, case_id, data, filename):
+    with pytest.raises(maplayers.LayerError):
+        maplayers.parse(data, filename=filename)
+
+    response = client.post(
+        f"/api/cases/{case_id}/map-layers/upload",
+        files={"file": (filename, io.BytesIO(data), "application/octet-stream")},
+        data={"title": "", "icons": "false"},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]

@@ -33,8 +33,8 @@ azimut                # starts on http://127.0.0.1:8477 and opens a browser tab
 
 No Python? Every release attaches a self-contained binary for Windows, macOS
 (Apple Silicon) and Linux on the
-[Releases page](https://github.com/OsintMeThat/azimut/releases) — download, run,
-and it opens in your browser.
+[Releases page](https://github.com/OsintMeThat/azimut/releases). Download it, run
+it, and it opens in your browser.
 
 Your cases and settings live under `~/Azimut`, outside the app: upgrading or
 removing Azimut leaves them alone. [Install in detail](#install-in-detail) covers
@@ -140,20 +140,30 @@ opens Azimut in your browser.
 | Windows | `azimut-windows-x86_64.exe` |
 | macOS (Apple Silicon) | `azimut-macos-arm64` |
 | macOS (Intel, 14+) | No standalone binary; install with `pipx` or `pip` |
-| Linux | `azimut-linux-x86_64` |
+| Linux (glibc 2.38+) | `azimut-linux-x86_64` |
+
+The Linux binary needs glibc 2.38 or newer: Ubuntu 24.04, Debian 13, Fedora 39
+or later. On an older distribution (Ubuntu 22.04, Debian 12, RHEL 9), install
+with `pipx` instead.
 
 First run, the binaries are **unsigned**, so the OS warns before letting them
 open:
-- **macOS**: right-click the file → **Open** → **Open** (Gatekeeper only
-  offers "Open" from the context menu for unidentified developers), or run
-  `xattr -d com.apple.quarantine ./azimut-macos-*` once.
+- **macOS**: a browser download is neither executable nor trusted yet. In
+  Terminal, from the folder it landed in:
+  ```bash
+  chmod +x azimut-macos-arm64
+  xattr -d com.apple.quarantine azimut-macos-arm64
+  ./azimut-macos-arm64
+  ```
+  Instead of `xattr`, you can open it once and allow it in **System Settings →
+  Privacy & Security → Open Anyway**.
 - **Windows**: SmartScreen shows "Windows protected your PC"; click **More
   info** → **Run anyway**.
 - **Linux**: mark it executable with `chmod +x azimut-linux-x86_64`.
 
-Azimut checks for a newer release on startup by default and links the download.
-Settings can disable that check, and **Settings → System → Check for updates**
-runs it manually. Replace the old binary with the new one. To uninstall, delete
+On startup, Azimut asks GitHub for a newer release and PyPI for newer
+downloaders by default, and links the download. Settings can disable that check,
+and **Settings → System → Check for updates** runs it manually. Replace the old binary with the new one. To uninstall, delete
 the binary. Either way `~/Azimut` stays put, so cases open unchanged.
 
 The downloadable binaries bundle a static **ffmpeg** (and ffprobe), so video
@@ -165,7 +175,7 @@ The bundled ffmpeg is redistributed under its own license; see
 
 ### From source
 
-Requires Python 3.11+ and Node.js 20+ for the frontend build.
+Requires Python 3.11+ and Node.js 20.19+ or 22.12+ for the frontend build.
 
 macOS and Linux:
 
@@ -245,12 +255,12 @@ On a 2D map it can draw Azimut's own tools over the site: measure, the case's
 saved points, sun and moon, a search grid that opens in the app afterwards, and
 reference windows holding the case's own images and videos beside the imagery.
 The scale is measured off the map rather than assumed, so the tools switch
-themselves off — with the reason shown — on a view they cannot compute on.
+themselves off on a view they cannot compute on, and say why.
 
 On Chrome, Edge and Brave, install it from **Settings → Capture extension**: the
 app writes the extension into a folder it owns, you load that folder unpacked
 once and paste the pairing token. Because the app owns the folder, later updates
-are one button — it rewrites the files and the extension restarts itself.
+are one button: it rewrites the files and the extension restarts itself.
 
 Firefox refuses an unsigned extension and forgets an unpacked one on exit, so it
 installs the signed `azimut-capture-<version>.xpi` instead. **Settings → Capture
@@ -281,16 +291,19 @@ it back, and the release tag must match it.
 
 The capture extension keeps **its own** version: the app release that last
 changed a shipped file, so it lags whenever the extension is left alone.
-`tests/test_updates.py` digests what the extension ships and fails either way —
+`tests/test_updates.py` digests what the extension ships and fails either way:
 a change without a bump, or a bump without a change. When you do change the
 extension, set `extension/manifest.json` to the current app version and record
 the digest the failing test prints.
 
 Within a development cycle that version cannot move: it is already the app's own.
 So the update button compares the **digest** instead, which the installed folder
-records in its `install.json` — meaning any edit under `extension/` shows up as
+records in its `install.json`, so any edit under `extension/` shows up as
 an available update immediately, with no bump and no restart. That is also the
-loop for testing the updater (`docs/superpowers/specs/2026-09-10-extension-self-update-design.md`).
+loop for testing the updater: Settings → Capture extension → **Install**, load
+the extension from the folder it shows, edit a file under `extension/`, then
+reopen Settings. **Update** lights up, and pressing it
+rewrites the folder and reloads the extension.
 
 ### Signing the extension for Firefox
 
@@ -300,17 +313,19 @@ from publishing: `--channel unlisted` runs automated validation, puts no listing
 on addons.mozilla.org, and hands the file back.
 
 Run it **after** the release carrying that version exists, from a checkout of the
-tag, with credentials from the AMO developer hub:
+tag, with credentials from the AMO developer hub kept in a file outside the repo.
+Never type the secret at a prompt or pass it as an argument, where the shell
+history keeps it.
 
 ```bash
-export AMO_JWT_ISSUER=... AMO_JWT_SECRET=...
+source ~/.config/azimut/amo.env   # AMO_JWT_ISSUER + AMO_JWT_SECRET, 0600 file outside the repo
 python3 scripts/sign_extension.py                    # signs, writes packaging/updates.json
 gh release upload v0.3.1 dist-xpi/azimut-capture-0.3.1.xpi
 ```
 
 Then commit `packaging/updates.json`. That file is what
 `browser_specific_settings.gecko.update_url` points at, served raw from `main`,
-and Firefox re-reads it about once a day — so a release that changed the
+and Firefox re-reads it about once a day, so a release that changed the
 extension is not delivered to Firefox users until it lands on the branch.
 After that manifest PR is merged, verify the public manifest, asset URL and
 signed bytes together:
@@ -321,8 +336,8 @@ python3 scripts/sign_extension.py --verify-release
 
 Two rules the script enforces rather than trusts:
 
-- **It signs what the extension ships**, not the `extension/` directory —
-  `extinstall.shipped_files()`, so the XPI, the .zip and the folder the app owns
+- **It signs what the extension ships**, not the `extension/` directory
+  (`extinstall.shipped_files()`), so the XPI, the .zip and the folder the app owns
   are the same bytes.
 - **A version is signed once.** AMO refuses a second copy of one it already has,
   and the extension's version deliberately stays put across releases that leave

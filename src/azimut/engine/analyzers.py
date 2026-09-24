@@ -244,7 +244,7 @@ def relpath(kind: str, ident: str) -> str:
         raise ValueError("unknown analysis item")
     if len(ident) != 12:
         raise ValueError("unknown analysis item")
-    return f"{layout.ANALYSIS_DIR}/{kind}-{ident}.json"
+    return layout.analysis_rel(kind, ident)
 
 
 def read(case: Case, kind: str, ident: str) -> dict[str, Any]:
@@ -257,8 +257,18 @@ def read(case: Case, kind: str, ident: str) -> dict[str, Any]:
             if not saved.get("area_dates"):
                 saved = share_areas(case, saved, ident)
                 media.write_json_atomic(path, saved)
-            saved["zones"] = [area_zone(read(case, "areas", pair["area_id"])).model_dump()
-                              for pair in saved["area_dates"]]
+            # An area deleted for good leaves the routine openable, without it and
+            # saying so, rather than a file every listing silently skips.
+            zones, kept, missing = [], [], []
+            for pair in saved["area_dates"]:
+                try:
+                    zones.append(area_zone(read(case, "areas", pair["area_id"])).model_dump())
+                    kept.append(pair)
+                except FileNotFoundError:
+                    missing.append(pair["area_id"])
+            saved["zones"], saved["area_dates"] = zones, kept
+            if missing:
+                saved["missing_areas"] = missing
     return saved
 
 
@@ -567,9 +577,9 @@ def frame(case: Case, run: dict[str, Any], source: Source, x: int, y: int,
     z, size = GRID
     edge = size + 2 * PAD if product else size
     key = _key(source, z, x, y, product)
-    name = f"{key}.png"
-    assets_rel = layout.analysis_assets_rel(f"runs-{run['id']}")
-    destination = case.resolve_inside(f"{assets_rel}/{name}")
+    frame_rel = layout.analysis_asset_rel(run["id"], key)
+    name = frame_rel.rsplit("/", 1)[-1]
+    destination = case.resolve_inside(frame_rel)
     raw = None
     # Reuse permanent evidence from this case, including after a bundle import.
     for folder in case.subdir(layout.ANALYSIS_DIR).glob("runs-*.assets"):
@@ -630,7 +640,7 @@ def frame(case: Case, run: dict[str, Any], source: Source, x: int, y: int,
                 destination.write_bytes(raw)
             else:
                 Image.fromarray(pixels).save(destination, "PNG")
-        run["frames"][key] = {"path": f"{assets_rel}/{name}", "source": source.model_dump(),
+        run["frames"][key] = {"path": frame_rel, "source": source.model_dump(),
                               "tile": [z, x, y], "index": product,
                               "sha256": hashlib.sha256(destination.read_bytes()).hexdigest()}
     return pixels
@@ -676,11 +686,13 @@ def ring_statistics(values: Any, water: Any, outer: int, guard: int) -> tuple[An
     return mean, deviation, count / float(outer * outer - guard * guard)
 
 
-def local_contrast(values: Any, water: Any, outer: int, guard: int) -> tuple[Any, Any]:
+def local_contrast(values: Any, water: Any, outer: int, guard: int) -> tuple[Any, Any, Any]:
     """How far each pixel stands above the water around it, in deviations.
 
     A vessel is not bright, it is brighter than its own patch of sea — which is
     what lets one threshold work over a calm lagoon and a sunlit swell alike.
+    Returns the contrast, the share of water in each ring and the ring's mean,
+    which the vessel detector also reads the excess over.
     """
     import numpy as np
 
@@ -689,7 +701,7 @@ def local_contrast(values: Any, water: Any, outer: int, guard: int) -> tuple[Any
     # step would then read as a hundred-sigma detection. One digital number is
     # the floor because one digital number is the smallest difference there is.
     contrast = (values - mean) / np.maximum(deviation, 1.0)
-    return np.where(share > 0, contrast, 0.0), share
+    return np.where(share > 0, contrast, 0.0), share, mean
 
 
 def sun_position(day: str, lat: float) -> tuple[float, float]:
@@ -884,10 +896,8 @@ def _vessels(product: Any, inside: Any, blocked: Any, metres: float,
     # Land is non-water in bulk. A hull is non-water too, but a small one.
     land = components_over(data & ~wet, metres * metres, LAND_M2)
     land = cv2.dilate(land.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
-    mean8, deviation8, share = ring_statistics(nir, water, VESSEL_RING, VESSEL_GUARD)
-    mean11, deviation11, _ = ring_statistics(swir, water, VESSEL_RING, VESSEL_GUARD)
-    near = np.where(share > 0, (nir - mean8) / np.maximum(deviation8, 1.0), 0.0)
-    short = np.where(share > 0, (swir - mean11) / np.maximum(deviation11, 1.0), 0.0)
+    near, share, mean8 = local_contrast(nir, water, VESSEL_RING, VESSEL_GUARD)
+    short, _, mean11 = local_contrast(swir, water, VESSEL_RING, VESSEL_GUARD)
     unit = 255 * sentinel.BAND_GAIN
     ok = inside & data & ~blocked & ~land & (share > VESSEL_WATER_SHARE)
     # Calibrated between 3 deviations, where small boats start to show among

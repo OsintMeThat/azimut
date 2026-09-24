@@ -37,9 +37,6 @@ export const PALETTE = [
   '#9aa7ff',
 ];
 
-/** Past this a snapshot is old enough that the row says so before it redraws. */
-export const FRESH_FOR_HOURS = 24;
-
 /**
  * Whether a layer follows its source rather than holding a file: a pasted
  * address, or a GeoConfirmed conflict. Those are re-read on Refresh and on case

@@ -147,10 +147,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Empty means "not minted yet" — never a valid credential.
     "ingest_token": "",
     # App self-update pop-up (frontend App.svelte + engine/updates.py):
-    # - update_check_on_start: ask GitHub for the latest release when the page
-    #   loads, and pop a notice if one is newer. On by default so a binary user
-    #   (no package manager behind them) hears about releases; the one network
-    #   call Azimut makes on mount, and the toggle in Settings turns it off.
+    # - update_check_on_start: ask GitHub for the latest release, and PyPI for
+    #   the two downloaders, when the page loads, and pop a notice if one is
+    #   newer. On by default so a binary user (no package manager behind them)
+    #   hears about releases; the one check Azimut makes on mount, and the toggle
+    #   in Settings turns both halves off.
     # - update_dismissed_version: the release the user chose "don't show again"
     #   for. The pop-up stays quiet for that exact tag; a newer one shows again.
     "update_check_on_start": True,

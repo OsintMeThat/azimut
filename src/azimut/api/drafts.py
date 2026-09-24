@@ -19,9 +19,10 @@ from pydantic import BaseModel, Field
 
 from ..engine import artifacts as artifact_engine
 from ..engine import links as link_engine
+from ..engine import media as media_engine
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
-from .naming import read_created_at, slugify
+from .naming import case_only, holders, read_created_at, slugify
 from .. import layout
 
 router = APIRouter(prefix="/api", tags=["drafts"])
@@ -167,21 +168,32 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
     # holds would leave two entities pointing at one file, and there is no sane
     # merge of the two. The first save of an unbound composer still writes over
     # a same-named draft — there the analyst is updating that one.
+    # Taken is judged without case, the draft being saved excepted: two names that
+    # differ only by case are one file on Windows and macOS.
     old = slugify(body.rename_from, "draft") if body.rename_from else None
     old_rel = layout.draft_rel(old) if old and old != name else None
-    if old_rel and path.exists():
+    if holders(path.parent, name, source=old if old_rel else name):
         raise HTTPException(status_code=409, detail="another draft already uses that name")
+    recased = case_only(old, name)
+    if recased and old:
+        # One file under both names there: renamed in place, never deleted as "the old one".
+        source = case.resolve_inside(layout.draft_rel(old))
+        # The name asked for, not `path`'s: Windows resolves a path to the case
+        # already on disk.
+        if source.is_file():
+            path = source.with_name(PurePosixPath(rel).name)
+            media_engine.rename_path(source, path)
 
     data = {
         "azimut_draft": DRAFT_MARKER,
         "title": name,
-        "created_at": read_created_at(case.resolve_inside(layout.draft_rel(old or name))) or _now(),
+        "created_at": read_created_at(
+            path if recased else case.resolve_inside(layout.draft_rel(old or name))
+        ) or _now(),
         "updated_at": _now(),
         "state": body.state,
     }
-    path.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    media_engine.write_json_atomic(path, data)
 
     # upsert the post entity (analyst action → confirmed). A rename rebinds the
     # entity the old name held rather than filing a second one, so the draft
@@ -200,7 +212,7 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
             attrs={"draft": rel},
             by="post-composer",
         )["id"]
-    if old_rel:
+    if old_rel and not recased:
         case.resolve_inside(layout.draft_rel(str(old))).unlink(missing_ok=True)
 
     # A post is derived from the proof it announces and the media it attaches —

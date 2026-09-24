@@ -84,6 +84,60 @@ describe('focus', () => {
   });
 });
 
+describe('tone', () => {
+  const confirmButton = (label) =>
+    [...document.querySelectorAll('[role="alertdialog"] button')].find(
+      (b) => b.textContent.trim() === label
+    );
+
+  it('marks an action nothing comes back from as danger', () => {
+    open(ConfirmDialog, {
+      title: 'Empty the trash', message: 'x', tone: 'danger', confirmLabel: 'Empty', oncancel: () => {},
+    });
+    const dialog = document.querySelector('[role="alertdialog"]');
+
+    expect(dialog.classList.contains('danger')).toBe(true);
+    expect(dialog.querySelector('.badge').classList.contains('danger')).toBe(true);
+    expect(confirmButton('Empty').classList.contains('btn-danger')).toBe(true);
+  });
+
+  it('keeps the plain accent for a delete the trash can undo', () => {
+    open(ConfirmDialog, { title: 'Delete', message: 'x', confirmLabel: 'Delete', oncancel: () => {} });
+    const dialog = document.querySelector('[role="alertdialog"]');
+
+    expect(dialog.classList.contains('danger')).toBe(false);
+    expect(dialog.querySelector('.badge').classList.contains('danger')).toBe(false);
+    expect(confirmButton('Delete').classList.contains('btn-primary')).toBe(true);
+    expect(confirmButton('Delete').classList.contains('btn-danger')).toBe(false);
+  });
+});
+
+describe('consequences', () => {
+  it('shows what can come back apart from what goes with it and what is scarred', () => {
+    open(ConfirmDialog, {
+      title: 'Delete',
+      message: 'x',
+      consequences: { cascade: [{ label: 'Clip work' }], tombstone: [{ label: 'Harbour proof' }] },
+      restorable: 'Restore it from the trash',
+      oncancel: () => {},
+    });
+    const blocks = [...document.querySelectorAll('.conseq')];
+
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0].classList.contains('danger')).toBe(true);
+    expect(blocks[0].textContent).toContain('Clip work');
+    expect(blocks[1].textContent).toContain('Harbour proof');
+    const restorable = document.querySelector('.conseq.restorable');
+    expect(restorable.textContent.trim()).toBe('Restore it from the trash');
+    expect(restorable.classList.contains('danger')).toBe(false);
+  });
+
+  it('draws no consequence block when there is none to state', () => {
+    open(ConfirmDialog, { title: 'Delete', message: 'x', oncancel: () => {} });
+    expect(document.querySelector('.conseq')).toBeNull();
+  });
+});
+
 describe('enter', () => {
   it('is not answered by the window, so a stray press cannot confirm', () => {
     const onconfirm = vi.fn();

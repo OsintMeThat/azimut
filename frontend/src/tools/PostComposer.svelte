@@ -610,7 +610,7 @@
     }
     // Pull the proof's coordinates + source into the post so the fields fill in.
     try {
-      const spec = await api.get(`/api/cases/${caseState.current.id}/proofs/${item.name}`);
+      const spec = await api.get(`/api/cases/${caseState.current.id}/proofs/${encodeURIComponent(item.name)}`);
       // Its sentence, once the spec is here. The picker row carries a filename
       // and a thumbnail, so the title above was only ever a stand-in for this.
       if (blank && spec.description?.trim()) description = spec.description.trim();
@@ -792,7 +792,7 @@
     deleteEntry = null;
     try {
       const caseId = caseState.current.id;
-      const result = await api.del(`/api/cases/${caseId}/drafts/${entry.name}`);
+      const result = await api.del(`/api/cases/${caseId}/drafts/${encodeURIComponent(entry.name)}`);
       await Promise.all([openDraftList(), reloadCase()]);
       deletedToast(caseId, result, entry.title);
     } catch (e) {
@@ -803,7 +803,7 @@
   async function loadDraft(name) {
     if (!caseState.current) return;
     try {
-      const doc = await api.get(`/api/cases/${caseState.current.id}/drafts/${name}`);
+      const doc = await api.get(`/api/cases/${caseState.current.id}/drafts/${encodeURIComponent(name)}`);
       const s = doc.state ?? {};
       description = s.description ?? '';
       coordsText = s.coordsText ?? '';

@@ -32,14 +32,6 @@ export function radarId(baseId, pass) {
   return [baseId, pass.date, pass.time.replace(/:/g, '')].join(SEP);
 }
 
-/** …and back: the pass an id names, or null for the plain basemap. */
-export function passOf(providerId) {
-  const [base, day, time] = String(providerId ?? '').split(SEP);
-  if (base !== RADAR_ID || !DAY.test(day ?? '') || !/^\d{6}$/.test(time ?? '')) return null;
-  const pass = { date: day, time: `${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4)}` };
-  return validPass(pass) ? pass : null;
-}
-
 function minutes(time) {
   const [, hours, mins, secs] = TIME.exec(time);
   return Number(hours) * 60 + Number(mins) + (Number(secs) >= 30 ? 1 : 0);

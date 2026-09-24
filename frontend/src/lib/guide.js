@@ -55,8 +55,8 @@ export const GUIDE = [
         text: 'Azimut owns the azimut/ directory inside a case and leaves the rest of the folder alone. A closed case can be copied as it is.',
       },
       {
-        label: 'Nothing leaves this machine',
-        text: 'Network access follows an action that needs it, such as a map tile or a download. The one call made on its own is an optional check for a new release, and Settings turns it off.',
+        label: 'The network waits for you',
+        text: 'Network access follows an action that needs it, such as a map tile or a download. The one check made on its own asks GitHub and PyPI for new versions when the app opens, and Settings turns it off.',
       },
       {
         label: 'The rail is a sequence',
@@ -212,7 +212,7 @@ export const GUIDE = [
       },
       {
         label: 'Somebody else’s map over yours',
-        text: 'Add a layer opens a KML, KMZ, GeoJSON or GPX file, follows a public My Maps, or brings in a GeoConfirmed conflict by dates and area. Its legend and its time strip filter it, and nothing in it joins the case.',
+        text: 'Add a layer opens a KML, KMZ, GeoJSON or GPX file, follows a public My Maps, or brings in a GeoConfirmed conflict by dates and area. Its legend and its time strip filter it. It is saved with the case, and its features never become entities.',
       },
       {
         label: 'The search bar answers before it asks',
@@ -228,7 +228,7 @@ export const GUIDE = [
       },
       {
         label: 'Compare keeps the ground fixed',
-        text: 'Read two locked views side by side, by swipe, opacity or blink. On a matched pair, Difference highlights what changed over any of them; notes, shapes and stamped markers stay editable in the saved comparison and appear in its outputs.',
+        text: 'Read two locked views side by side, by swipe, fade or blink. On a matched pair, Difference highlights what changed over any of them; notes, shapes and stamped markers stay editable in the saved comparison and appear in its outputs.',
       },
       {
         label: 'All dates, and when it appeared',

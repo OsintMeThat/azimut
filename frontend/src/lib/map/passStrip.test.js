@@ -7,7 +7,6 @@ import {
   lookupPath,
   lookupWindow,
   nextProbe,
-  sidePatch,
   startBracket,
   stripArchive,
   stripEntries,
@@ -57,8 +56,6 @@ describe('the strip', () => {
       { release: 55, acquired: '2025-02-20' }, { release: 41, acquired: '2023-06-11' }] });
     expect(wayback.map((row) => row.release)).toEqual([41, 55]);
     expect(entryOf(wayback, 'esri-wayback', { wayback_release: null })).toBe(wayback[1]);
-    expect(sidePatch('esri-wayback', wayback[0])).toEqual({ wayback_release: 41 });
-    expect(sidePatch('sentinel1', radar[0])).toEqual({ radar: { date: '2026-05-02', time: '05:42:40' } });
   });
 });
 

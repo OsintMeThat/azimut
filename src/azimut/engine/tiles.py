@@ -465,6 +465,26 @@ def is_placeholder_tile(content: bytes) -> bool:
     return hashlib.sha256(content).hexdigest() in PLACEHOLDER_TILE_SHA256
 
 
+_ADDRESS = re.compile(r"https?://\S+")
+
+
+def upstream_failure(exc: BaseException) -> str:
+    """What a failed provider call says in the browser, and never its address.
+
+    An httpx error's text carries the URL it was sent to. For Sentinel Hub that
+    URL holds the whole instance id, for Mapbox, Google or FIRMS the key, and a
+    message lands in the page, the network log and the screenshot attached to a
+    bug report. So the answer names what went wrong and nothing it was sent with.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"the provider answered {exc.response.status_code}"
+    if isinstance(exc, httpx.TimeoutException):
+        return "the provider did not answer in time"
+    if isinstance(exc, httpx.HTTPError):
+        return f"the provider could not be reached ({type(exc).__name__})"
+    return _ADDRESS.sub("<address>", str(exc))
+
+
 def resolve_url(provider: Provider) -> str:
     """The provider's live XYZ template — session token substituted if needed."""
     if provider.session != "google":
@@ -472,7 +492,7 @@ def resolve_url(provider: Provider) -> str:
     try:
         return google_tiles.resolve_template(provider.url)
     except Exception as exc:
-        raise TileFetchError(f"Google session token: {exc}") from exc
+        raise TileFetchError(f"Google session token: {upstream_failure(exc)}") from exc
 
 
 def tile_url(url_template: str, z: int, x: int, y: int, zoom_offset: int = 0) -> str:

@@ -52,10 +52,6 @@ describe('what typing costs', () => {
   it('leaves the list alone when the geocoder request was dropped rather than answered', () => {
     expect(source).toContain('if (!body.busy) places = body.places ?? []');
   });
-
-  it('survives a failed suggestion without breaking the bar', () => {
-    expect(source).toContain('/* the bar still works without suggestions */');
-  });
 });
 
 describe('choosing', () => {
@@ -77,8 +73,8 @@ describe('choosing', () => {
     expect(source).toContain('function settle() {');
     expect(source).toContain('clearTimeout(localTimer);\n    clearTimeout(remoteTimer);');
     expect(source).toContain('function choose(item) {\n    settle();');
-    // …and the same when Enter hands the text to the bar's own search
-    expect(source).toContain("// the bar's own search takes it from here, and asks for itself");
+    // Enter handing the text to the bar's own search settles too, and a failed
+    // suggestion leaves the bar working: PlaceSearch.render.test.js mounts both.
   });
 
   it('remembers what was picked', () => {

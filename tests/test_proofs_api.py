@@ -1324,6 +1324,31 @@ def test_clearing_the_date_takes_it_off_the_entity(client):
     )
 
 
+@pytest.mark.parametrize("cleared", ["", None])
+def test_a_date_and_description_cleared_in_details_stay_cleared(client, cleared):
+    cid = client.post("/api/cases", json={"name": "Cleared in Details"}).json()["id"]
+    client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"title": "Dated", "spec": {**SPEC, "when": "2024-05-01", "description": "Seen from the bridge"}},
+    )
+    proof = next(e for e in graph_read.entities(cid) if e["type"] == "proof")
+
+    client.patch(
+        f"/api/cases/{cid}/entities/{proof['id']}", json={"attrs": {"when": cleared, "notes": cleared}}
+    )
+
+    opened = client.get(f"/api/cases/{cid}/proofs/Dated").json()
+    assert opened["when"] is None and opened["description"] is None
+    # the composer saves what it opened, and the date must not come back with it
+    client.post(f"/api/cases/{cid}/proofs", json={"rename_from": "Dated", "title": "Dated", "spec": opened})
+    proof = next(e for e in graph_read.entities(cid) if e["type"] == "proof")
+    assert proof["attrs"]["when"] == "" and proof["attrs"]["notes"] == ""
+    assert (
+        client.get(f"/api/cases/{cid}/timeline", params={"categories": "statement"}).json()["items"]
+        == []
+    )
+
+
 def test_a_description_edited_in_the_graph_is_what_reopens(client):
     cid = client.post("/api/cases", json={"name": "Edited notes"}).json()["id"]
     client.post(
@@ -1562,3 +1587,46 @@ def test_a_statement_reworded_by_hand_keeps_its_own_wording(client):
     restated = _claims(cid)[0]
     assert restated["label"] == "The convoy was filmed that morning"
     assert restated["attrs"]["when"] == "2024-03-12"  # the date is still restated
+
+
+def test_a_proof_named_with_a_hash_is_opened_and_deleted_on_its_own(client):
+    from urllib.parse import quote
+
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    for title in ("Ops", "Ops #2"):
+        client.post(f"/api/cases/{cid}/proofs", json={"title": title, "spec": SPEC, "png_base64": _png_b64()})
+
+    assert client.get(f"/api/cases/{cid}/proofs/{quote('Ops #2', safe='')}").json()["title"] == "Ops #2"
+    assert client.delete(f"/api/cases/{cid}/proofs/{quote('Ops #2', safe='')}").status_code == 200
+
+    assert [row["name"] for row in client.get(f"/api/cases/{cid}/proofs").json()] == ["Ops"]
+
+
+@pytest.mark.parametrize("folded", [False, True], ids=["linux", "windows-macos"])
+def test_a_change_of_case_renames_the_proof_and_its_picture_in_place(client, monkeypatch, folded):
+    import casefold
+
+    from azimut import layout
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    client.post(f"/api/cases/{cid}/proofs", json={"title": "Roof", "spec": SPEC, "png_base64": _png_b64()})
+    if folded:
+        casefold.fold_names(monkeypatch, "proofs")
+
+    renamed = client.post(
+        f"/api/cases/{cid}/proofs", json={"title": "roof", "rename_from": "Roof", "spec": SPEC}
+    )
+
+    assert renamed.status_code == 200, renamed.text
+    case = Case.open(cid)
+    assert [p.name for p in (case.tool_root / "proofs" / layout.META_DIR).glob("*.json")] == ["roof.json"]
+    assert [p.name for p in (case.tool_root / "proofs").glob("*.png")] == ["roof.png"]
+    assert client.get(f"/api/cases/{cid}/proofs/roof").json()["title"] == "roof"
+
+
+def test_two_proofs_differing_only_by_case_cannot_both_be_saved(client):
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    client.post(f"/api/cases/{cid}/proofs", json={"title": "Roof", "spec": SPEC})
+
+    assert client.post(f"/api/cases/{cid}/proofs", json={"title": "roof", "spec": SPEC}).status_code == 409

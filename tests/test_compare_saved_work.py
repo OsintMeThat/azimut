@@ -152,3 +152,32 @@ def test_opening_a_case_from_an_earlier_build_places_its_comparisons(client):
     assert (placed["attrs"]["lat"], placed["attrs"]["lon"]) == (48.8584, 2.2945)
     # left for the Locate pass: a migration never waits on a geocoder
     assert "geo" not in placed["attrs"]
+
+
+def test_a_deleted_comparisons_kept_images_never_join_a_new_one_of_its_name(client):
+    cid = _case(client, "Kept stay put")
+    _save(client, cid, "Harbour")
+    _keep(client, cid, "Harbour")
+    group = client.delete(f"/api/cases/{cid}/compare/sessions/Harbour").json()["trash"]
+    elsewhere = _spec()
+    elsewhere["camera"] = {**elsewhere["camera"], "lat": -33.86, "lon": 151.2}
+
+    fresh = _save(client, cid, "Harbour", elsewhere)
+
+    assert fresh.status_code == 200, fresh.text
+    assert fresh.json()["name"] != "Harbour", "a name in the Trash is not free"
+    assert _row(client, cid, fresh.json()["name"])["kept"] == []
+    # and the deleted one can still come back, with its image
+    assert client.post(f"/api/cases/{cid}/trash/{group}/restore").status_code == 200
+    assert len(_row(client, cid, "Harbour")["kept"]) == 1
+
+
+def test_a_rename_onto_a_name_in_the_trash_is_refused(client):
+    cid = _case(client, "Trash names")
+    _save(client, cid, "Harbour")
+    client.delete(f"/api/cases/{cid}/compare/sessions/Harbour")
+    _save(client, cid, "Quay")
+
+    refused = _save(client, cid, "Harbour", rename_from="Quay")
+
+    assert refused.status_code == 409 and "Trash" in refused.json()["detail"]

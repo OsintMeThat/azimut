@@ -297,11 +297,6 @@ def fill_files(
     return draft
 
 
-def drop_for_url(case: Case, token: str, slot: str, url: str) -> dict[str, Any]:
-    """Let go of what one address put in a slot, files and all."""
-    return fill_files(case, token, slot, [], for_url=url)
-
-
 def record_post(case: Case, token: str, post: dict[str, Any]) -> dict[str, Any]:
     """Keep what the platform said about the post, and what its text states."""
     draft = read_draft(case, token)

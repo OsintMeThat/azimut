@@ -555,7 +555,7 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
                hint="a CSV table in the case, edited as a grid"),
     # One per file: the frames cut from it and the edits over them, saved as they
     # are made. Nothing in it outlives the file, so it depends on it.
-    EntityType("inspect-session", "Inspect session", DOCUMENT, "inspect", ANNEX,
+    EntityType("inspect-session", "Inspect work", DOCUMENT, "inspect", ANNEX,
                hint="the frames and edits made over one file, which die with it"),
     # A layout of pieces from any number of files. Its pieces are recipes rather
     # than pixels, so a lost source leaves a gap rather than voiding the layout,
@@ -565,12 +565,12 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
     EntityType("compare-session", "Compare session", DOCUMENT, "compare", ANNEX,
                hint="two map sources, their layers and the shared camera"),
     EntityType("analysis-zones", "Analysis areas", DOCUMENT, "polygon", ANNEX,
-               hint="saved geographic areas reusable by any Compare analyzer"),
+               hint="saved geographic areas reusable by any Detect analyzer"),
     EntityType("analysis-area", "Area", DOCUMENT, "mapArea", ANNEX,
                hint="a named area shared by detections in this case"),
-    # Named "watch" everywhere a user reads it: the type id is storage, and
+    # Named "routine" everywhere a user reads it: the type id is storage, and
     # renaming that would migrate files for a word nobody sees.
-    EntityType("analysis-follow-up", "Analysis watch", DOCUMENT, "clock", ANNEX,
+    EntityType("analysis-follow-up", "Detect routine", DOCUMENT, "clock", ANNEX,
                hint="an analyzer, its areas and a date rule, rerun on demand"),
     EntityType("analysis-run", "Analysis run", DOCUMENT, "changes", ANNEX,
                hint="candidate detections with frozen inputs and review decisions"),

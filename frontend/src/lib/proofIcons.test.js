@@ -5,7 +5,6 @@ import {
   PROOF_ICONS,
   glyphInk,
   iconAnchor,
-  iconBox,
   iconByName,
   iconOrigin,
   iconSizeFor,
@@ -60,9 +59,13 @@ describe('where a symbol sits', () => {
   });
 
   it('keeps the pin’s tip still while it is resized', () => {
-    const pin = { name: 'point', x: 300, y: 200 };
-    const small = iconBox({ ...pin, size: 40 });
-    const large = iconBox({ ...pin, size: 120 });
+    // the box a pin stored at (300, 200) covers, drawn at `size`
+    const boxAt = (size) => {
+      const origin = iconOrigin('point', size);
+      return { x: 300 + origin.x, y: 200 + origin.y, w: size, h: size };
+    };
+    const small = boxAt(40);
+    const large = boxAt(120);
     // the tip is the anchor, so it reads the same out of both boxes
     const tipOf = (box) => ({ x: box.x + box.w / 2, y: box.y + box.h * (22.4 / ICON_BOX) });
     expect(tipOf(small).x).toBeCloseTo(tipOf(large).x);

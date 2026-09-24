@@ -33,6 +33,7 @@ import io
 import json
 import warnings
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -47,7 +48,7 @@ from ..engine import links as link_engine
 from ..engine import media as media_engine
 from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
-from .naming import read_created_at, slugify
+from .naming import case_only, holders, read_created_at, slugify
 from .satellite import locate_on_save, saved_changed
 
 router = APIRouter(prefix="/api", tags=["compare"])
@@ -464,18 +465,56 @@ def load_session(case_id: str, name: str) -> dict[str, Any]:
 @router.post("/cases/{case_id}/compare/sessions")
 def save_session(case_id: str, body: SessionIn) -> dict[str, Any]:
     case = get_case(case_id)
-    case.subdir(layout.COMPARE_DIR).mkdir(parents=True, exist_ok=True)
+    with case.lock:
+        saved, located = _save_session(case, body)
+    # Outside the lock: locating the point may ask a geocoder for its country.
+    if located:
+        locate_on_save(case, *located)
+    saved_changed(case)
+    return saved
+
+
+def _save_session(
+    case: Case, body: SessionIn
+) -> tuple[dict[str, Any], tuple[str, float, float] | None]:
+    """Names answer to Windows and macOS, and to the Trash.
+
+    A name is taken by another comparison whatever its case, since two that differ
+    only by case are one file on two of the three systems. A name in the Trash is
+    not free either: the kept images of the deleted comparison still point at it,
+    and would attach themselves to a new one standing somewhere else.
+    """
+    folder = case.subdir(layout.COMPARE_DIR)
     name = slugify(body.title, "Comparison")
-    rel = layout.compare_session_rel(name)
-    path = case.resolve_inside(rel)
     old = slugify(body.rename_from, "Comparison") if body.rename_from else None
     old_rel = layout.compare_session_rel(old) if old and old != name else None
-    if old_rel and path.exists():
-        raise HTTPException(status_code=409, detail="another comparison already uses that name")
-    if body.rename_from is None and path.exists() and not body.overwrite:
-        raise HTTPException(status_code=409, detail="a comparison already uses that name")
+    trashed = case.trashed_stems(layout.COMPARE_DIR)
+    if old_rel:
+        if holders(folder, name, source=old):
+            raise HTTPException(status_code=409, detail="another comparison already uses that name")
+        if name.casefold() in trashed and not case_only(old, name):
+            raise HTTPException(
+                status_code=409, detail="a comparison in the Trash uses that name"
+            )
+    elif body.rename_from is None:
+        if holders(folder, name, source=name if body.overwrite else None):
+            raise HTTPException(status_code=409, detail="a comparison already uses that name")
+        if name.casefold() in trashed:
+            taken = {p.stem.casefold() for p in folder.glob("*.json")} | trashed
+            name = layout.free_stem(taken, name, "Comparison")
+    rel = layout.compare_session_rel(name)
+    path = case.resolve_inside(rel)
+    if old_rel and case_only(old, name):
+        source = case.resolve_inside(old_rel)
+        # The name asked for, not `path`'s: Windows resolves a path to the case
+        # already on disk.
+        if source.is_file():
+            path = source.with_name(PurePosixPath(rel).name)
+            media_engine.rename_path(source, path)
 
-    previous = case.resolve_inside(layout.compare_session_rel(old or name))
+    previous = path if old_rel and case_only(old, name) else case.resolve_inside(
+        layout.compare_session_rel(old or name)
+    )
     reading = _validated_spec(body.spec)
     saved = {
         "azimut_compare": 1,
@@ -499,11 +538,10 @@ def save_session(case_id: str, body: SessionIn) -> dict[str, Any]:
                                     by="compare")["id"]
     if old_rel:
         comparisons.follow_rename(case, old_rel, rel)
-        case.resolve_inside(old_rel).unlink(missing_ok=True)
-    if stale:
-        locate_on_save(case, entity_id, placed["lat"], placed["lon"])
-    saved_changed(case)
-    return {"name": name, "title": name, "spec_path": rel}
+        if not case_only(old, name):
+            case.resolve_inside(old_rel).unlink(missing_ok=True)
+    located = (entity_id, placed["lat"], placed["lon"]) if stale else None
+    return {"name": name, "title": name, "spec_path": rel}, located
 
 
 def _gif_bytes(a: Image.Image, b: Image.Image, animation: str, interval: int = 700) -> bytes:
@@ -836,6 +874,6 @@ def sentinel_frame(body: BandFrameIn) -> Response:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         config.record_usage("sentinelhub", 1)
-        raise HTTPException(status_code=502, detail=f"band request failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"band request failed: {tiles.upstream_failure(exc)}") from exc
     config.record_usage("sentinelhub", 1)
     return Response(content=data, media_type="image/png", headers={"Cache-Control": "no-store"})

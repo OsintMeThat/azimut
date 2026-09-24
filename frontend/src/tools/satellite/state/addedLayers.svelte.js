@@ -159,7 +159,7 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     renewed.add(layer.name);
     return act(layer.name, async () => {
       try {
-        const row = await api.post(`/api/cases/${caseId}/map-layers/${layer.name}/refresh`);
+        const row = await api.post(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}/refresh`);
         if (loadedFor !== caseId) return;
         if (row.sha256 !== layer.sha256) forget(row.name);
         replace(row);
@@ -178,7 +178,7 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
    */
   async function drawing(caseId, name) {
     if (drawings.has(name)) return drawings.get(name);
-    const data = await api.get(`/api/cases/${caseId}/map-layers/${name}/data`, {
+    const data = await api.get(`/api/cases/${caseId}/map-layers/${encodeURIComponent(name)}/data`, {
       cache: 'no-cache',
     });
     drawings.set(name, data);
@@ -262,7 +262,7 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
   }
 
   async function patch(caseId, name, body) {
-    const row = await api.patch(`/api/cases/${caseId}/map-layers/${name}`, body);
+    const row = await api.patch(`/api/cases/${caseId}/map-layers/${encodeURIComponent(name)}`, body);
     replace(row);
     return row;
   }
@@ -402,7 +402,7 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     refresh(caseId, layer) {
       return act(layer.name, async () => {
         try {
-          const row = await api.post(`/api/cases/${caseId}/map-layers/${layer.name}/refresh`);
+          const row = await api.post(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}/refresh`);
           if (row.sha256 !== layer.sha256) forget(row.name);
           replace(row);
           notify(
@@ -418,7 +418,7 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase }) 
     async remove(caseId, layer) {
       return act(layer.name, async () => {
         try {
-          await api.del(`/api/cases/${caseId}/map-layers/${layer.name}`);
+          await api.del(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}`);
           forget(layer.name);
           show(layer.name, false);
           renewed.delete(layer.name);

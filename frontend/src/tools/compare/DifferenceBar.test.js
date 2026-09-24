@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import DifferenceBar from './DifferenceBar.svelte';
 import { changeSettings } from '../../lib/map/changeAssist.js';
 
@@ -31,6 +34,21 @@ const base = (target, label) =>
     .find((entry) => entry.textContent.trim() === label);
 
 describe('Difference strip', () => {
+  it('keeps every tooltip to one short clause', () => {
+    // The settings sit on three tabs, so the written titles are read off the
+    // component rather than opened one tab at a time.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const source = readFileSync(join(here, 'DifferenceBar.svelte'), 'utf8');
+    const tips = [...source.matchAll(/title=(?:"([^"]*)"|\{([^}]*)\})/g)].flatMap(([, text, code]) =>
+      text !== undefined ? [text] : [...code.matchAll(/'([^']+)'|`([^`]+)`/g)].map((m) => m[1] ?? m[2]));
+
+    expect(tips.length).toBeGreaterThan(15);
+    for (const tip of tips) {
+      expect(tip.length, tip).toBeLessThanOrEqual(60);
+      expect(tip, tip).not.toContain(';');
+    }
+  });
+
   it('keeps an index reading as a Detect analyzer, and offers nothing for the picture methods', () => {
     const onanalyzer = vi.fn();
     const index = render({ settings: changeSettings({ method: 'index', index: 'nbr' }),

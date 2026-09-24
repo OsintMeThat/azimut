@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import json
 
+import casefold
 import graph_read
 import pytest
 from PIL import Image
@@ -232,7 +233,7 @@ def test_a_name_the_app_derived_from_the_file_describes_nothing():
     long = "@Suriyak - The second phase of Operation: what the convoy footage shows, day 2"
     cut = layout.slugify(long, "Inspect")
     assert inspectwork._describes_nothing(cut, long)
-    assert inspectwork._describes_nothing(inspectwork._free_title({cut.casefold()}, long, "Inspect"), long)
+    assert inspectwork._describes_nothing(layout.free_stem({cut.casefold()}, long, "Inspect"), long)
     assert inspectwork._describes_nothing(layout.slugify("Strike: day 2?", "Inspect"), "Strike: day 2?")
     assert inspectwork._describes_nothing("Roof 3", "Roof")
     assert not inspectwork._describes_nothing("Roof pass", "Roof")
@@ -366,6 +367,29 @@ def test_renaming_a_collage_moves_its_file_and_keeps_its_entity(client):
     assert after["id"] == before["id"]
     assert after["attrs"]["spec"] == ".collages/Harbour strip.json"
     assert client.get(f"/api/cases/{cid}/collages/Strip").status_code == 404
+
+
+@pytest.mark.parametrize("folded", [False, True], ids=["linux", "windows-macos"])
+def test_a_change_of_case_renames_the_collage_and_keeps_it(client, monkeypatch, folded):
+    cid = _case(client)
+    photo = _upload(client, cid, "roof.png")
+    _save_collage(client, cid, "Harbour strip", [_piece(photo)])
+    [before] = _of_type(cid, "collage")
+    if folded:
+        casefold.fold_names(monkeypatch, layout.COLLAGE_DIR)
+
+    renamed = _save_collage(client, cid, "harbour strip", [_piece(photo)], name="Harbour strip")
+
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "harbour strip"
+    folder = Case.open(cid).tool_root / layout.COLLAGE_DIR
+    assert [p.name for p in folder.glob("*.json")] == ["harbour strip.json"]
+    [after] = _of_type(cid, "collage")
+    assert after["id"] == before["id"]
+    assert after["attrs"]["spec"] == ".collages/harbour strip.json"
+    loaded = client.get(f"/api/cases/{cid}/collages/harbour strip")
+    assert loaded.status_code == 200
+    assert [n["id"] for n in loaded.json()["spec"]["nodes"]] == ["nd_1"]
 
 
 def test_a_collage_cannot_be_renamed_onto_another(client):
@@ -637,3 +661,34 @@ def test_restoring_a_pre_0_3_1_session_from_the_trash_merges_it(client):
     assert [f["id"] for f in spec["frames"]] == ["fr_now", "fr_then"]
     assert [e["label"] for e in _of_type(cid, "collage")] == ["Old pass"]
     assert "Merged with “Old pass”." in work["attrs"]["notes"]
+
+
+def test_a_0_3_0_copy_leaves_with_its_file_and_never_travels(client):
+    import zipfile
+
+    from azimut.engine import bundles
+
+    cid = _case(client)
+    roof = _upload(client, cid, "roof.png", (1, 1, 1))
+    gate = _upload(client, cid, "gate.png", (2, 2, 2))
+    case = Case.open(cid)
+    _legacy_session(case, "Roof pass", roof, frames=[_frame(roof)])
+    _legacy_session(case, "Gate pass", gate, frames=[_frame(gate)])
+    opened = _as_0_3_0(case)
+    roof_copy = opened.resolve_inside(layout.legacy_session_rel("Roof pass"))
+    gate_copy = opened.resolve_inside(layout.legacy_session_rel("Gate pass"))
+    assert roof_copy.is_file() and gate_copy.is_file()
+
+    exported = bundles.export_case(opened)
+    with zipfile.ZipFile(exported) as archive:
+        assert not [n for n in archive.namelist() if "/.inspect/.v1/" in n]
+
+    photo = graph_read.entity(cid, path=roof)
+    group = client.delete(f"/api/cases/{cid}/entities/{photo['id']}").json()["trash"]
+    # still in the Trash: the file can come back, and so may the need to undo the merge
+    assert roof_copy.is_file()
+
+    assert client.delete(f"/api/cases/{cid}/trash/{group}").status_code == 200
+
+    assert not roof_copy.exists()
+    assert gate_copy.is_file(), "a file still in the case keeps its copy"

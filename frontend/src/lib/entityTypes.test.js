@@ -127,10 +127,9 @@ describe('the entity vocabulary', () => {
     expect(marked.map((f) => f.heads)).toEqual(['', '']);
   });
 
-  it('names the families in registry order, which is what the board filters by', async () => {
+  it('lists the types in registry order', async () => {
     await mod.loadEntityTypes();
 
-    expect(mod.entityFamilies()).toEqual(['actor', 'place', 'collected', 'document']);
     expect(mod.entityTypes().map((e) => e.type)).toEqual(['person', 'place', 'media', 'bookmark']);
   });
 
@@ -157,8 +156,6 @@ describe('the entity vocabulary', () => {
     // a media is born from an import and a place from a save, so neither belongs
     // in a create menu
     expect(mod.creatableTypes().map((e) => e.type)).toEqual(['person']);
-    expect(mod.isManualEntityType('person')).toBe(true);
-    expect(mod.isManualEntityType('media')).toBe(false);
   });
 
   it('says which types have presentation photos', async () => {

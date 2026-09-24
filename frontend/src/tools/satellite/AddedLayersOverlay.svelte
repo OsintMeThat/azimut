@@ -38,7 +38,7 @@
    */
   function iconUrlFor(row) {
     if (!row.icons) return null;
-    const base = `/api/cases/${caseId}/map-layers/${row.name}/icons`;
+    const base = `/api/cases/${caseId}/map-layers/${encodeURIComponent(row.name)}/icons`;
     return (key) => `${base}/${key}`;
   }
 

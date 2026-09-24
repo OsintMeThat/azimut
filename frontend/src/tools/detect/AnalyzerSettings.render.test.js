@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import AnalyzerSettings from './AnalyzerSettings.svelte';
 
 /** A threshold is shown only where the method reads it, in the unit it reads it in. */
@@ -34,4 +37,23 @@ it('offers no cleanup or smoothing to a method that reads one image', () => {
   expect(text).not.toContain('Noise cleanup');
   expect(text).not.toContain('Smoothing');
   expect(text).toContain('Group within');
+});
+
+it('keeps the builder notes to one sentence and its tooltips to one clause', () => {
+  // Read off the components themselves: most of these sit behind a mode, a tab
+  // or a readonly state that no single mount reaches.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const files = readdirSync(here).filter((name) => /^Analyzer\w*\.svelte$/.test(name));
+  expect(files.length).toBeGreaterThan(4);
+  for (const name of files) {
+    const source = readFileSync(join(here, name), 'utf8');
+    for (const [, body] of source.matchAll(/<p class="(?:hint|note)[^"]*"[^>]*>([\s\S]*?)<\/p>/g)) {
+      const note = body.replace(/\{[^}]*\}/g, 'x').replace(/\s+/g, ' ').trim();
+      expect(note.replace(/[.?!]$/, ''), `${name}: ${note}`).not.toMatch(/[.?!] |;/);
+    }
+    for (const [, tip] of source.matchAll(/title="([^"]*)"/g)) {
+      expect(tip.length, `${name}: ${tip}`).toBeLessThanOrEqual(60);
+      expect(tip.replace(/[.?!]$/, ''), `${name}: ${tip}`).not.toMatch(/[.?!] |;/);
+    }
+  }
 });

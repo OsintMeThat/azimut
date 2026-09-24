@@ -472,7 +472,7 @@ export function createGridState({
     const marks = unsent;
     unsent = {};
     try {
-      const answer = await api.post(`/api/cases/${id}/search-grids/${slug}/marks`, { marks });
+      const answer = await api.post(`/api/cases/${id}/search-grids/${encodeURIComponent(slug)}/marks`, { marks });
       if (name === slug) baseRevision = answer?.revision ?? baseRevision;
     } catch (e) {
       // Put them back, without stepping on any made since: a mark that has been
@@ -492,7 +492,7 @@ export function createGridState({
     unsent = {};
     try {
       const spec = JSON.parse(JSON.stringify(grid)); // strip the $state proxy
-      const saved = await api.put(`/api/cases/${id}/search-grids/${slug}`, {
+      const saved = await api.put(`/api/cases/${id}/search-grids/${encodeURIComponent(slug)}`, {
         spec,
         title: grid.title,
         base_revision: baseRevision,
@@ -514,7 +514,7 @@ export function createGridState({
   async function saveOverTheirMarks(slug) {
     const id = caseId();
     try {
-      const fresh = await api.get(`/api/cases/${id}/search-grids/${slug}`);
+      const fresh = await api.get(`/api/cases/${id}/search-grids/${encodeURIComponent(slug)}`);
       if (name !== slug) return; // moved on already
       grid.statuses = mergedStatuses(fresh);
       baseRevision = fresh.revision ?? 0;
@@ -549,7 +549,7 @@ export function createGridState({
     const id = caseId();
     if (!id || specDirty) return;
     try {
-      const fresh = await api.get(`/api/cases/${id}/search-grids/${slug}`);
+      const fresh = await api.get(`/api/cases/${id}/search-grids/${encodeURIComponent(slug)}`);
       if (name !== slug) return;
       const statuses = mergedStatuses(fresh);
       grid = { ...fresh, statuses };
@@ -829,7 +829,7 @@ export function createGridState({
       hidden = false;
       await flushSave(); // persist the grid we're leaving
       try {
-        grid = await api.get(`/api/cases/${id}/search-grids/${slug}`);
+        grid = await api.get(`/api/cases/${id}/search-grids/${encodeURIComponent(slug)}`);
         name = slug;
         unsent = {}; // whatever is left belonged to the grid we just left
         specDirty = false;
@@ -855,7 +855,7 @@ export function createGridState({
       const id = caseId();
       if (id) {
         try {
-          await api.del(`/api/cases/${id}/search-grids/${slug}`);
+          await api.del(`/api/cases/${id}/search-grids/${encodeURIComponent(slug)}`);
         } catch {
           /* the file may already be gone — nothing left to do */
         }

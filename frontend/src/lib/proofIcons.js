@@ -133,13 +133,6 @@ export function iconOrigin(name, size) {
   return { x: -ax * size, y: -ay * size };
 }
 
-/** Box a placed symbol covers, in the surface's natural pixels. */
-export function iconBox(shape) {
-  const size = shape.size ?? ICON_SIZE_DEFAULT;
-  const origin = iconOrigin(shape.name, size);
-  return { x: (shape.x ?? 0) + origin.x, y: (shape.y ?? 0) + origin.y, w: size, h: size };
-}
-
 /**
  * Placed side in natural pixels, so a symbol reads the same on a 4000px frame
  * and an 800px one. Mirrors how stroke width is normalised by `baseScale`.

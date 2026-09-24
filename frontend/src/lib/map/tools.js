@@ -102,33 +102,6 @@ export const MAP_ACTIONS = [
   },
 ];
 
-/**
- * What can be drawn over the imagery.
- *
- * These never take a rail seat. That distinction is the point of the rework:
- * the old cluster mixed "what I am doing" with "what is shown", and put OSM
- * labels and saved pins in a toolbox.
- *
- * `handoff: true` marks a layer that only exists because another tool sent
- * something here — a sheet's coordinate column, a Timeline window. It appears
- * in the list when it arrives and leaves when it is closed, so it is never an
- * empty switch.
- */
-export const MAP_LAYERS = [
-  { id: 'labels', label: 'OSM labels', icon: 'text' },
-  { id: 'boundaries', label: 'Borders', icon: 'polygon' },
-  { id: 'roads', label: 'Roads', icon: 'line' },
-  { id: 'railway', label: 'OSM railways', icon: 'line' },
-  { id: 'power', label: 'Power lines', icon: 'network' },
-  { id: 'seamarks', label: 'Sea marks', icon: 'ship' },
-  { id: 'gpstraces', label: 'GPS traces', icon: 'freehand' },
-  { id: 'firms', label: 'Active fires', icon: 'flame' },
-  { id: 'nightlights', label: 'Night lights', icon: 'moon' },
-  { id: 'saved', label: 'Saved work', icon: 'pin' },
-  { id: 'sheet', label: 'Sheet points', icon: 'table', handoff: true },
-  { id: 'timeline', label: 'Timeline points', icon: 'clock', handoff: true },
-];
-
 /** The rail's entries, in order, with the one-shot actions filed in their group. */
 export function railEntries(modes = MAP_MODES, actions = MAP_ACTIONS) {
   return [

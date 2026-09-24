@@ -48,6 +48,11 @@
     <p class="meta">{[detection.analyzer, plural(detection.areas ?? 0, 'area'),
       ruleLabel(detection.date_rule, single)].filter(Boolean).join(' · ')}</p>
     <p class={`state ${state.tone}`}>{state.text}</p>
+    {#if detail?.missing_areas?.length}
+      <p class="state warn">
+        {detail.missing_areas.length === 1 ? 'An area it drew on was' : 'Areas it drew on were'} deleted. Edit the routine to add one.
+      </p>
+    {/if}
     {#if detection.active?.status === 'running'}
       <progress max={detection.active.total || 1} value={detection.active.progress ?? 0}></progress>
     {/if}

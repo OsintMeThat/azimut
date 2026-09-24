@@ -550,10 +550,10 @@
           <button class="btn btn-primary btn-sm read" disabled={reading} onclick={readFrames}>
             {reading ? 'Reading from Copernicus…' : preview ? 'Read the rest of the view' : 'Show the detections here'}
           </button>
-          <p class="hint">{missing} frame{missing === 1 ? '' : 's'} from Copernicus, one request each. Frames already read stay live as you move.</p>
+          <p class="hint">{missing} frame{missing === 1 ? '' : 's'} from Copernicus, one request each, and the frames already read stay live as you move.</p>
         {/if}
         {#if preview}
-          {#if preview.clipped}<p class="hint">The preview covers the middle of the view, {limits.preview_span ?? 3} tiles a side. Zoom in to see all of it.</p>{/if}
+          {#if preview.clipped}<p class="hint">The preview covers only the middle {limits.preview_span ?? 3} tiles a side of this view.</p>{/if}
           <p class="hint">Click the map to read every rule at a point and mark it in a check.</p>
         {/if}
       {/if}
@@ -604,7 +604,7 @@
       <AnalyzerSettings bind:recipe {capability} expanded />
     </section>
     <section aria-label="Description">
-      <label title="What this analyzer looks for, and what it cannot tell you. Left empty, it takes the sentence at the top.">Description
+      <label title="What this analyzer looks for and cannot tell you.">Description
         <textarea bind:value={recipe.description} maxlength="500" placeholder={phrase}></textarea>
       </label>
     </section>

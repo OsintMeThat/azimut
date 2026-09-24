@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   clampCrop, moveCrop, resizeCropByHandle,
-  QUAD_SIDES, quadEdgeMidpoints, moveQuadEdge, quadCentroid,
+  QUAD_SIDES, quadEdgeMidpoints, quadCentroid,
   quadsBounds, translateQuad, moveQuads, rotateQuads, scaleQuads, pinholeOps,
   buildFrameOps, hasVideoEdits, normalizeRightAngleRotation, rotationOps,
   sourceStem, timecode, frameSaveName, frameSaveNames, saveNameOf,
@@ -136,7 +136,7 @@ describe('resizeCropByHandle', () => {
   });
 });
 
-describe('quad side resize', () => {
+describe('quad side handles', () => {
   const rect = [[0, 0], [100, 0], [100, 80], [0, 80]]; // TL,TR,BR,BL
 
   it('exposes an edge midpoint per side', () => {
@@ -144,38 +144,6 @@ describe('quad side resize', () => {
     const mids = quadEdgeMidpoints(rect);
     expect(mids[0]).toMatchObject({ side: 0, x: 50, y: 0 }); // top
     expect(mids[2]).toMatchObject({ side: 2, x: 50, y: 80 }); // bottom
-  });
-
-  it('grows the rect by dragging the right edge outward', () => {
-    const out = moveQuadEdge(rect, 1, 40, 0); // right edge, drag +x
-    expect(out[1][0]).toBe(140); // TR moved out
-    expect(out[2][0]).toBe(140); // BR moved out
-    expect(out[0]).toEqual([0, 0]); // left edge fixed
-    expect(out[3]).toEqual([0, 80]);
-  });
-
-  it('ignores drag parallel to the edge (projects onto the normal)', () => {
-    const out = moveQuadEdge(rect, 1, 0, 30); // right edge, drag along the edge
-    expect(out[1][0]).toBe(100);
-    expect(out[2][0]).toBe(100);
-  });
-
-  it('keeps the opposite edge fixed on a warped quad', () => {
-    const warped = [[10, 5], [110, 0], [120, 90], [0, 85]];
-    const out = moveQuadEdge(warped, 0, 0, -20); // top edge outward (up)
-    // bottom corners unchanged
-    expect(out[2]).toEqual(warped[2]);
-    expect(out[3]).toEqual(warped[3]);
-    // top corners moved
-    expect(out[0]).not.toEqual(warped[0]);
-    expect(out[1]).not.toEqual(warped[1]);
-  });
-
-  it('moving an edge out then back returns near the start', () => {
-    const c0 = quadCentroid(rect);
-    const out = moveQuadEdge(moveQuadEdge(rect, 1, 40, 0), 1, -40, 0);
-    const c1 = quadCentroid(out);
-    expect(near(c0[0], c1[0], 1e-9)).toBe(true);
   });
 });
 

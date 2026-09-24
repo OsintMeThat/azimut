@@ -45,8 +45,8 @@
 
 <Modal title="Add a layer" {onclose} width="460px">
   <p class="lead">
-    A KML, KMZ, GeoJSON or GPX file, or a public map to follow. Its features are
-    drawn and filtered here; nothing in it joins the case.
+    A KML, KMZ, GeoJSON or GPX file, or a public map to follow, drawn over the
+    imagery with its features kept out of the case graph.
   </p>
 
   <section>
@@ -67,7 +67,7 @@
     </label>
     <p class="note">
       {fileIcons
-        ? "Icons inside a KMZ are read from the file. Icons at web addresses are fetched once, now."
+        ? 'Icons inside a KMZ are read from it, and icons at web addresses are fetched once, now.'
         : 'Nothing leaves this machine.'}
     </p>
   </section>
@@ -90,11 +90,10 @@
       {busy ? 'Reading…' : 'Subscribe'}
     </button>
     <!-- The one sentence this feature owes before it fetches: what it will ask
-         for, when, and what it will not do on its own. -->
+         for, and every moment it asks. -->
     <p class="note">
-      A My Maps share link, or any KML or GeoJSON address. It is read now, when
-      you press Refresh, and the first time you switch it on after opening
-      Azimut — never on a timer, and never while the layer is off.
+      A My Maps link or any KML or GeoJSON address, read now, on Refresh, and when
+      first switched on after opening Azimut.
     </p>
   </section>
 

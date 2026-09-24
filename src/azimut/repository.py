@@ -25,11 +25,6 @@ from typing import Any, Literal, Protocol, runtime_checkable
 #: `workspace` re-exports it for backward compatibility.
 EntityStatus = Literal["confirmed", "suggested"]
 
-#: A durable job's lifecycle state (doc "Job states"). `queued` work is claimed
-#: `running` by the single worker, then finishes `ready` or, past its retry
-#: budget, `failed`; `cancelled` is an explicit stop.
-JobState = Literal["queued", "running", "ready", "failed", "cancelled"]
-
 
 @runtime_checkable
 class CaseRepository(Protocol):

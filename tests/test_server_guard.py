@@ -4,11 +4,15 @@ The server binds localhost, but a page the browser already has open can still
 reach 127.0.0.1 directly, or point a name it controls at it (DNS rebinding).
 The guard is the wall: the Host must be a loopback name, and a cross-origin web
 Origin is turned away everywhere except the token-gated ingest island, which
-opens itself to browser-extension origins on purpose.
+opens itself to browser-extension origins on purpose. A GET from an <img> or a
+link carries no Origin at all, so the browser's `Sec-Fetch-Site` is read too: a
+foreign page reaches neither the API nor the case files.
 
 The shared ``client`` fixture already uses a loopback base_url, so per-request
 header overrides are exactly what the guard sees.
 """
+
+import pytest
 
 
 def test_loopback_host_is_allowed(client):
@@ -62,3 +66,47 @@ def test_a_malformed_pairing_token_is_a_refusal_and_not_a_crash(client):
         answer = client.get("/api/ingest/ping", headers={"X-Azimut-Token": token})
         assert answer.status_code == 401, token
         assert answer.json()["detail"] == "missing or invalid pairing token"
+
+
+
+@pytest.mark.parametrize("site", ["cross-site", "same-site"])
+@pytest.mark.parametrize("path", ["/api/health", "/files/any-case/media/x.png"])
+def test_a_foreign_page_without_an_origin_is_refused(client, site, path):
+    r = client.get(path, headers={"sec-fetch-site": site})
+    assert r.status_code == 403
+    assert r.text == "cross-site request refused"
+
+
+@pytest.mark.parametrize("site", ["same-origin", "none"])
+def test_the_apps_own_page_and_a_typed_address_are_served(client, site):
+    assert client.get("/api/health", headers={"sec-fetch-site": site}).status_code == 200
+
+
+def test_a_link_from_elsewhere_still_opens_the_app_and_the_ingest_island_keeps_its_token(client):
+    assert client.get("/", headers={"sec-fetch-site": "cross-site"}).status_code != 403
+    # the extension's worker may be named cross-site; its pairing token is the wall
+    assert client.get("/api/ingest/ping", headers={"sec-fetch-site": "cross-site"}).status_code == 401
+
+
+def test_a_foreign_tile_request_spends_nothing_and_reaches_no_provider(client, monkeypatch):
+    import httpx
+
+    from azimut import config
+    from azimut.api import satellite
+
+    reached: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        reached.append(str(request.url))
+        return httpx.Response(200, content=b"", headers={"content-type": "image/png"})
+
+    monkeypatch.setattr(satellite, "_tile_client", httpx.Client(transport=httpx.MockTransport(handler)))
+    before = config.load_settings().get("usage")
+
+    r = client.get(
+        "/api/tiles/esri-world-imagery/15/16600/11278", headers={"sec-fetch-site": "cross-site"}
+    )
+
+    assert r.status_code == 403
+    assert reached == []
+    assert config.load_settings().get("usage") == before

@@ -93,13 +93,15 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
 <case>/           # the analyst's: Azimut writes nothing here but azimut/
   README.txt      # which half of the folder is whose
   azimut/
-    case.json     # small manifest: name, dates, storage format and schema
+    case.json     # small manifest: name, dates, storage format, schema and to-do lists
     notes.md      # case-wide Markdown note
     notes/        # note bodies, named after their title, filed as in the notebook
     media/        # imported, downloaded and derived media
       .meta/      #   one sidecar per media
       .dl/        #   in-progress downloads (transient)
       .thumbs/    #   disposable thumbnail cache
+    sheets/       # CSV tables, one file per sheet
+      .meta/      #   what the grid remembers: widths, sort, colours, cell links
     proofs/       # rendered PNGs
       .meta/      #   editable specs and pasted assets
     exports/      # finished exports and the analyst's own files
@@ -107,10 +109,13 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
       case.db     #   entities, links, folders, catalog and jobs (SQLite)
       entity-images/ # private, bounded entity photos and their thumbnails
     .drafts/      # post drafts
-    .inspect/     # saved Inspect session specs
+    .inspect/     # one Inspect work per file (.v1/ keeps 0.3.0 sessions)
+    .collages/    # collage layouts; the picture is media
     .compare/     # saved Compare session specs
     .analysis/    # saved areas, saved detections, runs and the frames behind their results
     .search/      # saved Grid Search state
+    .layers/      # added map layers: spec, snapshot, icons
+      .cache/     #   parsed GeoJSON, rebuilt from the snapshot
     .trash/       # deleted artifacts grouped by delete action, in numbered slots
 ```
 
@@ -136,8 +141,8 @@ new directory level or a raised cap breaks it.
 schema fields. It no longer holds the graph, so the case switcher can identify a
 case without opening its database. `case.db` is the source of truth for mutable
 structured state (entities, links, folders, jobs). The files under `media/`,
-`proofs/`, `.drafts/`, `.inspect/`, `.compare/` and `notes/` are the source of truth for their
-own content.
+`proofs/`, `sheets/`, `.drafts/`, `.inspect/`, `.collages/`, `.compare/`, `.analysis/`,
+`.layers/` and `notes/` are the source of truth for their own content.
 
 App-wide preferences stay outside cases under `<workspace>/.azimut/settings/`:
 `settings.json`, `templates.json`, `signature.png` and the optional
@@ -146,8 +151,8 @@ there with independent atomic renames, so a partial move resumes. If both
 locations differ, the current hidden file wins and the legacy copy is retained
 beside it under a `.legacy` name.
 
-For media, proof PNGs, notes, drafts, Inspect sessions and Compare sessions, the human-readable
-filename stem is the name Azimut shows. Spaces, case and Unicode survive;
+For media, proof PNGs, notes, drafts, Inspect works, collages and Compare sessions, the
+human-readable filename stem is the name Azimut shows. Spaces, case and Unicode survive;
 characters forbidden by Windows are replaced and the returned canonical stem
 is written back to the UI. Renaming moves the file and its companions, rewrites
 exact stored paths in the graph, jobs, sidecars and tool specs, and rebinds the
@@ -459,8 +464,10 @@ Exports run as `bundle-export` jobs and write atomically to
 `<workspace>/.azimut/bundles/`, then stream to the browser as an attachment. The first
 ZIP member is `bundle-header.json`; the last is `bundle.json`, which lists every
 other member with its size and SHA-256. The database is copied consistently,
-its trash and unfinished jobs are removed, and it is vacuumed before packaging.
-`.trash/`, `media/.thumbs/` and `media/.dl/` never travel.
+its trash and every job are removed (a finished export or import still names
+folders of this machine), and it is vacuumed before packaging. `.trash/`,
+`media/.thumbs/`, `media/.dl/` and SQLite's journal beside `case.db` never travel;
+a journal an older export packed is verified and then dropped on import.
 Export also reserves filesystem headroom before writing its temporary output.
 
 Bundle format 2 carries the complete case under a `case/` member prefix:
@@ -633,8 +640,9 @@ Work starts only from a user action (an import, a regenerate) or crash recovery,
 never from merely opening a case or tab. A job lifecycle is `queued → running →
 ready`, or `failed` once its retry budget is spent, or `cancelled` (its media is
 gone). A job left `running` by an interrupted process is reclaimed to `queued` (or
-`failed`) on case open and on server startup (`Case.recover_jobs`,
-`server._recover_jobs`), so work resumes instead of stalling.
+`failed`) on server startup and whenever the workspace root changes
+(`workqueue.recover_all`, which runs `Case.recover_jobs` on every case), so work
+resumes instead of stalling.
 
 ### Budget, repair, retry states
 

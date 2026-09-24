@@ -25,25 +25,8 @@ describe('temporal input', () => {
   });
 });
 
-describe('temporal input in a narrow column', () => {
+describe('temporal input controls', () => {
   it('sizes its own controls, since a caller cannot style into a component', () => {
     expect(source).toContain('.input-sm { padding: 4px 7px; font-size: var(--fs-xs); }');
-  });
-
-  it('pairs the parts and hides the captions rather than stacking four rows', () => {
-    expect(source).toContain('class:compact');
-    expect(source).toContain('.compact .date-parts { grid-template-columns: auto minmax(0, 1fr); }');
-    expect(source).toContain('clip-path: inset(50%)');
-  });
-
-  it('keeps the labels in the markup, where a screen reader still reads them', () => {
-    // The compact rule hides them visually. Removing them would take the
-    // accessible name of every wrapping label with it.
-    expect(source).toContain('<span>Precision</span>');
-    expect(source).toContain('<span>Certainty</span>');
-  });
-
-  it('holds the syntax guide to the column it opens in', () => {
-    expect(source).toContain('.compact .advanced-guide { width: 100%; }');
   });
 });

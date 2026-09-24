@@ -16,36 +16,37 @@
 export function createAutosave({ write, delay = 800 }) {
   const state = $state({ status: 'idle', error: '' });
   let timer = null;
+  // The writes in flight, as one promise: it settles only once no rewrite is owed,
+  // so a change made during a write is waited for along with it.
   let running = null;
   let again = false;
 
-  async function run() {
+  function run() {
     clearTimeout(timer);
     timer = null;
     if (running) {
       again = true;
       return running;
     }
-    running = (async () => {
-      state.status = 'saving';
-      try {
-        await write();
-        state.status = 'saved';
-        state.error = '';
-      } catch (e) {
-        state.status = 'error';
-        state.error = e?.message || 'save failed';
-      }
+    const chain = (async () => {
+      do {
+        again = false;
+        state.status = 'saving';
+        try {
+          await write();
+          state.status = 'saved';
+          state.error = '';
+        } catch (e) {
+          state.status = 'error';
+          state.error = e?.message || 'save failed';
+        }
+      } while (again);
     })();
-    try {
-      await running;
-    } finally {
-      running = null;
-    }
-    if (again) {
-      again = false;
-      await run();
-    }
+    running = chain;
+    chain.then(() => {
+      if (running === chain) running = null;
+    });
+    return chain;
   }
 
   return {
@@ -56,8 +57,8 @@ export function createAutosave({ write, delay = 800 }) {
       timer = setTimeout(run, delay);
     },
     async flush() {
-      if (timer || again) return run();
-      if (running) await running;
+      if (timer) await run();
+      else if (running) await running;
     },
     /** Forget a pending write, for a document that is being thrown away. */
     cancel() {

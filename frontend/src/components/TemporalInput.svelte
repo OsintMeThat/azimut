@@ -8,12 +8,7 @@
   } from '../lib/temporalInput.js';
   import { formatTemporalValue } from '../lib/timeline.js';
 
-  // `compact` is for a narrow column — the proof composer's 300px side panel —
-  // where the three-part date row does not fit and overflows its own container.
-  // It stacks the parts instead, which is what the editor already does on a
-  // narrow window; the difference is that a media query reads the viewport and
-  // cannot see that a wide window holds a narrow column.
-  let { id, value = '', compact = false, onchange, onvaliditychange } = $props();
+  let { id, value = '', onchange, onvaliditychange } = $props();
   let state = $state(readTemporalInput(''));
   let sent = $state('');
   const rawValue = $derived(writeTemporalInput(state));
@@ -50,7 +45,7 @@
   }
 </script>
 
-<div class="temporal-editor" class:compact>
+<div class="temporal-editor">
   <label class="field format-field">
     <span>Format</span>
     <select
@@ -330,43 +325,6 @@
   .temporal-preview small { color: var(--text-3); }
   .temporal-preview code { margin-left: auto; color: var(--text-3); overflow-wrap: anywhere; }
   .temporal-preview.error { border-left-color: var(--danger); color: var(--danger); }
-  /* Compact: the parts pair up instead of stacking, and the controls carry their
-     own names. Four labelled rows made this one field taller than the coordinates
-     and the sources above it put together, for a value most proofs answer with a
-     single day. The selects say what they hold — Date, Day, Exact as stated — so
-     the label above each becomes a caption of the word underneath it; it stays
-     for a screen reader, which cannot see the option. */
-  .compact { gap: 5px; }
-  .compact .field > span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    border: 0;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-  /* Precision sits beside the value it qualifies — "Day" is three characters and
-     had a row of its own. Reading order is left to right then down, and it is
-     also the order the controls are reached in: nothing here is moved out of the
-     sequence it is written in. */
-  .compact .date-parts { grid-template-columns: auto minmax(0, 1fr); }
-  .compact .timestamp-parts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  /* Certainty is a sentence, not a word, and a timestamp needs its own width. */
-  .compact .certainty-field,
-  .compact .datetime-field { grid-column: 1 / -1; }
-  .compact .range-parts,
-  .compact .time-range-parts { grid-template-columns: 1fr; }
-  .compact .format-field { justify-self: stretch; }
-  .compact .format,
-  .compact .precision,
-  .compact .zone,
-  .compact .offset { width: 100%; }
-  /* The guide is a wide table, and the column it opens in clips what overflows
-     it. Held to the column, it scrolls inside itself instead of being cut off. */
-  .compact .advanced-guide { width: 100%; }
   @media (max-width: 620px) {
     .date-parts, .timestamp-parts, .range-parts, .time-range-parts { grid-template-columns: 1fr; }
     .format-field { justify-self: stretch; }

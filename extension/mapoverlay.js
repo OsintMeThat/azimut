@@ -271,8 +271,15 @@
     zIndex: "2147483000",
     pointerEvents: "none",
   });
-  const root = host.attachShadow({ mode: "open" });
+  // Closed, and created from this script's own world: the map site's scripts share
+  // the DOM, and an open root would hand them every case name, point and picture
+  // the panel shows. `host.shadowRoot` reads null to them.
+  const root = host.attachShadow({ mode: "closed" });
   document.documentElement.appendChild(host);
+  // The site can also dispatch events as well as the analyst can click, so only
+  // the browser's own are acted on. `=== false` because a test DOM leaves the
+  // flag unset; a browser always sets it.
+  const trusted = (fn) => (event) => (event.isTrusted === false ? undefined : fn(event));
   // Ground first, so it is under the drawing: FIRMS is a picture of what was
   // burning, and a measured path over it has to stay legible.
   const ground = document.createElement("div");
@@ -2261,7 +2268,7 @@
 
   // --- what the panel's controls do ------------------------------------------
 
-  panel.addEventListener("click", async (event) => {
+  panel.addEventListener("click", trusted(async (event) => {
     const target = event.target.closest("[data-act]");
     if (!target) return;
     const act = target.dataset.act;
@@ -2435,9 +2442,9 @@
       syncArmed();
       return render();
     }
-  });
+  }));
 
-  panel.addEventListener("change", async (event) => {
+  panel.addEventListener("change", trusted(async (event) => {
     const act = event.target.dataset.act;
     if (act === "case") {
       state.caseId = event.target.value;
@@ -2465,9 +2472,9 @@
       const metres = Number(event.target.value);
       if (metres >= 10) tools.grid.cellM = metres;
     }
-  });
+  }));
 
-  panel.addEventListener("input", (event) => {
+  panel.addEventListener("input", trusted((event) => {
     const act = event.target.dataset.act;
     if (act === "pin-title") state.pinTitle = event.target.value;
     if (act === "grid-title") state.gridTitle = event.target.value;
@@ -2481,11 +2488,11 @@
       if (readout) readout.textContent = tools.sky.readout() ?? "";
       redraw();
     }
-  });
+  }));
 
   // Dragging the panel by its header. Remembered per site, because a panel that
   // covers the sidebar on one map covers the map itself on another.
-  panel.addEventListener("pointerdown", (event) => {
+  panel.addEventListener("pointerdown", trusted((event) => {
     if (!event.target.closest("header") || event.target.closest("[data-act]")) return;
     const start = { x: event.clientX, y: event.clientY };
     const rect = panel.getBoundingClientRect();
@@ -2501,7 +2508,7 @@
     };
     window.addEventListener("pointermove", move, true);
     window.addEventListener("pointerup", up, true);
-  });
+  }));
 
   // --- what is remembered, per site ------------------------------------------
 
@@ -2629,17 +2636,17 @@
   // --- lifecycle -------------------------------------------------------------
 
   const listeners = [
-    [window, "pointerdown", onPointerDown, true],
-    [window, "pointermove", onPointerMove, true],
-    [window, "pointerup", onPointerUp, true],
-    [window, "click", onClick, true],
-    [window, "dblclick", onDoubleClick, true],
-    [window, "wheel", onWheel, { capture: true, passive: true }],
+    [window, "pointerdown", trusted(onPointerDown), true],
+    [window, "pointermove", trusted(onPointerMove), true],
+    [window, "pointerup", trusted(onPointerUp), true],
+    [window, "click", trusted(onClick), true],
+    [window, "dblclick", trusted(onDoubleClick), true],
+    [window, "wheel", trusted(onWheel), { capture: true, passive: true }],
     [window, "resize", onResize, false],
     [document, "visibilitychange", onShown, false],
-    [layer.canvas, "pointerdown", canvasDown, false],
-    [layer.canvas, "pointermove", canvasMove, false],
-    [layer.canvas, "pointerup", canvasUp, false],
+    [layer.canvas, "pointerdown", trusted(canvasDown), false],
+    [layer.canvas, "pointermove", trusted(canvasMove), false],
+    [layer.canvas, "pointerup", trusted(canvasUp), false],
   ];
   for (const [node, type, fn, opts] of listeners) node.addEventListener(type, fn, opts);
   const poll = setInterval(() => readUrl(), URL_POLL_MS);
@@ -2682,7 +2689,8 @@
     delete window.__AZIMUT_MAP_TOOLS__;
   }
 
-  window.__AZIMUT_MAP_TOOLS__ = { close, state, tools };
+  // This world's window, which the site cannot see: the root rides here for tests.
+  window.__AZIMUT_MAP_TOOLS__ = { close, state, tools, root };
 
   (async () => {
     await restore();

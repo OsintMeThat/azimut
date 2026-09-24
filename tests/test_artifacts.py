@@ -49,6 +49,38 @@ def delete_everything(client, case_id: str) -> None:
     raise AssertionError("entities kept coming back")
 
 
+STORAGE_DOC = Path(__file__).resolve().parent.parent / "docs" / "STORAGE_AND_PERFORMANCE.md"
+
+
+def documented_tree() -> set[str]:
+    """The directories the published case tree draws, relative to `azimut/`."""
+    text = STORAGE_DOC.read_text(encoding="utf-8")
+    block = text.split("## The shape of a case", 1)[1].split("```text\n", 1)[1]
+    block = block.split("```", 1)[0]
+    stack: list[tuple[int, str]] = []
+    out = set()
+    for line in block.splitlines():
+        name = line.split("#", 1)[0].strip()
+        if not name.endswith("/"):
+            continue
+        depth = len(line) - len(line.lstrip())
+        while stack and stack[-1][0] >= depth:
+            stack.pop()
+        stack.append((depth, name.rstrip("/")))
+        parts = [part for _, part in stack]
+        if parts[:2] == ["<case>", layout.TOOL_DIR] and len(parts) > 2:
+            out.add("/".join(parts[2:]))
+    return out
+
+
+def test_the_published_case_tree_draws_every_directory_a_case_is_born_with(tmp_path):
+    born = {
+        path.relative_to(layout.tool_root(tmp_path)).as_posix()
+        for path in layout.content_dirs(tmp_path)
+    }
+    assert born - documented_tree() == set()
+
+
 def test_deleting_everything_returns_the_case_to_its_birth_state(client):
     """The gate. One artifact per tool goes in, everything is deleted, and what
     is left has to be a fresh case — byte-for-byte in shape, if not in content.

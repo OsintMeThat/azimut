@@ -417,7 +417,6 @@
               Read the guide
               <Icon name="arrowRight" size={13} />
             </button>
-            <span class="door-note">Nothing leaves this machine.</span>
           </div>
         </div>
       {/if}
@@ -1014,9 +1013,5 @@
     align-items: center;
     gap: 12px;
     margin-top: 40px;
-  }
-  .door-note {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
   }
 </style>

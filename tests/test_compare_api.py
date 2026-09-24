@@ -7,7 +7,7 @@ import graph_read
 import pytest
 from PIL import Image
 
-from azimut import config
+from azimut import config, layout
 from azimut.api import compare as compare_api
 from azimut.api.compare import MAX_GIF_EDGE, _gif_frames, change_refusal
 from azimut.engine import links as link_engine
@@ -606,3 +606,29 @@ def test_band_frame_validates_before_asking(client, monkeypatch):
     assert client.post("/api/compare/sentinel-frame", json={**FRAME_BODY, "width": 5000}).status_code == 422
     assert client.post("/api/compare/sentinel-frame", json=FRAME_BODY).status_code == 422
     assert config.month_usage("sentinelhub") == before
+
+
+@pytest.mark.parametrize("folded", [False, True], ids=["linux", "windows-macos"])
+def test_a_change_of_case_renames_the_comparison_in_place(client, monkeypatch, folded):
+    import casefold
+
+    cid = _case(client, "Recased")
+    _save(client, cid, "Harbour")
+    if folded:
+        casefold.fold_names(monkeypatch, layout.COMPARE_DIR)
+
+    renamed = _save(client, cid, "harbour", rename_from="Harbour")
+
+    assert renamed.status_code == 200, renamed.text
+    folder = Case.open(cid).tool_root / layout.COMPARE_DIR
+    assert [p.name for p in folder.glob("*.json")] == ["harbour.json"]
+    assert client.get(f"/api/cases/{cid}/compare/sessions/harbour").status_code == 200
+
+
+def test_two_comparisons_differing_only_by_case_cannot_both_be_saved(client):
+    cid = _case(client, "One name")
+    _save(client, cid, "Harbour")
+
+    assert _save(client, cid, "harbour").status_code == 409
+    _save(client, cid, "Quay")
+    assert _save(client, cid, "harbour", rename_from="Quay").status_code == 409

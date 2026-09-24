@@ -293,3 +293,51 @@ def test_the_page_is_asked_for_again_on_every_visit(built_frontend, client):
 def test_workspace_module_exposes_the_guard_it_documents():
     # `Case.locate` is the only door to a case; keep the guard wired to it.
     assert workspace.layout.names_one_child is layout.names_one_child
+
+
+# -- a write cut short leaves the old text, never an empty file (AUD-017) --------
+
+
+def _interrupt_every_rename(monkeypatch):
+    def refuse(self, target):
+        raise OSError("the disk filled up")
+
+    monkeypatch.setattr(workspace.Path, "replace", refuse)
+
+
+def test_a_note_save_cut_short_keeps_the_note_it_was_replacing(client, monkeypatch):
+    cid = client.post("/api/cases", json={"name": "Cut short"}).json()["id"]
+    note = client.post(
+        f"/api/cases/{cid}/notes", json={"title": "Lead", "folder": "", "content": "# First lead"}
+    ).json()
+    case = Case.open(cid)
+    path = case.resolve_inside(note["attrs"]["path"])
+
+    _interrupt_every_rename(monkeypatch)
+    with pytest.raises(OSError):
+        case.write_note(note["id"], "half a sentence")
+    with pytest.raises(OSError):
+        case.write_notes("the case's own notes, half written")
+
+    assert path.read_text(encoding="utf-8") == "# First lead"
+    assert [p.name for p in path.parent.iterdir()] == [path.name], "no scratch file left behind"
+
+
+def test_a_spec_save_cut_short_keeps_the_spec_it_was_replacing(client, monkeypatch):
+    from azimut.api import drafts, proofs
+
+    cid = client.post("/api/cases", json={"name": "Cut short"}).json()["id"]
+    case = Case.open(cid)
+    spec = case.resolve_inside(layout.proof_spec_rel("Roof"))
+    draft = case.resolve_inside(layout.draft_rel("Thread"))
+    proofs._write_spec(spec, {"title": "Roof", "panels": []})
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Thread", "state": {"tweet1": "kept"}})
+    before = (spec.read_text(encoding="utf-8"), draft.read_text(encoding="utf-8"))
+
+    _interrupt_every_rename(monkeypatch)
+    with pytest.raises(OSError):
+        proofs._write_spec(spec, {"title": "Roof", "panels": [{"id": "p1"}]})
+    with pytest.raises(OSError):
+        drafts.save_draft(cid, drafts.DraftIn(title="Thread", state={"tweet1": "lost"}))
+
+    assert (spec.read_text(encoding="utf-8"), draft.read_text(encoding="utf-8")) == before

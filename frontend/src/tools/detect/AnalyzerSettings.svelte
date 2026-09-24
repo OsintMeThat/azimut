@@ -74,7 +74,7 @@
       <label class="grow" title="Drop candidates smaller than this.">Min area (m²)
         <input aria-label="Minimum area" type="number" min="0" max="100000000" bind:value={recipe.parameters.min_area} />
       </label>
-      <label class="grow" title="Drop candidates larger than this; 0 keeps them all.">Max area (m²)
+      <label class="grow" title="Drop candidates larger than this, or none at 0.">Max area (m²)
         <input aria-label="Maximum area" type="number" min="0" max="100000000" bind:value={recipe.parameters.max_area} />
       </label>
     </div>
@@ -85,7 +85,7 @@
         </select>
       </label>
     {/if}
-    <label title="Keep only candidates of this shape, measured along their own length.">Shape
+    <label title="Keep only candidates of this shape.">Shape
       <select aria-label="Candidate shape" value={recipe.parameters.shape ?? 'any'}
         onchange={(event) => (recipe.parameters = { ...recipe.parameters, shape: event.currentTarget.value })}>
         {#each SHAPES as [id, label] (id)}<option value={id}>{label}</option>{/each}
@@ -109,14 +109,14 @@
     <details>
       <summary>{single && !rules ? 'Grouping' : 'Noise and grouping'}</summary>
       {#if !single || rules}
-        <label title="Remove specks narrower than this; it also removes small real objects.">Noise cleanup · {recipe.parameters.cleanup}px<input type="range" min="0" max="3" bind:value={recipe.parameters.cleanup} /></label>
+        <label title="Remove specks narrower than this, real ones included.">Noise cleanup · {recipe.parameters.cleanup}px<input type="range" min="0" max="3" bind:value={recipe.parameters.cleanup} /></label>
         {#if capability.smoothing_m}
-          <label title="Average the radar over this much ground first; wider is quieter and coarser.">Averaging · {capability.smoothing_m * Math.max(1, recipe.parameters.smoothing)} m<input aria-label="Radar averaging" type="range" min="1" max="3" bind:value={recipe.parameters.smoothing} /></label>
+          <label title="Average the radar over this ground to quiet its speckle.">Averaging · {capability.smoothing_m * Math.max(1, recipe.parameters.smoothing)} m<input aria-label="Radar averaging" type="range" min="1" max="3" bind:value={recipe.parameters.smoothing} /></label>
         {:else}
-          <label title="Blur the reading first; zero keeps the finest detail.">Smoothing · {recipe.parameters.smoothing}px<input type="range" min="0" max="3" bind:value={recipe.parameters.smoothing} /></label>
+          <label title="Blur the reading first, or not at all at zero.">Smoothing · {recipe.parameters.smoothing}px<input type="range" min="0" max="3" bind:value={recipe.parameters.smoothing} /></label>
         {/if}
       {/if}
-      <label title="Join candidates this close; zero joins only touching ones.">Group within (m)<input type="number" min="0" max="500" bind:value={recipe.parameters.merge_metres} /></label>
+      <label title="Join candidates this close, only touching ones at zero.">Group within (m)<input type="number" min="0" max="500" bind:value={recipe.parameters.merge_metres} /></label>
     </details>
   {/if}
 </fieldset>

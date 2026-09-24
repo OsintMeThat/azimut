@@ -646,7 +646,7 @@ it('builds an analyzer from rules, tries it on the view, reads a point and keeps
   expect(asked).toHaveLength(1);
   expect(asked[0][1]).toMatchObject({ read: false, a: { date: '2026-05-04' }, b: { date: '2026-05-11' }, bounds: VIEW,
     recipe: { method: 'rules', match: 'all' } });
-  expect(target.textContent).toContain('2 frames from Copernicus, one request each.');
+  expect(target.textContent).toContain('2 frames from Copernicus, one request each,');
 
   button('Show the detections here').click(); await settle();
   expect(post).toHaveBeenLastCalledWith('/api/compare/analyzers/preview', expect.objectContaining({ read: true }));

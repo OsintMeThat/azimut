@@ -26,6 +26,7 @@ re-queues it.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import Any
@@ -237,8 +238,48 @@ def restore(case: Case, group_id: str) -> dict[str, Any]:
             raise CaseError(
                 f"'{occupied[0]}' is back in the case; rename or delete it before restoring"
             )
+        behind = _areas_in_the_trash(case, payload, root)
+        if behind:
+            raise CaseError(
+                f"this routine draws on an area that is in the Trash; restore '{behind[0]}' first"
+            )
         group = case.update_trash_group(group_id, state="restoring")
         return _finish_restore(case, group)
+
+
+def _areas_in_the_trash(case: Case, payload: dict[str, Any], root: Path) -> list[str]:
+    """The Trash groups holding a Detect area a routine being restored draws on.
+
+    A routine reads its areas by reference, so restored alone it would come back
+    as a file Detect cannot open. An area deleted for good is not asked for: the
+    routine then opens without it, saying so, and can be given another.
+    """
+    moved = dict(_moved(payload))
+    wanted: set[str] = set()
+    for entity in payload.get("entities") or []:
+        if entity.get("type") != "analysis-follow-up":
+            continue
+        slot = moved.get(str((entity.get("attrs") or {}).get("spec") or ""))
+        try:
+            spec = json.loads((root / slot).read_text(encoding="utf-8")) if slot else {}
+        except (OSError, ValueError):
+            continue
+        for pair in spec.get("area_dates") or []:
+            rel = f"{layout.ANALYSIS_DIR}/areas-{pair.get('area_id')}.json"
+            try:
+                present = case.resolve_inside(rel).exists()
+            except CaseError:
+                continue
+            if rel not in moved and not present:
+                wanted.add(rel)
+    if not wanted:
+        return []
+    labels = []
+    for listed in case.list_trash():  # listed without payloads, to stay bounded
+        group = case.get_trash_group(listed["id"]) or {}
+        if any(rel in wanted for rel, _slot in _moved(group.get("payload") or {})):
+            labels.append(listed["label"])
+    return labels
 
 
 def purge(case: Case, group_id: str) -> None:
@@ -251,6 +292,7 @@ def purge(case: Case, group_id: str) -> None:
             raise CaseError(f"trash group '{group_id}' not found")
         _drop_dir(case, group_id)
         case.remove_trash_group(group_id)
+        inspectwork.forget_legacy(case)
 
 
 def empty(case: Case) -> int:

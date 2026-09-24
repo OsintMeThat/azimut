@@ -23,7 +23,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | **Case** (topbar) | Board, Graph, Timeline, Sheet | v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
 | **Examine** | Inspect, Collage | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
-| **Map** | Satellite, Compare, Detect, Coords & Sky | Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
+| **Map** | Satellite, Compare, Detect, Coords & Sky | Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
 | **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
 
 **Case is not on the rail.** The rail reads as a sequence of stages, and the case is
@@ -1270,7 +1270,9 @@ transparent PNG of the pieces trimmed to their bounds.
 frames are joined, the latest session carries on, typed names and notes are kept in
 its notes, relations move to it, and each collage becomes a collage document named
 after the session that built it. The sessions are copied as they were to
-`.inspect/.v1/` first. A session brought back from the Trash merges the same way.
+`.inspect/.v1/` first. The copies stay on this machine, never in a bundle, and go
+once their file has left the Trash for good. A session brought back from the Trash
+merges the same way.
 
 ## Map
 
@@ -1372,7 +1374,9 @@ metres, which grows the mask past the soft edge the classification leaves.
 Detection, Display and Filters tabs separate the rest of the settings, with hover descriptions.
 The settings panel offers automatic/manual thresholds, tone matching, alignment,
 smoothing, cleanup, minimum area, class filters, palettes and heat/class/outline
-displays. A spectral index skips the automatic threshold: it is highlighted past
+displays. Smoothing and cleanup can take small real changes with the noise, and
+the Thermal palette is only colours, not a heat reading. A spectral index skips
+the automatic threshold: it is highlighted past
 a stated index change, the line Detect draws, so panning cannot move it. Tone
 matching defaults to automatic, which means none on Sentinel-2 — two passes
 already corrected to surface reflectance have no exposure left to match, and

@@ -84,8 +84,8 @@
 
 <Modal title="GeoConfirmed" {onclose} width="460px">
   <p class="lead">
-    Events GeoConfirmed's volunteers geolocated, each with its sources. They are
-    drawn and filtered here; nothing joins the case.
+    Events GeoConfirmed's volunteers geolocated, each with its sources, drawn here
+    and kept out of the case graph.
   </p>
 
   {#if reading}

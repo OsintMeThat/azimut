@@ -285,6 +285,34 @@ describe('the acts on a row', () => {
   });
 });
 
+describe('a name the URL would cut', () => {
+  it('encodes every name it puts in a path, so "Ops #2" never reaches "Ops"', async () => {
+    const ops = followed({ name: 'Ops #2', title: 'Ops #2', refresh: { on_open: false } });
+    rows = [ops];
+    api.post = vi.fn(async (path) => {
+      calls.push(['POST', path]);
+      return ops;
+    });
+    const layers = store();
+    layers.load('c1');
+    await settle();
+    calls.length = 0;
+
+    await layers.drawing('c1', 'Ops #2');
+    await layers.refresh('c1', layers.rows[0]);
+    await layers.toggleCategory('c1', layers.rows[0], 'Checkpoints');
+    await layers.remove('c1', layers.rows[0]);
+
+    const paths = calls.map(([, path]) => path);
+    expect(paths).toEqual([
+      '/api/cases/c1/map-layers/Ops%20%232/data',
+      '/api/cases/c1/map-layers/Ops%20%232/refresh',
+      '/api/cases/c1/map-layers/Ops%20%232',
+      '/api/cases/c1/map-layers/Ops%20%232',
+    ]);
+  });
+});
+
 describe('adding', () => {
   it('posts a file as multipart and closes the dialog on success', async () => {
     const layers = store();

@@ -5,14 +5,16 @@
 > new vocabulary. Tool proposals enter as `suggested` and remain distinct from
 > analyst-confirmed findings.
 
-**Storage schema: `9`.** The manifest carries `{"azimut": {"schema": 9,
+**Storage schema: `11`.** The manifest carries `{"azimut": {"schema": 11,
 "storage": "sqlite"}}`. Schema 3 moved the graph from `case.json` to per-case
 `case.db`; schema 9 gives that case its final folder layout and aligns each
 file-backed visible name with its filename stem in one idempotent migration.
 Schemas 4–8 were unreleased development checkpoints and normalize through the
-same jump. The entity/link shape is unchanged since v1. Breaking changes require
+same jump. Schema 11 gives each file one Inspect work, dates every kept Detect pin
+and stands every saved comparison on the map; 10 was a development checkpoint.
+The entity/link shape is unchanged since v1. Breaking changes require
 a manifest schema bump and migration. The internal SQLite schema is at version
-17: 8 adds `links.confidence`, 9 rebuilds the entity search index so a case
+18: 8 adds `links.confidence`, 9 rebuilds the entity search index so a case
 search reaches the declared fields (§2) rather than stopping at the label and the
 notes, 11 adds `links.nature` — what kind of tie an edge states, in the analyst's
 own words, and only where the verb declares a qualifier (§3) — and 10 adds
@@ -132,7 +134,7 @@ to one clause — no full stop, no em-dash, under a hundred characters.
 | `class` | a model the case counts with, never one particular object | `equipment-type` |
 | `identifier` | a handle on a system | `account`, `email`, `phone`, `domain`, `ip`, `network` |
 | `collected` | bytes gathered into the case rather than written, so one may depict a place | `media`, `capture` |
-| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `bookmark` |
+| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run`, `bookmark` |
 | `place` | a point, never a thing | `place` |
 | `claim` | a statement about the graph, carrying its own reasoning | `claim` |
 
@@ -161,7 +163,7 @@ picture of the case is about it. The line that matters is between the first two 
 |---|---|---|---|
 | `subject` | the case is about it | `person`, `organization`, `vehicle`, `vessel`, `aircraft`, `structure`, `equipment-type`, `account`, `email`, `phone`, `domain`, `ip`, `network`, `media`, `place`, `claim` | a node |
 | `attestation` | a wrapper around something the case already holds | `bookmark`, `proof`, `capture` | folded into the edge that carries its provenance, drawn or not (below) |
-| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `collage`, `compare-session` | out of the case readings, drawn by **My work** |
+| `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run` | out of the case readings, drawn by **My work** |
 | `deliverable` | what the case produced | `post` | out of the case readings, drawn by **My work** |
 
 A bookmark stays drawn because it is not a leaf: *this account posted it, this
@@ -183,9 +185,13 @@ answer by omission (`tests/test_entities.py`).
 | `proof` | document | attestation | ✅ | proof-composer | `spec` (json), `path` (png) | yes |
 | `post` | document | deliverable | ✅ | post-composer | `draft` (json) | yes |
 | `inspect-session` | document | annex | ✅ | inspect | `spec` (json), one per file | yes |
-| `collage` | document | annex | ✅ | inspect | `spec` (json) | yes |
+| `collage` | document | annex | ✅ | collage | `spec` (json) | yes |
 | `compare-session` | document | annex | ✅ | compare | `spec` (json), `preview?`, `lat`, `lon`, `zoom`, `bearing`, `footprint?`, `geo?` | yes |
 | `map-layer` | document | annex | ✅ | map layers | `spec` (json), `format`, `source_url?` | yes (spec + snapshot + icons) |
+| `analysis-area` | document | annex | ✅ | detect | `spec` (json): a named, coloured area routines share | yes (`.analysis/areas-<id>.json`) |
+| `analysis-zones` | document | annex | ✅ | detect | `spec` (json): a saved set of areas | yes (`.analysis/zones-<id>.json`) |
+| `analysis-follow-up` | document | annex | ✅ | detect | `spec` (json): an analyzer, its areas and a date rule | yes (`.analysis/followups-<id>.json`) |
+| `analysis-run` | document | annex | ✅ | detect | `spec` (json): candidates, frozen inputs and review decisions | yes (`.analysis/runs-<id>.json` + `.assets/` previews) |
 | `note` | document | annex | ✅ | notebook | `path`, `folder?` | yes (Markdown) |
 | `sheet` | document | annex | ✅ | sheet | `path` (csv) | yes (CSV + sidecar) |
 | `bookmark` | document | attestation | ✅ | capture extension | `url`, `fetched_at?`, `archive_url?`, `reliability?` | no (a URL) |

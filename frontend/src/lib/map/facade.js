@@ -46,9 +46,6 @@ const EVENTS = {
   contextmenu: ['contextmenu'],
 };
 
-/** The vocabulary `on()` accepts. */
-export const MAP_EVENTS = Object.keys(EVENTS);
-
 /**
  * How much deeper the app's zoom counts than the engine's.
  *

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  MAP_EVENTS,
   engineEvents,
   engineZoom,
   exactViewZoom,
@@ -277,8 +276,9 @@ describe('framing a set of points', () => {
 
 describe('the event vocabulary', () => {
   it('names what happened to the view, not what the engine calls it', () => {
-    expect(MAP_EVENTS).toEqual(['view-settled', 'view-move', 'rotate', 'click', 'contextmenu']);
     expect(engineEvents('view-settled')).toEqual(['moveend']);
+    expect(engineEvents('view-move')).toEqual(['move']);
+    for (const name of ['rotate', 'click', 'contextmenu']) expect(engineEvents(name)).toEqual([name]);
   });
 
   it('refuses a name it does not know', () => {

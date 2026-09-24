@@ -3580,7 +3580,7 @@
       // confirmed PNG to copy yet.
       if (dirty || !savedName) return;
       const cid = caseState.current.id;
-      const result = await api.post(`/api/cases/${cid}/proofs/${savedName}/export`);
+      const result = await api.post(`/api/cases/${cid}/proofs/${encodeURIComponent(savedName)}/export`);
       exportDir = result.folder;
       toast(`${result.file} written to ${destinationLabel(result.folder)}`, 'ok', 5200, {
         label: 'Show',
@@ -3868,7 +3868,7 @@
     deleteEntry = null;
     try {
       const caseId = caseState.current.id;
-      const result = await api.del(`/api/cases/${caseId}/proofs/${entry.name}`);
+      const result = await api.del(`/api/cases/${caseId}/proofs/${encodeURIComponent(entry.name)}`);
       await Promise.all([openProofList(), reloadCase()]);
       deletedToast(caseId, result, entry.title);
     } catch (e) {
@@ -3884,7 +3884,7 @@
 
   async function openProof(entry) {
     const run = ++openRun;
-    const spec = await api.get(`/api/cases/${caseState.current.id}/proofs/${entry.name}`);
+    const spec = await api.get(`/api/cases/${caseState.current.id}/proofs/${encodeURIComponent(entry.name)}`);
     if (run !== openRun) return;
     const style = normalizeProofStyle(spec);
     resetDoc();

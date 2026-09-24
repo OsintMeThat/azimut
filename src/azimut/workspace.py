@@ -174,6 +174,23 @@ def _replace_with_retry(src: Path, dst: Path) -> None:
             time.sleep(0.01)
 
 
+def write_text_atomic(path: Path, text: str) -> None:
+    """Replace a file's text whole: a reader, or a crash, sees the old or the new.
+
+    `write_text` truncates first, so a process killed or a disk filling half way
+    leaves an empty or cut file, which for a note is the analyst's text gone and
+    for a spec is one that no longer parses. The scratch file sits beside the
+    target so the rename never crosses a filesystem.
+    """
+    ensure_dir(path.parent)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(text, encoding="utf-8")
+        _replace_with_retry(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 class CaseError(Exception):
     """Raised for invalid case operations; maps to HTTP 4xx in the API layer."""
 
@@ -771,7 +788,7 @@ class Case(CaseStore):
             return ""
 
     def write_notes(self, text: str) -> None:
-        self.notes_path.write_text(text, encoding="utf-8")
+        write_text_atomic(self.notes_path, text)
 
     @property
     def note_dir(self) -> Path:
@@ -863,8 +880,7 @@ class Case(CaseStore):
             )
             rel = self.note_target(folder, canonical)
             note_path = self.resolve_inside(rel)
-            ensure_dir(note_path.parent)
-            note_path.write_text(content, encoding="utf-8")
+            write_text_atomic(note_path, content)
             return graph.update_entity(entity["id"], {"attrs": {"path": rel}})
 
     def read_note(self, entity_id: str) -> str:
@@ -876,9 +892,7 @@ class Case(CaseStore):
 
     def write_note(self, entity_id: str, text: str) -> None:
         entity = self._note_entity(entity_id)
-        path = self._note_path(entity)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        write_text_atomic(self._note_path(entity), text)
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -1135,6 +1149,23 @@ class Case(CaseStore):
 
     # -- helpers -------------------------------------------------------------
 
+    def trashed_stems(self, directory: str) -> set[str]:
+        """Casefolded names of the specs in `directory` that a delete moved to the Trash.
+
+        A new artifact must not take one: the restore would find its path occupied
+        and refuse, and anything that pointed at the old one by name (a kept image,
+        a layer's files) would attach itself to the newcomer.
+        """
+        prefix = f"{directory}/"
+        out = set()
+        for head in self.list_trash():
+            group = self.get_trash_group(head["id"]) or {}
+            for rel in (group.get("payload") or {}).get("files") or []:
+                rel = str(rel)
+                if rel.startswith(prefix) and rel.endswith(".json") and "/" not in rel[len(prefix):]:
+                    out.add(Path(rel).stem.casefold())
+        return out
+
     def subdir(self, name: str) -> Path:
         try:
             directory = layout.subdir(self.path, name)
@@ -1292,7 +1323,7 @@ def open_workspace() -> None:
     Imports are local because the modules below sit above this one; calling them
     at import time would close the circle.
     """
-    from .engine import bundles, scrapers, workqueue
+    from .engine import bundles, scrapers, tilecache, workqueue
 
     config.ensure_workspace()
     scrapers.activate()
@@ -1302,6 +1333,8 @@ def open_workspace() -> None:
             housekeeping()
         except Exception:  # noqa: BLE001 - see the docstring
             logger.warning("workspace housekeeping step failed", exc_info=True)
+    # Off the startup path: a cache months of Detect sweeps filled is a long walk.
+    threading.Thread(target=tilecache.sweep, name="tile-cache-sweep", daemon=True).start()
 
 
 def _one_work_per_file(case: Case) -> None:

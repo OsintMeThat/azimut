@@ -33,10 +33,6 @@ class DownloadIn(BaseModel):
     use_cookies: bool = False
 
 
-class DeleteIn(BaseModel):
-    path: str
-
-
 class ExportIn(BaseModel):
     """One media file to copy out. Where it goes is the folder saved for media
     (engine/exportdir.py), never something the request names."""

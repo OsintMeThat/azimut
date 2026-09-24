@@ -78,6 +78,87 @@ describe('createAutosave', () => {
     expect(write).toHaveBeenCalledTimes(1);
   });
 
+  describe('a change made while a write is in flight', () => {
+    /** Two writes the test ends by hand, logging when each starts and ends. */
+    function twoWrites() {
+      const log = [];
+      const writes = [deferred(), deferred()];
+      let n = 0;
+      const write = vi.fn(() => {
+        const i = n++;
+        log.push(`start ${i + 1}`);
+        return writes[i].promise.then(() => log.push(`end ${i + 1}`));
+      });
+      return { log, writes, write };
+    }
+
+    async function flushAfterBothWrites(saver, { log, writes }) {
+      saver.flush().then(() => log.push('flushed'));
+      writes[0].resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(log).toEqual(['start 1', 'end 1', 'start 2']);
+      writes[1].resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(log).toEqual(['start 1', 'end 1', 'start 2', 'end 2', 'flushed']);
+      expect(saver.pending).toBe(false);
+    }
+
+    it('is waited for by flush while its timer is still counting', async () => {
+      const writes = twoWrites();
+      const saver = createAutosave({ write: writes.write, delay: 100 });
+      saver.schedule();
+      await vi.advanceTimersByTimeAsync(100);
+      saver.schedule(); // the timer is pending, the first write still running
+
+      await flushAfterBothWrites(saver, writes);
+    });
+
+    it('is waited for by flush once it is queued behind the write', async () => {
+      const writes = twoWrites();
+      const saver = createAutosave({ write: writes.write, delay: 100 });
+      saver.schedule();
+      await vi.advanceTimersByTimeAsync(100);
+      saver.schedule();
+      await vi.advanceTimersByTimeAsync(100); // the timer fired into the running write
+
+      await flushAfterBothWrites(saver, writes);
+    });
+
+    it('leaves the status of that second write when flush returns', async () => {
+      const first = deferred();
+      const second = deferred();
+      const write = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      const saver = createAutosave({ write, delay: 100 });
+      saver.schedule();
+      await vi.advanceTimersByTimeAsync(100);
+      saver.schedule();
+
+      let seen = null;
+      saver.flush().then(() => (seen = { ...saver.state }));
+      first.resolve();
+      setTimeout(() => second.reject(new Error('gone')), 50);
+      await vi.advanceTimersByTimeAsync(50);
+      expect(write).toHaveBeenCalledTimes(2);
+      expect(seen).toEqual({ status: 'error', error: 'gone' });
+    });
+  });
+
+  it('keeps saving after a write that throws before it returns a promise', async () => {
+    const write = vi.fn(() => {
+      throw new Error('bad state');
+    });
+    const saver = createAutosave({ write, delay: 10 });
+    saver.schedule();
+    await saver.flush();
+    expect(saver.state.status).toBe('error');
+    expect(saver.pending).toBe(false);
+
+    write.mockResolvedValue();
+    saver.schedule();
+    await saver.flush();
+    expect(saver.state.status).toBe('saved');
+  });
+
   it('says a failed write failed, and tries again when asked', async () => {
     const write = vi.fn().mockRejectedValueOnce(new Error('disk full')).mockResolvedValue();
     const saver = createAutosave({ write, delay: 10 });

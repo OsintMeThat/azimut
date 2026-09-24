@@ -68,8 +68,8 @@
     {/if}
   </div>
   {#if !checks.length}
-    <p class="hint">A check is a place you trust, two passes, and pins where a candidate should come out or none
-      should. Rerun it after each change and it says which rule broke what. Checks are optional.</p>
+    <p class="hint">Checks are optional places you trust, pinned on two passes where a candidate should come out or
+      none should, and rerun to show which rule broke what.</p>
   {/if}
 
   {#each checks as check (check.id)}

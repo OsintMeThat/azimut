@@ -64,18 +64,6 @@ describe('entityIcon', () => {
   });
 });
 
-describe('isVideoEntity', () => {
-  it('falls back to the extension for media filed before `kind` existed', () => {
-    expect(mod.isVideoEntity({ attrs: { path: 'raw/clip_04.MP4' } })).toBe(true);
-    expect(mod.isVideoEntity({ attrs: { path: 'raw/frame.png' } })).toBe(false);
-    expect(mod.isVideoEntity({ attrs: {} })).toBe(false);
-  });
-
-  it('trusts `kind` over the extension', () => {
-    expect(mod.isVideoEntity({ attrs: { kind: 'image', path: 'weird.mp4' } })).toBe(false);
-  });
-});
-
 describe('madeHereLabel / madeHereBy', () => {
   it('names the act for material the case made out of what it holds', () => {
     expect(mod.madeHereLabel({ origin: 'inspect', op: 'frame' })).toBe('Frame');

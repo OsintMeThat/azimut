@@ -15,6 +15,16 @@ vi.mock('./api.js', () => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
 }));
 
+// The two bridge probes wait 700 ms of real time for an answer, and the startup
+// check does not await them. Left real, their timers outlive the test that
+// started them and can fire after happy-dom is torn down. Here nothing answers,
+// at once; extBridge.test.js covers the probes themselves.
+vi.mock('./extBridge.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  pingExtensions: vi.fn(async () => []),
+  extensionState: vi.fn(async () => []),
+}));
+
 async function freshState() {
   vi.resetModules();
   return import('./state.svelte.js');
@@ -256,6 +266,22 @@ describe('startup update check', () => {
 
     await expect(checkExtension()).resolves.toBeFalsy();
     expect(updatesState.extension).toBe(null);
+  });
+
+  it('leaves no bridge timer running once a test is over', async () => {
+    const { api } = await import('./api.js');
+    api.get.mockReset().mockRejectedValue(new Error('offline'));
+    const { checkForUpdatesOnStart } = await freshState();
+    const { pingExtensions, extensionState } = await import('./extBridge.js');
+    vi.useFakeTimers();
+    try {
+      await checkForUpdatesOnStart();
+      expect(pingExtensions).toHaveBeenCalled();
+      expect(extensionState).toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not surface an offline failure', async () => {

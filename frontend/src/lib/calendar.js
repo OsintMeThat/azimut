@@ -26,16 +26,7 @@ const MONTH = /^\d{4}-\d{2}$/;
 
 const pad = (value) => String(value).padStart(2, '0');
 
-/** A `YYYY-MM-DD` as a UTC date, or null — the same strictness as the service
- *  routes, so a half-typed field never becomes a request. */
-export function parseDay(iso) {
-  if (!DAY.test(String(iso ?? ''))) return null;
-  const at = new Date(`${iso}T00:00:00Z`);
-  // '2026-02-31' parses to March 3rd, which is not the day that was typed
-  return Number.isNaN(at.getTime()) || dayOf(at) !== iso ? null : at;
-}
-
-/** …and back. */
+/** A UTC date as `YYYY-MM-DD`. */
 export function dayOf(at) {
   return at.toISOString().slice(0, 10);
 }

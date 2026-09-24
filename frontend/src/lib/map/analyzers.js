@@ -15,13 +15,6 @@ export function marksToZones(marks, previous = []) {
   }));
 }
 
-/** Detect reads Sentinel-2 bands, so a map showing anything else has nothing to give it. */
-export function mapSource(side) {
-  if (side?.provider !== 'sentinel2') return null;
-  return { provider: 'sentinel2', date: side.sentinel?.date || '',
-    layer: side.sentinel?.layer || 'TRUE_COLOR', maxcc: side.sentinel?.maxcc ?? 30 };
-}
-
 /** Display clustering changes only marker layout; persisted candidates stay intact. */
 export function displayGroups(rows, project, radius = 24) {
   const groups = [];

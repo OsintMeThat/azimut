@@ -41,16 +41,6 @@ from .sheetpromote import ACTIONS, JOIN, MAKE, UPDATE
 if TYPE_CHECKING:
     from ..workspace import Case
 
-#: What a column may become. `ignore` is the default and the honest one: a worklist's
-#: private notes have no business in the case's record of a subject, so a column travels
-#: only when it was asked for.
-MODES = ("ignore", "row", "value", "point", "addresses", "statement", "row-edges")
-
-#: The modes that make something an edge can end at, in the order the join layer offers
-#: them. `addresses` is absent on purpose: a bookmark already arrives holding a `mentions`
-#: edge to the row's subject, so joining it a second time would state it twice.
-POINTING = ("row", "value", "point")
-
 
 class _Column:
     """One column's declaration, after the door has read it."""

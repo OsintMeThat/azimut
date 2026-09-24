@@ -61,7 +61,7 @@ describe('Proof Composer header', () => {
     expect(source).toContain('kind="proofs"');
     expect(source).toContain('confirmLabel="Export here"');
     expect(source).toContain('onchosen={useExportFolder}');
-    expect(source).toContain('api.post(`/api/cases/${cid}/proofs/${savedName}/export`)');
+    expect(source).toContain('api.post(`/api/cases/${cid}/proofs/${encodeURIComponent(savedName)}/export`)');
     expect(source).toContain('/proofs/export/reveal`');
     expect(source).toContain('if (dirty || !savedName) await save();');
     expect(source).toContain('if (dirty || !savedName) return;');

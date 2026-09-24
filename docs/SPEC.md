@@ -16,7 +16,8 @@ proofs, notes and exports in one portable case folder.
 ## 2. Principles
 
 1. **Local-first.** No account, telemetry or upload. Network access follows a
-   network-dependent action, except for the optional startup release check.
+   network-dependent action, except for the optional startup version check
+   (GitHub releases, PyPI for the downloaders).
 2. **Portable cases.** Files hold media, notes and proofs; per-case SQLite holds
    the graph. A closed case folder is complete and can be copied as-is.
 3. **Focused tools.** One tab performs one task and also works in a promotable
@@ -88,7 +89,7 @@ The entity/link schema has existed since v1. Full vocabulary lives in
   | class | equipment-type |
   | identifier | account, email, phone, domain, ip, network |
   | collected | media, capture |
-  | document | proof, post, note, inspect-session, collage, bookmark |
+  | document | proof, post, note, sheet, inspect-session, collage, compare-session, map-layer, analysis-* (Detect), bookmark |
   | place | place |
   | claim | claim |
 
@@ -277,8 +278,7 @@ supplies, since a ridge ends the day well before the flat horizon does.
 
 Toward v4: archive-on-download and a Wayback CDX snapshot timeline with diff; web-page save
 extension; provenance stamp on exports (short hash, optionally visible) that
-re-identifies a shared PNG in its case;
-Sentinel-2 change detection with an NDVI difference over a date range; source
+re-identifies a shared PNG in its case; source
 location pattern-of-life map and timeline; cross-case handle/coordinate/face
 search; optional quota-aware X publishing.
 
@@ -373,9 +373,13 @@ stops making sense.
   recoverable per-case job queue drained by one worker. Details in
   [STORAGE_AND_PERFORMANCE.md](STORAGE_AND_PERFORMANCE.md).
 - **Security posture** (single-user localhost): `127.0.0.1` bind + Host/Origin
-  guard (DNS rebinding), 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
+  guard (DNS rebinding), which also refuses a foreign page's `Sec-Fetch-Site` on
+  the API and the case files, since an image or a link sends no Origin on a GET;
+  0600/0700 perms, hard 100 MP Pillow limit, content-hashed
   names for images pasted into a proof (no client-chosen path), token-gated
-  ingest island for the extension. The one route that reads a case file back out
+  ingest island for the extension. A case file is served `nosniff`, and under a
+  `sandbox` policy unless its type only displays, so an SVG or a page that arrived
+  in a bundle never runs script in the app's origin. The one route that reads a case file back out
   of that island — the attachments a composer hand-off carries — fences on the
   **resolved** path, so `media/../case.json` is refused where a prefix read off
   the request would have served it. Filling a composer and handing a picture to a
@@ -404,7 +408,9 @@ stops making sense.
   thumbnails or link tallies, a sweep's own spec, a case's images and videos by
   name — and the panel
   itself reaches them only through the worker's own allowlist, since a content
-  script's fetch would carry the map site's origin and be refused. Keeping those
+  script's fetch would carry the map site's origin and be refused. It is drawn
+  in a closed shadow root and acts only on events the browser dispatched, so the
+  map site can neither read the panel nor press it. Keeping those
   panels in step adds one more, and it is the narrowest of them: a read-only
   stream of what changed, never of what it says, so an event names a case and a
   file and the panel re-reads it through the routes it already had. The worker
@@ -456,7 +462,9 @@ stops making sense.
   the distinction drawn is that this is the sharing mechanism the map's own
   creator switched on, not a way around a quota. It is fetched only when the
   analyst subscribes, presses Refresh, or switches the layer on for the first
-  time in a session, when it asked to be re-read then. Every added layer starts
+  time in a session, when it asked to be re-read then. A layer received in a
+  bundle is not re-read on switch-on, since its sender set that and chose the
+  address; it waits for a Refresh pressed here. Every added layer starts
   off when the app or the page opens again, so a layer heavy enough to take the
   tab down does not take it down again on reload; a shape it stops answering in
   fails with a sentence

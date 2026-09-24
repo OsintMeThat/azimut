@@ -26,13 +26,24 @@ STATIC_DIR = Path(__file__).parent / "static"
 SERVE_PORT: int | None = None
 
 # The server binds localhost only, but that alone doesn't stop a web page the
-# browser has open from reaching it — a page can hit 127.0.0.1 directly (its
-# own Origin travels along), or point a name it controls at 127.0.0.1 (DNS
-# rebinding, where the Host header becomes that name). Both are refused here:
-# the Host must be a loopback name (defeats rebinding), and a cross-origin
-# web Origin is turned away on every route except the token-gated ingest
-# island, which opens itself to browser-extension origins on purpose.
+# browser has open from reaching it. A page can hit 127.0.0.1 directly, or point
+# a name it controls at 127.0.0.1 (DNS rebinding, where the Host header becomes
+# that name). The Host must be a loopback name, which defeats rebinding. A
+# cross-origin web Origin is turned away on every route except the token-gated
+# ingest island, which opens itself to browser-extension origins on purpose.
+# Origin alone is not enough: an <img>, a <script> or a link sends none on a GET,
+# and a GET here can spend a provider's allowance or reach another host. The
+# browser's `Sec-Fetch-Site` names the page that asked, so the API and the case
+# files refuse one that is not this app's own (or a navigation typed by hand).
 LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
+#: `Sec-Fetch-Site` values naming another page: another site, or another port
+#: or name of this machine.
+FOREIGN_SITES = frozenset({"cross-site", "same-site"})
+#: What a foreign page may not reach. The SPA itself stays open to a link, and
+#: the ingest island answers only to its pairing token.
+FENCED_PREFIXES = ("/api/", "/files/")
+UNFENCED_PREFIXES = ("/api/ingest/",)
 
 
 class BulkBodyLimit:
@@ -181,6 +192,13 @@ def install_local_guard(app: FastAPI) -> None:
     async def local_guard(request: Request, call_next):
         if not _is_local(_hostname(request.headers.get("host", ""))):
             return PlainTextResponse("invalid host header", status_code=400)
+        path = request.url.path
+        if (
+            request.headers.get("sec-fetch-site", "").lower() in FOREIGN_SITES
+            and path.startswith(FENCED_PREFIXES)
+            and not path.startswith(UNFENCED_PREFIXES)
+        ):
+            return PlainTextResponse("cross-site request refused", status_code=403)
         origin = request.headers.get("origin")
         if origin and not _is_local(_hostname(origin)):
             ingest_extension = request.url.path.startswith(

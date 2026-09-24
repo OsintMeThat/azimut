@@ -130,38 +130,6 @@
 }
 .cmp-range:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
-.cmp-switch {
-  position: relative;
-  flex: 0 0 auto;
-  width: 30px;
-  height: 17px;
-  border-radius: 99px;
-  background: rgba(255, 255, 255, 0.18);
-  transition: background 0.15s var(--ease);
-}
-.cmp-switch::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: #f5f6f7;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-  transition: transform 0.15s var(--ease);
-}
-.cmp-switch.on { background: var(--accent); }
-.cmp-switch.on::after { transform: translateX(13px); }
-
-.cmp-kicker {
-  color: var(--glass-dim);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .cmp-mono {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -169,8 +137,8 @@
 
 /* The column beside the stage. Both computing modes use it, so setting up a
    difference and setting up a detection have the same shape: a header that
-   names the mode and says in one line what it reads, a scrolling body, and
-   one action pinned at the foot that never scrolls out of reach. It takes
+   names the mode, a scrolling body, and one action pinned at the foot that
+   never scrolls out of reach. It takes
    width from the maps rather than covering them — the map stays the thing
    you are working on. */
 .cmp-dock {
@@ -189,13 +157,6 @@
   border-bottom: 1px solid var(--border);
 }
 .cmp-dock > header strong { flex: 1; font-size: var(--fs-sm); }
-.cmp-dock-lead {
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-2);
-  font-size: var(--fs-xs);
-  line-height: 1.45;
-}
 .cmp-dock-body {
   display: grid;
   flex: 1;
@@ -219,34 +180,8 @@
 }
 .cmp-dock-foot .reason.warn { color: var(--warn); }
 
-/* One numbered step. The number is the whole instruction about order. */
-.cmp-step { display: grid; gap: 8px; }
-.cmp-step > header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 24px;
-}
-.cmp-step > header > strong {
-  flex: 1;
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.cmp-step-n {
-  display: grid;
-  place-items: center;
-  width: 19px;
-  height: 19px;
-  border-radius: 50%;
-  color: var(--text-3);
-  background: var(--bg-3);
-  font: 700 10px/1 var(--font-sans);
-}
-.cmp-step.done .cmp-step-n { color: var(--bg-0); background: var(--accent); }
-/* Notes are small wherever they sit in a dock, not only inside a step: a
-   paragraph that escapes this rule renders at body size and shouts. */
+/* Notes are small wherever they sit in a dock: a paragraph that escapes this
+   rule renders at body size and shouts. */
 .cmp-dock .hint { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; margin: 0; }
 .cmp-dock .warn { color: var(--warn); font-size: var(--fs-xs); line-height: 1.45; margin: 0; }
 

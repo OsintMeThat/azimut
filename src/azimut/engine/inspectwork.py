@@ -97,24 +97,6 @@ def _check_size(spec: dict[str, Any]) -> None:
         raise CaseError("that is too large to save")
 
 
-def _free_title(taken: set[str], title: str, fallback: str) -> str:
-    """`title` as a filename stem, numbered past whatever `taken` already holds.
-
-    `taken` is casefolded: two stems differing only by case are one file on Windows
-    and macOS.
-    """
-    base = layout.slugify(title, fallback)
-    if base.casefold() not in taken:
-        return base
-    n = 2
-    while True:
-        suffix = f" {n}"
-        candidate = layout.slugify(f"{base[: layout.MAX_SLUG - len(suffix)]}{suffix}", fallback)
-        if candidate.casefold() not in taken:
-            return candidate
-        n += 1
-
-
 def _stems(case: "Case", directory: str) -> set[str]:
     folder = case.tool_root / directory
     if not folder.is_dir():
@@ -122,26 +104,8 @@ def _stems(case: "Case", directory: str) -> set[str]:
     return {path.stem.casefold() for path in folder.glob("*.json")}
 
 
-def _trashed_stems(case: "Case", directory: str) -> set[str]:
-    """Names in `directory` that a delete moved into the Trash.
-
-    A new artifact must not take one: the restore would find its path occupied and
-    refuse, and clearing a file's work then starting over is exactly when someone
-    wants the old frames back.
-    """
-    prefix = f"{directory}/"
-    out = set()
-    for head in case.list_trash():
-        group = case.get_trash_group(head["id"]) or {}
-        for rel in (group.get("payload") or {}).get("files") or []:
-            rel = str(rel)
-            if rel.startswith(prefix) and rel.endswith(".json") and "/" not in rel[len(prefix):]:
-                out.add(Path(rel).stem.casefold())
-    return out
-
-
 def _taken(case: "Case", directory: str) -> set[str]:
-    return _stems(case, directory) | _trashed_stems(case, directory)
+    return _stems(case, directory) | case.trashed_stems(directory)
 
 
 def _describes_nothing(name: str, file_label: str) -> bool:
@@ -149,7 +113,7 @@ def _describes_nothing(name: str, file_label: str) -> bool:
 
     "Inspect 3" was the old default; a work is born under its file's name, numbered
     when that name was taken. Neither tells anyone anything the file does not. The
-    name is the file's label as `_free_title` wrote it: a long label is cut to fit
+    name is the file's label as `layout.free_stem` wrote it: a long label is cut to fit
     a filename and a character Windows forbids is replaced.
     """
     if _DEFAULT_SESSION.match(name):
@@ -312,7 +276,7 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any]) -> dict[str, Any
             created = previous.get("created_at") or _now()
         else:
             label = str(entity.get("label") or Path(subject).stem)
-            title = _free_title(_taken(case, layout.INSPECT_DIR), label, "Inspect")
+            title = layout.free_stem(_taken(case, layout.INSPECT_DIR), label, "Inspect")
             rel = layout.session_rel(title)
             created = _now()
         active = spec.get("activeFrameId")
@@ -357,7 +321,7 @@ def follow_file_rename(case: "Case", subject: str, old_labels: list[str], label:
         if not any(_describes_nothing(current, old) for old in old_labels if old):
             return
         stem = Path(rel).stem.casefold()
-        wanted = _free_title(_taken(case, layout.INSPECT_DIR) - {stem}, label, "Inspect")
+        wanted = layout.free_stem(_taken(case, layout.INSPECT_DIR) - {stem}, label, "Inspect")
         if wanted != current:
             case.update_entity(entity["id"], {"label": wanted})
 
@@ -448,7 +412,7 @@ def save_collage(
     with case.lock:
         case.subdir(layout.COLLAGE_DIR)
         if name is None:
-            final = _free_title(_taken(case, layout.COLLAGE_DIR), title, "Collage")
+            final = layout.free_stem(_taken(case, layout.COLLAGE_DIR), title, "Collage")
             old_rel = None
         else:
             current = layout.slugify(name, "Collage")
@@ -468,7 +432,17 @@ def save_collage(
         }
         if previous.get("migrated_from"):
             written["migrated_from"] = previous["migrated_from"]
-        if old_rel:
+        if old_rel and final.casefold() == current.casefold():
+            # A change of case only. Windows and macOS see one file under both
+            # names, so deleting "the old one" would delete the collage: rename it.
+            source = case.resolve_inside(old_rel)
+            if source.is_file():
+                media_engine.rename_path(source, source.with_name(Path(rel).name))
+            _write(case.resolve_inside(rel), written)
+            existing = case.find_entity(attr="spec", value=old_rel)
+            if existing:
+                case.update_entity(existing["id"], {"label": final, "attrs": {"spec": rel}})
+        elif old_rel:
             # Written under the new name before the old file goes, so a crash in
             # between leaves the collage twice rather than not at all.
             _write(case.resolve_inside(rel), written)
@@ -533,6 +507,37 @@ def _keep_legacy(case: "Case", rel: str) -> None:
     shutil.copy2(source, target)
 
 
+def forget_legacy(case: "Case") -> int:
+    """Drop the 0.3.0 copies of sessions on a file that is gone for good.
+
+    `_keep_legacy` keeps a session as it was, in case the merge ever needs undoing
+    by hand. That need ends with the file: once it is neither in the case nor in the
+    Trash, its work is gone, and a copy nothing shows would keep the notes and names
+    the analyst deleted. Returns how many copies went.
+    """
+    folder = case.tool_root / layout.INSPECT_DIR / ".v1"
+    if not folder.is_dir():
+        return 0
+    with case.lock:
+        waiting: set[str] = set()
+        for head in case.list_trash():
+            group = case.get_trash_group(head["id"]) or {}
+            waiting.update(str(rel) for rel in (group.get("payload") or {}).get("files") or [])
+        dropped = 0
+        for path in sorted(folder.glob("*.json")):
+            subject = _subject(_read(path) or {})
+            if not subject or subject in waiting:
+                continue
+            try:
+                present = case.resolve_inside(subject).exists()
+            except CaseError:
+                present = False
+            if not present:
+                path.unlink(missing_ok=True)
+                dropped += 1
+    return dropped
+
+
 def _extract_collages(
     case: "Case",
     rel: str,
@@ -553,7 +558,7 @@ def _extract_collages(
             while f"collage {n}" in taken:
                 n += 1
             wanted = f"Collage {n}"
-        title = _free_title(taken, wanted, "Collage")
+        title = layout.free_stem(taken, wanted, "Collage")
         body = {
             "width": collage.get("width"),
             "height": collage.get("height"),
@@ -736,7 +741,7 @@ def _merge_subject(
         )
         wanted = typed or file_label
         taken = _taken(case, layout.INSPECT_DIR) - {Path(rel).stem.casefold()}
-        title = _free_title(taken, wanted, "Inspect")
+        title = layout.free_stem(taken, wanted, "Inspect")
         if title != Path(rel).stem:
             entity = case.update_entity(entity["id"], {"label": title})
             rel = str((entity.get("attrs") or {}).get("spec") or rel)
