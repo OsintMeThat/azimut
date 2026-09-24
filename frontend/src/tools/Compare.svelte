@@ -1500,6 +1500,24 @@
     };
   }
 
+  /**
+   * A right-click on a mark opens the point menu under it, as on bare ground.
+   *
+   * Marks are drawn beside the map element rather than inside it, so the
+   * engine never hears a press on one, and the browser's own menu opened over
+   * the shape instead.
+   */
+  function onOverlayMenu(side, event) {
+    const { engine, element } = side === 'a' ? a : b;
+    if (!engine || !element || !event.target?.closest?.('.annotation-canvas')) return;
+    event.preventDefault();
+    const box = element.getBoundingClientRect();
+    const x = event.clientX - box.left;
+    const y = event.clientY - box.top;
+    const at = engine.containerPointToLatLng({ x, y });
+    onMapContextMenu(side, { lat: at.lat, lon: ((at.lon + 540) % 360) - 180, x, y });
+  }
+
   function closePointMenu() {
     pointLookupSeq += 1;
     pointMenu = null;
@@ -2102,7 +2120,8 @@
     bind:this={stageEl}
   >
     {#if a.present && home}
-      <div class="surface-shell primary">
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="surface-shell primary" oncontextmenu={(event) => onOverlayMenu('a', event)}>
         <div class="surface-label"><strong>A</strong></div>
         <MapSurface
           bind:this={a.surface}
@@ -2193,9 +2212,11 @@
     {/if}
 
     {#if b.present && home}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="surface-shell secondary"
         class:blink-hidden={mode === 'blink' && !blinkB}
+        oncontextmenu={(event) => onOverlayMenu('b', event)}
       >
         <div class="surface-label"><strong>B</strong></div>
         <MapSurface
