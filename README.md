@@ -88,15 +88,21 @@ Detect sweeps an area for what appeared, and the map takes layers made elsewhere
 - Radar: five Sentinel-1 analyzers (vessels, any change, razed buildings, new
   structures, floods) see through cloud and at night, and Sentinel-1 passes are a
   basemap in Satellite, Compare and Detect.
+- Build your own analyzer from rules on bands, indices, ground classes or radar,
+  with checks that turn red when a rule stops holding. Five examples ship with
+  theirs.
 - A candidate opens in Compare with one press, and All dates in Compare narrows
   down between which two pictures a change appeared.
+- Satellite, Compare and Detect share one camera, and a middle-drag turns any map.
+- Inspect keeps one work per file, saved as you go, and Collage is a tab of its own.
 - Open KML, KMZ, GeoJSON and GPX files or a public My Maps as map layers, and add
   a GeoConfirmed conflict. A dated layer narrows to a period.
 - Proofs turn and crop their images, stamp numbered markers and blur boxes, and
   carry a sentence and the date their material was taken.
 - To-do lists on Home, one date field across the app, a claim filed from where
   you are, and Reverse Search from a Media Library row or an Inspect frame.
-- Existing cases open unchanged, and older bundles still import.
+- Existing cases open as they are, with 0.3.0 Inspect sessions merged into one
+  work per file, and older bundles still import.
 
 ## Cases on disk
 

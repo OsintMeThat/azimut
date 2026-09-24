@@ -357,13 +357,13 @@
           <rect class="hit" x={box.x} y={box.y} width={box.size} height={box.size} fill="transparent" />
         {/if}
       {:else if mark.kind !== 'text'}
-        <path d={pathOf(shape)} stroke={mark.colour} stroke-width={mark.stroke_width}
+        <path class="body" d={pathOf(shape)} stroke={mark.colour} stroke-width={mark.stroke_width}
           fill={shape.closed ? mark.colour : 'none'} fill-opacity={mark.fill_opacity}
           stroke-dasharray={mark.kind === 'measure' ? '8 6' : undefined} />
         <!-- A band along the outline, wide enough to hit: a 4px arrow is a
-             target nobody can reliably click twice. For an area it is the only
-             target, its middle belonging to the map so dragging inside one pans
-             as it would anywhere else. -->
+             target nobody can reliably click twice. It is a box's, an ellipse's
+             or a polygon's only target: the middle belongs to the map, so
+             dragging inside one pans as it would anywhere else, filled or not. -->
         <path class="edge" d={pathOf(shape)} fill="none" stroke="transparent"
           stroke-width={Math.max(16, mark.stroke_width * 4)} />
         {#if shape.head}<polygon points={shape.head.map((p) => p.join(',')).join(' ')} fill={mark.colour} />{/if}
@@ -410,10 +410,11 @@
   .annotation-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 550; pointer-events: none; overflow: hidden; }
   .annotation-canvas.drawing { pointer-events: auto; cursor: crosshair; touch-action: none; }
   .mark { pointer-events: visiblePainted; cursor: move; }
+  .mark .body { pointer-events: visibleStroke; }
   .mark .edge { pointer-events: stroke; cursor: move; }
   .mark .hit { pointer-events: all; cursor: move; }
   .mark.area { pointer-events: none; }
-  .drawing .mark, .drawing .mark .edge { pointer-events: none; }
+  .drawing .mark, .drawing .mark .body, .drawing .mark .edge { pointer-events: none; }
   .vertex { pointer-events: auto; cursor: crosshair; }
   .vertex .grip { pointer-events: all; }
   .turn { pointer-events: auto; cursor: grab; }

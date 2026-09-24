@@ -16,7 +16,7 @@ from PIL import Image
 from pydantic import ValidationError
 
 from azimut import config
-from azimut.engine import analysis_geometry, analyzers, detect_rules, sentinel, tilecache, workqueue
+from azimut.engine import analysis_examples, analysis_geometry, analyzers, detect_rules, sentinel, tilecache, workqueue
 from azimut.engine.analysis_models import (
     BUILTINS,
     MAX_BANDS,
@@ -33,7 +33,7 @@ from azimut.engine.analysis_models import (
     recipe_products,
 )
 from azimut.workspace import Case
-from analyzerfixture import BARE, CLOUD, DARK, EDGE, SENTINEL_TILE, VEGETATION, WATER, at, put_picture, zone
+from analyzerfixture import BARE, CLOUD, DARK, EDGE, SENTINEL_TILE, UNSURE, VEGETATION, WATER, at, put_picture, zone
 from test_radar_detect import LAYER, TIME, level
 
 DAY_A, DAY_B = "2026-05-04", "2026-05-11"
@@ -740,6 +740,20 @@ def test_the_examples_are_whole_analyzers_whose_marks_sit_well_inside_their_tile
             tiles.update(detect_rules.check_tiles(check))
         # running all of an example's checks stays a handful of requests
         assert len(tiles) * len(recipe_products(built)) * (1 if single else 2) <= 16, example["id"]
+
+
+def test_the_burn_example_keeps_the_surf_out_by_its_near_infrared_not_its_class():
+    """Copernicus classed the surf off Lahaina on 8 August 2023 as unclassified,
+    not water, so a rule on pass A's scene class let the reef through. The
+    values here are the ones read at the reef's mark: water ends near-black in
+    near infrared on B, and char does not."""
+    burn = next(example for example in analysis_examples.EXAMPLES if example.id == "burn").recipe
+    before, after = scene(), scene()
+    paint(after, 100, 100, 30, 30, B08=0.12, B12=0.25)                   # the town, charred
+    paint(before, 300, 300, 30, 30, sky=UNSURE, B08=0.057, B12=0.057)    # the reef under surf
+    paint(after, 300, 300, 30, 30, sky=WATER, B08=0.0016, B12=0.0147)    # and calm since
+    binary = evaluate(burn, before, after).reading.binary
+    assert binary[115, 115] and not binary[315, 315]
 
 
 def test_an_example_copied_into_the_library_keeps_its_checks_and_the_backup_carries_them(client):

@@ -273,6 +273,21 @@ def test_a_storm_sea_is_still_sea():
     assert found(reading("radar-vessels", storm, storm)) == 1
 
 
+def test_a_sea_quieter_than_the_radar_is_measured_against_its_noise():
+    """Off Fujairah on a calm morning, cross-pol read at the product's -35 dB
+    floor. Measured against that floor, the faint copy a tanker leaves along the
+    track cleared the line as a vessel; measured against the sensor's own noise,
+    it does not, and the hull still does."""
+    hull = ((300, 300, 8, 3), (10.0, -5.0))
+    copy = ((150, 150, 3, 8), (-8.0, -24.0))
+    calm = _sea_with([hull, copy], sea_vv=-27.0, sea_vh=-40.0)
+    assert (calm[..., 1] == 1).mean() > 0.9      # cross-pol sits on the byte floor
+    result = reading("radar-vessels", calm, calm)
+    assert found(result) == 1
+    ys, xs = np.nonzero(result.binary)
+    assert 300 - PAD <= xs.min() and xs.max() < 308 - PAD + 2
+
+
 def test_radar_change_gates_bright_loss_bright_gain_and_new_water():
     ground = speckled(-10.0, 5), speckled(-16.0, 6)
     town = (slice(200, 240), slice(200, 240))

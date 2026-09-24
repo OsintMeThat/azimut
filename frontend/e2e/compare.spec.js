@@ -328,6 +328,46 @@ test('on a turned map a box runs along the screen, and turns from its grip', asy
   expect(errors).toEqual([]);
 });
 
+test('a drag inside a box pans the map, and a right-click on the box opens its point menu', async ({ page }) => {
+  const { errors } = await openCompare(page);
+  const canvas = page.getByLabel('Annotations on imagery A', { exact: true });
+  const box = await canvas.boundingBox();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  // A marker off to the side stays on the ground, so it tells whether the map moved.
+  await page.getByTitle('Numbered marker (N)', { exact: true }).click();
+  await page.mouse.click(cx + 200, cy + 120);
+  await page.getByTitle('Box (R)', { exact: true }).click();
+  await page.mouse.move(cx - 100, cy - 60);
+  await page.mouse.down();
+  await page.mouse.move(cx + 100, cy + 60, { steps: 6 });
+  await page.mouse.up();
+
+  const outline = canvas.locator('.mark > path.body');
+  const numeral = canvas.locator('.numeral');
+  const markerAt = async () => [Number(await numeral.getAttribute('x')), Number(await numeral.getAttribute('y'))];
+  const boxBefore = cornersOf(await outline.getAttribute('d'));
+  const markerBefore = await markerAt();
+
+  // Well inside the box, away from its outline: the drag is the map's.
+  await page.mouse.move(cx - 20, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 40, cy + 30, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(async () => (await markerAt())[0] - markerBefore[0]).toBeGreaterThan(30);
+  const markerAfter = await markerAt();
+  const boxAfter = cornersOf(await outline.getAttribute('d'));
+  // The box went with the ground and no further: it was not picked up.
+  expect(boxAfter[0][0] - boxBefore[0][0]).toBeCloseTo(markerAfter[0] - markerBefore[0], 0);
+  expect(boxAfter[0][1] - boxBefore[0][1]).toBeCloseTo(markerAfter[1] - markerBefore[1], 0);
+
+  // Its outline answers a right-click with the menu of the point under it.
+  const [left, right] = [boxAfter[0], boxAfter[1]];
+  await page.mouse.click(box.x + (left[0] + right[0]) / 2, box.y + (left[1] + right[1]) / 2, { button: 'right' });
+  await expect(page.getByRole('menu', { name: 'This point' })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('the export frame keeps its shape when the camera turns, and still exports', async ({ page }) => {
   // Tall enough for the frame's four corners to stay in view once it is turned.
   await page.setViewportSize({ width: 1600, height: 1100 });

@@ -1399,7 +1399,9 @@ and keeps the bearing it was drawn at. Any selected shape but a note or a stamp
 also shows a round grip above it: drag it to turn the shape about its centre,
 with Shift snapping to 15°.
 Every mark carries a wide invisible band along its outline, because a four-pixel
-arrow is a target nobody hits twice. The wheel still belongs to the map wherever
+arrow is a target nobody hits twice. That band is how a box, an ellipse or a
+polygon is picked and moved: its middle belongs to the map, filled or not, so a
+drag inside one pans the imagery under it. The wheel still belongs to the map wherever
 the pointer is: the marks are drawn over it rather than in it, and a zoom that
 stopped on whatever had been drawn read as a map that had frozen. Clicking the ground beside a mark lets it go;
 dragging the map is a pan and keeps it. The tool rail packs into two columns, like
@@ -1409,8 +1411,8 @@ and with the button behind them when the selection is dropped. **Pressing the to
 already in hand puts it down** and gives the cursor back, on this rail and on Proof
 Maker's: the way out of a drawing tool is the button you are already on.
 
-**Right-click the ground** here too, on either map, for the acts Compare can
-honour: copy the point in every coordinate format, ask what is there, save a
+**Right-click the ground** here too, on either map and on any mark drawn on it,
+for the acts Compare can honour: copy the point in every coordinate format, ask what is there, save a
 place there, start a distance measure from it — the annotation of the same
 name, anchored on the point and closed by the next click — or open it in
 Satellite or Detect. The rows Satellite offers for its own rails are left out

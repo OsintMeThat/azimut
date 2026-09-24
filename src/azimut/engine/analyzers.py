@@ -72,7 +72,7 @@ PAD = 32
 # Bumped when a product's layout changes, so a frame kept from an older run is
 # never decoded as a newer one.
 PRODUCT_VERSION = 2
-ENGINE_VERSION = 3
+ENGINE_VERSION = 4
 LOCK = threading.RLock()
 KINDS = {"areas": "analysis-area", "zones": "analysis-zones", "followups": "analysis-follow-up", "runs": "analysis-run"}
 ACTIVE = {"queued", "running"}
@@ -179,7 +179,7 @@ DARK_ABSENT = frozenset({"nbr"})
 # the May 2023 Emilia-Romagna floods, and Gaza City before and after late 2023.
 #
 # What is sea. Windy sea rose to -11 dB in VV in the North Sea storm, above
-# farmland's -10, so VV alone called it land; cross-pol stayed near -24 dB on
+# farmland's -10, so VV alone called it land; cross-pol stayed below -24 dB on
 # every sea and between -12 and -18 on vegetated land. Dry desert is as dark as
 # calm sea in both, and at Port Sudan the radar alone put 72 candidates on the
 # town and the sand around it. So the sea is first what Sentinel-2's own scene
@@ -196,6 +196,18 @@ SEA_VH_DB = -21.0
 # azimuth, the streaks turning blades smear, and sea spikes answer in VV alone.
 # In the Singapore anchorage every hull cleared VH by 8 dB, those ghosts 4 to 7.
 VH_GAP = 2.0
+# The sea is never measured as quieter than the radar's own noise. Sentinel-1's
+# noise floor in this mode is specified at -22 dB at worst and sits a few dB
+# lower mid-swath. Below it the processing takes the noise out, and calm water,
+# like cross-pol on most seas, reads as low as the product's -35 dB floor.
+# Measured against that, a return at -25 dB, which is noise, cleared the line:
+# off Fujairah, on a calm morning with a hundred tankers at anchor, the faint
+# copies each hull leaves along the track came back as 29 vessels. With the
+# background held at -24 dB they went, as did the pale streaks off Dover,
+# Singapore and Port Sudan's reefs, and no hull was lost there, in the Bandar
+# Abbas anchorage or among the Belgian turbines. At -22 dB small ships began
+# to go; at -26 dB a streak came back.
+SAR_NOISE_DB = -24.0
 # A weak return within 400 m of one 6 dB stronger is that one's sidelobe or
 # ghost: it cut the Belgian wind farms from 1,043 candidates to about one a
 # turbine, and cost the anchorage no hull.
@@ -985,10 +997,11 @@ def _sar_vessels(product: Any, water: Any, inside: Any, metres: float,
     """Hulls: a strong return standing out of the sea around it.
 
     Each pixel is measured against a ring of sea with a hole in the middle, the
-    ring the optical detector uses, in decibels above the ring's mean power. It
-    has to clear the line in VV and come close in VH, and not sit in the
-    shadow of a much stronger return. `water` is Sentinel-2's classification,
-    or None where the sweep could not read it.
+    ring the optical detector uses, in decibels above the ring's mean power or
+    the radar's noise floor, whichever is louder. It has to clear the line in VV
+    and come close in VH, and not sit in the shadow of a much stronger return.
+    `water` is Sentinel-2's classification, or None where the sweep could not
+    read it.
     """
     import cv2
     import numpy as np
@@ -1008,7 +1021,8 @@ def _sar_vessels(product: Any, water: Any, inside: Any, metres: float,
         decibels = sentinel.sar_decibels(level.astype(np.float64))
         power = np.where(data, 10.0 ** (decibels / 10.0), 0.0)
         mean, _, share = ring_statistics(power, sea, VESSEL_RING, VESSEL_GUARD)
-        return np.where(share > 0, decibels - 10.0 * np.log10(np.maximum(mean, 1e-9)), 0.0), share
+        background = np.maximum(mean, 10.0 ** (SAR_NOISE_DB / 10.0))
+        return np.where(share > 0, decibels - 10.0 * np.log10(background), 0.0), share
 
     vv, share = contrast(product[:, :, 0])
     vh, _ = contrast(product[:, :, 1])

@@ -8,8 +8,10 @@ of its rules is there to turn away, so removing that rule turns the check red.
 
 Every pass, mark and line here was read on the real scenes (2026-09-24), from
 Sentinel-2 Level-2A laid out as Detect's band evalscript returns it, through
-this engine's own `detect_rules.check`. Marks sit at least 64 pixels inside the
-grid tile they fall in, since a check reads each mark on its own tile.
+this engine's own `detect_rules.check`, then every check was run again through
+Copernicus itself, which is what an analyst's run reads. Marks sit at least 64
+pixels inside the grid tile they fall in, since a check reads each mark on its
+own tile.
 """
 
 from __future__ import annotations
@@ -50,15 +52,17 @@ def _example(ident: str, place: str, when: str, size: str, **fields: Any) -> Exa
 EXAMPLES: list[Example] = [
     # The Lahaina fire of 8 August 2023. A is that morning's pass, before the
     # town burned. Without the second rule a cloud the mask missed reads as a
-    # burn; without the third the surf on the reef does.
+    # burn; without the third the surf on the reef does. That rule reads near
+    # infrared rather than the scene classification, which Copernicus left
+    # unclassified under the surf that morning.
     _example(
         "burn", "Lahaina, Maui", "August 2023", "medium",
         name="Fresh burn", phenomenon="Fresh burn", colour="#ef4444",
-        description="The burn ratio dropped and ended low, on ground that was not water. "
-        "A field harvested between the passes can look the same.",
+        description="The burn ratio dropped and ended low, on ground brighter than water in "
+        "near infrared. A field harvested between the passes can look the same.",
         rules=[Rule(measure="index", index="nbr", on="change", op="le", value=-0.2),
                Rule(measure="index", index="nbr", on="b", op="le", value=0.1),
-               Rule(measure="class", classes=["water"], on="a", op="not")],
+               Rule(measure="band", band="B08", on="b", op="ge", value=0.04)],
         checks=_checks(
             "2023-08-08", "2023-08-13", "SWIR",
             ("town", "The town and hills that burned", (-156.68747, 20.86409, -156.66278, 20.90174),
