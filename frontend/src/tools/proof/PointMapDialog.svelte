@@ -17,10 +17,12 @@
   import { onMount, untrack } from 'svelte';
   import Modal from '../../components/Modal.svelte';
   import Icon from '../../components/Icon.svelte';
+  import TurnGuide from '../../components/TurnGuide.svelte';
   import MapSurface from '../satellite/MapSurface.svelte';
   import MapLayers from '../satellite/MapLayers.svelte';
   import { createImageryState, FALLBACK_PROVIDER } from '../satellite/state/imagery.svelte.js';
   import { createSurface } from '../../lib/map/surface.js';
+  import { turnFromKey, turnFromPress } from '../../lib/map/gestures.js';
   import { markerGeometry, markerSvg } from '../../lib/mapMarkers.js';
   // The reference layers, named where they are already named for a reader
   // (`lib/map/compare.js`): the same seven key-less overlays, the same words.
@@ -45,7 +47,9 @@
   const imagery = createImageryState({ api });
   let providerId = $state(FALLBACK_PROVIDER);
   let engine = $state(null);
+  let element = $state(null);
   let ready = $state(false);
+  let rotating = $state(null); // the grabbed point while the map turns
   // Where the pin starts: the opening camera, read once. The dialog is opened on
   // one row and closed on it, so a later view would be a different question.
   let at = $state(untrack(() => ({ lat: view.lat, lon: view.lon })));
@@ -105,6 +109,20 @@
     };
   });
 
+  // The same turn as every other map: a middle-drag, or Shift and the left
+  // button, about the grabbed point; Shift and an arrow from the keyboard.
+  $effect(() => {
+    if (!element || !engine) return;
+    const surface = element;
+    const down = (event) =>
+      turnFromPress(engine, event, {
+        onPivot: (point) => (rotating = point),
+        onEnd: () => (rotating = null),
+      });
+    surface.addEventListener('mousedown', down, true);
+    return () => surface.removeEventListener('mousedown', down, true);
+  });
+
   // Read before the guard: behind `surface?.` the position would never be read
   // at all while the map is still being built, and the pin would then stop
   // following anything.
@@ -114,10 +132,13 @@
   });
 </script>
 
+<svelte:window onkeydown={(event) => turnFromKey(engine, event)} />
+
 <Modal title="Move the point" {onclose} width="900px">
   <div class="stage">
     <MapSurface
       bind:engine
+      bind:element
       bind:ready
       bind:providerId
       {imagery}
@@ -127,6 +148,9 @@
       controlsTop={8}
       onclick={(clicked) => (at = clicked)}
     />
+    {#if rotating}
+      <TurnGuide x={rotating.x} y={rotating.y} />
+    {/if}
     <div class="layers" class:open={layersOpen}>
       {#if layersOpen}
         <MapLayers rows={layerRows} bind:open={layersOpen} />

@@ -15,10 +15,10 @@ picking one:
     something once the source is gone. Deleting the source leaves the artifact
     in place, with a tombstone recording what it came from.
 
-``depends-on`` (session → subject)
-    The artifact is nothing but a pointer at its subject: an Inspect session is
-    a set of adjustments over a video, worthless without it. Deleting the
-    subject deletes the session.
+``depends-on`` (work → subject)
+    The artifact is nothing but a pointer at its subject: a file's Inspect work
+    is frames and edits over that file, worthless without it. Deleting the
+    subject deletes the work.
 
 The test a new tool applies: *delete the target — is anything usable left in my
 file?* Yes → ``derived-from``. No → ``depends-on``. Emitted at save time with

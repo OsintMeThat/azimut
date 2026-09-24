@@ -73,8 +73,3 @@ export function matrixAngleDeg(m) {
 export function isIdentity(m, eps = 1e-6) {
   return IDENTITY.every((v, i) => Math.abs(m[i] - v) < eps);
 }
-
-/** Angle (deg) of the spoke from a pivot to a point, in screen space (Y down). */
-export function pointerAngleDeg(pivotX, pivotY, x, y) {
-  return Math.atan2(y - pivotY, x - pivotX) / DEG;
-}

@@ -26,6 +26,7 @@
     zoneRing,
   } from '../../lib/map/analyzers.js';
   import { plural } from '../../lib/map/detections.js';
+  import { recipeCapability } from '../../lib/map/analyzerRules.js';
   import { openCopernicusSettings } from '../../lib/navigate.js';
   import { uniform, whenNeed, whenSummary } from '../../lib/map/detectWhen.js';
   import AnalyzerSettings from './AnalyzerSettings.svelte';
@@ -84,8 +85,7 @@
 
   const builtins = $derived(catalogue?.builtins ?? []);
   const custom = $derived(catalogue?.custom ?? []);
-  const methodOf = (method) => catalogue?.methods?.find((m) => m.id === method) ?? {};
-  const capability = $derived(methodOf(recipe?.method));
+  const capability = $derived(recipeCapability(recipe, catalogue?.methods ?? []));
   /** A vessel or a fire is present on a date, not a difference between two. */
   const isSingle = $derived(!!capability.single);
   /** Radar reads Sentinel-1 through the layer Settings found, and has no clouds. */

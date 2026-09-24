@@ -1378,6 +1378,7 @@ def _structured_record_paths(case: Case) -> list[Path]:
     roots = (
         layout.subdir(case.path, "proofs") / layout.META_DIR,
         tool / layout.INSPECT_DIR,
+        tool / layout.COLLAGE_DIR,
         tool / layout.DRAFTS_DIR,
         tool / layout.SEARCH_DIR,
     )
@@ -1452,6 +1453,10 @@ def _finish_media_rename(case: Case, record: dict[str, str]) -> dict[str, Any]:
     indexed = {**data, "path": new}
     case.upsert_media_item(indexed, entity_id=owner_id)
     rewrite_file_references(case, old, new)
+    from . import inspectwork
+
+    old_labels = [str(owner.get("label") or "") if owner else "", Path(old).stem]
+    inspectwork.follow_file_rename(case, new, old_labels, title)
     _rename_journal(case).unlink(missing_ok=True)
     return indexed
 

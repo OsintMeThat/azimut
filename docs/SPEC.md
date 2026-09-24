@@ -57,7 +57,8 @@ azimut/        # everything Azimut owns; the rest of the folder is yours
   exports/     # finished exports and yours to fill
   .data/       # case.db, the authoritative SQLite graph, and entity photos
   .drafts/     # post drafts
-  .inspect/    # saved Inspect session specs
+  .inspect/    # each file's Inspect work: its frames and their edits
+  .collages/   # collage layouts; the picture one exports is media
   .compare/    # saved Compare session specs
   .analysis/   # Detect areas, saved detections, runs and the frames behind their results
   .search/     # saved Grid Search state
@@ -87,7 +88,7 @@ The entity/link schema has existed since v1. Full vocabulary lives in
   | class | equipment-type |
   | identifier | account, email, phone, domain, ip, network |
   | collected | media, capture |
-  | document | proof, post, note, inspect-session, bookmark |
+  | document | proof, post, note, inspect-session, collage, bookmark |
   | place | place |
   | claim | claim |
 
@@ -114,7 +115,7 @@ proof for publication.
 
 | Tool | What it does |
 |------|--------------|
-| ✅ **Media Library & Inspect** | Imports or downloads case media with metadata, provenance and hashes, then reviews images and video through saved editing sessions. |
+| ✅ **Media Library & Inspect** | Imports or downloads case media with metadata, provenance and hashes, then reviews images and video closely. |
 | ✅ **Satellite** | Saves places and attributed map captures from free or optional keyed imagery, including dated Sentinel-2 passes and usage controls. |
 | ✅ **Geo Proof** | Composes annotated panels, files their coordinates as places and exports an editable PNG proof. |
 | ✅ **Geo Report** | Prepares sourced proof threads and saved drafts without posting automatically. |
@@ -167,7 +168,7 @@ proof for publication.
 |------|--------------|
 | ✅ **Map engine** | Draws the map on MapLibre GL behind the `lib/map` façade, with the same providers, captures and bearing. |
 | ✅ **Map chrome** | Puts modes in one rail, map layers in their tool panel or popup, imagery in the map corner and position in a status line, each tool declared once. |
-| ✅ **Point menu** | Right-clicking the ground copies that point in every format, looks it up, saves, measures, reads the sky or opens its imagery history from it, and links it out. |
+| ✅ **Point menu** | Right-clicking the ground copies that point in every format, looks it up, saves, measures, reads the sky or opens its imagery history from it, opens it in the other map tabs, and links it out. |
 | ✅ **Map windows** | Opens the map in several tabs with the view in the URL, links map tabs and extension panels on other sites to one camera, and syncs saved points, grids and sweeps live to every tab and extension panel. |
 | ✅ **Map layers** | Stacks key-less overlays (borders, roads, railways, power lines, sea marks, GPS traces), NASA FIRMS fires and VIIRS night lights for a chosen day, and filters drawn pins by kind and folder. |
 | ✅ **Added map layers** | Opens a KML, KMZ, GeoJSON or GPX file, or follows a public My Maps or map URL refreshed only while enabled, and draws it with its own colours, optionally its own icons composed once at import, a legend that filters and a search that goes to one feature — read, cited and never adopted into the case. |
@@ -199,6 +200,13 @@ proof for publication.
 | ✅ **All dates** | Lists every dated picture of the point in Compare and narrows down, a question at a time, between which two a change appeared. |
 | ✅ **Copernicus where it is needed** | Detect and Compare say in the middle of the tool what Copernicus still lacks, with the free account, the Sentinel-2 configuration and the Sentinel-1 layer form field by field. |
 | ✅ **A candidate in Compare** | Opens a Detect candidate in Compare on the passes that found it, or against high-resolution imagery for a thing present on one pass. |
+| ✅ **Sizes in Detect** | Right-clicks Detect's map for its own point menu, measures a hull with a ruler, sizes each candidate along its footprint, walks the largest first, and hides the drawing or blinks A against B from the review. |
+| ✅ **Analyzers of your own** | Builds a Detect analyzer from up to six rules on any band, index, ground class or radar polarisation, read on A, B or the change, tried live on the map over any Copernicus layer with a point reading; optional checks (marked places reread as the rules change) and five calibrated examples that ship with theirs; also opened from a built-in or a Difference reading, with a shape filter for every analyzer. |
+| ✅ **Examine: Inspect and Collage** | Keeps one work per file, saved as it is made, with its frames on a strip; lays collages out of frames and images from any file; merges a case's 0.3.0 sessions on open. |
+| ✅ **One camera for the map tabs** | Satellite, Compare and Detect show the same ground, and the link carries it to other windows; a Detect review and a saved comparison keep theirs, and Settings turns it off. |
+| ✅ **Comparisons in Saved work** | A saved comparison stands on the map with the captures, at its frame's centre with the frame outlined, dated A → B, and reopens in Compare; an export can also be kept in the case under it. |
+| ✅ **Dated pins and pictures** | A kept Detect candidate files a claim at its pin (a change between two passes, or a thing seen on one); comparisons and pinned evidence carry each picture's date, estimates marked; Detect layers filter a change by its span; exports are named by their pictures' dates. |
+| ✅ **One turn on every map** | A middle-drag turns any map or Inspect frame like a wheel about the grabbed point, settling on north, in 15° steps with Ctrl; a middle click or Shift+↑ puts north back, Shift+← / → steps. |
 
 ---
 
@@ -230,7 +238,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **OCR** | Reads signs and plates on import (tesseract, a native binary rather than a wheel), and detects script and language. |
 | **Audio Transcript** | Transcribe and translate speech offline; flag acoustic context such as bells, adhan, aircraft or language. |
 | **Ground Imagery** | Ground-level photos: Panoramax/Mapillary/KartaView key-less first; Street View easy link, optional keyed in-app view. |
-| **Panorama** | Stitch a video window / frame set. Auto-stitch already in Inspect; still to do: sample a video window directly, seam blending. |
+| **Panorama** | Stitch a video window / frame set. Auto-stitch already in Collage; still to do: sample a video window directly, seam blending. |
 | **Proof annotation** | Grow the Geo Proof toolbox: dashed strokes; a document-level free layer so shapes cross panels and reach the margins; callout / zoom insets. |
 | **Detached tool windows** | The rule the map already follows, applied to the rest: a read-and-work surface (Board, Graph, Timeline) opens as many tabs as wanted and the tab it left stays live; a document editor opens one window per document and is greyed out where it was. Cross-tool handoffs route to wherever the tool now lives. |
 | **Command palette** | Ctrl+K reaches a tool, a case or an artifact. |
@@ -315,12 +323,13 @@ stops making sense.
 
 - **Media in the analyst's half:** a button that looks for media beside `azimut/` and offers to bring them into the case, rather than waiting for them to be moved into `media/` by hand.
 - **Count a statement's independence by origin, not by wrapper:** three collages made from one video are three sources today, and are arguably one. The graph already answers this for a place; changing it for a statement changes a published number.
-- **Free-form montage editor:** consider only if it stays distinct from Geo Proof and Inspect collage.
+- **Free-form montage editor:** consider only if it stays distinct from Geo Proof and the Collage tool.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
 - **More on the home page:** the case's own notes beside the tiles, and panels the analyst arranges rather than a fixed grid. Each has to earn its place there rather than beside Board, Graph and Timeline, which already read the case.
 - **Radar damage from a stack of passes:** the pixel-wise t-test (PWTT) over a year of passes before and weeks after, which two passes cannot match.
 - **Oil slicks by radar:** dark patches on the sea near anchorages and lanes, which Sentinel-1 shows through cloud.
+- **Map files out of the case:** export pins, claims and Detect findings as KML or GeoJSON, with TimeStamp and TimeSpan so another viewer's time slider reads them.
 - **A deleted case waits before it is gone:** artifacts, entities and bulk deletes are all recoverable, while removing a case is the one act with no way back and only a typed DELETE in front of it. Move the folder aside instead, and empty it later.
 
 ## 8. Explicit non-goals

@@ -186,12 +186,11 @@ def test_an_inspect_session_is_placed_through_the_media_it_points_at(client, sat
     frame = _frame_of(cid, video)
     cap = _sat(client, cid, 50.4501, 30.5234)
     _save_proof(client, cid, "Roofline", [frame, cap], coords={"lat": 50.4501, "lon": 30.5234})
-    client.post(
-        f"/api/cases/{cid}/inspect/sessions",
-        json={"title": "Pass", "spec": {"source": {"path": video, "kind": "image"}}},
-    )
+    work = client.put(
+        f"/api/cases/{cid}/inspect/work", json={"path": video, "spec": {"frames": []}}
+    ).json()
 
-    assert _points(client, cid, _id(cid, spec=".inspect/Pass.json")) == [(50.4501, 30.5234)]
+    assert _points(client, cid, _id(cid, spec=f".inspect/{work['name']}.json")) == [(50.4501, 30.5234)]
 
 
 # ── what the list refuses to do ─────────────────────────────────────────────

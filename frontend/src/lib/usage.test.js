@@ -154,10 +154,10 @@ describe('displayProviderId', () => {
 
   it("a provider's own eco threshold wins over the global one", () => {
     // Sentinel-2 caps at z14, so the global z15 would hide it at every zoom it
-    // can serve; its own z11 keeps the useful z12-14 band alive.
-    const s2 = { id: 'sentinel2', meter: 'sentinelhub', eco_max_zoom: 11 };
-    expect(displayProviderId(s2, 11)).toBe('esri-world-imagery');
-    expect(displayProviderId(s2, 12)).toBe('sentinel2');
+    // can serve; its own z7 keeps everything from z8 in alive.
+    const s2 = { id: 'sentinel2', meter: 'sentinelhub', eco_max_zoom: 7 };
+    expect(displayProviderId(s2, 7)).toBe('esri-world-imagery');
+    expect(displayProviderId(s2, 8)).toBe('sentinel2');
     expect(displayProviderId(s2, 14)).toBe('sentinel2');
     // the user's global setting doesn't drag it back under
     expect(displayProviderId(s2, 14, { ecoMaxZoom: 15 })).toBe('sentinel2');

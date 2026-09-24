@@ -4000,7 +4000,7 @@
     picker || newProofOpen || importOpen || openList !== null || discardConfirm
       || replaceWithNewConfirm || exportPicker || overwritePrompt !== null
       || placeOffer !== null || orphanOffer !== null || deleteEntry !== null
-      || sourcePick !== null
+      || sourcePick !== null || pointMap !== null
   );
   const editableShape = $derived(editableShapes.length === 1 ? editableShapes[0] : null);
   const fillableSelection = $derived(editableShapes.some((s) => canFill(s.kind)));

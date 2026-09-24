@@ -336,6 +336,7 @@
   let updateOnStart = $state(true); // pop a notice on load when a release is out
   // whether saving a proof files its point as a place, or asks first
   let proofPlaceAuto = $state(true);
+  let mapSync = $state(true); // Satellite, Compare and Detect share one camera
   let radarLayer = $state('');
   // a card of the Imagery tab asked for from elsewhere, opened and scrolled to
   let focusCard = $state('');
@@ -552,6 +553,7 @@
     reversePrefill = s.reverse_prefill ?? true;
     updateOnStart = s.update_check_on_start ?? true;
     proofPlaceAuto = s.proof_place_auto ?? true;
+    mapSync = s.map_sync ?? true;
     radarLayer = s.sentinel1_layer ?? '';
     applyPrefs(s); // the rest of the app reads these live
     await loadScrapers().catch(() => {}); // local disk read; never blocks Settings
@@ -851,6 +853,7 @@
           {saveHome}
           bind:proofPlaceAuto
           bind:reversePrefill
+          bind:mapSync
         />
       {/if}
 

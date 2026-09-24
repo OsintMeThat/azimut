@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from typing import Any
 
@@ -111,3 +112,39 @@ def interior(geometry: dict[str, Any], preferred: tuple[float, float]) -> tuple[
                 if right > left:
                     return ((left + right) / 2, y)
     raise ValueError("the footprint has no interior")
+
+
+def near(geometry: dict[str, Any], point: tuple[float, float], metres: float) -> bool:
+    """Whether a footprint covers a point, or comes within `metres` of it.
+
+    The point is tried where it is and `metres` away on each side, which is
+    close enough for a click beside a track a pixel wide.
+    """
+    polygons = [geometry["coordinates"]] if geometry["type"] == "Polygon" else geometry["coordinates"]
+    lon, lat = point
+    dy = metres / 110_574
+    dx = metres / (111_320 * max(0.08, math.cos(math.radians(lat))))
+    tries = [(lon, lat), (lon + dx, lat), (lon - dx, lat), (lon, lat + dy), (lon, lat - dy)]
+    return any(contains(polygon[0], spot) and not any(contains(hole, spot) for hole in polygon[1:])
+               for polygon in polygons for spot in tries)
+
+
+def elongation(geometry: dict[str, Any]) -> float:
+    """How many times longer than wide a footprint is, along its own axis.
+
+    The smallest turned rectangle around every outer ring's corners, measured
+    in local metres: about 1 for a roof or a crater, 10 for a track ten times
+    longer than it is wide, whichever way it runs.
+    """
+    import cv2
+    import numpy as np
+
+    polygons = [geometry["coordinates"]] if geometry["type"] == "Polygon" else geometry["coordinates"]
+    points = [point for polygon in polygons for point in polygon[0]]
+    if len(points) < 3:
+        return 1.0
+    across = math.cos(math.radians(sum(lat for _, lat in points) / len(points)))
+    local = np.array([[lon * 111_320 * across, lat * 110_574] for lon, lat in points], np.float32)
+    _, (width, height), _ = cv2.minAreaRect(local)
+    short, long = sorted((float(width), float(height)))
+    return long / max(short, 1.0)

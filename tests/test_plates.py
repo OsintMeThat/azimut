@@ -81,6 +81,21 @@ def test_a_plate_goes_to_the_folder_the_analyst_chose_and_never_overwrites(
     }
 
 
+def test_a_plate_that_asks_not_to_overwrite_takes_a_name_of_its_own_in_the_case(client):
+    """Compare names an image by its pictures' dates, so a second comparison of the
+    same pair must not replace the first."""
+    case_id = _case(client)
+
+    first = _write(client, case_id, format="png", png=_png(), svg="", overwrite=False)
+    second = _write(client, case_id, format="png", png=_png(), svg="", overwrite=False)
+
+    assert first.status_code == 200 and second.status_code == 200
+    assert second.json()["file"] != first.json()["file"]
+    assert {first.json()["file"], second.json()["file"]} <= {
+        path.name for path in exports_of(case_id).iterdir()
+    }
+
+
 def test_a_png_plate_is_written_as_an_image(client):
     case_id = _case(client)
 

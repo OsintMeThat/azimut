@@ -22,7 +22,7 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | **Home** (the mark) | Overview, Guide | |
 | **Case** (topbar) | Board, Graph, Timeline, Sheet | v5: Orchestrator |
 | **Sources** | Media Library, Files, Reverse Search | Channel Monitor, Evidence Locker |
-| **Examine** | Inspect (Selection / Frame / Collage / Analyze) | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
+| **Examine** | Inspect, Collage | Edit Provenance, Shot contact sheet, OCR, Image Compare, Hints, Sky Clock, audio |
 | **Map** | Satellite, Compare, Detect, Coords & Sky | Imagery Wayback, Event layers, Ground Imagery, Measures, Viewshed, OSM Query, Map Board |
 | **Compose** | Geo Proof, Geo Report, Notebook | Report Builder, GIF maker |
 
@@ -330,7 +330,7 @@ single root to expand from. Expansion is the drill-down.
   so a relation or a type added to the engine joins its lens with no edit.
   Narrowing the verbs never hides a subject: an entity with no edge *in this lens* is
   an answer. What a lens takes out of the drawing is a whole **role** — a post, a note
-  and an Inspect session are the filing rather than the case, and My work is the one
+  and a file's Inspect work are the filing rather than the case, and My work is the one
   click back to them. A node's degree follows the reading, so it never prices a click
   that could bring nothing in, and a name typed into the search can be brought into
   every reading except one that does not draw its type: that one says so instead.
@@ -1204,9 +1204,15 @@ file, Delete. The menu is placed against the window rather than inside the row,
 because a card clips what overflows it and the last row of a scrolled list would
 cut the menu off.
 
+**Reverse Search starts from Inspect's file list.** Every image and video in the
+case, filterable and searchable, with no worked-on row since the tab keeps nothing.
+The engines' own pages sit beside it, for a file that is not in the case. Once a
+picture is picked, **Change file** and the cross in the header work as in Inspect,
+and a case change drops the picture with its handoff.
+
 **Reverse Search opens on the picture it was sent.** From a Media Library row it
-is the case file; from Inspect's Frame tab it is the frame as it reads there —
-turned, adjusted and cropped — rendered by the tray's own route and filed nowhere,
+is the case file; from a frame in Inspect it is the frame as it reads there —
+turned, adjusted and cropped — rendered by the strip's own route and filed nowhere,
 and the tool says so under the preview. The crop is the point: an engine matches a
 subject better than the picture it sits in. The handoff is spent once, on the tab
 it was meant for, and a case change drops it with every other handoff.
@@ -1217,10 +1223,59 @@ the file; the backend returns the portable stem after replacing forbidden
 characters or resolving a case-insensitive collision. Downloads keep dates and
 remote ids in provenance instead of appending them to the visible name.
 
+## Examine
+
+Two tabs: **Inspect** reads one file closely, **Collage** lays out pieces from any
+number of files. Neither has a session to start, name or save.
+
+**The work stays with the file.** Opening a video or an image opens what was done to
+it: the frames cut from it, their turns, adjustments and crops, the clip's own
+adjustments. It is saved as it is made, a second or so after the last change, and
+the header says *Saving…*, *Saved* or *Not saved* with a retry. Opening a file only
+to look at it files nothing; the first real change does. A file has one work, named
+after the file, which the sidebar lists and reopens on that file. The name in the
+header renames the file itself, and the work follows unless it was given a name of
+its own. **Clear work** sends it to the Trash, so the reset can be undone.
+
+**The empty state is the file list.** Every image and video, the files already worked
+on first with their frame count, filterable by kind and searchable, with the folder
+browser behind `…`. **Change file** in the header opens the same list over the
+file; the cross closes it and goes back. Neither asks anything, since nothing is
+unsaved.
+
+**A strip instead of tabs.** Under the viewer, a video leads the strip and the frames
+cut from it follow, labelled by timecode. Clicking a tile is what the viewer and the
+panel show: the player with stepping, capture, orientation, clip adjustments and the
+sharpest-frame scan, or one frame with orientation, adjustments, crop, **Analyze**
+and reverse search. An image is its own single frame and needs no strip until
+**Duplicate** makes a second copy to crop differently. Removing a frame offers Undo.
+
+**Save to case is the one step that files media.** Each output carries its own block
+under the controls that shape it: a name that holds real text from the start, a
+folder, an optional note. A frame, the adjusted video or an exported collage then
+reads *In the case*, linked to the Media Library, until an edit makes it a
+different picture. **Save N frames** in the strip files every frame not in the case
+yet, under its default name.
+
+**A collage is a document.** New starts an empty canvas, filed once the first piece
+lands; the name in the header renames it and refuses a name another collage holds.
+Pieces come from **Frames**, the works of any file grouped by file, or **Images**,
+any case image. A piece is a recipe frozen when it is placed, so editing the frame
+later does not change the collage. A piece still rendering holds its place with a
+spinner. A renamed file is followed; a piece whose file was deleted keeps its place
+as a hatched gap, and the export waits until it is removed. The export is a
+transparent PNG of the pieces trimmed to their bounds.
+
+**0.3.0 sessions come over on open.** The sessions of one file merge into its work:
+frames are joined, the latest session carries on, typed names and notes are kept in
+its notes, relations move to it, and each collage becomes a collage document named
+after the session that built it. The sessions are copied as they were to
+`.inspect/.v1/` first. A session brought back from the Trash merges the same way.
+
 ## Map
 
-**Compare assembles two imagery views on one camera.** It opens on the home view
-with a key-less pair: an Esri Wayback release published a year or more back on A,
+**Compare assembles two imagery views on one camera.** It opens where the other map
+tabs left the window, or on the home view, with a key-less pair: an Esri Wayback release published a year or more back on A,
 today's World Imagery on B. That costs the release list and tiles, never a
 Copernicus request or a point's history, and A stays empty when no release list
 comes back rather than showing B twice. Panning that untouched pair leaves
@@ -1294,7 +1349,10 @@ the last reading stays up, marked in the strip as an earlier read, until **Read*
 export. A reading recomputes by itself after every move, on the
 frames it holds; what it never does on a pan is spend a request.
 These viewport captures depend on display resolution and zoom. Use the Detect
-tab for a fixed analysis grid across camera changes.
+tab for a fixed analysis grid across camera changes. An index reading carries
+**Save as a Detect analyzer** in the Detection tab: the same index, line, way it
+moved, cleanup and cloud switches become an analyzer of your own rules, and the
+toast opens it in Detect's builder, ready to sweep areas or run as a routine.
 The strip's **A / B / Both** says which images carry the highlights, in any view;
 Both is the default, because it shows what a change went *from* and *to* at the
 same time. **Blink** flashes the highlights on and off, because a thin highlight
@@ -1353,17 +1411,24 @@ Maker's: the way out of a drawing tool is the button you are already on.
 
 **Right-click the ground** here too, on either map, for the acts Compare can
 honour: copy the point in every coordinate format, ask what is there, save a
-place there, or start a distance measure from it — the annotation of the same
-name, anchored on the point and closed by the next click. The rows Satellite
-offers for its own rails are left out rather than shown dead.
+place there, start a distance measure from it — the annotation of the same
+name, anchored on the point and closed by the next click — or open it in
+Satellite or Detect. The rows Satellite offers for its own rails are left out
+rather than shown dead.
 
 **Save comparison** writes the editable version-2 session under `.compare/` and
-updates its rendered media preview in My work (PNG, or GIF for blink). A preview
-used by a derived proof is preserved when a later save creates new pixels.
+updates its rendered media preview in My work (PNG, or GIF for blink). The preview
+records the date of each picture, one Esri or Wayback only estimated marked `~` on
+its Time tab, where **Date a change** offers a claim that something changed between
+them. A preview used by a derived proof is preserved when a later save creates new pixels.
 **Open** restores the sources, layers, camera, view, the Difference switch, blink speed,
 detection settings, annotations and the optional export frame; a session saved while
 Difference was a view of its own reopens side by side with Difference on. Export writes an attributed PNG, blink GIF or divider-sweep GIF to the
-shared Views destination; an optional ground-anchored frame cuts any of the three to the
+shared Views destination, named by the comparison and its two pictures' dates, and
+never over an earlier file. **Also keep it in this case** files the same image in My
+work under the comparison, stamped with the reading on screen and never replaced by a
+later save; asked on a comparison never saved, it asks for a name first. An optional
+ground-anchored frame cuts any of the three to the
 chosen area, while Full view remains the default. The frame keeps the bearing it was
 drawn at: turning the camera turns it with the ground rather than reshaping it, and
 the export comes out upright as it was drawn, once all four corners are in view. Copy current PNG uses the clipboard.
@@ -1392,11 +1457,21 @@ over the imagery is reachable from nowhere else. Each section states its own
 count, so the strip carries none — folded shut, the panel shows the active half's
 name and its number.
 
-Saved work — places, captures and screenshots filed by the extension — lives in
-the **Saved** half, grouped by geography rather than by date. The
-tree's depth follows the case: one country opens straight on its regions, a
+Saved work — places, captures, screenshots filed by the extension and saved
+comparisons — lives in the **Saved** half, grouped by geography rather than by
+date. The tree's depth follows the case: one country opens straight on its regions, a
 worldwide case opens on continents. A filter and a `Media / Places / Captures`
-switch stay pinned above it; a screenshot counts as a capture. The panel opens on
+switch stay pinned above it; a screenshot counts as a capture, and so does a saved
+comparison, which is imagery of a point at two dates.
+
+**A comparison is one row, whatever was made from it.** It stands at its export
+frame's centre, or its view's when no frame was drawn, and the frame is outlined in
+dashes on the map, since it is the ground the images show rather than a guess about
+a place. The row reads its two pictures' dates, `2024-05-03~ → 2026-09-02`, and
+how many images were kept from it; its card lists them, and **Open in Compare**
+reopens it, from Satellite or from Compare's own maps. Deleting it moves the
+session to the Trash and leaves its images in Media. Its country is looked up on
+save, again only once it has moved about a kilometre. The panel opens on
 **Media**, which is what a map is read for: where the case's footage stands. That
 position is a **mode** — it reads its own index (`GET /satellite/media`, the first
 time it is opened, never on case open) — while Places and Captures filter the one
@@ -1594,8 +1669,10 @@ The row states five things:
   itself rather than a grouping guessed out of whichever property looked like one.
 - **Its dates, when it has any.** A layer that is on and whose features are
   dated (GeoConfirmed's events, a KML's TimeStamp or TimeSpan, a GPX waypoint's
-  time) draws its events over time as a strip of bars under the counts: a bar a
-  day for up to three months, a week for up to two years, a month past that.
+  time, a Detect snapshot's passes) draws its events over time as a strip of bars
+  under the counts: a bar a day for up to three months, a week for up to two years,
+  a month past that. A feature spanning days, a TimeSpan or a Detect change, counts
+  in every bar it meets and is in any period that meets it.
   The period is set on the strip itself. Drag across the bars to draw one, drag
   either handle to move a bound, slide the band between them, or click a bar to
   keep its day, week or month. Clicking one of the two dates under the strip
@@ -1691,6 +1768,8 @@ and time, and hands over no computed value.
 **Coords & Sky opens on the point the map is on.** The map publishes the point it
 records — its moved pin, else its centre — once it has been moved off the view it
 opened at, and the tab converts that point rather than opening on an empty field.
+Compare and Detect publish their centre each time they come to rest, so the tab
+reads whichever map was looked at last.
 A view nobody has moved yet is a setting rather than a finding, so it offers
 nothing. The conversion is local and that is all that happens: naming the place is
 a geocoder call, so the row offers **Name this place** instead of making it.
@@ -1783,7 +1862,8 @@ and captures credited under it.
 centre: copy it in every coordinate format, the analyst's own first; ask what
 is there, answered inside the menu; save a place there; start a distance from
 it; anchor the sun and moon on it; open its Wayback history; centre the map
-on it; compare it across time; or open it in another map site. A right-click on a shape that answers
+on it; compare it across time; or open it in Compare, in Detect or in another
+map site. A right-click on a shape that answers
 its own (a search-grid cell) stays that shape's. The menu flips away from the
 map's edges, walks with the arrow keys, and closes on Escape, a press outside,
 or a zoom that moves the ground from under it.
@@ -1798,6 +1878,33 @@ the view. It says it is working for as long as it takes rather than for a guesse
 few seconds: the walk through Esri's releases is slow, and a message that went out
 halfway through left the map looking like nothing was happening. Compare receives it the way it receives a saved comparison — older on
 A, newer on B — unsaved and unnamed, because nothing has been filed.
+
+**Open in…** lists the app's other map tabs first, then the maps outside it. A
+tab opens on the point at the zoom it was looked at: Satellite flies there, and
+Compare and Detect move their camera and keep their own pictures and work. In
+Detect a point asked for this way wins over the case's landing frame. A
+fullscreen map is left first.
+
+**The map tabs share one camera.** Satellite, Compare and Detect look at the same
+ground: a map leaves the window's camera where it comes to rest, even when its glide
+ends after you switched tab, and a map tab that shows takes it in one move, turn
+included. A hidden map never moves, so it loads no tiles and asks Copernicus nothing
+for ground nobody is looking at.
+A map whose imagery stops short of the shared zoom lands at its own ceiling and
+leaves the deeper zoom standing for the tab that has it. Two things keep their
+ground: a Detect run under review, and a saved comparison, whose camera is part of
+what was saved.
+Switching case leaves the camera where it is, since a view is not case state.
+Settings → General → Map tabs turns it off, and each tab keeps its own camera again.
+
+**Every map turns the same way.** A middle-drag, or Shift and the left button,
+turns it like a wheel about the point grabbed: a dashed circle marks that point,
+and the map follows the angle the pointer sweeps around it outside the circle.
+Inside, the map holds, so the pointer can cross the middle without a flip. Near
+north it settles on north, and Ctrl held lays the turn on 15° steps. A middle click puts north back up, as does Shift+↑;
+Shift+← and Shift+→ turn a step. The Move the point dialog in Geo Proof turns
+the same way, and Inspect's frame viewer takes the same drag, with a middle
+click standing the frame upright.
 
 **Compare here…** and **Open in…** are the two rows that open a list, and they
 open it *beside* the menu. A list unfolding inside would make the menu taller, and a menu already
@@ -1852,7 +1959,10 @@ Google, Bing, Earth and the other sites they draw on: an open panel counts as a
 second map, follows this tab's camera and leads it (`extension/README.md`). A
 panel in a background tab keeps the view until that tab is looked at, because
 following one costs those sites a reload; the app's own tabs have none to pay
-and follow wherever they are.
+and follow wherever they are. While the map tabs share one camera, the link carries
+that camera rather than Satellite's own: a pan in Compare or Detect reaches the
+other windows and the extension, and a view arriving moves whichever map tab is on
+screen.
 
 **The map keeps up with the other windows on the case.** A point saved, a grid
 drawn or a cell swept from the extension's panel over another map lands here
@@ -1879,13 +1989,32 @@ hand for the radar analyzers, field by field — and one press opens the Coperni
 card in Settings. The panel still opens on what the case already holds.
 
 Detect opens on Esri World Imagery, with Borders and saved results visible, framed
-on the areas this case watches — once, after which the camera is yours. A case
-with no area opens on the home view. The search, the compass and SAT's
+on the areas this case watches — once, after which the camera is yours. That
+framing waits for the tab to show. Arriving from another map tab while they share
+one view, Detect opens where that map was instead, since that is the ground in hand.
+A case with no area opens where the other map tabs left the window, or on the home
+view. A run under review keeps the map on it when you come back from another map
+tab. The search, the compass, the ruler and SAT's
 imagery/layer controls float over the map. There is no Detect header or
 full-width bottom strip. Attribution stays in the map's corner and the scale stays
 at bottom left; provider usage is a small chip beside the imagery selector. A pass
 date appears only while reading that pass, and run status stays in the panel.
-Leaving a pass restores the chosen basemap.
+Leaving a pass restores the chosen basemap. Sentinel-2 and Sentinel-1 sit in the
+imagery selector too, with their layer and day, so any Copernicus layer can be read
+over the ground; neither is remembered as the basemap, and Detect opens on free
+imagery.
+
+Right-clicking the map, or a candidate, area or measure drawn on it, opens
+Satellite's point menu, cut to what Detect can do:
+copy the point, **What is here?**, **Measure from here**, **Centre the map here**,
+**Compare here…** and **Open in…**, which lists Satellite and Compare first. While a finished run is under review, a point
+inside one of its areas also offers **Add candidate here**, for a hull the
+detector missed. The ruler under the compass, or `M`, measures a length: drag
+from one end to the other, then drag either end to adjust it. The label reads in
+the units set in Settings. `Delete` drops the selected measure and the bin beside
+the ruler clears them all. Measures are a scratch aid and are not saved. Taking
+the ruler up lets go of an area or a candidate being drawn, and drawing one puts
+the ruler down.
 
 The right dock has Routines, Saved and Areas tabs, with New detection always at
 the top. The tabs name their own list, so nothing is titled twice, and a second
@@ -1922,7 +2051,8 @@ else, because the answer changes every question after it:
   its trash hides or shows it, the one on a group's heading does the whole group,
   and showing frames the ground it covers. The layers button beside them snapshots
   what was kept or pinned into a SAT layer, a routine's heading into its one layer;
-  a run with nothing kept says so and stays greyed. A group folds shut from its heading.
+  a run with nothing kept says so and stays greyed. A change spans its two passes
+  in that layer, so its date filter finds it in any period between them. A group folds shut from its heading.
 - a **routine** is a place you come back to. It keeps its areas, its analyzer and
   what each pass compares against; it is run again whenever there is a new pass,
   and it remembers what it found.
@@ -2029,9 +2159,13 @@ has to stand out of the sea around it in both polarisations, which a strong
 target's ghosts and sea spikes do not, and a weak return beside a much stronger one
 is taken for its sidelobe. What counts as sea is Sentinel-2's own water class on
 the clearest pass of the year before, because dry desert is as radar-dark as calm
-water; the radar decides only where that pass saw cloud. A radar change is the
-power of both polarisations averaged over the size's window and compared between
-two passes of one track; *bright* ground is ground that answered like walls on the
+water; the radar decides only where that pass saw cloud. In a large port a
+terminal that Sentinel-2 took for water still gives candidates among the ships at
+berth, which no mask tried could remove without dropping the ships too. A radar
+change is the power of both polarisations averaged over ground, 45 m a step of the
+size's averaging (90 m at Medium), and compared between two passes of one track: a
+window counted in pixels held too few radar samples, and ground that did not change
+came back as thousands of pieces or one region kilometres wide. *Bright* ground is ground that answered like walls on the
 side that had them, and *water* is ground that went as dark as calm water. Two
 passes only flag where to look: the razed-buildings analyzer says so, and the
 flood one starts at Large, since a flood is fields wide. Without the radar layer
@@ -2050,13 +2184,100 @@ shadows the classification missed. The fire detector offers no switch: its band
 ratios reject cloud already. Thresholds open from a link rather than sitting in
 the way, and tuning them there changes this detection only.
 
-**Analyzers** lists the built-ins and your own, shared by every case. An analyzer
-is one calibrated method and how picky it is, so one of your own starts as a copy
-of the closest built-in: **New analyzer** asks what to start from, and the copy
-keeps that method while its name, sizes, thresholds, candidate label and colour
-become yours. A built-in opens read-only with **Copy to tune**; your own can be
-edited or removed from the list. A detection being built keeps its place while the
-library is open, and an analyzer saved from there comes back picked.
+**Analyzers** lists the built-ins and your own, shared by every case; one of your
+own with checks says under its name how they last came out (**3 checks · all
+pass**, **1 fails**, **not run**). **New analyzer** offers three roads, in this
+order. **Start from an example** lists five ready analyzers of your own, each with
+its checks: a fresh burn (Lahaina, August 2023), a forest cleared (Grünheide,
+2019 → 2020), water drained (the Kakhovka reservoir, June 2023), a solar farm built
+(Dubai, 2019 → 2023) and ships at anchor (Fujairah, one pass). A press copies it
+into the library at once, checks and all, under a free name, and opens it on its
+checks with the first one on the map. **Build your own rules** starts blank: an
+analyzer made of up to six rules, each a line a pixel has to cross. The last road
+starts from a built-in: the copy keeps its calibrated method while its name, sizes,
+thresholds, candidate label and colour become yours. Burn scars, vegetation loss
+and new water also carry **rules**, which opens them in the builder as the rules
+they apply. A built-in opens read-only with **Copy to tune** (and **Open as rules**
+where it has them); your own can be edited or removed from the list. A detection
+being built keeps its place while the library is open, and an analyzer saved from
+there comes back picked.
+
+The builder keeps the name and the sentence it reads as at the top, the map bench
+under them, and three tabs: **Rules**, **Checks** and **Settings** (sizes, shape,
+cleanup, smoothing, grouping, description, candidate label and colour). A rule
+names a quantity, then when it is read, then the line. The quantity is one of the
+six indices, **My index** (a normalised difference of any two Level-2A bands, with
+NDMI, NDSI, NDRE, NBR2 and GNDVI one pick away), one band's reflectance,
+brightness, a colour change, Sentinel-2's own ground class, or radar backscatter in
+VV, VH or VV − VH. It is read on **A**, on **B** or as the change **A → B** (B minus
+A, so a loss is negative), against **at least**, **at most**, **between** or, for a
+change, **either way**. Reflectance shows in percent and radar in decibels; a change
+in reflectance or radar takes the passes' overall shift in light out, as the
+built-ins do. **Against its surroundings** reads the quantity against the ground
+within a set distance, up to 300 m, the ring with a hole in the middle the vessel
+detectors use, so one line holds over a dark sea and a bright desert. **Keep what
+passes all** keeps a pixel that passes every rule and **any** one that passes a
+single one. The first measured rule, marked ★, ranks candidates: two of its units
+past its line is Strong (0.2 of an index, 4% reflectance, 4 dB). Rules that only
+read B need no reference, like a vessel. Radar and optical rules do not mix, and
+one analyzer reads at most six bands, each three a request per date and tile. The
+sentence at the top says the whole analyzer, and becomes its description unless
+one is written.
+
+The map is the builder's bench. **On the map** takes two passes typed or picked
+from **Find passes**. The **Imagery** switch lays A, B or the basemap under the
+preview, in any layer the Copernicus configuration offers, and the builder
+suggests the one that reads rule ★ best: NDVI for vegetation, short-wave infrared
+for burns and heat, false colour for water and hulls. The preview follows the map.
+Nothing reaches Copernicus unasked: it reads frames the app already holds, judges
+every tile it has, and when the view lacks some it says how many and waits for
+**Show the detections here** (**Read the rest of the view** once part of it is
+shown), one metered request each. Past three tiles a side it previews the middle
+of the view. From then on every change redraws within a moment, on those frames
+and without a request: each rule paints the pixels it keeps in its own colour (its
+dot hides or shows them, and pointing at a row shows that rule alone), the
+candidates a run would return are outlined with their pins, and each row says what
+share of the measured ground it keeps, alone and with the rules above it. The
+preview runs the engine's own evaluation, cleanup, sizes, shape and grouping, so
+what it outlines is what a sweep of the same ground returns. A click on the map
+reads every rule at that point: the value, before and after for a change, and a
+tick or a cross, so a thing that was not kept says which rule let it go. Under
+cloud or off the passes the card says so instead.
+
+**Checks** are the analyzer's own proof, and optional: nothing asks for one and
+saving never waits on them. A check keeps a place, a pair of passes and the layer B
+shows in, and pins marked **Should be found** or **Should stay empty**. **Add a
+check** opens one where the map is: until it has a pin it moves with the map (the
+map's search box reaches the other side of the world), the passes picked from then
+on are its passes (**Find passes** from the check opens the list), and while one of
+its two pins is armed every click on the map drops it, the crosshair and a chip on
+the map saying which, until the pin is pressed again or the chip closed. **Done**
+closes it; the analyzer is not saved while a check lacks its passes. The point card
+of a click opens anywhere, read or not, and carries both pins too: a point on the
+ground of the open check goes into it, one anywhere else makes the view a new check.
+A view moved off the ground its passes were picked for drops them. A check with no
+pins counts the candidates of its whole view, which its row says costs more frames
+than pins, each read on its own tile. The open check's view is framed on the map
+with its name, and its pins drawn: a filled ring where a candidate should come out,
+a struck ring where none should, green or red once read. While the builder has
+passes, a bar on the map switches the imagery under the preview between **A**,
+**B** and **Blink**, and back to the basemap. Checks reread themselves
+from the tile cache a moment after every change to the rules, with no request, so
+the tab's badge (**2/3**) and each row follow the lines as they move: **2 of 2
+found**, **stayed empty**, **1 of 1 flagged**. A check whose frames are not held
+says how many it lacks; **Run all** reads them, up to the count on its face, one
+request each, and a check reads only the tiles under its marks. A result read with
+other rules than the current ones says **Not rerun since the rules changed**. Each
+example's empty marks are traps for one of its rules: the reef off Lahaina and a
+cloud the mask missed, the mown meadows at Grünheide, the river and the cooling pond
+at Kakhovka (flagged as soon as the change reads **either way**), the panels already
+there in Dubai and the dunes the wind moved, the town of Fujairah. Removing the
+rule that guards one turns it red, which is the lesson. Checks are saved with the
+analyzer, so Settings backup carries them.
+
+**Shape** is offered to every analyzer: **compact** keeps roofs, craters and
+vehicles, **long and thin** roads, tracks and trenches, measured along each
+candidate's own length.
 
 **Start** names it, says what it is for, and runs it: **Run this pass** for a one
 pass, **Save and run the first pass** for a routine, which can also be saved
@@ -2084,10 +2305,15 @@ What a sweep produces is a list of candidates, strongest first, and nothing else
 reaches the case on its own. Each says how strong it is in a word (weak, clear or
 strong: how far past its threshold it got) and what was measured in units a reader
 can check, such as "6.2× brighter than the water around it" or "NBR 0.61 → −0.28".
+It also says how big it is: its area, then its length and width measured along its
+footprint, so a ship lying on the diagonal reads as long as it is. At 10 m a pixel
+that is a size class, not a survey, and a wake or a radar smear lengthens it.
+**Largest first** walks the queue by length instead, from its top; pressing it
+again returns to the run's order.
 A candidate that crosses a tile edge is one candidate with one picture, stitched
 from the tiles it touches. New candidates use the detector mask's simplified
 outline; merged components retain their parts as a MultiPolygon. The bounding
-box still drives crops, sizing and merge tests. Existing results keep their
+box still drives crops and merge tests. Existing results keep their
 stored rectangle geometry.
 
 Opening a run puts the map on the candidate the panel is about, close enough to
@@ -2104,15 +2330,27 @@ candidate in its run without creating a place or image. **Dismiss** removes it
 from the run. **Pin** opens the standard dialog for a name, optional description,
 after-only image and Point/Area geometry. Single-image methods default to after-only
 and Point; change methods default to paired images and Area. Pinning creates a
-place and a PNG in Files. The picture says on its face when and where: each image
+place and a PNG in Files, and links them: the picture shows the place. The picture says on its face when and where: each image
 carries its letter and its date (a radar pass its UTC time), and the foot holds the
 point's coordinates and the imagery's attribution, so the file still reads after
-the run is gone. Undo sends those copies to Trash. Evidence is enlarged
+the run is gone. The same dates reach the case's time. The PNG carries them on its
+Time tab, and a claim at the place, citing the picture, says what the sweep read: a
+change `occurred` between the two passes, a thing on one pass was `observed` on it.
+The place itself carries no date, and the claim no confidence. Undo sends those
+copies to Trash, the claim with them unless something was added to it. Evidence is enlarged
 by a whole-number factor with no interpolation, so a candidate a dozen pixels
 across can be read without pretending to detail the sensor never recorded. The
-candidate under review wears a ring on the map. **Add candidate** records a point or polygon on a successfully read area,
+candidate under review wears a ring on the map. **Add candidate**, or the map's right-click, records a point or polygon on a successfully read area,
 with `origin: manual`, the same pass pair, preview and verdicts. Manual candidates
 have dashed map outlines and a Manual label.
+
+Beside **Export as layer**, the eye (`H`) takes the candidates and areas off the
+map, so the pass shows bare; leaving the review puts them back. When the run
+read two passes, the blink (`B`) flips A against B on the map at Compare's
+normal speed, and a chip over the map says which is showing, in Compare's
+letters. Both passes are laid in the one map and kept loaded, so the blink
+reloads nothing; it is offered only for two dates of one archive, never for a
+detector that read one pass. Leaving the pass stops it.
 
 **Export as layer** is an explicit snapshot of kept and pinned candidates only.
 A routine updates one SAT layer, with a category per effective pass date; a one-off

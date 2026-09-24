@@ -47,3 +47,31 @@ describe('Compare here', () => {
     expect(compare).toContain('uiState.compareAt = null;');
   });
 });
+
+describe('an export kept in the case', () => {
+  it('is offered beside the copy on disk, and files the same image under its comparison', () => {
+    expect(compare).toContain('<input type="checkbox" bind:checked={keepInCase} />');
+    expect(compare).toContain('Also keep it in this case');
+    const keep = compare.slice(compare.indexOf('async function keepExport('));
+    expect(keep).toContain("form.append('spec', JSON.stringify(sessionSpec()));");
+    expect(keep).toContain('pictureDateFields(pictureDates())');
+    expect(keep).toContain('/compare/sessions/${encodeURIComponent(openedSession.name)}/images');
+    expect(compare).toContain("const kept = await keepExport(owner.id, 'png', blob);");
+    expect(compare).toContain('const kept = await keepExport(owner.id, animation, frameA, frameB);');
+  });
+
+  it('asks for a name first when the comparison was never saved, then exports', () => {
+    const run = compare.slice(compare.indexOf('async function runExport('));
+    expect(run).toContain('if (keepInCase && !openedSession) {');
+    expect(run).toContain('exportAfterSave = true;');
+    const save = compare.slice(compare.indexOf('async function performSessionSave('));
+    expect(save).toContain('await runExport();');
+    // cancelling the name cancels the export it was asked for
+    expect(compare).toContain('function closeSaveDialog() {');
+  });
+
+  it('reopens a saved comparison from its own card on the map', () => {
+    expect(compare).toContain("if (row?.kind === 'comparison' && row.session) requestOpenSession(row.session);");
+    expect(compare).toContain('onedit={editSaved}');
+  });
+});

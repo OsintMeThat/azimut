@@ -68,14 +68,14 @@ def _save(client, cid: str, title: str, spec: dict | None = None, **extra):
     )
 
 
-def _preview(client, cid: str, name: str, colour=(30, 60, 90), fmt: str = "png"):
+def _preview(client, cid: str, name: str, colour=(30, 60, 90), fmt: str = "png", **dates):
     files = {"image_a": ("a.png", _png(colour), "image/png")}
     if fmt == "blink":
         files["image_b"] = ("b.png", _png((20, 40, 220)), "image/png")
     return client.post(
         f"/api/cases/{cid}/compare/sessions/{name}/preview",
         files=files,
-        data={"format": fmt},
+        data={"format": fmt, **dates},
     )
 
 
@@ -434,6 +434,39 @@ def test_renaming_the_session_renames_its_image_on_the_next_save(client):
     assert [entity["attrs"]["path"] for entity in _entities(cid, "media")] == [renamed["path"]]
 
 
+def test_the_rendered_comparison_carries_the_date_of_each_picture(client):
+    """Two instants, never a range: the image does not say anything happened
+    between them. An estimated date says so on the axis."""
+    cid = _case(client, "Compare dated")
+    _save(client, cid, "Harbour reading")
+    body = _preview(client, cid, "Harbour reading", imagery_a="2024-05-03", imagery_a_exact="false",
+                    imagery_b="2026-09-02T05:42:10Z").json()
+
+    item = next(row for row in client.get(f"/api/cases/{cid}/media").json() if row["path"] == body["path"])
+    assert item["source"]["imagery_a"] == "2024-05-03"
+    assert item["source"]["imagery_a_exact"] is False
+    assert item["source"]["imagery_b"] == "2026-09-02T05:42:10Z"
+    assert "imagery_b_exact" not in item["source"]
+
+    media = _entities(cid, "media")[0]
+    page = client.get(f"/api/cases/{cid}/timeline", params={"entity": media["id"], "category": "media"}).json()
+    rows = {row["kind"]: row for row in page["items"]}
+    assert rows["imagery-a"]["raw"] == "2024-05-03~" and rows["imagery-a"]["approximate"]
+    assert rows["imagery-b"]["precision"] == "second"
+
+    # Saving again restates the dates of the pictures shown now, and drops the old.
+    _preview(client, cid, "Harbour reading", imagery_b="2026-09-03")
+    item = next(row for row in client.get(f"/api/cases/{cid}/media").json() if row["path"] == body["path"])
+    assert "imagery_a" not in item["source"] and item["source"]["imagery_b"] == "2026-09-03"
+
+
+@pytest.mark.parametrize("value", ["yesterday", "2026-09-02T05:42:10", "2026-09-02T05:42:10+02:00"])
+def test_a_picture_date_is_a_day_or_a_utc_instant(client, value):
+    cid = _case(client, "Compare date refused")
+    _save(client, cid, "Harbour reading")
+    assert _preview(client, cid, "Harbour reading", imagery_a=value).status_code == 422
+
+
 def test_a_preview_needs_its_session_and_a_blink_needs_b(client):
     cid = _case(client, "Compare preview refused")
     assert _preview(client, cid, "Nothing here").status_code == 404
@@ -466,6 +499,26 @@ def test_compare_gif_exports_blink_and_slide(client):
             assert gif.n_frames == expected_frames
             if animation == "blink":
                 assert gif.info["duration"] == 1500
+
+
+def test_a_second_gif_by_the_same_name_is_kept_beside_the_first(client):
+    """Exports are named by their pictures' dates, which two comparisons of one
+    pair share, so the case's own folder never overwrites one with the other."""
+    cid = _case(client, "Compare GIF twice")
+    written = []
+    for colour in ((220, 30, 30), (30, 220, 30)):
+        response = client.post(
+            f"/api/cases/{cid}/compare/gif",
+            files={
+                "image_a": ("a.png", _png(colour), "image/png"),
+                "image_b": ("b.png", _png((20, 40, 220)), "image/png"),
+            },
+            data={"animation": "blink", "filename": "compare-2024-05-03_2026-09-02"},
+        )
+        assert response.status_code == 200, response.text
+        written.append(Path(response.json()["path"]) / response.json()["file"])
+    assert written[0] != written[1]
+    assert all(path.is_file() for path in written)
 
 
 def test_compare_gif_rejects_non_png_and_unknown_animation(client):

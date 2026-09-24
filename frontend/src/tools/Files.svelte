@@ -42,7 +42,8 @@
 
   const TYPE_ICON = {
     media: 'image', capture: 'satellite', note: 'note', proof: 'proof',
-    post: 'post', place: 'pin', 'inspect-session': 'inspect', 'compare-session': 'compare', bookmark: 'link',
+    post: 'post', place: 'pin', 'inspect-session': 'inspect', collage: 'grid', 'compare-session': 'compare',
+    bookmark: 'link',
   };
   const VIDEO_EXTS = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v']);
 

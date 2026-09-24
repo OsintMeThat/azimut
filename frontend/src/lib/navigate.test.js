@@ -4,12 +4,13 @@ const post = vi.fn().mockResolvedValue({ path: '/cases/c1/azimut/media' });
 vi.mock('./api.js', () => ({ api: { post: (...a) => post(...a), get: vi.fn() } }));
 
 const { caseState, uiState } = await import('./state.svelte.js');
-const { gotoCapture, gotoPoint, openEntity, openGuide, openInReverseSearch, opensInFileManager } =
+const { gotoCapture, gotoPoint, openComparison, openEntity, openGuide, openInReverseSearch, openMapAt, opensInFileManager } =
   await import('./navigate.js');
 
 beforeEach(() => {
   uiState.tool = 'media';
   uiState.gotoCoords = null;
+  uiState.lookAt = null;
   uiState.focusCapture = null;
   uiState.openBoardEntity = null;
   uiState.openCompare = null;
@@ -138,6 +139,32 @@ describe('gotoPoint', () => {
   });
 });
 
+describe('openMapAt', () => {
+  it('flies Satellite to the point, at the zoom it was looked at', () => {
+    openMapAt('satellite', { lat: 12.76, lon: 43.65, zoom: 15 });
+    expect(uiState.tool).toBe('satellite');
+    expect(uiState.gotoCoords).toEqual({ lat: 12.76, lon: 43.65, zoom: 15 });
+    expect(uiState.lookAt).toBeNull();
+  });
+
+  it('moves Compare and Detect there, and leaves their own pictures to them', () => {
+    openMapAt('compare', { lat: 12.76, lon: 43.65, zoom: 15 });
+    expect(uiState.tool).toBe('compare');
+    expect(uiState.lookAt).toEqual({ tool: 'compare', lat: 12.76, lon: 43.65, zoom: 15 });
+    expect(uiState.compareAt ?? null).toBeNull();
+    openMapAt('detect', { lat: 12.76, lon: 43.65 });
+    expect(uiState.tool).toBe('detect');
+    expect(uiState.lookAt).toEqual({ tool: 'detect', lat: 12.76, lon: 43.65 });
+  });
+
+  it('goes nowhere for a tab that is not a map, or a point it could not place', () => {
+    openMapAt('board', { lat: 12.76, lon: 43.65 });
+    openMapAt('detect', { lat: Number('north'), lon: 43.65 });
+    expect(uiState.tool).toBe('media');
+    expect(uiState.lookAt).toBeNull();
+  });
+});
+
 describe('a file the app cannot display', () => {
   const plan = { id: 'm1', type: 'media', attrs: { path: 'media/site plan.pdf', kind: 'file' } };
 
@@ -186,11 +213,18 @@ describe('reopening an artifact in its tool', () => {
     expect(uiState.tool).toBe('post');
   });
 
-  it('names an inspect session by its spec file', () => {
+  it('names the Inspect work on a file by its spec file', () => {
     openEntity({ type: 'inspect-session', attrs: { spec: '.inspect/Bridge pass.json' } });
 
     expect(uiState.openInspect).toBe('Bridge pass');
     expect(uiState.tool).toBe('inspect');
+  });
+
+  it('names a collage by its spec file', () => {
+    openEntity({ type: 'collage', attrs: { spec: '.collages/Harbour strip.json' } });
+
+    expect(uiState.openCollage).toBe('Harbour strip');
+    expect(uiState.tool).toBe('collage');
   });
 
   it('names a comparison session by its spec file', () => {
@@ -206,5 +240,18 @@ describe('reopening an artifact in its tool', () => {
 
     expect(uiState.openProof).toBeNull();
     expect(uiState.tool).toBe('proof');
+  });
+});
+
+describe('openComparison', () => {
+  it('reopens a saved comparison from its Saved row, by the name Compare knows it by', () => {
+    openComparison({ kind: 'comparison', session: 'Harbour reading' });
+    expect(uiState.openCompare).toBe('Harbour reading');
+    expect(uiState.tool).toBe('compare');
+  });
+
+  it('goes nowhere for a row that names no comparison', () => {
+    openComparison({ kind: 'capture' });
+    expect(uiState.tool).toBe('media');
   });
 });

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from azimut import config, layout
+from azimut import config, layout, workspace
 from azimut.workspace import Case
 
 
@@ -99,7 +99,8 @@ def test_a_folder_holding_a_case_that_lost_its_manifest_is_recovered_not_reborn(
     assert folders(client) == {}
     reopened = client.get(f"/api/cases/{case_id}").json()
     assert reopened["name"] == "Lost manifest"
-    assert reopened["azimut"]["schema"] == 9
+    # stamped low on recovery, then carried through every folder migration on open
+    assert reopened["azimut"]["schema"] == workspace.CASE_SCHEMA
     notes = client.get(f"/api/cases/{case_id}/catalog/entities?type=note").json()
     assert [n["label"] for n in notes["items"]] == ["Lead"]
 

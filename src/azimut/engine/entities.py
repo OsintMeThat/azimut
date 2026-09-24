@@ -553,8 +553,15 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
     # names a subject is visible from that subject's side too.
     EntityType("sheet", "Sheet", DOCUMENT, "table", ANNEX,
                hint="a CSV table in the case, edited as a grid"),
+    # One per file: the frames cut from it and the edits over them, saved as they
+    # are made. Nothing in it outlives the file, so it depends on it.
     EntityType("inspect-session", "Inspect session", DOCUMENT, "inspect", ANNEX,
-               hint="saved adjustments over one file, which die with it"),
+               hint="the frames and edits made over one file, which die with it"),
+    # A layout of pieces from any number of files. Its pieces are recipes rather
+    # than pixels, so a lost source leaves a gap rather than voiding the layout,
+    # and the picture it exports is media of its own.
+    EntityType("collage", "Collage", DOCUMENT, "grid", ANNEX,
+               hint="frames and images laid out together, exported as one picture"),
     EntityType("compare-session", "Compare session", DOCUMENT, "compare", ANNEX,
                hint="two map sources, their layers and the shared camera"),
     EntityType("analysis-zones", "Analysis areas", DOCUMENT, "polygon", ANNEX,

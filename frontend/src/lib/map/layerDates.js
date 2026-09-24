@@ -3,14 +3,17 @@
  *
  * A layer's features carry a day, `date: 'YYYY-MM-DD'`, when their source dated
  * them (`engine/maplayers.py`): every GeoConfirmed event, a KML placemark with a
- * TimeStamp, a GPX waypoint. The filter is a period, `{ start, end }`, either
- * bound '' for open, compared as days on the map (`addedLayer.js`) and counted
- * here.
+ * TimeStamp, a GPX waypoint. A feature that spans several days also carries its
+ * last one, `date_end`: a KML TimeSpan, or a Detect change read between two
+ * passes. The filter is a period, `{ start, end }`, either bound '' for open, and
+ * a feature is in it when the days it spans meet the period, compared on the map
+ * (`addedLayer.js`) and counted here.
  *
  * **Indexed once per snapshot, then asked cheaply.** A layer holds up to a
- * hundred thousand features and the strip is redrawn on every drag, so the days
- * are sorted once per group and every question after that — how many in this
- * bar, how many in this period — is two binary searches per group.
+ * hundred thousand features and the strip is redrawn on every drag, so the first
+ * and last days are sorted once per group and every question after that — how
+ * many in this bar, how many in this period — is two binary searches per group:
+ * those that start by the period's end, less those that ended before it began.
  */
 
 const DAY_MS = 86_400_000;
@@ -38,28 +41,41 @@ export function dayLabel(iso) {
   return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 }
 
+/** The days one feature spans, both included, or null when it states none. */
+export function featureDays(properties) {
+  const start = dayNumber(properties?.date);
+  if (start === null) return null;
+  const end = dayNumber(properties?.date_end);
+  return { start, end: end !== null && end > start ? end : start };
+}
+
 /**
- * Every dated feature's day, sorted per group, or null for a layer with none.
+ * Every dated feature's first and last day, sorted per group, or null for a
+ * layer with none.
  *
  * @param {{ features?: object[] } | null} collection
- * @returns {{ first: number, last: number, groups: Map<string, Int32Array> } | null}
+ * @returns {{ first: number, last: number,
+ *   groups: Map<string, { starts: Int32Array, ends: Int32Array }> } | null}
  */
 export function indexDates(collection) {
   const lists = new Map();
   let first = Infinity;
   let last = -Infinity;
   for (const feature of collection?.features ?? []) {
-    const day = dayNumber(feature?.properties?.date);
-    if (day === null) continue;
+    const days = featureDays(feature?.properties);
+    if (days === null) continue;
     const group = feature.properties.category ?? '';
-    if (!lists.has(group)) lists.set(group, []);
-    lists.get(group).push(day);
-    if (day < first) first = day;
-    if (day > last) last = day;
+    if (!lists.has(group)) lists.set(group, { starts: [], ends: [] });
+    lists.get(group).starts.push(days.start);
+    lists.get(group).ends.push(days.end);
+    if (days.start < first) first = days.start;
+    if (days.end > last) last = days.end;
   }
   if (!lists.size) return null;
   const groups = new Map();
-  for (const [group, days] of lists) groups.set(group, Int32Array.from(days).sort());
+  for (const [group, { starts, ends }] of lists) {
+    groups.set(group, { starts: Int32Array.from(starts).sort(), ends: Int32Array.from(ends).sort() });
+  }
   return { first, last, groups };
 }
 
@@ -75,9 +91,9 @@ function lowerBound(sorted, value) {
   return low;
 }
 
-/** How many of a sorted list fall on days `from` to `to`, both included. */
-function between(sorted, from, to) {
-  return lowerBound(sorted, to + 1) - lowerBound(sorted, from);
+/** How many of a group's features meet days `from` to `to`, both included. */
+function between({ starts, ends }, from, to) {
+  return lowerBound(starts, to + 1) - lowerBound(ends, from);
 }
 
 /**
@@ -117,7 +133,8 @@ function steps(first, last, size) {
   return out;
 }
 
-/** How many features of the groups not switched off fall in each bar. */
+/** How many features of the groups not switched off meet each bar. A feature
+ *  spanning several bars counts in each, since it may belong to any of them. */
 export function histogram(index, hidden = [], edges = []) {
   if (!index) return edges.map(() => 0);
   const off = new Set(hidden);
@@ -157,14 +174,14 @@ export function within(index, hidden = [], period = null) {
   return { total, byGroup };
 }
 
-/** Whether one day is inside a period. An undated feature is outside any. */
-export function inPeriod(iso, period) {
+/** Whether a feature's days meet a period. An undated feature is outside any. */
+export function inPeriod(properties, period) {
   if (!active(period)) return true;
-  const day = dayNumber(iso);
-  if (day === null) return false;
+  const days = featureDays(properties);
+  if (days === null) return false;
   const from = dayNumber(period.start);
   const to = dayNumber(period.end);
-  return (from === null || day >= from) && (to === null || day <= to);
+  return (from === null || days.end >= from) && (to === null || days.start <= to);
 }
 
 /**

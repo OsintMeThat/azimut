@@ -1,10 +1,10 @@
 /**
- * Inspect-session helpers, shared by the Selection / Frame / Collage / Save tabs.
+ * Pure helpers shared by the Examine tools, Inspect and Collage.
  *
- * The Inspect tool is a scratch workspace: captured frames, per-frame adjustments
- * and a collage layout live here as plain data ("recipes") and only become case
- * media on an explicit Save. These pure helpers turn slider values into the live
- * CSS preview + the backend op pipeline, and handle the collage perspective math.
+ * Frames, their adjustments and collage layouts are plain data ("recipes") that
+ * only become case media when an output is saved to the case. These turn slider
+ * values into the live CSS preview and the backend op pipeline, name what a save
+ * files, and handle the collage perspective math.
  */
 
 // Order the adjust pipeline is applied in (matches the backend ORDER in bake()).
@@ -15,9 +15,9 @@ export const ADJUST_ORDER = [
 let _seq = 0;
 export const uid = (prefix = 'id') => `${prefix}_${Date.now().toString(36)}_${_seq++}`;
 
-// -- Save-tab naming ---------------------------------------------------------
-// What the user types at the Save gate becomes the media title *and* the stem of
-// the file on disk, so these defaults have to read as names, not placeholders.
+// -- naming what a save files ------------------------------------------------
+// What the analyst types at Save to case becomes the media title *and* the stem
+// of the file on disk, so these defaults have to read as names, not placeholders.
 
 /**
  * The name a savable inherits from what it was made out of.
@@ -57,12 +57,12 @@ export function frameSaveName(stem, time) {
 }
 
 /**
- * Default names for every frame in the tray, numbered only where they'd collide.
+ * Default names for every frame of a file, numbered only where they would collide.
  *
  * Naming by the second reads best, but two frames grabbed a few tenths apart
  * round to one name. Those get a counter, and only those, so the common one
  * frame per second stays clean. Inside a second the counter follows playback
- * order rather than the order the tray was filled in, which keeps a name sort
+ * order rather than the order the strip was filled in, which keeps a name sort
  * walking the video forward even when frames were taken back to front.
  */
 export function frameSaveNames(frames) {
@@ -80,22 +80,6 @@ export function frameSaveNames(frames) {
     byTime.forEach((index, rank) => { counter[index] = ` ${rank + 1}`; });
   }
   return frames.map((f, i) => `${frameSaveName(f.stem, f.time)}${counter[i]}`);
-}
-
-/**
- * The name every savable starts out holding, before anyone edits it.
- *
- * A base name numbers the gallery (`Roof 01`, `Roof 02`); numbering runs over the
- * whole gallery, not the ticked subset, so a name never renumbers under you as
- * you tick boxes. A lone savable takes the base name bare — a `01` with nothing
- * to follow it just adds noise. With no base name, each item's default stands.
- */
-export function autoSaveNames(savables, baseName = '') {
-  const base = String(baseName ?? '').trim();
-  return savables.map((it, i) => {
-    if (!base) return it.defaultName;
-    return savables.length > 1 ? `${base} ${String(i + 1).padStart(2, '0')}` : base;
-  });
 }
 
 /** The name an item is filed under: what stands in its field, else its default. */

@@ -209,8 +209,16 @@ export function mapFacade(map, container) {
     getZoom: () => viewZoom(map.getZoom()),
 
     setView: ({ lat, lon }, zoom) => map.jumpTo({ center: [lon, lat], zoom: engineZoom(zoom) }),
+    /**
+     * A whole camera in one jump, turn included: one move and one settle, where
+     * `setView` then `setBearing` would settle once on the old heading first.
+     */
+    setCamera: ({ lat, lon, zoom, bearing = 0 }) =>
+      map.jumpTo({ center: [lon, lat], zoom: engineZoom(zoom), bearing: -normalizeBearing(bearing) }),
     setZoom: (zoom) => map.setZoom(engineZoom(zoom)),
     setBearing: (deg) => map.setBearing(-normalizeBearing(deg)),
+    /** How deep this map goes right now, in app zoom: its basemap's ceiling. */
+    maxZoom: () => viewZoom(map.getMaxZoom()),
     /** Never animated: a rotation pans the map once per pointer move. */
     panBy: (dx, dy) => map.panBy([dx, dy], { duration: 0 }),
     fitBounds,

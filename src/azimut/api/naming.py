@@ -1,7 +1,7 @@
 """Naming rules shared by everything the analyst saves under a name.
 
-Inspect sessions, proofs, post drafts and satellite grids all turn a free-text
-title into the filename that holds it. They must agree: a session and a proof
+Collages, proofs, post drafts and satellite grids all turn a free-text
+title into the filename that holds it. They must agree: a collage and a proof
 called "Rooftop angle" land on the same stem, and the frontend mirrors this in
 ``lib/naming.js`` so it can predict a collision before it posts.
 

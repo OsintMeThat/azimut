@@ -241,9 +241,14 @@ def test_export_snapshots_kept_candidates_with_pass_categories_and_replaces_a_pa
     assert {c["name"] for c in updated["categories"]} == {"2026-05-11", "2026-05-18"}
     assert client.post(second_url + "/export").json()["features"] == 2
     drawing = json.loads(maplayers.drawing(case, updated["name"]).read_text())
-    features = sorted(drawing["features"], key=lambda f: f["properties"]["date"])
+    features = sorted(drawing["features"], key=lambda f: f["properties"]["pass_date"])
     assert int(features[0]["properties"]["colour"][1:3], 16) > int(features[1]["properties"]["colour"][1:3], 16)
     assert all(f["properties"]["run_id"] and f["properties"]["area_name"] for f in features)
+    # A change spans the passes it was read between, which is what the layer's
+    # time filter compares; the day it was found stays its group.
+    assert [(f["properties"]["date"], f["properties"]["date_end"]) for f in features] == [
+        (body["a"]["date"], "2026-05-11"), (body["a"]["date"], "2026-05-18")]
+    assert all(f["properties"]["pass_before"] == body["a"]["date"] for f in features)
     assert client.delete(first_url).status_code == 200
     assert client.delete(second_url).status_code == 200
     # Rebuild from the portable snapshot, without a run or the derived cache.

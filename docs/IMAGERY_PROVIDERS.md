@@ -266,11 +266,11 @@ stay at the repo's `tile_z` either way, so only the level's *name* differs:
 `Provider.zoom_offset=1` re-adds what `z_shift` took off. A wrong offset returns
 `400 Invalid TILECOL`.
 
-**Eco mode needs its own threshold here** (`Provider.eco_max_zoom=11`). The global
+**Eco mode needs its own threshold here** (`Provider.eco_max_zoom=7`). The global
 default (z15) is tuned for basemaps that run to z22; Sentinel-2's imagery stops at
-z14, so sharing it would replace the layer at most supported zooms. At z11 and
-out, one Sentinel-2 pixel covers about 40 m and free Esri imagery has comparable
-detail. The swap is limited to those low-detail views.
+z14, so sharing it would replace the layer at most supported zooms. At z7 and out
+the view spans a whole region and free Esri imagery serves it just as well. The
+swap is limited to those overview zooms.
 
 | Limit | Value | Consequence |
 |-------|-------|-------------|
@@ -308,6 +308,24 @@ Products are cached beside their picture under `<variant>~<product>~v<N>`
 (`analyzers.product_cache_id`), so a rerun over the same dates spends nothing,
 and `PRODUCT_VERSION` keeps a frame from an older layout from being decoded as a
 newer one.
+
+An analyzer of your own reads raw bands instead: `bands-B04-B08`, up to three
+Level-2A bands a product, named in the collection's order and checked against
+`sentinel.L2A_BANDS` before a script is built, so no free expression reaches an
+evalscript. Its channels are 16 bits, reflectance in ten-thousandths (Sentinel-2's
+own scale), because an index computed on the server from two dark bands loses its
+meaning at a byte's 0.2% step; the fourth channel is the same sky. Pillow cannot
+hold 16 bits across four channels, so the engine decodes these with OpenCV and
+keeps a run's copy as the PNG that arrived. A recipe reads every three distinct
+bands as one more request per date and tile, which the wizard counts. The
+builder's preview reads the same products over the view from the tile cache and
+fetches the missing ones only when **Read** is pressed, one metered request each,
+over at most three tiles a side. A check does the same on the tiles under its
+marks alone (`detect_rules.check_tiles`), cache first and **Run all** for the
+rest. The shipped examples were calibrated on Planetary Computer's key-less
+Level-2A, laid out as this evalscript returns it (the 1000 offset taken off from
+processing baseline 04.00, the way Sentinel Hub harmonises), so their marks cost
+no Copernicus request until a user runs them.
 
 Difference asks for the same bands over the view on screen (`sentinel.CHANGE_PRODUCTS`:
 `change-<index>`, and `change-sky` for the sky alone). Those frames are decoded in

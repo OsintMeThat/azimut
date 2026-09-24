@@ -5,7 +5,9 @@ from __future__ import annotations
 import io
 import math
 import secrets
-from typing import Any, Literal
+from typing import Any, Literal, get_args
+
+import httpx
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
@@ -14,12 +16,16 @@ from pydantic import Field, ValidationError
 
 from .. import config
 from ..engine import analyzers as engine
-from ..engine import analysis_export, analysis_geometry, media, workqueue
-from ..engine.analysis_models import (
-    BUILTINS, GROUPS, METHODS, RELIABILITY, SINGLE_METHODS, Area, AreaDates, AreaGeometry, Model, Recipe,
-    RunInput, ShortId, Source, Zone, ZoneSet,
+from ..engine import (
+    analysis_dating, analysis_examples, analysis_export, analysis_geometry, detect_rules, links, media, sentinel,
+    workqueue,
 )
-from .cases import delete_by_path, delete_entity_deep, get_case
+from ..engine.analysis_models import (
+    BUILTINS, GROUPS, MAX_AROUND, MAX_BANDS, MAX_CHECKS, MAX_MARKS, MAX_RULES, METHODS, RELIABILITY, Area, AreaDates,
+    AreaGeometry, Bounds, Check, Latitude, Longitude, Model, Recipe, RunInput, SceneClass, ShortId, Source, Zone,
+    ZoneSet, is_single,
+)
+from .cases import delete_by_path, delete_entities_deep, get_case
 
 router = APIRouter(prefix="/api", tags=["analyzers"])
 
@@ -42,7 +48,17 @@ def recipes() -> dict[str, Any]:
             "radar_layer": str(settings.get("sentinel1_layer") or ""),
             "groups": [{"id": ident, "label": label, "recipes": members}
                        for ident, label, members in GROUPS],
-            "reliability": RELIABILITY}
+            "reliability": RELIABILITY,
+            # What an analyzer of your own may say, and how far it may reach.
+            "rules": {"bands": list(sentinel.L2A_BANDS), "classes": list(get_args(SceneClass)),
+                      "max_rules": MAX_RULES, "max_bands": MAX_BANDS,
+                      "max_around": MAX_AROUND, "max_checks": MAX_CHECKS, "max_marks": MAX_MARKS,
+                      "preview_span": detect_rules.PREVIEW_SPAN},
+            # The built-ins a builder can open as the rules they apply.
+            "as_rules": {recipe.id: converted for recipe in BUILTINS
+                         if (converted := detect_rules.index_as_rules(recipe))},
+            # Ready analyzers with their checks, which a new one can start from.
+            "examples": analysis_examples.catalogue()}
 
 
 @router.post("/compare/analyzers")
@@ -66,6 +82,77 @@ def delete_recipe(ident: str) -> dict[str, bool]:
         settings["analyzers"] = [r for r in settings.get("analyzers", []) if r.get("id") != ident]
     config.update_settings(update)
     return {"deleted": True}
+
+
+class PreviewInput(Model):
+    """An analyzer of your own, the two passes to try it on, and the view."""
+    recipe: Recipe
+    a: Source = Field(default_factory=Source)
+    b: Source
+    bounds: Bounds
+    #: Fetch the frames the cache lacks. Only the analyst's Read sets it.
+    read: bool = False
+
+
+class ProbeInput(PreviewInput):
+    #: Longitude and latitude, inside the grid the preview reads.
+    point: tuple[Longitude, Latitude]
+
+
+class CheckInput(Model):
+    """An analyzer of your own as it stands, and one of its checks to rerun."""
+    recipe: Recipe
+    check: Check
+    #: Fetch the frames the cache lacks. Only the analyst's Run all sets it.
+    read: bool = False
+
+
+def _rules_only(body: PreviewInput | CheckInput) -> None:
+    if body.recipe.method != "rules":
+        raise HTTPException(422, "only an analyzer of your own rules has a live preview")
+
+
+def _previewing(work: Any) -> dict[str, Any]:
+    """Run a preview step, saying what went wrong in words an analyst can act on."""
+    try:
+        result: dict[str, Any] = work()
+        return result
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except sentinel.CoverageError as exc:
+        raise HTTPException(502, f"Copernicus returned no usable frame: {exc}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Copernicus could not be reached; nothing was fetched") from exc
+
+
+@router.post("/compare/analyzers/preview")
+def preview_rules(body: PreviewInput) -> dict[str, Any]:
+    """What an analyzer of your own keeps over the view, rule by rule.
+
+    Reads the tile cache only unless `read` is set, which fetches the missing
+    frames: one metered Sentinel Hub request each, for each date read.
+    """
+    _rules_only(body)
+    bounds = (body.bounds.west, body.bounds.south, body.bounds.east, body.bounds.north)
+    return _previewing(lambda: detect_rules.preview(body.recipe, body.a, body.b, bounds, read=body.read))
+
+
+@router.post("/compare/analyzers/probe")
+def probe_rules(body: ProbeInput) -> dict[str, Any]:
+    """Every rule's reading at one point of the preview. Never fetches."""
+    _rules_only(body)
+    return _previewing(lambda: detect_rules.probe(body.recipe, body.a, body.b, body.point))
+
+
+@router.post("/compare/analyzers/check")
+def check_rules(body: CheckInput) -> dict[str, Any]:
+    """One check rerun with the rules as they stand: what came out on each mark.
+
+    Reads the tile cache only unless `read` is set, which fetches the missing
+    frames the way the preview's Read does.
+    """
+    _rules_only(body)
+    return _previewing(lambda: detect_rules.check(body.recipe, body.check, read=body.read))
 
 
 Kind = Literal["areas", "zones", "followups", "runs"]
@@ -315,7 +402,7 @@ def add_manual(case_id: str, ident: str, body: ManualCandidate) -> dict[str, Any
         right = max(left + 1, math.ceil(max(p[0] for p in grid) * (1 << z) * size))
         bottom = max(top + 1, math.ceil(max(p[1] for p in grid) * (1 << z) * size))
         source = outcome or saved["input"]
-        sources = [source["b"]] if saved["input"]["recipe"]["method"] in SINGLE_METHODS else [source["a"], source["b"]]
+        sources = [source["b"]] if is_single(saved["input"]["recipe"]) else [source["a"], source["b"]]
         parts = []
         for ty in range(top // size, (bottom - 1) // size + 1):
             for tx in range(left // size, (right - 1) // size + 1):
@@ -336,7 +423,6 @@ def add_manual(case_id: str, ident: str, body: ManualCandidate) -> dict[str, Any
                "bbox": [west, south, east, north], "parts": parts, "review": "new",
                "phenomenon": "Manual candidate", "margin": 0, "measure": {},
                "area": (right - left) * (bottom - top) * mpp ** 2,
-               "width": (right - left) * mpp, "height": (bottom - top) * mpp,
                "sources": {"a": source["a"], "b": source["b"]}}
         saved["results"].append(row)
         saved["count"] = len(saved["results"])
@@ -516,14 +602,17 @@ def promote(case_id: str, ident: str, result_id: str, body: Promotion) -> dict[s
         # deleting the working run cannot remove evidence used by the case.
         source = {"type": "compare", "analysis_run": ident, "candidate_id": result_id,
                   "input": saved["input"], "candidate": result, "engine_version": saved["engine_version"]}
-        single = saved["input"]["recipe"]["method"] in SINGLE_METHODS
+        single = is_single(saved["input"]["recipe"])
         as_area = body.shape == "area" or (body.shape is None and not single)
         geometry = result["geometry"] if as_area else {"type": "Point", "coordinates": result["coordinates"]}
         if as_area and geometry["type"] == "Point":
             raise HTTPException(422, "this candidate is a point; pin it as a point")
-        filed = media.import_rendered_bytes(case, preview_bytes(case, saved, result,
-                                            after_only=single if body.after_only is None else body.after_only),
-                                            body.title, ".png", source, by="compare")
+        after_only = single if body.after_only is None else body.after_only
+        passes = analysis_dating.candidate_sources(saved, result)
+        filed = media.import_rendered_bytes(case, preview_bytes(case, saved, result, after_only=after_only),
+                                            body.title, ".png",
+                                            {**source, **analysis_dating.pictured(passes, one_pass=after_only)},
+                                            by="compare")
         lon, lat = result["coordinates"]
         if as_area:
             lon, lat = analysis_geometry.interior(geometry, (lon, lat))
@@ -533,21 +622,34 @@ def promote(case_id: str, ident: str, result_id: str, body: Promotion) -> dict[s
                                  **({"footprint": geometry} if as_area else {}),
                                  "evidence": filed["item"]["path"],
                                  "analysis_provenance": source}, by="compare")
+        # The picture shows the place it pins. Without the edge the two were tied
+        # only by `evidence`, which the picture's connections never read.
+        case.add_link(filed["entity"]["id"], entity["id"], links.DEPICTS, by="compare", unique=True)
+        # When it was seen goes on a statement at the pin, never on the place itself.
+        claim = analysis_dating.state(case, place=entity, evidence=filed["entity"], run_id=ident,
+                                      candidate_id=result_id, sources=passes, single=single,
+                                      title=body.title)
         result.update(entity_id=entity["id"], review="kept", reviewed_at=engine.now(),
                       title=body.title, description=body.description, pinned_geometry=geometry)
         engine.persist_run(case, saved)
-        return {"entity": entity, "image": filed["item"]["path"], "result": result}
+        return {"entity": entity, "image": filed["item"]["path"], "claim": claim, "result": result}
 
 
 @router.delete("/cases/{case_id}/analysis/runs/{ident}/results/{result_id}/promote")
 def unpromote(case_id: str, ident: str, result_id: str) -> dict[str, Any]:
-    """Undo keeping: the pin and its evidence go to Trash, the candidate returns."""
+    """Undo keeping: the pin and its evidence go to Trash, the candidate returns.
+
+    The statement the pin made goes with it, in the same Trash group, unless the
+    analyst has written to it since.
+    """
     case = get_case(case_id)
     with engine.LOCK, case._lock:
         saved = read(case, "runs", ident)
         result = result_of(saved, result_id)
         entity = kept_entity(case, result)
-        removed = delete_entity_deep(case, entity["id"]) if entity else None
+        claim = analysis_dating.withdrawable(case, ident, result_id)
+        going = [each for each in (entity["id"] if entity else None, claim) if each]
+        removed = delete_entities_deep(case, going) if going else None
         result.update(entity_id=None, review="new", reviewed_at=engine.now())
         engine.persist_run(case, saved)
         return {"result": result, "deleted": removed}

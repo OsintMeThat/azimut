@@ -113,12 +113,14 @@ const toast = vi.fn();
 const ensureCase = vi.fn(async () => ({ id: 'case-a' }));
 const reloadCase = vi.fn(async () => {});
 const caseState = { current: { id: 'case-a' } };
-const uiState = { tool: 'compare', openCompare: null };
+// Reactive, so a tab switch wakes the effects that watch it.
+const { uiState } = await import('./detect/uistate.fixture.svelte.js');
+const prefs = { homeView: { lat: 48.8566, lon: 2.3522, zoom: 16 }, units: 'metric', mapSync: false };
 vi.mock('../lib/state.svelte.js', () => ({
   caseState,
   ensureCase,
   fmtCoords: (lat, lon) => `${lat.toFixed(5)}, ${lon.toFixed(5)}`,
-  prefs: { homeView: { lat: 48.8566, lon: 2.3522, zoom: 16 }, units: 'metric' },
+  prefs,
   prefsReady: Promise.resolve(),
   reloadCase,
   toast,
@@ -142,6 +144,8 @@ function fakeEngine(opening, container) {
     container,
     setBearing: vi.fn((bearing) => (camera.bearing = bearing)),
     setView: vi.fn((view, zoom) => (camera = { ...camera, ...view, zoom })),
+    setCamera: vi.fn((next) => (camera = { lat: next.lat, lon: next.lon, zoom: next.zoom, bearing: next.bearing ?? 0 })),
+    maxZoom: vi.fn(() => 19),
     syncView: vi.fn((view, zoom) => (camera = { ...camera, ...view, zoom })),
     resize: vi.fn(),
     snapshot: vi.fn(() => ({ width: 400, height: 300 })),
@@ -239,6 +243,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   engines.length = 0;
   releases = [];
+  uiState.tool = 'compare';
+  uiState.openCompare = null;
+  uiState.compareAt = null;
+  uiState.lookAt = null;
+  uiState.mapView = null;
+  uiState.mapPoint = null;
+  prefs.mapSync = false;
 });
 
 afterEach(() => {
@@ -666,6 +677,43 @@ describe('Compare', () => {
     expect(drawn.some((path) => path.getAttribute('stroke-dasharray') === '8 6')).toBe(true);
   });
 
+  it('opens the right-clicked point in Satellite or Detect, at the zoom it was read at', async () => {
+    await open();
+    await add('A');
+    await add('B');
+    engines[0].handlers.contextmenu({ lat: 43.3, lon: 5.4, x: 120, y: 90 });
+    flushSync();
+    button('Open in', target.querySelector('[role="menu"]')).click();
+    await settle();
+    const sub = target.querySelector('[role="menu"][aria-label="Open this point in"]');
+    const rows = [...sub.querySelectorAll('[role="menuitem"]')].map((row) => row.textContent.trim());
+    expect(rows.slice(0, 2)).toEqual(['Satellite', 'Detect']);
+    expect(rows).not.toContain('Compare');
+    button('Detect', sub).click();
+    flushSync();
+    expect(uiState.tool).toBe('detect');
+    expect(uiState.lookAt).toEqual({ tool: 'detect', lat: 43.3, lon: 5.4, zoom: 16 });
+  });
+
+  it('moves both maps to a point another tab asked about, and keeps its pictures', async () => {
+    releases = [{ release: 30, date: '2026-09-01' }, { release: 20, date: '2025-06-01' }];
+    uiState.lookAt = { tool: 'compare', lat: 12.76, lon: 43.65, zoom: 15 };
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-23T12:00:00Z'));
+    try {
+      await openFresh();
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(uiState.lookAt).toBe(null);
+    expect(engines).toHaveLength(2);
+    for (const engine of engines) {
+      expect(engine.camera()).toMatchObject({ lat: 12.76, lon: 43.65, zoom: 15 });
+    }
+    // the opening pair was still built: the point moved the camera, not the pictures
+    expect(target.querySelectorAll('.empty-slot')).toHaveLength(0);
+  });
+
   it('saves a place on the right-clicked point without leaving the comparison', async () => {
     await open();
     await add('A');
@@ -773,6 +821,72 @@ describe('Compare', () => {
     // Back to the saved swipe, with both sources still on the stage.
     expect(target.querySelector('.compare-stage').classList.contains('swipe')).toBe(true);
     expect(target.querySelectorAll('.surface-shell')).toHaveLength(2);
+    expect(target.querySelector('.badge')).toBeNull();
+  });
+});
+
+describe('one camera for the map tabs', () => {
+  const SATELLITE = { lat: 12.7615, lon: 43.6571, zoom: 17, bearing: 30, by: 'satellite' };
+
+  /** The opening pair, both sides built: today's imagery against a year back. */
+  async function openPairOfMaps() {
+    releases = [{ release: 30, date: '2026-09-01' }, { release: 20, date: '2025-06-01' }];
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-23T12:00:00Z'));
+    try {
+      await openFresh();
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it('opens both maps where the other map tabs left the window', async () => {
+    prefs.mapSync = true;
+    uiState.mapView = { ...SATELLITE };
+    await openPairOfMaps();
+    expect(engines).toHaveLength(2);
+    for (const engine of engines) {
+      expect(engine.camera()).toMatchObject({ lat: SATELLITE.lat, lon: SATELLITE.lon, zoom: 17 });
+    }
+  });
+
+  it('writes where it comes to rest, for the other map tabs and for Coordinates', async () => {
+    prefs.mapSync = true;
+    await openPairOfMaps();
+    engines[0].handlers['view-settled']({ lat: 43.3, lon: 5.4, zoom: 15, bearing: 12 });
+    flushSync();
+    expect(uiState.mapView).toEqual({ lat: 43.3, lon: 5.4, zoom: 15, bearing: 12, by: 'compare' });
+    expect(uiState.mapPoint).toEqual({ lat: 43.3, lon: 5.4, zoom: 15 });
+  });
+
+  it('takes the window camera in one jump when it shows again', async () => {
+    prefs.mapSync = true;
+    await openPairOfMaps();
+    uiState.tool = 'satellite';
+    uiState.mapView = { ...SATELLITE };
+    flushSync();
+    expect(engines[0].setCamera).not.toHaveBeenCalled();
+    uiState.tool = 'compare';
+    flushSync();
+    // one map takes it; the camera link brings the other along
+    const took = engines.filter((engine) => engine.setCamera.mock.calls.length);
+    expect(took).toHaveLength(1);
+    expect(took[0].setCamera).toHaveBeenCalledWith(expect.objectContaining({ ...SATELLITE }));
+  });
+
+  it('keeps a saved comparison on the ground it was saved on', async () => {
+    prefs.mapSync = true;
+    await open();
+    button('Open', target).click();
+    await settle();
+    button('Harbour change', document.querySelector('[role="dialog"]')).click();
+    await settle();
+    uiState.tool = 'satellite';
+    uiState.mapView = { ...SATELLITE };
+    flushSync();
+    uiState.tool = 'compare';
+    flushSync();
+    for (const engine of engines) expect(engine.setCamera).not.toHaveBeenCalled();
     expect(target.querySelector('.badge')).toBeNull();
   });
 });

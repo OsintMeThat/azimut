@@ -34,6 +34,9 @@ function loadGroup() {
 /** Where the Media position's rows come from. */
 const MEDIA_INDEX = (caseId) => `/api/cases/${caseId}/satellite/media`;
 
+/** The entity a row's kind files through, where it is not the capture type. */
+const ENTITY_TYPE = { place: 'place', media: 'media', comparison: 'compare-session' };
+
 export function createSavedState({ api, notify, assignFolder, reloadCase }) {
   let rows = $state([]);
   // the located files, read the first time that position is opened
@@ -193,11 +196,12 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
    */
   async function move(caseId, row, folder) {
     // the row's kind *is* its entity type, bar the screenshot that rides the
-    // capture type. Filing a place as a capture would route it to PATCH /media,
-    // the sidecar of an image it is not.
+    // capture type and a comparison, which is its saved session. Filing a place
+    // as a capture would route it to PATCH /media, the sidecar of an image it is
+    // not, and a comparison's folder is the session's, not its preview's.
     const entity = {
       id: row.id,
-      type: ['place', 'media'].includes(row.kind) ? row.kind : 'capture',
+      type: ENTITY_TYPE[row.kind] ?? 'capture',
       attrs: { path: row.path },
     };
     try {
@@ -209,9 +213,10 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
     }
   }
 
-  /** Drop a saved item: a capture loses its image file, a place its entity. */
+  /** Drop a saved item: a capture loses its image file, a place or a comparison
+   *  its entity. A comparison's images stay in Media, as they do from Compare. */
   async function remove(caseId, row) {
-    return row.kind === 'place'
+    return row.kind === 'place' || row.kind === 'comparison'
       ? api.del(`/api/cases/${caseId}/entities/${row.id}`)
       : api.del(`/api/cases/${caseId}/satellite?path=${encodeURIComponent(row.path)}`);
   }

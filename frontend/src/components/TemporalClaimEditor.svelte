@@ -12,6 +12,8 @@
     initialWhen = '',
     initialStatement = '',
     initialRole = '',
+    /** Evidence a new claim cites from the start, such as the picture it was read on. */
+    initialCites = [],
     onsaved,
     oncancel,
   } = $props();
@@ -39,6 +41,7 @@
     when = item?.raw ?? initialWhen;
     timeRole = item?.time_role ?? initialRole;
     confidence = item?.confidence ?? '';
+    if (!item) cites = initialCites.map((entry) => ({ id: entry.id, label: entry.label, type: entry.type }));
   });
 
   $effect(() => {

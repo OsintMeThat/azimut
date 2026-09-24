@@ -27,4 +27,9 @@ describe('temporal Claim editor', () => {
     expect(picker).toContain("relationOptions('claim', entry.type, 'claim')");
     expect(picker).toContain('buildCatalogQuery(caseId, { types, query: term, limit: 200 })');
   });
+
+  it('starts a new claim citing the evidence it was opened from, and an edit from its own', () => {
+    expect(editor).toContain('initialCites = [],');
+    expect(editor).toContain('if (!item) cites = initialCites.map(');
+  });
 });

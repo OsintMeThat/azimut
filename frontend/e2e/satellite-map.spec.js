@@ -103,3 +103,39 @@ test('north is up again when the rose is pressed', async ({ page }) => {
   await page.getByRole('button', { name: 'Reset to north' }).click();
   await expect(page.getByRole('button', { name: /^0°$/ })).toBeVisible();
 });
+
+test('a middle drag turns like a wheel about the grabbed point, and a middle click puts north back', async ({ page }) => {
+  await openMap(page);
+  const box = await page.locator('.map').boundingBox();
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down({ button: 'middle' });
+  await expect(page.locator('.turn-guide')).toBeVisible();
+  // out of the guide circle due east, then three quarters of the wheel
+  // clockwise, in small steps, the way a hand goes round
+  for (let deg = 0; deg <= 270; deg += 5) {
+    const a = (deg * Math.PI) / 180;
+    await page.mouse.move(x + 120 * Math.cos(a), y + 120 * Math.sin(a));
+  }
+  await page.mouse.up({ button: 'middle' });
+  await expect(page.locator('.turn-guide')).toHaveCount(0);
+  // past half a turn and still the same way: 270°, not back towards north
+  await expect(page.getByRole('button', { name: /^270°$/ })).toBeVisible();
+
+  await page.mouse.click(x, y, { button: 'middle' });
+  await expect(page.getByRole('button', { name: /^0°$/ })).toBeVisible();
+});
+
+test('Shift and an arrow turn a step at a time, and Shift and up is north', async ({ page }) => {
+  await openMap(page);
+  // with the map focused, the engine would add a turn of its own if it could
+  await page.locator('.map canvas').first().click();
+  await page.keyboard.press('Shift+ArrowRight');
+  await page.keyboard.press('Shift+ArrowRight');
+  await expect(page.getByRole('button', { name: /^30°$/ })).toBeVisible();
+  await page.keyboard.press('Shift+ArrowLeft');
+  await expect(page.getByRole('button', { name: /^15°$/ })).toBeVisible();
+  await page.keyboard.press('Shift+ArrowUp');
+  await expect(page.getByRole('button', { name: /^0°$/ })).toBeVisible();
+});

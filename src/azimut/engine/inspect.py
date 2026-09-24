@@ -318,7 +318,7 @@ def run_analysis(
 ) -> dict[str, Any]:
     """Run a read-only analysis on a filed image or a transient frame recipe.
 
-    ``time_s``/``ops`` let the Inspect session analyse a not-yet-saved frame
+    ``time_s``/``ops`` let Inspect analyse a not-yet-saved frame
     (extracted from ``rel_path`` at ``time_s``, optionally adjusted) without filing
     anything. Plain image analysis (no ``time_s``/``ops``) keeps the original file
     open so metadata analyses (EXIF) still see it.
@@ -484,7 +484,7 @@ def _apply_meta(
     folder: str | None = None,
     notes: str | None = None,
 ) -> None:
-    """Write the Save gate's chosen name, folder and note onto the filed item.
+    """Write the name, folder and note chosen at Save to case onto the filed item.
 
     This applies to a deduped save too. Re-saving an unchanged collage lands on
     the same pixels and so on the same entity, and dropping the name there is
@@ -606,13 +606,13 @@ def suggest_frames(
 
 
 # ---------------------------------------------------------------------------
-# Session workspace: recipes -> filed entities (Inspect Selection/Frame/Collage/Save)
+# Recipes -> filed entities (Inspect's frames and video, Collage's export)
 # ---------------------------------------------------------------------------
 #
-# The Inspect UI is a scratch workspace: frames, adjustments and a collage layout
-# live in the browser as *recipes* (``{path, time?, ops[]}``) and nothing enters the
-# case until an explicit Save. These functions turn a recipe back into pixels and
-# file the result — full-res and reproducible, so provenance stays honest (spec §6).
+# Frames, adjustments and collage layouts are *recipes* (``{path, time?, ops[]}``),
+# kept with a file's work or a collage (engine/inspectwork). No media enters the
+# case until Save to case. These functions turn a recipe back into pixels and file
+# the result — full-res and reproducible, so provenance stays honest (spec §6).
 
 
 def _source_image(
@@ -638,7 +638,8 @@ def render_preview_png(
 ) -> bytes:
     """Render a recipe (video frame or image + ops) to PNG bytes — no filing.
 
-    Backs collage snapshots and rebuilding previews when a saved session reopens.
+    Backs frame previews, collage pieces and rebuilding both when a work or a
+    collage reopens.
     A remapped (panorama) piece keeps its alpha, so the canvas shows the same
     curved footprint the export will paint.
     """
@@ -660,14 +661,14 @@ def save_frame(
     folder: str | None = None,
     notes: str | None = None,
 ) -> dict[str, Any]:
-    """File one tray frame (a video frame or an adjusted image) as case media."""
+    """File one frame (a video frame or an adjusted image) as case media."""
     image = _source_image(case, rel_path, time_s, ops)
     stem = _name_stem(label, Path(rel_path).stem)
     if time_s is not None:
         tag, op = f"_t{time_s:.2f}s", "frame"
     else:
         tag, op = "_edit", "adjust"
-    # A named item keeps its name on disk, and nothing else: the tray already
+    # A named item keeps its name on disk, and nothing else: Inspect already
     # spells the instant into the name it sends, and `unique_path` settles a
     # collision, so a wall-clock stamp would only clutter the folder the analyst
     # opens. The timecode tag stands in on the fallback stem, where nothing else
@@ -723,17 +724,12 @@ def _compose_canvas(
     height: int,
     nodes: list[dict[str, Any]],
     background: str | None,
-    scale: float = 1.0,
 ) -> tuple[Image.Image, list[str]]:
-    """Warp each node's source into its quad and paint onto one canvas.
-
-    Shared by the filed export and the (unsaved) Save-tab preview. ``scale``
-    shrinks the whole layout (canvas + quads) for a cheaper preview render.
-    """
+    """Warp each node's source into its quad and paint onto one canvas."""
     if not nodes:
         raise ValueError("collage needs at least one image")
-    width = max(16, min(int(round(width * scale)), 8192))
-    height = max(16, min(int(round(height * scale)), 8192))
+    width = max(16, min(int(width), 8192))
+    height = max(16, min(int(height), 8192))
     canvas = (
         Image.new("RGB", (width, height), background)
         if background
@@ -754,7 +750,7 @@ def _compose_canvas(
         img = img.convert("RGB")
         w, h = img.size
         src_corners = [[0.0, 0.0], [float(w), 0.0], [float(w), float(h)], [0.0, float(h)]]
-        quad = [[float(x) * scale, float(y) * scale] for x, y in node["quad"]]
+        quad = [[float(x), float(y)] for x, y in node["quad"]]
         coeffs = _perspective_coeffs(quad, src_corners)
         warped = img.transform(
             (width, height), Image.Transform.PERSPECTIVE, coeffs, Image.Resampling.BICUBIC
@@ -765,29 +761,6 @@ def _compose_canvas(
         canvas.paste(warped, (0, 0), mask)
         sources.append(rel)
     return canvas, sources
-
-
-def compose_preview_png(
-    case: Case,
-    *,
-    width: int,
-    height: int,
-    nodes: list[dict[str, Any]],
-    background: str | None = None,
-    max_dim: int = 640,
-) -> bytes:
-    """Render the exact composited collage to PNG bytes — nothing is filed.
-
-    Same warp as :func:`compose_perspective`, downscaled to ``max_dim`` so the
-    Save tab can show a true-to-export thumbnail cheaply.
-    """
-    scale = min(1.0, max_dim / max(1, max(int(width), int(height))))
-    canvas, _ = _compose_canvas(
-        case, width=width, height=height, nodes=nodes, background=background, scale=scale
-    )
-    buf = io.BytesIO()
-    canvas.save(buf, "PNG")
-    return buf.getvalue()
 
 
 def compose_perspective(
@@ -801,7 +774,7 @@ def compose_perspective(
     folder: str | None = None,
     notes: str | None = None,
 ) -> dict[str, Any]:
-    """Composite tray/case images, each warped into a 4-point quad, onto a canvas.
+    """Composite frames and case images, each warped into a 4-point quad, onto a canvas.
 
     ``nodes`` are painted in order (later = on top); each is
     ``{"src": {path, time?, ops[]}, "quad": [[x,y]×4]}`` with the quad in canvas

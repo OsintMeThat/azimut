@@ -32,20 +32,22 @@
     caseState, uiState, ensureCase, reloadCase, toast, dismissToast, prefs, fmtCoords, prefsReady,
   } from '../lib/state.svelte.js';
   import { markerGeometry, markerSvg } from '../lib/mapMarkers.js';
-  import { startRectDrag, startRotateDrag } from '../lib/map/gestures.js';
+  import { startRectDrag, turnFromKey, turnFromPress } from '../lib/map/gestures.js';
   import { panelWidth } from '../lib/panelWidth.js';
   import PlaceSearch from './satellite/PlaceSearch.svelte';
   import { assignFolder } from '../lib/filing.js';
   import { saveRelation } from '../lib/relations.svelte.js';
-  import { openEntity } from '../lib/navigate.js';
+  import { openComparison, openEntity, openMapAt } from '../lib/navigate.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
   import { extensionVersion, mapLinkRelay, onActivated } from '../lib/extBridge.js';
   import { SENTINEL_ID } from '../lib/sentinel.js';
   import { WAYBACK_ID } from '../lib/wayback.js';
   import { COMPARE_SOURCES, comparePair } from '../lib/map/comparePair.js';
+  import { actionsFor, otherMapTools } from '../lib/map/contextMenu.js';
   import { buildHash, readSolo, splitHash } from '../lib/hash.js';
   import { readView, readWindowLabel, viewParams } from '../lib/map/view.js';
   import { createViewLink } from '../lib/map/link.js';
+  import { shareView } from '../lib/map/sharedView.js';
   import {
     askable,
     DATED as FIRMS_DATED,
@@ -78,6 +80,7 @@
     railSections,
   } from '../lib/map/tools.js';
   import Icon from '../components/Icon.svelte';
+  import TurnGuide from '../components/TurnGuide.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import Modal from '../components/Modal.svelte';
   import EntityDetails from '../components/EntityDetails.svelte';
@@ -138,6 +141,9 @@
   // The map opens on the saved home view, so it is not built until preferences
   // have landed — a deep link can mount this tool first.
   let homeReady = $state(false);
+  // …and the view it actually opens on, settled in `build`: the address, else
+  // where the other map tabs left the window, else home.
+  let opensOn = $state(null);
   let center = $state({ ...prefs.homeView });
   let markerStyle = $state('none'); // 'crosshair' | 'pin' | 'none'
   let moveMode = $state(false); // pin decoupled from center, draggable
@@ -509,8 +515,12 @@
     // The address wins over the saved home view: it is what a detached window,
     // a reload and a kept link all carry. A basemap named there has to exist —
     // the catalogue depends on which keys are configured, and an address can be
-    // typed by hand.
-    center = { ...openingHome };
+    // typed by hand. An address with no view leaves the map where the other map
+    // tabs left the window, when they share one.
+    const shared = openingView?.lat == null ? share.opening() : null;
+    center = shared ? { lat: shared.lat, lon: shared.lon, zoom: shared.zoom } : { ...openingHome };
+    if (shared) bearing = shared.bearing ?? 0;
+    opensOn = { ...center };
     if (openingView?.provider && imagery.find(openingView.provider)) {
       providerId = openingView.provider;
     }
@@ -519,9 +529,15 @@
     loadFireSensors();
     // A peer moved. Applied whatever this tab was doing, because the analyst
     // asked for that by pressing the link — but only while it is pressed.
+    // With the map tabs sharing a camera it is the window's camera that moves,
+    // so the tab on screen follows, whichever it is.
     viewLink = createViewLink(
       (view) => {
         if (!linked || !engine) return;
+        if (prefs.mapSync) {
+          uiState.mapView = { ...view, by: 'link' };
+          return;
+        }
         engine.setView(view, view.zoom);
         setBearing(view.bearing);
       },
@@ -582,6 +598,8 @@
     if (notesItem || placeModal || detailsEntityId || refs.picking || deleteTarget) return;
     const tag = e.target?.tagName;
     const typing = tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable;
+    // Shift and an arrow turn the map, as on every map in the app
+    if (!typing && turnFromKey(engine, e)) return;
     // Enter confirms a polygon area, same as the Confirm button
     if (grid.on && grid.drawMode === 'polygon' && !typing && e.key === 'Enter') {
       e.preventDefault();
@@ -653,20 +671,16 @@
     if (mapReady && shown.provider?.id === WAYBACK_ID) wb.loadReleases();
   });
 
-  // --- middle-drag rotate (item 3), Google-Earth style ---
-  // Grab a point → the map turns around *that* point (not the centre) as the
-  // cursor sweeps, with a sober target marking the pivot. A map only rotates
-  // about the centre, so after each bearing change we pan the grabbed geographic
-  // point back under the cursor — keeping it pinned exactly where you grabbed.
+  // --- middle-drag rotate, Google-Earth style ---
+  // Grab a point and drag sideways: the map turns around *that* point (not the
+  // centre), with a sober target marking the pivot. A middle click alone puts
+  // north back up (lib/map/gestures.js).
   function onMiddleRotateStart(e) {
     if (!engine) return;
-    // Middle button, or shift and the left one — the second was the old map's
-    // own gesture, kept rather than quietly dropped. Never shift over a mode
-    // already waiting for a left drag, though: those own the button.
-    const shiftDrag =
-      e.button === 0 && e.shiftKey && !capture.armed && grid.drawMode !== 'rect';
-    if (e.button !== 1 && !shiftDrag) return;
-    startRotateDrag(engine, e, {
+    // Shift and the left button turns too, as it did on the old map. Never over
+    // a mode already waiting for a left drag, though: those own the button.
+    turnFromPress(engine, e, {
+      shift: !capture.armed && grid.drawMode !== 'rect',
       onPivot: (pivot) => {
         rotatePivot = pivot;
         rotating = true;
@@ -793,15 +807,39 @@
    */
   let peerMaps = $state(0);
 
+  /** What the link sends: the window's camera while the map tabs share one, so
+   *  a pan in Compare or Detect reaches the other maps too; else this map's. */
+  function linkedView() {
+    if (prefs.mapSync && uiState.mapView) return uiState.mapView;
+    return { lat: center.lat, lon: center.lon, zoom: center.zoom, bearing };
+  }
+
   function toggleLink() {
     if (!peerMaps) return;
     linked = !linked;
-    if (linked) viewLink?.send({ lat: center.lat, lon: center.lon, zoom: center.zoom, bearing });
+    if (linked) viewLink?.send(linkedView());
   }
 
   $effect(() => {
     if (!linked || !mapReady) return;
-    viewLink?.send({ lat: center.lat, lon: center.lon, zoom: center.zoom, bearing });
+    viewLink?.send(linkedView());
+  });
+
+  /**
+   * The camera this window's map tabs share (`lib/map/sharedView.js`).
+   *
+   * Written when this map comes to rest on screen, and taken when this tab
+   * shows, or when the link moves it while it does.
+   */
+  const share = shareView('satellite', { state: uiState, enabled: () => prefs.mapSync });
+
+  $effect(() => {
+    uiState.mapView;
+    if (uiState.tool !== 'satellite' || !mapReady) return;
+    untrack(() => {
+      const next = share.pending(engine.camera());
+      if (next) engine.setCamera(next);
+    });
   });
 
   const WINDOWS_KEY = 'azimut:mapWindows';
@@ -852,6 +890,8 @@
   // part of a capture.
   let pointMenu = $state(null); // { lat, lon, x, y, frame, lookup }
   let pointLookupSeq = 0;
+  const pointActions = actionsFor(['lookup', 'place', 'measure', 'sky', 'history', 'centre']);
+  const pointTools = otherMapTools('satellite');
 
   function onMapContextMenu(at) {
     pointLookupSeq += 1;
@@ -899,6 +939,8 @@
       wb.historyAt({ lat: point.lat, lon: point.lon, zoom });
     } else if (id === 'compare') {
       await comparePoint(point, value);
+    } else if (id === 'goto') {
+      openMapAt(value, { ...point, zoom: center.zoom });
     }
   }
 
@@ -1789,6 +1831,13 @@
   // Deletions drop a file / an entity — always behind a confirm. The target is
   // a saved-index row; its kind says which of the two it is.
   let deleteTarget = $state(null);
+  const DELETE_WORDS = {
+    place: { title: 'Delete this place?', detail: 'Moves the saved point to the case trash.' },
+    comparison: {
+      title: 'Delete this comparison?',
+      detail: 'Moves the saved comparison to the case trash. Its images stay in Media.',
+    },
+  };
   let deleteBusy = $state(false);
 
   async function confirmDelete() {
@@ -1808,9 +1857,11 @@
     }
   }
 
-  /** The edit action, for whichever kind of row it was pressed on. */
+  /** The edit action, for whichever kind of row it was pressed on. A comparison
+   *  is edited where it was made. */
   function editSaved(row) {
     if (row.kind === 'place') openEditPlace(row);
+    else if (row.kind === 'comparison') openComparison(row);
     else notesItem = row;
   }
 
@@ -2124,7 +2175,7 @@
         {s2}
         wayback={wb}
         {s1}
-        home={openingHome}
+        home={opensOn}
         {overlays}
         imperial={prefs.units === 'imperial'}
         controlsTop={railBottom}
@@ -2136,6 +2187,7 @@
         onwidgetload={(meter) => imagery.countLoad(meter)}
         onwidgetauthfailure={onWidgetAuthFailure}
         onwidgetfailed={onWidgetFailed}
+        onviewsettled={(camera) => share.settled(camera, engine?.maxZoom())}
       >
       <!-- saved work on the map: navigation only, off by default, session-only.
            It draws the panel's current selection, not the whole index. -->
@@ -2325,15 +2377,10 @@
         </div>
       {/if}
 
-      <!-- middle-drag rotation pivot: sober target at the grabbed point, pinned
-           on screen while the map turns around it -->
+      <!-- middle-drag rotation: the wheel about the grabbed point, pinned on
+           screen while the map turns around it -->
       {#if rotating}
-        <div class="rotate-pivot" style:left={`${rotatePivot.x}px`} style:top={`${rotatePivot.y}px`} aria-hidden="true">
-          <svg width="40" height="40" viewBox="0 0 40 40">
-            <circle class="ring" cx="20" cy="20" r="15" />
-            <circle class="dot" cx="20" cy="20" r="1.5" />
-          </svg>
-        </div>
+        <TurnGuide x={rotatePivot.x} y={rotatePivot.y} />
       {/if}
 
       <!-- Where you are and what the armed tool is reading, then the two acts
@@ -2404,6 +2451,8 @@
           zoom={center.zoom}
           format={prefs.coordFormat}
           {fullscreen}
+          actions={pointActions}
+          tools={pointTools}
           lookup={pointMenu.lookup}
           {compareSources}
           onpick={onPointMenu}
@@ -2597,14 +2646,12 @@
   />
 {/if}
 
-<!-- delete confirm: a capture drops its image file, a place its entity -->
+<!-- delete confirm: a capture drops its image file, a place or a comparison its entity -->
 {#if deleteTarget}
   <ConfirmDialog
-    title={deleteTarget.kind === 'place' ? 'Delete this place?' : 'Delete this capture?'}
+    title={DELETE_WORDS[deleteTarget.kind]?.title ?? 'Delete this capture?'}
     message={`“${deleteTarget.title || coordsLabel(deleteTarget)}” will be removed from the case.`}
-    detail={deleteTarget.kind === 'place'
-      ? 'Moves the saved point to the case trash.'
-      : 'Moves the capture and its image to the case trash.'}
+    detail={DELETE_WORDS[deleteTarget.kind]?.detail ?? 'Moves the capture and its image to the case trash.'}
     restorable={RESTORABLE}
     confirmLabel="Delete"
     tone="default"
@@ -2762,30 +2809,6 @@
   :global(.sat-marker) {
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
   }
-  /* Sober rotation pivot (Google-Earth style): faint translucent ring + dot. */
-  .rotate-pivot {
-    position: absolute;
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-    z-index: 650;
-    color: #fff;
-  }
-  .rotate-pivot svg {
-    display: block;
-    overflow: visible;
-    filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.55));
-  }
-  .rotate-pivot .ring {
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1;
-    opacity: 0.5;
-  }
-  .rotate-pivot .dot {
-    fill: currentColor;
-    opacity: 0.8;
-  }
-
   /* fullscreen: the whole tool covers the viewport, above the app chrome */
   .tool.fullscreen {
     position: fixed;

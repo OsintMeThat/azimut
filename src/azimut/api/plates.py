@@ -76,6 +76,9 @@ class PlateIn(BaseModel):
     format: str = Field(default="svg", pattern="^(svg|png)$")
     svg: str = ""
     png: str = ""
+    #: False for a name that does not tell two exports apart. Compare names its
+    #: images by their pictures' dates, which two comparisons of one pair share.
+    overwrite: bool = True
 
 
 def _clean_svg(markup: str) -> bytes:
@@ -115,7 +118,8 @@ def write_plate(case_id: str, body: PlateIn) -> dict[str, Any]:
 
     Inside the case a re-export overwrites, the way a note's PDF does: that folder is
     refreshed in one click rather than accumulating copies. In a folder of the
-    analyst's own nothing is ever overwritten, because the files there are theirs.
+    analyst's own nothing is ever overwritten, because the files there are theirs,
+    and neither is a plate that asked not to be.
     """
     case = get_case(case_id)
     data = _clean_png(body.png) if body.format == "png" else _clean_svg(body.svg)
@@ -127,7 +131,7 @@ def write_plate(case_id: str, body: PlateIn) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     in_case = destination == layout.subdir(case.path, EXPORTS_DIR)
     try:
-        if in_case:
+        if in_case and body.overwrite:
             path = destination / filename
             path.write_bytes(data)
         else:

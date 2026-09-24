@@ -1781,6 +1781,11 @@ export async function installAppFixture(page, options = {}) {
       });
     }
     if (path === `/api/cases/${CASE_ID}/media`) return json(route, fixtureMedia);
+    // Inspect and Collage open on their pickers: no file worked on and no
+    // collage saved unless a spec brings some.
+    if (path === '/api/inspect/ops') return json(route, { filters: [], analyses: [] });
+    if (path === `/api/cases/${CASE_ID}/inspect/works`) return json(route, options.inspectWorks ?? []);
+    if (path === `/api/cases/${CASE_ID}/collages`) return json(route, options.collages ?? []);
     // One media file with everything its sidecar holds. The browse index leaves
     // enrichment's metadata dumps out, so the Details panel reads a file at a time.
     if (path === `/api/cases/${CASE_ID}/media/item`) {

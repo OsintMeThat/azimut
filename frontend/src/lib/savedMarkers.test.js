@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupSavedMarkers, markerPrecision, stackOrder } from './savedMarkers.js';
+import { groupSavedMarkers, keptLabel, markKind, markerPrecision, pairLabel, stackOrder } from './savedMarkers.js';
 
 const at = (id, lat, lon, extra = {}) => ({ id, kind: 'capture', lat, lon, ...extra });
 
@@ -86,6 +86,15 @@ describe('stackOrder', () => {
     expect(ordered.map((i) => i.id)).toEqual(['b', 'c', 'a']);
   });
 
+  it('dates a comparison by its later picture, an estimate included', () => {
+    const ordered = stackOrder([
+      { id: 'a', imagery_date: '2024-03' },
+      { id: 'cmp', kind: 'comparison', imagery_a: '2020-01-01~', imagery_b: '2025-06-01~' },
+    ]);
+
+    expect(ordered.map((i) => i.id)).toEqual(['cmp', 'a']);
+  });
+
   it('sends undated items to the end, newest save first', () => {
     const ordered = stackOrder([
       { id: 'a', fetched_at: '2026-01-01T00:00:00Z' },
@@ -94,5 +103,36 @@ describe('stackOrder', () => {
     ]);
 
     expect(ordered.map((i) => i.id)).toEqual(['b', 'c', 'a']);
+  });
+});
+
+describe('a comparison row', () => {
+  it('writes its two pictures, an undated one said as such', () => {
+    expect(pairLabel({ imagery_a: '2024-05-03~', imagery_b: '2026-09-02' })).toBe('2024-05-03~ → 2026-09-02');
+    expect(pairLabel({ imagery_b: '2026-09-02' })).toBe('undated → 2026-09-02');
+    expect(pairLabel({ kind: 'capture' })).toBe('');
+  });
+
+  it('counts the images kept from it', () => {
+    expect(keptLabel({ kept: [{}, {}] })).toBe('2 images kept');
+    expect(keptLabel({ kept: [{}] })).toBe('1 image kept');
+    expect(keptLabel({ kept: [] })).toBe('');
+  });
+});
+
+describe('markKind', () => {
+  it('draws one kind as itself', () => {
+    expect(markKind(['comparison'])).toBe('comparison');
+    expect(markKind(['place'])).toBe('place');
+  });
+
+  it('draws a stack of imagery as a capture, however it was made', () => {
+    // zoomed out, three captures and a comparison nearby merge into one mark
+    expect(markKind(['capture', 'comparison'])).toBe('capture');
+    expect(markKind(['capture', 'screenshot', 'comparison'])).toBe('capture');
+  });
+
+  it('draws a stack holding a place as the place', () => {
+    expect(markKind(['capture', 'place'])).toBe('place');
   });
 });

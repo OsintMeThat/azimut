@@ -106,6 +106,45 @@ describe('SavedPopup', () => {
   });
 });
 
+describe('SavedPopup, a saved comparison', () => {
+  const comparison = {
+    id: 's1',
+    kind: 'comparison',
+    title: 'Harbour reading',
+    lat: 48.0159,
+    lon: 37.8029,
+    session: 'Harbour reading',
+    path: 'media/Harbour reading.png',
+    thumbnail: 'media/.thumbs/h.jpg',
+    imagery_a: '2024-05-03~',
+    imagery_b: '2026-09-02',
+    footprint: { type: 'Polygon', coordinates: [[[37.8, 48], [37.81, 48], [37.81, 48.01], [37.8, 48]]] },
+    fetched_at: '2026-09-20T09:00:00Z',
+    kept: [{ path: 'media/Harbour reading 2024-05-03_2026-09-02.png', title: 'Harbour reading 2024-05-03_2026-09-02' }],
+  };
+
+  it('says it is a comparison, with both pictures and the images kept from it', () => {
+    const body = at([comparison]);
+
+    expect(body).toContain('Comparison');
+    expect(body).toContain('2024-05-03~ → 2026-09-02');
+    expect(body).toContain('framed');
+    expect(body).toContain('1 image kept');
+    expect(body).toContain('/files/case-1/media/Harbour%20reading%202024-05-03_2026-09-02.png');
+    expect(body).toContain('Open in Compare');
+    expect(body).not.toContain('traced area');
+  });
+
+  it('draws a stack of captures and comparisons with the capture glyph, not a pin', () => {
+    expect(overlay).toContain('const kind = markKind(mark.kinds);');
+  });
+
+  it('outlines its frame in dashes, never as a guess about a place', () => {
+    expect(overlay).toContain("row.kind === 'comparison'");
+    expect(overlay).toContain("dash: '5 4'");
+  });
+});
+
 describe('SavedOverlay popup wiring', () => {
   it('mounts the card as a component rather than building HTML by hand', () => {
     expect(overlay).toContain("import { mount, unmount } from 'svelte'");

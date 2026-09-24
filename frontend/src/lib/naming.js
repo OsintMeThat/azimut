@@ -1,6 +1,6 @@
 /**
- * Naming rules shared by everything the analyst saves under a name: inspect
- * sessions, proofs and post drafts.
+ * Naming rules shared by everything the analyst saves under a name: collages,
+ * proofs and post drafts.
  *
  * The rule is one line: **the name is the filename stem**. The human-readable
  * text in the header becomes the file stem, with only cross-platform forbidden
@@ -16,7 +16,7 @@
 export const MAX_SLUG = 68;
 
 /** What a fresh item of each kind is called until the analyst renames it. */
-export const NAME_PREFIX = { session: 'Inspect', proof: 'Proof', draft: 'Post', note: 'Note' };
+export const NAME_PREFIX = { collage: 'Collage', proof: 'Proof', draft: 'Post', note: 'Note' };
 
 /** Human-readable cross-platform filename stem — mirror of backend `slugify`. */
 export function slugify(text, fallback) {
@@ -49,7 +49,7 @@ export function uniqueName(base, taken) {
 }
 
 /**
- * Name for a fresh item of `kind`: "Inspect 1", "Proof 1", … taking the lowest
+ * Name for a fresh item of `kind`: "Collage 1", "Proof 1", … taking the lowest
  * free number so the case doesn't count past the gaps deletions leave behind.
  */
 export function nextName(kind, taken) {
@@ -71,11 +71,11 @@ export function isDefaultName(name, kind) {
 }
 
 // Where each kind's spec lives, and the entity attribute that points at it.
-// These mirror `layout.session_rel` / `proof_spec_rel` / `draft_rel` — the
+// These mirror `layout.collage_rel` / `proof_spec_rel` / `draft_rel` — the
 // specs are hidden inside the case folder, so a spec path is not the visible
 // path of the work it describes (a proof's own file is `proofs/<name>.png`).
 const SPEC_ATTR = {
-  session: { dir: '.inspect/', attr: 'spec' },
+  collage: { dir: '.collages/', attr: 'spec' },
   proof: { dir: 'proofs/.meta/', attr: 'spec' },
   draft: { dir: '.drafts/', attr: 'draft' },
 };

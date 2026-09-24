@@ -91,7 +91,7 @@
         </div>
         {#if item.note}<p class="note">{item.note}</p>{/if}
         <p class="meta">{[item.analyzer, plural(item.areas ?? 0, 'area'),
-          ruleLabel(item.date_rule, single(item.method))].filter(Boolean).join(' · ')}</p>
+          ruleLabel(item.date_rule, item.single ?? single(item.method))].filter(Boolean).join(' · ')}</p>
         <p class={`state ${state.tone}`}>{state.text}</p>
         {#if item.active?.status === 'running'}
           <progress max={item.active.total || 1} value={item.active.progress ?? 0}></progress>

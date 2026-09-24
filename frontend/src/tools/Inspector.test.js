@@ -1,216 +1,55 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
+/**
+ * The guards in Inspect that a render test cannot easily reach: work that returns
+ * after the file it was started for has closed, a save sent while the page goes,
+ * and the one route every preview is rendered through. Behaviour is driven in
+ * `Inspector.render.test.js`.
+ */
 const source = readFileSync(new URL('./Inspector.svelte', import.meta.url), 'utf8');
 
-describe('Inspect sessions', () => {
-  it('opens saved workspaces under an explicit label', () => {
-    expect(source).toContain('<Icon name="folderOpen" size={14} /> Open session');
-    expect(source).toContain('title="Reopen a saved session"');
+describe('Inspect — work that outlives the file it was started for', () => {
+  it('drops a frame whose file was closed while it rendered', () => {
+    // A capture is two round trips. The frame is evidence, so one that returns
+    // after the analyst switched file must not land in the file now open.
+    expect(source).toMatch(/async function capture\(time\) \{[\s\S]*?const run = openRun;/);
+    expect(source).toMatch(/const dim = await imageSize\(url\);\s*\n\s*if \(run !== openRun\) return;/);
+    expect(source).toMatch(/function closeFile\(\) \{\s*\n\s*openRun \+= 1;/);
   });
 
-  it('uses the same non-gold colored save action as Proof', () => {
-    expect(source).toContain('class="btn btn-ok btn-sm"');
-    expect(source).toContain('onclick={saveSession}');
-    expect(source).not.toContain('class="btn btn-primary btn-sm"\n        disabled={!session.source}');
+  it('saves to the case the work was opened in, even after the case changed', () => {
+    expect(source).toContain('await api.put(`/api/cases/${work.caseId}/inspect/work`');
+    expect(source).toContain('if (work.caseId && work.caseId !== caseState.current?.id) closeFile();');
   });
 
-  it('names the session in the header, and saves under that name', () => {
-    // Same affordance as the Proof Composer: the name is edited at the top of
-    // the tool, and Save writes under it — there is no "name this" dialog.
-    expect(source).toContain('<input class="input title-input" bind:value={sessionName}');
-    expect(source).toContain('aria-label="Session name"');
-    expect(source).toContain('rename_from: openedSession?.name ?? null, title, spec: sessionSpec()');
-    expect(source).toContain('sessionName = res.title;');
-    expect(source).toContain('openedSession = { name: res.name, title: res.title };');
-    expect(source).not.toContain("sessionModal.mode = 'save'");
-    expect(source).not.toContain('placeholder="Session name"');
+  it('writes before letting go of a file', () => {
+    expect(source).toMatch(/async function open\(item\) \{[\s\S]*?await autosave\.flush\(\);/);
+    expect(source).toContain("if (uiState.tool !== 'inspect') {\n      autosave.flush();");
+    expect(source).toContain('$effect(() => () => autosave.flush());');
   });
 
-  it('numbers a fresh session past the ones already in the case', () => {
-    expect(source).toContain("nextName('session', savedTitles(sessionEntities, 'session'))");
+  it('sends a pending save with the page as it closes', () => {
+    expect(source).toContain('<svelte:window onkeydown={onWindowKeydown} {onpagehide} />');
+    expect(source).toContain('if (autosave.pending) writeWork({ keepalive: true }).catch(() => {});');
   });
 
-  it('flags unsaved work against the last save rather than a hand-set flag', () => {
-    expect(source).toContain('{#if sessionDirty}<span class="badge">unsaved</span>{/if}');
-    expect(source).toContain("const signature = () => JSON.stringify([sessionName.trim(), sessionSpec()]);");
-  });
-
-  it('checks the current hidden spec path before claiming a saved session was deleted', () => {
-    // Sessions moved from `inspect/` to `.inspect/` when the case folder hid its
-    // machinery. The old literal matched no entity, so every save dropped the
-    // binding and warned the session had been deleted. Ask the helper instead.
-    expect(source).toContain("lookupEntity(id, specAttr('session'), specPath('session', sessionName))");
-    expect(source).not.toContain('`inspect/${sessionName}.json`');
-  });
-
-  it('asks before an unbound workspace takes a name another session holds', () => {
-    expect(source).toContain('if (!openedSession && takenSlugs().has(slug))');
-    expect(source).toContain('title="Overwrite this session?"');
-  });
-
-  it('starts new workspaces from a searchable image/video picker', () => {
-    expect(source).toContain("import SearchInput from '../components/SearchInput.svelte'");
-    expect(source).toContain("m.kind === 'image' || m.kind === 'video'");
-    expect(source).toContain('<Icon name="plus" size={14} /> New session');
-    expect(source).toContain('<h3 id="new-session-title">New session</h3>');
-    expect(source).toContain('bind:value={sourceQuery}');
-    expect(source).toContain('filteredSourceMedia.filter((m) => matchesSourceName(m, sourceQuery))');
-    expect(source).toContain('{#each pickableMedia as m (m.path)}');
-    expect(source).toContain('placeholder="Search names…"');
-    expect(source).toContain('function matchesSourceName(item, query)');
-    expect(source).toContain("matchesTerms(item.title || item.filename || '', query)");
-    expect(source).toContain('label={(m) => m.title || m.filename}');
-    expect(source).not.toContain('class="input source-select"');
-    expect(source).not.toContain('Choose a media…');
-  });
-
-  it('offers New session from the centered empty state', () => {
-    expect(source).toContain('<h3>Start a session</h3>');
-    expect(source).toContain(`      <p>Start a session to choose media.</p>
-      <button class="btn" onclick={startNewSession}>
-        <Icon name="plus" size={15} /> New session
-      </button>`);
-  });
-
-  it('separates images, videos, captures, frames, and collages in the new-session picker', () => {
-    expect(source).toContain("{ id: 'all', label: 'All' }");
-    expect(source).toContain("{ id: 'capture', label: 'Captures' }");
-    expect(source).toContain("{ id: 'frame', label: 'Frames' }");
-    expect(source).toContain("{ id: 'collage', label: 'Collages' }");
-    expect(source).toContain("source.type === 'satellite' || source.type === 'screenshot'");
-    expect(source).toContain("source.op === 'frame' || source.op === 'adjust'");
-    expect(source).toContain("source.op === 'collage'");
-  });
-
-  it('adds session search only once the saved-session list has more than six entries', () => {
-    expect(source).toContain('{#if sessionModal.list.length > 6}');
-    expect(source).toContain('bind:value={sessionQuery}');
-    expect(source).toContain('{#each visibleSessions as s (s.name)}');
-  });
-
-  it('offers a read-only folder browser with single selection and double-click confirmation', () => {
-    expect(source).toContain('title="Browse folders"');
-    expect(source).toContain('onconfirm={(m) => selectSourceBrowser(m, true)}');
-    expect(source).toContain('onconfirm={(s) => selectSessionBrowser(s, true)}');
-    expect(source).toContain('disabled={!sourceBrowseSelection} onclick={confirmSourceBrowser}');
-    expect(source).toContain('disabled={!sessionBrowseSelection} onclick={confirmSessionBrowser}');
-    expect(source).toContain("fetchAllEntities(caseState.current.id, { types: ['inspect-session'] })");
-    expect(source).toContain('function toggleSourceBrowser()');
-    expect(source).toContain('function toggleSessionBrowser()');
-    expect(source).not.toContain('>Back</button>');
-  });
-
-  it('shares one folder-browser helper with the other pickers', () => {
-    expect(source).toContain("import FolderBrowser from '../components/FolderBrowser.svelte'");
-    expect(source).not.toContain('function browserView(');
-    expect(source).not.toContain('class="browser-row"');
-    expect(source).toContain('white-space: nowrap;');
-  });
-
-  it('requires an active workspace to be discarded before starting another', () => {
-    expect(source).toContain('openSourceAfterDiscard = true;');
-    expect(source).toContain('if (openSourceAfterDiscard) {');
-    expect(source).toContain('openSourceDialog();');
-  });
-
-  it('keeps the Collage tab for video sessions but hides it for a still image', () => {
-    expect(source).toContain(
-      "session.source?.kind === 'video' ? ['selection', 'frame', 'collage', 'save'] : ['frame', 'save']"
-    );
-    expect(source).not.toContain(
-      "session.source?.kind === 'video' ? ['selection', 'frame', 'collage', 'save'] : ['frame', 'collage', 'save']"
-    );
-  });
-
-  it('names each savable after its source instead of Image 1', () => {
-    expect(source).toContain('defaultName: `${stem} (enhanced)`');
-    expect(source).toContain('defaultName: frameNames[i]');
-    expect(source).toContain('const frameNames = frameSaveNames(');
-    expect(source).not.toContain('label: `Image ${imgN}`');
-    expect(source).not.toContain("label: 'Video 1'");
-  });
-
-  it('names a frame after its media title, which only its path can reach', () => {
-    expect(source).toContain('const titleByPath = $derived(new Map(mediaList.map((m) => [m.path, m.title])))');
-    expect(source).toContain('stem: stemFor(fr.path)');
-    // the old shape read the file on disk and could never see a title
-    expect(source).not.toContain('sourceStem({ path: fr.path })');
-  });
-
-  it('keeps typed names outside the derived list so a slider move cannot wipe them', () => {
-    expect(source).toContain(
-      "const saveUi = $state({ selected: {}, folder: '', names: {}, touched: {}, baseName: '', note: '' });"
-    );
-  });
-
-  it('seeds every field with real text and lets the base name refill the untouched ones', () => {
-    expect(source).toContain(`    const auto = autoSaveNames(savables, saveUi.baseName);
-    savables.forEach((it, i) => {
-      if (saveUi.touched[it.key]) return;
-      if (it.kind === 'collage') it.collage.name = auto[i];
-      else saveUi.names[it.key] = auto[i];
-    });`);
-  });
-
-  it('gives a collage one name, shared by the Collage tab and the Save tab', () => {
-    expect(source).toContain(
-      "const saveName = (it) => (it.kind === 'collage' ? (it.collage.name ?? '') : (saveUi.names[it.key] ?? ''));"
-    );
-    expect(source).toContain(`    if (it.kind === 'collage') it.collage.name = value;
-    else saveUi.names[it.key] = value;`);
-    expect(source).toContain('<SaveGallery {savables} {saveUi} {saveName} {setSaveName} />');
-  });
-
-  it('protects a hand-renamed collage from being refilled by a base name', () => {
-    expect(source).toContain('onRename={(cl) => (saveUi.touched[`collage:${cl.id}`] = true)}');
-  });
-
-  it('files every kind under its resolved name, with the batch note', () => {
-    expect(source).toContain('const nameOf = (item) => saveNameOf(item, saveName(item));');
-    expect(source).toContain('items: frameItems, folder, notes: note,');
-    expect(source).toContain('label: nameOf(videoItem), notes: note,');
-    expect(source).toContain('label: nameOf(it), notes: note,');
-    expect(source).toContain('ops: buildFrameOps(filters, it.frame),\n          label: nameOf(it),');
-  });
-
-  it('says when a save landed on media the case already held', () => {
-    expect(source).toContain("dupes += (res?.saved ?? []).filter((r) => r.duplicate).length;");
-    expect(source).toContain("matched existing media and ${dupes === 1 ? 'was' : 'were'} renamed");
-  });
-
-  it('clears the naming fields when the workspace resets', () => {
-    expect(source).toContain(`    saveUi.names = {};
-    saveUi.touched = {};
-    saveUi.baseName = '';
-    saveUi.note = '';`);
+  it('files nothing for a file that was only looked at', () => {
+    expect(source).toContain('if (!work.name && isPristine(work, filters, videoFilters)) return;');
   });
 });
 
-describe('Inspect — work that outlived what it was started against', () => {
-  it('drops a frame whose session was cleared while it rendered', () => {
-    // `session` is one object mutated in place, so a capture awaiting two round
-    // trips cannot notice a discard or a source switch on its own — the frame
-    // landed in the new session and became the active one.
-    expect(source).toContain('let sessionRun = 0;');
-    expect(source).toContain('sessionRun += 1;');
-    expect(source).toMatch(/async function capture\(time\) \{[\s\S]*?const run = sessionRun;/);
-    expect(source).toMatch(/const dim = await imageSize\(url\);\s*\n\s*if \(run !== sessionRun\)/);
-  });
-
+describe('Inspect — crop keys', () => {
   it('lets Escape leave the crop it found rather than applying the new one', () => {
     expect(source).toContain("if (e.key === 'Enter') { e.preventDefault(); commitCrop(); }");
     expect(source).toContain("else if (e.key === 'Escape') { e.preventDefault(); cancelCrop(); }");
-    expect(source).toContain('function cancelCrop()');
-    expect(source).toContain('activeFrame.crop = cropBefore');
+    expect(source).toContain('if (activeFrame) activeFrame.crop = cropBefore;');
     expect(source).toContain('cropBefore = activeFrame.crop ? { ...activeFrame.crop } : null;');
   });
 });
 
 describe('Inspect → Reverse Search', () => {
   it('hands the frame over as it reads here, rendered without filing it', () => {
-    // The same recipe Save and the collage use, so what is searched is what is
-    // on screen: turned, adjusted and cropped.
     expect(source).toContain(
       'const blob = await renderBlob(frame.path, frame.time, buildFrameOps(filters, frame));'
     );
@@ -218,8 +57,15 @@ describe('Inspect → Reverse Search', () => {
     expect(source).toContain('reverse={reverseFrame}');
   });
 
-  it('keeps one render route for the tray, the collage and the handoff', () => {
-    expect(source).toContain('return URL.createObjectURL(await renderBlob(path, time, ops));');
+  it('keeps one render route for frames, previews and the handoff', () => {
     expect(source.match(/inspect\/render-preview/g)).toHaveLength(1);
+  });
+});
+
+describe('Inspect — words', () => {
+  it('no longer speaks of sessions to open, name or discard', () => {
+    const markup = source.slice(source.indexOf('</script>'));
+    expect(markup).not.toMatch(/session/i);
+    expect(markup).not.toContain('Discard');
   });
 });

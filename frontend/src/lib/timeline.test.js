@@ -10,6 +10,7 @@ import {
   bucketScale,
   bucketSpan,
   bucketWindow,
+  changeInterval,
   densityScale,
   densityTicks,
   densityUnit,
@@ -33,6 +34,7 @@ import {
   resizeTemporalRaw,
   resizeWindow,
   shiftWindow,
+  temporalKindLabel,
   timeAtRatio,
   validateTemporalValue,
   windowInputValue,
@@ -533,5 +535,33 @@ describe('the window, as one reading', () => {
       .toEqual(['Hour', 'Day', 'Week', 'Month', 'Year']);
     // nothing to resize without a window, and nothing invented either
     expect(resizeWindow('', '', 1000)).toEqual({ from: '', to: '' });
+  });
+});
+
+describe('two dated pictures', () => {
+  it('date a change as the span between them, earliest first', () => {
+    expect(changeInterval('2024-05-03', '2026-09-02')).toBe('2024-05-03/2026-09-02');
+    expect(changeInterval('2026-09-02', '2024-05-03')).toBe('2024-05-03/2026-09-02');
+  });
+
+  it('keep two radar instants exact, and read a day beside a time as days', () => {
+    expect(changeInterval('2026-09-02T05:42:10Z', '2026-09-02T17:31:02Z'))
+      .toBe('2026-09-02T05:42:10Z/2026-09-02T17:31:02Z');
+    expect(changeInterval('2024-05-03', '2026-09-02T05:42:10Z')).toBe('2024-05-03/2026-09-02');
+  });
+
+  it('keep an estimate marked on its own end', () => {
+    expect(changeInterval('2024-05-03~', '2026-09-02')).toBe('2024-05-03~/2026-09-02');
+  });
+
+  it('make no span of one day or of a missing picture', () => {
+    expect(changeInterval('2026-09-02', '2026-09-02T05:42:10Z')).toBe('');
+    expect(changeInterval('', '2026-09-02')).toBe('');
+  });
+
+  it('name each picture on the Time panel', () => {
+    expect(temporalKindLabel('imagery-a')).toBe('Imagery A');
+    expect(temporalKindLabel('imagery-b')).toBe('Imagery B');
+    expect(temporalKindLabel('something-new')).toBe('something-new');
   });
 });

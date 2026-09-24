@@ -141,6 +141,10 @@ describe('buildGeoTree filtering', () => {
 
   it('treats a screenshot as a capture in the kind filter', () => {
     expect(filterSaved(rows, { kind: 'captures' }).map((r) => r.id)).toEqual(['bb', 'ccc']);
+    // a saved comparison is imagery of a point at two dates: a capture too
+    const compared = [...rows, UA('dddd', 'Kyiv Oblast', { kind: 'comparison', title: 'harbour' })];
+    expect(filterSaved(compared, { kind: 'captures' }).map((r) => r.id)).toEqual(['bb', 'ccc', 'dddd']);
+    expect(filterSaved(compared, { kind: 'places' }).map((r) => r.id)).toEqual(['a']);
     expect(filterSaved(rows, { kind: 'places' }).map((r) => r.id)).toEqual(['a']);
     expect(filterSaved(rows, { kind: 'all' })).toHaveLength(3);
   });

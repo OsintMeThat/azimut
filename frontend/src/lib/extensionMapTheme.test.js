@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { paths } from '../components/Icon.svelte';
+import { CAPTURE_KINDS } from './geoTree.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (rel) => readFileSync(join(here, rel), 'utf8');
@@ -118,6 +119,10 @@ describe('the paint the tools use', () => {
       theme.MEASURE_STROKE.stroke,
       String(theme.MEASURE_STROKE.strokeWidth),
     ]);
+  });
+
+  it('draws the same stacks as captures as the Saved layer does', () => {
+    expect(theme.SAVED_CAPTURE_KINDS).toEqual([...CAPTURE_KINDS]);
   });
 
   it('names the same glyph for a saved row as the Saved layer', () => {

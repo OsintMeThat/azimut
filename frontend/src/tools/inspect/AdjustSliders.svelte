@@ -1,6 +1,6 @@
 <script>
   // Slider bank generated from the backend filter registry (/api/inspect/ops).
-  // Writes live into `values` (a reactive object owned by the session), so the
+  // Writes live into `values` (a reactive object owned by the work), so the
   // caller can build both the CSS live-preview and the backend op pipeline.
   let { filters, values } = $props();
 </script>

@@ -23,6 +23,7 @@ export const prefs = $state({
   coordFormat: 'dd', // 'dd' | 'dms' | 'mgrs'
   units: 'metric', // 'metric' | 'imperial'
   homeView: { lat: 43, lon: 25, zoom: 3 }, // where Satellite opens
+  mapSync: true, // Satellite, Compare and Detect share one camera
   detectView: { collapsed: false, basemap: 'esri-world-imagery', overlays: ['boundaries'], saved: true },
   captureScaleNorth: false, // burn a scale bar and a north arrow into captures
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
@@ -93,6 +94,7 @@ export function applyPrefs(s) {
   if (s.coord_format) prefs.coordFormat = s.coord_format;
   if (s.units) prefs.units = s.units;
   if (s.home_view) prefs.homeView = s.home_view;
+  if (s.map_sync !== undefined) prefs.mapSync = s.map_sync;
   if (s.detect_view) prefs.detectView = s.detect_view;
   if (s.capture_scale_north !== undefined) prefs.captureScaleNorth = s.capture_scale_north;
   if (s.post_mention !== undefined) prefs.postMention = s.post_mention; // '' = none
@@ -245,7 +247,8 @@ export const uiState = $state({
    */
   reverseTarget: null,
   focusMedia: null, // media path to highlight & scroll to in the Media Library
-  openInspect: null, // inspect-session name to reopen in the Inspect tool
+  openInspect: null, // name of a file's Inspect work, reopened on that file
+  openCollage: null, // collage name to reopen in the Collage tool
   openCompare: null, // compare-session name to reopen in the Compare tool
   openAnalyzer: null, // saved Detect item stem to reopen without loading imagery
   // Entity id the Board should open Details on. The graph-only types — a person,
@@ -297,6 +300,13 @@ export const uiState = $state({
    */
   mapPoint: null, // { lat, lon, zoom }
   /**
+   * The window's camera, which Satellite, Compare and Detect share while
+   * `prefs.mapSync` is on (`lib/map/sharedView.js`): `{ lat, lon, zoom,
+   * bearing, by }`, where `by` is the tab that wrote it or 'link' for the
+   * chain. Session-only. A case switch leaves it: a camera is not case state.
+   */
+  mapView: null,
+  /**
    * A pair of dated views of one point, handed to Compare from the map's own
    * right-click menu: `{ lat, lon, zoom, a, b, title }`, where each side is the
    * shape `applySide` already reads off a saved comparison. The dates are
@@ -304,6 +314,13 @@ export const uiState = $state({
    * rather than on two empty panes. Consumed once, session-only.
    */
   compareAt: null,
+  /**
+   * A point another map tab was asked to look at, from the right-click menu's
+   * Open in…: `{ tool: 'compare' | 'detect', lat, lon, zoom }`. That tab moves
+   * its camera there and keeps its own pictures and work; Satellite takes the
+   * same hand-off as `gotoCoords`. Consumed once, session-only.
+   */
+  lookAt: null,
   focusCapture: null, // case-relative capture path selected from another workspace
   // Satellite reference viewers: floating scratch windows holding a media image
   // over the map to eyeball against the imagery. Session-only — never captured
@@ -560,6 +577,7 @@ function clearCaseHandoffs() {
   uiState.focusMedia = null;
   uiState.focusCapture = null;
   uiState.openInspect = null;
+  uiState.openCollage = null;
   uiState.openCompare = null;
   uiState.openAnalyzer = null;
   uiState.drawInGraph = null;
@@ -569,6 +587,7 @@ function clearCaseHandoffs() {
   uiState.timelineRange = null;
   uiState.mapTimelineRange = null;
   uiState.gotoCoords = null;
+  uiState.lookAt = null;
   uiState.skyAt = null;
   uiState.refViewers = [];
 }

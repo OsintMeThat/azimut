@@ -10,6 +10,7 @@
   import Icon from '../../components/Icon.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { roadWords } from '../../lib/mediaViewer.js';
+  import { keptLabel, pairLabel } from '../../lib/savedMarkers.js';
 
   let {
     row,
@@ -32,9 +33,11 @@
     onhover = () => {},
   } = $props();
 
-  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen' };
+  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare' };
 
   const isPlace = $derived(row.kind === 'place');
+  // a saved comparison: it reopens in Compare, where its title and notes live
+  const isComparison = $derived(row.kind === 'comparison');
   // a located file: pressing it plays it beside the map, and it is edited in Media
   const isMedia = $derived(row.kind === 'media');
   const glyphName = $derived(
@@ -51,9 +54,11 @@
   const meta = $derived(
     isMedia
       ? roadWords(row)
-      : [row.zoom != null ? `z${Math.round(row.zoom)}` : null, row.provider ?? row.site, row.imagery_date]
-          .filter(Boolean)
-          .join(' · ')
+      : isComparison
+        ? [pairLabel(row), keptLabel(row)].filter(Boolean).join(' · ')
+        : [row.zoom != null ? `z${Math.round(row.zoom)}` : null, row.provider ?? row.site, row.imagery_date]
+            .filter(Boolean)
+            .join(' · ')
   );
   const blocked = $derived(fullscreen ? 'Exit fullscreen first. This leaves the map' : null);
   const proposed = $derived(row.status === 'suggested');
@@ -139,14 +144,14 @@
         title={blocked ?? `Open the source page (${row.site ?? 'external map'})`}
       ><Icon name="external" size={13} /></a>
     {/if}
-    <button class="act" title="Edit title & note" onclick={() => onedit(row)}>
-      <Icon name="note" size={13} />
+    <button class="act" title={isComparison ? 'Open in Compare' : 'Edit title & note'} onclick={() => onedit(row)}>
+      <Icon name={isComparison ? 'compare' : 'note'} size={13} />
     </button>
     {#if !isPlace}
       <button
         class="act"
-        disabled={fullscreen}
-        title={blocked ?? 'Send to Geo Proof'}
+        disabled={fullscreen || !row.path}
+        title={blocked ?? (row.path ? 'Send to Geo Proof' : 'Save the comparison again to draw its picture')}
         onclick={() => onproof(row)}
       ><Icon name="proof" size={13} /></button>
     {/if}

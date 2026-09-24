@@ -72,9 +72,10 @@ class FullCase:
     case_id: str
     photo: str = ""
     piece: str = ""
-    collage: str = ""
+    collage: str = ""  # the exported picture, which is media
+    collage_doc: str = ""  # the layout it was exported from
     capture: str = ""
-    session: str = ""
+    session: str = ""  # the photo's Inspect work
     compare_session: str = ""
     compare_image: str = ""  # the session's render, a media working file
     analyzer_zones: str = ""
@@ -175,18 +176,35 @@ def build_full_case(client, name: str = "Full case") -> FullCase:
     assert shot.status_code == 200, shot.text
     full.capture = client.get(f"/api/cases/{case_id}/satellite").json()[0]["path"]
 
-    # -- inspect session: adjustments over the photo (depends-on) -------------
-    session = client.post(
-        f"/api/cases/{case_id}/inspect/sessions",
+    # -- inspect work: the photo's edits (depends-on) --------------------------
+    work = client.put(
+        f"/api/cases/{case_id}/inspect/work",
         json={
-            "title": "Photo pass",
-            "spec": {"source": {"path": full.photo}, "ops": [
-                {"op": "brightness", "params": {"value": 1.2}}
+            "path": full.photo,
+            "spec": {"frames": [{
+                "id": "fr_1", "path": full.photo, "time": None,
+                "adjust": {"brightness": 1.2}, "crop": {"x": 0.1, "y": 0.1, "w": 0.5, "h": 0.5},
+            }]},
+        },
+    )
+    assert work.status_code == 200, work.text
+    full.session = f".inspect/{work.json()['name']}.json"
+
+    # -- a collage layout: pieces from both uploads, its own document ---------
+    layout_doc = client.post(
+        f"/api/cases/{case_id}/collages",
+        json={
+            "title": "Harbour strip",
+            "spec": {"width": 400, "height": 200, "nodes": [
+                {"id": "nd_1", "save": {"path": full.photo, "time": None, "ops": []},
+                 "w": 80, "h": 60, "quad": [[0, 0], [80, 0], [80, 60], [0, 60]]},
+                {"id": "nd_2", "save": {"path": full.piece, "time": None, "ops": []},
+                 "w": 60, "h": 60, "quad": [[90, 0], [150, 0], [150, 60], [90, 60]]},
             ]},
         },
     )
-    assert session.status_code == 200, session.text
-    full.session = f".inspect/{session.json()['name']}.json"
+    assert layout_doc.status_code == 200, layout_doc.text
+    full.collage_doc = f".collages/{layout_doc.json()['name']}.json"
 
     comparison = client.post(
         f"/api/cases/{case_id}/compare/sessions",

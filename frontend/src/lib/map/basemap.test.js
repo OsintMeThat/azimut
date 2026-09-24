@@ -151,6 +151,10 @@ describe('the layers on a map', () => {
       },
       getLayer: (id) => layers.find((l) => l.id === id),
       getLayersOrder: () => layers.map((l) => l.id),
+      setPaintProperty: (id, name, value) => {
+        const layer = layers.find((l) => l.id === id);
+        layer.paint = { ...layer.paint, [name]: value };
+      },
       setMaxZoom: (...args) => calls.setMaxZoom.push(args),
       on: (...args) => calls.on.push(args),
       off: (...args) => calls.off.push(args),
@@ -197,6 +201,36 @@ describe('the layers on a map', () => {
       basemaps.show(SENTINEL, 'sentinel2~TRUE_COLOR~~~CC100', 512);
       expect(map.layers.map((l) => l.id)).toEqual(['basemap-imagery']);
       expect(map.sources.get('basemap-imagery').tiles[0]).toContain('sentinel2~TRUE_COLOR');
+    });
+  });
+
+  it('lays a second picture over the first and flips it without a reload', async () => {
+    // Detect blinks pass A against pass B: both stay loaded, only the paint moves
+    await withStubbedGoogle(async ({ createBasemaps }) => {
+      const map = stubMap();
+      const onMeteredTiles = vi.fn();
+      const basemaps = createBasemaps(stubEngine(map), { onMeteredTiles });
+      basemaps.show(SENTINEL, 'sentinel2~TRUE_COLOR~2026-09-21~2026-09-21~CC100', 512);
+      basemaps.setOverlay('boundaries', true);
+      basemaps.setAlternate({ ...SENTINEL, meter: 'copernicus' }, 'sentinel2~TRUE_COLOR~2026-09-08~2026-09-08~CC100', 512);
+      const order = map.layers.map((l) => l.id);
+      expect(order.slice(0, 2)).toEqual(['basemap-imagery', 'basemap-alternate']);
+      expect(order.length).toBeGreaterThan(2);  // the borders stay over both pictures
+      const second = map.sources.get('basemap-alternate');
+      expect(second.tiles[0]).toContain('2026-09-08');
+      expect(map.getLayer('basemap-alternate').paint['raster-opacity']).toBe(0);
+      expect(onMeteredTiles).toHaveBeenCalled();
+      basemaps.showAlternate(true);
+      expect(map.getLayer('basemap-alternate').paint['raster-opacity']).toBe(1);
+      basemaps.showAlternate(false);
+      basemaps.setAlternate({ ...SENTINEL, meter: 'copernicus' }, 'sentinel2~TRUE_COLOR~2026-09-08~2026-09-08~CC100', 512);
+      expect(map.sources.get('basemap-alternate')).toBe(second);
+      // a new basemap still goes under the second picture
+      basemaps.show(ESRI, ESRI.id, 256);
+      expect(map.layers.map((l) => l.id).slice(0, 2)).toEqual(['basemap-imagery', 'basemap-alternate']);
+      basemaps.setAlternate(null);
+      expect(map.getLayer('basemap-alternate')).toBe(undefined);
+      expect(map.sources.has('basemap-alternate')).toBe(false);
     });
   });
 

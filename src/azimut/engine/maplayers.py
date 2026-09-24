@@ -419,14 +419,18 @@ def _properties(
     colour: str = "",
     icon: str = "",
     date: str = "",
+    date_end: str = "",
 ) -> dict[str, Any]:
-    """The five fields every feature carries, whatever it was read from, and a
-    sixth when the source dated it.
+    """The five fields every feature carries, whatever it was read from, and the
+    days the source dated it.
 
     `icon` names a stored pictogram rather than holding an address: the browser
     is told which image to draw, never where the source kept it. `date` is a day,
     `YYYY-MM-DD`, which is what the row's time filter compares; absent rather
     than empty, since most layers state none and a map may hold 100,000 features.
+    `date_end` is the last day of a feature that spans several, such as a KML
+    TimeSpan or a Detect change read between two passes, and is kept only when it
+    falls after `date`.
     """
     properties = {
         "name": _text(name, MAX_NAME),
@@ -438,6 +442,9 @@ def _properties(
     day = iso_day(date)
     if day:
         properties["date"] = day
+        end = iso_day(date_end)
+        if end > day:
+            properties["date_end"] = end
     return properties
 
 
@@ -610,7 +617,11 @@ def _from_geojson(data: bytes, filename: str) -> tuple[list[dict[str, Any]], str
                     name=_first(source, _NAME_KEYS),
                     description=_first(source, _DESCRIPTION_KEYS),
                     category=_text(source.get("category"), MAX_NAME) if document.get("azimut_detect_layer") == 1 else category,
-                    date=source.get("pass_date", "") if document.get("azimut_detect_layer") == 1 else "",
+                    # A change was read between two passes and spans both; a thing
+                    # present on one pass is dated by that pass alone.
+                    date=(source.get("pass_before") or source.get("pass_date", ""))
+                    if document.get("azimut_detect_layer") == 1 else "",
+                    date_end=source.get("pass_date", "") if document.get("azimut_detect_layer") == 1 else "",
                     # simplestyle-spec, which is what every tool that writes a
                     # styled GeoJSON — geojson.io included — puts the colour in
                     colour=_hex(source.get("marker-color") or source.get("stroke")
@@ -621,6 +632,8 @@ def _from_geojson(data: bytes, filename: str) -> tuple[list[dict[str, Any]], str
         if document.get("azimut_detect_layer") == 1:
             features[-1]["properties"].update({key: _text(source.get(key), MAX_NAME)
                 for key in ("pass_date", "detector", "area_name", "run_id")})
+            features[-1]["properties"].update({key: _text(source[key], MAX_NAME)
+                for key in ("pass_before", "pass_time") if source.get(key)})
     return features, _text(document.get("name"), MAX_NAME)
 
 
@@ -839,7 +852,7 @@ def _placemark(
         description = _kml_extended_data(element)
     style = _kml_style(element, styles)
     colour = str(style.get("colour") or "")
-    day = _kml_day(element)
+    day, last = _kml_days(element)
     icon = _icon_of(style)
     key = ""
     if icon is not None:
@@ -861,20 +874,21 @@ def _placemark(
                     # drawn by their own stroke and fill
                     icon=key if _kind(geometry) == "point" else "",
                     date=day,
+                    date_end=last,
                 ),
             }
         )
 
 
-def _kml_day(element: Element) -> str:
-    """When a placemark says it happened: a TimeStamp, else where a TimeSpan starts."""
+def _kml_days(element: Element) -> tuple[str, str]:
+    """When a placemark says it happened: a TimeStamp, else the days a TimeSpan runs."""
     stamp = _child(element, "TimeStamp")
     if stamp is not None:
-        return iso_day(_child_text(stamp, "when"))
+        return iso_day(_child_text(stamp, "when")), ""
     span = _child(element, "TimeSpan")
     if span is not None:
-        return iso_day(_child_text(span, "begin"))
-    return ""
+        return iso_day(_child_text(span, "begin")), iso_day(_child_text(span, "end"))
+    return "", ""
 
 
 def _kml_extended_data(element: Element) -> str:

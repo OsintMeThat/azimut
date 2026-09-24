@@ -32,6 +32,7 @@ vi.mock('../../lib/api.js', () => ({ api: { get, post, patch, put, del } }));
 vi.mock('../../lib/state.svelte.js', () => ({ ensureCase: async () => ({ id: 'case-a' }),
   reloadCase: async () => {}, toast, uiState: {}, prefs: { units: 'metric' } }));
 const { default: Panel } = await import('./DetectPanel.svelte');
+const { liveProps } = await import('./props.fixture.svelte.js');
 const { refreshRuns } = await import('../../lib/detectRuns.svelte.js');
 
 let live, target;
@@ -55,7 +56,7 @@ const runRow = (extra = {}) => ({ id: RUN, title: 'Harbour weekly', followup_id:
   created_at: '2026-09-06T10:00:00Z', ...extra });
 const finding = (extra = {}) => ({ id: '0-1', run_id: RUN, run_title: 'Harbour weekly', date: '2026-09-06',
   coordinates: [42.95, 14.81], phenomenon: 'Vessel candidate', strength: 'strong', measure: { value: 6.2 },
-  review: 'noted', area: 90, width: 15, height: 6, ...extra });
+  review: 'noted', area: 90, ...extra });
 
 /** A GET answered from a table of paths, with the libraries empty by default. */
 function answer(table = {}) {
@@ -104,6 +105,15 @@ it('asks which kind before asking anything else', async () => {
   labelled('New one pass').click(); await settle();
   expect(heading()).toBe('Where to look');
   expect(target.textContent).toContain('New pass');
+});
+
+it('closes the kind menu on a press anywhere else', async () => {
+  await open();
+  button('New detection').click(); await settle();
+  labelled('New one pass').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); await settle();
+  expect(labelled('New one pass')).not.toBe(null);
+  document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); await settle();
+  expect(labelled('New one pass')).toBe(null);
 });
 
 it('shows a routine with what it is for and where its last run stands', async () => {
@@ -532,7 +542,7 @@ it('makes an analyzer of its own from the closest built-in, and never writes ove
   post.mockImplementation(async (_, body) => ({ ...body, id: 'custom-copy' }));
   await open();
   labelled('Analyzers').click(); await settle();
-  expect(target.textContent).toContain('Yours start as a copy of the closest built-in.');
+  expect(target.textContent).toContain('build your own from rules you try on the map, or copy a calibrated built-in');
   starts('Vessels').click(); await settle();
   expect(target.textContent).toContain('Measures Vessels: infrared contrast over water');
   expect(button('Save changes')).toBeUndefined();
@@ -540,7 +550,7 @@ it('makes an analyzer of its own from the closest built-in, and never writes ove
   button('Back').click(); await settle();
 
   button('New analyzer').click(); await settle();
-  expect(heading()).toBe('Start from');
+  expect(heading()).toBe('Or start from a built-in');
   [...target.querySelectorAll('button.base')].find((b) => b.textContent.includes(recipe.name)).click(); await settle();
   const name = target.querySelector('[aria-label="Analyzer name"]');
   expect(name.value).toBe(`${recipe.name} copy`);
@@ -562,11 +572,346 @@ it('edits and removes an analyzer of its own', async () => {
   expect(del).toHaveBeenCalledWith('/api/compare/analyzers/custom-1');
 });
 
+// -- analyzers of your own rules ------------------------------------------------------
+
+const rulesMethods = [...methods, { id: 'rules', label: 'Your own rules', single: false, clouds: true,
+  sensor: 'sentinel2', frames: 4, sizes, measure: '', rules: true },
+{ id: 'sar-change', label: 'Radar change', single: false, clouds: false, sensor: 'sentinel1', frames: 4,
+  sizes, measure: '', smoothing_m: 45 }];
+const rulesCatalogue = (extra = {}) => catalogue({ methods: rulesMethods, rules: {
+  bands: ['B02', 'B03', 'B04', 'B08', 'B11', 'B12'], classes: ['vegetation', 'bare', 'water'],
+  max_rules: 6, max_bands: 6, max_around: 300, max_checks: 12, max_marks: 20, preview_span: 3 }, ...extra });
+const VIEW = { west: 2, south: 48, east: 2.05, north: 48.03 };
+const PREVIEWED = { ready: true, missing: 0, tiles: [[4230, 2930]], clipped: false,
+  box: { west: 0, south: 0, east: 1, north: 1 }, size: [512, 512], mask: '', measured: 0.9,
+  rules: [{ share: 0.012, kept: 0.012 }], kept: 0.01, count: 1, note: '',
+  candidates: [{ id: '0-1', coordinates: [2.01, 48.01], bbox: [2.01, 48.01, 2.011, 48.011], area: 900,
+    margin: 4, strength: 'strong', measure: {}, geometry: null }] };
+const debounce = (ms = 320) => new Promise((resolve) => setTimeout(resolve, ms));
+const phrase = () => [...target.querySelectorAll('.phrase')].map((p) => p.textContent.trim())[0];
+const tab = (name) => [...target.querySelectorAll('[role="tab"]')].find((b) => b.textContent.trim().startsWith(name));
+const rule = (extra = {}) => ({ measure: 'index', index: 'nbr', bands: ['B08', 'B04'], band: 'B08', polarisation: 'vv',
+  classes: [], on: 'change', op: 'le', value: -0.2, upper: 0, around: 0, ...extra });
+
+function copernicus(previewed = PREVIEWED, checked = () => ({ ready: true, missing: 0, count: 1, covered: [true] })) {
+  post.mockImplementation(async (path, body) => {
+    if (path === '/api/satellite/sentinel/acquisitions') {
+      return { dates: [{ date: '2026-05-11', cloud: 5, coverage: 1 }, { date: '2026-05-04', cloud: 3, coverage: 1 }], truncated: false };
+    }
+    if (path === '/api/compare/analyzers/preview') {
+      return body.read ? previewed : { ready: false, missing: 2, tiles: [[4230, 2930]], clipped: false, box: {}, size: [512, 512] };
+    }
+    if (path === '/api/compare/analyzers/probe') {
+      return { ready: true, imaged: true, measured: true, kept: true, rules: [{ passes: true, value: -0.6, before: 0.8, after: 0.2 }] };
+    }
+    if (path === '/api/compare/analyzers/check') return checked(body);
+    return { ...body, id: 'custom-aaaaaaaaaaaa' };
+  });
+}
+
+async function openBuilder(props = {}) {
+  await open({ viewBounds: () => VIEW, ...props });
+  labelled('Analyzers').click(); await settle();
+  button('New analyzer').click(); await settle();
+  starts('Build your own rules').click(); await settle();
+}
+
+/** Pick the two passes of the view and read its frames. */
+async function readTheView() {
+  button('Find passes').click(); await settle();
+  target.querySelector('[aria-label="Use 2026-05-04"] button').click(); await settle();
+  target.querySelectorAll('[aria-label="Use 2026-05-11"] button')[1].click(); await settle();
+  await debounce(); await settle();
+  button('Show the detections here').click(); await settle();
+}
+
+it('builds an analyzer from rules, tries it on the view, reads a point and keeps it for every case', async () => {
+  answer({ '/api/compare/analyzers': rulesCatalogue() });
+  copernicus();
+  await openBuilder();
+  expect(heading()).toBe('Build an analyzer');
+  expect(target.textContent).toContain('Pick pass A and pass B to try the rules on.');
+  expect(phrase()).toBe('Keeps ground where NDVI dropped by 0.25 or more, outside cloud.');
+  expect(tab('Rules').getAttribute('aria-selected')).toBe('true');
+  // building reads nothing: the pass lookup and the frames each wait to be asked for
+  await debounce(); await settle();
+  expect(post).not.toHaveBeenCalled();
+
+  button('Find passes').click(); await settle();
+  expect(post).toHaveBeenCalledWith('/api/satellite/sentinel/acquisitions', expect.objectContaining({ collection: 'sentinel2' }));
+  target.querySelector('[aria-label="Use 2026-05-04"] button').click(); await settle();
+  target.querySelectorAll('[aria-label="Use 2026-05-11"] button')[1].click(); await settle();
+  await debounce(); await settle();
+  const asked = post.mock.calls.filter(([path]) => path === '/api/compare/analyzers/preview');
+  expect(asked).toHaveLength(1);
+  expect(asked[0][1]).toMatchObject({ read: false, a: { date: '2026-05-04' }, b: { date: '2026-05-11' }, bounds: VIEW,
+    recipe: { method: 'rules', match: 'all' } });
+  expect(target.textContent).toContain('2 frames from Copernicus, one request each.');
+
+  button('Show the detections here').click(); await settle();
+  expect(post).toHaveBeenLastCalledWith('/api/compare/analyzers/preview', expect.objectContaining({ read: true }));
+  expect(target.textContent).toContain('1 candidate on the map');
+  expect(target.textContent).toContain('1.2 % of the ground');
+
+  await live.probeAt({ lon: 2.01, lat: 48.01 }); await settle();
+  expect(post).toHaveBeenLastCalledWith('/api/compare/analyzers/probe', expect.objectContaining({ point: [2.01, 48.01] }));
+
+  expect(button('Add to my analyzers').disabled).toBe(true);
+  const name = target.querySelector('[aria-label="Analyzer name"]');
+  name.value = 'Cleared ground'; name.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  button('Add to my analyzers').click(); await settle();
+  expect(post).toHaveBeenCalledWith('/api/compare/analyzers', expect.objectContaining({
+    id: 'custom', method: 'rules', name: 'Cleared ground', match: 'all', checks: [],
+    description: 'Keeps ground where NDVI dropped by 0.25 or more, outside cloud.',
+    rules: [expect.objectContaining({ measure: 'index', index: 'ndvi', on: 'change', op: 'le', value: -0.25 })] }));
+  // no check was asked for, so none was read
+  expect(post.mock.calls.some(([path]) => path === '/api/compare/analyzers/check')).toBe(false);
+});
+
+const EXAMPLE = { id: 'burn', place: 'Lahaina, Maui', when: 'August 2023', recipe: {
+  id: 'custom', name: 'Fresh burn', description: 'The burn ratio dropped.', phenomenon: 'Fresh burn', method: 'rules',
+  colour: '#ef4444', style: 'both', match: 'all', parameters: { ...recipe.parameters, shape: 'any', merge_metres: 30 },
+  rules: [rule(), rule({ on: 'b', value: 0.1 })],
+  checks: [
+    { id: 'town', name: 'The town that burned', a: { provider: 'sentinel2', date: '2023-08-08', layer: 'SWIR', maxcc: 100 },
+      b: { provider: 'sentinel2', date: '2023-08-13', layer: 'SWIR', maxcc: 100 },
+      bounds: { west: -156.69, south: 20.86, east: -156.66, north: 20.90 },
+      marks: [{ point: [-156.675, 20.872], expect: 'found' }, { point: [-156.675, 20.894], expect: 'found' }], result: null },
+    { id: 'reef', name: 'The reef off the town', a: { provider: 'sentinel2', date: '2023-08-08', layer: 'SWIR', maxcc: 100 },
+      b: { provider: 'sentinel2', date: '2023-08-13', layer: 'SWIR', maxcc: 100 },
+      bounds: { west: -156.69, south: 20.85, east: -156.66, north: 20.87 },
+      marks: [{ point: [-156.6753, 20.865], expect: 'empty' }], result: null },
+  ] } };
+
+it('starts from an example: copies it with its checks, opens on them and reads them when asked', async () => {
+  answer({ '/api/compare/analyzers': rulesCatalogue({ examples: [EXAMPLE] }) });
+  let reads = 0;
+  copernicus(PREVIEWED, (body) => {
+    if (!body.read) return { ready: false, missing: 2 };
+    reads++;
+    // the reef gets a candidate on it: the check that should stay empty does not
+    return { ready: true, missing: 0, count: 3, covered: body.check.id === 'town' ? [true, true] : [true] };
+  });
+  const onfly = vi.fn();
+  const onshow = vi.fn();
+  await open({ viewBounds: () => VIEW, onfly, onshow });
+  labelled('Analyzers').click(); await settle();
+  button('New analyzer').click(); await settle();
+  expect(target.textContent).toContain('Start from an example');
+  expect(target.textContent).toContain('Lahaina, Maui · August 2023 · 2 checks');
+  labelled('Start from the example Fresh burn').click(); await settle();
+
+  // it is in the library at once, under a name of its own, checks and all
+  expect(post).toHaveBeenCalledWith('/api/compare/analyzers', expect.objectContaining({
+    id: 'custom', name: 'Fresh burn', checks: EXAMPLE.recipe.checks }));
+  expect(toast).toHaveBeenCalledWith('Fresh burn is in your analyzers, with its checks', 'ok');
+  expect(heading()).toBe('Edit Fresh burn');
+  expect(tab('Checks').getAttribute('aria-selected')).toBe('true');
+  // the first check is on the bench: its ground, its passes, B in its layer
+  expect(onfly).toHaveBeenCalledWith({ bounds: EXAMPLE.recipe.checks[0].bounds });
+  expect(onshow).toHaveBeenLastCalledWith({ provider: 'sentinel2', date: '2023-08-13', layer: 'SWIR', maxcc: 100 });
+  expect(target.textContent).toContain('A 2023-08-08 → B 2023-08-13');
+
+  // the cache is read on its own; what it lacks waits for Run all, which says the cost
+  await debounce(900); await settle();
+  const dry = post.mock.calls.filter(([path, body]) => path === '/api/compare/analyzers/check' && !body.read);
+  expect(dry).toHaveLength(2);
+  expect(dry[0][1]).toMatchObject({ recipe: { method: 'rules' }, check: { id: 'town', result: null } });
+  expect(reads).toBe(0);
+  expect(starts('Run all').textContent.trim()).toBe('Run all · up to 4 requests');
+  expect(target.textContent).toContain('2 frames to read');
+
+  starts('Run all').click(); await settle();
+  expect(reads).toBe(2);
+  expect(target.textContent).toContain('2 of 2 found');
+  expect(target.textContent).toContain('1 of 1 flagged');
+  expect(tab('Checks').textContent.replace(/\s+/g, '')).toBe('Checks1/2');
+});
+
+it('marks a point read on the map in a check, which turns red when a rule loses it', async () => {
+  answer({ '/api/compare/analyzers': rulesCatalogue() });
+  let found = true;
+  copernicus(PREVIEWED, () => ({ ready: true, missing: 0, count: 1, covered: [found] }));
+  await openBuilder();
+  await readTheView();
+  await live.probeAt({ lon: 2.01, lat: 48.01 }); await settle();
+  live.markProbe('found'); await settle();
+
+  // no check was on the bench, so the view became one, with the passes shown
+  expect(tab('Checks').getAttribute('aria-selected')).toBe('true');
+  expect(target.textContent).toContain('Check 1');
+  await debounce(900); await settle();
+  const first = post.mock.calls.filter(([path]) => path === '/api/compare/analyzers/check').at(-1)[1];
+  expect(first).toMatchObject({ read: false, check: { name: 'Check 1', bounds: VIEW,
+    a: { date: '2026-05-04' }, b: { date: '2026-05-11' }, marks: [{ point: [2.01, 48.01], expect: 'found' }] } });
+  expect(target.textContent).toContain('1 of 1 found');
+  // the result written back asks for no other read, and a read from the cache never says Reading…
+  const reads = () => post.mock.calls.filter(([path]) => path === '/api/compare/analyzers/check').length;
+  const settled = reads();
+  await debounce(1600); await settle();
+  expect(reads()).toBe(settled);
+  expect(target.textContent).not.toContain('Reading…');
+
+  // a stricter line loses it: the check is reread from the cache and says so
+  found = false;
+  tab('Rules').click(); await settle();
+  const value = target.querySelector('[aria-label="Rule 1 value"]');
+  value.value = '-0.6'; value.dispatchEvent(new Event('change', { bubbles: true })); await settle();
+  await debounce(900); await settle();
+  tab('Checks').click(); await settle();
+  expect(target.textContent).toContain('0 of 1 found');
+  expect(tab('Checks').textContent.replace(/\s+/g, '')).toBe('Checks0/1');
+
+  const name = target.querySelector('[aria-label="Analyzer name"]');
+  name.value = 'Cleared ground'; name.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  button('Add to my analyzers').click(); await settle();
+  const saved = post.mock.calls.find(([path]) => path === '/api/compare/analyzers')[1];
+  expect(saved.checks).toEqual([expect.objectContaining({ name: 'Check 1',
+    result: expect.objectContaining({ count: 1, covered: [false] }) })]);
+  expect(saved.checks[0].result.signature).toMatch(/^[0-9a-z]+$/);
+});
+
+it('adds a check where the map is: pick its passes, drop pins with the map, done', async () => {
+  answer({ '/api/compare/analyzers': rulesCatalogue() });
+  copernicus();
+  let view = VIEW;
+  const props = liveProps({ caseId: 'case-a', viewBounds: () => view, mapView: { lat: 48, lon: 2, zoom: 13 } });
+  live = mount(Panel, { target, props });
+  await settle();
+  labelled('Analyzers').click(); await settle();
+  button('New analyzer').click(); await settle();
+  starts('Build your own rules').click(); await settle();
+  const name = target.querySelector('[aria-label="Analyzer name"]');
+  name.value = 'Cleared ground'; name.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  tab('Checks').click(); await settle();
+
+  starts('Add a check').click(); await settle();
+  expect(target.textContent).toContain('Check 1');
+  expect(target.textContent).toContain('None yet: until it has pins, this check is where the map is.');
+  // a check still being placed follows the map, and keeps the analyzer from being saved half made
+  expect(button('Add to my analyzers').disabled).toBe(true);
+  expect(target.textContent).toContain('“Check 1” needs its passes.');
+  view = { west: 139.6, south: 35.6, east: 139.7, north: 35.7 };
+  props.mapView = { lat: 35.65, lon: 139.65, zoom: 13 }; await settle();
+
+  // its dates are the passes picked now
+  button('Find passes').click(); await settle();
+  expect(post).toHaveBeenCalledWith('/api/satellite/sentinel/acquisitions', expect.objectContaining({
+    zones: [expect.objectContaining({ points: expect.arrayContaining([[139.6, 35.7]]) })] }));
+  target.querySelector('[aria-label="Use 2026-05-04"] button').click(); await settle();
+  target.querySelectorAll('[aria-label="Use 2026-05-11"] button')[1].click(); await settle();
+  expect(target.textContent).toContain('A 2026-05-04 → B 2026-05-11');
+
+  // arm a pin, and each click on the map drops one
+  button('Should be found').click(); await settle();
+  expect(button('Should be found').getAttribute('aria-pressed')).toBe('true');
+  live.pinAt({ lon: 139.65, lat: 35.65 }); await settle();
+  button('Should stay empty').click(); await settle();
+  live.pinAt({ lon: 139.62, lat: 35.66 }); await settle();
+  live.pinAt({ lon: 139.68, lat: 35.62 }); await settle();
+  expect([...target.querySelectorAll('.marks li')].map((li) => li.textContent.trim())).toEqual(
+    ['Should be found', 'Should stay empty', 'Should stay empty']);
+  labelled('Remove pin 3').click(); await settle();
+  button('Done').click(); await settle();
+  expect(target.querySelector('.editor')).toBe(null);
+  live.pinAt({ lon: 139.66, lat: 35.66 }); await settle();       // no check open: the click drops nothing
+
+  button('Add to my analyzers').click(); await settle();
+  const saved = post.mock.calls.find(([path]) => path === '/api/compare/analyzers')[1];
+  expect(saved.checks).toEqual([expect.objectContaining({ name: 'Check 1',
+    a: expect.objectContaining({ date: '2026-05-04' }), b: expect.objectContaining({ date: '2026-05-11' }),
+    bounds: expect.objectContaining({ west: 139.6, east: 139.7 }),
+    marks: [{ point: [139.65, 35.65], expect: 'found' }, { point: [139.62, 35.66], expect: 'empty' }] })]);
+});
+
+it('opens the reading card anywhere, and a point far off the open check starts a check of its own', async () => {
+  answer({ '/api/compare/analyzers': rulesCatalogue() });
+  copernicus();
+  await openBuilder();
+  // nothing picked yet: the card still opens and says why nothing is read
+  await live.probeAt({ lon: 2.01, lat: 48.01 }); await settle();
+  await readTheView();
+  await live.probeAt({ lon: 2.01, lat: 48.01 }); await settle();
+  live.markProbe('found'); await settle();
+  expect(target.textContent).toContain('Check 1');
+  await live.probeAt({ lon: 2.4, lat: 48.4 }); await settle();
+  live.markProbe('empty'); await settle();
+  expect(target.textContent).toContain('Check 2');
+});
+
+it('shows the passes in any Copernicus layer, and suggests the one that reads rule ★', async () => {
+  answer({ '/api/compare/analyzers': rulesCatalogue() });
+  copernicus();
+  const onshow = vi.fn();
+  await openBuilder({ onshow, passLayers: [{ id: 'TRUE_COLOR', label: 'True colour' }, { id: 'SWIR', label: 'SWIR' }, { id: 'NDVI', label: 'NDVI' }] });
+  button('Find passes').click(); await settle();
+  target.querySelector('[aria-label="Use 2026-05-11"] button:nth-child(2)').click(); await settle();
+  expect(onshow).toHaveBeenLastCalledWith(expect.objectContaining({ date: '2026-05-11', layer: 'TRUE_COLOR' }));
+  const layer = target.querySelector('[aria-label="Copernicus layer"]');
+  layer.value = 'SWIR'; layer.dispatchEvent(new Event('change', { bubbles: true })); await settle();
+  expect(onshow).toHaveBeenLastCalledWith(expect.objectContaining({ date: '2026-05-11', layer: 'SWIR' }));
+  starts('Show it in NDVI').click(); await settle();
+  expect(onshow).toHaveBeenLastCalledWith(expect.objectContaining({ layer: 'NDVI' }));
+  expect(starts('Show it in')).toBeUndefined();
+});
+
+it('adds, ranks, rewrites and removes rules, and the sentence follows', async () => {
+  answer({ '/api/compare/analyzers': rulesCatalogue() });
+  await openBuilder();
+  button('Add a rule').click(); await settle();
+  expect(phrase()).toBe('Keeps ground where NDVI dropped by 0.25 or more and NDVI on B at least 0.40, outside cloud.');
+  button('any').click(); await settle();
+  expect(phrase()).toContain('or NDVI on B at least 0.40');
+  labelled('Rank candidates by rule 2').click(); await settle();
+  expect(phrase()).toMatch(/^Keeps ground where NDVI on B at least 0.40 or NDVI dropped/);
+  const measure = target.querySelector('[aria-label="Rule 2 measures"]');
+  measure.value = 'band'; measure.dispatchEvent(new Event('change', { bubbles: true })); await settle();
+  expect(phrase()).toContain('B08 (near infrared) moved by 5.0% or more either way');
+  labelled('Remove rule 1').click(); await settle();
+  expect(phrase()).toBe('Keeps ground where B08 (near infrared) moved by 5.0% or more either way, outside cloud.');
+  expect(labelled('Remove rule 1')).toBe(null);          // the last rule stays
+  // size, description and label live under Settings
+  tab('Settings').click(); await settle();
+  expect(target.textContent).toContain('Size and grouping');
+  expect(target.querySelector('textarea').placeholder).toBe(phrase());
+});
+
+it('opens a calibrated index built-in as the rules it applies', async () => {
+  const asRules = { id: 'custom', name: 'Any surface change (rules)', description: '', phenomenon: 'Surface change',
+    method: 'rules', colour: '#f6a81a', style: 'both', parameters: { ...recipe.parameters, shape: 'any' }, match: 'all',
+    rules: [rule({ value: -0.27 })], checks: [] };
+  answer({ '/api/compare/analyzers': rulesCatalogue({ as_rules: { 'large-change': asRules } }) });
+  await open({ viewBounds: () => VIEW });
+  labelled('Analyzers').click(); await settle();
+  button('New analyzer').click(); await settle();
+  labelled('Open Any surface change as rules').click(); await settle();
+  expect(heading()).toBe('Build an analyzer');
+  expect(target.querySelector('[aria-label="Analyzer name"]').value).toBe('Any surface change (rules)');
+  expect(phrase()).toBe('Keeps ground where NBR dropped by 0.27 or more, outside cloud.');
+});
+
+it('opens an analyzer kept from Compare straight in the builder, with no case open', async () => {
+  const own = { ...structuredClone(recipe), id: 'custom-aaaaaaaaaaaa', name: 'NBR: Burnt', method: 'rules', match: 'all',
+    rules: [rule({ value: -0.3 })] };
+  answer({ '/api/compare/analyzers': rulesCatalogue({ custom: [own] }) });
+  await open({ caseId: null, opening: 'analyzer:custom-aaaaaaaaaaaa', viewBounds: () => VIEW });
+  expect(heading()).toBe('Edit NBR: Burnt');
+  expect(button('Save changes')).toBeDefined();
+});
+
+it('says in the library how an analyzer’s checks last came out', async () => {
+  const own = { ...EXAMPLE.recipe, id: 'custom-bbbbbbbbbbbb' };
+  answer({ '/api/compare/analyzers': rulesCatalogue({ custom: [own] }) });
+  await open();
+  labelled('Analyzers').click(); await settle();
+  expect(target.textContent).toContain('2 checks · not run');
+});
+
 // -- review --------------------------------------------------------------------------
 
 it('offers three verdicts, and only the pin reaches the case', async () => {
   const row = (id, lon, strength, value) => ({ id, coordinates: [lon, 48], bbox: [lon, 48, lon + 0.001, 48.001],
-    area: 90, width: 15, height: 6, margin: 2, strength, measure: { value }, review: 'new',
+    area: 90, margin: 2, strength, measure: { value }, review: 'new',
     phenomenon: 'Surface change', parts: [{ frames: ['a', 'b'], box: [0, 0, 4, 4] }] });
   const saved = { id: RUN, title: 'Harbour sweep', status: 'ready', progress: 1, total: 1,
     count: 2, engine_version: 2, results: [row('0-1', 2, 'strong', 12.34), row('0-2', 2.002, 'weak', 8)],
@@ -601,7 +946,7 @@ it('offers three verdicts, and only the pin reaches the case', async () => {
 
 it('walks the queue from the keys, and narrows it to what is still to review', async () => {
   const row = (id, lon, review) => ({ id, coordinates: [lon, 48], bbox: [lon, 48, lon + 0.001, 48.001],
-    area: 90, width: 15, height: 6, margin: 2, strength: 'strong', measure: { value: 3 }, review,
+    area: 90, margin: 2, strength: 'strong', measure: { value: 3 }, review,
     phenomenon: 'Surface change', parts: [{ frames: ['a', 'b'], box: [0, 0, 4, 4] }] });
   const saved = { id: RUN, title: 'Harbour sweep', status: 'ready', progress: 1, total: 1,
     count: 3, engine_version: 2,
@@ -639,6 +984,59 @@ it('walks the queue from the keys, and narrows it to what is still to review', a
   expect(target.textContent).toContain('1 of 1');
 });
 
+it('says how long a hull is, and walks the largest first when asked', async () => {
+  // Cells of 0.0001°, 7.4 m east to west and 11 m north to south at 48° N: a skiff of one,
+  // and a ship of twenty lying east to west.
+  const step = 0.0001;
+  const hull = (count) => ({ type: 'Polygon', coordinates: [[[2, 48], [2 + count * step, 48],
+    [2 + count * step, 48 + step], [2, 48 + step], [2, 48]]] });
+  const row = (id, count, strength) => ({ id, coordinates: [2, 48], bbox: [2, 48, 2 + count * step, 48 + step],
+    geometry: hull(count), area: count * 55, margin: 2, strength, measure: { value: 3 }, review: 'new',
+    phenomenon: 'Vessel candidate', parts: [{ frames: ['b'], box: [0, 0, 4, 4] }] });
+  const saved = { id: RUN, title: 'Harbour sweep', status: 'ready', progress: 1, total: 1, count: 2,
+    engine_version: 2, results: [row('0-1', 1, 'strong'), row('0-2', 20, 'weak')],
+    input: { title: 'Harbour sweep', zones: area, recipe: structuredClone(vessels), note: '',
+      a: { provider: 'sentinel2', date: '2026-05-11' }, b: { provider: 'sentinel2', date: '2026-05-11' },
+      offline: false, date_rule: 'manual', followup_id: null } };
+  answer({ [`/api/cases/case-a/analysis/runs/${RUN}`]: saved });
+  await open({ opening: `runs-${RUN}` });
+  // strongest first, as the run lists it: the skiff, long side first
+  expect(target.textContent).toContain('1 of 2');
+  expect(target.textContent).toContain('55 m² · ≈ 11 m long, 7.4 m wide');
+  button('Largest first').click(); await settle();
+  expect(button('Largest first').getAttribute('aria-pressed')).toBe('true');
+  // the ship comes up first, measured along its hull
+  expect(target.textContent).toContain('1 of 2');
+  expect(target.textContent).toContain('≈ 149 m long, 11 m wide');
+  // and back to the run's own order, from its top
+  button('Largest first').click(); await settle();
+  expect(target.textContent).toContain('≈ 11 m long, 7.4 m wide');
+});
+
+it('adds a candidate where the map was right-clicked, inside an area the run read', async () => {
+  const saved = { id: RUN, title: 'Harbour sweep', status: 'ready', progress: 1, total: 1, count: 0,
+    engine_version: 2, results: [],
+    area_runs: [{ area_id: 'area', status: 'ready', b: { provider: 'sentinel2', date: '2026-05-11' } }],
+    input: { title: 'Harbour sweep', zones: area, recipe: structuredClone(vessels), note: '',
+      a: { provider: 'sentinel2', date: '2026-05-11' }, b: { provider: 'sentinel2', date: '2026-05-11' },
+      offline: false, date_rule: 'manual', followup_id: null } };
+  // not while the list is up: there is no run to add it to
+  answer({ [`/api/cases/case-a/analysis/runs/${RUN}`]: saved });
+  await open();
+  expect(live.candidateAreaAt({ lat: 48.0005, lon: 2.0005 })).toBe(null);
+  unmount(live);
+  await open({ opening: `runs-${RUN}` });
+  expect(live.candidateAreaAt({ lat: 48.0005, lon: 2.0005 })).toBe('area');
+  expect(live.candidateAreaAt({ lat: 48.01, lon: 2.0005 })).toBe(null);
+  post.mockImplementation(async (_, body) => ({ id: 'manual-1', origin: 'manual', area_id: body.area_id,
+    geometry: body.geometry, coordinates: body.geometry.coordinates, bbox: [2, 48, 2.0001, 48.0001],
+    area: 55, margin: 0, measure: {}, review: 'new', phenomenon: 'Manual candidate', parts: [] }));
+  await live.addCandidate('area', { type: 'Point', coordinates: [2.0005, 48.0005] }); await settle();
+  expect(post).toHaveBeenCalledWith(`/api/cases/case-a/analysis/runs/${RUN}/results`,
+    { area_id: 'area', geometry: { type: 'Point', coordinates: [2.0005, 48.0005] } });
+  expect(target.textContent).toContain('Manual candidate · Manual');
+});
+
 it('reopens a run saved against Wayback without pretending it had a Sentinel-2 date', async () => {
   const old = { id: 'aaaaaaaaaaaa', title: 'Old harbour', status: 'ready', progress: 1, total: 1, count: 0,
     engine_version: 1, results: [],
@@ -660,7 +1058,7 @@ it('reopens a run saved against Wayback without pretending it had a Sentinel-2 d
 
 it('opens a candidate in Compare on the passes that found it', async () => {
   const { uiState } = await import('../../lib/state.svelte.js');
-  const row = { id: '0-1', coordinates: [2, 48], bbox: [2, 48, 2.001, 48.001], area: 90, width: 15, height: 6,
+  const row = { id: '0-1', coordinates: [2, 48], bbox: [2, 48, 2.001, 48.001], area: 90,
     margin: 2, strength: 'strong', measure: { value: 3 }, review: 'new', phenomenon: 'Surface change',
     parts: [{ frames: ['a', 'b'], box: [0, 0, 4, 4] }],
     sources: { a: { provider: 'sentinel2', date: '2026-05-04' }, b: { provider: 'sentinel2', date: '2026-05-11' } } };

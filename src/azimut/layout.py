@@ -50,8 +50,10 @@ TOOL_DIR = "azimut"
 
 #: Post drafts. Named for what they are; `exports/` is now free to mean exports.
 DRAFTS_DIR = ".drafts"
-#: Saved Inspect session specs.
+#: Inspect's per-file work: the frames cut from one video or image, and their edits.
 INSPECT_DIR = ".inspect"
+#: Collage layouts. The picture a collage exports is a media working file.
+COLLAGE_DIR = ".collages"
 #: Saved Compare session specs. Their rendered image is a media working file.
 COMPARE_DIR = ".compare"
 # Saved analyzer zones, follow-ups and runs with their owned input frames.
@@ -86,6 +88,7 @@ CASE_SUBDIRS = (
     "exports",
     DRAFTS_DIR,
     INSPECT_DIR,
+    COLLAGE_DIR,
     COMPARE_DIR,
     ANALYSIS_DIR,
     SEARCH_DIR,
@@ -126,7 +129,7 @@ MAX_CASE_SLUG = 48
 MAX_MEDIA_NAME = 90
 
 #: The stem of anything the analyst saves under a name — notes, proofs, inspect
-#: sessions, post drafts. Mirrored in `frontend/src/lib/naming.js`.
+#: work, collages, post drafts. Mirrored in `frontend/src/lib/naming.js`.
 MAX_SLUG = 68
 
 #: A note's filing folder: total path length, and how deep it may nest.
@@ -467,6 +470,15 @@ def draft_rel(name: str) -> str:
 
 def session_rel(name: str) -> str:
     return f"{INSPECT_DIR}/{name}.json"
+
+
+def legacy_session_rel(name: str) -> str:
+    """A pre-0.3.1 session exactly as it was, kept by the merge that replaced it."""
+    return f"{INSPECT_DIR}/.v1/{name}.json"
+
+
+def collage_rel(name: str) -> str:
+    return f"{COLLAGE_DIR}/{name}.json"
 
 
 def compare_session_rel(name: str) -> str:

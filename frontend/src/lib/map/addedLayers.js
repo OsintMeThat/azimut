@@ -250,8 +250,8 @@ export function searchFeatures(collection, query, options = {}) {
       colour: properties.colour || colours.get(category) || categoryColour(null, 0),
       // A match in a group the legend switched off, or outside the period: it
       // is a real feature, it is simply not on the map until that comes back.
-      hidden: off.has(category) || !inPeriod(properties.date, period),
-      outside: !inPeriod(properties.date, period),
+      hidden: off.has(category) || !inPeriod(properties, period),
+      outside: !inPeriod(properties, period),
     });
   });
   return { total, results };

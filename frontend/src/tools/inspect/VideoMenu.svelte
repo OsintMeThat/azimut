@@ -5,11 +5,15 @@
   import Icon from '../../components/Icon.svelte';
   import AdjustSliders from './AdjustSliders.svelte';
   import OrientationControls from './OrientationControls.svelte';
+  import SaveToCase from './SaveToCase.svelte';
 
-  // Right-panel menu for the Selection tab: scrub the video, capture frames into
-  // the transient tray (nothing is filed here), and tune video-level adjustments
-  // via the gear — those feed the optional "enhanced video" saved in the Save tab.
-  let { probeInfo, shared, videoFilters, session, capture } = $props();
+  // The panel beside the video: scrub it, capture frames (kept with the video's
+  // work as they are taken), and tune the whole clip. A turned or adjusted clip
+  // can be saved as a new video; the original is never touched.
+  let {
+    probeInfo, shared, videoFilters, work, capture,
+    videoEdited = false, videoSave, folder = $bindable(''),
+  } = $props();
 
   let suggestions = $state([]);
   let scanning = $state(false);
@@ -46,7 +50,7 @@
     suggestions = [];
     try {
       const { job_id } = await api.post(`/api/cases/${caseState.current.id}/inspect/suggest`, {
-        path: session.source.path,
+        path: work.source.path,
         count: 12,
       });
       suggestions = await poll(job_id);
@@ -67,10 +71,10 @@
   }
 
   const maxScore = $derived(Math.max(1, ...suggestions.map((s) => s.score)));
-  const gearActive = $derived(!isNeutral(videoFilters, session.videoAdjust));
+  const gearActive = $derived(!isNeutral(videoFilters, work.videoAdjust));
 
   function resetVideoAdjust() {
-    session.videoAdjust = adjustDefaults(videoFilters);
+    work.videoAdjust = adjustDefaults(videoFilters);
   }
 </script>
 
@@ -90,19 +94,15 @@
   </div>
 
   <button class="btn btn-primary w-full" disabled={capturing} onclick={() => grab()}>
-    <Icon name="image" size={15} /> Capture frame to tray
+    <Icon name="image" size={15} /> Capture frame
   </button>
-  <p class="hint tray-note">
-    <Icon name="layers" size={12} /> {session.frames.length} frame{session.frames.length === 1 ? '' : 's'}
-    in the tray. Nothing is saved until you use the Save tab.
-  </p>
 
   <div class="section">
     <div class="section-head"><span>Orientation</span></div>
     <OrientationControls
-      value={session.videoRotation}
-      onchange={(angle) => (session.videoRotation = angle)}
-      hint="The saved video and any new frames use this orientation."
+      value={work.videoRotation}
+      onchange={(angle) => (work.videoRotation = angle)}
+      hint="New frames and a saved video use this orientation."
     />
   </div>
 
@@ -112,13 +112,26 @@
       <Icon name={showGear ? 'chevronDown' : 'chevronRight'} size={14} />
     </button>
     {#if showGear}
-      <p class="hint">Preview the whole clip brighter/clearer; save an enhanced copy in Save.</p>
-      <AdjustSliders filters={videoFilters} values={session.videoAdjust} />
+      <p class="hint">Applies to the whole clip and to the frames captured from now on.</p>
+      <AdjustSliders filters={videoFilters} values={work.videoAdjust} />
       <button class="btn btn-ghost btn-sm reset" disabled={!gearActive} onclick={resetVideoAdjust}>
         <Icon name="reset" size={14} /> Reset adjustments
       </button>
     {/if}
   </div>
+
+  {#if videoEdited}
+    <div class="section">
+      <SaveToCase
+        defaultName={videoSave.defaultName}
+        filedPath={videoSave.filedPath}
+        busy={videoSave.busy}
+        bind:folder
+        hint="Re-encodes the whole clip turned and adjusted as shown."
+        onsave={videoSave.onsave}
+      />
+    </div>
+  {/if}
 
   <div class="section">
     <div class="section-head">
@@ -172,12 +185,6 @@
   .w-full {
     width: 100%;
     justify-content: center;
-  }
-  .tray-note {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin: -4px 0 0;
   }
   .section {
     border-top: 1px solid var(--border);

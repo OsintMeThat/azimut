@@ -80,6 +80,16 @@ def test_export_then_import_restores_keys_and_prefs(client):
     assert restored["units"] == "imperial"
 
 
+def test_the_map_tabs_switch_travels_with_the_backup(client):
+    client.put("/api/settings/prefs", json={"map_sync": False})
+    blob = bundle_of(client)
+    assert blob["settings"]["map_sync"] is False
+
+    client.put("/api/settings/prefs", json={"map_sync": True})
+    client.post("/api/settings/import", json=blob)
+    assert client.get("/api/settings").json()["map_sync"] is False
+
+
 # -- what the bundle carries ------------------------------------------------
 
 

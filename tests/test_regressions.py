@@ -80,7 +80,7 @@ def test_grid_delete_cannot_name_the_case_manifest(client):
     [
         ("proofs", "proof"),
         ("drafts", "draft"),
-        ("inspect/sessions", "session"),
+        ("collages", "collage"),
     ],
 )
 def test_artifact_delete_cannot_name_the_case_manifest(client, route, kind):
@@ -89,6 +89,21 @@ def test_artifact_delete_cannot_name_the_case_manifest(client, route, kind):
 
     client.request("DELETE", f"/api/cases/{case_id}/{route}/..%5C..%5Ccase")
     assert manifest.is_file(), f"{kind} delete removed the manifest"
+
+
+def test_work_routes_cannot_reach_outside_the_case(client):
+    """A work is addressed by the file it belongs to, never by a path the client
+    builds, and a name only ever resolves inside the Inspect folder."""
+    case_id = _case(client)
+    manifest = Case.locate(case_id).path / layout.TOOL_DIR / "case.json"
+
+    assert client.get(f"/api/cases/{case_id}/inspect/works/..%5C..%5Ccase").status_code in (403, 404)
+    client.request("DELETE", f"/api/cases/{case_id}/inspect/work", params={"path": "../case.json"})
+    saved = client.put(
+        f"/api/cases/{case_id}/inspect/work", json={"path": "../case.json", "spec": {"frames": []}}
+    )
+    assert saved.status_code == 400
+    assert manifest.is_file()
 
 
 # -- destructive-before-valid ------------------------------------------------

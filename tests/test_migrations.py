@@ -267,7 +267,7 @@ def _case_at_folder_checkpoint(schema: int) -> tuple[Case, dict[str, str]]:
     }
 
 
-@pytest.mark.parametrize("schema", range(workspace.STORAGE_SCHEMA, workspace.CASE_SCHEMA))
+@pytest.mark.parametrize("schema", range(workspace.STORAGE_SCHEMA, workspace.LAYOUT_SCHEMA))
 def test_every_unreleased_folder_checkpoint_jumps_to_the_final_layout(tmp_workspace, schema):
     case, expected = _case_at_folder_checkpoint(schema)
     legacy_manifest = (
@@ -308,7 +308,9 @@ def test_released_schema_three_is_stamped_only_once(tmp_workspace, monkeypatch):
 
     Case.open(case.id)
 
-    assert writes == [workspace.CASE_SCHEMA]
+    # The unreleased checkpoints collapse into the one layout stamp; the released
+    # steps after it each stamp their own.
+    assert writes == [workspace.LAYOUT_SCHEMA, workspace.CASE_SCHEMA]
 
 
 @pytest.mark.parametrize(
@@ -590,7 +592,7 @@ def test_schema_seven_case_gets_a_readme_without_overwriting_one(tmp_workspace):
     readme = layout.readme(case.path)
     readme.unlink()
     manifest = case.read()
-    manifest["azimut"]["schema"] = workspace.CASE_SCHEMA - 1
+    manifest["azimut"]["schema"] = workspace.LAYOUT_SCHEMA - 1
     case._write_json(manifest)
 
     opened = Case.open(case.id)
@@ -600,7 +602,7 @@ def test_schema_seven_case_gets_a_readme_without_overwriting_one(tmp_workspace):
 
     readme.write_text("My own instructions\n", encoding="utf-8")
     manifest = opened.read()
-    manifest["azimut"]["schema"] = workspace.CASE_SCHEMA - 1
+    manifest["azimut"]["schema"] = workspace.LAYOUT_SCHEMA - 1
     opened._write_json(manifest)
 
     Case.open(case.id)

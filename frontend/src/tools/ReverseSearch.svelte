@@ -10,21 +10,20 @@
   // is still what every refusal falls back to.
   //
   // Pick a case photo, or scrub a case video to a frame — or arrive from the Media
-  // Library or Inspect already holding one (`uiState.reverseTarget`). Adjustments
+  // Library or Inspect already holding one (`uiState.reverseTarget`). The picking
+  // is Inspect's own file list, kept on screen until a picture is chosen. Adjustments
   // (brightness, contrast, …) preview live and are baked into the exported
   // image via a same-origin canvas — nothing leaves the machine until an
   // engine tab is opened by the analyst.
   import { untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
-  import { matchesTerms } from '../lib/folderBrowse.js';
   import { caseState, prefs, uiState, toast } from '../lib/state.svelte.js';
   import { extensionVersion, handOffReverse } from '../lib/extBridge.js';
   import { MAX_HANDOFF_BYTES, UPLOAD_PAGES } from '../lib/reverseSearch.js';
   import Modal from '../components/Modal.svelte';
   import Icon from '../components/Icon.svelte';
-  import SearchInput from '../components/SearchInput.svelte';
-  import FolderBrowser from '../components/FolderBrowser.svelte';
+  import SourcePicker from '../components/SourcePicker.svelte';
 
   const PASTE = UPLOAD_PAGES.filter((e) => e.paste);
   const DRAG = UPLOAD_PAGES.filter((e) => !e.paste);
@@ -32,37 +31,16 @@
   // installing it with the app already open needs a tab reload either way, and
   // Settings is where that is said.
   const extInstalled = extensionVersion();
-  const MEDIA_FILTERS = [
-    { id: 'all', label: 'All' },
-    { id: 'image', label: 'Images' },
-    { id: 'video', label: 'Video' },
-    { id: 'capture', label: 'Captures' },
-    { id: 'frame', label: 'Frames' },
-    { id: 'collage', label: 'Collages' },
-  ];
 
   let pickerOpen = $state(false);
-  let mediaLibrary = $state([]);
-  let mediaQuery = $state('');
-  let mediaFilter = $state('all');
-  let pickerBrowserOpen = $state(false);
-  let pickerBrowsePath = $state('');
-  let pickerBrowseSelection = $state(null);
+  let mediaList = $state([]);
+  let mediaFor = $state(null); // the case `mediaList` was read from, once it has been
+  let loadedFor; // the case this tab last followed
   let selected = $state(null); // the chosen media item, or null
   let videoEl = $state(null); // the <video> element, when a video is selected
 
-  const searchableMedia = $derived(mediaLibrary.filter((m) => m.kind === 'image' || m.kind === 'video'));
-  const filteredPickerMedia = $derived(
-    mediaFilter === 'all' ? searchableMedia : searchableMedia.filter((m) => mediaCategory(m) === mediaFilter)
-  );
-  const pickableMedia = $derived(
-    mediaQuery.trim()
-      ? filteredPickerMedia.filter((m) => matchesMediaName(m, mediaQuery))
-      : filteredPickerMedia
-  );
-  const pickerBrowserEntries = $derived(
-    filteredPickerMedia.map((m) => ({ ...m, id: m.path, attrs: { folder: m.folder ?? '' } }))
-  );
+  const searchableMedia = $derived(mediaList.filter((m) => m.kind === 'image' || m.kind === 'video'));
+  const listed = $derived(caseState.current != null && mediaFor === caseState.current.id);
 
   // -- adjustments (client-side CSS filters, baked into the export) -----------
   const NEUTRAL = { brightness: 100, contrast: 100, saturate: 100, grayscale: 0 };
@@ -83,7 +61,8 @@
   // A picture that exists nowhere on disk is shown from an address made for it here,
   // and revoked once it is replaced or discarded.
   const srcOf = (item) => item.src ?? fileUrl(caseState.current.id, item.path);
-  const nameOf = (item) => (item.label || item.path).replace(/^media\//, '');
+  // The name the list and the Media Library show it by, as a handoff already carries.
+  const nameOf = (item) => (item.label || item.title || item.path).replace(/^media\//, '');
   const frameLabel = $derived(selected?.kind === 'video' ? 'frame' : 'image');
   const downloadName = () =>
     `reverse-${nameOf(selected).replace(/^.*\//, '').replace(/\.[^.]+$/, '')}.png`;
@@ -96,23 +75,33 @@
   const dragLeft = $derived(DRAG.filter((e) => !filled.includes(e)));
 
   // -- picker -----------------------------------------------------------------
-  async function openPicker() {
-    if (!caseState.current) {
-      toast('Open a case to search its media', 'warn');
-      return;
-    }
-    mediaQuery = '';
-    mediaFilter = 'all';
-    pickerBrowserOpen = false;
-    pickerBrowsePath = '';
-    pickerBrowseSelection = null;
+  async function refresh(id) {
     try {
-      mediaLibrary = await api.get(`/api/cases/${caseState.current.id}/media`);
-      pickerOpen = true;
+      const list = await api.get(`/api/cases/${id}/media`);
+      if (id !== caseState.current?.id) return;
+      mediaList = list;
+      mediaFor = id;
     } catch (e) {
       toast(e.message, 'danger');
     }
   }
+
+  // The list follows the case like Inspect's: an import, a delete or a restore
+  // elsewhere bumps its revision. A picture of the case before goes with it, as
+  // its handoff does, and before the page redraws, since its address names that
+  // case. The handoff below runs after, so it may then show the one it was given.
+  $effect.pre(() => {
+    const id = caseState.current?.id;
+    caseState.rev;
+    if (id !== loadedFor) {
+      if (loadedFor) untrack(discard);
+      loadedFor = id;
+      mediaList = [];
+      mediaFor = null;
+      pickerOpen = false;
+    }
+    if (id) refresh(id);
+  });
 
   /** Put a picture in front of the engines, dropping the address of the one before. */
   function show(item) {
@@ -143,54 +132,6 @@
   function seekToTarget() {
     if (!videoEl || selected?.time == null) return;
     videoEl.currentTime = Math.min(selected.time, videoEl.duration || selected.time);
-  }
-
-  function matchesMediaName(item, query) {
-    return matchesTerms(item.title || item.filename || '', query);
-  }
-
-  function mediaCategory(item) {
-    const source = item.source ?? {};
-    if (source.type === 'satellite' || source.type === 'screenshot') return 'capture';
-    if (source.op === 'collage') return 'collage';
-    if (source.op === 'frame' || source.op === 'adjust') return 'frame';
-    return item.kind;
-  }
-
-  function openPickerBrowser() {
-    mediaQuery = '';
-    pickerBrowsePath = '';
-    pickerBrowseSelection = null;
-    pickerBrowserOpen = true;
-  }
-
-  function togglePickerBrowser() {
-    if (pickerBrowserOpen) {
-      pickerBrowserOpen = false;
-      return;
-    }
-    openPickerBrowser();
-  }
-
-  function setMediaFilter(filter) {
-    mediaFilter = filter;
-    pickerBrowsePath = '';
-    pickerBrowseSelection = null;
-  }
-
-  function openPickerFolder(path) {
-    pickerBrowsePath = path;
-    pickerBrowseSelection = null;
-  }
-
-  function confirmPickerBrowser() {
-    const item = pickerBrowserEntries.find((m) => m.path === pickerBrowseSelection);
-    if (item) pickMedia(item);
-  }
-
-  function selectPickerBrowser(item, confirm = false) {
-    pickerBrowseSelection = item.path;
-    if (confirm) pickMedia(item);
   }
 
   function discard() {
@@ -354,69 +295,84 @@
   ];
 </script>
 
-<div class="tool">
-  <div class="tool-header">
-    <h2>Reverse Search</h2>
-    {#if selected}
-      <span class="sub">
-        {filled.length
-          ? `Send the ${frameLabel} to an engine`
-          : `Copy or save the ${frameLabel}, then hand it to an engine`}
-      </span>
-    {/if}
+{#snippet engineLinks()}
+  <div class="direct">
+    <span class="eg-head">Or open an engine and drag any file in</span>
+    <div class="engine-links">
+      {#each UPLOAD_PAGES as e (e.id)}
+        <a href={e.url} target="_blank" rel="noreferrer" class="engine-link">
+          {e.label} <Icon name="external" size={12} />
+        </a>
+      {/each}
+    </div>
   </div>
+{/snippet}
 
-  <div class="tool-body">
-    {#if !selected}
-      <div class="empty" style="height: 100%">
-        <div class="empty-icon"><Icon name="search" size={42} /></div>
-        <h3>Reverse image search</h3>
-        <p>Pick a case photo, or a video to grab a frame from, then send it to the engines.</p>
-        <button class="btn btn-sm" onclick={openPicker}>
-          <Icon name="image" size={15} /> Pick from case
-        </button>
-        <div class="fallback">
-          <span class="eg-head">Or open an engine and drag any file in</span>
-          <div class="engine-links">
-            {#each UPLOAD_PAGES as e (e.id)}
-              <a href={e.url} target="_blank" rel="noreferrer" class="engine-link">
-                {e.label} <Icon name="external" size={12} />
-              </a>
-            {/each}
-          </div>
-        </div>
+<div class="tool">
+  {#if selected}
+    <div class="tool-header">
+      <span class="file">
+        <Icon name={selected.kind === 'video' ? 'video' : 'image'} size={14} />
+        <span class="name" title={selected.path}>{nameOf(selected)}</span>
+      </span>
+      <div class="spacer"></div>
+      <button class="btn btn-sm" onclick={() => (pickerOpen = true)} title="Pick another image or video">
+        <Icon name="folderOpen" size={14} /> Change file
+      </button>
+      <button class="btn btn-ghost btn-sm" onclick={discard} title="Back to the file list" aria-label="Close file">
+        <Icon name="x" size={15} />
+      </button>
+    </div>
+  {/if}
+
+  {#if !selected}
+    {#if !caseState.current}
+      <div class="empty">
+        <Icon name="search" size={40} />
+        <p>Open a case to pick one of its pictures.</p>
+        {@render engineLinks()}
+      </div>
+    {:else if listed && searchableMedia.length === 0}
+      <div class="empty">
+        <Icon name="search" size={40} />
+        <p>Add an image or a video to the case to search it.</p>
+        <button class="btn" onclick={() => (uiState.tool = 'media')}>Go to Media Library</button>
+        {@render engineLinks()}
       </div>
     {:else}
+      <div class="start">
+        <div class="start-col">
+          <div class="start-head">
+            <div>
+              <h3>Pick a picture</h3>
+              <p>A photo, or a video to take a frame from. Nothing is sent until you press an engine.</p>
+            </div>
+            {@render engineLinks()}
+          </div>
+          {#if listed}
+            <SourcePicker media={searchableMedia} caseId={caseState.current.id} onpick={pickMedia} />
+          {/if}
+        </div>
+      </div>
+    {/if}
+  {:else}
+    <div class="tool-body">
       <div class="work">
         <div class="preview-col">
-          <div class="preview-panel card">
-            <div class="preview-bar">
-              <span class="file">
-                <Icon name={selected.kind === 'video' ? 'video' : 'image'} size={13} />
-                <span class="name" title={selected.path}>{nameOf(selected)}</span>
-              </span>
-              <span class="bar-actions">
-                <button class="btn btn-ghost btn-sm" onclick={openPicker}>Change</button>
-                <button class="btn btn-ghost btn-sm" onclick={discard}>
-                  <Icon name="x" size={13} /> Discard
-                </button>
-              </span>
-            </div>
-            <div class="preview">
-              {#if selected.kind === 'video'}
-                <!-- svelte-ignore a11y_media_has_caption -->
-                <video
-                  bind:this={videoEl}
-                  src={srcOf(selected)}
-                  controls
-                  preload="metadata"
-                  style="filter: {filterCss}"
-                  onloadedmetadata={seekToTarget}
-                ></video>
-              {:else}
-                <img src={srcOf(selected)} alt={nameOf(selected)} style="filter: {filterCss}" />
-              {/if}
-            </div>
+          <div class="preview card">
+            {#if selected.kind === 'video'}
+              <!-- svelte-ignore a11y_media_has_caption -->
+              <video
+                bind:this={videoEl}
+                src={srcOf(selected)}
+                controls
+                preload="metadata"
+                style="filter: {filterCss}"
+                onloadedmetadata={seekToTarget}
+              ></video>
+            {:else}
+              <img src={srcOf(selected)} alt={nameOf(selected)} style="filter: {filterCss}" />
+            {/if}
           </div>
           {#if selected.kind === 'video'}
             <p class="hint">Scrub to the moment, then copy or save the frame.</p>
@@ -515,76 +471,13 @@
           {/if}
         </div>
       </div>
-    {/if}
-  </div>
+    </div>
+  {/if}
 </div>
 
-{#if pickerOpen}
-  <Modal title="Pick a case image or video" width="640px" onclose={() => (pickerOpen = false)}>
-    <div class="picker-content">
-      <div class="picker-search">
-        <SearchInput bind:value={mediaQuery} placeholder="Search names…" width="100%" />
-        <button class="btn btn-ghost btn-sm browse-btn" title="Browse folders" onclick={togglePickerBrowser}>…</button>
-      </div>
-
-      {#if searchableMedia.length === 0}
-        <p class="picker-empty">No images or videos in this case yet. Import or download some in the Media tab.</p>
-      {:else}
-        <div class="picker-filters" aria-label="Media type">
-          {#each MEDIA_FILTERS as filter (filter.id)}
-            <button
-              class="btn btn-ghost btn-sm"
-              class:active={mediaFilter === filter.id}
-              aria-pressed={mediaFilter === filter.id}
-              onclick={() => setMediaFilter(filter.id)}
-            >
-              {filter.label}
-            </button>
-          {/each}
-        </div>
-
-        {#if pickerBrowserOpen}
-          <FolderBrowser
-            entries={pickerBrowserEntries}
-            path={pickerBrowsePath}
-            rootLabel="Case media"
-            selectedId={pickerBrowseSelection}
-            matches={(m) => matchesMediaName(m, mediaQuery)}
-            emptyText="This folder has no matching media."
-            icon={(m) => (m.kind === 'video' ? 'video' : 'image')}
-            label={(m) => m.title || m.filename}
-            onnavigate={openPickerFolder}
-            onselect={(m) => selectPickerBrowser(m)}
-            onconfirm={(m) => selectPickerBrowser(m, true)}
-          />
-          <div class="modal-actions">
-            <button class="btn btn-primary btn-sm" disabled={!pickerBrowseSelection} onclick={confirmPickerBrowser}>Use selected</button>
-          </div>
-        {:else if pickableMedia.length === 0}
-          <p class="modal-hint">No media matches this filter.</p>
-        {:else}
-          <div class="picker-list">
-            {#each pickableMedia as item (item.path)}
-              <button class="picker-open" onclick={() => pickMedia(item)} title={item.path}>
-                <div class="picker-thumb">
-                  {#if item.thumbnail}
-                    <img src={fileUrl(caseState.current.id, item.thumbnail)} alt="" loading="lazy" />
-                  {:else}
-                    <Icon name={item.kind === 'video' ? 'video' : 'image'} size={22} />
-                  {/if}
-                </div>
-                <span class="picker-copy">
-                  <span class="picker-title">{item.title || item.filename}</span>
-                  <span class="picker-meta">
-                    {mediaCategory(item)}{item.folder ? ` · ${item.folder}` : ''}
-                  </span>
-                </span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      {/if}
-    </div>
+{#if pickerOpen && listed}
+  <Modal title="Pick a case image or video" width="720px" onclose={() => (pickerOpen = false)}>
+    <SourcePicker media={searchableMedia} caseId={caseState.current.id} current={selected?.path} onpick={pickMedia} />
   </Modal>
 {/if}
 
@@ -597,23 +490,87 @@
     color: var(--text-3);
   }
 
-  /* empty state — shared .empty primitive, with the engine fallback below */
-  .fallback {
+  /* the picture's header, laid out as Inspect's */
+  .file {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    color: var(--text-2);
+  }
+  .file :global(svg) {
+    color: var(--text-3);
+    flex-shrink: 0;
+  }
+  .name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .spacer {
+    flex: 1;
+  }
+
+  /* landing: Inspect's file list, with the engines' own pages beside it. The
+     whole panel scrolls and the column sits centred in it, so the wheel works
+     over the margins and the scrollbar stays on the edge. */
+  .empty {
+    flex: 1;
+  }
+  .start {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+  .start-col {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 24px 20px;
+  }
+  .start-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px 24px;
+  }
+  .start-head h3 {
+    font-size: var(--fs-md);
+    font-weight: 700;
+    margin: 0 0 4px;
+  }
+  .start-head p {
+    margin: 0;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+  }
+  .direct {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .direct .eg-head {
+    margin-bottom: 0;
+  }
+  .empty .direct {
+    align-items: center;
+    width: 100%;
+    max-width: 360px;
     margin-top: 22px;
     padding-top: 20px;
     border-top: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    max-width: 360px;
   }
   .engine-links {
     display: flex;
     flex-wrap: wrap;
-    justify-content: center;
     gap: 6px 18px;
+  }
+  .empty .engine-links {
+    justify-content: center;
   }
   .engine-link {
     display: inline-flex;
@@ -645,41 +602,8 @@
     flex-direction: column;
     gap: 10px;
   }
-  .preview-panel {
-    overflow: hidden;
-  }
-  .preview-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 6px 8px 6px 12px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-2);
-  }
-  .file {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    min-width: 0;
-    color: var(--text-2);
-  }
-  .file :global(svg) {
-    color: var(--text-3);
-    flex-shrink: 0;
-  }
-  .name {
-    font-size: var(--fs-sm);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .bar-actions {
-    display: inline-flex;
-    gap: 2px;
-    flex-shrink: 0;
-  }
   .preview {
+    overflow: hidden;
     background: var(--bg-0);
     display: flex;
     justify-content: center;
@@ -721,9 +645,6 @@
     flex: 1 1 auto;
     justify-content: center;
     min-width: 120px;
-  }
-  .reset {
-    align-self: flex-end;
   }
   .inspect-link {
     align-self: flex-start;
@@ -785,109 +706,5 @@
   .reset {
     align-self: flex-end;
     margin-top: 2px;
-  }
-
-  /* picker modal */
-  .picker-content {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-  .picker-empty {
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-    padding: 8px;
-  }
-  .modal-hint {
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-    margin: 0;
-  }
-  .modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-  .picker-search {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .picker-search :global(.search-box) {
-    flex: 1;
-  }
-  .browse-btn {
-    min-width: 30px;
-    font-size: var(--fs-lg);
-    line-height: 1;
-  }
-  .picker-filters {
-    display: flex;
-    gap: 4px;
-    overflow-x: auto;
-    padding-bottom: 2px;
-  }
-  .picker-filters .active {
-    color: var(--text-1);
-    background: var(--bg-3);
-  }
-  .picker-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    max-height: min(52vh, 480px);
-    overflow: auto;
-  }
-  .picker-open {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 7px;
-    text-align: left;
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    background: var(--bg-2);
-  }
-  .picker-open:hover {
-    border-color: var(--accent);
-    background: var(--bg-3);
-  }
-  .picker-thumb {
-    display: grid;
-    place-items: center;
-    width: 48px;
-    height: 40px;
-    flex-shrink: 0;
-    overflow: hidden;
-    border-radius: var(--r-sm);
-    background: var(--bg-0);
-    color: var(--text-3);
-  }
-  .picker-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  .picker-copy {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    gap: 2px;
-  }
-  .picker-title,
-  .picker-meta {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .picker-title {
-    color: var(--text-1);
-    font-size: var(--fs-sm);
-    font-weight: 600;
-  }
-  .picker-meta {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
   }
 </style>

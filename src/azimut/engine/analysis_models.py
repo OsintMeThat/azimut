@@ -24,8 +24,13 @@ from pydantic import (
 )
 
 Method = Literal["vessels", "hotspots", "structure", "spots", "surface", "index",
-                 "sar-vessels", "sar-change"]
+                 "sar-vessels", "sar-change", "rules"]
 Index = Literal["ndvi", "ndwi", "mndwi", "nbr", "ndbi", "bsi"]
+#: Sentinel-2 Level-2A's bands, as an analyzer of your own may name them.
+#: `sentinel.L2A_BANDS` is the list the evalscripts accept, in this order.
+Band = Literal["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B11", "B12"]
+#: Ground as Sentinel-2's scene classification names it.
+SceneClass = Literal["vegetation", "bare", "water", "snow", "cloud", "shadow", "dark"]
 ShortId = Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]{1,48}$")]
 Colour = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]
 
@@ -101,6 +106,9 @@ class Parameters(Model):
     # classification calls ground.
     cloud_margin: int = Field(default=5, ge=0, le=10)
     merge_metres: FiniteFloat = Field(default=0, ge=0, le=500)
+    # Kept after sizing: a roof or a crater is compact, a road, a track or a
+    # trench is long and thin. "any" keeps both, as every built-in does.
+    shape: Literal["any", "compact", "elongated"] = "any"
 
     @model_validator(mode="before")
     @classmethod
@@ -135,9 +143,13 @@ SIZES: dict[str, dict[str, dict[str, float]]] = {
     "surface": _CHANGE_SIZES,
     "index": _CHANGE_SIZES,
     # Radar pixels are 10 m like Sentinel-2's, and speckle is what smoothing
-    # works against: a small target keeps the finest window.
+    # works against: for radar change a step of it is 45 m of ground
+    # (`SAR_WINDOW_M`), and a small target keeps the finest window.
     "sar-vessels": _sizes((0, 150_000, 0, 0, 30), (250, 150_000, 0, 0, 50), (2500, 400_000, 0, 0, 100)),
     "sar-change": _sizes((300, 0, 0, 1, 0), (2000, 0, 1, 2, 30), (20000, 0, 1, 3, 100)),
+    # Your own rules measure change like the index methods do. Radar rules
+    # take radar change's sizes instead (`METHODS`, the panel picks them).
+    "rules": _CHANGE_SIZES,
 }
 
 
@@ -179,27 +191,83 @@ class Zone(Model):
                 for i in range(64)]
 
 
-class Recipe(Model):
-    id: ShortId = "custom"
-    name: str = Field(min_length=1, max_length=120)
-    description: str = Field(default="", max_length=500)
-    phenomenon: str = Field(default="Surface change", min_length=1, max_length=120)
-    method: Method = "surface"
-    parameters: Parameters = Field(default_factory=Parameters)
-    colour: Colour = "#f6a81a"
-    style: Literal["pins", "outlines", "both"] = "both"
+# Scene classes, as Sen2Cor numbers them, behind the names a rule uses.
+SCENE_CLASSES: dict[str, tuple[int, ...]] = {
+    "vegetation": (4,), "bare": (5,), "water": (6,), "snow": (11,),
+    "cloud": (8, 9, 10), "shadow": (3,), "dark": (2,),
+}
+#: The bands each measure reads beyond the ones a rule names itself.
+VISIBLE_BANDS = ("B02", "B03", "B04")
+#: How many rules one analyzer holds, and how many bands they may read between
+#: them. Every three bands are one more request per date and tile.
+MAX_RULES = 6
+MAX_BANDS = 6
+#: How far "against its surroundings" may look, in metres: the context a band
+#: product carries around its tile (`analyzers.PAD`, 306 m at the equator).
+MAX_AROUND = 300
 
-    @model_validator(mode="before")
-    @classmethod
-    def legacy(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        # Areas belong to a saved detection, not to what it looks for. An
-        # analyzer saved with areas of its own still loads, without them.
-        data = {key: value for key, value in data.items() if key not in ("providers", "zones")}
-        if data.get("method") in LEGACY_METHODS:
-            data["method"] = LEGACY_METHODS[data["method"]]
-        return data
+
+class Rule(Model):
+    """One line of an analyzer of your own: a quantity, the date it is read on,
+    and the line it has to cross.
+
+    `on` is a date (A or B) or the change between them. A change is B minus A,
+    so a loss is a negative value; `moved` takes either way. `around` reads the
+    quantity against the ground around it, in metres, so "brighter than its
+    surroundings" is the same rule on a dark sea and a bright desert.
+    """
+
+    measure: Literal["index", "nd", "band", "brightness", "colour", "class", "radar"] = "index"
+    index: Index = "ndvi"
+    #: A normalised difference of two bands: (first − second) / (first + second).
+    bands: tuple[Band, Band] = ("B08", "B04")
+    band: Band = "B08"
+    polarisation: Literal["vv", "vh", "ratio"] = "vv"
+    classes: list[SceneClass] = Field(default_factory=list, max_length=7)
+    on: Literal["a", "b", "change"] = "b"
+    op: Literal["ge", "le", "between", "moved", "is", "not"] = "ge"
+    value: FiniteFloat = Field(default=0, ge=-100, le=100)
+    upper: FiniteFloat = Field(default=0, ge=-100, le=100)
+    around: int = Field(default=0, ge=0, le=MAX_AROUND)
+
+    @model_validator(mode="after")
+    def coherent(self) -> Rule:
+        if self.measure == "class":
+            if self.op not in ("is", "not"):
+                raise ValueError("a ground class rule says is or is not")
+            if self.on == "change":
+                raise ValueError("a ground class is read on one date; use two rules to compare them")
+            if not self.classes:
+                raise ValueError("choose at least one ground class")
+            if self.around:
+                raise ValueError("a ground class has no surroundings to compare with")
+            return self
+        if self.op in ("is", "not"):
+            raise ValueError("is and is not are for ground classes")
+        if self.op == "moved" and self.on != "change":
+            raise ValueError("moved by compares two dates")
+        if self.measure == "colour" and self.on != "change":
+            raise ValueError("a colour distance compares two dates")
+        if self.op == "between" and self.upper <= self.value:
+            raise ValueError("the upper bound must be above the lower one")
+        if self.measure == "nd" and self.bands[0] == self.bands[1]:
+            raise ValueError("a normalised difference needs two different bands")
+        return self
+
+    def bands_read(self) -> list[str]:
+        """The Sentinel-2 bands this rule needs, radar and ground classes none."""
+        from .sentinel import SPECTRAL_INDEX
+
+        if self.measure == "index":
+            high, low = SPECTRAL_INDEX[self.index]
+            return [*high, *low]
+        if self.measure == "nd":
+            return list(self.bands)
+        if self.measure == "band":
+            return [self.band]
+        if self.measure in ("brightness", "colour"):
+            return list(VISIBLE_BANDS)
+        return []
 
 
 class Source(Model):
@@ -237,6 +305,116 @@ class Source(Model):
         if not data.get("time"):
             data.pop("time", None)
         return data
+
+
+#: How many checks one analyzer keeps, and how many marks one check holds.
+MAX_CHECKS = 12
+MAX_MARKS = 20
+Longitude = Annotated[float, Field(ge=-180, le=180)]
+Latitude = Annotated[float, Field(ge=-85, le=85)]
+
+
+class Bounds(Model):
+    west: Longitude
+    south: Latitude
+    east: Longitude
+    north: Latitude
+
+
+class Mark(Model):
+    """A point of a check, and what a run of the analyzer should make of it."""
+
+    point: tuple[Longitude, Latitude]
+    expect: Literal["found", "empty"]
+
+
+class CheckResult(Model):
+    """How a check last came out, and which reading of the analyzer gave it.
+
+    `signature` is the panel's digest of the rules, `match` and parameters,
+    so a result read against rules that have changed since shows as stale.
+    `covered` says, mark by mark, whether a candidate came out on it.
+    """
+
+    signature: str = Field(pattern=r"^[0-9a-z]{1,32}$")
+    count: int = Field(ge=0, le=100_000)
+    covered: list[bool] = Field(default_factory=list, max_length=MAX_MARKS)
+
+
+class Check(Model):
+    """A place the analyst trusts, rerun after each change to the rules.
+
+    It keeps the exact pair of passes it was saved on, so a rerun reads the
+    same images. Marks say where a candidate must come out and where none may;
+    a check without marks still says how many candidates its view gave.
+    """
+
+    id: ShortId
+    name: str = Field(min_length=1, max_length=120)
+    a: Source = Field(default_factory=Source)
+    b: Source
+    bounds: Bounds
+    marks: list[Mark] = Field(default_factory=list, max_length=MAX_MARKS)
+    result: CheckResult | None = None
+
+    @model_validator(mode="after")
+    def placed(self) -> Check:
+        if not self.b.date:
+            raise ValueError("a check is read on a dated pass B")
+        if self.bounds.west >= self.bounds.east or self.bounds.south >= self.bounds.north:
+            raise ValueError("a check's view must not cross the antimeridian")
+        if self.result and self.result.covered and len(self.result.covered) != len(self.marks):
+            raise ValueError("a check's last result must match its marks")
+        return self
+
+
+class Recipe(Model):
+    id: ShortId = "custom"
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+    phenomenon: str = Field(default="Surface change", min_length=1, max_length=120)
+    method: Method = "surface"
+    parameters: Parameters = Field(default_factory=Parameters)
+    colour: Colour = "#f6a81a"
+    style: Literal["pins", "outlines", "both"] = "both"
+    #: The analyst's own rules, for `method="rules"` and nothing else. The
+    #: first measured one ranks candidates; `match` says whether a pixel has
+    #: to pass all of them or any one.
+    rules: list[Rule] = Field(default_factory=list, max_length=MAX_RULES)
+    match: Literal["all", "any"] = "all"
+    #: Places the analyst trusts, rerun after each change (`Check`).
+    checks: list[Check] = Field(default_factory=list, max_length=MAX_CHECKS)
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        # Areas belong to a saved detection, not to what it looks for. An
+        # analyzer saved with areas of its own still loads, without them.
+        data = {key: value for key, value in data.items() if key not in ("providers", "zones")}
+        if data.get("method") in LEGACY_METHODS:
+            data["method"] = LEGACY_METHODS[data["method"]]
+        return data
+
+    @model_validator(mode="after")
+    def own_rules(self) -> Recipe:
+        if self.method != "rules":
+            if self.rules or self.checks:
+                raise ValueError("only an analyzer of your own rules carries rules and checks")
+            return self
+        if not self.rules:
+            raise ValueError("add at least one rule")
+        radar = {rule.measure == "radar" for rule in self.rules if rule.measure != "class"}
+        if len(radar) > 1:
+            raise ValueError("radar and optical rules read two satellites; keep them in two analyzers")
+        if True in radar and any(rule.measure == "class" for rule in self.rules):
+            raise ValueError("ground classes come from Sentinel-2, which a radar analyzer does not read")
+        if len({check.id for check in self.checks}) != len(self.checks):
+            raise ValueError("check ids must be unique")
+        if len(rule_bands(self)) > MAX_BANDS:
+            raise ValueError(f"an analyzer reads at most {MAX_BANDS} bands")
+        return self
 
 
 class ZoneSet(Model):
@@ -298,7 +476,7 @@ class RunInput(Model):
             for pair in self.area_dates:
                 if pair.date_rule == "manual" and not pair.b.date:
                     raise ValueError("choose a pass date for each area")
-                if self.recipe.method not in SINGLE_METHODS and not pair.a.date and not (
+                if not is_single(self.recipe) and not pair.a.date and not (
                     pair.date_rule == "latest_previous" and self.followup_id
                 ):
                     raise ValueError("choose a reference date for each area")
@@ -308,13 +486,80 @@ class RunInput(Model):
         required = []
         if self.date_rule == "manual":
             required.append(self.b)
-        if self.recipe.method not in SINGLE_METHODS and (
+        if not is_single(self.recipe) and (
             self.date_rule != "latest_previous" or not self.followup_id
         ):
             required.append(self.a)
         if any(not source.date for source in required):
             raise ValueError("choose a dated Copernicus acquisition")
         return self
+
+
+def _as_recipe(recipe: Recipe | dict[str, Any]) -> Recipe:
+    return recipe if isinstance(recipe, Recipe) else Recipe.model_validate(recipe)
+
+
+def is_radar(recipe: Recipe | dict[str, Any]) -> bool:
+    """Whether the recipe reads Sentinel-1."""
+    recipe = _as_recipe(recipe)
+    if recipe.method == "rules":
+        return any(rule.measure == "radar" for rule in recipe.rules)
+    return recipe.method in RADAR_METHODS
+
+
+def is_single(recipe: Recipe | dict[str, Any]) -> bool:
+    """Whether the recipe reads one date: a thing present, not a change.
+
+    Rules that only ever read B need no reference, like a vessel or a fire.
+    """
+    recipe = _as_recipe(recipe)
+    if recipe.method == "rules":
+        return all(rule.on == "b" for rule in recipe.rules)
+    return recipe.method in SINGLE_METHODS
+
+
+def uses_clouds(recipe: Recipe | dict[str, Any]) -> bool:
+    """Whether the cloud and shadow switches mean anything for this recipe."""
+    recipe = _as_recipe(recipe)
+    if recipe.method == "rules":
+        return not is_radar(recipe)
+    return recipe.method in CLOUD_METHODS
+
+
+def recipe_sensor(recipe: Recipe | dict[str, Any]) -> str:
+    return "sentinel1" if is_radar(recipe) else "sentinel2"
+
+
+def rule_bands(recipe: Recipe) -> list[str]:
+    """Every Sentinel-2 band the recipe's rules read, in the collection's order."""
+    from .sentinel import L2A_BANDS
+
+    wanted = {band for rule in recipe.rules for band in rule.bands_read()}
+    return [band for band in L2A_BANDS if band in wanted]
+
+
+def recipe_products(recipe: Recipe | dict[str, Any]) -> list[str]:
+    """The band products one tile of this recipe reads, per date."""
+    from .sentinel import band_product
+
+    recipe = _as_recipe(recipe)
+    if recipe.method != "rules":
+        return [product_for(recipe.method, recipe.parameters.index)]
+    if is_radar(recipe):
+        return ["sar"]
+    bands = rule_bands(recipe)
+    # Ground classes and the cloud mask ride in every product, so a recipe of
+    # ground classes alone still reads one.
+    groups = [bands[i:i + 3] for i in range(0, len(bands), 3)] or [["B08"]]
+    return [band_product(group) for group in groups]
+
+
+def frames_for(recipe: Recipe | dict[str, Any]) -> int:
+    """Requests one tile costs: for each date read, the picture and every product."""
+    recipe = _as_recipe(recipe)
+    if recipe.method != "rules":
+        return frames_per_tile(recipe.method)
+    return (1 if is_single(recipe) else 2) * (1 + len(recipe_products(recipe)))
 
 
 def _recipe(size: str = "medium", **fields: Any) -> Recipe:
@@ -436,10 +681,19 @@ def frames_per_tile(method: str) -> int:
 # anything, `sensor` which collection its passes come from, `frames` what a
 # tile costs, `sizes` fills Small/Medium/Large and `measure` words a candidate's
 # reading ({value}, {signed}, {before}, {after} and {index} are filled in).
+#: Ground one step of smoothing averages over, where a method counts it in
+#: metres rather than pixels (`engine/analyzers.py` says why for radar).
+SMOOTHING_M = {"sar-change": 45.0}
+
+# `rules` is the one method whose answers depend on the recipe: which dates,
+# which satellite and how many frames follow from the rules it holds, and the
+# panel works them out from those (lib/map/analyzerRules.js). What it states
+# here is the answer for a change in Sentinel-2 bands.
 METHODS = [
     {"id": method, "label": label, "single": method in SINGLE_METHODS,
-     "clouds": method in CLOUD_METHODS, "sensor": sensor_for(method),
-     "frames": frames_per_tile(method), "sizes": SIZES[method], "measure": measure}
+     "clouds": method in CLOUD_METHODS or method == "rules", "sensor": sensor_for(method),
+     "frames": frames_per_tile(method), "sizes": SIZES[method], "measure": measure,
+     "smoothing_m": SMOOTHING_M.get(method), "rules": method == "rules"}
     for method, label, measure in [
         ("vessels", "Vessels: infrared contrast over water",
          "{value}× brighter than the water around it"),
@@ -452,5 +706,6 @@ METHODS = [
         ("sar-vessels", "Radar: strong return over water",
          "{value} dB brighter than the sea around it"),
         ("sar-change", "Radar: backscatter change", "Backscatter {signed} dB, {before} → {after} dB"),
+        ("rules", "Your own rules", ""),
     ]
 ]

@@ -12,6 +12,7 @@
  */
 import { COORD_FORMATS, formatCoords } from '../coords.js';
 import { mapLinks } from '../maplinks.js';
+import { TOOL_LABELS } from '../workspaces.js';
 
 const FORMAT_LABELS = { dd: 'DD', dms: 'DMS', mgrs: 'MGRS' };
 
@@ -36,6 +37,7 @@ export function copyRows(lat, lon, preferred = 'dd') {
 export const ACTIONS = [
   { id: 'lookup', label: 'What is here?', icon: 'search' },
   { id: 'place', label: 'Save place here…', icon: 'pin' },
+  { id: 'candidate', label: 'Add candidate here', icon: 'plus' },
   { id: 'measure', label: 'Measure from here', icon: 'ruler' },
   { id: 'sky', label: 'Sun and moon from here', icon: 'sun' },
   { id: 'history', label: 'Imagery history here', icon: 'clock' },
@@ -45,13 +47,25 @@ export const ACTIONS = [
 /**
  * The acts a tool can actually perform, in the order above.
  *
- * Satellite offers all of them; Compare has no sun panel and no measure rail,
- * so it asks for the subset it can honour rather than showing rows that do
- * nothing. The order stays the list's, not the caller's, so the menu reads the
- * same wherever it opens.
+ * Satellite has no run to add a candidate to, Compare has no sun panel and no
+ * measure rail, and Detect has neither the sun nor the imagery history, so each
+ * asks for the subset it can honour rather than showing rows that do nothing.
+ * The order stays the list's, not the caller's, so the menu reads the same
+ * wherever it opens.
  */
 export function actionsFor(ids) {
   return ACTIONS.filter((action) => ids.includes(action.id));
+}
+
+/** The app's map tabs, each able to open on a point another one was showing. */
+export const MAP_TOOLS = ['satellite', 'compare', 'detect'];
+
+/**
+ * The other map tabs a point can be opened in, under their tabs' own names:
+ * the first rows of Open in…, above the maps outside the app.
+ */
+export function otherMapTools(current) {
+  return MAP_TOOLS.filter((id) => id !== current).map((id) => ({ id, label: TOOL_LABELS[id] }));
 }
 
 /** The external maps, opened on the clicked point at the current zoom. */

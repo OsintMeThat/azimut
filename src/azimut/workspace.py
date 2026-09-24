@@ -57,7 +57,12 @@ if TYPE_CHECKING:
 # nobody has on disk.
 JSON_SCHEMA = 2
 STORAGE_SCHEMA = 3
-CASE_SCHEMA = 9
+#: The last folder shape before Inspect gave each file one work (0.3.0 wrote it).
+LAYOUT_SCHEMA = 9
+#: One Inspect work per file, before kept Detect pins stated when they were seen
+#: and saved comparisons stood on the map.
+WORK_SCHEMA = 10
+CASE_SCHEMA = 11
 
 # from_version -> function(data) returning data reshaped for from_version + 1.
 # The runner (Case.migrate) owns stamping the new schema number, so a migration
@@ -965,6 +970,7 @@ class Case(CaseStore):
         rules: dict[str, tuple[str, Callable[[str], str], str]] = {
             "proof": ("spec", layout.proof_spec_rel, "Proof"),
             "inspect-session": ("spec", layout.session_rel, "Inspect"),
+            "collage": ("spec", layout.collage_rel, "Collage"),
             "compare-session": ("spec", layout.compare_session_rel, "Comparison"),
             "post": ("draft", layout.draft_rel, "Post"),
             "sheet": ("path", layout.sheet_rel, "Sheet"),
@@ -1298,10 +1304,38 @@ def open_workspace() -> None:
             logger.warning("workspace housekeeping step failed", exc_info=True)
 
 
-_FINAL_LAYOUT_MIGRATION = FolderMigration(CASE_SCHEMA, _normalize_case_layout)
+def _one_work_per_file(case: Case) -> None:
+    """Merge each file's Inspect sessions into one work, and lift the collages out.
+
+    Imported here rather than at the top: the engine imports this module.
+    """
+    from .engine import inspectwork
+
+    inspectwork.migrate_case(case)
+
+
+def _dated_and_placed_work(case: Case) -> None:
+    """State when each kept Detect pin was seen, and stand each saved comparison
+    on the map, as a pin kept or a comparison saved today does."""
+    from .engine import analysis_dating, comparisons
+
+    analysis_dating.backfill(case)
+    comparisons.backfill(case)
+
+
+def _one_work_then_dated_work(case: Case) -> None:
+    _one_work_per_file(case)
+    _dated_and_placed_work(case)
+
+
+_FINAL_LAYOUT_MIGRATION = FolderMigration(LAYOUT_SCHEMA, _normalize_case_layout)
 FOLDER_MIGRATIONS.update(
-    {version: _FINAL_LAYOUT_MIGRATION for version in range(STORAGE_SCHEMA, CASE_SCHEMA)}
+    {version: _FINAL_LAYOUT_MIGRATION for version in range(STORAGE_SCHEMA, LAYOUT_SCHEMA)}
 )
+# Schema 10 was never released: a 0.3.0 case takes both steps in one stamp, and
+# only a case a development build already moved to 10 runs the second alone.
+FOLDER_MIGRATIONS[LAYOUT_SCHEMA] = FolderMigration(CASE_SCHEMA, _one_work_then_dated_work)
+FOLDER_MIGRATIONS[WORK_SCHEMA] = FolderMigration(CASE_SCHEMA, _dated_and_placed_work)
 
 
 if TYPE_CHECKING:

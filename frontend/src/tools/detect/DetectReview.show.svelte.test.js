@@ -12,8 +12,8 @@ const RUN = '123456789abc';
 const area = [{ id: 'area', name: 'Area', kind: 'rect', points: [[2, 48], [2.001, 48.001]] }];
 const pass = { provider: 'sentinel1', date: '2026-09-22', layer: 'RADAR', maxcc: 100, time: '02:06:41' };
 const other = { ...pass, date: '2026-09-10', time: '02:06:40' };
-const row = (id, source) => ({ id, coordinates: [2, 48], bbox: [2, 48, 2.001, 48.001], area: 90, width: 15,
-  height: 6, margin: 2, strength: 'strong', measure: { value: 3 }, review: 'new', phenomenon: 'Vessel candidate (radar)',
+const row = (id, source) => ({ id, coordinates: [2, 48], bbox: [2, 48, 2.001, 48.001], area: 90,
+  margin: 2, strength: 'strong', measure: { value: 3 }, review: 'new', phenomenon: 'Vessel candidate (radar)',
   parts: [{ frames: ['a'], box: [0, 0, 4, 4] }], sources: { a: source, b: source } });
 const recipe = { id: 'radar-vessels', name: 'Vessels by radar', method: 'sar-vessels', colour: '#38bdf8', style: 'both',
   phenomenon: 'Vessel candidate (radar)', parameters: {} };

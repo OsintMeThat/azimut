@@ -284,13 +284,17 @@ The schema counter is independent of the JSON `CASE_SCHEMA`: the
 manifest's `azimut.storage` field selects the backend, and each format counts its own
 shape upgrades.
 
-The case manifest is at `CASE_SCHEMA` 9. Schema 3 is the last released folder
+The case manifest is at `CASE_SCHEMA` 11. Schema 3 is the last released folder
 shape before the `azimut/` boundary; schemas 4–8 were development checkpoints
 and never became public formats. `FolderMigration` therefore declares a target
 schema instead of assuming `+1`: every schema-3 case and any development case at
 4–8 runs the same idempotent normalizer and is stamped 9 only after the whole
 layout and visible-name contract are valid. A stopped migration keeps its older
-stamp and resumes the same normalizer on the next open. Media moves additionally
+stamp and resumes the same normalizer on the next open. Schema 9 is what 0.3.0
+wrote; one step takes it to 11, giving each file one Inspect work, then dating
+every kept Detect pin (`analysis_dating.backfill`) and standing every saved
+comparison on the map (`comparisons.backfill`). Schema 10 was a development
+checkpoint and runs only those last two. Media moves additionally
 use `.data/rename.json`, so a restart can finish references after the bytes moved.
 
 ### Tables
