@@ -3,22 +3,33 @@
 Azimut is a local OSINT workspace: media, geolocation work, proofs and notes in
 one portable case folder, on your own machine.
 
-This release sweeps an area for what appeared, and puts maps made
-elsewhere on yours.
+This release sweeps an area for what appeared, by day or by radar, and puts
+maps made elsewhere on yours.
 
 ## Detect
 
 - **Detect** is a new tab under Map. Draw one or more areas on
   Sentinel-2 and it sweeps them at full resolution for vessels, fires and gas
   flares, construction, small spots, any surface change, burn scars, vegetation
-  loss or new water. You can also copy an analyzer and tune your own.
+  loss or new water.
+- Five radar analyzers read Sentinel-1 through cloud and at night: vessels, any
+  change, damaged or razed buildings, new structures and vehicles, and floods.
+  They use a Sentinel-1 layer you add to your Copernicus configuration, and
+  Settings → Imagery walks you through it.
+- **Build your own analyzer** from up to six rules on a band, an index, a ground
+  class or radar, and watch what each rule keeps on the map as you change it.
+  Checks are places you trust, pinned as "should be found" or "should stay
+  empty", and they turn red when a rule stops holding. Five examples ship with
+  their checks: Lahaina, Grünheide, Kakhovka, Dubai and Fujairah.
 - Ask for a small, medium or large target instead of setting thresholds. The
   areas are priced in Copernicus requests before anything is fetched.
 - **Find passes** lists the dates your areas really have, with how much of them
   each pass covered and how cloudy it was. A finished run says how much it read,
   so "nothing found" and "never looked" stay apart.
-- Candidates come strongest first, one at a time. **Keep as a pin** files one
-  with its own evidence crop; nothing else reaches the case.
+- Candidates come strongest first, one at a time, sized along their footprint.
+  **Keep as a pin** files one with its own evidence crop and a claim dated by the
+  passes that found it; nothing else reaches the case.
+- A candidate opens in Compare on the passes that found it.
 - Areas can be saved with the case. A watch keeps an analyzer, its areas and a
   date rule together, and **Run again** repeats the sweep.
 - Detect needs Copernicus credentials in Settings.
@@ -27,6 +38,12 @@ elsewhere on yours.
 
 - Compare opens on a Wayback release from a year ago against today's World
   Imagery, with no key needed. **New** offers the other starting pairs.
+- **All dates** lists every dated picture of the point and narrows down, a
+  question at a time, between which two a change appeared.
+- Sentinel-1 radar passes are a basemap in Satellite, Compare and Detect, named
+  by day, UTC time and direction.
+- A saved comparison stands on the map beside the captures, dated A → B, and
+  reopens in Compare.
 - "Change assist" is now **Difference**. Its cloud switch uses the same
   Sentinel-2 cloud and shadow mask as Detect instead of guessing from the
   picture, so a white roof is no longer taken for a cloud.
@@ -36,7 +53,9 @@ elsewhere on yours.
 - Difference is a switch beside the four views rather than a view of its own:
   its highlights lie over side by side, swipe, fade or blink, on A, B or both.
   They can blink.
-- Right-click the ground for the point menu.
+- Right-click the ground, or a shape drawn on it, for the point menu. A drag
+  inside a box, an ellipse or a polygon moves the map; a shape is picked by its
+  outline.
 - Right-click a point on the Satellite map to open Compare on its last two
   Wayback pictures or its last two Copernicus passes.
 - An export frame sets what an export shows. Numbered markers and blur boxes can
@@ -46,6 +65,15 @@ elsewhere on yours.
   camera turns, and exports upright as drawn.
 - Difference's settings stay put through a read, lie over the highlights, and
   close on a click outside them.
+
+## One camera for the maps
+
+- Satellite, Compare and Detect show the same ground: pan one and the others are
+  there when you switch. A link carries it to other windows. A Detect review and
+  an open saved comparison keep their own view, and Settings → General turns
+  the sharing off.
+- A middle-drag turns any map, or an Inspect frame, about the point you grabbed,
+  in 15° steps with Ctrl. A middle click or Shift+↑ puts north back.
 
 ## Layers from elsewhere
 
@@ -76,6 +104,17 @@ elsewhere on yours.
   for the original footage, never for a frame cut from it.
 - Place any point of a proof on a map instead of typing it. Each panel keeps its
   own point.
+
+## Inspect and Collage
+
+- Inspect keeps one work per file, saved as you go, with its frames on a strip.
+  There are no sessions to open or save. **Save to case** is still the only step
+  that files a frame or an adjusted video as media.
+- **Collage** is a tab of its own. It lays out frames and images from any number
+  of files, and the picture it exports is case media.
+- The file name in Inspect's header renames the media itself.
+- The first time a case opens, its 0.3.0 Inspect sessions of one file become one
+  work: the latest is kept, and the others' notes and names are carried into it.
 
 ## Elsewhere
 
@@ -125,5 +164,6 @@ update it from Settings → Capture extension. Firefox updates the signed add-on
 itself; a new install uses `azimut-capture-0.3.1.xpi` attached to this release,
 opened from `about:addons` → gear menu → **Install Add-on From File**.
 
-Your existing cases open as they are. No export, migration or manual step is
-needed, and older case bundles still import.
+Your existing cases open as they are. Apart from Inspect sessions becoming one
+work per file, nothing changes in them, no export or manual step is needed, and
+older case bundles still import.
