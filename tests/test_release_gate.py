@@ -399,6 +399,20 @@ def test_the_linux_binary_states_and_holds_its_glibc_floor():
     assert f"glibc {stated} or newer" in readme
 
 
+def test_the_linux_binary_leaves_libmvec_to_the_system():
+    """The vendored ffmpeg links glibc's libmvec, which PyInstaller packs by default.
+
+    The runner's copy asks the system's libm for GLIBC_2.39, above the stated floor;
+    the floor gate caught it on the 0.3.1 dry run, in the 0.3.0 binary as well.
+    """
+    root = Path(__file__).resolve().parent.parent
+    spec = (root / "packaging" / "azimut.spec").read_text(encoding="utf-8")
+    kept = 'a.binaries = [entry for entry in a.binaries if not entry[0].startswith("libmvec.so")]'
+
+    assert kept in spec
+    assert spec.index(kept) < spec.index("exe = EXE(")
+
+
 def test_the_glibc_floor_reads_versions_off_an_elf_image():
     floor = _glibc_floor()
 
