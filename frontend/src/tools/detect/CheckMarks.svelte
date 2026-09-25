@@ -4,6 +4,10 @@
    * name, and its pins, a filled ring where a candidate should come out and a
    * struck ring where none should, green or red once the check has been read
    * with the rules as they stand. The map keeps its clicks: this only shows.
+   *
+   * The ground outside the frame is veiled. The rules' preview covers the whole
+   * view, which opens with a margin around the check, so without the veil the
+   * painted ground ran past the frame and read as the frame being off.
    */
   let { engine, marks = [], ground = null } = $props();
 
@@ -27,14 +31,20 @@
     const corners = [[west, north], [east, north], [east, south], [west, south]]
       .map(([lon, lat]) => engine.latLngToContainerPoint({ lon, lat }));
     const top = corners.reduce((best, point) => (point.y < best.y ? point : best), corners[0]);
-    return { points: corners.map((point) => `${point.x},${point.y}`).join(' '), label: top };
+    const points = corners.map((point) => `${point.x},${point.y}`).join(' ');
+    // Everything but the frame: a ring far past any screen, the frame cut out of it.
+    const veil = `M-1e5,-1e5H1e5V1e5H-1e5Z M${corners.map((point) => `${point.x},${point.y}`).join(' L')}Z`;
+    return { points, veil, label: top };
   });
   const words = (mark) => `${mark.expect === 'found' ? 'Should be found' : 'Should stay empty'}${
     mark.ok === true ? ', and it is' : mark.ok === false ? ', and it is not' : ''}`;
 </script>
 
 {#if frame}
-  <svg class="ground" aria-hidden="true"><polygon points={frame.points} /></svg>
+  <svg class="ground" aria-hidden="true">
+    <path class="veil" d={frame.veil} fill-rule="evenodd" />
+    <polygon points={frame.points} />
+  </svg>
   <span class="ground-name" style:left={`${frame.label.x}px`} style:top={`${frame.label.y}px`}>{ground.name}</span>
 {/if}
 {#each placed as mark, i (i)}
@@ -52,7 +62,8 @@
     overflow: visible;
     pointer-events: none;
   }
-  .ground polygon { fill: rgb(255 255 255 / 0.04); stroke: #f8fafc; stroke-width: 1.5; stroke-dasharray: 6 4; }
+  .ground polygon { fill: none; stroke: #f8fafc; stroke-width: 1.5; stroke-dasharray: 6 4; }
+  .ground .veil { fill: rgb(0 0 0 / 0.5); }
   .ground-name {
     position: absolute;
     z-index: 551;

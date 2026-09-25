@@ -725,6 +725,25 @@ def test_media_rename_recovers_after_files_moved_before_database_update(client, 
     assert not journal.exists()
 
 
+def test_media_rename_takes_the_name_of_a_deleted_file(client):
+    # Deleting a file keeps its finished jobs (enqueue resets them on reuse), so the
+    # second rename onto "Shared" used to fail on the jobs' (kind, key) uniqueness
+    # after the file had already moved, leaving the entity on the old path.
+    cid = client.post("/api/cases", json={"name": "Rename over deleted"}).json()["id"]
+    first = _upload(client, cid, "one.png", _png_bytes()).json()["item"]
+    renamed = client.patch(f"/api/cases/{cid}/media", json={"path": first["path"], "title": "Shared"})
+    assert renamed.status_code == 200
+    client.delete(f"/api/cases/{cid}/media", params={"path": "media/Shared.png"})
+
+    second = _upload(client, cid, "two.png", _png_bytes(color=(90, 10, 10))).json()["item"]
+    again = client.patch(f"/api/cases/{cid}/media", json={"path": second["path"], "title": "Shared"})
+
+    assert again.status_code == 200
+    from azimut.workspace import Case
+
+    assert Case.open(cid).find_entity(attr="path", value="media/Shared.png")["label"] == "Shared"
+
+
 def test_media_rename_uses_portable_case_insensitive_collisions(client):
     cid = client.post("/api/cases", json={"name": "Portable names"}).json()["id"]
     _upload(client, cid, "Clip.png", _png_bytes()).json()["item"]

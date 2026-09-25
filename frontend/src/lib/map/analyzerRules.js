@@ -6,6 +6,7 @@
  * decibels. Only the words and the sliders here show reflectance in percent.
  */
 import { CHANGE_INDICES, indexThreshold } from './changeAssist.js';
+import { toMercator } from './groundFrame.js';
 
 export const MEASURES = Object.freeze([
   { id: 'index', label: 'Index', hint: 'A published spectral index.' },
@@ -414,6 +415,34 @@ export function paintMask(bits, { shown = [], hover = null, colours = RULE_COLOU
     }
   }
   return out;
+}
+
+/**
+ * Keep a painted mask to the ground inside `bounds` ({ west, south, east, north }
+ * in degrees), clearing every pixel outside. The mask covers `box`, its extent in
+ * Web Mercator metres; both are aligned with the ground, so the kept part is a
+ * pixel rectangle however the map is turned. Used while a check is open: it
+ * judges its own frame, so the map paints nothing past it.
+ */
+export function clipToBounds(rgba, width, height, box, bounds) {
+  const [west, north] = toMercator(bounds.west, bounds.north);
+  const [east, south] = toMercator(bounds.east, bounds.south);
+  const column = (x) => ((x - box.west) / (box.east - box.west)) * width;
+  const row = (y) => ((box.north - y) / (box.north - box.south)) * height;
+  const x0 = Math.max(0, Math.floor(column(west)));
+  const x1 = Math.min(width, Math.ceil(column(east)));
+  const y0 = Math.max(0, Math.floor(row(north)));
+  const y1 = Math.min(height, Math.ceil(row(south)));
+  const out = new Uint8ClampedArray(rgba.length);
+  for (let y = y0; y < y1; y++) {
+    out.set(rgba.subarray((y * width + x0) * 4, (y * width + x1) * 4), (y * width + x0) * 4);
+  }
+  return out;
+}
+
+/** Whether a [lon, lat] point is inside `bounds`. */
+export function insideBounds([lon, lat], bounds) {
+  return lon >= bounds.west && lon <= bounds.east && lat >= bounds.south && lat <= bounds.north;
 }
 
 /** A share of the measured ground, as the funnel prints it. */

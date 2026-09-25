@@ -7,9 +7,10 @@
    * zoomed or turned, and repaints only when a rule is shown, hidden or hovered.
    */
   import { compose, cssMatrix, imageToMercator, invert, screenToMercator } from '../../lib/map/groundFrame.js';
-  import { RULE_COLOURS, paintMask } from '../../lib/map/analyzerRules.js';
+  import { RULE_COLOURS, clipToBounds, paintMask } from '../../lib/map/analyzerRules.js';
 
-  let { engine, element, preview = null, shown = [], hover = null, colours = RULE_COLOURS } = $props();
+  /** `within`: the open check's bounds, past which nothing is painted. */
+  let { engine, element, preview = null, shown = [], hover = null, colours = RULE_COLOURS, within = null } = $props();
 
   let canvas = $state(null);
   let bits = $state(null);
@@ -53,7 +54,9 @@
     if (bits.length !== width * height) return;
     canvas.width = width;
     canvas.height = height;
-    canvas.getContext('2d').putImageData(new ImageData(paintMask(bits, { shown, hover, colours }), width, height), 0, 0);
+    const painted = paintMask(bits, { shown, hover, colours });
+    const kept = within && preview.box ? clipToBounds(painted, width, height, preview.box, within) : painted;
+    canvas.getContext('2d').putImageData(new ImageData(kept, width, height), 0, 0);
   });
 
   const transform = $derived.by(() => {

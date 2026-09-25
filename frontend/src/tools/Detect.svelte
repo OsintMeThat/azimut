@@ -20,6 +20,7 @@
   import { caseState, dismissToast, prefs, prefsReady, toast, uiState } from '../lib/state.svelte.js';
   import { marksToZones, sourceLabel, viewZone, zoneMarks, zoneRing } from '../lib/map/analyzers.js';
   import { blinkable } from '../lib/map/detectReview.js';
+  import { insideBounds } from '../lib/map/analyzerRules.js';
   import { DEFAULT_BLINK_INTERVAL } from '../lib/map/compare.js';
   import { createImageryState } from './satellite/state/imagery.svelte.js';
   import { createSentinelState } from './satellite/state/sentinel.svelte.js';
@@ -123,10 +124,14 @@
     layersAsked = true;
     untrack(() => s2.loadLayers(false, true));
   });
+  // While a check is open the map shows what the rules keep inside its frame only:
+  // the check judges that ground, and paint past the frame read as it being off.
   const previewLayer = $derived(builder?.preview?.ready ? [{
     id: 'builder-preview', visible: true,
     input: { recipe: { colour: builder.colour, style: builder.style } },
-    results: builder.preview.candidates.map((row) => ({ ...row, review: 'new', phenomenon: builder.phenomenon })),
+    results: builder.preview.candidates
+      .filter((row) => !builder.ground || insideBounds(row.coordinates, builder.ground.bounds))
+      .map((row) => ({ ...row, review: 'new', phenomenon: builder.phenomenon })),
   }] : []);
   $effect(() => { manualTool = manual?.kind === 'polygon' ? 'polygon' : 'select'; });
 
@@ -635,7 +640,7 @@
         />
         {#if builder}
           <RuleLayers {engine} {element} preview={builder.preview} shown={builder.shown} hover={builder.hover}
-            colours={builder.colours} />
+            colours={builder.colours} within={builder.ground?.bounds ?? null} />
           {#if previewLayer.length}
             <AnalysisOverlay {engine} layers={previewLayer} onpick={(_, id) => {
               const row = builder.preview.candidates.find((candidate) => candidate.id === id);

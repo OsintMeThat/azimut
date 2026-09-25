@@ -3394,13 +3394,30 @@ class SqliteCase:
                 )
 
             for row in conn.execute(
-                "SELECT id, job_key, payload_json FROM jobs"
+                "SELECT id, kind, job_key, payload_json FROM jobs"
             ).fetchall():
                 payload = json.loads(row["payload_json"])
                 replaced = _replace_exact(payload, old, new)
                 key = new if row["job_key"] == old else row["job_key"]
                 if key == row["job_key"] and replaced == payload:
                     continue
+                if key != row["job_key"]:
+                    # A rename only lands on a path no file holds, so a job already
+                    # keyed there was left by a file deleted from it: enqueue keeps
+                    # finished rows to reset them. Re-keying over it would break the
+                    # (kind, key) uniqueness halfway through the rename, after the
+                    # file had moved, and the recovery would fail the same way.
+                    conn.execute(
+                        "DELETE FROM jobs WHERE kind = ? AND job_key = ? AND state != 'running'",
+                        (row["kind"], key),
+                    )
+                    if conn.execute(
+                        "SELECT 1 FROM jobs WHERE kind = ? AND job_key = ?", (row["kind"], key)
+                    ).fetchone():
+                        # The worker is still on the stale one. Let it finish; the
+                        # renamed file's own row is the one to give up.
+                        conn.execute("DELETE FROM jobs WHERE id = ?", (row["id"],))
+                        continue
                 conn.execute(
                     "UPDATE jobs SET job_key = ?, payload_json = ?, updated_at = ?"
                     " WHERE id = ?",
