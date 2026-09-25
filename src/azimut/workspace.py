@@ -1046,7 +1046,7 @@ class Case(CaseStore):
         applied: list[tuple[str, str]] = []
         try:
             for source, destination in moves:
-                if source.exists() and source != destination:
+                if source.exists() and str(source) != str(destination):
                     media_engine.rename_path(source, destination)
                     moved.append((source, destination))
             for old, new in replacements:

@@ -1339,8 +1339,12 @@ def write_json_atomic(path: Path, data: dict[str, Any]) -> None:
 
 
 def rename_path(source: Path, destination: Path) -> None:
-    """Rename one file, including a case-only rename on Windows/macOS."""
-    if source == destination:
+    """Rename one file, including a case-only rename on Windows/macOS.
+
+    Compared as strings: a Windows path compares without regard to case, so
+    `Roof.json == roof.json` there and the case-only rename would never run.
+    """
+    if str(source) == str(destination):
         return
     ensure_dir(destination.parent)
     if (
